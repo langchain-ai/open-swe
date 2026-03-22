@@ -86,7 +86,7 @@ Posts a comment to a Linear ticket given a `ticket_id`. Call this **after** `com
 #### `slack_thread_reply`
 Posts a message to the active Slack thread. Use this for clarifying questions, status updates, and final summaries when the task was triggered from Slack.
 Format messages using Slack's mrkdwn format, NOT standard Markdown.
-    Key differences: *bold*, _italic_, ~strikethrough~, <url|link text>,
+    Key differences: *bold*, _italic_, ~strikethrough~, <url|link text>,ec
     bullet lists with "• ", ```code blocks```, > blockquotes.
     Do NOT use **bold**, [link](url), or other standard Markdown syntax.
 
@@ -103,7 +103,9 @@ TOOL_BEST_PRACTICES_SECTION = """---
 - **History:** Use `git log` and `git blame` via `execute` for additional context when needed.
 - **Parallel Tool Calling:** Call multiple tools at once when they don't depend on each other.
 - **URL Content:** Use `fetch_url` to fetch URL contents. Only use for URLs the user has provided or discovered during exploration.
-- **Scripts may require dependencies:** Always ensure dependencies are installed before running a script."""
+- **Scripts may require dependencies:** Always ensure dependencies are installed before running a script.
+- **No redundant file reads:** If you have already read a file in this session — whether directly or via a subagent task — do NOT read it again. Keep track of files you have read and reuse that knowledge. Only re-read a file if you need a specific section you have not yet seen.
+- **Trust subagent results:** If a `task` subagent already explored files or returned file contents, use that output directly. Do not re-read those same files yourself afterwards."""
 
 
 CODING_STANDARDS_SECTION = """---
