@@ -451,6 +451,12 @@ The workflow is intentionally split:
 ### Safety Rules
 
 - validation success is not completion
+- before the repair loop starts, a pre-task git check requires a clean working tree
+- the pre-task git check fetches `origin` and `upstream` when those remotes exist
+- the current branch is merged with `origin/<current-branch>` first so fork commits stay authoritative
+- then `upstream/<default-branch>` is integrated into the current branch with merge semantics, never a hard reset
+- if sync creates conflicts, the run stops and reports the conflicting files instead of discarding work
+- the pre-task git check never force-pushes automatically
 - finalization is required
 - `--no-finalize` is an explicit opt-out and leaves the run incomplete
 - the finalizer creates or reuses a commit-linked validation record
@@ -486,3 +492,11 @@ The implementation details live lower in this file and in the dedicated docs:
 ## License
 
 MIT
+
+<!-- fix-agent-prepublish-docs:start -->
+## Pre-Publish Docs Gate
+
+Before a real publish, the agent now runs a documentation impact check.
+If code or operator-facing behavior changed and docs are stale, it updates the tracked docs before publish, reruns validation, and only then continues with push/PR work.
+Current docs refresh policy: `patch` when docs drift is detected.
+<!-- fix-agent-prepublish-docs:end -->

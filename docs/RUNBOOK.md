@@ -127,6 +127,12 @@ python local_fix_agent.py --list-pattern-sources
 The workflow is split on purpose:
 
 - validation proves a specific repo state
+- before validation or repair, the agent runs a pre-task git check when the repo is a git checkout
+- that check requires a clean working tree and stops immediately if there are uncommitted changes
+- `origin` is treated as the source of truth for your forked branch, so the agent fetches `origin` and merges `origin/<current-branch>` first
+- if an `upstream` remote exists, the agent fetches it, detects its default branch automatically, and merges `upstream/<default-branch>` into the current branch second
+- the sync strategy is merge-first with normal git fast-forward behavior when available; it never hard-resets or force-pushes
+- any sync conflict is a blocking handoff and the agent prints the conflicting files
 - finalization decides whether that validated state should publish, noop, or block
 - docs updates happen inside finalization so published code and docs stay together
 - branch alignment happens before publish so the PR is more likely to be mergeable immediately
@@ -253,3 +259,11 @@ The operator mental model above is the part you should carry around day to day. 
 - `--publish-only` uses the current repo state but still respects validation gating
 - the finalizer can create a validation record itself when one is missing
 - post-publish PR mergeability verification remains active even when pre-publish base alignment succeeds
+
+<!-- fix-agent-prepublish-runbook:start -->
+## Pre-Publish Docs Check
+
+Real publish now includes a docs gate after validation succeeds and before branch/commit/push work starts.
+The agent detects documentation impact, refreshes affected docs in the same change set, reruns validation, and blocks publish if docs repair or revalidation fails.
+Default docs refresh mode when triggered: `patch`.
+<!-- fix-agent-prepublish-runbook:end -->

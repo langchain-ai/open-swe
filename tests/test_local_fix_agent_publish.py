@@ -5,6 +5,7 @@ import json
 import sys
 from pathlib import Path
 from types import SimpleNamespace
+import time
 
 import pytest
 
@@ -1306,19 +1307,408 @@ def test_sync_with_upstream_before_workflow_no_upstream(tmp_path: Path) -> None:
     result = lfa.sync_with_upstream_before_workflow(repo, validation_command="pytest -q")
 
     assert result["upstream_detected"] is False
+    assert result["origin_detected"] is False
     assert result["sync_attempted"] is False
     assert result["sync_result"] == "not_needed"
 
 
-def test_sync_with_upstream_before_workflow_behind_runs_sync_and_validation(
+def test_sync_with_upstream_before_workflow_dirty_tree_blocks_before_fetch(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
+
+    commands: list[object] = []
+
+    def fake_run_subprocess(command, cwd, shell=False):
+        commands.append(command)
+        return 0, ""
+
+    monkeypatch.setattr(lfa, "is_git_repo", lambda current_repo: True)
+    monkeypatch.setattr(lfa, "current_git_branch", lambda current_repo: "feature")
+    monkeypatch.setattr(
+        lfa,
+        "classify_pre_task_working_tree",
+        lambda current_repo: {
+            "working_tree_detected": True,
+            "working_tree_clean": False,
+            "working_tree_status": " M app.py\n?? notes.txt",
+            "dirty_paths": ["app.py", "notes.txt"],
+            "auto_stage_attempted": False,
+            "auto_staged_paths": [],
+            "auto_removed_paths": [],
+            "remaining_unstaged_paths": ["app.py", "notes.txt"],
+            "working_tree_blockers": [
+                {"path": "app.py", "file_type": "code", "reason": "publishable file requires manual review before staging"},
+                {"path": "notes.txt", "file_type": "artifact", "reason": "unknown/generated artifact; requires manual review"},
+            ],
+            "working_tree_summary": "Uncommitted changes detected. Blocked due to 2 ambiguous files requiring manual review.",
+        },
+    )
+    monkeypatch.setattr(lfa, "run_subprocess", fake_run_subprocess)
+
+    result = lfa.sync_with_upstream_before_workflow(repo, validation_command="pytest -q")
+
+    assert result["sync_result"] == "blocked"
+    assert "ambiguous changes requiring manual review" in result["reason"]
+    assert result["dirty_paths"] == ["app.py", "notes.txt"]
+    assert result["working_tree_blockers"] == [
+        {"path": "app.py", "file_type": "code", "reason": "publishable file requires manual review before staging"},
+        {"path": "notes.txt", "file_type": "artifact", "reason": "unknown/generated artifact; requires manual review"},
+    ]
+    assert commands == []
+
+
+def test_sync_with_upstream_before_workflow_auto_stages_safe_changes_and_proceeds(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    monkeypatch.setattr(lfa, "is_git_repo", lambda current_repo: True)
+    monkeypatch.setattr(lfa, "current_git_branch", lambda current_repo: "feature")
+    monkeypatch.setattr(
+        lfa,
+        "classify_pre_task_working_tree",
+        lambda current_repo: {
+            "working_tree_detected": True,
+            "working_tree_clean": False,
+            "working_tree_status": "M  local_fix_agent.py",
+            "dirty_paths": ["local_fix_agent.py"],
+            "auto_stage_attempted": True,
+            "auto_staged_paths": ["local_fix_agent.py"],
+            "auto_removed_paths": [],
+            "remaining_unstaged_paths": [],
+            "working_tree_blockers": [],
+            "working_tree_summary": "Uncommitted changes detected; staged safe files.",
+        },
+    )
+    monkeypatch.setattr(lfa, "parse_remote_names", lambda current_repo: [])
+    monkeypatch.setattr(
+        lfa,
+        "run_subprocess",
+        lambda command, cwd, shell=False: (_ for _ in ()).throw(AssertionError(f"unexpected command: {command}")),
+    )
+
+    result = lfa.sync_with_upstream_before_workflow(repo, validation_command="pytest -q")
+
+    assert result["sync_result"] == "not_needed"
+    assert result["working_tree_detected"] is True
+    assert result["auto_stage_attempted"] is True
+    assert result["auto_staged_paths"] == ["local_fix_agent.py"]
+    assert result["auto_removed_paths"] == []
+    assert result["remaining_unstaged_paths"] == []
+    assert result["working_tree_blockers"] == []
+
+
+def test_sync_with_upstream_before_workflow_auto_removes_artifact_and_proceeds(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    artifact_name = "c7c5dc0cfd3d57af083f1ae879ccfb868f2f2e76.txt"
+    (repo / artifact_name).write_text("temporary artifact\n")
+
+    monkeypatch.setattr(lfa, "is_git_repo", lambda current_repo: True)
+    monkeypatch.setattr(lfa, "current_git_branch", lambda current_repo: "feature")
+    monkeypatch.setattr(
+        lfa,
+        "classify_pre_task_working_tree",
+        lambda current_repo: {
+            "working_tree_detected": True,
+            "working_tree_clean": True,
+            "working_tree_status": "",
+            "dirty_paths": [artifact_name],
+            "auto_stage_attempted": False,
+            "auto_staged_paths": [],
+            "auto_removed_paths": [artifact_name],
+            "remaining_unstaged_paths": [],
+            "working_tree_blockers": [],
+            "working_tree_summary": "Uncommitted changes detected; removed artifacts.",
+        },
+    )
+    monkeypatch.setattr(lfa, "parse_remote_names", lambda current_repo: [])
+    monkeypatch.setattr(
+        lfa,
+        "run_subprocess",
+        lambda command, cwd, shell=False: (_ for _ in ()).throw(AssertionError(f"unexpected command: {command}")),
+    )
+
+    result = lfa.sync_with_upstream_before_workflow(repo, validation_command="pytest -q")
+
+    assert result["sync_result"] == "not_needed"
+    assert result["auto_stage_attempted"] is False
+    assert result["auto_removed_paths"] == [artifact_name]
+    assert result["remaining_unstaged_paths"] == []
+    assert result["working_tree_blockers"] == []
+
+
+def test_sync_with_upstream_before_workflow_clean_repo_preserves_existing_behavior(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    monkeypatch.setattr(lfa, "is_git_repo", lambda current_repo: True)
+    monkeypatch.setattr(lfa, "current_git_branch", lambda current_repo: "feature")
+    monkeypatch.setattr(
+        lfa,
+        "classify_pre_task_working_tree",
+        lambda current_repo: {
+            "working_tree_detected": False,
+            "working_tree_clean": True,
+            "working_tree_status": "",
+            "dirty_paths": [],
+            "auto_stage_attempted": False,
+            "auto_staged_paths": [],
+            "auto_removed_paths": [],
+            "remaining_unstaged_paths": [],
+            "working_tree_blockers": [],
+            "working_tree_summary": "Working tree already clean.",
+        },
+    )
+    monkeypatch.setattr(lfa, "parse_remote_names", lambda current_repo: [])
+    monkeypatch.setattr(
+        lfa,
+        "run_subprocess",
+        lambda command, cwd, shell=False: (_ for _ in ()).throw(AssertionError(f"unexpected command: {command}")),
+    )
+
+    result = lfa.sync_with_upstream_before_workflow(repo, validation_command="pytest -q")
+
+    assert result["sync_result"] == "not_needed"
+    assert result["working_tree_detected"] is False
+    assert result["auto_stage_attempted"] is False
+    assert result["auto_staged_paths"] == []
+    assert result["auto_removed_paths"] == []
+    assert result["remaining_unstaged_paths"] == []
+    assert result["working_tree_blockers"] == []
+
+
+def test_classify_pre_task_working_tree_auto_stages_safe_changes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = Path("/tmp/repo")
+    stage_state = {"after_add": False}
+    commands: list[list[str]] = []
+
+    def fake_classify_publish_working_tree(current_repo: Path) -> dict:
+        if stage_state["after_add"]:
+            return {
+                "status_output": "M  local_fix_agent.py",
+                "clean": False,
+                "has_unstaged": False,
+                "has_staged": True,
+                "has_untracked": False,
+                "staged_paths": ["local_fix_agent.py"],
+                "unstaged_paths": [],
+                "untracked_paths": [],
+            }
+        return {
+            "status_output": " M local_fix_agent.py",
+            "clean": False,
+            "has_unstaged": True,
+            "has_staged": False,
+            "has_untracked": False,
+            "staged_paths": [],
+            "unstaged_paths": ["local_fix_agent.py"],
+            "untracked_paths": [],
+        }
+
+    def fake_run_subprocess(command, cwd: Path, shell: bool = False) -> tuple[int, str]:
+        commands.append(command)
+        if command == ["git", "diff", "--cached", "--name-only"]:
+            return 0, "local_fix_agent.py\n" if stage_state["after_add"] else ""
+        if command == ["git", "status", "--short", "--untracked-files=all"]:
+            return (
+                0,
+                "M  local_fix_agent.py\n" if stage_state["after_add"] else " M local_fix_agent.py\n",
+            )
+        if command == ["git", "add", "-A", "--", "local_fix_agent.py"]:
+            stage_state["after_add"] = True
+            return 0, ""
+        raise AssertionError(f"unexpected command: {command}")
+
+    monkeypatch.setattr(lfa, "classify_publish_working_tree", fake_classify_publish_working_tree)
+    monkeypatch.setattr(lfa, "meaningful_changed_paths", lambda current_repo, ignore_path_predicate=None: ["local_fix_agent.py"])
+    monkeypatch.setattr(lfa, "run_subprocess", fake_run_subprocess)
+
+    result = lfa.classify_pre_task_working_tree(repo)
+
+    assert result["working_tree_detected"] is True
+    assert result["auto_stage_attempted"] is True
+    assert result["auto_staged_paths"] == ["local_fix_agent.py"]
+    assert result["auto_removed_paths"] == []
+    assert result["remaining_unstaged_paths"] == []
+    assert result["working_tree_blockers"] == []
+    assert ["git", "add", "-A", "--", "local_fix_agent.py"] in commands
+
+
+def test_classify_pre_task_working_tree_auto_removes_artifact(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    artifact_name = "c7c5dc0cfd3d57af083f1ae879ccfb868f2f2e76.txt"
+    (repo / artifact_name).write_text("temporary artifact\n")
+    commands: list[list[str]] = []
+
+    def fake_classify_publish_working_tree(current_repo: Path) -> dict:
+        if (repo / artifact_name).exists():
+            return {
+                "status_output": f"?? {artifact_name}",
+                "clean": False,
+                "has_unstaged": False,
+                "has_staged": False,
+                "has_untracked": True,
+                "staged_paths": [],
+                "unstaged_paths": [],
+                "untracked_paths": [artifact_name],
+            }
+        return {
+            "status_output": "",
+            "clean": True,
+            "has_unstaged": False,
+            "has_staged": False,
+            "has_untracked": False,
+            "staged_paths": [],
+            "unstaged_paths": [],
+            "untracked_paths": [],
+        }
+
+    monkeypatch.setattr(lfa, "classify_publish_working_tree", fake_classify_publish_working_tree)
+    monkeypatch.setattr(lfa, "meaningful_changed_paths", lambda current_repo, ignore_path_predicate=None: [artifact_name])
+    def fail_run_subprocess(command, cwd, shell=False):
+        commands.append(command)
+        if command == ["git", "diff", "--cached", "--name-only"]:
+            return 0, ""
+        if command == ["git", "status", "--short", "--untracked-files=all"]:
+            return (0, f"?? {artifact_name}\n" if (repo / artifact_name).exists() else "")
+        raise AssertionError(f"unexpected command: {command}")
+
+    monkeypatch.setattr(lfa, "run_subprocess", fail_run_subprocess)
+
+    result = lfa.classify_pre_task_working_tree(repo)
+
+    assert result["working_tree_detected"] is True
+    assert result["auto_stage_attempted"] is False
+    assert result["auto_removed_paths"] == [artifact_name]
+    assert result["remaining_unstaged_paths"] == []
+    assert result["working_tree_blockers"] == []
+    assert not (repo / artifact_name).exists()
+    assert not any(command[:3] == ["git", "add", "-A"] for command in commands)
+
+
+def test_classify_pre_task_working_tree_blocks_on_ambiguous_file(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = Path("/tmp/repo")
+    commands: list[list[str]] = []
+
+    monkeypatch.setattr(
+        lfa,
+        "classify_publish_working_tree",
+        lambda current_repo: {
+            "status_output": "?? settings.data",
+            "clean": False,
+            "has_unstaged": False,
+            "has_staged": False,
+            "has_untracked": True,
+            "staged_paths": [],
+            "unstaged_paths": [],
+            "untracked_paths": ["settings.data"],
+        },
+    )
+    monkeypatch.setattr(lfa, "meaningful_changed_paths", lambda current_repo, ignore_path_predicate=None: ["settings.data"])
+    def fail_run_subprocess(command, cwd, shell=False):
+        commands.append(command)
+        if command == ["git", "diff", "--cached", "--name-only"]:
+            return 0, ""
+        if command == ["git", "status", "--short", "--untracked-files=all"]:
+            return 0, "?? settings.data\n"
+        raise AssertionError(f"unexpected command: {command}")
+
+    monkeypatch.setattr(lfa, "run_subprocess", fail_run_subprocess)
+
+    result = lfa.classify_pre_task_working_tree(repo)
+
+    assert result["working_tree_detected"] is True
+    assert result["auto_stage_attempted"] is False
+    assert result["auto_staged_paths"] == []
+    assert result["auto_removed_paths"] == []
+    assert result["remaining_unstaged_paths"] == ["settings.data"]
+    assert result["working_tree_blockers"] == [
+        {"path": "settings.data", "file_type": "unknown", "reason": "unknown/generated artifact; requires manual review"}
+    ]
+    assert "ambiguous file" in result["working_tree_summary"]
+    assert not any(command[:3] == ["git", "add", "-A"] for command in commands)
+
+
+def test_classify_pre_task_working_tree_clean_repo_is_unchanged(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = Path("/tmp/repo")
+    commands: list[list[str]] = []
+
+    monkeypatch.setattr(
+        lfa,
+        "classify_publish_working_tree",
+        lambda current_repo: {
+            "status_output": "",
+            "clean": True,
+            "has_unstaged": False,
+            "has_staged": False,
+            "has_untracked": False,
+            "staged_paths": [],
+            "unstaged_paths": [],
+            "untracked_paths": [],
+        },
+    )
+    monkeypatch.setattr(lfa, "meaningful_changed_paths", lambda current_repo, ignore_path_predicate=None: [])
+    def fail_run_subprocess(command, cwd, shell=False):
+        commands.append(command)
+        if command == ["git", "diff", "--cached", "--name-only"]:
+            return 0, ""
+        if command == ["git", "status", "--short", "--untracked-files=all"]:
+            return 0, ""
+        raise AssertionError(f"unexpected command: {command}")
+
+    monkeypatch.setattr(lfa, "run_subprocess", fail_run_subprocess)
+
+    result = lfa.classify_pre_task_working_tree(repo)
+
+    assert result["working_tree_detected"] is False
+    assert result["working_tree_clean"] is True
+    assert result["auto_stage_attempted"] is False
+    assert result["auto_staged_paths"] == []
+    assert result["auto_removed_paths"] == []
+    assert result["remaining_unstaged_paths"] == []
+    assert result["working_tree_blockers"] == []
+    assert not any(command[:3] == ["git", "add", "-A"] for command in commands)
+
+
+def test_sync_with_upstream_before_workflow_syncs_origin_first_then_upstream_and_validates(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    commands: list[object] = []
     saved: list[tuple[str, str]] = []
 
     def fake_run_subprocess(command, cwd, shell=False):
+        commands.append(command)
+        if command == ["git", "fetch", "origin"]:
+            return 0, ""
+        if command == ["git", "rev-parse", "--verify", "origin/feature"]:
+            return 0, "abc123\n"
+        if command == ["git", "rev-list", "--left-right", "--count", "HEAD...origin/feature"]:
+            return 0, "2 1\n"
         if command == ["git", "fetch", "upstream"]:
             return 0, ""
         if command == ["git", "symbolic-ref", "refs/remotes/upstream/HEAD"]:
@@ -1336,6 +1726,18 @@ def test_sync_with_upstream_before_workflow_behind_runs_sync_and_validation(
         return 0, ""
 
     monkeypatch.setattr(lfa, "is_git_repo", lambda current_repo: True)
+    monkeypatch.setattr(lfa, "current_git_branch", lambda current_repo: "feature")
+    monkeypatch.setattr(
+        lfa,
+        "classify_git_working_tree",
+        lambda current_repo: {
+            "clean": True,
+            "status_output": "",
+            "staged_paths": [],
+            "unstaged_paths": [],
+            "untracked_paths": [],
+        },
+    )
     monkeypatch.setattr(lfa, "parse_remote_names", lambda current_repo: ["origin", "upstream"])
     monkeypatch.setattr(lfa, "run_subprocess", fake_run_subprocess)
     monkeypatch.setattr(
@@ -1355,6 +1757,13 @@ def test_sync_with_upstream_before_workflow_behind_runs_sync_and_validation(
 
     result = lfa.sync_with_upstream_before_workflow(repo, validation_command="pytest -q")
 
+    assert result["current_branch"] == "feature"
+    assert result["origin_detected"] is True
+    assert result["origin_branch"] == "origin/feature"
+    assert result["origin_ahead_count"] == 2
+    assert result["origin_behind_count"] == 1
+    assert result["origin_sync_attempted"] is True
+    assert result["origin_sync_result"] == "success"
     assert result["upstream_detected"] is True
     assert result["upstream_branch"] == "upstream/main"
     assert result["ahead_count"] == 1
@@ -1364,15 +1773,80 @@ def test_sync_with_upstream_before_workflow_behind_runs_sync_and_validation(
     assert result["validation_result_after_sync"] == "success"
     assert result["analysis"]["risk_level"] == "low"
     assert saved[-1] == ("upstream-sync", "success")
+    assert result["git_actions"] == [
+        "git fetch origin",
+        "git merge --no-edit origin/feature",
+        "git fetch upstream",
+        "git merge --no-edit upstream/main",
+    ]
+    assert commands.index(["git", "fetch", "origin"]) < commands.index(["git", "fetch", "upstream"])
 
 
-def test_sync_with_upstream_before_workflow_conflict_resolution_success(
+def test_sync_with_upstream_before_workflow_origin_only_merge_marks_success(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
-    saved: list[tuple[str, str, list[str]]] = []
+
+    def fake_run_subprocess(command, cwd, shell=False):
+        if command == ["git", "fetch", "origin"]:
+            return 0, ""
+        if command == ["git", "rev-parse", "--verify", "origin/feature"]:
+            return 0, "abc123\n"
+        if command == ["git", "rev-list", "--left-right", "--count", "HEAD...origin/feature"]:
+            return 0, "0 2\n"
+        if command == ["git", "fetch", "upstream"]:
+            return 0, ""
+        if command == ["git", "symbolic-ref", "refs/remotes/upstream/HEAD"]:
+            return 0, "refs/remotes/upstream/main\n"
+        if command == ["git", "rev-list", "--left-right", "--count", "HEAD...upstream/main"]:
+            return 0, "0 0\n"
+        return 0, ""
+
+    monkeypatch.setattr(lfa, "is_git_repo", lambda current_repo: True)
+    monkeypatch.setattr(lfa, "current_git_branch", lambda current_repo: "feature")
+    monkeypatch.setattr(
+        lfa,
+        "classify_git_working_tree",
+        lambda current_repo: {
+            "clean": True,
+            "status_output": "",
+            "staged_paths": [],
+            "unstaged_paths": [],
+            "untracked_paths": [],
+        },
+    )
+    monkeypatch.setattr(lfa, "parse_remote_names", lambda current_repo: ["origin", "upstream"])
+    monkeypatch.setattr(lfa, "run_subprocess", fake_run_subprocess)
+    monkeypatch.setattr(
+        lfa,
+        "run_sync_operation_with_conflict_hook",
+        lambda current_repo, sync_operation, command, validation_command="", no_auto_conflict_resolution_after_sync=False: (
+            True,
+            "",
+            {"merge_conflicts_detected": False, "merge_result": "not_needed"},
+        ),
+    )
+
+    result = lfa.sync_with_upstream_before_workflow(repo, validation_command="pytest -q")
+
+    assert result["origin_sync_result"] == "success"
+    assert result["sync_result"] == "success"
+    assert result["validation_result_after_sync"] == "not_run"
+    assert result["git_actions"] == [
+        "git fetch origin",
+        "git merge --no-edit origin/feature",
+        "git fetch upstream",
+    ]
+
+
+def test_sync_with_upstream_before_workflow_upstream_conflict_blocks_and_reports_files(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
 
     def fake_run_subprocess(command, cwd, shell=False):
         if command == ["git", "fetch", "upstream"]:
@@ -1390,38 +1864,45 @@ def test_sync_with_upstream_before_workflow_conflict_resolution_success(
         return 0, ""
 
     monkeypatch.setattr(lfa, "is_git_repo", lambda current_repo: True)
-    monkeypatch.setattr(lfa, "parse_remote_names", lambda current_repo: ["origin", "upstream"])
+    monkeypatch.setattr(lfa, "current_git_branch", lambda current_repo: "feature")
+    monkeypatch.setattr(
+        lfa,
+        "classify_git_working_tree",
+        lambda current_repo: {
+            "clean": True,
+            "status_output": "",
+            "staged_paths": [],
+            "unstaged_paths": [],
+            "untracked_paths": [],
+        },
+    )
+    monkeypatch.setattr(lfa, "parse_remote_names", lambda current_repo: ["upstream"])
     monkeypatch.setattr(lfa, "run_subprocess", fake_run_subprocess)
     monkeypatch.setattr(
         lfa,
         "run_sync_operation_with_conflict_hook",
         lambda current_repo, sync_operation, command, validation_command="", no_auto_conflict_resolution_after_sync=False: (
-            True,
-            "",
+            False,
+            "upstream merge produced conflicts in: app.py",
             {
                 "merge_conflicts_detected": True,
                 "conflicted_files": ["app.py"],
-                "resolution_strategy_per_file": {"app.py": "structured_merge_combined_logic"},
-                "validation_result_after_merge": "success",
-                "merge_result": "success",
-                "blocked_reason": "",
+                "resolution_strategy_per_file": {"app.py": "manual_resolution_required"},
+                "validation_result_after_merge": "not_run",
+                "merge_result": "blocked",
+                "blocked_reason": "upstream merge produced conflicts in: app.py",
             },
         ),
-    )
-    monkeypatch.setattr(
-        lfa,
-        "update_recent_state",
-        lambda current_repo, test_cmd, mode, success, artifact_dir=None, target="", files_changed=None, confidence="", blocked_reason="": saved.append((mode, str(success), list(files_changed or []))) or Path("/tmp/state.json"),
     )
 
     result = lfa.sync_with_upstream_before_workflow(repo, validation_command="pytest -q")
 
-    assert result["sync_result"] == "success"
+    assert result["sync_result"] == "blocked"
     assert result["merge_conflict_result"]["conflicted_files"] == ["app.py"]
-    assert saved[-1] == ("upstream-sync", "success", ["app.py"])
+    assert "app.py" in result["reason"]
 
 
-def test_sync_with_upstream_before_workflow_conflict_blocked(
+def test_sync_with_upstream_before_workflow_origin_conflict_blocks_and_reports_files(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -1429,6 +1910,14 @@ def test_sync_with_upstream_before_workflow_conflict_blocked(
     repo.mkdir()
 
     def fake_run_subprocess(command, cwd, shell=False):
+        if command == ["git", "fetch", "origin"]:
+            return 0, ""
+        if command == ["git", "rev-parse", "--verify", "origin/feature"]:
+            return 0, "abc123\n"
+        if command == ["git", "rev-list", "--left-right", "--count", "HEAD...origin/feature"]:
+            return 0, "0 1\n"
+        if command == ["git", "fetch", "upstream"]:
+            raise AssertionError("upstream fetch should not run after origin conflict")
         if command == ["git", "fetch", "upstream"]:
             return 0, ""
         if command == ["git", "symbolic-ref", "refs/remotes/upstream/HEAD"]:
@@ -1444,6 +1933,18 @@ def test_sync_with_upstream_before_workflow_conflict_blocked(
         return 0, ""
 
     monkeypatch.setattr(lfa, "is_git_repo", lambda current_repo: True)
+    monkeypatch.setattr(lfa, "current_git_branch", lambda current_repo: "feature")
+    monkeypatch.setattr(
+        lfa,
+        "classify_git_working_tree",
+        lambda current_repo: {
+            "clean": True,
+            "status_output": "",
+            "staged_paths": [],
+            "unstaged_paths": [],
+            "untracked_paths": [],
+        },
+    )
     monkeypatch.setattr(lfa, "parse_remote_names", lambda current_repo: ["origin", "upstream"])
     monkeypatch.setattr(lfa, "run_subprocess", fake_run_subprocess)
     monkeypatch.setattr(
@@ -1451,14 +1952,14 @@ def test_sync_with_upstream_before_workflow_conflict_blocked(
         "run_sync_operation_with_conflict_hook",
         lambda current_repo, sync_operation, command, validation_command="", no_auto_conflict_resolution_after_sync=False: (
             False,
-            "config conflict is not clearly compatible",
+            "origin merge produced conflicts in: settings.json",
             {
                 "merge_conflicts_detected": True,
                 "conflicted_files": ["settings.json"],
-                "resolution_strategy_per_file": {"settings.json": "blocked_ambiguous_config_conflict"},
+                "resolution_strategy_per_file": {"settings.json": "manual_resolution_required"},
                 "validation_result_after_merge": "not_run",
                 "merge_result": "blocked",
-                "blocked_reason": "config conflict is not clearly compatible",
+                "blocked_reason": "origin merge produced conflicts in: settings.json",
             },
         ),
     )
@@ -1466,7 +1967,8 @@ def test_sync_with_upstream_before_workflow_conflict_blocked(
     result = lfa.sync_with_upstream_before_workflow(repo, validation_command="pytest -q")
 
     assert result["sync_result"] == "blocked"
-    assert result["reason"] == "config conflict is not clearly compatible"
+    assert result["origin_sync_result"] == "blocked"
+    assert result["reason"] == "origin merge produced conflicts in: settings.json"
     assert result["merge_conflict_result"]["merge_result"] == "blocked"
 
 
@@ -1579,40 +2081,7 @@ def test_print_upstream_change_analysis_outputs_summary(capsys: pytest.CaptureFi
     assert "risk_level: high" in output
 
 
-def test_sync_with_upstream_before_workflow_high_risk_blocks_without_force(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    repo = tmp_path / "repo"
-    repo.mkdir()
-
-    def fake_run_subprocess(command, cwd, shell=False):
-        if command == ["git", "fetch", "upstream"]:
-            return 0, ""
-        if command == ["git", "symbolic-ref", "refs/remotes/upstream/HEAD"]:
-            return 0, "refs/remotes/upstream/main\n"
-        if command == ["git", "rev-list", "--left-right", "--count", "HEAD...upstream/main"]:
-            return 0, "0 1\n"
-        if command == ["git", "log", "HEAD..upstream/main", "--oneline"]:
-            return 0, "abc123 core change\n"
-        if command == ["git", "diff", "--name-status", "HEAD..upstream/main"]:
-            return 0, "M\tagent/core.py\n"
-        if command == ["git", "diff", "HEAD..upstream/main"]:
-            return 0, "diff --git a/agent/core.py b/agent/core.py\n+return 1\n"
-        return 0, ""
-
-    monkeypatch.setattr(lfa, "is_git_repo", lambda current_repo: True)
-    monkeypatch.setattr(lfa, "parse_remote_names", lambda current_repo: ["origin", "upstream"])
-    monkeypatch.setattr(lfa, "run_subprocess", fake_run_subprocess)
-
-    result = lfa.sync_with_upstream_before_workflow(repo, validation_command="pytest -q")
-
-    assert result["sync_result"] == "blocked"
-    assert "use --force-upstream-merge to override" in result["reason"]
-    assert result["sync_attempted"] is False
-
-
-def test_sync_with_upstream_before_workflow_high_risk_force_allows_merge(
+def test_sync_with_upstream_before_workflow_high_risk_still_merges_upstream(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -1637,7 +2106,19 @@ def test_sync_with_upstream_before_workflow_high_risk_force_allows_merge(
         return 0, ""
 
     monkeypatch.setattr(lfa, "is_git_repo", lambda current_repo: True)
-    monkeypatch.setattr(lfa, "parse_remote_names", lambda current_repo: ["origin", "upstream"])
+    monkeypatch.setattr(lfa, "current_git_branch", lambda current_repo: "feature")
+    monkeypatch.setattr(
+        lfa,
+        "classify_git_working_tree",
+        lambda current_repo: {
+            "clean": True,
+            "status_output": "",
+            "staged_paths": [],
+            "unstaged_paths": [],
+            "untracked_paths": [],
+        },
+    )
+    monkeypatch.setattr(lfa, "parse_remote_names", lambda current_repo: ["upstream"])
     monkeypatch.setattr(lfa, "run_subprocess", fake_run_subprocess)
     monkeypatch.setattr(
         lfa,
@@ -1650,11 +2131,7 @@ def test_sync_with_upstream_before_workflow_high_risk_force_allows_merge(
     )
     monkeypatch.setattr(lfa, "update_recent_state", lambda *args, **kwargs: Path("/tmp/state.json"))
 
-    result = lfa.sync_with_upstream_before_workflow(
-        repo,
-        validation_command="pytest -q",
-        force_upstream_merge=True,
-    )
+    result = lfa.sync_with_upstream_before_workflow(repo, validation_command="pytest -q")
 
     assert result["sync_result"] == "success"
     assert result["sync_attempted"] is True
@@ -2804,6 +3281,327 @@ def test_publish_current_safe_file_plus_artifact_auto_removes_and_publishes(monk
     assert any(cmd[:3] == ["git", "push", "-u"] for cmd in commands)
 
 
+def test_publish_current_repo_state_auto_removes_agent_run_artifacts(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    run_dir = repo / ".fix_agent_runs" / "run123"
+    run_dir.mkdir(parents=True)
+    diff_path = run_dir / "diff.patch"
+    log_path = run_dir / "log.txt"
+    diff_path.write_text("generated diff")
+    log_path.write_text("generated log")
+    stage_state = {"after_add": False}
+    commands: list[list[str]] = []
+    monkeypatch.setattr(lfa, "load_publish_state", lambda current_repo: {})
+    monkeypatch.setattr(lfa, "save_publish_state", lambda current_repo, state: None)
+    monkeypatch.setattr(lfa, "detect_publish_environment", lambda: {"ci": False, "github_actions": False, "interactive": False, "allow_auto_fork": False})
+    monkeypatch.setattr(lfa, "is_git_repo", lambda current_repo: True)
+    monkeypatch.setattr(lfa, "parse_remote_names", lambda current_repo: ["origin"])
+    monkeypatch.setattr(lfa, "current_git_branch", lambda current_repo: "feature")
+    monkeypatch.setattr(lfa, "detect_default_branch", lambda current_repo: "main")
+    monkeypatch.setattr(lfa, "build_publish_preflight", lambda current_repo, branch: make_preflight())
+    monkeypatch.setattr(lfa, "parse_head_commit", lambda current_repo: "abc123")
+    monkeypatch.setattr(lfa, "branch_already_up_to_date", lambda current_repo, branch, remote_ref="origin": (False, "abc122"))
+    monkeypatch.setattr(lfa, "prepare_publish_target", lambda current_repo, result: (True, "", ""))
+    monkeypatch.setattr(lfa, "publish_meaningful_changed_paths", lambda current_repo: ["local_fix_agent.py"])
+    monkeypatch.setattr(
+        lfa,
+        "classify_publishable_changes",
+        lambda current_repo, baseline_commit="", current_commit="HEAD": {
+            "status_output": (
+                " M local_fix_agent.py\n" "?? .fix_agent_runs/run123/diff.patch\n" "?? .fix_agent_runs/run123/log.txt\n"
+            ),
+            "meaningful_changes_detected": True,
+            "meaningful_paths": ["local_fix_agent.py"],
+            "ignored_changes": [],
+            "last_published_commit": "",
+            "current_commit": "abc123",
+            "diff_files_detected": [],
+        },
+    )
+    def classify_run_artifact_working_tree(_current_repo: Path) -> dict:
+        lines = []
+        untracked_paths: list[str] = []
+        if stage_state["after_add"]:
+            lines.append("M  local_fix_agent.py")
+        else:
+            lines.append(" M local_fix_agent.py")
+        for artifact in (diff_path, log_path):
+            rel = str(artifact.relative_to(repo))
+            if artifact.exists():
+                lines.append(f"?? {rel}")
+                untracked_paths.append(rel)
+        status_output = "\n".join(lines)
+        return {
+            "status_output": status_output,
+            "clean": False,
+            "has_unstaged": not stage_state["after_add"],
+            "has_staged": stage_state["after_add"],
+            "has_untracked": bool(untracked_paths),
+            "staged_paths": ["local_fix_agent.py"] if stage_state["after_add"] else [],
+            "unstaged_paths": [] if stage_state["after_add"] else ["local_fix_agent.py"],
+            "untracked_paths": untracked_paths,
+        }
+
+    monkeypatch.setattr(lfa, "classify_publish_working_tree", classify_run_artifact_working_tree)
+
+    def fake_run_subprocess(command, cwd: Path, shell: bool = False) -> tuple[int, str]:
+        commands.append(command)
+        if command == ["git", "fetch", "origin", "main"]:
+            return 0, ""
+        if command == ["git", "rev-list", "--left-right", "--count", "HEAD...origin/main"]:
+            return 0, "1 0\n"
+        if command == ["git", "add", "-A", "--", "local_fix_agent.py"]:
+            stage_state["after_add"] = True
+            return 0, ""
+        if command[:2] == ["git", "commit"]:
+            return 0, ""
+        if command[:3] == ["git", "push", "-u"]:
+            return 0, ""
+        if command[:3] == ["gh", "pr", "view"]:
+            return 0, json.dumps({"mergeable": "MERGEABLE", "mergeStateStatus": "CLEAN", "baseRefName": "main", "headRefName": "feature"})
+        raise AssertionError(f"unexpected command: {command}")
+
+    monkeypatch.setattr(lfa, "run_subprocess", fake_run_subprocess)
+    monkeypatch.setattr(
+        lfa,
+        "verify_publish_sync",
+        lambda current_repo, branch, remote_ref="origin": {
+            "current_branch": branch,
+            "upstream_branch": f"{remote_ref}/{branch}",
+            "upstream_exists": True,
+            "local_head": "abc123",
+            "remote_head": "abc123",
+            "synced": True,
+            "reason": "",
+        },
+    )
+
+    result = lfa.publish_current_repo_state(repo, "", False, False, False, "", "", False)
+
+    assert result["final"]["status"] == "success"
+    assert result["blocker_remediation_attempted"] is True
+    assert result["blocker_remediation_result"] == "success"
+    assert set(result["auto_removed_paths"]) == {".fix_agent_runs/run123/diff.patch", ".fix_agent_runs/run123/log.txt"}
+    assert not diff_path.exists()
+    assert not log_path.exists()
+    assert result["true_blockers"] == []
+
+
+def test_publish_current_repo_state_agent_run_artifact_outside_policy_blocks(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    outside_dir = repo / ".fix_agent_runs_extra"
+    outside_dir.mkdir()
+    artifact = outside_dir / "artifact.log"
+    artifact.write_text("temp")
+    stage_state = {"after_add": False}
+    commands: list[list[str]] = []
+    monkeypatch.setattr(lfa, "load_publish_state", lambda current_repo: {})
+    monkeypatch.setattr(lfa, "save_publish_state", lambda current_repo, state: None)
+    monkeypatch.setattr(lfa, "detect_publish_environment", lambda: {"ci": False, "github_actions": False, "interactive": False, "allow_auto_fork": False})
+    monkeypatch.setattr(lfa, "is_git_repo", lambda current_repo: True)
+    monkeypatch.setattr(lfa, "parse_remote_names", lambda current_repo: ["origin"])
+    monkeypatch.setattr(lfa, "current_git_branch", lambda current_repo: "feature")
+    monkeypatch.setattr(lfa, "detect_default_branch", lambda current_repo: "main")
+    monkeypatch.setattr(lfa, "build_publish_preflight", lambda current_repo, branch: make_preflight())
+    monkeypatch.setattr(lfa, "parse_head_commit", lambda current_repo: "abc123")
+    monkeypatch.setattr(lfa, "branch_already_up_to_date", lambda current_repo, branch, remote_ref="origin": (False, "abc122"))
+    monkeypatch.setattr(lfa, "prepare_publish_target", lambda current_repo, result: (True, "", ""))
+    monkeypatch.setattr(lfa, "publish_meaningful_changed_paths", lambda current_repo: ["local_fix_agent.py"])
+    monkeypatch.setattr(
+        lfa,
+        "classify_publishable_changes",
+        lambda current_repo, baseline_commit="", current_commit="HEAD": {
+            "status_output": f" M local_fix_agent.py\n?? {artifact.relative_to(repo)}\n",
+            "meaningful_changes_detected": True,
+            "meaningful_paths": ["local_fix_agent.py"],
+            "ignored_changes": [],
+            "last_published_commit": "",
+            "current_commit": "abc123",
+            "diff_files_detected": [],
+        },
+    )
+    def classify_external_artifact_working_tree(_: Path) -> dict:
+        lines = []
+        if stage_state["after_add"]:
+            lines.append("M  local_fix_agent.py")
+        else:
+            lines.append(" M local_fix_agent.py")
+        artifact_rel = str(artifact.relative_to(repo))
+        if artifact.exists():
+            lines.append(f"?? {artifact_rel}")
+        status_output = "\n".join(lines)
+        return {
+            "status_output": status_output,
+            "clean": False,
+            "has_unstaged": not stage_state["after_add"],
+            "has_staged": stage_state["after_add"],
+            "has_untracked": artifact.exists(),
+            "staged_paths": ["local_fix_agent.py"] if stage_state["after_add"] else [],
+            "unstaged_paths": [] if stage_state["after_add"] else ["local_fix_agent.py"],
+            "untracked_paths": [artifact_rel] if artifact.exists() else [],
+        }
+
+    monkeypatch.setattr(lfa, "classify_publish_working_tree", classify_external_artifact_working_tree)
+
+    def fake_run_subprocess(command, cwd: Path, shell: bool = False) -> tuple[int, str]:
+        commands.append(command)
+        if command == ["git", "fetch", "origin", "main"]:
+            return 0, ""
+        if command == ["git", "rev-list", "--left-right", "--count", "HEAD...origin/main"]:
+            return 0, "1 0\n"
+        if command == ["git", "add", "-A", "--", "local_fix_agent.py"]:
+            stage_state["after_add"] = True
+            return 0, ""
+        if command[:2] == ["git", "commit"]:
+            return 0, ""
+        if command[:3] == ["git", "push", "-u"]:
+            return 0, ""
+        raise AssertionError(f"unexpected command: {command}")
+
+    monkeypatch.setattr(lfa, "run_subprocess", fake_run_subprocess)
+    monkeypatch.setattr(
+        lfa,
+        "verify_publish_sync",
+        lambda current_repo, branch, remote_ref="origin": {
+            "current_branch": branch,
+            "upstream_branch": f"{remote_ref}/{branch}",
+            "upstream_exists": True,
+            "local_head": "abc123",
+            "remote_head": "abc123",
+            "synced": True,
+            "reason": "",
+        },
+    )
+
+    result = lfa.publish_current_repo_state(repo, "", False, False, False, "", "", False)
+
+    assert result["final"]["status"] == "blocked"
+    assert result["auto_removed_paths"] == []
+    assert result["true_blockers"] == [
+        {"path": str(artifact.relative_to(repo)), "file_type": "artifact", "reason": "unknown/generated artifact; requires manual review"}
+    ]
+
+
+def test_attempt_publish_auto_revalidation_reruns_when_stale(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    validation_state = {
+        "validation_state": "success",
+        "validation_result": "success",
+        "validation_commit_match": False,
+        "fingerprint_match": False,
+        "last_validated_commit": "abc123",
+        "current_commit": "def456",
+        "last_validated_fingerprint": "hash1",
+        "current_fingerprint": "hash2",
+        "meaningful_changes_detected": True,
+    }
+    def fake_load_recent_state() -> dict:
+        return {
+            "recent_runs": [
+                {
+                    "repo": str(repo),
+                    "target": "",
+                    "commit_hash": "abc123",
+                    "validation_command": "echo ok",
+                    "validation_result": "success",
+                    "success": True,
+                    "ts": int(time.time()),
+                }
+            ]
+        }
+    monkeypatch.setattr(lfa, "load_recent_state", lambda: fake_load_recent_state())
+    monkeypatch.setattr(lfa, "update_recent_state", lambda *args, **kwargs: None)
+    monkeypatch.setattr(lfa, "run_subprocess", lambda cmd, cwd, shell=True: (0, "ok"))
+    monkeypatch.setattr(
+        lfa,
+        "resolve_publish_validation_state",
+        lambda current_repo: {
+            "validation_state": "success",
+            "validation_result": "success",
+            "validation_commit_match": True,
+            "fingerprint_match": True,
+            "last_validated_commit": "def456",
+            "current_commit": "def456",
+            "validation_age_seconds": 0,
+        },
+    )
+    result = lfa.attempt_publish_auto_revalidation(repo, validation_state)
+    assert result["validation_stale_detected"] is True
+    assert result["validation_rerun_attempted"] is True
+    assert result["validation_rerun_result"] == "success"
+    assert result["validation_commit_updated"] is True
+    assert result["validation_state"] == "success"
+
+
+def test_attempt_publish_auto_revalidation_blocks_when_rerun_fails(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    validation_state = {
+        "validation_state": "success",
+        "validation_result": "success",
+        "validation_commit_match": False,
+        "fingerprint_match": False,
+        "last_validated_commit": "abc123",
+        "current_commit": "def456",
+    }
+    monkeypatch.setattr(
+        lfa,
+        "load_recent_state",
+        lambda: {
+            "recent_runs": [
+                {
+                    "repo": str(repo),
+                    "target": "",
+                    "commit_hash": "abc123",
+                    "validation_command": "echo fail",
+                    "validation_result": "success",
+                    "success": True,
+                    "ts": int(time.time()),
+                }
+            ]
+        },
+    )
+    monkeypatch.setattr(lfa, "update_recent_state", lambda *args, **kwargs: None)
+    monkeypatch.setattr(lfa, "run_subprocess", lambda cmd, cwd, shell=True: (1, "failed"))
+    monkeypatch.setattr(
+        lfa,
+        "resolve_publish_validation_state",
+        lambda current_repo: {
+            "validation_state": "blocked",
+            "validation_result": "blocked",
+            "validation_commit_match": False,
+            "fingerprint_match": False,
+            "last_validated_commit": "abc123",
+            "current_commit": "def456",
+        },
+    )
+    result = lfa.attempt_publish_auto_revalidation(repo, validation_state)
+    assert result["validation_stale_detected"] is True
+    assert result["validation_rerun_attempted"] is True
+    assert result["validation_rerun_result"] == "failed"
+    assert result["validation_state"] == "blocked"
+
+
+def test_attempt_publish_auto_revalidation_skips_when_current(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    validation_state = {
+        "validation_state": "success",
+        "validation_result": "success",
+        "validation_commit_match": True,
+        "fingerprint_match": True,
+        "last_validated_commit": "abc123",
+        "current_commit": "abc123",
+    }
+    monkeypatch.setattr(lfa, "load_recent_state", lambda: {"recent_runs": []})
+    result = lfa.attempt_publish_auto_revalidation(repo, validation_state)
+    assert result["validation_stale_detected"] is False
+    assert result["validation_rerun_attempted"] is False
+    assert result["validation_rerun_result"] == "not_needed"
+
 def test_publish_current_untracked_files_stage_and_continue(monkeypatch: pytest.MonkeyPatch) -> None:
     repo = Path("/tmp/repo")
     commands: list[list[str]] = []
@@ -3515,6 +4313,117 @@ def test_ensure_validation_record_failed_validation_blocks(monkeypatch: pytest.M
     assert result["ok"] is False
     assert result["validation_record_created"] is True
     assert result["validation_result"] == "failed"
+
+
+def test_run_repo_validation_command_invalid_shell_command_uses_fallback(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "local_fix_agent.py").write_text("print('ok')\n")
+    calls: list[object] = []
+    updates: list[tuple[str, str, str]] = []
+
+    def fake_run_subprocess(command, cwd, shell=False):
+        calls.append(command)
+        if shell and command == "bad((":
+            return 2, '/bin/sh: 1: Syntax error: word unexpected (expecting ")")'
+        if shell and command == "pytest -q":
+            return 0, "ok"
+        return 0, ""
+
+    monkeypatch.setattr(lfa, "run_subprocess", fake_run_subprocess)
+    monkeypatch.setattr(lfa, "meaningful_changed_paths", lambda current_repo: ["local_fix_agent.py"])
+    monkeypatch.setattr(lfa, "repo_files", lambda current_repo: ["local_fix_agent.py", "tests/test_local_fix_agent_publish.py"])
+    monkeypatch.setattr(lfa, "latest_repo_validation_command", lambda current_repo: "bad((")
+    monkeypatch.setattr(
+        lfa,
+        "update_recent_state",
+        lambda current_repo, test_cmd, mode, success, artifact_dir=None, target="", files_changed=None, confidence="", blocked_reason="": updates.append((test_cmd, str(success), blocked_reason)) or Path("/tmp/state.json"),
+    )
+
+    result = lfa.run_repo_validation_command(
+        repo,
+        "bad((",
+        mode="finalization-prepare",
+        confidence="finalization-prepare",
+    )
+
+    assert result["ok"] is True
+    assert result["validation_result"] == "success"
+    assert result["validation_error_type"] == "invalid_validation_command"
+    assert result["fallback_validation_used"] is True
+    assert result["fallback_validation_result"] == "passed"
+    assert result["validation_command_used"] == "pytest -q"
+    assert updates[0][1] == "success"
+    assert "Validation command failed; used fallback pytest validation." in updates[0][2]
+    assert calls == ["bad((", "pytest -q"]
+
+
+def test_run_repo_validation_command_real_test_failure_does_not_fallback(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "local_fix_agent.py").write_text("print('ok')\n")
+    updates: list[tuple[str, str, str]] = []
+
+    monkeypatch.setattr(
+        lfa,
+        "run_subprocess",
+        lambda command, cwd, shell=False: (1, "FAILED tests/test_local_fix_agent_publish.py::test_x\nE       assert 1 == 2"),
+    )
+    monkeypatch.setattr(lfa, "meaningful_changed_paths", lambda current_repo: ["local_fix_agent.py"])
+    monkeypatch.setattr(lfa, "repo_files", lambda current_repo: ["local_fix_agent.py", "tests/test_local_fix_agent_publish.py"])
+    monkeypatch.setattr(
+        lfa,
+        "update_recent_state",
+        lambda current_repo, test_cmd, mode, success, artifact_dir=None, target="", files_changed=None, confidence="", blocked_reason="": updates.append((test_cmd, str(success), blocked_reason)) or Path("/tmp/state.json"),
+    )
+
+    result = lfa.run_repo_validation_command(
+        repo,
+        "pytest -q",
+        mode="finalization-prepare",
+        confidence="finalization-prepare",
+    )
+
+    assert result["ok"] is False
+    assert result["validation_result"] == "failed"
+    assert result["validation_error_type"] == "assertion_mismatch"
+    assert result["fallback_validation_used"] is False
+    assert result["fallback_validation_result"] == "not_needed"
+    assert result["validation_command_used"] == "pytest -q"
+    assert updates[0][0] == "pytest -q"
+
+
+def test_run_repo_validation_command_invalid_command_uses_py_compile_after_invalid_pytest(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "local_fix_agent.py").write_text("print('ok')\n")
+    calls: list[object] = []
+
+    def fake_run_subprocess(command, cwd, shell=False):
+        calls.append(command)
+        if shell and command in {"bad((", "stillbad((", "pytest -q"}:
+            return 2, '/bin/sh: 1: command not found'
+        return 0, ""
+
+    monkeypatch.setattr(lfa, "run_subprocess", fake_run_subprocess)
+    monkeypatch.setattr(lfa, "meaningful_changed_paths", lambda current_repo: ["local_fix_agent.py"])
+    monkeypatch.setattr(lfa, "repo_files", lambda current_repo: ["local_fix_agent.py", "tests/test_local_fix_agent_publish.py"])
+    monkeypatch.setattr(lfa, "latest_repo_validation_command", lambda current_repo: "stillbad((")
+    monkeypatch.setattr(lfa, "update_recent_state", lambda *args, **kwargs: Path("/tmp/state.json"))
+
+    result = lfa.run_repo_validation_command(
+        repo,
+        "bad((",
+        mode="finalization-prepare",
+        confidence="finalization-prepare",
+    )
+
+    assert result["ok"] is True
+    assert result["validation_error_type"] == "invalid_validation_command"
+    assert result["fallback_validation_used"] is True
+    assert result["fallback_validation_result"] == "passed"
+    assert "py_compile" in result["validation_command_used"]
+    assert calls == ["bad((", "stillbad((", "pytest -q", [lfa.sys.executable, "-m", "py_compile", "local_fix_agent.py"]]
 
 
 def test_no_finalize_is_reported_as_incomplete(capsys: pytest.CaptureFixture[str]) -> None:

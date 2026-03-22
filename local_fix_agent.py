@@ -22,7 +22,7 @@ import urllib.error
 import urllib.request
 from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlsplit, urlunsplit
 
-MODEL = "qwen2.5-coder:14b"
+MODEL = "qwen3-coder:30b"
 DEFAULT_MAX_STEPS = 40
 DEFAULT_MAX_FILE_CHARS = 20000
 MAX_COMMIT_PATHS = 50
@@ -863,6 +863,7 @@ PUBLISH_GENERATED_DIRS = {
     "dist",
     "htmlcov",
     "site",
+    RUN_ARTIFACTS_DIR_NAME,
 }
 PUBLISH_GENERATED_SUFFIXES = {
     ".pyc",
@@ -883,6 +884,7 @@ PUBLISH_CONFIG_SUFFIXES = {".cfg", ".ini", ".json", ".toml", ".yaml", ".yml"}
 PUBLISH_CODE_SUFFIXES = {".js", ".jsx", ".py", ".ts", ".tsx"}
 DEFAULT_PUBLISH_AUTO_REMOVE_SAFE_ARTIFACTS = True
 DEFAULT_PUBLISH_AUTO_IGNORE_KNOWN_JUNK = False
+DEFAULT_PUBLISH_RUN_ARTIFACT_DIRS = [RUN_ARTIFACTS_DIR_NAME]
 
 
 def _publish_config_block(config: dict | None) -> dict:
@@ -904,6 +906,7 @@ def load_publish_blocker_policy(repo: Path, *, auto_remediate: bool = True) -> d
     known_junk_globs = _publish_config_globs(publish_blockers.get("known_junk_globs", []))
     safe_ignore_globs = _publish_config_globs(publish_blockers.get("safe_ignore_globs", []))
     safe_remove_globs = _publish_config_globs(publish_blockers.get("safe_remove_globs", []))
+    run_artifact_dirs = _publish_config_globs(publish_blockers.get("run_artifact_dirs", DEFAULT_PUBLISH_RUN_ARTIFACT_DIRS))
     return {
         "auto_remediate": bool(auto_remediate),
         "auto_remove_safe_artifacts": bool(publish_blockers.get("auto_remove_safe_artifacts", DEFAULT_PUBLISH_AUTO_REMOVE_SAFE_ARTIFACTS)),
@@ -911,6 +914,7 @@ def load_publish_blocker_policy(repo: Path, *, auto_remediate: bool = True) -> d
         "known_junk_globs": known_junk_globs,
         "safe_ignore_globs": safe_ignore_globs,
         "safe_remove_globs": safe_remove_globs,
+        "run_artifact_dirs": run_artifact_dirs,
     }
 
 
@@ -922,6 +926,17 @@ def publish_path_matches_any_glob(path: str, globs: list[str]) -> str:
     return ""
 
 
+def is_run_artifact_path(path: str, policy: dict) -> bool:
+    normalized = str(path or "").strip()
+    if not normalized:
+        return False
+    run_dirs = set(path.strip() for path in (policy.get("run_artifact_dirs") or []))
+    if not run_dirs:
+        return False
+    rel_path = Path(normalized)
+    return bool(rel_path.parts and rel_path.parts[0] in run_dirs)
+
+
 def is_high_confidence_safe_artifact_path(path: str, analysis: dict, policy: dict) -> bool:
     normalized = str(path or "").strip()
     rel = Path(normalized) if normalized else Path()
@@ -931,6 +946,8 @@ def is_high_confidence_safe_artifact_path(path: str, analysis: dict, policy: dic
     if publish_path_matches_any_glob(normalized, list(policy.get("safe_remove_globs") or [])):
         return True
     if publish_path_matches_any_glob(normalized, list(policy.get("known_junk_globs") or [])):
+        return True
+    if is_run_artifact_path(normalized, policy) and str(analysis.get("file_type") or "") in {"artifact", "generated"}:
         return True
     return str(analysis.get("classification_source") or "") in {"pattern_match", "path_rule"} and str(analysis.get("file_type") or "") in {"artifact", "generated"}
 
@@ -1699,6 +1716,149 @@ def split_publish_auto_stage_paths(paths: list[str]) -> tuple[list[str], list[st
     return safe_paths, blocked_paths
 
 
+PRE_TASK_AUTO_STAGE_FILE_TYPES = {"code", "docs", "script", "test"}
+
+
+def classify_pre_task_working_tree(repo: Path, *, auto_remediate: bool = True) -> dict:
+    result = {
+        "working_tree_detected": False,
+        "working_tree_clean": True,
+        "working_tree_status": "",
+        "dirty_paths": [],
+        "auto_stage_attempted": False,
+        "auto_staged_paths": [],
+        "auto_removed_paths": [],
+        "remaining_unstaged_paths": [],
+        "working_tree_blockers": [],
+        "working_tree_summary": "",
+    }
+    blocker_policy = load_publish_blocker_policy(repo, auto_remediate=auto_remediate)
+
+    def audit_state() -> tuple[dict, list[dict], list[dict], dict]:
+        working_tree = classify_publish_working_tree(repo)
+        result["working_tree_clean"] = bool(working_tree.get("clean"))
+        result["working_tree_status"] = str(working_tree.get("status_output") or "")
+        dirty_paths = list(
+            dict.fromkeys(
+                list(working_tree.get("staged_paths") or [])
+                + list(working_tree.get("unstaged_paths") or [])
+                + list(working_tree.get("untracked_paths") or [])
+            )
+        )
+        if dirty_paths and not result["dirty_paths"]:
+            result["dirty_paths"] = dirty_paths
+        result["working_tree_detected"] = bool(result["working_tree_detected"] or dirty_paths)
+        audit = normalize_publish_working_tree_audit(repo, working_tree, expected_paths=None)
+        decisions, _summary, remaining_unstaged, _overall_reason = build_publish_file_decisions(
+            list(audit.get("entries") or []),
+            expected_paths=None,
+            staged_paths=list(audit.get("staged_paths") or []),
+            remaining_paths=list(audit.get("remaining_paths") or []),
+        )
+        decision_sets = summarize_publish_decision_sets(decisions, remaining_unstaged)
+        analyses = analyze_publish_blockers(repo, remaining_unstaged)
+        enriched_analyses: list[dict] = []
+        for item in analyses:
+            enriched = dict(item)
+            enriched.update(classify_publish_blocker_remediation(repo, item, blocker_policy))
+            enriched_analyses.append(enriched)
+        return working_tree, remaining_unstaged, enriched_analyses, decision_sets
+
+    working_tree, remaining_unstaged, analyses, decision_sets = audit_state()
+    if not result["working_tree_detected"]:
+        result["working_tree_summary"] = "Working tree already clean."
+        return result
+
+    safe_stage_paths = [
+        str(item.get("path") or "")
+        for item in remaining_unstaged
+        if bool(item.get("publishable"))
+        and str(item.get("file_type") or "") in PRE_TASK_AUTO_STAGE_FILE_TYPES
+        and str(item.get("path") or "")
+    ]
+    if safe_stage_paths:
+        result["auto_stage_attempted"] = True
+        code, output = run_subprocess(["git", "add", "-A", "--", *safe_stage_paths], repo)
+        if code != 0:
+            result["remaining_unstaged_paths"] = list(decision_sets.get("unresolved_paths") or [])
+            result["working_tree_blockers"] = [
+                {
+                    "path": path,
+                    "file_type": "unknown",
+                    "reason": f"automatic staging failed: {output.strip() or 'git add failed'}",
+                }
+                for path in safe_stage_paths
+            ]
+            result["working_tree_summary"] = "Uncommitted changes detected, but automatic staging failed."
+            return result
+        result["auto_staged_paths"] = sorted(set(safe_stage_paths))
+        working_tree, remaining_unstaged, analyses, decision_sets = audit_state()
+
+    remediation_attempts = 0
+    while remediation_attempts < 3:
+        auto_resolvable = [
+            item
+            for item in analyses
+            if str(item.get("remediation_class") or "") == "auto_resolvable_safe"
+        ]
+        if not auto_resolvable:
+            break
+        remediation = remediate_publish_blockers(repo, analyses, blocker_policy)
+        remediation_attempts += 1
+        result["auto_removed_paths"] = sorted(
+            set(list(result.get("auto_removed_paths") or []) + list(remediation.get("auto_removed_paths") or []))
+        )
+        if str(remediation.get("result") or "") == "blocked":
+            break
+        working_tree, remaining_unstaged, analyses, decision_sets = audit_state()
+
+    blockers: list[dict] = list(decision_sets.get("true_blockers") or [])
+    for item in remaining_unstaged:
+        path = str(item.get("path") or "")
+        file_type = str(item.get("file_type") or "unknown")
+        if not path or not bool(item.get("publishable")):
+            continue
+        if path in result["auto_staged_paths"]:
+            continue
+        blockers.append(
+            {
+                "path": path,
+                "file_type": file_type,
+                "reason": "publishable file requires manual review before staging",
+            }
+        )
+    deduped_blockers: list[dict] = []
+    seen_blockers: set[str] = set()
+    for item in blockers:
+        path = str(item.get("path") or "")
+        if not path or path in seen_blockers:
+            continue
+        seen_blockers.add(path)
+        deduped_blockers.append(item)
+    result["working_tree_blockers"] = deduped_blockers
+    result["remaining_unstaged_paths"] = list(decision_sets.get("unresolved_paths") or [])
+    if result["working_tree_blockers"]:
+        blocker_count = len(result["working_tree_blockers"])
+        noun = "file" if blocker_count == 1 else "files"
+        result["working_tree_summary"] = (
+            "Uncommitted changes detected; safe files were staged and artifacts removed where possible."
+            if result["auto_staged_paths"] or result["auto_removed_paths"]
+            else "Uncommitted changes detected."
+        )
+        result["working_tree_summary"] += f" Blocked due to {blocker_count} ambiguous {noun} requiring manual review."
+        return result
+    if result["auto_staged_paths"] or result["auto_removed_paths"]:
+        actions: list[str] = []
+        if result["auto_staged_paths"]:
+            actions.append("staged safe files")
+        if result["auto_removed_paths"]:
+            actions.append("removed artifacts")
+        result["working_tree_summary"] = "Uncommitted changes detected; " + " and ".join(actions) + "."
+    else:
+        result["working_tree_summary"] = "Uncommitted changes detected, but only ignored/internal files remain."
+    return result
+
+
 def format_manual_staging_commands(paths: list[str], restore_paths: list[str] | None = None) -> list[str]:
     commands: list[str] = []
     for path in paths:
@@ -2401,6 +2561,14 @@ def run_sync_operation_with_conflict_hook(
     return True, output.strip(), conflict_result
 
 
+def append_git_action(result: dict, action: str) -> None:
+    text = str(action or "").strip()
+    if not text:
+        return
+    result.setdefault("git_actions", []).append(text)
+    progress(f"git: {text}")
+
+
 def detect_remote_default_branch(repo: Path, remote_name: str, fallback_branch: str = "main") -> str:
     code, output = run_subprocess(["git", "symbolic-ref", f"refs/remotes/{remote_name}/HEAD"], repo)
     if code == 0 and output.strip():
@@ -2414,6 +2582,11 @@ def detect_remote_default_branch(repo: Path, remote_name: str, fallback_branch: 
         if code == 0:
             return remote_ref
     return f"{remote_name}/{fallback_branch}"
+
+
+def git_ref_exists(repo: Path, ref_name: str) -> bool:
+    code, _ = run_subprocess(["git", "rev-parse", "--verify", ref_name], repo)
+    return code == 0
 
 
 def parse_ahead_behind_counts(output: str) -> tuple[int, int]:
@@ -2635,15 +2808,43 @@ def run_repo_validation_command(
             "validation_result": "blocked",
             "reason": f"no validation command available after {mode}",
             "output": "",
+            "validation_error_type": "unknown",
+            "fallback_validation_used": False,
+            "fallback_validation_result": "not_needed",
         }
     code, output = run_subprocess(command, repo, shell=True)
     validation_result = "success" if code == 0 else "failed"
     blocked_reason = ""
+    validation_error_type = "unknown"
+    fallback_validation_used = False
+    fallback_validation_result = "not_needed"
+    command_used = command
     if code != 0:
-        blocked_reason = (output or "").strip()[:500]
+        blocked_reason = (output or "").strip()[:2000]
+        validation_error_type = map_validation_error_type(classify_failure_type(output), extract_failure_context(output, repo), output)
+        if is_invalid_validation_command_output(output):
+            validation_error_type = "invalid_validation_command"
+            fallback_validation_used = True
+            fallback = run_validation_fallback_chain(repo, failed_command=command, files_changed=files_changed)
+            fallback_validation_result = "passed" if fallback.get("ok") else "failed"
+            command_used = str(fallback.get("command") or command)
+            if fallback.get("ok"):
+                validation_result = "success"
+                blocked_reason = str(fallback.get("summary") or "Validation command failed; used fallback validation.")
+                output = "\n".join(
+                    part for part in [str(output or "").strip(), str(fallback.get("summary") or "").strip()] if part
+                ).strip()
+            else:
+                blocked_reason = str(fallback.get("summary") or "Fallback validation failed.")
+                if fallback.get("output"):
+                    blocked_reason = f"{blocked_reason}: {str(fallback.get('output') or '').strip()[:500]}"
+                output = "\n".join(
+                    part for part in [str(output or "").strip(), str(fallback.get("output") or "").strip()] if part
+                ).strip()
+                validation_error_type = str(fallback.get("validation_error_type") or "unknown")
     update_recent_state(
         repo,
-        command,
+        command_used,
         mode,
         validation_result,
         None,
@@ -2653,15 +2854,38 @@ def run_repo_validation_command(
         blocked_reason=blocked_reason,
     )
     return {
-        "ok": code == 0,
+        "ok": validation_result == "success",
         "validation_result": validation_result,
         "reason": blocked_reason or "",
         "output": output,
+        "validation_error_type": validation_error_type,
+        "fallback_validation_used": fallback_validation_used,
+        "fallback_validation_result": fallback_validation_result,
+        "validation_command_used": command_used,
     }
 
 
 def make_upstream_sync_result() -> dict:
     return {
+        "current_branch": "",
+        "working_tree_detected": False,
+        "working_tree_clean": True,
+        "working_tree_status": "",
+        "dirty_paths": [],
+        "auto_stage_attempted": False,
+        "auto_staged_paths": [],
+        "auto_removed_paths": [],
+        "remaining_unstaged_paths": [],
+        "working_tree_blockers": [],
+        "working_tree_summary": "",
+        "git_actions": [],
+        "origin_detected": False,
+        "origin_branch": "",
+        "origin_ahead_count": 0,
+        "origin_behind_count": 0,
+        "origin_sync_attempted": False,
+        "origin_sync_result": "not_needed",
+        "origin_reason": "",
         "upstream_detected": False,
         "upstream_branch": "upstream/main",
         "behind_count": 0,
@@ -2684,6 +2908,166 @@ def make_upstream_sync_result() -> dict:
     }
 
 
+def is_invalid_validation_command_output(output: str) -> bool:
+    normalized = normalize_failure_output(output)
+    if not normalized:
+        return False
+    shell_markers = [
+        "/bin/sh:",
+        "command not found",
+        "syntax error",
+        "word unexpected",
+        "unexpected token",
+        "not found",
+    ]
+    if not any(marker in normalized for marker in shell_markers):
+        return False
+    real_code_markers = [
+        "traceback",
+        "syntaxerror",
+        "indentationerror",
+        "taberror",
+        "importerror",
+        "modulenotfounderror",
+        "assertionerror",
+        "error collecting",
+        "failed tests",
+        "e       assert",
+        "nameerror",
+        "attributeerror",
+    ]
+    return not any(marker in normalized for marker in real_code_markers)
+
+
+def fallback_validation_python_files(repo: Path, files_changed: list[str] | None = None) -> list[str]:
+    candidates = [path for path in list(files_changed or []) if path.endswith(".py")]
+    if not candidates:
+        candidates = [path for path in meaningful_changed_paths(repo) if path.endswith(".py")]
+    if not candidates:
+        candidates = [path for path in repo_files(repo) if path.endswith(".py")]
+    existing: list[str] = []
+    for path in candidates:
+        try:
+            if (repo / path).exists():
+                existing.append(path)
+        except OSError:
+            continue
+    return existing[:200]
+
+
+def repo_has_pytest_tests(repo: Path) -> bool:
+    try:
+        if (repo / "tests").is_dir():
+            return True
+    except OSError:
+        return False
+    return any(path.startswith("tests/") or Path(path).name.startswith("test_") for path in repo_files(repo))
+
+
+def run_fallback_python_validation(repo: Path, *, files_changed: list[str] | None = None) -> dict:
+    py_paths = fallback_validation_python_files(repo, files_changed=files_changed)
+    if not py_paths:
+        return {
+            "ok": True,
+            "command": "",
+            "files": [],
+            "output": "",
+            "summary": "Validation command failed; fallback syntax validation found no Python files to check.",
+        }
+    command = [sys.executable, "-m", "py_compile", *py_paths]
+    code, output = run_subprocess(command, repo)
+    return {
+        "ok": code == 0,
+        "command": " ".join(shlex.quote(part) for part in command),
+        "files": py_paths,
+        "output": output,
+        "validation_error_type": map_validation_error_type(classify_failure_type(output), extract_failure_context(output, repo), output) if code != 0 else "unknown",
+        "summary": (
+            "Validation command failed; used fallback syntax validation."
+            if code == 0
+            else "Fallback syntax validation failed."
+        ),
+    }
+
+
+def run_validation_fallback_chain(
+    repo: Path,
+    *,
+    failed_command: str,
+    files_changed: list[str] | None = None,
+) -> dict:
+    candidates: list[dict] = []
+    remembered = latest_repo_validation_command(repo).strip()
+    if remembered and remembered != failed_command and not remembered.startswith("n/a ("):
+        candidates.append({"kind": "repo_defined_validation", "command": remembered, "shell": True})
+    if repo_has_pytest_tests(repo):
+        candidates.append({"kind": "pytest", "command": "pytest -q", "shell": True})
+    candidates.append({"kind": "py_compile", "command": "", "shell": False})
+
+    attempted: list[dict] = []
+    for candidate in candidates:
+        if candidate["kind"] == "py_compile":
+            fallback = run_fallback_python_validation(repo, files_changed=files_changed)
+            attempted.append(
+                {
+                    "kind": "py_compile",
+                    "command": str(fallback.get("command") or ""),
+                    "result": "passed" if fallback.get("ok") else "failed",
+                    "invalid_or_unavailable": False,
+                }
+            )
+            return {
+                "ok": bool(fallback.get("ok")),
+                "command": str(fallback.get("command") or ""),
+                "kind": "py_compile",
+                "output": str(fallback.get("output") or ""),
+                "summary": str(fallback.get("summary") or ""),
+                "attempted": attempted,
+                "validation_error_type": str(fallback.get("validation_error_type") or ("unknown" if fallback.get("ok") else "syntax")),
+            }
+
+        code, output = run_subprocess(str(candidate["command"]), repo, shell=bool(candidate["shell"]))
+        invalid = is_invalid_validation_command_output(output) or not str(candidate["command"]).strip()
+        attempted.append(
+            {
+                "kind": str(candidate["kind"]),
+                "command": str(candidate["command"]),
+                "result": "passed" if code == 0 else ("invalid" if invalid else "failed"),
+                "invalid_or_unavailable": invalid,
+            }
+        )
+        if code == 0:
+            return {
+                "ok": True,
+                "command": str(candidate["command"]),
+                "kind": str(candidate["kind"]),
+                "output": output,
+                "summary": f"Validation command failed; used fallback {candidate['kind']} validation.",
+                "attempted": attempted,
+                "validation_error_type": "unknown",
+            }
+        if not invalid:
+            return {
+                "ok": False,
+                "command": str(candidate["command"]),
+                "kind": str(candidate["kind"]),
+                "output": output,
+                "summary": f"Fallback validation failed at {candidate['kind']}.",
+                "attempted": attempted,
+                "validation_error_type": map_validation_error_type(classify_failure_type(output), extract_failure_context(output, repo), output),
+            }
+
+    return {
+        "ok": False,
+        "command": "",
+        "kind": "none",
+        "output": "",
+        "summary": "No fallback validation strategy was available.",
+        "attempted": attempted,
+        "validation_error_type": "unknown",
+    }
+
+
 def print_upstream_change_analysis(analysis: dict) -> None:
     print("\n=== UPSTREAM CHANGE ANALYSIS ===")
     print(f"commits: {int(analysis.get('commit_count', 0) or 0)}")
@@ -2695,7 +3079,25 @@ def print_upstream_change_analysis(analysis: dict) -> None:
 
 
 def print_upstream_sync_summary(result: dict) -> None:
-    print("\n=== UPSTREAM SYNC ===")
+    print("\n=== PRE-TASK GIT CHECK ===")
+    print(f"current_branch: {result.get('current_branch') or '(unknown)'}")
+    print(f"working_tree_detected: {format_bool(result.get('working_tree_detected'))}")
+    print(f"working_tree_clean: {format_bool(result.get('working_tree_clean', True))}")
+    print(f"auto_stage_attempted: {format_bool(result.get('auto_stage_attempted'))}")
+    print(f"auto_staged_paths: {result.get('auto_staged_paths') or []}")
+    print(f"auto_removed_paths: {result.get('auto_removed_paths') or []}")
+    print(f"remaining_unstaged_paths: {result.get('remaining_unstaged_paths') or []}")
+    print(f"working_tree_blockers: {result.get('working_tree_blockers') or []}")
+    if result.get("working_tree_summary"):
+        print(f"working_tree_summary: {result.get('working_tree_summary')}")
+    print(f"origin_detected: {format_bool(result.get('origin_detected'))}")
+    print(f"origin_branch: {result.get('origin_branch') or '(none)'}")
+    print(f"origin_ahead_count: {int(result.get('origin_ahead_count', 0) or 0)}")
+    print(f"origin_behind_count: {int(result.get('origin_behind_count', 0) or 0)}")
+    print(f"origin_sync_attempted: {format_bool(result.get('origin_sync_attempted'))}")
+    print(f"origin_sync_result: {result.get('origin_sync_result') or 'not_needed'}")
+    if result.get("origin_reason"):
+        print(f"origin_reason: {result.get('origin_reason')}")
     print(f"upstream_detected: {format_bool(result.get('upstream_detected'))}")
     print(f"upstream_branch: {result.get('upstream_branch') or 'upstream/main'}")
     print(f"behind_count: {int(result.get('behind_count', 0) or 0)}")
@@ -2704,6 +3106,11 @@ def print_upstream_sync_summary(result: dict) -> None:
     print(f"sync_result: {result.get('sync_result') or 'not_needed'}")
     if result.get("reason"):
         print(f"sync_reason: {result.get('reason')}")
+    actions = list(result.get("git_actions") or [])
+    if actions:
+        print("git_actions:")
+        for action in actions:
+            print(f"- {action}")
 
 
 def sync_with_upstream_before_workflow(
@@ -2718,10 +3125,90 @@ def sync_with_upstream_before_workflow(
     result = make_upstream_sync_result()
     if no_upstream_sync or not is_git_repo(repo):
         return result
+    result["current_branch"] = current_git_branch(repo)
+    if not result["current_branch"]:
+        result["sync_result"] = "blocked"
+        result["reason"] = "Pre-task git check blocked because the current branch could not be detected."
+        return result
+    working_tree = classify_pre_task_working_tree(repo)
+    result["working_tree_detected"] = bool(working_tree.get("working_tree_detected"))
+    result["working_tree_clean"] = bool(working_tree.get("working_tree_clean"))
+    result["working_tree_status"] = str(working_tree.get("working_tree_status") or "")
+    result["dirty_paths"] = list(working_tree.get("dirty_paths") or [])
+    result["auto_stage_attempted"] = bool(working_tree.get("auto_stage_attempted"))
+    result["auto_staged_paths"] = list(working_tree.get("auto_staged_paths") or [])
+    result["auto_removed_paths"] = list(working_tree.get("auto_removed_paths") or [])
+    result["remaining_unstaged_paths"] = list(working_tree.get("remaining_unstaged_paths") or [])
+    result["working_tree_blockers"] = list(working_tree.get("working_tree_blockers") or [])
+    result["working_tree_summary"] = str(working_tree.get("working_tree_summary") or "")
+    if result["working_tree_blockers"]:
+        result["sync_result"] = "blocked"
+        result["reason"] = (
+            "Pre-task git check blocked because the working tree still has ambiguous changes requiring manual review. "
+            "Inspect the listed blockers before rerunning."
+        )
+        return result
     remotes = parse_remote_names(repo)
+    current_branch = str(result.get("current_branch") or "")
+    if "origin" in remotes:
+        result["origin_detected"] = True
+        append_git_action(result, "git fetch origin")
+        fetch_code, fetch_output = run_subprocess(["git", "fetch", "origin"], repo)
+        if fetch_code != 0:
+            result["origin_sync_result"] = "blocked"
+            result["sync_result"] = "blocked"
+            result["origin_reason"] = fetch_output.strip() or "git fetch origin failed"
+            result["reason"] = result["origin_reason"]
+            return result
+        origin_branch = f"origin/{current_branch}"
+        result["origin_branch"] = origin_branch
+        if git_ref_exists(repo, origin_branch):
+            count_code, count_output = run_subprocess(["git", "rev-list", "--left-right", "--count", f"HEAD...{origin_branch}"], repo)
+            if count_code != 0:
+                result["origin_sync_result"] = "blocked"
+                result["sync_result"] = "blocked"
+                result["origin_reason"] = count_output.strip() or f"failed to compare HEAD with {origin_branch}"
+                result["reason"] = result["origin_reason"]
+                return result
+            origin_ahead_count, origin_behind_count = parse_ahead_behind_counts(count_output)
+            result["origin_ahead_count"] = origin_ahead_count
+            result["origin_behind_count"] = origin_behind_count
+            if origin_behind_count > 0:
+                result["origin_sync_attempted"] = True
+                result["sync_attempted"] = True
+                append_git_action(result, f"git merge --no-edit {origin_branch}")
+                ok, sync_reason, conflict_result = run_sync_operation_with_conflict_hook(
+                    repo,
+                    sync_operation="origin_sync",
+                    command=["git", "merge", "--no-edit", origin_branch],
+                    validation_command="",
+                    no_auto_conflict_resolution_after_sync=True,
+                )
+                if conflict_result.get("merge_conflicts_detected"):
+                    result["merge_conflict_result"] = conflict_result
+                    result["origin_sync_result"] = "blocked"
+                    result["sync_result"] = "blocked"
+                    conflicted = ", ".join(conflict_result.get("conflicted_files") or []) or "unknown files"
+                    result["origin_reason"] = sync_reason or f"origin merge produced conflicts in: {conflicted}"
+                    result["reason"] = result["origin_reason"]
+                    return result
+                if not ok:
+                    result["origin_sync_result"] = "blocked"
+                    result["sync_result"] = "blocked"
+                    result["origin_reason"] = sync_reason or "origin sync failed"
+                    result["reason"] = result["origin_reason"]
+                    return result
+                result["origin_sync_result"] = "success"
+            else:
+                result["origin_sync_result"] = "not_needed"
+        else:
+            result["origin_sync_result"] = "not_needed"
+            result["origin_reason"] = f"{origin_branch} does not exist"
     if "upstream" not in remotes:
+        result["sync_result"] = "success" if result.get("origin_sync_result") == "success" else "not_needed"
         return result
     result["upstream_detected"] = True
+    append_git_action(result, "git fetch upstream")
     fetch_code, fetch_output = run_subprocess(["git", "fetch", "upstream"], repo)
     if fetch_code != 0:
         result["sync_result"] = "blocked"
@@ -2738,7 +3225,7 @@ def sync_with_upstream_before_workflow(
     result["ahead_count"] = ahead_count
     result["behind_count"] = behind_count
     if behind_count <= 0:
-        result["sync_result"] = "not_needed"
+        result["sync_result"] = "success" if result.get("origin_sync_result") == "success" else "not_needed"
         return result
     analysis = analyze_upstream_changes(repo, upstream_branch)
     result["analysis"] = analysis
@@ -2746,49 +3233,21 @@ def sync_with_upstream_before_workflow(
         result["sync_result"] = "blocked"
         result["reason"] = str(analysis.get("reason") or "failed to analyze upstream changes")
         return result
-    if str(analysis.get("risk_level") or "low") == "high" and not force_upstream_merge:
-        result["sync_result"] = "blocked"
-        result["reason"] = (
-            f"upstream merge blocked because risk_level=high: {analysis.get('risk_reason') or 'explicit review required'}; "
-            "use --force-upstream-merge to override"
-        )
-        return result
     result["sync_attempted"] = True
     effective_validation_command = validation_command.strip() or latest_repo_validation_command(repo)
+    append_git_action(result, f"git merge --no-edit {upstream_branch}")
     ok, sync_reason, conflict_result = run_sync_operation_with_conflict_hook(
         repo,
-        sync_operation="branch_sync",
+        sync_operation="upstream_sync",
         command=["git", "merge", "--no-edit", upstream_branch],
         validation_command=effective_validation_command,
-        no_auto_conflict_resolution_after_sync=no_auto_conflict_resolution_after_sync,
+        no_auto_conflict_resolution_after_sync=True,
     )
     if conflict_result.get("merge_conflicts_detected"):
-        conflict_result["sync_operation_attempted"] = True
-        conflict_result["sync_operation"] = "branch_sync"
-        conflict_result["conflict_source"] = "branch_sync"
         result["merge_conflict_result"] = conflict_result
-        if not ok:
-            result["sync_result"] = "blocked"
-            result["reason"] = sync_reason or str(conflict_result.get("blocked_reason") or "merge conflict resolution blocked")
-            return result
-        validation_result = str(conflict_result.get("validation_result_after_merge") or "success")
-        result["validation_result_after_sync"] = validation_result
-        if validation_result == "success":
-            update_recent_state(
-                repo,
-                effective_validation_command,
-                "upstream-sync",
-                "success",
-                None,
-                target,
-                files_changed=list(conflict_result.get("conflicted_files") or []),
-                confidence="upstream-sync",
-                blocked_reason="",
-            )
-            result["sync_result"] = "success"
-            return result
         result["sync_result"] = "blocked"
-        result["reason"] = str(conflict_result.get("blocked_reason") or "validation failed after merge conflict resolution")
+        conflicted = ", ".join(conflict_result.get("conflicted_files") or []) or "unknown files"
+        result["reason"] = sync_reason or str(conflict_result.get("blocked_reason") or f"upstream merge produced conflicts in: {conflicted}")
         return result
     if not ok:
         result["sync_result"] = "blocked"
@@ -3592,6 +4051,389 @@ def extract_failure_context(output: str, repo: Path | None = None) -> dict:
         "actual_value": actual,
         "stack_frames": stack_frames[:5],
     }
+
+
+def normalize_repo_relative_python_path(path: str, repo: Path) -> str:
+    candidate = path.strip()
+    if not candidate:
+        return ""
+    try:
+        candidate_path = Path(candidate)
+        if candidate_path.is_absolute():
+            return str(candidate_path.resolve().relative_to(repo))
+    except (OSError, ValueError):
+        return ""
+    normalized = candidate.replace("\\", "/").lstrip("./")
+    if normalized in set(repo_files(repo)):
+        return normalized
+    return ""
+
+
+def extract_validation_path_references(output: str, repo: Path) -> list[str]:
+    seen: set[str] = set()
+    paths: list[str] = []
+
+    def add(candidate: str) -> None:
+        normalized = normalize_repo_relative_python_path(candidate, repo)
+        if normalized and normalized not in seen:
+            seen.add(normalized)
+            paths.append(normalized)
+
+    for match in re.findall(r'File "([^"]+\.py)"', output):
+        add(match)
+    for match in re.findall(r"((?:\./)?(?:tests?/)?[\w./-]+\.py):\d+", output):
+        add(match)
+    for match in re.findall(r"(ERROR collecting\s+((?:\./)?(?:tests?/)?[\w./-]+\.py))", output):
+        add(match[1])
+    for match in re.findall(r"FAILED\s+((?:\./)?(?:tests?/)?[\w./-]+\.py)(?:::.*)?", output):
+        add(match)
+
+    return paths
+
+
+def extract_validation_test_files(output: str, repo: Path, failure_context: dict) -> list[str]:
+    seen: set[str] = set()
+    files: list[str] = []
+
+    def add(candidate: str) -> None:
+        normalized = normalize_repo_relative_python_path(candidate, repo)
+        if normalized and normalized not in seen and is_test_file_path(normalized):
+            seen.add(normalized)
+            files.append(normalized)
+
+    test_name = str(failure_context.get("failing_test_name") or "")
+    if "::" in test_name:
+        add(test_name.split("::", 1)[0])
+
+    for match in re.findall(r"FAILED\s+((?:\./)?(?:tests?/)?[\w./-]+\.py)(?:::.*)?", output):
+        add(match)
+    for match in re.findall(r"ERROR collecting\s+((?:\./)?(?:tests?/)?[\w./-]+\.py)", output):
+        add(match)
+    for path in extract_validation_path_references(output, repo):
+        if is_test_file_path(path):
+            add(path)
+
+    return files[:5]
+
+
+def extract_module_import_candidates(output: str, repo: Path) -> list[str]:
+    all_repo_files = set(repo_files(repo))
+    seen: set[str] = set()
+    candidates: list[str] = []
+
+    def add(path: str) -> None:
+        if path in all_repo_files and path not in seen:
+            seen.add(path)
+            candidates.append(path)
+
+    module_names: set[str] = set()
+    for match in re.findall(r"(?:ModuleNotFoundError|ImportError):.*?'([^']+)'", output):
+        module_names.add(match.strip())
+    for match in re.findall(r"(?:from|import)\s+([a-zA-Z_][\w.]*)", output):
+        module_names.add(match.strip())
+
+    for module in module_names:
+        module_path = module.replace(".", "/")
+        add(f"{module_path}.py")
+        add(f"{module.split('.')[-1]}.py")
+        add(f"tests/{module_path}.py")
+
+    return candidates[:5]
+
+
+def map_validation_error_type(failure_type: str, failure_context: dict, output: str) -> str:
+    normalized = normalize_failure_output(output)
+    if is_invalid_validation_command_output(output):
+        return "invalid_validation_command"
+    if failure_type == FAILURE_SYNTAX_ERROR:
+        return "syntax"
+    if failure_type == FAILURE_IMPORT_ERROR:
+        return "import"
+    if failure_context.get("failing_test_name"):
+        if failure_context.get("failing_assertion") or "assertionerror" in normalized:
+            return "assertion_mismatch"
+        return "failing_test"
+    if any(token in normalized for token in ["traceback", "error collecting", "command not found", "failed", "exception"]):
+        return "command_failure"
+    return "unknown"
+
+
+def summarize_failure_context_snippet(output: str, limit: int = 800) -> str:
+    snippet = (output or "").strip()
+    snippet = re.sub(r"\n{3,}", "\n\n", snippet)
+    return snippet[:limit]
+
+
+def extract_failure_line_numbers(failure_context: dict, output: str = "") -> list[int]:
+    numbers: list[int] = []
+    seen: set[int] = set()
+    for frame in failure_context.get("stack_frames", []):
+        line = frame.get("line")
+        if isinstance(line, int) and line > 0 and line not in seen:
+            seen.add(line)
+            numbers.append(line)
+    for match in re.findall(r'File "[^"]+\.py", line (\d+)', output):
+        line = int(match)
+        if line > 0 and line not in seen:
+            seen.add(line)
+            numbers.append(line)
+    return numbers[:10]
+
+
+def build_validation_repair_target_details(
+    validation_error_type: str,
+    failing_test_files: list[str],
+    failing_source_files: list[str],
+    traceback_files: list[str],
+    precision_patch: dict,
+) -> list[dict]:
+    details: list[dict] = []
+    seen: set[str] = set()
+
+    def add(path: str, target_type: str, confidence: str, reason: str) -> None:
+        if not path or path in seen:
+            return
+        seen.add(path)
+        details.append(
+            {
+                "target_path": path,
+                "target_type": target_type,
+                "target_confidence": confidence,
+                "target_reason": reason,
+            }
+        )
+
+    if precision_patch.get("file"):
+        precision_reason = str(precision_patch.get("reason") or "high-confidence target from traceback or validation output")
+        if validation_error_type == "import":
+            precision_reason = "explicit source file from import failure"
+        elif validation_error_type == "syntax":
+            precision_reason = "explicit source file from py_compile or syntax traceback"
+        add(
+            str(precision_patch.get("file")),
+            "source" if not is_test_file_path(str(precision_patch.get("file"))) else "test",
+            "high",
+            precision_reason,
+        )
+
+    for path in failing_source_files:
+        if path in traceback_files or validation_error_type in {"syntax", "import"}:
+            confidence = "high"
+            reason = "explicit source file from traceback, py_compile, or import failure"
+        else:
+            confidence = "medium"
+            reason = "pytest failure referenced this source file"
+        add(path, "source", confidence, reason)
+
+    for path in failing_test_files:
+        confidence = "low"
+        reason = "only failing test ownership is clear"
+        if not failing_source_files:
+            confidence = "medium"
+            reason = "failing test file identified from pytest output"
+        add(path, "test", confidence, reason)
+
+    return details[:5]
+
+
+def format_validation_failure_analysis(analysis: dict) -> str:
+    return "\n".join(
+        [
+            "=== VALIDATION FAILURE ANALYSIS ===",
+            f"validation_error_type: {analysis.get('validation_error_type') or 'unknown'}",
+            f"failing_command: {analysis.get('failing_command') or '(none)'}",
+            f"failing_test_files: {analysis.get('failing_test_files') or []}",
+            f"failing_source_files: {analysis.get('failing_source_files') or []}",
+            f"traceback_files: {analysis.get('traceback_files') or []}",
+            f"failure_line_numbers: {analysis.get('failure_line_numbers') or []}",
+            f"repair_targets: {analysis.get('repair_targets') or []}",
+            f"repair_target_details: {analysis.get('repair_target_details') or []}",
+            f"target_confidence: {analysis.get('target_confidence') or 'low'}",
+            f"target_reason: {analysis.get('target_reason') or '(none)'}",
+            f"repair_context_used: {format_bool(analysis.get('repair_context_used'))}",
+            f"repair_goal: {analysis.get('repair_goal') or '(none)'}",
+            f"failure_context_snippet: {analysis.get('failure_context_snippet') or '(none)'}",
+        ]
+    )
+
+
+def latest_failed_validation_run(repo: Path) -> dict:
+    repo_str = str(repo.resolve())
+    state = load_recent_state()
+    recent_runs = [item for item in state.get("recent_runs", []) if isinstance(item, dict)]
+    for item in reversed(recent_runs):
+        if str(item.get("repo") or "") != repo_str:
+            continue
+        result = str(item.get("validation_result") or "").strip()
+        if result in {"failed", "blocked"}:
+            return item
+    return {}
+
+
+def analyze_validation_failure(
+    repo: Path,
+    *,
+    publish_output: str = "",
+    validation_command: str = "",
+    validation_output: str = "",
+) -> dict:
+    recent_failure = latest_failed_validation_run(repo)
+    command = str(validation_command or recent_failure.get("validation_command") or "").strip()
+    if not command:
+        match = re.search(r"validation_command:\s*(.+)", publish_output)
+        if match:
+            command = match.group(1).strip()
+
+    output = str(validation_output or recent_failure.get("blocked_reason") or "").strip()
+    if not output:
+        reason_match = re.search(r"validation_record_reason:\s*(.+)", publish_output)
+        if reason_match:
+            output = reason_match.group(1).strip()
+    combined_output = "\n".join(part for part in [output, publish_output] if part).strip()
+    failure_context = extract_failure_context(combined_output, repo)
+    failure_type = classify_failure_type(combined_output)
+    validation_error_type = map_validation_error_type(failure_type, failure_context, combined_output)
+    failing_test_files = extract_validation_test_files(combined_output, repo, failure_context)
+    traceback_files = [
+        str(frame.get("path") or "")
+        for frame in failure_context.get("stack_frames", [])
+        if str(frame.get("path") or "")
+    ]
+    for path in extract_validation_path_references(combined_output, repo):
+        if path not in traceback_files:
+            traceback_files.append(path)
+    traceback_files = traceback_files[:5]
+    failure_line_numbers = extract_failure_line_numbers(failure_context, combined_output)
+    relevant_context = extract_relevant_file_context(
+        repo,
+        combined_output,
+        list(recent_failure.get("files_changed") or []),
+    )
+    precision_patch = extract_precision_patch_context(combined_output, relevant_context, failure_context)
+
+    explicit_source_candidates: list[str] = []
+    inferred_source_candidates: list[str] = []
+    seen_sources: set[str] = set()
+
+    def add_source(candidate: str, *, explicit: bool) -> None:
+        normalized = normalize_repo_relative_python_path(candidate, repo) if candidate else ""
+        if normalized and normalized not in seen_sources and not is_test_file_path(normalized):
+            seen_sources.add(normalized)
+            if explicit:
+                explicit_source_candidates.append(normalized)
+            else:
+                inferred_source_candidates.append(normalized)
+
+    for frame in failure_context.get("stack_frames", []):
+        add_source(str(frame.get("path") or ""), explicit=True)
+    for path in extract_validation_path_references(combined_output, repo):
+        if not is_test_file_path(path):
+            add_source(path, explicit=True)
+    for path in extract_module_import_candidates(combined_output, repo):
+        add_source(path, explicit=True)
+    if explicit_source_candidates or failure_context.get("stack_frames"):
+        for path in relevant_context.get("required_impl_files", []):
+            add_source(path, explicit=False)
+
+    if not explicit_source_candidates and validation_error_type not in {"syntax", "import"}:
+        precision_patch = {"active": False, "file": "", "symbol": "", "reason": ""}
+
+    source_candidates = explicit_source_candidates + [path for path in inferred_source_candidates if path not in explicit_source_candidates]
+
+    repair_targets: list[str] = []
+    if precision_patch.get("file"):
+        repair_targets.append(str(precision_patch.get("file")))
+    repair_targets.extend(path for path in source_candidates if path not in repair_targets)
+    if not repair_targets:
+        repair_targets.extend(path for path in failing_test_files if path not in repair_targets)
+
+    repair_targets = repair_targets[:3]
+    repair_target_details = build_validation_repair_target_details(
+        validation_error_type,
+        failing_test_files[:5],
+        source_candidates[:5],
+        traceback_files,
+        precision_patch,
+    )
+    repair_context_used = bool(combined_output and (repair_target_details or failure_context.get("failing_test_name")))
+    top_target = repair_target_details[0] if repair_target_details else {}
+    if validation_error_type == "syntax" and repair_targets:
+        repair_goal = f"Fix the syntax error blocking validation in {repair_targets[0]}."
+    elif validation_error_type == "import" and repair_targets:
+        repair_goal = f"Fix the import failure blocking validation, starting with {repair_targets[0]}."
+    elif validation_error_type in {"failing_test", "assertion_mismatch"} and failing_test_files:
+        target_label = repair_targets[0] if repair_targets else failing_test_files[0]
+        repair_goal = f"Fix the validation failure reported by {failing_test_files[0]}, starting with {target_label}."
+    elif command:
+        repair_goal = f"Fix the validation failure from `{command}`."
+    else:
+        repair_goal = "Fix the validation failure blocking publish."
+
+    return {
+        "failing_command": command,
+        "validation_error_type": validation_error_type,
+        "failing_test_files": failing_test_files[:5],
+        "failing_source_files": source_candidates[:5],
+        "traceback_files": traceback_files,
+        "failure_line_numbers": failure_line_numbers,
+        "failure_context_snippet": summarize_failure_context_snippet(combined_output),
+        "repair_targets": repair_targets,
+        "repair_target_details": repair_target_details,
+        "target_confidence": str(top_target.get("target_confidence") or ("low" if not repair_context_used else "medium")),
+        "target_reason": str(top_target.get("target_reason") or ("no high-confidence target inferred" if not repair_context_used else "validation analysis inferred a likely target")),
+        "repair_goal": repair_goal,
+        "repair_context_used": repair_context_used,
+        "failing_test_name": str(failure_context.get("failing_test_name") or ""),
+        "failing_assertion": str(failure_context.get("failing_assertion") or ""),
+        "expected_value": str(failure_context.get("expected_value") or ""),
+        "actual_value": str(failure_context.get("actual_value") or ""),
+        "stack_frames": list(failure_context.get("stack_frames") or []),
+        "relevant_files": list(relevant_context.get("selected") or []),
+        "primary_file": str(relevant_context.get("primary_file") or ""),
+        "precision_patch": dict(precision_patch),
+        "analysis_source": "recent_state" if recent_failure else "publish_output",
+    }
+
+
+def validation_error_type_to_failure_type(error_type: str) -> str:
+    mapping = {
+        "syntax": FAILURE_SYNTAX_ERROR,
+        "import": FAILURE_IMPORT_ERROR,
+        "failing_test": FAILURE_ASSERTION_FAILURE,
+        "assertion_mismatch": FAILURE_ASSERTION_FAILURE,
+        "command_failure": FAILURE_RUNTIME_ERROR,
+    }
+    return mapping.get(str(error_type or "").strip(), FAILURE_UNKNOWN)
+
+
+def repair_context_as_failure_context(repair_context: dict) -> dict:
+    return {
+        "failing_test_name": str(repair_context.get("failing_test_name") or ""),
+        "failing_assertion": str(repair_context.get("failing_assertion") or ""),
+        "expected_value": str(repair_context.get("expected_value") or ""),
+        "actual_value": str(repair_context.get("actual_value") or ""),
+        "stack_frames": list(repair_context.get("stack_frames") or []),
+    }
+
+
+def format_repair_context_note(repair_context: dict) -> str:
+    if not repair_context or not repair_context.get("repair_context_used"):
+        return ""
+    return (
+        "Publish validation failure analysis:\n"
+        f"- validation_error_type: {repair_context.get('validation_error_type') or 'unknown'}\n"
+        f"- failing_command: {repair_context.get('failing_command') or '(none)'}\n"
+        f"- failing_test_files: {repair_context.get('failing_test_files') or []}\n"
+        f"- failing_source_files: {repair_context.get('failing_source_files') or []}\n"
+        f"- traceback_files: {repair_context.get('traceback_files') or []}\n"
+        f"- failure_line_numbers: {repair_context.get('failure_line_numbers') or []}\n"
+        f"- repair_targets: {repair_context.get('repair_targets') or []}\n"
+        f"- repair_target_details: {repair_context.get('repair_target_details') or []}\n"
+        f"- target_confidence: {repair_context.get('target_confidence') or 'low'}\n"
+        f"- target_reason: {repair_context.get('target_reason') or '(none)'}\n"
+        f"- repair_goal: {repair_context.get('repair_goal') or '(none)'}\n"
+        f"- failure_context_snippet: {repair_context.get('failure_context_snippet') or '(none)'}\n"
+    )
 
 
 def load_pattern_memory(repo: Path) -> dict:
@@ -4537,6 +5379,9 @@ def ensure_validation_record_for_current_commit(
             "validation_result": validation_result,
             "validation_command": str(validation_command or latest_repo_validation_command(repo) or ""),
             "reason": str(state.get("reason") or ""),
+            "validation_error_type": "unknown",
+            "fallback_validation_used": False,
+            "fallback_validation_result": "not_needed",
         }
     command = str(validation_command or latest_repo_validation_command(repo) or "").strip()
     if not command:
@@ -4552,6 +5397,9 @@ def ensure_validation_record_for_current_commit(
                 if current_commit and last_commit == current_commit
                 else "no validation command is available to create a validation record for the current commit"
             ),
+            "validation_error_type": "unknown",
+            "fallback_validation_used": False,
+            "fallback_validation_result": "not_needed",
         }
     validation_run = run_repo_validation_command(
         repo,
@@ -4568,8 +5416,11 @@ def ensure_validation_record_for_current_commit(
         "validation_record_reused": False,
         "validation_commit": str(refreshed.get("current_commit") or current_commit or ""),
         "validation_result": refreshed_result,
-        "validation_command": command,
+        "validation_command": str(validation_run.get("validation_command_used") or command),
         "reason": str(refreshed.get("reason") or validation_run.get("reason") or ""),
+        "validation_error_type": str(validation_run.get("validation_error_type") or "unknown"),
+        "fallback_validation_used": bool(validation_run.get("fallback_validation_used")),
+        "fallback_validation_result": str(validation_run.get("fallback_validation_result") or "not_needed"),
     }
 
 
@@ -4581,6 +5432,12 @@ def print_validation_record_result(result: dict) -> None:
     print(f"validation_result: {result.get('validation_result') or 'blocked'}")
     if result.get("validation_command"):
         print(f"validation_command: {result.get('validation_command')}")
+    print(f"validation_error_type: {result.get('validation_error_type') or 'unknown'}")
+    print(f"fallback_validation_used: {format_bool(result.get('fallback_validation_used'))}")
+    print(f"fallback_validation_result: {result.get('fallback_validation_result') or 'not_needed'}")
+    if result.get("fallback_validation_used") and result.get("fallback_validation_result") == "passed":
+        print("what_happened: Validation command failed; used fallback validation.")
+        print("what_happened_detail: Fallback validation passed; continuing publish.")
     if result.get("reason"):
         print(f"validation_record_reason: {result.get('reason')}")
 
@@ -4594,6 +5451,8 @@ def attempt_publish_auto_revalidation(
     result = dict(validation_state)
     original_commit_match = bool(result.get("validation_commit_match"))
     fingerprint_match = bool(result.get("fingerprint_match"))
+    validation_stale = bool(result.get("validation_state") == "success" and not original_commit_match)
+    pre_rerun_last_validated_commit = str(result.get("last_validated_commit") or "")
     result["auto_revalidated"] = False
     result["validation_reused"] = bool(
         result.get("validation_state") == "success"
@@ -4601,6 +5460,10 @@ def attempt_publish_auto_revalidation(
     )
     result["auto_revalidation_result"] = "not_needed"
     result["auto_revalidation_attempted"] = False
+    result["validation_stale_detected"] = validation_stale
+    result["validation_rerun_attempted"] = False
+    result["validation_rerun_result"] = "not_needed"
+    result["validation_commit_updated"] = False
     if result.get("validation_state") == "success" and original_commit_match:
         result["publish_reason"] = "validated"
         return result
@@ -4656,6 +5519,13 @@ def attempt_publish_auto_revalidation(
     post_revalidation_commit_match = bool(refreshed.get("validation_commit_match"))
     refreshed["validation_commit_match"] = original_commit_match
     refreshed["auto_revalidation_result"] = "success" if refreshed.get("validation_state") == "success" and post_revalidation_commit_match else "failed"
+    refreshed["validation_stale_detected"] = validation_stale
+    refreshed["validation_rerun_attempted"] = True
+    refreshed["validation_rerun_result"] = "success" if refreshed.get("auto_revalidation_result") == "success" else "failed"
+    refreshed["validation_commit_updated"] = bool(
+        refreshed.get("last_validated_commit")
+        and refreshed.get("last_validated_commit") != pre_rerun_last_validated_commit
+    )
     if not post_revalidation_commit_match:
         refreshed["validation_state"] = "blocked"
         refreshed["validation_result"] = "blocked"
@@ -12457,6 +13327,10 @@ def make_publish_result() -> dict:
         "auto_revalidated": False,
         "validation_reused": False,
         "auto_revalidation_result": "not_needed",
+        "validation_stale_detected": False,
+        "validation_rerun_attempted": False,
+        "validation_rerun_result": "not_needed",
+        "validation_commit_updated": False,
         "publish_reason": "",
         "branch": "",
         "commit_sha": "",
@@ -14518,6 +15392,10 @@ def print_post_success_publish_summary(summary: dict) -> None:
     print(f"auto_revalidated: {format_bool(summary.get('auto_revalidated'))}")
     print(f"validation_reused: {format_bool(summary.get('validation_reused'))}")
     print(f"auto_revalidation_result: {summary.get('auto_revalidation_result') or 'not_needed'}")
+    print(f"validation_stale_detected: {format_bool(summary.get('validation_stale_detected'))}")
+    print(f"validation_rerun_attempted: {format_bool(summary.get('validation_rerun_attempted'))}")
+    print(f"validation_rerun_result: {summary.get('validation_rerun_result') or 'not_needed'}")
+    print(f"validation_commit_updated: {format_bool(summary.get('validation_commit_updated'))}")
     print(f"last_validated_commit: {summary.get('last_validated_commit') or '(none)'}")
     print(f"current_commit: {summary.get('current_commit') or '(none)'}")
     print(f"validation_age_seconds: {summary.get('validation_age_seconds', -1)}")
@@ -14718,6 +15596,10 @@ def print_publish_summary(publish_result: dict) -> None:
     print(f"auto_revalidated: {format_bool(publish_result.get('auto_revalidated'))}")
     print(f"validation_reused: {format_bool(publish_result.get('validation_reused'))}")
     print(f"auto_revalidation_result: {publish_result.get('auto_revalidation_result') or 'not_needed'}")
+    print(f"validation_stale_detected: {format_bool(publish_result.get('validation_stale_detected'))}")
+    print(f"validation_rerun_attempted: {format_bool(publish_result.get('validation_rerun_attempted'))}")
+    print(f"validation_rerun_result: {publish_result.get('validation_rerun_result') or 'not_needed'}")
+    print(f"validation_commit_updated: {format_bool(publish_result.get('validation_commit_updated'))}")
     print(f"last_validated_commit: {publish_result.get('last_validated_commit') or '(none)'}")
     print(f"current_commit: {publish_result.get('current_commit') or '(none)'}")
     print(f"validation_age_seconds: {publish_result.get('validation_age_seconds', -1)}")
@@ -15722,6 +16604,7 @@ def build_system_prompt(
     hypothesis: dict | None = None,
     current_plan: dict | None = None,
     memory_hint: dict | None = None,
+    repair_context: dict | None = None,
 ) -> str:
     return (
         "You are a careful Python coding agent working in a local repository.\n"
@@ -15734,6 +16617,7 @@ def build_system_prompt(
         "After tests pass, inspect git_diff and optionally commit with a concise message.\n"
         "Do not repeat failed ideas.\n"
         "When tests pass, respond with a short summary.\n"
+        f"{format_repair_context_note(repair_context)}\n"
         f"{build_strategy_guidance(strategy_mode, failure_type, precision_patch, diversification, hypothesis, current_plan, memory_hint)}"
     )
 
@@ -15749,6 +16633,7 @@ def build_user_prompt(
     hypothesis: dict | None = None,
     current_plan: dict | None = None,
     memory_hint: dict | None = None,
+    repair_context: dict | None = None,
 ) -> str:
     validation_note = ""
     if CURRENT_VALIDATION_PLAN.get("active"):
@@ -15768,11 +16653,13 @@ def build_user_prompt(
                 f"- probe_summary: {probe_finding.get('summary') or probe_finding.get('error') or '(none)'}\n"
                 f"- probe_reasoning: {CURRENT_VALIDATION_PLAN.get('probe_reasoning') or '(none)'}\n"
             )
+    repair_context_note = format_repair_context_note(repair_context)
     return (
         f"Repository: {repo}\n"
         f"Current branch: {branch_name or '(unknown or no git branch)'}\n"
         f"Goal: make this pass: {test_cmd}\n"
         f"{validation_note}"
+        f"{repair_context_note}"
         f"{build_strategy_guidance(strategy_mode, failure_type, precision_patch, diversification, hypothesis, current_plan, memory_hint)}\n\n"
         "Suggested workflow:\n"
         "1. Run tests.\n"
@@ -17147,6 +18034,9 @@ def main():
     parser.add_argument("--config-validation-cmd", help="Custom validation command for config workflows.")
     parser.add_argument("--target", help="SSH host for remote execution.")
     parser.add_argument("--test-cmd", help="Test command")
+    parser.add_argument("--repair-context-file", help="JSON file with targeted repair context from publish validation analysis.")
+    parser.add_argument("--analyze-validation-failure", action="store_true", help="Analyze the latest publish/finalization validation failure and emit structured targeting context.")
+    parser.add_argument("--validation-output-file", help="Optional text file containing validation or publish output to analyze.")
     parser.add_argument("test_cmd_positional", nargs=argparse.REMAINDER, help="Optional test command for wrapper usage.")
     parser.add_argument("--mode", choices=sorted(RUN_MODES.keys()), help="Preset run mode")
     parser.add_argument("--last", action="store_true", help="Reuse the last repo and, if needed, the last test command. Works well with --publish.")
@@ -17245,6 +18135,26 @@ def main():
             "output": args.output or "human",
         }
         raise SystemExit(run_interactive_app(initial_session))
+
+    if args.analyze_validation_failure:
+        repo_value = Path(args.repo).expanduser() if args.repo else Path.cwd()
+        if not repo_value.is_absolute():
+            repo_value = (Path.cwd() / repo_value).resolve()
+        publish_output = ""
+        if args.validation_output_file:
+            output_path = Path(args.validation_output_file).expanduser()
+            if not output_path.is_absolute():
+                output_path = (Path.cwd() / output_path).resolve()
+            publish_output = output_path.read_text() if output_path.exists() else ""
+        analysis = analyze_validation_failure(
+            repo_value,
+            publish_output=publish_output,
+        )
+        if args.output == "json":
+            print(json.dumps(analysis, indent=2, sort_keys=True))
+        else:
+            print(format_validation_failure_analysis(analysis))
+        return
 
     pattern_special_mode = bool(
         args.learn_from
@@ -18094,7 +19004,7 @@ def main():
     messages = [
         {
             "role": "system",
-            "content": build_system_prompt(STRATEGY_MINIMAL_PATCH, FAILURE_UNKNOWN, None, None, None, None, None),
+            "content": build_system_prompt(STRATEGY_MINIMAL_PATCH, FAILURE_UNKNOWN, None, None, None, None, None, None),
         },
         {
             "role": "user",
@@ -18104,6 +19014,7 @@ def main():
                 args.test_cmd,
                 STRATEGY_MINIMAL_PATCH,
                 FAILURE_UNKNOWN,
+                None,
                 None,
                 None,
                 None,
@@ -18163,6 +19074,7 @@ def main():
         "successful_symbols": [],
         "failed_strategies": [],
     }
+    repair_context = {}
     current_failure_context = {
         "failing_test_name": "",
         "failing_assertion": "",
@@ -18193,6 +19105,50 @@ def main():
     best_attempt: dict | None = None
     stronger_inspection_required = False
 
+    if getattr(args, "repair_context_file", ""):
+        try:
+            repair_context_path = Path(str(args.repair_context_file)).expanduser()
+            repair_context = json.loads(repair_context_path.read_text())
+        except (OSError, json.JSONDecodeError):
+            repair_context = {}
+        if repair_context.get("repair_context_used"):
+            failure_type = validation_error_type_to_failure_type(str(repair_context.get("validation_error_type") or ""))
+            current_failure_context = repair_context_as_failure_context(repair_context)
+            required_test_files = list(repair_context.get("failing_test_files") or [])[:1]
+            required_impl_files = list(repair_context.get("failing_source_files") or repair_context.get("repair_targets") or [])[:1]
+            required_traceback_files = [frame.get("path", "") for frame in current_failure_context.get("stack_frames", []) if frame.get("path")]
+            primary_relevant_file = str(
+                (repair_context.get("repair_targets") or repair_context.get("failing_source_files") or [""])[0] or ""
+            )
+            selected_relevant_files = [
+                {"path": path, "score": 10 - index, "reasons": ["publish validation failure analysis"]}
+                for index, path in enumerate(repair_context.get("repair_targets") or repair_context.get("failing_source_files") or [])
+                if path
+            ][:5]
+            if primary_relevant_file:
+                precision_patch = {
+                    "active": True,
+                    "file": primary_relevant_file,
+                    "symbol": str((repair_context.get("precision_patch") or {}).get("symbol") or ""),
+                    "reason": "seeded from publish validation failure analysis",
+                }
+            current_hypothesis = {
+                "text": str(repair_context.get("repair_goal") or ""),
+                "symbols": [str((repair_context.get("precision_patch") or {}).get("symbol") or "")] if (repair_context.get("precision_patch") or {}).get("symbol") else [],
+                "files": [primary_relevant_file] if primary_relevant_file else [],
+            }
+            current_plan = build_attempt_plan(
+                {
+                    "selected": selected_relevant_files,
+                    "required_test_files": required_test_files,
+                    "required_impl_files": required_impl_files,
+                    "required_traceback_files": required_traceback_files,
+                    "primary_file": primary_relevant_file,
+                },
+                precision_patch,
+                current_failure_context,
+            )
+
     for step in range(1, args.max_steps + 1):
         print(f"\n=== AGENT STEP {step} ===")
         API_SAFETY_STATE["attempt_rate_limit_hits"] = 0
@@ -18211,6 +19167,7 @@ def main():
             current_hypothesis,
             current_plan,
             current_memory_hint,
+            repair_context,
         )
         messages[1]["content"] = build_user_prompt(
             repo,
@@ -18223,9 +19180,12 @@ def main():
             current_hypothesis,
             current_plan,
             current_memory_hint,
+            repair_context,
         )
         print(f"Active strategy mode: {strategy_mode}")
         print(f"Detected failure type: {failure_type}")
+        if repair_context.get("repair_context_used") and step == 1:
+            print(format_validation_failure_analysis(repair_context))
         if current_failure_context.get("failing_test_name"):
             print(format_failure_context(current_failure_context))
         if current_hypothesis.get("text"):

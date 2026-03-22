@@ -166,6 +166,20 @@ What to do:
 - resolve the branch state
 - rerun the finalizer
 
+### Pre-task git check blocked
+
+Meaning:
+
+- the agent stopped before starting work because the repo was not safe to sync automatically
+- common causes are a dirty working tree, a failed `git fetch`, or merge conflicts while integrating `origin/<current-branch>` or `upstream/<default-branch>`
+
+What to do:
+
+- if the output says the working tree is dirty, commit, stash, or remove the uncommitted changes first
+- if the output lists conflicted files, resolve those files manually and rerun the same command
+- if a fetch failed, verify that the `origin` and `upstream` remotes exist and are reachable
+- review the printed `git_actions` list to see exactly which fetch and merge steps were attempted
+
 ### Manual merge required
 
 When the agent cannot safely resolve a merge conflict, it prints:
@@ -294,3 +308,10 @@ If you need the deeper model:
   the branch exists, but the change is not yet safely ready to merge
 
 That separation is intentional. It is what keeps the workflow understandable and safe.
+
+<!-- fix-agent-prepublish-troubleshooting:start -->
+## Publish Blocked By Docs Drift
+
+If the pre-publish docs gate detects that operator docs need updates and automatic refresh or revalidation fails, publish is blocked.
+The publish summary reports `docs_required`, `docs_updated`, `docs_refresh_mode`, and the affected `docs_targets` so the block reason is explicit.
+<!-- fix-agent-prepublish-troubleshooting:end -->
