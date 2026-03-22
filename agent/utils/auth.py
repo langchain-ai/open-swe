@@ -162,14 +162,14 @@ async def get_github_token_for_user(ls_user_id: str, tenant_id: str) -> dict[str
                 return {"token": token}
             if auth_url:
                 return {"auth_url": auth_url}
-            return {"error": f"Unexpected auth result: {response_data}"}
+            return {"error": "Unexpected auth response"}
 
     except httpx.HTTPStatusError as e:
         logger.error("GitHub auth API HTTP error: %s - %s", e.response.status_code, e.response.text)
-        return {"error": f"HTTP error: {e.response.status_code} - {e.response.text}"}
+        return {"error": f"HTTP error: {e.response.status_code}"}
     except Exception as e:  # noqa: BLE001
         logger.error("GitHub auth API call failed: %s: %s", type(e).__name__, str(e))
-        return {"error": str(e)}
+        return {"error": f"Auth request failed: {type(e).__name__}"}
 
 
 async def resolve_github_token_from_email(email: str) -> dict[str, Any]:
@@ -329,9 +329,10 @@ async def save_encrypted_token_from_email(
     token = auth_result.get("token")
     if not token:
         error = auth_result.get("error", "unknown")
+        logger.error("GitHub token resolution failed: %s", error)
         message = (
             "❌ **GitHub Auth Error**\n\n"
-            f"Failed to authenticate with GitHub: {error}\n\n"
+            "Failed to authenticate with GitHub. "
             "Please try again or contact support."
         )
         await leave_failure_comment(source, message)
