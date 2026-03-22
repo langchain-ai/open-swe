@@ -88,6 +88,16 @@ Use this when you want the agent to inspect and plan without committing a publis
 
 This is the normal final step after successful changes.
 
+### Expert Auto Policy
+
+```bash
+python local_fix_agent.py --auto --publish-only
+```
+
+Use this when you want the agent to apply expert defaults instead of stepping through separate gates by hand.
+The shared policy inspects the repo, stages safe publishable files, removes known artifacts, ignores internal state files, chooses a valid validation command or fallback chain, runs one bounded targeted repair when validation points to a likely file, and publishes when the resulting state is safe.
+It blocks only on ambiguous files, low-confidence repair targets, repeated validation failure, merge conflicts, or missing required inputs.
+
 ### 4. Publish the current repo state directly
 
 ```bash

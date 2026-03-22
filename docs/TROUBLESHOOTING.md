@@ -19,6 +19,9 @@ The canonical finalizer is:
 
 If a run ends after validation but before finalization, that is incomplete, not successful. The explicit incomplete outcome is reported as `finalization skipped (incomplete)`.
 
+If you are using `python local_fix_agent.py --auto` or interactive quick mode, the agent will try to clean safe blockers, validate with the best available command, repair one clear validation failure, and continue automatically.
+Those modes should only stop when they hit a real ambiguity, repeated validation failure, merge conflict, or missing required input.
+
 ## What Is Happening?
 
 The system separates outcomes on purpose:

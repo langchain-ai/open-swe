@@ -1692,6 +1692,399 @@ def test_classify_pre_task_working_tree_clean_repo_is_unchanged(
     assert not any(command[:3] == ["git", "add", "-A"] for command in commands)
 
 
+def test_execute_auto_policy_auto_cleans_validates_and_publishes(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    monkeypatch.setattr(
+        lfa,
+        "classify_pre_task_working_tree",
+        lambda current_repo, auto_remediate=True: {
+            "working_tree_detected": True,
+            "auto_staged_paths": ["local_fix_agent.py"],
+            "auto_removed_paths": [".fix_agent_runs/tmp.log"],
+            "working_tree_blockers": [],
+            "dirty_paths": ["local_fix_agent.py", ".fix_agent_runs/tmp.log"],
+        },
+    )
+    monkeypatch.setattr(lfa, "resolve_auto_validation_command", lambda current_repo, explicit_command, script_path=None: "pytest -q")
+    monkeypatch.setattr(
+        lfa,
+        "run_repo_validation_command",
+        lambda *args, **kwargs: {
+            "ok": True,
+            "validation_result": "success",
+            "validation_command_used": "pytest -q",
+            "fallback_validation_used": False,
+        },
+    )
+    monkeypatch.setattr(
+        lfa,
+        "resolve_publish_validation_state",
+        lambda current_repo: {
+            "validation_state": "success",
+            "reason": "validated",
+            "validation_commit_match": True,
+            "fingerprint_match": True,
+            "last_validated_commit": "abc",
+            "current_commit": "abc",
+            "validation_age_seconds": 5,
+        },
+    )
+    monkeypatch.setattr(lfa, "attempt_publish_auto_revalidation", lambda current_repo, validation_state, no_auto_revalidate=False: dict(validation_state))
+    monkeypatch.setattr(
+        lfa,
+        "publish_current_repo_state",
+        lambda *args, **kwargs: {
+            "final": {"status": "success"},
+            "pr_url": "https://github.com/example/demo/pull/1",
+            "reason": "",
+        },
+    )
+
+    result = lfa.execute_auto_policy(repo, workflow_selected="publish", publish_requested=True)
+
+    assert result["working_tree_detected"] is True
+    assert result["safe_changes_staged"] == ["local_fix_agent.py"]
+    assert result["artifacts_removed"] == [".fix_agent_runs/tmp.log"]
+    assert result["validation_result"] == "success"
+    assert result["publish_result"] == "success"
+    assert result["pr_url"] == "https://github.com/example/demo/pull/1"
+    assert result["final_decision_reason"] == "validation passed and publish succeeded"
+
+
+def test_execute_auto_policy_invalid_validation_command_uses_fallback_then_publishes(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    monkeypatch.setattr(
+        lfa,
+        "classify_pre_task_working_tree",
+        lambda current_repo, auto_remediate=True: {
+            "working_tree_detected": False,
+            "auto_staged_paths": [],
+            "auto_removed_paths": [],
+            "working_tree_blockers": [],
+            "dirty_paths": [],
+        },
+    )
+    monkeypatch.setattr(
+        lfa,
+        "run_repo_validation_command",
+        lambda *args, **kwargs: {
+            "ok": True,
+            "validation_result": "success",
+            "validation_command_used": "python -m py_compile local_fix_agent.py",
+            "fallback_validation_used": True,
+            "validation_error_type": "invalid_validation_command",
+        },
+    )
+    monkeypatch.setattr(
+        lfa,
+        "resolve_publish_validation_state",
+        lambda current_repo: {
+            "validation_state": "success",
+            "reason": "fallback syntax validation passed",
+            "validation_commit_match": True,
+            "fingerprint_match": True,
+            "last_validated_commit": "abc",
+            "current_commit": "abc",
+            "validation_age_seconds": 2,
+        },
+    )
+    monkeypatch.setattr(lfa, "attempt_publish_auto_revalidation", lambda current_repo, validation_state, no_auto_revalidate=False: dict(validation_state))
+    monkeypatch.setattr(
+        lfa,
+        "publish_current_repo_state",
+        lambda *args, **kwargs: {
+            "final": {"status": "success"},
+            "pr_url": "",
+            "reason": "",
+        },
+    )
+
+    result = lfa.execute_auto_policy(
+        repo,
+        workflow_selected="publish",
+        validation_command="broken && )",
+        publish_requested=True,
+    )
+
+    assert result["fallback_validation_used"] is True
+    assert result["validation_command_used"] == "python -m py_compile local_fix_agent.py"
+    assert result["publish_result"] == "success"
+
+
+def test_execute_auto_policy_repairs_targeted_pytest_failure_then_publishes(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    validation_calls = {"count": 0}
+    captured_repair: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        lfa,
+        "classify_pre_task_working_tree",
+        lambda current_repo, auto_remediate=True: {
+            "working_tree_detected": True,
+            "auto_staged_paths": ["tests/test_publish.py"],
+            "auto_removed_paths": [],
+            "working_tree_blockers": [],
+            "dirty_paths": ["tests/test_publish.py", "local_fix_agent.py"],
+        },
+    )
+    monkeypatch.setattr(lfa, "resolve_auto_validation_command", lambda current_repo, explicit_command, script_path=None: "pytest tests/test_publish.py -q")
+
+    def fake_validation(*args, **kwargs):
+        validation_calls["count"] += 1
+        if validation_calls["count"] == 1:
+            return {
+                "ok": False,
+                "validation_result": "failed",
+                "validation_command_used": "pytest tests/test_publish.py -q",
+                "fallback_validation_used": False,
+                "output": "FAILED tests/test_publish.py::test_publish\nFile \"/tmp/repo/local_fix_agent.py\", line 10, in build\nAssertionError\n",
+                "reason": "pytest failed",
+            }
+        return {
+            "ok": True,
+            "validation_result": "success",
+            "validation_command_used": "pytest tests/test_publish.py -q",
+            "fallback_validation_used": False,
+        }
+
+    monkeypatch.setattr(lfa, "run_repo_validation_command", fake_validation)
+    monkeypatch.setattr(
+        lfa,
+        "analyze_validation_failure",
+        lambda current_repo, publish_output="", validation_command="", validation_output="": {
+            "validation_error_type": "assertion_mismatch",
+            "repair_targets": ["local_fix_agent.py"],
+            "repair_context_used": True,
+            "target_confidence": "high",
+            "failure_context_snippet": "FAILED tests/test_publish.py::test_publish",
+        },
+    )
+
+    def fake_repair(current_repo, *, validation_command, repair_context, max_steps=2):
+        captured_repair["validation_command"] = validation_command
+        captured_repair["repair_context"] = repair_context
+        captured_repair["max_steps"] = max_steps
+        return {"attempted": True, "ok": True, "output": "repair ok", "command": ["python", "local_fix_agent.py"]}
+
+    monkeypatch.setattr(lfa, "run_auto_policy_repair", fake_repair)
+    monkeypatch.setattr(
+        lfa,
+        "resolve_publish_validation_state",
+        lambda current_repo: {
+            "validation_state": "success",
+            "reason": "validated after repair",
+            "validation_commit_match": True,
+            "fingerprint_match": True,
+            "last_validated_commit": "abc",
+            "current_commit": "abc",
+            "validation_age_seconds": 1,
+        },
+    )
+    monkeypatch.setattr(lfa, "attempt_publish_auto_revalidation", lambda current_repo, validation_state, no_auto_revalidate=False: dict(validation_state))
+    monkeypatch.setattr(
+        lfa,
+        "publish_current_repo_state",
+        lambda *args, **kwargs: {
+            "final": {"status": "success"},
+            "pr_url": "https://github.com/example/demo/pull/2",
+            "reason": "",
+        },
+    )
+
+    result = lfa.execute_auto_policy(repo, workflow_selected="publish", publish_requested=True)
+
+    assert validation_calls["count"] == 2
+    assert result["repair_attempted"] is True
+    assert result["repair_targets"] == ["local_fix_agent.py"]
+    assert result["repair_context_used"] is True
+    assert captured_repair["validation_command"] == "pytest tests/test_publish.py -q"
+    assert captured_repair["repair_context"] == {
+        "validation_error_type": "assertion_mismatch",
+        "repair_targets": ["local_fix_agent.py"],
+        "repair_context_used": True,
+        "target_confidence": "high",
+        "failure_context_snippet": "FAILED tests/test_publish.py::test_publish",
+    }
+    assert result["publish_result"] == "success"
+
+
+def test_execute_auto_policy_blocks_on_ambiguous_file(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    monkeypatch.setattr(
+        lfa,
+        "classify_pre_task_working_tree",
+        lambda current_repo, auto_remediate=True: {
+            "working_tree_detected": True,
+            "auto_staged_paths": [],
+            "auto_removed_paths": [],
+            "working_tree_blockers": [{"path": "settings.data", "reason": "manual review required"}],
+            "dirty_paths": ["settings.data"],
+        },
+    )
+
+    result = lfa.execute_auto_policy(repo, workflow_selected="publish", publish_requested=True)
+
+    assert result["validation_result"] == "blocked"
+    assert result["publish_result"] == "blocked"
+    assert result["final_decision_reason"] == "ambiguous file blocker requires manual review"
+    assert "ambiguous" in result["human_summary"].lower()
+
+
+def test_execute_auto_policy_create_new_script_flow_uses_shared_policy(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    script_path = repo / "scripts" / "new_tool.py"
+    script_path.parent.mkdir()
+    script_path.write_text("print('ok')\n")
+
+    monkeypatch.setattr(
+        lfa,
+        "classify_pre_task_working_tree",
+        lambda current_repo, auto_remediate=True: {
+            "working_tree_detected": True,
+            "auto_staged_paths": ["scripts/new_tool.py"],
+            "auto_removed_paths": [],
+            "working_tree_blockers": [],
+            "dirty_paths": ["scripts/new_tool.py"],
+        },
+    )
+    monkeypatch.setattr(
+        lfa,
+        "build_script_validation_plan",
+        lambda current_repo, current_script: {"primary_command": f"python -m py_compile {current_script.relative_to(current_repo)}"},
+    )
+    monkeypatch.setattr(
+        lfa,
+        "run_repo_validation_command",
+        lambda *args, **kwargs: {
+            "ok": True,
+            "validation_result": "success",
+            "validation_command_used": "python -m py_compile scripts/new_tool.py",
+            "fallback_validation_used": False,
+        },
+    )
+    monkeypatch.setattr(
+        lfa,
+        "resolve_publish_validation_state",
+        lambda current_repo: {
+            "validation_state": "success",
+            "reason": "validated",
+            "validation_commit_match": True,
+            "fingerprint_match": True,
+            "last_validated_commit": "abc",
+            "current_commit": "abc",
+            "validation_age_seconds": 1,
+        },
+    )
+    monkeypatch.setattr(lfa, "attempt_publish_auto_revalidation", lambda current_repo, validation_state, no_auto_revalidate=False: dict(validation_state))
+    monkeypatch.setattr(
+        lfa,
+        "publish_current_repo_state",
+        lambda *args, **kwargs: {
+            "final": {"status": "success"},
+            "pr_url": "https://github.com/example/demo/pull/3",
+            "reason": "",
+        },
+    )
+
+    result = lfa.execute_auto_policy(
+        repo,
+        workflow_selected="create_new_script",
+        publish_requested=True,
+        script_path=script_path,
+    )
+
+    assert result["workflow_selected"] == "create_new_script"
+    assert result["validation_command_used"] == "python -m py_compile scripts/new_tool.py"
+    assert result["publish_result"] == "success"
+
+
+def test_execute_auto_policy_docs_only_change_publishes_without_blocking(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    monkeypatch.setattr(
+        lfa,
+        "classify_pre_task_working_tree",
+        lambda current_repo, auto_remediate=True: {
+            "working_tree_detected": True,
+            "auto_staged_paths": ["docs/RUNBOOK.md"],
+            "auto_removed_paths": [],
+            "working_tree_blockers": [],
+            "dirty_paths": ["docs/RUNBOOK.md"],
+        },
+    )
+    monkeypatch.setattr(
+        lfa,
+        "run_repo_validation_command",
+        lambda *args, **kwargs: {
+            "ok": True,
+            "validation_result": "success",
+            "validation_command_used": "pytest -q",
+            "fallback_validation_used": False,
+        },
+    )
+    monkeypatch.setattr(
+        lfa,
+        "resolve_publish_validation_state",
+        lambda current_repo: {
+            "validation_state": "success",
+            "reason": "validated",
+            "validation_commit_match": True,
+            "fingerprint_match": True,
+            "last_validated_commit": "abc",
+            "current_commit": "abc",
+            "validation_age_seconds": 1,
+        },
+    )
+    monkeypatch.setattr(lfa, "attempt_publish_auto_revalidation", lambda current_repo, validation_state, no_auto_revalidate=False: dict(validation_state))
+    monkeypatch.setattr(
+        lfa,
+        "publish_current_repo_state",
+        lambda *args, **kwargs: {
+            "final": {"status": "success"},
+            "pr_url": "",
+            "reason": "",
+        },
+    )
+
+    result = lfa.execute_auto_policy(repo, workflow_selected="publish", publish_requested=True)
+    lfa.print_auto_execution_summary(result)
+    output = capsys.readouterr().out
+
+    assert result["safe_changes_staged"] == ["docs/RUNBOOK.md"]
+    assert result["publish_result"] == "success"
+    assert "workflow_selected: publish" in output
+    assert "safe_changes_staged: ['docs/RUNBOOK.md']" in output
+    assert "final_decision_reason: validation passed and publish succeeded" in output
+
+
 def test_sync_with_upstream_before_workflow_syncs_origin_first_then_upstream_and_validates(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -7070,6 +7463,30 @@ def test_run_prepublish_docs_stage_update_failure_blocks(monkeypatch: pytest.Mon
 
     assert result["blocked"] is True
     assert result["reason"] == "docs refresh failed"
+
+
+def test_docs_publish_block_content_covers_operator_features() -> None:
+    readme_block = lfa.docs_publish_block_for_target("README.md", "rewrite")
+    runbook_block = lfa.docs_publish_block_for_target("docs/RUNBOOK.md", "patch")
+    troubleshooting_block = lfa.docs_publish_block_for_target("docs/TROUBLESHOOTING.md", "patch")
+
+    assert "interactive app shell" in readme_block
+    assert "`fixapp` / `fixit` / `fixpublish`" in readme_block
+    assert "quick mode" in readme_block
+    assert "guided mode" in readme_block
+    assert "`Create a new script` workflow" in readme_block
+    assert "`--auto` expert policy" in readme_block
+
+    assert "interactive terminal app" in runbook_block
+    assert "quick mode versus guided mode" in runbook_block
+    assert "`Create a new script` workflow" in runbook_block
+    assert "unified `--auto` policy" in runbook_block
+
+    assert "interactive app shell" in troubleshooting_block
+    assert "launcher commands" in troubleshooting_block
+    assert "quick versus guided behavior" in troubleshooting_block
+    assert "`Create a new script` workflow" in troubleshooting_block
+    assert "shared `--auto` path" in troubleshooting_block
 
 
 def test_publish_validated_run_docs_update_is_included_in_published_result(monkeypatch: pytest.MonkeyPatch) -> None:

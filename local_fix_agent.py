@@ -52,6 +52,7 @@ PRIMARY_OPERATOR_DOC_FILES = [
     "docs/TROUBLESHOOTING.md",
 ]
 RUN_MODES = {
+    "auto": {"max_steps": 20, "max_file_chars": 12000},
     "quick": {"max_steps": 20, "max_file_chars": 12000},
     "safe": {"max_steps": 40, "max_file_chars": 20000},
     "deep": {"max_steps": 70, "max_file_chars": 30000},
@@ -3442,6 +3443,8 @@ def docs_publish_block_for_target(target: str, refresh_mode: str) -> str:
                 "",
                 "Before a real publish, the agent now runs a documentation impact check.",
                 "If code or operator-facing behavior changed and docs are stale, it updates the tracked docs before publish, reruns validation, and only then continues with push/PR work.",
+                "The operator-facing surface includes the interactive app shell, the `fixapp` / `fixit` / `fixpublish` launchers, quick mode, guided mode, the `Create a new script` workflow, and the shared `--auto` expert policy.",
+                "Those flows are expected to stay documented together so the default operator path and the finalizer path do not drift apart.",
                 f"Current docs refresh policy: `{refresh_mode}` when docs drift is detected.",
             ]
         )
@@ -3452,6 +3455,7 @@ def docs_publish_block_for_target(target: str, refresh_mode: str) -> str:
                 "",
                 "Real publish now includes a docs gate after validation succeeds and before branch/commit/push work starts.",
                 "The agent detects documentation impact, refreshes affected docs in the same change set, reruns validation, and blocks publish if docs repair or revalidation fails.",
+                "That coverage includes the interactive terminal app, launcher commands, quick mode versus guided mode, the `Create a new script` workflow, and the unified `--auto` policy that stages safe changes, validates, repairs once when needed, and publishes when safe.",
                 f"Default docs refresh mode when triggered: `{refresh_mode}`.",
             ]
         )
@@ -3462,6 +3466,7 @@ def docs_publish_block_for_target(target: str, refresh_mode: str) -> str:
                 "",
                 "If the pre-publish docs gate detects that operator docs need updates and automatic refresh or revalidation fails, publish is blocked.",
                 "The publish summary reports `docs_required`, `docs_updated`, `docs_refresh_mode`, and the affected `docs_targets` so the block reason is explicit.",
+                "When troubleshooting operator drift, check the interactive app shell, launcher commands, quick versus guided behavior, the `Create a new script` workflow, and the shared `--auto` path together because they are refreshed as one operator surface.",
             ]
         )
     return ""
@@ -5440,6 +5445,249 @@ def print_validation_record_result(result: dict) -> None:
         print("what_happened_detail: Fallback validation passed; continuing publish.")
     if result.get("reason"):
         print(f"validation_record_reason: {result.get('reason')}")
+
+
+def make_auto_execution_result(workflow_selected: str = "auto") -> dict:
+    return {
+        "workflow_selected": workflow_selected,
+        "working_tree_detected": False,
+        "safe_changes_staged": [],
+        "artifacts_removed": [],
+        "validation_command_used": "",
+        "fallback_validation_used": False,
+        "validation_result": "not_run",
+        "repair_attempted": False,
+        "repair_targets": [],
+        "publish_result": "not_requested",
+        "pr_url": "",
+        "final_decision_reason": "",
+        "human_summary": "",
+        "working_tree_blockers": [],
+        "repair_context_used": False,
+        "repair_target_confidence": "low",
+        "repair_output": "",
+        "publish_detail": {},
+        "validation_detail": {},
+    }
+
+
+def print_auto_execution_summary(result: dict) -> None:
+    print("\n=== AUTO POLICY SUMMARY ===")
+    print(f"workflow_selected: {result.get('workflow_selected') or 'auto'}")
+    print(f"working_tree_detected: {format_bool(result.get('working_tree_detected'))}")
+    print(f"safe_changes_staged: {result.get('safe_changes_staged') or []}")
+    print(f"artifacts_removed: {result.get('artifacts_removed') or []}")
+    print(f"validation_command_used: {result.get('validation_command_used') or '(none)'}")
+    print(f"fallback_validation_used: {format_bool(result.get('fallback_validation_used'))}")
+    print(f"validation_result: {result.get('validation_result') or 'not_run'}")
+    print(f"repair_attempted: {format_bool(result.get('repair_attempted'))}")
+    print(f"repair_targets: {result.get('repair_targets') or []}")
+    print(f"publish_result: {result.get('publish_result') or 'not_requested'}")
+    print(f"pr_url: {result.get('pr_url') or 'none'}")
+    print(f"final_decision_reason: {result.get('final_decision_reason') or '(none)'}")
+    print(result.get("human_summary") or "The auto policy completed.")
+
+
+def resolve_auto_validation_command(repo: Path, explicit_command: str = "", script_path: Path | None = None) -> str:
+    command = str(explicit_command or "").strip()
+    if command:
+        return command
+    if script_path:
+        plan = build_script_validation_plan(repo, script_path)
+        return str(plan.get("primary_command") or "").strip()
+    return str(latest_repo_validation_command(repo) or "").strip()
+
+
+def run_auto_policy_repair(
+    repo: Path,
+    *,
+    validation_command: str,
+    repair_context: dict,
+    max_steps: int = 2,
+) -> dict:
+    result = {
+        "attempted": False,
+        "ok": False,
+        "output": "",
+        "command": [],
+    }
+    command = [
+        sys.executable,
+        str(Path(__file__).resolve()),
+        "--repo",
+        str(repo),
+        "--mode",
+        "quick",
+        "--max-steps",
+        str(max(1, max_steps)),
+        "--no-upstream-sync",
+        "--no-finalize",
+        "--no-publish-on-success",
+    ]
+    if validation_command.strip():
+        command.extend(["--test-cmd", validation_command.strip()])
+    temp_path = None
+    if repair_context:
+        fd, temp_name = tempfile.mkstemp(prefix="auto_repair_context_", suffix=".json")
+        os.close(fd)
+        temp_path = Path(temp_name)
+        temp_path.write_text(json.dumps(repair_context, indent=2, sort_keys=True))
+        command.extend(["--repair-context-file", str(temp_path)])
+    try:
+        code, output = run_subprocess(command, repo)
+    finally:
+        if temp_path:
+            try:
+                temp_path.unlink()
+            except OSError:
+                pass
+    result["attempted"] = True
+    result["ok"] = code == 0
+    result["output"] = output
+    result["command"] = command
+    return result
+
+
+def execute_auto_policy(
+    repo: Path,
+    *,
+    workflow_selected: str,
+    validation_command: str = "",
+    publish_requested: bool = False,
+    publish_branch: str = "",
+    publish_pr: bool = False,
+    publish_merge: bool = False,
+    publish_merge_local_main: bool = False,
+    publish_message: str = "",
+    target: str = "",
+    dry_run_mode: bool = False,
+    force_publish: bool = False,
+    auto_stage_safe_paths: bool = True,
+    auto_remediate_blockers: bool = True,
+    explain_staging: bool = False,
+    max_repair_steps: int = 2,
+    script_path: Path | None = None,
+) -> dict:
+    result = make_auto_execution_result(workflow_selected)
+    working_tree = classify_pre_task_working_tree(repo, auto_remediate=auto_remediate_blockers)
+    result["working_tree_detected"] = bool(working_tree.get("working_tree_detected"))
+    result["safe_changes_staged"] = list(working_tree.get("auto_staged_paths") or [])
+    result["artifacts_removed"] = list(working_tree.get("auto_removed_paths") or [])
+    result["working_tree_blockers"] = list(working_tree.get("working_tree_blockers") or [])
+    if result["working_tree_blockers"]:
+        result["validation_result"] = "blocked"
+        result["publish_result"] = "blocked" if publish_requested else "not_requested"
+        result["final_decision_reason"] = "ambiguous file blocker requires manual review"
+        blocker_count = len(result["working_tree_blockers"])
+        noun = "file" if blocker_count == 1 else "files"
+        result["human_summary"] = f"Safe cleanup stopped because {blocker_count} ambiguous {noun} still need manual review."
+        return result
+
+    chosen_validation_command = resolve_auto_validation_command(repo, validation_command, script_path=script_path)
+    result["validation_command_used"] = chosen_validation_command or "(none)"
+    validation_run = run_repo_validation_command(
+        repo,
+        chosen_validation_command,
+        mode=f"{workflow_selected}-auto",
+        confidence="auto",
+        target=target,
+        files_changed=list(working_tree.get("dirty_paths") or []),
+    )
+    result["validation_result"] = str(validation_run.get("validation_result") or "failed")
+    result["fallback_validation_used"] = bool(validation_run.get("fallback_validation_used"))
+    result["validation_command_used"] = str(validation_run.get("validation_command_used") or chosen_validation_command or "(none)")
+    result["validation_detail"] = dict(validation_run)
+
+    if not validation_run.get("ok"):
+        analysis = analyze_validation_failure(repo, publish_output=str(validation_run.get("output") or validation_run.get("reason") or ""))
+        result["repair_targets"] = list(analysis.get("repair_targets") or [])
+        result["repair_context_used"] = bool(analysis.get("repair_context_used"))
+        result["repair_target_confidence"] = str(analysis.get("target_confidence") or "low")
+        repair_run = run_auto_policy_repair(
+            repo,
+            validation_command=chosen_validation_command,
+            repair_context=analysis if analysis.get("repair_context_used") else {},
+            max_steps=max_repair_steps,
+        )
+        result["repair_attempted"] = True
+        result["repair_output"] = str(repair_run.get("output") or "")
+        rerun = run_repo_validation_command(
+            repo,
+            chosen_validation_command,
+            mode=f"{workflow_selected}-auto-repair",
+            confidence="auto-repair",
+            target=target,
+            files_changed=list(working_tree.get("dirty_paths") or []),
+        )
+        result["validation_result"] = str(rerun.get("validation_result") or "failed")
+        result["fallback_validation_used"] = bool(rerun.get("fallback_validation_used"))
+        result["validation_command_used"] = str(rerun.get("validation_command_used") or result["validation_command_used"])
+        result["validation_detail"] = dict(rerun)
+        if not rerun.get("ok"):
+            result["publish_result"] = "blocked" if publish_requested else "not_requested"
+            result["final_decision_reason"] = "validation still fails after bounded repair"
+            result["human_summary"] = "Safe cleanup completed, but validation still failed after one bounded repair attempt."
+            return result
+
+    if not publish_requested:
+        result["publish_result"] = "not_requested"
+        result["final_decision_reason"] = "validation passed and no publish was requested"
+        summary_bits = []
+        if result["safe_changes_staged"]:
+            summary_bits.append("Safe changes were staged")
+        if result["artifacts_removed"]:
+            summary_bits.append("artifacts were removed")
+        summary_bits.append("validation passed")
+        result["human_summary"] = ", ".join(summary_bits) + "."
+        return result
+
+    validation_state = resolve_publish_validation_state(repo)
+    validation_state = attempt_publish_auto_revalidation(
+        repo,
+        validation_state,
+        no_auto_revalidate=False,
+    )
+    publish_result = publish_current_repo_state(
+        repo,
+        publish_branch,
+        publish_pr,
+        publish_merge,
+        publish_merge_local_main,
+        publish_message,
+        target,
+        dry_run_mode,
+        validation_state=str(validation_state.get("validation_state") or "blocked"),
+        validation_detail=str(validation_state.get("reason") or ""),
+        force_publish=force_publish,
+        validation_commit_match=bool(validation_state.get("validation_commit_match")),
+        fingerprint_match=bool(validation_state.get("fingerprint_match")),
+        last_validated_commit=str(validation_state.get("last_validated_commit") or ""),
+        current_commit=str(validation_state.get("current_commit") or ""),
+        validation_age_seconds=int(validation_state.get("validation_age_seconds", -1)),
+        auto_revalidated=bool(validation_state.get("auto_revalidated")),
+        validation_reused=bool(validation_state.get("validation_reused")),
+        auto_revalidation_result=str(validation_state.get("auto_revalidation_result") or "not_needed"),
+        auto_stage_safe_paths=auto_stage_safe_paths,
+        auto_remediate_blockers=auto_remediate_blockers,
+        explain_staging=explain_staging,
+    )
+    result["publish_detail"] = publish_result
+    result["publish_result"] = str((publish_result.get("final") or {}).get("status") or "failed")
+    result["pr_url"] = str(publish_result.get("pr_url") or "")
+    if result["publish_result"] == "success":
+        result["final_decision_reason"] = "validation passed and publish succeeded"
+        summary_bits = []
+        if result["safe_changes_staged"]:
+            summary_bits.append("Safe changes were staged")
+        if result["artifacts_removed"]:
+            summary_bits.append("artifacts were removed")
+        summary_bits.append("validation passed")
+        summary_bits.append("publish succeeded")
+        result["human_summary"] = ", ".join(summary_bits) + "."
+    else:
+        result["final_decision_reason"] = str(publish_result.get("reason") or "publish blocked after validation passed")
+        result["human_summary"] = f"Validation passed, but publish blocked because {result['final_decision_reason']}."
+    return result
 
 
 def attempt_publish_auto_revalidation(
@@ -11769,6 +12017,8 @@ def interactive_new_script_action(session: dict) -> dict:
     repair_command = build_interactive_common_args(session, repo=repo, include_proxy=True, include_output=False)
     repair_command.extend(["--script", output_display, "--no-finalize"])
     repair_command.extend(pattern_args)
+    if quick_mode:
+        repair_command.append("--auto")
     if validation_choice == "custom" and custom_validation_command:
         repair_command.extend(["--test-cmd", custom_validation_command])
     elif validation_choice == "cli_help":
@@ -11782,6 +12032,14 @@ def interactive_new_script_action(session: dict) -> dict:
         "run_command": ["./scripts/fixpublish.sh"],
         "cwd": str(repo_path),
     }
+    if quick_mode:
+        publish_args = build_interactive_common_args(session, repo=repo, include_proxy=True, include_output=False)
+        publish_args.extend(["--auto", "--publish-only"])
+        publish_command = {
+            "label": "publish new script",
+            "compact_preview": "Publish the new script through the unified expert auto policy",
+            "args": publish_args,
+        }
     notes = [
         f"generation_plan: {preview_plan.get('task_purpose') or purpose}",
         "patterns_likely_to_be_applied: " + (str(likely_patterns) if likely_patterns else "[]"),
@@ -12374,6 +12632,8 @@ def interactive_fix_validate_action(session: dict) -> dict:
     fix_command = build_interactive_common_args(session, repo=repo, include_proxy=True, include_output=False)
     fix_command.extend(["--script", script])
     fix_command.extend(pattern_args)
+    if quick_mode and mode == "fix_and_validate":
+        fix_command.append("--auto")
     advanced_notes: list[str] = []
     if selected_validation_command:
         fix_command.extend(["--test-cmd", selected_validation_command])
@@ -12507,6 +12767,33 @@ def interactive_publish_current_action(session: dict) -> dict:
         preview_args.append("--no-auto-conflict-resolution-after-sync")
         wrapper_args.append("--no-auto-conflict-resolution-after-sync")
     launcher_path = str((Path(__file__).resolve().parent / "scripts" / "fixpublish.sh").resolve())
+    command_item = {
+        "label": "publish current repo state",
+        "args": [],
+        "compact_preview": f"Run fixpublish ({'auto-stage on' if auto_stage_safe_files else 'manual staging'})",
+        "preview_command": interactive_preview_shell_command(preview_args),
+        "run_command": [launcher_path, *wrapper_args],
+    }
+    if quick_mode:
+        auto_args = build_interactive_common_args(session, repo=repo, include_proxy=True, include_output=False)
+        auto_args.extend(["--auto", "--publish-only"])
+        if publish_mode == "force":
+            auto_args.append("--force-publish")
+        if not auto_stage_safe_files:
+            auto_args.append("--no-auto-stage")
+        if not auto_remediate_blockers:
+            auto_args.append("--no-auto-remediate-blockers")
+        if run_validation_if_needed == "skip":
+            auto_args.append("--no-auto-revalidate")
+        if explain_staging:
+            auto_args.append("--explain-staging")
+        if no_auto_conflict_resolution:
+            auto_args.append("--no-auto-conflict-resolution-after-sync")
+        command_item = {
+            "label": "publish current repo state",
+            "args": auto_args,
+            "compact_preview": "Publish the current repo through the unified expert auto policy",
+        }
     return {
         "workflow": "Publish current repo state",
         "description": "Use this when you want to publish the current working tree through the guarded publish-current path.",
@@ -12546,15 +12833,7 @@ def interactive_publish_current_action(session: dict) -> dict:
                 + str((preflight.get("blocked_analysis_summary") or {}).get("primary_next_step") or "(none)")
             ),
         ],
-        "commands": [
-            {
-                "label": "publish current repo state",
-                "args": [],
-                "compact_preview": f"Run fixpublish ({'auto-stage on' if auto_stage_safe_files else 'manual staging'})",
-                "preview_command": interactive_preview_shell_command(preview_args),
-                "run_command": [launcher_path, *wrapper_args],
-            }
-        ],
+        "commands": [command_item],
         "result_context": {"preflight": preflight},
         "result_renderer": render_interactive_publish_result,
     }
@@ -18182,6 +18461,7 @@ def main():
     parser.add_argument("--reuse-last-test", action="store_true", help="Reuse the most recent test command.")
     parser.add_argument("--dry-run", action="store_true", help="Run the agent but skip commit.")
     parser.add_argument("--explain-only", action="store_true", help="Print resolved settings and exit.")
+    parser.add_argument("--auto", action="store_true", help="Use the shared expert policy to inspect, clean, validate, repair once when needed, and publish when safe.")
     parser.add_argument("--show-diff", action="store_true", help="Show the resulting diff automatically after a successful run.")
     parser.add_argument("--publish", action="store_true", help="Compatibility flag for the default validated-run publish behavior.")
     parser.add_argument("--publish-on-success", action="store_true", help="Compatibility flag; publish-on-success is already the default for validated runs.")
@@ -18314,7 +18594,7 @@ def main():
 
     repo, args.test_cmd, args.max_steps, args.max_file_chars, resolved_mode, mode_source, config_path, recent_state_path, safety_settings, target = resolve_run_settings(
         args,
-        require_test_cmd=not args.publish_only and not pattern_special_mode and not args.ensure_validation_record and not args.probe_url and not args.sync_conflicts and not args.script_validate_only and not args.config_file,
+        require_test_cmd=not args.auto and not args.publish_only and not pattern_special_mode and not args.ensure_validation_record and not args.probe_url and not args.sync_conflicts and not args.script_validate_only and not args.config_file,
     )
     if not target and not repo.exists():
         print(f"Missing repo path: {repo}", file=sys.stderr)
@@ -18867,6 +19147,31 @@ def main():
             print(f"validation_output: {validation_result.get('output')}")
         if not validation_result.get("ok") and not validation_result.get("skipped") and not args.eval_pattern_learning:
             raise SystemExit(1)
+        if args.auto and publish_requested and not args.eval_pattern_learning:
+            auto_result = execute_auto_policy(
+                repo,
+                workflow_selected="create_new_script",
+                validation_command=str(chosen_plan.get("primary_command") or args.test_cmd or ""),
+                publish_requested=True,
+                publish_branch=args.publish_branch or "",
+                publish_pr=args.publish_pr,
+                publish_merge=args.publish_merge,
+                publish_merge_local_main=args.publish_merge_local_main,
+                publish_message=args.publish_message or "",
+                target=target,
+                dry_run_mode=args.dry_run,
+                force_publish=bool(args.force_publish),
+                auto_stage_safe_paths=not bool(args.no_auto_stage),
+                auto_remediate_blockers=not bool(args.no_auto_remediate_blockers),
+                explain_staging=bool(args.explain_staging),
+                max_repair_steps=min(3, max(1, int(args.max_steps or 2))),
+            )
+            print_auto_execution_summary(auto_result)
+            if auto_result.get("publish_detail"):
+                print_publish_summary(auto_result["publish_detail"])
+            if auto_result.get("publish_result") != "success":
+                raise SystemExit(1)
+            return
         if not args.eval_pattern_learning:
             return
     if args.eval_pattern_learning:
@@ -18958,6 +19263,35 @@ def main():
             return
         if not merge_conflict_outcome.get("continue_with_repair"):
             raise SystemExit(1)
+    if args.auto:
+        workflow_selected = "publish" if (args.publish_only or publish_requested) else "fix_validate"
+        auto_result = execute_auto_policy(
+            repo,
+            workflow_selected=workflow_selected,
+            validation_command=args.test_cmd or "",
+            publish_requested=bool(args.publish_only or publish_requested),
+            publish_branch=args.publish_branch or "",
+            publish_pr=args.publish_pr,
+            publish_merge=args.publish_merge,
+            publish_merge_local_main=args.publish_merge_local_main,
+            publish_message=args.publish_message or "",
+            target=target,
+            dry_run_mode=args.dry_run,
+            force_publish=bool(args.force_publish),
+            auto_stage_safe_paths=not bool(args.no_auto_stage),
+            auto_remediate_blockers=not bool(args.no_auto_remediate_blockers),
+            explain_staging=bool(args.explain_staging),
+            max_repair_steps=min(3, max(1, int(args.max_steps or 2))),
+            script_path=Path(args.script).expanduser().resolve() if args.script else None,
+        )
+        print_auto_execution_summary(auto_result)
+        if auto_result.get("publish_detail"):
+            print_publish_summary(auto_result["publish_detail"])
+        if auto_result.get("validation_result") != "success":
+            raise SystemExit(1)
+        if bool(args.publish_only or publish_requested) and auto_result.get("publish_result") != "success":
+            raise SystemExit(1)
+        return
     if args.publish_only:
         validation_state = resolve_publish_validation_state(repo)
         validation_state = attempt_publish_auto_revalidation(

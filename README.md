@@ -235,9 +235,16 @@ Most common commands:
 
 ```bash
 fixit pytest tests/test_x.py -q
+python local_fix_agent.py --auto --publish-only
 ./scripts/fixpublish.sh
 python local_fix_agent.py --interactive
 ```
+
+### Expert Auto Mode
+
+`python local_fix_agent.py --auto` is the shared "do the right thing" path.
+It inspects the repo, stages safe publishable changes, removes known artifacts, ignores internal state files, chooses the safest available validation command, runs one bounded targeted repair when validation clearly identifies a likely file, and publishes when the resulting state is safe.
+It stops only for real ambiguity or risk such as ambiguous files, low-confidence repair targeting, repeated validation failure, merge conflicts, or missing required inputs.
 
 ### What Is Happening?
 
@@ -307,6 +314,9 @@ Use the interactive terminal app when you want a guided front-end instead of rem
 ```bash
 python local_fix_agent.py --interactive
 ```
+
+In interactive quick mode, the app now uses the same expert auto policy by default.
+Guided mode still shows the plan first and only asks when the next step is genuinely ambiguous.
 
 Install global user-level launchers when you want the tool available from anywhere on the system:
 
