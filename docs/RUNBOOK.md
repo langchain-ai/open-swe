@@ -265,5 +265,5 @@ The operator mental model above is the part you should carry around day to day. 
 
 Real publish now includes a docs gate after validation succeeds and before branch/commit/push work starts.
 The agent detects documentation impact, refreshes affected docs in the same change set, reruns validation, and blocks publish if docs repair or revalidation fails.
-Default docs refresh mode when triggered: `patch`.
+Default docs refresh mode when triggered: `rewrite`.
 <!-- fix-agent-prepublish-runbook:end -->
