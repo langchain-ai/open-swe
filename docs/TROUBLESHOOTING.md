@@ -294,3 +294,10 @@ If you need the deeper model:
   the branch exists, but the change is not yet safely ready to merge
 
 That separation is intentional. It is what keeps the workflow understandable and safe.
+
+<!-- fix-agent-prepublish-troubleshooting:start -->
+## Publish Blocked By Docs Drift
+
+If the pre-publish docs gate detects that operator docs need updates and automatic refresh or revalidation fails, publish is blocked.
+The publish summary reports `docs_required`, `docs_updated`, `docs_refresh_mode`, and the affected `docs_targets` so the block reason is explicit.
+<!-- fix-agent-prepublish-troubleshooting:end -->

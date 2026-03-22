@@ -1,0 +1,36 @@
+{
+  "attempts": [
+    {
+      "candidate_count": 1,
+      "candidate_rejections": 1,
+      "candidate_scores": [
+        0
+      ],
+      "hypothesis_result": "rejected",
+      "step": 1,
+      "strategy_type": "fallback/default",
+      "validation_outcomes": [
+        "rejected"
+      ]
+    },
+    {
+      "candidate_count": 0,
+      "candidate_rejections": 0,
+      "candidate_scores": [],
+      "hypothesis_result": "rejected",
+      "step": 2,
+      "strategy_type": "fallback/default",
+      "validation_outcomes": []
+    }
+  ],
+  "attempts_to_success": null,
+  "blocked_reason": "repeated candidate validation rejection",
+  "cooldowns_triggered": 0,
+  "likely_rate_limit_hits": 0,
+  "proxy_enabled": false,
+  "remote_blocked_kind": null,
+  "repo": "/home/tom/ai/open-swe",
+  "rollback_count": 0,
+  "success": false,
+  "total_attempts": 70
+}

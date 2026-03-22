@@ -486,3 +486,11 @@ The implementation details live lower in this file and in the dedicated docs:
 ## License
 
 MIT
+
+<!-- fix-agent-prepublish-docs:start -->
+## Pre-Publish Docs Gate
+
+Before a real publish, the agent now runs a documentation impact check.
+If code or operator-facing behavior changed and docs are stale, it updates the tracked docs before publish, reruns validation, and only then continues with push/PR work.
+Current docs refresh policy: `patch` when docs drift is detected.
+<!-- fix-agent-prepublish-docs:end -->

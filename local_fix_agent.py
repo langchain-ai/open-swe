@@ -863,6 +863,7 @@ PUBLISH_GENERATED_DIRS = {
     "dist",
     "htmlcov",
     "site",
+    RUN_ARTIFACTS_DIR_NAME,
 }
 PUBLISH_GENERATED_SUFFIXES = {
     ".pyc",
@@ -883,6 +884,7 @@ PUBLISH_CONFIG_SUFFIXES = {".cfg", ".ini", ".json", ".toml", ".yaml", ".yml"}
 PUBLISH_CODE_SUFFIXES = {".js", ".jsx", ".py", ".ts", ".tsx"}
 DEFAULT_PUBLISH_AUTO_REMOVE_SAFE_ARTIFACTS = True
 DEFAULT_PUBLISH_AUTO_IGNORE_KNOWN_JUNK = False
+DEFAULT_PUBLISH_RUN_ARTIFACT_DIRS = [RUN_ARTIFACTS_DIR_NAME]
 
 
 def _publish_config_block(config: dict | None) -> dict:
@@ -904,6 +906,7 @@ def load_publish_blocker_policy(repo: Path, *, auto_remediate: bool = True) -> d
     known_junk_globs = _publish_config_globs(publish_blockers.get("known_junk_globs", []))
     safe_ignore_globs = _publish_config_globs(publish_blockers.get("safe_ignore_globs", []))
     safe_remove_globs = _publish_config_globs(publish_blockers.get("safe_remove_globs", []))
+    run_artifact_dirs = _publish_config_globs(publish_blockers.get("run_artifact_dirs", DEFAULT_PUBLISH_RUN_ARTIFACT_DIRS))
     return {
         "auto_remediate": bool(auto_remediate),
         "auto_remove_safe_artifacts": bool(publish_blockers.get("auto_remove_safe_artifacts", DEFAULT_PUBLISH_AUTO_REMOVE_SAFE_ARTIFACTS)),
@@ -911,6 +914,7 @@ def load_publish_blocker_policy(repo: Path, *, auto_remediate: bool = True) -> d
         "known_junk_globs": known_junk_globs,
         "safe_ignore_globs": safe_ignore_globs,
         "safe_remove_globs": safe_remove_globs,
+        "run_artifact_dirs": run_artifact_dirs,
     }
 
 
@@ -922,6 +926,17 @@ def publish_path_matches_any_glob(path: str, globs: list[str]) -> str:
     return ""
 
 
+def is_run_artifact_path(path: str, policy: dict) -> bool:
+    normalized = str(path or "").strip()
+    if not normalized:
+        return False
+    run_dirs = set(path.strip() for path in (policy.get("run_artifact_dirs") or []))
+    if not run_dirs:
+        return False
+    rel_path = Path(normalized)
+    return bool(rel_path.parts and rel_path.parts[0] in run_dirs)
+
+
 def is_high_confidence_safe_artifact_path(path: str, analysis: dict, policy: dict) -> bool:
     normalized = str(path or "").strip()
     rel = Path(normalized) if normalized else Path()
@@ -931,6 +946,8 @@ def is_high_confidence_safe_artifact_path(path: str, analysis: dict, policy: dic
     if publish_path_matches_any_glob(normalized, list(policy.get("safe_remove_globs") or [])):
         return True
     if publish_path_matches_any_glob(normalized, list(policy.get("known_junk_globs") or [])):
+        return True
+    if is_run_artifact_path(normalized, policy) and str(analysis.get("file_type") or "") in {"artifact", "generated"}:
         return True
     return str(analysis.get("classification_source") or "") in {"pattern_match", "path_rule"} and str(analysis.get("file_type") or "") in {"artifact", "generated"}
 

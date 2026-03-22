@@ -253,3 +253,11 @@ The operator mental model above is the part you should carry around day to day. 
 - `--publish-only` uses the current repo state but still respects validation gating
 - the finalizer can create a validation record itself when one is missing
 - post-publish PR mergeability verification remains active even when pre-publish base alignment succeeds
+
+<!-- fix-agent-prepublish-runbook:start -->
+## Pre-Publish Docs Check
+
+Real publish now includes a docs gate after validation succeeds and before branch/commit/push work starts.
+The agent detects documentation impact, refreshes affected docs in the same change set, reruns validation, and blocks publish if docs repair or revalidation fails.
+Default docs refresh mode when triggered: `patch`.
+<!-- fix-agent-prepublish-runbook:end -->

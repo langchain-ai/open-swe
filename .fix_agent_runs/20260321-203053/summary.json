@@ -1,0 +1,44 @@
+{
+  "comparison": "Run comparison: performance regressed. success_rate 0.00->0.00, avg_attempts 1.00->35.50, candidate_rejection_rate 1.00->1.00.",
+  "continue_cmd": "python /home/tom/ai/open-swe/local_fix_agent.py --continue",
+  "diff_path": "/home/tom/ai/open-swe/.fix_agent_runs/20260321-203053/diff.patch",
+  "full_suite_cmd": "python /home/tom/ai/open-swe/local_fix_agent.py --repo \"/home/tom/ai/open-swe\" --mode deep --test-cmd \"pytest -q\"",
+  "rerun_cmd": "python /home/tom/ai/open-swe/local_fix_agent.py --repo \"/home/tom/ai/open-swe\" --mode deep --test-cmd \"python -m py_compile local_fix_agent.py\"",
+  "run_metrics": {
+    "attempts": [
+      {
+        "candidate_count": 1,
+        "candidate_rejections": 1,
+        "candidate_scores": [
+          0
+        ],
+        "hypothesis_result": "rejected",
+        "step": 1,
+        "strategy_type": "fallback/default",
+        "validation_outcomes": [
+          "rejected"
+        ]
+      },
+      {
+        "candidate_count": 0,
+        "candidate_rejections": 0,
+        "candidate_scores": [],
+        "hypothesis_result": "rejected",
+        "step": 2,
+        "strategy_type": "fallback/default",
+        "validation_outcomes": []
+      }
+    ],
+    "attempts_to_success": null,
+    "blocked_reason": "repeated candidate validation rejection",
+    "cooldowns_triggered": 0,
+    "likely_rate_limit_hits": 0,
+    "proxy_enabled": false,
+    "remote_blocked_kind": null,
+    "repo": "/home/tom/ai/open-swe",
+    "rollback_count": 0,
+    "success": false,
+    "total_attempts": 70
+  },
+  "summary": "=== RUN METRICS ===\nsuccess: False\ntotal_attempts: 70\nattempts_to_success: n/a\navg_candidates_evaluated: 0.50\ncandidate_rejection_rate: 1.00\nrollback_count: 0\nproxy_enabled: False\nlikely_rate_limit_hits: 0\ncooldowns_triggered: 0\nremote_blocked_kind: none\nblocked_reason: repeated candidate validation rejection\nmost_successful_strategies: none"
+}
