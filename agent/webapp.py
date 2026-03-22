@@ -84,7 +84,7 @@ ALLOWED_GITHUB_ORGS: frozenset[str] = frozenset(
 
 LINEAR_API_KEY = os.environ.get("LINEAR_API_KEY", "")
 
-_GITHUB_BOT_MESSAGE_PREFIXES = (
+_BOT_MESSAGE_PREFIXES = (
     "🔐 **GitHub Authentication Required**",
     "✅ **Pull Request Created**",
     "✅ **Pull Request Updated**",
@@ -93,6 +93,8 @@ _GITHUB_BOT_MESSAGE_PREFIXES = (
     "🤖 **Agent Response**",
     "❌ **Agent Error**",
 )
+# Backward-compatible alias used by GitHub comment filtering helpers
+_GITHUB_BOT_MESSAGE_PREFIXES = _BOT_MESSAGE_PREFIXES
 
 
 def get_repo_config_from_team_mapping(
@@ -896,22 +898,12 @@ async def linear_webhook(  # noqa: PLR0911, PLR0912, PLR0915
         return {"status": "ignored", "reason": "Comment is from a bot"}
 
     comment_body = data.get("body", "")
-    bot_message_prefixes = [
-        "🔐 **GitHub Authentication Required**",
-        "✅ **Pull Request Created**",
-        "✅ **Pull Request Updated**",
-        "**Pull Request Created**",
-        "**Pull Request Updated**",
-        "🤖 **Agent Response**",
-        "❌ **Agent Error**",
-    ]
-    for prefix in bot_message_prefixes:
-        if comment_body.startswith(prefix):
-            logger.debug("Ignoring webhook: comment is our own bot message")
-            return {"status": "ignored", "reason": "Comment is our own bot message"}
-    if "@openswe" not in comment_body.lower():
-        logger.debug("Ignoring webhook: comment doesn't mention @openswe")
-        return {"status": "ignored", "reason": "Comment doesn't mention @openswe"}
+    if any(comment_body.startswith(prefix) for prefix in _BOT_MESSAGE_PREFIXES):
+        logger.debug("Ignoring webhook: comment is our own bot message")
+        return {"status": "ignored", "reason": "Comment is our own bot message"}
+    if not any(tag in comment_body.lower() for tag in OPEN_SWE_TAGS):
+        logger.debug("Ignoring webhook: comment doesn't mention @openswe or @open-swe")
+        return {"status": "ignored", "reason": "Comment doesn't mention @openswe or @open-swe"}
 
     issue = data.get("issue", {})
     if not issue:
