@@ -236,6 +236,7 @@ Most common commands:
 ```bash
 fixit pytest tests/test_x.py -q
 ./scripts/fixpublish.sh
+python local_fix_agent.py --interactive
 ```
 
 ### What Is Happening?
@@ -287,12 +288,140 @@ Import a script into the private pattern repo:
 python local_fix_agent.py --script /path/to/example.py --add-to-training
 ```
 
+Import a repo or folder of scripts into the private pattern repo:
+
+```bash
+python local_fix_agent.py --import-pattern-repo /path/to/scripts
+python local_fix_agent.py --import-pattern-repo /path/to/repo/tools --pattern-include 'jobs/*.py' --pattern-exclude 'jobs/legacy_*'
+```
+
 Inspect learned patterns:
 
 ```bash
 python local_fix_agent.py --list-patterns
 python local_fix_agent.py --list-patterns --filter-state curated_trusted
 ```
+
+Use the interactive terminal app when you want a guided front-end instead of remembering flags:
+
+```bash
+python local_fix_agent.py --interactive
+```
+
+Install global user-level launchers when you want the tool available from anywhere on the system:
+
+```bash
+./scripts/install_launchers.sh
+```
+
+That installs:
+
+- `fixapp` -> `python local_fix_agent.py --interactive`
+- `fixpublish` -> `./scripts/fixpublish.sh`
+- `fixit` -> `python local_fix_agent.py`
+
+The interactive app is the top-level front-end for the whole system. The main menu and backend routing are in place, and the fully guided workflows now include `Fix or validate a script`, `Create a new script`, `Publish current repo state`, `Import a script into training`, and `Work with a config file`.
+
+The operator UX now has two consistent interactive modes:
+
+- `guided`
+  - asks the normal workflow questions
+  - keeps advanced options hidden unless requested
+- `quick`
+  - uses the default answers for the common path
+  - still shows a confirmation summary before running
+
+The interactive app presents one top-level menu for:
+
+- fix or validate a script
+- create a new script
+- publish current repo state
+- publish last validated run
+- import a script into training
+- work with a config file
+- inspect learned patterns
+- manage patterns
+- probe API / M3U8 endpoint
+- sync/repair repo conflicts
+- settings / advanced options
+
+The `Fix or validate a script` workflow is the primary day-to-day interactive path. It now guides the operator through:
+
+- repo path and script path
+- fix-and-validate vs validate-only mode
+- validation command choice: auto-detect, remembered default, or custom
+- learned pattern source choice
+- optional advanced flags
+- optional probing when the script looks network-dependent
+
+Before running, it shows a confirmation summary and the equivalent backend command(s). After the run it prints an operator-facing result summary with the validation result, validation command used, patterns/probing context, and a short plain-English `what_happened` line.
+
+The `Publish current repo state` workflow is now also fully guided. It helps the operator review:
+
+- changed files that would be published
+- staged vs unstaged state
+- whether a validation record exists and still matches the current commit
+- whether revalidation is likely to run
+- whether auto-stage can safely resolve the current working tree
+- whether high-confidence safe blockers can be remediated automatically
+- whether publish would block before running the finalizer
+
+It still delegates the real work to the canonical finalizer wrapper, so the safety guarantees stay in one backend path. If publish blocks, the interactive summary explains whether the blocker came from unstaged files, stale validation, or another publish safety check.
+
+When publish blocks on unstaged files, the agent now uses the same centralized classification logic to explain each blocker in operator terms:
+
+- what the file probably is
+- why it blocked publish
+- whether it should be staged, ignored, left alone, or removed
+- exact commands for the safest next action
+
+That includes artifact-style files, internal state files, and safe publishable files that only need `git add`.
+
+The finalizer now also attempts blocker remediation before it gives up. By default it will:
+
+- auto-stage safe publishable paths
+- ignore internal state files as non-blocking
+- auto-remove high-confidence temporary artifact files when they are clearly junk output
+
+It still does not auto-resolve ambiguous code, config, or unknown data files. Disable blocker remediation with `--no-auto-remediate-blockers`.
+
+The `Import a script into training` workflow is now the guided ingestion path for learned patterns. It supports:
+
+- local file, SSH, or HTTP/HTTPS acquisition
+- sanitization before learning so secrets and environment-specific values are redacted
+- validation and optional repair before promotion
+- trust selection between `trusted` and `experimental`
+- classification with confidence scoring before final promotion
+
+The workflow keeps trusted promotion gated. If the imported script is low-confidence, limited-validation, or still failing after repair, the operator is shown a clear summary and can downgrade to experimental trust instead of silently promoting unsafe content.
+
+The backend learning system also supports repo/folder import with `--import-pattern-repo`. That mode scans a local repo or subtree, imports each candidate file through the same sanitize/validate/repair rules, preserves per-file provenance, and learns collection-level conventions such as shared helper structure, naming style, validation style, and recurring network/proxy/auth patterns. Collection imports are grouped under `imports/...` inside the private pattern repo, and the final summary reports candidate counts, promoted counts, blocked counts, repo-level patterns added, and pattern-memory delta.
+
+The `Create a new script` workflow is now the builder path for the system. It asks for the script purpose, output path, an optional domain hint, pattern source, optional bounded probing for network-dependent tasks, and a validation plan. If generation validation fails, it can hand the generated file into the existing fix/validate backend for a repair pass. After a successful generate-and-validate run, it can optionally hand off to the canonical publish flow.
+
+The generation pipeline now plans before it writes. It combines:
+
+- task intent
+- trusted learned patterns from file-level and repo-level sources
+- optional live API or M3U8 probe evidence when the task is network-dependent
+- a selected validation plan
+- a generation confidence score
+
+For local-only scripts, generation stays lightweight and pattern-driven. For network-dependent scripts, the tool can use bounded probe findings to shape JSON parsing, playlist branching, proxy/auth handling, redirects, and safe validation choices without hardcoding secrets into the generated file.
+
+The `Work with a config file` workflow is the config-maintenance path. It supports `nginx`, generic reverse proxy configs, `php.ini`, and PHP-FPM pool configs. The workflow can validate, clean up, compare, generate, or align a config file, and it only keeps edits when the selected validation command succeeds. Default validation commands include `nginx -t -c <path>`, `php-fpm -t`, and `php -n -c <path> -m`, with custom validation commands available when the environment needs something more specific. It does not reload or restart services by default.
+
+Across workflows, the interactive app now uses the same shape:
+
+1. `when_to_use`
+2. minimal prompts
+3. confirmation summary
+4. command preview
+5. `Run`, `Back`, or `Cancel`
+6. result block
+7. `what_happened`
+
+If `~/.local/bin` is not already on `PATH`, the installer prints the exact commands to add it for the current shell and to persist it in `~/.bashrc` or `~/.zshrc`.
 
 ### Why Did It Do That?
 
@@ -327,6 +456,9 @@ The workflow is intentionally split:
 - the finalizer creates or reuses a commit-linked validation record
 - docs updates happen inside finalization
 - publish decisions use meaningful-change detection
+- safe publishable files may be auto-staged during finalization; use `--no-auto-stage` to require fully manual staging
+- staging decisions are classified per file as `code`, `test`, `docs`, `config`, `script`, `state`, `generated`, `artifact`, or `unknown`; use `--explain-staging` to print the full reasoning
+- live API and HLS/M3U8 probes are available when endpoint truth matters; probe only for network-dependent scripts or debugging, not on every run
 - the publish branch is aligned with its base branch before publish when safe
 - PR mergeability is checked again after publish as a safety net
 - learning uses trust-gated pattern sources; raw candidates do not become trusted automatically

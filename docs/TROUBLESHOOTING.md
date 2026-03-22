@@ -81,6 +81,30 @@ Most common explanations:
 - there were no meaningful changes since the last successful published state
 - the current publishable state already matches a previous successful publish state
 
+### Why did publish block on staging?
+
+Most common explanations:
+
+- `--no-auto-stage` was used, so the tool reported exact manual `git add -- <path>` commands instead of staging automatically
+- a remaining publishable path was ambiguous or outside the safe auto-stage policy
+- auto-stage ran, but the post-stage re-audit still found unstaged publishable files
+
+When staging blocks, the publish summary reports:
+
+- `auto_stage_attempted`
+- `auto_stage_result`
+- `auto_staged_paths`
+- `remaining_unstaged_paths`
+- `remaining_unstaged`
+- `file_decisions`
+- `staging_summary`
+- `staging_decision_reason`
+- `staging_reason`
+
+The `next_action` field includes the exact manual staging commands the operator should run next.
+
+Use `--explain-staging` when you need the full per-file classification. That output shows each file's `file_type`, whether it was publishable, whether it was auto-staged, ignored, or blocked, and the reason for that decision.
+
 ### Why did publish succeed but the workflow still not feel done?
 
 Because publish success and PR mergeability are different checks. A branch can be pushed successfully while the PR still needs mergeability verification or repair.

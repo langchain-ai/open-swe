@@ -173,6 +173,10 @@ These are different from trust level. Promotion state describes where a source i
 - The finalizer is the only canonical publish path.
 - Docs updates happen inside finalization, not as a separate ad hoc step.
 - Publish/noop decisions are based on meaningful changes, not only on working-tree noise.
+- Safe publishable files may be auto-staged by default, but publish still blocks unless the re-audit shows the intended paths are actually staged.
+- `--no-auto-stage` disables that convenience path and forces an exact manual staging handoff instead.
+- `--explain-staging` prints the per-file classification, publishability decision, and staging action for auditability.
+- Use live probing only when a script depends on API, auth/proxy, or HLS/M3U8 behavior; it is a bounded debugging tool, not a default step.
 - The branch is aligned with its base branch before publish when that can be done safely.
 - PR mergeability is checked after publish as a final safety net.
 - Ambiguous merge conflicts block instead of being guessed through.
