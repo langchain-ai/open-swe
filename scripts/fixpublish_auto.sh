@@ -28,24 +28,27 @@ run_and_print() {
 extract_pr_url() {
   local output="$1"
   local line
+  local found=""
   while IFS= read -r line; do
     case "$line" in
       pr_url:\ *)
         local value="${line#pr_url: }"
-        if [[ -n "$value" && "$value" != "(none)" ]]; then
-          printf '%s\n' "$value"
-          return 0
+        if [[ -n "$value" && "$value" != "(none)" && "$value" != "none" && "$value" == https://github.com/*/pull/* ]]; then
+          found="$value"
         fi
         ;;
       previous_pr_url:\ *)
         local value="${line#previous_pr_url: }"
-        if [[ -n "$value" && "$value" != "(none)" ]]; then
-          printf '%s\n' "$value"
-          return 0
+        if [[ -n "$value" && "$value" != "(none)" && "$value" != "none" && "$value" == https://github.com/*/pull/* ]]; then
+          found="$value"
         fi
         ;;
     esac
   done <<<"$output"
+  if [[ -n "$found" ]]; then
+    printf '%s\n' "$found"
+    return 0
+  fi
   return 1
 }
 
