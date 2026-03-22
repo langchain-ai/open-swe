@@ -91,7 +91,10 @@ Format messages using Slack's mrkdwn format, NOT standard Markdown.
     Do NOT use **bold**, [link](url), or other standard Markdown syntax.
 
 #### `github_comment`
-Posts a comment to a GitHub issue or pull request. Provide the `issue_number` explicitly. Use this when the task was triggered from GitHub — to reply with updates, answers, or a summary after completing work."""
+Posts a comment to a GitHub issue or pull request. Provide the `issue_number` explicitly. Use this when the task was triggered from GitHub — to reply with updates, answers, or a summary after completing work.
+
+#### `fetch_github_pr_comments`
+Fetches all review comments on a GitHub pull request since the last @open-swe mention. Use this when you are triggered from Slack to work on a GitHub PR but the review comments were not included in your context. Pass the `pr_number` from the PR URL."""
 
 
 TOOL_BEST_PRACTICES_SECTION = """---
