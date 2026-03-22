@@ -1077,7 +1077,13 @@ async def health_check() -> dict[str, str]:
 
 
 _SUPPORTED_GH_EVENTS = frozenset(
-    ["issue_comment", "issues", "pull_request_review_comment", "pull_request_review", "pull_request"]
+    [
+        "issue_comment",
+        "issues",
+        "pull_request_review_comment",
+        "pull_request_review",
+        "pull_request",
+    ]
 )
 _SUPPORTED_GH_ISSUE_ACTIONS = frozenset(["edited", "opened", "reopened"])
 _SUPPORTED_GH_PR_ACTIONS = frozenset(["ready_for_review"])
@@ -1306,7 +1312,9 @@ async def process_github_pr_comment(payload: dict[str, Any], event_type: str) ->
     )
 
 
-_PR_REVIEW_SKILL_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "skills", "pr-review", "SKILL.md")
+_PR_REVIEW_SKILL_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(__file__)), "skills", "pr-review", "SKILL.md"
+)
 
 
 def _load_pr_review_skill() -> str:
@@ -1379,11 +1387,7 @@ async def process_github_pr_ready_for_review(payload: dict[str, Any]) -> None:
 
     skill_content = _load_pr_review_skill()
 
-    prompt = (
-        f"This PR has been marked ready for review.\n\n"
-        f"PR: {pr_url}\n"
-        f"Title: {pr_title}\n"
-    )
+    prompt = f"This PR has been marked ready for review.\n\nPR: {pr_url}\nTitle: {pr_title}\n"
     if pr_body:
         prompt += f"Description: {pr_body}\n"
     prompt += (

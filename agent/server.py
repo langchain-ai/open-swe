@@ -393,7 +393,9 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
     agents_md = await read_agents_md_in_sandbox(sandbox_backend, repo_dir)
     review_mode = config["configurable"].get("review_mode", False)
 
-    logger.info("Returning agent with sandbox for thread %s (review_mode=%s)", thread_id, review_mode)
+    logger.info(
+        "Returning agent with sandbox for thread %s (review_mode=%s)", thread_id, review_mode
+    )
 
     tools = [
         http_request,
