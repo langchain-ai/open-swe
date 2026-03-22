@@ -227,8 +227,27 @@ async def create_github_pr(
                     head_branch=head_branch,
                 )
                 if existing:
-                    logger.info("Using existing PR for head branch: %s", existing[0])
-                    return existing[0], existing[1], True
+                    existing_url, existing_number = existing
+                    logger.info("Updating existing PR #%s for head branch: %s", existing_number, existing_url)
+                    patch_response = await http_client.patch(
+                        f"https://api.github.com/repos/{repo_owner}/{repo_name}/pulls/{existing_number}",
+                        headers={
+                            "Authorization": f"Bearer {github_token}",
+                            "Accept": "application/vnd.github+json",
+                            "X-GitHub-Api-Version": "2022-11-28",
+                        },
+                        json={"title": title, "body": body},
+                    )
+                    if patch_response.status_code != 200:  # noqa: PLR2004
+                        logger.error(
+                            "Failed to update existing PR #%s (%s): %s",
+                            existing_number,
+                            patch_response.status_code,
+                            patch_response.json().get("message"),
+                        )
+                    else:
+                        logger.info("Successfully updated existing PR #%s title and body", existing_number)
+                    return existing_url, existing_number, True
             else:
                 logger.error(
                     "GitHub API error (%s): %s",
