@@ -3,6 +3,7 @@ from .fetch_url import fetch_url
 from .github_comment import github_comment
 from .http_request import http_request
 from .linear_comment import linear_comment
+from .mcp_call import mcp_call
 from .slack_thread_reply import slack_thread_reply
 
 __all__ = [
@@ -11,5 +12,6 @@ __all__ = [
     "github_comment",
     "http_request",
     "linear_comment",
+    "mcp_call",
     "slack_thread_reply",
 ]

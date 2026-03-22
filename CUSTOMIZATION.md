@@ -227,6 +227,40 @@ return create_deep_agent(
 
 The agent will automatically see the tool's name, docstring, and parameter types — the docstring serves as the tool description, so write it clearly.
 
+### MCP server integration
+
+Open SWE has a built-in `mcp_call` tool for connecting to any [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server — no fork required. When `MCP_SERVER_URL` is set, the tool is automatically added to the agent's toolset.
+
+**Environment variables:**
+
+```bash
+# Required
+MCP_SERVER_URL=https://your-mcp-server.example.com/mcp
+MCP_SERVER_API_KEY=your-api-key
+
+# Optional
+MCP_SERVER_TIMEOUT=30       # Request timeout in seconds (default: 30)
+MCP_SERVER_NAME=context     # Human-readable name for logs (default: "mcp")
+```
+
+The tool sends a JSON-RPC 2.0 `tools/call` request and returns the text content from the response. When `MCP_SERVER_URL` is not set, the tool is not loaded and has zero impact on existing agent behavior.
+
+**Example AGENTS.md configuration:**
+
+```markdown
+## Knowledge Base
+
+Use the mcp_call tool to access the team knowledge base before starting any task:
+
+  mcp_call("get_task_context", {"area": "upload-retry", "platform": "ios"})
+
+Search across all knowledge:
+  mcp_call("search", {"query": "race condition", "platform": "ios"})
+
+Deep dive on a specific incident:
+  mcp_call("get_rca", {"id": "SWAT-421"})
+```
+
 ### Removing tools
 
 If you only use Linear (not Slack), remove `slack_thread_reply` from the tools list and vice versa. If you don't need web fetching, remove `fetch_url`. The only tool that's essential to the core workflow is `commit_and_open_pr`.

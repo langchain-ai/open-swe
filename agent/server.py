@@ -4,6 +4,7 @@
 # Suppress deprecation warnings from langchain_core (e.g., Pydantic V1 on Python 3.14+)
 # ruff: noqa: E402
 import logging
+import os
 import shlex
 import warnings
 
@@ -385,6 +386,20 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
     linear_issue_number = linear_issue.get("linear_issue_number", "")
     agents_md = await read_agents_md_in_sandbox(sandbox_backend, repo_dir)
 
+    tools = [
+        http_request,
+        fetch_url,
+        commit_and_open_pr,
+        linear_comment,
+        slack_thread_reply,
+        github_comment,
+    ]
+
+    if os.environ.get("MCP_SERVER_URL"):
+        from .tools.mcp_call import mcp_call
+
+        tools.append(mcp_call)
+
     logger.info("Returning agent with sandbox for thread %s", thread_id)
     return create_deep_agent(
         model=make_model("anthropic:claude-opus-4-6", temperature=0, max_tokens=20_000),
@@ -394,14 +409,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
             linear_issue_number=linear_issue_number,
             agents_md=agents_md,
         ),
-        tools=[
-            http_request,
-            fetch_url,
-            commit_and_open_pr,
-            linear_comment,
-            slack_thread_reply,
-            github_comment,
-        ],
+        tools=tools,
         backend=sandbox_backend,
         middleware=[
             ToolErrorMiddleware(),
