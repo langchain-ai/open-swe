@@ -35,6 +35,7 @@ from .middleware import (
 from .prompt import construct_system_prompt
 from .tools import (
     commit_and_open_pr,
+    edit_pull_request,
     fetch_url,
     github_comment,
     http_request,
@@ -398,6 +399,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
             http_request,
             fetch_url,
             commit_and_open_pr,
+            edit_pull_request,
             linear_comment,
             slack_thread_reply,
             github_comment,

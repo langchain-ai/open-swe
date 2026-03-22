@@ -276,6 +276,56 @@ async def _find_existing_pr(
     return None, None
 
 
+HTTP_OK = 200
+
+
+async def edit_github_pr(
+    repo_owner: str,
+    repo_name: str,
+    github_token: str,
+    pr_number: int,
+    title: str | None = None,
+    body: str | None = None,
+) -> tuple[str | None, int | None]:
+    """Update an existing GitHub pull request title and/or body."""
+    pr_payload: dict[str, str] = {}
+    if title is not None:
+        pr_payload["title"] = title
+    if body is not None:
+        pr_payload["body"] = body
+
+    if not pr_payload:
+        logger.warning("edit_github_pr called with no fields to update")
+        return None, None
+
+    async with httpx.AsyncClient() as http_client:
+        try:
+            response = await http_client.patch(
+                f"https://api.github.com/repos/{repo_owner}/{repo_name}/pulls/{pr_number}",
+                headers={
+                    "Authorization": f"Bearer {github_token}",
+                    "Accept": "application/vnd.github+json",
+                    "X-GitHub-Api-Version": "2022-11-28",
+                },
+                json=pr_payload,
+            )
+            pr_data = response.json()
+            if response.status_code == HTTP_OK:
+                pr_url = pr_data.get("html_url")
+                logger.info("PR #%d updated successfully: %s", pr_number, pr_url)
+                return pr_url, pr_data.get("number")
+
+            logger.error(
+                "GitHub API error (%s): %s",
+                response.status_code,
+                pr_data.get("message"),
+            )
+            return None, None
+        except httpx.HTTPError:
+            logger.exception("Failed to update PR #%d via GitHub API", pr_number)
+            return None, None
+
+
 async def get_github_default_branch(
     repo_owner: str,
     repo_name: str,
