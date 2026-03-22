@@ -391,8 +391,37 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
     linear_project_id = linear_issue.get("linear_project_id", "")
     linear_issue_number = linear_issue.get("linear_issue_number", "")
     agents_md = await read_agents_md_in_sandbox(sandbox_backend, repo_dir)
+    review_mode = config["configurable"].get("review_mode", False)
 
-    logger.info("Returning agent with sandbox for thread %s", thread_id)
+    logger.info(
+        "Returning agent with sandbox for thread %s (review_mode=%s)", thread_id, review_mode
+    )
+
+    tools = [
+        http_request,
+        fetch_url,
+        list_pr_reviews,
+        get_pr_review,
+        create_pr_review,
+        update_pr_review,
+        dismiss_pr_review,
+        submit_pr_review,
+        list_pr_review_comments,
+    ]
+    if not review_mode:
+        tools.insert(2, commit_and_open_pr)
+        tools.append(linear_comment)
+        tools.append(slack_thread_reply)
+        tools.append(github_comment)
+
+    middleware = [
+        ToolErrorMiddleware(),
+        check_message_queue_before_model,
+        ensure_no_empty_msg,
+    ]
+    if not review_mode:
+        middleware.append(open_pr_if_needed)
+
     return create_deep_agent(
         model=make_model("anthropic:claude-opus-4-6", temperature=0, max_tokens=20_000),
         system_prompt=construct_system_prompt(
@@ -401,26 +430,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
             linear_issue_number=linear_issue_number,
             agents_md=agents_md,
         ),
-        tools=[
-            http_request,
-            fetch_url,
-            commit_and_open_pr,
-            linear_comment,
-            slack_thread_reply,
-            github_comment,
-            list_pr_reviews,
-            get_pr_review,
-            create_pr_review,
-            update_pr_review,
-            dismiss_pr_review,
-            submit_pr_review,
-            list_pr_review_comments,
-        ],
+        tools=tools,
         backend=sandbox_backend,
-        middleware=[
-            ToolErrorMiddleware(),
-            check_message_queue_before_model,
-            ensure_no_empty_msg,
-            open_pr_if_needed,
-        ],
+        middleware=middleware,
     ).with_config(config)
