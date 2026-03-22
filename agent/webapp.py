@@ -1077,9 +1077,10 @@ async def health_check() -> dict[str, str]:
 
 
 _SUPPORTED_GH_EVENTS = frozenset(
-    ["issue_comment", "issues", "pull_request_review_comment", "pull_request_review"]
+    ["issue_comment", "issues", "pull_request_review_comment", "pull_request_review", "pull_request"]
 )
 _SUPPORTED_GH_ISSUE_ACTIONS = frozenset(["edited", "opened", "reopened"])
+_SUPPORTED_GH_PR_ACTIONS = frozenset(["ready_for_review"])
 
 
 def _build_github_issue_comments_text(comments: list[dict[str, Any]]) -> str:
@@ -1305,6 +1306,124 @@ async def process_github_pr_comment(payload: dict[str, Any], event_type: str) ->
     )
 
 
+_PR_REVIEW_SKILL_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "skills", "pr-review", "SKILL.md")
+
+
+def _load_pr_review_skill() -> str:
+    """Load the PR review skill content from SKILL.md."""
+    try:
+        with open(_PR_REVIEW_SKILL_PATH) as f:
+            return f.read()
+    except FileNotFoundError:
+        logger.warning("PR review skill not found at %s", _PR_REVIEW_SKILL_PATH)
+        return ""
+
+
+async def process_github_pr_ready_for_review(payload: dict[str, Any]) -> None:
+    """Process a pull_request ready_for_review event and trigger an automatic review run."""
+    pr = payload.get("pull_request", {})
+    repo = payload.get("repository", {})
+    repo_config = {
+        "owner": repo.get("owner", {}).get("login", ""),
+        "name": repo.get("name", ""),
+    }
+    pr_number = pr.get("number")
+    pr_url = pr.get("html_url", "")
+    pr_title = pr.get("title", "")
+    pr_body = pr.get("body", "") or ""
+    github_login = pr.get("user", {}).get("login", "")
+    branch_name = pr.get("head", {}).get("ref", "")
+
+    if not pr_number:
+        logger.warning("No PR number found in ready_for_review payload, skipping")
+        return
+
+    email = GITHUB_USER_EMAIL_MAP.get(github_login, "")
+    if not email:
+        logger.warning("No email mapping for GitHub user '%s', skipping", github_login)
+        return
+
+    stable_key = f"{repo_config['owner']}/{repo_config['name']}/pr/{pr_number}"
+    thread_id = str(uuid.uuid5(uuid.NAMESPACE_URL, stable_key))
+
+    langgraph_client = get_client(url=LANGGRAPH_URL)
+    try:
+        await langgraph_client.threads.update(thread_id, metadata={"branch_name": branch_name})
+    except Exception as exc:  # noqa: BLE001
+        if _is_not_found_error(exc):
+            await langgraph_client.threads.create(
+                thread_id=thread_id,
+                if_exists="do_nothing",
+                metadata={"branch_name": branch_name},
+            )
+
+    github_token = await _get_or_resolve_thread_github_token(thread_id, email)
+    if not github_token:
+        logger.warning("No GitHub token for thread %s, skipping", thread_id)
+        return
+
+    # React with 👀 on the PR to acknowledge review is starting
+    async with httpx.AsyncClient() as http_client:
+        try:
+            await http_client.post(
+                f"https://api.github.com/repos/{repo_config['owner']}/{repo_config['name']}/issues/{pr_number}/reactions",
+                headers={
+                    "Authorization": f"Bearer {github_token}",
+                    "Accept": "application/vnd.github+json",
+                    "X-GitHub-Api-Version": "2022-11-28",
+                },
+                json={"content": "eyes"},
+            )
+        except Exception:
+            logger.exception("Failed to react to PR #%s", pr_number)
+
+    skill_content = _load_pr_review_skill()
+
+    prompt = (
+        f"This PR has been marked ready for review.\n\n"
+        f"PR: {pr_url}\n"
+        f"Title: {pr_title}\n"
+    )
+    if pr_body:
+        prompt += f"Description: {pr_body}\n"
+    prompt += (
+        "\nPlease review this PR thoroughly.\n\n"
+        "IMPORTANT RULES:\n"
+        "- REVIEW ONLY — do NOT write, edit, or commit any code\n"
+        "- Use `create_pr_review` to submit your review — this is the ONLY comment you should leave\n"
+        "- Do NOT call `github_comment` separately — the review body is your summary\n"
+        "- Keep feedback concise: flag only real issues, skip style nits\n"
+        "- Inline comments should be short and actionable, not essays"
+    )
+    if skill_content:
+        prompt += f"\n\n---\n\n## PR Review Skill\n\n{skill_content}"
+
+    thread_active = await is_thread_active(thread_id)
+    if thread_active:
+        logger.info("Thread %s is busy, queuing PR ready_for_review message", thread_id)
+        await queue_message_for_thread(thread_id, prompt)
+        return
+
+    logger.info("Creating review run for PR #%s on thread %s", pr_number, thread_id)
+    await langgraph_client.runs.create(
+        thread_id,
+        "agent",
+        input={"messages": [{"role": "user", "content": prompt}]},
+        config={
+            "configurable": {
+                "source": "github",
+                "github_login": github_login,
+                "repo": repo_config,
+                "pr_number": pr_number,
+                "review_mode": True,
+            },
+            "metadata": _AGENT_VERSION_METADATA,
+        },
+        if_not_exists="create",
+    )
+    logger.info("Review run created for PR #%s on thread %s", pr_number, thread_id)
+
+
 async def process_github_issue(payload: dict[str, Any], event_type: str) -> None:
     """Process a GitHub issue or issue comment that tagged @open-swe."""
     issue = payload.get("issue", {})
@@ -1455,6 +1574,16 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks) ->
             webhook_repo_config.get("owner"),
         )
         return {"status": "ignored", "reason": "Repository org not in allowlist"}
+
+    # Handle pull_request ready_for_review — automatic review, no @openswe tag needed
+    if event_type == "pull_request":
+        action = payload.get("action", "")
+        if action not in _SUPPORTED_GH_PR_ACTIONS:
+            logger.info("Ignoring unsupported pull_request action: %s", action)
+            return {"status": "ignored", "reason": f"Unsupported pull_request action: {action}"}
+        logger.info("Accepted pull_request ready_for_review webhook, scheduling review task")
+        background_tasks.add_task(process_github_pr_ready_for_review, payload)
+        return {"status": "accepted", "message": "Processing pull_request ready_for_review event"}
 
     issue = payload.get("issue", {})
     is_pull_request_comment = bool(event_type == "issue_comment" and issue.get("pull_request"))

@@ -14,8 +14,8 @@ Leave a structured GitHub review — not just a plain comment. Use the review to
 1. Call `list_pr_reviews` first — see what's already been reviewed so you don't duplicate feedback
 2. Fetch the PR diff using `http_request`: `GET /repos/{owner}/{repo}/pulls/{pull_number}`
 3. Read the changed files in the sandbox — clone the repo and read full file context, not just the diff
-4. Create the review using `create_pr_review` with inline comments where possible
-5. Always call `github_comment` after submitting the review with a short human-readable summary
+4. Create the review using `create_pr_review` with inline comments where possible — this is your only output
+5. Keep the review body short: 2-4 sentences max. Inline comments should be 1-2 lines each.
 
 ## What to Look For
 
