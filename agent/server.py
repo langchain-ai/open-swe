@@ -35,7 +35,10 @@ from .middleware import (
 from .prompt import construct_system_prompt
 from .tools import (
     commit_and_open_pr,
+    create_pr_review,
+    dismiss_pr_review,
     fetch_url,
+    get_pr_review,
     github_comment,
     http_request,
     linear_comment,
@@ -45,7 +48,11 @@ from .tools import (
     linear_get_issue_comments,
     linear_list_teams,
     linear_update_issue,
+    list_pr_review_comments,
+    list_pr_reviews,
     slack_thread_reply,
+    submit_pr_review,
+    update_pr_review,
 )
 from .utils.auth import resolve_github_token
 from .utils.model import make_model
@@ -413,6 +420,13 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
             linear_update_issue,
             slack_thread_reply,
             github_comment,
+            list_pr_reviews,
+            get_pr_review,
+            create_pr_review,
+            update_pr_review,
+            dismiss_pr_review,
+            submit_pr_review,
+            list_pr_review_comments,
         ],
         backend=sandbox_backend,
         middleware=[
