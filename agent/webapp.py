@@ -37,7 +37,7 @@ from .utils.github_token import get_github_token_from_thread
 from .utils.github_user_email_map import GITHUB_USER_EMAIL_MAP
 from .utils.linear import post_linear_trace_comment
 from .utils.linear_team_repo_map import LINEAR_TEAM_TO_REPO
-from .utils.multimodal import dedupe_urls, extract_image_urls, fetch_image_block
+from .utils.multimodal import collect_image_urls, dedupe_urls, extract_image_urls, fetch_image_block
 from .utils.repo import extract_repo_from_text
 from .utils.slack import (
     add_slack_reaction,
@@ -1315,9 +1315,7 @@ async def process_github_pr_comment(payload: dict[str, Any], event_type: str) ->
         return
 
     prompt = build_pr_prompt(comments, pr_url)
-    image_urls = dedupe_urls(
-        [url for c in comments for url in extract_image_urls(c.get("body", ""))]
-    )
+    image_urls = collect_image_urls(comments=comments)
     content_blocks: list[dict[str, Any]] = [create_text_block(prompt)]
     if image_urls:
         logger.info("Preparing %d image(s) for GitHub PR comment", len(image_urls))
@@ -1396,10 +1394,10 @@ async def process_github_issue(payload: dict[str, Any], event_type: str) -> None
                 comment.get("user", {}).get("login", github_login) or github_login,
                 comment_body,
             )
-            image_urls = dedupe_urls(extract_image_urls(comment_body))
+            image_urls = collect_image_urls(comment_body)
         else:
             prompt = build_github_issue_update_prompt(github_login, title, description)
-            image_urls = dedupe_urls(extract_image_urls(description))
+            image_urls = collect_image_urls(description)
     else:
         comments = await fetch_issue_comments(
             repo_config, issue_number, token=github_token or app_token
@@ -1425,10 +1423,7 @@ async def process_github_issue(payload: dict[str, Any], event_type: str) -> None
             github_login=github_login,
             issue_author=issue_author,
         )
-        image_urls = dedupe_urls(
-            extract_image_urls(description)
-            + [url for c in comments for url in extract_image_urls(c.get("body", ""))]
-        )
+        image_urls = collect_image_urls(description, comments)
 
     content_blocks: list[dict[str, Any]] = [create_text_block(prompt)]
     if image_urls:

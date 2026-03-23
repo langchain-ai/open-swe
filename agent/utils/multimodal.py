@@ -103,3 +103,15 @@ async def fetch_image_block(
 
 def dedupe_urls(urls: list[str]) -> list[str]:
     return list(dict.fromkeys(urls))
+
+
+def collect_image_urls(
+    text: str = "",
+    comments: list[dict] | None = None,
+) -> list[str]:
+    """Extract and deduplicate image URLs from text and/or a list of comment dicts."""
+    urls: list[str] = list(extract_image_urls(text))
+    if comments:
+        for c in comments:
+            urls.extend(extract_image_urls(c.get("body", "")))
+    return dedupe_urls(urls)
