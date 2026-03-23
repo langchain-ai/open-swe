@@ -1,19 +1,21 @@
 ---
 name: pr-review
-description: Use when asked to review a pull request, leave feedback on a PR, check code quality, approve or request changes, or when @openswe is mentioned in a PR comment asking for a review.
+description: Use when asked to review a pull request, leave feedback on a PR, check code quality, or request changes, or when @openswe is mentioned in a PR comment asking for a review.
 ---
 
 # PR Review Skill
 
 ## Goal
 
-Leave a structured GitHub review — not just a plain comment. Use the review tools to create inline feedback, approve, or request changes directly on the PR.
+Leave a structured GitHub review — not just a plain comment. Use the review tools to create inline feedback or request changes directly on the PR.
+
+**Do not approve PRs.** If you think a PR looks good and should be approved, leave a `COMMENT` review stating that it looks good and should be approved. Actual approval must be done by a human.
 
 ## Review Process
 
 1. Call `list_pr_reviews` first — see what's already been reviewed so you don't duplicate feedback
-2. Fetch the PR diff using `http_request`: `GET /repos/{owner}/{repo}/pulls/{pull_number}`
-3. Read the changed files in the sandbox — clone the repo and read full file context, not just the diff
+2. Use `git diff` in the sandbox to get the PR diff — the repo is already cloned locally
+3. Read the changed files in the sandbox — the repo is already checked out, no need to clone
 4. Create the review using `create_pr_review` with inline comments where possible
 5. Always call `github_comment` after submitting the review with a short human-readable summary
 
@@ -38,11 +40,10 @@ Leave a structured GitHub review — not just a plain comment. Use the review to
 
 ## Review Events — When to Use Each
 
-- **APPROVE** — code is correct, safe, and ready to merge. No unresolved blocking concerns.
 - **REQUEST_CHANGES** — there are blocking issues the author must fix before merge.
-- **COMMENT** — feedback only, not blocking. Use for questions or suggestions.
+- **COMMENT** — feedback only, not blocking. Use for questions, suggestions, or when the PR looks good and should be approved.
 
-Never APPROVE if you have an unresolved blocking concern. Never REQUEST_CHANGES for style nits.
+Never use APPROVE. Never REQUEST_CHANGES for style nits.
 
 ## Available Tools
 
@@ -62,8 +63,8 @@ open-swe has the following PR review tools available:
 
 ```
 pull_number: int          # PR number
-event: str                # APPROVE | REQUEST_CHANGES | COMMENT
-body: str                 # Top-level review summary (required for APPROVE and REQUEST_CHANGES)
+event: str                # REQUEST_CHANGES | COMMENT (APPROVE is not allowed)
+body: str                 # Top-level review summary (required for REQUEST_CHANGES)
 comments: list            # Optional inline comments (see format below)
 commit_id: str            # Optional — defaults to latest commit
 ```
@@ -71,7 +72,7 @@ commit_id: str            # Optional — defaults to latest commit
 Inline comment format:
 ```json
 {
-  "path": "agent/tools/github_review.py",
+  "path": "src/utils/auth.py",
   "line": 42,
   "side": "RIGHT",
   "body": "This will fail if the token is expired — handle the 401 case."
@@ -102,5 +103,5 @@ When the author pushes new commits addressing your feedback:
 - `line` refers to the line number in the **new file** (RIGHT side). Use `side: "LEFT"` for deleted lines.
 - You can only dismiss **your own** reviews — not reviews from other users
 - `update_pr_review` only updates the review body — it does not update inline comments
-- GitHub requires a non-empty `body` for APPROVE and REQUEST_CHANGES events
+- GitHub requires a non-empty `body` for REQUEST_CHANGES events
 - `list_pr_review_comments` without a `review_id` returns all review comments on the PR
