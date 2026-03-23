@@ -35,11 +35,24 @@ from .middleware import (
 from .prompt import construct_system_prompt
 from .tools import (
     commit_and_open_pr,
+    create_pr_review,
+    dismiss_pr_review,
     fetch_url,
+    get_pr_review,
     github_comment,
     http_request,
     linear_comment,
+    linear_create_issue,
+    linear_delete_issue,
+    linear_get_issue,
+    linear_get_issue_comments,
+    linear_list_teams,
+    linear_update_issue,
+    list_pr_review_comments,
+    list_pr_reviews,
     slack_thread_reply,
+    submit_pr_review,
+    update_pr_review,
 )
 from .utils.auth import resolve_github_token
 from .utils.model import make_model
@@ -362,6 +375,24 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
         msg = "Cannot proceed: no repo was cloned. Set 'repo.owner' and 'repo.name' in the configurable config"
         raise RuntimeError(msg)
 
+    branch_name = get_config().get("metadata", {}).get("branch_name")
+    if branch_name:
+        logger.info("Checking out branch '%s' in sandbox for thread %s", branch_name, thread_id)
+        loop = asyncio.get_event_loop()
+        safe_repo_dir = shlex.quote(repo_dir)
+        safe_branch = shlex.quote(branch_name)
+        checkout_result = await loop.run_in_executor(
+            None,
+            sandbox_backend.execute,
+            f"cd {safe_repo_dir} && git fetch origin && git checkout {safe_branch}",
+        )
+        if checkout_result.exit_code != 0:
+            logger.warning(
+                "Failed to checkout branch '%s': %s",
+                branch_name,
+                checkout_result.output[:200] if checkout_result.output else "",
+            )
+
     linear_issue = config["configurable"].get("linear_issue", {})
     linear_project_id = linear_issue.get("linear_project_id", "")
     linear_issue_number = linear_issue.get("linear_issue_number", "")
@@ -381,8 +412,21 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
             fetch_url,
             commit_and_open_pr,
             linear_comment,
+            linear_create_issue,
+            linear_delete_issue,
+            linear_get_issue,
+            linear_get_issue_comments,
+            linear_list_teams,
+            linear_update_issue,
             slack_thread_reply,
             github_comment,
+            list_pr_reviews,
+            get_pr_review,
+            create_pr_review,
+            update_pr_review,
+            dismiss_pr_review,
+            submit_pr_review,
+            list_pr_review_comments,
         ],
         backend=sandbox_backend,
         middleware=[

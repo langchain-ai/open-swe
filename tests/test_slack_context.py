@@ -321,3 +321,39 @@ def test_get_slack_repo_config_github_url_beats_thread_metadata(
     )
 
     assert repo == {"owner": "langchain-ai", "name": "langgraph-api"}
+
+
+def test_get_slack_repo_config_repo_name_only_defaults_org(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """repo:name without org should default owner to langchain-ai."""
+    threads_client = _FakeThreadsClient(raise_not_found=True)
+
+    async def fake_post_slack_thread_reply(channel_id: str, thread_ts: str, text: str) -> bool:
+        return True
+
+    monkeypatch.setattr(webapp, "get_client", lambda url: _FakeClient(threads_client))
+    monkeypatch.setattr(webapp, "post_slack_thread_reply", fake_post_slack_thread_reply)
+
+    repo = asyncio.run(
+        webapp.get_slack_repo_config("fix bug in repo:langchainplus", "C123", "1.234")
+    )
+
+    assert repo == {"owner": "langchain-ai", "name": "langchainplus"}
+
+
+def test_get_slack_repo_config_repo_name_only_space_syntax(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """repo name (space syntax, no org) should default owner to langchain-ai."""
+    threads_client = _FakeThreadsClient(raise_not_found=True)
+
+    async def fake_post_slack_thread_reply(channel_id: str, thread_ts: str, text: str) -> bool:
+        return True
+
+    monkeypatch.setattr(webapp, "get_client", lambda url: _FakeClient(threads_client))
+    monkeypatch.setattr(webapp, "post_slack_thread_reply", fake_post_slack_thread_reply)
+
+    repo = asyncio.run(webapp.get_slack_repo_config("fix bug in repo open-swe", "C123", "1.234"))
+
+    assert repo == {"owner": "langchain-ai", "name": "open-swe"}

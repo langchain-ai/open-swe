@@ -1,3 +1,4 @@
+
 # Installation Guide
 
 This guide walks you through setting up Open SWE end-to-end: local development, GitHub App creation, LangSmith configuration, webhooks, and production deployment.
@@ -105,11 +106,13 @@ Open SWE uses [LangSmith](https://smith.langchain.com/) for:
 - **Tracing**: all agent runs are logged for debugging and observability
 - **Sandboxes**: each task runs in an isolated LangSmith cloud sandbox
 
-### 4a. Get your API key
+### 4a. Get your API key, project and tenant IDs
 
 1. Create a [LangSmith account](https://smith.langchain.com/) if you don't have one
 2. Go to **Settings → API Keys → Create API Key**
 3. Save it as `LANGSMITH_API_KEY_PROD`
+4. Get your **Tenant ID**: Visit LangSmith, login, then copy the UUID in the URL. Example: if your URL is `https://smith.langchain.com/o/72184268-01ea-4d29-98cc-6cfcf0f2abb0/agents/chat` -> the tenant ID would be `72184268-01ea-4d29-98cc-6cfcf0f2abb0`. Save it as `LANGSMITH_TENANT_ID_PROD`.
+5. Get your **Project ID**: open your tracing project in LangSmith, then click on the **ID** button in the top left, directly next to the project name. Save it as `LANGSMITH_TRACING_PROJECT_ID_PROD`
 
 ### 4b. Configure GitHub OAuth (optional but recommended)
 
@@ -201,6 +204,8 @@ LINEAR_TEAM_TO_REPO = {
 }
 ```
 
+Users can also override the team/project mapping per-comment by including `repo:owner/name` (or a GitHub URL) in their `@openswe` comment. The mapping is used as a fallback when no repo is specified in the comment text.
+
 ### Slack (optional)
 
 **Create a Slack App:**
@@ -282,14 +287,9 @@ LINEAR_TEAM_TO_REPO = {
 - `SLACK_BOT_USER_ID`: the bot's user ID (find it in Slack by clicking the bot's profile)
 - `SLACK_BOT_USERNAME`: the bot's display name (e.g. `open-swe`)
 
-**Configure default repo:**
+**Default repo:**
 
-Slack messages are routed to a default repo unless the user specifies one with `repo:owner/name`:
-
-```bash
-SLACK_REPO_OWNER="my-org"      # Default GitHub org
-SLACK_REPO_NAME="my-repo"      # Default GitHub repo
-```
+Slack messages are routed to the default repo (`DEFAULT_REPO_OWNER`/`DEFAULT_REPO_NAME` — see step 6) unless the user specifies one with `repo:owner/name` in their message.
 
 ## 6. Environment variables
 
@@ -300,6 +300,9 @@ Create a `.env` file in the project root. Below is the full list — only fill i
 LANGSMITH_API_KEY_PROD=""              # From step 4a
 LANGCHAIN_TRACING_V2="true"
 LANGCHAIN_PROJECT=""                   # LangSmith project name for traces
+LANGSMITH_TENANT_ID_PROD=""           
+LANGSMITH_TRACING_PROJECT_ID_PROD=""  
+LANGSMITH_URL_PROD="https://smith.langchain.com"                 
 
 # === LLM ===
 ANTHROPIC_API_KEY=""                   # Anthropic API key (default provider)
@@ -325,6 +328,11 @@ GITHUB_OAUTH_PROVIDER_ID=""            # The provider ID from steps 3a / 4b
 # Leave empty to allow all orgs.
 ALLOWED_GITHUB_ORGS=""                 # e.g. "my-org,my-other-org"
 
+# === Default Repository ===
+# Used across all triggers when no repo is specified.
+DEFAULT_REPO_OWNER=""                  # Default GitHub org (e.g. "my-org")
+DEFAULT_REPO_NAME=""                   # Default GitHub repo (e.g. "my-repo")
+
 # === Linear (if using Linear trigger) ===
 LINEAR_API_KEY=""                      # From step 5
 LINEAR_WEBHOOK_SECRET=""               # From step 5
@@ -334,8 +342,6 @@ SLACK_BOT_TOKEN=""                     # From step 5
 SLACK_BOT_USER_ID=""
 SLACK_BOT_USERNAME=""
 SLACK_SIGNING_SECRET=""
-SLACK_REPO_OWNER=""                    # Default org for Slack-triggered tasks
-SLACK_REPO_NAME=""                     # Default repo for Slack-triggered tasks
 
 # === Sandbox (optional) ===
 DEFAULT_SANDBOX_TEMPLATE_NAME=""       # Custom sandbox template name (default: deepagents-cli)

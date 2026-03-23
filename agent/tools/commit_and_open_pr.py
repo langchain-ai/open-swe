@@ -139,10 +139,21 @@ def commit_and_open_pr(
         if not (has_uncommitted_changes or has_unpushed_commits):
             return {"success": False, "error": "No changes detected", "pr_url": None}
 
+        metadata = config.get("metadata", {})
+        branch_name = metadata.get("branch_name")
         current_branch = git_current_branch(sandbox_backend, repo_dir)
-        target_branch = f"open-swe/{thread_id}"
+        target_branch = branch_name if branch_name else f"open-swe/{thread_id}"
         if current_branch != target_branch:
-            if not git_checkout_branch(sandbox_backend, repo_dir, target_branch):
+            if branch_name:
+                # Existing branch — plain checkout, do not create or reset
+                result = sandbox_backend.execute(f"cd {repo_dir} && git checkout {target_branch}")
+                if result.exit_code != 0:
+                    return {
+                        "success": False,
+                        "error": f"Failed to checkout branch {target_branch}",
+                        "pr_url": None,
+                    }
+            elif not git_checkout_branch(sandbox_backend, repo_dir, target_branch):
                 return {
                     "success": False,
                     "error": f"Failed to checkout branch {target_branch}",
