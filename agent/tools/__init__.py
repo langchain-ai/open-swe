@@ -1,5 +1,6 @@
 from .commit_and_open_pr import commit_and_open_pr
 from .fetch_url import fetch_url
+from .github_ci import get_pr_check_runs, rerun_failed_check_runs
 from .github_comment import github_comment
 from .github_review import (
     create_pr_review,
@@ -25,12 +26,14 @@ __all__ = [
     "create_pr_review",
     "dismiss_pr_review",
     "fetch_url",
+    "get_pr_check_runs",
     "get_pr_review",
     "github_comment",
     "http_request",
     "linear_comment",
     "list_pr_review_comments",
     "list_pr_reviews",
+    "rerun_failed_check_runs",
     "linear_create_issue",
     "linear_delete_issue",
     "linear_get_issue",
