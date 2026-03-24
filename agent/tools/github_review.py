@@ -93,8 +93,8 @@ def create_pr_review(
 
     Args:
         pull_number: The PR number to review.
-        body: The review body text (required for APPROVE/REQUEST_CHANGES, optional for COMMENT).
-        event: The review action - one of APPROVE, REQUEST_CHANGES, or COMMENT.
+        body: The review body text (required for REQUEST_CHANGES, optional for COMMENT).
+        event: The review action - one of REQUEST_CHANGES or COMMENT. APPROVE is not allowed.
         comments: Optional list of review comments. Each comment dict should have:
             - path (str): The relative file path to comment on.
             - body (str): The comment text.
@@ -107,6 +107,12 @@ def create_pr_review(
     Returns:
         Dictionary with success status and the created review data.
     """
+    if event == "APPROVE":
+        return {
+            "success": False,
+            "error": "APPROVE is not allowed. If you think this PR should be approved, leave a COMMENT review stating that the PR looks good and should be approved.",
+        }
+
     repo_config = _get_repo_config()
     if not repo_config:
         return {"success": False, "error": "No repo config found"}
@@ -229,7 +235,7 @@ def submit_pr_review(
         pull_number: The PR number.
         review_id: The ID of the pending review to submit.
         body: Optional body text for the review submission.
-        event: The review action - one of APPROVE, REQUEST_CHANGES, or COMMENT.
+        event: The review action - one of REQUEST_CHANGES or COMMENT. APPROVE is not allowed.
 
     Returns:
         Dictionary with success status and the submitted review data.
@@ -241,6 +247,12 @@ def submit_pr_review(
     token = asyncio.run(_get_token())
     if not token:
         return {"success": False, "error": "Failed to get GitHub App installation token"}
+
+    if event == "APPROVE":
+        return {
+            "success": False,
+            "error": "APPROVE is not allowed. If you think this PR should be approved, leave a COMMENT review stating that the PR looks good and should be approved.",
+        }
 
     url = f"{_repo_url(repo_config)}/pulls/{pull_number}/reviews/{review_id}/events"
     payload: dict[str, Any] = {"event": event}
