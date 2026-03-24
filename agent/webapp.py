@@ -1455,9 +1455,7 @@ async def process_github_pr_ready_for_review(payload: dict[str, Any]) -> None:
     if pr_body:
         prompt += f"Description: {pr_body}\n"
     if linear_issue_data:
-        prompt += (
-            f"\n## Linear Ticket: {linear_issue_data['identifier']} — {linear_issue_data['title']}\n"
-        )
+        prompt += f"\n## Linear Ticket: {linear_issue_data['identifier']} — {linear_issue_data['title']}\n"
         if linear_issue_data.get("description"):
             prompt += f"{linear_issue_data['description']}\n"
         prompt += (
@@ -1496,8 +1494,12 @@ async def process_github_pr_ready_for_review(payload: dict[str, Any]) -> None:
                 "pr_number": pr_number,
                 "review_mode": True,
                 "linear_issue": {
-                    "linear_project_id": linear_identifier.split("-")[0] if linear_issue_data else "",
-                    "linear_issue_number": linear_identifier.split("-")[1] if linear_issue_data else "",
+                    "linear_project_id": linear_identifier.split("-")[0]
+                    if linear_issue_data
+                    else "",
+                    "linear_issue_number": linear_identifier.split("-")[1]
+                    if linear_issue_data
+                    else "",
                 },
             },
             "metadata": _AGENT_VERSION_METADATA,
