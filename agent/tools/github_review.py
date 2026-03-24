@@ -5,6 +5,7 @@ import httpx
 from langgraph.config import get_config
 
 from ..utils.github_app import get_github_app_installation_token
+from ..utils.http import get_http_client
 
 GITHUB_API_BASE = "https://api.github.com"
 
@@ -45,14 +46,14 @@ def list_pr_reviews(pull_number: int) -> dict[str, Any]:
     url = f"{_repo_url(repo_config)}/pulls/{pull_number}/reviews"
 
     async def _fetch() -> dict[str, Any]:
-        async with httpx.AsyncClient() as client:
-            response = await client.get(url, headers=_github_headers(token))
-            if response.status_code != 200:
-                return {
-                    "success": False,
-                    "error": f"GitHub API returned {response.status_code}: {response.text}",
-                }
-            return {"success": True, "reviews": response.json()}
+        client = get_http_client()
+        response = await client.get(url, headers=_github_headers(token))
+        if response.status_code != 200:
+            return {
+                "success": False,
+                "error": f"GitHub API returned {response.status_code}: {response.text}",
+            }
+        return {"success": True, "reviews": response.json()}
 
     return asyncio.run(_fetch())
 
@@ -70,14 +71,14 @@ def get_pr_review(pull_number: int, review_id: int) -> dict[str, Any]:
     url = f"{_repo_url(repo_config)}/pulls/{pull_number}/reviews/{review_id}"
 
     async def _fetch() -> dict[str, Any]:
-        async with httpx.AsyncClient() as client:
-            response = await client.get(url, headers=_github_headers(token))
-            if response.status_code != 200:
-                return {
-                    "success": False,
-                    "error": f"GitHub API returned {response.status_code}: {response.text}",
-                }
-            return {"success": True, "review": response.json()}
+        client = get_http_client()
+        response = await client.get(url, headers=_github_headers(token))
+        if response.status_code != 200:
+            return {
+                "success": False,
+                "error": f"GitHub API returned {response.status_code}: {response.text}",
+            }
+        return {"success": True, "review": response.json()}
 
     return asyncio.run(_fetch())
 
@@ -125,14 +126,14 @@ def create_pr_review(
         payload["commit_id"] = commit_id
 
     async def _create() -> dict[str, Any]:
-        async with httpx.AsyncClient() as client:
-            response = await client.post(url, headers=_github_headers(token), json=payload)
-            if response.status_code not in (200, 201):
-                return {
-                    "success": False,
-                    "error": f"GitHub API returned {response.status_code}: {response.text}",
-                }
-            return {"success": True, "review": response.json()}
+        client = get_http_client()
+        response = await client.post(url, headers=_github_headers(token), json=payload)
+        if response.status_code not in (200, 201):
+            return {
+                "success": False,
+                "error": f"GitHub API returned {response.status_code}: {response.text}",
+            }
+        return {"success": True, "review": response.json()}
 
     return asyncio.run(_create())
 
@@ -163,14 +164,14 @@ def update_pr_review(
     url = f"{_repo_url(repo_config)}/pulls/{pull_number}/reviews/{review_id}"
 
     async def _update() -> dict[str, Any]:
-        async with httpx.AsyncClient() as client:
-            response = await client.put(url, headers=_github_headers(token), json={"body": body})
-            if response.status_code != 200:
-                return {
-                    "success": False,
-                    "error": f"GitHub API returned {response.status_code}: {response.text}",
-                }
-            return {"success": True, "review": response.json()}
+        client = get_http_client()
+        response = await client.put(url, headers=_github_headers(token), json={"body": body})
+        if response.status_code != 200:
+            return {
+                "success": False,
+                "error": f"GitHub API returned {response.status_code}: {response.text}",
+            }
+        return {"success": True, "review": response.json()}
 
     return asyncio.run(_update())
 
@@ -201,16 +202,16 @@ def dismiss_pr_review(
     url = f"{_repo_url(repo_config)}/pulls/{pull_number}/reviews/{review_id}/dismissals"
 
     async def _dismiss() -> dict[str, Any]:
-        async with httpx.AsyncClient() as client:
-            response = await client.put(
-                url, headers=_github_headers(token), json={"message": message}
-            )
-            if response.status_code != 200:
-                return {
-                    "success": False,
-                    "error": f"GitHub API returned {response.status_code}: {response.text}",
-                }
-            return {"success": True, "review": response.json()}
+        client = get_http_client()
+        response = await client.put(
+            url, headers=_github_headers(token), json={"message": message}
+        )
+        if response.status_code != 200:
+            return {
+                "success": False,
+                "error": f"GitHub API returned {response.status_code}: {response.text}",
+            }
+        return {"success": True, "review": response.json()}
 
     return asyncio.run(_dismiss())
 
@@ -248,14 +249,14 @@ def submit_pr_review(
         payload["body"] = body
 
     async def _submit() -> dict[str, Any]:
-        async with httpx.AsyncClient() as client:
-            response = await client.post(url, headers=_github_headers(token), json=payload)
-            if response.status_code not in (200, 201):
-                return {
-                    "success": False,
-                    "error": f"GitHub API returned {response.status_code}: {response.text}",
-                }
-            return {"success": True, "review": response.json()}
+        client = get_http_client()
+        response = await client.post(url, headers=_github_headers(token), json=payload)
+        if response.status_code not in (200, 201):
+            return {
+                "success": False,
+                "error": f"GitHub API returned {response.status_code}: {response.text}",
+            }
+        return {"success": True, "review": response.json()}
 
     return asyncio.run(_submit())
 
@@ -288,13 +289,13 @@ def list_pr_review_comments(
         url = f"{_repo_url(repo_config)}/pulls/{pull_number}/comments"
 
     async def _fetch() -> dict[str, Any]:
-        async with httpx.AsyncClient() as client:
-            response = await client.get(url, headers=_github_headers(token))
-            if response.status_code != 200:
-                return {
-                    "success": False,
-                    "error": f"GitHub API returned {response.status_code}: {response.text}",
-                }
-            return {"success": True, "comments": response.json()}
+        client = get_http_client()
+        response = await client.get(url, headers=_github_headers(token))
+        if response.status_code != 200:
+            return {
+                "success": False,
+                "error": f"GitHub API returned {response.status_code}: {response.text}",
+            }
+        return {"success": True, "comments": response.json()}
 
     return asyncio.run(_fetch())

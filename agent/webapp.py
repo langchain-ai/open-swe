@@ -10,6 +10,8 @@ from typing import Any
 
 import httpx
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
+
+from .utils.http import get_http_client
 from langchain_core.messages.content import create_text_block
 from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
@@ -143,24 +145,24 @@ async def react_to_linear_comment(comment_id: str, emoji: str = "👀") -> bool:
     }
     """
 
-    async with httpx.AsyncClient() as client:
-        try:
-            response = await client.post(
-                url,
-                headers={
-                    "Authorization": LINEAR_API_KEY,
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "query": mutation,
-                    "variables": {"commentId": comment_id, "emoji": emoji},
-                },
-            )
-            response.raise_for_status()
-            result = response.json()
-            return bool(result.get("data", {}).get("reactionCreate", {}).get("success"))
-        except Exception:  # noqa: BLE001
-            return False
+    client = get_http_client()
+    try:
+        response = await client.post(
+            url,
+            headers={
+                "Authorization": LINEAR_API_KEY,
+                "Content-Type": "application/json",
+            },
+            json={
+                "query": mutation,
+                "variables": {"commentId": comment_id, "emoji": emoji},
+            },
+        )
+        response.raise_for_status()
+        result = response.json()
+        return bool(result.get("data", {}).get("reactionCreate", {}).get("success"))
+    except Exception:  # noqa: BLE001
+        return False
 
 
 async def fetch_linear_issue_details(issue_id: str) -> dict[str, Any] | None:
@@ -210,25 +212,25 @@ async def fetch_linear_issue_details(issue_id: str) -> dict[str, Any] | None:
     }
     """
 
-    async with httpx.AsyncClient() as client:
-        try:
-            response = await client.post(
-                url,
-                headers={
-                    "Authorization": LINEAR_API_KEY,
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "query": query,
-                    "variables": {"issueId": issue_id},
-                },
-            )
-            response.raise_for_status()
-            result = response.json()
+    client = get_http_client()
+    try:
+        response = await client.post(
+            url,
+            headers={
+                "Authorization": LINEAR_API_KEY,
+                "Content-Type": "application/json",
+            },
+            json={
+                "query": query,
+                "variables": {"issueId": issue_id},
+            },
+        )
+        response.raise_for_status()
+        result = response.json()
 
-            return result.get("data", {}).get("issue")
-        except httpx.HTTPError:
-            return None
+        return result.get("data", {}).get("issue")
+    except httpx.HTTPError:
+        return None
 
 
 def generate_thread_id_from_issue(issue_id: str) -> str:
@@ -615,11 +617,11 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
         logger.info("Preparing %d image(s) for multimodal content", len(image_urls))
         logger.debug("Image URLs: %s", image_urls)
 
-        async with httpx.AsyncClient() as client:
-            for image_url in image_urls:
-                image_block = await fetch_image_block(image_url, client)
-                if image_block:
-                    content_blocks.append(image_block)
+        client = get_http_client()
+        for image_url in image_urls:
+            image_block = await fetch_image_block(image_url, client)
+            if image_block:
+                content_blocks.append(image_block)
         logger.info("Built %d content block(s) for prompt", len(content_blocks))
 
     linear_project_id = ""
@@ -784,11 +786,11 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
     )
     if image_urls:
         logger.info("Preparing %d image(s) for Slack mention", len(image_urls))
-        async with httpx.AsyncClient() as http_client:
-            for image_url in image_urls:
-                image_block = await fetch_image_block(image_url, http_client)
-                if image_block:
-                    content_blocks.append(image_block)
+        http_client = get_http_client()
+        for image_url in image_urls:
+            image_block = await fetch_image_block(image_url, http_client)
+            if image_block:
+                content_blocks.append(image_block)
 
     configurable: dict[str, Any] = {
         "repo": repo_config,

@@ -8,6 +8,7 @@ from typing import Any
 
 import httpx
 
+from agent.utils.http import get_http_client
 from agent.utils.langsmith import get_langsmith_trace_url
 
 logger = logging.getLogger(__name__)
@@ -28,20 +29,20 @@ async def _graphql_request(query: str, variables: dict[str, Any] | None = None) 
     if not LINEAR_API_KEY:
         return {"error": "LINEAR_API_KEY is not set"}
 
-    async with httpx.AsyncClient() as http_client:
-        try:
-            response = await http_client.post(
-                LINEAR_API_URL,
-                headers=_headers(),
-                json={"query": query, "variables": variables or {}},
-            )
-            response.raise_for_status()
-            result = response.json()
-            if result.get("errors"):
-                return {"error": result["errors"]}
-            return result.get("data", {})
-        except Exception as e:  # noqa: BLE001
-            return {"error": str(e)}
+    http_client = get_http_client()
+    try:
+        response = await http_client.post(
+            LINEAR_API_URL,
+            headers=_headers(),
+            json={"query": query, "variables": variables or {}},
+        )
+        response.raise_for_status()
+        result = response.json()
+        if result.get("errors"):
+            return {"error": result["errors"]}
+        return result.get("data", {})
+    except Exception as e:  # noqa: BLE001
+        return {"error": str(e)}
 
 
 async def comment_on_linear_issue(

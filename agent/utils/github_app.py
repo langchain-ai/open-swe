@@ -9,6 +9,8 @@ import time
 import httpx
 import jwt
 
+from agent.utils.http import get_http_client
+
 logger = logging.getLogger(__name__)
 
 GITHUB_APP_ID = os.environ.get("GITHUB_APP_ID", "")
@@ -40,17 +42,17 @@ async def get_github_app_installation_token() -> str | None:
 
     try:
         app_jwt = _generate_app_jwt()
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                f"https://api.github.com/app/installations/{GITHUB_APP_INSTALLATION_ID}/access_tokens",
-                headers={
-                    "Authorization": f"Bearer {app_jwt}",
-                    "Accept": "application/vnd.github+json",
-                    "X-GitHub-Api-Version": "2022-11-28",
-                },
-            )
-            response.raise_for_status()
-            return response.json().get("token")
+        client = get_http_client()
+        response = await client.post(
+            f"https://api.github.com/app/installations/{GITHUB_APP_INSTALLATION_ID}/access_tokens",
+            headers={
+                "Authorization": f"Bearer {app_jwt}",
+                "Accept": "application/vnd.github+json",
+                "X-GitHub-Api-Version": "2022-11-28",
+            },
+        )
+        response.raise_for_status()
+        return response.json().get("token")
     except Exception:
         logger.exception("Failed to get GitHub App installation token")
         return None
