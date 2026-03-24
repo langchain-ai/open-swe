@@ -5,6 +5,7 @@ import hmac
 import json
 import logging
 import os
+import re
 import uuid
 from typing import Any
 
@@ -161,6 +162,43 @@ async def react_to_linear_comment(comment_id: str, emoji: str = "👀") -> bool:
             return bool(result.get("data", {}).get("reactionCreate", {}).get("success"))
         except Exception:  # noqa: BLE001
             return False
+
+
+async def fetch_linear_issue_by_identifier(identifier: str) -> dict[str, Any] | None:
+    """Fetch Linear issue by its human-readable identifier (e.g. 'OPE-27').
+
+    Args:
+        identifier: The Linear issue identifier like 'OPE-27'
+
+    Returns:
+        Issue data dict with id, identifier, title, description, url — or None if not found.
+    """
+    if not LINEAR_API_KEY:
+        return None
+
+    query = """
+    query GetIssueByIdentifier($identifier: String!) {
+        issue(id: $identifier) {
+            id
+            identifier
+            title
+            description
+            url
+        }
+    }
+    """
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.post(
+                "https://api.linear.app/graphql",
+                headers={"Authorization": LINEAR_API_KEY, "Content-Type": "application/json"},
+                json={"query": query, "variables": {"identifier": identifier}},
+            )
+            response.raise_for_status()
+            return response.json().get("data", {}).get("issue")
+        except Exception:  # noqa: BLE001
+            logger.warning("Failed to fetch Linear issue by identifier %s", identifier)
+            return None
 
 
 async def fetch_linear_issue_details(issue_id: str) -> dict[str, Any] | None:
@@ -1406,11 +1444,29 @@ async def process_github_pr_ready_for_review(payload: dict[str, Any]) -> None:
 
     skill_content = _load_pr_review_skill()
 
+    linear_issue_data = None
+    linear_identifier = ""
+    match = re.search(r"\[closes\s+([A-Z]+-\d+)\]", pr_title, re.IGNORECASE)
+    if match:
+        linear_identifier = match.group(1).upper()
+        linear_issue_data = await fetch_linear_issue_by_identifier(linear_identifier)
+
     prompt = f"This PR has been marked ready for review.\n\nPR: {pr_url}\nTitle: {pr_title}\n"
     if pr_body:
         prompt += f"Description: {pr_body}\n"
+    if linear_issue_data:
+        prompt += (
+            f"\n## Linear Ticket: {linear_issue_data['identifier']} — {linear_issue_data['title']}\n"
+        )
+        if linear_issue_data.get("description"):
+            prompt += f"{linear_issue_data['description']}\n"
+        prompt += (
+            "\nUse this Linear ticket as the source of truth for what was supposed to be implemented. "
+            "As part of your review, verify that everything described in the ticket has been implemented correctly in this PR. "
+            "Call out anything that was requested in the ticket but is missing or incorrectly implemented."
+        )
     prompt += (
-        "\nPlease review this PR thoroughly.\n\n"
+        "\n\nPlease review this PR thoroughly.\n\n"
         "IMPORTANT RULES:\n"
         "- REVIEW ONLY — do NOT write, edit, or commit any code\n"
         "- Use `create_pr_review` to submit your review — this is the ONLY comment you should leave\n"
@@ -1439,6 +1495,10 @@ async def process_github_pr_ready_for_review(payload: dict[str, Any]) -> None:
                 "repo": repo_config,
                 "pr_number": pr_number,
                 "review_mode": True,
+                "linear_issue": {
+                    "linear_project_id": linear_identifier.split("-")[0] if linear_issue_data else "",
+                    "linear_issue_number": linear_identifier.split("-")[1] if linear_issue_data else "",
+                },
             },
             "metadata": _AGENT_VERSION_METADATA,
         },
