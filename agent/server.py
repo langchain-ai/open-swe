@@ -54,7 +54,7 @@ from .tools import (
     submit_pr_review,
     update_pr_review,
 )
-from .utils.auth import resolve_github_token
+from .utils.auth import resolve_git_token
 from .utils.model import make_model
 from .utils.sandbox import create_sandbox
 
@@ -65,6 +65,7 @@ SANDBOX_CREATION_TIMEOUT = 180
 SANDBOX_POLL_INTERVAL = 1.0
 
 from .utils.agents_md import read_agents_md_in_sandbox
+from .utils.git_provider import get_clone_url
 from .utils.github import (
     _CRED_FILE_PATH,
     cleanup_git_credentials,
@@ -105,7 +106,7 @@ async def _clone_or_pull_repo_in_sandbox(  # noqa: PLR0915
 
     work_dir = await aresolve_sandbox_work_dir(sandbox_backend)
     repo_dir = await aresolve_repo_dir(sandbox_backend, repo)
-    clean_url = f"https://github.com/{owner}/{repo}.git"
+    clean_url = get_clone_url(owner, repo)
     cred_helper_arg = f"-c credential.helper='store --file={_CRED_FILE_PATH}'"
     safe_repo_dir = shlex.quote(repo_dir)
     safe_clean_url = shlex.quote(clean_url)
@@ -264,7 +265,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
             tools=[],
         ).with_config(config)
 
-    github_token, new_encrypted = await resolve_github_token(config, thread_id)
+    github_token, new_encrypted = await resolve_git_token(config, thread_id)
     config["metadata"]["github_token_encrypted"] = new_encrypted
 
     sandbox_backend = SANDBOX_BACKENDS.get(thread_id)

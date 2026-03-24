@@ -16,6 +16,7 @@ from langchain.agents.middleware import AgentState, after_agent
 from langgraph.config import get_config
 from langgraph.runtime import Runtime
 
+from ..utils.git_provider import GITLAB, get_git_provider, get_noreply_email
 from ..utils.github import (
     create_github_pr,
     get_github_default_branch,
@@ -30,6 +31,7 @@ from ..utils.github import (
     git_push,
 )
 from ..utils.github_token import get_github_token
+from ..utils.gitlab import create_gitlab_mr, get_gitlab_default_branch
 from ..utils.sandbox_paths import aresolve_repo_dir
 from ..utils.sandbox_state import get_sandbox_backend
 
@@ -136,7 +138,7 @@ async def open_pr_if_needed(
             sandbox_backend,
             repo_dir,
             "open-swe[bot]",
-            "open-swe@users.noreply.github.com",
+            get_noreply_email(),
         )
         await asyncio.to_thread(git_add_all, sandbox_backend, repo_dir)
         await asyncio.to_thread(git_commit, sandbox_backend, repo_dir, commit_message)
@@ -148,18 +150,36 @@ async def open_pr_if_needed(
                 git_push, sandbox_backend, repo_dir, target_branch, github_token
             )
 
-            base_branch = await get_github_default_branch(repo_owner, repo_name, github_token)
-            logger.info("Using base branch: %s", base_branch)
-
-            await create_github_pr(
-                repo_owner=repo_owner,
-                repo_name=repo_name,
-                github_token=github_token,
-                title=pr_title,
-                head_branch=target_branch,
-                base_branch=base_branch,
-                body=pr_body,
-            )
+            provider = get_git_provider()
+            base_branch_override = configurable.get("base_branch")
+            if provider == GITLAB:
+                base_branch = base_branch_override or await get_gitlab_default_branch(
+                    repo_owner, repo_name, github_token
+                )
+                logger.info("Using base branch: %s", base_branch)
+                await create_gitlab_mr(
+                    repo_owner=repo_owner,
+                    repo_name=repo_name,
+                    gitlab_token=github_token,
+                    title=pr_title,
+                    head_branch=target_branch,
+                    base_branch=base_branch,
+                    body=pr_body,
+                )
+            else:
+                base_branch = base_branch_override or await get_github_default_branch(
+                    repo_owner, repo_name, github_token
+                )
+                logger.info("Using base branch: %s", base_branch)
+                await create_github_pr(
+                    repo_owner=repo_owner,
+                    repo_name=repo_name,
+                    github_token=github_token,
+                    title=pr_title,
+                    head_branch=target_branch,
+                    base_branch=base_branch,
+                    body=pr_body,
+                )
 
         logger.info("After-agent middleware completed successfully")
 
