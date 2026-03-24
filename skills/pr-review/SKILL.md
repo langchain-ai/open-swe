@@ -13,11 +13,15 @@ Leave a structured GitHub review — not just a plain comment. Use the review to
 
 ## Review Process
 
+**Before starting:** Extract the PR number from the PR URL in your prompt (e.g. `https://github.com/owner/repo/pull/123` → `123`). You will need this for every tool call.
+
 1. Call `list_pr_reviews` first — see what's already been reviewed so you don't duplicate feedback
-2. Use `git diff` in the sandbox to get the PR diff — the repo is already cloned locally
+2. Run `git diff origin/HEAD...HEAD` in the sandbox to get the PR diff — the repo is already cloned and checked out to the PR branch
 3. Read the changed files in the sandbox — the repo is already checked out, no need to clone
 4. Create the review using `create_pr_review` with inline comments where possible
 5. Always call `github_comment` after submitting the review with a short human-readable summary
+   - If no critical or high severity issues were found, post: `"🤖 PR Review — No critical or high severity issues found."`
+   - If issues were found, summarize them briefly
 
 ## What to Look For
 
@@ -88,6 +92,21 @@ For multi-line inline comments, add:
   "side": "RIGHT"
 }
 ```
+
+## Sensitive Path Scrutiny
+
+After getting the diff, check if any changed files match these patterns.
+If they do, apply the stricter criteria below — regardless of how small the change looks.
+
+| Path pattern | What to check |
+|---|---|
+| `**/auth/**`, `**/authn/**`, `**/authz/**` | Auth bypass, privilege escalation, token handling, missing permission checks |
+| `**/migrations/**`, `**/alembic/**` | Destructive SQL (DROP, DELETE without WHERE), missing rollback, column type changes on large tables |
+| `.github/workflows/**` | Secrets being printed/exported, untrusted input in `run:` steps, pinned action SHAs changed |
+| `**/.env*`, `**/secrets/**` | Hardcoded credentials being added, secrets committed to source |
+| `**/middleware/**` | Auth middleware bypassed or reordered, new routes skipping auth |
+
+For any file matching the above: always use `REQUEST_CHANGES` if something looks off — don't downgrade to `COMMENT`.
 
 ## Updating Previous Reviews
 
