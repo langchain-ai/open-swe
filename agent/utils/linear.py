@@ -6,8 +6,6 @@ import logging
 import os
 from typing import Any
 
-import httpx
-
 from agent.utils.http import get_http_client
 from agent.utils.langsmith import get_langsmith_trace_url
 

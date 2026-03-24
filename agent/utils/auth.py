@@ -9,8 +9,6 @@ from typing import Any, Literal
 
 import httpx
 import jwt
-
-from .http import get_http_client
 from langgraph.config import get_config
 from langgraph.graph.state import RunnableConfig
 from langgraph_sdk import get_client
@@ -19,6 +17,7 @@ from ..encryption import encrypt_token
 from .github_app import get_github_app_installation_token
 from .github_token import get_github_token_from_thread
 from .github_user_email_map import GITHUB_USER_EMAIL_MAP
+from .http import get_http_client
 from .linear import comment_on_linear_issue
 from .slack import post_slack_ephemeral_message, post_slack_thread_reply
 

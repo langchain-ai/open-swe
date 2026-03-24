@@ -6,7 +6,6 @@ import logging
 import os
 import time
 
-import httpx
 import jwt
 
 from agent.utils.http import get_http_client

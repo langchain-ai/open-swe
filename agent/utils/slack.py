@@ -350,9 +350,7 @@ async def fetch_slack_thread_messages(channel_id: str, thread_ts: str) -> list[d
             messages.extend(item for item in batch if isinstance(item, dict))
 
         response_metadata = payload.get("response_metadata", {})
-        cursor = (
-            response_metadata.get("next_cursor") if isinstance(response_metadata, dict) else ""
-        )
+        cursor = response_metadata.get("next_cursor") if isinstance(response_metadata, dict) else ""
         if not cursor:
             break
 

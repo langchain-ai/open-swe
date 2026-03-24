@@ -10,7 +10,6 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-import httpx
 from langchain.agents.middleware import AgentState, before_model
 from langgraph.config import get_config, get_store
 from langgraph.runtime import Runtime

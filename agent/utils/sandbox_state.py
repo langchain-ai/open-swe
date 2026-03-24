@@ -39,8 +39,3 @@ async def get_sandbox_backend(thread_id: str) -> Any | None:
     sandbox_backend = await asyncio.to_thread(create_sandbox, sandbox_id)
     SANDBOX_BACKENDS[thread_id] = sandbox_backend
     return sandbox_backend
-
-
-def get_sandbox_backend_sync(thread_id: str) -> Any | None:
-    """Sync wrapper for get_sandbox_backend."""
-    return asyncio.run(get_sandbox_backend(thread_id))

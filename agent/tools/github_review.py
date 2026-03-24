@@ -1,7 +1,6 @@
 import asyncio
 from typing import Any
 
-import httpx
 from langgraph.config import get_config
 
 from ..utils.github_app import get_github_app_installation_token
@@ -203,9 +202,7 @@ def dismiss_pr_review(
 
     async def _dismiss() -> dict[str, Any]:
         client = get_http_client()
-        response = await client.put(
-            url, headers=_github_headers(token), json={"message": message}
-        )
+        response = await client.put(url, headers=_github_headers(token), json={"message": message})
         if response.status_code != 200:
             return {
                 "success": False,
