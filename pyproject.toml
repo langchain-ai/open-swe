@@ -8,6 +8,7 @@ license = { text = "MIT" }
 dependencies = [
     "deepagents>=0.4.3",
     "fastapi>=0.104.0",
+    "langchain-mcp-adapters>=0.1.0",
     "uvicorn>=0.24.0",
     "httpx>=0.25.0",
     "PyJWT>=2.8.0",
