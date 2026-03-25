@@ -1812,7 +1812,7 @@ dev = [
 requires-dist = [
     { name = "cryptography", specifier = ">=41.0.0" },
     { name = "deepagents", specifier = ">=0.4.3" },
-    { name = "exa-py", specifier = ">=1.0.0" },
+    { name = "exa-py", specifier = ">=2.10.1" },
     { name = "fastapi", specifier = ">=0.104.0" },
     { name = "httpx", specifier = ">=0.25.0" },
     { name = "langchain", specifier = ">=1.2.9" },
