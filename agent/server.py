@@ -4,6 +4,7 @@
 # Suppress deprecation warnings from langchain_core (e.g., Pydantic V1 on Python 3.14+)
 # ruff: noqa: E402
 import logging
+import os
 import shlex
 import warnings
 
@@ -245,6 +246,7 @@ def graph_loaded_for_execution(config: RunnableConfig) -> bool:
     )
 
 
+DEFAULT_LLM_MODEL_ID = "anthropic:claude-opus-4-6"
 DEFAULT_RECURSION_LIMIT = 1_000
 
 
@@ -401,7 +403,11 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
 
     logger.info("Returning agent with sandbox for thread %s", thread_id)
     return create_deep_agent(
-        model=make_model("anthropic:claude-opus-4-6", temperature=0, max_tokens=20_000),
+        model=make_model(
+            os.environ.get("LLM_MODEL_ID", DEFAULT_LLM_MODEL_ID),
+            temperature=0,
+            max_tokens=20_000,
+        ),
         system_prompt=construct_system_prompt(
             repo_dir,
             linear_project_id=linear_project_id,
