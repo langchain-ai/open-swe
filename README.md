@@ -9,7 +9,7 @@
 </div>
 
 <div align="center">
-  <h3>Open-source framework for building your org's internal coding agent.</h3>
+  <h3>Open-source framework for building your org's internal coding agent. 🚀</h3>
 </div>
 
 <div align="center">
