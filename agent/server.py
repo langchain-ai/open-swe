@@ -38,7 +38,6 @@ from .tools import (
     create_pr_review,
     dismiss_pr_review,
     fetch_url,
-    web_search,
     get_pr_review,
     github_comment,
     http_request,
@@ -54,6 +53,7 @@ from .tools import (
     slack_thread_reply,
     submit_pr_review,
     update_pr_review,
+    web_search,
 )
 from .utils.auth import resolve_github_token
 from .utils.model import make_model
