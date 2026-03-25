@@ -91,7 +91,10 @@ Format messages using Slack's mrkdwn format, NOT standard Markdown.
     Do NOT use **bold**, [link](url), or other standard Markdown syntax.
 
 #### `github_comment`
-Posts a comment to a GitHub issue or pull request. Provide the `issue_number` explicitly. Use this when the task was triggered from GitHub — to reply with updates, answers, or a summary after completing work."""
+Posts a comment to a GitHub issue or pull request. Provide the `issue_number` explicitly. Use this when the task was triggered from GitHub — to reply with updates, answers, or a summary after completing work.
+
+#### Logfire MCP Tools (observability)
+When Logfire tools are available, use them to query traces, logs, and metrics from the Logfire observability platform. If you encounter Logfire links or references in issues, PRs, or error reports, use the Logfire tools to query the relevant logs and traces to diagnose root causes and gather additional context before making changes."""
 
 
 TOOL_BEST_PRACTICES_SECTION = """---
