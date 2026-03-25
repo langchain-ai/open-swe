@@ -4,6 +4,7 @@ import pytest
 
 from agent import webapp
 from agent.utils.slack import (
+    convert_mentions_to_slack_format,
     format_slack_messages_for_prompt,
     replace_bot_mention_with_username,
     select_slack_context_messages,
@@ -105,6 +106,28 @@ def test_replace_bot_mention_with_username() -> None:
         replace_bot_mention_with_username("<@UBOT> can you help?", "UBOT", "open-swe")
         == "@open-swe can you help?"
     )
+
+
+def test_convert_mentions_to_slack_format_basic() -> None:
+    assert (
+        convert_mentions_to_slack_format("Hey @Brace Sproul(U06KD8BFY95), check this")
+        == "Hey <@U06KD8BFY95>, check this"
+    )
+
+
+def test_convert_mentions_to_slack_format_multiple() -> None:
+    text = "@Alice(U111) and @Bob(U222) please review"
+    assert convert_mentions_to_slack_format(text) == "<@U111> and <@U222> please review"
+
+
+def test_convert_mentions_to_slack_format_no_match() -> None:
+    text = "No mentions here, just @plain text"
+    assert convert_mentions_to_slack_format(text) == text
+
+
+def test_convert_mentions_to_slack_format_preserves_existing_slack_mentions() -> None:
+    text = "Already tagged <@U06KD8BFY95> correctly"
+    assert convert_mentions_to_slack_format(text) == text
 
 
 def test_format_slack_messages_for_prompt_uses_name_and_id() -> None:
