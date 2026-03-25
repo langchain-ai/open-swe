@@ -5,7 +5,7 @@ Open SWE is designed to be forked and customized for your org. The core agent is
 ```python
 # agent/server.py — the key lines
 return create_deep_agent(
-    model=make_model("anthropic:claude-opus-4-6", temperature=0, max_tokens=20_000),
+    model=make_model(os.environ.get("LLM_MODEL_ID", DEFAULT_LLM_MODEL_ID), temperature=0, max_tokens=20_000),
     system_prompt=construct_system_prompt(repo_dir, ...),
     tools=[http_request, fetch_url, commit_and_open_pr, linear_comment, slack_thread_reply],
     backend=sandbox_backend,
@@ -117,11 +117,14 @@ See `agent/integrations/langsmith.py` (`LangSmithBackend` class) for a full refe
 
 ## 2. Model
 
-The model is configured in the `get_agent()` function in `agent/server.py`:
+The model is configured in the `get_agent()` function in `agent/server.py`. By default it uses `anthropic:claude-opus-4-6`, but you can override it with the `LLM_MODEL_ID` environment variable:
 
-```python
-model=make_model("anthropic:claude-opus-4-6", temperature=0, max_tokens=20_000)
+```bash
+# Set the model via environment variable (uses provider:model format)
+LLM_MODEL_ID="anthropic:claude-sonnet-4-6"
 ```
+
+If `LLM_MODEL_ID` is not set, the default model (`anthropic:claude-opus-4-6`) is used.
 
 ### Switching models
 
