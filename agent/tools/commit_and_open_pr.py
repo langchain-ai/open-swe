@@ -4,6 +4,13 @@ from typing import Any
 
 from langgraph.config import get_config
 
+from ..utils.authorship import (
+    OPEN_SWE_BOT_EMAIL,
+    OPEN_SWE_BOT_NAME,
+    add_pr_collaboration_note,
+    add_user_coauthor_trailer,
+    resolve_triggering_user_identity,
+)
 from ..utils.github import (
     create_github_pr,
     get_github_default_branch,
@@ -133,6 +140,9 @@ def commit_and_open_pr(
             return {"success": False, "error": "No sandbox found for thread", "pr_url": None}
 
         repo_dir = resolve_repo_dir(sandbox_backend, repo_name)
+        github_token = get_github_token()
+        user_identity = resolve_triggering_user_identity(config, github_token)
+        pr_body = add_pr_collaboration_note(body, user_identity)
 
         has_uncommitted_changes = git_has_uncommitted_changes(sandbox_backend, repo_dir)
         git_fetch_origin(sandbox_backend, repo_dir)
@@ -165,12 +175,12 @@ def commit_and_open_pr(
         git_config_user(
             sandbox_backend,
             repo_dir,
-            "open-swe[bot]",
-            "open-swe@users.noreply.github.com",
+            OPEN_SWE_BOT_NAME,
+            OPEN_SWE_BOT_EMAIL,
         )
         git_add_all(sandbox_backend, repo_dir)
 
-        commit_msg = commit_message or title
+        commit_msg = add_user_coauthor_trailer(commit_message or title, user_identity)
         if has_uncommitted_changes:
             commit_result = git_commit(sandbox_backend, repo_dir, commit_msg)
             if commit_result.exit_code != 0:
@@ -180,7 +190,6 @@ def commit_and_open_pr(
                     "pr_url": None,
                 }
 
-        github_token = get_github_token()
         if not github_token:
             logger.error("commit_and_open_pr missing GitHub token for thread %s", thread_id)
             return {
@@ -208,6 +217,7 @@ def commit_and_open_pr(
                 base_branch=base_branch,
                 body=body,
                 labels=labels,
+                body=pr_body,
             )
         )
 
