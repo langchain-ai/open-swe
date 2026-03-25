@@ -1,7 +1,7 @@
 import asyncio
 import logging
 import os
-from typing import Any, Literal
+from typing import Any
 
 from exa_py import Exa
 
@@ -12,8 +12,6 @@ def web_search(
     query: str,
     num_results: int = 5,
     include_contents: bool = True,
-    search_type: Literal["neural", "fast", "auto", "deep"] = "auto",
-    category: Literal["company", "research paper", "news", "pdf", "github"] | None = None,
 ) -> dict[str, Any]:
     """Search the web using Exa to find relevant information.
 
@@ -24,13 +22,6 @@ def web_search(
         query: The search query
         num_results: Number of results to return (default: 5)
         include_contents: Whether to include full page contents (default: True)
-        search_type: Search type - "auto" lets Exa decide the best approach (default: "auto")
-        category: Optional category to filter results. One of:
-            - "github": GitHub repos, code, issues
-            - "research paper": Technical papers and docs
-            - "news": Release notes, announcements
-            - "pdf": PDF documentation
-            - None: No category filter (default)
 
     Returns:
         Dictionary containing:
@@ -54,16 +45,14 @@ def web_search(
                 query,
                 text=True,
                 num_results=num_results,
-                type=search_type,
-                category=category,
+                type="auto",
             )
         else:
             result = await asyncio.to_thread(
                 client.search,
                 query,
                 num_results=num_results,
-                type=search_type,
-                category=category,
+                type="auto",
             )
         return {"success": True, "results": str(result), "error": None}
 
