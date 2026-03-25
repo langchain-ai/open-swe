@@ -166,6 +166,7 @@ async def create_github_pr(
     head_branch: str,
     base_branch: str,
     body: str,
+    labels: list[str] | None = None,
 ) -> tuple[str | None, int | None, bool]:
     """Create a draft GitHub pull request via the API.
 
@@ -177,6 +178,7 @@ async def create_github_pr(
         head_branch: Source branch name
         base_branch: Target branch name
         body: PR description
+        labels: Optional list of label names to apply to the PR
 
     Returns:
         Tuple of (pr_url, pr_number, pr_existing) if successful, (None, None, False) otherwise
@@ -215,6 +217,10 @@ async def create_github_pr(
                 pr_url = pr_data.get("html_url")
                 pr_number = pr_data.get("number")
                 logger.info("PR created successfully: %s", pr_url)
+                if labels and pr_number:
+                    await _apply_labels(
+                        http_client, repo_owner, repo_name, github_token, pr_number, labels
+                    )
                 return pr_url, pr_number, False
 
             if pr_response.status_code == HTTP_UNPROCESSABLE_ENTITY:
@@ -228,6 +234,15 @@ async def create_github_pr(
                 )
                 if existing:
                     logger.info("Using existing PR for head branch: %s", existing[0])
+                    if labels and existing[1]:
+                        await _apply_labels(
+                            http_client,
+                            repo_owner,
+                            repo_name,
+                            github_token,
+                            existing[1],
+                            labels,
+                        )
                     return existing[0], existing[1], True
             else:
                 logger.error(
@@ -244,6 +259,38 @@ async def create_github_pr(
         except httpx.HTTPError:
             logger.exception("Failed to create PR via GitHub API")
             return None, None, False
+
+
+async def _apply_labels(
+    http_client: httpx.AsyncClient,
+    repo_owner: str,
+    repo_name: str,
+    github_token: str,
+    pr_number: int,
+    labels: list[str],
+) -> None:
+    """Apply labels to a GitHub pull request (issue endpoint)."""
+    try:
+        response = await http_client.post(
+            f"https://api.github.com/repos/{repo_owner}/{repo_name}/issues/{pr_number}/labels",
+            headers={
+                "Authorization": f"Bearer {github_token}",
+                "Accept": "application/vnd.github+json",
+                "X-GitHub-Api-Version": "2022-11-28",
+            },
+            json={"labels": labels},
+        )
+        if response.status_code == 200:  # noqa: PLR2004
+            logger.info("Labels %s applied to PR #%s", labels, pr_number)
+        else:
+            logger.error(
+                "Failed to apply labels to PR #%s (%s): %s",
+                pr_number,
+                response.status_code,
+                response.text,
+            )
+    except httpx.HTTPError:
+        logger.exception("Failed to apply labels to PR #%s", pr_number)
 
 
 async def _find_existing_pr(
