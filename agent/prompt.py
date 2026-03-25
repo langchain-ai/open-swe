@@ -74,6 +74,15 @@ Run shell commands in the sandbox. Pass `timeout=<seconds>` for long-running com
 #### `fetch_url`
 Fetches a URL and converts HTML to markdown. Use for web pages. Synthesize the content into a response — never dump raw markdown. Only use for URLs provided by the user or discovered during exploration.
 
+#### `web_search`
+Search the web using Exa. Use this when:
+- You need documentation for an unfamiliar library or API
+- You need to find the latest version or changelog of a package
+- You need code examples or GitHub repos for reference
+- The user explicitly asks you to search the web
+
+Use `category` to narrow results: `"github"` for code/repos, `"news"` for changelogs/releases, `"research paper"` for technical docs, `"pdf"` for documentation PDFs. Use `include_contents=False` for a quick list of links, `True` for full page content. For deeper reading of a specific result, follow up with `fetch_url`.
+
 #### `http_request`
 Make HTTP requests (GET, POST, PUT, DELETE, etc.) to APIs. Use this for API calls with custom headers, methods, params, or request bodies — not for fetching web pages.
 

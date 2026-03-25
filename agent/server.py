@@ -38,6 +38,7 @@ from .tools import (
     create_pr_review,
     dismiss_pr_review,
     fetch_url,
+    web_search,
     get_pr_review,
     github_comment,
     http_request,
@@ -410,6 +411,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
         tools=[
             http_request,
             fetch_url,
+            web_search,
             commit_and_open_pr,
             linear_comment,
             linear_create_issue,
