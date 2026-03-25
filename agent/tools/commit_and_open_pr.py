@@ -189,9 +189,20 @@ def commit_and_open_pr(
 
         push_result = git_push(sandbox_backend, repo_dir, target_branch, github_token)
         if push_result.exit_code != 0:
+            push_output = push_result.output.strip()
+            if "403" in push_output or "Permission" in push_output or "denied" in push_output.lower():
+                return {
+                    "success": False,
+                    "error": (
+                        f"PERMANENT_FAILURE: do not retry. Git push was rejected with a 403 "
+                        f"permission denied error — the token does not have write access to this "
+                        f"repository. Report this to the user and stop. Details: {push_output}"
+                    ),
+                    "pr_url": None,
+                }
             return {
                 "success": False,
-                "error": f"Git push failed: {push_result.output.strip()}",
+                "error": f"Git push failed: {push_output}",
                 "pr_url": None,
             }
 
