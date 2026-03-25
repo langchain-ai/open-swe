@@ -54,6 +54,7 @@ from .tools import (
     slack_thread_reply,
     submit_pr_review,
     update_pr_review,
+    web_search,
 )
 from .utils.auth import resolve_github_token
 from .utils.model import make_model
@@ -416,6 +417,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
         tools=[
             http_request,
             fetch_url,
+            web_search,
             commit_and_open_pr,
             linear_comment,
             linear_create_issue,
