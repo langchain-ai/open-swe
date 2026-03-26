@@ -55,6 +55,7 @@ from .tools import (
     update_pr_review,
 )
 from .utils.auth import resolve_github_token
+from .utils.mcp_tools import get_logfire_mcp_tools
 from .utils.model import make_model
 from .utils.sandbox import create_sandbox
 
@@ -398,6 +399,8 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
     linear_issue_number = linear_issue.get("linear_issue_number", "")
     agents_md = await read_agents_md_in_sandbox(sandbox_backend, repo_dir)
 
+    logfire_tools = await get_logfire_mcp_tools()
+
     logger.info("Returning agent with sandbox for thread %s", thread_id)
     return create_deep_agent(
         model=make_model("anthropic:claude-opus-4-6", temperature=0, max_tokens=20_000),
@@ -427,6 +430,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
             dismiss_pr_review,
             submit_pr_review,
             list_pr_review_comments,
+            *logfire_tools,
         ],
         backend=sandbox_backend,
         middleware=[
