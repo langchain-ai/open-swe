@@ -43,11 +43,14 @@ Set the `SANDBOX_TYPE` environment variable to switch providers. Each provider h
 |---|---|---|
 | `langsmith` (default) | `agent/integrations/langsmith.py` | `LANGSMITH_API_KEY_PROD`, `SANDBOX_TYPE="langsmith"` |
 | `daytona` | `agent/integrations/daytona.py` | `DAYTONA_API_KEY`, `SANDBOX_TYPE="daytona"` |
+| `docker` | `agent/integrations/docker.py` | Docker installed, `SANDBOX_TYPE="docker"` |
 | `runloop` | `agent/integrations/runloop.py` | `RUNLOOP_API_KEY`, `SANDBOX_TYPE="runloop"` |
 | `modal` | `agent/integrations/modal.py` | Modal credentials, `SANDBOX_TYPE="modal"` |
 | `local` | `agent/integrations/local.py` | None (no isolation — development only), `SANDBOX_TYPE="local"` |
 
 > **Warning**: `local` runs commands directly on your host with no sandboxing. Only use for local development with human-in-the-loop enabled.
+
+> **Note**: For detailed sandbox integration examples and guides, see the [`docs/sandbox-examples/`](docs/sandbox-examples/) directory.
 
 ### Adding a new sandbox provider
 
