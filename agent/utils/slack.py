@@ -182,10 +182,16 @@ def format_slack_messages_for_prompt(
     return "\n".join(lines)
 
 
-async def post_slack_thread_reply(channel_id: str, thread_ts: str, text: str) -> bool:
-    """Post a reply in a Slack thread."""
+async def post_slack_thread_reply(
+    channel_id: str, thread_ts: str, text: str
+) -> tuple[bool, str | None]:
+    """Post a reply in a Slack thread.
+
+    Returns a tuple of (success, error_message).  error_message is None on success
+    and contains the Slack API error code (or a short description) on failure.
+    """
     if not SLACK_BOT_TOKEN:
-        return False
+        return False, "SLACK_BOT_TOKEN is not configured"
 
     payload = {
         "channel": channel_id,
@@ -203,12 +209,13 @@ async def post_slack_thread_reply(channel_id: str, thread_ts: str, text: str) ->
             response.raise_for_status()
             data = response.json()
             if not data.get("ok"):
-                logger.warning("Slack chat.postMessage failed: %s", data.get("error"))
-                return False
-            return True
-        except httpx.HTTPError:
+                error = data.get("error", "unknown_error")
+                logger.warning("Slack chat.postMessage failed: %s", error)
+                return False, error
+            return True, None
+        except httpx.HTTPError as exc:
             logger.exception("Slack chat.postMessage request failed")
-            return False
+            return False, str(exc)
 
 
 async def post_slack_ephemeral_message(
