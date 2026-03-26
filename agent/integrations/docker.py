@@ -94,9 +94,7 @@ def _get_docker_client():
         client.ping()
         return client
     except Exception as e:
-        raise RuntimeError(
-            f"Failed to connect to Docker. Ensure Docker is running: {e}"
-        ) from e
+        raise RuntimeError(f"Failed to connect to Docker. Ensure Docker is running: {e}") from e
 
 
 def _get_config_from_env() -> dict[str, Any]:
@@ -663,6 +661,7 @@ def _update_thread_sandbox_metadata(sandbox_id: str) -> None:
 
 # Convenience functions for container management
 
+
 def list_docker_sandboxes(prefix: str | None = None) -> list[dict[str, Any]]:
     """List all Docker sandbox containers.
 
@@ -673,17 +672,23 @@ def list_docker_sandboxes(prefix: str | None = None) -> list[dict[str, Any]]:
         List of dictionaries with container information (id, name, status, image).
     """
     client = _get_docker_client()
-    container_prefix = prefix or os.getenv("DOCKER_SANDBOX_CONTAINER_PREFIX", DEFAULT_CONTAINER_PREFIX)
+    container_prefix = prefix or os.getenv(
+        "DOCKER_SANDBOX_CONTAINER_PREFIX", DEFAULT_CONTAINER_PREFIX
+    )
 
     containers = []
     for container in client.containers.list(all=True):
         if container.name.startswith(container_prefix):
-            containers.append({
-                "id": container.short_id,
-                "name": container.name,
-                "status": container.status,
-                "image": container.image.tags[0] if container.image.tags else container.image.id,
-            })
+            containers.append(
+                {
+                    "id": container.short_id,
+                    "name": container.name,
+                    "status": container.status,
+                    "image": container.image.tags[0]
+                    if container.image.tags
+                    else container.image.id,
+                }
+            )
 
     return containers
 
@@ -700,7 +705,9 @@ def cleanup_all_docker_sandboxes(prefix: str | None = None) -> int:
         Number of containers removed.
     """
     client = _get_docker_client()
-    container_prefix = prefix or os.getenv("DOCKER_SANDBOX_CONTAINER_PREFIX", DEFAULT_CONTAINER_PREFIX)
+    container_prefix = prefix or os.getenv(
+        "DOCKER_SANDBOX_CONTAINER_PREFIX", DEFAULT_CONTAINER_PREFIX
+    )
 
     count = 0
     for container in client.containers.list(all=True):

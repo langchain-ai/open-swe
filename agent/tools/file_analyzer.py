@@ -69,9 +69,7 @@ def _analyze_python(content: str) -> dict[str, Any]:
                     "docstring": ast.get_docstring(node)[:100] + "..."
                     if ast.get_docstring(node)
                     else None,
-                    "methods": [
-                        n.name for n in node.body if isinstance(n, ast.FunctionDef)
-                    ],
+                    "methods": [n.name for n in node.body if isinstance(n, ast.FunctionDef)],
                 }
                 result["classes"].append(class_info)
 
@@ -122,33 +120,41 @@ def _analyze_javascript_typescript(content: str, is_typescript: bool = False) ->
     }
 
     # Import statements
-    import_pattern = r'import\s+(?:(\{[^}]+\})|(\w+)(?:\s*,\s*\{[^}]+\})?)\s*from\s*[\'"]([^\'"]+)[\'"]'
+    import_pattern = (
+        r'import\s+(?:(\{[^}]+\})|(\w+)(?:\s*,\s*\{[^}]+\})?)\s*from\s*[\'"]([^\'"]+)[\'"]'
+    )
     for match in re.finditer(import_pattern, content):
-        result["imports"].append({
-            "what": match.group(1) or match.group(2),
-            "from": match.group(3),
-        })
+        result["imports"].append(
+            {
+                "what": match.group(1) or match.group(2),
+                "from": match.group(3),
+            }
+        )
 
     # Export statements
-    export_pattern = r'export\s+(?:default\s+)?(?:(class|function|const|let|var|interface|type)\s+)?(\w+)'
+    export_pattern = (
+        r"export\s+(?:default\s+)?(?:(class|function|const|let|var|interface|type)\s+)?(\w+)"
+    )
     for match in re.finditer(export_pattern, content):
         result["exports"].append({"type": match.group(1), "name": match.group(2)})
 
     # Function declarations
-    func_pattern = r'(?:export\s+)?(?:async\s+)?function\s+(\w+)\s*\(([^)]*)\)'
+    func_pattern = r"(?:export\s+)?(?:async\s+)?function\s+(\w+)\s*\(([^)]*)\)"
     for match in re.finditer(func_pattern, content):
-        result["functions"].append({
-            "name": match.group(1),
-            "params": match.group(2).strip() if match.group(2) else "",
-        })
+        result["functions"].append(
+            {
+                "name": match.group(1),
+                "params": match.group(2).strip() if match.group(2) else "",
+            }
+        )
 
     # Arrow functions
-    arrow_pattern = r'(?:export\s+)?(?:const|let|var)\s+(\w+)\s*(?::\s*[^=]+)?\s*=\s*(?:async\s+)?(?:\([^)]*\)|[^=])\s*=>'
+    arrow_pattern = r"(?:export\s+)?(?:const|let|var)\s+(\w+)\s*(?::\s*[^=]+)?\s*=\s*(?:async\s+)?(?:\([^)]*\)|[^=])\s*=>"
     for match in re.finditer(arrow_pattern, content):
         result["functions"].append({"name": match.group(1), "type": "arrow"})
 
     # Class declarations
-    class_pattern = r'(?:export\s+)?class\s+(\w+)(?:\s+extends\s+(\w+))?'
+    class_pattern = r"(?:export\s+)?class\s+(\w+)(?:\s+extends\s+(\w+))?"
     for match in re.finditer(class_pattern, content):
         class_info = {"name": match.group(1)}
         if match.group(2):
@@ -157,14 +163,14 @@ def _analyze_javascript_typescript(content: str, is_typescript: bool = False) ->
 
     # TypeScript interfaces and types
     if is_typescript:
-        interface_pattern = r'(?:export\s+)?interface\s+(\w+)(?:\s+extends\s+(\w+))?'
+        interface_pattern = r"(?:export\s+)?interface\s+(\w+)(?:\s+extends\s+(\w+))?"
         for match in re.finditer(interface_pattern, content):
             interface_info = {"name": match.group(1)}
             if match.group(2):
                 interface_info["extends"] = match.group(2)
             result["interfaces"].append(interface_info)
 
-        type_pattern = r'(?:export\s+)?type\s+(\w+)\s*='
+        type_pattern = r"(?:export\s+)?type\s+(\w+)\s*="
         for match in re.finditer(type_pattern, content):
             result["types"].append({"name": match.group(1)})
 
@@ -195,7 +201,7 @@ def _count_code_lines(content: str, comment_prefixes: list[str]) -> dict[str, in
             continue
 
         # Handle multi-line comments (Python docstrings, JS block comments)
-        if '"""' in stripped or "'''" in stripped or '/*' in stripped or '*/' in stripped:
+        if '"""' in stripped or "'''" in stripped or "/*" in stripped or "*/" in stripped:
             in_multiline_comment = not in_multiline_comment
             comment_lines += 1
             continue
