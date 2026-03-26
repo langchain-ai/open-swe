@@ -64,6 +64,12 @@ class _FakeFiles:
             return self.files[path]
         raise FileNotFoundError(path)
 
+    def read_bytes(self, path: str, **kwargs) -> bytes:
+        if path in self.files:
+            v = self.files[path]
+            return v if isinstance(v, bytes) else v.encode("utf-8")
+        raise FileNotFoundError(path)
+
 
 class _FakeSandboxSync:
     def __init__(

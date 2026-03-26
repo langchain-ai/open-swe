@@ -87,9 +87,9 @@ class OpenSandboxBackend(BaseSandbox):
         responses: list[FileDownloadResponse] = []
         for path in paths:
             try:
-                content = self._sandbox.files.read_file(path)
+                data = self._sandbox.files.read_bytes(path)
                 responses.append(
-                    FileDownloadResponse(path=path, content=content.encode("utf-8"), error=None)
+                    FileDownloadResponse(path=path, content=data, error=None)
                 )
             except Exception:
                 responses.append(FileDownloadResponse(path=path, content=None, error="file_not_found"))
