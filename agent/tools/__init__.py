@@ -1,5 +1,6 @@
 from .commit_and_open_pr import commit_and_open_pr
 from .fetch_url import fetch_url
+from .file_analyzer import directory_summary, file_analyzer
 from .github_comment import github_comment
 from .github_review import (
     create_pr_review,
@@ -23,8 +24,10 @@ from .slack_thread_reply import slack_thread_reply
 __all__ = [
     "commit_and_open_pr",
     "create_pr_review",
+    "directory_summary",
     "dismiss_pr_review",
     "fetch_url",
+    "file_analyzer",
     "get_pr_review",
     "github_comment",
     "http_request",

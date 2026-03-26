@@ -36,8 +36,10 @@ from .prompt import construct_system_prompt
 from .tools import (
     commit_and_open_pr,
     create_pr_review,
+    directory_summary,
     dismiss_pr_review,
     fetch_url,
+    file_analyzer,
     get_pr_review,
     github_comment,
     http_request,
@@ -410,6 +412,8 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
         tools=[
             http_request,
             fetch_url,
+            file_analyzer,
+            directory_summary,
             commit_and_open_pr,
             linear_comment,
             linear_create_issue,
