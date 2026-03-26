@@ -66,9 +66,7 @@ DEFAULT_REPO_NAME = os.environ.get("DEFAULT_REPO_NAME", "langchainplus")
 SLACK_REPO_OWNER = os.environ.get("SLACK_REPO_OWNER", "") or DEFAULT_REPO_OWNER
 SLACK_REPO_NAME = os.environ.get("SLACK_REPO_NAME", "") or DEFAULT_REPO_NAME
 
-LANGGRAPH_URL = os.environ.get("LANGGRAPH_URL") or os.environ.get(
-    "LANGGRAPH_URL_PROD", "http://localhost:2024"
-)
+langgraph_client = get_client()
 
 _AGENT_VERSION_METADATA: dict[str, str] = (
     {"LANGSMITH_AGENT_VERSION": os.environ["LANGCHAIN_REVISION_ID"]}
@@ -342,7 +340,7 @@ async def get_slack_repo_config(message: str, channel_id: str, thread_ts: str) -
     default_owner = SLACK_REPO_OWNER.strip() or DEFAULT_REPO_OWNER
     default_name = SLACK_REPO_NAME.strip() or DEFAULT_REPO_NAME
     thread_id = generate_thread_id_from_slack_thread(channel_id, thread_ts)
-    langgraph_client = get_client(url=LANGGRAPH_URL)
+
 
     repo_config = extract_repo_from_text(message, default_owner=default_owner)
 
@@ -378,9 +376,9 @@ async def is_thread_active(thread_id: str) -> bool:
     Returns:
         True if the thread status is "busy", False otherwise
     """
-    langgraph_client = get_client(url=LANGGRAPH_URL)
+
     try:
-        logger.debug("Fetching thread status for %s from %s", thread_id, LANGGRAPH_URL)
+        logger.debug("Fetching thread status for %s", thread_id)
         thread = await langgraph_client.threads.get(thread_id)
         status = thread.get("status", "idle")
         logger.info(
@@ -402,7 +400,7 @@ async def is_thread_active(thread_id: str) -> bool:
 
 async def _thread_exists(thread_id: str) -> bool:
     """Return whether a LangGraph thread already exists."""
-    langgraph_client = get_client(url=LANGGRAPH_URL)
+
     try:
         await langgraph_client.threads.get(thread_id)
         return True
@@ -429,7 +427,7 @@ async def queue_message_for_thread(
     Returns:
         True if successfully queued, False otherwise
     """
-    langgraph_client = get_client(url=LANGGRAPH_URL)
+
     try:
         namespace = ("queue", thread_id)
         key = "pending_messages"
@@ -662,7 +660,7 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
 
         if queued:
             logger.info("Message queued for thread %s, will be processed by middleware", thread_id)
-            langgraph_client = get_client(url=LANGGRAPH_URL)
+        
             runs = await langgraph_client.runs.list(thread_id, limit=1)
             if runs:
                 await post_linear_trace_comment(issue_id, runs[0]["run_id"], triggering_comment_id)
@@ -670,7 +668,7 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
             logger.error("Failed to queue message for thread %s", thread_id)
     else:
         logger.info("Creating LangGraph run for thread %s", thread_id)
-        langgraph_client = get_client(url=LANGGRAPH_URL)
+    
         run = await langgraph_client.runs.create(
             thread_id,
             "agent",
@@ -804,7 +802,7 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
         "source": "slack",
     }
 
-    langgraph_client = get_client(url=LANGGRAPH_URL)
+
     await _upsert_slack_thread_repo_metadata(thread_id, repo_config, langgraph_client)
 
     thread_active = await is_thread_active(thread_id)
@@ -1179,7 +1177,7 @@ async def _trigger_or_queue_run(
         return
 
     logger.info("Creating LangGraph run for thread %s from GitHub PR comment", thread_id)
-    langgraph_client = get_client(url=LANGGRAPH_URL)
+
     await langgraph_client.runs.create(
         thread_id,
         "agent",
@@ -1272,7 +1270,7 @@ async def process_github_pr_comment(payload: dict[str, Any], event_type: str) ->
         stable_key = f"{owner}/{name}/pr/{pr_number}"
         thread_id = str(uuid.uuid5(uuid.NAMESPACE_URL, stable_key))
         logger.info("Generated thread_id %s for non-open-swe branch '%s'", thread_id, branch_name)
-        langgraph_client = get_client(url=LANGGRAPH_URL)
+    
         try:
             await langgraph_client.threads.update(thread_id, metadata={"branch_name": branch_name})
         except Exception as exc:  # noqa: BLE001
@@ -1430,7 +1428,7 @@ async def process_github_issue(payload: dict[str, Any], event_type: str) -> None
         return
 
     logger.info("Creating LangGraph run for thread %s from GitHub issue", thread_id)
-    langgraph_client = get_client(url=LANGGRAPH_URL)
+
     await langgraph_client.runs.create(
         thread_id,
         "agent",

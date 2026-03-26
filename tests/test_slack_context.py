@@ -157,7 +157,7 @@ def test_get_slack_repo_config_message_repo_overrides_existing_thread_repo(
         captured["text"] = text
         return True
 
-    monkeypatch.setattr(webapp, "get_client", lambda url: _FakeClient(threads_client))
+    monkeypatch.setattr(webapp, "langgraph_client", _FakeClient(threads_client))
     monkeypatch.setattr(webapp, "post_slack_thread_reply", fake_post_slack_thread_reply)
 
     repo = asyncio.run(
@@ -177,7 +177,7 @@ def test_get_slack_repo_config_parses_message_for_new_thread(
     async def fake_post_slack_thread_reply(channel_id: str, thread_ts: str, text: str) -> bool:
         return True
 
-    monkeypatch.setattr(webapp, "get_client", lambda url: _FakeClient(threads_client))
+    monkeypatch.setattr(webapp, "langgraph_client", _FakeClient(threads_client))
     monkeypatch.setattr(webapp, "post_slack_thread_reply", fake_post_slack_thread_reply)
 
     repo = asyncio.run(
@@ -197,7 +197,7 @@ def test_get_slack_repo_config_existing_thread_without_repo_uses_default(
     async def fake_post_slack_thread_reply(channel_id: str, thread_ts: str, text: str) -> bool:
         return True
 
-    monkeypatch.setattr(webapp, "get_client", lambda url: _FakeClient(threads_client))
+    monkeypatch.setattr(webapp, "langgraph_client", _FakeClient(threads_client))
     monkeypatch.setattr(webapp, "post_slack_thread_reply", fake_post_slack_thread_reply)
 
     repo = asyncio.run(webapp.get_slack_repo_config("please help", "C123", "1.234"))
@@ -217,7 +217,7 @@ def test_get_slack_repo_config_space_syntax_detected(
     async def fake_post_slack_thread_reply(channel_id: str, thread_ts: str, text: str) -> bool:
         return True
 
-    monkeypatch.setattr(webapp, "get_client", lambda url: _FakeClient(threads_client))
+    monkeypatch.setattr(webapp, "langgraph_client", _FakeClient(threads_client))
     monkeypatch.setattr(webapp, "post_slack_thread_reply", fake_post_slack_thread_reply)
 
     repo = asyncio.run(
@@ -238,7 +238,7 @@ def test_get_slack_repo_config_github_url_extracted(
     async def fake_post_slack_thread_reply(channel_id: str, thread_ts: str, text: str) -> bool:
         return True
 
-    monkeypatch.setattr(webapp, "get_client", lambda url: _FakeClient(threads_client))
+    monkeypatch.setattr(webapp, "langgraph_client", _FakeClient(threads_client))
     monkeypatch.setattr(webapp, "post_slack_thread_reply", fake_post_slack_thread_reply)
 
     repo = asyncio.run(
@@ -261,7 +261,7 @@ def test_get_slack_repo_config_explicit_repo_beats_github_url(
     async def fake_post_slack_thread_reply(channel_id: str, thread_ts: str, text: str) -> bool:
         return True
 
-    monkeypatch.setattr(webapp, "get_client", lambda url: _FakeClient(threads_client))
+    monkeypatch.setattr(webapp, "langgraph_client", _FakeClient(threads_client))
     monkeypatch.setattr(webapp, "post_slack_thread_reply", fake_post_slack_thread_reply)
 
     repo = asyncio.run(
@@ -286,7 +286,7 @@ def test_get_slack_repo_config_explicit_space_syntax_beats_thread_metadata(
     async def fake_post_slack_thread_reply(channel_id: str, thread_ts: str, text: str) -> bool:
         return True
 
-    monkeypatch.setattr(webapp, "get_client", lambda url: _FakeClient(threads_client))
+    monkeypatch.setattr(webapp, "langgraph_client", _FakeClient(threads_client))
     monkeypatch.setattr(webapp, "post_slack_thread_reply", fake_post_slack_thread_reply)
 
     repo = asyncio.run(
@@ -309,7 +309,7 @@ def test_get_slack_repo_config_github_url_beats_thread_metadata(
     async def fake_post_slack_thread_reply(channel_id: str, thread_ts: str, text: str) -> bool:
         return True
 
-    monkeypatch.setattr(webapp, "get_client", lambda url: _FakeClient(threads_client))
+    monkeypatch.setattr(webapp, "langgraph_client", _FakeClient(threads_client))
     monkeypatch.setattr(webapp, "post_slack_thread_reply", fake_post_slack_thread_reply)
 
     repo = asyncio.run(
@@ -332,7 +332,7 @@ def test_get_slack_repo_config_repo_name_only_defaults_org(
     async def fake_post_slack_thread_reply(channel_id: str, thread_ts: str, text: str) -> bool:
         return True
 
-    monkeypatch.setattr(webapp, "get_client", lambda url: _FakeClient(threads_client))
+    monkeypatch.setattr(webapp, "langgraph_client", _FakeClient(threads_client))
     monkeypatch.setattr(webapp, "post_slack_thread_reply", fake_post_slack_thread_reply)
 
     repo = asyncio.run(
@@ -351,7 +351,7 @@ def test_get_slack_repo_config_repo_name_only_space_syntax(
     async def fake_post_slack_thread_reply(channel_id: str, thread_ts: str, text: str) -> bool:
         return True
 
-    monkeypatch.setattr(webapp, "get_client", lambda url: _FakeClient(threads_client))
+    monkeypatch.setattr(webapp, "langgraph_client", _FakeClient(threads_client))
     monkeypatch.setattr(webapp, "post_slack_thread_reply", fake_post_slack_thread_reply)
 
     repo = asyncio.run(webapp.get_slack_repo_config("fix bug in repo open-swe", "C123", "1.234"))
