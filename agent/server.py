@@ -216,25 +216,34 @@ async def _recreate_sandbox(
     return sandbox_backend, repo_dir
 
 
-async def _wait_for_sandbox_id(thread_id: str) -> str:
+async def _wait_for_sandbox_id(thread_id: str) -> str | None:
     """Wait for sandbox_id to be set in thread metadata.
 
     Polls thread metadata until sandbox_id is set to a real value
-    (not the creating sentinel).
-
-    Raises:
-        TimeoutError: If sandbox creation takes too long
+    (not the creating sentinel).  If no other run is actively creating
+    the sandbox (stale sentinel), resets the sentinel and returns None
+    so the caller can create it.
     """
     elapsed = 0.0
     while elapsed < SANDBOX_CREATION_TIMEOUT:
         sandbox_id = await get_sandbox_id_from_metadata(thread_id)
         if sandbox_id is not None and sandbox_id != SANDBOX_CREATING:
             return sandbox_id
+        if sandbox_id is None:
+            # Another run failed and reset the sentinel — caller should create.
+            return None
         await asyncio.sleep(SANDBOX_POLL_INTERVAL)
         elapsed += SANDBOX_POLL_INTERVAL
 
-    msg = f"Timeout waiting for sandbox creation for thread {thread_id}"
-    raise TimeoutError(msg)
+    # Timed out — the creating sentinel is likely stale (previous run crashed).
+    # Reset it so this run can take over sandbox creation.
+    logger.warning(
+        "Timed out waiting for sandbox creation for thread %s, "
+        "resetting stale sentinel",
+        thread_id,
+    )
+    await client.threads.update(thread_id=thread_id, metadata={"sandbox_id": None})
+    return None
 
 
 def graph_loaded_for_execution(config: RunnableConfig) -> bool:
@@ -276,6 +285,12 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
     if sandbox_id == SANDBOX_CREATING and not sandbox_backend:
         logger.info("Sandbox creation in progress, waiting...")
         sandbox_id = await _wait_for_sandbox_id(thread_id)
+        if sandbox_id is None:
+            logger.info(
+                "Stale or failed sandbox creation detected for thread %s, "
+                "will create new sandbox",
+                thread_id,
+            )
 
     if sandbox_backend:
         logger.info("Using cached sandbox backend for thread %s", thread_id)
