@@ -370,34 +370,37 @@ async def get_slack_repo_config(message: str, channel_id: str, thread_ts: str) -
 
 
 async def is_thread_active(thread_id: str) -> bool:
-    """Check if a thread is currently active (has a running run).
+    """Check if a thread currently has a running run.
+
+    Uses runs.list to check for runs with "running" status rather than
+    relying on thread status, which can get stuck as "busy" if a run
+    crashes (e.g. sandbox went down).
 
     Args:
         thread_id: The LangGraph thread ID
 
     Returns:
-        True if the thread status is "busy", False otherwise
+        True if the thread has a running run, False otherwise
     """
     langgraph_client = get_client(url=LANGGRAPH_URL)
     try:
-        logger.debug("Fetching thread status for %s from %s", thread_id, LANGGRAPH_URL)
-        thread = await langgraph_client.threads.get(thread_id)
-        status = thread.get("status", "idle")
+        runs = await langgraph_client.runs.list(thread_id, limit=1, status="running")
+        is_active = len(runs) > 0
         logger.info(
-            "Thread %s status check: status=%s, is_busy=%s",
+            "Thread %s active check: running_runs=%d, is_active=%s",
             thread_id,
-            status,
-            status == "busy",
+            len(runs),
+            is_active,
         )
+        return is_active
     except Exception as e:  # noqa: BLE001
         logger.warning(
-            "Failed to get thread status for %s: %s (type: %s) - assuming not active",
+            "Failed to check running runs for %s: %s (type: %s) - assuming not active",
             thread_id,
             e,
             type(e).__name__,
         )
-        status = "idle"
-    return status == "busy"
+        return False
 
 
 async def _thread_exists(thread_id: str) -> bool:
