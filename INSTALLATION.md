@@ -160,12 +160,17 @@ GITHUB_USER_EMAIL_MAP = {
 }
 ```
 
-You should also add the GitHub organization which should be allowed to be triggered from in GitHub:
+You should also configure which GitHub organizations and/or repositories the agent is allowed to operate on. You can specify allowed orgs, specific `owner/repo` pairs, or both:
 
-`agent/webapp.py`
-```python
-ALLOWED_GITHUB_ORGS = "langchain-ai,anthropics"
+```bash
+# Allow all repos in these orgs
+ALLOWED_GITHUB_ORGS="langchain-ai,anthropics"
+
+# Allow specific repos (owner/repo format)
+ALLOWED_GITHUB_REPOS="some-user/their-repo,another-org/specific-repo"
 ```
+
+A webhook is accepted if the repo's org is in `ALLOWED_GITHUB_ORGS` **or** the `owner/repo` is in `ALLOWED_GITHUB_REPOS`. If both are empty, all repos are allowed.
 
 ### Linear (optional)
 
@@ -323,10 +328,14 @@ GITHUB_WEBHOOK_SECRET=""               # The secret you generated in step 3b
 # With these, each user authenticates with their own GitHub account.
 GITHUB_OAUTH_PROVIDER_ID=""            # The provider ID from steps 3a / 4b
 
-# === Org Allowlist (optional) ===
+# === Repo Allowlist (optional) ===
 # Comma-separated list of GitHub orgs the agent is allowed to operate on.
 # Leave empty to allow all orgs.
 ALLOWED_GITHUB_ORGS=""                 # e.g. "my-org,my-other-org"
+# Comma-separated list of specific owner/repo pairs the agent is allowed to operate on.
+# A repo is allowed if its org is in ALLOWED_GITHUB_ORGS OR its owner/repo is in ALLOWED_GITHUB_REPOS.
+# Leave both empty to allow all repos.
+ALLOWED_GITHUB_REPOS=""                # e.g. "some-user/their-repo,another-org/specific-repo"
 
 # === Default Repository ===
 # Used across all triggers when no repo is specified.

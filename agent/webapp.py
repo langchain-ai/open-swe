@@ -82,6 +82,12 @@ ALLOWED_GITHUB_ORGS: frozenset[str] = frozenset(
     if org.strip()
 )
 
+ALLOWED_GITHUB_REPOS: frozenset[str] = frozenset(
+    repo.strip().lower()
+    for repo in os.environ.get("ALLOWED_GITHUB_REPOS", "").split(",")
+    if repo.strip()
+)
+
 LINEAR_API_KEY = os.environ.get("LINEAR_API_KEY", "")
 
 _GITHUB_BOT_MESSAGE_PREFIXES = (
@@ -289,16 +295,22 @@ def _is_not_found_error(exc: Exception) -> bool:
     return getattr(exc, "status_code", None) == 404
 
 
-def _is_repo_org_allowed(repo_config: dict[str, str]) -> bool:
-    """Check if the repo owner/org is in the allowlist.
+def _is_repo_allowed(repo_config: dict[str, str]) -> bool:
+    """Check if the repo is in the allowlist.
 
-    Returns True if no allowlist is configured (empty ALLOWED_GITHUB_ORGS),
-    or if the repo owner is in the allowlist.
+    Returns True if no allowlist is configured (both ALLOWED_GITHUB_ORGS and
+    ALLOWED_GITHUB_REPOS are empty), or if the repo owner is in
+    ALLOWED_GITHUB_ORGS, or if owner/name is in ALLOWED_GITHUB_REPOS.
     """
-    if not ALLOWED_GITHUB_ORGS:
+    if not ALLOWED_GITHUB_ORGS and not ALLOWED_GITHUB_REPOS:
         return True
     owner = repo_config.get("owner", "").lower()
-    return owner in ALLOWED_GITHUB_ORGS
+    name = repo_config.get("name", "").lower()
+    if ALLOWED_GITHUB_ORGS and owner in ALLOWED_GITHUB_ORGS:
+        return True
+    if ALLOWED_GITHUB_REPOS and f"{owner}/{name}" in ALLOWED_GITHUB_REPOS:
+        return True
+    return False
 
 
 async def _upsert_slack_thread_repo_metadata(
@@ -953,12 +965,13 @@ async def linear_webhook(  # noqa: PLR0911, PLR0912, PLR0915
             },
         )
 
-    if not _is_repo_org_allowed(repo_config):
+    if not _is_repo_allowed(repo_config):
         logger.warning(
-            "Rejecting Linear webhook: org '%s' not in ALLOWED_GITHUB_ORGS",
+            "Rejecting Linear webhook: repo '%s/%s' not in allowlist",
             repo_config.get("owner"),
+            repo_config.get("name"),
         )
-        return {"status": "ignored", "reason": "Repository org not in allowlist"}
+        return {"status": "ignored", "reason": "Repository not in allowlist"}
 
     repo_owner = repo_config["owner"]
     repo_name = repo_config["name"]
@@ -1071,12 +1084,13 @@ async def slack_webhook(request: Request, background_tasks: BackgroundTasks) -> 
     }
     repo_config = await get_slack_repo_config(text, channel_id, thread_ts)
 
-    if not _is_repo_org_allowed(repo_config):
+    if not _is_repo_allowed(repo_config):
         logger.warning(
-            "Rejecting Slack webhook: org '%s' not in ALLOWED_GITHUB_ORGS",
+            "Rejecting Slack webhook: repo '%s/%s' not in allowlist",
             repo_config.get("owner"),
+            repo_config.get("name"),
         )
-        return {"status": "ignored", "reason": "Repository org not in allowlist"}
+        return {"status": "ignored", "reason": "Repository not in allowlist"}
 
     background_tasks.add_task(process_slack_mention, event_data, repo_config)
 
@@ -1474,12 +1488,13 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks) ->
         "owner": webhook_repo.get("owner", {}).get("login", ""),
         "name": webhook_repo.get("name", ""),
     }
-    if not _is_repo_org_allowed(webhook_repo_config):
+    if not _is_repo_allowed(webhook_repo_config):
         logger.warning(
-            "Rejecting GitHub webhook: org '%s' not in ALLOWED_GITHUB_ORGS",
+            "Rejecting GitHub webhook: repo '%s/%s' not in allowlist",
             webhook_repo_config.get("owner"),
+            webhook_repo_config.get("name"),
         )
-        return {"status": "ignored", "reason": "Repository org not in allowlist"}
+        return {"status": "ignored", "reason": "Repository not in allowlist"}
 
     issue = payload.get("issue", {})
     is_pull_request_comment = bool(event_type == "issue_comment" and issue.get("pull_request"))
