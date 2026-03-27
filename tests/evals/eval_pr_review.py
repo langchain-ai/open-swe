@@ -11,8 +11,8 @@ import httpx
 import pytest
 from anthropic import Anthropic
 from dotenv import load_dotenv
-from langsmith import testing as t
 from langgraph_sdk import get_client
+from langsmith import testing as t
 
 load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
@@ -30,6 +30,7 @@ pytestmark = pytest.mark.langsmith
 # ---------------------------------------------------------------------------
 # Dataset fixture
 # ---------------------------------------------------------------------------
+
 
 def load_dataset() -> list[dict[str, Any]]:
     return json.loads(DATASET_PATH.read_text())
@@ -87,8 +88,7 @@ def build_review_prompt(pr_url: str, pr_title: str, commit_id: str, diff: str) -
     )
     if diff:
         prompt += (
-            f"**PR Diff (exact changes at commit {commit_id[:12]}):**\n"
-            f"```diff\n{diff}\n```\n\n"
+            f"**PR Diff (exact changes at commit {commit_id[:12]}):**\n```diff\n{diff}\n```\n\n"
         )
     prompt += (
         "Please review this PR thoroughly based on the diff above.\n\n"
@@ -109,6 +109,7 @@ def build_review_prompt(pr_url: str, pr_title: str, commit_id: str, diff: str) -
 # ---------------------------------------------------------------------------
 # Agent runner
 # ---------------------------------------------------------------------------
+
 
 async def run_agent_on_pr(entry: dict[str, Any]) -> str:
     """Run the agent on a PR and return its output as a string."""
@@ -210,13 +211,15 @@ async def llm_judge(expected: dict, actual: str) -> dict[str, str]:
     response = client.messages.create(
         model="claude-sonnet-4-6",
         max_tokens=512,
-        messages=[{
-            "role": "user",
-            "content": JUDGE_PROMPT.format(
-                expected=json.dumps(expected, indent=2),
-                actual=actual,
-            ),
-        }],
+        messages=[
+            {
+                "role": "user",
+                "content": JUDGE_PROMPT.format(
+                    expected=json.dumps(expected, indent=2),
+                    actual=actual,
+                ),
+            }
+        ],
     )
     text = response.content[0].text
 
@@ -238,6 +241,7 @@ async def llm_judge(expected: dict, actual: str) -> dict[str, str]:
 # Test
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 @pytest.mark.langsmith
 async def test_pr_review(eval_entry: dict[str, Any]):
@@ -257,7 +261,14 @@ async def test_pr_review(eval_entry: dict[str, Any]):
     # Save results locally
     results = json.loads(RESULTS_PATH.read_text()) if RESULTS_PATH.exists() else []
     results = [r for r in results if r.get("id") != eval_entry["id"]]  # replace existing
-    results.append({"id": eval_entry["id"], "pr_number": eval_entry["pr_number"], "agent_output": agent_output, **scores})
+    results.append(
+        {
+            "id": eval_entry["id"],
+            "pr_number": eval_entry["pr_number"],
+            "agent_output": agent_output,
+            **scores,
+        }
+    )
     RESULTS_PATH.write_text(json.dumps(results, indent=2))
 
     assert scores["final_score"] != "FAIL", (

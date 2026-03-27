@@ -36,7 +36,10 @@ def get(url, params=None):
 def list_org_repos():
     repos, page = [], 1
     while True:
-        data = get(f"https://api.github.com/orgs/{ORG}/repos", params={"per_page": 100, "page": page, "type": "all"})
+        data = get(
+            f"https://api.github.com/orgs/{ORG}/repos",
+            params={"per_page": 100, "page": page, "type": "all"},
+        )
         if not data:
             break
         repos.extend(data)
@@ -51,7 +54,13 @@ def list_closed_prs(repo, max_prs=200):
     while len(prs) < max_prs:
         data = get(
             f"https://api.github.com/repos/{ORG}/{repo}/pulls",
-            params={"state": "closed", "per_page": 100, "page": page, "sort": "updated", "direction": "desc"},
+            params={
+                "state": "closed",
+                "per_page": 100,
+                "page": page,
+                "sort": "updated",
+                "direction": "desc",
+            },
         )
         if not data:
             break
@@ -105,9 +114,14 @@ def main():
 
             for review in devin_reviews:
                 inline = [
-                    {"file": c["path"], "line": c.get("line") or c.get("original_line"), "body": c["body"]}
+                    {
+                        "file": c["path"],
+                        "line": c.get("line") or c.get("original_line"),
+                        "body": c["body"],
+                    }
                     for c in all_inline
-                    if c["user"]["login"] == DEVIN_LOGIN and c.get("pull_request_review_id") == review["id"]
+                    if c["user"]["login"] == DEVIN_LOGIN
+                    and c.get("pull_request_review_id") == review["id"]
                 ]
                 entry = {
                     "pr_number": pr_number,
@@ -122,7 +136,9 @@ def main():
                     "inline_comments": inline,
                 }
                 results.append(entry)
-                print(f"  [FOUND] PR #{pr_number} | {review['state']} | outcome={entry['pr_outcome']} | {pr['title'][:60]}")
+                print(
+                    f"  [FOUND] PR #{pr_number} | {review['state']} | outcome={entry['pr_outcome']} | {pr['title'][:60]}"
+                )
 
             time.sleep(0.3)
 

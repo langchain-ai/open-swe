@@ -21,7 +21,12 @@ def github_comment(message: str, issue_number: int) -> dict[str, Any]:
         return {"success": False, "error": "Message cannot be empty"}
 
     if configurable.get("eval_mode"):
-        return {"success": True, "intercepted": True, "message": message, "issue_number": issue_number}
+        return {
+            "success": True,
+            "intercepted": True,
+            "message": message,
+            "issue_number": issue_number,
+        }
 
     token = asyncio.run(get_github_app_installation_token())
     if not token:
