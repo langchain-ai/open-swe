@@ -117,6 +117,17 @@ def create_pr_review(
     if not repo_config:
         return {"success": False, "error": "No repo config found"}
 
+    config = get_config()
+    if config.get("configurable", {}).get("eval_mode"):
+        intercepted: dict[str, Any] = {"event": event}
+        if body is not None:
+            intercepted["body"] = body
+        if comments:
+            intercepted["comments"] = comments
+        if commit_id:
+            intercepted["commit_id"] = commit_id
+        return {"success": True, "intercepted": True, "review": intercepted}
+
     token = asyncio.run(_get_token())
     if not token:
         return {"success": False, "error": "Failed to get GitHub App installation token"}
@@ -243,6 +254,13 @@ def submit_pr_review(
     repo_config = _get_repo_config()
     if not repo_config:
         return {"success": False, "error": "No repo config found"}
+
+    config = get_config()
+    if config.get("configurable", {}).get("eval_mode"):
+        intercepted: dict[str, Any] = {"event": event}
+        if body is not None:
+            intercepted["body"] = body
+        return {"success": True, "intercepted": True, "review": intercepted}
 
     token = asyncio.run(_get_token())
     if not token:

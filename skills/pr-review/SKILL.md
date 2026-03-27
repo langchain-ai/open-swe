@@ -16,19 +16,10 @@ Leave a structured GitHub review — not just a plain comment. Use the review to
 **Before starting:** Extract the PR number from the PR URL in your prompt (e.g. `https://github.com/owner/repo/pull/123` → `123`). You will need this for every tool call.
 
 1. Call `list_pr_reviews` first — see what's already been reviewed so you don't duplicate feedback
-<<<<<<< yogesh/auto-pr-review
 2. Fetch the PR diff using `http_request`: `GET /repos/{owner}/{repo}/pulls/{pull_number}`
 3. Read the changed files in the sandbox — clone the repo and read full file context, not just the diff
 4. Create the review using `create_pr_review` with inline comments where possible — this is your only output
 5. Keep the review body short: 2-4 sentences max. Inline comments should be 1-2 lines each.
-=======
-2. Run `git diff origin/HEAD...HEAD` in the sandbox to get the PR diff — the repo is already cloned and checked out to the PR branch
-3. Read the changed files in the sandbox — the repo is already checked out, no need to clone
-4. Create the review using `create_pr_review` with inline comments where possible
-5. Always call `github_comment` after submitting the review with a short human-readable summary
-   - If no critical or high severity issues were found, post: `"🤖 PR Review — No critical or high severity issues found."`
-   - If issues were found, summarize them briefly
->>>>>>> yogesh/pr-review-skill
 
 ## What to Look For
 
