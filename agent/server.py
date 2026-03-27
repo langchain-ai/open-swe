@@ -407,6 +407,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
             os.environ.get("LLM_MODEL_ID", DEFAULT_LLM_MODEL_ID),
             temperature=0,
             max_tokens=20_000,
+            max_retries=4,
         ),
         system_prompt=construct_system_prompt(
             repo_dir,
