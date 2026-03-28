@@ -64,3 +64,6 @@ ignore = [
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+filterwarnings = [
+    "ignore:langsmith\\.sandbox is in alpha\\.:FutureWarning",
+]
