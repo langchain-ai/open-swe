@@ -23,7 +23,7 @@ import asyncio
 warnings.filterwarnings("ignore", message=".*Pydantic V1.*", category=UserWarning)
 
 # Now safe to import agent (which imports LangChain modules)
-from deepagents import create_deep_agent
+from deepagents import SubAgent, create_deep_agent
 from deepagents.backends.protocol import SandboxBackendProtocol
 from langsmith.sandbox import SandboxClientError
 
@@ -437,6 +437,25 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
             list_pr_review_comments,
         ],
         backend=sandbox_backend,
+        subagents=[
+            SubAgent(
+                name="general-purpose",
+                description="General-purpose agent for researching complex questions, searching for files and content, and executing multi-step tasks. Use this agent to perform searches, investigations, and analysis across the codebase.",
+                system_prompt=(
+                    "In order to complete the objective, you have access to a number of standard tools.\n\n"
+                    "When your task is research or investigation:\n"
+                    "- Search for technical identifiers (function names, hook names, state variable names, API endpoints) — NEVER search for visible UI text like tab names, button labels, or display strings; these match hundreds of files and give no signal\n"
+                    "- Return a structured findings table: file path | line number | severity | one-sentence description | single problematic code line. One row per issue. No prose paragraphs, no fix code blocks, no full file dumps.\n"
+                    "- Never say 'the summary above' or reference prior context — your response is the only output the caller receives\n"
+                    "- If asked to return file contents or exact code, return the verbatim text — never summarize or paraphrase code you are asked to retrieve\n"
+                    "- If a search returns no results, try 1-2 different specific technical terms; if still no results after that, report 'no findings for this area' and stop — do not keep searching with variations of the same dead-end pattern\n"
+                    "- Stay within your assigned file scope — do not read files outside what your task description specifies\n"
+                    "- If your task says 'grep only' or 'do not read files', use ONLY grep/search commands — never open a file, just return grep match results\n"
+                    "- Never re-read a file you have already read unless you modified it\n"
+                    "- Never re-run a command that already succeeded unless you made code changes since"
+                ),
+            )
+        ],
         middleware=[
             ToolErrorMiddleware(),
             check_message_queue_before_model,
