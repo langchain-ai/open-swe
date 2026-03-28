@@ -1,4 +1,4 @@
-.PHONY: all format format-check lint test tests integration_tests help run dev
+.PHONY: all format format-check lint test tests integration_tests help run dev poc-dev
 
 # Default target executed when no arguments are given to make.
 all: help
@@ -9,6 +9,9 @@ all: help
 
 dev:
 	langgraph dev
+
+poc-dev:
+	bash scripts/start_github_poc.sh
 
 run:
 	uvicorn agent.webapp:app --reload --port 8000
@@ -60,6 +63,7 @@ format-check:
 help:
 	@echo '----'
 	@echo 'dev                          - run LangGraph dev server'
+	@echo 'poc-dev                      - validate .env and run the GitHub-only POC server'
 	@echo 'run                          - run webhook server'
 	@echo 'install                      - install dependencies'
 	@echo 'format                       - run code formatters'

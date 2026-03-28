@@ -79,6 +79,27 @@ from .utils.sandbox_paths import aresolve_repo_dir, aresolve_sandbox_work_dir
 from .utils.sandbox_state import SANDBOX_BACKENDS, get_sandbox_id_from_metadata
 
 
+def _get_reply_tools(source: str) -> list:
+    """Return source-appropriate reply tools."""
+    if source == "github":
+        return [github_comment]
+    if source == "slack":
+        return [slack_thread_reply]
+    if source == "linear":
+        return [linear_comment]
+    return [linear_comment, slack_thread_reply, github_comment]
+
+
+async def _persist_sandbox_metadata(
+    thread_id: str, sandbox_id: str, repo_dir: str | None = None
+) -> None:
+    """Store the active sandbox metadata on the thread."""
+    metadata: dict[str, str] = {"sandbox_id": sandbox_id}
+    if repo_dir:
+        metadata["repo_dir"] = repo_dir
+    await client.threads.update(thread_id=thread_id, metadata=metadata)
+
+
 async def _clone_or_pull_repo_in_sandbox(  # noqa: PLR0915
     sandbox_backend: SandboxBackendProtocol,
     owner: str,
@@ -209,6 +230,7 @@ async def _recreate_sandbox(
         repo_dir = await _clone_or_pull_repo_in_sandbox(
             sandbox_backend, repo_owner, repo_name, github_token
         )
+        await _persist_sandbox_metadata(thread_id, sandbox_backend.id, repo_dir)
     except Exception:
         logger.exception("Failed to recreate sandbox after connection failure")
         await client.threads.update(thread_id=thread_id, metadata={"sandbox_id": None})
@@ -316,11 +338,6 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
                     sandbox_backend, repo_owner, repo_name, github_token
                 )
                 logger.info("Repo cloned to %s", repo_dir)
-
-                await client.threads.update(
-                    thread_id=thread_id,
-                    metadata={"repo_dir": repo_dir},
-                )
         except Exception:
             logger.exception("Failed to create sandbox or clone repo")
             try:
@@ -373,6 +390,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
                 raise
 
     SANDBOX_BACKENDS[thread_id] = sandbox_backend
+    await _persist_sandbox_metadata(thread_id, sandbox_backend.id, repo_dir)
 
     if not repo_dir:
         msg = "Cannot proceed: no repo was cloned. Set 'repo.owner' and 'repo.name' in the configurable config"
@@ -399,6 +417,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
     linear_issue = config["configurable"].get("linear_issue", {})
     linear_project_id = linear_issue.get("linear_project_id", "")
     linear_issue_number = linear_issue.get("linear_issue_number", "")
+    source = config["configurable"].get("source", "")
     agents_md = await read_agents_md_in_sandbox(sandbox_backend, repo_dir)
 
     logger.info("Returning agent with sandbox for thread %s", thread_id)
@@ -419,15 +438,12 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
             fetch_url,
             web_search,
             commit_and_open_pr,
-            linear_comment,
             linear_create_issue,
             linear_delete_issue,
             linear_get_issue,
             linear_get_issue_comments,
             linear_list_teams,
             linear_update_issue,
-            slack_thread_reply,
-            github_comment,
             list_pr_reviews,
             get_pr_review,
             create_pr_review,
@@ -435,6 +451,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
             dismiss_pr_review,
             submit_pr_review,
             list_pr_review_comments,
+            *_get_reply_tools(source),
         ],
         backend=sandbox_backend,
         middleware=[

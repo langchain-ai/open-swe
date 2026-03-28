@@ -298,7 +298,7 @@ Create a `.env` file in the project root. Below is the full list — only fill i
 ```bash
 # === LangSmith ===
 LANGSMITH_API_KEY_PROD=""              # From step 4a
-LANGCHAIN_TRACING_V2="true"
+LANGCHAIN_TRACING_V2="false"           # Local GitHub-only POC default; set to true when LangSmith is configured
 LANGCHAIN_PROJECT=""                   # LangSmith project name for traces
 LANGSMITH_TENANT_ID_PROD=""           
 LANGSMITH_TRACING_PROJECT_ID_PROD=""  
@@ -327,6 +327,16 @@ GITHUB_OAUTH_PROVIDER_ID=""            # The provider ID from steps 3a / 4b
 # Comma-separated list of GitHub orgs the agent is allowed to operate on.
 # Leave empty to allow all orgs.
 ALLOWED_GITHUB_ORGS=""                 # e.g. "my-org,my-other-org"
+
+# === Repo Allowlist (optional) ===
+# Comma-separated list of owner/name repositories the agent is allowed to operate on.
+# Use this for a single-repo GitHub-only POC.
+ALLOWED_GITHUB_REPOS=""                # e.g. "my-org/my-repo"
+
+# === GitHub User -> LangSmith Email Mapping ===
+# For quick POCs, you can provide the allowlist as JSON instead of editing
+# agent/utils/github_user_email_map.py directly.
+GITHUB_USER_EMAIL_MAP_JSON=""          # e.g. '{"octocat":"octocat@example.com"}'
 
 # === Default Repository ===
 # Used across all triggers when no repo is specified.
@@ -374,6 +384,27 @@ The server runs on `http://localhost:2024` with these endpoints:
 | `GET /health` | Health check |
 
 ## 8. Verify it works
+
+### Fastest GitHub-only POC
+
+If you want the shortest path to a local demo, start with only:
+
+- GitHub App + `POST /webhooks/github`
+- `GITHUB_OAUTH_PROVIDER_ID=""` to stay in bot-token-only mode
+- `ALLOWED_GITHUB_REPOS="owner/repo"` to restrict the agent to a single repository
+- `GITHUB_USER_EMAIL_MAP_JSON='{"github-login":"email@example.com"}'` for the triggering user
+
+For the lowest-dependency local variant:
+
+- `SANDBOX_TYPE=local`
+- `LOCAL_SANDBOX_ROOT_DIR="../.open-swe-local-sandbox"` so the cloned target repo stays outside the `open-swe` source tree and does not trigger `langgraph dev` reloads
+- `LLM_MODEL_ID="openai:gpt-5"` (or another OpenAI Responses model available on your account)
+- `OPENAI_API_KEY=...`
+- `LANGCHAIN_TRACING_V2="false"` unless you also configured LangSmith tracing credentials
+
+This skips LangSmith sandbox requirements entirely, but note that `local` runs commands directly on your machine and should only be used for local development.
+
+You can leave all Linear and Slack variables empty for this flow.
 
 ### GitHub
 

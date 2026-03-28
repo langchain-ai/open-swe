@@ -2,9 +2,22 @@
 
 Add entries here as:
     "github-username": "user@example.com",
+
+For local POCs, you can also override or extend this mapping with the
+``GITHUB_USER_EMAIL_MAP_JSON`` environment variable:
+
+    GITHUB_USER_EMAIL_MAP_JSON='{"octocat": "octocat@example.com"}'
 """
 
-GITHUB_USER_EMAIL_MAP: dict[str, str] = {
+from __future__ import annotations
+
+import json
+import logging
+import os
+
+logger = logging.getLogger(__name__)
+
+_DEFAULT_GITHUB_USER_EMAIL_MAP: dict[str, str] = {
     "aran-yogesh": "yogesh.mahendran@langchain.dev",
     "AaryanPotdar": "aaryan.potdar@langchain.dev",
     "agola11": "ankush@langchain.dev",
@@ -124,4 +137,52 @@ GITHUB_USER_EMAIL_MAP: dict[str, str] = {
     "steve-langchain": "steve@langchain.dev",
     "SumedhArani": "sumedh@langchain.dev",
     "suraj-langchain": "suraj@langchain.dev",
+}
+
+
+def _load_env_github_user_email_map() -> dict[str, str]:
+    """Load optional GitHub user -> email overrides from the environment."""
+    raw_mapping = os.environ.get("GITHUB_USER_EMAIL_MAP_JSON", "").strip()
+    if not raw_mapping:
+        return {}
+
+    try:
+        parsed = json.loads(raw_mapping)
+    except json.JSONDecodeError:
+        logger.warning(
+            "Ignoring GITHUB_USER_EMAIL_MAP_JSON because it is not valid JSON: %s",
+            raw_mapping,
+        )
+        return {}
+
+    if not isinstance(parsed, dict):
+        logger.warning("Ignoring GITHUB_USER_EMAIL_MAP_JSON because it is not a JSON object")
+        return {}
+
+    normalized: dict[str, str] = {}
+    for github_login, email in parsed.items():
+        if not isinstance(github_login, str) or not isinstance(email, str):
+            logger.warning(
+                "Ignoring GitHub user mapping with non-string key/value: %r -> %r",
+                github_login,
+                email,
+            )
+            continue
+        login = github_login.strip()
+        user_email = email.strip()
+        if not login or not user_email:
+            logger.warning(
+                "Ignoring GitHub user mapping with an empty login or email: %r -> %r",
+                github_login,
+                email,
+            )
+            continue
+        normalized[login] = user_email
+
+    return normalized
+
+
+GITHUB_USER_EMAIL_MAP: dict[str, str] = {
+    **_DEFAULT_GITHUB_USER_EMAIL_MAP,
+    **_load_env_github_user_email_map(),
 }

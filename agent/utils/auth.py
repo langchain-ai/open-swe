@@ -44,12 +44,17 @@ logger.debug(
 def is_bot_token_only_mode() -> bool:
     """Check if we're in bot-token-only mode.
 
-    This is the case when LANGSMITH_API_KEY_PROD is set (deployed) but neither
-    X_SERVICE_AUTH_JWT_SECRET nor USER_ID_API_KEY_MAP is configured, meaning we
-    can't resolve per-user GitHub OAuth tokens. In this mode the GitHub App
-    installation token is used for all git operations instead.
+    This mode is active when per-user GitHub OAuth is not configured. That can
+    happen in the original hosted setup when LangSmith is configured but there
+    is no service JWT bridge, or in local GitHub-only setups where
+    GITHUB_OAUTH_PROVIDER_ID is intentionally left empty.
+
+    In this mode the GitHub App installation token is used for all git
+    operations instead of resolving user-scoped OAuth tokens.
     """
-    return bool(LANGSMITH_API_KEY and not X_SERVICE_AUTH_JWT_SECRET and not USER_ID_API_KEY_MAP)
+    missing_user_oauth = not GITHUB_OAUTH_PROVIDER_ID
+    missing_service_bridge = not X_SERVICE_AUTH_JWT_SECRET and not USER_ID_API_KEY_MAP
+    return bool(missing_user_oauth or (LANGSMITH_API_KEY and missing_service_bridge))
 
 
 def _retry_instruction(source: str) -> str:
@@ -342,7 +347,12 @@ async def save_encrypted_token_from_email(
 
 
 async def _resolve_bot_installation_token(thread_id: str) -> tuple[str, str]:
-    """Get a GitHub App installation token and persist it for the thread."""
+    """Get a fresh GitHub App installation token for bot-token-only mode.
+
+    Installation tokens are short-lived and can be re-derived from the app
+    credentials, so local GitHub-only setups do not need to persist them on
+    the thread. This keeps the POC working without TOKEN_ENCRYPTION_KEY.
+    """
     bot_token = await get_github_app_installation_token()
     if not bot_token:
         raise RuntimeError(
@@ -353,8 +363,7 @@ async def _resolve_bot_installation_token(thread_id: str) -> tuple[str, str]:
     logger.info(
         "Using GitHub App installation token for thread %s (bot-token-only mode)", thread_id
     )
-    encrypted = await persist_encrypted_github_token(thread_id, bot_token)
-    return bot_token, encrypted
+    return bot_token, ""
 
 
 async def resolve_github_token(config: RunnableConfig, thread_id: str) -> tuple[str, str]:

@@ -258,7 +258,15 @@ def test_process_github_issue_existing_thread_uses_followup_prompt(monkeypatch) 
     async def fake_fetch_issue_comments(
         repo_config: dict[str, str], issue_number: int, *, token: str | None = None
     ) -> list[dict[str, object]]:
-        raise AssertionError("fetch_issue_comments should not be called for follow-up prompts")
+        captured["fetch_token"] = token
+        return [
+            {
+                "author": "octocat",
+                "body": "@openswe please handle this",
+                "created_at": "2026-03-09T00:00:00Z",
+                "comment_id": 999,
+            }
+        ]
 
     async def fake_thread_exists(thread_id: str) -> bool:
         return True
@@ -311,5 +319,30 @@ def test_process_github_issue_existing_thread_uses_followup_prompt(monkeypatch) 
         )
     )
 
-    assert captured["prompt"] == "**octocat:**\n@openswe please handle this"
-    assert "## Repository" not in captured["prompt"]
+    assert captured["fetch_token"] == "user-token"
+    assert "Continue working on this existing GitHub issue." in captured["prompt"]
+    assert "## Repository: langchain-ai/open-swe" in captured["prompt"]
+    assert "## Title: Fix the flaky test" in captured["prompt"]
+    assert "Latest triggering comment from @octocat" in captured["prompt"]
+
+
+def test_get_or_resolve_thread_github_token_skips_persistence_in_bot_mode(monkeypatch) -> None:
+    async def fake_get_github_app_installation_token() -> str | None:
+        return "bot-token"
+
+    async def fake_persist_encrypted_github_token(thread_id: str, token: str) -> str:
+        raise AssertionError("bot-token-only mode should not persist installation tokens")
+
+    monkeypatch.setattr(webapp, "is_bot_token_only_mode", lambda: True)
+    monkeypatch.setattr(
+        webapp, "get_github_app_installation_token", fake_get_github_app_installation_token
+    )
+    monkeypatch.setattr(
+        webapp, "persist_encrypted_github_token", fake_persist_encrypted_github_token
+    )
+
+    token = asyncio.run(
+        webapp._get_or_resolve_thread_github_token("thread-123", "octocat@example.com")
+    )
+
+    assert token == "bot-token"

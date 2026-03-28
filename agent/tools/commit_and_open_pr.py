@@ -4,6 +4,7 @@ from typing import Any
 
 from langgraph.config import get_config
 
+from ..utils.auth import resolve_github_token
 from ..utils.authorship import (
     OPEN_SWE_BOT_EMAIL,
     OPEN_SWE_BOT_NAME,
@@ -29,6 +30,20 @@ from ..utils.sandbox_paths import resolve_repo_dir
 from ..utils.sandbox_state import get_sandbox_backend_sync
 
 logger = logging.getLogger(__name__)
+
+
+def _resolve_github_token_for_pr(config: dict[str, Any], thread_id: str) -> str | None:
+    """Resolve a GitHub token for PR operations."""
+    github_token = get_github_token()
+    if github_token:
+        return github_token
+
+    try:
+        github_token, _encrypted_token = asyncio.run(resolve_github_token(config, thread_id))
+    except Exception:  # noqa: BLE001
+        logger.exception("Failed to resolve GitHub token for thread %s", thread_id)
+        return None
+    return github_token
 
 
 def commit_and_open_pr(
@@ -138,7 +153,7 @@ def commit_and_open_pr(
             return {"success": False, "error": "No sandbox found for thread", "pr_url": None}
 
         repo_dir = resolve_repo_dir(sandbox_backend, repo_name)
-        github_token = get_github_token()
+        github_token = _resolve_github_token_for_pr(config, thread_id)
         user_identity = resolve_triggering_user_identity(config, github_token)
         pr_body = add_pr_collaboration_note(body, user_identity)
 

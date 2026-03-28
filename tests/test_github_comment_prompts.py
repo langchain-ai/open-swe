@@ -79,3 +79,29 @@ def test_build_github_issue_prompt_only_wraps_external_comments() -> None:
     assert github_comments.UNTRUSTED_GITHUB_COMMENT_OPEN_TAG in prompt
     assert github_comments.UNTRUSTED_GITHUB_COMMENT_CLOSE_TAG in prompt
     assert "External Untrusted Comments" not in prompt
+
+
+def test_build_github_issue_retry_prompt_reanchors_to_issue_context() -> None:
+    prompt = webapp.build_github_issue_retry_prompt(
+        {"owner": "parimple", "name": "BohtPY"},
+        9,
+        "issue-123",
+        "Create the smoke-test file",
+        "Add OPEN_SWE_SMOKE_TEST.md and open a draft PR.",
+        [
+            {
+                "author": "parimple",
+                "body": "@openswe retry with refreshed OpenAI credential",
+                "created_at": "2026-03-28T10:00:00Z",
+            }
+        ],
+        github_login="parimple",
+        latest_comment_author="parimple",
+        latest_comment_body="@openswe retry with refreshed OpenAI credential",
+        issue_author="parimple",
+    )
+
+    assert "Treat the original issue request below as the primary task" in prompt
+    assert "Create the smoke-test file" in prompt
+    assert "OPEN_SWE_SMOKE_TEST.md" in prompt
+    assert "retry with refreshed OpenAI credential" in prompt

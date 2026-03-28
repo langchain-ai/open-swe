@@ -81,6 +81,11 @@ ALLOWED_GITHUB_ORGS: frozenset[str] = frozenset(
     for org in os.environ.get("ALLOWED_GITHUB_ORGS", "").split(",")
     if org.strip()
 )
+ALLOWED_GITHUB_REPOS: frozenset[str] = frozenset(
+    repo.strip().lower()
+    for repo in os.environ.get("ALLOWED_GITHUB_REPOS", "").split(",")
+    if repo.strip()
+)
 
 LINEAR_API_KEY = os.environ.get("LINEAR_API_KEY", "")
 
@@ -299,6 +304,22 @@ def _is_repo_org_allowed(repo_config: dict[str, str]) -> bool:
         return True
     owner = repo_config.get("owner", "").lower()
     return owner in ALLOWED_GITHUB_ORGS
+
+
+def _is_repo_allowed(repo_config: dict[str, str]) -> bool:
+    """Check if the repo passes both org and repo-level allowlists."""
+    if not _is_repo_org_allowed(repo_config):
+        return False
+
+    if not ALLOWED_GITHUB_REPOS:
+        return True
+
+    owner = repo_config.get("owner", "").strip().lower()
+    name = repo_config.get("name", "").strip().lower()
+    if not owner or not name:
+        return False
+
+    return f"{owner}/{name}" in ALLOWED_GITHUB_REPOS
 
 
 async def _upsert_slack_thread_repo_metadata(
@@ -953,12 +974,13 @@ async def linear_webhook(  # noqa: PLR0911, PLR0912, PLR0915
             },
         )
 
-    if not _is_repo_org_allowed(repo_config):
+    if not _is_repo_allowed(repo_config):
         logger.warning(
-            "Rejecting Linear webhook: org '%s' not in ALLOWED_GITHUB_ORGS",
+            "Rejecting Linear webhook: repo '%s/%s' is not in the allowlist",
             repo_config.get("owner"),
+            repo_config.get("name"),
         )
-        return {"status": "ignored", "reason": "Repository org not in allowlist"}
+        return {"status": "ignored", "reason": "Repository not in allowlist"}
 
     repo_owner = repo_config["owner"]
     repo_name = repo_config["name"]
@@ -1071,12 +1093,13 @@ async def slack_webhook(request: Request, background_tasks: BackgroundTasks) -> 
     }
     repo_config = await get_slack_repo_config(text, channel_id, thread_ts)
 
-    if not _is_repo_org_allowed(repo_config):
+    if not _is_repo_allowed(repo_config):
         logger.warning(
-            "Rejecting Slack webhook: org '%s' not in ALLOWED_GITHUB_ORGS",
+            "Rejecting Slack webhook: repo '%s/%s' is not in the allowlist",
             repo_config.get("owner"),
+            repo_config.get("name"),
         )
-        return {"status": "ignored", "reason": "Repository org not in allowlist"}
+        return {"status": "ignored", "reason": "Repository not in allowlist"}
 
     background_tasks.add_task(process_slack_mention, event_data, repo_config)
 
@@ -1152,6 +1175,44 @@ def build_github_issue_followup_prompt(github_login: str, comment_body: str) -> 
     )
 
 
+def build_github_issue_retry_prompt(
+    repo_config: dict[str, str],
+    issue_number: int,
+    issue_id: str,
+    title: str,
+    body: str,
+    comments: list[dict[str, Any]],
+    *,
+    github_login: str,
+    latest_comment_author: str,
+    latest_comment_body: str,
+    issue_author: str = "",
+) -> str:
+    """Build a re-anchored prompt for follow-up GitHub issue comments."""
+    latest_comment = format_github_comment_body_for_prompt(
+        latest_comment_author, latest_comment_body
+    )
+    issue_prompt = build_github_issue_prompt(
+        repo_config,
+        issue_number,
+        issue_id,
+        title,
+        body,
+        comments,
+        github_login=github_login,
+        issue_author=issue_author,
+    )
+    return (
+        "Continue working on this existing GitHub issue.\n\n"
+        "Treat the original issue request below as the primary task. "
+        "If the latest comment is a retry or status update, continue the implementation work for "
+        "the issue itself instead of debugging or repeating prior agent summaries unless the new "
+        "comment explicitly changes the scope.\n\n"
+        f"## Latest triggering comment from @{latest_comment_author}:\n{latest_comment}\n\n"
+        f"{issue_prompt}"
+    )
+
+
 def build_github_issue_update_prompt(github_login: str, title: str, body: str) -> str:
     """Build the prompt for a follow-up GitHub issue title/body update."""
     sanitized_title = sanitize_github_comment_body(title)
@@ -1204,15 +1265,13 @@ async def _get_or_resolve_thread_github_token(thread_id: str, email: str) -> str
     """Resolve and persist a GitHub token for a thread when available.
 
     In bot-token-only mode, returns a fresh GitHub App installation token
-    instead of resolving per-user OAuth tokens.
+    instead of resolving per-user OAuth tokens. We intentionally do not
+    persist installation tokens because they are short-lived and can always
+    be re-derived from the GitHub App credentials.
     """
     if is_bot_token_only_mode():
         bot_token = await get_github_app_installation_token()
         if bot_token:
-            try:
-                await persist_encrypted_github_token(thread_id, bot_token)
-            except Exception:
-                logger.warning("Could not persist bot token for thread %s", thread_id)
             return bot_token
         logger.warning("Bot-token-only mode but GitHub App token unavailable")
         return None
@@ -1385,9 +1444,32 @@ async def process_github_issue(payload: dict[str, Any], event_type: str) -> None
 
     if existing_thread:
         if event_type == "issue_comment":
-            prompt = build_github_issue_followup_prompt(
-                comment.get("user", {}).get("login", github_login) or github_login,
-                comment.get("body", ""),
+            comments = await fetch_issue_comments(
+                repo_config, issue_number, token=github_token or app_token
+            )
+            if comment_id and not any(item.get("comment_id") == comment_id for item in comments):
+                comments.append(
+                    {
+                        "body": comment.get("body", ""),
+                        "author": comment.get("user", {}).get("login", "unknown"),
+                        "created_at": comment.get("created_at", ""),
+                        "comment_id": comment_id,
+                    }
+                )
+                comments.sort(key=lambda item: item.get("created_at", ""))
+
+            prompt = build_github_issue_retry_prompt(
+                repo_config,
+                issue_number,
+                issue_id,
+                title,
+                description,
+                comments,
+                github_login=github_login,
+                latest_comment_author=comment.get("user", {}).get("login", github_login)
+                or github_login,
+                latest_comment_body=comment.get("body", ""),
+                issue_author=issue_author,
             )
         else:
             prompt = build_github_issue_update_prompt(github_login, title, description)
@@ -1474,12 +1556,13 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks) ->
         "owner": webhook_repo.get("owner", {}).get("login", ""),
         "name": webhook_repo.get("name", ""),
     }
-    if not _is_repo_org_allowed(webhook_repo_config):
+    if not _is_repo_allowed(webhook_repo_config):
         logger.warning(
-            "Rejecting GitHub webhook: org '%s' not in ALLOWED_GITHUB_ORGS",
+            "Rejecting GitHub webhook: repo '%s/%s' is not in the allowlist",
             webhook_repo_config.get("owner"),
+            webhook_repo_config.get("name"),
         )
-        return {"status": "ignored", "reason": "Repository org not in allowlist"}
+        return {"status": "ignored", "reason": "Repository not in allowlist"}
 
     issue = payload.get("issue", {})
     is_pull_request_comment = bool(event_type == "issue_comment" and issue.get("pull_request"))

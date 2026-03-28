@@ -120,11 +120,14 @@ def resolve_triggering_user_identity(
 ) -> CollaboratorIdentity | None:
     """Resolve the triggering user's git identity.
 
-    Prefer the GitHub account identity derived from the token when available.
-    Fall back to config metadata when the run originated from GitHub or when
-    Slack/Linear supplied an explicit user name and email.
+    Prefer config metadata for GitHub runs because GitHub App installation
+    tokens cannot resolve `/user` and only create noisy 403s in local bot-only
+    mode. For non-GitHub sources, prefer the GitHub token when a user token is
+    available and fall back to config metadata otherwise.
     """
-
+    configurable = config.get("configurable", {})
+    if _normalize_text(configurable.get("source")) == "github":
+        return _identity_from_config(config) or _identity_from_github_token(github_token)
     return _identity_from_github_token(github_token) or _identity_from_config(config)
 
 
