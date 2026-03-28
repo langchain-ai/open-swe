@@ -259,8 +259,8 @@ def generate_thread_id_from_github_issue(issue_id: str) -> str:
 def generate_thread_id_from_slack_thread(channel_id: str, thread_id: str) -> str:
     """Generate a deterministic thread ID from a Slack thread identifier."""
     composite = f"{channel_id}:{thread_id}"
-    md5_hex = hashlib.md5(composite.encode("utf-8")).hexdigest()
-    return str(uuid.UUID(hex=md5_hex))
+    sha256_hex = hashlib.sha256(composite.encode("utf-8")).hexdigest()
+    return str(uuid.UUID(hex=sha256_hex[:32]))
 
 
 def _extract_repo_config_from_thread(thread: dict[str, Any]) -> dict[str, str] | None:

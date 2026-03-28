@@ -1,7 +1,10 @@
 from typing import Any
+from urllib.parse import urlparse, urlunparse
 
 import requests
 from markdownify import markdownify
+
+from ..utils.url_validation import validate_url
 
 
 def fetch_url(url: str, timeout: int = 30) -> dict[str, Any]:
@@ -29,11 +32,25 @@ def fetch_url(url: str, timeout: int = 30) -> dict[str, Any]:
     3. Synthesize this into a clear, natural language response
     4. NEVER show the raw markdown to the user unless specifically requested
     """
+    result = validate_url(url, allowed_schemes=frozenset({"http", "https"}))
+    if result is None:
+        return {"error": "URL blocked by SSRF protection", "url": url}
+
+    resolved_ip, port, hostname = result
+
+    # Connect to the resolved IP directly to prevent DNS-rebinding attacks
+    parsed = urlparse(url)
+    pinned_netloc = f"{resolved_ip}:{port}" if port not in (80, 443) else resolved_ip
+    pinned_url = urlunparse(parsed._replace(netloc=pinned_netloc))
+
     try:
         response = requests.get(
-            url,
+            pinned_url,
             timeout=timeout,
-            headers={"User-Agent": "Mozilla/5.0 (compatible; DeepAgents/1.0)"},
+            headers={
+                "User-Agent": "Mozilla/5.0 (compatible; DeepAgents/1.0)",
+                "Host": hostname,
+            },
         )
         response.raise_for_status()
 
@@ -41,10 +58,10 @@ def fetch_url(url: str, timeout: int = 30) -> dict[str, Any]:
         markdown_content = markdownify(response.text)
 
         return {
-            "url": str(response.url),
+            "url": url,
             "markdown_content": markdown_content,
             "status_code": response.status_code,
             "content_length": len(markdown_content),
         }
     except requests.exceptions.RequestException as e:
-        return {"error": f"Fetch URL error: {e!s}", "url": url}
+        return {"error": f"Fetch URL error: {type(e).__name__}", "url": url}
