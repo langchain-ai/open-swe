@@ -27,6 +27,16 @@ required_vars=(
 
 source .env
 
+langgraph_url="${LANGGRAPH_URL:-http://127.0.0.1:2024}"
+langgraph_health_url="${langgraph_url%/}/health"
+langgraph_host_port="${langgraph_url#http://}"
+langgraph_host_port="${langgraph_host_port#https://}"
+langgraph_host_port="${langgraph_host_port%%/*}"
+langgraph_port="${langgraph_host_port##*:}"
+if [[ "$langgraph_port" == "$langgraph_host_port" ]]; then
+  langgraph_port="2024"
+fi
+
 missing_vars=()
 for var_name in "${required_vars[@]}"; do
   if [[ -z "${!var_name:-}" ]]; then
@@ -124,5 +134,18 @@ if [[ "${SANDBOX_TYPE}" == "local" ]]; then
   echo "Warning: local sandbox runs commands directly on this machine."
 fi
 echo
+
+if curl -fsS --max-time 2 "${langgraph_health_url}" >/dev/null 2>&1; then
+  echo "LangGraph dev server is already running at ${langgraph_url}."
+  echo "Reusing the existing local server instead of starting a duplicate."
+  exit 0
+fi
+
+if lsof -nP -iTCP:"${langgraph_port}" -sTCP:LISTEN >/dev/null 2>&1; then
+  echo "Port ${langgraph_port} is already in use, but ${langgraph_health_url} did not respond."
+  echo "Stop the existing process or update LANGGRAPH_URL before starting the GitHub-only POC."
+  exit 1
+fi
+
 echo "Starting LangGraph dev server..."
 exec uv run langgraph dev --no-browser
