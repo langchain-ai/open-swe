@@ -84,8 +84,8 @@ async def open_pr_if_needed(
             logger.info("No commit_and_open_pr tool call found, skipping PR creation")
             return None
 
-        if "success" in pr_payload:
-            # Tool already handled commit/push/PR creation
+        if pr_payload.get("success"):
+            # Tool succeeded — commit/push/PR already handled
             return None
 
         pr_title = pr_payload.get("title", "feat: Open SWE PR")
