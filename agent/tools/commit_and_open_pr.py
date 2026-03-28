@@ -16,7 +16,7 @@ from ..utils.github import (
     create_github_pr,
     get_github_default_branch,
     git_add_all,
-    git_checkout_branch,
+    git_checkout_branch_from_start_point,
     git_commit,
     git_config_user,
     git_current_branch,
@@ -168,6 +168,7 @@ def commit_and_open_pr(
         branch_name = metadata.get("branch_name")
         current_branch = git_current_branch(sandbox_backend, repo_dir)
         target_branch = branch_name if branch_name else f"open-swe/{thread_id}"
+        base_branch = asyncio.run(get_github_default_branch(repo_owner, repo_name, github_token))
         if current_branch != target_branch:
             if branch_name:
                 # Existing branch — plain checkout, do not create or reset
@@ -178,7 +179,12 @@ def commit_and_open_pr(
                         "error": f"Failed to checkout branch {target_branch}",
                         "pr_url": None,
                     }
-            elif not git_checkout_branch(sandbox_backend, repo_dir, target_branch):
+            elif not git_checkout_branch_from_start_point(
+                sandbox_backend,
+                repo_dir,
+                target_branch,
+                f"origin/{base_branch}",
+            ):
                 return {
                     "success": False,
                     "error": f"Failed to checkout branch {target_branch}",
@@ -219,7 +225,6 @@ def commit_and_open_pr(
                 "pr_url": None,
             }
 
-        base_branch = asyncio.run(get_github_default_branch(repo_owner, repo_name, github_token))
         pr_url, _pr_number, pr_existing = asyncio.run(
             create_github_pr(
                 repo_owner=repo_owner,

@@ -27,7 +27,7 @@ from ..utils.github import (
     create_github_pr,
     get_github_default_branch,
     git_add_all,
-    git_checkout_branch,
+    git_checkout_branch_from_start_point,
     git_commit,
     git_config_user,
     git_current_branch,
@@ -131,6 +131,7 @@ async def open_pr_if_needed(
         branch_name = metadata.get("branch_name")
         current_branch = await asyncio.to_thread(git_current_branch, sandbox_backend, repo_dir)
         target_branch = branch_name if branch_name else f"open-swe/{thread_id}"
+        base_branch = await get_github_default_branch(repo_owner, repo_name, github_token)
 
         if current_branch != target_branch:
             if branch_name:
@@ -141,7 +142,11 @@ async def open_pr_if_needed(
                 )
             else:
                 await asyncio.to_thread(
-                    git_checkout_branch, sandbox_backend, repo_dir, target_branch
+                    git_checkout_branch_from_start_point,
+                    sandbox_backend,
+                    repo_dir,
+                    target_branch,
+                    f"origin/{base_branch}",
                 )
 
         await asyncio.to_thread(
@@ -159,7 +164,6 @@ async def open_pr_if_needed(
                 git_push, sandbox_backend, repo_dir, target_branch, github_token
             )
 
-            base_branch = await get_github_default_branch(repo_owner, repo_name, github_token)
             logger.info("Using base branch: %s", base_branch)
 
             await create_github_pr(

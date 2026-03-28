@@ -79,6 +79,23 @@ def git_checkout_branch(
     return fallback.exit_code == 0
 
 
+def git_checkout_branch_from_start_point(
+    sandbox_backend: SandboxBackendProtocol,
+    repo_dir: str,
+    branch: str,
+    start_point: str,
+) -> bool:
+    """Checkout a branch from a specific start point, resetting it if needed."""
+    safe_branch = shlex.quote(branch)
+    safe_start_point = shlex.quote(start_point)
+    result = _run_git(
+        sandbox_backend,
+        repo_dir,
+        f"git checkout -B {safe_branch} {safe_start_point}",
+    )
+    return result.exit_code == 0
+
+
 def git_config_user(
     sandbox_backend: SandboxBackendProtocol,
     repo_dir: str,
