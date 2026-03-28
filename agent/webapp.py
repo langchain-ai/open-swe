@@ -411,12 +411,15 @@ async def is_thread_active(thread_id: str) -> bool:
             status == "busy",
         )
     except Exception as e:  # noqa: BLE001
-        logger.warning(
-            "Failed to get thread status for %s: %s (type: %s) - assuming not active",
-            thread_id,
-            e,
-            type(e).__name__,
-        )
+        if _is_not_found_error(e):
+            logger.info("Thread %s does not exist yet; assuming not active", thread_id)
+        else:
+            logger.warning(
+                "Failed to get thread status for %s: %s (type: %s) - assuming not active",
+                thread_id,
+                e,
+                type(e).__name__,
+            )
         status = "idle"
     return status == "busy"
 

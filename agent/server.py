@@ -10,6 +10,63 @@ import warnings
 
 logger = logging.getLogger(__name__)
 
+
+def _is_local_poc_mode() -> bool:
+    return os.getenv("SANDBOX_TYPE") == "local" and not any(
+        os.getenv(key)
+        for key in (
+            "LANGSMITH_API_KEY",
+            "LANGSMITH_API_KEY_PROD",
+            "LANGSMITH_TENANT_ID_PROD",
+            "LANGSMITH_TRACING_PROJECT_ID_PROD",
+        )
+    )
+
+
+class _SuppressMessageFilter(logging.Filter):
+    def __init__(self, *substrings: str):
+        super().__init__()
+        self.substrings = substrings
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        message = record.getMessage()
+        return not all(substring in message for substring in self.substrings)
+
+
+if _is_local_poc_mode():
+    warnings.filterwarnings(
+        "ignore",
+        message=r".*langsmith\.sandbox is in alpha.*",
+        category=FutureWarning,
+    )
+    warnings.filterwarnings(
+        "ignore",
+        message=r".*Calling \.text\(\) as a method is deprecated.*",
+    )
+    warnings.filterwarnings(
+        "ignore",
+        message=r".*Pydantic serializer warnings:.*",
+    )
+    logging.getLogger("langsmith.client").addFilter(
+        _SuppressMessageFilter("Failed to send compressed multipart ingest:")
+    )
+    logging.getLogger("langgraph_api.timing.timer").addFilter(
+        _SuppressMessageFilter("Import for graph agent exceeded the expected startup time")
+    )
+    logging.getLogger("langgraph_api.server").addFilter(
+        _SuppressMessageFilter("GET /threads/", "404")
+    )
+    logging.getLogger("httpx").addFilter(
+        _SuppressMessageFilter(
+            "GET http://localhost:2024/threads/",
+            "404 Not Found",
+        )
+    )
+    logging.getLogger("langgraph_api.graph").addFilter(
+        _SuppressMessageFilter("Slow graph load. Accessing graph 'agent'")
+    )
+    logging.getLogger("watchfiles.main").setLevel(logging.WARNING)
+
 from langgraph.config import get_config
 from langgraph.graph.state import RunnableConfig
 from langgraph.pregel import Pregel

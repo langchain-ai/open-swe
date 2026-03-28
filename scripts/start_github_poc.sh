@@ -117,7 +117,11 @@ fi
 if [[ "${SANDBOX_TYPE}" == "local" ]]; then
   mkdir -p "${LOCAL_SANDBOX_ROOT_DIR}"
   if [[ -z "${LANGSMITH_API_KEY_PROD:-}" && -z "${LANGSMITH_TENANT_ID_PROD:-}" && -z "${LANGSMITH_TRACING_PROJECT_ID_PROD:-}" ]]; then
+    export LANGGRAPH_NO_VERSION_CHECK="1"
     export LANGCHAIN_TRACING_V2="false"
+    export LANGSMITH_TRACING_V2="false"
+    export LANGCHAIN_TRACING="false"
+    export LANGSMITH_TRACING="false"
     export PYTHONWARNINGS="${PYTHONWARNINGS:+${PYTHONWARNINGS},}ignore:API key must be provided when using hosted LangSmith API"
     echo "LangSmith tracing is disabled for this local POC because no LangSmith credentials are configured."
   fi
@@ -148,4 +152,8 @@ if lsof -nP -iTCP:"${langgraph_port}" -sTCP:LISTEN >/dev/null 2>&1; then
 fi
 
 echo "Starting LangGraph dev server..."
-exec uv run langgraph dev --no-browser
+langgraph_args=(uv run langgraph dev --no-browser)
+if [[ "${SANDBOX_TYPE}" == "local" ]]; then
+  langgraph_args+=(--no-reload)
+fi
+exec "${langgraph_args[@]}"

@@ -397,10 +397,11 @@ If you want the shortest path to a local demo, start with only:
 For the lowest-dependency local variant:
 
 - `SANDBOX_TYPE=local`
-- `LOCAL_SANDBOX_ROOT_DIR="../.open-swe-local-sandbox"` so the cloned target repo stays outside the `open-swe` source tree and does not trigger `langgraph dev` reloads
+- `LOCAL_SANDBOX_ROOT_DIR="${HOME}/.open-swe-local-sandbox"` so the cloned target repo stays outside your working tree and does not trigger `langgraph dev` reloads
 - `LLM_MODEL_ID="openai:gpt-5"` (or another OpenAI Responses model available on your account)
 - `OPENAI_API_KEY=...`
 - `LANGCHAIN_TRACING_V2="false"` unless you also configured LangSmith tracing credentials
+- the helper starts `langgraph dev --no-reload` in this local POC path, so sandbox activity stays quiet but code edits require a manual restart
 
 This skips LangSmith sandbox requirements entirely, but note that `local` runs commands directly on your machine and should only be used for local development.
 
