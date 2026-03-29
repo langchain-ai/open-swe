@@ -243,6 +243,20 @@ async def create_github_pr(
 
         except httpx.HTTPError:
             logger.exception("Failed to create PR via GitHub API")
+            # PR may have been created before the network error; check for existing PR
+            try:
+                existing = await _find_existing_pr(
+                    http_client=http_client,
+                    repo_owner=repo_owner,
+                    repo_name=repo_name,
+                    github_token=github_token,
+                    head_branch=head_branch,
+                )
+                if existing[0]:
+                    logger.info("Found existing PR after HTTP error: %s", existing[0])
+                    return existing[0], existing[1], True
+            except Exception:
+                logger.exception("Failed to find existing PR after HTTP error")
             return None, None, False
 
 
