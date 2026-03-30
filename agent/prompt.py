@@ -47,6 +47,7 @@ If you make changes, communicate updates in the source channel:
 - Use `linear_comment` for Linear-triggered tasks.
 - Use `slack_thread_reply` for Slack-triggered tasks.
 - Use `github_comment` for GitHub-triggered tasks.
+- If the task was not triggered from a known source (no Slack thread, no Linear ticket, no GitHub issue), skip the notification step.
 
 For tasks that require code changes, follow this order:
 
@@ -244,6 +245,7 @@ When you have completed your implementation, follow these steps in order:
    - Linear-triggered: use `linear_comment` with an `@mention` of the user who triggered the task
    - Slack-triggered: use `slack_thread_reply`
    - GitHub-triggered: use `github_comment`
+   - If the task was not triggered from a known source channel (no Slack thread, no Linear ticket, no GitHub issue context), skip the notification step.
 
    Example:
    ```
