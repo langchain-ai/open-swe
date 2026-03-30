@@ -8,6 +8,8 @@ import shlex
 import httpx
 from deepagents.backends.protocol import ExecuteResponse, SandboxBackendProtocol
 
+from agent.utils.http import get_http_client
+
 logger = logging.getLogger(__name__)
 
 # HTTP status codes
@@ -197,53 +199,53 @@ async def create_github_pr(
         repo_name,
     )
 
-    async with httpx.AsyncClient() as http_client:
-        try:
-            pr_response = await http_client.post(
-                f"https://api.github.com/repos/{repo_owner}/{repo_name}/pulls",
-                headers={
-                    "Authorization": f"Bearer {github_token}",
-                    "Accept": "application/vnd.github+json",
-                    "X-GitHub-Api-Version": "2022-11-28",
-                },
-                json=pr_payload,
+    http_client = get_http_client()
+    try:
+        pr_response = await http_client.post(
+            f"https://api.github.com/repos/{repo_owner}/{repo_name}/pulls",
+            headers={
+                "Authorization": f"Bearer {github_token}",
+                "Accept": "application/vnd.github+json",
+                "X-GitHub-Api-Version": "2022-11-28",
+            },
+            json=pr_payload,
+        )
+
+        pr_data = pr_response.json()
+
+        if pr_response.status_code == HTTP_CREATED:
+            pr_url = pr_data.get("html_url")
+            pr_number = pr_data.get("number")
+            logger.info("PR created successfully: %s", pr_url)
+            return pr_url, pr_number, False
+
+        if pr_response.status_code == HTTP_UNPROCESSABLE_ENTITY:
+            logger.error("GitHub API validation error (422): %s", pr_data.get("message"))
+            existing = await _find_existing_pr(
+                http_client=http_client,
+                repo_owner=repo_owner,
+                repo_name=repo_name,
+                github_token=github_token,
+                head_branch=head_branch,
+            )
+            if existing:
+                logger.info("Using existing PR for head branch: %s", existing[0])
+                return existing[0], existing[1], True
+        else:
+            logger.error(
+                "GitHub API error (%s): %s",
+                pr_response.status_code,
+                pr_data.get("message"),
             )
 
-            pr_data = pr_response.json()
+        if "errors" in pr_data:
+            logger.error("GitHub API errors detail: %s", pr_data.get("errors"))
 
-            if pr_response.status_code == HTTP_CREATED:
-                pr_url = pr_data.get("html_url")
-                pr_number = pr_data.get("number")
-                logger.info("PR created successfully: %s", pr_url)
-                return pr_url, pr_number, False
+        return None, None, False
 
-            if pr_response.status_code == HTTP_UNPROCESSABLE_ENTITY:
-                logger.error("GitHub API validation error (422): %s", pr_data.get("message"))
-                existing = await _find_existing_pr(
-                    http_client=http_client,
-                    repo_owner=repo_owner,
-                    repo_name=repo_name,
-                    github_token=github_token,
-                    head_branch=head_branch,
-                )
-                if existing:
-                    logger.info("Using existing PR for head branch: %s", existing[0])
-                    return existing[0], existing[1], True
-            else:
-                logger.error(
-                    "GitHub API error (%s): %s",
-                    pr_response.status_code,
-                    pr_data.get("message"),
-                )
-
-            if "errors" in pr_data:
-                logger.error("GitHub API errors detail: %s", pr_data.get("errors"))
-
-            return None, None, False
-
-        except httpx.HTTPError:
-            logger.exception("Failed to create PR via GitHub API")
-            return None, None, False
+    except httpx.HTTPError:
+        logger.exception("Failed to create PR via GitHub API")
+        return None, None, False
 
 
 async def _find_existing_pr(
@@ -292,27 +294,27 @@ async def get_github_default_branch(
         The default branch name (e.g., "main" or "master")
     """
     try:
-        async with httpx.AsyncClient() as http_client:
-            response = await http_client.get(
-                f"https://api.github.com/repos/{repo_owner}/{repo_name}",
-                headers={
-                    "Authorization": f"Bearer {github_token}",
-                    "Accept": "application/vnd.github+json",
-                    "X-GitHub-Api-Version": "2022-11-28",
-                },
-            )
+        http_client = get_http_client()
+        response = await http_client.get(
+            f"https://api.github.com/repos/{repo_owner}/{repo_name}",
+            headers={
+                "Authorization": f"Bearer {github_token}",
+                "Accept": "application/vnd.github+json",
+                "X-GitHub-Api-Version": "2022-11-28",
+            },
+        )
 
-            if response.status_code == 200:  # noqa: PLR2004
-                repo_data = response.json()
-                default_branch = repo_data.get("default_branch", "main")
-                logger.debug("Got default branch from GitHub API: %s", default_branch)
-                return default_branch
+        if response.status_code == 200:  # noqa: PLR2004
+            repo_data = response.json()
+            default_branch = repo_data.get("default_branch", "main")
+            logger.debug("Got default branch from GitHub API: %s", default_branch)
+            return default_branch
 
-            logger.warning(
-                "Failed to get repo info from GitHub API (%s), falling back to 'main'",
-                response.status_code,
-            )
-            return "main"
+        logger.warning(
+            "Failed to get repo info from GitHub API (%s), falling back to 'main'",
+            response.status_code,
+        )
+        return "main"
 
     except httpx.HTTPError:
         logger.exception("Failed to get default branch from GitHub API, falling back to 'main'")

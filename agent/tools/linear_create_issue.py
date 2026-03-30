@@ -1,10 +1,9 @@
-import asyncio
 from typing import Any
 
 from ..utils.linear import create_issue
 
 
-def linear_create_issue(
+async def linear_create_issue(
     team_id: str,
     title: str,
     description: str | None = None,
@@ -29,15 +28,13 @@ def linear_create_issue(
     Returns:
         Dictionary with 'success' bool and 'issue' details.
     """
-    return asyncio.run(
-        create_issue(
-            team_id=team_id,
-            title=title,
-            description=description,
-            assignee_id=assignee_id,
-            priority=priority,
-            state_id=state_id,
-            label_ids=label_ids,
-            project_id=project_id,
-        )
+    return await create_issue(
+        team_id=team_id,
+        title=title,
+        description=description,
+        assignee_id=assignee_id,
+        priority=priority,
+        state_id=state_id,
+        label_ids=label_ids,
+        project_id=project_id,
     )

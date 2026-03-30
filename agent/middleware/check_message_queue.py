@@ -10,11 +10,11 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-import httpx
 from langchain.agents.middleware import AgentState, before_model
 from langgraph.config import get_config, get_store
 from langgraph.runtime import Runtime
 
+from ..utils.http import get_http_client
 from ..utils.multimodal import fetch_image_block
 
 logger = logging.getLogger(__name__)
@@ -37,11 +37,11 @@ async def _build_blocks_from_payload(
 
     if not image_urls:
         return blocks
-    async with httpx.AsyncClient() as client:
-        for image_url in image_urls:
-            image_block = await fetch_image_block(image_url, client)
-            if image_block:
-                blocks.append(image_block)
+    client = get_http_client()
+    for image_url in image_urls:
+        image_block = await fetch_image_block(image_url, client)
+        if image_block:
+            blocks.append(image_block)
     return blocks
 
 

@@ -13,6 +13,7 @@ from typing import Any
 
 import httpx
 
+from agent.utils.http import get_http_client
 from agent.utils.langsmith import get_langsmith_trace_url
 
 logger = logging.getLogger(__name__)
@@ -193,22 +194,22 @@ async def post_slack_thread_reply(channel_id: str, thread_ts: str, text: str) ->
         "text": text,
     }
 
-    async with httpx.AsyncClient() as http_client:
-        try:
-            response = await http_client.post(
-                f"{SLACK_API_BASE_URL}/chat.postMessage",
-                headers=_slack_headers(),
-                json=payload,
-            )
-            response.raise_for_status()
-            data = response.json()
-            if not data.get("ok"):
-                logger.warning("Slack chat.postMessage failed: %s", data.get("error"))
-                return False
-            return True
-        except httpx.HTTPError:
-            logger.exception("Slack chat.postMessage request failed")
+    http_client = get_http_client()
+    try:
+        response = await http_client.post(
+            f"{SLACK_API_BASE_URL}/chat.postMessage",
+            headers=_slack_headers(),
+            json=payload,
+        )
+        response.raise_for_status()
+        data = response.json()
+        if not data.get("ok"):
+            logger.warning("Slack chat.postMessage failed: %s", data.get("error"))
             return False
+        return True
+    except httpx.HTTPError:
+        logger.exception("Slack chat.postMessage request failed")
+        return False
 
 
 async def post_slack_ephemeral_message(
@@ -226,22 +227,22 @@ async def post_slack_ephemeral_message(
     if thread_ts:
         payload["thread_ts"] = thread_ts
 
-    async with httpx.AsyncClient() as http_client:
-        try:
-            response = await http_client.post(
-                f"{SLACK_API_BASE_URL}/chat.postEphemeral",
-                headers=_slack_headers(),
-                json=payload,
-            )
-            response.raise_for_status()
-            data = response.json()
-            if not data.get("ok"):
-                logger.warning("Slack chat.postEphemeral failed: %s", data.get("error"))
-                return False
-            return True
-        except httpx.HTTPError:
-            logger.exception("Slack chat.postEphemeral request failed")
+    http_client = get_http_client()
+    try:
+        response = await http_client.post(
+            f"{SLACK_API_BASE_URL}/chat.postEphemeral",
+            headers=_slack_headers(),
+            json=payload,
+        )
+        response.raise_for_status()
+        data = response.json()
+        if not data.get("ok"):
+            logger.warning("Slack chat.postEphemeral failed: %s", data.get("error"))
             return False
+        return True
+    except httpx.HTTPError:
+        logger.exception("Slack chat.postEphemeral request failed")
+        return False
 
 
 async def add_slack_reaction(channel_id: str, message_ts: str, emoji: str = "eyes") -> bool:
@@ -255,24 +256,24 @@ async def add_slack_reaction(channel_id: str, message_ts: str, emoji: str = "eye
         "name": emoji,
     }
 
-    async with httpx.AsyncClient() as http_client:
-        try:
-            response = await http_client.post(
-                f"{SLACK_API_BASE_URL}/reactions.add",
-                headers=_slack_headers(),
-                json=payload,
-            )
-            response.raise_for_status()
-            data = response.json()
-            if data.get("ok"):
-                return True
-            if data.get("error") == "already_reacted":
-                return True
-            logger.warning("Slack reactions.add failed: %s", data.get("error"))
-            return False
-        except httpx.HTTPError:
-            logger.exception("Slack reactions.add request failed")
-            return False
+    http_client = get_http_client()
+    try:
+        response = await http_client.post(
+            f"{SLACK_API_BASE_URL}/reactions.add",
+            headers=_slack_headers(),
+            json=payload,
+        )
+        response.raise_for_status()
+        data = response.json()
+        if data.get("ok"):
+            return True
+        if data.get("error") == "already_reacted":
+            return True
+        logger.warning("Slack reactions.add failed: %s", data.get("error"))
+        return False
+    except httpx.HTTPError:
+        logger.exception("Slack reactions.add request failed")
+        return False
 
 
 async def get_slack_user_info(user_id: str) -> dict[str, Any] | None:
@@ -280,23 +281,23 @@ async def get_slack_user_info(user_id: str) -> dict[str, Any] | None:
     if not SLACK_BOT_TOKEN:
         return None
 
-    async with httpx.AsyncClient() as http_client:
-        try:
-            response = await http_client.get(
-                f"{SLACK_API_BASE_URL}/users.info",
-                headers=_slack_headers(),
-                params={"user": user_id},
-            )
-            response.raise_for_status()
-            data = response.json()
-            if not data.get("ok"):
-                logger.warning("Slack users.info failed: %s", data.get("error"))
-                return None
-            user = data.get("user")
-            if isinstance(user, dict):
-                return user
-        except httpx.HTTPError:
-            logger.exception("Slack users.info request failed")
+    http_client = get_http_client()
+    try:
+        response = await http_client.get(
+            f"{SLACK_API_BASE_URL}/users.info",
+            headers=_slack_headers(),
+            params={"user": user_id},
+        )
+        response.raise_for_status()
+        data = response.json()
+        if not data.get("ok"):
+            logger.warning("Slack users.info failed: %s", data.get("error"))
+            return None
+        user = data.get("user")
+        if isinstance(user, dict):
+            return user
+    except httpx.HTTPError:
+        logger.exception("Slack users.info request failed")
     return None
 
 
@@ -328,38 +329,36 @@ async def fetch_slack_thread_messages(channel_id: str, thread_ts: str) -> list[d
     messages: list[dict[str, Any]] = []
     cursor: str | None = None
 
-    async with httpx.AsyncClient() as http_client:
-        while True:
-            params: dict[str, str | int] = {"channel": channel_id, "ts": thread_ts, "limit": 200}
-            if cursor:
-                params["cursor"] = cursor
+    http_client = get_http_client()
+    while True:
+        params: dict[str, str | int] = {"channel": channel_id, "ts": thread_ts, "limit": 200}
+        if cursor:
+            params["cursor"] = cursor
 
-            try:
-                response = await http_client.get(
-                    f"{SLACK_API_BASE_URL}/conversations.replies",
-                    headers=_slack_headers(),
-                    params=params,
-                )
-                response.raise_for_status()
-                payload = response.json()
-            except httpx.HTTPError:
-                logger.exception("Slack conversations.replies request failed")
-                break
-
-            if not payload.get("ok"):
-                logger.warning("Slack conversations.replies failed: %s", payload.get("error"))
-                break
-
-            batch = payload.get("messages", [])
-            if isinstance(batch, list):
-                messages.extend(item for item in batch if isinstance(item, dict))
-
-            response_metadata = payload.get("response_metadata", {})
-            cursor = (
-                response_metadata.get("next_cursor") if isinstance(response_metadata, dict) else ""
+        try:
+            response = await http_client.get(
+                f"{SLACK_API_BASE_URL}/conversations.replies",
+                headers=_slack_headers(),
+                params=params,
             )
-            if not cursor:
-                break
+            response.raise_for_status()
+            payload = response.json()
+        except httpx.HTTPError:
+            logger.exception("Slack conversations.replies request failed")
+            break
+
+        if not payload.get("ok"):
+            logger.warning("Slack conversations.replies failed: %s", payload.get("error"))
+            break
+
+        batch = payload.get("messages", [])
+        if isinstance(batch, list):
+            messages.extend(item for item in batch if isinstance(item, dict))
+
+        response_metadata = payload.get("response_metadata", {})
+        cursor = response_metadata.get("next_cursor") if isinstance(response_metadata, dict) else ""
+        if not cursor:
+            break
 
     messages.sort(key=lambda item: _parse_ts(item.get("ts")))
     return messages

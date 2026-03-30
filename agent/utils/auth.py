@@ -17,6 +17,7 @@ from ..encryption import encrypt_token
 from .github_app import get_github_app_installation_token
 from .github_token import get_github_token_from_thread
 from .github_user_email_map import GITHUB_USER_EMAIL_MAP
+from .http import get_http_client
 from .linear import comment_on_linear_issue
 from .slack import post_slack_ephemeral_message, post_slack_thread_reply
 
@@ -101,25 +102,25 @@ async def get_ls_user_id_from_email(email: str) -> dict[str, str | None]:
 
     url = f"{LANGSMITH_API_URL}/api/v1/workspaces/current/members/active"
 
-    async with httpx.AsyncClient() as client:
-        try:
-            response = await client.get(
-                url,
-                headers={"X-API-Key": LANGSMITH_API_KEY},
-                params={"emails": [email]},
-            )
-            response.raise_for_status()
-            members = response.json()
+    http_client = get_http_client()
+    try:
+        response = await http_client.get(
+            url,
+            headers={"X-API-Key": LANGSMITH_API_KEY},
+            params={"emails": [email]},
+        )
+        response.raise_for_status()
+        members = response.json()
 
-            if members and len(members) > 0:
-                member = members[0]
-                return {
-                    "ls_user_id": member.get("ls_user_id"),
-                    "tenant_id": member.get("tenant_id"),
-                }
-        except Exception as e:
-            logger.exception("Error getting LangSmith user info for email: %s", e)
-        return {"ls_user_id": None, "tenant_id": None}
+        if members and len(members) > 0:
+            member = members[0]
+            return {
+                "ls_user_id": member.get("ls_user_id"),
+                "tenant_id": member.get("tenant_id"),
+            }
+    except Exception as e:
+        logger.exception("Error getting LangSmith user info for email: %s", e)
+    return {"ls_user_id": None, "tenant_id": None}
 
 
 async def get_github_token_for_user(ls_user_id: str, tenant_id: str) -> dict[str, Any]:
@@ -146,23 +147,23 @@ async def get_github_token_for_user(ls_user_id: str, tenant_id: str) -> dict[str
             "ls_user_id": ls_user_id,
         }
 
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                f"{LANGSMITH_HOST_API_URL}/v2/auth/authenticate",
-                json=payload,
-                headers=headers,
-            )
-            response.raise_for_status()
-            response_data = response.json()
+        client = get_http_client()
+        response = await client.post(
+            f"{LANGSMITH_HOST_API_URL}/v2/auth/authenticate",
+            json=payload,
+            headers=headers,
+        )
+        response.raise_for_status()
+        response_data = response.json()
 
-            token = response_data.get("token")
-            auth_url = response_data.get("url")
+        token = response_data.get("token")
+        auth_url = response_data.get("url")
 
-            if token:
-                return {"token": token}
-            if auth_url:
-                return {"auth_url": auth_url}
-            return {"error": f"Unexpected auth result: {response_data}"}
+        if token:
+            return {"token": token}
+        if auth_url:
+            return {"auth_url": auth_url}
+        return {"error": f"Unexpected auth result: {response_data}"}
 
     except httpx.HTTPStatusError as e:
         logger.error("GitHub auth API HTTP error: %s - %s", e.response.status_code, e.response.text)

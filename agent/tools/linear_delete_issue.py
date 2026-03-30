@@ -1,10 +1,9 @@
-import asyncio
 from typing import Any
 
 from ..utils.linear import delete_issue
 
 
-def linear_delete_issue(issue_id: str) -> dict[str, Any]:
+async def linear_delete_issue(issue_id: str) -> dict[str, Any]:
     """Delete a Linear issue.
 
     Args:
@@ -13,4 +12,4 @@ def linear_delete_issue(issue_id: str) -> dict[str, Any]:
     Returns:
         Dictionary with 'success' bool.
     """
-    return asyncio.run(delete_issue(issue_id))
+    return await delete_issue(issue_id)
