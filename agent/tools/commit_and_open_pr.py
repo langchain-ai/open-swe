@@ -81,7 +81,11 @@ def _run_blocking_git_ops(
     if push_result.exit_code != 0:
         return {"error": f"Git push failed: {push_result.output.strip()}", "pr_url": None}
 
-    return {"target_branch": target_branch, "github_token": github_token, "user_identity": user_identity}
+    return {
+        "target_branch": target_branch,
+        "github_token": github_token,
+        "user_identity": user_identity,
+    }
 
 
 async def commit_and_open_pr(
