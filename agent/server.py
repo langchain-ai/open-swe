@@ -409,6 +409,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
     tools = [
         http_request,
         fetch_url,
+        web_search,
         list_pr_reviews,
         get_pr_review,
         create_pr_review,

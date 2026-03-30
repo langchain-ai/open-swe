@@ -1143,7 +1143,7 @@ _SUPPORTED_GH_EVENTS = frozenset(
     ]
 )
 _SUPPORTED_GH_ISSUE_ACTIONS = frozenset(["edited", "opened", "reopened"])
-_SUPPORTED_GH_PR_ACTIONS = frozenset(["ready_for_review"])
+_SUPPORTED_GH_PR_ACTIONS = frozenset(["ready_for_review", "opened"])
 
 
 def _build_github_issue_comments_text(comments: list[dict[str, Any]]) -> str:
@@ -1402,6 +1402,10 @@ async def process_github_pr_ready_for_review(payload: dict[str, Any]) -> None:
     pr_body = pr.get("body", "") or ""
     github_login = pr.get("user", {}).get("login", "")
     branch_name = pr.get("head", {}).get("ref", "")
+
+    if pr.get("draft"):
+        logger.info("Ignoring draft PR #%s, will review when marked ready", pr_number)
+        return
 
     if not pr_number:
         logger.warning("No PR number found in ready_for_review payload, skipping")
