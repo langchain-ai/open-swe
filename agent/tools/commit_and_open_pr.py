@@ -143,6 +143,13 @@ def commit_and_open_pr(
         user_identity = resolve_triggering_user_identity(config, github_token)
         pr_body = add_pr_collaboration_note(body, user_identity)
 
+        has_uncommitted_changes = git_has_uncommitted_changes(sandbox_backend, repo_dir)
+        git_fetch_origin(sandbox_backend, repo_dir)
+        has_unpushed_commits = git_has_unpushed_commits(sandbox_backend, repo_dir)
+
+        if not (has_uncommitted_changes or has_unpushed_commits):
+            return {"success": False, "error": "No changes detected", "pr_url": None}
+
         installation_token = asyncio.run(get_github_app_installation_token())
         if not installation_token:
             return {
@@ -150,13 +157,6 @@ def commit_and_open_pr(
                 "error": "Failed to get GitHub App installation token",
                 "pr_url": None,
             }
-
-        has_uncommitted_changes = git_has_uncommitted_changes(sandbox_backend, repo_dir)
-        git_fetch_origin(sandbox_backend, repo_dir)
-        has_unpushed_commits = git_has_unpushed_commits(sandbox_backend, repo_dir)
-
-        if not (has_uncommitted_changes or has_unpushed_commits):
-            return {"success": False, "error": "No changes detected", "pr_url": None}
 
         metadata = config.get("metadata", {})
         branch_name = metadata.get("branch_name")
