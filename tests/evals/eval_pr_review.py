@@ -79,9 +79,7 @@ async def fetch_commit_diff(pr_url: str, commit_id: str) -> str:
     return ""
 
 
-def build_review_prompt(
-    pr_url: str, pr_title: str, pr_body: str = "", commit_id: str = ""
-) -> str:
+def build_review_prompt(pr_url: str, pr_title: str, pr_body: str = "", commit_id: str = "") -> str:
     """Build review prompt matching process_github_pr_ready_for_review in webapp.py exactly."""
     parts = pr_url.rstrip("/").split("/")
     owner, repo = parts[-4], parts[-3]
