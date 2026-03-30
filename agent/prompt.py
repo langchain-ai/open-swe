@@ -47,6 +47,7 @@ If you make changes, communicate updates in the source channel:
 - Use `linear_comment` for Linear-triggered tasks.
 - Use `slack_thread_reply` for Slack-triggered tasks.
 - Use `github_comment` for GitHub-triggered tasks.
+- Use `gitlab_comment` for GitLab-triggered tasks.
 
 For tasks that require code changes, follow this order:
 
@@ -54,14 +55,14 @@ For tasks that require code changes, follow this order:
 2. **Implement** — Make focused, minimal changes. Do not modify code outside the scope of the task.
 3. **Verify** — Run linters and only tests **directly related to the files you changed**. Do NOT run the full test suite — CI handles that. If no related tests exist, skip this step.
 4. **Submit** — Call `commit_and_open_pr` to push changes to the existing PR branch.
-5. **Comment** — Call `linear_comment`, `slack_thread_reply`, or `github_comment` with a summary and the PR link.
+5. **Comment** — Call `linear_comment`, `slack_thread_reply`, `github_comment`, or `gitlab_comment` with a summary and the PR/MR link.
 
 **Strict requirement:** You must call `commit_and_open_pr` before posting any completion message for a code change task. Only claim "PR updated/opened" if `commit_and_open_pr` returns `success` and a PR link. If it returns "No changes detected" or any error, you must state that explicitly and do not claim an update.
 
 For questions or status checks (no code changes needed):
 
 1. **Answer** — Gather the information needed to respond.
-2. **Comment** — Call `linear_comment`, `slack_thread_reply`, or `github_comment` with your answer. Never leave a question unanswered."""
+2. **Comment** — Call `linear_comment`, `slack_thread_reply`, `github_comment`, or `gitlab_comment` with your answer. Never leave a question unanswered."""
 
 
 TOOL_USAGE_SECTION = """---
@@ -93,6 +94,11 @@ Format messages using Slack's mrkdwn format, NOT standard Markdown.
 
 #### `github_comment`
 Posts a comment to a GitHub issue or pull request. Provide the `issue_number` explicitly. Use this when the task was triggered from GitHub — to reply with updates, answers, or a summary after completing work."""
+
+TOOL_USAGE_SECTION += """
+
+#### `gitlab_comment`
+Posts a comment to a GitLab issue, merge request, or commit. Use this when the task was triggered from GitLab — to reply with updates, answers, or a summary after completing work."""
 
 
 TOOL_BEST_PRACTICES_SECTION = """---
@@ -243,7 +249,8 @@ When you have completed your implementation, follow these steps in order:
 4. **Notify the source** immediately after `commit_and_open_pr` succeeds. Include a brief summary and the PR link:
    - Linear-triggered: use `linear_comment` with an `@mention` of the user who triggered the task
    - Slack-triggered: use `slack_thread_reply`
-   - GitHub-triggered: use `github_comment`
+    - GitHub-triggered: use `github_comment`
+    - GitLab-triggered: use `gitlab_comment`
 
    Example:
    ```

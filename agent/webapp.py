@@ -35,6 +35,11 @@ from .utils.github_comments import (
 )
 from .utils.github_token import get_github_token_from_thread
 from .utils.github_user_email_map import GITHUB_USER_EMAIL_MAP
+from .utils.gitlab_comments import (
+    OPEN_SWE_TAGS as GITLAB_OPEN_SWE_TAGS,
+    extract_gitlab_repo_config,
+    verify_gitlab_webhook_secret,
+)
 from .utils.linear import post_linear_trace_comment
 from .utils.linear_team_repo_map import LINEAR_TEAM_TO_REPO
 from .utils.multimodal import dedupe_urls, extract_image_urls, fetch_image_block
@@ -58,6 +63,7 @@ app = FastAPI()
 
 LINEAR_WEBHOOK_SECRET = os.environ.get("LINEAR_WEBHOOK_SECRET", "")
 GITHUB_WEBHOOK_SECRET = os.environ.get("GITHUB_WEBHOOK_SECRET", "")
+GITLAB_WEBHOOK_SECRET = os.environ.get("GITLAB_WEBHOOK_SECRET", "")
 SLACK_SIGNING_SECRET = os.environ.get("SLACK_SIGNING_SECRET", "")
 SLACK_BOT_USER_ID = os.environ.get("SLACK_BOT_USER_ID", "")
 SLACK_BOT_USERNAME = os.environ.get("SLACK_BOT_USERNAME", "")
@@ -253,6 +259,65 @@ def generate_thread_id_from_github_issue(issue_id: str) -> str:
     return (
         f"{hash_bytes[:8]}-{hash_bytes[8:12]}-{hash_bytes[12:16]}-"
         f"{hash_bytes[16:20]}-{hash_bytes[20:32]}"
+    )
+
+
+def generate_thread_id_from_gitlab_issue(project_id: int | str, issue_iid: int | str) -> str:
+    """Generate a deterministic thread ID from a GitLab issue IID."""
+    hash_bytes = hashlib.sha256(f"gitlab-issue:{project_id}:{issue_iid}".encode()).hexdigest()
+    return (
+        f"{hash_bytes[:8]}-{hash_bytes[8:12]}-{hash_bytes[12:16]}-"
+        f"{hash_bytes[16:20]}-{hash_bytes[20:32]}"
+    )
+
+
+def generate_thread_id_from_gitlab_merge_request(project_id: int | str, mr_iid: int | str) -> str:
+    """Generate a deterministic thread ID from a GitLab merge request IID."""
+    hash_bytes = hashlib.sha256(f"gitlab-mr:{project_id}:{mr_iid}".encode()).hexdigest()
+    return (
+        f"{hash_bytes[:8]}-{hash_bytes[8:12]}-{hash_bytes[12:16]}-"
+        f"{hash_bytes[16:20]}-{hash_bytes[20:32]}"
+    )
+
+
+def generate_thread_id_from_gitlab_commit(project_id: int | str, commit_sha: str) -> str:
+    """Generate a deterministic thread ID from a GitLab commit SHA."""
+    hash_bytes = hashlib.sha256(f"gitlab-commit:{project_id}:{commit_sha}".encode()).hexdigest()
+    return (
+        f"{hash_bytes[:8]}-{hash_bytes[8:12]}-{hash_bytes[12:16]}-"
+        f"{hash_bytes[16:20]}-{hash_bytes[20:32]}"
+    )
+
+
+def _coerce_gitlab_iid(value: Any) -> int | str | None:
+    """Normalize GitLab issue/MR IID values when present."""
+    if value in (None, ""):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return None
+        if stripped.isdigit():
+            return int(stripped)
+        return stripped
+    return None
+
+
+def _extract_gitlab_issue_iid(payload: dict[str, Any]) -> int | str | None:
+    """Extract a GitLab issue IID from note payload variants."""
+    issue = payload.get("issue", {})
+    object_attributes = payload.get("object_attributes", {})
+    return _coerce_gitlab_iid(issue.get("iid") or object_attributes.get("noteable_iid"))
+
+
+def _extract_gitlab_merge_request_iid(payload: dict[str, Any]) -> int | str | None:
+    """Extract a GitLab MR IID from note payload variants."""
+    merge_request = payload.get("merge_request", {})
+    object_attributes = payload.get("object_attributes", {})
+    return _coerce_gitlab_iid(
+        merge_request.get("iid") or object_attributes.get("noteable_iid")
     )
 
 
@@ -1087,6 +1152,178 @@ async def slack_webhook(request: Request, background_tasks: BackgroundTasks) -> 
 async def slack_webhook_verify() -> dict[str, str]:
     """Verify endpoint for Slack webhook setup."""
     return {"status": "ok", "message": "Slack webhook endpoint is active"}
+
+
+async def process_gitlab_note(payload: dict[str, Any]) -> None:
+    """Process a GitLab issue or merge request note mentioning @openswe."""
+    repo_config = extract_gitlab_repo_config(payload)
+    object_attributes = payload.get("object_attributes", {})
+    noteable_type = object_attributes.get("noteable_type", "")
+    note_body = object_attributes.get("note", "")
+    user = payload.get("user", {})
+    username = user.get("username") or user.get("name") or "GitLab user"
+    project = payload.get("project", {})
+    project_id = project.get("id", "")
+
+    if noteable_type == "Issue":
+        issue = payload.get("issue", {})
+        issue_iid = _extract_gitlab_issue_iid(payload)
+        if not issue_iid:
+            logger.warning(
+                "Missing GitLab issue IID in webhook payload: keys(issue)=%s keys(object_attributes)=%s",
+                sorted(issue.keys()),
+                sorted(object_attributes.keys()),
+            )
+            return
+        thread_id = generate_thread_id_from_gitlab_issue(project_id, issue_iid)
+        prompt = (
+            "Please work on the following GitLab issue.\n\n"
+            f"## Repository: {repo_config.get('owner')}/{repo_config.get('name')}\n\n"
+            f"## Triggered by: {username}\n\n"
+            f"## GitLab Issue: #{issue_iid}\n\n"
+            f"## Title: {issue.get('title', 'No title')}\n\n"
+            f"## Description:\n{issue.get('description') or 'No description'}\n\n"
+            f"## Latest Note Request\n{note_body}\n\n"
+            "When you need to communicate on GitLab, use `gitlab_comment`."
+        )
+        configurable = {
+            "source": "gitlab",
+            "repo": repo_config,
+            "gitlab_issue": {
+                "iid": issue_iid,
+                "title": issue.get("title", ""),
+                "url": issue.get("url", "") or object_attributes.get("url", ""),
+            },
+        }
+    elif noteable_type == "MergeRequest":
+        merge_request = payload.get("merge_request", {})
+        mr_iid = _extract_gitlab_merge_request_iid(payload)
+        if not mr_iid:
+            logger.warning(
+                "Missing GitLab merge request IID in webhook payload: keys(merge_request)=%s keys(object_attributes)=%s",
+                sorted(merge_request.keys()),
+                sorted(object_attributes.keys()),
+            )
+            return
+        thread_id = generate_thread_id_from_gitlab_merge_request(project_id, mr_iid)
+        prompt = (
+            "You've been tagged in GitLab merge request comments. Please resolve them.\n\n"
+            f"MR: {merge_request.get('url', object_attributes.get('url', ''))}\n\n"
+            f"## Repository: {repo_config.get('owner')}/{repo_config.get('name')}\n\n"
+            f"## Triggered by: {username}\n\n"
+            f"## Latest Note Request\n{note_body}\n\n"
+            "If code changes are needed, call `commit_and_open_pr` to push them and open or update the merge request.\n"
+            "Always call `gitlab_comment` before finishing."
+        )
+        configurable = {
+            "source": "gitlab",
+            "repo": repo_config,
+            "gitlab_merge_request": {
+                "iid": mr_iid,
+                "title": merge_request.get("title", ""),
+                "url": merge_request.get("url", "") or object_attributes.get("url", ""),
+            },
+        }
+    elif noteable_type == "Commit":
+        commit = payload.get("commit", {})
+        commit_sha = str(commit.get("id") or object_attributes.get("commit_id") or "").strip()
+        if not commit_sha:
+            logger.warning(
+                "Missing GitLab commit SHA in webhook payload: keys(commit)=%s keys(object_attributes)=%s",
+                sorted(commit.keys()),
+                sorted(object_attributes.keys()),
+            )
+            return
+        thread_id = generate_thread_id_from_gitlab_commit(project_id, commit_sha)
+        prompt = (
+            "Please work on the following GitLab commit comment request.\n\n"
+            f"## Repository: {repo_config.get('owner')}/{repo_config.get('name')}\n\n"
+            f"## Triggered by: {username}\n\n"
+            f"## GitLab Commit: `{commit_sha}`\n\n"
+            f"## Commit Title: {commit.get('title', 'No title')}\n\n"
+            f"## Commit Message:\n{commit.get('message') or 'No message'}\n\n"
+            f"## Latest Note Request\n{note_body}\n\n"
+            "When you need to communicate on GitLab, use `gitlab_comment`."
+        )
+        configurable = {
+            "source": "gitlab",
+            "repo": repo_config,
+            "gitlab_commit": {
+                "sha": commit_sha,
+                "title": commit.get("title", ""),
+                "url": commit.get("url", "") or object_attributes.get("url", ""),
+            },
+        }
+    else:
+        logger.info("Ignoring unsupported GitLab noteable type: %s", noteable_type)
+        return
+
+    logger.info(
+        "Processing GitLab note: type=%s project_id=%s repo=%s/%s thread_id=%s",
+        noteable_type,
+        project_id,
+        repo_config.get("owner"),
+        repo_config.get("name"),
+        thread_id,
+    )
+    thread_active = await is_thread_active(thread_id)
+    if thread_active:
+        logger.info("GitLab thread %s is active, queueing follow-up note", thread_id)
+        await queue_message_for_thread(thread_id, prompt)
+        return
+
+    langgraph_client = get_client(url=LANGGRAPH_URL)
+    logger.info("Creating LangGraph run for GitLab thread %s", thread_id)
+    await langgraph_client.runs.create(
+        thread_id,
+        "agent",
+        input={"messages": [{"role": "user", "content": prompt}]},
+        config={"configurable": configurable, "metadata": _AGENT_VERSION_METADATA},
+        if_not_exists="create",
+    )
+    logger.info("LangGraph run created for GitLab thread %s", thread_id)
+
+
+@app.post("/webhooks/gitlab")
+async def gitlab_webhook(request: Request, background_tasks: BackgroundTasks) -> dict[str, str]:
+    """Handle GitLab note webhooks for issue and merge request comments."""
+    body = await request.body()
+    token = request.headers.get("X-Gitlab-Token", "")
+    if not verify_gitlab_webhook_secret(token, GITLAB_WEBHOOK_SECRET):
+        raise HTTPException(status_code=401, detail="Invalid signature")
+
+    try:
+        payload = json.loads(body)
+    except json.JSONDecodeError:
+        logger.exception("Failed to parse GitLab webhook JSON")
+        return {"status": "error", "message": "Invalid JSON"}
+
+    if payload.get("object_kind") != "note":
+        return {"status": "ignored", "reason": "Not a note event"}
+
+    object_attributes = payload.get("object_attributes", {})
+    if object_attributes.get("action") and object_attributes.get("action") != "create":
+        return {"status": "ignored", "reason": "Only note create actions are supported"}
+
+    noteable_type = str(object_attributes.get("noteable_type", ""))
+    if noteable_type not in {"Issue", "MergeRequest", "Commit"}:
+        return {
+            "status": "ignored",
+            "reason": f"Unsupported noteable_type: {noteable_type or '<missing>'}",
+        }
+
+    note_body = str(object_attributes.get("note", ""))
+    if not any(tag in note_body.lower() for tag in GITLAB_OPEN_SWE_TAGS):
+        return {"status": "ignored", "reason": "Note does not mention @openswe or @open-swe"}
+
+    background_tasks.add_task(process_gitlab_note, payload)
+    return {"status": "accepted", "message": "Processing GitLab note event"}
+
+
+@app.get("/webhooks/gitlab")
+async def gitlab_webhook_verify() -> dict[str, str]:
+    """Verify endpoint for GitLab webhook setup."""
+    return {"status": "ok", "message": "GitLab webhook endpoint is active"}
 
 
 @app.get("/health")

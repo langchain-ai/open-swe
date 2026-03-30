@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import shlex
+from urllib.parse import urlparse
 
 import httpx
 from deepagents.backends.protocol import ExecuteResponse, SandboxBackendProtocol
@@ -116,13 +117,21 @@ def git_get_remote_url(sandbox_backend: SandboxBackendProtocol, repo_dir: str) -
 _CRED_FILE_PATH = "/tmp/.git-credentials"
 
 
-def setup_git_credentials(sandbox_backend: SandboxBackendProtocol, github_token: str) -> None:
-    """Write GitHub credentials to a temporary file using the sandbox write API.
+def setup_git_credentials(
+    sandbox_backend: SandboxBackendProtocol,
+    github_token: str,
+    remote_url: str = "https://github.com",
+    username: str = "git",
+) -> None:
+    """Write git credentials to a temporary file using the sandbox write API.
 
     The write API sends content in the HTTP body (not via a shell command),
     so the token never appears in shell history or process listings.
     """
-    sandbox_backend.write(_CRED_FILE_PATH, f"https://git:{github_token}@github.com\n")
+    parsed = urlparse(remote_url)
+    scheme = parsed.scheme or "https"
+    netloc = parsed.netloc or parsed.path.split("/", 1)[0]
+    sandbox_backend.write(_CRED_FILE_PATH, f"{scheme}://{username}:{github_token}@{netloc}\n")
     sandbox_backend.execute(f"chmod 600 {_CRED_FILE_PATH}")
 
 
@@ -146,12 +155,15 @@ def git_push(
     repo_dir: str,
     branch: str,
     github_token: str | None = None,
+    *,
+    remote_url: str = "https://github.com",
+    username: str = "git",
 ) -> ExecuteResponse:
     """Push the branch to origin, using a token if needed."""
     safe_branch = shlex.quote(branch)
     if not github_token:
         return _run_git(sandbox_backend, repo_dir, f"git push origin {safe_branch}")
-    setup_git_credentials(sandbox_backend, github_token)
+    setup_git_credentials(sandbox_backend, github_token, remote_url=remote_url, username=username)
     try:
         return _git_with_credentials(sandbox_backend, repo_dir, f"push origin {safe_branch}")
     finally:

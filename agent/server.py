@@ -41,6 +41,7 @@ from .tools import (
     fetch_url,
     get_pr_review,
     github_comment,
+    gitlab_comment,
     http_request,
     linear_comment,
     linear_create_issue,
@@ -58,6 +59,7 @@ from .tools import (
 )
 from .utils.auth import resolve_github_token
 from .utils.model import make_model
+from .utils.scm import get_clone_url, get_git_credential_username, get_scm_provider
 from .utils.sandbox import create_sandbox
 
 client = get_client()
@@ -79,19 +81,38 @@ from .utils.sandbox_paths import aresolve_repo_dir, aresolve_sandbox_work_dir
 from .utils.sandbox_state import SANDBOX_BACKENDS, get_sandbox_id_from_metadata
 
 
+def _resolved_sandbox_id(sandbox_backend: SandboxBackendProtocol, thread_id: str) -> str:
+    sandbox_id = getattr(sandbox_backend, "id", None)
+    if isinstance(sandbox_id, str) and sandbox_id and sandbox_id != SANDBOX_CREATING:
+        return sandbox_id
+    return f"local-{thread_id}"
+
+
+async def _persist_sandbox_metadata(
+    thread_id: str,
+    sandbox_backend: SandboxBackendProtocol,
+    *,
+    repo_dir: str | None = None,
+) -> None:
+    metadata: dict[str, str] = {"sandbox_id": _resolved_sandbox_id(sandbox_backend, thread_id)}
+    if repo_dir:
+        metadata["repo_dir"] = repo_dir
+    await client.threads.update(thread_id=thread_id, metadata=metadata)
+
+
 async def _clone_or_pull_repo_in_sandbox(  # noqa: PLR0915
     sandbox_backend: SandboxBackendProtocol,
     owner: str,
     repo: str,
     github_token: str | None = None,
 ) -> str:
-    """Clone a GitHub repo into the sandbox, or pull if it already exists.
+    """Clone a git repo into the sandbox, or pull if it already exists.
 
     Args:
         sandbox_backend: The sandbox backend to execute commands in (LangSmithBackend)
-        owner: GitHub repo owner
-        repo: GitHub repo name
-        github_token: GitHub access token (from agent auth or env var)
+        owner: Repository owner / namespace
+        repo: Repository name
+        github_token: Source control access token
 
     Returns:
         Path to the cloned/updated repo directory
@@ -101,13 +122,16 @@ async def _clone_or_pull_repo_in_sandbox(  # noqa: PLR0915
 
     token = github_token
     if not token:
-        msg = "No GitHub token provided"
+        msg = "No source control token provided"
         logger.error(msg)
         raise ValueError(msg)
 
+    repo_config = {"owner": owner, "name": repo}
+    scm_provider = get_scm_provider(repo_config)
     work_dir = await aresolve_sandbox_work_dir(sandbox_backend)
     repo_dir = await aresolve_repo_dir(sandbox_backend, repo)
-    clean_url = f"https://github.com/{owner}/{repo}.git"
+    clean_url = get_clone_url(owner, repo, repo_config)
+    credential_username = get_git_credential_username(scm_provider)
     cred_helper_arg = f"-c credential.helper='store --file={_CRED_FILE_PATH}'"
     safe_repo_dir = shlex.quote(repo_dir)
     safe_clean_url = shlex.quote(clean_url)
@@ -140,7 +164,14 @@ async def _clone_or_pull_repo_in_sandbox(  # noqa: PLR0915
 
         logger.info("Repo is clean, pulling latest changes from %s/%s", owner, repo)
 
-        await loop.run_in_executor(None, setup_git_credentials, sandbox_backend, token)
+        await loop.run_in_executor(
+            None,
+            setup_git_credentials,
+            sandbox_backend,
+            token,
+            clean_url,
+            credential_username,
+        )
         try:
             pull_result = await loop.run_in_executor(
                 None,
@@ -164,7 +195,14 @@ async def _clone_or_pull_repo_in_sandbox(  # noqa: PLR0915
         return repo_dir
 
     logger.info("Cloning repo %s/%s to %s", owner, repo, repo_dir)
-    await loop.run_in_executor(None, setup_git_credentials, sandbox_backend, token)
+    await loop.run_in_executor(
+        None,
+        setup_git_credentials,
+        sandbox_backend,
+        token,
+        clean_url,
+        credential_username,
+    )
     try:
         result = await loop.run_in_executor(
             None,
@@ -209,6 +247,7 @@ async def _recreate_sandbox(
         repo_dir = await _clone_or_pull_repo_in_sandbox(
             sandbox_backend, repo_owner, repo_name, github_token
         )
+        await _persist_sandbox_metadata(thread_id, sandbox_backend, repo_dir=repo_dir)
     except Exception:
         logger.exception("Failed to recreate sandbox after connection failure")
         await client.threads.update(thread_id=thread_id, metadata={"sandbox_id": None})
@@ -247,6 +286,7 @@ def graph_loaded_for_execution(config: RunnableConfig) -> bool:
 
 
 DEFAULT_LLM_MODEL_ID = "anthropic:claude-opus-4-6"
+DEFAULT_LLM_MAX_TOKENS = 12_000
 DEFAULT_RECURSION_LIMIT = 1_000
 
 
@@ -274,8 +314,16 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
     sandbox_id = await get_sandbox_id_from_metadata(thread_id)
 
     if sandbox_id == SANDBOX_CREATING and not sandbox_backend:
-        logger.info("Sandbox creation in progress, waiting...")
-        sandbox_id = await _wait_for_sandbox_id(thread_id)
+        if os.environ.get("SANDBOX_TYPE", "langsmith") == "local":
+            logger.info(
+                "Found stale local sandbox creation sentinel for thread %s; resetting metadata",
+                thread_id,
+            )
+            await client.threads.update(thread_id=thread_id, metadata={"sandbox_id": None})
+            sandbox_id = None
+        else:
+            logger.info("Sandbox creation in progress, waiting...")
+            sandbox_id = await _wait_for_sandbox_id(thread_id)
 
     if sandbox_backend:
         logger.info("Using cached sandbox backend for thread %s", thread_id)
@@ -307,7 +355,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
         try:
             # Create sandbox without context manager cleanup (sandbox persists)
             sandbox_backend = await asyncio.to_thread(create_sandbox)
-            logger.info("Sandbox created: %s", sandbox_backend.id)
+            logger.info("Sandbox created: %s", _resolved_sandbox_id(sandbox_backend, thread_id))
 
             repo_dir = None
             if repo_owner and repo_name:
@@ -317,10 +365,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
                 )
                 logger.info("Repo cloned to %s", repo_dir)
 
-                await client.threads.update(
-                    thread_id=thread_id,
-                    metadata={"repo_dir": repo_dir},
-                )
+            await _persist_sandbox_metadata(thread_id, sandbox_backend, repo_dir=repo_dir)
         except Exception:
             logger.exception("Failed to create sandbox or clone repo")
             try:
@@ -345,7 +390,11 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
 
             try:
                 sandbox_backend = await asyncio.to_thread(create_sandbox)
-                logger.info("New sandbox created: %s", sandbox_backend.id)
+                logger.info(
+                    "New sandbox created: %s",
+                    _resolved_sandbox_id(sandbox_backend, thread_id),
+                )
+                await _persist_sandbox_metadata(thread_id, sandbox_backend)
             except Exception:
                 logger.exception("Failed to create replacement sandbox")
                 await client.threads.update(thread_id=thread_id, metadata={"sandbox_id": None})
@@ -400,13 +449,14 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
     linear_project_id = linear_issue.get("linear_project_id", "")
     linear_issue_number = linear_issue.get("linear_issue_number", "")
     agents_md = await read_agents_md_in_sandbox(sandbox_backend, repo_dir)
+    max_tokens = int(os.environ.get("LLM_MAX_TOKENS", DEFAULT_LLM_MAX_TOKENS))
 
     logger.info("Returning agent with sandbox for thread %s", thread_id)
     return create_deep_agent(
         model=make_model(
             os.environ.get("LLM_MODEL_ID", DEFAULT_LLM_MODEL_ID),
             temperature=0,
-            max_tokens=20_000,
+            max_tokens=max_tokens,
         ),
         system_prompt=construct_system_prompt(
             repo_dir,
@@ -428,6 +478,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
             linear_update_issue,
             slack_thread_reply,
             github_comment,
+            gitlab_comment,
             list_pr_reviews,
             get_pr_review,
             create_pr_review,
