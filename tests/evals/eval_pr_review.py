@@ -7,6 +7,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+import httpx
 import pytest
 from anthropic import Anthropic
 from dotenv import load_dotenv
