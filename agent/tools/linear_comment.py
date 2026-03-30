@@ -1,10 +1,9 @@
-import asyncio
 from typing import Any
 
 from ..utils.linear import comment_on_linear_issue
 
 
-def linear_comment(comment_body: str, ticket_id: str) -> dict[str, Any]:
+async def linear_comment(comment_body: str, ticket_id: str) -> dict[str, Any]:
     """Post a comment to a Linear issue.
 
     Use this tool to communicate progress and completion to stakeholders on Linear.
@@ -22,5 +21,5 @@ def linear_comment(comment_body: str, ticket_id: str) -> dict[str, Any]:
     Returns:
         Dictionary with 'success' (bool) key.
     """
-    success = asyncio.run(comment_on_linear_issue(ticket_id, comment_body))
+    success = await comment_on_linear_issue(ticket_id, comment_body)
     return {"success": success}

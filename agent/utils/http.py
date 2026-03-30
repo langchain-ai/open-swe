@@ -27,7 +27,8 @@ def get_http_client(base_url: str = "", timeout: float = 10.0) -> httpx.AsyncCli
     """
     if base_url not in _CLIENT_CACHE:
         if len(_CLIENT_CACHE) >= _CLIENT_CACHE_MAX_SIZE:
-            _CLIENT_CACHE.popitem()
+            oldest_key = next(iter(_CLIENT_CACHE))
+            _CLIENT_CACHE.pop(oldest_key)
         _CLIENT_CACHE[base_url] = _create_http_client(base_url, timeout)
 
     cached_client = _CLIENT_CACHE[base_url]

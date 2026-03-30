@@ -310,11 +310,11 @@ async def get_github_default_branch(
             logger.debug("Got default branch from GitHub API: %s", default_branch)
             return default_branch
 
-            logger.warning(
-                "Failed to get repo info from GitHub API (%s), falling back to 'main'",
-                response.status_code,
-            )
-            return "main"
+        logger.warning(
+            "Failed to get repo info from GitHub API (%s), falling back to 'main'",
+            response.status_code,
+        )
+        return "main"
 
     except httpx.HTTPError:
         logger.exception("Failed to get default branch from GitHub API, falling back to 'main'")

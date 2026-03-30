@@ -1,4 +1,3 @@
-import asyncio
 from typing import Any
 
 from langgraph.config import get_config
@@ -7,7 +6,7 @@ from ..utils.github_app import get_github_app_installation_token
 from ..utils.github_comments import post_github_comment
 
 
-def github_comment(message: str, issue_number: int) -> dict[str, Any]:
+async def github_comment(message: str, issue_number: int) -> dict[str, Any]:
     """Post a comment to a GitHub issue or pull request."""
     config = get_config()
     configurable = config.get("configurable", {})
@@ -20,9 +19,9 @@ def github_comment(message: str, issue_number: int) -> dict[str, Any]:
     if not message.strip():
         return {"success": False, "error": "Message cannot be empty"}
 
-    token = asyncio.run(get_github_app_installation_token())
+    token = await get_github_app_installation_token()
     if not token:
         return {"success": False, "error": "Failed to get GitHub App installation token"}
 
-    success = asyncio.run(post_github_comment(repo_config, issue_number, message, token=token))
+    success = await post_github_comment(repo_config, issue_number, message, token=token)
     return {"success": success}

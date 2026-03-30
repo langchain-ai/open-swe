@@ -1,4 +1,3 @@
-import asyncio
 from typing import Any
 
 from langgraph.config import get_config
@@ -6,7 +5,7 @@ from langgraph.config import get_config
 from ..utils.slack import post_slack_thread_reply
 
 
-def slack_thread_reply(message: str) -> dict[str, Any]:
+async def slack_thread_reply(message: str) -> dict[str, Any]:
     """Post a message to the current Slack thread.
 
     Format messages using Slack's mrkdwn format, NOT standard Markdown.
@@ -28,5 +27,5 @@ def slack_thread_reply(message: str) -> dict[str, Any]:
     if not message.strip():
         return {"success": False, "error": "Message cannot be empty"}
 
-    success = asyncio.run(post_slack_thread_reply(channel_id, thread_ts, message))
+    success = await post_slack_thread_reply(channel_id, thread_ts, message)
     return {"success": success}

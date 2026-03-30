@@ -1,10 +1,9 @@
-import asyncio
 from typing import Any
 
 from ..utils.linear import update_issue
 
 
-def linear_update_issue(
+async def linear_update_issue(
     issue_id: str,
     title: str | None = None,
     description: str | None = None,
@@ -27,14 +26,12 @@ def linear_update_issue(
     Returns:
         Dictionary with 'success' bool and updated 'issue' details.
     """
-    return asyncio.run(
-        update_issue(
-            issue_id=issue_id,
-            title=title,
-            description=description,
-            assignee_id=assignee_id,
-            priority=priority,
-            state_id=state_id,
-            label_ids=label_ids,
-        )
+    return await update_issue(
+        issue_id=issue_id,
+        title=title,
+        description=description,
+        assignee_id=assignee_id,
+        priority=priority,
+        state_id=state_id,
+        label_ids=label_ids,
     )
