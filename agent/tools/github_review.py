@@ -240,6 +240,12 @@ def submit_pr_review(
     Returns:
         Dictionary with success status and the submitted review data.
     """
+    if event == "APPROVE":
+        return {
+            "success": False,
+            "error": "APPROVE is not allowed. If you think this PR should be approved, leave a COMMENT review stating that the PR looks good and should be approved.",
+        }
+
     repo_config = _get_repo_config()
     if not repo_config:
         return {"success": False, "error": "No repo config found"}
@@ -247,12 +253,6 @@ def submit_pr_review(
     token = asyncio.run(_get_token())
     if not token:
         return {"success": False, "error": "Failed to get GitHub App installation token"}
-
-    if event == "APPROVE":
-        return {
-            "success": False,
-            "error": "APPROVE is not allowed. If you think this PR should be approved, leave a COMMENT review stating that the PR looks good and should be approved.",
-        }
 
     url = f"{_repo_url(repo_config)}/pulls/{pull_number}/reviews/{review_id}/events"
     payload: dict[str, Any] = {"event": event}
