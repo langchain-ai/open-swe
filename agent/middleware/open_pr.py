@@ -36,6 +36,7 @@ from ..utils.github import (
     git_has_unpushed_commits,
     git_push,
 )
+from ..utils.github_app import get_github_app_installation_token
 from ..utils.github_token import get_github_token
 from ..utils.sandbox_paths import aresolve_repo_dir
 from ..utils.sandbox_state import get_sandbox_backend
@@ -98,6 +99,11 @@ async def open_pr_if_needed(
         pr_body = add_pr_collaboration_note(pr_body, user_identity)
         commit_message = add_user_coauthor_trailer(commit_message, user_identity)
 
+        installation_token = await get_github_app_installation_token()
+        if not installation_token:
+            logger.error("Failed to get GitHub App installation token for thread %s", thread_id)
+            return None
+
         if not thread_id:
             raise ValueError("No thread_id found in config")
 
@@ -154,23 +160,22 @@ async def open_pr_if_needed(
         await asyncio.to_thread(git_add_all, sandbox_backend, repo_dir)
         await asyncio.to_thread(git_commit, sandbox_backend, repo_dir, commit_message)
 
-        if github_token:
-            await asyncio.to_thread(
-                git_push, sandbox_backend, repo_dir, target_branch, github_token
-            )
+        await asyncio.to_thread(
+            git_push, sandbox_backend, repo_dir, target_branch, installation_token
+        )
 
-            base_branch = await get_github_default_branch(repo_owner, repo_name, github_token)
-            logger.info("Using base branch: %s", base_branch)
+        base_branch = await get_github_default_branch(repo_owner, repo_name, installation_token)
+        logger.info("Using base branch: %s", base_branch)
 
-            await create_github_pr(
-                repo_owner=repo_owner,
-                repo_name=repo_name,
-                github_token=github_token,
-                title=pr_title,
-                head_branch=target_branch,
-                base_branch=base_branch,
-                body=pr_body,
-            )
+        await create_github_pr(
+            repo_owner=repo_owner,
+            repo_name=repo_name,
+            github_token=installation_token,
+            title=pr_title,
+            head_branch=target_branch,
+            base_branch=base_branch,
+            body=pr_body,
+        )
 
         logger.info("After-agent middleware completed successfully")
 
