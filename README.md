@@ -144,6 +144,75 @@ This is an area where you can extend Open SWE for your org: add deterministic CI
 - **[Installation Guide](INSTALLATION.md)** — GitHub App creation, LangSmith, Linear/Slack/GitHub triggers, and production deployment
 - **[Customization Guide](CUSTOMIZATION.md)** — swap the sandbox, model, tools, triggers, system prompt, and middleware for your org
 
+## GitLab Configuration
+
+> [!NOTE]
+> Upstream Open SWE is GitHub-first. This workspace also supports GitLab-triggered tasks for internal deployments, including **Issue notes**, **Merge Request notes**, and **Commit notes**.
+
+If you want to run Open SWE against a self-hosted or LAN-only GitLab instance, add the following environment variables to your `.env`:
+
+```env
+SCM_PROVIDER="gitlab"
+GITLAB_URL="http://your-gitlab-host"
+GITLAB_TOKEN="glpat-..."
+GITLAB_WEBHOOK_SECRET="replace-with-random-secret"
+
+DEFAULT_REPO_OWNER="your-group-or-subgroup"
+DEFAULT_REPO_NAME="your-repo"
+
+SANDBOX_TYPE="local"
+LOCAL_SANDBOX_ROOT_DIR="/absolute/path/to/your/workspace-root"
+```
+
+Recommended companion settings for OpenAI-compatible oneapi / local model gateways:
+
+```env
+LLM_MODEL_ID="openai:gpt-4o"
+OPENAI_API_BASE="http://your-oneapi-host/v1"
+OPENAI_API_KEY="your-key"
+OPENAI_USE_RESPONSES_API="false"
+```
+
+### Required GitLab webhook
+
+Create a **Note Hook** in your GitLab project or group that points to:
+
+```text
+http://<your-open-swe-host>:2024/webhooks/gitlab
+```
+
+Use the same secret value as `GITLAB_WEBHOOK_SECRET`.
+
+Open SWE will only process new comments that:
+
+- are `note` events
+- are `create` actions
+- mention one of: `@openswe`, `@open-swe`, `@openswe-dev`
+
+### Supported GitLab trigger types
+
+- **Issue note** — ask the agent to work on an issue and reply back on the same issue
+- **Merge request note** — ask the agent to address review feedback and reply on the same merge request
+- **Commit note** — ask the agent to implement or inspect something from a commit discussion and reply on the same commit
+
+### Example GitLab comment
+
+```text
+@openswe 请处理这个需求：
+
+1. 为 java-demo 增加一个 /health-swe 接口
+2. 返回 JSON：{"status":"ok"}
+3. 补充对应测试
+4. 完成后把变更说明回复到当前讨论
+```
+
+### Notes for local/LAN deployments
+
+- If your Open SWE service is only reachable inside your LAN, GitLab only needs network access to that internal address; a public IP is not required.
+- For local sandbox mode, keep the target repo checked out under `LOCAL_SANDBOX_ROOT_DIR`, otherwise the agent cannot reuse the local working copy.
+- If the local repo has uncommitted changes, Open SWE may skip pulling from origin to avoid overwriting work.
+- GitLab webhook `200 accepted` only means the webhook was received. The actual task result should be checked in the Open SWE thread/run state or in the follow-up GitLab comment posted by the agent.
+
 ## License
 
 MIT

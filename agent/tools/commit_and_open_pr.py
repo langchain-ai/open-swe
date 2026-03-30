@@ -12,8 +12,6 @@ from ..utils.authorship import (
     resolve_triggering_user_identity,
 )
 from ..utils.github import (
-    create_github_pr,
-    get_github_default_branch,
     git_add_all,
     git_checkout_branch,
     git_commit,
@@ -25,6 +23,14 @@ from ..utils.github import (
     git_push,
 )
 from ..utils.github_token import get_github_token
+from ..utils.scm import (
+    create_review_request,
+    get_clone_url,
+    get_default_branch,
+    get_git_credential_username,
+    get_review_request_label,
+    get_scm_provider,
+)
 from ..utils.sandbox_paths import resolve_repo_dir
 from ..utils.sandbox_state import get_sandbox_backend_sync
 
@@ -36,7 +42,7 @@ def commit_and_open_pr(
     body: str,
     commit_message: str | None = None,
 ) -> dict[str, Any]:
-    """Commit all current changes and open a GitHub Pull Request.
+    """Commit all current changes and open a pull request or merge request.
 
     You MUST call this tool when you have completed your work and want to
     submit your changes for review. This is the final step in your workflow.
@@ -138,8 +144,12 @@ def commit_and_open_pr(
             return {"success": False, "error": "No sandbox found for thread", "pr_url": None}
 
         repo_dir = resolve_repo_dir(sandbox_backend, repo_name)
-        github_token = get_github_token()
-        user_identity = resolve_triggering_user_identity(config, github_token)
+        scm_provider = get_scm_provider(repo_config)
+        scm_token = get_github_token()
+        user_identity = resolve_triggering_user_identity(
+            config,
+            scm_token if scm_provider == "github" else None,
+        )
         pr_body = add_pr_collaboration_note(body, user_identity)
 
         has_uncommitted_changes = git_has_uncommitted_changes(sandbox_backend, repo_dir)
@@ -188,15 +198,23 @@ def commit_and_open_pr(
                     "pr_url": None,
                 }
 
-        if not github_token:
-            logger.error("commit_and_open_pr missing GitHub token for thread %s", thread_id)
+        if not scm_token:
+            logger.error("commit_and_open_pr missing source control token for thread %s", thread_id)
             return {
                 "success": False,
-                "error": "Missing GitHub token",
+                "error": "Missing source control token",
                 "pr_url": None,
             }
 
-        push_result = git_push(sandbox_backend, repo_dir, target_branch, github_token)
+        remote_url = get_clone_url(repo_owner, repo_name, repo_config)
+        push_result = git_push(
+            sandbox_backend,
+            repo_dir,
+            target_branch,
+            scm_token,
+            remote_url=remote_url,
+            username=get_git_credential_username(scm_provider),
+        )
         if push_result.exit_code != 0:
             return {
                 "success": False,
@@ -204,12 +222,13 @@ def commit_and_open_pr(
                 "pr_url": None,
             }
 
-        base_branch = asyncio.run(get_github_default_branch(repo_owner, repo_name, github_token))
+        base_branch = asyncio.run(get_default_branch(scm_provider, repo_owner, repo_name, scm_token))
         pr_url, _pr_number, pr_existing = asyncio.run(
-            create_github_pr(
+            create_review_request(
+                provider=scm_provider,
                 repo_owner=repo_owner,
                 repo_name=repo_name,
-                github_token=github_token,
+                token=scm_token,
                 title=title,
                 head_branch=target_branch,
                 base_branch=base_branch,
@@ -218,9 +237,10 @@ def commit_and_open_pr(
         )
 
         if not pr_url:
+            review_request_label = get_review_request_label(scm_provider)
             return {
                 "success": False,
-                "error": "Failed to create GitHub PR",
+                "error": f"Failed to create {review_request_label}",
                 "pr_url": None,
                 "pr_existing": False,
             }

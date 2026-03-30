@@ -18,6 +18,7 @@ from .github_app import get_github_app_installation_token
 from .github_token import get_github_token_from_thread
 from .github_user_email_map import GITHUB_USER_EMAIL_MAP
 from .linear import comment_on_linear_issue
+from .scm import get_scm_provider
 from .slack import post_slack_ephemeral_message, post_slack_thread_reply
 
 logger = logging.getLogger(__name__)
@@ -44,12 +45,21 @@ logger.debug(
 def is_bot_token_only_mode() -> bool:
     """Check if we're in bot-token-only mode.
 
-    This is the case when LANGSMITH_API_KEY_PROD is set (deployed) but neither
-    X_SERVICE_AUTH_JWT_SECRET nor USER_ID_API_KEY_MAP is configured, meaning we
-    can't resolve per-user GitHub OAuth tokens. In this mode the GitHub App
-    installation token is used for all git operations instead.
+    This is the case when per-user GitHub OAuth is unavailable but a GitHub App
+    installation token can be used instead. That includes deployed environments
+    with LangSmith configured but no service auth, as well as local development
+    where only the GitHub App env vars are set.
     """
-    return bool(LANGSMITH_API_KEY and not X_SERVICE_AUTH_JWT_SECRET and not USER_ID_API_KEY_MAP)
+    github_app_available = bool(
+        os.environ.get("GITHUB_APP_ID", "")
+        and os.environ.get("GITHUB_APP_PRIVATE_KEY", "")
+        and os.environ.get("GITHUB_APP_INSTALLATION_ID", "")
+    )
+    per_user_oauth_available = bool(
+        LANGSMITH_API_KEY and GITHUB_OAUTH_PROVIDER_ID and X_SERVICE_AUTH_JWT_SECRET
+    ) or bool(USER_ID_API_KEY_MAP)
+
+    return github_app_available and not per_user_oauth_available
 
 
 def _retry_instruction(source: str) -> str:
@@ -373,6 +383,14 @@ async def resolve_github_token(config: RunnableConfig, thread_id: str) -> tuple[
     Raises:
         RuntimeError: If source is missing or token resolution fails.
     """
+    provider = get_scm_provider(config.get("configurable", {}).get("repo", {}))
+    if provider == "gitlab":
+        gitlab_token = os.environ.get("GITLAB_TOKEN", "").strip()
+        if not gitlab_token:
+            raise RuntimeError("GitLab auth failed: GITLAB_TOKEN is not configured")
+        encrypted = await persist_encrypted_github_token(thread_id, gitlab_token)
+        return gitlab_token, encrypted
+
     if is_bot_token_only_mode():
         return await _resolve_bot_installation_token(thread_id)
 

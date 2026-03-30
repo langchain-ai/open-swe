@@ -11,6 +11,7 @@ from .github_review import (
     update_pr_review,
 )
 from .http_request import http_request
+from .gitlab_comment import gitlab_comment
 from .linear_comment import linear_comment
 from .linear_create_issue import linear_create_issue
 from .linear_delete_issue import linear_delete_issue
@@ -28,6 +29,7 @@ __all__ = [
     "fetch_url",
     "get_pr_review",
     "github_comment",
+    "gitlab_comment",
     "http_request",
     "linear_comment",
     "list_pr_review_comments",

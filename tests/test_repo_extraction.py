@@ -53,6 +53,15 @@ class TestExtractRepoFromText:
         result = extract_repo_from_text("repo:my-org/my-repo/")
         assert result == {"owner": "my-org", "name": "my-repo"}
 
+    def test_repo_syntax_supports_gitlab_subgroups(self) -> None:
+        result = extract_repo_from_text("repo:platform/frontend/test-swe")
+        assert result == {"owner": "platform/frontend", "name": "test-swe"}
+
+    def test_gitlab_url(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("GITLAB_URL", "http://gitlab.local")
+        result = extract_repo_from_text("check http://gitlab.local/platform/frontend/test-swe please")
+        assert result == {"owner": "platform/frontend", "name": "test-swe"}
+
 
 class TestLinearWebhookRepoOverride:
     """Test that the Linear webhook handler checks comment body for repo config first."""
