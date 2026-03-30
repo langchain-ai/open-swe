@@ -5,6 +5,7 @@ from langgraph.config import get_config
 
 from ..utils.github_app import get_github_app_installation_token
 from ..utils.github_comments import post_github_comment
+from ..utils.mode import is_eval_mode
 
 
 def github_comment(message: str, issue_number: int) -> dict[str, Any]:
@@ -20,7 +21,7 @@ def github_comment(message: str, issue_number: int) -> dict[str, Any]:
     if not message.strip():
         return {"success": False, "error": "Message cannot be empty"}
 
-    if configurable.get("eval_mode"):
+    if is_eval_mode():
         return {
             "success": True,
             "intercepted": True,

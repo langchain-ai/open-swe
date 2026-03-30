@@ -79,11 +79,29 @@ async def fetch_commit_diff(pr_url: str, commit_id: str) -> str:
     return ""
 
 
-def build_review_prompt(pr_url: str, pr_title: str, pr_body: str = "") -> str:
+def build_review_prompt(
+    pr_url: str, pr_title: str, pr_body: str = "", commit_id: str = ""
+) -> str:
     """Build review prompt matching process_github_pr_ready_for_review in webapp.py exactly."""
+    parts = pr_url.rstrip("/").split("/")
+    owner, repo = parts[-4], parts[-3]
+
     prompt = f"This PR has been marked ready for review.\n\nPR: {pr_url}\nTitle: {pr_title}\n"
     if pr_body:
         prompt += f"Description: {pr_body}\n"
+    if commit_id:
+        prompt += (
+            f"\n**IMPORTANT: Review at commit `{commit_id}`.**\n"
+            f"Before reviewing, you MUST fetch and checkout this exact commit. Run these commands in order:\n"
+            f"```\n"
+            f"cd /workspace/{repo}\n"
+            f"git remote set-url origin https://x-access-token:{GITHUB_PAT}@github.com/{owner}/{repo}.git\n"
+            f"git fetch origin {commit_id}\n"
+            f"git checkout {commit_id}\n"
+            f"```\n"
+            f"Do NOT proceed with the review until `git checkout {commit_id}` succeeds.\n"
+            f"Then review the diff with `git diff origin/main...HEAD`.\n"
+        )
     prompt += (
         "\n\nPlease review this PR thoroughly.\n\n"
         "IMPORTANT RULES:\n"
@@ -108,16 +126,33 @@ async def run_agent_on_pr(entry: dict[str, Any]) -> str:
     """Run the agent on a PR and return its output as a string."""
     client = get_client(url=LANGGRAPH_URL)
     thread_id = str(uuid.uuid4())
-    prompt = build_review_prompt(entry["pr_url"], entry["pr_title"], entry.get("pr_body", ""))
+    prompt = build_review_prompt(
+        entry["pr_url"], entry["pr_title"], entry.get("pr_body", ""), entry.get("commit_id", "")
+    )
+
+    # Create thread with PR ref + commit_id so server.py checks out the exact commit
+    pr_number = entry["pr_number"]
+    commit_id = entry.get("commit_id", "")
+    thread_metadata: dict[str, str] = {
+        "branch_name": f"refs/pull/{pr_number}/head",
+    }
+    if commit_id:
+        thread_metadata["commit_id"] = commit_id
+
+    await client.threads.create(
+        thread_id=thread_id,
+        if_exists="do_nothing",
+        metadata=thread_metadata,
+    )
 
     configurable = {
         "source": "github",
         "github_login": "aran-yogesh",
         "github_user_id": 0,
         "repo": entry["input"]["configurable"]["repo"],
-        "pr_number": entry["pr_number"],
+        "pr_number": pr_number,
         "review_mode": True,
-        "eval_mode": True,
+        "mode": "eval",
         "linear_issue": {
             "linear_project_id": "",
             "linear_issue_number": "",
@@ -169,40 +204,42 @@ async def run_agent_on_pr(entry: dict[str, Any]) -> str:
 # LLM-as-judge
 # ---------------------------------------------------------------------------
 
-JUDGE_PROMPT = """You are evaluating whether an AI agent correctly reviewed a pull request.
+JUDGE_PROMPT = """You are evaluating whether an AI agent caught the same issues that Devin flagged in a pull request review.
 
-## Expected Review (ground truth from Devin)
+## Expected Issues (ground truth from Devin)
 {expected}
 
 ## Agent's Actual Review
 {actual}
 
-Score on:
-1. Recall — did the agent catch the critical issues? (FULL / PARTIAL / MISS)
-2. Precision — did it add noise / false positives? (CLEAN / NOISY)
-3. Verdict — did the agent's verdict match the expected `overall_verdict` in the ground truth? (CORRECT / WRONG)
-   - The expected verdict is in the `overall_verdict` field of the Expected Review above.
-   - CORRECT means the agent used the same verdict type (REQUEST_CHANGES / COMMENT / APPROVE).
-   - Do NOT use your own judgment about what verdict was warranted — only compare against the expected.
-4. Final score — use exactly these rules:
-   - PASS: recall=FULL AND verdict=CORRECT
-   - PARTIAL: recall=PARTIAL (any verdict); OR recall=MISS but agent raised at least some observations (even if wrong findings); OR recall=FULL with verdict=WRONG
-   - FAIL: recall=MISS AND the agent's review is completely off-base with no relevant observations whatsoever
+## Instructions
 
-Respond as:
-RECALL: [FULL|PARTIAL|MISS]
-RECALL_REASON: ...
-PRECISION: [CLEAN|NOISY]
-VERDICT: [CORRECT|WRONG]
-FINAL_SCORE: [PASS|PARTIAL|FAIL]
-SUMMARY: one sentence"""
+The expected review contains an `issues` list. For each expected issue, determine whether the agent's review catches it.
+
+An issue counts as CAUGHT if the agent:
+- References the same file (exact path match), AND
+- Identifies the same conceptual bug or problem (doesn't need to match word-for-word, but must describe the same root cause)
+
+An issue counts as MISSED if the agent does not mention the file at all, or mentions the file but describes an unrelated problem.
+
+## Output format
+
+For each expected issue, output one line:
+
+ISSUE: [file path] — [CAUGHT|MISSED] — [one sentence reason]
+
+Then output:
+
+CAUGHT_COUNT: [number of CAUGHT issues]
+TOTAL_COUNT: [total number of expected issues]
+SUMMARY: [one sentence overall summary]"""
 
 
-async def llm_judge(expected: dict, actual: str) -> dict[str, str]:
+async def llm_judge(expected: dict, actual: str) -> dict[str, Any]:
     client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
     response = client.messages.create(
         model="claude-sonnet-4-6",
-        max_tokens=512,
+        max_tokens=1024,
         messages=[
             {
                 "role": "user",
@@ -215,17 +252,28 @@ async def llm_judge(expected: dict, actual: str) -> dict[str, str]:
     )
     text = response.content[0].text
 
-    def extract(key: str) -> str:
-        m = re.search(rf"{key}: (.+)", text)
-        return m.group(1).strip() if m else ""
+    # Parse counts
+    caught_match = re.search(r"^CAUGHT_COUNT: (\d+)", text, re.MULTILINE)
+    total_match = re.search(r"^TOTAL_COUNT: (\d+)", text, re.MULTILINE)
+    summary_match = re.search(r"^SUMMARY: (.+)", text, re.MULTILINE)
+
+    caught_count = int(caught_match.group(1)) if caught_match else 0
+    total_count = int(total_match.group(1)) if total_match else len(expected.get("issues", []))
+    summary = summary_match.group(1).strip() if summary_match else ""
+
+    percentage_passed = round((caught_count / total_count) * 100) if total_count > 0 else 0
+    result = "pass" if caught_count == total_count else "fail"
+
+    # Extract per-issue details
+    issue_lines = re.findall(r"^ISSUE: (.+)", text, re.MULTILINE)
 
     return {
-        "recall": extract("RECALL"),
-        "recall_reason": extract("RECALL_REASON"),
-        "precision": extract("PRECISION"),
-        "verdict": extract("VERDICT"),
-        "final_score": extract("FINAL_SCORE"),
-        "summary": extract("SUMMARY"),
+        "result": result,
+        "percentage_passed": percentage_passed,
+        "caught_count": caught_count,
+        "total_count": total_count,
+        "issues": issue_lines,
+        "summary": summary,
     }
 
 
@@ -263,7 +311,8 @@ async def test_pr_review(eval_entry: dict[str, Any]):
     )
     RESULTS_PATH.write_text(json.dumps(results, indent=2))
 
-    assert scores["final_score"] != "FAIL", (
+    assert scores["result"] == "pass", (
         f"PR #{eval_entry['pr_number']} ({eval_entry['id']}): {scores['summary']}\n"
-        f"recall={scores['recall']} | verdict={scores['verdict']}"
+        f"percentage_passed={scores['percentage_passed']}% "
+        f"({scores['caught_count']}/{scores['total_count']})"
     )
