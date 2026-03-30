@@ -7,7 +7,6 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-import httpx
 import pytest
 from anthropic import Anthropic
 from dotenv import load_dotenv
@@ -79,26 +78,19 @@ async def fetch_commit_diff(pr_url: str, commit_id: str) -> str:
     return ""
 
 
-def build_review_prompt(pr_url: str, pr_title: str, commit_id: str, diff: str) -> str:
-    prompt = (
-        f"This PR has been marked ready for review.\n\n"
-        f"PR: {pr_url}\n"
-        f"Title: {pr_title}\n"
-        f"Commit: {commit_id}\n\n"
-    )
-    if diff:
-        prompt += (
-            f"**PR Diff (exact changes at commit {commit_id[:12]}):**\n```diff\n{diff}\n```\n\n"
-        )
+def build_review_prompt(pr_url: str, pr_title: str, pr_body: str = "") -> str:
+    """Build review prompt matching process_github_pr_ready_for_review in webapp.py exactly."""
+    prompt = f"This PR has been marked ready for review.\n\nPR: {pr_url}\nTitle: {pr_title}\n"
+    if pr_body:
+        prompt += f"Description: {pr_body}\n"
     prompt += (
-        "Please review this PR thoroughly based on the diff above.\n\n"
+        "\n\nPlease review this PR thoroughly.\n\n"
         "IMPORTANT RULES:\n"
         "- REVIEW ONLY — do NOT write, edit, or commit any code\n"
         "- Use `create_pr_review` to submit your review — this is the ONLY comment you should leave\n"
         "- Do NOT call `github_comment` separately — the review body is your summary\n"
         "- Keep feedback concise: flag only real issues, skip style nits\n"
-        "- Inline comments should be short and actionable, not essays\n"
-        "- **The diff is the ground truth** — the sandbox files are from a later commit and may already have fixes applied. Review ONLY what is in the diff above, not what is on disk."
+        "- Inline comments should be short and actionable, not essays"
     )
     skill_content = _load_skill()
     if skill_content:
@@ -115,8 +107,7 @@ async def run_agent_on_pr(entry: dict[str, Any]) -> str:
     """Run the agent on a PR and return its output as a string."""
     client = get_client(url=LANGGRAPH_URL)
     thread_id = str(uuid.uuid4())
-    diff = await fetch_commit_diff(entry["pr_url"], entry["commit_id"])
-    prompt = build_review_prompt(entry["pr_url"], entry["pr_title"], entry["commit_id"], diff)
+    prompt = build_review_prompt(entry["pr_url"], entry["pr_title"], entry.get("pr_body", ""))
 
     configurable = {
         "source": "github",
