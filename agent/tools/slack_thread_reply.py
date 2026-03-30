@@ -2,7 +2,7 @@ from typing import Any
 
 from langgraph.config import get_config
 
-from ..utils.slack import post_slack_thread_reply
+from ..utils.slack import convert_mentions_to_slack_format, post_slack_thread_reply
 
 
 async def slack_thread_reply(message: str) -> dict[str, Any]:
@@ -11,7 +11,11 @@ async def slack_thread_reply(message: str) -> dict[str, Any]:
     Format messages using Slack's mrkdwn format, NOT standard Markdown.
     Key differences: *bold*, _italic_, ~strikethrough~, <url|link text>,
     bullet lists with "• ", ```code blocks```, > blockquotes.
-    Do NOT use **bold**, [link](url), or other standard Markdown syntax."""
+    Do NOT use **bold**, [link](url), or other standard Markdown syntax.
+
+    To mention/tag a user, use Slack's mention format: <@USER_ID>.
+    You can find user IDs in the conversation context (e.g. @Name(U06KD8BFY95)).
+    Example: <@U06KD8BFY95> will tag that user in the message."""
     config = get_config()
     configurable = config.get("configurable", {})
     slack_thread = configurable.get("slack_thread", {})
@@ -28,4 +32,6 @@ async def slack_thread_reply(message: str) -> dict[str, Any]:
         return {"success": False, "error": "Message cannot be empty"}
 
     success = await post_slack_thread_reply(channel_id, thread_ts, message)
+    message = convert_mentions_to_slack_format(message)
+    success = asyncio.run(post_slack_thread_reply(channel_id, thread_ts, message))
     return {"success": success}

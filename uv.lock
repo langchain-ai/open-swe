@@ -687,6 +687,24 @@ wheels = [
 ]
 
 [[package]]
+name = "exa-py"
+version = "2.10.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "httpcore" },
+    { name = "httpx" },
+    { name = "openai" },
+    { name = "pydantic" },
+    { name = "python-dotenv" },
+    { name = "requests" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/fb/bb/23c9f78edbf0e0d656839be7346a2f77b9caaae8cc3cb301012c46fd7dc5/exa_py-2.10.1.tar.gz", hash = "sha256:731958c2befc5fc82f031c93cfe7b3d55dc3b0e1bf32f83ec34d32a65ee31ba1", size = 53826, upload-time = "2026-03-25T00:50:49.286Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/fc/8d/0665263aa8d51ef8e2a3955e2b56496add4879730451961b09610bbc7036/exa_py-2.10.1-py3-none-any.whl", hash = "sha256:e2174c932764fff747e84e9e6d0637eaa4a6503556014df73a3427f42cc9d6a7", size = 72270, upload-time = "2026-03-25T00:50:47.721Z" },
+]
+
+[[package]]
 name = "fastapi"
 version = "0.128.3"
 source = { registry = "https://pypi.org/simple" }
@@ -1765,6 +1783,7 @@ source = { editable = "." }
 dependencies = [
     { name = "cryptography" },
     { name = "deepagents" },
+    { name = "exa-py" },
     { name = "fastapi" },
     { name = "httpx" },
     { name = "langchain" },
@@ -1793,6 +1812,7 @@ dev = [
 requires-dist = [
     { name = "cryptography", specifier = ">=41.0.0" },
     { name = "deepagents", specifier = ">=0.4.3" },
+    { name = "exa-py", specifier = ">=2.10.1" },
     { name = "fastapi", specifier = ">=0.104.0" },
     { name = "httpx", specifier = ">=0.25.0" },
     { name = "langchain", specifier = ">=1.2.9" },

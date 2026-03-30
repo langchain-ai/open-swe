@@ -4,6 +4,13 @@ from typing import Any
 
 from langgraph.config import get_config
 
+from ..utils.authorship import (
+    OPEN_SWE_BOT_EMAIL,
+    OPEN_SWE_BOT_NAME,
+    add_pr_collaboration_note,
+    add_user_coauthor_trailer,
+    resolve_triggering_user_identity,
+)
 from ..utils.github import (
     create_github_pr,
     get_github_default_branch,
@@ -180,6 +187,18 @@ async def commit_and_open_pr(
         sandbox_backend = await get_sandbox_backend(thread_id)
         if not sandbox_backend:
             return {"success": False, "error": "No sandbox found for thread", "pr_url": None}
+
+        repo_dir = resolve_repo_dir(sandbox_backend, repo_name)
+        github_token = get_github_token()
+        user_identity = resolve_triggering_user_identity(config, github_token)
+        pr_body = add_pr_collaboration_note(body, user_identity)
+
+        has_uncommitted_changes = git_has_uncommitted_changes(sandbox_backend, repo_dir)
+        git_fetch_origin(sandbox_backend, repo_dir)
+        has_unpushed_commits = git_has_unpushed_commits(sandbox_backend, repo_dir)
+
+        if not (has_uncommitted_changes or has_unpushed_commits):
+            return {"success": False, "error": "No changes detected", "pr_url": None}
 
         metadata = config.get("metadata", {})
         branch_name = metadata.get("branch_name")
