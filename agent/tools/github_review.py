@@ -39,6 +39,9 @@ def list_pr_reviews(pull_number: int) -> dict[str, Any]:
     if not repo_config:
         return {"success": False, "error": "No repo config found"}
 
+    if is_eval_mode():
+        return {"success": True, "intercepted": True, "reviews": []}
+
     token = asyncio.run(_get_token())
     if not token:
         return {"success": False, "error": "Failed to get GitHub App installation token"}
@@ -63,6 +66,9 @@ def get_pr_review(pull_number: int, review_id: int) -> dict[str, Any]:
     repo_config = _get_repo_config()
     if not repo_config:
         return {"success": False, "error": "No repo config found"}
+
+    if is_eval_mode():
+        return {"success": True, "intercepted": True, "review": {}}
 
     token = asyncio.run(_get_token())
     if not token:
@@ -173,6 +179,9 @@ def update_pr_review(
     if not repo_config:
         return {"success": False, "error": "No repo config found"}
 
+    if is_eval_mode():
+        return {"success": True, "intercepted": True, "review": {"body": body}}
+
     token = asyncio.run(_get_token())
     if not token:
         return {"success": False, "error": "Failed to get GitHub App installation token"}
@@ -210,6 +219,9 @@ def dismiss_pr_review(
     repo_config = _get_repo_config()
     if not repo_config:
         return {"success": False, "error": "No repo config found"}
+
+    if is_eval_mode():
+        return {"success": True, "intercepted": True, "review": {"message": message}}
 
     token = asyncio.run(_get_token())
     if not token:
@@ -306,6 +318,9 @@ def list_pr_review_comments(
     repo_config = _get_repo_config()
     if not repo_config:
         return {"success": False, "error": "No repo config found"}
+
+    if is_eval_mode():
+        return {"success": True, "intercepted": True, "comments": []}
 
     token = asyncio.run(_get_token())
     if not token:

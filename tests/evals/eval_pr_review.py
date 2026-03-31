@@ -7,7 +7,6 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-import httpx
 import pytest
 from anthropic import Anthropic
 from dotenv import load_dotenv
@@ -19,10 +18,7 @@ load_dotenv(Path(__file__).parent.parent.parent / ".env")
 LANGGRAPH_URL = os.environ.get("LANGGRAPH_URL") or os.environ.get("LANGGRAPH_URL_PROD")
 GITHUB_PAT = os.environ.get("GITHUB_PAT", "")
 DATASET_PATH = Path(__file__).parent / "dataset.json"
-DIFFS_DIR = Path(__file__).parent / "diffs"
 RESULTS_PATH = Path(__file__).parent / "eval_results.json"
-
-DIFFS_DIR.mkdir(exist_ok=True)
 
 pytestmark = pytest.mark.langsmith
 
@@ -56,29 +52,6 @@ def _load_skill() -> str:
         return ""
 
 
-async def fetch_commit_diff(pr_url: str, commit_id: str) -> str:
-    """Fetch the diff for an exact commit SHA, using local cache if available."""
-    cache_file = DIFFS_DIR / f"{commit_id}.diff"
-    if cache_file.exists():
-        return cache_file.read_text()
-
-    parts = pr_url.rstrip("/").split("/")
-    owner, repo = parts[-4], parts[-3]
-    url = f"https://api.github.com/repos/{owner}/{repo}/commits/{commit_id}"
-    headers = {
-        "Authorization": f"Bearer {GITHUB_PAT}",
-        "Accept": "application/vnd.github.v3.diff",
-        "X-GitHub-Api-Version": "2022-11-28",
-    }
-    async with httpx.AsyncClient(follow_redirects=True, timeout=30) as client:
-        response = await client.get(url, headers=headers)
-    if response.status_code == 200:
-        diff = response.text
-        cache_file.write_text(diff)
-        return diff
-    return ""
-
-
 def build_review_prompt(
     pr_url: str,
     pr_title: str,
@@ -103,8 +76,6 @@ def build_review_prompt(
             f"\n**IMPORTANT: Review at commit `{commit_id}`.**\n"
             f"Before reviewing, you MUST fetch and checkout this exact commit. Run these commands in order:\n"
             f"```\n"
-            f"cd /workspace/{repo}\n"
-            f"git remote set-url origin https://x-access-token:{GITHUB_PAT}@github.com/{owner}/{repo}.git\n"
             f"git fetch origin {commit_id}\n"
             f"git checkout {commit_id}\n"
             f"{diff_cmd}\n"
@@ -145,20 +116,7 @@ async def run_agent_on_pr(entry: dict[str, Any]) -> str:
         entry.get("base_commit", ""),
     )
 
-    # Create thread with PR ref + commit_id so server.py checks out the exact commit
     pr_number = entry["pr_number"]
-    commit_id = entry.get("commit_id", "")
-    thread_metadata: dict[str, str] = {
-        "branch_name": f"refs/pull/{pr_number}/head",
-    }
-    if commit_id:
-        thread_metadata["commit_id"] = commit_id
-
-    await client.threads.create(
-        thread_id=thread_id,
-        if_exists="do_nothing",
-        metadata=thread_metadata,
-    )
 
     configurable = {
         "source": "github",
@@ -212,7 +170,15 @@ async def run_agent_on_pr(entry: dict[str, Any]) -> str:
                 except (json.JSONDecodeError, TypeError):
                     pass
 
-    return intercepted_review or agent_output
+    output = intercepted_review or agent_output
+    return _redact_secrets(output)
+
+
+def _redact_secrets(text: str) -> str:
+    """Remove sensitive tokens from text before logging."""
+    if GITHUB_PAT:
+        text = text.replace(GITHUB_PAT, "***")
+    return text
 
 
 # ---------------------------------------------------------------------------
