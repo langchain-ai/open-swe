@@ -1,3 +1,5 @@
+from langchain_core.messages import SystemMessage
+
 from .utils.github_comments import UNTRUSTED_GITHUB_COMMENT_OPEN_TAG
 
 WORKING_ENV_SECTION = """---
@@ -257,10 +259,8 @@ When you have completed your implementation, follow these steps in order:
 Always call `commit_and_open_pr` followed by the appropriate reply tool once implementation is complete and code quality checks pass."""
 
 
-SYSTEM_PROMPT = (
-    WORKING_ENV_SECTION
-    + FILE_MANAGEMENT_SECTION
-    + TASK_OVERVIEW_SECTION
+_STATIC_PROMPT = (
+    TASK_OVERVIEW_SECTION
     + TASK_EXECUTION_SECTION
     + TOOL_USAGE_SECTION
     + TOOL_BEST_PRACTICES_SECTION
@@ -270,11 +270,6 @@ SYSTEM_PROMPT = (
     + CODE_REVIEW_GUIDELINES_SECTION
     + COMMUNICATION_SECTION
     + EXTERNAL_UNTRUSTED_COMMENTS_SECTION
-    + COMMIT_PR_SECTION
-    + """
-
-{agents_md_section}
-"""
 )
 
 
@@ -283,7 +278,7 @@ def construct_system_prompt(
     linear_project_id: str = "",
     linear_issue_number: str = "",
     agents_md: str = "",
-) -> str:
+) -> SystemMessage:
     agents_md_section = ""
     if agents_md:
         agents_md_section = (
@@ -293,9 +288,27 @@ def construct_system_prompt(
             f"{agents_md}\n"
             "</agents_md>\n"
         )
-    return SYSTEM_PROMPT.format(
-        working_dir=working_dir,
-        linear_project_id=linear_project_id or "<PROJECT_ID>",
-        linear_issue_number=linear_issue_number or "<ISSUE_NUMBER>",
-        agents_md_section=agents_md_section,
+
+    dynamic_content = (
+        WORKING_ENV_SECTION.format(working_dir=working_dir)
+        + FILE_MANAGEMENT_SECTION.format(working_dir=working_dir)
+        + COMMIT_PR_SECTION.format(
+            linear_project_id=linear_project_id or "<PROJECT_ID>",
+            linear_issue_number=linear_issue_number or "<ISSUE_NUMBER>",
+        )
+        + agents_md_section
+    )
+
+    return SystemMessage(
+        content_blocks=[
+            {
+                "type": "text",
+                "text": _STATIC_PROMPT,
+                "cache_control": {"type": "ephemeral", "ttl": "5m"},
+            },
+            {
+                "type": "text",
+                "text": dynamic_content,
+            },
+        ]
     )
