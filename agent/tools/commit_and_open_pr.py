@@ -24,6 +24,7 @@ from ..utils.github import (
     git_has_unpushed_commits,
     git_push,
 )
+from ..utils.github_app import get_github_app_installation_token
 from ..utils.github_token import get_github_token
 from ..utils.sandbox_paths import resolve_repo_dir
 from ..utils.sandbox_state import get_sandbox_backend_sync
@@ -149,6 +150,14 @@ def commit_and_open_pr(
         if not (has_uncommitted_changes or has_unpushed_commits):
             return {"success": False, "error": "No changes detected", "pr_url": None}
 
+        installation_token = asyncio.run(get_github_app_installation_token())
+        if not installation_token:
+            return {
+                "success": False,
+                "error": "Failed to get GitHub App installation token",
+                "pr_url": None,
+            }
+
         metadata = config.get("metadata", {})
         branch_name = metadata.get("branch_name")
         current_branch = git_current_branch(sandbox_backend, repo_dir)
@@ -188,15 +197,7 @@ def commit_and_open_pr(
                     "pr_url": None,
                 }
 
-        if not github_token:
-            logger.error("commit_and_open_pr missing GitHub token for thread %s", thread_id)
-            return {
-                "success": False,
-                "error": "Missing GitHub token",
-                "pr_url": None,
-            }
-
-        push_result = git_push(sandbox_backend, repo_dir, target_branch, github_token)
+        push_result = git_push(sandbox_backend, repo_dir, target_branch, installation_token)
         if push_result.exit_code != 0:
             return {
                 "success": False,
@@ -204,12 +205,14 @@ def commit_and_open_pr(
                 "pr_url": None,
             }
 
-        base_branch = asyncio.run(get_github_default_branch(repo_owner, repo_name, github_token))
+        base_branch = asyncio.run(
+            get_github_default_branch(repo_owner, repo_name, installation_token)
+        )
         pr_url, _pr_number, pr_existing = asyncio.run(
             create_github_pr(
                 repo_owner=repo_owner,
                 repo_name=repo_name,
-                github_token=github_token,
+                github_token=installation_token,
                 title=title,
                 head_branch=target_branch,
                 base_branch=base_branch,
