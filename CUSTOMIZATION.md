@@ -45,6 +45,7 @@ Set the `SANDBOX_TYPE` environment variable to switch providers. Each provider h
 | `daytona` | `agent/integrations/daytona.py` | `DAYTONA_API_KEY`, `SANDBOX_TYPE="daytona"` |
 | `runloop` | `agent/integrations/runloop.py` | `RUNLOOP_API_KEY`, `SANDBOX_TYPE="runloop"` |
 | `modal` | `agent/integrations/modal.py` | Modal credentials, `SANDBOX_TYPE="modal"` |
+| `opensandbox` | `agent/integrations/opensandbox.py` | `OPEN_SANDBOX_API_KEY`, `OPEN_SANDBOX_DOMAIN`, `SANDBOX_TYPE="opensandbox"` |
 | `local` | `agent/integrations/local.py` | None (no isolation — development only), `SANDBOX_TYPE="local"` |
 
 > **Warning**: `local` runs commands directly on your host with no sandboxing. Only use for local development with human-in-the-loop enabled.
