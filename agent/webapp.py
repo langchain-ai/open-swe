@@ -1168,6 +1168,7 @@ async def _trigger_or_queue_run(
     prompt: str,
     *,
     github_login: str,
+    github_user_id: int | None,
     repo_config: dict[str, str],
     pr_number: int,
 ) -> None:
@@ -1188,6 +1189,7 @@ async def _trigger_or_queue_run(
             "configurable": {
                 "source": "github",
                 "github_login": github_login,
+                "github_user_id": github_user_id,
                 "repo": repo_config,
                 "pr_number": pr_number,
             },
@@ -1251,6 +1253,7 @@ async def process_github_pr_comment(payload: dict[str, Any], event_type: str) ->
         comment_id,
         node_id,
     ) = await extract_pr_context(payload, event_type)
+    github_user_id = payload.get("sender", {}).get("id")
 
     logger.info(
         "Processing GitHub PR comment: event=%s, pr=%s, branch=%s",
@@ -1319,6 +1322,7 @@ async def process_github_pr_comment(payload: dict[str, Any], event_type: str) ->
         thread_id,
         prompt,
         github_login=github_login,
+        github_user_id=github_user_id,
         repo_config=repo_config,
         pr_number=pr_number,
     )
@@ -1336,6 +1340,7 @@ async def process_github_issue(payload: dict[str, Any], event_type: str) -> None
     issue_id = str(issue.get("id", ""))
     issue_number = issue.get("number")
     github_login = payload.get("sender", {}).get("login", "")
+    github_user_id = payload.get("sender", {}).get("id")
     issue_url = issue.get("html_url", "") or issue.get("url", "")
     title = issue.get("title", "No title")
     description = issue.get("body") or "No description"
@@ -1414,6 +1419,7 @@ async def process_github_issue(payload: dict[str, Any], event_type: str) -> None
     configurable: dict[str, Any] = {
         "source": "github",
         "github_login": github_login,
+        "github_user_id": github_user_id,
         "repo": repo_config,
         "github_issue": {
             "id": issue_id,
