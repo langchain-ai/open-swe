@@ -240,6 +240,8 @@ When you have completed your implementation, follow these steps in order:
 
 **IMPORTANT: Never claim a PR was created or updated unless `commit_and_open_pr` returned `success` and a PR link. If it returns "No changes detected" or any error, report that instead.**
 
+**IMPORTANT: If `commit_and_open_pr` returns an error containing "403", "Permission denied", or "PERMANENT_FAILURE", this is a permanent authorization failure — the token does not have write access to the repository. Do NOT retry. Report the error to the user immediately and stop.**
+
 4. **Notify the source** immediately after `commit_and_open_pr` succeeds. Include a brief summary and the PR link:
    - Linear-triggered: use `linear_comment` with an `@mention` of the user who triggered the task
    - Slack-triggered: use `slack_thread_reply`
