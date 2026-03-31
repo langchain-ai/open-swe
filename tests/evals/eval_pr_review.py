@@ -61,9 +61,6 @@ def build_review_prompt(
     base_commit: str = "",
 ) -> str:
     """Build review prompt matching process_github_pr_ready_for_review in webapp.py exactly."""
-    parts = pr_url.rstrip("/").split("/")
-    owner, repo = parts[-4], parts[-3]
-
     prompt = f"This PR has been marked ready for review.\n\nPR: {pr_url}\nTitle: {pr_title}\n"
     if pr_body:
         prompt += f"Description: {pr_body}\n"
