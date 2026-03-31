@@ -229,9 +229,70 @@ CAUGHT_COUNT: [number of CAUGHT issues]
 TOTAL_COUNT: [total number of expected issues]
 SUMMARY: [one sentence overall summary]"""
 
+JUDGE_PROMPT_ZERO_ISSUES = """You are evaluating whether an AI agent correctly identified that a pull request has no issues.
+
+## Expected Review (ground truth from Devin)
+{expected}
+
+Devin found NO issues in this PR. The expected verdict is APPROVE.
+
+## Agent's Actual Review
+{actual}
+
+## Instructions
+
+The agent should NOT have flagged any critical or blocking issues. Minor observations or style comments are acceptable, but the agent should not have requested changes or flagged false-positive bugs.
+
+Evaluate:
+1. Did the agent approve or give a non-blocking comment? (PASS)
+2. Did the agent request changes or flag critical issues that don't exist? (FAIL)
+
+## Output format
+
+VERDICT: [PASS|FAIL]
+FALSE_POSITIVES: [number of false critical/blocking issues flagged, 0 if none]
+SUMMARY: [one sentence overall summary]"""
+
 
 async def llm_judge(expected: dict, actual: str) -> dict[str, Any]:
     client = AsyncAnthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+    expected_issues = expected.get("issues", [])
+
+    # Zero-issues case: check the agent didn't flag false positives
+    if len(expected_issues) == 0:
+        response = await client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=1024,
+            messages=[
+                {
+                    "role": "user",
+                    "content": JUDGE_PROMPT_ZERO_ISSUES.format(
+                        expected=json.dumps(expected, indent=2),
+                        actual=actual,
+                    ),
+                }
+            ],
+        )
+        text = response.content[0].text
+        verdict_match = re.search(r"^VERDICT: (PASS|FAIL)", text, re.MULTILINE)
+        fp_match = re.search(r"^FALSE_POSITIVES: (\d+)", text, re.MULTILINE)
+        summary_match = re.search(r"^SUMMARY: (.+)", text, re.MULTILINE)
+
+        verdict = verdict_match.group(1) if verdict_match else "FAIL"
+        false_positives = int(fp_match.group(1)) if fp_match else 0
+        summary = summary_match.group(1).strip() if summary_match else ""
+
+        return {
+            "result": "pass" if verdict == "PASS" else "fail",
+            "percentage_passed": 100 if verdict == "PASS" else 0,
+            "caught_count": 0,
+            "total_count": 0,
+            "false_positives": false_positives,
+            "issues": [],
+            "summary": summary,
+        }
+
+    # Normal case: check if agent caught expected issues
     response = await client.messages.create(
         model="claude-sonnet-4-6",
         max_tokens=1024,
@@ -253,7 +314,7 @@ async def llm_judge(expected: dict, actual: str) -> dict[str, Any]:
     summary_match = re.search(r"^SUMMARY: (.+)", text, re.MULTILINE)
 
     caught_count = int(caught_match.group(1)) if caught_match else 0
-    total_count = int(total_match.group(1)) if total_match else len(expected.get("issues", []))
+    total_count = int(total_match.group(1)) if total_match else len(expected_issues)
     summary = summary_match.group(1).strip() if summary_match else ""
 
     percentage_passed = round((caught_count / total_count) * 100) if total_count > 0 else 0

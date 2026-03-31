@@ -38,8 +38,7 @@
       ],
       "raw_review_body": "Devin Review found 5 potential issues. View 4 additional findings in Devin Review."
     }
-  }
-  ,
+  },
   {
     "id": "eval_002",
     "pr_number": 20890,
@@ -76,18 +75,15 @@
   },
   {
     "id": "eval_003",
-    "pr_number": 20874,
+    "pr_number": 21245,
     "repo": "langchain-ai/langchainplus",
-    "pr_url": "https://github.com/langchain-ai/langchainplus/pull/20874",
-    "pr_title": "fix: add gh cli to install script for forge [closes LSA-000]",
-    "commit_id": "8ad3743087cef21e331cda513be42c88b2d888ab",
-    "base_commit": "35763d699a",
-    "pr_files": "smith-go/forge_agent/",
+    "pr_url": "https://github.com/langchain-ai/langchainplus/pull/21245",
+    "pr_title": "fix(tracer-sessions): remove streaming_rate from Python stat defaults",
+    "commit_id": "f310b8964862c12f729e3ba825a27f5647bafaa4",
     "pr_outcome": "merged",
     "label": "incorrect_implementation",
-    "label_reason": "GITHUB_REPO env var added but missing from Appendix A environment variables table in the agent prompt",
+    "label_reason": "Removing streaming_rate default 0.0 from _STAT_SELECT_TO_DEFAULT_VALUE causes streaming_rate to return None instead of 0.0 in API responses",
     "track": "merged",
-    "notes": "Devin left 3 reviews across 3 commits (0286ff6, cf43e5a, 866f949). This eval uses the first review — each subsequent review found a new related issue as the author pushed fixes.",
     "input": {
       "configurable": {
         "source": "github",
@@ -95,20 +91,269 @@
           "owner": "langchain-ai",
           "name": "langchainplus"
         },
-        "pr_number": 20874
+        "pr_number": 21245
       }
     },
     "expected_review": {
       "overall_verdict": "COMMENT",
       "issues": [
         {
-          "file": "smith-go/forge_agent/prompts/CLAUDE.md",
-          "line": 367,
-          "description": "GITHUB_REPO is added as a new env var (handler.go:336) and referenced in the setup verification step (CLAUDE.md:69), but the Appendix A environment variables reference table (lines 367-372) was not updated to include it. The agent is instructed to use a variable not documented in the reference table.",
+          "file": "smith-backend/app/models/tracer_sessions/stats.py",
+          "line": 64,
+          "description": "Removing schemas.RunStatsSelect.streaming_rate: 0.0 from _STAT_SELECT_TO_DEFAULT_VALUE causes streaming_rate to return None instead of 0.0 in API responses. At stats.py:500-503, the expression `v or _STAT_SELECT_TO_DEFAULT_VALUE.get(...)` uses Python's `or` operator which treats 0.0 as falsy. When streaming_rate is 0.0 (legitimate value meaning 0% streaming) or None (ClickHouse returns NULL when token_run_count = 0), the fallback lookup now returns None instead of 0.0. This changes the API contract — the MultiSessionStats TypedDict declares streaming_rate: float (not Optional[float]).",
           "severity": "medium"
         }
       ],
-      "raw_review_body": "Devin Review found 1 potential issue. View 2 additional findings in Devin Review."
+      "raw_review_body": "Devin Review found 1 potential issue. View 1 additional finding in Devin Review."
+    }
+  },
+  {
+    "id": "eval_004",
+    "pr_number": 21260,
+    "repo": "langchain-ai/langchainplus",
+    "pr_url": "https://github.com/langchain-ai/langchainplus/pull/21260",
+    "pr_title": "fix(smith-backend): delete stale archived runs from correct table",
+    "commit_id": "03669f309ef6b2b15bed540a7650e8d9c93c8d97",
+    "pr_outcome": "merged",
+    "label": "no_issues",
+    "label_reason": "Devin Review found no potential bugs to report",
+    "track": "merged",
+    "input": {
+      "configurable": {
+        "source": "github",
+        "repo": {
+          "owner": "langchain-ai",
+          "name": "langchainplus"
+        },
+        "pr_number": 21260
+      }
+    },
+    "expected_review": {
+      "overall_verdict": "APPROVE",
+      "issues": [],
+      "raw_review_body": "Devin Review: No Issues Found. Devin Review analyzed this PR and found no potential bugs to report."
+    }
+  },
+  {
+    "id": "eval_005",
+    "pr_number": 21244,
+    "repo": "langchain-ai/langchainplus",
+    "pr_url": "https://github.com/langchain-ai/langchainplus/pull/21244",
+    "pr_title": "fix(playground): support disabling experiments by tenant",
+    "commit_id": "c6df7ffbb0cc794d24008a3f607eaaf4b1fb0667",
+    "pr_outcome": "merged",
+    "label": "incorrect_implementation",
+    "label_reason": "Disabled-tenant early return bypasses deferred CompleteExperimentBatch, leaving experiments permanently stuck in-progress",
+    "track": "merged",
+    "input": {
+      "configurable": {
+        "source": "github",
+        "repo": {
+          "owner": "langchain-ai",
+          "name": "langchainplus"
+        },
+        "pr_number": 21244
+      }
+    },
+    "expected_review": {
+      "overall_verdict": "COMMENT",
+      "issues": [
+        {
+          "file": "smith-go/playground/experiment_task.go",
+          "line": 165,
+          "description": "Disabled-tenant guard at lines 159-165 returns before the defer that calls CompleteExperimentBatch is registered (line 172). Because SkipRetry means asynq won't retry the task, the batch's run count is never reported back to the tracer_session.__progress tracker. completed_run_count will never reach expected_run_count, so end_time is never set and the experiment appears permanently in-progress.",
+          "severity": "critical"
+        }
+      ],
+      "raw_review_body": "Devin Review found 1 potential issue. View 1 additional finding in Devin Review."
+    }
+  },
+  {
+    "id": "eval_006",
+    "pr_number": 21219,
+    "repo": "langchain-ai/langchainplus",
+    "pr_url": "https://github.com/langchain-ai/langchainplus/pull/21219",
+    "pr_title": "fix(fleet): revert \"feat(sandbox): Support x service auth in sandboxes\" [closes AB-000]",
+    "commit_id": "080967f38bae67f61266bab34d9f809d9e384d83",
+    "pr_outcome": "merged",
+    "label": "incorrect_implementation",
+    "label_reason": "ServiceIdentityForge skip applied to write routes but not read routes in claim_handler.go, breaking Forge's ability to read back created claims",
+    "track": "merged",
+    "input": {
+      "configurable": {
+        "source": "github",
+        "repo": {
+          "owner": "langchain-ai",
+          "name": "langchainplus"
+        },
+        "pr_number": 21219
+      }
+    },
+    "expected_review": {
+      "overall_verdict": "COMMENT",
+      "issues": [
+        {
+          "file": "smith-go/sandboxes/claim_handler.go",
+          "line": 76,
+          "description": "ServiceIdentityForge is added as a permission-skip identity on CreateClaim (line 80), UpdateClaim (line 88), and DeleteClaim (line 91), but NOT on ListClaims (line 76), GetClaim (line 83), or GetClaimStatus (line 85). A Forge service identity can create a sandbox claim but cannot subsequently read it back or check its provisioning status. The old requireSandboxPermission applied the Forge skip to ALL routes uniformly.",
+          "severity": "critical"
+        }
+      ],
+      "raw_review_body": "Devin Review found 1 potential issue. View 4 additional findings in Devin Review."
+    }
+  },
+  {
+    "id": "eval_007",
+    "pr_number": 21210,
+    "repo": "langchain-ai/langchainplus",
+    "pr_url": "https://github.com/langchain-ai/langchainplus/pull/21210",
+    "pr_title": "chore: update mcp server crud with new vendor id constraint [closes AB-1766]",
+    "commit_id": "a528037aee3a22e2ac5c29e0d43dcc99f8414cc9",
+    "pr_outcome": "merged",
+    "label": "incorrect_implementation",
+    "label_reason": "ON DELETE CASCADE silently deletes MCP servers when vendor disconnected, and frontend filter change breaks visibility of existing Arcade MCP servers",
+    "track": "merged",
+    "input": {
+      "configurable": {
+        "source": "github",
+        "repo": {
+          "owner": "langchain-ai",
+          "name": "langchainplus"
+        },
+        "pr_number": 21210
+      }
+    },
+    "expected_review": {
+      "overall_verdict": "REQUEST_CHANGES",
+      "issues": [
+        {
+          "file": "smith-backend/alembic/versions/2026_03_30_1200-b9e4f1a2c8d3_add_external_system_id_to_mcp_servers.py",
+          "line": 33,
+          "description": "The migration creates FK fk_mcp_servers_mcp_vendor_id with ON DELETE CASCADE. When a vendor's settings are deleted via DELETE /v1/platform/mcp-vendors/{vendor_slug}/settings, the mcp_vendors row is deleted, which cascades to delete all mcp_servers rows that reference it. Disconnecting from Arcade (or any vendor) will silently destroy all associated MCP server configurations — an irreversible data loss. ON DELETE SET NULL would preserve the servers while clearing the vendor association.",
+          "severity": "critical"
+        },
+        {
+          "file": "smith-frontend/src/Pages/AgentBuilder/features/integrations/components/ArcadeContent.tsx",
+          "line": 60,
+          "description": "Frontend filter changed from s.url.startsWith(ARCADE_GATEWAY_BASE_URL) to s.vendor_id === 'arcade'. Existing MCP servers created before this PR were added without a vendor_id (column just added in migration with no backfill). These servers will have vendor_id as undefined, so they'll be excluded by the new filter, causing a regression for non-admin users who previously saw Arcade servers.",
+          "severity": "critical"
+        }
+      ],
+      "raw_review_body": "Devin Review found 2 potential issues. View 5 additional findings in Devin Review."
+    }
+  },
+  {
+    "id": "eval_008",
+    "pr_number": 21197,
+    "repo": "langchain-ai/langchainplus",
+    "pr_url": "https://github.com/langchain-ai/langchainplus/pull/21197",
+    "pr_title": "feat(sandbox): add snapshot and claim migrations for Firecracker sandboxes [INF-1813]",
+    "commit_id": "1b646dc1d8cafd309492914dac55a55f94e5f4ac",
+    "pr_outcome": "merged",
+    "label": "incorrect_implementation",
+    "label_reason": "Index on existing table created non-concurrently violating mandatory rule, and missing ON DELETE CASCADE on sandbox_snapshots.tenant_id FK",
+    "track": "merged",
+    "input": {
+      "configurable": {
+        "source": "github",
+        "repo": {
+          "owner": "langchain-ai",
+          "name": "langchainplus"
+        },
+        "pr_number": 21197
+      }
+    },
+    "expected_review": {
+      "overall_verdict": "REQUEST_CHANGES",
+      "issues": [
+        {
+          "file": "smith-backend/alembic/versions/2026_03_26_2230-923ebe5534bd_add_snapshot_id_to_sandbox_claims.py",
+          "line": 40,
+          "description": "CREATE INDEX IF NOT EXISTS host_sandbox_claims_snapshot_id_idx is created non-concurrently and without an autocommit_block(), violating the mandatory AGENTS.md rule: 'Indexes should always be created CONCURRENTLY in autocommit blocks to avoid locking production tables.' The host_sandbox_claims table is an existing production table. The established codebase pattern uses `with op.get_context().autocommit_block(): + CREATE INDEX CONCURRENTLY`.",
+          "severity": "critical"
+        },
+        {
+          "file": "smith-backend/alembic/versions/2026_03_26_1734-48558b1405de_add_sandbox_snapshots_table.py",
+          "line": 24,
+          "description": "sandbox_snapshots table's FK on tenant_id uses REFERENCES tenants(id) without ON DELETE CASCADE. All sibling sandbox tables (host_sandbox_templates, host_sandbox_volumes, host_sandbox_claims, host_sandbox_warmpools) use ON DELETE CASCADE. Without it, any attempt to delete a tenant that has sandbox_snapshots rows will fail with a foreign key violation error, breaking tenant cleanup/deletion workflows.",
+          "severity": "critical"
+        }
+      ],
+      "raw_review_body": "Devin Review found 2 potential issues. View 3 additional findings in Devin Review."
+    }
+  },
+  {
+    "id": "eval_009",
+    "pr_number": 21185,
+    "repo": "langchain-ai/langchainplus",
+    "pr_url": "https://github.com/langchain-ai/langchainplus/pull/21185",
+    "pr_title": "chore: add column to mcp-servers for system id for filtering [relates to AB-1766]",
+    "commit_id": "ded87dff4a4bccbd73c3cb4afac9ad2a624e72ea",
+    "pr_outcome": "merged",
+    "label": "incorrect_implementation",
+    "label_reason": "FK constraint added inline with ADD COLUMN acquires write-blocking lock on both tables, and docstring Revises comment references wrong parent migration",
+    "track": "merged",
+    "input": {
+      "configurable": {
+        "source": "github",
+        "repo": {
+          "owner": "langchain-ai",
+          "name": "langchainplus"
+        },
+        "pr_number": 21185
+      }
+    },
+    "expected_review": {
+      "overall_verdict": "REQUEST_CHANGES",
+      "issues": [
+        {
+          "file": "smith-backend/alembic/versions/2026_03_30_1200-b9e4f1a2c8d3_add_external_system_id_to_mcp_servers.py",
+          "line": 23,
+          "description": "The ALTER TABLE ... ADD COLUMN ... REFERENCES mcp_vendors(id) ON DELETE CASCADE statement at lines 19-23 adds a foreign key constraint within a transactional ALTER TABLE. In PostgreSQL, adding an FK acquires a ShareRowExclusiveLock on both mcp_servers (the referencing table) and mcp_vendors (the referenced table), which blocks all INSERT, UPDATE, and DELETE on both tables for the duration of the transaction. This violates the spirit of the migration rules in AGENTS.md which emphasize avoiding table locks.",
+          "severity": "critical"
+        },
+        {
+          "file": "smith-backend/alembic/versions/2026_03_30_1200-b9e4f1a2c8d3_add_external_system_id_to_mcp_servers.py",
+          "line": 4,
+          "description": "The docstring on line 4 says Revises: 7fc05ba22972, but the actual down_revision on line 13 is 144db48d2f90. The revision 7fc05ba22972 is the grandparent (144db48d2f90's own parent). While Alembic uses the variable and ignores the comment, the mismatch is misleading for developers inspecting the migration chain.",
+          "severity": "medium"
+        }
+      ],
+      "raw_review_body": "Devin Review found 2 new potential issues. View 4 additional findings in Devin Review."
+    }
+  },
+  {
+    "id": "eval_010",
+    "pr_number": 21182,
+    "repo": "langchain-ai/langchainplus",
+    "pr_url": "https://github.com/langchain-ai/langchainplus/pull/21182",
+    "pr_title": "feat(frontend): Add radio card component [DE-126]",
+    "commit_id": "9bf195be5fb608c1756aa017a4f7d060be9dd222",
+    "pr_outcome": "merged",
+    "label": "incorrect_implementation",
+    "label_reason": "Missing data-[disabled]: prefix on hover class causes enabled unchecked radio buttons to show disabled hover background",
+    "track": "merged",
+    "input": {
+      "configurable": {
+        "source": "github",
+        "repo": {
+          "owner": "langchain-ai",
+          "name": "langchainplus"
+        },
+        "pr_number": 21182
+      }
+    },
+    "expected_review": {
+      "overall_verdict": "COMMENT",
+      "issues": [
+        {
+          "file": "smith-frontend/src/design-system/components/RadioButton/constants.ts",
+          "line": 47,
+          "description": "The newly appended class data-[state=unchecked]:hover:bg-disabled on line 47 is missing the data-[disabled]: prefix. Every other class in the disabledUnchecked style string is scoped to data-[disabled]:, but this new addition is not, so it applies to all unchecked radio buttons on hover — including enabled ones. This will either override the correct data-[state=unchecked]:hover:bg-elevated-hover from radioButtonRootStateStyles.uncheckedEnabled or create an unpredictable CSS conflict. Since radioButtonRootStateStyles is consumed by both RadioButton and the new RadioCard, this is a regression affecting all radio-style components.",
+          "severity": "critical"
+        }
+      ],
+      "raw_review_body": "Devin Review found 1 potential issue. View 3 additional findings in Devin Review."
     }
   }
 ]
