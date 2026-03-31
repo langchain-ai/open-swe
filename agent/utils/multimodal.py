@@ -20,6 +20,7 @@ IMAGE_URL_RE = re.compile(
     r"(https?://[^\s)]+\.(?:png|jpe?g|gif|webp|bmp|tiff)(?:\?[^\s)]+)?)",
     re.IGNORECASE,
 )
+GITHUB_ASSET_URL_RE = re.compile(r"(https://github\.com/user-attachments/assets/[a-zA-Z0-9_-]+)")
 
 
 def extract_image_urls(text: str) -> list[str]:
@@ -30,6 +31,7 @@ def extract_image_urls(text: str) -> list[str]:
     urls: list[str] = []
     urls.extend(IMAGE_MARKDOWN_RE.findall(text))
     urls.extend(IMAGE_URL_RE.findall(text))
+    urls.extend(GITHUB_ASSET_URL_RE.findall(text))
 
     deduped = dedupe_urls(urls)
     if deduped:
@@ -101,3 +103,15 @@ async def fetch_image_block(
 
 def dedupe_urls(urls: list[str]) -> list[str]:
     return list(dict.fromkeys(urls))
+
+
+def collect_image_urls(
+    text: str = "",
+    comments: list[dict] | None = None,
+) -> list[str]:
+    """Extract and deduplicate image URLs from text and/or a list of comment dicts."""
+    urls: list[str] = list(extract_image_urls(text))
+    if comments:
+        for c in comments:
+            urls.extend(extract_image_urls(c.get("body", "")))
+    return dedupe_urls(urls)
