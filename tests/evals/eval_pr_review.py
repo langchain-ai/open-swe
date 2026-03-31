@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from anthropic import Anthropic
+from anthropic import AsyncAnthropic
 from dotenv import load_dotenv
 from langgraph_sdk import get_client
 from langsmith import testing as t
@@ -60,7 +60,13 @@ def build_review_prompt(
     pr_files: str = "",
     base_commit: str = "",
 ) -> str:
-    """Build review prompt matching process_github_pr_ready_for_review in webapp.py exactly."""
+    """Build review prompt based on process_github_pr_ready_for_review in webapp.py.
+
+    Intentional deviations from production:
+    - Omits Linear ticket context (not available in eval dataset)
+    - Adds eval-only rules: review-only mode, no github_comment calls
+    - Uses commit_id^ as default diff base to scope the review to a single commit
+    """
     prompt = f"This PR has been marked ready for review.\n\nPR: {pr_url}\nTitle: {pr_title}\n"
     if pr_body:
         prompt += f"Description: {pr_body}\n"
@@ -130,7 +136,7 @@ async def run_agent_on_pr(entry: dict[str, Any]) -> str:
     }
 
     agent_output = ""
-    intercepted_review = ""
+    intercepted_payloads: list[dict[str, Any]] = []
     stream = client.runs.stream(
         thread_id,
         "agent",
@@ -158,14 +164,25 @@ async def run_agent_on_pr(entry: dict[str, Any]) -> str:
                     if text:
                         agent_output = text
             elif role == "tool":
-                # capture intercepted review/comment tool results
+                # accumulate all intercepted tool results
                 content = last.get("content", "")
                 try:
                     payload = json.loads(content) if isinstance(content, str) else content
                     if isinstance(payload, dict) and payload.get("intercepted"):
-                        intercepted_review = json.dumps(payload, indent=2)
+                        intercepted_payloads.append(payload)
                 except (json.JSONDecodeError, TypeError):
                     pass
+
+    # Prefer the create_pr_review result (has "review" with "event") over
+    # github_comment results, so the judge scores the actual review content.
+    intercepted_review = ""
+    for p in intercepted_payloads:
+        review = p.get("review")
+        if isinstance(review, dict) and "event" in review:
+            intercepted_review = json.dumps(p, indent=2)
+            break
+    if not intercepted_review and intercepted_payloads:
+        intercepted_review = json.dumps(intercepted_payloads[0], indent=2)
 
     output = intercepted_review or agent_output
     return _redact_secrets(output)
@@ -214,8 +231,8 @@ SUMMARY: [one sentence overall summary]"""
 
 
 async def llm_judge(expected: dict, actual: str) -> dict[str, Any]:
-    client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
-    response = client.messages.create(
+    client = AsyncAnthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+    response = await client.messages.create(
         model="claude-sonnet-4-6",
         max_tokens=1024,
         messages=[

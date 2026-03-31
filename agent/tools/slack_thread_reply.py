@@ -3,6 +3,7 @@ from typing import Any
 
 from langgraph.config import get_config
 
+from ..utils.mode import is_eval_mode
 from ..utils.slack import convert_mentions_to_slack_format, post_slack_thread_reply
 
 
@@ -17,6 +18,9 @@ def slack_thread_reply(message: str) -> dict[str, Any]:
     To mention/tag a user, use Slack's mention format: <@USER_ID>.
     You can find user IDs in the conversation context (e.g. @Name(U06KD8BFY95)).
     Example: <@U06KD8BFY95> will tag that user in the message."""
+    if is_eval_mode():
+        return {"success": True, "intercepted": True, "message": message}
+
     config = get_config()
     configurable = config.get("configurable", {})
     slack_thread = configurable.get("slack_thread", {})

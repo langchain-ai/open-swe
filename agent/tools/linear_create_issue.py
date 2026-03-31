@@ -2,6 +2,7 @@ import asyncio
 from typing import Any
 
 from ..utils.linear import create_issue
+from ..utils.mode import is_eval_mode
 
 
 def linear_create_issue(
@@ -29,6 +30,9 @@ def linear_create_issue(
     Returns:
         Dictionary with 'success' bool and 'issue' details.
     """
+    if is_eval_mode():
+        return {"success": True, "intercepted": True, "issue": {"title": title, "team_id": team_id}}
+
     return asyncio.run(
         create_issue(
             team_id=team_id,

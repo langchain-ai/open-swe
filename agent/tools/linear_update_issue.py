@@ -2,6 +2,7 @@ import asyncio
 from typing import Any
 
 from ..utils.linear import update_issue
+from ..utils.mode import is_eval_mode
 
 
 def linear_update_issue(
@@ -27,6 +28,9 @@ def linear_update_issue(
     Returns:
         Dictionary with 'success' bool and updated 'issue' details.
     """
+    if is_eval_mode():
+        return {"success": True, "intercepted": True, "issue": {"issue_id": issue_id}}
+
     return asyncio.run(
         update_issue(
             issue_id=issue_id,

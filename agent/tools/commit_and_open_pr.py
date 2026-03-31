@@ -26,6 +26,7 @@ from ..utils.github import (
 )
 from ..utils.github_token import get_github_token
 from ..utils.sandbox_paths import resolve_repo_dir
+from ..utils.mode import is_eval_mode
 from ..utils.sandbox_state import get_sandbox_backend_sync
 
 logger = logging.getLogger(__name__)
@@ -115,6 +116,15 @@ def commit_and_open_pr(
         - pr_url: URL of the created PR if successful, otherwise None
         - pr_existing: Whether a PR already existed for this branch
     """
+    if is_eval_mode():
+        return {
+            "success": True,
+            "intercepted": True,
+            "pr_url": None,
+            "pr_existing": False,
+            "title": title,
+        }
+
     try:
         config = get_config()
         configurable = config.get("configurable", {})
