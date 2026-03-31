@@ -24,7 +24,12 @@ def linear_comment(comment_body: str, ticket_id: str) -> dict[str, Any]:
         Dictionary with 'success' (bool) key.
     """
     if is_eval_mode():
-        return {"success": True, "intercepted": True, "comment_body": comment_body, "ticket_id": ticket_id}
+        return {
+            "success": True,
+            "intercepted": True,
+            "comment_body": comment_body,
+            "ticket_id": ticket_id,
+        }
 
     success = asyncio.run(comment_on_linear_issue(ticket_id, comment_body))
     return {"success": success}

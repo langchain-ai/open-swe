@@ -25,8 +25,8 @@ from ..utils.github import (
     git_push,
 )
 from ..utils.github_token import get_github_token
-from ..utils.sandbox_paths import resolve_repo_dir
 from ..utils.mode import is_eval_mode
+from ..utils.sandbox_paths import resolve_repo_dir
 from ..utils.sandbox_state import get_sandbox_backend_sync
 
 logger = logging.getLogger(__name__)
