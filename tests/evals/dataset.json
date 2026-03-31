@@ -81,6 +81,7 @@
     "pr_url": "https://github.com/langchain-ai/langchainplus/pull/20874",
     "pr_title": "fix: add gh cli to install script for forge [closes LSA-000]",
     "commit_id": "8ad3743087cef21e331cda513be42c88b2d888ab",
+    "base_commit": "35763d699a",
     "pr_files": "smith-go/forge_agent/",
     "pr_outcome": "merged",
     "label": "incorrect_implementation",
