@@ -18,8 +18,14 @@ Leave a structured GitHub review — not just a plain comment. Use the review to
 1. Call `list_pr_reviews` first — see what's already been reviewed so you don't duplicate feedback
 2. Determine the PR's base branch from the PR context (e.g. the webhook payload or PR URL metadata), then run `git diff origin/<base_branch>...HEAD` in the sandbox to get the PR diff — the repo is already cloned and checked out to the PR branch
 3. Read the changed files in the sandbox — the repo is already checked out, no need to clone
-4. Create the review using `create_pr_review` with inline comments where possible
-5. Always call `github_comment` after submitting the review with a short human-readable summary
+4. **Completeness check (MANDATORY — do this BEFORE writing the review):**
+   - For each changed file, use `grep` or `execute` to search the **entire** file — do NOT rely on `read_file` alone since it truncates large files.
+   - For each new name in the diff, pick a **sibling** (an existing name next to it) and `grep` the changed files for that sibling. Every place the sibling appears, the new name should too. If it doesn't, flag it.
+   - Check if there are other functions, handlers, or code paths in the same file that work with the same data but were NOT updated.
+   - Grep the repo for other callers or consumers of any changed interface — flag anything that still uses the old name, old endpoint, or old behavior.
+   - **Do NOT skip this step.** Do NOT submit the review until you have completed all completeness checks above.
+5. Create the review using `create_pr_review` with inline comments where possible
+6. Always call `github_comment` after submitting the review with a short human-readable summary
    - If no critical or high severity issues were found, post: `"🤖 PR Review — No critical or high severity issues found."`
    - If issues were found, summarize them briefly
 
@@ -36,6 +42,15 @@ Leave a structured GitHub review — not just a plain comment. Use the review to
 - Missing tests for new logic
 - Unclear naming that hurts readability
 - Dead code or unused imports
+
+**Must check — incomplete changes:**
+
+After reviewing what changed, ask: **"what else should have changed but didn't?"**
+
+- For every new name introduced in the diff, find its **siblings** — other names that follow the same pattern or live alongside it. Then **grep the changed files for a sibling** (not the new name). Every place a sibling appears, the new name should probably appear too. If it doesn't, flag it. This is the most important check — do not skip it.
+- For every change in the diff, grep for other places in the repo that depend on the same name, interface, or behavior — and flag any that weren't updated.
+
+**This is the highest-value part of the review.** Most bugs that reach production are not in the code that was written — they're in the code that should have been changed but wasn't. Always run the sibling grep before concluding a review.
 
 **Skip entirely:**
 - Style preferences not enforced by a linter

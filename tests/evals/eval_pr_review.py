@@ -79,7 +79,9 @@ async def fetch_commit_diff(pr_url: str, commit_id: str) -> str:
     return ""
 
 
-def build_review_prompt(pr_url: str, pr_title: str, pr_body: str = "", commit_id: str = "") -> str:
+def build_review_prompt(
+    pr_url: str, pr_title: str, pr_body: str = "", commit_id: str = "", pr_files: str = ""
+) -> str:
     """Build review prompt matching process_github_pr_ready_for_review in webapp.py exactly."""
     parts = pr_url.rstrip("/").split("/")
     owner, repo = parts[-4], parts[-3]
@@ -96,9 +98,11 @@ def build_review_prompt(pr_url: str, pr_title: str, pr_body: str = "", commit_id
             f"git remote set-url origin https://x-access-token:{GITHUB_PAT}@github.com/{owner}/{repo}.git\n"
             f"git fetch origin {commit_id}\n"
             f"git checkout {commit_id}\n"
+            f"git diff {commit_id}^..{commit_id}"
+            f"{' -- ' + pr_files if pr_files else ''}\n"
             f"```\n"
             f"Do NOT proceed with the review until `git checkout {commit_id}` succeeds.\n"
-            f"Then review the diff with `git diff origin/main...HEAD`.\n"
+            f"Use the EXACT diff command above (diff against parent commit, NOT origin/main).\n"
         )
     prompt += (
         "\n\nPlease review this PR thoroughly.\n\n"
@@ -125,7 +129,11 @@ async def run_agent_on_pr(entry: dict[str, Any]) -> str:
     client = get_client(url=LANGGRAPH_URL)
     thread_id = str(uuid.uuid4())
     prompt = build_review_prompt(
-        entry["pr_url"], entry["pr_title"], entry.get("pr_body", ""), entry.get("commit_id", "")
+        entry["pr_url"],
+        entry["pr_title"],
+        entry.get("pr_body", ""),
+        entry.get("commit_id", ""),
+        entry.get("pr_files", ""),
     )
 
     # Create thread with PR ref + commit_id so server.py checks out the exact commit
