@@ -136,7 +136,6 @@ def git_push(
     return _run_git(sandbox_backend, repo_dir, f"git push origin {safe_branch}")
 
 
-
 async def create_github_pr(
     repo_owner: str,
     repo_name: str,
