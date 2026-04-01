@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 from datetime import UTC, datetime, timedelta
@@ -55,17 +56,21 @@ def is_bot_token_only_mode() -> bool:
 def _retry_instruction(source: str) -> str:
     if source == "slack":
         return "Once authenticated, mention me again in this Slack thread to retry."
+    if source == "acp":
+        return "Once authenticated, retry the request from your ACP client."
     return "Once authenticated, reply to this issue mentioning @openswe to retry."
 
 
 def _source_account_label(source: str) -> str:
     if source == "slack":
         return "Slack"
+    if source == "acp":
+        return "ACP"
     return "Linear"
 
 
 def _auth_link_text(source: str, auth_url: str) -> str:
-    if source == "slack":
+    if source in {"slack", "acp"}:
         return auth_url
     return f"[Authenticate with GitHub]({auth_url})"
 
@@ -73,6 +78,8 @@ def _auth_link_text(source: str, auth_url: str) -> str:
 def _work_item_label(source: str) -> str:
     if source == "slack":
         return "thread"
+    if source == "acp":
+        return "session"
     return "issue"
 
 
@@ -80,6 +87,25 @@ def get_secret_key_for_user(
     user_id: str, tenant_id: str, expiration_seconds: int = 300
 ) -> tuple[str, Literal["service", "api_key"]]:
     """Create a short-lived service JWT for authenticating as a specific user."""
+    if USER_ID_API_KEY_MAP:
+        try:
+            parsed = json.loads(USER_ID_API_KEY_MAP)
+        except json.JSONDecodeError as exc:
+            msg = "USER_ID_API_KEY_MAP must be valid JSON."
+            raise ValueError(msg) from exc
+
+        if not isinstance(parsed, dict):
+            msg = "USER_ID_API_KEY_MAP must decode to an object."
+            raise ValueError(msg)
+
+        entry = parsed.get(user_id)
+        if isinstance(entry, str) and entry:
+            return entry, "api_key"
+        if isinstance(entry, dict):
+            api_key = entry.get("api_key")
+            if isinstance(api_key, str) and api_key:
+                return api_key, "api_key"
+
     if not X_SERVICE_AUTH_JWT_SECRET:
         msg = "X_SERVICE_AUTH_JWT_SECRET is not configured. Cannot generate service keys."
         raise ValueError(msg)
@@ -164,6 +190,49 @@ async def get_github_token_for_user(ls_user_id: str, tenant_id: str) -> dict[str
                 return {"auth_url": auth_url}
             return {"error": f"Unexpected auth result: {response_data}"}
 
+    except httpx.HTTPStatusError as e:
+        logger.error("GitHub auth API HTTP error: %s - %s", e.response.status_code, e.response.text)
+        return {"error": f"HTTP error: {e.response.status_code} - {e.response.text}"}
+    except Exception as e:  # noqa: BLE001
+        logger.error("GitHub auth API call failed: %s: %s", type(e).__name__, str(e))
+        return {"error": str(e)}
+
+
+async def get_github_token_for_langsmith_api_key(
+    api_key: str,
+    tenant_id: str | None = None,
+) -> dict[str, Any]:
+    """Get a GitHub OAuth token for the current LangSmith API key principal."""
+    if not GITHUB_OAUTH_PROVIDER_ID:
+        logger.error("GitHub auth failed: GITHUB_OAUTH_PROVIDER_ID is not configured")
+        return {"error": "GITHUB_OAUTH_PROVIDER_ID not configured"}
+
+    headers = {"X-API-Key": api_key}
+    if tenant_id:
+        headers["X-Tenant-Id"] = tenant_id
+
+    payload = {
+        "provider": GITHUB_OAUTH_PROVIDER_ID,
+        "scopes": ["repo"],
+    }
+
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"{LANGSMITH_HOST_API_URL}/v2/auth/authenticate",
+                json=payload,
+                headers=headers,
+            )
+            response.raise_for_status()
+            response_data = response.json()
+
+        token = response_data.get("token")
+        auth_url = response_data.get("url")
+        if token:
+            return {"token": token}
+        if auth_url:
+            return {"auth_url": auth_url}
+        return {"error": f"Unexpected auth result: {response_data}"}
     except httpx.HTTPStatusError as e:
         logger.error("GitHub auth API HTTP error: %s - %s", e.response.status_code, e.response.text)
         return {"error": f"HTTP error: {e.response.status_code} - {e.response.text}"}
@@ -261,6 +330,9 @@ async def leave_failure_comment(
         logger.warning(
             "Auth failure for GitHub-triggered run (no token to post comment): %s", message
         )
+        return
+    if source == "acp":
+        logger.warning("Auth failure for ACP-triggered run: %s", message)
         return
     raise ValueError(f"Unknown source: {source}")
 
@@ -386,6 +458,12 @@ async def resolve_github_token(config: RunnableConfig, thread_id: str) -> tuple[
         return await _resolve_bot_installation_token(thread_id)
 
     source = configurable.get("source")
+    if (
+        source == "acp"
+        and configurable.get("allow_github_app_fallback") is True
+        and not configurable.get("user_email")
+    ):
+        return await _resolve_bot_installation_token(thread_id)
     if not source:
         logger.error("Missing source for thread %s; cannot route auth failure responses", thread_id)
         raise RuntimeError(f"GitHub auth failed for thread {thread_id}: missing source")

@@ -139,9 +139,14 @@ This is an area where you can extend Open SWE for your org: add deterministic CI
 
 ## ACP Connector
 
-Open SWE now includes an `open-swe-acp` connector for ACP-compatible desktop clients. The connector runs locally over stdio, derives the GitHub repo from the current workspace, authenticates the caller with a GitHub user token, and forwards ACP sessions to a remote Open SWE LangGraph deployment.
+Open SWE now includes an `open-swe-acp` connector for ACP-compatible desktop clients. The connector runs locally over stdio, derives the GitHub repo from the current workspace, authenticates the caller, and forwards ACP sessions to a remote Open SWE LangGraph deployment.
 
-Set `OPEN_SWE_LANGGRAPH_URL` to your deployment URL and optionally `OPEN_SWE_LANGGRAPH_API_KEY` if your LangGraph server requires auth. Set `OPEN_SWE_GITHUB_TOKEN` to the requesting user's GitHub token so the connector can authenticate the ACP client and pass the correct user identity into Open SWE. If your local checkout does not have a GitHub `origin` remote, set `OPEN_SWE_REPO=owner/name` instead.
+Set `OPEN_SWE_LANGGRAPH_URL` to your deployment URL and optionally `OPEN_SWE_LANGGRAPH_API_KEY` if your LangGraph server requires auth. Then choose one ACP auth mode:
+
+- `LangSmith`: set `OPEN_SWE_LANGSMITH_API_KEY` and, if needed, `OPEN_SWE_LANGSMITH_WORKSPACE_ID`. The connector exchanges that LangSmith identity for the caller's GitHub OAuth token, so Open SWE runs as the authenticated user.
+- `API key`: set `OPEN_SWE_ACP_API_KEY` on the client and configure `OPEN_SWE_ACP_API_KEYS` on the connector as JSON. API-key identities can either map to a specific user context or fall back to shared GitHub App execution for self-hosted deployments without LangSmith.
+
+If your local checkout does not have a GitHub `origin` remote, set `OPEN_SWE_REPO=owner/name` instead.
 
 ```bash
 uv run open-swe-acp

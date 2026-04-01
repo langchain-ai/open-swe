@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import pytest
@@ -105,12 +106,27 @@ class _FakeLangGraphClient:
         self.runs = _FakeRuns(self.threads)
 
 
-_AUTHENTICATED_USER = acp_connector.AuthenticatedUser(
+_LANGSMITH_PRINCIPAL = acp_connector.AuthenticatedPrincipal(
+    provider="langsmith",
+    subject="octocat",
+    display_name="The Octocat",
+    user_email="octocat@example.com",
     github_token="ghu_test",
     github_login="octocat",
     github_user_id=123,
-    github_email="octocat@example.com",
     github_name="The Octocat",
+)
+
+_API_KEY_PRINCIPAL = acp_connector.AuthenticatedPrincipal(
+    provider="api_key",
+    subject="desktop-user",
+    display_name="Desktop User",
+    user_email=None,
+    github_token=None,
+    github_login=None,
+    github_user_id=None,
+    github_name=None,
+    allow_github_app_fallback=True,
 )
 
 
@@ -122,34 +138,35 @@ def _make_agent(client: _FakeLangGraphClient) -> acp_connector.OpenSWEAcpAgent:
     )
 
 
-def _mock_authenticated_user(
+def _mock_authenticated_principal(
     monkeypatch: pytest.MonkeyPatch,
-    user: acp_connector.AuthenticatedUser = _AUTHENTICATED_USER,
+    principal: acp_connector.AuthenticatedPrincipal = _LANGSMITH_PRINCIPAL,
 ) -> None:
-    monkeypatch.setenv(acp_connector.ACP_GITHUB_TOKEN_ENV, user.github_token)
-
-    async def fake_resolve_authenticated_user_from_github_token(
-        token: str,
-    ) -> acp_connector.AuthenticatedUser:
-        assert token == user.github_token
-        return user
+    async def fake_require_authenticated_principal(
+        self: acp_connector.OpenSWEAcpAgent,
+        *,
+        force_refresh: bool = False,
+    ) -> acp_connector.AuthenticatedPrincipal:
+        return principal
 
     monkeypatch.setattr(
-        acp_connector,
-        "resolve_authenticated_user_from_github_token",
-        fake_resolve_authenticated_user_from_github_token,
+        acp_connector.OpenSWEAcpAgent,
+        "_require_authenticated_principal",
+        fake_require_authenticated_principal,
     )
 
 
 @pytest.mark.asyncio
-async def test_initialize_advertises_github_token_auth() -> None:
+async def test_initialize_advertises_langsmith_and_api_key_auth() -> None:
     agent = _make_agent(_FakeLangGraphClient())
 
     response = await agent.initialize()
 
     assert response.auth_methods
-    assert response.auth_methods[0].id == acp_connector.ACP_GITHUB_TOKEN_AUTH_METHOD_ID
-    assert response.auth_methods[0].vars[0].name == acp_connector.ACP_GITHUB_TOKEN_ENV
+    assert [method.id for method in response.auth_methods] == [
+        acp_connector.ACP_LANGSMITH_AUTH_METHOD_ID,
+        acp_connector.ACP_API_KEY_AUTH_METHOD_ID,
+    ]
 
 
 @pytest.mark.asyncio
@@ -163,12 +180,75 @@ async def test_new_session_requires_authentication() -> None:
 
 
 @pytest.mark.asyncio
-async def test_new_session_persists_repo_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_authenticate_with_langsmith_exchanges_for_github_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    agent = _make_agent(_FakeLangGraphClient())
+    monkeypatch.setenv(acp_connector.ACP_LANGSMITH_API_KEY_ENV, "lsv2_test")
+
+    async def fake_get_github_token_for_langsmith_api_key(
+        api_key: str,
+        tenant_id: str | None = None,
+    ) -> dict[str, str]:
+        assert api_key == "lsv2_test"
+        assert tenant_id is None
+        return {"token": "ghu_test"}
+
+    async def fake_resolve_authenticated_principal_from_github_token(
+        token: str,
+        *,
+        token_label: str,
+    ) -> acp_connector.AuthenticatedPrincipal:
+        assert token == "ghu_test"
+        assert token_label == f"{acp_connector.ACP_LANGSMITH_API_KEY_ENV} GitHub exchange"
+        return acp_connector.AuthenticatedPrincipal(
+            provider="github",
+            subject="octocat",
+            display_name="The Octocat",
+            user_email="octocat@example.com",
+            github_token="ghu_test",
+            github_login="octocat",
+            github_user_id=123,
+            github_name="The Octocat",
+        )
+
+    monkeypatch.setattr(
+        acp_connector,
+        "get_github_token_for_langsmith_api_key",
+        fake_get_github_token_for_langsmith_api_key,
+    )
+    monkeypatch.setattr(
+        acp_connector,
+        "resolve_authenticated_principal_from_github_token",
+        fake_resolve_authenticated_principal_from_github_token,
+    )
+
+    response = await agent.authenticate(acp_connector.ACP_LANGSMITH_AUTH_METHOD_ID)
+
+    assert isinstance(response, object)
+    assert agent._authenticated_principal == _LANGSMITH_PRINCIPAL
+
+
+@pytest.mark.asyncio
+async def test_new_session_persists_api_key_identity_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
     client = _FakeLangGraphClient()
     agent = _make_agent(client)
     conn = _FakeConnection()
     agent.on_connect(conn)
-    _mock_authenticated_user(monkeypatch)
+    monkeypatch.setenv(acp_connector.ACP_API_KEY_ENV, "secret-1")
+    monkeypatch.setenv(
+        acp_connector.ACP_API_KEYS_ENV,
+        json.dumps(
+            [
+                {
+                    "subject": "desktop-user",
+                    "display_name": "Desktop User",
+                    "key": "secret-1",
+                    "allow_github_app_fallback": True,
+                }
+            ]
+        ),
+    )
 
     monkeypatch.setattr(
         acp_connector,
@@ -184,18 +264,17 @@ async def test_new_session_persists_repo_metadata(monkeypatch: pytest.MonkeyPatc
         "cwd": "/tmp/open-swe",
         "title": "langchain-ai/open-swe",
         "source": "acp",
-        "acp_user": {
-            "login": "octocat",
-            "id": "123",
-            "email": "octocat@example.com",
-            "name": "The Octocat",
+        "acp_auth": {
+            "provider": "api_key",
+            "subject": "desktop-user",
+            "display_name": "Desktop User",
         },
     }
     assert conn.notifications[-1][1]["update"]["sessionUpdate"] == "session_info_update"
 
 
 @pytest.mark.asyncio
-async def test_list_sessions_filters_by_repo(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_list_sessions_filters_by_repo_and_identity(monkeypatch: pytest.MonkeyPatch) -> None:
     client = _FakeLangGraphClient()
     client.threads.search_results = [
         {
@@ -204,7 +283,7 @@ async def test_list_sessions_filters_by_repo(monkeypatch: pytest.MonkeyPatch) ->
             "metadata": {
                 "repo": {"owner": "langchain-ai", "name": "open-swe"},
                 "title": "One",
-                "acp_user": {"login": "octocat", "id": "123"},
+                "acp_auth": {"provider": "langsmith", "subject": "octocat", "display_name": "The Octocat"},
             },
         },
         {
@@ -213,12 +292,12 @@ async def test_list_sessions_filters_by_repo(monkeypatch: pytest.MonkeyPatch) ->
             "metadata": {
                 "repo": {"owner": "langchain-ai", "name": "open-swe"},
                 "title": "Two",
-                "acp_user": {"login": "other-user", "id": "999"},
+                "acp_auth": {"provider": "langsmith", "subject": "someone-else", "display_name": "Other User"},
             },
         },
     ]
     agent = _make_agent(client)
-    _mock_authenticated_user(monkeypatch)
+    _mock_authenticated_principal(monkeypatch)
 
     monkeypatch.setattr(
         acp_connector,
@@ -255,7 +334,7 @@ async def test_load_session_replays_existing_messages(monkeypatch: pytest.Monkey
     agent = _make_agent(client)
     conn = _FakeConnection()
     agent.on_connect(conn)
-    _mock_authenticated_user(monkeypatch)
+    _mock_authenticated_principal(monkeypatch)
 
     await agent.load_session("/tmp/open-swe", "thread-1")
 
@@ -264,7 +343,9 @@ async def test_load_session_replays_existing_messages(monkeypatch: pytest.Monkey
 
 
 @pytest.mark.asyncio
-async def test_load_session_rejects_thread_owned_by_different_acp_user(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_load_session_rejects_thread_owned_by_different_acp_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     client = _FakeLangGraphClient()
     client.threads.thread = {
         "thread_id": "thread-1",
@@ -273,11 +354,11 @@ async def test_load_session_rejects_thread_owned_by_different_acp_user(monkeypat
         "metadata": {
             "repo": {"owner": "langchain-ai", "name": "open-swe"},
             "title": "Existing thread",
-            "acp_user": {"login": "someone-else", "id": "456"},
+            "acp_auth": {"provider": "langsmith", "subject": "someone-else", "display_name": "Other User"},
         },
     }
     agent = _make_agent(client)
-    _mock_authenticated_user(monkeypatch)
+    _mock_authenticated_principal(monkeypatch)
 
     with pytest.raises(RequestError) as exc_info:
         await agent.load_session("/tmp/open-swe", "thread-1")
@@ -286,7 +367,7 @@ async def test_load_session_rejects_thread_owned_by_different_acp_user(monkeypat
 
 
 @pytest.mark.asyncio
-async def test_prompt_forwards_to_langgraph_and_replays_new_messages(
+async def test_prompt_forwards_langsmith_identity_to_langgraph_and_replays_new_messages(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     client = _FakeLangGraphClient()
@@ -303,7 +384,7 @@ async def test_prompt_forwards_to_langgraph_and_replays_new_messages(
     agent = _make_agent(client)
     conn = _FakeConnection()
     agent.on_connect(conn)
-    _mock_authenticated_user(monkeypatch)
+    _mock_authenticated_principal(monkeypatch, _LANGSMITH_PRINCIPAL)
 
     await agent.load_session("/tmp/open-swe", "thread-1")
     conn.notifications.clear()
@@ -320,8 +401,36 @@ async def test_prompt_forwards_to_langgraph_and_replays_new_messages(
         "owner": "langchain-ai",
         "name": "open-swe",
     }
+    assert client.runs.created[0]["config"]["configurable"]["acp_auth_provider"] == "langsmith"
+    assert client.runs.created[0]["config"]["configurable"]["acp_auth_subject"] == "octocat"
     assert client.runs.created[0]["config"]["configurable"]["github_token"] == "ghu_test"
     assert client.runs.created[0]["config"]["configurable"]["github_login"] == "octocat"
     assert client.runs.created[0]["config"]["configurable"]["user_email"] == "octocat@example.com"
     assert client.runs.created[0]["multitask_strategy"] == "interrupt"
     assert conn.notifications[-1][1]["update"]["content"]["text"] == "I found the issue and opened a fix."
+
+
+@pytest.mark.asyncio
+async def test_prompt_includes_github_app_fallback_for_api_key_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _FakeLangGraphClient()
+    client.threads.thread = {
+        "thread_id": "thread-1",
+        "status": "idle",
+        "updated_at": "2026-04-01T00:00:00+00:00",
+        "metadata": {
+            "repo": {"owner": "langchain-ai", "name": "open-swe"},
+            "cwd": "/tmp/open-swe",
+            "title": "Existing thread",
+        },
+    }
+    agent = _make_agent(client)
+    _mock_authenticated_principal(monkeypatch, _API_KEY_PRINCIPAL)
+
+    await agent.load_session("/tmp/open-swe", "thread-1")
+    await agent.prompt([TextContentBlock(type="text", text="Run the task")], "thread-1")
+
+    assert client.runs.created[0]["config"]["configurable"]["acp_auth_provider"] == "api_key"
+    assert client.runs.created[0]["config"]["configurable"]["allow_github_app_fallback"] is True
+    assert client.runs.created[0]["config"]["configurable"]["github_token"] is None
