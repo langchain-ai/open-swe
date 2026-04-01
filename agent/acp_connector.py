@@ -14,6 +14,7 @@ from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any, Protocol
 
+import httpx
 from acp import RequestError, run_agent, session_notification
 from acp.connection import Connection
 from acp.helpers import (
@@ -24,7 +25,9 @@ from acp.helpers import (
 from acp.schema import (
     AgentCapabilities,
     AuthenticateResponse,
+    AuthEnvVar,
     CloseSessionResponse,
+    EnvVarAuthMethod,
     Implementation,
     InitializeResponse,
     ListSessionsResponse,
@@ -45,6 +48,8 @@ from .utils.messages import extract_text_content
 DEFAULT_ASSISTANT_ID = "agent"
 DEFAULT_PAGE_SIZE = 20
 THREAD_POLL_INTERVAL_SECONDS = 1.0
+ACP_GITHUB_TOKEN_ENV = "OPEN_SWE_GITHUB_TOKEN"
+ACP_GITHUB_TOKEN_AUTH_METHOD_ID = "github-token"
 
 _GITHUB_REMOTE_RE = re.compile(
     r"^(?:git@|ssh://git@|https://|http://)?github\.com[:/](?P<owner>[^/]+)/(?P<name>[^/]+?)(?:\.git)?/?$"
@@ -62,6 +67,15 @@ class SessionState:
     repo_config: dict[str, str]
     title: str
     last_message_count: int = 0
+
+
+@dataclass(slots=True, frozen=True)
+class AuthenticatedUser:
+    github_token: str
+    github_login: str
+    github_user_id: int | None
+    github_email: str | None
+    github_name: str
 
 
 def _project_version() -> str:
@@ -86,6 +100,101 @@ def _parse_repo_override(value: str | None) -> dict[str, str] | None:
     if not owner or not name:
         return None
     return {"owner": owner, "name": name}
+
+
+def _github_headers(token: str) -> dict[str, str]:
+    return {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+
+
+async def _resolve_github_email(client: httpx.AsyncClient, token: str) -> str | None:
+    try:
+        response = await client.get("https://api.github.com/user/emails", headers=_github_headers(token))
+    except httpx.HTTPError:
+        return None
+
+    if response.status_code != 200:
+        return None
+
+    emails = response.json()
+    if not isinstance(emails, list):
+        return None
+
+    for email in emails:
+        if (
+            isinstance(email, dict)
+            and email.get("primary") is True
+            and email.get("verified") is True
+            and isinstance(email.get("email"), str)
+            and email["email"]
+        ):
+            return email["email"]
+    for email in emails:
+        if (
+            isinstance(email, dict)
+            and email.get("verified") is True
+            and isinstance(email.get("email"), str)
+            and email["email"]
+        ):
+            return email["email"]
+    for email in emails:
+        if isinstance(email, dict) and isinstance(email.get("email"), str) and email["email"]:
+            return email["email"]
+    return None
+
+
+async def resolve_authenticated_user_from_github_token(token: str) -> AuthenticatedUser:
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        try:
+            response = await client.get("https://api.github.com/user", headers=_github_headers(token))
+        except httpx.HTTPError as exc:
+            raise RequestError.auth_required(
+                {"message": f"Failed to validate {ACP_GITHUB_TOKEN_ENV}: {exc}"}
+            ) from exc
+
+    if response.status_code != 200:
+        raise RequestError.auth_required(
+            {
+                "message": f"Failed to validate {ACP_GITHUB_TOKEN_ENV}",
+                "status_code": response.status_code,
+            }
+        )
+
+    payload = response.json()
+    github_login = payload.get("login")
+    if not isinstance(github_login, str) or not github_login:
+        raise RequestError.auth_required(
+            {"message": f"{ACP_GITHUB_TOKEN_ENV} did not resolve to a GitHub user login"}
+        )
+
+    github_type = payload.get("type")
+    if isinstance(github_type, str) and github_type.lower() != "user":
+        raise RequestError.auth_required(
+            {
+                "message": (
+                    f"{ACP_GITHUB_TOKEN_ENV} must belong to a human GitHub user, "
+                    f"got account type {github_type!r}"
+                )
+            }
+        )
+
+    github_email = payload.get("email")
+    if not isinstance(github_email, str) or not github_email:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            github_email = await _resolve_github_email(client, token)
+
+    github_user_id = payload.get("id") if isinstance(payload.get("id"), int) else None
+    github_name = payload.get("name") if isinstance(payload.get("name"), str) and payload.get("name") else github_login
+    return AuthenticatedUser(
+        github_token=token,
+        github_login=github_login,
+        github_user_id=github_user_id,
+        github_email=github_email,
+        github_name=github_name,
+    )
 
 
 def _extract_repo_from_remote(remote_url: str) -> dict[str, str] | None:
@@ -170,6 +279,45 @@ def _thread_metadata(thread: dict[str, Any]) -> dict[str, Any]:
     return metadata if isinstance(metadata, dict) else {}
 
 
+def _thread_acp_user(thread: dict[str, Any]) -> dict[str, str] | None:
+    acp_user = _thread_metadata(thread).get("acp_user")
+    if not isinstance(acp_user, dict):
+        return None
+
+    normalized: dict[str, str] = {}
+    for key in ("login", "id", "email", "name"):
+        value = acp_user.get(key)
+        if isinstance(value, str) and value:
+            normalized[key] = value
+    return normalized or None
+
+
+def _acp_user_metadata(user: AuthenticatedUser) -> dict[str, str]:
+    metadata = {
+        "login": user.github_login,
+        "name": user.github_name,
+    }
+    if user.github_user_id is not None:
+        metadata["id"] = str(user.github_user_id)
+    if user.github_email:
+        metadata["email"] = user.github_email
+    return metadata
+
+
+def _user_matches_thread(thread: dict[str, Any], user: AuthenticatedUser) -> bool:
+    thread_user = _thread_acp_user(thread)
+    if not thread_user:
+        return True
+
+    if user.github_user_id is not None and thread_user.get("id"):
+        return thread_user["id"] == str(user.github_user_id)
+    if thread_user.get("login"):
+        return thread_user["login"] == user.github_login
+    if user.github_email and thread_user.get("email"):
+        return thread_user["email"].casefold() == user.github_email.casefold()
+    return False
+
+
 def _message_role(message: dict[str, Any]) -> str:
     role = message.get("type") or message.get("role") or ""
     return str(role).lower()
@@ -209,6 +357,7 @@ class OpenSWEAcpAgent:
         self._sessions: dict[str, SessionState] = {}
         self._active_runs: dict[str, str] = {}
         self._attach_tasks: dict[str, asyncio.Task[None]] = {}
+        self._authenticated_user: AuthenticatedUser | None = None
 
     def on_connect(self, conn: Connection) -> None:
         self._conn = conn
@@ -226,12 +375,38 @@ class OpenSWEAcpAgent:
                 prompt_capabilities=PromptCapabilities(embedded_context=True, image=True),
                 session_capabilities=SessionCapabilities(list=SessionListCapabilities()),
             ),
+            auth_methods=[
+                EnvVarAuthMethod(
+                    type="env_var",
+                    id=ACP_GITHUB_TOKEN_AUTH_METHOD_ID,
+                    name="GitHub token",
+                    description=(
+                        "Provide a GitHub user token so Open SWE can authenticate the ACP client "
+                        "and attribute runs to the requesting user."
+                    ),
+                    vars=[
+                        AuthEnvVar(
+                            name=ACP_GITHUB_TOKEN_ENV,
+                            label="GitHub token",
+                        )
+                    ],
+                )
+            ],
         )
 
-    async def authenticate(self, **_: Any) -> AuthenticateResponse | None:
+    async def authenticate(self, method_id: str, **_: Any) -> AuthenticateResponse | None:
+        if method_id != ACP_GITHUB_TOKEN_AUTH_METHOD_ID:
+            raise RequestError.invalid_params(
+                {
+                    "message": f"Unsupported authentication method {method_id!r}",
+                    "method_id": method_id,
+                }
+            )
+        await self._require_authenticated_user(force_refresh=True)
         return AuthenticateResponse()
 
     async def new_session(self, cwd: str, **_: Any) -> NewSessionResponse:
+        user = await self._require_authenticated_user()
         client = self._client()
         repo_config = resolve_repo_config(cwd, repo_override=self.repo_override)
         thread = await client.threads.create(
@@ -240,6 +415,7 @@ class OpenSWEAcpAgent:
                 "cwd": cwd,
                 "title": f"{repo_config['owner']}/{repo_config['name']}",
                 "source": "acp",
+                "acp_user": _acp_user_metadata(user),
             }
         )
         session_id = thread["thread_id"]
@@ -253,8 +429,10 @@ class OpenSWEAcpAgent:
         return NewSessionResponse(session_id=session_id)
 
     async def load_session(self, cwd: str, session_id: str, **_: Any) -> LoadSessionResponse | None:
+        user = await self._require_authenticated_user()
         client = self._client()
         thread = await client.threads.get(session_id)
+        self._assert_thread_access(thread, session_id, user)
         repo_config = _thread_repo_config(thread) or resolve_repo_config(cwd, repo_override=self.repo_override)
         session = SessionState(
             session_id=session_id,
@@ -277,6 +455,7 @@ class OpenSWEAcpAgent:
         return await self.load_session(cwd=cwd, session_id=session_id, **kwargs)
 
     async def list_sessions(self, cursor: str | None = None, cwd: str | None = None, **_: Any) -> ListSessionsResponse:
+        user = await self._require_authenticated_user()
         client = self._client()
         offset = int(cursor or "0")
         repo_filter = resolve_repo_config(cwd, repo_override=self.repo_override) if cwd else None
@@ -284,6 +463,8 @@ class OpenSWEAcpAgent:
 
         filtered_threads: list[dict[str, Any]] = []
         for thread in threads:
+            if not _user_matches_thread(thread, user):
+                continue
             repo_config = _thread_repo_config(thread)
             if repo_filter and repo_config != repo_filter:
                 continue
@@ -309,6 +490,7 @@ class OpenSWEAcpAgent:
         return ListSessionsResponse(sessions=sessions, next_cursor=next_cursor)
 
     async def prompt(self, prompt: list[Any], session_id: str, message_id: str | None = None, **_: Any) -> PromptResponse:
+        user = await self._require_authenticated_user()
         client = self._client()
         session = await self._ensure_session(session_id)
         await self._cancel_attach_task(session_id)
@@ -321,12 +503,7 @@ class OpenSWEAcpAgent:
             session.title = title_hint
             await client.threads.update(
                 thread_id=session_id,
-                metadata={
-                    "repo": session.repo_config,
-                    "cwd": session.cwd,
-                    "title": session.title,
-                    "source": "acp",
-                },
+                metadata=self._session_metadata(session, user),
             )
             await self._notify_session_info(session_id)
 
@@ -345,6 +522,10 @@ class OpenSWEAcpAgent:
                 "configurable": {
                     "repo": session.repo_config,
                     "source": "acp",
+                    "github_token": user.github_token,
+                    "github_login": user.github_login,
+                    "github_user_id": user.github_user_id,
+                    "user_email": user.github_email,
                 }
             },
             multitask_strategy="interrupt",
@@ -420,7 +601,9 @@ class OpenSWEAcpAgent:
         session = self._sessions.get(session_id)
         if session:
             return session
+        user = await self._require_authenticated_user()
         thread = await self._client().threads.get(session_id)
+        self._assert_thread_access(thread, session_id, user)
         repo_config = _thread_repo_config(thread)
         if not repo_config:
             raise RequestError.resource_not_found(session_id)
@@ -432,6 +615,56 @@ class OpenSWEAcpAgent:
         )
         self._sessions[session_id] = session
         return session
+
+    async def _require_authenticated_user(self, *, force_refresh: bool = False) -> AuthenticatedUser:
+        if self._authenticated_user is not None and not force_refresh:
+            return self._authenticated_user
+
+        github_token = os.getenv(ACP_GITHUB_TOKEN_ENV, "").strip()
+        if not github_token:
+            raise RequestError.auth_required(
+                {
+                    "message": (
+                        "Open SWE ACP requires a GitHub user token. "
+                        f"Set {ACP_GITHUB_TOKEN_ENV} and call authenticate."
+                    ),
+                    "env_var": ACP_GITHUB_TOKEN_ENV,
+                }
+            )
+
+        authenticated_user = await resolve_authenticated_user_from_github_token(github_token)
+        if (
+            self._authenticated_user is not None
+            and self._authenticated_user.github_login != authenticated_user.github_login
+        ):
+            self._sessions.clear()
+            self._active_runs.clear()
+        self._authenticated_user = authenticated_user
+        return authenticated_user
+
+    def _assert_thread_access(
+        self,
+        thread: dict[str, Any],
+        session_id: str,
+        user: AuthenticatedUser,
+    ) -> None:
+        if _user_matches_thread(thread, user):
+            return
+        raise RequestError.auth_required(
+            {
+                "message": "This Open SWE thread belongs to a different ACP user",
+                "session_id": session_id,
+            }
+        )
+
+    def _session_metadata(self, session: SessionState, user: AuthenticatedUser) -> dict[str, Any]:
+        return {
+            "repo": session.repo_config,
+            "cwd": session.cwd,
+            "title": session.title,
+            "source": "acp",
+            "acp_user": _acp_user_metadata(user),
+        }
 
     def _convert_prompt_blocks(self, prompt: list[Any]) -> list[dict[str, Any]]:
         blocks: list[dict[str, Any]] = []

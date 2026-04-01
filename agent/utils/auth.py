@@ -373,10 +373,18 @@ async def resolve_github_token(config: RunnableConfig, thread_id: str) -> tuple[
     Raises:
         RuntimeError: If source is missing or token resolution fails.
     """
+    configurable = config["configurable"]
+    explicit_token = configurable.get("github_token")
+    if isinstance(explicit_token, str) and explicit_token:
+        return explicit_token, ""
+
+    cached_token, cached_encrypted = await get_github_token_from_thread(thread_id)
+    if cached_token and cached_encrypted:
+        return cached_token, cached_encrypted
+
     if is_bot_token_only_mode():
         return await _resolve_bot_installation_token(thread_id)
 
-    configurable = config["configurable"]
     source = configurable.get("source")
     if not source:
         logger.error("Missing source for thread %s; cannot route auth failure responses", thread_id)
@@ -384,9 +392,6 @@ async def resolve_github_token(config: RunnableConfig, thread_id: str) -> tuple[
 
     try:
         if source == "github":
-            cached_token, cached_encrypted = await get_github_token_from_thread(thread_id)
-            if cached_token and cached_encrypted:
-                return cached_token, cached_encrypted
             github_login = configurable.get("github_login")
             email = GITHUB_USER_EMAIL_MAP.get(github_login or "")
             if not email:

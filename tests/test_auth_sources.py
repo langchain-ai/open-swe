@@ -85,3 +85,23 @@ def test_leave_failure_comment_falls_back_to_slack_thread_when_ephemeral_fails(
     asyncio.run(auth.leave_failure_comment("slack", "auth failed"))
 
     assert thread_called == {"channel_id": "C123", "thread_ts": "1.2", "message": "auth failed"}
+
+
+def test_resolve_github_token_prefers_explicit_configurable_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fail_if_called(thread_id: str) -> tuple[str | None, str | None]:
+        raise AssertionError
+
+    monkeypatch.setattr(auth, "get_github_token_from_thread", fail_if_called)
+    monkeypatch.setattr(auth, "is_bot_token_only_mode", lambda: False)
+
+    token, encrypted = asyncio.run(
+        auth.resolve_github_token(
+            {"configurable": {"source": "acp", "github_token": "ghu_direct"}},
+            "thread-1",
+        )
+    )
+
+    assert token == "ghu_direct"
+    assert encrypted == ""
