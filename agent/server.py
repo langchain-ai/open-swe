@@ -378,6 +378,17 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
         msg = "Cannot proceed: no repo was cloned. Set 'repo.owner' and 'repo.name' in the configurable config"
         raise RuntimeError(msg)
 
+    if config["configurable"].get("mode") == "eval" and github_token and repo_owner and repo_name:
+        loop = asyncio.get_event_loop()
+        safe_repo_dir = shlex.quote(repo_dir)
+        await loop.run_in_executor(
+            None,
+            sandbox_backend.execute,
+            f"cd {safe_repo_dir} && git remote set-url origin "
+            f"https://x-access-token:{shlex.quote(github_token)}@github.com/"
+            f"{shlex.quote(repo_owner)}/{shlex.quote(repo_name)}.git",
+        )
+
     branch_name = get_config().get("metadata", {}).get("branch_name")
     if branch_name:
         logger.info("Checking out branch '%s' in sandbox for thread %s", branch_name, thread_id)

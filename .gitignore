@@ -51,6 +51,10 @@ credentials.json
 # Test traces
 apps/cli/test_traces/
 
+# Eval generated files
+tests/evals/diffs/
+tests/evals/eval_results.json
+
 # Python
 __pycache__/
 **/__pycache__/
