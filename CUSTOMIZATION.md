@@ -5,7 +5,7 @@ Open SWE is designed to be forked and customized for your org. The core agent is
 ```python
 # agent/server.py — the key lines
 return create_deep_agent(
-    model=make_model("anthropic:claude-opus-4-6", temperature=0, max_tokens=20_000),
+    model=make_model(os.environ.get("LLM_MODEL_ID", DEFAULT_LLM_MODEL_ID), temperature=0, max_tokens=20_000),
     system_prompt=construct_system_prompt(repo_dir, ...),
     tools=[http_request, fetch_url, commit_and_open_pr, linear_comment, slack_thread_reply],
     backend=sandbox_backend,
@@ -117,11 +117,14 @@ See `agent/integrations/langsmith.py` (`LangSmithBackend` class) for a full refe
 
 ## 2. Model
 
-The model is configured in the `get_agent()` function in `agent/server.py`:
+The model is configured in the `get_agent()` function in `agent/server.py`. By default it uses `anthropic:claude-opus-4-6`, but you can override it with the `LLM_MODEL_ID` environment variable:
 
-```python
-model=make_model("anthropic:claude-opus-4-6", temperature=0, max_tokens=20_000)
+```bash
+# Set the model via environment variable (uses provider:model format)
+LLM_MODEL_ID="anthropic:claude-sonnet-4-6"
 ```
+
+If `LLM_MODEL_ID` is not set, the default model (`anthropic:claude-opus-4-6`) is used.
 
 ### Switching models
 
@@ -264,6 +267,29 @@ To fully remove a trigger's code, delete the corresponding endpoint from `agent/
 - **Linear**: `linear_webhook()` and `process_linear_issue()`
 - **Slack**: `slack_webhook()` and `process_slack_mention()`
 
+### Default repository
+
+Set the default GitHub org and repo used across all triggers (Slack, Linear, GitHub) when no repo is specified:
+
+```bash
+DEFAULT_REPO_OWNER="my-org"      # Default GitHub org (used everywhere)
+DEFAULT_REPO_NAME="my-repo"      # Default GitHub repo (used everywhere)
+```
+
+These are used as the fallback when:
+- A Slack message doesn't specify a repo (and no thread metadata exists)
+- A Linear issue's team/project isn't in the `LINEAR_TEAM_TO_REPO` mapping
+- A user writes `repo:name` without an org prefix — the org defaults to `DEFAULT_REPO_OWNER`
+
+### Repository extraction from messages
+
+Both Slack and Linear support specifying a target repo directly in the message or comment text. The shared utility `extract_repo_from_text()` in `agent/utils/repo.py` handles parsing these formats:
+
+- `repo:owner/name` — explicit org and repo
+- `repo owner/name` — space syntax (same result)
+- `repo:name` — repo name only; the org defaults to `DEFAULT_REPO_OWNER`
+- `https://github.com/owner/name` — GitHub URL
+
 ### Customizing Linear routing
 
 The `LINEAR_TEAM_TO_REPO` dict in `agent/utils/linear_team_repo_map.py` maps Linear teams and projects to GitHub repos:
@@ -280,16 +306,13 @@ LINEAR_TEAM_TO_REPO = {
 }
 ```
 
+Users can also override the team/project mapping on a per-comment basis by including `repo:owner/name` in their `@openswe` comment. This takes priority over the mapping — the mapping is used as a fallback when no repo is specified in the comment. If the team/project isn't found in the mapping either, `DEFAULT_REPO_OWNER`/`DEFAULT_REPO_NAME` is used.
+
 ### Customizing Slack routing
 
-Slack uses env vars for default routing:
+Slack uses `DEFAULT_REPO_OWNER` and `DEFAULT_REPO_NAME` as the fallback when no repo is specified in a message.
 
-```bash
-SLACK_REPO_OWNER="my-org"
-SLACK_REPO_NAME="my-repo"
-```
-
-Users can override per-message with `repo:owner/name` syntax in their Slack message.
+Users can override per-message with `repo:owner/name` syntax in their Slack message. A shorthand `repo:name` (without the org) is also supported — the org defaults to `DEFAULT_REPO_OWNER`.
 
 ### Adding a new trigger
 
