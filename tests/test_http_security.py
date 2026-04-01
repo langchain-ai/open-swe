@@ -72,7 +72,9 @@ def test_fetch_url_blocks_private_ip_without_issuing_a_request(monkeypatch) -> N
 def test_fetch_url_blocks_redirects_to_private_ips(monkeypatch) -> None:
     calls: list[tuple[str, str, bool]] = []
 
-    def fake_request(method: str, url: str, *, timeout: int, allow_redirects: bool, **kwargs) -> FakeResponse:  # type: ignore[no-untyped-def]
+    def fake_request(
+        method: str, url: str, *, timeout: int, allow_redirects: bool, **kwargs
+    ) -> FakeResponse:  # type: ignore[no-untyped-def]
         calls.append((method, url, allow_redirects))
         return FakeResponse(
             status_code=302,
