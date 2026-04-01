@@ -28,6 +28,7 @@ from ..utils.github import (
     get_github_default_branch,
     git_add_all,
     git_checkout_branch,
+    git_checkout_existing_branch,
     git_commit,
     git_config_user,
     git_current_branch,
@@ -142,8 +143,7 @@ async def open_pr_if_needed(
             if branch_name:
                 # Existing branch — plain checkout, do not create or reset
                 await asyncio.to_thread(
-                    sandbox_backend.execute,
-                    f"cd {repo_dir} && git checkout {target_branch}",
+                    git_checkout_existing_branch, sandbox_backend, repo_dir, target_branch
                 )
             else:
                 await asyncio.to_thread(
