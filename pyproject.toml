@@ -24,6 +24,7 @@ dependencies = [
     "langchain-modal>=0.0.2",
     "langchain-runloop>=0.0.3",
     "exa-py>=2.10.1",
+    "agent-client-protocol>=0.9.0",
 ]
 
 [project.optional-dependencies]
@@ -32,6 +33,9 @@ dev = [
     "pytest-asyncio>=0.21.0",
     "ruff>=0.1.0",
 ]
+
+[project.scripts]
+open-swe-acp = "agent.acp_connector:main"
 
 [build-system]
 requires = ["hatchling"]

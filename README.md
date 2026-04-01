@@ -137,6 +137,18 @@ This is an area where you can extend Open SWE for your org: add deterministic CI
 - **Opens PRs automatically** — commits changes and opens a draft PR when done, linked back to your ticket
 - **Subagent support** — the agent can spawn child agents for parallel subtasks
 
+## ACP Connector
+
+Open SWE now includes an `open-swe-acp` connector for ACP-compatible desktop clients. The connector runs locally over stdio, derives the GitHub repo from the current workspace, and forwards ACP sessions to a remote Open SWE LangGraph deployment.
+
+Set `OPEN_SWE_LANGGRAPH_URL` to your deployment URL and optionally `OPEN_SWE_LANGGRAPH_API_KEY` if your LangGraph server requires auth. If your local checkout does not have a GitHub `origin` remote, set `OPEN_SWE_REPO=owner/name` instead.
+
+```bash
+uv run open-swe-acp
+```
+
+ACP session IDs map directly to Open SWE thread IDs, so clients can both start a new remote Open SWE thread and reopen an existing one with `session/load`.
+
 ---
 
 ## Getting Started
