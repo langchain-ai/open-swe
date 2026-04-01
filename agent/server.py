@@ -37,11 +37,25 @@ from .middleware import (
 from .prompt import construct_system_prompt
 from .tools import (
     commit_and_open_pr,
+    create_pr_review,
+    dismiss_pr_review,
     fetch_url,
+    get_pr_review,
     github_comment,
     http_request,
     linear_comment,
+    linear_create_issue,
+    linear_delete_issue,
+    linear_get_issue,
+    linear_get_issue_comments,
+    linear_list_teams,
+    linear_update_issue,
+    list_pr_review_comments,
+    list_pr_reviews,
     slack_thread_reply,
+    submit_pr_review,
+    update_pr_review,
+    web_search,
 )
 from .utils.auth import resolve_github_token
 from .utils.github_app import get_github_app_installation_token
@@ -120,7 +134,7 @@ async def _clone_or_pull_repo_in_sandbox(
             pull_result = await loop.run_in_executor(
                 None,
                 sandbox_backend.execute,
-                f"cd {repo_dir} && git pull origin $(git rev-parse --abbrev-ref HEAD)",
+                f"cd {shlex.quote(repo_dir)} && git pull origin $(git rev-parse --abbrev-ref HEAD)",
             )
             logger.debug("Git pull result: exit_code=%s", pull_result.exit_code)
             if pull_result.exit_code != 0:
@@ -141,7 +155,7 @@ async def _clone_or_pull_repo_in_sandbox(
         result = await loop.run_in_executor(
             None,
             sandbox_backend.execute,
-            f"git clone {clean_url} {repo_dir}",
+            f"git clone {shlex.quote(clean_url)} {shlex.quote(repo_dir)}",
         )
         logger.debug("Git clone result: exit_code=%s", result.exit_code)
     except Exception:
@@ -165,6 +179,10 @@ async def _create_sandbox_with_proxy(github_token: str | None) -> SandboxBackend
     """
     installation_token = await get_github_app_installation_token()
     proxy_token = installation_token or github_token
+    if not proxy_token:
+        msg = "Cannot create sandbox: no GitHub token available (installation token and user token are both missing)"
+        logger.error(msg)
+        raise ValueError(msg)
     return await asyncio.to_thread(create_langsmith_sandbox, None, proxy_token)
 
 
@@ -395,10 +413,24 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
         tools=[
             http_request,
             fetch_url,
+            web_search,
             commit_and_open_pr,
             linear_comment,
+            linear_create_issue,
+            linear_delete_issue,
+            linear_get_issue,
+            linear_get_issue_comments,
+            linear_list_teams,
+            linear_update_issue,
             slack_thread_reply,
             github_comment,
+            list_pr_reviews,
+            get_pr_review,
+            create_pr_review,
+            update_pr_review,
+            dismiss_pr_review,
+            submit_pr_review,
+            list_pr_review_comments,
         ],
         backend=sandbox_backend,
         middleware=[

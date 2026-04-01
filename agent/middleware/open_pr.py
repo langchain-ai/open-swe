@@ -131,22 +131,26 @@ async def open_pr_if_needed(
         await asyncio.to_thread(git_commit, sandbox_backend, repo_dir, commit_message)
 
         github_token = get_github_token()
-
-        if github_token:
-            await asyncio.to_thread(git_push, sandbox_backend, repo_dir, target_branch)
-
-            base_branch = await get_github_default_branch(repo_owner, repo_name, github_token)
-            logger.info("Using base branch: %s", base_branch)
-
-            await create_github_pr(
-                repo_owner=repo_owner,
-                repo_name=repo_name,
-                github_token=github_token,
-                title=pr_title,
-                head_branch=target_branch,
-                base_branch=base_branch,
-                body=pr_body,
+        if not github_token:
+            logger.error(
+                "No GitHub token available for thread %s — cannot push or create PR", thread_id
             )
+            return None
+
+        await asyncio.to_thread(git_push, sandbox_backend, repo_dir, target_branch)
+
+        base_branch = await get_github_default_branch(repo_owner, repo_name, github_token)
+        logger.info("Using base branch: %s", base_branch)
+
+        await create_github_pr(
+            repo_owner=repo_owner,
+            repo_name=repo_name,
+            github_token=github_token,
+            title=pr_title,
+            head_branch=target_branch,
+            base_branch=base_branch,
+            body=pr_body,
+        )
 
         logger.info("After-agent middleware completed successfully")
 
