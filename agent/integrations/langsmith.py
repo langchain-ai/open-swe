@@ -69,7 +69,13 @@ def _configure_github_proxy(sandbox_name: str, github_token: str, api_key: str) 
                 {
                     "name": "github",
                     "match_hosts": ["github.com", "*.github.com"],
-                    "inject_headers": {"Authorization": f"Basic {basic_auth}"},
+                    "headers": [
+                        {
+                            "name": "Authorization",
+                            "type": "opaque",
+                            "value": f"Basic {basic_auth}",
+                        }
+                    ],
                 }
             ]
         }

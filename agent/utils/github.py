@@ -136,22 +136,6 @@ def git_push(
     return _run_git(sandbox_backend, repo_dir, f"git push origin {safe_branch}")
 
 
-def git_pull_branch(
-    sandbox_backend: SandboxBackendProtocol,
-    repo_dir: str,
-    branch: str,
-    github_token: str | None = None,
-) -> ExecuteResponse:
-    """Pull a specific branch from origin, using a token if needed."""
-    safe_branch = shlex.quote(branch)
-    if not github_token:
-        return _run_git(sandbox_backend, repo_dir, f"git pull origin {safe_branch}")
-    setup_git_credentials(sandbox_backend, github_token)
-    try:
-        return _git_with_credentials(sandbox_backend, repo_dir, f"pull origin {safe_branch}")
-    finally:
-        cleanup_git_credentials(sandbox_backend)
-
 
 async def create_github_pr(
     repo_owner: str,
