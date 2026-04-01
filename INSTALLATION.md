@@ -204,6 +204,8 @@ LINEAR_TEAM_TO_REPO = {
 }
 ```
 
+Users can also override the team/project mapping per-comment by including `repo:owner/name` (or a GitHub URL) in their `@openswe` comment. The mapping is used as a fallback when no repo is specified in the comment text.
+
 ### Slack (optional)
 
 **Create a Slack App:**
@@ -285,14 +287,9 @@ LINEAR_TEAM_TO_REPO = {
 - `SLACK_BOT_USER_ID`: the bot's user ID (find it in Slack by clicking the bot's profile)
 - `SLACK_BOT_USERNAME`: the bot's display name (e.g. `open-swe`)
 
-**Configure default repo:**
+**Default repo:**
 
-Slack messages are routed to a default repo unless the user specifies one with `repo:owner/name`:
-
-```bash
-SLACK_REPO_OWNER="my-org"      # Default GitHub org
-SLACK_REPO_NAME="my-repo"      # Default GitHub repo
-```
+Slack messages are routed to the default repo (`DEFAULT_REPO_OWNER`/`DEFAULT_REPO_NAME` — see step 6) unless the user specifies one with `repo:owner/name` in their message.
 
 ## 6. Environment variables
 
@@ -331,6 +328,11 @@ GITHUB_OAUTH_PROVIDER_ID=""            # The provider ID from steps 3a / 4b
 # Leave empty to allow all orgs.
 ALLOWED_GITHUB_ORGS=""                 # e.g. "my-org,my-other-org"
 
+# === Default Repository ===
+# Used across all triggers when no repo is specified.
+DEFAULT_REPO_OWNER=""                  # Default GitHub org (e.g. "my-org")
+DEFAULT_REPO_NAME=""                   # Default GitHub repo (e.g. "my-repo")
+
 # === Linear (if using Linear trigger) ===
 LINEAR_API_KEY=""                      # From step 5
 LINEAR_WEBHOOK_SECRET=""               # From step 5
@@ -340,8 +342,9 @@ SLACK_BOT_TOKEN=""                     # From step 5
 SLACK_BOT_USER_ID=""
 SLACK_BOT_USERNAME=""
 SLACK_SIGNING_SECRET=""
-SLACK_REPO_OWNER=""                    # Default org for Slack-triggered tasks
-SLACK_REPO_NAME=""                     # Default repo for Slack-triggered tasks
+
+# === Exa (optional — enables web search tool) ===
+EXA_API_KEY=""                         # From https://dashboard.exa.ai
 
 # === Sandbox (optional) ===
 DEFAULT_SANDBOX_TEMPLATE_NAME=""       # Custom sandbox template name (default: deepagents-cli)

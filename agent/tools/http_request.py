@@ -1,15 +1,20 @@
 import ipaddress
 import socket
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 import requests
+
+_MAX_REDIRECTS = 5
 
 
 def _is_url_safe(url: str) -> tuple[bool, str]:
     """Check if a URL is safe to request (not targeting private/internal networks)."""
     try:
         parsed = urlparse(url)
+        if parsed.scheme not in {"http", "https"}:
+            return False, f"Unsupported URL scheme: {parsed.scheme or '<missing>'}"
+
         hostname = parsed.hostname
         if not hostname:
             return False, "Could not parse hostname from URL"
@@ -44,6 +49,54 @@ def _blocked_response(url: str, reason: str) -> dict[str, Any]:
     }
 
 
+def _request_with_safe_redirects(
+    method: str,
+    url: str,
+    *,
+    timeout: int,
+    **kwargs: Any,
+) -> tuple[requests.Response | None, dict[str, Any] | None]:
+    """Issue a request while validating every redirect target before following it."""
+    current_method = method.upper()
+    current_url = url
+    request_kwargs = dict(kwargs)
+
+    for redirect_count in range(_MAX_REDIRECTS + 1):
+        is_safe, reason = _is_url_safe(current_url)
+        if not is_safe:
+            return None, _blocked_response(current_url, reason)
+
+        response = requests.request(
+            current_method,
+            current_url,
+            timeout=timeout,
+            allow_redirects=False,
+            **request_kwargs,
+        )
+
+        if not response.is_redirect and not response.is_permanent_redirect:
+            return response, None
+
+        location = response.headers.get("Location")
+        if not location:
+            return response, None
+
+        if redirect_count == _MAX_REDIRECTS:
+            return None, _blocked_response(current_url, "Too many redirects")
+
+        current_url = urljoin(str(response.url), location)
+
+        if response.status_code == requests.codes.see_other or (
+            response.status_code in {requests.codes.moved, requests.codes.found}
+            and current_method not in {"GET", "HEAD"}
+        ):
+            current_method = "GET"
+            request_kwargs.pop("data", None)
+            request_kwargs.pop("json", None)
+
+    return None, _blocked_response(current_url, "Too many redirects")
+
+
 def http_request(
     url: str,
     method: str = "GET",
@@ -65,10 +118,6 @@ def http_request(
     Returns:
         Dictionary with response data including status, headers, and content
     """
-    is_safe, reason = _is_url_safe(url)
-    if not is_safe:
-        return _blocked_response(url, reason)
-
     try:
         kwargs: dict[str, Any] = {}
 
@@ -82,7 +131,14 @@ def http_request(
             else:
                 kwargs["data"] = data
 
-        response = requests.request(method.upper(), url, timeout=timeout, **kwargs)
+        response, blocked = _request_with_safe_redirects(
+            method,
+            url,
+            timeout=timeout,
+            **kwargs,
+        )
+        if blocked:
+            return blocked
 
         try:
             content = response.json()

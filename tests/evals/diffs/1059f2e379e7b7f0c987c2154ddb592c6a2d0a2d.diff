@@ -1,0 +1,193 @@
+diff --git a/smith-go/playground/experiment_service.go b/smith-go/playground/experiment_service.go
+index 98a0140c66b1..04a8ff98ffdc 100644
+--- a/smith-go/playground/experiment_service.go
++++ b/smith-go/playground/experiment_service.go
+@@ -417,7 +417,7 @@ func (s *ExperimentService) materializeExamples(
+ 		if len(resolved) > 0 {
+ 			attachments = make(map[string]any, len(resolved))
+ 			for k, v := range resolved {
+-				attachments[k] = map[string]any{
++				attachments[sanitizeAttachmentKey(k)] = map[string]any{
+ 					"storage_url":   v.StorageURL,
+ 					"presigned_url": v.PresignedURL,
+ 					"mime_type":     v.MimeType,
+@@ -820,6 +820,19 @@ func runHasError(run map[string]any) bool {
+ 	return true
+ }
+ 
++// attachmentPrefix is the key prefix used in the attachment_urls JSONB column.
++const attachmentPrefix = "attachment."
++
++// sanitizeAttachmentKey converts a raw attachment_urls key (e.g.
++// "attachment.5872_BORK.png") into the template variable name expected by the
++// prompt (e.g. "5872_BORK_png"). This mirrors the frontend's
++// convertAttachmentNameToTemplateVar and the Python backend's
++// sanitize_attachment_name.
++func sanitizeAttachmentKey(key string) string {
++	key = strings.TrimPrefix(key, attachmentPrefix)
++	return strings.ReplaceAll(key, ".", "_")
++}
++
+ func isPromptPlaygroundManifest(manifest map[string]any) bool {
+ 	idRaw, ok := manifest["id"].([]any)
+ 	if !ok || len(idRaw) != 3 {
+diff --git a/smith-go/playground/experiment_service_test.go b/smith-go/playground/experiment_service_test.go
+index 31bb941c9ecb..58388b986fad 100644
+--- a/smith-go/playground/experiment_service_test.go
++++ b/smith-go/playground/experiment_service_test.go
+@@ -265,3 +265,22 @@ func TestToolDefinition_MarshalRoundTrip_NoDoubleEmission(t *testing.T) {
+ 	_, hasFunction := roundTripped["function"]
+ 	assert.False(t, hasFunction, "flat format should not emit function")
+ }
++
++func TestSanitizeAttachmentKey(t *testing.T) {
++	tests := []struct {
++		input    string
++		expected string
++	}{
++		{"attachment.5872_BORK.png", "5872_BORK_png"},
++		{"attachment.invoice.pdf", "invoice_pdf"},
++		{"image", "image"},
++		{"attachment.nested.dots.file.txt", "nested_dots_file_txt"},
++		{"no_prefix_just_dots.csv", "no_prefix_just_dots_csv"},
++	}
++
++	for _, tc := range tests {
++		t.Run(tc.input, func(t *testing.T) {
++			assert.Equal(t, tc.expected, sanitizeAttachmentKey(tc.input))
++		})
++	}
++}
+diff --git a/smith-playground/playground/api/endpoints/internal.py b/smith-playground/playground/api/endpoints/internal.py
+index fd590e96843b..85abbbee03a5 100644
+--- a/smith-playground/playground/api/endpoints/internal.py
++++ b/smith-playground/playground/api/endpoints/internal.py
+@@ -1,7 +1,9 @@
+ import asyncio
++import base64
+ from typing import Any, Union
+ from uuid import UUID, uuid4
+ 
++import httpx
+ import orjson
+ import structlog
+ from fastapi import Depends, Header, HTTPException, Response
+@@ -14,6 +16,9 @@
+ from pydantic import BaseModel
+ from sse_starlette import EventSourceResponse
+ 
++from playground.models.playground.multimodal_utils import (
++    is_supported_multimodal_mime_type,
++)
+ from playground.models.playground.schema import (
+     PlaygroundExample,
+     PlaygroundExamplesRequestSchema,
+@@ -32,6 +37,88 @@
+ 
+ logger = structlog.get_logger(__name__)
+ 
++_ATTACHMENT_FETCH_TIMEOUT_SECONDS = 30
++
++
++async def _fetch_and_encode_attachment(
++    aclient: httpx.AsyncClient,
++    key: str,
++    presigned_url: str,
++    mime_type: str,
++) -> tuple[str, dict[str, str]] | None:
++    """Fetch a single presigned-URL attachment and return (key, {data, mime_type})."""
++    try:
++        response = await aclient.get(presigned_url)
++        response.raise_for_status()
++        content_type = response.headers.get("Content-Type", mime_type)
++        if not content_type or not is_supported_multimodal_mime_type(content_type):
++            return None
++
++        encoded = base64.b64encode(response.content).decode("utf-8")
++        if content_type.startswith("audio/"):
++            data = encoded
++        else:
++            data = f"data:{content_type};base64,{encoded}"
++        return key, {"data": data, "mime_type": content_type}
++    except httpx.HTTPError as e:
++        logger.error(
++            "Failed to fetch presigned attachment",
++            error=str(e),
++            key=key,
++        )
++        return None
++
++
++async def _resolve_presigned_attachments(
++    attachments: dict[str, Any] | None,
++) -> dict[str, Any]:
++    """Download presigned-URL attachments and convert to {data, mime_type} format.
++
++    The Go experiment service sends attachments as
++    {"presigned_url": "...", "mime_type": "...", "storage_url": "..."}.
++    The playground multimodal pipeline expects {"data": "<base64>", "mime_type": "..."}.
++    This bridges the two formats, mirroring smith-backend's format_attachment_urls.
++    """
++    if not attachments:
++        return {}
++
++    resolved: dict[str, Any] = {}
++    fetch_tasks: list[asyncio.Task] = []
++
++    async with httpx.AsyncClient(timeout=_ATTACHMENT_FETCH_TIMEOUT_SECONDS) as aclient:
++        for key, value in attachments.items():
++            if not isinstance(value, dict):
++                resolved[key] = value
++                continue
++
++            if "data" in value and "mime_type" in value:
++                resolved[key] = value
++                continue
++
++            presigned_url = value.get("presigned_url")
++            if not presigned_url:
++                resolved[key] = value
++                continue
++
++            fetch_tasks.append(
++                asyncio.create_task(
++                    _fetch_and_encode_attachment(
++                        aclient,
++                        key,
++                        presigned_url,
++                        value.get("mime_type", ""),
++                    )
++                )
++            )
++
++        if fetch_tasks:
++            results = await asyncio.gather(*fetch_tasks)
++            for result in results:
++                if result is not None:
++                    resolved[result[0]] = result[1]
++
++    return resolved
++
+ 
+ # Dependency to extract headers
+ def get_internal_auth_headers(
+@@ -88,7 +175,9 @@ async def internal_batch_examples_handler(
+ 
+     examples = request.examples
+     inputs = [format_example_inputs(e.inputs) for e in examples]
+-    attachments = [e.attachments for e in examples]
++    attachments = await asyncio.gather(
++        *[_resolve_presigned_attachments(e.attachments) for e in examples]
++    )
+     combined_inputs: list[dict | list] = []
+     for i in range(len(inputs)):
+         curr_input = inputs[i]
+@@ -262,7 +351,7 @@ async def process_example(example: PlaygroundExample, run_id: UUID):
+         tracers = [playground_tracer]
+         config = {**runnable_config, "callbacks": tracers, "run_id": run_id}
+         inputs = format_example_inputs(example.inputs)
+-        attachments = example.attachments
++        attachments = await _resolve_presigned_attachments(example.attachments)
+ 
+         is_first = True
+         try:

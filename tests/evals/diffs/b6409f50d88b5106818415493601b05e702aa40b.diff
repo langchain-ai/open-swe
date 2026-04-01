@@ -1,0 +1,792 @@
+diff --git a/agent-builder-trigger-server/app/providers/base.py b/agent-builder-trigger-server/app/providers/base.py
+index 05e00faa11e8..647ba78f99ae 100644
+--- a/agent-builder-trigger-server/app/providers/base.py
++++ b/agent-builder-trigger-server/app/providers/base.py
+@@ -2,7 +2,7 @@
+ 
+ from abc import ABC, abstractmethod
+ 
+-from app.providers.types import ProviderItem, ProviderType
++from app.providers.types import ProviderAccount, ProviderType
+ 
+ 
+ class ProviderHandler(ABC):
+@@ -19,4 +19,4 @@ def accounts_available(self) -> bool:
+         return True
+ 
+     @abstractmethod
+-    async def fetch_account(self, access_token: str) -> ProviderItem: ...
++    async def fetch_account(self, access_token: str) -> ProviderAccount: ...
+diff --git a/agent-builder-trigger-server/app/providers/handlers/google.py b/agent-builder-trigger-server/app/providers/handlers/google.py
+index 8e3762d750b1..07807d554e83 100644
+--- a/agent-builder-trigger-server/app/providers/handlers/google.py
++++ b/agent-builder-trigger-server/app/providers/handlers/google.py
+@@ -11,16 +11,18 @@
+     HTTP_UNAUTHORIZED,
+     USERINFO_TIMEOUT_SECONDS,
+ )
+-from app.providers.types import ItemStatus, ProviderItem, ProviderType
++from app.providers.types import AccountStatus, ProviderAccount, ProviderType
+ 
+ logger = structlog.get_logger(__name__)
+ 
+-_ERROR = ProviderItem(token_id="", status=ItemStatus.PROVIDER_ERROR)
+-_FORBIDDEN = ProviderItem(token_id="", status=ItemStatus.FORBIDDEN)
+-_INSUFFICIENT_SCOPE = ProviderItem(token_id="", status=ItemStatus.INSUFFICIENT_SCOPE)
++_ERROR = ProviderAccount(token_id="", status=AccountStatus.PROVIDER_ERROR)
++_FORBIDDEN = ProviderAccount(token_id="", status=AccountStatus.FORBIDDEN)
++_INSUFFICIENT_SCOPE = ProviderAccount(
++    token_id="", status=AccountStatus.INSUFFICIENT_SCOPE
++)
+ 
+ 
+-def _status_for(code: int) -> ProviderItem:
++def _status_for(code: int) -> ProviderAccount:
+     if code == HTTP_FORBIDDEN:
+         return _FORBIDDEN
+     if code == HTTP_UNAUTHORIZED:
+@@ -37,7 +39,7 @@ def provider_type(self) -> ProviderType:
+     def display_name(self) -> str:
+         return "Google"
+ 
+-    async def fetch_account(self, access_token: str) -> ProviderItem:
++    async def fetch_account(self, access_token: str) -> ProviderAccount:
+         try:
+             async with httpx.AsyncClient(timeout=USERINFO_TIMEOUT_SECONDS) as client:
+                 resp = await client.get(
+@@ -51,9 +53,9 @@ async def fetch_account(self, access_token: str) -> ProviderItem:
+                 data = resp.json()
+                 email = (data.get("email") or "").strip().lower() or None
+ 
+-                return ProviderItem(
++                return ProviderAccount(
+                     token_id="",
+-                    status=ItemStatus.OK,
++                    status=AccountStatus.OK,
+                     email=email,
+                     name=data.get("name"),
+                 )
+diff --git a/agent-builder-trigger-server/app/providers/handlers/microsoft.py b/agent-builder-trigger-server/app/providers/handlers/microsoft.py
+index 1c1833ee3dd2..b122c101ef0d 100644
+--- a/agent-builder-trigger-server/app/providers/handlers/microsoft.py
++++ b/agent-builder-trigger-server/app/providers/handlers/microsoft.py
+@@ -11,16 +11,16 @@
+     MICROSOFT_USERINFO_URL,
+     USERINFO_TIMEOUT_SECONDS,
+ )
+-from app.providers.types import ItemStatus, ProviderItem, ProviderType
++from app.providers.types import AccountStatus, ProviderAccount, ProviderType
+ 
+ logger = structlog.get_logger(__name__)
+ 
+-_ERROR = ProviderItem(token_id="", status=ItemStatus.PROVIDER_ERROR)
+-_FORBIDDEN = ProviderItem(token_id="", status=ItemStatus.FORBIDDEN)
+-_INSUFFICIENT_SCOPE = ProviderItem(token_id="", status=ItemStatus.INSUFFICIENT_SCOPE)
++_ERROR = ProviderAccount(token_id="", status=AccountStatus.PROVIDER_ERROR)
++_FORBIDDEN = ProviderAccount(token_id="", status=AccountStatus.FORBIDDEN)
++_INSUFFICIENT_SCOPE = ProviderAccount(token_id="", status=AccountStatus.INSUFFICIENT_SCOPE)
+ 
+ 
+-def _status_for(code: int) -> ProviderItem:
++def _status_for(code: int) -> ProviderAccount:
+     if code == HTTP_FORBIDDEN:
+         return _INSUFFICIENT_SCOPE
+     if code == HTTP_UNAUTHORIZED:
+@@ -37,7 +37,7 @@ def provider_type(self) -> ProviderType:
+     def display_name(self) -> str:
+         return "Microsoft"
+ 
+-    async def fetch_account(self, access_token: str) -> ProviderItem:
++    async def fetch_account(self, access_token: str) -> ProviderAccount:
+         try:
+             async with httpx.AsyncClient(timeout=USERINFO_TIMEOUT_SECONDS) as client:
+                 resp = await client.get(
+@@ -53,9 +53,9 @@ async def fetch_account(self, access_token: str) -> ProviderItem:
+                     data.get("mail") or data.get("userPrincipalName") or ""
+                 ).strip().lower() or None
+ 
+-                return ProviderItem(
++                return ProviderAccount(
+                     token_id="",
+-                    status=ItemStatus.OK,
++                    status=AccountStatus.OK,
+                     email=email,
+                     name=data.get("displayName"),
+                 )
+diff --git a/agent-builder-trigger-server/app/providers/handlers/slack.py b/agent-builder-trigger-server/app/providers/handlers/slack.py
+index a4f4b3118ae0..0728dfb9c927 100644
+--- a/agent-builder-trigger-server/app/providers/handlers/slack.py
++++ b/agent-builder-trigger-server/app/providers/handlers/slack.py
+@@ -9,23 +9,23 @@
+     SLACK_AUTH_TEST_URL,
+     USERINFO_TIMEOUT_SECONDS,
+ )
+-from app.providers.types import ItemStatus, ProviderItem, ProviderType
++from app.providers.types import AccountStatus, ProviderAccount, ProviderType
+ 
+ logger = structlog.get_logger(__name__)
+ 
+-_ERROR = ProviderItem(token_id="", status=ItemStatus.PROVIDER_ERROR)
++_ERROR = ProviderAccount(token_id="", status=AccountStatus.PROVIDER_ERROR)
+ 
+ SCOPE_ERRORS = frozenset({"missing_scope", "not_allowed_token_type"})
+ 
+ 
+-def _status_for_slack_error(error: str | None) -> ItemStatus:
++def _status_for_slack_error(error: str | None) -> AccountStatus:
+     if error in SCOPE_ERRORS:
+-        return ItemStatus.INSUFFICIENT_SCOPE
++        return AccountStatus.INSUFFICIENT_SCOPE
+     if error == "token_revoked":
+-        return ItemStatus.AUTH_REQUIRED
++        return AccountStatus.AUTH_REQUIRED
+     if error in ("account_inactive", "org_login_required"):
+-        return ItemStatus.FORBIDDEN
+-    return ItemStatus.PROVIDER_ERROR
++        return AccountStatus.FORBIDDEN
++    return AccountStatus.PROVIDER_ERROR
+ 
+ 
+ class SlackHandler(ProviderHandler):
+@@ -37,7 +37,7 @@ def provider_type(self) -> ProviderType:
+     def display_name(self) -> str:
+         return "Slack"
+ 
+-    async def fetch_account(self, access_token: str) -> ProviderItem:
++    async def fetch_account(self, access_token: str) -> ProviderAccount:
+         try:
+             async with httpx.AsyncClient(timeout=USERINFO_TIMEOUT_SECONDS) as client:
+                 resp = await client.post(
+@@ -52,14 +52,14 @@ async def fetch_account(self, access_token: str) -> ProviderItem:
+                 if not data.get("ok"):
+                     error = data.get("error")
+                     logger.warning("slack_auth_test_not_ok", error=error)
+-                    return ProviderItem(
++                    return ProviderAccount(
+                         token_id="",
+                         status=_status_for_slack_error(error),
+                     )
+ 
+-                return ProviderItem(
++                return ProviderAccount(
+                     token_id="",
+-                    status=ItemStatus.OK,
++                    status=AccountStatus.OK,
+                     name=data.get("user"),
+                     metadata={"team": data.get("team", "")},
+                 )
+diff --git a/agent-builder-trigger-server/app/providers/service.py b/agent-builder-trigger-server/app/providers/service.py
+index 2f29f84b4c3e..5e959f33ace0 100644
+--- a/agent-builder-trigger-server/app/providers/service.py
++++ b/agent-builder-trigger-server/app/providers/service.py
+@@ -5,12 +5,11 @@
+ import httpx
+ import structlog
+ 
+-from app.providers.constants import PROFILE_SCOPES
+ from app.providers.registry import ProviderRegistry
+ from app.providers.types import (
+-    ItemStatus,
+-    PaginatedItems,
+-    ProviderItem,
++    AccountStatus,
++    PaginatedAccounts,
++    ProviderAccount,
+     ProviderResponse,
+ )
+ from app.utils import AuthClient
+@@ -45,59 +44,60 @@ def list_providers(self) -> list[ProviderResponse]:
+             for handler in self._registry.all_handlers()
+         ]
+ 
+-    async def list_items(
++    async def list_accounts(
+         self,
+         provider_id: str,
+         user_id: str,
+         page: int = 1,
+         page_size: int = 20,
+         token_id: str | None = None,
+-    ) -> PaginatedItems:
++    ) -> PaginatedAccounts:
+         handler = self._registry.get_by_provider_id(provider_id)
+         if not handler:
+-            return PaginatedItems(items=[], total=0, page=page, page_size=page_size)
++            return PaginatedAccounts(items=[], total=0, page=page, page_size=page_size)
+ 
+         tokens = await self._fetch_tokens(provider_id, token_id)
+         if not tokens:
+-            return PaginatedItems(items=[], total=0, page=page, page_size=page_size)
++            return PaginatedAccounts(items=[], total=0, page=page, page_size=page_size)
+ 
+-        provider_type = handler.provider_type
+-        scopes = PROFILE_SCOPES.get(provider_type, [])
+-
+-        async def resolve_token(token: dict) -> ProviderItem:
++        async def resolve_token(token: dict) -> ProviderAccount:
+             tid = token["id"]
+             try:
+                 auth_result = await self._auth_client.authenticate(
+                     provider=provider_id,
+-                    scopes=scopes,
++                    scopes=[],
+                     user_id=user_id,
+                     token_id=tid,
+                 )
+             except Exception:
+                 logger.exception("token_auth_failed", token_id=tid)
+-                return ProviderItem(token_id=tid, status=ItemStatus.PROVIDER_ERROR)
++                return ProviderAccount(
++                    token_id=tid, status=AccountStatus.PROVIDER_ERROR
++                )
+ 
+             if auth_result.auth_required:
+-                return ProviderItem(token_id=tid, status=ItemStatus.AUTH_REQUIRED)
++                return ProviderAccount(token_id=tid, status=AccountStatus.AUTH_REQUIRED)
+ 
+             if not auth_result.token:
+-                return ProviderItem(token_id=tid, status=ItemStatus.PROVIDER_ERROR)
++                return ProviderAccount(
++                    token_id=tid, status=AccountStatus.PROVIDER_ERROR
++                )
+ 
+-            item = await handler.fetch_account(auth_result.token)
+-            return item.model_copy(update={"token_id": tid})
++            account = await handler.fetch_account(auth_result.token)
++            return account.model_copy(update={"token_id": tid})
+ 
+-        items = list(
++        accounts = list(
+             await asyncio.gather(
+                 *(resolve_token(t) for t in tokens),
+             )
+         )
+ 
+-        total = len(items)
++        total = len(accounts)
+         start = (page - 1) * page_size
+         end = start + page_size
+ 
+-        return PaginatedItems(
+-            items=items[start:end],
++        return PaginatedAccounts(
++            accounts=accounts[start:end],
+             total=total,
+             page=page,
+             page_size=page_size,
+diff --git a/agent-builder-trigger-server/app/providers/types.py b/agent-builder-trigger-server/app/providers/types.py
+index 94ed8a76b511..141e037db149 100644
+--- a/agent-builder-trigger-server/app/providers/types.py
++++ b/agent-builder-trigger-server/app/providers/types.py
+@@ -13,7 +13,7 @@ class ProviderType(StrEnum):
+     NOTION = "notion"
+ 
+ 
+-class ItemStatus(StrEnum):
++class AccountStatus(StrEnum):
+     OK = "ok"
+     INSUFFICIENT_SCOPE = "insufficient_scope"
+     FORBIDDEN = "forbidden"
+@@ -21,16 +21,16 @@ class ItemStatus(StrEnum):
+     PROVIDER_ERROR = "provider_error"
+ 
+ 
+-class ProviderItem(BaseModel):
++class ProviderAccount(BaseModel):
+     token_id: str
+-    status: ItemStatus = ItemStatus.OK
++    status: AccountStatus = AccountStatus.OK
+     email: str | None = None
+     name: str | None = None
+     metadata: dict[str, str] = {}
+ 
+ 
+-class PaginatedItems(BaseModel):
+-    items: list[ProviderItem]
++class PaginatedAccounts(BaseModel):
++    accounts: list[ProviderAccount]
+     total: int
+     page: int
+     page_size: int
+diff --git a/agent-builder-trigger-server/app/server.py b/agent-builder-trigger-server/app/server.py
+index 07c40ca9e46e..39ac88e8e00a 100644
+--- a/agent-builder-trigger-server/app/server.py
++++ b/agent-builder-trigger-server/app/server.py
+@@ -26,7 +26,7 @@
+ from app.langchain_triggers.triggers import cron_trigger
+ from app.providers.service import ProviderService
+ from app.providers.setup import create_registry
+-from app.providers.types import PaginatedItems, ProviderResponse
++from app.providers.types import PaginatedAccounts, ProviderResponse
+ from app.slack_database import register_slack_policies
+ from app.triggers.account import resolve_account_info
+ from app.triggers.gmail_v2.cron_polling import gmail_cron
+@@ -199,14 +199,14 @@ async def _list_providers(request: Request) -> list[ProviderResponse]:
+     return service.list_providers()
+ 
+ 
+-@app.get("/v1/providers/{provider_id}/items")
+-async def _list_provider_items(
++@app.get("/v1/providers/{provider_id}/accounts")
++async def _list_provider_accounts(
+     request: Request,
+     provider_id: str,
+     token_id: str | None = None,
+     page: int = 1,
+     page_size: int = 20,
+-) -> PaginatedItems:
++) -> PaginatedAccounts:
+     current_user = request.state.current_user
+     user_id = current_user.get("identity")
+     if not user_id:
+@@ -218,7 +218,7 @@ async def _list_provider_items(
+         host_api_base_url=settings.TRIGGER_SERVER_HOST_API_URL,
+         request_headers=dict(request.headers),
+     )
+-    return await service.list_items(
++    return await service.list_accounts(
+         provider_id=provider_id,
+         user_id=user_id,
+         page=page,
+diff --git a/smith-frontend/src/Pages/AgentBuilder/features/integrations/components/AccountRow.tsx b/smith-frontend/src/Pages/AgentBuilder/features/integrations/components/AccountRow.tsx
+index a360b9024072..4dda93ecf403 100644
+--- a/smith-frontend/src/Pages/AgentBuilder/features/integrations/components/AccountRow.tsx
++++ b/smith-frontend/src/Pages/AgentBuilder/features/integrations/components/AccountRow.tsx
+@@ -3,6 +3,7 @@ import {
+   DotsVerticalIcon,
+   Edit03Icon,
+   RefreshCcw01Icon,
++  RefreshCw05Icon,
+   Star01Icon,
+   Trash01Icon,
+ } from '@langchain/untitled-ui-icons';
+@@ -31,6 +32,7 @@ export function AccountRow({
+   onMutate,
+   requiredScopes,
+   onUpdatePermissions,
++  onFetchLabel,
+ }: {
+   token: TokenSummary;
+   index: number;
+@@ -38,6 +40,8 @@ export function AccountRow({
+   onMutate: () => void;
+   requiredScopes?: string[];
+   onUpdatePermissions?: (tokenId: string) => void;
++  /** When provided, shows a button to fetch the account name from the provider. */
++  onFetchLabel?: (tokenId: string) => Promise<string | null>;
+ }) {
+   const { createToast } = useToast();
+   const tenantId = useTenantId();
+@@ -49,8 +53,32 @@ export function AccountRow({
+     token.provider_account_label ?? ''
+   );
+ 
++  const [isFetchingIdentity, setIsFetchingIdentity] = useState(false);
++  const [resolvedIdentity, setResolvedIdentity] = useState<string | null>(null);
+   const label = token.provider_account_label ?? `Account ${index + 1}`;
+ 
++  const handleFetchIdentity = async () => {
++    if (!onFetchLabel) return;
++    setIsFetchingIdentity(true);
++    try {
++      const identity = await onFetchLabel(token.id);
++      setResolvedIdentity(identity);
++      if (!identity) {
++        createToast({
++          title: 'Could not resolve account identity',
++          type: 'error',
++        });
++      }
++    } catch {
++      createToast({
++        title: 'Failed to fetch account identity',
++        type: 'error',
++      });
++    } finally {
++      setIsFetchingIdentity(false);
++    }
++  };
++
+   const hasMissingScopes =
+     requiredScopes &&
+     requiredScopes.length > 0 &&
+@@ -164,9 +192,27 @@ export function AccountRow({
+         <div className="size-3.5" />
+       )}
+       <div className="flex min-w-0 flex-1 flex-col">
+-        <Text variant="sm" className="truncate">
+-          {label}
+-        </Text>
++        <div className="flex items-center gap-1.5">
++          <Text variant="sm" className="truncate">
++            {label}
++          </Text>
++          {onFetchLabel && !resolvedIdentity && (
++            <IconButton
++              icon={RefreshCw05Icon}
++              label="Resolve account identity"
++              size="sm"
++              variant="plain"
++              color="secondary"
++              loading={isFetchingIdentity}
++              onClick={() => void handleFetchIdentity()}
++            />
++          )}
++        </div>
++        {resolvedIdentity && (
++          <Text variant="xs" color="tertiary" className="truncate">
++            {resolvedIdentity}
++          </Text>
++        )}
+         {token.is_default && (
+           <Text variant="xs" color="tertiary">
+             Primary account
+diff --git a/smith-frontend/src/Pages/AgentBuilder/features/integrations/components/BuiltInServiceCard.tsx b/smith-frontend/src/Pages/AgentBuilder/features/integrations/components/BuiltInServiceCard.tsx
+index e1d6feaf3a76..fbf2a86334c9 100644
+--- a/smith-frontend/src/Pages/AgentBuilder/features/integrations/components/BuiltInServiceCard.tsx
++++ b/smith-frontend/src/Pages/AgentBuilder/features/integrations/components/BuiltInServiceCard.tsx
+@@ -149,6 +149,12 @@ export function BuiltInServiceCard({
+     <StatusBadge status="connected" />
+   ) : cardStatus === 'missing_scopes' ? (
+     <StatusBadge status="missing_scopes" />
++  ) : multiAccountEnabled ? (
++    <CardActionButton
++      label={connectActionLabel}
++      loading={isAuthenticating}
++      onClick={() => setDialogOpen(true)}
++    />
+   ) : (
+     <CardActionButton
+       label={connectActionLabel}
+@@ -254,16 +260,16 @@ export function BuiltInServiceCard({
+             {isOAuthProvider && multiAccountEnabled && (
+               <ProviderAccountsSection
+                 providerId={oauthProviderId}
+-                onAuthorizeNew={() => {
+-                  void authenticate({
++                onAuthorizeNew={() =>
++                  authenticate({
+                     oauthMode: MCP_OAUTH_MODE.LegacySharedProvider,
+                     oauthProviderId,
+                     scopes,
+                     useAgentBuilderPublicOAuth: true,
+                     forceNew: true,
+                     isDefault: false,
+-                  });
+-                }}
++                  })
++                }
+                 isAuthenticating={isAuthenticating}
+                 requiredScopes={scopes}
+                 onUpdatePermissions={(tokenId) => {
+diff --git a/smith-frontend/src/Pages/AgentBuilder/features/integrations/components/McpServerDialog.tsx b/smith-frontend/src/Pages/AgentBuilder/features/integrations/components/McpServerDialog.tsx
+index 739114299494..6fc5263d2373 100644
+--- a/smith-frontend/src/Pages/AgentBuilder/features/integrations/components/McpServerDialog.tsx
++++ b/smith-frontend/src/Pages/AgentBuilder/features/integrations/components/McpServerDialog.tsx
+@@ -107,10 +107,10 @@ export function McpServerDialog({
+     });
+   };
+ 
+-  const handleAuthorizeNew = async () => {
+-    if (!server) return;
++  const handleAuthorizeNew = async (): Promise<boolean> => {
++    if (!server) return false;
+     if (server.oauth_provider_id) {
+-      await authenticate({
++      return authenticate({
+         oauthMode: MCP_OAUTH_MODE.LegacySharedProvider,
+         oauthProviderId: server.oauth_provider_id,
+         forceNew: true,
+@@ -118,7 +118,9 @@ export function McpServerDialog({
+       });
+     } else if (onConnect) {
+       await onConnect(server);
++      return true;
+     }
++    return false;
+   };
+ 
+   const handleConnect = async () => {
+diff --git a/smith-frontend/src/Pages/AgentBuilder/features/integrations/components/ProviderAccountsSection.tsx b/smith-frontend/src/Pages/AgentBuilder/features/integrations/components/ProviderAccountsSection.tsx
+index 9d9999dac89c..a9577d715e4e 100644
+--- a/smith-frontend/src/Pages/AgentBuilder/features/integrations/components/ProviderAccountsSection.tsx
++++ b/smith-frontend/src/Pages/AgentBuilder/features/integrations/components/ProviderAccountsSection.tsx
+@@ -1,19 +1,60 @@
+ import { PlusIcon } from '@langchain/untitled-ui-icons';
+ 
++import { useMemo, useState } from 'react';
+ import useSWR from 'swr';
+ 
+ import type { TokenSummary } from '@/Pages/AgentBuilder/hooks/use-agent-connections';
++import { agentBuilderTriggerServerUrl } from '@/Pages/AgentBuilder/lib/constants';
++import { Dialog, DialogContent } from '@/components/Dialog/Dialog';
++import useToast from '@/components/Toast/useToast';
+ import { fetcher } from '@/data/fetcher';
+-import { Button, Text } from '@/design-system';
++import { Button, Input, Text } from '@/design-system';
+ import { cn } from '@/design-system/utils/cn';
+ import { useTenantId } from '@/hooks/useTenantId';
+ import { hostApiPathV2 } from '@/utils/constants';
+ 
+ import { AccountRow } from './AccountRow';
+ 
++interface ProviderItem {
++  token_id: string;
++  status: string;
++  email: string | null;
++  name: string | null;
++  metadata: Record<string, string>;
++}
++
++interface PaginatedItems {
++  items: ProviderItem[];
++  total: number;
++  page: number;
++  page_size: number;
++}
++
++interface ProviderResponse {
++  type: string;
++  provider_id: string;
++  display_name: string;
++  accounts_available: boolean;
++}
++
++/** Cached list of providers the trigger server supports. */
++function useSupportedProviders(tenantId: string | null | undefined) {
++  return useSWR(
++    tenantId && agentBuilderTriggerServerUrl
++      ? `supported-providers:${tenantId}`
++      : null,
++    () =>
++      fetcher<ProviderResponse[]>({
++        url: `${agentBuilderTriggerServerUrl}/v1/providers`,
++        headers: { 'X-Tenant-Id': tenantId ?? '' },
++      }),
++    { revalidateOnFocus: false, revalidateOnReconnect: false }
++  );
++}
++
+ interface ProviderAccountsSectionProps {
+   providerId: string;
+-  onAuthorizeNew: () => void;
++  onAuthorizeNew: () => Promise<boolean>;
+   isAuthenticating: boolean;
+   requiredScopes?: string[];
+   onUpdatePermissions?: (tokenId: string) => void;
+@@ -27,6 +68,12 @@ export function ProviderAccountsSection({
+   onUpdatePermissions,
+ }: ProviderAccountsSectionProps) {
+   const tenantId = useTenantId();
++  const { createToast } = useToast();
++  const [showLabelDialog, setShowLabelDialog] = useState(false);
++  const [newLabel, setNewLabel] = useState('');
++  const [isSettingLabel, setIsSettingLabel] = useState(false);
++  const [pendingTokenId, setPendingTokenId] = useState<string | null>(null);
++  const [isFetchingLabel, setIsFetchingLabel] = useState(false);
+ 
+   const {
+     data: tokens,
+@@ -42,6 +89,16 @@ export function ProviderAccountsSection({
+       })
+   );
+ 
++  // Check if the trigger server supports this provider for label resolution.
++  const { data: supportedProviders } = useSupportedProviders(tenantId);
++  const isProviderSupported = useMemo(
++    () =>
++      (supportedProviders ?? []).some(
++        (p) => p.provider_id === providerId && p.accounts_available
++      ),
++    [supportedProviders, providerId]
++  );
++
+   // Stable sort: primary first, then by creation time.
+   // Prevents index-based fallback labels from shifting on mutations.
+   const sortedTokens = tokens
+@@ -52,6 +109,136 @@ export function ProviderAccountsSection({
+     : undefined;
+   const hasTokens = sortedTokens && sortedTokens.length > 0;
+ 
++  const fetchAccountLabel = async (tokenId: string): Promise<string | null> => {
++    if (!tenantId || !agentBuilderTriggerServerUrl || !isProviderSupported) {
++      return null;
++    }
++    try {
++      const response = await fetcher<PaginatedItems, { token_id: string }>({
++        url: `${agentBuilderTriggerServerUrl}/v1/providers/${providerId}/items`,
++        params: { token_id: tokenId },
++        headers: { 'X-Tenant-Id': tenantId },
++      });
++      const item = response.items.find((i) => i.token_id === tokenId);
++      if (item?.status === 'ok') {
++        return item.email ?? item.name ?? null;
++      }
++    } catch {
++      // Fall through
++    }
++    return null;
++  };
++
++  const handleAuthorize = async () => {
++    const existingIds = new Set(tokens?.map((t) => t.id) ?? []);
++    const success = await onAuthorizeNew();
++
++    if (success) {
++      setIsFetchingLabel(true);
++      try {
++        const updatedTokens = await mutate();
++        const newToken = updatedTokens?.find((t) => !existingIds.has(t.id));
++        if (newToken) {
++          setPendingTokenId(newToken.id);
++          const suggestedLabel = await fetchAccountLabel(newToken.id);
++          setNewLabel(suggestedLabel ?? '');
++          setShowLabelDialog(true);
++        }
++      } finally {
++        setIsFetchingLabel(false);
++      }
++    }
++  };
++
++  const handleSaveLabel = async () => {
++    const label = newLabel.trim();
++    if (!label || !pendingTokenId || !tenantId) return;
++
++    setIsSettingLabel(true);
++    try {
++      await fetcher({
++        url: `${hostApiPathV2}/auth/tokens/${pendingTokenId}/metadata`,
++        method: 'PATCH',
++        headers: { 'X-Tenant-Id': tenantId },
++        json: { provider_account_label: label },
++      });
++      await mutate();
++    } catch {
++      createToast({ title: 'Failed to set account label', type: 'error' });
++    } finally {
++      setIsSettingLabel(false);
++    }
++
++    setShowLabelDialog(false);
++    setPendingTokenId(null);
++    setNewLabel('');
++  };
++
++  const dismissLabelDialog = () => {
++    setShowLabelDialog(false);
++    setPendingTokenId(null);
++    setNewLabel('');
++  };
++
++  const isBusy = isAuthenticating || isFetchingLabel || isSettingLabel;
++
++  const labelDialog = (
++    <Dialog
++      open={showLabelDialog}
++      onOpenChange={(open) => {
++        if (!open && !isSettingLabel) dismissLabelDialog();
++      }}
++    >
++      <DialogContent
++        title="Name this account"
++        description={
++          <Text variant="xs" color="tertiary">
++            Add a label to identify this account (e.g. Work, Personal).
++          </Text>
++        }
++        className="max-w-sm"
++        childrenClassName="px-6 pb-6"
++      >
++        <form
++          onSubmit={(e) => {
++            e.preventDefault();
++            void handleSaveLabel();
++          }}
++          className="flex flex-col gap-4"
++        >
++          <Input
++            size="sm"
++            placeholder="e.g. Work, Personal"
++            value={newLabel}
++            onChange={setNewLabel}
++            autoFocus
++          />
++          <div className="flex justify-end gap-2">
++            <Button
++              type="button"
++              size="sm"
++              variant="outlined"
++              color="secondary"
++              onClick={dismissLabelDialog}
++              disabled={isSettingLabel}
++            >
++              Skip
++            </Button>
++            <Button
++              type="submit"
++              size="sm"
++              color="primary"
++              disabled={!newLabel.trim()}
++              loading={isSettingLabel}
++            >
++              Save
++            </Button>
++          </div>
++        </form>
++      </DialogContent>
++    </Dialog>
++  );
++
+   const sectionHeader = (
+     <div className="mb-3">
+       <Text variant="xs" color="tertiary">
+@@ -95,14 +282,15 @@ export function ProviderAccountsSection({
+             size="xs"
+             color="primary"
+             leftDecorator={PlusIcon}
+-            loading={isAuthenticating}
+-            disabled={isAuthenticating}
++            loading={isBusy}
++            disabled={isBusy}
+             className="px-2 py-0.5"
+-            onClick={onAuthorizeNew}
++            onClick={() => void handleAuthorize()}
+           >
+             Connect account
+           </Button>
+         </div>
++        {labelDialog}
+       </div>
+     );
+   }
+@@ -121,13 +309,14 @@ export function ProviderAccountsSection({
+               onMutate={mutate}
+               requiredScopes={requiredScopes}
+               onUpdatePermissions={onUpdatePermissions}
++              onFetchLabel={isProviderSupported ? fetchAccountLabel : undefined}
+             />
+           ))}
+         </div>
+         <button
+           type="button"
+-          disabled={isAuthenticating}
+-          onClick={onAuthorizeNew}
++          disabled={isBusy}
++          onClick={() => void handleAuthorize()}
+           className="flex w-full items-center gap-2 border-t border-secondary bg-secondary/30 px-3 py-2.5 text-left text-brand-primary transition-colors hover:bg-brand-tertiary"
+         >
+           <PlusIcon className="size-3.5" />
+@@ -136,10 +325,11 @@ export function ProviderAccountsSection({
+             variant="xs"
+             className="font-medium text-brand-primary"
+           >
+-            {isAuthenticating ? 'Connecting...' : 'Add another account'}
++            {isBusy ? 'Connecting...' : 'Add another account'}
+           </Text>
+         </button>
+       </div>
++      {labelDialog}
+     </div>
+   );
+ }

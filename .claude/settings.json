@@ -1,0 +1,71 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pytest *)",
+      "Bash(python -m pytest *)",
+      "Bash(./venv/bin/pytest *)",
+      "Bash(ruff *)",
+      "Bash(./venv/bin/ruff *)",
+      "Bash(black *)",
+      "Bash(./venv/bin/black *)",
+      "Bash(mypy *)",
+      "Bash(./venv/bin/mypy *)",
+      "Bash(python scripts/ci/*)",
+      "Bash(./scripts/ci/*)",
+      "Bash(git diff *)",
+      "Bash(git status)",
+      "Bash(git status *)",
+      "Bash(git log *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git branch *)",
+      "Bash(git checkout *)",
+      "Bash(git fetch *)",
+      "Bash(git merge *)",
+      "Bash(git stash *)",
+      "Bash(git mv *)",
+      "Bash(git rev-parse *)",
+      "Bash(git push *)",
+      "Bash(git pull *)",
+      "Bash(gh pr *)",
+      "Bash(gh issue *)",
+      "Bash(python3:*)",
+      "Bash(source /Users/yogeshmahendran/Desktop/openswe-v3/open-swe/.venv/bin/activate)",
+      "Bash(pip index:*)",
+      "Bash(wc -l /Users/yogeshmahendran/Desktop/openswe-v3/open-swe/agent/*.py)",
+      "Bash(wc:*)",
+      "Bash(find /Users/yogeshmahendran/Desktop/openswe-v3/langchainplus -type f -name *review*)",
+      "Bash(find /Users/yogeshmahendran/Desktop/openswe-v3/langchainplus -type d -path */skills/*)",
+      "Bash(grep -r \"review.*pr\\\\|pr.*review\\\\|pull.*request.*review\" /Users/yogeshmahendran/Desktop/openswe-v3/langchainplus --include=*.py --include=*.ts --include=*.tsx --include=*.md -l)",
+      "Bash(grep -r \"class.*Review\\\\|def.*review\" /Users/yogeshmahendran/Desktop/openswe-v3/langchainplus --include=*.py -l)",
+      "Bash(git -C /Users/yogeshmahendran/Desktop/openswe-v3/open-swe log --all --name-only --oneline)",
+      "Read(//Users/yogeshmahendran/**)",
+      "Bash(git config:*)",
+      "Bash(security find-internet-password:*)",
+      "Bash(grep -r \"teams\\\\|Teams\\\\|microsoft\\\\|Microsoft\\\\|msteams\\\\|MSTeams\" /Users/yogeshmahendran/Desktop/openswe-v3/open-swe --include=*.py --include=*.md)",
+      "Bash(uv run:*)",
+      "Bash(uv add:*)"
+    ],
+    "deny": [
+      "Read(.env)",
+      "Read(.env.local)",
+      "Edit(.env*)",
+      "Write(.env*)",
+      "Bash(rm -rf *)"
+    ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/python_quality.sh",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}

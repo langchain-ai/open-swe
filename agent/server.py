@@ -4,6 +4,8 @@
 # Suppress deprecation warnings from langchain_core (e.g., Pydantic V1 on Python 3.14+)
 # ruff: noqa: E402
 import logging
+import os
+import shlex
 import warnings
 
 logger = logging.getLogger(__name__)
@@ -223,6 +225,7 @@ def graph_loaded_for_execution(config: RunnableConfig) -> bool:
     )
 
 
+DEFAULT_LLM_MODEL_ID = "anthropic:claude-opus-4-6"
 DEFAULT_RECURSION_LIMIT = 1_000
 
 
@@ -353,6 +356,24 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
         msg = "Cannot proceed: no repo was cloned. Set 'repo.owner' and 'repo.name' in the configurable config"
         raise RuntimeError(msg)
 
+    branch_name = get_config().get("metadata", {}).get("branch_name")
+    if branch_name:
+        logger.info("Checking out branch '%s' in sandbox for thread %s", branch_name, thread_id)
+        loop = asyncio.get_event_loop()
+        safe_repo_dir = shlex.quote(repo_dir)
+        safe_branch = shlex.quote(branch_name)
+        checkout_result = await loop.run_in_executor(
+            None,
+            sandbox_backend.execute,
+            f"cd {safe_repo_dir} && git fetch origin && git checkout {safe_branch}",
+        )
+        if checkout_result.exit_code != 0:
+            logger.warning(
+                "Failed to checkout branch '%s': %s",
+                branch_name,
+                checkout_result.output[:200] if checkout_result.output else "",
+            )
+
     linear_issue = config["configurable"].get("linear_issue", {})
     linear_project_id = linear_issue.get("linear_project_id", "")
     linear_issue_number = linear_issue.get("linear_issue_number", "")
@@ -360,7 +381,11 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
 
     logger.info("Returning agent with sandbox for thread %s", thread_id)
     return create_deep_agent(
-        model=make_model("anthropic:claude-opus-4-6", temperature=0, max_tokens=20_000),
+        model=make_model(
+            os.environ.get("LLM_MODEL_ID", DEFAULT_LLM_MODEL_ID),
+            temperature=0,
+            max_tokens=20_000,
+        ),
         system_prompt=construct_system_prompt(
             repo_dir,
             linear_project_id=linear_project_id,
