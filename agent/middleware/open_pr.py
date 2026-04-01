@@ -157,9 +157,7 @@ async def open_pr_if_needed(
 
         installation_token = await get_github_app_installation_token()
         if not installation_token:
-            logger.error(
-                "Failed to get GitHub App installation token for thread %s", thread_id
-            )
+            logger.error("Failed to get GitHub App installation token for thread %s", thread_id)
             return None
 
         await asyncio.to_thread(git_push, sandbox_backend, repo_dir, target_branch)
