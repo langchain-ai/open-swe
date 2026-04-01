@@ -445,7 +445,7 @@ def _principal_matches_thread(thread: dict[str, Any], principal: AuthenticatedPr
 
     thread_user = _thread_acp_user(thread)
     if not thread_user:
-        return True
+        return False
 
     if principal.github_user_id is not None and thread_user.get("id"):
         return thread_user["id"] == str(principal.github_user_id)
@@ -474,6 +474,26 @@ def _first_text_block(prompt: list[Any]) -> str:
             if text:
                 texts.append(text)
     return "\n\n".join(texts).strip()
+
+
+def _active_run_id_from_thread_state(thread: dict[str, Any], state: dict[str, Any] | None = None) -> str | None:
+    run_id = thread.get("run_id")
+    if isinstance(run_id, str) and run_id:
+        return run_id
+
+    metadata = thread.get("metadata")
+    if isinstance(metadata, dict):
+        run_id = metadata.get("run_id")
+        if isinstance(run_id, str) and run_id:
+            return run_id
+
+    if not isinstance(state, dict):
+        return None
+    state_metadata = state.get("metadata")
+    if not isinstance(state_metadata, dict):
+        return None
+    run_id = state_metadata.get("run_id")
+    return run_id if isinstance(run_id, str) and run_id else None
 
 
 class OpenSWEAcpAgent:
@@ -603,6 +623,7 @@ class OpenSWEAcpAgent:
         await self._notify_session_info(session_id)
         await self._emit_all_messages(session_id)
         if thread.get("status") == "busy":
+            await self._remember_active_run(session_id, thread=thread)
             await self._notify_update(
                 session_id,
                 update_agent_thought_text("Attached to an active Open SWE run. Waiting for new output."),
@@ -735,8 +756,8 @@ class OpenSWEAcpAgent:
         return CloseSessionResponse()
 
     async def cancel(self, session_id: str, **_: Any) -> None:
+        run_id = self._active_runs.get(session_id) or await self._remember_active_run(session_id)
         await self._cancel_attach_task(session_id)
-        run_id = self._active_runs.get(session_id)
         if not run_id:
             return
         await self._client().runs.cancel(session_id, run_id, wait=False, action="interrupt")
@@ -1080,6 +1101,19 @@ class OpenSWEAcpAgent:
             await self._emit_new_messages(session_id)
         finally:
             self._attach_tasks.pop(session_id, None)
+            self._active_runs.pop(session_id, None)
+
+    async def _remember_active_run(self, session_id: str, *, thread: dict[str, Any] | None = None) -> str | None:
+        active_run_id = self._active_runs.get(session_id)
+        if active_run_id:
+            return active_run_id
+
+        thread_data = thread or await self._client().threads.get(session_id)
+        state = await self._client().threads.get_state(session_id)
+        active_run_id = _active_run_id_from_thread_state(thread_data, state)
+        if active_run_id:
+            self._active_runs[session_id] = active_run_id
+        return active_run_id
 
 
 def build_parser() -> argparse.ArgumentParser:

@@ -29,7 +29,7 @@ class _FakeThreads:
             "metadata": {},
         }
         self.search_results: list[dict[str, Any]] = []
-        self.state = {"values": {"messages": []}}
+        self.state = {"values": {"messages": []}, "metadata": {}}
 
     async def create(self, *, metadata: dict[str, Any]) -> dict[str, Any]:
         self.created_metadata = metadata
@@ -321,6 +321,7 @@ async def test_load_session_replays_existing_messages(monkeypatch: pytest.Monkey
         "metadata": {
             "repo": {"owner": "langchain-ai", "name": "open-swe"},
             "title": "Existing thread",
+            "acp_auth": {"provider": "langsmith", "subject": "octocat", "display_name": "The Octocat"},
         },
     }
     client.threads.state = {
@@ -340,6 +341,29 @@ async def test_load_session_replays_existing_messages(monkeypatch: pytest.Monkey
 
     updates = [payload["update"]["sessionUpdate"] for _, payload in conn.notifications]
     assert updates == ["session_info_update", "user_message_chunk", "agent_message_chunk"]
+
+
+@pytest.mark.asyncio
+async def test_load_session_rejects_thread_without_acp_identity_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _FakeLangGraphClient()
+    client.threads.thread = {
+        "thread_id": "thread-1",
+        "status": "idle",
+        "updated_at": "2026-04-01T00:00:00+00:00",
+        "metadata": {
+            "repo": {"owner": "langchain-ai", "name": "open-swe"},
+            "title": "Legacy thread",
+        },
+    }
+    agent = _make_agent(client)
+    _mock_authenticated_principal(monkeypatch)
+
+    with pytest.raises(RequestError) as exc_info:
+        await agent.load_session("/tmp/open-swe", "thread-1")
+
+    assert str(exc_info.value) == "Authentication required"
 
 
 @pytest.mark.asyncio
@@ -379,6 +403,7 @@ async def test_prompt_forwards_langsmith_identity_to_langgraph_and_replays_new_m
             "repo": {"owner": "langchain-ai", "name": "open-swe"},
             "cwd": "/tmp/open-swe",
             "title": "Existing thread",
+            "acp_auth": {"provider": "langsmith", "subject": "octocat", "display_name": "The Octocat"},
         },
     }
     agent = _make_agent(client)
@@ -423,6 +448,7 @@ async def test_prompt_includes_github_app_fallback_for_api_key_identity(
             "repo": {"owner": "langchain-ai", "name": "open-swe"},
             "cwd": "/tmp/open-swe",
             "title": "Existing thread",
+            "acp_auth": {"provider": "api_key", "subject": "desktop-user", "display_name": "Desktop User"},
         },
     }
     agent = _make_agent(client)
@@ -434,3 +460,29 @@ async def test_prompt_includes_github_app_fallback_for_api_key_identity(
     assert client.runs.created[0]["config"]["configurable"]["acp_auth_provider"] == "api_key"
     assert client.runs.created[0]["config"]["configurable"]["allow_github_app_fallback"] is True
     assert client.runs.created[0]["config"]["configurable"]["github_token"] is None
+
+
+@pytest.mark.asyncio
+async def test_cancel_interrupts_busy_run_after_load_session_reattach(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _FakeLangGraphClient()
+    client.threads.thread = {
+        "thread_id": "thread-1",
+        "status": "busy",
+        "updated_at": "2026-04-01T00:00:00+00:00",
+        "metadata": {
+            "repo": {"owner": "langchain-ai", "name": "open-swe"},
+            "cwd": "/tmp/open-swe",
+            "title": "Existing thread",
+            "acp_auth": {"provider": "langsmith", "subject": "octocat", "display_name": "The Octocat"},
+        },
+    }
+    client.threads.state = {"values": {"messages": []}, "metadata": {"run_id": "run-remote"}}
+    agent = _make_agent(client)
+    _mock_authenticated_principal(monkeypatch)
+
+    await agent.load_session("/tmp/open-swe", "thread-1")
+    await agent.cancel("thread-1")
+
+    assert client.runs.cancelled == [("thread-1", "run-remote")]
