@@ -1,5 +1,6 @@
 """Encryption utilities for sensitive data like tokens."""
 
+import base64
 import logging
 import os
 
@@ -10,6 +11,10 @@ logger = logging.getLogger(__name__)
 
 class EncryptionKeyMissingError(ValueError):
     """Raised when TOKEN_ENCRYPTION_KEY environment variable is not set."""
+
+
+class EncryptionKeyInvalidError(ValueError):
+    """Raised when TOKEN_ENCRYPTION_KEY is not a valid Fernet key."""
 
 
 def _get_encryption_key() -> bytes:
@@ -23,10 +28,24 @@ def _get_encryption_key() -> bytes:
 
     Raises:
         EncryptionKeyMissingError: If TOKEN_ENCRYPTION_KEY is not set
+        EncryptionKeyInvalidError: If TOKEN_ENCRYPTION_KEY is not a valid Fernet key
     """
     explicit_key = os.environ.get("TOKEN_ENCRYPTION_KEY")
     if not explicit_key:
         raise EncryptionKeyMissingError
+
+    try:
+        decoded = base64.urlsafe_b64decode(explicit_key)
+        if len(decoded) != 32:
+            raise EncryptionKeyInvalidError(
+                f"TOKEN_ENCRYPTION_KEY must be 32 bytes after base64 decoding, got {len(decoded)} bytes"
+            )
+    except Exception as exc:
+        if isinstance(exc, EncryptionKeyInvalidError):
+            raise
+        raise EncryptionKeyInvalidError(
+            f"TOKEN_ENCRYPTION_KEY must be valid base64url: {exc}"
+        ) from exc
 
     return explicit_key.encode()
 

@@ -34,10 +34,10 @@ USER_ID_API_KEY_MAP = os.environ.get("USER_ID_API_KEY_MAP", "")
 logger.debug(
     "Auth env snapshot: LANGSMITH_API_KEY_PROD=%s LANGSMITH_ENDPOINT=%s "
     "LANGSMITH_HOST_API_URL=%s GITHUB_OAUTH_PROVIDER_ID=%s",
-    "set" if LANGSMITH_API_KEY else "missing",
-    "set" if LANGSMITH_API_URL else "missing",
-    "set" if LANGSMITH_HOST_API_URL else "missing",
-    "set" if GITHUB_OAUTH_PROVIDER_ID else "missing",
+    "[REDACTED]" if LANGSMITH_API_KEY else "missing",
+    "[REDACTED]" if LANGSMITH_API_URL else "missing",
+    "[REDACTED]" if LANGSMITH_HOST_API_URL else "missing",
+    "[REDACTED]" if GITHUB_OAUTH_PROVIDER_ID else "missing",
 )
 
 

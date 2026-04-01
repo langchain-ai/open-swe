@@ -128,62 +128,62 @@ async def _clone_or_pull_repo_in_sandbox(  # noqa: PLR0915
         except Exception:
             logger.exception("Failed to remove invalid directory")
             raise
-    else:
-        logger.info("Repo exists at %s, checking for uncommitted changes", repo_dir)
-        has_changes = await loop.run_in_executor(
-            None, git_has_uncommitted_changes, sandbox_backend, repo_dir
-        )
 
-        if has_changes:
-            logger.warning("Repo has uncommitted changes at %s, skipping pull", repo_dir)
-            return repo_dir
-
-        logger.info("Repo is clean, pulling latest changes from %s/%s", owner, repo)
-
+        logger.info("Cloning repo %s/%s to %s", owner, repo, repo_dir)
         await loop.run_in_executor(None, setup_git_credentials, sandbox_backend, token)
         try:
-            pull_result = await loop.run_in_executor(
+            result = await loop.run_in_executor(
                 None,
                 sandbox_backend.execute,
-                f"cd {repo_dir} && git {cred_helper_arg} pull origin $(git rev-parse --abbrev-ref HEAD)",
+                f"git {cred_helper_arg} clone {safe_clean_url} {safe_repo_dir}",
             )
-            logger.debug("Git pull result: exit_code=%s", pull_result.exit_code)
-            if pull_result.exit_code != 0:
-                logger.warning(
-                    "Git pull failed with exit code %s: %s",
-                    pull_result.exit_code,
-                    pull_result.output[:200] if pull_result.output else "",
-                )
+            logger.debug("Git clone result: exit_code=%s", result.exit_code)
         except Exception:
-            logger.exception("Failed to execute git pull")
+            logger.exception("Failed to execute git clone")
             raise
         finally:
             await loop.run_in_executor(None, cleanup_git_credentials, sandbox_backend)
 
-        logger.info("Repo updated at %s", repo_dir)
+        if result.exit_code != 0:
+            msg = f"Failed to clone repo {owner}/{repo}: {result.output}"
+            logger.error(msg)
+            raise RuntimeError(msg)
+
+        logger.info("Repo cloned successfully at %s", repo_dir)
         return repo_dir
 
-    logger.info("Cloning repo %s/%s to %s", owner, repo, repo_dir)
+    logger.info("Repo exists at %s, checking for uncommitted changes", repo_dir)
+    has_changes = await loop.run_in_executor(
+        None, git_has_uncommitted_changes, sandbox_backend, repo_dir
+    )
+
+    if has_changes:
+        logger.warning("Repo has uncommitted changes at %s, skipping pull", repo_dir)
+        return repo_dir
+
+    logger.info("Repo is clean, pulling latest changes from %s/%s", owner, repo)
+
     await loop.run_in_executor(None, setup_git_credentials, sandbox_backend, token)
     try:
-        result = await loop.run_in_executor(
+        pull_result = await loop.run_in_executor(
             None,
             sandbox_backend.execute,
-            f"git {cred_helper_arg} clone {safe_clean_url} {safe_repo_dir}",
+            f"cd {repo_dir} && git {cred_helper_arg} pull origin $(git rev-parse --abbrev-ref HEAD)",
         )
-        logger.debug("Git clone result: exit_code=%s", result.exit_code)
+        logger.debug("Git pull result: exit_code=%s", pull_result.exit_code)
+        if pull_result.exit_code != 0:
+            logger.warning(
+                "Git pull failed with exit code %s: %s",
+                pull_result.exit_code,
+                pull_result.output[:200] if pull_result.output else "",
+            )
     except Exception:
-        logger.exception("Failed to execute git clone")
+        logger.exception("Failed to execute git pull")
         raise
     finally:
         await loop.run_in_executor(None, cleanup_git_credentials, sandbox_backend)
 
-    if result.exit_code != 0:
-        msg = f"Failed to clone repo {owner}/{repo}: {result.output}"
-        logger.error(msg)
-        raise RuntimeError(msg)
-
-    logger.info("Repo cloned successfully at %s", repo_dir)
+    logger.info("Repo updated at %s", repo_dir)
     return repo_dir
 
 
