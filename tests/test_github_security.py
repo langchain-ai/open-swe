@@ -27,5 +27,3 @@ def test_git_checkout_existing_branch_quotes_repo_dir_and_branch() -> None:
     github.git_checkout_existing_branch(sandbox, repo_dir, branch)
 
     assert sandbox.commands == [f"cd {shlex.quote(repo_dir)} && git checkout {shlex.quote(branch)}"]
-
-
