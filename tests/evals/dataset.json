@@ -74,40 +74,6 @@
     }
   },
   {
-    "id": "eval_003",
-    "pr_number": 21245,
-    "repo": "langchain-ai/langchainplus",
-    "pr_url": "https://github.com/langchain-ai/langchainplus/pull/21245",
-    "pr_title": "fix(tracer-sessions): remove streaming_rate from Python stat defaults",
-    "commit_id": "f310b8964862c12f729e3ba825a27f5647bafaa4",
-    "pr_outcome": "merged",
-    "label": "incorrect_implementation",
-    "label_reason": "Removing streaming_rate default 0.0 from _STAT_SELECT_TO_DEFAULT_VALUE causes streaming_rate to return None instead of 0.0 in API responses",
-    "track": "merged",
-    "input": {
-      "configurable": {
-        "source": "github",
-        "repo": {
-          "owner": "langchain-ai",
-          "name": "langchainplus"
-        },
-        "pr_number": 21245
-      }
-    },
-    "expected_review": {
-      "overall_verdict": "COMMENT",
-      "issues": [
-        {
-          "file": "smith-backend/app/models/tracer_sessions/stats.py",
-          "line": 64,
-          "description": "Removing schemas.RunStatsSelect.streaming_rate: 0.0 from _STAT_SELECT_TO_DEFAULT_VALUE causes streaming_rate to return None instead of 0.0 in API responses. At stats.py:500-503, the expression `v or _STAT_SELECT_TO_DEFAULT_VALUE.get(...)` uses Python's `or` operator which treats 0.0 as falsy. When streaming_rate is 0.0 (legitimate value meaning 0% streaming) or None (ClickHouse returns NULL when token_run_count = 0), the fallback lookup now returns None instead of 0.0. This changes the API contract — the MultiSessionStats TypedDict declares streaming_rate: float (not Optional[float]).",
-          "severity": "medium"
-        }
-      ],
-      "raw_review_body": "Devin Review found 1 potential issue. View 1 additional finding in Devin Review."
-    }
-  },
-  {
     "id": "eval_004",
     "pr_number": 21260,
     "repo": "langchain-ai/langchainplus",
