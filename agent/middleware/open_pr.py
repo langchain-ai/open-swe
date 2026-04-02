@@ -100,6 +100,11 @@ async def open_pr_if_needed(
         pr_body = add_pr_collaboration_note(pr_body, user_identity)
         commit_message = add_user_coauthor_trailer(commit_message, user_identity)
 
+        installation_token = await get_github_app_installation_token()
+        if not installation_token:
+            logger.error("Failed to get GitHub App installation token for thread %s", thread_id)
+            return None
+
         if not thread_id:
             raise ValueError("No thread_id found in config")
 
@@ -154,11 +159,6 @@ async def open_pr_if_needed(
         )
         await asyncio.to_thread(git_add_all, sandbox_backend, repo_dir)
         await asyncio.to_thread(git_commit, sandbox_backend, repo_dir, commit_message)
-
-        installation_token = await get_github_app_installation_token()
-        if not installation_token:
-            logger.error("Failed to get GitHub App installation token for thread %s", thread_id)
-            return None
 
         await asyncio.to_thread(git_push, sandbox_backend, repo_dir, target_branch)
 
