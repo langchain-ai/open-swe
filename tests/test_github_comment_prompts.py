@@ -24,7 +24,7 @@ def test_build_pr_prompt_wraps_external_comments_without_trust_section() -> None
 
 
 def test_construct_system_prompt_includes_untrusted_comment_guidance() -> None:
-    prompt = construct_system_prompt("/workspace/open-swe")
+    prompt = construct_system_prompt()
 
     assert "External Untrusted Comments" in prompt
     assert github_comments.UNTRUSTED_GITHUB_COMMENT_OPEN_TAG in prompt
