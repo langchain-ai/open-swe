@@ -66,6 +66,145 @@ SANDBOX_CREATING = "__creating__"
 SANDBOX_CREATION_TIMEOUT = 180
 SANDBOX_POLL_INTERVAL = 1.0
 
+from .utils.agents_md import read_agents_md_in_sandbox
+from .utils.github import (
+    _CRED_FILE_PATH,
+    cleanup_git_credentials,
+    git_current_branch,
+    git_has_uncommitted_changes,
+    git_pull_branch,
+    is_valid_git_repo,
+    remove_directory,
+    setup_git_credentials,
+)
+from .utils.sandbox_paths import aresolve_repo_dir, aresolve_sandbox_work_dir
+from .utils.sandbox_state import SANDBOX_BACKENDS, get_sandbox_id_from_metadata
+
+
+async def _clone_or_pull_repo_in_sandbox(  # noqa: PLR0915
+    sandbox_backend: SandboxBackendProtocol,
+    owner: str,
+    repo: str,
+    github_token: str | None = None,
+) -> str:
+    """Clone a GitHub repo into the sandbox, or pull if it already exists.
+
+    Args:
+        sandbox_backend: The sandbox backend to execute commands in (LangSmithBackend)
+        owner: GitHub repo owner
+        repo: GitHub repo name
+        github_token: GitHub access token (from agent auth or env var)
+
+    Returns:
+        Path to the cloned/updated repo directory
+    """
+    logger.info("_clone_or_pull_repo_in_sandbox called for %s/%s", owner, repo)
+    loop = asyncio.get_event_loop()
+
+    token = github_token
+    if not token:
+        msg = "No GitHub token provided"
+        logger.error(msg)
+        raise ValueError(msg)
+
+    work_dir = await aresolve_sandbox_work_dir(sandbox_backend)
+    repo_dir = await aresolve_repo_dir(sandbox_backend, repo)
+    clean_url = f"https://github.com/{owner}/{repo}.git"
+    cred_helper = shlex.quote(f"store --file={_CRED_FILE_PATH}")
+    safe_repo_dir = shlex.quote(repo_dir)
+    safe_clean_url = shlex.quote(clean_url)
+
+    logger.info("Resolved sandbox work dir to %s", work_dir)
+
+    is_git_repo = await loop.run_in_executor(None, is_valid_git_repo, sandbox_backend, repo_dir)
+
+    if not is_git_repo:
+        logger.warning("Repo directory missing or not a valid git repo at %s, removing", repo_dir)
+        try:
+            removed = await loop.run_in_executor(None, remove_directory, sandbox_backend, repo_dir)
+            if not removed:
+                msg = f"Failed to remove invalid directory at {repo_dir}"
+                logger.error(msg)
+                raise RuntimeError(msg)
+            logger.info("Removed invalid directory, will clone fresh repo")
+        except Exception:
+            logger.exception("Failed to remove invalid directory")
+            raise
+    else:
+        logger.info("Repo exists at %s, checking for uncommitted changes", repo_dir)
+        has_changes = await loop.run_in_executor(
+            None, git_has_uncommitted_changes, sandbox_backend, repo_dir
+        )
+
+        if has_changes:
+            logger.warning("Repo has uncommitted changes at %s, skipping pull", repo_dir)
+            return repo_dir
+
+        logger.info("Repo is clean, pulling latest changes from %s/%s", owner, repo)
+
+        try:
+            current_branch = await loop.run_in_executor(
+                None, git_current_branch, sandbox_backend, repo_dir
+            )
+            if not current_branch:
+                msg = f"Failed to determine current branch for repo at {repo_dir}"
+                logger.error(msg)
+                raise RuntimeError(msg)
+
+            pull_result = await loop.run_in_executor(
+                None,
+                git_pull_branch,
+                sandbox_backend,
+                repo_dir,
+                current_branch,
+                token,
+            )
+            logger.debug("Git pull result: exit_code=%s", pull_result.exit_code)
+            if pull_result.exit_code != 0:
+                logger.warning(
+                    "Git pull failed with exit code %s: %s",
+                    pull_result.exit_code,
+                    pull_result.output[:200] if pull_result.output else "",
+                )
+        except Exception:
+            logger.exception("Failed to execute git pull")
+            raise
+
+        logger.info("Repo updated at %s", repo_dir)
+        return repo_dir
+
+    logger.info("Cloning repo %s/%s to %s", owner, repo, repo_dir)
+    await loop.run_in_executor(None, setup_git_credentials, sandbox_backend, token)
+    try:
+        result = await loop.run_in_executor(
+            None,
+            sandbox_backend.execute,
+            f"git -c credential.helper={cred_helper} clone {safe_clean_url} {safe_repo_dir}",
+        )
+        logger.debug("Git clone result: exit_code=%s", result.exit_code)
+    except Exception:
+        logger.exception("Failed to execute git clone")
+        raise
+    finally:
+        await loop.run_in_executor(None, cleanup_git_credentials, sandbox_backend)
+
+    if result.exit_code != 0:
+        msg = f"Failed to clone repo {owner}/{repo}: {result.output}"
+        logger.error(msg)
+        raise RuntimeError(msg)
+
+    logger.info("Repo cloned successfully at %s", repo_dir)
+    return repo_dir
+
+
+async def _recreate_sandbox(
+    thread_id: str,
+    repo_owner: str,
+    repo_name: str,
+    *,
+    github_token: str | None,
+) -> tuple[SandboxBackendProtocol, str]:
+    """Recreate a sandbox and clone the repo after a connection failure.
 
 async def _recreate_sandbox(thread_id: str) -> SandboxBackendProtocol:
     """Recreate a sandbox after a connection failure."""

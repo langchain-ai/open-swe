@@ -19,7 +19,8 @@ def _run_git(
     sandbox_backend: SandboxBackendProtocol, repo_dir: str, command: str
 ) -> ExecuteResponse:
     """Run a git command in the sandbox repo directory."""
-    return sandbox_backend.execute(f"cd {repo_dir} && {command}")
+    safe_repo_dir = shlex.quote(repo_dir)
+    return sandbox_backend.execute(f"cd {safe_repo_dir} && {command}")
 
 
 def is_valid_git_repo(sandbox_backend: SandboxBackendProtocol, repo_dir: str) -> bool:
@@ -77,6 +78,14 @@ def git_checkout_branch(
         return True
     fallback = _run_git(sandbox_backend, repo_dir, f"git checkout {safe_branch}")
     return fallback.exit_code == 0
+
+
+def git_checkout_existing_branch(
+    sandbox_backend: SandboxBackendProtocol, repo_dir: str, branch: str
+) -> ExecuteResponse:
+    """Checkout an existing branch without creating or resetting it."""
+    safe_branch = shlex.quote(branch)
+    return _run_git(sandbox_backend, repo_dir, f"git checkout {safe_branch}")
 
 
 def git_config_user(
@@ -154,6 +163,23 @@ def git_push(
     setup_git_credentials(sandbox_backend, github_token)
     try:
         return _git_with_credentials(sandbox_backend, repo_dir, f"push origin {safe_branch}")
+    finally:
+        cleanup_git_credentials(sandbox_backend)
+
+
+def git_pull_branch(
+    sandbox_backend: SandboxBackendProtocol,
+    repo_dir: str,
+    branch: str,
+    github_token: str | None = None,
+) -> ExecuteResponse:
+    """Pull a specific branch from origin, using a token if needed."""
+    safe_branch = shlex.quote(branch)
+    if not github_token:
+        return _run_git(sandbox_backend, repo_dir, f"git pull origin {safe_branch}")
+    setup_git_credentials(sandbox_backend, github_token)
+    try:
+        return _git_with_credentials(sandbox_backend, repo_dir, f"pull origin {safe_branch}")
     finally:
         cleanup_git_credentials(sandbox_backend)
 
