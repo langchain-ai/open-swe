@@ -5,7 +5,6 @@ import hmac
 import json
 import logging
 import os
-import re
 import uuid
 from typing import Any
 
@@ -36,8 +35,10 @@ from .utils.github_comments import (
 )
 from .utils.github_token import get_github_token_from_thread
 from .utils.github_user_email_map import GITHUB_USER_EMAIL_MAP
+from .utils.linear import post_linear_trace_comment
 from .utils.linear_team_repo_map import LINEAR_TEAM_TO_REPO
 from .utils.multimodal import dedupe_urls, extract_image_urls, fetch_image_block
+from .utils.repo import extract_repo_from_text
 from .utils.slack import (
     add_slack_reaction,
     fetch_slack_thread_messages,
@@ -45,6 +46,7 @@ from .utils.slack import (
     get_slack_user_info,
     get_slack_user_names,
     post_slack_thread_reply,
+    post_slack_trace_reply,
     select_slack_context_messages,
     strip_bot_mention,
     verify_slack_signature,
@@ -59,8 +61,10 @@ GITHUB_WEBHOOK_SECRET = os.environ.get("GITHUB_WEBHOOK_SECRET", "")
 SLACK_SIGNING_SECRET = os.environ.get("SLACK_SIGNING_SECRET", "")
 SLACK_BOT_USER_ID = os.environ.get("SLACK_BOT_USER_ID", "")
 SLACK_BOT_USERNAME = os.environ.get("SLACK_BOT_USERNAME", "")
-SLACK_REPO_OWNER = os.environ.get("SLACK_REPO_OWNER", "langchain-ai")
-SLACK_REPO_NAME = os.environ.get("SLACK_REPO_NAME", "open-swe")
+DEFAULT_REPO_OWNER = os.environ.get("DEFAULT_REPO_OWNER", "langchain-ai")
+DEFAULT_REPO_NAME = os.environ.get("DEFAULT_REPO_NAME", "langchainplus")
+SLACK_REPO_OWNER = os.environ.get("SLACK_REPO_OWNER", "") or DEFAULT_REPO_OWNER
+SLACK_REPO_NAME = os.environ.get("SLACK_REPO_NAME", "") or DEFAULT_REPO_NAME
 
 LANGGRAPH_URL = os.environ.get("LANGGRAPH_URL") or os.environ.get(
     "LANGGRAPH_URL_PROD", "http://localhost:2024"
@@ -94,20 +98,11 @@ _GITHUB_BOT_MESSAGE_PREFIXES = (
 def get_repo_config_from_team_mapping(
     team_identifier: str, project_name: str = ""
 ) -> dict[str, str]:
-    """
-    Look up repository configuration from LINEAR_TEAM_TO_REPO mapping.
+    """Look up repository configuration from LINEAR_TEAM_TO_REPO mapping."""
+    fallback = {"owner": DEFAULT_REPO_OWNER, "name": DEFAULT_REPO_NAME}
 
-    Supports both legacy flat mapping (team -> repo) and new nested mapping (team -> project -> repo).
-
-    Args:
-        team_identifier: Team name or ID to look up (e.g., "LangChain OSS")
-        project_name: Name of the project (e.g., "deepagents")
-
-    Returns:
-        Repository config dict with 'owner' and 'name' keys. Defaults to langchainplus if not found.
-    """
     if not team_identifier or team_identifier not in LINEAR_TEAM_TO_REPO:
-        return {"owner": "langchain-ai", "name": "langchainplus"}
+        return fallback
 
     config = LINEAR_TEAM_TO_REPO[team_identifier]
 
@@ -122,7 +117,7 @@ def get_repo_config_from_team_mapping(
     if "default" in config:
         return config["default"]
 
-    return {"owner": "langchain-ai", "name": "langchainplus"}
+    return fallback
 
 
 async def react_to_linear_comment(comment_id: str, emoji: str = "👀") -> bool:
@@ -344,31 +339,19 @@ async def check_if_using_repo_msg_sent(
 
 async def get_slack_repo_config(message: str, channel_id: str, thread_ts: str) -> dict[str, str]:
     """Resolve repository configuration for Slack-triggered runs."""
-    default_owner = SLACK_REPO_OWNER.strip() or "langchain-ai"
-    default_name = SLACK_REPO_NAME.strip() or "langchainplus"
+    default_owner = SLACK_REPO_OWNER.strip() or DEFAULT_REPO_OWNER
+    default_name = SLACK_REPO_NAME.strip() or DEFAULT_REPO_NAME
     thread_id = generate_thread_id_from_slack_thread(channel_id, thread_ts)
     langgraph_client = get_client(url=LANGGRAPH_URL)
 
-    owner: str | None = None
-    name: str | None = None
+    repo_config = extract_repo_from_text(message, default_owner=default_owner)
 
-    if "repo:" in message or "repo " in message:
-        match = re.search(r"repo[: ]([a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+)", message)
-        if match:
-            owner, name = match.group(1).split("/", 1)
-
-    if not owner or not name:
-        github_match = re.search(r"github\.com/([a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+)", message)
-        if github_match:
-            owner, name = github_match.group(1).split("/", 1)
-
-    if not owner or not name:
+    if not repo_config:
         try:
             thread = await langgraph_client.threads.get(thread_id)
             thread_repo_config = _extract_repo_config_from_thread(thread)
             if thread_repo_config:
-                owner = thread_repo_config["owner"]
-                name = thread_repo_config["name"]
+                repo_config = thread_repo_config
         except Exception as exc:  # noqa: BLE001
             if not _is_not_found_error(exc):
                 logger.exception(
@@ -376,15 +359,14 @@ async def get_slack_repo_config(message: str, channel_id: str, thread_ts: str) -
                     thread_id,
                 )
 
-    if not owner or not name:
-        owner = default_owner
-        name = default_name
+    if not repo_config:
+        repo_config = {"owner": default_owner, "name": default_name}
 
-    using_repo_str = f"Using repository: `{owner}/{name}`"
+    using_repo_str = f"Using repository: `{repo_config['owner']}/{repo_config['name']}`"
     if not await check_if_using_repo_msg_sent(channel_id, thread_ts, using_repo_str):
         await post_slack_thread_reply(channel_id, thread_ts, using_repo_str)
 
-    return {"owner": owner, "name": name}
+    return repo_config
 
 
 async def is_thread_active(thread_id: str) -> bool:
@@ -681,12 +663,16 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
 
         if queued:
             logger.info("Message queued for thread %s, will be processed by middleware", thread_id)
+            langgraph_client = get_client(url=LANGGRAPH_URL)
+            runs = await langgraph_client.runs.list(thread_id, limit=1)
+            if runs:
+                await post_linear_trace_comment(issue_id, runs[0]["run_id"], triggering_comment_id)
         else:
             logger.error("Failed to queue message for thread %s", thread_id)
     else:
         logger.info("Creating LangGraph run for thread %s", thread_id)
         langgraph_client = get_client(url=LANGGRAPH_URL)
-        await langgraph_client.runs.create(
+        run = await langgraph_client.runs.create(
             thread_id,
             "agent",
             input={"messages": [{"role": "user", "content": content_blocks}]},
@@ -694,6 +680,7 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
             if_not_exists="create",
         )
         logger.info("LangGraph run created successfully for thread %s", thread_id)
+        await post_linear_trace_comment(issue_id, run["run_id"], triggering_comment_id)
 
 
 async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[str, str]) -> None:
@@ -785,6 +772,25 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
     )
     content_blocks: list[dict[str, Any]] = [create_text_block(prompt)]
 
+    image_urls = dedupe_urls(
+        [url for msg in context_messages for url in extract_image_urls(msg.get("text", ""))]
+        + [
+            f["url_private"]
+            for msg in context_messages
+            for f in msg.get("files", [])
+            if isinstance(f, dict)
+            and f.get("mimetype", "").startswith("image/")
+            and f.get("url_private")
+        ]
+    )
+    if image_urls:
+        logger.info("Preparing %d image(s) for Slack mention", len(image_urls))
+        async with httpx.AsyncClient() as http_client:
+            for image_url in image_urls:
+                image_block = await fetch_image_block(image_url, http_client)
+                if image_block:
+                    content_blocks.append(image_block)
+
     configurable: dict[str, Any] = {
         "repo": repo_config,
         "slack_thread": {
@@ -801,7 +807,25 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
 
     langgraph_client = get_client(url=LANGGRAPH_URL)
     await _upsert_slack_thread_repo_metadata(thread_id, repo_config, langgraph_client)
-    await langgraph_client.runs.create(
+
+    thread_active = await is_thread_active(thread_id)
+    if thread_active:
+        logger.info(
+            "Thread %s is active, queuing Slack message for middleware pickup",
+            thread_id,
+        )
+        queued_payload = {"text": prompt, "image_urls": []}
+        queued = await queue_message_for_thread(
+            thread_id=thread_id,
+            message_content=queued_payload,
+        )
+        if queued:
+            logger.info("Slack message queued for thread %s", thread_id)
+        else:
+            logger.error("Failed to queue Slack message for thread %s", thread_id)
+        return
+
+    run = await langgraph_client.runs.create(
         thread_id,
         "agent",
         input={"messages": [{"role": "user", "content": content_blocks}]},
@@ -809,6 +833,7 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
         if_not_exists="create",
         multitask_strategy="interrupt",
     )
+    await post_slack_trace_reply(channel_id, thread_ts, run["run_id"])
 
 
 def verify_linear_signature(body: bytes, signature: str, secret: str) -> bool:
@@ -901,24 +926,33 @@ async def linear_webhook(  # noqa: PLR0911, PLR0912, PLR0915
         logger.warning("Failed to fetch full issue details, using webhook data")
         full_issue = issue
 
-    team = full_issue.get("team", {})
-    team_name = team.get("name", "") if team else ""
-    project = full_issue.get("project")
-    project_name = project.get("name", "") if project else ""
+    repo_config = extract_repo_from_text(comment_body, default_owner=DEFAULT_REPO_OWNER)
 
-    team_identifier = team_name.strip() if team_name else ""
-    project_key = project_name.strip() if project_name else ""
+    if repo_config:
+        logger.debug(
+            "Using repo from comment body: %s/%s",
+            repo_config["owner"],
+            repo_config["name"],
+        )
+    else:
+        team = full_issue.get("team", {})
+        team_name = team.get("name", "") if team else ""
+        project = full_issue.get("project")
+        project_name = project.get("name", "") if project else ""
 
-    repo_config = get_repo_config_from_team_mapping(team_identifier, project_key)
+        team_identifier = team_name.strip() if team_name else ""
+        project_key = project_name.strip() if project_name else ""
 
-    logger.debug(
-        "Team/project lookup result",
-        extra={
-            "team_name": team_identifier,
-            "project_name": project_key,
-            "repo_config": repo_config,
-        },
-    )
+        repo_config = get_repo_config_from_team_mapping(team_identifier, project_key)
+
+        logger.debug(
+            "Team/project lookup result",
+            extra={
+                "team_name": team_identifier,
+                "project_name": project_key,
+                "repo_config": repo_config,
+            },
+        )
 
     if not _is_repo_org_allowed(repo_config):
         logger.warning(
@@ -1135,6 +1169,7 @@ async def _trigger_or_queue_run(
     prompt: str,
     *,
     github_login: str,
+    github_user_id: int | None,
     repo_config: dict[str, str],
     pr_number: int,
 ) -> None:
@@ -1155,6 +1190,7 @@ async def _trigger_or_queue_run(
             "configurable": {
                 "source": "github",
                 "github_login": github_login,
+                "github_user_id": github_user_id,
                 "repo": repo_config,
                 "pr_number": pr_number,
             },
@@ -1218,6 +1254,7 @@ async def process_github_pr_comment(payload: dict[str, Any], event_type: str) ->
         comment_id,
         node_id,
     ) = await extract_pr_context(payload, event_type)
+    github_user_id = payload.get("sender", {}).get("id")
 
     logger.info(
         "Processing GitHub PR comment: event=%s, pr=%s, branch=%s",
@@ -1228,8 +1265,29 @@ async def process_github_pr_comment(payload: dict[str, Any], event_type: str) ->
 
     thread_id = get_thread_id_from_branch(branch_name) if branch_name else None
     if not thread_id:
-        logger.warning("Could not extract thread_id from branch '%s', skipping", branch_name)
-        return
+        if not pr_number:
+            logger.warning(
+                "Could not determine thread_id for branch '%s' (no pr_number), skipping",
+                branch_name,
+            )
+            return
+        owner = repo_config.get("owner", "")
+        name = repo_config.get("name", "")
+        stable_key = f"{owner}/{name}/pr/{pr_number}"
+        thread_id = str(uuid.uuid5(uuid.NAMESPACE_URL, stable_key))
+        logger.info("Generated thread_id %s for non-open-swe branch '%s'", thread_id, branch_name)
+        langgraph_client = get_client(url=LANGGRAPH_URL)
+        try:
+            await langgraph_client.threads.update(thread_id, metadata={"branch_name": branch_name})
+        except Exception as exc:  # noqa: BLE001
+            if _is_not_found_error(exc):
+                await langgraph_client.threads.create(
+                    thread_id=thread_id,
+                    if_exists="do_nothing",
+                    metadata={"branch_name": branch_name},
+                )
+            else:
+                logger.warning("Failed to persist branch_name metadata for thread %s", thread_id)
 
     email = GITHUB_USER_EMAIL_MAP.get(github_login, "")
     if not email:
@@ -1265,6 +1323,7 @@ async def process_github_pr_comment(payload: dict[str, Any], event_type: str) ->
         thread_id,
         prompt,
         github_login=github_login,
+        github_user_id=github_user_id,
         repo_config=repo_config,
         pr_number=pr_number,
     )
@@ -1282,6 +1341,7 @@ async def process_github_issue(payload: dict[str, Any], event_type: str) -> None
     issue_id = str(issue.get("id", ""))
     issue_number = issue.get("number")
     github_login = payload.get("sender", {}).get("login", "")
+    github_user_id = payload.get("sender", {}).get("id")
     issue_url = issue.get("html_url", "") or issue.get("url", "")
     title = issue.get("title", "No title")
     description = issue.get("body") or "No description"
@@ -1360,6 +1420,7 @@ async def process_github_issue(payload: dict[str, Any], event_type: str) -> None
     configurable: dict[str, Any] = {
         "source": "github",
         "github_login": github_login,
+        "github_user_id": github_user_id,
         "repo": repo_config,
         "github_issue": {
             "id": issue_id,

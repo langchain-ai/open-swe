@@ -7,10 +7,13 @@ import hashlib
 import hmac
 import logging
 import os
+import re
 import time
 from typing import Any
 
 import httpx
+
+from agent.utils.langsmith import get_langsmith_trace_url
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +65,11 @@ def replace_bot_mention_with_username(text: str, bot_user_id: str, bot_username:
     if bot_user_id and bot_username:
         return text.replace(f"<@{bot_user_id}>", f"@{bot_username}")
     return text
+
+
+def convert_mentions_to_slack_format(text: str) -> str:
+    """Convert @Name(USER_ID) patterns to Slack's <@USER_ID> mention format."""
+    return re.sub(r"@[^()]+\(([A-Z0-9]+)\)", r"<@\1>", text)
 
 
 def verify_slack_signature(
@@ -355,3 +363,12 @@ async def fetch_slack_thread_messages(channel_id: str, thread_ts: str) -> list[d
 
     messages.sort(key=lambda item: _parse_ts(item.get("ts")))
     return messages
+
+
+async def post_slack_trace_reply(channel_id: str, thread_ts: str, run_id: str) -> None:
+    """Post a trace URL reply in a Slack thread."""
+    trace_url = get_langsmith_trace_url(run_id)
+    if trace_url:
+        await post_slack_thread_reply(
+            channel_id, thread_ts, f"Working on it! <{trace_url}|View trace>"
+        )

@@ -117,6 +117,7 @@ Format messages using Slack's mrkdwn format, NOT standard Markdown.
     Key differences: *bold*, _italic_, ~strikethrough~, <url|link text>,
     bullet lists with "• ", ```code blocks```, > blockquotes.
     Do NOT use **bold**, [link](url), or other standard Markdown syntax.
+    To mention/tag a user, use `<@USER_ID>` (e.g. `<@U06KD8BFY95>`). You can find user IDs in the conversation context next to display names (e.g. `@Name(U06KD8BFY95)`).
 
 #### `github_comment`
 Posts a comment to a GitHub issue or pull request. Provide the `issue_number` explicitly. Use this when the task was triggered from GitHub — to reply with updates, answers, or a summary after completing work."""
