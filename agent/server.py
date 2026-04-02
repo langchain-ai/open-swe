@@ -22,6 +22,7 @@ warnings.filterwarnings("ignore", message=".*Pydantic V1.*", category=UserWarnin
 
 # Now safe to import agent (which imports LangChain modules)
 from deepagents import create_deep_agent
+from deepagents.backends.protocol import SandboxBackendProtocol
 from langsmith.sandbox import SandboxClientError
 
 from .middleware import (
@@ -69,7 +70,7 @@ from .utils.github import setup_git_credentials
 from .utils.sandbox_state import SANDBOX_BACKENDS, get_sandbox_id_from_metadata
 
 
-async def _recreate_sandbox(thread_id: str) -> object:
+async def _recreate_sandbox(thread_id: str) -> SandboxBackendProtocol:
     """Recreate a sandbox after a connection failure."""
     SANDBOX_BACKENDS.pop(thread_id, None)
     await client.threads.update(
@@ -201,6 +202,10 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             sandbox_backend.execute,
             "git config --global credential.helper 'store --file=/tmp/.git-credentials'",
         )
+    await asyncio.to_thread(
+        sandbox_backend.execute,
+        "git config --global user.name 'open-swe[bot]' && git config --global user.email 'open-swe@users.noreply.github.com'",
+    )
 
     linear_issue = config["configurable"].get("linear_issue", {})
     linear_project_id = linear_issue.get("linear_project_id", "")

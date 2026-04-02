@@ -1,9 +1,12 @@
+import logging
 import os
 from typing import Any
 
 import httpx
 
 from ..utils.linear_team_repo_map import LINEAR_TEAM_TO_REPO
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_GITHUB_ORG = os.getenv("DEFAULT_GITHUB_ORG", "langchain-ai")
 
@@ -55,6 +58,6 @@ def list_repos(org: str | None = None) -> dict[str, Any]:
             if response.status_code == 200:
                 result["org_repos"] = [{"owner": org, "name": r["name"]} for r in response.json()]
         except Exception:
-            pass
+            logger.warning("Failed to fetch repos for org %s", org)
 
     return result

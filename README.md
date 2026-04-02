@@ -42,8 +42,8 @@ Rather than forking an existing agent or building from scratch, Open SWE **compo
 ```python
 create_deep_agent(
     model="anthropic:claude-opus-4-6",
-    system_prompt=construct_system_prompt(repo_dir, ...),
-    tools=[http_request, fetch_url, commit_and_open_pr, linear_comment, slack_thread_reply],
+    system_prompt=construct_system_prompt(...),
+    tools=[http_request, fetch_url, list_repos, get_branch_name, commit_and_open_pr, linear_comment, slack_thread_reply],
     backend=sandbox_backend,
     middleware=[ToolErrorMiddleware(), check_message_queue_before_model, ...],
 )

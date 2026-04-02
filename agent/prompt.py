@@ -310,9 +310,19 @@ SYSTEM_PROMPT = (
 def construct_system_prompt(
     linear_project_id: str = "",
     linear_issue_number: str = "",
+    agents_md: str = "",
 ) -> str:
+    agents_md_section = ""
+    if agents_md:
+        agents_md_section = (
+            "\nThe following text is pulled from the repository's AGENTS.md file. "
+            "It may contain specific instructions and guidelines for the agent.\n"
+            "<agents_md>\n"
+            f"{agents_md}\n"
+            "</agents_md>\n"
+        )
     return SYSTEM_PROMPT.format(
         linear_project_id=linear_project_id or "<PROJECT_ID>",
         linear_issue_number=linear_issue_number or "<ISSUE_NUMBER>",
-        agents_md_section="",
+        agents_md_section=agents_md_section,
     )
