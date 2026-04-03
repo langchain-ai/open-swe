@@ -1,5 +1,7 @@
 """Sandbox provider integrations."""
 
-from agent.integrations.langsmith import LangSmithBackend, LangSmithProvider
+from deepagents.backends import LangSmithSandbox
 
-__all__ = ["LangSmithBackend", "LangSmithProvider"]
+from agent.integrations.langsmith import LangSmithProvider
+
+__all__ = ["LangSmithProvider", "LangSmithSandbox"]

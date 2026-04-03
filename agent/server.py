@@ -90,7 +90,7 @@ async def _clone_or_pull_repo_in_sandbox(  # noqa: PLR0915
     """Clone a GitHub repo into the sandbox, or pull if it already exists.
 
     Args:
-        sandbox_backend: The sandbox backend to execute commands in (LangSmithBackend)
+        sandbox_backend: The sandbox backend to execute commands in
         owner: GitHub repo owner
         repo: GitHub repo name
         github_token: GitHub access token (from agent auth or env var)

@@ -1,7 +1,4 @@
-"""LangSmith sandbox backend implementation.
-
-Copied from deepagents-cli to avoid requiring deepagents-cli as a dependency.
-"""
+"""LangSmith sandbox backend integration."""
 
 from __future__ import annotations
 
@@ -11,15 +8,9 @@ import time
 from abc import ABC, abstractmethod
 from typing import Any
 
-from deepagents.backends.protocol import (
-    ExecuteResponse,
-    FileDownloadResponse,
-    FileUploadResponse,
-    SandboxBackendProtocol,
-    WriteResult,
-)
-from deepagents.backends.sandbox import BaseSandbox
-from langsmith.sandbox import Sandbox, SandboxClient, SandboxTemplate
+from deepagents.backends import LangSmithSandbox
+from deepagents.backends.protocol import SandboxBackendProtocol
+from langsmith.sandbox import SandboxClient, SandboxTemplate
 
 
 def _get_langsmith_api_key() -> str | None:
@@ -32,12 +23,7 @@ def _get_langsmith_api_key() -> str | None:
 
 
 def _get_sandbox_template_config() -> tuple[str | None, str | None]:
-    """Get sandbox template configuration from environment.
-
-    Returns:
-        Tuple of (template_name, template_image) from environment variables.
-        Values are None if not set in environment.
-    """
+    """Get sandbox template configuration from environment."""
     template_name = os.environ.get("DEFAULT_SANDBOX_TEMPLATE_NAME")
     template_image = os.environ.get("DEFAULT_SANDBOX_TEMPLATE_IMAGE")
     return template_name, template_image
@@ -47,10 +33,6 @@ def create_langsmith_sandbox(
     sandbox_id: str | None = None,
 ) -> SandboxBackendProtocol:
     """Create or connect to a LangSmith sandbox without automatic cleanup.
-
-    This function directly uses the LangSmithProvider to create/connect to sandboxes
-    without the context manager cleanup, allowing sandboxes to persist across
-    multiple agent invocations.
 
     Args:
         sandbox_id: Optional existing sandbox ID to connect to.
@@ -99,7 +81,6 @@ def _update_thread_sandbox_metadata(sandbox_id: str) -> None:
         else:
             loop.create_task(_update())
     except Exception:
-        # Best-effort: ignore failures (no config context, client unavailable, etc.)
         pass
 
 
@@ -127,87 +108,12 @@ class SandboxProvider(ABC):
         raise NotImplementedError
 
 
-# Default template configuration
 DEFAULT_TEMPLATE_NAME = "open-swe"
 DEFAULT_TEMPLATE_IMAGE = "python:3"
 
 
-class LangSmithBackend(BaseSandbox):
-    """LangSmith backend implementation conforming to SandboxBackendProtocol.
-
-    This implementation inherits all file operation methods from BaseSandbox
-    and only implements the execute() method using LangSmith's API.
-    """
-
-    def __init__(self, sandbox: Sandbox) -> None:
-        self._sandbox = sandbox
-        self._default_timeout: int = 30 * 5  # 5 minute default
-
-    @property
-    def id(self) -> str:
-        """Unique identifier for the sandbox backend."""
-        return self._sandbox.name
-
-    def execute(self, command: str, *, timeout: int | None = None) -> ExecuteResponse:
-        """Execute a command in the sandbox and return ExecuteResponse.
-
-        Args:
-            command: Full shell command string to execute.
-            timeout: Maximum time in seconds to wait for the command to complete.
-                If None, uses the default timeout of 5 minutes.
-
-        Returns:
-            ExecuteResponse with combined output, exit code, and truncation flag.
-        """
-        effective_timeout = timeout if timeout is not None else self._default_timeout
-        result = self._sandbox.run(command, timeout=effective_timeout)
-
-        # Combine stdout and stderr (matching other backends' approach)
-        output = result.stdout or ""
-        if result.stderr:
-            output += "\n" + result.stderr if output else result.stderr
-
-        return ExecuteResponse(
-            output=output,
-            exit_code=result.exit_code,
-            truncated=False,
-        )
-
-    def write(self, file_path: str, content: str) -> WriteResult:
-        """Write content using the LangSmith SDK to avoid ARG_MAX.
-
-        BaseSandbox.write() sends the full content in a shell command, which
-        can exceed ARG_MAX for large content. This override uses the SDK's
-        native write(), which sends content in the HTTP body.
-        """
-        try:
-            self._sandbox.write(file_path, content.encode("utf-8"))
-            return WriteResult(path=file_path, files_update=None)
-        except Exception as e:
-            return WriteResult(error=f"Failed to write file '{file_path}': {e}")
-
-    def download_files(self, paths: list[str]) -> list[FileDownloadResponse]:
-        """Download multiple files from the LangSmith sandbox."""
-        responses: list[FileDownloadResponse] = []
-        for path in paths:
-            content = self._sandbox.read(path)
-            responses.append(FileDownloadResponse(path=path, content=content, error=None))
-        return responses
-
-    def upload_files(self, files: list[tuple[str, bytes]]) -> list[FileUploadResponse]:
-        """Upload multiple files to the LangSmith sandbox."""
-        responses: list[FileUploadResponse] = []
-        for path, content in files:
-            self._sandbox.write(path, content)
-            responses.append(FileUploadResponse(path=path, error=None))
-        return responses
-
-
 class LangSmithProvider(SandboxProvider):
-    """LangSmith sandbox provider implementation.
-
-    Manages LangSmith sandbox lifecycle using the LangSmith SDK.
-    """
+    """LangSmith sandbox provider implementation."""
 
     def __init__(self, api_key: str | None = None) -> None:
         from langsmith import sandbox
@@ -237,7 +143,7 @@ class LangSmithProvider(SandboxProvider):
             except Exception as e:
                 msg = f"Failed to connect to existing sandbox '{sandbox_id}': {e}"
                 raise RuntimeError(msg) from e
-            return LangSmithBackend(sandbox)
+            return LangSmithSandbox(sandbox)
 
         resolved_template_name, resolved_image_name = self._resolve_template(
             template, template_image
@@ -253,7 +159,6 @@ class LangSmithProvider(SandboxProvider):
             msg = f"Failed to create sandbox from template '{resolved_template_name}': {e}"
             raise RuntimeError(msg) from e
 
-        # Verify sandbox is ready by polling
         for _ in range(timeout // 2):
             try:
                 result = sandbox.run("echo ready", timeout=5)
@@ -268,7 +173,7 @@ class LangSmithProvider(SandboxProvider):
             msg = f"LangSmith sandbox failed to start within {timeout} seconds"
             raise RuntimeError(msg)
 
-        return LangSmithBackend(sandbox)
+        return LangSmithSandbox(sandbox)
 
     def delete(self, *, sandbox_id: str, **kwargs: Any) -> None:
         """Delete a LangSmith sandbox."""
@@ -285,7 +190,6 @@ class LangSmithProvider(SandboxProvider):
             return DEFAULT_TEMPLATE_NAME, resolved_image
         if isinstance(template, str):
             return template, resolved_image
-        # SandboxTemplate object
         if template_image is None and template.image:
             resolved_image = template.image
         return template.name, resolved_image
