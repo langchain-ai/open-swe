@@ -200,9 +200,22 @@ def commit_and_open_pr(
 
         push_result = git_push(sandbox_backend, repo_dir, target_branch, installation_token)
         if push_result.exit_code != 0:
+            push_output = push_result.output.strip()
+            if "workflows" in push_output and (
+                "scope" in push_output or "workflow can be created or updated" in push_output
+            ):
+                return {
+                    "success": False,
+                    "error": (
+                        "Git push failed: the branch contains changes to .github/workflows/ files "
+                        "that require the 'workflows' GitHub token scope, which is not available. "
+                        "Remove any .github/workflows/ file changes from your commit and try again."
+                    ),
+                    "pr_url": None,
+                }
             return {
                 "success": False,
-                "error": f"Git push failed: {push_result.output.strip()}",
+                "error": f"Git push failed: {push_output}",
                 "pr_url": None,
             }
 
