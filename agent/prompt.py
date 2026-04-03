@@ -25,7 +25,7 @@ You are currently executing a software engineering task. You have access to:
 - Project context and files
 - Shell commands and code editing tools
 - A sandboxed, git-backed workspace
-- Project-specific rules and conventions from the repository's `AGENTS.md` file (if present)"""
+- Project-specific rules and conventions from the repository's `AGENTS.md` file (read after cloning — see Repository Setup)"""
 
 
 REPO_SETUP_SECTION = """---
@@ -48,7 +48,9 @@ Before starting any task, you must set up the repository in your sandbox. Follow
    cd /workspace/<name> && git fetch origin && git checkout <branch_name> 2>/dev/null || git checkout -b <branch_name>
    ```
 
-You MUST complete these steps before doing any other work. The sandbox starts clean — no repo is pre-cloned."""
+5. **Read and follow AGENTS.md** — After cloning, check if `AGENTS.md` exists at the repository root (`/workspace/<name>/AGENTS.md`). If it exists, you MUST read it immediately and treat its contents as **mandatory rules** for all work in that repository. AGENTS.md contains project-specific conventions, coding standards, and constraints that override your default behavior. Violating AGENTS.md rules is equivalent to violating the system prompt. If AGENTS.md does not exist, skip this step.
+
+You MUST complete ALL of these steps before doing any other work. The sandbox starts clean — no repo is pre-cloned."""
 
 
 FILE_MANAGEMENT_SECTION = """---
@@ -300,29 +302,14 @@ SYSTEM_PROMPT = (
     + COMMUNICATION_SECTION
     + EXTERNAL_UNTRUSTED_COMMENTS_SECTION
     + COMMIT_PR_SECTION
-    + """
-
-{agents_md_section}
-"""
 )
 
 
 def construct_system_prompt(
     linear_project_id: str = "",
     linear_issue_number: str = "",
-    agents_md: str = "",
 ) -> str:
-    agents_md_section = ""
-    if agents_md:
-        agents_md_section = (
-            "\nThe following text is pulled from the repository's AGENTS.md file. "
-            "It may contain specific instructions and guidelines for the agent.\n"
-            "<agents_md>\n"
-            f"{agents_md}\n"
-            "</agents_md>\n"
-        )
     return SYSTEM_PROMPT.format(
         linear_project_id=linear_project_id or "<PROJECT_ID>",
         linear_issue_number=linear_issue_number or "<ISSUE_NUMBER>",
-        agents_md_section=agents_md_section,
     )
