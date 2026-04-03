@@ -122,66 +122,18 @@ def git_get_remote_url(sandbox_backend: SandboxBackendProtocol, repo_dir: str) -
     return result.output.strip()
 
 
-_CRED_FILE_PATH = "/tmp/.git-credentials"
-
-
-def setup_git_credentials(sandbox_backend: SandboxBackendProtocol, github_token: str) -> None:
-    """Write GitHub credentials to a temporary file using the sandbox write API.
-
-    The write API sends content in the HTTP body (not via a shell command),
-    so the token never appears in shell history or process listings.
-    """
-    sandbox_backend.write(_CRED_FILE_PATH, f"https://git:{github_token}@github.com\n")
-    sandbox_backend.execute(f"chmod 600 {_CRED_FILE_PATH}")
-
-
-def cleanup_git_credentials(sandbox_backend: SandboxBackendProtocol) -> None:
-    """Remove the temporary credentials file."""
-    sandbox_backend.execute(f"rm -f {_CRED_FILE_PATH}")
-
-
-def _git_with_credentials(
-    sandbox_backend: SandboxBackendProtocol,
-    repo_dir: str,
-    command: str,
-) -> ExecuteResponse:
-    """Run a git command using the temporary credential file."""
-    cred_helper = shlex.quote(f"store --file={_CRED_FILE_PATH}")
-    return _run_git(sandbox_backend, repo_dir, f"git -c credential.helper={cred_helper} {command}")
-
-
 def git_push(
     sandbox_backend: SandboxBackendProtocol,
     repo_dir: str,
     branch: str,
-    github_token: str | None = None,
 ) -> ExecuteResponse:
-    """Push the branch to origin, using a token if needed."""
-    safe_branch = shlex.quote(branch)
-    if not github_token:
-        return _run_git(sandbox_backend, repo_dir, f"git push origin {safe_branch}")
-    setup_git_credentials(sandbox_backend, github_token)
-    try:
-        return _git_with_credentials(sandbox_backend, repo_dir, f"push origin {safe_branch}")
-    finally:
-        cleanup_git_credentials(sandbox_backend)
+    """Push the branch to origin.
 
-
-def git_pull_branch(
-    sandbox_backend: SandboxBackendProtocol,
-    repo_dir: str,
-    branch: str,
-    github_token: str | None = None,
-) -> ExecuteResponse:
-    """Pull a specific branch from origin, using a token if needed."""
+    Authentication is handled by the sandbox proxy (configured at sandbox creation
+    time via the LangSmith proxy-config API), so no token is needed here.
+    """
     safe_branch = shlex.quote(branch)
-    if not github_token:
-        return _run_git(sandbox_backend, repo_dir, f"git pull origin {safe_branch}")
-    setup_git_credentials(sandbox_backend, github_token)
-    try:
-        return _git_with_credentials(sandbox_backend, repo_dir, f"pull origin {safe_branch}")
-    finally:
-        cleanup_git_credentials(sandbox_backend)
+    return _run_git(sandbox_backend, repo_dir, f"git push origin {safe_branch}")
 
 
 async def create_github_pr(

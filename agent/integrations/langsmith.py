@@ -5,12 +5,15 @@ Copied from deepagents-cli to avoid requiring deepagents-cli as a dependency.
 
 from __future__ import annotations
 
+import base64
 import contextlib
+import logging
 import os
 import time
 from abc import ABC, abstractmethod
 from typing import Any
 
+import httpx
 from deepagents.backends.protocol import (
     ExecuteResponse,
     FileDownloadResponse,
@@ -20,6 +23,8 @@ from deepagents.backends.protocol import (
 )
 from deepagents.backends.sandbox import BaseSandbox
 from langsmith.sandbox import Sandbox, SandboxClient, SandboxTemplate
+
+logger = logging.getLogger(__name__)
 
 
 def _get_langsmith_api_key() -> str | None:
@@ -43,8 +48,51 @@ def _get_sandbox_template_config() -> tuple[str | None, str | None]:
     return template_name, template_image
 
 
+def _configure_github_proxy(sandbox_name: str, github_token: str, api_key: str) -> None:
+    """Configure sandbox proxy to inject GitHub auth for all github.com requests.
+
+    Uses the LangSmith proxy-config API to set up header injection so that
+    git operations (clone, pull, push) authenticate via the proxy rather than
+    writing credentials to disk in the sandbox.
+
+    Args:
+        sandbox_name: The sandbox name/ID returned by the LangSmith API.
+        github_token: GitHub token to inject as Authorization header.
+        api_key: LangSmith API key for the PATCH request.
+    """
+    langsmith_endpoint = os.environ.get("LANGSMITH_ENDPOINT", "https://api.smith.langchain.com")
+    url = f"{langsmith_endpoint}/v2/sandboxes/boxes/{sandbox_name}"
+    basic_auth = base64.b64encode(f"x-access-token:{github_token}".encode()).decode()
+    payload = {
+        "proxy_config": {
+            "rules": [
+                {
+                    "name": "github",
+                    "match_hosts": ["github.com", "*.github.com"],
+                    "headers": [
+                        {
+                            "name": "Authorization",
+                            "type": "opaque",
+                            "value": f"Basic {basic_auth}",
+                        }
+                    ],
+                }
+            ]
+        }
+    }
+    with httpx.Client() as client:
+        response = client.patch(
+            url,
+            json=payload,
+            headers={"X-API-Key": api_key},
+        )
+        response.raise_for_status()
+    logger.info("Configured GitHub proxy for sandbox %s", sandbox_name)
+
+
 def create_langsmith_sandbox(
     sandbox_id: str | None = None,
+    github_token: str | None = None,
 ) -> SandboxBackendProtocol:
     """Create or connect to a LangSmith sandbox without automatic cleanup.
 
@@ -52,9 +100,16 @@ def create_langsmith_sandbox(
     without the context manager cleanup, allowing sandboxes to persist across
     multiple agent invocations.
 
+    When creating a new sandbox (sandbox_id is None) and a github_token is provided,
+    the sandbox proxy is configured to inject the GitHub Authorization header for
+    all github.com requests, so git operations authenticate without storing
+    credentials in the sandbox filesystem.
+
     Args:
         sandbox_id: Optional existing sandbox ID to connect to.
                    If None, creates a new sandbox.
+        github_token: Optional GitHub token. Used to configure proxy auth on
+                      new sandboxes. Ignored when connecting to an existing sandbox.
 
     Returns:
         SandboxBackendProtocol instance
@@ -69,6 +124,10 @@ def create_langsmith_sandbox(
         template_image=template_image,
     )
     _update_thread_sandbox_metadata(backend.id)
+
+    if sandbox_id is None and github_token and api_key:
+        _configure_github_proxy(backend.id, github_token, api_key)
+
     return backend
 
 
@@ -128,7 +187,7 @@ class SandboxProvider(ABC):
 
 
 # Default template configuration
-DEFAULT_TEMPLATE_NAME = "open-swe"
+DEFAULT_TEMPLATE_NAME = "open-swe-new"
 DEFAULT_TEMPLATE_IMAGE = "python:3"
 
 

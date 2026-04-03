@@ -160,9 +160,7 @@ async def open_pr_if_needed(
         await asyncio.to_thread(git_add_all, sandbox_backend, repo_dir)
         await asyncio.to_thread(git_commit, sandbox_backend, repo_dir, commit_message)
 
-        await asyncio.to_thread(
-            git_push, sandbox_backend, repo_dir, target_branch, installation_token
-        )
+        await asyncio.to_thread(git_push, sandbox_backend, repo_dir, target_branch)
 
         base_branch = await get_github_default_branch(repo_owner, repo_name, installation_token)
         logger.info("Using base branch: %s", base_branch)
