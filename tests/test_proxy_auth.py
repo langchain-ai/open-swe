@@ -101,52 +101,59 @@ class TestCreateSandboxWithProxy:
     """Tests for _create_sandbox_with_proxy token source selection."""
 
     @pytest.mark.asyncio
-    async def test_prefers_installation_token(self) -> None:
-        """Installation token should be used over user token."""
+    async def test_uses_installation_token_for_langsmith(self) -> None:
+        """Installation token should be used for proxy auth on langsmith sandboxes."""
         with (
             patch(
                 "agent.server.get_github_app_installation_token",
                 new_callable=AsyncMock,
                 return_value="ghs_install",
             ),
-            patch("agent.server.create_langsmith_sandbox") as mock_create,
+            patch("agent.server.create_sandbox") as mock_create,
+            patch("agent.server._configure_github_proxy") as mock_proxy,
+            patch.dict("os.environ", {"SANDBOX_TYPE": "langsmith", "LANGSMITH_API_KEY": "ls-key"}),
         ):
-            mock_create.return_value = MagicMock()
+            mock_create.return_value = MagicMock(id="sandbox-123")
 
             from agent.server import _create_sandbox_with_proxy
 
-            await _create_sandbox_with_proxy("user_token")
+            await _create_sandbox_with_proxy()
 
-            mock_create.assert_called_once_with(None, "ghs_install")
+            mock_create.assert_called_once_with()
+            mock_proxy.assert_called_once_with("sandbox-123", "ghs_install", "ls-key")
 
     @pytest.mark.asyncio
-    async def test_falls_back_to_user_token(self) -> None:
-        """User token should be used when installation token is unavailable."""
+    async def test_skips_proxy_for_non_langsmith(self) -> None:
+        """Non-langsmith sandboxes should skip proxy configuration."""
         with (
+            patch("agent.server.create_sandbox") as mock_create,
+            patch("agent.server._configure_github_proxy") as mock_proxy,
+            patch.dict("os.environ", {"SANDBOX_TYPE": "daytona"}),
+        ):
+            mock_create.return_value = MagicMock(id="sandbox-456")
+
+            from agent.server import _create_sandbox_with_proxy
+
+            await _create_sandbox_with_proxy()
+
+            mock_create.assert_called_once_with()
+            mock_proxy.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_raises_when_no_installation_token_for_langsmith(self) -> None:
+        """Should raise ValueError when installation token is unavailable for langsmith."""
+        with (
+            patch("agent.server.create_sandbox") as mock_create,
             patch(
                 "agent.server.get_github_app_installation_token",
                 new_callable=AsyncMock,
                 return_value=None,
             ),
-            patch("agent.server.create_langsmith_sandbox") as mock_create,
+            patch.dict("os.environ", {"SANDBOX_TYPE": "langsmith"}),
         ):
-            mock_create.return_value = MagicMock()
+            mock_create.return_value = MagicMock(id="sandbox-789")
 
             from agent.server import _create_sandbox_with_proxy
 
-            await _create_sandbox_with_proxy("user_token")
-
-            mock_create.assert_called_once_with(None, "user_token")
-
-    @pytest.mark.asyncio
-    async def test_raises_when_no_token_available(self) -> None:
-        """Should raise ValueError when both tokens are None."""
-        with patch(
-            "agent.server.get_github_app_installation_token",
-            new_callable=AsyncMock,
-            return_value=None,
-        ):
-            from agent.server import _create_sandbox_with_proxy
-
-            with pytest.raises(ValueError, match="no GitHub token available"):
-                await _create_sandbox_with_proxy(None)
+            with pytest.raises(ValueError, match="installation token is unavailable"):
+                await _create_sandbox_with_proxy()
