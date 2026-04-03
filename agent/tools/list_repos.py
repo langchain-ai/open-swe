@@ -1,9 +1,11 @@
+import asyncio
 import logging
 import os
 from typing import Any
 
 import httpx
 
+from ..utils.github_app import get_github_app_installation_token
 from ..utils.linear_team_repo_map import LINEAR_TEAM_TO_REPO
 
 logger = logging.getLogger(__name__)
@@ -49,9 +51,13 @@ def list_repos(org: str | None = None) -> dict[str, Any]:
 
     if org:
         try:
+            headers = {"Accept": "application/vnd.github+json"}
+            token = asyncio.run(get_github_app_installation_token())
+            if token:
+                headers["Authorization"] = f"Bearer {token}"
             response = httpx.get(
                 f"https://api.github.com/orgs/{org}/repos",
-                headers={"Accept": "application/vnd.github+json"},
+                headers=headers,
                 params={"per_page": 100, "sort": "updated"},
                 timeout=10,
             )
