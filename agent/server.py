@@ -28,7 +28,6 @@ from deepagents.backends.protocol import SandboxBackendProtocol
 from langsmith.sandbox import SandboxClientError
 
 from .integrations.langsmith import _configure_github_proxy, _get_langsmith_api_key
-from .utils.sandbox import create_sandbox
 from .middleware import (
     ToolErrorMiddleware,
     check_message_queue_before_model,
@@ -61,6 +60,7 @@ from .tools import (
 from .utils.auth import resolve_github_token
 from .utils.github_app import get_github_app_installation_token
 from .utils.model import make_model
+from .utils.sandbox import create_sandbox
 
 client = get_client()
 
