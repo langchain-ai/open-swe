@@ -253,8 +253,18 @@ async def create_github_pr(
                     head_branch=head_branch,
                 )
                 if existing:
-                    logger.info("Using existing PR for head branch: %s", existing[0])
-                    return existing[0], existing[1], True
+                    pr_url, pr_number = existing
+                    logger.info("Using existing PR for head branch: %s", pr_url)
+                    await _update_github_pr(
+                        http_client=http_client,
+                        repo_owner=repo_owner,
+                        repo_name=repo_name,
+                        github_token=github_token,
+                        pr_number=pr_number,
+                        title=title,
+                        body=body,
+                    )
+                    return pr_url, pr_number, True
             else:
                 logger.error(
                     "GitHub API error (%s): %s",
@@ -300,6 +310,40 @@ async def _find_existing_pr(
         pr = data[0]
         return pr.get("html_url"), pr.get("number")
     return None, None
+
+
+async def _update_github_pr(
+    http_client: httpx.AsyncClient,
+    repo_owner: str,
+    repo_name: str,
+    github_token: str,
+    pr_number: int | None,
+    title: str,
+    body: str,
+) -> None:
+    """Update an existing PR's title and body via PATCH."""
+    if pr_number is None:
+        logger.warning("Cannot update PR: pr_number is None")
+        return
+    headers = {
+        "Authorization": f"Bearer {github_token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    response = await http_client.patch(
+        f"https://api.github.com/repos/{repo_owner}/{repo_name}/pulls/{pr_number}",
+        headers=headers,
+        json={"title": title, "body": body},
+    )
+    if response.status_code == 200:  # noqa: PLR2004
+        logger.info("Updated existing PR #%s with new title and body", pr_number)
+    else:
+        logger.warning(
+            "Failed to update PR #%s (%s): %s",
+            pr_number,
+            response.status_code,
+            response.json().get("message"),
+        )
 
 
 async def get_github_default_branch(
