@@ -284,6 +284,13 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
     sandbox_id = await get_sandbox_id_from_metadata(thread_id)
 
     if sandbox_id == SANDBOX_CREATING and not sandbox_backend:
+        logger.warning(
+            "Found stale SANDBOX_CREATING for thread %s with no cached backend, resetting",
+            thread_id,
+        )
+        await client.threads.update(thread_id=thread_id, metadata={"sandbox_id": None})
+        sandbox_id = None
+    elif sandbox_id == SANDBOX_CREATING:
         logger.info("Sandbox creation in progress, waiting...")
         sandbox_id = await _wait_for_sandbox_id(thread_id)
 
