@@ -13,6 +13,9 @@ dev:
 run:
 	uvicorn agent.webapp:app --reload --port 8000
 
+proxy:
+	python -m agent.claude_code_proxy
+
 install:
 	uv pip install -e .
 
@@ -61,6 +64,7 @@ help:
 	@echo '----'
 	@echo 'dev                          - run LangGraph dev server'
 	@echo 'run                          - run webhook server'
+	@echo 'proxy                        - run Claude Code local API proxy (port 9999)'
 	@echo 'install                      - install dependencies'
 	@echo 'format                       - run code formatters'
 	@echo 'lint                         - run linters'
