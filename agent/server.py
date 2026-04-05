@@ -187,9 +187,7 @@ async def _create_sandbox_with_proxy() -> SandboxBackendProtocol:
             msg = "Cannot configure proxy: GitHub App installation token is unavailable"
             logger.error(msg)
             raise ValueError(msg)
-        await asyncio.to_thread(
-            _configure_github_proxy, sandbox_backend.id, installation_token
-        )
+        await asyncio.to_thread(_configure_github_proxy, sandbox_backend.id, installation_token)
 
     return sandbox_backend
 

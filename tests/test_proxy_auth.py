@@ -56,7 +56,11 @@ class TestConfigureGithubProxy:
         with (
             patch("agent.integrations.langsmith.httpx.Client") as mock_client_cls,
             patch.dict(
-                "os.environ", {"LANGSMITH_ENDPOINT": "https://test.api.smith.langchain.com", "LANGSMITH_API_KEY": "api-key"}
+                "os.environ",
+                {
+                    "LANGSMITH_ENDPOINT": "https://test.api.smith.langchain.com",
+                    "LANGSMITH_API_KEY": "api-key",
+                },
             ),
         ):
             mock_client = MagicMock()
