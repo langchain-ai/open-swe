@@ -21,6 +21,9 @@ def create_modal_sandbox(sandbox_id: str | None = None):
     if sandbox_id:
         sandbox = modal.Sandbox.from_id(sandbox_id, app=app)
     else:
-        sandbox = modal.Sandbox.create(app=app)
+        sandbox = modal.Sandbox.create(
+            app=app,
+            image=modal.Image.debian_slim(python_version="3.12").apt_install("git"),
+        )
 
     return ModalSandbox(sandbox=sandbox)
