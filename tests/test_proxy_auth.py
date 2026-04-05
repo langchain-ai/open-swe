@@ -19,7 +19,10 @@ class TestConfigureGithubProxy:
         token = "ghs_testtoken123"
         expected_basic = base64.b64encode(f"x-access-token:{token}".encode()).decode()
 
-        with patch("agent.integrations.langsmith.httpx.Client") as mock_client_cls:
+        with (
+            patch("agent.integrations.langsmith.httpx.Client") as mock_client_cls,
+            patch.dict("os.environ", {"LANGSMITH_API_KEY": "ls-api-key"}),
+        ):
             mock_client = MagicMock()
             mock_response = MagicMock()
             mock_response.raise_for_status = MagicMock()
@@ -27,7 +30,7 @@ class TestConfigureGithubProxy:
             mock_client_cls.return_value.__enter__ = MagicMock(return_value=mock_client)
             mock_client_cls.return_value.__exit__ = MagicMock(return_value=False)
 
-            _configure_github_proxy("sandbox-abc123", token, "ls-api-key")
+            _configure_github_proxy("sandbox-abc123", token)
 
             mock_client.patch.assert_called_once()
             call_kwargs = mock_client.patch.call_args
@@ -53,7 +56,7 @@ class TestConfigureGithubProxy:
         with (
             patch("agent.integrations.langsmith.httpx.Client") as mock_client_cls,
             patch.dict(
-                "os.environ", {"LANGSMITH_ENDPOINT": "https://test.api.smith.langchain.com"}
+                "os.environ", {"LANGSMITH_ENDPOINT": "https://test.api.smith.langchain.com", "LANGSMITH_API_KEY": "api-key"}
             ),
         ):
             mock_client = MagicMock()
@@ -63,14 +66,17 @@ class TestConfigureGithubProxy:
             mock_client_cls.return_value.__enter__ = MagicMock(return_value=mock_client)
             mock_client_cls.return_value.__exit__ = MagicMock(return_value=False)
 
-            _configure_github_proxy("sandbox-xyz", "token", "api-key")
+            _configure_github_proxy("sandbox-xyz", "token")
 
             url = mock_client.patch.call_args.args[0]
             assert url == "https://test.api.smith.langchain.com/v2/sandboxes/boxes/sandbox-xyz"
 
     def test_sends_api_key_header(self) -> None:
         """Verify the PATCH includes the LangSmith API key."""
-        with patch("agent.integrations.langsmith.httpx.Client") as mock_client_cls:
+        with (
+            patch("agent.integrations.langsmith.httpx.Client") as mock_client_cls,
+            patch.dict("os.environ", {"LANGSMITH_API_KEY": "my-api-key"}),
+        ):
             mock_client = MagicMock()
             mock_response = MagicMock()
             mock_response.raise_for_status = MagicMock()
@@ -78,14 +84,17 @@ class TestConfigureGithubProxy:
             mock_client_cls.return_value.__enter__ = MagicMock(return_value=mock_client)
             mock_client_cls.return_value.__exit__ = MagicMock(return_value=False)
 
-            _configure_github_proxy("sandbox-abc", "token", "my-api-key")
+            _configure_github_proxy("sandbox-abc", "token")
 
             headers = mock_client.patch.call_args.kwargs["headers"]
             assert headers == {"X-API-Key": "my-api-key"}
 
     def test_raises_on_http_error(self) -> None:
         """Verify HTTP errors propagate."""
-        with patch("agent.integrations.langsmith.httpx.Client") as mock_client_cls:
+        with (
+            patch("agent.integrations.langsmith.httpx.Client") as mock_client_cls,
+            patch.dict("os.environ", {"LANGSMITH_API_KEY": "api-key"}),
+        ):
             mock_client = MagicMock()
             mock_client.patch.side_effect = httpx.HTTPStatusError(
                 "Server error", request=MagicMock(), response=MagicMock(status_code=500)
@@ -94,7 +103,7 @@ class TestConfigureGithubProxy:
             mock_client_cls.return_value.__exit__ = MagicMock(return_value=False)
 
             with pytest.raises(httpx.HTTPStatusError):
-                _configure_github_proxy("sandbox-abc", "token", "api-key")
+                _configure_github_proxy("sandbox-abc", "token")
 
 
 class TestCreateSandboxWithProxy:
@@ -120,7 +129,7 @@ class TestCreateSandboxWithProxy:
             await _create_sandbox_with_proxy()
 
             mock_create.assert_called_once_with()
-            mock_proxy.assert_called_once_with("sandbox-123", "ghs_install", "ls-key")
+            mock_proxy.assert_called_once_with("sandbox-123", "ghs_install")
 
     @pytest.mark.asyncio
     async def test_skips_proxy_for_non_langsmith(self) -> None:

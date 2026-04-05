@@ -48,7 +48,7 @@ def _get_sandbox_template_config() -> tuple[str | None, str | None]:
     return template_name, template_image
 
 
-def _configure_github_proxy(sandbox_name: str, github_token: str, api_key: str) -> None:
+def _configure_github_proxy(sandbox_name: str, github_token: str) -> None:
     """Configure sandbox proxy to inject GitHub auth for all github.com requests.
 
     Uses the LangSmith proxy-config API to set up header injection so that
@@ -58,8 +58,11 @@ def _configure_github_proxy(sandbox_name: str, github_token: str, api_key: str) 
     Args:
         sandbox_name: The sandbox name/ID returned by the LangSmith API.
         github_token: GitHub token to inject as Authorization header.
-        api_key: LangSmith API key for the PATCH request.
     """
+    api_key = _get_langsmith_api_key()
+    if not api_key:
+        logger.warning("No LangSmith API key found, skipping GitHub proxy configuration")
+        return
     langsmith_endpoint = os.environ.get("LANGSMITH_ENDPOINT", "https://api.smith.langchain.com")
     url = f"{langsmith_endpoint}/v2/sandboxes/boxes/{sandbox_name}"
     basic_auth = base64.b64encode(f"x-access-token:{github_token}".encode()).decode()
@@ -125,8 +128,8 @@ def create_langsmith_sandbox(
     )
     _update_thread_sandbox_metadata(backend.id)
 
-    if sandbox_id is None and github_token and api_key:
-        _configure_github_proxy(backend.id, github_token, api_key)
+    if sandbox_id is None and github_token:
+        _configure_github_proxy(backend.id, github_token)
 
     return backend
 

@@ -27,7 +27,7 @@ from deepagents import create_deep_agent
 from deepagents.backends.protocol import SandboxBackendProtocol
 from langsmith.sandbox import SandboxClientError
 
-from .integrations.langsmith import _configure_github_proxy, _get_langsmith_api_key
+from .integrations.langsmith import _configure_github_proxy
 from .middleware import (
     ToolErrorMiddleware,
     check_message_queue_before_model,
@@ -187,17 +187,9 @@ async def _create_sandbox_with_proxy() -> SandboxBackendProtocol:
             msg = "Cannot configure proxy: GitHub App installation token is unavailable"
             logger.error(msg)
             raise ValueError(msg)
-        api_key = _get_langsmith_api_key()
-        if api_key:
-            await asyncio.to_thread(
-                _configure_github_proxy, sandbox_backend.id, installation_token, api_key
-            )
-        else:
-            logger.warning(
-                "No LangSmith API key found — skipping proxy config. "
-                "Git operations in sandbox %s will fail without auth.",
-                sandbox_backend.id,
-            )
+        await asyncio.to_thread(
+            _configure_github_proxy, sandbox_backend.id, installation_token
+        )
 
     return sandbox_backend
 
