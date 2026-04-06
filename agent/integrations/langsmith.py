@@ -5,12 +5,15 @@ Copied from deepagents-cli to avoid requiring deepagents-cli as a dependency.
 
 from __future__ import annotations
 
+import base64
 import contextlib
+import logging
 import os
 import time
 from abc import ABC, abstractmethod
 from typing import Any
 
+import httpx
 from deepagents.backends.protocol import (
     ExecuteResponse,
     FileDownloadResponse,
@@ -20,6 +23,8 @@ from deepagents.backends.protocol import (
 )
 from deepagents.backends.sandbox import BaseSandbox
 from langsmith.sandbox import Sandbox, SandboxClient, SandboxTemplate
+
+logger = logging.getLogger(__name__)
 
 
 def _get_langsmith_api_key() -> str | None:
@@ -114,10 +119,6 @@ def create_langsmith_sandbox(
         template_image=template_image,
     )
     _update_thread_sandbox_metadata(backend.id)
-
-    if sandbox_id is None and github_token:
-        _configure_github_proxy(backend.id, github_token)
-
     return backend
 
 
@@ -177,7 +178,7 @@ class SandboxProvider(ABC):
 
 
 # Default template configuration
-DEFAULT_TEMPLATE_NAME = "open-swe"
+DEFAULT_TEMPLATE_NAME = "open-swe-new"
 DEFAULT_TEMPLATE_IMAGE = "python:3"
 
 

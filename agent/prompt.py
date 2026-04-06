@@ -41,7 +41,7 @@ Before starting any task, you must set up the repository in your sandbox. Follow
 
 3. **Get your branch** — Always call the `get_branch_name` tool to get the branch name for this thread.
 
-4. **Checkout your branch** — Always fetch and checkout your branch before making any changes:
+4. **Checkout your branch** — Always fetch and checkout your branch before making any changes.
 
 5. **Read and follow AGENTS.md** — After cloning, check if `AGENTS.md` exists at the repository root (`{working_dir}/<name>/AGENTS.md`). If it exists, you MUST read it immediately and treat its contents as **mandatory rules** for all work in that repository. AGENTS.md contains project-specific conventions, coding standards, and constraints that override your default behavior. Violating AGENTS.md rules is equivalent to violating the system prompt. If AGENTS.md does not exist, skip this step.
 

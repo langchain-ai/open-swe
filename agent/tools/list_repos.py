@@ -1,4 +1,3 @@
-import asyncio
 import logging
 import os
 from typing import Any
@@ -36,7 +35,7 @@ def _get_common_repos() -> list[dict[str, str]]:
     return repos
 
 
-def list_repos(org: str | None = None) -> dict[str, Any]:
+async def list_repos(org: str | None = None) -> dict[str, Any]:
     """List available GitHub repositories.
 
     Returns common repos from the configured repo map.
@@ -52,15 +51,16 @@ def list_repos(org: str | None = None) -> dict[str, Any]:
     if org:
         try:
             headers = {"Accept": "application/vnd.github+json"}
-            token = asyncio.run(get_github_app_installation_token())
+            token = await get_github_app_installation_token()
             if token:
                 headers["Authorization"] = f"Bearer {token}"
-            response = httpx.get(
-                f"https://api.github.com/orgs/{org}/repos",
-                headers=headers,
-                params={"per_page": 100, "sort": "updated"},
-                timeout=10,
-            )
+            async with httpx.AsyncClient() as client:
+                response = await client.get(
+                    f"https://api.github.com/orgs/{org}/repos",
+                    headers=headers,
+                    params={"per_page": 100, "sort": "updated"},
+                    timeout=10,
+                )
             if response.status_code == 200:
                 result["org_repos"] = [{"owner": org, "name": r["name"]} for r in response.json()]
         except Exception:
