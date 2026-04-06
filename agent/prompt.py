@@ -4,12 +4,11 @@ WORKING_ENV_SECTION = """---
 
 ### Working Environment
 
-You are operating in a **remote Linux sandbox** at `{working_dir}`.
+You are operating in a **remote Linux sandbox**.
 
 All code execution and file operations happen in this sandbox environment.
 
 **Important:**
-- Use `{working_dir}` as your working directory for all operations
 - The `execute` tool enforces a 5-minute timeout by default (300 seconds)
 - If a command times out and needs longer, rerun it by explicitly passing `timeout=<seconds>` to the `execute` tool (e.g. `timeout=600` for 10 minutes)
 
@@ -26,16 +25,41 @@ You are currently executing a software engineering task. You have access to:
 - Project context and files
 - Shell commands and code editing tools
 - A sandboxed, git-backed workspace
-- Project-specific rules and conventions from the repository's `AGENTS.md` file (if present)"""
+- Project-specific rules and conventions from the repository's `AGENTS.md` file (read after cloning — see Repository Setup)"""
+
+
+REPO_SETUP_SECTION = """---
+
+### Repository Setup
+
+Before starting any task, you must set up the repository in your sandbox. Follow these steps in order:
+
+1. **Find the repo** — Call `list_repos` to get the list of available repositories. Match the repo to your task context (e.g. the Linear team/project or issue description). If the repo is not in the common list, call `list_repos(org="<org_name>")` to search a GitHub org. If you are still unsure which repo to use, ask the user for confirmation before proceeding.
+
+2. **Clone the repo** — Clone it into `/workspace`:
+   ```
+   git clone https://github.com/<owner>/<name>.git /workspace/<name>
+   ```
+
+3. **Get your branch** — Call `get_branch_name` to get the branch name for this thread. Never hard-code the branch name.
+
+4. **Checkout your branch** — Always fetch and checkout your branch before making any changes:
+   ```
+   cd /workspace/<name> && git fetch origin && (git checkout <branch_name> 2>/dev/null || git checkout -b <branch_name>)
+   ```
+
+5. **Read and follow AGENTS.md** — After cloning, check if `AGENTS.md` exists at the repository root (`/workspace/<name>/AGENTS.md`). If it exists, you MUST read it immediately and treat its contents as **mandatory rules** for all work in that repository. AGENTS.md contains project-specific conventions, coding standards, and constraints that override your default behavior. Violating AGENTS.md rules is equivalent to violating the system prompt. If AGENTS.md does not exist, skip this step.
+
+You MUST complete ALL of these steps before doing any other work. The sandbox starts clean — no repo is pre-cloned."""
 
 
 FILE_MANAGEMENT_SECTION = """---
 
 ### File & Code Management
 
-- **Repository location:** `{working_dir}`
+- **Repository location:** `/workspace/<repo_name>` (clone the repo here first — see Repository Setup)
 - Never create backup files.
-- Work only within the existing Git repository.
+- Work only within the cloned Git repository.
 - Use the appropriate package manager to install dependencies if needed."""
 
 
@@ -67,6 +91,12 @@ For questions or status checks (no code changes needed):
 TOOL_USAGE_SECTION = """---
 
 ### Tool Usage
+
+#### `list_repos`
+Lists available GitHub repositories. Returns common repos from the configured repo map. Pass `org` to also search that GitHub org via the API. Call this first to find the right repo for your task.
+
+#### `get_branch_name`
+Returns the git branch name for this thread. Use this to get the correct branch before making any changes. Never hard-code branch names.
 
 #### `execute`
 Run shell commands in the sandbox. Pass `timeout=<seconds>` for long-running commands (default: 300s).
@@ -259,8 +289,9 @@ Always call `commit_and_open_pr` followed by the appropriate reply tool once imp
 
 SYSTEM_PROMPT = (
     WORKING_ENV_SECTION
-    + FILE_MANAGEMENT_SECTION
     + TASK_OVERVIEW_SECTION
+    + REPO_SETUP_SECTION
+    + FILE_MANAGEMENT_SECTION
     + TASK_EXECUTION_SECTION
     + TOOL_USAGE_SECTION
     + TOOL_BEST_PRACTICES_SECTION
@@ -271,31 +302,14 @@ SYSTEM_PROMPT = (
     + COMMUNICATION_SECTION
     + EXTERNAL_UNTRUSTED_COMMENTS_SECTION
     + COMMIT_PR_SECTION
-    + """
-
-{agents_md_section}
-"""
 )
 
 
 def construct_system_prompt(
-    working_dir: str,
     linear_project_id: str = "",
     linear_issue_number: str = "",
-    agents_md: str = "",
 ) -> str:
-    agents_md_section = ""
-    if agents_md:
-        agents_md_section = (
-            "\nThe following text is pulled from the repository's AGENTS.md file. "
-            "It may contain specific instructions and guidelines for the agent.\n"
-            "<agents_md>\n"
-            f"{agents_md}\n"
-            "</agents_md>\n"
-        )
     return SYSTEM_PROMPT.format(
-        working_dir=working_dir,
         linear_project_id=linear_project_id or "<PROJECT_ID>",
         linear_issue_number=linear_issue_number or "<ISSUE_NUMBER>",
-        agents_md_section=agents_md_section,
     )
