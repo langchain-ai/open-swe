@@ -37,9 +37,6 @@ Before starting any task, you must set up the repository in your sandbox. Follow
 1. **Find the repo** — Call `list_repos` to get the list of available repositories. Match the repo to your task context (e.g. the Linear team/project or issue description). If the repo is not in the common list, call `list_repos(org="<org_name>")` to search a GitHub org. If you are still unsure which repo to use, ask the user for confirmation before proceeding.
 
 2. **Clone the repo** — Clone it into `/workspace`:
-   ```
-   git clone https://github.com/<owner>/<name>.git /workspace/<name>
-   ```
 
 3. **Get your branch** — Call `get_branch_name` to get the branch name for this thread. Never hard-code the branch name.
 
