@@ -33,7 +33,6 @@ from .middleware import (
     open_pr_if_needed,
 )
 from .prompt import construct_system_prompt
-from .utils.sandbox_paths import aresolve_sandbox_work_dir
 from .tools import (
     commit_and_open_pr,
     create_pr_review,
@@ -62,6 +61,7 @@ from .utils.auth import resolve_github_token
 from .utils.github_app import get_github_app_installation_token
 from .utils.model import make_model
 from .utils.sandbox import create_sandbox
+from .utils.sandbox_paths import aresolve_sandbox_work_dir
 
 client = get_client()
 
@@ -120,6 +120,28 @@ async def _recreate_sandbox(thread_id: str) -> SandboxBackendProtocol:
         logger.exception("Failed to recreate sandbox after connection failure")
         await client.threads.update(thread_id=thread_id, metadata={"sandbox_id": None})
         raise
+    return sandbox_backend
+
+
+async def check_or_recreate_sandbox(
+    sandbox_backend: SandboxBackendProtocol, thread_id: str
+) -> SandboxBackendProtocol:
+    """Check if a cached sandbox is reachable; recreate it if not.
+
+    Pings the sandbox with a lightweight command. If the sandbox is
+    unreachable (SandboxClientError), it is torn down and a fresh one
+    is created via _recreate_sandbox.
+
+    Returns the original backend if healthy, or a new one if recreated.
+    """
+    try:
+        await asyncio.to_thread(sandbox_backend.execute, "echo ok")
+    except SandboxClientError:
+        logger.warning(
+            "Cached sandbox is no longer reachable for thread %s, recreating",
+            thread_id,
+        )
+        sandbox_backend = await _recreate_sandbox(thread_id)
     return sandbox_backend
 
 
@@ -182,14 +204,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
 
     if sandbox_backend:
         logger.info("Using cached sandbox backend for thread %s", thread_id)
-        try:
-            await asyncio.to_thread(sandbox_backend.execute, "echo ok")
-        except SandboxClientError:
-            logger.warning(
-                "Cached sandbox is no longer reachable for thread %s, recreating",
-                thread_id,
-            )
-            sandbox_backend = await _recreate_sandbox(thread_id)
+        sandbox_backend = await check_or_recreate_sandbox(sandbox_backend, thread_id)
 
     elif sandbox_id is None:
         logger.info("Creating new sandbox for thread %s", thread_id)
