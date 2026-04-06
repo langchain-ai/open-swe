@@ -23,7 +23,6 @@ def _run_git(
     return sandbox_backend.execute(f"cd {safe_repo_dir} && {command}")
 
 
-
 def git_has_uncommitted_changes(sandbox_backend: SandboxBackendProtocol, repo_dir: str) -> bool:
     """Check whether the repo has uncommitted changes."""
     result = _run_git(sandbox_backend, repo_dir, "git status --porcelain")
