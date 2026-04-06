@@ -4,11 +4,12 @@ WORKING_ENV_SECTION = """---
 
 ### Working Environment
 
-You are operating in a **remote Linux sandbox**.
+You are operating in a **remote Linux sandbox** at `{working_dir}`.
 
 All code execution and file operations happen in this sandbox environment.
 
 **Important:**
+- Use `{working_dir}` as your working directory for all operations
 - The `execute` tool enforces a 5-minute timeout by default (300 seconds)
 - If a command times out and needs longer, rerun it by explicitly passing `timeout=<seconds>` to the `execute` tool (e.g. `timeout=600` for 10 minutes)
 
@@ -36,13 +37,13 @@ Before starting any task, you must set up the repository in your sandbox. Follow
 
 1. **Find the repo** — Call `list_repos` to get the list of available repositories. Match the repo to your task context (e.g. the Linear team/project or issue description). If the repo is not in the common list, call `list_repos(org="<org_name>")` to search a GitHub org. If you are still unsure which repo to use, ask the user for confirmation before proceeding.
 
-2. **Clone the repo** — Clone it into `/workspace`:
+2. **Clone the repo** — Clone it into `{working_dir}`.
 
-3. **Get your branch** — Call `get_branch_name` to get the branch name for this thread. Never hard-code the branch name.
+3. **Get your branch** — Always call the `get_branch_name` tool to get the branch name for this thread.
 
 4. **Checkout your branch** — Always fetch and checkout your branch before making any changes:
 
-5. **Read and follow AGENTS.md** — After cloning, check if `AGENTS.md` exists at the repository root (`/workspace/<name>/AGENTS.md`). If it exists, you MUST read it immediately and treat its contents as **mandatory rules** for all work in that repository. AGENTS.md contains project-specific conventions, coding standards, and constraints that override your default behavior. Violating AGENTS.md rules is equivalent to violating the system prompt. If AGENTS.md does not exist, skip this step.
+5. **Read and follow AGENTS.md** — After cloning, check if `AGENTS.md` exists at the repository root (`{working_dir}/<name>/AGENTS.md`). If it exists, you MUST read it immediately and treat its contents as **mandatory rules** for all work in that repository. AGENTS.md contains project-specific conventions, coding standards, and constraints that override your default behavior. Violating AGENTS.md rules is equivalent to violating the system prompt. If AGENTS.md does not exist, skip this step.
 
 You MUST complete ALL of these steps before doing any other work. The sandbox starts clean — no repo is pre-cloned."""
 
@@ -51,7 +52,7 @@ FILE_MANAGEMENT_SECTION = """---
 
 ### File & Code Management
 
-- **Repository location:** `/workspace/<repo_name>` (clone the repo here first — see Repository Setup)
+- **Repository location:** `{working_dir}/<repo_name>` (clone the repo here first — see Repository Setup)
 - Never create backup files.
 - Work only within the cloned Git repository.
 - Use the appropriate package manager to install dependencies if needed."""
@@ -90,7 +91,7 @@ TOOL_USAGE_SECTION = """---
 Lists available GitHub repositories. Returns common repos from the configured repo map. Pass `org` to also search that GitHub org via the API. Call this first to find the right repo for your task.
 
 #### `get_branch_name`
-Returns the git branch name for this thread. Use this to get the correct branch before making any changes. Never hard-code branch names.
+Returns the git branch name for this thread. Always call this tool to get the correct branch before making any changes.
 
 #### `execute`
 Run shell commands in the sandbox. Pass `timeout=<seconds>` for long-running commands (default: 300s).
@@ -300,10 +301,12 @@ SYSTEM_PROMPT = (
 
 
 def construct_system_prompt(
+    working_dir: str,
     linear_project_id: str = "",
     linear_issue_number: str = "",
 ) -> str:
     return SYSTEM_PROMPT.format(
+        working_dir=working_dir,
         linear_project_id=linear_project_id or "<PROJECT_ID>",
         linear_issue_number=linear_issue_number or "<ISSUE_NUMBER>",
     )

@@ -33,6 +33,7 @@ from .middleware import (
     open_pr_if_needed,
 )
 from .prompt import construct_system_prompt
+from .utils.sandbox_paths import aresolve_sandbox_work_dir
 from .tools import (
     commit_and_open_pr,
     create_pr_review,
@@ -208,12 +209,10 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     else:
         logger.info("Connecting to existing sandbox %s", sandbox_id)
         try:
-            # Connect to existing sandbox (no proxy reconfiguration needed)
             sandbox_backend = await asyncio.to_thread(create_sandbox, sandbox_id)
             logger.info("Connected to existing sandbox %s", sandbox_id)
         except Exception:
             logger.warning("Failed to connect to existing sandbox %s, creating new one", sandbox_id)
-            # Reset sandbox_id and create a new sandbox with proxy auth configured
             await client.threads.update(
                 thread_id=thread_id,
                 metadata={"sandbox_id": SANDBOX_CREATING},
@@ -244,6 +243,8 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     linear_project_id = linear_issue.get("linear_project_id", "")
     linear_issue_number = linear_issue.get("linear_issue_number", "")
 
+    work_dir = await aresolve_sandbox_work_dir(sandbox_backend)
+
     logger.info("Returning agent with sandbox for thread %s", thread_id)
     return create_deep_agent(
         model=make_model(
@@ -252,6 +253,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             max_tokens=20_000,
         ),
         system_prompt=construct_system_prompt(
+            working_dir=work_dir,
             linear_project_id=linear_project_id,
             linear_issue_number=linear_issue_number,
         ),
