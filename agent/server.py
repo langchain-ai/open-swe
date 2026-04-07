@@ -89,7 +89,7 @@ async def _clone_or_pull_repo_in_sandbox(
     time), so no token is needed here.
 
     Args:
-        sandbox_backend: The sandbox backend to execute commands in (LangSmithBackend)
+        sandbox_backend: The sandbox backend to execute commands in
         owner: GitHub repo owner
         repo: GitHub repo name
 

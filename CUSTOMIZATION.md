@@ -84,7 +84,7 @@ The factory must return an object implementing `SandboxBackendProtocol` from `de
 
 If none of the built-in providers fit, you can build your own. The agent accepts any backend that implements `SandboxBackendProtocol` from `deepagents`. The protocol requires:
 
-- **File operations**: `ls_info()`, `read()`, `write()`, `edit()`, `glob_info()`, `grep_raw()`
+- **File operations**: `ls()`, `read()`, `write()`, `edit()`, `glob()`, `grep()`
 - **Shell execution**: `execute(command, timeout=None) -> ExecuteResponse`
 - **Identity**: `id` property returning a unique sandbox identifier
 
@@ -111,7 +111,7 @@ class MySandbox(BaseSandbox):
         )
 ```
 
-See `agent/integrations/langsmith.py` (`LangSmithBackend` class) for a full reference implementation.
+See `deepagents.backends.LangSmithSandbox` and `agent/integrations/langsmith.py` for a full reference implementation.
 
 ---
 
