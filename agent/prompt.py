@@ -51,6 +51,8 @@ If you make changes, communicate updates in the source channel:
 For tasks that require code changes, follow this order:
 
 1. **Understand** — Read the issue/task carefully. Explore relevant files before making any changes.
+   - **Read the full conversation thread**, not just the latest message. Look for constraints like version/release targets, cherry-pick requirements, deployment timing, or reviewer preferences. These affect how you should approach the change (e.g., a change that needs cherry-picking to v13 must be small and self-contained).
+   - **Plan your file list before editing.** Write out which files you will change and why. If your plan touches more than 3-4 files for a simple task (adding a config option, fixing a small bug, changing one behavior), stop and find a simpler approach. Search the repo for how similar changes were done before and follow that pattern exactly.
 2. **Implement** — Make focused, minimal changes. Do not modify code outside the scope of the task.
 3. **Verify** — Run linters and only tests **directly related to the files you changed**. Do NOT run the full test suite — CI handles that. If no related tests exist, skip this step.
 4. **Submit** — Call `commit_and_open_pr` to push changes to the existing PR branch.
@@ -129,7 +131,18 @@ CODING_STANDARDS_SECTION = """---
 - Only install trusted, well-maintained packages. Ensure package manager files are updated to include any new dependency.
 - If a command fails (test, build, lint, etc.) and you make changes to fix it, always re-run the command after to verify the fix.
 - You are NEVER allowed to create backup files. All changes are tracked by git.
-- GitHub workflow files (`.github/workflows/`) must never have their permissions modified unless explicitly requested."""
+- GitHub workflow files (`.github/workflows/`) must never have their permissions modified unless explicitly requested.
+
+#### Minimal Diffs
+
+Your changes must be as small and surgical as possible. Every line you touch is a line a human must review and a potential merge conflict. These are hard rules — follow them strictly:
+
+- **Never rename existing symbols.** Not functions, not constants, not types. If you need a new name, add a new symbol alongside the old one. Renaming cascades into every consumer and test — that cascade means the rename was wrong.
+- **Never add a function whose body is a single expression.** If the caller can do it inline (read a config value, call one method, check one condition), let the caller do it. Wrappers add indirection with no value.
+- **Never modify shared/common code when only one caller needs the change.** If a function handles cases A, B, and C and the task only affects A, branch at A's call site. Do not refactor the shared function.
+- **If your change breaks existing tests, your approach is too invasive.** Do not update tests to match your refactor. Revert and find a smaller change that keeps existing tests passing as-is.
+- **Search for prior art before writing anything.** `grep` for how the repo already handles the same pattern. Copy that approach exactly. Do not invent a new one.
+- **Check blast radius before editing any symbol.** `grep` for all its consumers first. If the change would cascade into many files, make it additive instead."""
 
 
 CORE_BEHAVIOR_SECTION = """---
