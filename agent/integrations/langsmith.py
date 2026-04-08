@@ -69,39 +69,13 @@ def _configure_github_proxy(sandbox_name: str, github_token: str) -> None:
             ]
         }
     }
-    max_retries = 3
-    retry_delay = 5
     with httpx.Client() as client:
-        for attempt in range(max_retries):
-            if attempt > 0:
-                time.sleep(retry_delay)
-            try:
-                response = client.patch(
-                    url,
-                    json=payload,
-                    headers={"X-API-Key": api_key},
-                )
-            except httpx.HTTPError as e:
-                logger.warning(
-                    "Proxy config attempt %d/%d connection error: %s",
-                    attempt + 1,
-                    max_retries,
-                    e,
-                )
-                if attempt == max_retries - 1:
-                    raise
-                continue
-            if response.is_success:
-                break
-            logger.warning(
-                "Proxy config attempt %d/%d failed (%s): %s",
-                attempt + 1,
-                max_retries,
-                response.status_code,
-                response.text,
-            )
-            if attempt == max_retries - 1:
-                response.raise_for_status()
+        response = client.patch(
+            url,
+            json=payload,
+            headers={"X-API-Key": api_key},
+        )
+        response.raise_for_status()
     logger.info("Configured GitHub proxy for sandbox %s", sandbox_name)
 
 
