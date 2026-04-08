@@ -151,6 +151,14 @@ def commit_and_open_pr(
         if not (has_uncommitted_changes or has_unpushed_commits):
             return {"success": False, "error": "No changes detected", "pr_url": None}
 
+        installation_token = asyncio.run(get_github_app_installation_token())
+        if not installation_token:
+            return {
+                "success": False,
+                "error": "Failed to get GitHub App installation token",
+                "pr_url": None,
+            }
+
         metadata = config.get("metadata", {})
         branch_name = metadata.get("branch_name")
         current_branch = git_current_branch(sandbox_backend, repo_dir)
@@ -190,15 +198,7 @@ def commit_and_open_pr(
                     "pr_url": None,
                 }
 
-        installation_token = asyncio.run(get_github_app_installation_token())
-        if not installation_token:
-            return {
-                "success": False,
-                "error": "Failed to get GitHub App installation token",
-                "pr_url": None,
-            }
-
-        push_result = git_push(sandbox_backend, repo_dir, target_branch)
+        push_result = git_push(sandbox_backend, repo_dir, target_branch, installation_token)
         if push_result.exit_code != 0:
             return {
                 "success": False,
