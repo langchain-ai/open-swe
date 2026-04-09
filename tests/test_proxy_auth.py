@@ -170,3 +170,121 @@ class TestCreateSandboxWithProxy:
 
             with pytest.raises(ValueError, match="installation token is unavailable"):
                 await _create_sandbox_with_proxy()
+
+
+class _DummyAgent:
+    def with_config(self, config):
+        return self
+
+
+class TestRefreshProxyOnSandboxReuse:
+    """Tests for refreshing GitHub proxy auth on sandbox reuse."""
+
+    @staticmethod
+    def _execution_config() -> dict:
+        return {
+            "configurable": {
+                "__is_for_execution__": True,
+                "thread_id": "thread-123",
+                "repo": {"owner": "langchain-ai", "name": "open-swe"},
+            },
+            "metadata": {},
+        }
+
+    @pytest.mark.asyncio
+    async def test_refreshes_proxy_for_cached_langsmith_sandbox(self) -> None:
+        """Cached sandboxes should get a fresh proxy token before git operations."""
+        config = self._execution_config()
+        mock_sandbox = MagicMock(id="sandbox-cached")
+
+        with (
+            patch("agent.server.get_config", return_value=config),
+            patch(
+                "agent.server.resolve_github_token",
+                new_callable=AsyncMock,
+                return_value=("ghp", "enc"),
+            ),
+            patch(
+                "agent.server.get_sandbox_id_from_metadata",
+                new_callable=AsyncMock,
+                return_value="sandbox-cached",
+            ),
+            patch(
+                "agent.server.get_github_app_installation_token",
+                new_callable=AsyncMock,
+                return_value="ghs_fresh",
+            ),
+            patch("agent.server._configure_github_proxy") as mock_proxy,
+            patch(
+                "agent.server._clone_or_pull_repo_in_sandbox",
+                new_callable=AsyncMock,
+                return_value="/workspace/open-swe",
+            ),
+            patch(
+                "agent.server.read_agents_md_in_sandbox",
+                new_callable=AsyncMock,
+                return_value="",
+            ),
+            patch("agent.server.make_model", return_value=MagicMock()),
+            patch("agent.server.construct_system_prompt", return_value="prompt"),
+            patch("agent.server.create_deep_agent", return_value=_DummyAgent()),
+            patch.dict(
+                "agent.server.SANDBOX_BACKENDS",
+                {"thread-123": mock_sandbox},
+                clear=True,
+            ),
+            patch.dict("os.environ", {"SANDBOX_TYPE": "langsmith"}),
+        ):
+            from agent.server import get_agent
+
+            await get_agent(config)
+
+            mock_proxy.assert_called_once_with("sandbox-cached", "ghs_fresh")
+
+    @pytest.mark.asyncio
+    async def test_refreshes_proxy_when_reconnecting_to_existing_langsmith_sandbox(self) -> None:
+        """Reconnected sandboxes should also get a fresh proxy token."""
+        config = self._execution_config()
+        mock_sandbox = MagicMock(id="sandbox-existing")
+
+        with (
+            patch("agent.server.get_config", return_value=config),
+            patch(
+                "agent.server.resolve_github_token",
+                new_callable=AsyncMock,
+                return_value=("ghp", "enc"),
+            ),
+            patch(
+                "agent.server.get_sandbox_id_from_metadata",
+                new_callable=AsyncMock,
+                return_value="sandbox-existing",
+            ),
+            patch("agent.server.create_sandbox", return_value=mock_sandbox) as mock_create,
+            patch(
+                "agent.server.get_github_app_installation_token",
+                new_callable=AsyncMock,
+                return_value="ghs_fresh",
+            ),
+            patch("agent.server._configure_github_proxy") as mock_proxy,
+            patch(
+                "agent.server._clone_or_pull_repo_in_sandbox",
+                new_callable=AsyncMock,
+                return_value="/workspace/open-swe",
+            ),
+            patch(
+                "agent.server.read_agents_md_in_sandbox",
+                new_callable=AsyncMock,
+                return_value="",
+            ),
+            patch("agent.server.make_model", return_value=MagicMock()),
+            patch("agent.server.construct_system_prompt", return_value="prompt"),
+            patch("agent.server.create_deep_agent", return_value=_DummyAgent()),
+            patch.dict("agent.server.SANDBOX_BACKENDS", {}, clear=True),
+            patch.dict("os.environ", {"SANDBOX_TYPE": "langsmith"}),
+        ):
+            from agent.server import get_agent
+
+            await get_agent(config)
+
+            mock_create.assert_called_once_with("sandbox-existing")
+            mock_proxy.assert_called_once_with("sandbox-existing", "ghs_fresh")
