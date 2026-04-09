@@ -354,7 +354,6 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
         try:
             sandbox_backend = await asyncio.to_thread(create_sandbox, sandbox_id)
             logger.info("Connected to existing sandbox %s", sandbox_id)
-            await _refresh_github_proxy_if_needed(sandbox_backend)
         except Exception:
             logger.warning("Failed to connect to existing sandbox %s, creating new one", sandbox_id)
             # Reset sandbox_id and create a new sandbox with proxy auth configured
@@ -370,6 +369,8 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
                 logger.exception("Failed to create replacement sandbox")
                 await client.threads.update(thread_id=thread_id, metadata={"sandbox_id": None})
                 raise
+
+        await _refresh_github_proxy_if_needed(sandbox_backend)
 
         metadata = get_config().get("metadata", {})
         repo_dir = metadata.get("repo_dir")
