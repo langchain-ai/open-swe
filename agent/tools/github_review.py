@@ -108,7 +108,10 @@ def create_pr_review(
         Dictionary with success status and the created review data.
     """
     if event == "APPROVE":
-        return {"success": False, "error": "APPROVE is not allowed. Use COMMENT or REQUEST_CHANGES."}
+        return {
+            "success": False,
+            "error": "APPROVE is not allowed. Use COMMENT or REQUEST_CHANGES.",
+        }
 
     repo_config = _get_repo_config()
     if not repo_config:
@@ -238,7 +241,10 @@ def submit_pr_review(
         Dictionary with success status and the submitted review data.
     """
     if event == "APPROVE":
-        return {"success": False, "error": "APPROVE is not allowed. Use COMMENT or REQUEST_CHANGES."}
+        return {
+            "success": False,
+            "error": "APPROVE is not allowed. Use COMMENT or REQUEST_CHANGES.",
+        }
 
     repo_config = _get_repo_config()
     if not repo_config:
