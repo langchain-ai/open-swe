@@ -192,7 +192,7 @@ async def _create_sandbox_with_proxy() -> SandboxBackendProtocol:
     return sandbox_backend
 
 
-async def _refresh_github_proxy_if_needed(
+async def _refresh_github_proxy(
     sandbox_backend: SandboxBackendProtocol,
 ) -> None:
     """Refresh GitHub proxy credentials for reused LangSmith sandboxes."""
@@ -301,7 +301,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
         metadata = get_config().get("metadata", {})
         repo_dir = metadata.get("repo_dir")
 
-        await _refresh_github_proxy_if_needed(sandbox_backend)
+        await _refresh_github_proxy(sandbox_backend)
 
         if repo_owner and repo_name:
             logger.info("Pulling latest changes for repo %s/%s", repo_owner, repo_name)
@@ -370,7 +370,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
                 await client.threads.update(thread_id=thread_id, metadata={"sandbox_id": None})
                 raise
 
-        await _refresh_github_proxy_if_needed(sandbox_backend)
+        await _refresh_github_proxy(sandbox_backend)
 
         metadata = get_config().get("metadata", {})
         repo_dir = metadata.get("repo_dir")
