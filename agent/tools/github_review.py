@@ -107,7 +107,7 @@ def create_pr_review(
     Returns:
         Dictionary with success status and the created review data.
     """
-    if event == "APPROVE":
+    if event.upper() == "APPROVE":
         return {
             "success": False,
             "error": "APPROVE is not allowed. Use COMMENT or REQUEST_CHANGES.",
@@ -240,7 +240,7 @@ def submit_pr_review(
     Returns:
         Dictionary with success status and the submitted review data.
     """
-    if event == "APPROVE":
+    if event.upper() == "APPROVE":
         return {
             "success": False,
             "error": "APPROVE is not allowed. Use COMMENT or REQUEST_CHANGES.",
