@@ -198,7 +198,6 @@ class TestRefreshProxyOnSandboxReuse:
         mock_sandbox = MagicMock(id="sandbox-cached")
 
         with (
-            patch("agent.server.get_config", return_value=config),
             patch(
                 "agent.server.resolve_github_token",
                 new_callable=AsyncMock,
@@ -215,6 +214,16 @@ class TestRefreshProxyOnSandboxReuse:
                 return_value="ghs_fresh",
             ),
             patch("agent.server._configure_github_proxy") as mock_proxy,
+            patch(
+                "agent.server.aresolve_sandbox_work_dir",
+                new_callable=AsyncMock,
+                return_value="/workspace",
+            ),
+            patch(
+                "agent.server.check_or_recreate_sandbox",
+                new_callable=AsyncMock,
+                return_value=mock_sandbox,
+            ),
             patch("agent.server.make_model", return_value=MagicMock()),
             patch("agent.server.construct_system_prompt", return_value="prompt"),
             patch("agent.server.create_deep_agent", return_value=_DummyAgent()),
@@ -238,7 +247,6 @@ class TestRefreshProxyOnSandboxReuse:
         mock_sandbox = MagicMock(id="sandbox-existing")
 
         with (
-            patch("agent.server.get_config", return_value=config),
             patch(
                 "agent.server.resolve_github_token",
                 new_callable=AsyncMock,
@@ -256,6 +264,11 @@ class TestRefreshProxyOnSandboxReuse:
                 return_value="ghs_fresh",
             ),
             patch("agent.server._configure_github_proxy") as mock_proxy,
+            patch(
+                "agent.server.aresolve_sandbox_work_dir",
+                new_callable=AsyncMock,
+                return_value="/workspace",
+            ),
             patch("agent.server.make_model", return_value=MagicMock()),
             patch("agent.server.construct_system_prompt", return_value="prompt"),
             patch("agent.server.create_deep_agent", return_value=_DummyAgent()),
