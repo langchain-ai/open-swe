@@ -35,7 +35,7 @@ def _get_common_repos() -> list[dict[str, str]]:
     return repos
 
 
-async def list_repos(org: str | None = None) -> dict[str, Any]:
+async def list_repos(organization_name: str | None = None) -> dict[str, Any]:
     """List available GitHub repositories.
 
     Returns common repos from the configured repo map.
