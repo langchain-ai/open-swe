@@ -29,10 +29,7 @@ async def list_repos(organization_name: str) -> dict[str, Any]:
                 timeout=10,
             )
         if response.status_code == 200:
-            repos = [
-                {"owner": organization_name, "name": r["name"]}
-                for r in response.json()
-            ]
+            repos = [{"owner": organization_name, "name": r["name"]} for r in response.json()]
             return {"repos": repos}
         return {"error": f"GitHub API returned status {response.status_code}"}
     except Exception:
