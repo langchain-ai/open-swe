@@ -81,6 +81,7 @@ def _configure_github_proxy(sandbox_name: str, github_token: str) -> None:
 
 def create_langsmith_sandbox(
     sandbox_id: str | None = None,
+    github_token: str | None = None,
 ) -> SandboxBackendProtocol:
     """Create or connect to a LangSmith sandbox without automatic cleanup.
 
@@ -91,6 +92,8 @@ def create_langsmith_sandbox(
     Args:
         sandbox_id: Optional existing sandbox ID to connect to.
                    If None, creates a new sandbox.
+        github_token: Optional GitHub token. Used to configure proxy auth on
+                      new sandboxes. Ignored when connecting to an existing sandbox.
 
     Returns:
         SandboxBackendProtocol instance
@@ -105,6 +108,10 @@ def create_langsmith_sandbox(
         template_image=template_image,
     )
     _update_thread_sandbox_metadata(backend.id)
+
+    if sandbox_id is None and github_token:
+        _configure_github_proxy(backend.id, github_token)
+
     return backend
 
 

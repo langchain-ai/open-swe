@@ -92,6 +92,24 @@ async def _create_sandbox_with_proxy() -> SandboxBackendProtocol:
     return sandbox_backend
 
 
+async def _refresh_github_proxy(
+    sandbox_backend: SandboxBackendProtocol,
+) -> None:
+    """Refresh GitHub proxy credentials for reused LangSmith sandboxes."""
+    if os.getenv("SANDBOX_TYPE", "langsmith") != "langsmith":
+        return
+
+    installation_token = await get_github_app_installation_token()
+    if not installation_token:
+        logger.warning(
+            "Skipping GitHub proxy refresh for sandbox %s: installation token unavailable",
+            sandbox_backend.id,
+        )
+        return
+
+    await asyncio.to_thread(_configure_github_proxy, sandbox_backend.id, installation_token)
+
+
 async def _recreate_sandbox(thread_id: str) -> SandboxBackendProtocol:
     """Recreate a sandbox after a connection failure.
 
@@ -194,6 +212,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
 
     if sandbox_backend:
         logger.info("Using cached sandbox backend for thread %s", thread_id)
+        await _refresh_github_proxy(sandbox_backend)
         sandbox_backend = await check_or_recreate_sandbox(sandbox_backend, thread_id)
 
     elif sandbox_id is None:
@@ -218,6 +237,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             logger.info("Connected to existing sandbox %s", sandbox_id)
         except Exception:
             logger.warning("Failed to connect to existing sandbox %s, creating new one", sandbox_id)
+            # Reset sandbox_id and create a new sandbox with proxy auth configured
             await client.threads.update(
                 thread_id=thread_id,
                 metadata={"sandbox_id": SANDBOX_CREATING},
@@ -230,6 +250,9 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 logger.exception("Failed to create replacement sandbox")
                 await client.threads.update(thread_id=thread_id, metadata={"sandbox_id": None})
                 raise
+
+        await _refresh_github_proxy(sandbox_backend)
+
 
     SANDBOX_BACKENDS[thread_id] = sandbox_backend
 
