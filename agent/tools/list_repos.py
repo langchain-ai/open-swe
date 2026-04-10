@@ -1,69 +1,40 @@
 import logging
-import os
 from typing import Any
 
 import httpx
 
 from ..utils.github_app import get_github_app_installation_token
-from ..utils.linear_team_repo_map import LINEAR_TEAM_TO_REPO
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_GITHUB_ORG = os.getenv("DEFAULT_GITHUB_ORG", "langchain-ai")
 
+async def list_repos(organization_name: str) -> dict[str, Any]:
+    """List GitHub repositories for an organization via the GitHub API.
 
-def _get_common_repos() -> list[dict[str, str]]:
-    """Extract unique repos from LINEAR_TEAM_TO_REPO."""
-    repos: list[dict[str, str]] = []
-    seen: set[tuple[str, str]] = set()
+    Args:
+        organization_name: The GitHub organization to list repos for.
 
-    for team_config in LINEAR_TEAM_TO_REPO.values():
-        entries: list[dict[str, str]] = []
-        if "owner" in team_config and "name" in team_config:
-            entries.append({"owner": team_config["owner"], "name": team_config["name"]})
-        if "projects" in team_config:
-            entries.extend(team_config["projects"].values())
-        if "default" in team_config:
-            entries.append(team_config["default"])
-
-        for entry in entries:
-            key = (entry["owner"], entry["name"])
-            if key not in seen:
-                seen.add(key)
-                repos.append({"owner": entry["owner"], "name": entry["name"]})
-
-    return repos
-
-
-async def list_repos(organization_name: str | None = None) -> dict[str, Any]:
-    """List available GitHub repositories.
-
-    Returns common repos from the configured repo map.
-    Pass org to also search that GitHub org via the API.
     If unsure which repo to use, ask the user for confirmation.
     """
-    common_repos = _get_common_repos()
-    result: dict[str, Any] = {
-        "common_repos": common_repos,
-        "default_org": DEFAULT_GITHUB_ORG,
-    }
-
-    if org:
-        try:
-            headers = {"Accept": "application/vnd.github+json"}
-            token = await get_github_app_installation_token()
-            if token:
-                headers["Authorization"] = f"Bearer {token}"
-            async with httpx.AsyncClient() as client:
-                response = await client.get(
-                    f"https://api.github.com/orgs/{org}/repos",
-                    headers=headers,
-                    params={"per_page": 100, "sort": "updated"},
-                    timeout=10,
-                )
-            if response.status_code == 200:
-                result["org_repos"] = [{"owner": org, "name": r["name"]} for r in response.json()]
-        except Exception:
-            logger.warning("Failed to fetch repos for org %s", org)
-
-    return result
+    try:
+        headers = {"Accept": "application/vnd.github+json"}
+        token = await get_github_app_installation_token()
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"https://api.github.com/orgs/{organization_name}/repos",
+                headers=headers,
+                params={"per_page": 100, "sort": "updated"},
+                timeout=10,
+            )
+        if response.status_code == 200:
+            repos = [
+                {"owner": organization_name, "name": r["name"]}
+                for r in response.json()
+            ]
+            return {"repos": repos}
+        return {"error": f"GitHub API returned status {response.status_code}"}
+    except Exception:
+        logger.warning("Failed to fetch repos for org %s", organization_name)
+        return {"error": f"Failed to fetch repos for org {organization_name}"}

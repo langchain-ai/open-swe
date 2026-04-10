@@ -35,7 +35,7 @@ REPO_SETUP_SECTION = """---
 
 Before starting any task, you must set up the repository in your sandbox. Follow these steps in order:
 
-1. **Find the repo** — Call `list_repos` to get the list of available repositories. Match the repo to your task context (e.g. the Linear team/project or issue description). If the repo is not in the common list, call `list_repos(org="<org_name>")` to search a GitHub org. If you are still unsure which repo to use, ask the user for confirmation before proceeding.
+1. **Find the repo** — Call `list_repos(organization_name="<org>")` to list repositories for a GitHub organization. Match the repo to your task context (e.g. the Linear team/project or issue description). If you are unsure which repo to use, ask the user for confirmation before proceeding.
 
 2. **Clone the repo** — Clone it into `{working_dir}`.
 
@@ -88,7 +88,7 @@ TOOL_USAGE_SECTION = """---
 ### Tool Usage
 
 #### `list_repos`
-Lists available GitHub repositories. Returns common repos from the configured repo map. Pass `org` to also search that GitHub org via the API. Call this first to find the right repo for your task.
+Lists GitHub repositories for a given organization via the GitHub API. Pass `organization_name` to specify which org to query. Call this first to find the right repo for your task.
 
 #### `get_branch_name`
 Returns the git branch name for this thread. Always call this tool to get the correct branch before making any changes.
