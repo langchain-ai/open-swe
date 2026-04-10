@@ -252,6 +252,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 raise
 
         await _refresh_github_proxy(sandbox_backend)
+        sandbox_backend = await check_or_recreate_sandbox(sandbox_backend, thread_id)
 
     SANDBOX_BACKENDS[thread_id] = sandbox_backend
 
