@@ -172,7 +172,6 @@ class TestCreateSandboxWithProxy:
                 await _create_sandbox_with_proxy()
 
 
-
 class _DummyAgent:
     def with_config(self, config):
         return self

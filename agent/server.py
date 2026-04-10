@@ -253,7 +253,6 @@ async def get_agent(config: RunnableConfig) -> Pregel:
 
         await _refresh_github_proxy(sandbox_backend)
 
-
     SANDBOX_BACKENDS[thread_id] = sandbox_backend
 
     if sandbox_id != sandbox_backend.id:
