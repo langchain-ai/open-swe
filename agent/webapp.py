@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import uuid
+from collections.abc import Sequence
 from typing import Any
 
 import httpx
@@ -682,6 +683,22 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
         await post_linear_trace_comment(issue_id, run["run_id"], triggering_comment_id)
 
 
+def _extract_slack_image_urls(messages: Sequence[dict[str, Any] | None]) -> list[str]:
+    """Collect image URLs from Slack message text and image file uploads."""
+    valid_messages = [m for m in messages if isinstance(m, dict)]
+    return dedupe_urls(
+        [url for msg in valid_messages for url in extract_image_urls(msg.get("text", ""))]
+        + [
+            f["url_private"]
+            for msg in valid_messages
+            for f in msg.get("files", [])
+            if isinstance(f, dict)
+            and f.get("mimetype", "").startswith("image/")
+            and f.get("url_private")
+        ]
+    )
+
+
 async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[str, str]) -> None:
     """Process a Slack app mention by creating or interrupting a thread run."""
     channel_id = event_data.get("channel_id", "")
@@ -769,27 +786,6 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
         "Use `slack_thread_reply` to communicate in this Slack thread for clarifications, "
         "status updates, and final summaries."
     )
-    content_blocks: list[dict[str, Any]] = [create_text_block(prompt)]
-
-    image_urls = dedupe_urls(
-        [url for msg in context_messages for url in extract_image_urls(msg.get("text", ""))]
-        + [
-            f["url_private"]
-            for msg in context_messages
-            for f in msg.get("files", [])
-            if isinstance(f, dict)
-            and f.get("mimetype", "").startswith("image/")
-            and f.get("url_private")
-        ]
-    )
-    if image_urls:
-        logger.info("Preparing %d image(s) for Slack mention", len(image_urls))
-        async with httpx.AsyncClient() as http_client:
-            for image_url in image_urls:
-                image_block = await fetch_image_block(image_url, http_client)
-                if image_block:
-                    content_blocks.append(image_block)
-
     configurable: dict[str, Any] = {
         "repo": repo_config,
         "slack_thread": {
@@ -813,16 +809,35 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
             "Thread %s is active, queuing Slack message for middleware pickup",
             thread_id,
         )
-        queued_payload = {"text": prompt, "image_urls": []}
+        current_message = next(
+            (m for m in context_messages if str(m.get("ts")) == str(event_ts)),
+            None,
+        )
+        current_image_urls = _extract_slack_image_urls([current_message]) if current_message else []
+        queued_payload = {"text": prompt, "image_urls": current_image_urls}
         queued = await queue_message_for_thread(
             thread_id=thread_id,
             message_content=queued_payload,
         )
         if queued:
-            logger.info("Slack message queued for thread %s", thread_id)
+            logger.info(
+                "Slack message queued for thread %s with %d image(s)",
+                thread_id,
+                len(current_image_urls),
+            )
         else:
             logger.error("Failed to queue Slack message for thread %s", thread_id)
         return
+
+    content_blocks: list[dict[str, Any]] = [create_text_block(prompt)]
+    image_urls = _extract_slack_image_urls(context_messages)
+    if image_urls:
+        logger.info("Preparing %d image(s) for Slack mention", len(image_urls))
+        async with httpx.AsyncClient() as http_client:
+            for image_url in image_urls:
+                image_block = await fetch_image_block(image_url, http_client)
+                if image_block:
+                    content_blocks.append(image_block)
 
     run = await langgraph_client.runs.create(
         thread_id,
