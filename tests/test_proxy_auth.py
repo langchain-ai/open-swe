@@ -241,6 +241,51 @@ class TestRefreshProxyOnSandboxReuse:
             mock_proxy.assert_called_once_with("sandbox-cached", "ghs_fresh")
 
     @pytest.mark.asyncio
+    async def test_resets_stale_sandbox_creating_without_cached_backend(self) -> None:
+        config = self._execution_config()
+        mock_backend = MagicMock(id="sandbox-new")
+        mock_client = MagicMock()
+        mock_client.threads.update = AsyncMock()
+
+        with (
+            patch(
+                "agent.server.resolve_github_token",
+                new_callable=AsyncMock,
+                return_value=("ghp", "enc"),
+            ),
+            patch(
+                "agent.server.get_sandbox_id_from_metadata",
+                new_callable=AsyncMock,
+                return_value=SANDBOX_CREATING,
+            ),
+            patch(
+                "agent.server.get_github_app_installation_token",
+                new_callable=AsyncMock,
+                return_value="ghs_fresh",
+            ),
+            patch("agent.server._wait_for_sandbox_id", new_callable=AsyncMock),
+            patch(
+                "agent.server._create_sandbox_with_proxy",
+                new_callable=AsyncMock,
+                return_value=mock_backend,
+            ),
+            patch("agent.server.make_model", return_value=MagicMock()),
+            patch("agent.server.construct_system_prompt", return_value="prompt"),
+            patch("agent.server.create_deep_agent", return_value=_DummyAgent()),
+            patch.dict("agent.server.SANDBOX_BACKENDS", {}, clear=True),
+            patch("agent.server.asyncio.to_thread", new_callable=AsyncMock),
+            patch("agent.server.client", mock_client),
+            patch.dict("os.environ", {"SANDBOX_TYPE": "langsmith"}),
+        ):
+            from agent.server import get_agent
+
+            await get_agent(config)
+
+        reset_call = mock_client.threads.update.await_args_list[0][1]
+        assert reset_call["thread_id"] == "thread-123"
+        assert reset_call["metadata"] == {"sandbox_id": None}
+
+    @pytest.mark.asyncio
     async def test_refreshes_proxy_when_reconnecting_to_existing_langsmith_sandbox(self) -> None:
         """Reconnected sandboxes should also get a fresh proxy token."""
         config = self._execution_config()
