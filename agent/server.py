@@ -6,6 +6,7 @@
 import logging
 import os
 import warnings
+from datetime import UTC, datetime
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +69,7 @@ client = get_client()
 SANDBOX_CREATING = "__creating__"
 SANDBOX_CREATION_TIMEOUT = 180
 SANDBOX_POLL_INTERVAL = 1.0
+SANDBOX_CREATING_STALE_AFTER_SECONDS = 600
 
 from .utils.sandbox_state import SANDBOX_BACKENDS, get_sandbox_id_from_metadata
 
@@ -153,20 +155,46 @@ async def check_or_recreate_sandbox(
     return sandbox_backend
 
 
-async def _wait_for_sandbox_id(thread_id: str) -> str:
+async def _wait_for_sandbox_id(thread_id: str) -> str | None:
     """Wait for sandbox_id to be set in thread metadata.
 
-    Polls thread metadata until sandbox_id is set to a real value
-    (not the creating sentinel).
+    Polls thread metadata until sandbox_id is set to a real value (not the
+    creating sentinel), or returns None if the sentinel has gone stale.
 
     Raises:
         TimeoutError: If sandbox creation takes too long
     """
     elapsed = 0.0
     while elapsed < SANDBOX_CREATION_TIMEOUT:
-        sandbox_id = await get_sandbox_id_from_metadata(thread_id)
+        try:
+            thread = await client.threads.get(thread_id)
+        except Exception:
+            logger.exception("Failed to read thread %s while waiting for sandbox", thread_id)
+            await asyncio.sleep(SANDBOX_POLL_INTERVAL)
+            elapsed += SANDBOX_POLL_INTERVAL
+            continue
+
+        metadata = thread.get("metadata") or {}
+        sandbox_id = metadata.get("sandbox_id")
+
         if sandbox_id is not None and sandbox_id != SANDBOX_CREATING:
             return sandbox_id
+
+        if sandbox_id == SANDBOX_CREATING and thread_id not in SANDBOX_BACKENDS:
+            try:
+                updated_at = datetime.fromisoformat(thread.get("updated_at") or "")
+                if updated_at.tzinfo is None:
+                    updated_at = updated_at.replace(tzinfo=UTC)
+                age = (datetime.now(UTC) - updated_at).total_seconds()
+            except (TypeError, ValueError):
+                age = 0.0
+            if age > SANDBOX_CREATING_STALE_AFTER_SECONDS:
+                logger.warning(
+                    "Stale SANDBOX_CREATING sentinel for thread %s, recreating",
+                    thread_id,
+                )
+                return None
+
         await asyncio.sleep(SANDBOX_POLL_INTERVAL)
         elapsed += SANDBOX_POLL_INTERVAL
 
