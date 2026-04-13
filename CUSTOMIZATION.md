@@ -385,6 +385,45 @@ The system prompt is assembled in `agent/prompt.py` from modular sections. You c
 | `CODE_REVIEW_GUIDELINES_SECTION` | How the agent reviews code changes |
 | `COMMUNICATION_SECTION` | Formatting and messaging guidelines |
 
+### Default prompt file
+
+Open SWE supports a `default_prompt.md` file for org-level instructions that apply to **every** agent run, regardless of which repository is being worked on. This is the recommended way to set default repository preferences, org conventions, and shared guidelines.
+
+The file is loaded at agent startup and injected into the system prompt between the task overview and repository setup sections.
+
+**Location:** `default_prompt.md` in the project root (next to `langgraph.json`).
+
+**Override:** Set the `DEFAULT_PROMPT_PATH` environment variable to use a different file:
+
+```bash
+DEFAULT_PROMPT_PATH="/path/to/my-org-prompt.md"
+```
+
+**Format:** Write plain markdown. The content is injected as-is under a `### Custom Instructions` heading in the system prompt. Example:
+
+```markdown
+# Default Prompt
+
+## Default Repository
+
+When no repository is specified, work on the **my-app** repository under **my-org**.
+
+## Organization Conventions
+
+- Use conventional commits: feat:, fix:, chore:
+- Always tag the requesting user when work is complete
+```
+
+**Loading order:** Default prompt → System prompt sections → AGENTS.md (per-repo). If the file is missing or empty, it is silently skipped — no error is raised.
+
+**When to use `default_prompt.md` vs `AGENTS.md`:**
+
+| | `default_prompt.md` | `AGENTS.md` |
+|---|---|---|
+| Scope | All tasks, all repos | Single repository |
+| Location | Open SWE project root | Target repo root |
+| Use for | Default repo, org conventions | Repo-specific coding standards |
+
 ### Using AGENTS.md
 
 Drop an `AGENTS.md` file in the root of any repository to add repo-specific instructions. The agent reads it from the sandbox at startup and appends it to the system prompt. This is the easiest way to encode conventions per-repo without modifying Open SWE's code.

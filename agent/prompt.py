@@ -1,4 +1,37 @@
+import logging
+import os
+from pathlib import Path
+
 from .utils.github_comments import UNTRUSTED_GITHUB_COMMENT_OPEN_TAG
+
+logger = logging.getLogger(__name__)
+
+DEFAULT_PROMPT_PATH = os.environ.get(
+    "DEFAULT_PROMPT_PATH",
+    str(Path(__file__).resolve().parent.parent / "default_prompt.md"),
+)
+
+
+def _load_default_prompt() -> str:
+    """Load custom prompt from the default prompt file.
+
+    Returns empty string if the file doesn't exist or can't be read.
+    """
+    try:
+        path = Path(DEFAULT_PROMPT_PATH)
+        if path.is_file():
+            content = path.read_text().strip()
+            if content:
+                # Escape curly braces so .format() doesn't choke on them
+                escaped = content.replace("{", "{{").replace("}", "}}")
+                return f"""---
+
+### Custom Instructions
+
+{escaped}"""
+    except Exception:
+        logger.warning("Failed to read default prompt file at %s", DEFAULT_PROMPT_PATH)
+    return ""
 
 WORKING_ENV_SECTION = """---
 
@@ -282,9 +315,10 @@ When you have completed your implementation, follow these steps in order:
 Always call `commit_and_open_pr` followed by the appropriate reply tool once implementation is complete and code quality checks pass."""
 
 
-SYSTEM_PROMPT = (
+SYSTEM_PROMPT_TEMPLATE = (
     WORKING_ENV_SECTION
     + TASK_OVERVIEW_SECTION
+    + "{default_prompt_section}"
     + REPO_SETUP_SECTION
     + FILE_MANAGEMENT_SECTION
     + TASK_EXECUTION_SECTION
@@ -305,8 +339,10 @@ def construct_system_prompt(
     linear_project_id: str = "",
     linear_issue_number: str = "",
 ) -> str:
-    return SYSTEM_PROMPT.format(
+    default_prompt_section = _load_default_prompt()
+    return SYSTEM_PROMPT_TEMPLATE.format(
         working_dir=working_dir,
         linear_project_id=linear_project_id or "<PROJECT_ID>",
         linear_issue_number=linear_issue_number or "<ISSUE_NUMBER>",
+        default_prompt_section=default_prompt_section,
     )
