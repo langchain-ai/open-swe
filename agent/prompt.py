@@ -33,6 +33,7 @@ def _load_default_prompt() -> str:
         logger.warning("Failed to read default prompt file at %s", DEFAULT_PROMPT_PATH)
     return ""
 
+
 WORKING_ENV_SECTION = """---
 
 ### Working Environment
