@@ -139,7 +139,26 @@ model=make_model("openai:gpt-4o", temperature=0, max_tokens=16_000)
 
 # Google
 model=make_model("google_genai:gemini-2.5-pro", temperature=0, max_tokens=16_000)
+
+# MiniMax (requires MINIMAX_API_KEY env var)
+model=make_model("minimax:MiniMax-M2.7", temperature=0, max_tokens=16_000)
 ```
+
+#### MiniMax models
+
+| Model ID | Description |
+|---|---|
+| `MiniMax-M2.7` | Peak performance, recommended default |
+| `MiniMax-M2.7-highspeed` | Same performance, faster and more agile |
+
+Set the following environment variable to use MiniMax:
+
+```bash
+MINIMAX_API_KEY="your-minimax-api-key"
+LLM_MODEL_ID="minimax:MiniMax-M2.7"
+```
+
+> **Note**: MiniMax's API is OpenAI-compatible and routes to `https://api.minimax.io/v1`.
 
 The `make_model()` helper in `agent/utils/model.py` wraps `langchain.chat_models.init_chat_model`. For OpenAI models, it automatically enables the Responses API. For full control, pass a pre-configured model instance directly:
 
