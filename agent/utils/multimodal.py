@@ -8,7 +8,7 @@ import mimetypes
 import os
 import re
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 import httpx
 from langchain_core.messages.content import create_image_block
@@ -64,7 +64,45 @@ async def fetch_image_block(
                     "SLACK_BOT_TOKEN not set; cannot authenticate image fetch for %s",
                     image_url,
                 )
-        response = await client.get(image_url, headers=headers, follow_redirects=True)
+        if headers:
+            response = await client.get(image_url, headers=headers, follow_redirects=False)
+            redirect_count = 0
+            parsed_origin = urlparse(image_url)
+            origin = (
+                parsed_origin.scheme.lower(),
+                (parsed_origin.hostname or "").lower(),
+                parsed_origin.port,
+            )
+            while response.is_redirect:
+                if redirect_count >= 5:
+                    logger.warning(
+                        "Too many redirects while fetching authenticated image %s",
+                        image_url,
+                    )
+                    return None
+                location = response.headers.get("Location")
+                if not location:
+                    logger.warning(
+                        "Redirect missing location while fetching authenticated image %s",
+                        image_url,
+                    )
+                    return None
+                next_url = urljoin(str(response.request.url), location)
+                parsed_next = urlparse(next_url)
+                next_origin = (
+                    parsed_next.scheme.lower(),
+                    (parsed_next.hostname or "").lower(),
+                    parsed_next.port,
+                )
+                next_headers = headers if next_origin == origin else None
+                response = await client.get(
+                    next_url,
+                    headers=next_headers,
+                    follow_redirects=False,
+                )
+                redirect_count += 1
+        else:
+            response = await client.get(image_url, follow_redirects=True)
         response.raise_for_status()
         content_type = response.headers.get("Content-Type", "").split(";")[0].strip()
         if not content_type:
