@@ -24,13 +24,13 @@ return create_deep_agent(
 
 By default, Open SWE runs each task in a [LangSmith cloud sandbox](https://docs.smith.langchain.com/) — an isolated Linux environment where the agent clones the repo and executes commands. Sandbox creation and connection is handled in `agent/integrations/langsmith.py`.
 
-### Using a custom sandbox template
+### Using a custom sandbox snapshot
 
-Set environment variables to use a custom Docker image:
+Build a snapshot in LangSmith (UI or `SandboxClient.create_snapshot`) from your Docker image and point Open SWE at its UUID:
 
 ```bash
-DEFAULT_SANDBOX_TEMPLATE_NAME="my-template"    # Template registered in LangSmith
-DEFAULT_SANDBOX_TEMPLATE_IMAGE="my-org/my-image:latest"  # Docker image
+DEFAULT_SANDBOX_SNAPSHOT_ID="<snapshot-uuid>"                      # Required
+DEFAULT_SANDBOX_SNAPSHOT_FS_CAPACITY_BYTES="34359738368"           # Optional, default 32 GiB
 ```
 
 This is useful for pre-installing languages, frameworks, or internal tools that your repos depend on — reducing setup time per agent run.

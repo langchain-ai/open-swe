@@ -129,17 +129,33 @@ To set up per-user OAuth:
 3. Enter the **Client ID** and **Client Secret** from your GitHub App (found on the GitHub App settings page under **OAuth credentials**)
 4. Save. You'll reference this Provider ID as `GITHUB_OAUTH_PROVIDER_ID` in your environment variables.
 
-### 4c. Sandbox templates (optional)
+### 4c. Sandbox snapshots
 
-LangSmith sandboxes provide the isolated execution environment for each agent run. You can create a template using the same Docker image we use internally by visiting the sandbox page in LangSmith, and setting the following fields:
+LangSmith sandboxes provide the isolated execution environment for each agent run. Open SWE boots each sandbox from a pre-built **snapshot** — you build the snapshot once (from a Docker image) and then reference it by UUID.
 
-- `Name`: you can set this to whatever name you'd like, e.g. `open-swe`
-- `Container Image`: `bracelangchain/deepagents-sandbox:v1` this contains the [Docker file in this repo](./Dockerfile)
-- `CPU`: `500m`
-- `Memory`: `4096Mi`
-- `Ephemeral Storage`: `15Gi`
+Build a snapshot in the LangSmith UI (Sandboxes → Snapshots → New), or via the SDK:
 
-> If you don't set these, you can use a Python based docker image in the template.
+```python
+from langsmith.sandbox import SandboxClient
+
+client = SandboxClient(api_key="<your key>")
+snapshot = client.create_snapshot(
+    name="open-swe",
+    docker_image="bracelangchain/deepagents-sandbox:v1",  # built from ./Dockerfile
+    fs_capacity_bytes=32 * 1024**3,
+)
+print(snapshot.id)
+```
+
+Then set the resulting UUID in your environment:
+
+```bash
+DEFAULT_SANDBOX_SNAPSHOT_ID="<snapshot-uuid>"
+# Optional; overrides the snapshot's root FS size at sandbox boot. Default is 32 GiB.
+DEFAULT_SANDBOX_SNAPSHOT_FS_CAPACITY_BYTES="34359738368"
+```
+
+`DEFAULT_SANDBOX_SNAPSHOT_ID` is required when `SANDBOX_TYPE=langsmith`. The server validates this at startup and refuses to boot if it's missing.
 
 ## 5. Set up triggers
 
@@ -442,8 +458,9 @@ The `langgraph.json` at the project root already defines the graph entry point a
 
 - Verify `LANGSMITH_API_KEY_PROD` is set and valid
 - Check LangSmith sandbox quotas in your workspace settings
-- If you see `Failed to check template ''`, ensure either `DEFAULT_SANDBOX_TEMPLATE_NAME` is set or that your LangSmith API key has permissions to create sandbox templates
-- If you get a 403 Forbidden error on the sandbox templates endpoint, your LangSmith workspace may not have sandbox access enabled — contact LangSmith support
+- If the server refuses to start with `DEFAULT_SANDBOX_SNAPSHOT_ID must be set`, build a snapshot (see step 4c) and export its UUID
+- If you see `Failed to create sandbox from snapshot '<id>'`, confirm the snapshot exists in your workspace and has status `ready`
+- If you get a 403 Forbidden error on the sandbox endpoints, your LangSmith workspace may not have sandbox access enabled — contact LangSmith support
 
 ### Agent not responding to comments
 
