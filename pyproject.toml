@@ -6,31 +6,31 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 dependencies = [
-    "deepagents>=0.5.0a4",
-    "fastapi>=0.104.0",
-    "uvicorn>=0.24.0",
+    "deepagents>=0.5.3",
+    "fastapi>=0.135.3",
+    "uvicorn>=0.44.0",
     "httpx>=0.25.0",
     "PyJWT>=2.12.0",
     "cryptography>=41.0.0",
-    "langgraph-sdk>=0.1.0",
+    "langgraph-sdk>=0.3.13",
     "langchain>=1.2.9",
     "langgraph>=1.0.8",
     "markdownify>=1.2.2",
     "langchain-anthropic>1.1.0",
     "langgraph-cli[inmem]>=0.4.21",
-    "langsmith>=0.7.31",
-    "langchain-openai==1.1.10",
-    "langchain-daytona>=0.0.3",
-    "langchain-modal>=0.0.2",
-    "langchain-runloop>=0.0.3",
-    "exa-py>=2.10.1",
+    "langsmith>=0.7.32",
+    "langchain-openai==1.1.13",
+    "langchain-daytona>=0.0.5",
+    "langchain-modal>=0.0.3",
+    "langchain-runloop>=0.0.4",
+    "exa-py>=2.12.0",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=9.0.3",
     "pytest-asyncio>=0.21.0",
-    "ruff>=0.1.0",
+    "ruff>=0.15.10",
     "Pygments>=2.20.0",
 ]
 
