@@ -277,7 +277,6 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     return create_deep_agent(
         model=make_model(
             os.environ.get("LLM_MODEL_ID", DEFAULT_LLM_MODEL_ID),
-            temperature=0,
             max_tokens=20_000,
         ),
         system_prompt=construct_system_prompt(
