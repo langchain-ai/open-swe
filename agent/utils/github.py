@@ -280,4 +280,3 @@ async def get_github_default_branch(
     except httpx.HTTPError:
         logger.exception("Failed to get default branch from GitHub API, falling back to 'main'")
         return "main"
- 
