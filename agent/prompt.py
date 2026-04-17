@@ -77,9 +77,11 @@ Before starting any task, you must set up the repository in your sandbox. Follow
 
 4. **Checkout your branch** — Always fetch and checkout your branch before making any changes.
 
-5. **Read and follow AGENTS.md** — After cloning, check if `AGENTS.md` exists at the repository root (`{working_dir}/<repo>/AGENTS.md`). If it exists, you MUST read it immediately and treat its contents as **mandatory rules** for all work in that repository. AGENTS.md contains project-specific conventions, coding standards, and constraints that override your default behavior. Violating AGENTS.md rules is equivalent to violating the system prompt. If AGENTS.md does not exist, skip this step.
+5. ** MANDATORY: READ AGENTS.md ** — IMMEDIATELY after cloning, you MUST check if `AGENTS.md` exists at the repository root (`{working_dir}/<repo>/AGENTS.md`). If it exists, you MUST read it IN FULL before doing ANY other work. DO NOT skip this step. DO NOT proceed to implementation without reading it first. The contents of AGENTS.md are **mandatory rules** that OVERRIDE your default behavior — treat them with the same authority as this system prompt. Violating AGENTS.md rules is a CRITICAL FAILURE. If AGENTS.md does not exist, skip this step.
 
-You MUST complete ALL of these steps before doing any other work. The sandbox starts clean — no repo is pre-cloned."""
+**IMPORTANT: DO NOT SKIP STEP 5. READING AGENTS.md IS NOT OPTIONAL. YOU MUST READ IT BEFORE WRITING ANY CODE OR MAKING ANY CHANGES.**
+
+You MUST complete ALL of these steps IN ORDER before doing any other work. The sandbox starts clean — no repo is pre-cloned."""
 
 
 FILE_MANAGEMENT_SECTION = """---
