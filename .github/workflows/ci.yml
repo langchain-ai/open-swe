@@ -46,3 +46,31 @@ jobs:
         run: uv sync --locked --extra dev
       - name: Run unit tests
         run: make test
+
+  e2e-tests:
+    name: Agent e2e (playwright)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@cec208311dfd045dd5311c1add060b2062131d57 # v8.0.0
+      - name: Install dependencies
+        run: uv sync --locked --extra dev
+      - name: Install playwright chromium
+        run: uv run --with playwright --with pytest --with pytest-asyncio --with pytest-playwright python -m playwright install --with-deps chromium
+      - name: Seed .env from .env.ci
+        run: cp .env.ci .env
+      - name: Start agent + fake-deps
+        run: make up-test
+      - name: Run e2e tests
+        run: make test-e2e
+      - name: Stop servers
+        if: always()
+        run: make stop
+      - name: Upload server logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-logs
+          path: logs/
+          if-no-files-found: ignore

@@ -24,6 +24,7 @@
 # misc
 .DS_Store
 *.pem
+!.github/ci/fake_github_app_key.pem
 
 # debug
 npm-debug.log*
@@ -61,4 +62,9 @@ __pycache__/
 *.egg-info/
 .eggs/
 
-# 
+# fake-deps local dev state
+hack/fake_deps/dev_app_key.pem
+hack/fake_deps/fake_deps.sqlite3
+hack/fake_deps/fake_deps.sqlite3-*
+hack/fake_deps/sample_repos/
+logs/

@@ -1,9 +1,12 @@
 import logging
+import os
 from typing import Any
 
 import httpx
 
 from ..utils.github_app import get_github_app_installation_token
+
+GITHUB_API_BASE_URL = os.environ.get("GITHUB_API_BASE_URL", "https://api.github.com").rstrip("/")
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +43,7 @@ async def list_repos(
         path_prefix = "orgs" if is_organization else "users"
         async with httpx.AsyncClient() as client:
             response = await client.get(
-                f"https://api.github.com/{path_prefix}/{organization_name}/repos",
+                f"{GITHUB_API_BASE_URL}/{path_prefix}/{organization_name}/repos",
                 headers=headers,
                 params={"per_page": min(per_page, 100), "sort": sort, "page": page},
                 timeout=10,

@@ -30,6 +30,18 @@ RUN install -m 0755 -d /etc/apt/keyrings \
     && apt-get install -y "docker-ce-cli=${DOCKER_CLI_VERSION}" \
     && rm -rf /var/lib/apt/lists/*
 
+# GitHub CLI (gh). Used by the agent in `nofixedrepo` mode where the repo isn't
+# known in advance and commit_and_open_pr is unavailable — the agent drives
+# git + gh from the shell instead.
+RUN install -m 0755 -d /etc/apt/keyrings \
+    && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg -o /etc/apt/keyrings/githubcli.gpg \
+    && chmod a+r /etc/apt/keyrings/githubcli.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli.gpg] https://cli.github.com/packages stable main" \
+      | tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
+    && apt-get update \
+    && apt-get install -y gh \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN set -eux; \
     arch="$(dpkg --print-architecture)"; \
     case "${arch}" in \
@@ -70,4 +82,5 @@ RUN echo "=== Installed versions ===" \
     && yarn --version \
     && go version \
     && docker --version \
-    && git --version
+    && git --version \
+    && gh --version | head -1

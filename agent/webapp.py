@@ -6,6 +6,8 @@ import json
 import logging
 import os
 import uuid
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import Any
 
 import httpx
@@ -38,7 +40,9 @@ from .utils.github_user_email_map import GITHUB_USER_EMAIL_MAP
 from .utils.linear import post_linear_trace_comment
 from .utils.linear_team_repo_map import LINEAR_TEAM_TO_REPO
 from .utils.multimodal import dedupe_urls, extract_image_urls, fetch_image_block
+from .utils.options import allow_any_gh_user_enabled, nofixedrepo_enabled, slackv2_enabled
 from .utils.repo import extract_repo_from_text
+from .utils.sandbox import validate_sandbox_startup_config
 from .utils.slack import (
     add_slack_reaction,
     fetch_slack_thread_messages,
@@ -48,13 +52,25 @@ from .utils.slack import (
     post_slack_thread_reply,
     post_slack_trace_reply,
     select_slack_context_messages,
+    set_slack_thread_status,
     strip_bot_mention,
     verify_slack_signature,
+)
+from .utils.slack_thread_cache import (
+    has_slack_thread_participation,
+    record_slack_thread_participation,
 )
 
 logger = logging.getLogger(__name__)
 
-app = FastAPI()
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    validate_sandbox_startup_config()
+    yield
+
+
+app = FastAPI(lifespan=lifespan)
 
 LINEAR_WEBHOOK_SECRET = os.environ.get("LINEAR_WEBHOOK_SECRET", "")
 GITHUB_WEBHOOK_SECRET = os.environ.get("GITHUB_WEBHOOK_SECRET", "")
@@ -682,14 +698,21 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
         await post_linear_trace_comment(issue_id, run["run_id"], triggering_comment_id)
 
 
-async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[str, str]) -> None:
-    """Process a Slack app mention by creating or interrupting a thread run."""
+async def process_slack_mention(
+    event_data: dict[str, Any], repo_config: dict[str, str] | None
+) -> None:
+    """Process a Slack app mention by creating or interrupting a thread run.
+
+    ``repo_config`` is ``None`` when running in the "open" repo-resolution
+    mode — the agent is given a sandbox and decides what to clone itself.
+    """
     channel_id = event_data.get("channel_id", "")
     thread_ts = event_data.get("thread_ts", "")
     event_ts = event_data.get("event_ts", "")
     user_id = event_data.get("user_id", "")
     text = event_data.get("text", "")
     bot_user_id = event_data.get("bot_user_id", "")
+    channel_type = event_data.get("channel_type", "")
 
     if not channel_id or not thread_ts or not event_ts:
         logger.warning(
@@ -700,15 +723,36 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
         )
         return
 
-    reacted = await add_slack_reaction(channel_id, event_ts, "eyes")
-    if not reacted:
-        logger.debug(
-            "Unable to add eyes reaction for Slack message ts=%s in channel=%s",
-            event_ts,
-            channel_id,
+    if slackv2_enabled():
+        acked = await set_slack_thread_status(
+            channel_id, thread_ts, "is thinking..."
         )
+        if not acked:
+            logger.debug(
+                "Unable to set assistant thread status for ts=%s in channel=%s",
+                event_ts,
+                channel_id,
+            )
+    else:
+        reacted = await add_slack_reaction(channel_id, event_ts, "eyes")
+        if not reacted:
+            logger.debug(
+                "Unable to add eyes reaction for Slack message ts=%s in channel=%s",
+                event_ts,
+                channel_id,
+            )
+    # Record participation now (the ack — reaction or thread status — is a
+    # visible bot action). This keeps the "no-retag" follow-up behavior
+    # working even if the run dispatch below fails or is delayed.
+    record_slack_thread_participation(channel_id, thread_ts)
 
-    thread_id = generate_thread_id_from_slack_thread(channel_id, thread_ts)
+    # In a DM, the channel itself is the 1:1 with one human, so the entire
+    # conversation — across all top-level messages over time — is a single
+    # langgraph thread. deepagents handles history compaction. In channels
+    # we still key on thread_ts (one agent thread per Slack thread).
+    is_dm = slackv2_enabled() and channel_type == "im"
+    thread_anchor = "dm" if is_dm else thread_ts
+    thread_id = generate_thread_id_from_slack_thread(channel_id, thread_anchor)
 
     user_email = None
     user_name = ""
@@ -758,17 +802,32 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
     )
     trigger_user = user_name or (f"<@{user_id}>" if user_id else "Unknown user")
 
-    prompt = (
-        "You were mentioned in Slack.\n\n"
-        f"## Repository\n{repo_config.get('owner')}/{repo_config.get('name')}\n\n"
-        f"## Triggered by\n{trigger_user}\n\n"
-        f"## Slack Thread\n- Channel: {channel_id}\n- Thread TS: {thread_ts}\n"
-        f"- Context starts at: {context_source}\n\n"
-        f"## Conversation Context\n{context_text}\n\n"
-        f"## Latest Mention Request\n{clean_text}\n\n"
-        "Use `slack_thread_reply` to communicate in this Slack thread for clarifications, "
-        "status updates, and final summaries."
-    )
+    if repo_config is None:
+        repo_section = (
+            "## Repository\nNone assigned. You have a sandbox and may clone any "
+            "repository the user asks about. Ask for a repo URL if the request "
+            "is ambiguous — do not assume a default. Tools that need a repo "
+            "(`commit_and_open_pr`, `github_comment`) require `configurable.repo` "
+            "and will not work until one is set.\n\n"
+        )
+    else:
+        repo_section = f"## Repository\n{repo_config.get('owner')}/{repo_config.get('name')}\n\n"
+    if is_dm:
+        # slackv2 DMs are a single perpetual langgraph thread per (channel, user);
+        # prior turns live in the agent's message history. Don't re-inject a
+        # heavy framing each turn — just pass the user's raw text so follow-ups
+        # feel like one continuous conversation.
+        prompt = clean_text
+    else:
+        prompt = (
+            "You were mentioned in Slack.\n\n" + repo_section + f"## Triggered by\n{trigger_user}\n\n"
+            f"## Slack Thread\n- Channel: {channel_id}\n- Thread TS: {thread_ts}\n"
+            f"- Context starts at: {context_source}\n\n"
+            f"## Conversation Context\n{context_text}\n\n"
+            f"## Latest Mention Request\n{clean_text}\n\n"
+            "Use `slack_thread_reply` to communicate in this Slack thread for clarifications, "
+            "status updates, and final summaries."
+        )
     content_blocks: list[dict[str, Any]] = [create_text_block(prompt)]
 
     image_urls = dedupe_urls(
@@ -791,10 +850,10 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
                     content_blocks.append(image_block)
 
     configurable: dict[str, Any] = {
-        "repo": repo_config,
         "slack_thread": {
             "channel_id": channel_id,
             "thread_ts": thread_ts,
+            "channel_type": channel_type,
             "triggering_user_id": user_id,
             "triggering_user_name": user_name,
             "triggering_user_email": user_email,
@@ -803,9 +862,12 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
         "user_email": user_email,
         "source": "slack",
     }
+    if repo_config is not None:
+        configurable["repo"] = repo_config
 
     langgraph_client = get_client(url=LANGGRAPH_URL)
-    await _upsert_slack_thread_repo_metadata(thread_id, repo_config, langgraph_client)
+    if repo_config is not None:
+        await _upsert_slack_thread_repo_metadata(thread_id, repo_config, langgraph_client)
 
     thread_active = await is_thread_active(thread_id)
     if thread_active:
@@ -1018,27 +1080,14 @@ async def slack_webhook(request: Request, background_tasks: BackgroundTasks) -> 
         return {"status": "ignored", "reason": "Not an event callback"}
 
     event = payload.get("event", {})
-    if event.get("type") != "app_mention":
-        message_text = event.get("text", "")
-        has_username_mention = bool(
-            event.get("type") == "message"
-            and SLACK_BOT_USERNAME
-            and f"@{SLACK_BOT_USERNAME}" in message_text
-        )
-        has_id_mention = bool(
-            event.get("type") == "message"
-            and SLACK_BOT_USER_ID
-            and f"<@{SLACK_BOT_USER_ID}>" in message_text
-        )
-        if not (has_username_mention or has_id_mention):
-            return {"status": "ignored", "reason": "Not an app_mention event"}
 
     if event.get("subtype") == "bot_message" or event.get("bot_id"):
         return {"status": "ignored", "reason": "Event from a bot"}
 
     channel_id = event.get("channel", "")
     event_ts = event.get("ts", "")
-    thread_ts = event.get("thread_ts") or event_ts
+    incoming_thread_ts = event.get("thread_ts") or ""
+    thread_ts = incoming_thread_ts or event_ts
     user_id = event.get("user", "")
     text = event.get("text", "")
     if not channel_id or not event_ts or not thread_ts:
@@ -1061,6 +1110,32 @@ async def slack_webhook(request: Request, background_tasks: BackgroundTasks) -> 
     if bot_user_id and user_id == bot_user_id:
         return {"status": "ignored", "reason": "Event from this bot user"}
 
+    event_type = event.get("type")
+    channel_type = event.get("channel_type") or ""
+    is_dm = channel_type == "im"
+    parent_user_id = event.get("parent_user_id") or ""
+    is_thread_reply = bool(incoming_thread_ts) and incoming_thread_ts != event_ts
+    has_username_mention = bool(SLACK_BOT_USERNAME and f"@{SLACK_BOT_USERNAME}" in text)
+    has_id_mention = bool(bot_user_id and f"<@{bot_user_id}>" in text)
+    reply_to_bot = bool(is_thread_reply and bot_user_id and parent_user_id == bot_user_id)
+    thread_participant = bool(
+        is_thread_reply and has_slack_thread_participation(channel_id, incoming_thread_ts)
+    )
+
+    # DMs from a human go straight through — in an IM with the bot, every
+    # message is addressed to the bot by definition, so requiring an @mention
+    # is nonsensical. See Slack's message.im event docs.
+    should_accept = (
+        is_dm
+        or event_type == "app_mention"
+        or has_username_mention
+        or has_id_mention
+        or reply_to_bot
+        or thread_participant
+    )
+    if not should_accept:
+        return {"status": "ignored", "reason": "Not addressed to the bot"}
+
     event_data = {
         "channel_id": channel_id,
         "thread_ts": thread_ts,
@@ -1068,15 +1143,18 @@ async def slack_webhook(request: Request, background_tasks: BackgroundTasks) -> 
         "user_id": user_id,
         "text": text,
         "bot_user_id": bot_user_id,
+        "channel_type": channel_type,
     }
-    repo_config = await get_slack_repo_config(text, channel_id, thread_ts)
-
-    if not _is_repo_org_allowed(repo_config):
-        logger.warning(
-            "Rejecting Slack webhook: org '%s' not in ALLOWED_GITHUB_ORGS",
-            repo_config.get("owner"),
-        )
-        return {"status": "ignored", "reason": "Repository org not in allowlist"}
+    if nofixedrepo_enabled():
+        repo_config: dict[str, str] | None = None
+    else:
+        repo_config = await get_slack_repo_config(text, channel_id, thread_ts)
+        if not _is_repo_org_allowed(repo_config):
+            logger.warning(
+                "Rejecting Slack webhook: org '%s' not in ALLOWED_GITHUB_ORGS",
+                repo_config.get("owner"),
+            )
+            return {"status": "ignored", "reason": "Repository org not in allowlist"}
 
     background_tasks.add_task(process_slack_mention, event_data, repo_config)
 
@@ -1290,8 +1368,15 @@ async def process_github_pr_comment(payload: dict[str, Any], event_type: str) ->
 
     email = GITHUB_USER_EMAIL_MAP.get(github_login, "")
     if not email:
-        logger.warning("No email mapping for GitHub user '%s', skipping", github_login)
-        return
+        if allow_any_gh_user_enabled():
+            email = f"{github_login}@local"
+            logger.warning(
+                "allowanyghuser: letting unknown GitHub user '%s' through as %s",
+                github_login, email,
+            )
+        else:
+            logger.warning("No email mapping for GitHub user '%s', skipping", github_login)
+            return
 
     github_token = await _get_or_resolve_thread_github_token(thread_id, email)
     if not github_token:
@@ -1360,8 +1445,15 @@ async def process_github_issue(payload: dict[str, Any], event_type: str) -> None
 
     email = GITHUB_USER_EMAIL_MAP.get(github_login, "")
     if not email:
-        logger.warning("No email mapping for GitHub user '%s', skipping", github_login)
-        return
+        if allow_any_gh_user_enabled():
+            email = f"{github_login}@local"
+            logger.warning(
+                "allowanyghuser: letting unknown GitHub user '%s' through as %s",
+                github_login, email,
+            )
+        else:
+            logger.warning("No email mapping for GitHub user '%s', skipping", github_login)
+            return
 
     thread_id = generate_thread_id_from_github_issue(issue_id)
     existing_thread = await _thread_exists(thread_id)

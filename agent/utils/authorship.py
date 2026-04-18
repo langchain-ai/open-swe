@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass
 from typing import Any
 
@@ -11,6 +12,8 @@ import httpx
 from .github_user_email_map import GITHUB_USER_EMAIL_MAP
 
 logger = logging.getLogger(__name__)
+
+GITHUB_API_BASE_URL = os.environ.get("GITHUB_API_BASE_URL", "https://api.github.com").rstrip("/")
 
 OPEN_SWE_BOT_NAME = "open-swe[bot]"
 OPEN_SWE_BOT_EMAIL = "open-swe@users.noreply.github.com"
@@ -46,7 +49,7 @@ def _identity_from_github_token(github_token: str | None) -> CollaboratorIdentit
 
     try:
         response = httpx.get(
-            "https://api.github.com/user",
+            f"{GITHUB_API_BASE_URL}/user",
             headers={
                 "Authorization": f"Bearer {github_token}",
                 "Accept": "application/vnd.github+json",

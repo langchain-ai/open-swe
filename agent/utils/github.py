@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import logging
+import os
 import shlex
 
 import httpx
 from deepagents.backends.protocol import ExecuteResponse, SandboxBackendProtocol
 
 logger = logging.getLogger(__name__)
+
+GITHUB_API_BASE_URL = os.environ.get("GITHUB_API_BASE_URL", "https://api.github.com").rstrip("/")
 
 # HTTP status codes
 HTTP_CREATED = 201
@@ -163,7 +166,7 @@ async def create_github_pr(
     async with httpx.AsyncClient() as http_client:
         try:
             pr_response = await http_client.post(
-                f"https://api.github.com/repos/{repo_owner}/{repo_name}/pulls",
+                f"{GITHUB_API_BASE_URL}/repos/{repo_owner}/{repo_name}/pulls",
                 headers={
                     "Authorization": f"Bearer {github_token}",
                     "Accept": "application/vnd.github+json",
@@ -225,7 +228,7 @@ async def _find_existing_pr(
     head_ref = f"{repo_owner}:{head_branch}"
     for state in ("open", "all"):
         response = await http_client.get(
-            f"https://api.github.com/repos/{repo_owner}/{repo_name}/pulls",
+            f"{GITHUB_API_BASE_URL}/repos/{repo_owner}/{repo_name}/pulls",
             headers=headers,
             params={"head": head_ref, "state": state, "per_page": 1},
         )
@@ -257,7 +260,7 @@ async def get_github_default_branch(
     try:
         async with httpx.AsyncClient() as http_client:
             response = await http_client.get(
-                f"https://api.github.com/repos/{repo_owner}/{repo_name}",
+                f"{GITHUB_API_BASE_URL}/repos/{repo_owner}/{repo_name}",
                 headers={
                     "Authorization": f"Bearer {github_token}",
                     "Accept": "application/vnd.github+json",

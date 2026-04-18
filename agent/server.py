@@ -6,6 +6,7 @@
 import logging
 import os
 import warnings
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +61,7 @@ from .tools import (
 from .utils.auth import resolve_github_token
 from .utils.github_app import get_github_app_installation_token
 from .utils.model import make_model
+from .utils.options import nofixedrepo_enabled
 from .utils.sandbox import create_sandbox
 from .utils.sandbox_paths import aresolve_sandbox_work_dir
 
@@ -273,7 +275,52 @@ async def get_agent(config: RunnableConfig) -> Pregel:
 
     work_dir = await aresolve_sandbox_work_dir(sandbox_backend)
 
-    logger.info("Returning agent with sandbox for thread %s", thread_id)
+    # In nofixedrepo mode the agent doesn't have `configurable.repo`, so all
+    # the tools that depend on it would just error out. Drop them and steer
+    # the LLM to use `git` + `gh` from the shell instead (see prompt.py).
+    nofixedrepo = nofixedrepo_enabled()
+
+    tools: list[Any] = [
+        http_request,
+        fetch_url,
+        web_search,
+        list_repos,
+        get_branch_name,
+        linear_comment,
+        linear_create_issue,
+        linear_delete_issue,
+        linear_get_issue,
+        linear_get_issue_comments,
+        linear_list_teams,
+        linear_update_issue,
+        slack_thread_reply,
+    ]
+    if not nofixedrepo:
+        tools.extend([
+            commit_and_open_pr,
+            github_comment,
+            list_pr_reviews,
+            get_pr_review,
+            create_pr_review,
+            update_pr_review,
+            dismiss_pr_review,
+            submit_pr_review,
+            list_pr_review_comments,
+        ])
+
+    middleware: list[Any] = [
+        ToolErrorMiddleware(),
+        check_message_queue_before_model,
+        ensure_no_empty_msg,
+    ]
+    if not nofixedrepo:
+        middleware.append(open_pr_if_needed)
+
+    logger.info(
+        "Returning agent with sandbox for thread %s (nofixedrepo=%s)",
+        thread_id,
+        nofixedrepo,
+    )
     return create_deep_agent(
         model=make_model(
             os.environ.get("LLM_MODEL_ID", DEFAULT_LLM_MODEL_ID),
@@ -283,36 +330,9 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             working_dir=work_dir,
             linear_project_id=linear_project_id,
             linear_issue_number=linear_issue_number,
+            nofixedrepo=nofixedrepo,
         ),
-        tools=[
-            http_request,
-            fetch_url,
-            web_search,
-            list_repos,
-            get_branch_name,
-            commit_and_open_pr,
-            linear_comment,
-            linear_create_issue,
-            linear_delete_issue,
-            linear_get_issue,
-            linear_get_issue_comments,
-            linear_list_teams,
-            linear_update_issue,
-            slack_thread_reply,
-            github_comment,
-            list_pr_reviews,
-            get_pr_review,
-            create_pr_review,
-            update_pr_review,
-            dismiss_pr_review,
-            submit_pr_review,
-            list_pr_review_comments,
-        ],
+        tools=tools,
         backend=sandbox_backend,
-        middleware=[
-            ToolErrorMiddleware(),
-            check_message_queue_before_model,
-            ensure_no_empty_msg,
-            open_pr_if_needed,
-        ],
+        middleware=middleware,
     ).with_config(config)

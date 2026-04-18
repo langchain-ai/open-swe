@@ -1,0 +1,787 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>fake-deps — Slack + GitHub mock</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: -apple-system, "Segoe UI", sans-serif; background: #f5f5f5; color: #1d1c1d; height: 100vh; display: flex; flex-direction: column; }
+  header { display: flex; align-items: center; gap: 12px; padding: 8px 14px; background: #1d1c1d; color: #fff; flex-shrink: 0; }
+  header h1 { font-size: 14px; font-weight: 700; margin: 0; opacity: 0.9; }
+  .tabs { display: flex; gap: 4px; }
+  .tab { padding: 6px 14px; border-radius: 4px; background: transparent; color: #bbb; cursor: pointer; font-size: 13px; border: 0; }
+  .tab.active { background: #fff; color: #1d1c1d; font-weight: 600; }
+  #status { margin-left: auto; font-size: 11px; font-family: ui-monospace, monospace; max-width: 45vw; text-align: right; opacity: 0.7; word-break: break-all; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #activity { font-size: 10px; font-family: ui-monospace, monospace; opacity: 0.55; max-width: 25vw; text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-right: 8px; }
+  main { flex: 1; overflow: hidden; display: flex; }
+  .panel { display: none; width: 100%; height: 100%; }
+  .panel.active { display: flex; }
+
+  /* Slack --------------------------------------------------------------- */
+  #slack-panel { display: none; grid-template-columns: 220px 1fr 360px; width: 100%; }
+  #slack-panel.active { display: grid; }
+  #slack-rail { background: #3f0e40; color: #fff; padding: 14px 10px; overflow-y: auto; }
+  #slack-rail h2 { font-size: 11px; margin: 16px 0 6px; opacity: 0.7; text-transform: uppercase; letter-spacing: 0.05em; }
+  #slack-rail .item { padding: 4px 8px; border-radius: 4px; font-size: 14px; }
+  #slack-rail .item.active { background: #1164a3; }
+  #slack-rail button { margin-top: 12px; width: 100%; padding: 6px; background: #611f63; border: 0; color: #fff; border-radius: 4px; cursor: pointer; }
+  #slack-main { display: flex; flex-direction: column; background: #fff; border-right: 1px solid #e0e0e0; min-width: 0; min-height: 0; overflow: hidden; }
+  .channel-header { padding: 12px 16px; border-bottom: 1px solid #e0e0e0; font-weight: 700; display: flex; justify-content: space-between; align-items: center; }
+  #slack-messages, #slack-thread-body, #gh-detail { flex: 1; overflow-y: auto; padding: 12px; }
+  .msg { display: flex; gap: 10px; padding: 6px 6px; border-radius: 4px; }
+  .msg:hover { background: #f2f2f2; }
+  .msg .avatar { width: 34px; height: 34px; background: #616061; color: #fff; border-radius: 4px; text-align: center; line-height: 34px; font-weight: bold; flex-shrink: 0; }
+  .msg.bot .avatar { background: #611f63; }
+  .msg .right { flex: 1; min-width: 0; }
+  .msg .meta { font-size: 12px; color: #616061; margin-bottom: 2px; }
+  .msg .meta strong { color: #1d1c1d; font-size: 15px; }
+  .msg .body { white-space: pre-wrap; font-size: 14px; line-height: 1.45; }
+  .msg .actions { display: none; margin-left: auto; align-self: flex-start; }
+  .msg:hover .actions { display: block; }
+  .msg .actions button { font-size: 11px; padding: 4px 8px; background: #fff; border: 1px solid #ccc; border-radius: 3px; cursor: pointer; }
+  .msg .replies { font-size: 12px; color: #1264a3; cursor: pointer; margin-top: 4px; font-weight: 600; }
+  .msg .reactions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+  .msg .reactions .pill { display: inline-flex; align-items: center; gap: 4px; padding: 2px 7px; border: 1px solid #c8dcef; background: #e8f5fa; border-radius: 12px; font-size: 12px; color: #1264a3; }
+  .thread-status { padding: 6px 14px; font-size: 12px; color: #616061; font-style: italic; border-top: 1px solid #e0e0e0; background: #f8f8f8; display: none; }
+  .thread-status.on { display: block; }
+  .thread-status .shimmer { background: linear-gradient(90deg, #616061 0%, #c8c8c8 50%, #616061 100%); background-size: 200% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: shimmer 1.6s linear infinite; }
+  @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+  .composer-shell { position: relative; padding: 10px 12px; border-top: 1px solid #e0e0e0; background: #fff; }
+  .composer-shell textarea { width: 100%; min-height: 44px; padding: 8px; border: 1px solid #c8c8c8; border-radius: 4px; font-family: inherit; font-size: 14px; resize: vertical; }
+  #slack-thread { display: none; flex-direction: column; background: #fff; min-height: 0; overflow: hidden; }
+  #slack-thread.open { display: flex; }
+  #slack-thread .header { padding: 12px 14px; border-bottom: 1px solid #e0e0e0; font-weight: bold; display: flex; justify-content: space-between; }
+  #slack-thread .close { cursor: pointer; border: none; background: none; font-size: 22px; color: #616061; }
+
+  /* @ autocomplete */
+  .mention-menu { position: absolute; bottom: 100%; left: 8px; margin-bottom: 6px; background: #fff; border: 1px solid #dcdcdc; border-radius: 8px; box-shadow: 0 6px 20px rgba(0,0,0,.12); min-width: 240px; z-index: 20; overflow: hidden; }
+  .mention-menu .hdr { padding: 4px 10px; font-size: 11px; color: #616061; background: #f5f5f5; border-bottom: 1px solid #eee; }
+  .mention-item { padding: 6px 10px; cursor: pointer; font-size: 14px; display: flex; align-items: center; gap: 8px; }
+  .mention-item.active { background: #1264a3; color: #fff; }
+  .mention-item .avatar-sm { width: 22px; height: 22px; background: #616061; color: #fff; border-radius: 4px; text-align: center; line-height: 22px; font-weight: 700; font-size: 12px; }
+  .mention-item.active .avatar-sm { background: #fff; color: #1264a3; }
+  .mention-item .name { font-weight: 600; }
+  .mention-item .id { opacity: 0.55; font-family: ui-monospace, monospace; font-size: 11px; margin-left: auto; }
+  .mention-pill { background: #e8f1fa; color: #1264a3; padding: 0 4px; border-radius: 3px; font-weight: 600; }
+
+  /* GitHub ------------------------------------------------------------- */
+  #gh-panel { display: none; grid-template-columns: 260px 340px 1fr; width: 100%; }
+  #gh-panel.active { display: grid; }
+  #gh-rail { background: #24292f; color: #fff; padding: 14px 10px; overflow-y: auto; }
+  #gh-rail h2 { font-size: 11px; margin: 16px 0 6px; opacity: 0.7; text-transform: uppercase; letter-spacing: 0.05em; }
+  #gh-rail .item { padding: 6px 8px; border-radius: 4px; cursor: pointer; font-size: 14px; }
+  #gh-rail .item.active { background: #0969da; }
+  #gh-rail .item .repo-desc { font-size: 11px; opacity: 0.7; display: block; margin-top: 2px; }
+  #gh-mid { background: #fff; border-right: 1px solid #e0e0e0; display: flex; flex-direction: column; overflow: hidden; }
+  .gh-subnav { display: flex; gap: 4px; padding: 10px 12px; border-bottom: 1px solid #e0e0e0; background: #f6f8fa; }
+  .gh-subnav button { padding: 4px 12px; border-radius: 4px; border: 1px solid #d1d9e0; background: #fff; cursor: pointer; font-size: 13px; }
+  .gh-subnav button.active { background: #0969da; color: #fff; border-color: #0969da; }
+  #gh-list { overflow-y: auto; flex: 1; }
+  .gh-list-item { padding: 10px 12px; border-bottom: 1px solid #eee; cursor: pointer; }
+  .gh-list-item:hover { background: #f6f8fa; }
+  .gh-list-item.active { background: #ddf4ff; }
+  .gh-list-item h3 { font-size: 14px; margin: 0 0 4px; }
+  .gh-list-item .meta { font-size: 11px; color: #656d76; }
+  .badge { display: inline-block; padding: 1px 6px; border-radius: 10px; font-size: 10px; font-weight: 600; }
+  .badge.open { background: #dafbe1; color: #116329; }
+  .badge.closed { background: #ffebe9; color: #82071e; }
+  .badge.draft { background: #eff1f3; color: #57606a; }
+  .badge.pr { background: #ddf4ff; color: #0969da; }
+  #gh-detail { background: #fff; padding: 14px 20px; }
+  #gh-detail h1 { font-size: 20px; margin: 0 0 4px; }
+  #gh-detail .title-meta { font-size: 12px; color: #656d76; margin-bottom: 14px; }
+  .comment { border: 1px solid #d1d9e0; border-radius: 6px; margin-bottom: 10px; overflow: hidden; }
+  .comment .head { padding: 6px 10px; background: #f6f8fa; font-size: 12px; display: flex; justify-content: space-between; }
+  .comment .body { padding: 10px; font-size: 14px; white-space: pre-wrap; background: #fff; }
+  .comment .head strong { color: #0969da; }
+  .compose { margin-top: 14px; padding: 10px; border: 1px solid #d1d9e0; border-radius: 6px; background: #f6f8fa; }
+  .compose textarea { width: 100%; min-height: 80px; padding: 8px; border: 1px solid #d1d9e0; border-radius: 4px; font-family: inherit; font-size: 14px; resize: vertical; background: #fff; }
+  .compose .btn-row { margin-top: 8px; display: flex; gap: 8px; align-items: center; }
+  .compose button { padding: 6px 14px; border-radius: 4px; border: 1px solid #2da44e; background: #2da44e; color: #fff; font-weight: 600; cursor: pointer; font-size: 13px; }
+  .compose button.secondary { background: #fff; color: #24292f; border-color: #d1d9e0; font-weight: 500; }
+  .compose .hint { font-size: 11px; color: #656d76; }
+  pre.code { background: #f6f8fa; padding: 12px; border-radius: 4px; overflow-x: auto; font-size: 12px; line-height: 1.4; font-family: ui-monospace, monospace; }
+  .file-entry { padding: 5px 10px; cursor: pointer; font-family: ui-monospace, monospace; font-size: 13px; border-bottom: 1px solid #eee; }
+  .file-entry:hover { background: #f6f8fa; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>fake-deps</h1>
+  <div class="tabs">
+    <button class="tab active" data-tab="slack">Slack</button>
+    <button class="tab" data-tab="gh">GitHub</button>
+  </div>
+  <div id="activity"></div>
+  <div id="status">ready.</div>
+</header>
+
+<main>
+
+<!-- SLACK PANEL ============================================================ -->
+<section id="slack-panel" class="active">
+  <aside id="slack-rail">
+    <h2>Workspace</h2>
+    <div class="item">fake-workspace</div>
+    <h2>Channels</h2>
+    <div id="slack-channel-list"></div>
+    <h2>Direct messages</h2>
+    <div id="slack-dm-list"></div>
+    <h2>Members</h2>
+    <div id="slack-members"></div>
+    <button id="slack-reset">Reset messages</button>
+  </aside>
+  <div id="slack-main">
+    <div class="channel-header">
+      <strong id="slack-channel-title">#general</strong>
+      <span style="font-size:12px;color:#616061">Posting as <strong id="slack-me"></strong></span>
+    </div>
+    <div id="slack-messages"></div>
+    <div class="composer-shell">
+      <textarea id="slack-composer" placeholder="Message #general"></textarea>
+    </div>
+  </div>
+  <aside id="slack-thread">
+    <div class="header">
+      <div>Thread</div>
+      <button class="close" onclick="closeSlackThread()">×</button>
+    </div>
+    <div id="slack-thread-body"></div>
+    <div id="slack-thread-status" class="thread-status"></div>
+    <div class="composer-shell">
+      <textarea id="slack-thread-composer" placeholder="Reply..."></textarea>
+    </div>
+  </aside>
+</section>
+
+<!-- GITHUB PANEL =========================================================== -->
+<section id="gh-panel">
+  <aside id="gh-rail">
+    <h2>Repositories</h2>
+    <div id="gh-repos"></div>
+    <button id="gh-reset" style="margin-top:14px;width:100%;padding:6px;background:#8250df;border:0;color:#fff;border-radius:4px;cursor:pointer">Reset issues/PRs</button>
+  </aside>
+  <div id="gh-mid">
+    <div class="gh-subnav">
+      <button class="active" data-sub="issues">Issues</button>
+      <button data-sub="pulls">Pull requests</button>
+      <button data-sub="code">Code</button>
+      <button data-sub="new" style="margin-left:auto;background:#2da44e;color:#fff;border-color:#2da44e">+ New issue</button>
+    </div>
+    <div id="gh-list"></div>
+  </div>
+  <div id="gh-detail">
+    <div style="color:#656d76;font-size:14px;margin-top:40px;text-align:center">Pick a repo and an item.</div>
+  </div>
+</section>
+
+</main>
+
+<script>
+// ===================================================================
+// Shared helpers
+// ===================================================================
+const state = {
+  slack: { messages: [], users: {}, channels: [], activeChannelId: '', dmChannelId: '', bot_user_id: '', bot_username: '', current_user_id: '', threadTs: null, threadStatuses: {} },
+  gh: {
+    repos: [], issues: [], pulls: [], comments: [],
+    selectedRepo: null, sub: 'issues', selectedIssue: null, selectedPull: null,
+    codePath: '', codeEntries: [],
+  },
+};
+
+function el(tag, attrs = {}, children = []) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === 'class') e.className = v;
+    else if (k === 'html') e.innerHTML = v;
+    else if (k.startsWith('on')) e[k] = v;
+    else if (k === 'dataset') Object.assign(e.dataset, v);
+    else e.setAttribute(k, v);
+  }
+  (Array.isArray(children) ? children : [children]).forEach(c => {
+    if (c == null || c === false) return;
+    e.appendChild(typeof c === 'string' ? document.createTextNode(c) : c);
+  });
+  return e;
+}
+
+function setStatus(text) {
+  document.getElementById('status').textContent = text;
+}
+
+function setActivity(text) {
+  document.getElementById('activity').textContent = text;
+}
+
+// Tabs (hash-routed so /#slack and /#gh deep-link into the right view).
+function activateTab(which) {
+  if (which !== 'slack' && which !== 'gh') which = 'slack';
+  document.querySelectorAll('.tabs .tab').forEach(t => {
+    t.classList.toggle('active', t.dataset.tab === which);
+  });
+  document.getElementById('slack-panel').classList.toggle('active', which === 'slack');
+  document.getElementById('gh-panel').classList.toggle('active', which === 'gh');
+  if (location.hash !== '#' + which) {
+    history.replaceState(null, '', '#' + which);
+  }
+}
+document.querySelectorAll('.tabs .tab').forEach(btn => {
+  btn.onclick = () => activateTab(btn.dataset.tab);
+});
+window.addEventListener('hashchange', () => activateTab(location.hash.slice(1)));
+activateTab(location.hash.slice(1));
+
+// ===================================================================
+// Slack
+// ===================================================================
+
+function slackRenderBody(text) {
+  const frag = document.createDocumentFragment();
+  const re = /<@([A-Za-z0-9_-]+)>/g;
+  let last = 0, m;
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > last) frag.appendChild(document.createTextNode(text.slice(last, m.index)));
+    const u = state.slack.users[m[1]];
+    const display = u ? (u.profile?.display_name || u.name) : m[1];
+    frag.appendChild(el('span', { class: 'mention-pill' }, `@${display}`));
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) frag.appendChild(document.createTextNode(text.slice(last)));
+  return frag;
+}
+
+const EMOJI = { eyes: '👀', white_check_mark: '✅', x: '❌', warning: '⚠️',
+                tada: '🎉', thumbsup: '👍', thumbsdown: '👎', rocket: '🚀',
+                wave: '👋', robot_face: '🤖' };
+
+function slackRenderMessage(m, inThread=false) {
+  const initial = (m.user_name || '?')[0].toUpperCase();
+  const avatar = el('div', { class: 'avatar' }, initial);
+  const meta = el('div', { class: 'meta' }, [
+    el('strong', {}, m.user_name || m.user),
+    '  ',
+    new Date(parseFloat(m.ts) * 1000).toLocaleTimeString(),
+  ]);
+  const body = el('div', { class: 'body' });
+  body.appendChild(slackRenderBody(m.text));
+  const rightChildren = [meta, body];
+  if (m.reactions && m.reactions.length) {
+    rightChildren.push(el('div', { class: 'reactions' },
+      m.reactions.map(r =>
+        el('span', { class: 'pill', title: `:${r.name}:` },
+          `${EMOJI[r.name] || `:${r.name}:`} ${r.count}`))));
+  }
+  const right = el('div', { class: 'right' }, rightChildren);
+  if (!inThread) {
+    const replies = state.slack.messages.filter(x => x.thread_ts === m.ts && x.ts !== m.ts);
+    if (replies.length) {
+      right.appendChild(el('div', { class: 'replies', onclick: () => openSlackThread(m.ts) },
+        `${replies.length} ${replies.length === 1 ? 'reply' : 'replies'}`));
+    }
+  }
+  const actions = el('div', { class: 'actions' },
+    inThread ? [] : [el('button', { onclick: () => openSlackThread(m.ts) }, 'Reply in thread')]);
+  return el('div', { class: `msg ${m.is_bot ? 'bot' : ''}`, dataset: { ts: m.ts } }, [avatar, right, actions]);
+}
+
+function slackRender() {
+  const activeCh = state.slack.activeChannelId;
+  const isDM = activeCh === state.slack.dmChannelId;
+  const channelMeta = state.slack.channels.find(c => c.id === activeCh) || {};
+
+  const msgs = document.getElementById('slack-messages');
+  msgs.innerHTML = '';
+  state.slack.messages
+    .filter(m => (m.channel_id || activeCh) === activeCh)
+    .filter(m => !m.thread_ts || m.thread_ts === m.ts)
+    .forEach(m => msgs.appendChild(slackRenderMessage(m)));
+  requestAnimationFrame(() => { msgs.scrollTop = msgs.scrollHeight; });
+
+  const title = document.getElementById('slack-channel-title');
+  title.textContent = isDM ? `@${channelMeta.name || 'bot'}` : `#${channelMeta.name || 'general'}`;
+  const composer = document.getElementById('slack-composer');
+  composer.placeholder = isDM ? `Message @${channelMeta.name || 'bot'}` : `Message #${channelMeta.name || 'general'}`;
+
+  const chList = document.getElementById('slack-channel-list');
+  chList.innerHTML = '';
+  state.slack.channels.filter(c => c.kind === 'channel').forEach(c => {
+    const active = c.id === activeCh ? ' active' : '';
+    chList.appendChild(el('div', {
+      class: 'item' + active,
+      onclick: () => slackSwitchChannel(c.id),
+    }, `# ${c.name}`));
+  });
+  const dmList = document.getElementById('slack-dm-list');
+  dmList.innerHTML = '';
+  state.slack.channels.filter(c => c.kind === 'im').forEach(c => {
+    const active = c.id === activeCh ? ' active' : '';
+    dmList.appendChild(el('div', {
+      class: 'item' + active,
+      onclick: () => slackSwitchChannel(c.id),
+    }, `@ ${c.name}`));
+  });
+
+  const members = document.getElementById('slack-members');
+  members.innerHTML = '';
+  Object.values(state.slack.users).forEach(u => {
+    const tag = u.id === state.slack.current_user_id ? ' (you)' :
+                u.id === state.slack.bot_user_id ? ' [bot]' : '';
+    members.appendChild(el('div', { class: 'item' }, (u.profile?.display_name || u.name) + tag));
+  });
+
+  const me = state.slack.users[state.slack.current_user_id];
+  document.getElementById('slack-me').textContent = me?.profile?.display_name || me?.name || '?';
+  if (state.slack.threadTs) slackRenderThread();
+}
+
+function slackSwitchChannel(channelId) {
+  state.slack.activeChannelId = channelId;
+  closeSlackThread();
+  slackRender();
+}
+
+function slackRenderThread() {
+  const body = document.getElementById('slack-thread-body');
+  body.innerHTML = '';
+  const root = state.slack.messages.find(m => m.ts === state.slack.threadTs);
+  if (root) body.appendChild(slackRenderMessage(root, true));
+  state.slack.messages
+    .filter(m => m.thread_ts === state.slack.threadTs && m.ts !== state.slack.threadTs)
+    .forEach(m => body.appendChild(slackRenderMessage(m, true)));
+  requestAnimationFrame(() => { body.scrollTop = body.scrollHeight; });
+
+  const statusEl = document.getElementById('slack-thread-status');
+  const status = state.slack.threadStatuses[`${state.slack.activeChannelId}/${state.slack.threadTs}`] || '';
+  if (status) {
+    const botName = state.slack.bot_username || 'app';
+    statusEl.innerHTML = '';
+    statusEl.appendChild(el('span', { class: 'shimmer' }, `${botName} ${status}`));
+    statusEl.classList.add('on');
+  } else {
+    statusEl.textContent = '';
+    statusEl.classList.remove('on');
+  }
+}
+
+function openSlackThread(ts) {
+  state.slack.threadTs = ts;
+  document.getElementById('slack-thread').classList.add('open');
+  slackRenderThread();
+  document.getElementById('slack-thread-composer').focus();
+}
+function closeSlackThread() {
+  state.slack.threadTs = null;
+  document.getElementById('slack-thread').classList.remove('open');
+}
+
+async function slackSend(text, threadTs) {
+  setStatus('sending...');
+  try {
+    const r = await fetch('/slack/ui/send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, thread_ts: threadTs || null, channel_id: state.slack.activeChannelId }),
+    });
+    const d = await r.json();
+    setStatus(`webhook ${d.forwarded_status ?? 'ERR'} — ${JSON.stringify(d.forwarded_response)}`);
+  } catch (e) {
+    setStatus(`send failed: ${e}`);
+  }
+}
+
+function attachMentionPicker(textareaId) {
+  const ta = document.getElementById(textareaId);
+  const shell = ta.parentElement;
+  let menuEl = null, matches = [], active = 0;
+  function closeMenu() { if (menuEl) { menuEl.remove(); menuEl = null; matches = []; } }
+  function getQuery() {
+    const v = ta.value, pos = ta.selectionStart;
+    let i = pos - 1;
+    while (i >= 0 && /[A-Za-z0-9_.-]/.test(v[i])) i--;
+    if (i < 0 || v[i] !== '@') return null;
+    if (i > 0 && !/\s/.test(v[i - 1])) return null;
+    return { query: v.slice(i + 1, pos), start: i, end: pos };
+  }
+  function render() {
+    if (!menuEl) {
+      menuEl = document.createElement('div'); menuEl.className = 'mention-menu';
+      const hdr = document.createElement('div'); hdr.className = 'hdr'; menuEl.appendChild(hdr);
+      const list = document.createElement('div'); list.className = 'list'; menuEl.appendChild(list);
+      shell.appendChild(menuEl);
+    }
+    menuEl.querySelector('.hdr').textContent = `People matching "${getQuery()?.query ?? ''}"`;
+    const list = menuEl.querySelector('.list'); list.innerHTML = '';
+    matches.forEach((u, i) => {
+      const name = u.profile?.display_name || u.name;
+      const item = document.createElement('div');
+      item.className = 'mention-item' + (i === active ? ' active' : '');
+      item.innerHTML = `<span class="avatar-sm">${name[0].toUpperCase()}</span>`
+        + `<span class="name">${name}</span><span class="id">${u.id}</span>`;
+      item.onmousedown = (e) => { e.preventDefault(); pick(i); };
+      list.appendChild(item);
+    });
+  }
+  function refresh() {
+    const q = getQuery();
+    if (!q) return closeMenu();
+    const needle = q.query.toLowerCase();
+    matches = Object.values(state.slack.users).filter(u =>
+      `${u.id} ${u.name} ${u.profile?.display_name ?? ''}`.toLowerCase().includes(needle)
+    ).slice(0, 8);
+    active = 0;
+    if (!matches.length) return closeMenu();
+    render();
+  }
+  function pick(idx) {
+    const q = getQuery(); if (!q || !matches[idx]) return;
+    const u = matches[idx];
+    const before = ta.value.slice(0, q.start), after = ta.value.slice(q.end);
+    const token = `<@${u.id}> `;
+    ta.value = before + token + after;
+    const newPos = (before + token).length;
+    ta.setSelectionRange(newPos, newPos);
+    closeMenu(); ta.dispatchEvent(new Event('input'));
+  }
+  ta.addEventListener('input', refresh);
+  ta.addEventListener('click', refresh);
+  ta.addEventListener('keyup', (e) => { if (['ArrowLeft','ArrowRight','Home','End'].includes(e.key)) refresh(); });
+  ta.addEventListener('keydown', (e) => {
+    if (!menuEl || !matches.length) return;
+    if (e.key === 'ArrowDown') { e.preventDefault(); active = (active+1) % matches.length; render(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); active = (active-1+matches.length) % matches.length; render(); }
+    else if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); e.stopImmediatePropagation(); pick(active); }
+    else if (e.key === 'Escape') { e.preventDefault(); closeMenu(); }
+  }, true);
+  ta.addEventListener('blur', () => setTimeout(closeMenu, 120));
+}
+
+document.getElementById('slack-composer').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault(); const v = e.target.value.trim(); if (!v) return;
+    e.target.value = ''; slackSend(v, null);
+  }
+});
+document.getElementById('slack-thread-composer').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault(); const v = e.target.value.trim(); if (!v || !state.slack.threadTs) return;
+    e.target.value = ''; slackSend(v, state.slack.threadTs);
+  }
+});
+document.getElementById('slack-reset').onclick = () => fetch('/slack/ui/reset', { method: 'POST' });
+
+async function slackLoadState() {
+  const d = await (await fetch('/slack/ui/state')).json();
+  Object.assign(state.slack, {
+    users: d.users, messages: d.messages,
+    channels: d.channels || [{ id: d.channel.id, name: d.channel.name, kind: 'channel' }],
+    activeChannelId: state.slack.activeChannelId || d.channel.id,
+    dmChannelId: d.dm_channel_id || '',
+    bot_user_id: d.bot_user_id, bot_username: d.bot_username || '',
+    current_user_id: d.current_user_id,
+    threadStatuses: d.thread_statuses || {},
+  });
+  slackRender();
+}
+
+// ===================================================================
+// GitHub
+// ===================================================================
+
+function renderRepoList() {
+  const host = document.getElementById('gh-repos');
+  host.innerHTML = '';
+  state.gh.repos.forEach(r => {
+    const active = state.gh.selectedRepo === r.full_name ? ' active' : '';
+    host.appendChild(el('div', {
+      class: 'item' + active,
+      onclick: () => { state.gh.selectedRepo = r.full_name; state.gh.selectedIssue = null; state.gh.selectedPull = null; renderAll(); },
+    }, [
+      el('div', { html: '<strong>' + r.full_name + '</strong>' }),
+      el('span', { class: 'repo-desc' }, r.description || ''),
+    ]));
+  });
+}
+
+function renderSubnav() {
+  document.querySelectorAll('.gh-subnav button[data-sub]').forEach(b => {
+    b.classList.toggle('active', b.dataset.sub === state.gh.sub);
+    if (b.dataset.sub === 'new') b.classList.remove('active');
+  });
+}
+
+async function renderGhList() {
+  const host = document.getElementById('gh-list');
+  host.innerHTML = '';
+  if (!state.gh.selectedRepo) {
+    host.innerHTML = '<div style="padding:14px;color:#656d76;font-size:13px">Pick a repo from the left.</div>';
+    return;
+  }
+  const [owner, name] = state.gh.selectedRepo.split('/');
+  if (state.gh.sub === 'issues') {
+    const items = state.gh.issues.filter(i => i.html_url.includes(`#issue/${owner}/${name}/`) && !i.pull_request);
+    items.forEach(i => host.appendChild(ghIssueListItem(i, owner, name)));
+    if (!items.length) host.innerHTML = '<div style="padding:14px;color:#656d76;font-size:13px">No issues.</div>';
+  } else if (state.gh.sub === 'pulls') {
+    const items = state.gh.pulls.filter(p => p.html_url.includes(`#pr/${owner}/${name}/`));
+    items.forEach(p => host.appendChild(ghPullListItem(p, owner, name)));
+    if (!items.length) host.innerHTML = '<div style="padding:14px;color:#656d76;font-size:13px">No pull requests.</div>';
+  } else if (state.gh.sub === 'code') {
+    await renderCodeList(owner, name);
+  }
+}
+
+function ghIssueListItem(i, owner, name) {
+  const active = state.gh.selectedIssue === i.number ? ' active' : '';
+  return el('div', {
+    class: 'gh-list-item' + active,
+    onclick: () => { state.gh.selectedIssue = i.number; state.gh.selectedPull = null; renderGhList(); renderGhDetail(); },
+  }, [
+    el('h3', {}, `#${i.number} ${i.title}`),
+    el('div', { class: 'meta' }, [
+      el('span', { class: `badge ${i.state}` }, i.state),
+      ' · ',
+      `opened by ${i.user.login}`,
+    ]),
+  ]);
+}
+
+function ghPullListItem(p, owner, name) {
+  const active = state.gh.selectedPull === p.number ? ' active' : '';
+  return el('div', {
+    class: 'gh-list-item' + active,
+    onclick: () => { state.gh.selectedPull = p.number; state.gh.selectedIssue = null; renderGhList(); renderGhDetail(); },
+  }, [
+    el('h3', {}, `#${p.number} ${p.title}`),
+    el('div', { class: 'meta' }, [
+      el('span', { class: 'badge pr' }, 'PR'),
+      ' · ',
+      el('span', { class: `badge ${p.draft ? 'draft' : p.state}` }, p.draft ? 'draft' : p.state),
+      ' · ',
+      `${p.head.ref} → ${p.base.ref} · opened by ${p.user.login}`,
+    ]),
+  ]);
+}
+
+async function renderCodeList(owner, name) {
+  const host = document.getElementById('gh-list');
+  host.innerHTML = '<div style="padding:10px;color:#656d76;font-size:12px">loading...</div>';
+  const r = await fetch(`/github/ui/repo_file?owner=${owner}&repo=${name}&path=${encodeURIComponent(state.gh.codePath)}`);
+  const d = await r.json();
+  host.innerHTML = '';
+  if (d.error) { host.innerHTML = `<div style="padding:14px">${d.error}</div>`; return; }
+  if (d.kind === 'dir') {
+    if (state.gh.codePath) {
+      const parent = state.gh.codePath.split('/').slice(0, -1).join('/');
+      host.appendChild(el('div', {
+        class: 'file-entry',
+        onclick: () => { state.gh.codePath = parent; renderGhList(); },
+      }, '.. /'));
+    }
+    d.entries.forEach(e => {
+      const full = state.gh.codePath ? `${state.gh.codePath}/${e}` : e;
+      host.appendChild(el('div', {
+        class: 'file-entry',
+        onclick: async () => {
+          // Try to fetch as file
+          const r = await fetch(`/github/ui/repo_file?owner=${owner}&repo=${name}&path=${encodeURIComponent(full)}`);
+          const d = await r.json();
+          if (d.kind === 'file') {
+            renderFileDetail(e, d);
+          } else {
+            state.gh.codePath = full; renderGhList();
+          }
+        },
+      }, e));
+    });
+  }
+}
+
+function renderFileDetail(name, fileData) {
+  const host = document.getElementById('gh-detail');
+  host.innerHTML = '';
+  host.appendChild(el('h1', {}, name));
+  const decoded = atob(fileData.content_b64);
+  host.appendChild(el('pre', { class: 'code' }, decoded));
+}
+
+async function renderGhDetail() {
+  const host = document.getElementById('gh-detail');
+  host.innerHTML = '';
+  if (!state.gh.selectedRepo) return;
+  const [owner, name] = state.gh.selectedRepo.split('/');
+
+  if (state.gh.selectedIssue) {
+    const i = state.gh.issues.find(x => x.number === state.gh.selectedIssue && x.html_url.includes(`${owner}/${name}`));
+    if (!i) return;
+    host.appendChild(el('h1', {}, `${i.title} `));
+    host.appendChild(el('span', { class: `badge ${i.state}`, style: 'margin-left:6px' }, i.state));
+    host.appendChild(el('div', { class: 'title-meta' }, `#${i.number} opened by ${i.user.login}`));
+    if (i.body) host.appendChild(ghComment({ body: i.body, user: i.user, created_at: i.created_at }, /*isOP*/true));
+    state.gh.comments
+      .filter(c => c.html_url.includes(`#issue/${owner}/${name}/${i.number}`))
+      .sort((a, b) => a.id - b.id)
+      .forEach(c => host.appendChild(ghComment(c)));
+    host.appendChild(ghCompose(owner, name, i.number));
+  } else if (state.gh.selectedPull) {
+    const p = state.gh.pulls.find(x => x.number === state.gh.selectedPull && x.html_url.includes(`${owner}/${name}`));
+    if (!p) return;
+    host.appendChild(el('h1', {}, `${p.title} `));
+    host.appendChild(el('span', { class: `badge ${p.draft ? 'draft' : p.state}`, style: 'margin-left:6px' }, p.draft ? 'draft' : p.state));
+    host.appendChild(el('div', { class: 'title-meta' }, `#${p.number} · ${p.head.ref} → ${p.base.ref} · opened by ${p.user.login}`));
+    if (p.body) host.appendChild(ghComment({ body: p.body, user: p.user, created_at: p.created_at }, true));
+    host.appendChild(el('div', { style: 'color:#656d76;font-size:12px;margin-top:14px' }, 'Diff view not yet implemented. Clone and inspect locally:'));
+    host.appendChild(el('pre', { class: 'code' }, `git clone http://localhost:3000/git/${owner}/${name}.git`));
+  } else {
+    host.innerHTML = '<div style="color:#656d76;font-size:14px;margin-top:40px;text-align:center">Pick an item.</div>';
+  }
+}
+
+function ghComment(c, isOP) {
+  const who = c.user?.login || 'unknown';
+  return el('div', { class: 'comment' }, [
+    el('div', { class: 'head' }, [
+      el('span', {}, [el('strong', {}, who), ' ', isOP ? 'opened this' : 'commented']),
+      el('span', { style: 'color:#656d76' }, new Date(parseFloat(c.created_at) * 1000).toLocaleString()),
+    ]),
+    el('div', { class: 'body' }, c.body || ''),
+  ]);
+}
+
+function ghCompose(owner, name, number) {
+  const ta = el('textarea', { placeholder: 'Write a comment... (mention @openswe to trigger the agent)' });
+  const btn = el('button', {
+    onclick: async () => {
+      const body = ta.value.trim();
+      if (!body) return;
+      setStatus('posting...');
+      const r = await fetch('/github/ui/post_comment_and_trigger', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ owner, repo: name, number, body }),
+      });
+      const d = await r.json();
+      setStatus(`webhook ${d.forwarded_status ?? 'ERR'} — ${JSON.stringify(d.forwarded_response)}`);
+      ta.value = '';
+    },
+  }, 'Comment & trigger webhook');
+  const mentionBtn = el('button', {
+    class: 'secondary',
+    onclick: () => { ta.value = (ta.value ? ta.value + ' ' : '') + '@openswe '; ta.focus(); },
+  }, '@openswe');
+  return el('div', { class: 'compose' }, [
+    ta,
+    el('div', { class: 'btn-row' }, [
+      btn, mentionBtn,
+      el('span', { class: 'hint' }, 'Comment is saved AND an issue_comment webhook is signed and POSTed to the agent.'),
+    ]),
+  ]);
+}
+
+document.querySelectorAll('.gh-subnav button[data-sub]').forEach(btn => {
+  btn.onclick = async () => {
+    if (btn.dataset.sub === 'new') return ghCreateIssuePrompt();
+    state.gh.sub = btn.dataset.sub;
+    state.gh.codePath = '';
+    renderSubnav();
+    await renderGhList();
+  };
+});
+
+async function ghCreateIssuePrompt() {
+  if (!state.gh.selectedRepo) { alert('Pick a repo first.'); return; }
+  const title = prompt('Issue title?');
+  if (!title) return;
+  const body = prompt('Body? (optional)') || '';
+  const [owner, name] = state.gh.selectedRepo.split('/');
+  await fetch('/github/ui/create_issue', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ owner, repo: name, title, body }),
+  });
+  await ghLoadState();
+}
+
+document.getElementById('gh-reset').onclick = async () => {
+  await fetch('/github/ui/reset', { method: 'POST' });
+  await ghLoadState();
+};
+
+async function ghLoadState() {
+  const d = await (await fetch('/github/ui/state')).json();
+  Object.assign(state.gh, {
+    repos: d.repos, issues: d.issues, pulls: d.pulls, comments: d.comments,
+  });
+  if (!state.gh.selectedRepo && d.repos.length) state.gh.selectedRepo = d.repos[0].full_name;
+  renderAll();
+}
+
+function renderAll() {
+  renderRepoList(); renderSubnav(); renderGhList(); renderGhDetail();
+}
+
+// ===================================================================
+// SSE — shared event bus
+// ===================================================================
+
+function connectEvents() {
+  const src = new EventSource('/slack/ui/events');  // slack's stream is the only one mounted
+  src.onmessage = (ev) => {
+    let d; try { d = JSON.parse(ev.data); } catch { return; }
+    if (d.type === 'slack_message_added') {
+      state.slack.messages.push(d.message); slackRender();
+    } else if (d.type === 'slack_reset') {
+      state.slack.messages = []; state.slack.threadStatuses = {}; closeSlackThread(); slackRender();
+    } else if (d.type === 'slack_thread_status') {
+      if (d.bot_username) state.slack.bot_username = d.bot_username;
+      const key = `${d.channel}/${d.thread_ts}`;
+      if (d.status) state.slack.threadStatuses[key] = d.status;
+      else delete state.slack.threadStatuses[key];
+      setActivity(`slack thread status [${d.channel}/${d.thread_ts}] → ${d.status || '(cleared)'}`);
+      if (state.slack.threadTs === d.thread_ts) slackRenderThread();
+    } else if (d.type === 'webhook_result') {
+      setStatus(`[${d.target}] webhook ${d.status ?? 'ERR'} — ${JSON.stringify(d.response)}`);
+    } else if (d.type === 'slack_reaction') {
+      setActivity(`slack reaction :${d.name}: on ${d.ts}`);
+      const target = state.slack.messages.find(x => x.ts === d.ts);
+      if (target) {
+        target.reactions = target.reactions || [];
+        const existing = target.reactions.find(r => r.name === d.name);
+        if (existing) {
+          if (!existing.users.includes(d.user_id)) {
+            existing.users.push(d.user_id);
+            existing.count = existing.users.length;
+          }
+        } else {
+          target.reactions.push({ name: d.name, count: 1, users: [d.user_id] });
+        }
+        slackRender();
+        if (state.slack.threadTs) slackRenderThread();
+      }
+    } else if (d.type === 'slack_ephemeral') {
+      setActivity(`slack ephemeral → ${d.user}: ${d.text}`);
+    } else if (d.type === 'gh_comment_added') {
+      state.gh.comments.unshift(d.comment); renderGhDetail();
+    } else if (d.type === 'gh_issue_created' || d.type === 'gh_pr_created' || d.type === 'gh_reset') {
+      ghLoadState();
+    } else if (d.type === 'gh_reaction_added') {
+      setActivity(`gh reaction :${d.content}: on ${d.target_type}#${d.target_id}`);
+    }
+  };
+  src.onerror = () => { src.close(); setTimeout(connectEvents, 2000); };
+}
+
+// ===================================================================
+// Boot
+// ===================================================================
+attachMentionPicker('slack-composer');
+attachMentionPicker('slack-thread-composer');
+(async () => {
+  await slackLoadState();
+  await ghLoadState();
+  connectEvents();
+})();
+</script>
+
+</body>
+</html>

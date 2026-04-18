@@ -1,4 +1,5 @@
 import asyncio
+import os
 from typing import Any
 
 import httpx
@@ -6,7 +7,7 @@ from langgraph.config import get_config
 
 from ..utils.github_app import get_github_app_installation_token
 
-GITHUB_API_BASE = "https://api.github.com"
+GITHUB_API_BASE = os.environ.get("GITHUB_API_BASE_URL", "https://api.github.com").rstrip("/")
 
 
 def _get_repo_config() -> dict[str, str]:

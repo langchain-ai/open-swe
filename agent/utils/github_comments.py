@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import hmac
 import logging
+import os
 import re
 from typing import Any
 
@@ -15,17 +16,21 @@ from .github_user_email_map import GITHUB_USER_EMAIL_MAP
 
 logger = logging.getLogger(__name__)
 
+GITHUB_API_BASE_URL = os.environ.get("GITHUB_API_BASE_URL", "https://api.github.com").rstrip("/")
+
 OPEN_SWE_TAGS = ("@openswe", "@open-swe", "@openswe-dev")
 UNTRUSTED_GITHUB_COMMENT_OPEN_TAG = "<dangerous-external-untrusted-users-comment>"
 UNTRUSTED_GITHUB_COMMENT_CLOSE_TAG = "</dangerous-external-untrusted-users-comment>"
 _SANITIZED_UNTRUSTED_GITHUB_COMMENT_OPEN_TAG = "[blocked-untrusted-comment-tag-open]"
 _SANITIZED_UNTRUSTED_GITHUB_COMMENT_CLOSE_TAG = "[blocked-untrusted-comment-tag-close]"
 
-# Reaction endpoint differs per comment type
+# Reaction endpoint differs per comment type. Double-braced placeholders are
+# resolved by the caller via .format(**vars); GITHUB_API_BASE_URL is baked in at
+# module import time.
 _REACTION_ENDPOINTS: dict[str, str] = {
-    "issue_comment": "https://api.github.com/repos/{owner}/{repo}/issues/comments/{comment_id}/reactions",
-    "pull_request_review_comment": "https://api.github.com/repos/{owner}/{repo}/pulls/comments/{comment_id}/reactions",
-    "pull_request_review": "https://api.github.com/repos/{owner}/{repo}/pulls/{pull_number}/reviews/{comment_id}/reactions",
+    "issue_comment": f"{GITHUB_API_BASE_URL}/repos/{{owner}}/{{repo}}/issues/comments/{{comment_id}}/reactions",
+    "pull_request_review_comment": f"{GITHUB_API_BASE_URL}/repos/{{owner}}/{{repo}}/pulls/comments/{{comment_id}}/reactions",
+    "pull_request_review": f"{GITHUB_API_BASE_URL}/repos/{{owner}}/{{repo}}/pulls/{{pull_number}}/reviews/{{comment_id}}/reactions",
 }
 
 
@@ -138,7 +143,7 @@ async def _react_via_graphql(node_id: str | None, *, token: str) -> bool:
     async with httpx.AsyncClient() as http_client:
         try:
             response = await http_client.post(
-                "https://api.github.com/graphql",
+                f"{GITHUB_API_BASE_URL}/graphql",
                 headers={"Authorization": f"Bearer {token}"},
                 json={"query": query, "variables": {"subjectId": node_id}},
             )
@@ -162,7 +167,7 @@ async def post_github_comment(
     """Post a comment to a GitHub issue or PR."""
     owner = repo_config.get("owner", "")
     repo = repo_config.get("name", "")
-    url = f"https://api.github.com/repos/{owner}/{repo}/issues/{issue_number}/comments"
+    url = f"{GITHUB_API_BASE_URL}/repos/{owner}/{repo}/issues/{issue_number}/comments"
     async with httpx.AsyncClient() as client:
         try:
             response = await client.post(
@@ -196,7 +201,7 @@ async def fetch_issue_comments(
     async with httpx.AsyncClient() as http_client:
         comments = await _fetch_paginated(
             http_client,
-            f"https://api.github.com/repos/{owner}/{repo}/issues/{issue_number}/comments",
+            f"{GITHUB_API_BASE_URL}/repos/{owner}/{repo}/issues/{issue_number}/comments",
             headers,
         )
 
@@ -246,17 +251,17 @@ async def fetch_pr_comments_since_last_tag(
         pr_comments, review_comments, reviews = await asyncio.gather(
             _fetch_paginated(
                 http_client,
-                f"https://api.github.com/repos/{owner}/{repo}/issues/{pr_number}/comments",
+                f"{GITHUB_API_BASE_URL}/repos/{owner}/{repo}/issues/{pr_number}/comments",
                 headers,
             ),
             _fetch_paginated(
                 http_client,
-                f"https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}/comments",
+                f"{GITHUB_API_BASE_URL}/repos/{owner}/{repo}/pulls/{pr_number}/comments",
                 headers,
             ),
             _fetch_paginated(
                 http_client,
-                f"https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}/reviews",
+                f"{GITHUB_API_BASE_URL}/repos/{owner}/{repo}/pulls/{pr_number}/reviews",
                 headers,
             ),
         )
@@ -345,7 +350,7 @@ async def fetch_pr_branch(
     try:
         async with httpx.AsyncClient() as http_client:
             response = await http_client.get(
-                f"https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}",
+                f"{GITHUB_API_BASE_URL}/repos/{owner}/{repo}/pulls/{pr_number}",
                 headers=headers,
             )
             if response.status_code == 200:  # noqa: PLR2004

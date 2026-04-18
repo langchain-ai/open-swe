@@ -14,10 +14,11 @@ from typing import Any
 import httpx
 
 from agent.utils.langsmith import get_langsmith_trace_url
+from agent.utils.slack_thread_cache import record_slack_thread_participation
 
 logger = logging.getLogger(__name__)
 
-SLACK_API_BASE_URL = "https://slack.com/api"
+SLACK_API_BASE_URL = os.environ.get("SLACK_API_BASE_URL", "https://slack.com/api").rstrip("/")
 SLACK_BOT_TOKEN = os.environ.get("SLACK_BOT_TOKEN", "")
 
 
@@ -182,6 +183,30 @@ def format_slack_messages_for_prompt(
     return "\n".join(lines)
 
 
+async def post_slack_message(channel_id: str, text: str) -> bool:
+    """Post a top-level (non-threaded) message to a Slack channel/DM."""
+    if not SLACK_BOT_TOKEN:
+        return False
+
+    payload = {"channel": channel_id, "text": text}
+    async with httpx.AsyncClient() as http_client:
+        try:
+            response = await http_client.post(
+                f"{SLACK_API_BASE_URL}/chat.postMessage",
+                headers=_slack_headers(),
+                json=payload,
+            )
+            response.raise_for_status()
+            data = response.json()
+            if not data.get("ok"):
+                logger.warning("Slack chat.postMessage failed: %s", data.get("error"))
+                return False
+            return True
+        except httpx.HTTPError:
+            logger.exception("Slack chat.postMessage request failed")
+            return False
+
+
 async def post_slack_thread_reply(channel_id: str, thread_ts: str, text: str) -> bool:
     """Post a reply in a Slack thread."""
     if not SLACK_BOT_TOKEN:
@@ -205,6 +230,7 @@ async def post_slack_thread_reply(channel_id: str, thread_ts: str, text: str) ->
             if not data.get("ok"):
                 logger.warning("Slack chat.postMessage failed: %s", data.get("error"))
                 return False
+            record_slack_thread_participation(channel_id, thread_ts)
             return True
         except httpx.HTTPError:
             logger.exception("Slack chat.postMessage request failed")
@@ -272,6 +298,43 @@ async def add_slack_reaction(channel_id: str, message_ts: str, emoji: str = "eye
             return False
         except httpx.HTTPError:
             logger.exception("Slack reactions.add request failed")
+            return False
+
+
+async def set_slack_thread_status(
+    channel_id: str, thread_ts: str, status: str
+) -> bool:
+    """Set (or clear) the Assistant-API thread status for a Slack thread.
+
+    Slack renders this as "<App Name> <status>" below the composer, e.g.
+    "openswe-bot is thinking...". Sending an empty string clears it.
+    """
+    if not SLACK_BOT_TOKEN:
+        return False
+
+    payload = {
+        "channel_id": channel_id,
+        "thread_ts": thread_ts,
+        "status": status,
+    }
+
+    async with httpx.AsyncClient() as http_client:
+        try:
+            response = await http_client.post(
+                f"{SLACK_API_BASE_URL}/assistant.threads.setStatus",
+                headers=_slack_headers(),
+                json=payload,
+            )
+            response.raise_for_status()
+            data = response.json()
+            if data.get("ok"):
+                return True
+            logger.warning(
+                "Slack assistant.threads.setStatus failed: %s", data.get("error")
+            )
+            return False
+        except httpx.HTTPError:
+            logger.exception("Slack assistant.threads.setStatus request failed")
             return False
 
 

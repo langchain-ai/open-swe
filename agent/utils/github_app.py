@@ -13,7 +13,20 @@ logger = logging.getLogger(__name__)
 
 GITHUB_APP_ID = os.environ.get("GITHUB_APP_ID", "")
 GITHUB_APP_PRIVATE_KEY = os.environ.get("GITHUB_APP_PRIVATE_KEY", "")
+# In dev you usually want a PEM file on disk rather than escaping the whole key
+# into a single env line. Path wins if the inline var is empty.
+_GITHUB_APP_PRIVATE_KEY_PATH = os.environ.get("GITHUB_APP_PRIVATE_KEY_PATH", "")
+if not GITHUB_APP_PRIVATE_KEY and _GITHUB_APP_PRIVATE_KEY_PATH:
+    try:
+        with open(_GITHUB_APP_PRIVATE_KEY_PATH) as _f:
+            GITHUB_APP_PRIVATE_KEY = _f.read()
+    except OSError:
+        logger.warning(
+            "GITHUB_APP_PRIVATE_KEY_PATH=%s could not be read",
+            _GITHUB_APP_PRIVATE_KEY_PATH,
+        )
 GITHUB_APP_INSTALLATION_ID = os.environ.get("GITHUB_APP_INSTALLATION_ID", "")
+GITHUB_API_BASE_URL = os.environ.get("GITHUB_API_BASE_URL", "https://api.github.com").rstrip("/")
 
 
 def _generate_app_jwt() -> str:
@@ -42,7 +55,7 @@ async def get_github_app_installation_token() -> str | None:
         app_jwt = _generate_app_jwt()
         async with httpx.AsyncClient() as client:
             response = await client.post(
-                f"https://api.github.com/app/installations/{GITHUB_APP_INSTALLATION_ID}/access_tokens",
+                f"{GITHUB_API_BASE_URL}/app/installations/{GITHUB_APP_INSTALLATION_ID}/access_tokens",
                 headers={
                     "Authorization": f"Bearer {app_jwt}",
                     "Accept": "application/vnd.github+json",

@@ -390,7 +390,11 @@ async def resolve_github_token(config: RunnableConfig, thread_id: str) -> tuple[
             github_login = configurable.get("github_login")
             email = GITHUB_USER_EMAIL_MAP.get(github_login or "")
             if not email:
-                raise ValueError(f"No email mapping found for GitHub user '{github_login}'")
+                from .options import allow_any_gh_user_enabled
+                if allow_any_gh_user_enabled() and github_login:
+                    email = f"{github_login}@local"
+                else:
+                    raise ValueError(f"No email mapping found for GitHub user '{github_login}'")
             return await save_encrypted_token_from_email(email, source)
         return await save_encrypted_token_from_email(configurable.get("user_email"), source)
     except ValueError as exc:
