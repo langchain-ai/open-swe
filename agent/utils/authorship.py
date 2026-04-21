@@ -23,6 +23,7 @@ class CollaboratorIdentity:
     display_name: str
     commit_name: str
     commit_email: str
+    github_login: str | None = None
 
 
 def _normalize_text(value: Any) -> str:
@@ -72,6 +73,7 @@ def _identity_from_github_token(github_token: str | None) -> CollaboratorIdentit
             display_name=display_name,
             commit_name=display_name,
             commit_email=commit_email,
+            github_login=login,
         )
     except httpx.HTTPError:
         logger.debug("Failed to resolve GitHub user identity from token", exc_info=True)
@@ -92,6 +94,7 @@ def _identity_from_config(config: dict[str, Any]) -> CollaboratorIdentity | None
                 display_name=github_login,
                 commit_name=github_login,
                 commit_email=commit_email,
+                github_login=github_login,
             )
 
     slack_thread = configurable.get("slack_thread", {})

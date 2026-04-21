@@ -173,6 +173,7 @@ async def open_pr_if_needed(
             head_branch=target_branch,
             base_branch=base_branch,
             body=pr_body,
+            assignee_login=user_identity.github_login if user_identity else None,
         )
 
         logger.info("After-agent middleware completed successfully")
