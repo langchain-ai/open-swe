@@ -153,6 +153,10 @@ Then set the resulting UUID in your environment:
 DEFAULT_SANDBOX_SNAPSHOT_ID="<snapshot-uuid>"
 # Optional; overrides the snapshot's root FS size at sandbox boot. Default is 32 GiB.
 DEFAULT_SANDBOX_SNAPSHOT_FS_CAPACITY_BYTES="34359738368"
+# Optional; number of vCPUs per sandbox. Default is 4.
+DEFAULT_SANDBOX_VCPUS="4"
+# Optional; memory in bytes per sandbox. Default is 15 GiB.
+DEFAULT_SANDBOX_MEM_BYTES="16106127360"
 ```
 
 `DEFAULT_SANDBOX_SNAPSHOT_ID` is required when `SANDBOX_TYPE=langsmith`. The server validates this at startup and refuses to boot if it's missing.
@@ -363,8 +367,10 @@ SLACK_SIGNING_SECRET=""
 EXA_API_KEY=""                         # From https://dashboard.exa.ai
 
 # === Sandbox (optional) ===
-DEFAULT_SANDBOX_TEMPLATE_NAME=""       # Custom sandbox template name (default: deepagents-cli)
-DEFAULT_SANDBOX_TEMPLATE_IMAGE=""      # Custom Docker image (default: python:3)
+DEFAULT_SANDBOX_SNAPSHOT_ID=""         # Required when SANDBOX_TYPE=langsmith (see step 4c)
+DEFAULT_SANDBOX_SNAPSHOT_FS_CAPACITY_BYTES=""  # Root FS size in bytes (default: 32 GiB)
+DEFAULT_SANDBOX_VCPUS=""               # vCPUs per sandbox (default: 4)
+DEFAULT_SANDBOX_MEM_BYTES=""           # Memory in bytes per sandbox (default: 15 GiB)
 
 # === Token Encryption ===
 TOKEN_ENCRYPTION_KEY=""                # Generate with: openssl rand -base64 32

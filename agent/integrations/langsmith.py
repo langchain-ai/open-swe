@@ -16,6 +16,8 @@ from langsmith.sandbox import SandboxClient
 logger = logging.getLogger(__name__)
 
 DEFAULT_SNAPSHOT_FS_CAPACITY_BYTES = 32 * 1024**3
+DEFAULT_SANDBOX_VCPUS = 4
+DEFAULT_SANDBOX_MEM_BYTES = 15 * 1024**3  # 15 GiB
 
 
 def _get_langsmith_api_key() -> str | None:
@@ -27,16 +29,16 @@ def _get_langsmith_api_key() -> str | None:
     return os.environ.get("LANGSMITH_API_KEY") or os.environ.get("LANGSMITH_API_KEY_PROD")
 
 
-def _get_sandbox_snapshot_config() -> tuple[str | None, int]:
-    """Get sandbox snapshot configuration from environment.
-
-    Returns (snapshot_id, fs_capacity_bytes). fs_capacity_bytes falls back
-    to DEFAULT_SNAPSHOT_FS_CAPACITY_BYTES (32 GB) when the env var is unset.
-    """
+def _get_sandbox_snapshot_config() -> tuple[str | None, int, int, int]:
+    """Get sandbox snapshot configuration from environment."""
     snapshot_id = os.environ.get("DEFAULT_SANDBOX_SNAPSHOT_ID")
     raw_capacity = os.environ.get("DEFAULT_SANDBOX_SNAPSHOT_FS_CAPACITY_BYTES")
     fs_capacity_bytes = int(raw_capacity) if raw_capacity else DEFAULT_SNAPSHOT_FS_CAPACITY_BYTES
-    return snapshot_id, fs_capacity_bytes
+    raw_vcpus = os.environ.get("DEFAULT_SANDBOX_VCPUS")
+    vcpus = int(raw_vcpus) if raw_vcpus else DEFAULT_SANDBOX_VCPUS
+    raw_mem = os.environ.get("DEFAULT_SANDBOX_MEM_BYTES")
+    mem_bytes = int(raw_mem) if raw_mem else DEFAULT_SANDBOX_MEM_BYTES
+    return snapshot_id, fs_capacity_bytes, vcpus, mem_bytes
 
 
 def _configure_github_proxy(sandbox_name: str, github_token: str) -> None:
@@ -104,13 +106,15 @@ def create_langsmith_sandbox(
         SandboxBackendProtocol instance
     """
     api_key = _get_langsmith_api_key()
-    snapshot_id, fs_capacity_bytes = _get_sandbox_snapshot_config()
+    snapshot_id, fs_capacity_bytes, vcpus, mem_bytes = _get_sandbox_snapshot_config()
 
     provider = LangSmithProvider(api_key=api_key)
     backend = provider.get_or_create(
         sandbox_id=sandbox_id,
         snapshot_id=snapshot_id,
         fs_capacity_bytes=fs_capacity_bytes,
+        vcpus=vcpus,
+        mem_bytes=mem_bytes,
     )
     _update_thread_sandbox_metadata(backend.id)
 
@@ -210,6 +214,8 @@ class LangSmithProvider(SandboxProvider):
         timeout: int = 180,
         snapshot_id: str | None = None,
         fs_capacity_bytes: int | None = None,
+        vcpus: int | None = None,
+        mem_bytes: int | None = None,
         **kwargs: Any,
     ) -> SandboxBackendProtocol:
         """Get existing or create new LangSmith sandbox."""
@@ -232,6 +238,8 @@ class LangSmithProvider(SandboxProvider):
             sandbox = self._client.create_sandbox(
                 snapshot_id=snapshot_id,
                 fs_capacity_bytes=fs_capacity_bytes,
+                vcpus=vcpus,
+                mem_bytes=mem_bytes,
                 timeout=timeout,
             )
         except Exception as e:
