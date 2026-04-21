@@ -21,7 +21,9 @@ class _FakeResponse:
 
 
 class _FakeAsyncClient:
-    def __init__(self, responses: list[_FakeResponse], calls: list[tuple[str, str, dict | None]]) -> None:
+    def __init__(
+        self, responses: list[_FakeResponse], calls: list[tuple[str, str, dict | None]]
+    ) -> None:
         self._responses = responses
         self._calls = calls
 
@@ -31,7 +33,9 @@ class _FakeAsyncClient:
     async def __aexit__(self, exc_type, exc, tb) -> None:
         return None
 
-    async def post(self, url: str, *, headers: dict[str, str], json: dict | None = None) -> _FakeResponse:
+    async def post(
+        self, url: str, *, headers: dict[str, str], json: dict | None = None
+    ) -> _FakeResponse:
         self._calls.append(("POST", url, json))
         return self._responses.pop(0)
 
@@ -43,7 +47,9 @@ class _FakeAsyncClient:
 
 
 class _RaiseOnSecondPostClient(_FakeAsyncClient):
-    async def post(self, url: str, *, headers: dict[str, str], json: dict | None = None) -> _FakeResponse:
+    async def post(
+        self, url: str, *, headers: dict[str, str], json: dict | None = None
+    ) -> _FakeResponse:
         self._calls.append(("POST", url, json))
         if len(self._calls) == 2:
             request = github.httpx.Request("POST", url)
