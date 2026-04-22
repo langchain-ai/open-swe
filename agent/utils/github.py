@@ -129,7 +129,6 @@ async def create_github_pr(
     head_branch: str,
     base_branch: str,
     body: str,
-    assignee_login: str | None = None,
 ) -> tuple[str | None, int | None, bool]:
     """Create a draft GitHub pull request via the API.
 
@@ -141,7 +140,6 @@ async def create_github_pr(
         head_branch: Source branch name
         base_branch: Target branch name
         body: PR description
-        assignee_login: GitHub login to assign to the PR after it is opened
 
     Returns:
         Tuple of (pr_url, pr_number, pr_existing) if successful, (None, None, False) otherwise
@@ -179,14 +177,6 @@ async def create_github_pr(
             if pr_response.status_code == HTTP_CREATED:
                 pr_url = pr_data.get("html_url")
                 pr_number = pr_data.get("number")
-                await _assign_pr_assignee(
-                    http_client=http_client,
-                    repo_owner=repo_owner,
-                    repo_name=repo_name,
-                    github_token=github_token,
-                    pr_number=pr_number,
-                    assignee_login=assignee_login,
-                )
                 logger.info("PR created successfully: %s", pr_url)
                 return pr_url, pr_number, False
 
@@ -200,14 +190,6 @@ async def create_github_pr(
                     head_branch=head_branch,
                 )
                 if existing:
-                    await _assign_pr_assignee(
-                        http_client=http_client,
-                        repo_owner=repo_owner,
-                        repo_name=repo_name,
-                        github_token=github_token,
-                        pr_number=existing[1],
-                        assignee_login=assignee_login,
-                    )
                     logger.info("Using existing PR for head branch: %s", existing[0])
                     return existing[0], existing[1], True
             else:
@@ -225,52 +207,6 @@ async def create_github_pr(
         except httpx.HTTPError:
             logger.exception("Failed to create PR via GitHub API")
             return None, None, False
-
-
-async def _assign_pr_assignee(
-    http_client: httpx.AsyncClient,
-    repo_owner: str,
-    repo_name: str,
-    github_token: str,
-    pr_number: int | None,
-    assignee_login: str | None,
-) -> None:
-    """Assign a PR to a GitHub user without failing PR creation on errors."""
-    if not pr_number or not assignee_login:
-        return
-
-    try:
-        response = await http_client.post(
-            f"https://api.github.com/repos/{repo_owner}/{repo_name}/issues/{pr_number}/assignees",
-            headers={
-                "Authorization": f"Bearer {github_token}",
-                "Accept": "application/vnd.github+json",
-                "X-GitHub-Api-Version": "2022-11-28",
-            },
-            json={"assignees": [assignee_login]},
-        )
-        if response.is_success:
-            logger.info("Assigned PR #%s to %s", pr_number, assignee_login)
-            return
-
-        try:
-            payload = response.json()
-        except ValueError:
-            payload = {}
-        logger.warning(
-            "Failed to assign PR #%s to %s (%s): %s",
-            pr_number,
-            assignee_login,
-            response.status_code,
-            payload.get("message") if isinstance(payload, dict) else None,
-        )
-    except httpx.HTTPError:
-        logger.warning(
-            "Failed to assign PR #%s to %s because of an HTTP error",
-            pr_number,
-            assignee_login,
-            exc_info=True,
-        )
 
 
 async def _find_existing_pr(

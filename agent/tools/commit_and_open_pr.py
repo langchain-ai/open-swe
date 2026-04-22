@@ -218,7 +218,6 @@ def commit_and_open_pr(
                 head_branch=target_branch,
                 base_branch=base_branch,
                 body=pr_body,
-                assignee_login=user_identity.github_login if user_identity else None,
             )
         )
 
