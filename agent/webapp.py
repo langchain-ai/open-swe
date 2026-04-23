@@ -681,7 +681,7 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
     else:
         logger.info("Creating LangGraph run for thread %s", thread_id)
         langgraph_client = get_client(url=LANGGRAPH_URL)
-        run = await langgraph_client.runs.create(
+        await langgraph_client.runs.create(
             thread_id,
             "agent",
             input={"messages": [{"role": "user", "content": content_blocks}]},
@@ -834,7 +834,7 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
             logger.error("Failed to queue Slack message for thread %s", thread_id)
         return
 
-    run = await langgraph_client.runs.create(
+    await langgraph_client.runs.create(
         thread_id,
         "agent",
         input={"messages": [{"role": "user", "content": content_blocks}]},
