@@ -675,7 +675,7 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
             langgraph_client = get_client(url=LANGGRAPH_URL)
             runs = await langgraph_client.runs.list(thread_id, limit=1)
             if runs:
-                await post_linear_trace_comment(issue_id, runs[0]["run_id"], triggering_comment_id)
+                await post_linear_trace_comment(issue_id, thread_id, triggering_comment_id)
         else:
             logger.error("Failed to queue message for thread %s", thread_id)
     else:
@@ -689,7 +689,7 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
             if_not_exists="create",
         )
         logger.info("LangGraph run created successfully for thread %s", thread_id)
-        await post_linear_trace_comment(issue_id, run["run_id"], triggering_comment_id)
+        await post_linear_trace_comment(issue_id, thread_id, triggering_comment_id)
 
 
 async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[str, str]) -> None:
@@ -842,7 +842,7 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
         if_not_exists="create",
         multitask_strategy="interrupt",
     )
-    await post_slack_trace_reply(channel_id, thread_ts, run["run_id"])
+    await post_slack_trace_reply(channel_id, thread_ts, thread_id)
 
 
 def verify_linear_signature(body: bytes, signature: str, secret: str) -> bool:

@@ -365,10 +365,12 @@ async def fetch_slack_thread_messages(channel_id: str, thread_ts: str) -> list[d
     return messages
 
 
-async def post_slack_trace_reply(channel_id: str, thread_ts: str, run_id: str) -> None:
+async def post_slack_trace_reply(channel_id: str, thread_ts: str, thread_id: str) -> None:
     """Post a trace URL reply in a Slack thread."""
-    trace_url = get_langsmith_trace_url(run_id)
+    trace_url = get_langsmith_trace_url(thread_id)
     if trace_url:
         await post_slack_thread_reply(
             channel_id, thread_ts, f"Working on it! <{trace_url}|View trace>"
         )
+    else:
+        await post_slack_thread_reply(channel_id, thread_ts, "Working on it!")
