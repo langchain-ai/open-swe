@@ -12,6 +12,11 @@ from .github_review import (
     update_pr_review,
 )
 from .http_request import http_request
+from .langsmith_traces import (
+    langsmith_get_run,
+    langsmith_list_runs,
+    langsmith_project_stats,
+)
 from .linear_comment import linear_comment
 from .linear_create_issue import linear_create_issue
 from .linear_delete_issue import linear_delete_issue
@@ -32,6 +37,9 @@ __all__ = [
     "get_pr_review",
     "github_comment",
     "http_request",
+    "langsmith_get_run",
+    "langsmith_list_runs",
+    "langsmith_project_stats",
     "linear_comment",
     "list_pr_review_comments",
     "list_pr_reviews",
