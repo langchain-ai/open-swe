@@ -35,6 +35,10 @@ class TestExtractRepoFromText:
         )
         assert result == {"owner": "langchain-ai", "name": "langgraph-api"}
 
+    def test_github_url_with_trailing_slash(self) -> None:
+        result = extract_repo_from_text("check https://github.com/langchain-ai/langgraph-api/")
+        assert result == {"owner": "langchain-ai", "name": "langgraph-api"}
+
     def test_explicit_repo_beats_github_url(self) -> None:
         result = extract_repo_from_text(
             "see https://github.com/langchain-ai/langgraph-api but use repo:my-org/my-repo"
