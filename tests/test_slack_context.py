@@ -173,7 +173,17 @@ def test_get_slack_repo_config_message_repo_overrides_existing_thread_repo(
         thread={"metadata": {"repo": {"owner": "saved-owner", "name": "saved-repo"}}}
     )
 
+    posted = False
+
+    async def fake_post_slack_thread_reply(channel_id: str, thread_ts: str, text: str) -> bool:
+        nonlocal posted
+        posted = True
+        return True
+
     monkeypatch.setattr(webapp, "get_client", lambda url: _FakeClient(threads_client))
+    monkeypatch.setattr(
+        webapp, "post_slack_thread_reply", fake_post_slack_thread_reply, raising=False
+    )
 
     repo = asyncio.run(
         webapp.get_slack_repo_config("please use repo:new-owner/new-repo", "C123", "1.234")
@@ -181,6 +191,7 @@ def test_get_slack_repo_config_message_repo_overrides_existing_thread_repo(
 
     assert repo == {"owner": "new-owner", "name": "new-repo"}
     assert threads_client.requested_thread_id is None
+    assert not posted
 
 
 def test_get_slack_repo_config_parses_message_for_new_thread(
