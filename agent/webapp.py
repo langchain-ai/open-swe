@@ -48,7 +48,6 @@ from .utils.slack import (
     format_slack_messages_for_prompt,
     get_slack_user_info,
     get_slack_user_names,
-    post_slack_thread_reply,
     post_slack_trace_reply,
     select_slack_context_messages,
     strip_bot_mention,
@@ -337,16 +336,6 @@ async def _upsert_slack_thread_repo_metadata(
         )
 
 
-async def check_if_using_repo_msg_sent(
-    channel_id: str, thread_ts: str, using_repo_str: str
-) -> bool:
-    thread_messages = await fetch_slack_thread_messages(channel_id, thread_ts)
-    for message in thread_messages:
-        if using_repo_str in message.get("text", ""):
-            return True
-    return False
-
-
 async def get_slack_repo_config(message: str, channel_id: str, thread_ts: str) -> dict[str, str]:
     """Resolve repository configuration for Slack-triggered runs."""
     default_owner = SLACK_REPO_OWNER.strip() or DEFAULT_REPO_OWNER
@@ -371,10 +360,6 @@ async def get_slack_repo_config(message: str, channel_id: str, thread_ts: str) -
 
     if not repo_config:
         repo_config = {"owner": default_owner, "name": default_name}
-
-    using_repo_str = f"Using repository: `{repo_config['owner']}/{repo_config['name']}`"
-    if not await check_if_using_repo_msg_sent(channel_id, thread_ts, using_repo_str):
-        await post_slack_thread_reply(channel_id, thread_ts, using_repo_str)
 
     return repo_config
 
