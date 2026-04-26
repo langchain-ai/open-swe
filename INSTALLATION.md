@@ -127,7 +127,9 @@ To set up per-user OAuth:
 1. In LangSmith, go to **Settings → OAuth Providers → Add Provider**
 2. Set the **Provider ID** to the same string you chose in step 3a (e.g. `github-oauth-provider`)
 3. Enter the **Client ID** and **Client Secret** from your GitHub App (found on the GitHub App settings page under **OAuth credentials**)
-4. Save. You'll reference this Provider ID as `GITHUB_OAUTH_PROVIDER_ID` in your environment variables.
+4. Enter the **Authorization URL** as `https://github.com/login/oauth/authorize` and the **Token URL** as `https://github.com/login/oauth/access_token`.
+5. Leave "Enable PKCE" unchecked.
+6. Save. You'll reference this Provider ID as `GITHUB_OAUTH_PROVIDER_ID` in your environment variables.
 
 ### 4c. Sandbox snapshots
 
