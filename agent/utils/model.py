@@ -5,7 +5,7 @@ from langchain.chat_models import init_chat_model
 OPENAI_RESPONSES_WS_BASE_URL = "wss://api.openai.com/v1"
 
 
-OpenAIReasoningEffort = Literal["none", "minimal", "low", "medium", "high", "xhigh"]
+OpenAIReasoningEffort = Literal["none", "low", "medium", "high", "xhigh"]
 
 
 class OpenAIReasoning(TypedDict, total=False):
