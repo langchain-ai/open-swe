@@ -1,10 +1,18 @@
+from typing import Literal, TypedDict, Unpack
+
 from langchain.chat_models import init_chat_model
 
 OPENAI_RESPONSES_WS_BASE_URL = "wss://api.openai.com/v1"
 
 
-def make_model(model_id: str, **kwargs: dict):
-    model_kwargs = kwargs.copy()
+class ModelKwargs(TypedDict, total=False):
+    max_tokens: int | None
+    reasoning_effort: Literal["minimal", "low", "medium", "high"]
+    temperature: float | None
+
+
+def make_model(model_id: str, **kwargs: Unpack[ModelKwargs]):
+    model_kwargs: dict[str, object] = kwargs.copy()
 
     if model_id.startswith("openai:"):
         model_kwargs["base_url"] = OPENAI_RESPONSES_WS_BASE_URL
