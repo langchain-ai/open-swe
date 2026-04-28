@@ -186,7 +186,7 @@ def graph_loaded_for_execution(config: RunnableConfig) -> bool:
 DEFAULT_LLM_MODEL_ID = "openai:gpt-5.5"
 DEFAULT_LLM_REASONING: OpenAIReasoning = {"effort": "medium"}
 DEFAULT_LLM_MAX_TOKENS = 128_000
-DEFAULT_RECURSION_LIMIT = 1_000
+DEFAULT_RECURSION_LIMIT = 9_999
 
 
 async def get_agent(config: RunnableConfig) -> Pregel:
