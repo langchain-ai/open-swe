@@ -7,7 +7,7 @@ Open SWE is designed to be forked and customized for your org. The core agent is
 model_id = os.environ.get("LLM_MODEL_ID", DEFAULT_LLM_MODEL_ID)
 model_kwargs = {"max_tokens": 20_000}
 if model_id == DEFAULT_LLM_MODEL_ID:
-    model_kwargs["reasoning_effort"] = DEFAULT_LLM_REASONING_EFFORT
+    model_kwargs["reasoning"] = DEFAULT_LLM_REASONING
 
 return create_deep_agent(
     model=make_model(model_id, **model_kwargs),
@@ -144,7 +144,7 @@ Use the `provider:model` format:
 model=make_model("anthropic:claude-sonnet-4-6", temperature=0, max_tokens=16_000)
 
 # OpenAI (uses Responses API by default)
-model=make_model("openai:gpt-5.5", max_tokens=20_000, reasoning_effort="medium")
+model=make_model("openai:gpt-5.5", max_tokens=20_000, reasoning={"effort": "medium"})
 
 # Google
 model=make_model("google_genai:gemini-2.5-pro", temperature=0, max_tokens=16_000)
@@ -176,7 +176,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         model = make_model("anthropic:claude-sonnet-4-6", temperature=0, max_tokens=16_000)
     else:
         # Full model for code changes from Linear
-        model = make_model("openai:gpt-5.5", max_tokens=20_000, reasoning_effort="medium")
+        model = make_model("openai:gpt-5.5", max_tokens=20_000, reasoning={"effort": "medium"})
     
     return create_deep_agent(model=model, ...)
 ```

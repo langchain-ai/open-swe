@@ -59,7 +59,7 @@ from .tools import (
 )
 from .utils.auth import resolve_github_token
 from .utils.github_app import get_github_app_installation_token
-from .utils.model import make_model
+from .utils.model import ModelKwargs, OpenAIReasoning, make_model
 from .utils.sandbox import create_sandbox
 from .utils.sandbox_paths import aresolve_sandbox_work_dir
 
@@ -184,7 +184,7 @@ def graph_loaded_for_execution(config: RunnableConfig) -> bool:
 
 
 DEFAULT_LLM_MODEL_ID = "openai:gpt-5.5"
-DEFAULT_LLM_REASONING_EFFORT = "medium"
+DEFAULT_LLM_REASONING: OpenAIReasoning = {"effort": "medium"}
 DEFAULT_RECURSION_LIMIT = 1_000
 
 
@@ -275,9 +275,9 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     work_dir = await aresolve_sandbox_work_dir(sandbox_backend)
 
     model_id = os.environ.get("LLM_MODEL_ID", DEFAULT_LLM_MODEL_ID)
-    model_kwargs: dict[str, object] = {"max_tokens": 20_000}
+    model_kwargs: ModelKwargs = {"max_tokens": 20_000}
     if model_id == DEFAULT_LLM_MODEL_ID:
-        model_kwargs["reasoning_effort"] = DEFAULT_LLM_REASONING_EFFORT
+        model_kwargs["reasoning"] = DEFAULT_LLM_REASONING
 
     logger.info("Returning agent with sandbox for thread %s", thread_id)
     return create_deep_agent(
