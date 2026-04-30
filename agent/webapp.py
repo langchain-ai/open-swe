@@ -5,8 +5,9 @@ import hmac
 import json
 import logging
 import os
-import re
 import uuid
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import Any
 
 import httpx
@@ -15,7 +16,11 @@ from langchain_core.messages.content import create_text_block
 from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
 
-from .utils.auth import persist_encrypted_github_token, resolve_github_token_from_email
+from .utils.auth import (
+    is_bot_token_only_mode,
+    persist_encrypted_github_token,
+    resolve_github_token_from_email,
+)
 from .utils.comments import get_recent_comments
 from .utils.github_app import get_github_app_installation_token
 from .utils.github_comments import (
@@ -32,15 +37,19 @@ from .utils.github_comments import (
 )
 from .utils.github_token import get_github_token_from_thread
 from .utils.github_user_email_map import GITHUB_USER_EMAIL_MAP
+from .utils.linear import post_linear_trace_comment
 from .utils.linear_team_repo_map import LINEAR_TEAM_TO_REPO
 from .utils.multimodal import dedupe_urls, extract_image_urls, fetch_image_block
+from .utils.repo import extract_repo_from_text
+from .utils.sandbox import validate_sandbox_startup_config
 from .utils.slack import (
     add_slack_reaction,
     fetch_slack_thread_messages,
     format_slack_messages_for_prompt,
     get_slack_user_info,
     get_slack_user_names,
-    post_slack_thread_reply,
+    post_slack_trace_reply,
+    resolve_slack_links_in_context,
     select_slack_context_messages,
     strip_bot_mention,
     verify_slack_signature,
@@ -48,18 +57,39 @@ from .utils.slack import (
 
 logger = logging.getLogger(__name__)
 
-app = FastAPI()
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    validate_sandbox_startup_config()
+    yield
+
+
+app = FastAPI(lifespan=lifespan)
 
 LINEAR_WEBHOOK_SECRET = os.environ.get("LINEAR_WEBHOOK_SECRET", "")
 GITHUB_WEBHOOK_SECRET = os.environ.get("GITHUB_WEBHOOK_SECRET", "")
 SLACK_SIGNING_SECRET = os.environ.get("SLACK_SIGNING_SECRET", "")
 SLACK_BOT_USER_ID = os.environ.get("SLACK_BOT_USER_ID", "")
 SLACK_BOT_USERNAME = os.environ.get("SLACK_BOT_USERNAME", "")
-SLACK_REPO_OWNER = os.environ.get("SLACK_REPO_OWNER", "langchain-ai")
-SLACK_REPO_NAME = os.environ.get("SLACK_REPO_NAME", "open-swe")
+DEFAULT_REPO_OWNER = os.environ.get("DEFAULT_REPO_OWNER", "langchain-ai")
+DEFAULT_REPO_NAME = os.environ.get("DEFAULT_REPO_NAME", "langchainplus")
+SLACK_REPO_OWNER = os.environ.get("SLACK_REPO_OWNER", "") or DEFAULT_REPO_OWNER
+SLACK_REPO_NAME = os.environ.get("SLACK_REPO_NAME", "") or DEFAULT_REPO_NAME
 
 LANGGRAPH_URL = os.environ.get("LANGGRAPH_URL") or os.environ.get(
     "LANGGRAPH_URL_PROD", "http://localhost:2024"
+)
+
+_AGENT_VERSION_METADATA: dict[str, str] = (
+    {"LANGSMITH_AGENT_VERSION": os.environ["LANGCHAIN_REVISION_ID"]}
+    if os.environ.get("LANGCHAIN_REVISION_ID")
+    else {}
+)
+
+ALLOWED_GITHUB_ORGS: frozenset[str] = frozenset(
+    org.strip().lower()
+    for org in os.environ.get("ALLOWED_GITHUB_ORGS", "").split(",")
+    if org.strip()
 )
 
 LINEAR_API_KEY = os.environ.get("LINEAR_API_KEY", "")
@@ -78,20 +108,11 @@ _GITHUB_BOT_MESSAGE_PREFIXES = (
 def get_repo_config_from_team_mapping(
     team_identifier: str, project_name: str = ""
 ) -> dict[str, str]:
-    """
-    Look up repository configuration from LINEAR_TEAM_TO_REPO mapping.
+    """Look up repository configuration from LINEAR_TEAM_TO_REPO mapping."""
+    fallback = {"owner": DEFAULT_REPO_OWNER, "name": DEFAULT_REPO_NAME}
 
-    Supports both legacy flat mapping (team -> repo) and new nested mapping (team -> project -> repo).
-
-    Args:
-        team_identifier: Team name or ID to look up (e.g., "LangChain OSS")
-        project_name: Name of the project (e.g., "deepagents")
-
-    Returns:
-        Repository config dict with 'owner' and 'name' keys. Defaults to langchainplus if not found.
-    """
     if not team_identifier or team_identifier not in LINEAR_TEAM_TO_REPO:
-        return {"owner": "langchain-ai", "name": "langchainplus"}
+        return fallback
 
     config = LINEAR_TEAM_TO_REPO[team_identifier]
 
@@ -106,7 +127,7 @@ def get_repo_config_from_team_mapping(
     if "default" in config:
         return config["default"]
 
-    return {"owner": "langchain-ai", "name": "langchainplus"}
+    return fallback
 
 
 async def react_to_linear_comment(comment_id: str, emoji: str = "👀") -> bool:
@@ -278,6 +299,18 @@ def _is_not_found_error(exc: Exception) -> bool:
     return getattr(exc, "status_code", None) == 404
 
 
+def _is_repo_org_allowed(repo_config: dict[str, str]) -> bool:
+    """Check if the repo owner/org is in the allowlist.
+
+    Returns True if no allowlist is configured (empty ALLOWED_GITHUB_ORGS),
+    or if the repo owner is in the allowlist.
+    """
+    if not ALLOWED_GITHUB_ORGS:
+        return True
+    owner = repo_config.get("owner", "").lower()
+    return owner in ALLOWED_GITHUB_ORGS
+
+
 async def _upsert_slack_thread_repo_metadata(
     thread_id: str, repo_config: dict[str, str], langgraph_client: LangGraphClient
 ) -> None:
@@ -304,43 +337,21 @@ async def _upsert_slack_thread_repo_metadata(
         )
 
 
-async def check_if_using_repo_msg_sent(
-    channel_id: str, thread_ts: str, using_repo_str: str
-) -> bool:
-    thread_messages = await fetch_slack_thread_messages(channel_id, thread_ts)
-    for message in thread_messages:
-        if using_repo_str in message.get("text", ""):
-            return True
-    return False
-
-
 async def get_slack_repo_config(message: str, channel_id: str, thread_ts: str) -> dict[str, str]:
     """Resolve repository configuration for Slack-triggered runs."""
-    default_owner = SLACK_REPO_OWNER.strip() or "langchain-ai"
-    default_name = SLACK_REPO_NAME.strip() or "langchainplus"
+    default_owner = SLACK_REPO_OWNER.strip() or DEFAULT_REPO_OWNER
+    default_name = SLACK_REPO_NAME.strip() or DEFAULT_REPO_NAME
     thread_id = generate_thread_id_from_slack_thread(channel_id, thread_ts)
     langgraph_client = get_client(url=LANGGRAPH_URL)
 
-    owner: str | None = None
-    name: str | None = None
+    repo_config = extract_repo_from_text(message, default_owner=default_owner)
 
-    if "repo:" in message or "repo " in message:
-        match = re.search(r"repo[: ]([a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+)", message)
-        if match:
-            owner, name = match.group(1).split("/", 1)
-
-    if not owner or not name:
-        github_match = re.search(r"github\.com/([a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+)", message)
-        if github_match:
-            owner, name = github_match.group(1).split("/", 1)
-
-    if not owner or not name:
+    if not repo_config:
         try:
             thread = await langgraph_client.threads.get(thread_id)
             thread_repo_config = _extract_repo_config_from_thread(thread)
             if thread_repo_config:
-                owner = thread_repo_config["owner"]
-                name = thread_repo_config["name"]
+                repo_config = thread_repo_config
         except Exception as exc:  # noqa: BLE001
             if not _is_not_found_error(exc):
                 logger.exception(
@@ -348,15 +359,10 @@ async def get_slack_repo_config(message: str, channel_id: str, thread_ts: str) -
                     thread_id,
                 )
 
-    if not owner or not name:
-        owner = default_owner
-        name = default_name
+    if not repo_config:
+        repo_config = {"owner": default_owner, "name": default_name}
 
-    using_repo_str = f"Using repository: `{owner}/{name}`"
-    if not await check_if_using_repo_msg_sent(channel_id, thread_ts, using_repo_str):
-        await post_slack_thread_reply(channel_id, thread_ts, using_repo_str)
-
-    return {"owner": owner, "name": name}
+    return repo_config
 
 
 async def is_thread_active(thread_id: str) -> bool:
@@ -652,6 +658,10 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
 
         if queued:
             logger.info("Message queued for thread %s, will be processed by middleware", thread_id)
+            langgraph_client = get_client(url=LANGGRAPH_URL)
+            runs = await langgraph_client.runs.list(thread_id, limit=1)
+            if runs:
+                await post_linear_trace_comment(issue_id, thread_id, triggering_comment_id)
         else:
             logger.error("Failed to queue message for thread %s", thread_id)
     else:
@@ -661,10 +671,11 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
             thread_id,
             "agent",
             input={"messages": [{"role": "user", "content": content_blocks}]},
-            config={"configurable": configurable},
+            config={"configurable": configurable, "metadata": _AGENT_VERSION_METADATA},
             if_not_exists="create",
         )
         logger.info("LangGraph run created successfully for thread %s", thread_id)
+        await post_linear_trace_comment(issue_id, thread_id, triggering_comment_id)
 
 
 async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[str, str]) -> None:
@@ -743,6 +754,11 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
     )
     trigger_user = user_name or (f"<@{user_id}>" if user_id else "Unknown user")
 
+    # Auto-resolve cross-posted Slack message links in context
+    resolved_links_section, image_urls_from_links = await resolve_slack_links_in_context(
+        context_messages, user_names_by_id
+    )
+
     prompt = (
         "You were mentioned in Slack.\n\n"
         f"## Repository\n{repo_config.get('owner')}/{repo_config.get('name')}\n\n"
@@ -751,10 +767,32 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
         f"- Context starts at: {context_source}\n\n"
         f"## Conversation Context\n{context_text}\n\n"
         f"## Latest Mention Request\n{clean_text}\n\n"
-        "Use `slack_thread_reply` to communicate in this Slack thread for clarifications, "
-        "status updates, and final summaries."
+        + (f"{resolved_links_section}\n\n" if resolved_links_section else "")
+        + "Use `slack_thread_reply` to communicate in this Slack thread for clarifications, "
+        "status updates, and final summaries. Use `slack_read_thread_messages` to read any "
+        "Slack messages by providing channel_id and message_ts."
     )
     content_blocks: list[dict[str, Any]] = [create_text_block(prompt)]
+
+    image_urls = dedupe_urls(
+        [url for msg in context_messages for url in extract_image_urls(msg.get("text", ""))]
+        + [
+            f["url_private"]
+            for msg in context_messages
+            for f in msg.get("files", [])
+            if isinstance(f, dict)
+            and f.get("mimetype", "").startswith("image/")
+            and f.get("url_private")
+        ]
+        + image_urls_from_links
+    )
+    if image_urls:
+        logger.info("Preparing %d image(s) for Slack mention", len(image_urls))
+        async with httpx.AsyncClient() as http_client:
+            for image_url in image_urls:
+                image_block = await fetch_image_block(image_url, http_client)
+                if image_block:
+                    content_blocks.append(image_block)
 
     configurable: dict[str, Any] = {
         "repo": repo_config,
@@ -772,14 +810,33 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
 
     langgraph_client = get_client(url=LANGGRAPH_URL)
     await _upsert_slack_thread_repo_metadata(thread_id, repo_config, langgraph_client)
+
+    thread_active = await is_thread_active(thread_id)
+    if thread_active:
+        logger.info(
+            "Thread %s is active, queuing Slack message for middleware pickup",
+            thread_id,
+        )
+        queued_payload = {"text": prompt, "image_urls": []}
+        queued = await queue_message_for_thread(
+            thread_id=thread_id,
+            message_content=queued_payload,
+        )
+        if queued:
+            logger.info("Slack message queued for thread %s", thread_id)
+        else:
+            logger.error("Failed to queue Slack message for thread %s", thread_id)
+        return
+
     await langgraph_client.runs.create(
         thread_id,
         "agent",
         input={"messages": [{"role": "user", "content": content_blocks}]},
-        config={"configurable": configurable},
+        config={"configurable": configurable, "metadata": _AGENT_VERSION_METADATA},
         if_not_exists="create",
         multitask_strategy="interrupt",
     )
+    await post_slack_trace_reply(channel_id, thread_ts, thread_id)
 
 
 def verify_linear_signature(body: bytes, signature: str, secret: str) -> bool:
@@ -794,7 +851,8 @@ def verify_linear_signature(body: bytes, signature: str, secret: str) -> bool:
         True if signature is valid, False otherwise
     """
     if not secret:
-        return True
+        logger.warning("LINEAR_WEBHOOK_SECRET is not configured — rejecting webhook request")
+        return False
 
     expected = hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
 
@@ -813,9 +871,7 @@ async def linear_webhook(  # noqa: PLR0911, PLR0912, PLR0915
     body = await request.body()
 
     signature = request.headers.get("Linear-Signature", "")
-    if LINEAR_WEBHOOK_SECRET and not verify_linear_signature(
-        body, signature, LINEAR_WEBHOOK_SECRET
-    ):
+    if not verify_linear_signature(body, signature, LINEAR_WEBHOOK_SECRET):
         logger.warning("Invalid webhook signature")
         raise HTTPException(status_code=401, detail="Invalid signature")
 
@@ -873,24 +929,40 @@ async def linear_webhook(  # noqa: PLR0911, PLR0912, PLR0915
         logger.warning("Failed to fetch full issue details, using webhook data")
         full_issue = issue
 
-    team = full_issue.get("team", {})
-    team_name = team.get("name", "") if team else ""
-    project = full_issue.get("project")
-    project_name = project.get("name", "") if project else ""
+    repo_config = extract_repo_from_text(comment_body, default_owner=DEFAULT_REPO_OWNER)
 
-    team_identifier = team_name.strip() if team_name else ""
-    project_key = project_name.strip() if project_name else ""
+    if repo_config:
+        logger.debug(
+            "Using repo from comment body: %s/%s",
+            repo_config["owner"],
+            repo_config["name"],
+        )
+    else:
+        team = full_issue.get("team", {})
+        team_name = team.get("name", "") if team else ""
+        project = full_issue.get("project")
+        project_name = project.get("name", "") if project else ""
 
-    repo_config = get_repo_config_from_team_mapping(team_identifier, project_key)
+        team_identifier = team_name.strip() if team_name else ""
+        project_key = project_name.strip() if project_name else ""
 
-    logger.debug(
-        "Team/project lookup result",
-        extra={
-            "team_name": team_identifier,
-            "project_name": project_key,
-            "repo_config": repo_config,
-        },
-    )
+        repo_config = get_repo_config_from_team_mapping(team_identifier, project_key)
+
+        logger.debug(
+            "Team/project lookup result",
+            extra={
+                "team_name": team_identifier,
+                "project_name": project_key,
+                "repo_config": repo_config,
+            },
+        )
+
+    if not _is_repo_org_allowed(repo_config):
+        logger.warning(
+            "Rejecting Linear webhook: org '%s' not in ALLOWED_GITHUB_ORGS",
+            repo_config.get("owner"),
+        )
+        return {"status": "ignored", "reason": "Repository org not in allowlist"}
 
     repo_owner = repo_config["owner"]
     repo_name = repo_config["name"]
@@ -927,7 +999,7 @@ async def slack_webhook(request: Request, background_tasks: BackgroundTasks) -> 
 
     signature = request.headers.get("X-Slack-Signature", "")
     timestamp = request.headers.get("X-Slack-Request-Timestamp", "")
-    if SLACK_SIGNING_SECRET and not verify_slack_signature(
+    if not verify_slack_signature(
         body=body,
         timestamp=timestamp,
         signature=signature,
@@ -1003,6 +1075,13 @@ async def slack_webhook(request: Request, background_tasks: BackgroundTasks) -> 
     }
     repo_config = await get_slack_repo_config(text, channel_id, thread_ts)
 
+    if not _is_repo_org_allowed(repo_config):
+        logger.warning(
+            "Rejecting Slack webhook: org '%s' not in ALLOWED_GITHUB_ORGS",
+            repo_config.get("owner"),
+        )
+        return {"status": "ignored", "reason": "Repository org not in allowlist"}
+
     background_tasks.add_task(process_slack_mention, event_data, repo_config)
 
     return {"status": "accepted", "message": "Slack mention queued"}
@@ -1050,17 +1129,20 @@ def build_github_issue_prompt(
     comments: list[dict[str, Any]],
     *,
     github_login: str,
+    issue_author: str = "",
 ) -> str:
     """Build the user prompt for a GitHub issue-triggered run."""
     triggered_by_line = f"## Triggered by: {github_login}\n\n" if github_login else ""
     comments_text = _build_github_issue_comments_text(comments)
+    sanitized_title = sanitize_github_comment_body(title)
+    formatted_body = format_github_comment_body_for_prompt(issue_author or github_login, body)
     return (
         "Please work on the following GitHub issue:\n\n"
         f"## Repository: {repo_config.get('owner')}/{repo_config.get('name')}\n\n"
         f"{triggered_by_line}"
         f"## GitHub Issue: #{issue_number} - Issue ID: {issue_id}\n\n"
-        f"## Title: {title}\n\n"
-        f"## Description:\n{body}\n"
+        f"## Title: {sanitized_title}\n\n"
+        f"## Description:\n{formatted_body}\n"
         f"{comments_text}\n\n"
         "Please analyze this issue and implement the necessary changes. "
         "When you need to communicate on GitHub, use `github_comment` with the issue number."
@@ -1090,6 +1172,7 @@ async def _trigger_or_queue_run(
     prompt: str,
     *,
     github_login: str,
+    github_user_id: int | None,
     repo_config: dict[str, str],
     pr_number: int,
 ) -> None:
@@ -1110,9 +1193,11 @@ async def _trigger_or_queue_run(
             "configurable": {
                 "source": "github",
                 "github_login": github_login,
+                "github_user_id": github_user_id,
                 "repo": repo_config,
                 "pr_number": pr_number,
-            }
+            },
+            "metadata": _AGENT_VERSION_METADATA,
         },
         if_not_exists="create",
     )
@@ -1120,7 +1205,22 @@ async def _trigger_or_queue_run(
 
 
 async def _get_or_resolve_thread_github_token(thread_id: str, email: str) -> str | None:
-    """Resolve and persist a GitHub token for a thread when available."""
+    """Resolve and persist a GitHub token for a thread when available.
+
+    In bot-token-only mode, returns a fresh GitHub App installation token
+    instead of resolving per-user OAuth tokens.
+    """
+    if is_bot_token_only_mode():
+        bot_token = await get_github_app_installation_token()
+        if bot_token:
+            try:
+                await persist_encrypted_github_token(thread_id, bot_token)
+            except Exception:
+                logger.warning("Could not persist bot token for thread %s", thread_id)
+            return bot_token
+        logger.warning("Bot-token-only mode but GitHub App token unavailable")
+        return None
+
     github_token, _encrypted_token = await get_github_token_from_thread(thread_id)
     if github_token:
         return github_token
@@ -1157,6 +1257,7 @@ async def process_github_pr_comment(payload: dict[str, Any], event_type: str) ->
         comment_id,
         node_id,
     ) = await extract_pr_context(payload, event_type)
+    github_user_id = payload.get("sender", {}).get("id")
 
     logger.info(
         "Processing GitHub PR comment: event=%s, pr=%s, branch=%s",
@@ -1167,8 +1268,29 @@ async def process_github_pr_comment(payload: dict[str, Any], event_type: str) ->
 
     thread_id = get_thread_id_from_branch(branch_name) if branch_name else None
     if not thread_id:
-        logger.warning("Could not extract thread_id from branch '%s', skipping", branch_name)
-        return
+        if not pr_number:
+            logger.warning(
+                "Could not determine thread_id for branch '%s' (no pr_number), skipping",
+                branch_name,
+            )
+            return
+        owner = repo_config.get("owner", "")
+        name = repo_config.get("name", "")
+        stable_key = f"{owner}/{name}/pr/{pr_number}"
+        thread_id = str(uuid.uuid5(uuid.NAMESPACE_URL, stable_key))
+        logger.info("Generated thread_id %s for non-open-swe branch '%s'", thread_id, branch_name)
+        langgraph_client = get_client(url=LANGGRAPH_URL)
+        try:
+            await langgraph_client.threads.update(thread_id, metadata={"branch_name": branch_name})
+        except Exception as exc:  # noqa: BLE001
+            if _is_not_found_error(exc):
+                await langgraph_client.threads.create(
+                    thread_id=thread_id,
+                    if_exists="do_nothing",
+                    metadata={"branch_name": branch_name},
+                )
+            else:
+                logger.warning("Failed to persist branch_name metadata for thread %s", thread_id)
 
     email = GITHUB_USER_EMAIL_MAP.get(github_login, "")
     if not email:
@@ -1199,11 +1321,12 @@ async def process_github_pr_comment(payload: dict[str, Any], event_type: str) ->
         logger.info("No comments found since last @open-swe tag for PR %s", pr_number)
         return
 
-    prompt = build_pr_prompt(comments, pr_url)
+    prompt = build_pr_prompt(comments, pr_url, repo_config=repo_config)
     await _trigger_or_queue_run(
         thread_id,
         prompt,
         github_login=github_login,
+        github_user_id=github_user_id,
         repo_config=repo_config,
         pr_number=pr_number,
     )
@@ -1221,9 +1344,11 @@ async def process_github_issue(payload: dict[str, Any], event_type: str) -> None
     issue_id = str(issue.get("id", ""))
     issue_number = issue.get("number")
     github_login = payload.get("sender", {}).get("login", "")
+    github_user_id = payload.get("sender", {}).get("id")
     issue_url = issue.get("html_url", "") or issue.get("url", "")
     title = issue.get("title", "No title")
     description = issue.get("body") or "No description"
+    issue_author = issue.get("user", {}).get("login", "")
 
     logger.info(
         "Processing GitHub issue: event=%s, issue=%s, repo=%s/%s",
@@ -1293,10 +1418,12 @@ async def process_github_issue(payload: dict[str, Any], event_type: str) -> None
             description,
             comments,
             github_login=github_login,
+            issue_author=issue_author,
         )
     configurable: dict[str, Any] = {
         "source": "github",
         "github_login": github_login,
+        "github_user_id": github_user_id,
         "repo": repo_config,
         "github_issue": {
             "id": issue_id,
@@ -1318,7 +1445,7 @@ async def process_github_issue(payload: dict[str, Any], event_type: str) -> None
         thread_id,
         "agent",
         input={"messages": [{"role": "user", "content": prompt}]},
-        config={"configurable": configurable},
+        config={"configurable": configurable, "metadata": _AGENT_VERSION_METADATA},
         if_not_exists="create",
     )
     logger.info("LangGraph run created for thread %s from GitHub issue", thread_id)
@@ -1344,6 +1471,19 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks) ->
     except json.JSONDecodeError:
         logger.exception("Failed to parse GitHub webhook JSON")
         return {"status": "error", "message": "Invalid JSON"}
+
+    # Check org allowlist
+    webhook_repo = payload.get("repository", {})
+    webhook_repo_config = {
+        "owner": webhook_repo.get("owner", {}).get("login", ""),
+        "name": webhook_repo.get("name", ""),
+    }
+    if not _is_repo_org_allowed(webhook_repo_config):
+        logger.warning(
+            "Rejecting GitHub webhook: org '%s' not in ALLOWED_GITHUB_ORGS",
+            webhook_repo_config.get("owner"),
+        )
+        return {"status": "ignored", "reason": "Repository org not in allowlist"}
 
     issue = payload.get("issue", {})
     is_pull_request_comment = bool(event_type == "issue_comment" and issue.get("pull_request"))

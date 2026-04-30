@@ -4,10 +4,15 @@ Open SWE is designed to be forked and customized for your org. The core agent is
 
 ```python
 # agent/server.py — the key lines
+model_id = os.environ.get("LLM_MODEL_ID", DEFAULT_LLM_MODEL_ID)
+model_kwargs = {"max_tokens": DEFAULT_LLM_MAX_TOKENS}
+if model_id == DEFAULT_LLM_MODEL_ID:
+    model_kwargs["reasoning"] = DEFAULT_LLM_REASONING
+
 return create_deep_agent(
-    model=make_model("anthropic:claude-opus-4-6", temperature=0, max_tokens=20_000),
-    system_prompt=construct_system_prompt(repo_dir, ...),
-    tools=[http_request, fetch_url, commit_and_open_pr, linear_comment, slack_thread_reply],
+    model=make_model(model_id, **model_kwargs),
+    system_prompt=construct_system_prompt(...),
+    tools=[http_request, fetch_url, list_repos, get_branch_name, commit_and_open_pr, linear_comment, slack_thread_reply],
     backend=sandbox_backend,
     middleware=[
         ToolErrorMiddleware(),
@@ -24,97 +29,69 @@ return create_deep_agent(
 
 By default, Open SWE runs each task in a [LangSmith cloud sandbox](https://docs.smith.langchain.com/) — an isolated Linux environment where the agent clones the repo and executes commands. Sandbox creation and connection is handled in `agent/integrations/langsmith.py`.
 
-### Using a custom sandbox template
+### Using a custom sandbox snapshot
 
-Set environment variables to use a custom Docker image:
+Build a snapshot in LangSmith (UI or `SandboxClient.create_snapshot`) from your Docker image and point Open SWE at its UUID:
 
 ```bash
-DEFAULT_SANDBOX_TEMPLATE_NAME="my-template"    # Template registered in LangSmith
-DEFAULT_SANDBOX_TEMPLATE_IMAGE="my-org/my-image:latest"  # Docker image
+DEFAULT_SANDBOX_SNAPSHOT_ID="<snapshot-uuid>"                      # Required
+DEFAULT_SANDBOX_SNAPSHOT_FS_CAPACITY_BYTES="34359738368"           # Optional, default 32 GiB
+DEFAULT_SANDBOX_VCPUS="4"                                          # Optional, default 4
+DEFAULT_SANDBOX_MEM_BYTES="16106127360"                            # Optional, default 15 GiB
 ```
 
 This is useful for pre-installing languages, frameworks, or internal tools that your repos depend on — reducing setup time per agent run.
 
 ### Using a different sandbox provider
 
-The `deepagents` ecosystem includes several sandbox providers out of the box. To swap providers, replace the `create_langsmith_sandbox()` call in `agent/server.py` with one of the following:
+Set the `SANDBOX_TYPE` environment variable to switch providers. Each provider has a corresponding integration file in `agent/integrations/` and a factory function registered in `agent/utils/sandbox.py`:
 
-#### Modal
+| `SANDBOX_TYPE` | Integration file | Required env vars |
+|---|---|---|
+| `langsmith` (default) | `agent/integrations/langsmith.py` | `LANGSMITH_API_KEY_PROD`, `SANDBOX_TYPE="langsmith"` |
+| `daytona` | `agent/integrations/daytona.py` | `DAYTONA_API_KEY`, `SANDBOX_TYPE="daytona"` |
+| `runloop` | `agent/integrations/runloop.py` | `RUNLOOP_API_KEY`, `SANDBOX_TYPE="runloop"` |
+| `modal` | `agent/integrations/modal.py` | Modal credentials, `SANDBOX_TYPE="modal"` |
+| `local` | `agent/integrations/local.py` | None (no isolation — development only), `SANDBOX_TYPE="local"` |
 
-```bash
-pip install langchain-modal
-```
+> **Warning**: `local` runs commands directly on your host with no sandboxing. Only use for local development with human-in-the-loop enabled.
 
-```python
-import modal
-from langchain_modal import ModalSandbox
+### Adding a new sandbox provider
 
-app = modal.App.lookup("open-swe")
-sandbox_backend = ModalSandbox(sandbox=modal.Sandbox.create(app=app))
-```
-
-This is what Ramp uses for their Inspect agent — container-based isolation with fast spin-up.
-
-#### Daytona
-
-```bash
-pip install langchain-daytona
-```
+1. **Create an integration file** at `agent/integrations/my_provider.py` with a factory function matching this signature:
 
 ```python
-from daytona import Daytona
-from langchain_daytona import DaytonaSandbox
+def create_my_provider_sandbox(sandbox_id: str | None = None):
+    """Create or reconnect to a sandbox.
 
-sandbox = Daytona().create()
-sandbox_backend = DaytonaSandbox(sandbox=sandbox)
+    Args:
+        sandbox_id: Optional existing sandbox ID to reconnect to.
+            If None, creates a new sandbox.
+
+    Returns:
+        An object implementing SandboxBackendProtocol.
+    """
+    ...
 ```
 
-#### Runloop
-
-```bash
-pip install langchain-runloop
-```
+2. **Register it** in `agent/utils/sandbox.py` by importing your factory and adding it to `SANDBOX_FACTORIES`:
 
 ```python
-import os
-from runloop_api_client import RunloopSDK
-from langchain_runloop import RunloopSandbox
+from agent.integrations.my_provider import create_my_provider_sandbox
 
-client = RunloopSDK(bearer_token=os.environ["RUNLOOP_API_KEY"])
-devbox = client.devbox.create()
-sandbox_backend = RunloopSandbox(devbox=devbox)
+SANDBOX_FACTORIES = {
+    ...
+    "my_provider": create_my_provider_sandbox,
+}
 ```
 
-#### Local shell (no isolation — development only)
-
-```python
-from deepagents.backends import LocalShellBackend
-
-sandbox_backend = LocalShellBackend(
-    root_dir="/path/to/repo",
-    inherit_env=True,
-)
-```
-
-> **Warning**: `LocalShellBackend` runs commands directly on your host machine with no sandboxing. Only use for local development with human-in-the-loop enabled.
-
-#### Wiring it up
-
-All providers implement `SandboxBackendProtocol` and are interchangeable. Replace the sandbox creation in `agent/server.py`:
-
-```python
-# Before (LangSmith)
-sandbox_backend = await asyncio.to_thread(create_langsmith_sandbox)
-
-# After (any provider)
-sandbox_backend = await asyncio.to_thread(create_my_sandbox)
-```
+The factory must return an object implementing `SandboxBackendProtocol` from `deepagents`. See the existing integration files for reference.
 
 ### Building a custom sandbox provider
 
 If none of the built-in providers fit, you can build your own. The agent accepts any backend that implements `SandboxBackendProtocol` from `deepagents`. The protocol requires:
 
-- **File operations**: `ls_info()`, `read()`, `write()`, `edit()`, `glob_info()`, `grep_raw()`
+- **File operations**: `ls()`, `read()`, `write()`, `edit()`, `glob()`, `grep()`
 - **Shell execution**: `execute(command, timeout=None) -> ExecuteResponse`
 - **Identity**: `id` property returning a unique sandbox identifier
 
@@ -141,17 +118,22 @@ class MySandbox(BaseSandbox):
         )
 ```
 
-See `agent/integrations/langsmith.py` (`LangSmithBackend` class) for a full reference implementation.
+See `deepagents.backends.LangSmithSandbox` and `agent/integrations/langsmith.py` for a full reference implementation.
 
 ---
 
 ## 2. Model
 
-The model is configured in the `get_agent()` function in `agent/server.py`:
+The model is configured in the `get_agent()` function in `agent/server.py`. By default it uses `openai:gpt-5.5` with medium reasoning effort, but you can override the model with the `LLM_MODEL_ID` environment variable:
 
-```python
-model=make_model("anthropic:claude-opus-4-6", temperature=0, max_tokens=20_000)
+```bash
+# Set the model via environment variable (uses provider:model format)
+LLM_MODEL_ID="anthropic:claude-sonnet-4-6"
 ```
+
+If `LLM_MODEL_ID` is not set, the default model (`openai:gpt-5.5`) is used.
+
+`max_tokens` is a maximum completion/output token budget, not the model's total context window. For OpenAI reasoning models, this budget can include both internal reasoning tokens and final response tokens.
 
 ### Switching models
 
@@ -162,7 +144,7 @@ Use the `provider:model` format:
 model=make_model("anthropic:claude-sonnet-4-6", temperature=0, max_tokens=16_000)
 
 # OpenAI (uses Responses API by default)
-model=make_model("openai:gpt-4o", temperature=0, max_tokens=16_000)
+model=make_model("openai:gpt-5.5", max_tokens=128_000, reasoning={"effort": "medium"})
 
 # Google
 model=make_model("google_genai:gemini-2.5-pro", temperature=0, max_tokens=16_000)
@@ -194,7 +176,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         model = make_model("anthropic:claude-sonnet-4-6", temperature=0, max_tokens=16_000)
     else:
         # Full model for code changes from Linear
-        model = make_model("anthropic:claude-opus-4-6", temperature=0, max_tokens=20_000)
+        model = make_model("openai:gpt-5.5", max_tokens=128_000, reasoning={"effort": "medium"})
     
     return create_deep_agent(model=model, ...)
 ```
@@ -294,6 +276,29 @@ To fully remove a trigger's code, delete the corresponding endpoint from `agent/
 - **Linear**: `linear_webhook()` and `process_linear_issue()`
 - **Slack**: `slack_webhook()` and `process_slack_mention()`
 
+### Default repository
+
+Set the default GitHub org and repo used across all triggers (Slack, Linear, GitHub) when no repo is specified:
+
+```bash
+DEFAULT_REPO_OWNER="my-org"      # Default GitHub org (used everywhere)
+DEFAULT_REPO_NAME="my-repo"      # Default GitHub repo (used everywhere)
+```
+
+These are used as the fallback when:
+- A Slack message doesn't specify a repo (and no thread metadata exists)
+- A Linear issue's team/project isn't in the `LINEAR_TEAM_TO_REPO` mapping
+- A user writes `repo:name` without an org prefix — the org defaults to `DEFAULT_REPO_OWNER`
+
+### Repository extraction from messages
+
+Both Slack and Linear support specifying a target repo directly in the message or comment text. The shared utility `extract_repo_from_text()` in `agent/utils/repo.py` handles parsing these formats:
+
+- `repo:owner/name` — explicit org and repo
+- `repo owner/name` — space syntax (same result)
+- `repo:name` — repo name only; the org defaults to `DEFAULT_REPO_OWNER`
+- `https://github.com/owner/name` — GitHub URL
+
 ### Customizing Linear routing
 
 The `LINEAR_TEAM_TO_REPO` dict in `agent/utils/linear_team_repo_map.py` maps Linear teams and projects to GitHub repos:
@@ -310,16 +315,13 @@ LINEAR_TEAM_TO_REPO = {
 }
 ```
 
+Users can also override the team/project mapping on a per-comment basis by including `repo:owner/name` in their `@openswe` comment. This takes priority over the mapping — the mapping is used as a fallback when no repo is specified in the comment. If the team/project isn't found in the mapping either, `DEFAULT_REPO_OWNER`/`DEFAULT_REPO_NAME` is used.
+
 ### Customizing Slack routing
 
-Slack uses env vars for default routing:
+Slack uses `DEFAULT_REPO_OWNER` and `DEFAULT_REPO_NAME` as the fallback when no repo is specified in a message.
 
-```bash
-SLACK_REPO_OWNER="my-org"
-SLACK_REPO_NAME="my-repo"
-```
-
-Users can override per-message with `repo:owner/name` syntax in their Slack message.
+Users can override per-message with `repo:owner/name` syntax in their Slack message. A shorthand `repo:name` (without the org) is also supported — the org defaults to `DEFAULT_REPO_OWNER`.
 
 ### Adding a new trigger
 
@@ -391,6 +393,45 @@ The system prompt is assembled in `agent/prompt.py` from modular sections. You c
 | `COMMIT_PR_SECTION` | PR title/body format and commit conventions |
 | `CODE_REVIEW_GUIDELINES_SECTION` | How the agent reviews code changes |
 | `COMMUNICATION_SECTION` | Formatting and messaging guidelines |
+
+### Default prompt file
+
+Open SWE supports a `default_prompt.md` file for org-level instructions that apply to **every** agent run, regardless of which repository is being worked on. This is the recommended way to set default repository preferences, org conventions, and shared guidelines.
+
+The file is loaded at agent startup and injected into the system prompt between the task overview and repository setup sections.
+
+**Location:** [`default_prompt.md`](./default_prompt.md) in the project root.
+
+**Override:** Set the `DEFAULT_PROMPT_PATH` environment variable to use a different file:
+
+```bash
+DEFAULT_PROMPT_PATH="/path/to/my-org-prompt.md"
+```
+
+**Format:** Write plain markdown. The content is injected as-is under a `### Custom Instructions` heading in the system prompt. Example:
+
+```markdown
+# Default Prompt
+
+## Default Repository
+
+When no repository is specified, work on the **my-app** repository under **my-org**.
+
+## Organization Conventions
+
+- Use conventional commits: feat:, fix:, chore:
+- Always tag the requesting user when work is complete
+```
+
+**Loading order:** Default prompt → System prompt sections → AGENTS.md (per-repo). If the file is missing or empty, it is silently skipped — no error is raised.
+
+**When to use `default_prompt.md` vs `AGENTS.md`:**
+
+| | `default_prompt.md` | `AGENTS.md` |
+|---|---|---|
+| Scope | All tasks, all repos | Single repository |
+| Location | Open SWE project root | Target repo root |
+| Use for | Default repo, org conventions | Repo-specific coding standards |
 
 ### Using AGENTS.md
 
