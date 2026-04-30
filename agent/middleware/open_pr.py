@@ -168,11 +168,12 @@ async def open_pr_if_needed(
         await create_github_pr(
             repo_owner=repo_owner,
             repo_name=repo_name,
-            github_token=installation_token,
+            github_token=github_token or installation_token,
             title=pr_title,
             head_branch=target_branch,
             base_branch=base_branch,
             body=pr_body,
+            installation_token=installation_token,
         )
 
         logger.info("After-agent middleware completed successfully")

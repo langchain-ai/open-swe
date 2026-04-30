@@ -500,13 +500,13 @@ async def resolve_slack_links_in_context(
                 resolved_parts.append(
                     f"**{link_url}**\n  Author: {author}\n  Message: {resolved_text}"
                 )
-                for f in resolved.get("files", []):
+                for file_info in resolved.get("files", []):
                     if (
-                        isinstance(f, dict)
-                        and f.get("mimetype", "").startswith("image/")
-                        and f.get("url_private")
+                        isinstance(file_info, dict)
+                        and file_info.get("mimetype", "").startswith("image/")
+                        and file_info.get("url_private")
                     ):
-                        image_urls.append(f["url_private"])
+                        image_urls.append(file_info["url_private"])
             else:
                 resolved_parts.append(
                     f"**{link_url}**\n  (Could not fetch — bot may not have access)"
@@ -524,10 +524,12 @@ async def resolve_slack_links_in_context(
     return resolved_links_section, image_urls
 
 
-async def post_slack_trace_reply(channel_id: str, thread_ts: str, run_id: str) -> None:
+async def post_slack_trace_reply(channel_id: str, thread_ts: str, thread_id: str) -> None:
     """Post a trace URL reply in a Slack thread."""
-    trace_url = get_langsmith_trace_url(run_id)
+    trace_url = get_langsmith_trace_url(thread_id)
     if trace_url:
         await post_slack_thread_reply(
             channel_id, thread_ts, f"Working on it! <{trace_url}|View trace>"
         )
+    else:
+        await post_slack_thread_reply(channel_id, thread_ts, "Working on it!")

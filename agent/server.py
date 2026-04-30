@@ -60,7 +60,7 @@ from .tools import (
 )
 from .utils.auth import resolve_github_token
 from .utils.github_app import get_github_app_installation_token
-from .utils.model import make_model
+from .utils.model import ModelKwargs, OpenAIReasoning, make_model
 from .utils.sandbox import create_sandbox
 from .utils.sandbox_paths import aresolve_sandbox_work_dir
 
@@ -184,8 +184,10 @@ def graph_loaded_for_execution(config: RunnableConfig) -> bool:
     )
 
 
-DEFAULT_LLM_MODEL_ID = "anthropic:claude-opus-4-6"
-DEFAULT_RECURSION_LIMIT = 1_000
+DEFAULT_LLM_MODEL_ID = "openai:gpt-5.5"
+DEFAULT_LLM_REASONING: OpenAIReasoning = {"effort": "medium"}
+DEFAULT_LLM_MAX_TOKENS = 64_000
+DEFAULT_RECURSION_LIMIT = 9_999
 
 
 async def get_agent(config: RunnableConfig) -> Pregel:
@@ -274,13 +276,14 @@ async def get_agent(config: RunnableConfig) -> Pregel:
 
     work_dir = await aresolve_sandbox_work_dir(sandbox_backend)
 
+    model_id = os.environ.get("LLM_MODEL_ID", DEFAULT_LLM_MODEL_ID)
+    model_kwargs: ModelKwargs = {"max_tokens": DEFAULT_LLM_MAX_TOKENS}
+    if model_id == DEFAULT_LLM_MODEL_ID:
+        model_kwargs["reasoning"] = DEFAULT_LLM_REASONING
+
     logger.info("Returning agent with sandbox for thread %s", thread_id)
     return create_deep_agent(
-        model=make_model(
-            os.environ.get("LLM_MODEL_ID", DEFAULT_LLM_MODEL_ID),
-            temperature=0,
-            max_tokens=20_000,
-        ),
+        model=make_model(model_id, **model_kwargs),
         system_prompt=construct_system_prompt(
             working_dir=work_dir,
             linear_project_id=linear_project_id,

@@ -6,6 +6,8 @@ import json
 import logging
 import os
 import uuid
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import Any
 
 import httpx
@@ -39,13 +41,13 @@ from .utils.linear import post_linear_trace_comment
 from .utils.linear_team_repo_map import LINEAR_TEAM_TO_REPO
 from .utils.multimodal import dedupe_urls, extract_image_urls, fetch_image_block
 from .utils.repo import extract_repo_from_text
+from .utils.sandbox import validate_sandbox_startup_config
 from .utils.slack import (
     add_slack_reaction,
     fetch_slack_thread_messages,
     format_slack_messages_for_prompt,
     get_slack_user_info,
     get_slack_user_names,
-    post_slack_thread_reply,
     post_slack_trace_reply,
     resolve_slack_links_in_context,
     select_slack_context_messages,
@@ -55,7 +57,14 @@ from .utils.slack import (
 
 logger = logging.getLogger(__name__)
 
-app = FastAPI()
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    validate_sandbox_startup_config()
+    yield
+
+
+app = FastAPI(lifespan=lifespan)
 
 LINEAR_WEBHOOK_SECRET = os.environ.get("LINEAR_WEBHOOK_SECRET", "")
 GITHUB_WEBHOOK_SECRET = os.environ.get("GITHUB_WEBHOOK_SECRET", "")
@@ -328,16 +337,6 @@ async def _upsert_slack_thread_repo_metadata(
         )
 
 
-async def check_if_using_repo_msg_sent(
-    channel_id: str, thread_ts: str, using_repo_str: str
-) -> bool:
-    thread_messages = await fetch_slack_thread_messages(channel_id, thread_ts)
-    for message in thread_messages:
-        if using_repo_str in message.get("text", ""):
-            return True
-    return False
-
-
 async def get_slack_repo_config(message: str, channel_id: str, thread_ts: str) -> dict[str, str]:
     """Resolve repository configuration for Slack-triggered runs."""
     default_owner = SLACK_REPO_OWNER.strip() or DEFAULT_REPO_OWNER
@@ -362,10 +361,6 @@ async def get_slack_repo_config(message: str, channel_id: str, thread_ts: str) -
 
     if not repo_config:
         repo_config = {"owner": default_owner, "name": default_name}
-
-    using_repo_str = f"Using repository: `{repo_config['owner']}/{repo_config['name']}`"
-    if not await check_if_using_repo_msg_sent(channel_id, thread_ts, using_repo_str):
-        await post_slack_thread_reply(channel_id, thread_ts, using_repo_str)
 
     return repo_config
 
@@ -666,13 +661,13 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
             langgraph_client = get_client(url=LANGGRAPH_URL)
             runs = await langgraph_client.runs.list(thread_id, limit=1)
             if runs:
-                await post_linear_trace_comment(issue_id, runs[0]["run_id"], triggering_comment_id)
+                await post_linear_trace_comment(issue_id, thread_id, triggering_comment_id)
         else:
             logger.error("Failed to queue message for thread %s", thread_id)
     else:
         logger.info("Creating LangGraph run for thread %s", thread_id)
         langgraph_client = get_client(url=LANGGRAPH_URL)
-        run = await langgraph_client.runs.create(
+        await langgraph_client.runs.create(
             thread_id,
             "agent",
             input={"messages": [{"role": "user", "content": content_blocks}]},
@@ -680,7 +675,7 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
             if_not_exists="create",
         )
         logger.info("LangGraph run created successfully for thread %s", thread_id)
-        await post_linear_trace_comment(issue_id, run["run_id"], triggering_comment_id)
+        await post_linear_trace_comment(issue_id, thread_id, triggering_comment_id)
 
 
 async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[str, str]) -> None:
@@ -833,7 +828,7 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
             logger.error("Failed to queue Slack message for thread %s", thread_id)
         return
 
-    run = await langgraph_client.runs.create(
+    await langgraph_client.runs.create(
         thread_id,
         "agent",
         input={"messages": [{"role": "user", "content": content_blocks}]},
@@ -841,7 +836,7 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
         if_not_exists="create",
         multitask_strategy="interrupt",
     )
-    await post_slack_trace_reply(channel_id, thread_ts, run["run_id"])
+    await post_slack_trace_reply(channel_id, thread_ts, thread_id)
 
 
 def verify_linear_signature(body: bytes, signature: str, secret: str) -> bool:

@@ -129,21 +129,35 @@ async def create_github_pr(
     head_branch: str,
     base_branch: str,
     body: str,
+    installation_token: str | None = None,
 ) -> tuple[str | None, int | None, bool]:
     """Create a draft GitHub pull request via the API.
+
+    When *github_token* differs from *installation_token* (e.g. a user
+    OAuth token), the function first attempts to create the PR with the
+    user token so the user becomes the PR author.  If that fails it
+    retries with the installation token.  The ``OpenSWE`` label is
+    always added using the installation token.
 
     Args:
         repo_owner: Repository owner (e.g., "langchain-ai")
         repo_name: Repository name (e.g., "deepagents")
-        github_token: GitHub access token
+        github_token: GitHub access token (user token preferred)
         title: PR title
         head_branch: Source branch name
         base_branch: Target branch name
         body: PR description
+        installation_token: GitHub App installation token used for labeling and as a fallback
+            for PR creation. Falls back to github_token when not provided.
 
     Returns:
         Tuple of (pr_url, pr_number, pr_existing) if successful, (None, None, False) otherwise
     """
+    tokens_to_try = [github_token]
+    if installation_token and installation_token != github_token:
+        tokens_to_try.append(installation_token)
+    label_tok = installation_token or github_token
+
     pr_payload = {
         "title": title,
         "head": head_branch,
@@ -161,52 +175,119 @@ async def create_github_pr(
     )
 
     async with httpx.AsyncClient() as http_client:
-        try:
-            pr_response = await http_client.post(
-                f"https://api.github.com/repos/{repo_owner}/{repo_name}/pulls",
-                headers={
-                    "Authorization": f"Bearer {github_token}",
-                    "Accept": "application/vnd.github+json",
-                    "X-GitHub-Api-Version": "2022-11-28",
-                },
-                json=pr_payload,
+        for token in tokens_to_try:
+            try:
+                pr_response = await http_client.post(
+                    f"https://api.github.com/repos/{repo_owner}/{repo_name}/pulls",
+                    headers={
+                        "Authorization": f"Bearer {token}",
+                        "Accept": "application/vnd.github+json",
+                        "X-GitHub-Api-Version": "2022-11-28",
+                    },
+                    json=pr_payload,
+                )
+
+                pr_data = pr_response.json()
+
+                if pr_response.status_code == HTTP_CREATED:
+                    pr_url = pr_data.get("html_url")
+                    pr_number = pr_data.get("number")
+                    await _add_label(
+                        http_client,
+                        repo_owner,
+                        repo_name,
+                        label_tok,
+                        pr_number,
+                    )
+                    logger.info("PR created successfully: %s", pr_url)
+                    return pr_url, pr_number, False
+
+                if pr_response.status_code == HTTP_UNPROCESSABLE_ENTITY:
+                    logger.error("GitHub API validation error (422): %s", pr_data.get("message"))
+                    existing = await _find_existing_pr(
+                        http_client=http_client,
+                        repo_owner=repo_owner,
+                        repo_name=repo_name,
+                        github_token=token,
+                        head_branch=head_branch,
+                    )
+                    if existing:
+                        await _add_label(
+                            http_client,
+                            repo_owner,
+                            repo_name,
+                            label_tok,
+                            existing[1],
+                        )
+                        logger.info("Using existing PR for head branch: %s", existing[0])
+                        return existing[0], existing[1], True
+                    else:
+                        logger.debug(
+                            "Could not find existing PR with current token, will retry"
+                            if token != tokens_to_try[-1]
+                            else "Could not find existing PR"
+                        )
+                else:
+                    logger.error(
+                        "GitHub API error (%s): %s",
+                        pr_response.status_code,
+                        pr_data.get("message"),
+                    )
+
+                if "errors" in pr_data:
+                    logger.error("GitHub API errors detail: %s", pr_data.get("errors"))
+
+                # If this was the user token, fall through to retry with installation token
+                if token != tokens_to_try[-1]:
+                    logger.info("Retrying PR creation with installation token")
+                    continue
+
+                return None, None, False
+
+            except httpx.HTTPError:
+                logger.exception("Failed to create PR via GitHub API")
+                if token != tokens_to_try[-1]:
+                    logger.info("Retrying PR creation with installation token")
+                    continue
+                return None, None, False
+
+    return None, None, False
+
+
+_OPENSWE_LABEL = "OpenSWE"
+
+
+async def _add_label(
+    http_client: httpx.AsyncClient,
+    repo_owner: str,
+    repo_name: str,
+    github_token: str,
+    pr_number: int | None,
+) -> None:
+    """Add the 'OpenSWE' label to a PR without failing PR creation on errors."""
+    if not pr_number:
+        return
+
+    try:
+        response = await http_client.post(
+            f"https://api.github.com/repos/{repo_owner}/{repo_name}/issues/{pr_number}/labels",
+            headers={
+                "Authorization": f"Bearer {github_token}",
+                "Accept": "application/vnd.github+json",
+                "X-GitHub-Api-Version": "2022-11-28",
+            },
+            json={"labels": [_OPENSWE_LABEL]},
+        )
+        if response.is_success:
+            logger.info("Added '%s' label to PR #%s", _OPENSWE_LABEL, pr_number)
+        else:
+            logger.warning(
+                "Failed to add label to PR #%s (%s)",
+                pr_number,
+                response.status_code,
             )
-
-            pr_data = pr_response.json()
-
-            if pr_response.status_code == HTTP_CREATED:
-                pr_url = pr_data.get("html_url")
-                pr_number = pr_data.get("number")
-                logger.info("PR created successfully: %s", pr_url)
-                return pr_url, pr_number, False
-
-            if pr_response.status_code == HTTP_UNPROCESSABLE_ENTITY:
-                logger.error("GitHub API validation error (422): %s", pr_data.get("message"))
-                existing = await _find_existing_pr(
-                    http_client=http_client,
-                    repo_owner=repo_owner,
-                    repo_name=repo_name,
-                    github_token=github_token,
-                    head_branch=head_branch,
-                )
-                if existing:
-                    logger.info("Using existing PR for head branch: %s", existing[0])
-                    return existing[0], existing[1], True
-            else:
-                logger.error(
-                    "GitHub API error (%s): %s",
-                    pr_response.status_code,
-                    pr_data.get("message"),
-                )
-
-            if "errors" in pr_data:
-                logger.error("GitHub API errors detail: %s", pr_data.get("errors"))
-
-            return None, None, False
-
-        except httpx.HTTPError:
-            logger.exception("Failed to create PR via GitHub API")
-            return None, None, False
+    except httpx.HTTPError:
+        logger.warning("Failed to add label to PR #%s", pr_number, exc_info=True)
 
 
 async def _find_existing_pr(
