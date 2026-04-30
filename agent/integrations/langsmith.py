@@ -16,8 +16,8 @@ from langsmith.sandbox import SandboxClient
 logger = logging.getLogger(__name__)
 
 DEFAULT_SNAPSHOT_FS_CAPACITY_BYTES = 32 * 1024**3
-DEFAULT_SANDBOX_VCPUS = 4
-DEFAULT_SANDBOX_MEM_BYTES = 15 * 1024**3  # 15 GiB
+DEFAULT_SANDBOX_VCPUS = 2
+DEFAULT_SANDBOX_MEM_BYTES = 7936 * 1024**2  # 7936 MiB ("large" tier cap)
 
 
 def _get_langsmith_api_key() -> str | None:
