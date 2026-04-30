@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from typing import Any
 
 import pytest
 
@@ -8,7 +9,7 @@ from agent.utils import github
 
 
 class _FakeResponse:
-    def __init__(self, status_code: int, payload: object) -> None:
+    def __init__(self, status_code: int, payload: Any) -> None:
         self.status_code = status_code
         self._payload = payload
 
@@ -16,7 +17,7 @@ class _FakeResponse:
     def is_success(self) -> bool:
         return 200 <= self.status_code < 300
 
-    def json(self) -> object:
+    def json(self) -> Any:
         return self._payload
 
 
@@ -268,6 +269,55 @@ def test_create_pr_falls_back_to_installation_token(
 
     assert result == ("https://github.com/o/r/pull/12", 12, False)
     # 3 calls: failed PR create, successful PR create, label
+    assert len(calls) == 3
+
+
+def test_create_pr_falls_back_on_http_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When user token raises HTTPError, retries with installation token."""
+    calls: list[tuple[str, str, dict | None]] = []
+    responses = [
+        # Installation token succeeds
+        _FakeResponse(201, {"html_url": "https://github.com/o/r/pull/12", "number": 12}),
+        # Label
+        _FakeResponse(200, [{"name": "OpenSWE"}]),
+    ]
+
+    class _RaiseFirstPostClient(_FakeAsyncClient):
+        """Raises on the first POST only (user token), then delegates to normal behavior."""
+
+        _first = True
+
+        async def post(
+            self, url: str, *, headers: dict[str, str], json: dict | None = None
+        ) -> _FakeResponse:
+            self._calls.append(("POST", url, json))
+            if self._first:
+                self._first = False
+                request = github.httpx.Request("POST", url)
+                raise github.httpx.ConnectError("boom", request=request)
+            return self._responses.pop(0)
+
+    monkeypatch.setattr(
+        github.httpx, "AsyncClient", lambda: _RaiseFirstPostClient(responses, calls)
+    )
+
+    result = asyncio.run(
+        github.create_github_pr(
+            repo_owner="o",
+            repo_name="r",
+            github_token="user-token",
+            title="feat: test",
+            head_branch="feature",
+            base_branch="main",
+            body="body",
+            installation_token="install-token",
+        )
+    )
+
+    assert result == ("https://github.com/o/r/pull/12", 12, False)
+    # 3 calls: failed POST (user token), successful POST (install token), label POST
     assert len(calls) == 3
 
 

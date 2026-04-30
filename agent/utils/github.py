@@ -221,6 +221,12 @@ async def create_github_pr(
                         )
                         logger.info("Using existing PR for head branch: %s", existing[0])
                         return existing[0], existing[1], True
+                    else:
+                        logger.debug(
+                            "Could not find existing PR with current token, will retry"
+                            if token != tokens_to_try[-1]
+                            else "Could not find existing PR"
+                        )
                 else:
                     logger.error(
                         "GitHub API error (%s): %s",
@@ -258,7 +264,7 @@ async def _add_label(
     github_token: str,
     pr_number: int | None,
 ) -> None:
-    """Add the 'openswe' label to a PR without failing PR creation on errors."""
+    """Add the 'OpenSWE' label to a PR without failing PR creation on errors."""
     if not pr_number:
         return
 
