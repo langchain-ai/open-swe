@@ -12,6 +12,7 @@ import time
 from typing import Any
 
 import httpx
+from langgraph_sdk.client import LangGraphClient
 
 from agent.utils.langsmith import get_langsmith_trace_url
 
@@ -182,10 +183,10 @@ def format_slack_messages_for_prompt(
     return "\n".join(lines)
 
 
-async def post_slack_thread_reply(channel_id: str, thread_ts: str, text: str) -> bool:
-    """Post a reply in a Slack thread."""
+async def post_slack_thread_reply_with_ts(channel_id: str, thread_ts: str, text: str) -> str | None:
+    """Post a reply in a Slack thread and return its Slack timestamp."""
     if not SLACK_BOT_TOKEN:
-        return False
+        return None
 
     payload = {
         "channel": channel_id,
@@ -204,11 +205,17 @@ async def post_slack_thread_reply(channel_id: str, thread_ts: str, text: str) ->
             data = response.json()
             if not data.get("ok"):
                 logger.warning("Slack chat.postMessage failed: %s", data.get("error"))
-                return False
-            return True
+                return None
+            message_ts = data.get("ts")
+            return message_ts if isinstance(message_ts, str) and message_ts else None
         except httpx.HTTPError:
             logger.exception("Slack chat.postMessage request failed")
-            return False
+            return None
+
+
+async def post_slack_thread_reply(channel_id: str, thread_ts: str, text: str) -> bool:
+    """Post a reply in a Slack thread."""
+    return await post_slack_thread_reply_with_ts(channel_id, thread_ts, text) is not None
 
 
 async def post_slack_ephemeral_message(
@@ -524,12 +531,112 @@ async def resolve_slack_links_in_context(
     return resolved_links_section, image_urls
 
 
-async def post_slack_trace_reply(channel_id: str, thread_ts: str, thread_id: str) -> None:
-    """Post a trace URL reply in a Slack thread."""
+async def post_slack_trace_reply(channel_id: str, thread_ts: str, thread_id: str) -> str | None:
+    """Post a trace URL reply in a Slack thread and return its Slack timestamp."""
     trace_url = get_langsmith_trace_url(thread_id)
     if trace_url:
-        await post_slack_thread_reply(
+        return await post_slack_thread_reply_with_ts(
             channel_id, thread_ts, f"Working on it! <{trace_url}|View trace>"
         )
-    else:
-        await post_slack_thread_reply(channel_id, thread_ts, "Working on it!")
+    return await post_slack_thread_reply_with_ts(channel_id, thread_ts, "Working on it!")
+
+
+_SLACK_RUN_MAP_NAMESPACE = "slack_run_map"
+_THREAD_RUN_KEY_PREFIX = "thread:"
+_MESSAGE_RUN_KEY_PREFIX = "message:"
+
+
+def _extract_run_id_from_store_item(item: dict[str, Any] | None) -> str | None:
+    if not item:
+        return None
+    value = item.get("value")
+    if not isinstance(value, dict):
+        return None
+    run_id = value.get("run_id")
+    return run_id if isinstance(run_id, str) and run_id else None
+
+
+async def store_slack_run_mapping(
+    langgraph_client: LangGraphClient,
+    channel_id: str,
+    thread_ts: str,
+    run_id: str,
+    *,
+    message_ts: str | None = None,
+) -> None:
+    """Persist Slack thread/message to LangGraph run mapping."""
+    namespace = (_SLACK_RUN_MAP_NAMESPACE, channel_id)
+    value = {"run_id": run_id, "thread_ts": thread_ts}
+    try:
+        await langgraph_client.store.put_item(
+            namespace, f"{_THREAD_RUN_KEY_PREFIX}{thread_ts}", value
+        )
+        if message_ts:
+            await langgraph_client.store.put_item(
+                namespace,
+                f"{_MESSAGE_RUN_KEY_PREFIX}{message_ts}",
+                {**value, "message_ts": message_ts},
+            )
+    except Exception:
+        logger.exception(
+            "Failed to store Slack run mapping for channel=%s thread=%s run=%s",
+            channel_id,
+            thread_ts,
+            run_id,
+        )
+
+
+async def store_slack_message_run_mapping(
+    langgraph_client: LangGraphClient,
+    channel_id: str,
+    thread_ts: str,
+    message_ts: str,
+) -> None:
+    """Persist a Slack message mapping using the current thread's run mapping."""
+    namespace = (_SLACK_RUN_MAP_NAMESPACE, channel_id)
+    try:
+        item = await langgraph_client.store.get_item(
+            namespace, f"{_THREAD_RUN_KEY_PREFIX}{thread_ts}"
+        )
+        run_id = _extract_run_id_from_store_item(item)
+        if not run_id:
+            logger.debug(
+                "No Slack thread run mapping found for channel=%s thread=%s",
+                channel_id,
+                thread_ts,
+            )
+            return
+        await store_slack_run_mapping(
+            langgraph_client,
+            channel_id,
+            thread_ts,
+            run_id,
+            message_ts=message_ts,
+        )
+    except Exception:
+        logger.exception(
+            "Failed to store Slack message run mapping for channel=%s message=%s",
+            channel_id,
+            message_ts,
+        )
+
+
+async def lookup_run_id_for_slack_message(
+    langgraph_client: LangGraphClient,
+    channel_id: str,
+    message_ts: str,
+) -> str | None:
+    """Look up the LangGraph run mapped to a specific Slack bot message."""
+    namespace = (_SLACK_RUN_MAP_NAMESPACE, channel_id)
+    try:
+        item = await langgraph_client.store.get_item(
+            namespace, f"{_MESSAGE_RUN_KEY_PREFIX}{message_ts}"
+        )
+        return _extract_run_id_from_store_item(item)
+    except Exception:
+        logger.exception(
+            "Failed to look up Slack message run mapping for channel=%s message=%s",
+            channel_id,
+            message_ts,
+        )
+        return None

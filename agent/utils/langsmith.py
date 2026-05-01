@@ -2,8 +2,13 @@
 
 from __future__ import annotations
 
+import functools
 import logging
 import os
+import uuid
+from typing import Any
+
+from langsmith import Client as LangSmithClient
 
 logger = logging.getLogger(__name__)
 
@@ -30,3 +35,88 @@ def get_langsmith_trace_url(thread_id: str) -> str | None:
             "Failed to build LangSmith trace URL for thread %s", thread_id, exc_info=True
         )
         return None
+
+
+@functools.lru_cache(maxsize=1)
+def _build_langsmith_feedback_clients() -> tuple[LangSmithClient, ...]:
+    clients: list[LangSmithClient] = []
+    seen_keys: set[str] = set()
+
+    api_endpoint = os.environ.get("LANGSMITH_ENDPOINT", "https://api.smith.langchain.com")
+    client_configs = (
+        (
+            os.environ.get("LANGSMITH_API_KEY") or os.environ.get("LANGCHAIN_API_KEY"),
+            api_endpoint,
+        ),
+        (
+            os.environ.get("LANGSMITH_API_KEY_PROD"),
+            os.environ.get("LANGSMITH_ENDPOINT_PROD", api_endpoint),
+        ),
+    )
+
+    for api_key, api_url in client_configs:
+        if not api_key or api_key in seen_keys:
+            continue
+        clients.append(LangSmithClient(api_key=api_key, api_url=api_url))
+        seen_keys.add(api_key)
+
+    return tuple(clients)
+
+
+def _feedback_id(run_id: str, key: str) -> uuid.UUID:
+    return uuid.uuid5(uuid.NAMESPACE_URL, f"langsmith-feedback:{run_id}:{key}")
+
+
+def create_langsmith_feedback(
+    run_id: str,
+    key: str,
+    *,
+    score: float,
+    comment: str | None = None,
+    source_info: dict[str, Any] | None = None,
+) -> bool:
+    """Create or update deterministic feedback on all configured LangSmith clients."""
+    clients = _build_langsmith_feedback_clients()
+    if not clients:
+        logger.warning("No LangSmith API key configured, skipping feedback")
+        return False
+
+    feedback_id = _feedback_id(run_id, key)
+    any_success = False
+    for client in clients:
+        try:
+            client.create_feedback(
+                run_id=run_id,
+                key=key,
+                score=score,
+                comment=comment,
+                source_info=source_info,
+                feedback_source_type="api",
+                feedback_id=feedback_id,
+            )
+            any_success = True
+        except Exception:
+            try:
+                client.update_feedback(feedback_id, score=score, comment=comment)
+                any_success = True
+            except Exception:
+                logger.exception("Failed to create or update LangSmith feedback for run %s", run_id)
+    return any_success
+
+
+def delete_langsmith_feedback(run_id: str, key: str) -> bool:
+    """Delete deterministic feedback from all configured LangSmith clients."""
+    clients = _build_langsmith_feedback_clients()
+    if not clients:
+        logger.warning("No LangSmith API key configured, skipping feedback deletion")
+        return False
+
+    feedback_id = _feedback_id(run_id, key)
+    any_success = False
+    for client in clients:
+        try:
+            client.delete_feedback(feedback_id)
+            any_success = True
+        except Exception:
+            logger.exception("Failed to delete LangSmith feedback for run %s", run_id)
+    return any_success
