@@ -93,17 +93,12 @@ async def open_pr_if_needed(
         pr_title = pr_payload.get("title", "feat: Open SWE PR")
         pr_body = pr_payload.get("body", "Automated PR created by Open SWE agent.")
         commit_message = pr_payload.get("commit_message", pr_title)
-        github_token = get_github_token()
+        github_token = get_github_token(config)
         user_identity = await asyncio.to_thread(
             resolve_triggering_user_identity, config, github_token
         )
         pr_body = add_pr_collaboration_note(pr_body, user_identity)
         commit_message = add_user_coauthor_trailer(commit_message, user_identity)
-
-        installation_token = await get_github_app_installation_token()
-        if not installation_token:
-            logger.error("Failed to get GitHub App installation token for thread %s", thread_id)
-            return None
 
         if not thread_id:
             raise ValueError("No thread_id found in config")
@@ -130,6 +125,11 @@ async def open_pr_if_needed(
 
         if not has_changes:
             logger.info("No changes detected, skipping PR creation")
+            return None
+
+        installation_token = await get_github_app_installation_token()
+        if not installation_token:
+            logger.error("Failed to get GitHub App installation token for thread %s", thread_id)
             return None
 
         logger.info("Changes detected, preparing PR for thread %s", thread_id)
