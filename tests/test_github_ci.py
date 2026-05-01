@@ -18,6 +18,18 @@ def _make_response(status_code: int, json_data: Any) -> MagicMock:
     return resp
 
 
+def _check_run(
+    run_id: int, conclusion: str = "success", status: str = "completed"
+) -> dict[str, Any]:
+    return {
+        "id": run_id,
+        "name": f"job-{run_id}",
+        "status": status,
+        "conclusion": conclusion,
+        "html_url": f"https://github.com/checks/{run_id}",
+    }
+
+
 # ---------------------------------------------------------------------------
 # get_pr_check_runs
 # ---------------------------------------------------------------------------
@@ -137,6 +149,69 @@ def test_get_pr_check_runs_with_failure(monkeypatch: pytest.MonkeyPatch) -> None
     assert result["all_passed"] is False
 
 
+def test_get_pr_check_runs_empty_checks_not_all_passed(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        github_ci, "_get_repo_config", lambda: {"owner": "langchain-ai", "name": "open-swe"}
+    )
+    monkeypatch.setattr(github_ci, "_get_token", AsyncMock(return_value="test-token"))
+
+    mock_client = AsyncMock()
+    mock_client.get = AsyncMock(
+        side_effect=[
+            _make_response(200, {"head": {"sha": "empty123"}}),
+            _make_response(200, {"total_count": 0, "check_runs": []}),
+        ]
+    )
+
+    mock_async_context = MagicMock()
+    mock_async_context.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_async_context.__aexit__ = AsyncMock(return_value=False)
+
+    with patch("agent.tools.github_ci.httpx.AsyncClient", return_value=mock_async_context):
+        result = github_ci.get_pr_check_runs(42)
+
+    assert result["success"] is True
+    assert result["total_count"] == 0
+    assert result["check_runs"] == []
+    assert result["all_passed"] is False
+    assert result["any_failed"] is False
+    assert result["any_pending"] is False
+
+
+def test_get_pr_check_runs_paginates_before_summarizing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        github_ci, "_get_repo_config", lambda: {"owner": "langchain-ai", "name": "open-swe"}
+    )
+    monkeypatch.setattr(github_ci, "_get_token", AsyncMock(return_value="test-token"))
+
+    first_page_runs = [_check_run(run_id) for run_id in range(1, 101)]
+    second_page_runs = [_check_run(101, conclusion="failure")]
+
+    mock_client = AsyncMock()
+    mock_client.get = AsyncMock(
+        side_effect=[
+            _make_response(200, {"head": {"sha": "paged123"}}),
+            _make_response(200, {"total_count": 101, "check_runs": first_page_runs}),
+            _make_response(200, {"total_count": 101, "check_runs": second_page_runs}),
+        ]
+    )
+
+    mock_async_context = MagicMock()
+    mock_async_context.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_async_context.__aexit__ = AsyncMock(return_value=False)
+
+    with patch("agent.tools.github_ci.httpx.AsyncClient", return_value=mock_async_context):
+        result = github_ci.get_pr_check_runs(42)
+
+    assert result["success"] is True
+    assert result["total_count"] == 101
+    assert len(result["check_runs"]) == 101
+    assert result["any_failed"] is True
+    assert result["all_passed"] is False
+
+
 def test_get_pr_check_runs_pr_fetch_error(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         github_ci, "_get_repo_config", lambda: {"owner": "langchain-ai", "name": "open-swe"}
@@ -244,3 +319,36 @@ def test_rerun_failed_check_runs_with_failures(monkeypatch: pytest.MonkeyPatch) 
     assert set(result["rerun_run_ids"]) == {200, 201}
     assert len(result["rerun_results"]) == 2
     assert all(r["success"] for r in result["rerun_results"])
+
+
+def test_rerun_failed_check_runs_paginates_workflow_runs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        github_ci, "_get_repo_config", lambda: {"owner": "langchain-ai", "name": "open-swe"}
+    )
+    monkeypatch.setattr(github_ci, "_get_token", AsyncMock(return_value="test-token"))
+
+    first_page_runs = [{"id": run_id, "conclusion": "success"} for run_id in range(1, 101)]
+    second_page_runs = [{"id": 999, "conclusion": "failure"}]
+
+    mock_client = AsyncMock()
+    mock_client.get = AsyncMock(
+        side_effect=[
+            _make_response(200, {"head": {"sha": "paged-rerun"}}),
+            _make_response(200, {"workflow_runs": first_page_runs}),
+            _make_response(200, {"workflow_runs": second_page_runs}),
+        ]
+    )
+    mock_client.post = AsyncMock(return_value=_make_response(201, {}))
+
+    mock_async_context = MagicMock()
+    mock_async_context.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_async_context.__aexit__ = AsyncMock(return_value=False)
+
+    with patch("agent.tools.github_ci.httpx.AsyncClient", return_value=mock_async_context):
+        result = github_ci.rerun_failed_check_runs(42)
+
+    assert result["success"] is True
+    assert result["rerun_run_ids"] == [999]
+    assert len(result["rerun_results"]) == 1

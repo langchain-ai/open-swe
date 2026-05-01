@@ -32,6 +32,41 @@ def _repo_url(repo_config: dict[str, str]) -> str:
     return f"{GITHUB_API_BASE}/repos/{owner}/{name}"
 
 
+async def _fetch_paginated_items(
+    client: httpx.AsyncClient,
+    url: str,
+    headers: dict[str, str],
+    item_key: str,
+    params: dict[str, str] | None = None,
+) -> tuple[list[dict[str, Any]] | None, int | None, str | None]:
+    items: list[dict[str, Any]] = []
+    total_count: int | None = None
+    page = 1
+
+    while True:
+        page_params = {"per_page": "100", "page": str(page)}
+        if params:
+            page_params.update(params)
+
+        response = await client.get(url, headers=headers, params=page_params)
+        if response.status_code != 200:
+            return None, None, f"GitHub API returned {response.status_code}: {response.text}"
+
+        data = response.json()
+        if total_count is None and isinstance(data.get("total_count"), int):
+            total_count = data["total_count"]
+
+        page_items = data.get(item_key, [])
+        if not isinstance(page_items, list):
+            return None, None, f"GitHub API response missing {item_key} list"
+
+        items.extend(page_items)
+        if len(page_items) < 100:
+            return items, total_count, None
+
+        page += 1
+
+
 def get_pr_check_runs(pull_number: int) -> dict[str, Any]:
     """Get CI check run status for a pull request.
 
@@ -68,15 +103,18 @@ def get_pr_check_runs(pull_number: int) -> dict[str, Any]:
 
             # Step 2: get check runs for that SHA
             check_runs_url = f"{_repo_url(repo_config)}/commits/{head_sha}/check-runs"
-            cr_response = await client.get(check_runs_url, headers=_github_headers(token))
-            if cr_response.status_code != 200:
+            check_runs, total_count, error = await _fetch_paginated_items(
+                client,
+                check_runs_url,
+                _github_headers(token),
+                "check_runs",
+            )
+            if error or check_runs is None:
                 return {
                     "success": False,
-                    "error": f"GitHub API returned {cr_response.status_code} fetching check runs: {cr_response.text}",
+                    "error": f"Error fetching check runs: {error}",
                 }
 
-            data = cr_response.json()
-            check_runs = data.get("check_runs", [])
             summary = [
                 {
                     "id": run.get("id"),
@@ -88,6 +126,7 @@ def get_pr_check_runs(pull_number: int) -> dict[str, Any]:
                 for run in check_runs
             ]
 
+            has_check_runs = bool(check_runs)
             all_passed = all(
                 run.get("conclusion") == "success"
                 for run in check_runs
@@ -102,9 +141,9 @@ def get_pr_check_runs(pull_number: int) -> dict[str, Any]:
             return {
                 "success": True,
                 "head_sha": head_sha,
-                "total_count": data.get("total_count", len(check_runs)),
+                "total_count": total_count if total_count is not None else len(check_runs),
                 "check_runs": summary,
-                "all_passed": all_passed and not any_pending,
+                "all_passed": has_check_runs and all_passed and not any_pending,
                 "any_failed": any_failed,
                 "any_pending": any_pending,
             }
@@ -149,18 +188,19 @@ def rerun_failed_check_runs(pull_number: int) -> dict[str, Any]:
 
             # Step 2: get workflow runs for that SHA
             runs_url = f"{_repo_url(repo_config)}/actions/runs"
-            runs_response = await client.get(
+            workflow_runs, _, error = await _fetch_paginated_items(
+                client,
                 runs_url,
-                headers=_github_headers(token),
+                _github_headers(token),
+                "workflow_runs",
                 params={"head_sha": head_sha},
             )
-            if runs_response.status_code != 200:
+            if error or workflow_runs is None:
                 return {
                     "success": False,
-                    "error": f"GitHub API returned {runs_response.status_code} fetching workflow runs: {runs_response.text}",
+                    "error": f"Error fetching workflow runs: {error}",
                 }
 
-            workflow_runs = runs_response.json().get("workflow_runs", [])
             failed_run_ids = [
                 run["id"]
                 for run in workflow_runs
