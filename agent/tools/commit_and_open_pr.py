@@ -177,9 +177,7 @@ def commit_and_open_pr(
         if current_branch != target_branch:
             if branch_name:
                 # Existing branch — plain checkout, do not create or reset
-                result = git_checkout_existing_branch(
-                    sandbox_backend, repo_dir, target_branch
-                )
+                result = git_checkout_existing_branch(sandbox_backend, repo_dir, target_branch)
                 if result.exit_code != 0:
                     return {
                         "success": False,
