@@ -4,8 +4,13 @@ Open SWE is designed to be forked and customized for your org. The core agent is
 
 ```python
 # agent/server.py — the key lines
+model_id = os.environ.get("LLM_MODEL_ID", DEFAULT_LLM_MODEL_ID)
+model_kwargs = {"max_tokens": DEFAULT_LLM_MAX_TOKENS}
+if model_id == DEFAULT_LLM_MODEL_ID:
+    model_kwargs["reasoning"] = DEFAULT_LLM_REASONING
+
 return create_deep_agent(
-    model=make_model(os.environ.get("LLM_MODEL_ID", DEFAULT_LLM_MODEL_ID), temperature=0, max_tokens=20_000),
+    model=make_model(model_id, **model_kwargs),
     system_prompt=construct_system_prompt(...),
     tools=[http_request, fetch_url, list_repos, get_branch_name, commit_and_open_pr, linear_comment, slack_thread_reply],
     backend=sandbox_backend,
@@ -24,13 +29,15 @@ return create_deep_agent(
 
 By default, Open SWE runs each task in a [LangSmith cloud sandbox](https://docs.smith.langchain.com/) — an isolated Linux environment where the agent clones the repo and executes commands. Sandbox creation and connection is handled in `agent/integrations/langsmith.py`.
 
-### Using a custom sandbox template
+### Using a custom sandbox snapshot
 
-Set environment variables to use a custom Docker image:
+Build a snapshot in LangSmith (UI or `SandboxClient.create_snapshot`) from your Docker image and point Open SWE at its UUID:
 
 ```bash
-DEFAULT_SANDBOX_TEMPLATE_NAME="my-template"    # Template registered in LangSmith
-DEFAULT_SANDBOX_TEMPLATE_IMAGE="my-org/my-image:latest"  # Docker image
+DEFAULT_SANDBOX_SNAPSHOT_ID="<snapshot-uuid>"                      # Required
+DEFAULT_SANDBOX_SNAPSHOT_FS_CAPACITY_BYTES="34359738368"           # Optional, default 32 GiB
+DEFAULT_SANDBOX_VCPUS="4"                                          # Optional, default 4
+DEFAULT_SANDBOX_MEM_BYTES="16106127360"                            # Optional, default 15 GiB
 ```
 
 This is useful for pre-installing languages, frameworks, or internal tools that your repos depend on — reducing setup time per agent run.
@@ -117,14 +124,16 @@ See `deepagents.backends.LangSmithSandbox` and `agent/integrations/langsmith.py`
 
 ## 2. Model
 
-The model is configured in the `get_agent()` function in `agent/server.py`. By default it uses `anthropic:claude-opus-4-6`, but you can override it with the `LLM_MODEL_ID` environment variable:
+The model is configured in the `get_agent()` function in `agent/server.py`. By default it uses `openai:gpt-5.5` with medium reasoning effort, but you can override the model with the `LLM_MODEL_ID` environment variable:
 
 ```bash
 # Set the model via environment variable (uses provider:model format)
 LLM_MODEL_ID="anthropic:claude-sonnet-4-6"
 ```
 
-If `LLM_MODEL_ID` is not set, the default model (`anthropic:claude-opus-4-6`) is used.
+If `LLM_MODEL_ID` is not set, the default model (`openai:gpt-5.5`) is used.
+
+`max_tokens` is a maximum completion/output token budget, not the model's total context window. For OpenAI reasoning models, this budget can include both internal reasoning tokens and final response tokens.
 
 ### Switching models
 
@@ -135,7 +144,7 @@ Use the `provider:model` format:
 model=make_model("anthropic:claude-sonnet-4-6", temperature=0, max_tokens=16_000)
 
 # OpenAI (uses Responses API by default)
-model=make_model("openai:gpt-4o", temperature=0, max_tokens=16_000)
+model=make_model("openai:gpt-5.5", max_tokens=128_000, reasoning={"effort": "medium"})
 
 # Google
 model=make_model("google_genai:gemini-2.5-pro", temperature=0, max_tokens=16_000)
@@ -167,7 +176,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         model = make_model("anthropic:claude-sonnet-4-6", temperature=0, max_tokens=16_000)
     else:
         # Full model for code changes from Linear
-        model = make_model("anthropic:claude-opus-4-6", temperature=0, max_tokens=20_000)
+        model = make_model("openai:gpt-5.5", max_tokens=128_000, reasoning={"effort": "medium"})
     
     return create_deep_agent(model=model, ...)
 ```

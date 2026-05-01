@@ -45,7 +45,7 @@ Open SWE authenticates as a [GitHub App](https://docs.github.com/en/apps/creatin
 Before creating the app you need to decide on an **OAuth provider ID** — this is a short string you'll use in both GitHub and LangSmith to link the two. Pick something memorable, for example:
 
 ```
-github-oauth-provider
+your-org-github-oauth
 ```
 
 Write this down. You'll use it in the callback URL below and again in step 4 when configuring LangSmith.
@@ -56,7 +56,7 @@ Write this down. You'll use it in the callback URL below and again in step 4 whe
 2. Fill in:
    - **App name**: `open-swe` (or your preferred name)
    - **Homepage URL**: This can be any valid URL — it's only shown on the GitHub Marketplace page (which you won't be using). Use something like `https://github.com/langchain-ai/open-swe`
-   - **Callback URL**: `https://smith.langchain.com/host-oauth-callback/<your-provider-id>` — replace `<your-provider-id>` with the ID you chose in step 3a (e.g. `https://smith.langchain.com/host-oauth-callback/github-oauth-provider`)
+   - **Callback URL**: `https://smith.langchain.com/host-oauth-callback/<your-provider-id>` — replace `<your-provider-id>` with the ID you chose in step 3a (e.g. `https://smith.langchain.com/host-oauth-callback/your-org-github-oauth`)
    - **Request user authorization (OAuth) during installation**: ✅ Enable this
    - **Webhook URL**: `https://<your-ngrok-url>/webhooks/github` — use the ngrok URL from step 2
    - **Webhook secret**: generate one and save it — you'll need it later as `GITHUB_WEBHOOK_SECRET`:
@@ -125,21 +125,43 @@ This lets each user authenticate with their own GitHub account. Without it, all 
 To set up per-user OAuth:
 
 1. In LangSmith, go to **Settings → OAuth Providers → Add Provider**
-2. Set the **Provider ID** to the same string you chose in step 3a (e.g. `github-oauth-provider`)
+2. Set the **Provider ID** to the same string you chose in step 3a (e.g. `your-org-github-oauth`)
 3. Enter the **Client ID** and **Client Secret** from your GitHub App (found on the GitHub App settings page under **OAuth credentials**)
-4. Save. You'll reference this Provider ID as `GITHUB_OAUTH_PROVIDER_ID` in your environment variables.
+4. Enter the **Authorization URL** as `https://github.com/login/oauth/authorize` and the **Token URL** as `https://github.com/login/oauth/access_token`.
+5. Leave "Enable PKCE" unchecked.
+6. Save. You'll reference this Provider ID as `GITHUB_OAUTH_PROVIDER_ID` in your environment variables.
 
-### 4c. Sandbox templates (optional)
+### 4c. Sandbox snapshots
 
-LangSmith sandboxes provide the isolated execution environment for each agent run. You can create a template using the same Docker image we use internally by visiting the sandbox page in LangSmith, and setting the following fields:
+LangSmith sandboxes provide the isolated execution environment for each agent run. Open SWE boots each sandbox from a pre-built **snapshot** — you build the snapshot once (from a Docker image) and then reference it by UUID.
 
-- `Name`: you can set this to whatever name you'd like, e.g. `open-swe`
-- `Container Image`: `bracelangchain/deepagents-sandbox:v1` this contains the [Docker file in this repo](./Dockerfile)
-- `CPU`: `500m`
-- `Memory`: `4096Mi`
-- `Ephemeral Storage`: `15Gi`
+Build a snapshot in the LangSmith UI (Sandboxes → Snapshots → New), or via the SDK:
 
-> If you don't set these, you can use a Python based docker image in the template.
+```python
+from langsmith.sandbox import SandboxClient
+
+client = SandboxClient(api_key="<your key>")
+snapshot = client.create_snapshot(
+    name="open-swe",
+    docker_image="bracelangchain/deepagents-sandbox:v1",  # built from ./Dockerfile
+    fs_capacity_bytes=32 * 1024**3,
+)
+print(snapshot.id)
+```
+
+Then set the resulting UUID in your environment:
+
+```bash
+DEFAULT_SANDBOX_SNAPSHOT_ID="<snapshot-uuid>"
+# Optional; overrides the snapshot's root FS size at sandbox boot. Default is 32 GiB.
+DEFAULT_SANDBOX_SNAPSHOT_FS_CAPACITY_BYTES="34359738368"
+# Optional; number of vCPUs per sandbox. Default is 4.
+DEFAULT_SANDBOX_VCPUS="4"
+# Optional; memory in bytes per sandbox. Default is 15 GiB.
+DEFAULT_SANDBOX_MEM_BYTES="16106127360"
+```
+
+`DEFAULT_SANDBOX_SNAPSHOT_ID` is required when `SANDBOX_TYPE=langsmith`. The server validates this at startup and refuses to boot if it's missing.
 
 ## 5. Set up triggers
 
@@ -347,8 +369,10 @@ SLACK_SIGNING_SECRET=""
 EXA_API_KEY=""                         # From https://dashboard.exa.ai
 
 # === Sandbox (optional) ===
-DEFAULT_SANDBOX_TEMPLATE_NAME=""       # Custom sandbox template name (default: deepagents-cli)
-DEFAULT_SANDBOX_TEMPLATE_IMAGE=""      # Custom Docker image (default: python:3)
+DEFAULT_SANDBOX_SNAPSHOT_ID=""         # Required when SANDBOX_TYPE=langsmith (see step 4c)
+DEFAULT_SANDBOX_SNAPSHOT_FS_CAPACITY_BYTES=""  # Root FS size in bytes (default: 32 GiB)
+DEFAULT_SANDBOX_VCPUS=""               # vCPUs per sandbox (default: 4)
+DEFAULT_SANDBOX_MEM_BYTES=""           # Memory in bytes per sandbox (default: 15 GiB)
 
 # === Token Encryption ===
 TOKEN_ENCRYPTION_KEY=""                # Generate with: openssl rand -base64 32
@@ -442,8 +466,9 @@ The `langgraph.json` at the project root already defines the graph entry point a
 
 - Verify `LANGSMITH_API_KEY_PROD` is set and valid
 - Check LangSmith sandbox quotas in your workspace settings
-- If you see `Failed to check template ''`, ensure either `DEFAULT_SANDBOX_TEMPLATE_NAME` is set or that your LangSmith API key has permissions to create sandbox templates
-- If you get a 403 Forbidden error on the sandbox templates endpoint, your LangSmith workspace may not have sandbox access enabled — contact LangSmith support
+- If the server refuses to start with `DEFAULT_SANDBOX_SNAPSHOT_ID must be set`, build a snapshot (see step 4c) and export its UUID
+- If you see `Failed to create sandbox from snapshot '<id>'`, confirm the snapshot exists in your workspace and has status `ready`
+- If you get a 403 Forbidden error on the sandbox endpoints, your LangSmith workspace may not have sandbox access enabled — contact LangSmith support
 
 ### Agent not responding to comments
 
