@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from typing import Any
 
 from langchain.agents.middleware import AgentState, after_agent
@@ -14,6 +15,22 @@ from ..utils.slack import post_slack_thread_reply
 logger = logging.getLogger(__name__)
 
 _LIMIT_MARKER = "Model call limits exceeded"
+
+
+def _content_to_text(content: object) -> str:
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return str(content)
+
+    parts: list[str] = []
+    for block in content:
+        if isinstance(block, Mapping):
+            text = block.get("text", "")
+            parts.append(text if isinstance(text, str) else str(text))
+        else:
+            parts.append(str(block))
+    return " ".join(parts)
 
 
 @after_agent
@@ -32,23 +49,27 @@ async def notify_step_limit_reached(
         return None
 
     last_msg = messages[-1]
-    content = getattr(last_msg, "content", "") or ""
-    if isinstance(content, list):
-        content = " ".join(
-            block.get("text", "") if isinstance(block, dict) else str(block)
-            for block in content
-        )
+    content = _content_to_text(getattr(last_msg, "content", "") or "")
 
     if _LIMIT_MARKER not in content:
         return None
 
     config = get_config()
     configurable = config.get("configurable", {})
-    slack_thread = configurable.get("slack_thread", {})
+    slack_thread = configurable.get("slack_thread") if isinstance(configurable, dict) else None
+    if not isinstance(slack_thread, dict):
+        logger.info("No Slack thread config — cannot send step-limit notification")
+        return None
+
     channel_id = slack_thread.get("channel_id")
     thread_ts = slack_thread.get("thread_ts")
 
-    if not channel_id or not thread_ts:
+    if (
+        not isinstance(channel_id, str)
+        or not isinstance(thread_ts, str)
+        or not channel_id
+        or not thread_ts
+    ):
         logger.info("No Slack thread config — cannot send step-limit notification")
         return None
 

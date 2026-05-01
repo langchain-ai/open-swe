@@ -328,7 +328,8 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             ToolErrorMiddleware(),
             check_message_queue_before_model,
             ensure_no_empty_msg,
-            open_pr_if_needed,
+            # after_agent hooks run in reverse list order; notify after the PR safety net.
             notify_step_limit_reached,
+            open_pr_if_needed,
         ],
     ).with_config(config)
