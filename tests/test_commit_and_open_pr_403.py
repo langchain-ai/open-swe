@@ -1,5 +1,6 @@
 """Tests that commit_and_open_pr returns a PERMANENT_FAILURE message on 403 push errors."""
-from unittest.mock import MagicMock, patch
+
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from deepagents.backends.protocol import ExecuteResponse
 
@@ -29,9 +30,15 @@ def _make_config(thread_id: str = "test-thread") -> dict:
 @patch("agent.tools.commit_and_open_pr.git_config_user")
 @patch("agent.tools.commit_and_open_pr.git_add_all")
 @patch("agent.tools.commit_and_open_pr.get_github_token", return_value="ghp_token")
+@patch(
+    "agent.tools.commit_and_open_pr.get_github_app_installation_token",
+    new_callable=AsyncMock,
+    return_value="ghs_token",
+)
 @patch("agent.tools.commit_and_open_pr.git_push")
 def test_403_push_returns_permanent_failure(
     mock_git_push,
+    mock_get_installation_token,
     mock_get_token,
     mock_git_add_all,
     mock_git_config_user,
@@ -57,7 +64,9 @@ def test_403_push_returns_permanent_failure(
         ),
     )
 
-    result = commit_and_open_pr(title="fix: something", body="## Description\nfoo\n\n## Test Plan\n- [ ] check")
+    result = commit_and_open_pr(
+        title="fix: something", body="## Description\nfoo\n\n## Test Plan\n- [ ] check"
+    )
 
     assert result["success"] is False
     assert result["pr_url"] is None
@@ -78,9 +87,15 @@ def test_403_push_returns_permanent_failure(
 @patch("agent.tools.commit_and_open_pr.git_config_user")
 @patch("agent.tools.commit_and_open_pr.git_add_all")
 @patch("agent.tools.commit_and_open_pr.get_github_token", return_value="ghp_token")
+@patch(
+    "agent.tools.commit_and_open_pr.get_github_app_installation_token",
+    new_callable=AsyncMock,
+    return_value="ghs_token",
+)
 @patch("agent.tools.commit_and_open_pr.git_push")
 def test_non_403_push_failure_returns_regular_error(
     mock_git_push,
+    mock_get_installation_token,
     mock_get_token,
     mock_git_add_all,
     mock_git_config_user,
@@ -102,7 +117,9 @@ def test_non_403_push_failure_returns_regular_error(
         output="error: failed to push some refs to 'origin'",
     )
 
-    result = commit_and_open_pr(title="fix: something", body="## Description\nfoo\n\n## Test Plan\n- [ ] check")
+    result = commit_and_open_pr(
+        title="fix: something", body="## Description\nfoo\n\n## Test Plan\n- [ ] check"
+    )
 
     assert result["success"] is False
     assert result["pr_url"] is None
