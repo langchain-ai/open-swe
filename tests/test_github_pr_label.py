@@ -71,61 +71,81 @@ class _AlwaysRaisePostClient(_FakeAsyncClient):
         raise github.httpx.ConnectError("boom", request=request)
 
 
-# -- _add_label tests --
+# -- _add_labels tests --
 
 
-def test_add_label_success(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_add_labels_success(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[str, str, dict | None]] = []
-    responses = [_FakeResponse(200, [{"name": "OpenSWE"}])]
+    responses = [_FakeResponse(200, [{"name": "OpenSWE"}, {"name": "preview-self-hosted"}])]
     client = _FakeAsyncClient(responses, calls)
 
-    asyncio.run(github._add_label(client, "o", "r", "token", 12))
+    asyncio.run(github._add_labels(client, "o", "r", "token", 12, ["preview-self-hosted"]))
 
     assert calls == [
-        ("POST", "https://api.github.com/repos/o/r/issues/12/labels", {"labels": ["OpenSWE"]}),
+        (
+            "POST",
+            "https://api.github.com/repos/o/r/issues/12/labels",
+            {"labels": ["OpenSWE", "preview-self-hosted"]},
+        ),
     ]
 
 
-def test_add_label_skips_when_no_pr_number() -> None:
+def test_add_labels_skips_when_no_pr_number() -> None:
     """Should return immediately without making any API calls."""
 
     async def _run() -> None:
         # Pass a mock that would fail if called
-        await github._add_label(None, "o", "r", "token", None)  # type: ignore[arg-type]
+        await github._add_labels(None, "o", "r", "token", None)  # type: ignore[arg-type]
 
     asyncio.run(_run())
 
 
-def test_add_label_does_not_raise_on_api_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_add_labels_does_not_raise_on_api_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[str, str, dict | None]] = []
     responses = [_FakeResponse(403, {"message": "Resource not accessible by integration"})]
     client = _FakeAsyncClient(responses, calls)
 
     # Should not raise
-    asyncio.run(github._add_label(client, "o", "r", "token", 12))
+    asyncio.run(github._add_labels(client, "o", "r", "token", 12))
 
     assert len(calls) == 1
 
 
-def test_add_label_does_not_raise_on_http_error() -> None:
+def test_add_labels_does_not_raise_on_http_error() -> None:
     calls: list[tuple[str, str, dict | None]] = []
     responses: list[_FakeResponse] = []
     client = _AlwaysRaisePostClient(responses, calls)
 
     # The POST will raise — should not propagate
-    asyncio.run(github._add_label(client, "o", "r", "token", 5))
+    asyncio.run(github._add_labels(client, "o", "r", "token", 5))
 
     assert len(calls) == 1
+
+
+def test_add_labels_deduplicates_default_label() -> None:
+    calls: list[tuple[str, str, dict | None]] = []
+    responses = [_FakeResponse(200, [{"name": "OpenSWE"}])]
+    client = _FakeAsyncClient(responses, calls)
+
+    asyncio.run(github._add_labels(client, "o", "r", "token", 5, ["OpenSWE", "bug"]))
+
+    assert calls == [
+        (
+            "POST",
+            "https://api.github.com/repos/o/r/issues/5/labels",
+            {"labels": ["OpenSWE", "bug"]},
+        ),
+    ]
 
 
 # -- create_github_pr with label tests --
 
 
-def test_create_pr_adds_label_on_new_pr(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_create_pr_adds_labels_on_new_pr(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[str, str, dict | None]] = []
     responses = [
         _FakeResponse(201, {"html_url": "https://github.com/o/r/pull/12", "number": 12}),
-        _FakeResponse(200, [{"name": "OpenSWE"}]),
+        _FakeResponse(200, [{"name": "OpenSWE"}, {"name": "preview-self-hosted"}]),
     ]
     monkeypatch.setattr(github.httpx, "AsyncClient", lambda: _FakeAsyncClient(responses, calls))
 
@@ -139,6 +159,7 @@ def test_create_pr_adds_label_on_new_pr(monkeypatch: pytest.MonkeyPatch) -> None
             base_branch="main",
             body="body",
             installation_token="install-token",
+            labels=["preview-self-hosted"],
         )
     )
 
@@ -152,7 +173,7 @@ def test_create_pr_adds_label_on_new_pr(monkeypatch: pytest.MonkeyPatch) -> None
     assert calls[1] == (
         "POST",
         "https://api.github.com/repos/o/r/issues/12/labels",
-        {"labels": ["OpenSWE"]},
+        {"labels": ["OpenSWE", "preview-self-hosted"]},
     )
 
 

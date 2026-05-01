@@ -37,6 +37,7 @@ def commit_and_open_pr(
     title: str,
     body: str,
     commit_message: str | None = None,
+    labels: list[str] | None = None,
 ) -> dict[str, Any]:
     """Commit all current changes and open a GitHub Pull Request.
 
@@ -109,6 +110,8 @@ def commit_and_open_pr(
         title: PR title following the format above (e.g. "fix: resolve auth bug [closes AA-123]")
         body: PR description following the template above with ## Description and ## Test Plan
         commit_message: Optional git commit message. If not provided, the PR title is used.
+        labels: Optional GitHub label names to apply to the PR. Use when the user mentions
+            labels in the request, e.g. ["preview-self-hosted"].
 
     Returns:
         Dictionary containing:
@@ -220,6 +223,7 @@ def commit_and_open_pr(
                 base_branch=base_branch,
                 body=pr_body,
                 installation_token=installation_token,
+                labels=labels,
             )
         )
 
