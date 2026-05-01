@@ -22,6 +22,15 @@ WORKFLOW_SCOPE_OUTPUT = (
 )
 
 
+WORKFLOW_PERMISSION_OUTPUT = (
+    "To https://github.com/langchain-ai/open-swe.git\n"
+    " ! [remote rejected]       open-swe/abc -> open-swe/abc "
+    "(refusing to allow a GitHub App to create or update workflow "
+    "`.github/workflows/ci.yml` without `workflows` permission)\n"
+    "error: failed to push some refs to 'https://github.com/langchain-ai/open-swe.git'\n"
+)
+
+
 def _run_with_push_result(push_result: MagicMock) -> dict:
     """Run commit_and_open_pr with all external calls mocked, using the given push_result."""
     config = {
@@ -45,9 +54,7 @@ def _run_with_push_result(push_result: MagicMock) -> dict:
             return_value="token",
         ),
         patch("agent.tools.commit_and_open_pr.get_github_token", return_value="gh-token"),
-        patch(
-            "agent.tools.commit_and_open_pr.resolve_triggering_user_identity", return_value=None
-        ),
+        patch("agent.tools.commit_and_open_pr.resolve_triggering_user_identity", return_value=None),
         patch(
             "agent.tools.commit_and_open_pr.add_pr_collaboration_note",
             side_effect=lambda body, _: body,
@@ -88,6 +95,15 @@ class TestWorkflowScopePushError:
         assert result["pr_url"] is None
         # Must NOT be the raw git output dump that causes blind agent retries
         assert "remote rejected" not in result["error"]
+
+    def test_workflow_permission_error_returns_actionable_message(self):
+        result = _run_with_push_result(_make_exec_result(1, WORKFLOW_PERMISSION_OUTPUT))
+
+        assert result["success"] is False
+        assert ".github/workflows/" in result["error"]
+        assert "Remove any .github/workflows/" in result["error"]
+        assert result["pr_url"] is None
+        assert "PERMANENT_FAILURE" not in result["error"]
 
     def test_non_workflow_push_error_returns_generic_message(self):
         """Non-workflow failures that are not permanent auth errors return the generic message."""
