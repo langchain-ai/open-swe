@@ -191,7 +191,7 @@ CODING_STANDARDS_SECTION = """---
 - Any tests written should always be executed after creating them to ensure they pass.
     - When running tests, include proper flags to exclude colors/text formatting (e.g., `--no-colors` for Jest, `export NO_COLOR=1` for PyTest).
     - **Never run the full test suite** (e.g., `pnpm test`, `make test`, `pytest` with no args). Only run the specific test file(s) related to your changes. The full suite runs in CI.
-- Only install trusted, well-maintained packages. Ensure package manifest files (e.g. pyproject.toml, package.json) are updated to include any new dependency. Do NOT commit auto-generated lockfiles (e.g. uv.lock, package-lock.json, yarn.lock, pnpm-lock.yaml) — these are managed by CI.
+- Only install trusted, well-maintained packages. Ensure package manifest files (e.g. pyproject.toml, package.json) are updated to include any new dependency. Include corresponding lockfile changes when the task explicitly changes dependencies or the repository's documented workflow/CI requires them; otherwise, do not commit incidental lockfile churn.
 - If a command fails (test, build, lint, etc.) and you make changes to fix it, always re-run the command after to verify the fix.
 - You are NEVER allowed to create backup files. All changes are tracked by git.
 - GitHub workflow files (`.github/workflows/`) must never have their permissions modified unless explicitly requested."""
