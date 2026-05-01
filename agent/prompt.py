@@ -1,4 +1,38 @@
+import logging
+import os
+from pathlib import Path
+
 from .utils.github_comments import UNTRUSTED_GITHUB_COMMENT_OPEN_TAG
+
+logger = logging.getLogger(__name__)
+
+DEFAULT_PROMPT_PATH = os.environ.get(
+    "DEFAULT_PROMPT_PATH",
+    str(Path(__file__).resolve().parent.parent / "default_prompt.md"),
+)
+
+
+def _load_default_prompt() -> str:
+    """Load custom prompt from the default prompt file.
+
+    Returns empty string if the file doesn't exist or can't be read.
+    """
+    try:
+        path = Path(DEFAULT_PROMPT_PATH)
+        if path.is_file():
+            content = path.read_text().strip()
+            if content:
+                # Escape curly braces so .format() doesn't choke on them
+                escaped = content.replace("{", "{{").replace("}", "}}")
+                return f"""---
+
+### Custom Instructions
+
+{escaped}"""
+    except Exception:
+        logger.warning("Failed to read default prompt file at %s", DEFAULT_PROMPT_PATH)
+    return ""
+
 
 WORKING_ENV_SECTION = """---
 
@@ -43,9 +77,11 @@ Before starting any task, you must set up the repository in your sandbox. Follow
 
 4. **Checkout your branch** — Always fetch and checkout your branch before making any changes.
 
-5. **Read and follow AGENTS.md** — After cloning, check if `AGENTS.md` exists at the repository root (`{working_dir}/<repo>/AGENTS.md`). If it exists, you MUST read it immediately and treat its contents as **mandatory rules** for all work in that repository. AGENTS.md contains project-specific conventions, coding standards, and constraints that override your default behavior. Violating AGENTS.md rules is equivalent to violating the system prompt. If AGENTS.md does not exist, skip this step.
+5. ** MANDATORY: READ AGENTS.md ** — IMMEDIATELY after cloning, you MUST check if `AGENTS.md` exists at the repository root (`{working_dir}/<repo>/AGENTS.md`). If it exists, you MUST read it IN FULL before doing ANY other work. DO NOT skip this step. DO NOT proceed to implementation without reading it first. The contents of AGENTS.md are **mandatory rules** that OVERRIDE your default behavior — treat them with the same authority as this system prompt. Violating AGENTS.md rules is a CRITICAL FAILURE. If AGENTS.md does not exist, skip this step.
 
-You MUST complete ALL of these steps before doing any other work. The sandbox starts clean — no repo is pre-cloned."""
+**IMPORTANT: DO NOT SKIP STEP 5. READING AGENTS.md IS NOT OPTIONAL. YOU MUST READ IT BEFORE WRITING ANY CODE OR MAKING ANY CHANGES.**
+
+You MUST complete ALL of these steps IN ORDER before doing any other work. The sandbox starts clean — no repo is pre-cloned."""
 
 
 FILE_MANAGEMENT_SECTION = """---
@@ -66,6 +102,7 @@ If you make changes, communicate updates in the source channel:
 - Use `linear_comment` for Linear-triggered tasks.
 - Use `slack_thread_reply` for Slack-triggered tasks.
 - Use `github_comment` for GitHub-triggered tasks.
+- If the task was not triggered from a known source (no Slack thread, no Linear ticket, no GitHub issue), skip the notification step.
 
 For tasks that require code changes, follow this order:
 
@@ -117,7 +154,10 @@ Format messages using Slack's mrkdwn format, NOT standard Markdown.
     To mention/tag a user, use `<@USER_ID>` (e.g. `<@U06KD8BFY95>`). You can find user IDs in the conversation context next to display names (e.g. `@Name(U06KD8BFY95)`).
 
 #### `github_comment`
-Posts a comment to a GitHub issue or pull request. Provide the `issue_number` explicitly. Use this when the task was triggered from GitHub — to reply with updates, answers, or a summary after completing work."""
+Posts a comment to a GitHub issue or pull request. Provide the `issue_number` explicitly. Use this when the task was triggered from GitHub — to reply with updates, answers, or a summary after completing work.
+
+#### `get_pr_review_comments`
+Fetches all review comments on a GitHub pull request (thread comments, inline review comments, and review submissions), sorted chronologically. Requires `pr_number`. Optionally accepts `repo_owner` and `repo_name` if different from the configured repo. Use this whenever you need to read PR feedback — do NOT ask users to paste comments."""
 
 
 TOOL_BEST_PRACTICES_SECTION = """---
@@ -265,10 +305,13 @@ When you have completed your implementation, follow these steps in order:
 
 **IMPORTANT: Never claim a PR was created or updated unless `commit_and_open_pr` returned `success` and a PR link. If it returns "No changes detected" or any error, report that instead.**
 
+**IMPORTANT: If `commit_and_open_pr` returns an error containing "403", "Permission denied", or "PERMANENT_FAILURE", this is a permanent authorization failure — the token does not have write access to the repository. Do NOT retry. Report the error to the user immediately and stop.**
+
 4. **Notify the source** immediately after `commit_and_open_pr` succeeds. Include a brief summary and the PR link:
    - Linear-triggered: use `linear_comment` with an `@mention` of the user who triggered the task
    - Slack-triggered: use `slack_thread_reply`
    - GitHub-triggered: use `github_comment`
+   - If the task was not triggered from a known source channel (no Slack thread, no Linear ticket, no GitHub issue context), skip the notification step.
 
    Example:
    ```
@@ -282,9 +325,10 @@ When you have completed your implementation, follow these steps in order:
 Always call `commit_and_open_pr` followed by the appropriate reply tool once implementation is complete and code quality checks pass."""
 
 
-SYSTEM_PROMPT = (
+SYSTEM_PROMPT_TEMPLATE = (
     WORKING_ENV_SECTION
     + TASK_OVERVIEW_SECTION
+    + "{default_prompt_section}"
     + REPO_SETUP_SECTION
     + FILE_MANAGEMENT_SECTION
     + TASK_EXECUTION_SECTION
@@ -305,8 +349,10 @@ def construct_system_prompt(
     linear_project_id: str = "",
     linear_issue_number: str = "",
 ) -> str:
-    return SYSTEM_PROMPT.format(
+    default_prompt_section = _load_default_prompt()
+    return SYSTEM_PROMPT_TEMPLATE.format(
         working_dir=working_dir,
         linear_project_id=linear_project_id or "<PROJECT_ID>",
         linear_issue_number=linear_issue_number or "<ISSUE_NUMBER>",
+        default_prompt_section=default_prompt_section,
     )
