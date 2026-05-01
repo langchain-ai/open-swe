@@ -233,26 +233,26 @@ def test_get_pr_check_runs_pr_fetch_error(monkeypatch: pytest.MonkeyPatch) -> No
 
 
 # ---------------------------------------------------------------------------
-# rerun_failed_check_runs
+# rerun_failed_workflow_runs
 # ---------------------------------------------------------------------------
 
 
-def test_rerun_failed_check_runs_no_repo_config(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_rerun_failed_workflow_runs_no_repo_config(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(github_ci, "_get_repo_config", lambda: {})
-    result = github_ci.rerun_failed_check_runs(42)
+    result = github_ci.rerun_failed_workflow_runs(42)
     assert result == {"success": False, "error": "No repo config found"}
 
 
-def test_rerun_failed_check_runs_no_token(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_rerun_failed_workflow_runs_no_token(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         github_ci, "_get_repo_config", lambda: {"owner": "langchain-ai", "name": "open-swe"}
     )
     monkeypatch.setattr(github_ci, "_get_token", AsyncMock(return_value=None))
-    result = github_ci.rerun_failed_check_runs(42)
+    result = github_ci.rerun_failed_workflow_runs(42)
     assert result == {"success": False, "error": "Failed to get GitHub App installation token"}
 
 
-def test_rerun_failed_check_runs_no_failures(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_rerun_failed_workflow_runs_no_failures(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         github_ci, "_get_repo_config", lambda: {"owner": "langchain-ai", "name": "open-swe"}
     )
@@ -278,14 +278,14 @@ def test_rerun_failed_check_runs_no_failures(monkeypatch: pytest.MonkeyPatch) ->
     mock_async_context.__aexit__ = AsyncMock(return_value=False)
 
     with patch("agent.tools.github_ci.httpx.AsyncClient", return_value=mock_async_context):
-        result = github_ci.rerun_failed_check_runs(42)
+        result = github_ci.rerun_failed_workflow_runs(42)
 
     assert result["success"] is True
     assert result["rerun_run_ids"] == []
     assert "No failed workflow runs" in result["message"]
 
 
-def test_rerun_failed_check_runs_with_failures(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_rerun_failed_workflow_runs_with_failures(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         github_ci, "_get_repo_config", lambda: {"owner": "langchain-ai", "name": "open-swe"}
     )
@@ -313,7 +313,7 @@ def test_rerun_failed_check_runs_with_failures(monkeypatch: pytest.MonkeyPatch) 
     mock_async_context.__aexit__ = AsyncMock(return_value=False)
 
     with patch("agent.tools.github_ci.httpx.AsyncClient", return_value=mock_async_context):
-        result = github_ci.rerun_failed_check_runs(42)
+        result = github_ci.rerun_failed_workflow_runs(42)
 
     assert result["success"] is True
     assert set(result["rerun_run_ids"]) == {200, 201}
@@ -321,7 +321,7 @@ def test_rerun_failed_check_runs_with_failures(monkeypatch: pytest.MonkeyPatch) 
     assert all(r["success"] for r in result["rerun_results"])
 
 
-def test_rerun_failed_check_runs_paginates_workflow_runs(
+def test_rerun_failed_workflow_runs_paginates_workflow_runs(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
@@ -347,8 +347,76 @@ def test_rerun_failed_check_runs_paginates_workflow_runs(
     mock_async_context.__aexit__ = AsyncMock(return_value=False)
 
     with patch("agent.tools.github_ci.httpx.AsyncClient", return_value=mock_async_context):
-        result = github_ci.rerun_failed_check_runs(42)
+        result = github_ci.rerun_failed_workflow_runs(42)
 
     assert result["success"] is True
     assert result["rerun_run_ids"] == [999]
     assert len(result["rerun_results"]) == 1
+
+
+def test_get_pr_check_runs_paginated_fetch_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Surface a non-200 response that occurs on a later page of pagination."""
+    monkeypatch.setattr(
+        github_ci, "_get_repo_config", lambda: {"owner": "langchain-ai", "name": "open-swe"}
+    )
+    monkeypatch.setattr(github_ci, "_get_token", AsyncMock(return_value="test-token"))
+
+    first_page_runs = [_check_run(run_id) for run_id in range(1, 101)]
+
+    mock_client = AsyncMock()
+    mock_client.get = AsyncMock(
+        side_effect=[
+            _make_response(200, {"head": {"sha": "paged-error"}}),
+            _make_response(200, {"total_count": 200, "check_runs": first_page_runs}),
+            _make_response(500, {"message": "server error"}),
+        ]
+    )
+
+    mock_async_context = MagicMock()
+    mock_async_context.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_async_context.__aexit__ = AsyncMock(return_value=False)
+
+    with patch("agent.tools.github_ci.httpx.AsyncClient", return_value=mock_async_context):
+        result = github_ci.get_pr_check_runs(42)
+
+    assert result["success"] is False
+    assert "500" in result["error"]
+
+
+def test_rerun_failed_workflow_runs_skips_action_required(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`action_required` runs need manual approval and must not be rerun."""
+    monkeypatch.setattr(
+        github_ci, "_get_repo_config", lambda: {"owner": "langchain-ai", "name": "open-swe"}
+    )
+    monkeypatch.setattr(github_ci, "_get_token", AsyncMock(return_value="test-token"))
+
+    pr_data = {"head": {"sha": "ccc222"}}
+    workflow_runs_data = {
+        "workflow_runs": [
+            {"id": 300, "conclusion": "failure"},
+            {"id": 301, "conclusion": "action_required"},
+            {"id": 302, "conclusion": "success"},
+        ]
+    }
+
+    mock_client = AsyncMock()
+    mock_client.get = AsyncMock(
+        side_effect=[
+            _make_response(200, pr_data),
+            _make_response(200, workflow_runs_data),
+        ]
+    )
+    mock_client.post = AsyncMock(return_value=_make_response(201, {}))
+
+    mock_async_context = MagicMock()
+    mock_async_context.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_async_context.__aexit__ = AsyncMock(return_value=False)
+
+    with patch("agent.tools.github_ci.httpx.AsyncClient", return_value=mock_async_context):
+        result = github_ci.rerun_failed_workflow_runs(42)
+
+    assert result["success"] is True
+    assert result["rerun_run_ids"] == [300]
+    assert mock_client.post.await_count == 1

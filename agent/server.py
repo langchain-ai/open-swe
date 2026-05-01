@@ -54,7 +54,7 @@ from .tools import (
     list_pr_review_comments,
     list_pr_reviews,
     list_repos,
-    rerun_failed_check_runs,
+    rerun_failed_workflow_runs,
     slack_read_thread_messages,
     slack_thread_reply,
     submit_pr_review,
@@ -318,7 +318,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             submit_pr_review,
             list_pr_review_comments,
             get_pr_check_runs,
-            rerun_failed_check_runs,
+            rerun_failed_workflow_runs,
         ],
         backend=sandbox_backend,
         middleware=[

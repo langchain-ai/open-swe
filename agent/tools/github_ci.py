@@ -7,6 +7,11 @@ from langgraph.config import get_config
 from ..utils.github_app import get_github_app_installation_token
 
 GITHUB_API_BASE = "https://api.github.com"
+PER_PAGE = 100
+HTTP_TIMEOUT_SECONDS = 30.0
+
+FAILED_CONCLUSIONS = ("failure", "timed_out", "cancelled", "action_required")
+RERUNNABLE_CONCLUSIONS = ("failure", "timed_out", "cancelled")
 
 
 def _get_repo_config() -> dict[str, str]:
@@ -32,6 +37,10 @@ def _repo_url(repo_config: dict[str, str]) -> str:
     return f"{GITHUB_API_BASE}/repos/{owner}/{name}"
 
 
+def _http_client() -> httpx.AsyncClient:
+    return httpx.AsyncClient(timeout=httpx.Timeout(HTTP_TIMEOUT_SECONDS))
+
+
 async def _fetch_paginated_items(
     client: httpx.AsyncClient,
     url: str,
@@ -44,9 +53,11 @@ async def _fetch_paginated_items(
     page = 1
 
     while True:
-        page_params = {"per_page": "100", "page": str(page)}
-        if params:
-            page_params.update(params)
+        # Reserved pagination params take precedence over caller-supplied params
+        # so the end-of-pagination check below stays consistent with PER_PAGE.
+        page_params = dict(params) if params else {}
+        page_params["per_page"] = str(PER_PAGE)
+        page_params["page"] = str(page)
 
         response = await client.get(url, headers=headers, params=page_params)
         if response.status_code != 200:
@@ -61,7 +72,7 @@ async def _fetch_paginated_items(
             return None, None, f"GitHub API response missing {item_key} list"
 
         items.extend(page_items)
-        if len(page_items) < 100:
+        if len(page_items) < PER_PAGE:
             return items, total_count, None
 
         page += 1
@@ -72,6 +83,10 @@ def get_pr_check_runs(pull_number: int) -> dict[str, Any]:
 
     Returns all check runs for the PR's latest commit with their status and conclusion.
     Use this to check if CI is passing before declaring a PR ready for review.
+
+    Note: this returns all check runs (GitHub Actions plus any third-party CI like
+    CircleCI, Vercel, etc.). The companion `rerun_failed_workflow_runs` tool only
+    retries GitHub Actions workflow runs.
 
     Args:
         pull_number: The PR number to get check runs for.
@@ -88,7 +103,7 @@ def get_pr_check_runs(pull_number: int) -> dict[str, Any]:
         return {"success": False, "error": "Failed to get GitHub App installation token"}
 
     async def _fetch() -> dict[str, Any]:
-        async with httpx.AsyncClient() as client:
+        async with _http_client() as client:
             # Step 1: get the PR's head commit SHA
             pr_url = f"{_repo_url(repo_config)}/pulls/{pull_number}"
             pr_response = await client.get(pr_url, headers=_github_headers(token))
@@ -132,10 +147,7 @@ def get_pr_check_runs(pull_number: int) -> dict[str, Any]:
                 for run in check_runs
                 if run.get("status") == "completed"
             )
-            any_failed = any(
-                run.get("conclusion") in ("failure", "timed_out", "cancelled", "action_required")
-                for run in check_runs
-            )
+            any_failed = any(run.get("conclusion") in FAILED_CONCLUSIONS for run in check_runs)
             any_pending = any(run.get("status") != "completed" for run in check_runs)
 
             return {
@@ -151,12 +163,14 @@ def get_pr_check_runs(pull_number: int) -> dict[str, Any]:
     return asyncio.run(_fetch())
 
 
-def rerun_failed_check_runs(pull_number: int) -> dict[str, Any]:
-    """Rerun failed or cancelled GitHub Actions check runs for a pull request.
+def rerun_failed_workflow_runs(pull_number: int) -> dict[str, Any]:
+    """Rerun failed jobs for failed/timed-out/cancelled GitHub Actions workflow runs.
 
-    Use this to retry flaky CI failures without human intervention.
-    Finds all failed workflow runs associated with the PR's latest commit and
-    reruns only the failed jobs.
+    Use this to retry flaky CI failures without human intervention. Only operates on
+    GitHub Actions workflow runs — third-party CI checks (CircleCI, Vercel, etc.)
+    surfaced by `get_pr_check_runs` are not affected. Skips runs with conclusion
+    `action_required`, since those need manual approval (e.g. environment protection)
+    rather than a rerun.
 
     Args:
         pull_number: The PR number whose failed CI runs should be rerun.
@@ -173,7 +187,7 @@ def rerun_failed_check_runs(pull_number: int) -> dict[str, Any]:
         return {"success": False, "error": "Failed to get GitHub App installation token"}
 
     async def _rerun() -> dict[str, Any]:
-        async with httpx.AsyncClient() as client:
+        async with _http_client() as client:
             # Step 1: get the PR's head commit SHA
             pr_url = f"{_repo_url(repo_config)}/pulls/{pull_number}"
             pr_response = await client.get(pr_url, headers=_github_headers(token))
@@ -204,7 +218,7 @@ def rerun_failed_check_runs(pull_number: int) -> dict[str, Any]:
             failed_run_ids = [
                 run["id"]
                 for run in workflow_runs
-                if run.get("conclusion") in ("failure", "timed_out", "cancelled", "action_required")
+                if run.get("conclusion") in RERUNNABLE_CONCLUSIONS
             ]
 
             if not failed_run_ids:
@@ -215,25 +229,24 @@ def rerun_failed_check_runs(pull_number: int) -> dict[str, Any]:
                     "rerun_run_ids": [],
                 }
 
-            # Step 3: rerun failed jobs for each failed workflow run
-            rerun_results = []
-            for run_id in failed_run_ids:
+            # Step 3: rerun failed jobs concurrently for all failed workflow runs
+            async def _rerun_one(run_id: int) -> dict[str, Any]:
                 rerun_url = f"{_repo_url(repo_config)}/actions/runs/{run_id}/rerun-failed-jobs"
                 rerun_response = await client.post(rerun_url, headers=_github_headers(token))
-                rerun_results.append(
-                    {
-                        "run_id": run_id,
-                        "status_code": rerun_response.status_code,
-                        "success": rerun_response.status_code in (200, 201, 204),
-                    }
-                )
+                return {
+                    "run_id": run_id,
+                    "status_code": rerun_response.status_code,
+                    "success": rerun_response.status_code in (200, 201, 204),
+                }
+
+            rerun_results = await asyncio.gather(*(_rerun_one(rid) for rid in failed_run_ids))
 
             all_rerun_succeeded = all(r["success"] for r in rerun_results)
             return {
                 "success": all_rerun_succeeded,
                 "head_sha": head_sha,
                 "rerun_run_ids": failed_run_ids,
-                "rerun_results": rerun_results,
+                "rerun_results": list(rerun_results),
             }
 
     return asyncio.run(_rerun())
