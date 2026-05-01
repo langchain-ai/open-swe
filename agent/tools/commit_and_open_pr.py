@@ -16,6 +16,7 @@ from ..utils.github import (
     git_has_uncommitted_changes,
     git_has_unpushed_commits,
     git_push,
+    is_permanent_github_push_failure,
 )
 from ..utils.github_token import get_github_token
 from ..utils.sandbox_paths import resolve_repo_dir
@@ -190,7 +191,7 @@ def commit_and_open_pr(
         push_result = git_push(sandbox_backend, repo_dir, target_branch, github_token)
         if push_result.exit_code != 0:
             push_output = push_result.output.strip()
-            if "403" in push_output or "Permission" in push_output or "denied" in push_output.lower():
+            if is_permanent_github_push_failure(push_output):
                 return {
                     "success": False,
                     "error": (

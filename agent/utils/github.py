@@ -15,6 +15,17 @@ HTTP_CREATED = 201
 HTTP_UNPROCESSABLE_ENTITY = 422
 
 
+def is_permanent_github_push_failure(output: str) -> bool:
+    """Return whether git push output indicates a permanent auth failure."""
+    normalized_output = output.lower()
+    return (
+        "permanent_failure" in normalized_output
+        or "403" in normalized_output
+        or "permission" in normalized_output
+        or "denied" in normalized_output
+    )
+
+
 def _run_git(
     sandbox_backend: SandboxBackendProtocol, repo_dir: str, command: str
 ) -> ExecuteResponse:
