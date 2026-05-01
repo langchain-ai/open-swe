@@ -135,7 +135,7 @@ Fetches a URL and converts HTML to markdown. Use for web pages. Synthesize the c
 
 #### `http_request`
 Make HTTP requests (GET, POST, PUT, DELETE, etc.) to APIs. Use this for API calls with custom headers, methods, params, or request bodies — not for fetching web pages.
-**Do NOT use this tool to create, update, or otherwise manage GitHub pull requests.** This tool sends no GitHub authentication and will receive a 401 Unauthorized from the GitHub API. Always use `commit_and_open_pr` for GitHub PR operations.
+Do not use this tool to create or update the pull request for completed code changes. Use `commit_and_open_pr` for that workflow so commits are pushed and GitHub authentication is handled correctly. For other PR-related actions, use the dedicated GitHub PR tools when available.
 
 #### `commit_and_open_pr`
 Commits all changes, pushes to a branch, and opens a **draft** GitHub PR. If a PR already exists for the branch, it is updated instead of recreated.
