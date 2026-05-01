@@ -16,6 +16,7 @@ from ..utils.github import (
     get_github_default_branch,
     git_add_all,
     git_checkout_branch,
+    git_checkout_existing_branch,
     git_commit,
     git_config_user,
     git_current_branch,
@@ -23,7 +24,9 @@ from ..utils.github import (
     git_has_uncommitted_changes,
     git_has_unpushed_commits,
     git_push,
+    is_permanent_github_push_failure,
 )
+from ..utils.github_app import get_github_app_installation_token
 from ..utils.github_token import get_github_token
 from ..utils.sandbox_paths import resolve_repo_dir
 from ..utils.sandbox_state import get_sandbox_backend_sync
@@ -156,7 +159,7 @@ def commit_and_open_pr(
         if current_branch != target_branch:
             if branch_name:
                 # Existing branch — plain checkout, do not create or reset
-                result = sandbox_backend.execute(f"cd {repo_dir} && git checkout {target_branch}")
+                result = git_checkout_existing_branch(sandbox_backend, repo_dir, target_branch)
                 if result.exit_code != 0:
                     return {
                         "success": False,
@@ -188,32 +191,47 @@ def commit_and_open_pr(
                     "pr_url": None,
                 }
 
-        if not github_token:
-            logger.error("commit_and_open_pr missing GitHub token for thread %s", thread_id)
+        installation_token = asyncio.run(get_github_app_installation_token())
+        if not installation_token:
             return {
                 "success": False,
-                "error": "Missing GitHub token",
+                "error": "Failed to get GitHub App installation token",
                 "pr_url": None,
             }
 
-        push_result = git_push(sandbox_backend, repo_dir, target_branch, github_token)
+        push_result = git_push(sandbox_backend, repo_dir, target_branch)
         if push_result.exit_code != 0:
+            push_output = push_result.output.strip()
+            if is_permanent_github_push_failure(push_output):
+                return {
+                    "success": False,
+                    "error": (
+                        f"PERMANENT_FAILURE: do not retry. Git push was rejected with a 403 "
+                        f"permission denied error — the token does not have write access to this "
+                        f"repository. Report this to the user and stop. Details: {push_output}"
+                    ),
+                    "pr_url": None,
+                }
             return {
                 "success": False,
-                "error": f"Git push failed: {push_result.output.strip()}",
+                "error": f"Git push failed: {push_output}",
                 "pr_url": None,
             }
 
-        base_branch = asyncio.run(get_github_default_branch(repo_owner, repo_name, github_token))
+        base_branch = asyncio.run(
+            get_github_default_branch(repo_owner, repo_name, installation_token)
+        )
+
         pr_url, _pr_number, pr_existing = asyncio.run(
             create_github_pr(
                 repo_owner=repo_owner,
                 repo_name=repo_name,
-                github_token=github_token,
+                github_token=github_token or installation_token,
                 title=title,
                 head_branch=target_branch,
                 base_branch=base_branch,
                 body=pr_body,
+                installation_token=installation_token,
             )
         )
 

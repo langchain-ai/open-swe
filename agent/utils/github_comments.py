@@ -383,7 +383,11 @@ async def extract_pr_context(
     return repo_config, pr_number, branch_name, github_login, pr_url, comment_id, node_id
 
 
-def build_pr_prompt(comments: list[dict[str, Any]], pr_url: str) -> str:
+def build_pr_prompt(
+    comments: list[dict[str, Any]],
+    pr_url: str,
+    repo_config: dict[str, str] | None = None,
+) -> str:
     """Format PR comments into a human message for the agent."""
     lines: list[str] = []
     for c in comments:
@@ -398,8 +402,12 @@ def build_pr_prompt(comments: list[dict[str, Any]], pr_url: str) -> str:
             lines.append(f"\n**{author}**:\n{body}\n")
 
     comments_text = "".join(lines)
+    repo_line = ""
+    if repo_config:
+        repo_line = f"## Repository: {repo_config.get('owner')}/{repo_config.get('name')}\n\n"
     return (
         "You've been tagged in GitHub PR comments. Please resolve them.\n\n"
+        f"{repo_line}"
         f"PR: {pr_url}\n\n"
         f"## Comments:\n{comments_text}\n\n"
         "If code changes are needed:\n"

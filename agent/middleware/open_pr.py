@@ -28,6 +28,7 @@ from ..utils.github import (
     get_github_default_branch,
     git_add_all,
     git_checkout_branch,
+    git_checkout_existing_branch,
     git_commit,
     git_config_user,
     git_current_branch,
@@ -35,7 +36,9 @@ from ..utils.github import (
     git_has_uncommitted_changes,
     git_has_unpushed_commits,
     git_push,
+    is_permanent_github_push_failure,
 )
+from ..utils.github_app import get_github_app_installation_token
 from ..utils.github_token import get_github_token
 from ..utils.sandbox_paths import aresolve_repo_dir
 from ..utils.sandbox_state import get_sandbox_backend
@@ -84,14 +87,18 @@ async def open_pr_if_needed(
             logger.info("No commit_and_open_pr tool call found, skipping PR creation")
             return None
 
-        if "success" in pr_payload:
-            # Tool already handled commit/push/PR creation
+        if pr_payload.get("success"):
+            return None
+
+        error = pr_payload.get("error")
+        if isinstance(error, str) and is_permanent_github_push_failure(error):
+            logger.info("Skipping PR safety net after permanent push failure")
             return None
 
         pr_title = pr_payload.get("title", "feat: Open SWE PR")
         pr_body = pr_payload.get("body", "Automated PR created by Open SWE agent.")
         commit_message = pr_payload.get("commit_message", pr_title)
-        github_token = get_github_token()
+        github_token = get_github_token(config)
         user_identity = await asyncio.to_thread(
             resolve_triggering_user_identity, config, github_token
         )
@@ -125,6 +132,11 @@ async def open_pr_if_needed(
             logger.info("No changes detected, skipping PR creation")
             return None
 
+        installation_token = await get_github_app_installation_token()
+        if not installation_token:
+            logger.error("Failed to get GitHub App installation token for thread %s", thread_id)
+            return None
+
         logger.info("Changes detected, preparing PR for thread %s", thread_id)
 
         metadata = config.get("metadata", {})
@@ -136,8 +148,7 @@ async def open_pr_if_needed(
             if branch_name:
                 # Existing branch — plain checkout, do not create or reset
                 await asyncio.to_thread(
-                    sandbox_backend.execute,
-                    f"cd {repo_dir} && git checkout {target_branch}",
+                    git_checkout_existing_branch, sandbox_backend, repo_dir, target_branch
                 )
             else:
                 await asyncio.to_thread(
@@ -154,23 +165,21 @@ async def open_pr_if_needed(
         await asyncio.to_thread(git_add_all, sandbox_backend, repo_dir)
         await asyncio.to_thread(git_commit, sandbox_backend, repo_dir, commit_message)
 
-        if github_token:
-            await asyncio.to_thread(
-                git_push, sandbox_backend, repo_dir, target_branch, github_token
-            )
+        await asyncio.to_thread(git_push, sandbox_backend, repo_dir, target_branch)
 
-            base_branch = await get_github_default_branch(repo_owner, repo_name, github_token)
-            logger.info("Using base branch: %s", base_branch)
+        base_branch = await get_github_default_branch(repo_owner, repo_name, installation_token)
+        logger.info("Using base branch: %s", base_branch)
 
-            await create_github_pr(
-                repo_owner=repo_owner,
-                repo_name=repo_name,
-                github_token=github_token,
-                title=pr_title,
-                head_branch=target_branch,
-                base_branch=base_branch,
-                body=pr_body,
-            )
+        await create_github_pr(
+            repo_owner=repo_owner,
+            repo_name=repo_name,
+            github_token=github_token or installation_token,
+            title=pr_title,
+            head_branch=target_branch,
+            base_branch=base_branch,
+            body=pr_body,
+            installation_token=installation_token,
+        )
 
         logger.info("After-agent middleware completed successfully")
 

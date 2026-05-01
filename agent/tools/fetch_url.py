@@ -3,6 +3,8 @@ from typing import Any
 import requests
 from markdownify import markdownify
 
+from .http_request import _request_with_safe_redirects
+
 
 def fetch_url(url: str, timeout: int = 30) -> dict[str, Any]:
     """Fetch content from a URL and convert HTML to markdown format.
@@ -30,11 +32,19 @@ def fetch_url(url: str, timeout: int = 30) -> dict[str, Any]:
     4. NEVER show the raw markdown to the user unless specifically requested
     """
     try:
-        response = requests.get(
+        response, blocked = _request_with_safe_redirects(
+            "GET",
             url,
             timeout=timeout,
             headers={"User-Agent": "Mozilla/5.0 (compatible; DeepAgents/1.0)"},
         )
+        if blocked:
+            return {
+                "error": blocked["content"],
+                "status_code": blocked["status_code"],
+                "url": blocked["url"],
+            }
+
         response.raise_for_status()
 
         # Convert HTML content to markdown
