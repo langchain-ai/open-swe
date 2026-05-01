@@ -1,3 +1,4 @@
+
 # Installation Guide
 
 This guide walks you through setting up Open SWE end-to-end: local development, GitHub App creation, LangSmith configuration, webhooks, and production deployment.
@@ -105,11 +106,13 @@ Open SWE uses [LangSmith](https://smith.langchain.com/) for:
 - **Tracing**: all agent runs are logged for debugging and observability
 - **Sandboxes**: each task runs in an isolated LangSmith cloud sandbox
 
-### 4a. Get your API key
+### 4a. Get your API key, project and tenant IDs
 
 1. Create a [LangSmith account](https://smith.langchain.com/) if you don't have one
 2. Go to **Settings → API Keys → Create API Key**
 3. Save it as `LANGSMITH_API_KEY_PROD`
+4. Get your **Tenant ID**: Visit LangSmith, login, then copy the UUID in the URL. Example: if your URL is `https://smith.langchain.com/o/72184268-01ea-4d29-98cc-6cfcf0f2abb0/agents/chat` -> the tenant ID would be `72184268-01ea-4d29-98cc-6cfcf0f2abb0`. Save it as `LANGSMITH_TENANT_ID_PROD`.
+5. Get your **Project ID**: open your tracing project in LangSmith, then click on the **ID** button in the top left, directly next to the project name. Save it as `LANGSMITH_TRACING_PROJECT_ID_PROD`
 
 ### 4b. Configure GitHub OAuth (optional but recommended)
 
@@ -126,17 +129,37 @@ To set up per-user OAuth:
 3. Enter the **Client ID** and **Client Secret** from your GitHub App (found on the GitHub App settings page under **OAuth credentials**)
 4. Save. You'll reference this Provider ID as `GITHUB_OAUTH_PROVIDER_ID` in your environment variables.
 
-### 4c. Sandbox templates (optional)
+### 4c. Sandbox snapshots
 
-LangSmith sandboxes provide the isolated execution environment for each agent run. You can create a template using the same Docker image we use internally by visiting the sandbox page in LangSmith, and setting the following fields:
+LangSmith sandboxes provide the isolated execution environment for each agent run. Open SWE boots each sandbox from a pre-built **snapshot** — you build the snapshot once (from a Docker image) and then reference it by UUID.
 
-- `Name`: you can set this to whatever name you'd like, e.g. `open-swe`
-- `Container Image`: `bracelangchain/deepagents-sandbox:v1` this contains the [Docker file in this repo](./Dockerfile)
-- `CPU`: `500m`
-- `Memory`: `4096Mi`
-- `Ephemeral Storage`: `15Gi`
+Build a snapshot in the LangSmith UI (Sandboxes → Snapshots → New), or via the SDK:
 
-> If you don't set these, you can use a Python based docker image in the template.
+```python
+from langsmith.sandbox import SandboxClient
+
+client = SandboxClient(api_key="<your key>")
+snapshot = client.create_snapshot(
+    name="open-swe",
+    docker_image="bracelangchain/deepagents-sandbox:v1",  # built from ./Dockerfile
+    fs_capacity_bytes=32 * 1024**3,
+)
+print(snapshot.id)
+```
+
+Then set the resulting UUID in your environment:
+
+```bash
+DEFAULT_SANDBOX_SNAPSHOT_ID="<snapshot-uuid>"
+# Optional; overrides the snapshot's root FS size at sandbox boot. Default is 32 GiB.
+DEFAULT_SANDBOX_SNAPSHOT_FS_CAPACITY_BYTES="34359738368"
+# Optional; number of vCPUs per sandbox. Default is 4.
+DEFAULT_SANDBOX_VCPUS="4"
+# Optional; memory in bytes per sandbox. Default is 15 GiB.
+DEFAULT_SANDBOX_MEM_BYTES="16106127360"
+```
+
+`DEFAULT_SANDBOX_SNAPSHOT_ID` is required when `SANDBOX_TYPE=langsmith`. The server validates this at startup and refuses to boot if it's missing.
 
 ## 5. Set up triggers
 
@@ -200,6 +223,8 @@ LINEAR_TEAM_TO_REPO = {
     },
 }
 ```
+
+Users can also override the team/project mapping per-comment by including `repo:owner/name` (or a GitHub URL) in their `@openswe` comment. The mapping is used as a fallback when no repo is specified in the comment text.
 
 ### Slack (optional)
 
@@ -282,14 +307,9 @@ LINEAR_TEAM_TO_REPO = {
 - `SLACK_BOT_USER_ID`: the bot's user ID (find it in Slack by clicking the bot's profile)
 - `SLACK_BOT_USERNAME`: the bot's display name (e.g. `open-swe`)
 
-**Configure default repo:**
+**Default repo:**
 
-Slack messages are routed to a default repo unless the user specifies one with `repo:owner/name`:
-
-```bash
-SLACK_REPO_OWNER="my-org"      # Default GitHub org
-SLACK_REPO_NAME="my-repo"      # Default GitHub repo
-```
+Slack messages are routed to the default repo (`DEFAULT_REPO_OWNER`/`DEFAULT_REPO_NAME` — see step 6) unless the user specifies one with `repo:owner/name` in their message.
 
 ## 6. Environment variables
 
@@ -300,6 +320,9 @@ Create a `.env` file in the project root. Below is the full list — only fill i
 LANGSMITH_API_KEY_PROD=""              # From step 4a
 LANGCHAIN_TRACING_V2="true"
 LANGCHAIN_PROJECT=""                   # LangSmith project name for traces
+LANGSMITH_TENANT_ID_PROD=""           
+LANGSMITH_TRACING_PROJECT_ID_PROD=""  
+LANGSMITH_URL_PROD="https://smith.langchain.com"                 
 
 # === LLM ===
 ANTHROPIC_API_KEY=""                   # Anthropic API key (default provider)
@@ -325,6 +348,11 @@ GITHUB_OAUTH_PROVIDER_ID=""            # The provider ID from steps 3a / 4b
 # Leave empty to allow all orgs.
 ALLOWED_GITHUB_ORGS=""                 # e.g. "my-org,my-other-org"
 
+# === Default Repository ===
+# Used across all triggers when no repo is specified.
+DEFAULT_REPO_OWNER=""                  # Default GitHub org (e.g. "my-org")
+DEFAULT_REPO_NAME=""                   # Default GitHub repo (e.g. "my-repo")
+
 # === Linear (if using Linear trigger) ===
 LINEAR_API_KEY=""                      # From step 5
 LINEAR_WEBHOOK_SECRET=""               # From step 5
@@ -334,12 +362,15 @@ SLACK_BOT_TOKEN=""                     # From step 5
 SLACK_BOT_USER_ID=""
 SLACK_BOT_USERNAME=""
 SLACK_SIGNING_SECRET=""
-SLACK_REPO_OWNER=""                    # Default org for Slack-triggered tasks
-SLACK_REPO_NAME=""                     # Default repo for Slack-triggered tasks
+
+# === Exa (optional — enables web search tool) ===
+EXA_API_KEY=""                         # From https://dashboard.exa.ai
 
 # === Sandbox (optional) ===
-DEFAULT_SANDBOX_TEMPLATE_NAME=""       # Custom sandbox template name (default: deepagents-cli)
-DEFAULT_SANDBOX_TEMPLATE_IMAGE=""      # Custom Docker image (default: python:3)
+DEFAULT_SANDBOX_SNAPSHOT_ID=""         # Required when SANDBOX_TYPE=langsmith (see step 4c)
+DEFAULT_SANDBOX_SNAPSHOT_FS_CAPACITY_BYTES=""  # Root FS size in bytes (default: 32 GiB)
+DEFAULT_SANDBOX_VCPUS=""               # vCPUs per sandbox (default: 4)
+DEFAULT_SANDBOX_MEM_BYTES=""           # Memory in bytes per sandbox (default: 15 GiB)
 
 # === Token Encryption ===
 TOKEN_ENCRYPTION_KEY=""                # Generate with: openssl rand -base64 32
@@ -433,8 +464,9 @@ The `langgraph.json` at the project root already defines the graph entry point a
 
 - Verify `LANGSMITH_API_KEY_PROD` is set and valid
 - Check LangSmith sandbox quotas in your workspace settings
-- If you see `Failed to check template ''`, ensure either `DEFAULT_SANDBOX_TEMPLATE_NAME` is set or that your LangSmith API key has permissions to create sandbox templates
-- If you get a 403 Forbidden error on the sandbox templates endpoint, your LangSmith workspace may not have sandbox access enabled — contact LangSmith support
+- If the server refuses to start with `DEFAULT_SANDBOX_SNAPSHOT_ID must be set`, build a snapshot (see step 4c) and export its UUID
+- If you see `Failed to create sandbox from snapshot '<id>'`, confirm the snapshot exists in your workspace and has status `ready`
+- If you get a 403 Forbidden error on the sandbox endpoints, your LangSmith workspace may not have sandbox access enabled — contact LangSmith support
 
 ### Agent not responding to comments
 
