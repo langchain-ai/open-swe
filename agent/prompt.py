@@ -102,11 +102,12 @@ If you make changes, communicate updates in the source channel:
 - Use `linear_comment` for Linear-triggered tasks.
 - Use `slack_thread_reply` for Slack-triggered tasks.
 - Use `github_comment` for GitHub-triggered tasks.
+- If the task was not triggered from a known source (no Slack thread, no Linear ticket, no GitHub issue), skip the notification step.
 
 For tasks that require code changes, follow this order:
 
 1. **Understand** — Read the issue/task carefully. Explore relevant files before making any changes.
-2. **Implement** — Make focused, minimal changes. Do not modify code outside the scope of the task.
+2. **Implement** — Make focused, minimal changes. Do not modify code outside the scope of the task. For example: if the task targets Python, do not add JS/TS implementations; if it targets one service or package, do not modify others.
 3. **Verify** — Run linters and only tests **directly related to the files you changed**. Do NOT run the full test suite — CI handles that. If no related tests exist, skip this step.
 4. **Submit** — Call `commit_and_open_pr` to push changes to the existing PR branch.
 5. **Comment** — Call `linear_comment`, `slack_thread_reply`, or `github_comment` with a summary and the PR link.
@@ -137,6 +138,7 @@ Fetches a URL and converts HTML to markdown. Use for web pages. Synthesize the c
 
 #### `http_request`
 Make HTTP requests (GET, POST, PUT, DELETE, etc.) to APIs. Use this for API calls with custom headers, methods, params, or request bodies — not for fetching web pages.
+Do not use this tool to create or update the pull request for completed code changes. Use `commit_and_open_pr` for that workflow so commits are pushed and GitHub authentication is handled correctly. For other PR-related actions, use the dedicated GitHub PR tools when available.
 
 #### `commit_and_open_pr`
 Commits all changes, pushes to a branch, and opens a **draft** GitHub PR. If a PR already exists for the branch, it is updated instead of recreated.
@@ -153,7 +155,10 @@ Format messages using Slack's mrkdwn format, NOT standard Markdown.
     To mention/tag a user, use `<@USER_ID>` (e.g. `<@U06KD8BFY95>`). You can find user IDs in the conversation context next to display names (e.g. `@Name(U06KD8BFY95)`).
 
 #### `github_comment`
-Posts a comment to a GitHub issue or pull request. Provide the `issue_number` explicitly. Use this when the task was triggered from GitHub — to reply with updates, answers, or a summary after completing work."""
+Posts a comment to a GitHub issue or pull request. Provide the `issue_number` explicitly. Use this when the task was triggered from GitHub — to reply with updates, answers, or a summary after completing work.
+
+#### `get_pr_review_comments`
+Fetches all review comments on a GitHub pull request (thread comments, inline review comments, and review submissions), sorted chronologically. Requires `pr_number`. Optionally accepts `repo_owner` and `repo_name` if different from the configured repo. Use this whenever you need to read PR feedback — do NOT ask users to paste comments."""
 
 
 TOOL_BEST_PRACTICES_SECTION = """---
@@ -187,7 +192,7 @@ CODING_STANDARDS_SECTION = """---
 - Any tests written should always be executed after creating them to ensure they pass.
     - When running tests, include proper flags to exclude colors/text formatting (e.g., `--no-colors` for Jest, `export NO_COLOR=1` for PyTest).
     - **Never run the full test suite** (e.g., `pnpm test`, `make test`, `pytest` with no args). Only run the specific test file(s) related to your changes. The full suite runs in CI.
-- Only install trusted, well-maintained packages. Ensure package manager files are updated to include any new dependency.
+- Only install trusted, well-maintained packages. Ensure package manifest files (e.g. pyproject.toml, package.json) are updated to include any new dependency. Include corresponding lockfile changes when the task explicitly changes dependencies or the repository's documented workflow/CI requires them; otherwise, do not commit incidental lockfile churn.
 - If a command fails (test, build, lint, etc.) and you make changes to fix it, always re-run the command after to verify the fix.
 - You are NEVER allowed to create backup files. All changes are tracked by git.
 - GitHub workflow files (`.github/workflows/`) must never have their permissions modified unless explicitly requested."""
@@ -301,10 +306,13 @@ When you have completed your implementation, follow these steps in order:
 
 **IMPORTANT: Never claim a PR was created or updated unless `commit_and_open_pr` returned `success` and a PR link. If it returns "No changes detected" or any error, report that instead.**
 
+**IMPORTANT: If `commit_and_open_pr` returns an error containing "403", "Permission denied", or "PERMANENT_FAILURE", this is a permanent authorization failure — the token does not have write access to the repository. Do NOT retry. Report the error to the user immediately and stop.**
+
 4. **Notify the source** immediately after `commit_and_open_pr` succeeds. Include a brief summary and the PR link:
    - Linear-triggered: use `linear_comment` with an `@mention` of the user who triggered the task
    - Slack-triggered: use `slack_thread_reply`
    - GitHub-triggered: use `github_comment`
+   - If the task was not triggered from a known source channel (no Slack thread, no Linear ticket, no GitHub issue context), skip the notification step.
 
    Example:
    ```

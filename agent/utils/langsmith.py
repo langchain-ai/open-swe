@@ -20,11 +20,13 @@ def _compose_langsmith_project_url() -> str:
     return f"{host_url}/o/{tenant_id}/projects/p/{project_id}"
 
 
-def get_langsmith_trace_url(run_id: str) -> str | None:
-    """Build the LangSmith trace URL for a given run ID."""
+def get_langsmith_trace_url(thread_id: str) -> str | None:
+    """Build the LangSmith thread URL for a given thread ID."""
     try:
-        base = _compose_langsmith_project_url()
-        return f"{base}?peek={run_id}&peeked_trace={run_id}"
+        project_url = _compose_langsmith_project_url()
+        return f"{project_url}/t/{thread_id}"
     except Exception:  # noqa: BLE001
-        logger.warning("Failed to build LangSmith trace URL for run %s", run_id, exc_info=True)
+        logger.warning(
+            "Failed to build LangSmith trace URL for thread %s", thread_id, exc_info=True
+        )
         return None

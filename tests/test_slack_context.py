@@ -169,19 +169,21 @@ def test_select_slack_context_messages_detects_username_mention() -> None:
 def test_get_slack_repo_config_message_repo_overrides_existing_thread_repo(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    captured: dict[str, str] = {}
     threads_client = _FakeThreadsClient(
         thread={"metadata": {"repo": {"owner": "saved-owner", "name": "saved-repo"}}}
     )
 
+    posted = False
+
     async def fake_post_slack_thread_reply(channel_id: str, thread_ts: str, text: str) -> bool:
-        captured["channel_id"] = channel_id
-        captured["thread_ts"] = thread_ts
-        captured["text"] = text
+        nonlocal posted
+        posted = True
         return True
 
     monkeypatch.setattr(webapp, "get_client", lambda url: _FakeClient(threads_client))
-    monkeypatch.setattr(webapp, "post_slack_thread_reply", fake_post_slack_thread_reply)
+    monkeypatch.setattr(
+        webapp, "post_slack_thread_reply", fake_post_slack_thread_reply, raising=False
+    )
 
     repo = asyncio.run(
         webapp.get_slack_repo_config("please use repo:new-owner/new-repo", "C123", "1.234")
@@ -189,7 +191,7 @@ def test_get_slack_repo_config_message_repo_overrides_existing_thread_repo(
 
     assert repo == {"owner": "new-owner", "name": "new-repo"}
     assert threads_client.requested_thread_id is None
-    assert captured["text"] == "Using repository: `new-owner/new-repo`"
+    assert not posted
 
 
 def test_get_slack_repo_config_parses_message_for_new_thread(
@@ -197,11 +199,7 @@ def test_get_slack_repo_config_parses_message_for_new_thread(
 ) -> None:
     threads_client = _FakeThreadsClient(raise_not_found=True)
 
-    async def fake_post_slack_thread_reply(channel_id: str, thread_ts: str, text: str) -> bool:
-        return True
-
     monkeypatch.setattr(webapp, "get_client", lambda url: _FakeClient(threads_client))
-    monkeypatch.setattr(webapp, "post_slack_thread_reply", fake_post_slack_thread_reply)
 
     repo = asyncio.run(
         webapp.get_slack_repo_config("please use repo:new-owner/new-repo", "C123", "1.234")
@@ -217,11 +215,7 @@ def test_get_slack_repo_config_existing_thread_without_repo_uses_default(
     monkeypatch.setattr(webapp, "SLACK_REPO_OWNER", "default-owner")
     monkeypatch.setattr(webapp, "SLACK_REPO_NAME", "default-repo")
 
-    async def fake_post_slack_thread_reply(channel_id: str, thread_ts: str, text: str) -> bool:
-        return True
-
     monkeypatch.setattr(webapp, "get_client", lambda url: _FakeClient(threads_client))
-    monkeypatch.setattr(webapp, "post_slack_thread_reply", fake_post_slack_thread_reply)
 
     repo = asyncio.run(webapp.get_slack_repo_config("please help", "C123", "1.234"))
 
@@ -237,11 +231,7 @@ def test_get_slack_repo_config_space_syntax_detected(
     """repo owner/name (space instead of colon) should be detected correctly."""
     threads_client = _FakeThreadsClient(raise_not_found=True)
 
-    async def fake_post_slack_thread_reply(channel_id: str, thread_ts: str, text: str) -> bool:
-        return True
-
     monkeypatch.setattr(webapp, "get_client", lambda url: _FakeClient(threads_client))
-    monkeypatch.setattr(webapp, "post_slack_thread_reply", fake_post_slack_thread_reply)
 
     repo = asyncio.run(
         webapp.get_slack_repo_config(
@@ -258,11 +248,7 @@ def test_get_slack_repo_config_github_url_extracted(
     """GitHub URL in message should be used to detect the repo."""
     threads_client = _FakeThreadsClient(raise_not_found=True)
 
-    async def fake_post_slack_thread_reply(channel_id: str, thread_ts: str, text: str) -> bool:
-        return True
-
     monkeypatch.setattr(webapp, "get_client", lambda url: _FakeClient(threads_client))
-    monkeypatch.setattr(webapp, "post_slack_thread_reply", fake_post_slack_thread_reply)
 
     repo = asyncio.run(
         webapp.get_slack_repo_config(
@@ -281,11 +267,7 @@ def test_get_slack_repo_config_explicit_repo_beats_github_url(
     """Explicit repo: syntax takes priority over a GitHub URL also present in the message."""
     threads_client = _FakeThreadsClient(raise_not_found=True)
 
-    async def fake_post_slack_thread_reply(channel_id: str, thread_ts: str, text: str) -> bool:
-        return True
-
     monkeypatch.setattr(webapp, "get_client", lambda url: _FakeClient(threads_client))
-    monkeypatch.setattr(webapp, "post_slack_thread_reply", fake_post_slack_thread_reply)
 
     repo = asyncio.run(
         webapp.get_slack_repo_config(
@@ -306,11 +288,7 @@ def test_get_slack_repo_config_explicit_space_syntax_beats_thread_metadata(
         thread={"metadata": {"repo": {"owner": "saved-owner", "name": "saved-repo"}}}
     )
 
-    async def fake_post_slack_thread_reply(channel_id: str, thread_ts: str, text: str) -> bool:
-        return True
-
     monkeypatch.setattr(webapp, "get_client", lambda url: _FakeClient(threads_client))
-    monkeypatch.setattr(webapp, "post_slack_thread_reply", fake_post_slack_thread_reply)
 
     repo = asyncio.run(
         webapp.get_slack_repo_config(
@@ -329,11 +307,7 @@ def test_get_slack_repo_config_github_url_beats_thread_metadata(
         thread={"metadata": {"repo": {"owner": "saved-owner", "name": "saved-repo"}}}
     )
 
-    async def fake_post_slack_thread_reply(channel_id: str, thread_ts: str, text: str) -> bool:
-        return True
-
     monkeypatch.setattr(webapp, "get_client", lambda url: _FakeClient(threads_client))
-    monkeypatch.setattr(webapp, "post_slack_thread_reply", fake_post_slack_thread_reply)
 
     repo = asyncio.run(
         webapp.get_slack_repo_config(
@@ -352,11 +326,7 @@ def test_get_slack_repo_config_repo_name_only_defaults_org(
     """repo:name without org should default owner to langchain-ai."""
     threads_client = _FakeThreadsClient(raise_not_found=True)
 
-    async def fake_post_slack_thread_reply(channel_id: str, thread_ts: str, text: str) -> bool:
-        return True
-
     monkeypatch.setattr(webapp, "get_client", lambda url: _FakeClient(threads_client))
-    monkeypatch.setattr(webapp, "post_slack_thread_reply", fake_post_slack_thread_reply)
 
     repo = asyncio.run(
         webapp.get_slack_repo_config("fix bug in repo:langchainplus", "C123", "1.234")
@@ -371,11 +341,7 @@ def test_get_slack_repo_config_repo_name_only_space_syntax(
     """repo name (space syntax, no org) should default owner to langchain-ai."""
     threads_client = _FakeThreadsClient(raise_not_found=True)
 
-    async def fake_post_slack_thread_reply(channel_id: str, thread_ts: str, text: str) -> bool:
-        return True
-
     monkeypatch.setattr(webapp, "get_client", lambda url: _FakeClient(threads_client))
-    monkeypatch.setattr(webapp, "post_slack_thread_reply", fake_post_slack_thread_reply)
 
     repo = asyncio.run(webapp.get_slack_repo_config("fix bug in repo open-swe", "C123", "1.234"))
 
