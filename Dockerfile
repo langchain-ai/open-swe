@@ -1,4 +1,4 @@
-FROM python:3.12.12-slim-trixie
+FROM python:3.14.0-slim-trixie
 
 ARG DOCKER_CLI_VERSION=5:29.1.5-1~debian.13~trixie
 ARG NODEJS_VERSION=22.22.0-1nodesource1

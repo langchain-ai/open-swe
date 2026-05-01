@@ -36,6 +36,7 @@ from ..utils.github import (
     git_has_uncommitted_changes,
     git_has_unpushed_commits,
     git_push,
+    is_permanent_github_push_failure,
 )
 from ..utils.github_app import get_github_app_installation_token
 from ..utils.github_token import get_github_token
@@ -86,24 +87,23 @@ async def open_pr_if_needed(
             logger.info("No commit_and_open_pr tool call found, skipping PR creation")
             return None
 
-        if "success" in pr_payload:
-            # Tool already handled commit/push/PR creation
+        if pr_payload.get("success"):
+            return None
+
+        error = pr_payload.get("error")
+        if isinstance(error, str) and is_permanent_github_push_failure(error):
+            logger.info("Skipping PR safety net after permanent push failure")
             return None
 
         pr_title = pr_payload.get("title", "feat: Open SWE PR")
         pr_body = pr_payload.get("body", "Automated PR created by Open SWE agent.")
         commit_message = pr_payload.get("commit_message", pr_title)
-        github_token = get_github_token()
+        github_token = get_github_token(config)
         user_identity = await asyncio.to_thread(
             resolve_triggering_user_identity, config, github_token
         )
         pr_body = add_pr_collaboration_note(pr_body, user_identity)
         commit_message = add_user_coauthor_trailer(commit_message, user_identity)
-
-        installation_token = await get_github_app_installation_token()
-        if not installation_token:
-            logger.error("Failed to get GitHub App installation token for thread %s", thread_id)
-            return None
 
         if not thread_id:
             raise ValueError("No thread_id found in config")
@@ -130,6 +130,11 @@ async def open_pr_if_needed(
 
         if not has_changes:
             logger.info("No changes detected, skipping PR creation")
+            return None
+
+        installation_token = await get_github_app_installation_token()
+        if not installation_token:
+            logger.error("Failed to get GitHub App installation token for thread %s", thread_id)
             return None
 
         logger.info("Changes detected, preparing PR for thread %s", thread_id)
@@ -160,9 +165,7 @@ async def open_pr_if_needed(
         await asyncio.to_thread(git_add_all, sandbox_backend, repo_dir)
         await asyncio.to_thread(git_commit, sandbox_backend, repo_dir, commit_message)
 
-        await asyncio.to_thread(
-            git_push, sandbox_backend, repo_dir, target_branch, installation_token
-        )
+        await asyncio.to_thread(git_push, sandbox_backend, repo_dir, target_branch)
 
         base_branch = await get_github_default_branch(repo_owner, repo_name, installation_token)
         logger.info("Using base branch: %s", base_branch)
@@ -170,11 +173,12 @@ async def open_pr_if_needed(
         await create_github_pr(
             repo_owner=repo_owner,
             repo_name=repo_name,
-            github_token=installation_token,
+            github_token=github_token or installation_token,
             title=pr_title,
             head_branch=target_branch,
             base_branch=base_branch,
             body=pr_body,
+            installation_token=installation_token,
         )
 
         logger.info("After-agent middleware completed successfully")

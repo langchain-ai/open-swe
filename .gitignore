@@ -24,6 +24,11 @@
 # misc
 .DS_Store
 *.pem
+*.key
+*.crt
+*.p12
+*.pfx
+*.jks
 
 # debug
 npm-debug.log*
@@ -33,6 +38,7 @@ yarn-error.log*
 # local env files
 .env*.local
 .env
+.env.*
 
 # vercel
 .vercel
@@ -52,6 +58,7 @@ credentials.json
 apps/cli/test_traces/
 
 # Python
+.venv/
 __pycache__/
 **/__pycache__/
 *.py[cod]
