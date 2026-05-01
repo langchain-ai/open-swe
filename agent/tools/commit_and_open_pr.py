@@ -126,7 +126,8 @@ def commit_and_open_pr(
 
     Args:
         title: PR title following the format above (e.g. "fix: resolve auth bug [closes AA-123]")
-        body: PR description following the template above with ## Description and ## Test Plan
+        body: PR description following the template above with ## Description,
+            ## Release Note, and ## Test Plan
         commit_message: Optional git commit message. If not provided, the PR title is used.
 
     Returns:
