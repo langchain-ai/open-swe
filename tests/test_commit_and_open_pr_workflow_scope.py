@@ -90,10 +90,10 @@ class TestWorkflowScopePushError:
         assert "remote rejected" not in result["error"]
 
     def test_non_workflow_push_error_returns_generic_message(self):
-        """Non-workflow push failures still return the original generic error message."""
+        """Non-workflow failures that are not permanent auth errors return the generic message."""
         generic_output = (
             "To https://github.com/langchain-ai/open-swe.git\n"
-            " ! [remote rejected] open-swe/abc -> open-swe/abc (permission denied)\n"
+            " ! [rejected] open-swe/abc -> open-swe/abc (non-fast-forward)\n"
             "error: failed to push some refs\n"
         )
         result = _run_with_push_result(_make_exec_result(1, generic_output))
