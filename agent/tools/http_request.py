@@ -7,12 +7,16 @@ from typing import Any
 from urllib.parse import urljoin, urlparse
 
 import requests
+from requests.utils import get_environ_proxies, should_bypass_proxies
 
 _MAX_REDIRECTS = 5
 
 # Serialises pinned DNS resolution. _pinned_dns_resolution swaps the global
-# socket.getaddrinfo, so concurrent pin scopes inside the same process must not
+# socket.getaddrinfo so concurrent pin scopes inside the same process must not
 # overlap. The lock is held only for the duration of a single HTTP request.
+# Combined with the thread-id check inside the installed resolver, threads
+# *other* than the pin-issuing thread observe pure fall-through to the original
+# resolver — the swap is observable but behaves identically to no swap for them.
 _DNS_PIN_LOCK = threading.Lock()
 
 
@@ -24,6 +28,13 @@ def _is_url_safe(url: str) -> tuple[bool, str, list[str]]:
     False. The list is what callers must pin DNS resolution to during the actual
     request — re-resolving on connect lets a short-TTL attacker DNS-rebind to a
     private address after this check passes.
+
+    Only globally routable unicast addresses are accepted. ``ipaddress.is_global``
+    catches every range ``is_private/is_loopback/is_link_local/is_reserved`` reject
+    plus the ones those properties miss — RFC 6598 carrier-grade NAT (100.64.0.0/10),
+    the unspecified address (0.0.0.0 / ::), and broadcast (255.255.255.255). It does
+    NOT reject IPv4 multicast (224.0.0.0/4) since multicast is technically globally
+    scoped, so multicast is excluded explicitly.
     """
     try:
         parsed = urlparse(url)
@@ -47,8 +58,8 @@ def _is_url_safe(url: str) -> tuple[bool, str, list[str]]:
             except ValueError:
                 continue
 
-            if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
-                return False, f"URL resolves to blocked address: {ip_str}", []
+            if (not ip.is_global) or ip.is_multicast:
+                return False, f"URL resolves to non-global address: {ip_str}", []
 
             if ip_str not in validated_ips:
                 validated_ips.append(ip_str)
@@ -59,6 +70,22 @@ def _is_url_safe(url: str) -> tuple[bool, str, list[str]]:
         return True, "", validated_ips
     except Exception as e:  # noqa: BLE001
         return False, f"URL validation error: {e}", []
+
+
+def _proxy_in_use_for(url: str) -> bool:
+    """Return True if an HTTP proxy from the environment would handle ``url``.
+
+    When a proxy is in the path, the agent connects to the proxy and the proxy
+    resolves the destination hostname. Local DNS pinning (this module's defense
+    against rebinding) becomes non-authoritative because the resolution that
+    matters happens on the proxy side, outside our control. The safe response
+    is to refuse the request — the operator can either disable the proxy for
+    SSRF-sensitive calls (e.g. via NO_PROXY) or bypass this guard intentionally
+    and rely on the proxy's own egress filtering.
+    """
+    if should_bypass_proxies(url, no_proxy=None):
+        return False
+    return bool(get_environ_proxies(url, no_proxy=None))
 
 
 def _build_pinned_addr_info(ip_str: str, port: int) -> tuple:
@@ -86,11 +113,16 @@ def _pinned_dns_resolution(target_hostname: str, pinned_ips: list[str]) -> Itera
     with an internal IP. With pinning, the second lookup returns the IPs the
     validator already approved.
 
-    Lookups for hostnames *other* than ``target_hostname`` fall through to the
-    system resolver, so unrelated DNS work in the same call stack is unaffected.
-    The module-level lock serialises overlapping pin scopes inside the process.
+    Although ``socket.getaddrinfo`` is a process-global function, the installed
+    resolver is **thread-scoped**: it only returns pinned IPs to the thread that
+    entered this context. Other threads — including ones doing unrelated DNS at
+    the same moment — observe a pure fall-through to the original resolver, even
+    if they happen to look up ``target_hostname``. The module-level lock then
+    serialises overlapping pin scopes within the same process so two pin-issuing
+    threads can't clobber each other's installed resolver mid-request.
     """
     target = target_hostname.lower()
+    pin_owner_tid = threading.get_ident()
 
     addr_infos_cache: dict[int, list[tuple]] = {}
 
@@ -111,7 +143,11 @@ def _pinned_dns_resolution(target_hostname: str, pinned_ips: list[str]) -> Itera
         original = socket.getaddrinfo
 
         def _pinned(host, port, *args, **kwargs):  # type: ignore[no-untyped-def]
-            if host and str(host).lower() == target:
+            # Only the pin-issuing thread sees the pinned answer. Other threads
+            # fall through to the original resolver as if no pin existed, so the
+            # process-wide swap of socket.getaddrinfo doesn't leak pinning into
+            # unrelated DNS work running concurrently.
+            if threading.get_ident() == pin_owner_tid and host and str(host).lower() == target:
                 infos = _build_for_port(int(port) if port else 0)
                 if infos:
                     return infos
@@ -155,6 +191,14 @@ def _request_with_safe_redirects(
         is_safe, reason, validated_ips = _is_url_safe(current_url)
         if not is_safe:
             return None, _blocked_response(current_url, reason)
+
+        if _proxy_in_use_for(current_url):
+            return None, _blocked_response(
+                current_url,
+                "HTTP proxy is configured for this URL; SSRF DNS pinning is not "
+                "authoritative through proxies. Add this host to NO_PROXY or unset "
+                "HTTP_PROXY/HTTPS_PROXY for SSRF-sensitive requests.",
+            )
 
         parsed = urlparse(current_url)
         hostname = parsed.hostname or ""

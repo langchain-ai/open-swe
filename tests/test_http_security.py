@@ -274,3 +274,156 @@ def test_is_url_safe_dedupes_validated_ips(monkeypatch) -> None:
     is_safe, _reason, ips = http_request_tool._is_url_safe("https://dupe.example/")
     assert is_safe is True
     assert ips == [_PUBLIC_IP]
+
+
+# --- Non-global address ranges that is_private/is_loopback miss --------------------
+
+import threading  # noqa: E402
+
+import pytest  # noqa: E402
+
+
+@pytest.mark.parametrize(
+    ("blocked_ip", "label"),
+    [
+        ("100.64.0.1", "carrier-grade NAT (RFC 6598)"),
+        ("100.127.255.254", "carrier-grade NAT high end"),
+        ("224.0.0.1", "multicast"),
+        ("239.255.255.250", "multicast SSDP"),
+        ("0.0.0.0", "unspecified"),
+        ("255.255.255.255", "broadcast"),
+    ],
+)
+def test_is_url_safe_blocks_non_global_ranges_missed_by_is_private(
+    monkeypatch, blocked_ip: str, label: str
+) -> None:
+    """is_private/is_loopback/is_link_local/is_reserved miss several special-use
+    ranges that ip.is_global rejects: CGN 100.64/10, multicast, unspecified,
+    broadcast. The validator must reject all of them."""
+    monkeypatch.setattr(socket, "getaddrinfo", lambda *a, **kw: [_addr_info(blocked_ip, 0)])
+    is_safe, reason, ips = http_request_tool._is_url_safe(f"https://{label}.example/")
+    assert is_safe is False, f"{label} ({blocked_ip}) should be blocked"
+    assert blocked_ip in reason
+    assert ips == []
+
+
+# --- Cross-thread isolation of the pinned resolver ----------------------------------
+
+
+def test_pin_does_not_leak_to_other_threads(monkeypatch) -> None:
+    """The pinned resolver only returns pinned IPs to its issuing thread. Another
+    thread that happens to resolve the same hostname during the pin window must
+    fall through to the original resolver — the process-wide socket.getaddrinfo
+    swap is observable but behaves as a no-op for unrelated threads."""
+    other_thread_calls: list[tuple[str, int]] = []
+
+    def fake_original(host, port, *args, **kwargs):  # type: ignore[no-untyped-def]
+        other_thread_calls.append((host, port))
+        return [_addr_info(_PUBLIC_IP_2, port or 0)]
+
+    monkeypatch.setattr(socket, "getaddrinfo", fake_original)
+
+    other_thread_result: list[list[tuple]] = []
+    can_resolve = threading.Event()
+    pin_can_exit = threading.Event()
+
+    def in_other_thread() -> None:
+        can_resolve.wait(timeout=2.0)
+        # Inside the pin's lock window, but called from a different thread.
+        other_thread_result.append(socket.getaddrinfo("api.example.com", 443))
+        pin_can_exit.set()
+
+    worker = threading.Thread(target=in_other_thread)
+    worker.start()
+    try:
+        with http_request_tool._pinned_dns_resolution("api.example.com", [_PUBLIC_IP]):
+            # Issuing-thread lookup uses pinned IPs.
+            issuing_thread_result = socket.getaddrinfo("api.example.com", 443)
+            # Now let the other thread resolve while the pin is still active.
+            can_resolve.set()
+            assert pin_can_exit.wait(timeout=2.0), "other thread did not finish"
+    finally:
+        worker.join(timeout=2.0)
+
+    assert issuing_thread_result == [_addr_info(_PUBLIC_IP, 443)]
+    # Other thread saw the original resolver (fake_original), not the pin.
+    assert other_thread_result == [[_addr_info(_PUBLIC_IP_2, 443)]]
+    assert other_thread_calls == [("api.example.com", 443)]
+
+
+# --- Proxy refusal: DNS pinning is not authoritative through HTTP proxies ----------
+
+
+def test_request_blocked_when_http_proxy_set(monkeypatch) -> None:
+    """When HTTP_PROXY is configured, requests would route through the proxy and
+    the proxy resolves the destination on its side — local DNS pinning doesn't
+    apply. The guard must refuse rather than silently bypass its own SSRF check."""
+    monkeypatch.setenv("HTTP_PROXY", "http://proxy.internal:3128")
+    monkeypatch.setenv("HTTPS_PROXY", "http://proxy.internal:3128")
+    monkeypatch.delenv("NO_PROXY", raising=False)
+    monkeypatch.delenv("no_proxy", raising=False)
+
+    def fail_request(*args, **kwargs):  # type: ignore[no-untyped-def]
+        raise AssertionError("request should not be issued when a proxy is configured")
+
+    monkeypatch.setattr(http_request_tool.requests, "request", fail_request)
+    monkeypatch.setattr(socket, "getaddrinfo", lambda *a, **kw: [_addr_info(_PUBLIC_IP, 0)])
+
+    result = http_request_tool.http_request("https://example.com/data")
+
+    assert result["status_code"] == 0
+    assert "proxy" in result["content"].lower()
+
+
+def test_request_proceeds_when_host_in_no_proxy(monkeypatch) -> None:
+    """If NO_PROXY exempts the target host, the request goes direct, local DNS
+    pinning IS authoritative, and the request must proceed normally."""
+    monkeypatch.setenv("HTTP_PROXY", "http://proxy.internal:3128")
+    monkeypatch.setenv("HTTPS_PROXY", "http://proxy.internal:3128")
+    monkeypatch.setenv("NO_PROXY", "example.com")
+
+    monkeypatch.setattr(socket, "getaddrinfo", lambda *a, **kw: [_addr_info(_PUBLIC_IP, 0)])
+
+    issued: list[str] = []
+
+    def fake_request(method, url, **kwargs):  # type: ignore[no-untyped-def]
+        issued.append(url)
+        return FakeResponse(status_code=200, url=url, text="ok")
+
+    monkeypatch.setattr(http_request_tool.requests, "request", fake_request)
+
+    result = http_request_tool.http_request("https://example.com/data")
+
+    assert result["status_code"] == 200
+    assert issued == ["https://example.com/data"]
+
+
+def test_request_proceeds_with_no_proxy_env(monkeypatch) -> None:
+    """No proxy env at all → request proceeds, baseline confirmation that the
+    proxy refusal is gated on actual proxy configuration, not the check itself."""
+    for var in (
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "all_proxy",
+        "NO_PROXY",
+        "no_proxy",
+    ):
+        monkeypatch.delenv(var, raising=False)
+
+    monkeypatch.setattr(socket, "getaddrinfo", lambda *a, **kw: [_addr_info(_PUBLIC_IP, 0)])
+
+    issued: list[str] = []
+
+    def fake_request(method, url, **kwargs):  # type: ignore[no-untyped-def]
+        issued.append(url)
+        return FakeResponse(status_code=200, url=url, text="ok")
+
+    monkeypatch.setattr(http_request_tool.requests, "request", fake_request)
+
+    result = http_request_tool.http_request("https://example.com/data")
+
+    assert result["status_code"] == 200
+    assert issued == ["https://example.com/data"]
