@@ -5,6 +5,7 @@ the success value from commit_and_open_pr tool results.
 """
 
 import json
+from contextlib import ExitStack
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -93,6 +94,21 @@ class TestOpenPrIfNeededMiddleware:
     def _make_state(self, messages: list) -> dict:
         return {"messages": messages}
 
+    def _patch_auth_flow(self) -> ExitStack:
+        stack = ExitStack()
+        stack.enter_context(patch("agent.middleware.open_pr.get_github_token", return_value="token"))
+        stack.enter_context(
+            patch("agent.middleware.open_pr.resolve_triggering_user_identity", return_value=None)
+        )
+        stack.enter_context(
+            patch(
+                "agent.middleware.open_pr.get_github_app_installation_token",
+                new_callable=AsyncMock,
+                return_value="installation-token",
+            )
+        )
+        return stack
+
     def test_skips_when_commit_and_open_pr_succeeded(self) -> None:
         """When success=True, the tool handled everything — middleware should be a no-op."""
         payload = {"success": True, "error": None, "pr_url": "https://github.com/org/repo/pull/42"}
@@ -162,7 +178,8 @@ class TestOpenPrIfNeededMiddleware:
                         ):
                             # Middleware should NOT short-circuit; it reaches sandbox logic
                             # We verify get_sandbox_backend was called (safety net fired)
-                            await open_pr_if_needed.aafter_agent(state, self._make_runtime())
+                            with self._patch_auth_flow():
+                                await open_pr_if_needed.aafter_agent(state, self._make_runtime())
 
         # The safety net fired: get_sandbox_backend was called
         mock_sandbox.assert_called_once_with("thread-push-fail")
@@ -212,7 +229,8 @@ class TestOpenPrIfNeededMiddleware:
                             "agent.middleware.open_pr.git_has_unpushed_commits",
                             return_value=True,
                         ):
-                            await open_pr_if_needed.aafter_agent(state, self._make_runtime())
+                            with self._patch_auth_flow():
+                                await open_pr_if_needed.aafter_agent(state, self._make_runtime())
 
         # The safety net fired: get_sandbox_backend was called
         mock_sandbox.assert_called_once_with("thread-pr-fail")
@@ -276,7 +294,8 @@ class TestOpenPrIfNeededMiddleware:
             with patch(
                 "agent.middleware.open_pr.get_sandbox_backend", side_effect=fake_get_sandbox
             ):
-                await open_pr_if_needed.aafter_agent(state, self._make_runtime())
+                with self._patch_auth_flow():
+                    await open_pr_if_needed.aafter_agent(state, self._make_runtime())
 
         # If the old buggy `"success" in pr_payload` check was used, the middleware
         # would have returned None before reaching get_sandbox_backend.
