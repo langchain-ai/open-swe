@@ -5,6 +5,7 @@ from typing import Any
 from langgraph.config import get_config
 
 from ..utils.github import edit_github_pr
+from ..utils.github_app import get_github_app_installation_token
 from ..utils.github_token import get_github_token
 
 logger = logging.getLogger(__name__)
@@ -55,7 +56,9 @@ def edit_pull_request(
                 "pr_url": None,
             }
 
-        github_token = get_github_token()
+        github_token = get_github_token(config)
+        if not github_token:
+            github_token = asyncio.run(get_github_app_installation_token())
         if not github_token:
             return {"success": False, "error": "Missing GitHub token", "pr_url": None}
 
