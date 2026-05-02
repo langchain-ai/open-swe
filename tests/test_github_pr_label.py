@@ -46,6 +46,12 @@ class _FakeAsyncClient:
         self._calls.append(("GET", url, params))
         return self._responses.pop(0)
 
+    async def patch(
+        self, url: str, *, headers: dict[str, str], json: dict | None = None
+    ) -> _FakeResponse:
+        self._calls.append(("PATCH", url, json))
+        return self._responses.pop(0)
+
 
 class _RaiseOnLabelPostClient(_FakeAsyncClient):
     """Raises on the second POST (the label call) to simulate network failure."""
@@ -161,6 +167,7 @@ def test_create_pr_adds_label_on_existing_pr(monkeypatch: pytest.MonkeyPatch) ->
     responses = [
         _FakeResponse(422, {"message": "A pull request already exists"}),
         _FakeResponse(200, [{"html_url": "https://github.com/o/r/pull/7", "number": 7}]),
+        _FakeResponse(200, {"html_url": "https://github.com/o/r/pull/7", "number": 7}),
         _FakeResponse(200, [{"name": "OpenSWE"}]),
     ]
     monkeypatch.setattr(github.httpx, "AsyncClient", lambda: _FakeAsyncClient(responses, calls))
@@ -180,10 +187,96 @@ def test_create_pr_adds_label_on_existing_pr(monkeypatch: pytest.MonkeyPatch) ->
 
     assert result == ("https://github.com/o/r/pull/7", 7, True)
     assert calls[2] == (
+        "PATCH",
+        "https://api.github.com/repos/o/r/pulls/7",
+        {"title": "feat: test", "body": "body"},
+    )
+    assert calls[3] == (
         "POST",
         "https://api.github.com/repos/o/r/issues/7/labels",
         {"labels": ["OpenSWE"]},
     )
+
+
+def test_create_pr_returns_failure_when_existing_pr_update_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[str, str, dict | None]] = []
+    responses = [
+        _FakeResponse(422, {"message": "A pull request already exists"}),
+        _FakeResponse(200, [{"html_url": "https://github.com/o/r/pull/7", "number": 7}]),
+        _FakeResponse(403, {"message": "Resource not accessible by integration"}),
+    ]
+    monkeypatch.setattr(github.httpx, "AsyncClient", lambda: _FakeAsyncClient(responses, calls))
+
+    result = asyncio.run(
+        github.create_github_pr(
+            repo_owner="o",
+            repo_name="r",
+            github_token="token",
+            title="feat: test",
+            head_branch="feature",
+            base_branch="main",
+            body="body",
+        )
+    )
+
+    assert result == (None, None, False)
+    assert calls == [
+        (
+            "POST",
+            "https://api.github.com/repos/o/r/pulls",
+            {
+                "title": "feat: test",
+                "head": "feature",
+                "base": "main",
+                "body": "body",
+                "draft": True,
+            },
+        ),
+        (
+            "GET",
+            "https://api.github.com/repos/o/r/pulls",
+            {"head": "o:feature", "state": "open", "per_page": 1},
+        ),
+        (
+            "PATCH",
+            "https://api.github.com/repos/o/r/pulls/7",
+            {"title": "feat: test", "body": "body"},
+        ),
+    ]
+
+
+def test_create_pr_retries_existing_pr_update_with_installation_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[str, str, dict | None]] = []
+    responses = [
+        _FakeResponse(422, {"message": "A pull request already exists"}),
+        _FakeResponse(200, [{"html_url": "https://github.com/o/r/pull/7", "number": 7}]),
+        _FakeResponse(403, {"message": "Resource not accessible by integration"}),
+        _FakeResponse(422, {"message": "A pull request already exists"}),
+        _FakeResponse(200, [{"html_url": "https://github.com/o/r/pull/7", "number": 7}]),
+        _FakeResponse(200, {"html_url": "https://github.com/o/r/pull/7", "number": 7}),
+        _FakeResponse(200, [{"name": "OpenSWE"}]),
+    ]
+    monkeypatch.setattr(github.httpx, "AsyncClient", lambda: _FakeAsyncClient(responses, calls))
+
+    result = asyncio.run(
+        github.create_github_pr(
+            repo_owner="o",
+            repo_name="r",
+            github_token="user-token",
+            title="feat: test",
+            head_branch="feature",
+            base_branch="main",
+            body="body",
+            installation_token="install-token",
+        )
+    )
+
+    assert result == ("https://github.com/o/r/pull/7", 7, True)
+    assert [call[0] for call in calls] == ["POST", "GET", "PATCH", "POST", "GET", "PATCH", "POST"]
 
 
 def test_create_pr_succeeds_when_label_fails(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -15,6 +15,17 @@ HTTP_CREATED = 201
 HTTP_UNPROCESSABLE_ENTITY = 422
 
 
+def is_permanent_github_push_failure(output: str) -> bool:
+    """Return whether git push output indicates a permanent auth failure."""
+    normalized_output = output.lower()
+    return (
+        "permanent_failure" in normalized_output
+        or "403" in normalized_output
+        or "permission" in normalized_output
+        or "denied" in normalized_output
+    )
+
+
 def _run_git(
     sandbox_backend: SandboxBackendProtocol, repo_dir: str, command: str
 ) -> ExecuteResponse:
@@ -52,17 +63,19 @@ def git_current_branch(sandbox_backend: SandboxBackendProtocol, repo_dir: str) -
 
 def git_checkout_branch(
     sandbox_backend: SandboxBackendProtocol, repo_dir: str, branch: str
-) -> bool:
-    """Checkout branch, creating it if needed."""
+) -> tuple[bool, str]:
+    """Checkout branch, creating it if needed. Returns (success, error_output)."""
     safe_branch = shlex.quote(branch)
     checkout_result = _run_git(sandbox_backend, repo_dir, f"git checkout -B {safe_branch}")
     if checkout_result.exit_code == 0:
-        return True
+        return True, ""
     fallback_create = _run_git(sandbox_backend, repo_dir, f"git checkout -b {safe_branch}")
     if fallback_create.exit_code == 0:
-        return True
+        return True, ""
     fallback = _run_git(sandbox_backend, repo_dir, f"git checkout {safe_branch}")
-    return fallback.exit_code == 0
+    if fallback.exit_code == 0:
+        return True, ""
+    return False, fallback.output.strip() or checkout_result.output.strip()
 
 
 def git_checkout_existing_branch(
@@ -211,16 +224,31 @@ async def create_github_pr(
                         github_token=token,
                         head_branch=head_branch,
                     )
-                    if existing:
+                    pr_url, pr_number = existing
+                    if pr_url:
+                        logger.info("Using existing PR for head branch: %s", pr_url)
+                        updated = await _update_github_pr(
+                            http_client=http_client,
+                            repo_owner=repo_owner,
+                            repo_name=repo_name,
+                            github_token=token,
+                            pr_number=pr_number,
+                            title=title,
+                            body=body,
+                        )
+                        if not updated:
+                            if token != tokens_to_try[-1]:
+                                logger.info("Retrying existing PR update with installation token")
+                                continue
+                            return None, None, False
                         await _add_label(
                             http_client,
                             repo_owner,
                             repo_name,
                             label_tok,
-                            existing[1],
+                            pr_number,
                         )
-                        logger.info("Using existing PR for head branch: %s", existing[0])
-                        return existing[0], existing[1], True
+                        return pr_url, pr_number, True
                     else:
                         logger.debug(
                             "Could not find existing PR with current token, will retry"
@@ -249,6 +277,28 @@ async def create_github_pr(
                 if token != tokens_to_try[-1]:
                     logger.info("Retrying PR creation with installation token")
                     continue
+
+                try:
+                    existing_pr_url, existing_pr_number = await _find_existing_pr(
+                        http_client=http_client,
+                        repo_owner=repo_owner,
+                        repo_name=repo_name,
+                        github_token=token,
+                        head_branch=head_branch,
+                    )
+                    if existing_pr_url:
+                        await _add_label(
+                            http_client,
+                            repo_owner,
+                            repo_name,
+                            label_tok,
+                            existing_pr_number,
+                        )
+                        logger.info("Found existing PR after HTTP error: %s", existing_pr_url)
+                        return existing_pr_url, existing_pr_number, True
+                except Exception:
+                    logger.exception("Failed to find existing PR after HTTP error")
+
                 return None, None, False
 
     return None, None, False
@@ -368,6 +418,45 @@ async def edit_github_pr(
         except httpx.HTTPError:
             logger.exception("Failed to update PR #%d via GitHub API", pr_number)
             return None, None
+
+
+async def _update_github_pr(
+    http_client: httpx.AsyncClient,
+    repo_owner: str,
+    repo_name: str,
+    github_token: str,
+    pr_number: int | None,
+    title: str,
+    body: str,
+) -> bool:
+    """Update an existing PR's title and body via PATCH."""
+    if pr_number is None:
+        logger.warning("Cannot update PR: pr_number is None")
+        return False
+    headers = {
+        "Authorization": f"Bearer {github_token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    try:
+        response = await http_client.patch(
+            f"https://api.github.com/repos/{repo_owner}/{repo_name}/pulls/{pr_number}",
+            headers=headers,
+            json={"title": title, "body": body},
+        )
+    except httpx.HTTPError:
+        logger.warning("Failed to update PR #%s", pr_number, exc_info=True)
+        return False
+    if response.status_code == 200:  # noqa: PLR2004
+        logger.info("Updated existing PR #%s with new title and body", pr_number)
+        return True
+    logger.warning(
+        "Failed to update PR #%s (%s): %s",
+        pr_number,
+        response.status_code,
+        response.json().get("message"),
+    )
+    return False
 
 
 async def get_github_default_branch(

@@ -23,13 +23,16 @@ warnings.filterwarnings("ignore", message=".*Pydantic V1.*", category=UserWarnin
 # Now safe to import agent (which imports LangChain modules)
 from deepagents import create_deep_agent
 from deepagents.backends.protocol import SandboxBackendProtocol
+from langchain.agents.middleware import ModelCallLimitMiddleware
 from langsmith.sandbox import SandboxClientError
 
 from .integrations.langsmith import _configure_github_proxy
 from .middleware import (
+    SanitizeToolInputsMiddleware,
     ToolErrorMiddleware,
     check_message_queue_before_model,
     ensure_no_empty_msg,
+    notify_step_limit_reached,
     open_pr_if_needed,
 )
 from .prompt import construct_system_prompt
@@ -40,6 +43,7 @@ from .tools import (
     edit_pull_request,
     fetch_url,
     get_branch_name,
+    get_pr_check_runs,
     get_pr_review,
     get_pr_review_comments,
     github_comment,
@@ -54,6 +58,7 @@ from .tools import (
     list_pr_review_comments,
     list_pr_reviews,
     list_repos,
+    rerun_failed_workflow_runs,
     slack_read_thread_messages,
     slack_thread_reply,
     submit_pr_review,
@@ -317,12 +322,18 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             dismiss_pr_review,
             submit_pr_review,
             list_pr_review_comments,
+            get_pr_check_runs,
+            rerun_failed_workflow_runs,
         ],
         backend=sandbox_backend,
         middleware=[
+            SanitizeToolInputsMiddleware(),
+            ModelCallLimitMiddleware(run_limit=60, exit_behavior="end"),
             ToolErrorMiddleware(),
             check_message_queue_before_model,
             ensure_no_empty_msg,
+            # after_agent hooks run in reverse list order; notify after the PR safety net.
+            notify_step_limit_reached,
             open_pr_if_needed,
         ],
     ).with_config(config)

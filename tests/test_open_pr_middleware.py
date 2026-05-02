@@ -96,7 +96,9 @@ class TestOpenPrIfNeededMiddleware:
 
     def _patch_auth_flow(self) -> ExitStack:
         stack = ExitStack()
-        stack.enter_context(patch("agent.middleware.open_pr.get_github_token", return_value="token"))
+        stack.enter_context(
+            patch("agent.middleware.open_pr.get_github_token", return_value="token")
+        )
         stack.enter_context(
             patch("agent.middleware.open_pr.resolve_triggering_user_identity", return_value=None)
         )
@@ -130,6 +132,83 @@ class TestOpenPrIfNeededMiddleware:
             result = open_pr_if_needed.after_agent(state, self._make_runtime())
 
         assert result is None
+
+    @pytest.mark.asyncio
+    async def test_skips_when_commit_and_open_pr_failed_permanently(self) -> None:
+        payload = {
+            "success": False,
+            "error": (
+                "PERMANENT_FAILURE: do not retry. Git push was rejected with a 403 "
+                "permission denied error."
+            ),
+            "pr_url": None,
+        }
+        state = self._make_state(
+            [
+                ToolMessage(
+                    content=json.dumps(payload),
+                    tool_call_id="1",
+                    name="commit_and_open_pr",
+                )
+            ]
+        )
+
+        with (
+            patch(
+                "agent.middleware.open_pr.get_config",
+                return_value={
+                    "configurable": {
+                        "thread_id": "thread-permanent",
+                        "repo": {"owner": "org", "name": "repo"},
+                    }
+                },
+            ),
+            patch(
+                "agent.middleware.open_pr.get_sandbox_backend", new_callable=AsyncMock
+            ) as mock_sandbox,
+        ):
+            await open_pr_if_needed.aafter_agent(state, self._make_runtime())
+
+        mock_sandbox.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_skips_when_commit_and_open_pr_failed_fatally(self) -> None:
+        payload = {
+            "success": False,
+            "error": (
+                "Failed to create GitHub PR. Do not retry this tool — if the push succeeded, "
+                "the PR may need to be opened manually."
+            ),
+            "pr_url": None,
+            "fatal": True,
+        }
+        state = self._make_state(
+            [
+                ToolMessage(
+                    content=json.dumps(payload),
+                    tool_call_id="1",
+                    name="commit_and_open_pr",
+                )
+            ]
+        )
+
+        with (
+            patch(
+                "agent.middleware.open_pr.get_config",
+                return_value={
+                    "configurable": {
+                        "thread_id": "thread-fatal",
+                        "repo": {"owner": "org", "name": "repo"},
+                    }
+                },
+            ),
+            patch(
+                "agent.middleware.open_pr.get_sandbox_backend", new_callable=AsyncMock
+            ) as mock_sandbox,
+        ):
+            await open_pr_if_needed.aafter_agent(state, self._make_runtime())
+
+        mock_sandbox.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_proceeds_when_commit_and_open_pr_failed_git_push(self) -> None:
@@ -262,7 +341,7 @@ class TestOpenPrIfNeededMiddleware:
         """
         payload = {
             "success": False,
-            "error": "Git push failed: remote rejected (permission denied)",
+            "error": "Git push failed: remote contains work",
             "pr_url": None,
         }
         state = self._make_state(

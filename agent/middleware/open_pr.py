@@ -36,6 +36,7 @@ from ..utils.github import (
     git_has_uncommitted_changes,
     git_has_unpushed_commits,
     git_push,
+    is_permanent_github_push_failure,
 )
 from ..utils.github_app import get_github_app_installation_token
 from ..utils.github_token import get_github_token
@@ -87,23 +88,26 @@ async def open_pr_if_needed(
             return None
 
         if pr_payload.get("success"):
-            # Tool already handled commit/push/PR creation
+            return None
+
+        error = pr_payload.get("error")
+        if pr_payload.get("fatal") is True or (isinstance(error, str) and "Do not retry" in error):
+            logger.info("Skipping PR safety net after fatal commit_and_open_pr failure")
+            return None
+
+        if isinstance(error, str) and is_permanent_github_push_failure(error):
+            logger.info("Skipping PR safety net after permanent push failure")
             return None
 
         pr_title = pr_payload.get("title", "feat: Open SWE PR")
         pr_body = pr_payload.get("body", "Automated PR created by Open SWE agent.")
         commit_message = pr_payload.get("commit_message", pr_title)
-        github_token = get_github_token()
+        github_token = get_github_token(config)
         user_identity = await asyncio.to_thread(
             resolve_triggering_user_identity, config, github_token
         )
         pr_body = add_pr_collaboration_note(pr_body, user_identity)
         commit_message = add_user_coauthor_trailer(commit_message, user_identity)
-
-        installation_token = await get_github_app_installation_token()
-        if not installation_token:
-            logger.error("Failed to get GitHub App installation token for thread %s", thread_id)
-            return None
 
         if not thread_id:
             raise ValueError("No thread_id found in config")
@@ -130,6 +134,11 @@ async def open_pr_if_needed(
 
         if not has_changes:
             logger.info("No changes detected, skipping PR creation")
+            return None
+
+        installation_token = await get_github_app_installation_token()
+        if not installation_token:
+            logger.error("Failed to get GitHub App installation token for thread %s", thread_id)
             return None
 
         logger.info("Changes detected, preparing PR for thread %s", thread_id)

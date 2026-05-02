@@ -45,7 +45,7 @@ Open SWE authenticates as a [GitHub App](https://docs.github.com/en/apps/creatin
 Before creating the app you need to decide on an **OAuth provider ID** — this is a short string you'll use in both GitHub and LangSmith to link the two. Pick something memorable, for example:
 
 ```
-github-oauth-provider
+your-org-github-oauth
 ```
 
 Write this down. You'll use it in the callback URL below and again in step 4 when configuring LangSmith.
@@ -56,7 +56,7 @@ Write this down. You'll use it in the callback URL below and again in step 4 whe
 2. Fill in:
    - **App name**: `open-swe` (or your preferred name)
    - **Homepage URL**: This can be any valid URL — it's only shown on the GitHub Marketplace page (which you won't be using). Use something like `https://github.com/langchain-ai/open-swe`
-   - **Callback URL**: `https://smith.langchain.com/host-oauth-callback/<your-provider-id>` — replace `<your-provider-id>` with the ID you chose in step 3a (e.g. `https://smith.langchain.com/host-oauth-callback/github-oauth-provider`)
+   - **Callback URL**: `https://smith.langchain.com/host-oauth-callback/<your-provider-id>` — replace `<your-provider-id>` with the ID you chose in step 3a (e.g. `https://smith.langchain.com/host-oauth-callback/your-org-github-oauth`)
    - **Request user authorization (OAuth) during installation**: ✅ Enable this
    - **Webhook URL**: `https://<your-ngrok-url>/webhooks/github` — use the ngrok URL from step 2
    - **Webhook secret**: generate one and save it — you'll need it later as `GITHUB_WEBHOOK_SECRET`:
@@ -125,9 +125,11 @@ This lets each user authenticate with their own GitHub account. Without it, all 
 To set up per-user OAuth:
 
 1. In LangSmith, go to **Settings → OAuth Providers → Add Provider**
-2. Set the **Provider ID** to the same string you chose in step 3a (e.g. `github-oauth-provider`)
+2. Set the **Provider ID** to the same string you chose in step 3a (e.g. `your-org-github-oauth`)
 3. Enter the **Client ID** and **Client Secret** from your GitHub App (found on the GitHub App settings page under **OAuth credentials**)
-4. Save. You'll reference this Provider ID as `GITHUB_OAUTH_PROVIDER_ID` in your environment variables.
+4. Enter the **Authorization URL** as `https://github.com/login/oauth/authorize` and the **Token URL** as `https://github.com/login/oauth/access_token`.
+5. Leave "Enable PKCE" unchecked.
+6. Save. You'll reference this Provider ID as `GITHUB_OAUTH_PROVIDER_ID` in your environment variables.
 
 ### 4c. Sandbox snapshots
 

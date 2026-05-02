@@ -24,6 +24,7 @@ from ..utils.github import (
     git_has_uncommitted_changes,
     git_has_unpushed_commits,
     git_push,
+    is_permanent_github_push_failure,
 )
 from ..utils.github_app import get_github_app_installation_token
 from ..utils.github_token import get_github_token
@@ -31,6 +32,16 @@ from ..utils.sandbox_paths import resolve_repo_dir
 from ..utils.sandbox_state import get_sandbox_backend_sync
 
 logger = logging.getLogger(__name__)
+
+
+def _is_workflow_scope_push_failure(output: str) -> bool:
+    normalized_output = output.lower()
+    return "workflows" in normalized_output and (
+        "scope" in normalized_output
+        or "permission" in normalized_output
+        or "workflow can be created or updated" in normalized_output
+        or "create or update workflow" in normalized_output
+    )
 
 
 def commit_and_open_pr(
@@ -78,6 +89,11 @@ def commit_and_open_pr(
         DO NOT list files changed or enumerate code
         changes — that information is already in the commit history.>
 
+        ## Release Note
+        <One-line summary for the changelog, written for self-hosted customers.
+        Write "none" for changes that don't need a changelog entry
+        (internal, CI, tests, refactors, etc.)>
+
         ## Test Plan
         - [ ] <new test case or manual verification step ONLY for new behavior>
 
@@ -96,6 +112,9 @@ def commit_and_open_pr(
 
         Resolves AA-123
 
+        ## Release Note
+        Fixed authentication failure for users without profiles.
+
         ## Test Plan
         - [ ] Verify login works for users without profiles
 
@@ -107,7 +126,8 @@ def commit_and_open_pr(
 
     Args:
         title: PR title following the format above (e.g. "fix: resolve auth bug [closes AA-123]")
-        body: PR description following the template above with ## Description and ## Test Plan
+        body: PR description following the template above with ## Description,
+            ## Release Note, and ## Test Plan
         commit_message: Optional git commit message. If not provided, the PR title is used.
 
     Returns:
@@ -123,7 +143,11 @@ def commit_and_open_pr(
         thread_id = configurable.get("thread_id")
 
         if not thread_id:
-            return {"success": False, "error": "Missing thread_id in config", "pr_url": None}
+            return {
+                "success": False,
+                "error": "Missing thread_id in config",
+                "pr_url": None,
+            }
 
         repo_config = configurable.get("repo", {})
         repo_owner = repo_config.get("owner")
@@ -137,7 +161,11 @@ def commit_and_open_pr(
 
         sandbox_backend = get_sandbox_backend_sync(thread_id)
         if not sandbox_backend:
-            return {"success": False, "error": "No sandbox found for thread", "pr_url": None}
+            return {
+                "success": False,
+                "error": "No sandbox found for thread",
+                "pr_url": None,
+            }
 
         repo_dir = resolve_repo_dir(sandbox_backend, repo_name)
         github_token = get_github_token()
@@ -162,15 +190,19 @@ def commit_and_open_pr(
                 if result.exit_code != 0:
                     return {
                         "success": False,
-                        "error": f"Failed to checkout branch {target_branch}",
+                        "error": f"Failed to checkout branch {target_branch}: {result.output.strip()}. Do not retry this tool — the git environment needs manual inspection.",
                         "pr_url": None,
+                        "fatal": True,
                     }
-            elif not git_checkout_branch(sandbox_backend, repo_dir, target_branch):
-                return {
-                    "success": False,
-                    "error": f"Failed to checkout branch {target_branch}",
-                    "pr_url": None,
-                }
+            else:
+                ok, git_err = git_checkout_branch(sandbox_backend, repo_dir, target_branch)
+                if not ok:
+                    return {
+                        "success": False,
+                        "error": f"Failed to checkout branch {target_branch}: {git_err}. Do not retry this tool — the git environment needs manual inspection.",
+                        "pr_url": None,
+                        "fatal": True,
+                    }
 
         git_config_user(
             sandbox_backend,
@@ -200,9 +232,30 @@ def commit_and_open_pr(
 
         push_result = git_push(sandbox_backend, repo_dir, target_branch)
         if push_result.exit_code != 0:
+            push_output = push_result.output.strip()
+            if _is_workflow_scope_push_failure(push_output):
+                return {
+                    "success": False,
+                    "error": (
+                        "Git push failed: the branch contains changes to .github/workflows/ files "
+                        "that require the 'workflows' GitHub token scope, which is not available. "
+                        "Remove any .github/workflows/ file changes from your commit and try again."
+                    ),
+                    "pr_url": None,
+                }
+            if is_permanent_github_push_failure(push_output):
+                return {
+                    "success": False,
+                    "error": (
+                        f"PERMANENT_FAILURE: do not retry. Git push was rejected with a 403 "
+                        f"permission denied error — the token does not have write access to this "
+                        f"repository. Report this to the user and stop. Details: {push_output}"
+                    ),
+                    "pr_url": None,
+                }
             return {
                 "success": False,
-                "error": f"Git push failed: {push_result.output.strip()}",
+                "error": f"Git push failed: {push_output}",
                 "pr_url": None,
             }
 
@@ -226,9 +279,10 @@ def commit_and_open_pr(
         if not pr_url:
             return {
                 "success": False,
-                "error": "Failed to create GitHub PR",
+                "error": "Failed to create GitHub PR. Do not retry this tool — if the push succeeded, the PR may need to be opened manually.",
                 "pr_url": None,
                 "pr_existing": False,
+                "fatal": True,
             }
 
         return {
