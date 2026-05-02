@@ -1,4 +1,5 @@
 from .commit_and_open_pr import commit_and_open_pr
+from .edit_pull_request import edit_pull_request
 from .fetch_url import fetch_url
 from .get_branch_name import get_branch_name
 from .get_pr_review_comments import get_pr_review_comments
@@ -30,6 +31,7 @@ __all__ = [
     "commit_and_open_pr",
     "create_pr_review",
     "dismiss_pr_review",
+    "edit_pull_request",
     "fetch_url",
     "get_branch_name",
     "get_pr_check_runs",

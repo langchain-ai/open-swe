@@ -49,7 +49,7 @@ Set the `SANDBOX_TYPE` environment variable to switch providers. Each provider h
 | `SANDBOX_TYPE` | Integration file | Required env vars |
 |---|---|---|
 | `langsmith` (default) | `agent/integrations/langsmith.py` | `LANGSMITH_API_KEY_PROD`, `SANDBOX_TYPE="langsmith"` |
-| `daytona` | `agent/integrations/daytona.py` | `DAYTONA_API_KEY`, `SANDBOX_TYPE="daytona"` |
+| `daytona` | `agent/integrations/daytona.py` | `DAYTONA_API_KEY`, `SANDBOX_TYPE="daytona"`, optional `DAYTONA_SANDBOX_SNAPSHOT` |
 | `runloop` | `agent/integrations/runloop.py` | `RUNLOOP_API_KEY`, `SANDBOX_TYPE="runloop"` |
 | `modal` | `agent/integrations/modal.py` | Modal credentials, `SANDBOX_TYPE="modal"` |
 | `local` | `agent/integrations/local.py` | None (no isolation — development only), `SANDBOX_TYPE="local"` |

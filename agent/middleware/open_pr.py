@@ -36,6 +36,7 @@ from ..utils.github import (
     git_has_uncommitted_changes,
     git_has_unpushed_commits,
     git_push,
+    is_permanent_github_push_failure,
 )
 from ..utils.github_app import get_github_app_installation_token
 from ..utils.github_token import get_github_token
@@ -87,7 +88,15 @@ async def open_pr_if_needed(
             return None
 
         if pr_payload.get("success"):
-            # Tool already handled commit/push/PR creation
+            return None
+
+        error = pr_payload.get("error")
+        if pr_payload.get("fatal") is True or (isinstance(error, str) and "Do not retry" in error):
+            logger.info("Skipping PR safety net after fatal commit_and_open_pr failure")
+            return None
+
+        if isinstance(error, str) and is_permanent_github_push_failure(error):
+            logger.info("Skipping PR safety net after permanent push failure")
             return None
 
         pr_title = pr_payload.get("title", "feat: Open SWE PR")
