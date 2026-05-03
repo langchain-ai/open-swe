@@ -195,6 +195,7 @@ DEFAULT_LLM_MODEL_ID = "openai:gpt-5.5"
 DEFAULT_LLM_REASONING: OpenAIReasoning = {"effort": "medium"}
 DEFAULT_LLM_MAX_TOKENS = 64_000
 DEFAULT_RECURSION_LIMIT = 9_999
+MODEL_CALL_RECURSION_LIMIT = 5_000  # ~half the recursion limit to account for tool calls
 
 
 async def get_agent(config: RunnableConfig) -> Pregel:
@@ -328,7 +329,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         backend=sandbox_backend,
         middleware=[
             SanitizeToolInputsMiddleware(),
-            ModelCallLimitMiddleware(run_limit=60, exit_behavior="end"),
+            ModelCallLimitMiddleware(run_limit=MODEL_CALL_RECURSION_LIMIT, exit_behavior="end"),
             ToolErrorMiddleware(),
             check_message_queue_before_model,
             ensure_no_empty_msg,
