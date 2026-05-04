@@ -80,6 +80,18 @@ def commit_and_open_pr(
     - "feat: add dark mode toggle to settings [closes ENG-456]"
     - "chore: upgrade dependencies to latest versions [closes OPS-789]"
 
+    ## Title Stability (IMPORTANT)
+
+    Set the PR title ONCE when the PR is first created and KEEP IT THE SAME on
+    every subsequent call for the same PR. Passing a different title on a
+    follow-up call updates the PR title on GitHub, which is noisy and unwanted.
+
+    When iterating on an existing PR (follow-up commits, review feedback, etc.),
+    look up the current PR title first and pass that exact same title back in.
+    The ONLY acceptable reason to change the title is when the overall scope of
+    the PR has changed so substantially that the original title is no longer
+    accurate. Do NOT change the title to describe the latest commit.
+
     ## Body Format (REQUIRED)
 
     The PR body MUST follow this exact template:

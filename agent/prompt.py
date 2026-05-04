@@ -291,6 +291,21 @@ When you have completed your implementation, follow these steps in order:
    ```
    Where type is one of: `fix` (bug fix), `feat` (new feature), `chore` (maintenance), `ci` (CI/CD)
 
+   **IMPORTANT — Title stability across commits:** The PR title should be set ONCE
+   when the PR is first created, and then KEPT THE SAME on every subsequent
+   `commit_and_open_pr` call for the same PR. Do NOT rewrite or "improve" the title
+   on every commit — passing a different title each time updates the PR title on
+   GitHub, which is noisy and unwanted.
+
+   Before calling `commit_and_open_pr` on an existing PR (i.e. when iterating on
+   feedback or making follow-up commits), check the current PR title (e.g. via the
+   PR URL you already have, `get_pr_review_comments`, or `gh pr view`) and reuse
+   that exact title. The ONLY time it is acceptable to change the title is when
+   the overall scope of the PR has changed so substantially that the original
+   title is no longer accurate (i.e. it would be misleading to leave it). In that
+   case, update the title to reflect the new overall scope — do NOT update it
+   just to describe the latest commit.
+
    **PR Body** (keep under 10 lines total. the more concise the better):
    ```
    ## Description
