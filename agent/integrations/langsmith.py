@@ -41,8 +41,36 @@ def _get_sandbox_snapshot_config() -> tuple[str | None, int, int, int]:
     return snapshot_id, fs_capacity_bytes, vcpus, mem_bytes
 
 
+def _github_proxy_rules(github_token: str) -> list[dict[str, Any]]:
+    basic_auth = base64.b64encode(f"x-access-token:{github_token}".encode()).decode()
+    return [
+        {
+            "name": "github-api",
+            "match_hosts": ["api.github.com"],
+            "headers": [
+                {
+                    "name": "Authorization",
+                    "type": "opaque",
+                    "value": f"Bearer {github_token}",
+                }
+            ],
+        },
+        {
+            "name": "github",
+            "match_hosts": ["github.com", "*.github.com"],
+            "headers": [
+                {
+                    "name": "Authorization",
+                    "type": "opaque",
+                    "value": f"Basic {basic_auth}",
+                }
+            ],
+        },
+    ]
+
+
 def _configure_github_proxy(sandbox_name: str, github_token: str) -> None:
-    """Configure sandbox proxy to inject GitHub auth for all github.com requests.
+    """Configure sandbox proxy to inject GitHub auth for GitHub traffic.
 
     Uses the LangSmith proxy-config API to set up header injection so that
     git operations (clone, pull, push) authenticate via the proxy rather than
@@ -58,24 +86,7 @@ def _configure_github_proxy(sandbox_name: str, github_token: str) -> None:
         return
     langsmith_endpoint = os.environ.get("LANGSMITH_ENDPOINT", "https://api.smith.langchain.com")
     url = f"{langsmith_endpoint}/v2/sandboxes/boxes/{sandbox_name}"
-    basic_auth = base64.b64encode(f"x-access-token:{github_token}".encode()).decode()
-    payload = {
-        "proxy_config": {
-            "rules": [
-                {
-                    "name": "github",
-                    "match_hosts": ["github.com", "*.github.com"],
-                    "headers": [
-                        {
-                            "name": "Authorization",
-                            "type": "opaque",
-                            "value": f"Basic {basic_auth}",
-                        }
-                    ],
-                }
-            ]
-        }
-    }
+    payload = {"proxy_config": {"rules": _github_proxy_rules(github_token)}}
     with httpx.Client() as client:
         response = client.patch(
             url,

@@ -39,7 +39,7 @@ make format             # ruff format + ruff check --fix
 3. No sandbox at all → create one, set `__creating__` sentinel, then real id.
 4. Metadata has an id but no cache → reconnect; fall back to recreate on failure.
 
-For `SANDBOX_TYPE=langsmith` (default), every sandbox creation/refresh also calls `_configure_github_proxy` with a fresh GitHub App installation token (`get_github_app_installation_token`). Other providers (modal, daytona, runloop, local) skip the proxy step. Provider is selected via `SANDBOX_TYPE` env var; factory is `agent/utils/sandbox.py:create_sandbox`.
+For `SANDBOX_TYPE=langsmith` (default), every sandbox creation/refresh also calls `_configure_github_proxy` with a fresh GitHub App installation token (`get_github_app_installation_token`). The proxy injects Basic auth for `github.com` git traffic and Bearer auth for `api.github.com` so sandbox commands can use `GH_TOKEN=dummy gh ...` without storing real tokens in the sandbox. Other providers (modal, daytona, runloop, local) skip the proxy step. Provider is selected via `SANDBOX_TYPE` env var; factory is `agent/utils/sandbox.py:create_sandbox`.
 
 ### Middleware stack (order matters)
 

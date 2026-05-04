@@ -1,17 +1,13 @@
-"""After-agent middleware that creates a GitHub PR if needed.
-
-Runs once after the agent finishes as a safety net. If the agent called
-``commit_and_open_pr`` and it already succeeded, this is a no-op. Otherwise it
-commits any remaining changes, pushes to a feature branch, and opens a GitHub PR.
-"""
+"""After-agent middleware that creates a GitHub PR if needed."""
 
 from __future__ import annotations
 
 import asyncio
-import json as _json
 import logging
+import shlex
 from typing import Any
 
+from deepagents.backends.protocol import ExecuteResponse, SandboxBackendProtocol
 from langchain.agents.middleware import AgentState, after_agent
 from langgraph.config import get_config
 from langgraph.runtime import Runtime
@@ -24,8 +20,6 @@ from ..utils.authorship import (
     resolve_triggering_user_identity,
 )
 from ..utils.github import (
-    create_github_pr,
-    get_github_default_branch,
     git_add_all,
     git_checkout_branch,
     git_checkout_existing_branch,
@@ -36,9 +30,7 @@ from ..utils.github import (
     git_has_uncommitted_changes,
     git_has_unpushed_commits,
     git_push,
-    is_permanent_github_push_failure,
 )
-from ..utils.github_app import get_github_app_installation_token
 from ..utils.github_token import get_github_token
 from ..utils.sandbox_paths import aresolve_repo_dir
 from ..utils.sandbox_state import get_sandbox_backend
@@ -46,24 +38,72 @@ from ..utils.sandbox_state import get_sandbox_backend
 logger = logging.getLogger(__name__)
 
 
-def _extract_pr_params_from_messages(messages: list) -> dict[str, Any] | None:
-    """Extract commit_and_open_pr tool result payload."""
-    for msg in reversed(messages):
-        if isinstance(msg, dict):
-            content = msg.get("content", "")
-            name = msg.get("name", "")
-        else:
-            content = getattr(msg, "content", "")
-            name = getattr(msg, "name", "")
+def _run_gh(
+    sandbox_backend: SandboxBackendProtocol,
+    repo_dir: str,
+    command: str,
+) -> ExecuteResponse:
+    safe_repo_dir = shlex.quote(repo_dir)
+    return sandbox_backend.execute(f"cd {safe_repo_dir} && GH_TOKEN=dummy gh {command}")
 
-        if name == "commit_and_open_pr" and content:
-            try:
-                parsed = _json.loads(content) if isinstance(content, str) else content
-                if isinstance(parsed, dict):
-                    return parsed
-            except (ValueError, TypeError):
-                pass
-    return None
+
+def _default_branch(
+    sandbox_backend: SandboxBackendProtocol,
+    repo_dir: str,
+) -> str:
+    result = _run_gh(
+        sandbox_backend,
+        repo_dir,
+        "repo view --json defaultBranchRef --jq .defaultBranchRef.name",
+    )
+    return result.output.strip() if result.exit_code == 0 else "main"
+
+
+def _existing_pr_url(
+    sandbox_backend: SandboxBackendProtocol,
+    repo_dir: str,
+) -> str | None:
+    result = _run_gh(sandbox_backend, repo_dir, "pr view --json url --jq .url")
+    if result.exit_code != 0:
+        return None
+    pr_url = result.output.strip()
+    return pr_url or None
+
+
+def _create_or_update_pr(
+    sandbox_backend: SandboxBackendProtocol,
+    repo_dir: str,
+    title: str,
+    body: str,
+    base_branch: str,
+    target_branch: str,
+) -> str | None:
+    safe_title = shlex.quote(title)
+    safe_body = shlex.quote(body)
+
+    existing_url = _existing_pr_url(sandbox_backend, repo_dir)
+    if existing_url:
+        result = _run_gh(
+            sandbox_backend,
+            repo_dir,
+            f"pr edit --title {safe_title} --body {safe_body}",
+        )
+        if result.exit_code != 0:
+            logger.warning("Failed to update existing PR: %s", result.output.strip())
+        return existing_url
+
+    safe_base = shlex.quote(base_branch)
+    safe_head = shlex.quote(target_branch)
+    result = _run_gh(
+        sandbox_backend,
+        repo_dir,
+        f"pr create --draft --title {safe_title} --body {safe_body} --base {safe_base} --head {safe_head}",
+    )
+    if result.exit_code != 0:
+        logger.warning("Failed to create PR via gh: %s", result.output.strip())
+        return None
+    pr_url = result.output.strip().splitlines()[-1] if result.output.strip() else None
+    return pr_url
 
 
 @after_agent
@@ -71,7 +111,7 @@ async def open_pr_if_needed(
     state: AgentState,
     runtime: Runtime,
 ) -> dict[str, Any] | None:
-    """Middleware that commits/pushes changes after agent runs if `commit_and_open_pr` tool didn't."""
+    """Commit/push changes and ensure a draft PR exists after agent runs."""
     logger.info("After-agent middleware started")
 
     try:
@@ -80,40 +120,21 @@ async def open_pr_if_needed(
         thread_id = configurable.get("thread_id")
         logger.debug("Middleware running for thread %s", thread_id)
 
-        messages = state.get("messages", [])
-        pr_payload = _extract_pr_params_from_messages(messages)
-
-        if not pr_payload:
-            logger.info("No commit_and_open_pr tool call found, skipping PR creation")
-            return None
-
-        if pr_payload.get("success"):
-            return None
-
-        error = pr_payload.get("error")
-        if pr_payload.get("fatal") is True or (isinstance(error, str) and "Do not retry" in error):
-            logger.info("Skipping PR safety net after fatal commit_and_open_pr failure")
-            return None
-
-        if isinstance(error, str) and is_permanent_github_push_failure(error):
-            logger.info("Skipping PR safety net after permanent push failure")
-            return None
-
-        pr_title = pr_payload.get("title", "feat: Open SWE PR")
-        pr_body = pr_payload.get("body", "Automated PR created by Open SWE agent.")
-        commit_message = pr_payload.get("commit_message", pr_title)
         github_token = get_github_token(config)
         user_identity = await asyncio.to_thread(
             resolve_triggering_user_identity, config, github_token
         )
-        pr_body = add_pr_collaboration_note(pr_body, user_identity)
-        commit_message = add_user_coauthor_trailer(commit_message, user_identity)
+        pr_title = "feat: open swe changes"
+        pr_body = add_pr_collaboration_note(
+            "Automated draft PR created by Open SWE.",
+            user_identity,
+        )
+        commit_message = add_user_coauthor_trailer(pr_title, user_identity)
 
         if not thread_id:
             raise ValueError("No thread_id found in config")
 
         repo_config = configurable.get("repo", {})
-        repo_owner = repo_config.get("owner")
         repo_name = repo_config.get("name")
 
         sandbox_backend = await get_sandbox_backend(thread_id)
@@ -136,11 +157,6 @@ async def open_pr_if_needed(
             logger.info("No changes detected, skipping PR creation")
             return None
 
-        installation_token = await get_github_app_installation_token()
-        if not installation_token:
-            logger.error("Failed to get GitHub App installation token for thread %s", thread_id)
-            return None
-
         logger.info("Changes detected, preparing PR for thread %s", thread_id)
 
         metadata = config.get("metadata", {})
@@ -150,7 +166,6 @@ async def open_pr_if_needed(
 
         if current_branch != target_branch:
             if branch_name:
-                # Existing branch — plain checkout, do not create or reset
                 await asyncio.to_thread(
                     git_checkout_existing_branch, sandbox_backend, repo_dir, target_branch
                 )
@@ -167,23 +182,25 @@ async def open_pr_if_needed(
             OPEN_SWE_BOT_EMAIL,
         )
         await asyncio.to_thread(git_add_all, sandbox_backend, repo_dir)
-        await asyncio.to_thread(git_commit, sandbox_backend, repo_dir, commit_message)
+        if has_uncommitted_changes:
+            await asyncio.to_thread(git_commit, sandbox_backend, repo_dir, commit_message)
 
         await asyncio.to_thread(git_push, sandbox_backend, repo_dir, target_branch)
 
-        base_branch = await get_github_default_branch(repo_owner, repo_name, installation_token)
+        base_branch = await asyncio.to_thread(_default_branch, sandbox_backend, repo_dir)
         logger.info("Using base branch: %s", base_branch)
 
-        await create_github_pr(
-            repo_owner=repo_owner,
-            repo_name=repo_name,
-            github_token=github_token or installation_token,
-            title=pr_title,
-            head_branch=target_branch,
-            base_branch=base_branch,
-            body=pr_body,
-            installation_token=installation_token,
+        pr_url = await asyncio.to_thread(
+            _create_or_update_pr,
+            sandbox_backend,
+            repo_dir,
+            pr_title,
+            pr_body,
+            base_branch,
+            target_branch,
         )
+        if pr_url:
+            logger.info("Ensured draft PR exists: %s", pr_url)
 
         logger.info("After-agent middleware completed successfully")
 

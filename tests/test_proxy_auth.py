@@ -36,16 +36,24 @@ class TestConfigureGithubProxy:
             call_kwargs = mock_client.patch.call_args
             payload = call_kwargs.kwargs["json"]
 
-            # Verify proxy_config structure
             assert "proxy_config" in payload
             rules = payload["proxy_config"]["rules"]
-            assert len(rules) == 1
+            assert len(rules) == 2
 
-            rule = rules[0]
-            assert rule["name"] == "github"
-            assert rule["match_hosts"] == ["github.com", "*.github.com"]
+            api_rule = rules[0]
+            assert api_rule["name"] == "github-api"
+            assert api_rule["match_hosts"] == ["api.github.com"]
+            api_headers = api_rule["headers"]
+            assert len(api_headers) == 1
+            assert api_headers[0]["name"] == "Authorization"
+            assert api_headers[0]["type"] == "opaque"
+            assert api_headers[0]["value"] == f"Bearer {token}"
 
-            headers = rule["headers"]
+            web_rule = rules[1]
+            assert web_rule["name"] == "github"
+            assert web_rule["match_hosts"] == ["github.com", "*.github.com"]
+
+            headers = web_rule["headers"]
             assert len(headers) == 1
             assert headers[0]["name"] == "Authorization"
             assert headers[0]["type"] == "opaque"
