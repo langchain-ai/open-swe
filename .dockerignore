@@ -1,0 +1,14 @@
+.git
+.env
+.env.*
+*.pem
+*.key
+*.crt
+credentials.json
+node_modules
+__pycache__
+.pytest_cache
+.ruff_cache
+.venv
+.DS_Store
+logs.txt

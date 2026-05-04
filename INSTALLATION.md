@@ -143,7 +143,7 @@ from langsmith.sandbox import SandboxClient
 client = SandboxClient(api_key="<your key>")
 snapshot = client.create_snapshot(
     name="open-swe",
-    docker_image="bracelangchain/deepagents-sandbox:v1",  # built from ./Dockerfile
+    docker_image="johanneslangchain/open-swe-sandbox:gh-cli",  # built from ./Dockerfile
     fs_capacity_bytes=32 * 1024**3,
 )
 print(snapshot.id)
