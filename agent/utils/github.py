@@ -233,7 +233,6 @@ async def create_github_pr(
                             repo_name=repo_name,
                             github_token=token,
                             pr_number=pr_number,
-                            body=body,
                         )
                         if not updated:
                             if token != tokens_to_try[-1]:
@@ -425,22 +424,27 @@ async def _update_github_pr(
     repo_name: str,
     github_token: str,
     pr_number: int | None,
-    body: str,
     title: str | None = None,
+    body: str | None = None,
 ) -> bool:
     """Update an existing PR via PATCH."""
     if pr_number is None:
         logger.warning("Cannot update PR: pr_number is None")
         return False
+    payload: dict[str, str] = {}
+    if title is not None:
+        payload["title"] = title
+    if body is not None:
+        payload["body"] = body
+    if not payload:
+        logger.info("No existing PR fields to update for PR #%s", pr_number)
+        return True
     headers = {
         "Authorization": f"Bearer {github_token}",
         "Accept": "application/vnd.github+json",
         "X-GitHub-Api-Version": "2022-11-28",
     }
     try:
-        payload = {"body": body}
-        if title is not None:
-            payload["title"] = title
         response = await http_client.patch(
             f"https://api.github.com/repos/{repo_owner}/{repo_name}/pulls/{pr_number}",
             headers=headers,

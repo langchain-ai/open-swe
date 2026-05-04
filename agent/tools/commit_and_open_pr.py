@@ -53,6 +53,9 @@ def commit_and_open_pr(
 
     You MUST call this tool when you have completed your work and want to
     submit your changes for review. This is the final step in your workflow.
+    If a PR already exists for the branch, this tool reuses it and preserves
+    the existing PR title and description. To intentionally edit existing PR
+    metadata, use `edit_pull_request` after this succeeds.
 
     Before calling this tool, ensure you have:
     1. Reviewed your changes for correctness

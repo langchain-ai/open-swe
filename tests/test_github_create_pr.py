@@ -11,6 +11,45 @@ from agent.utils.github import create_github_pr
 
 
 @pytest.mark.asyncio
+async def test_create_github_pr_existing_pr_preserves_description():
+    """Existing PRs should be reused without overwriting their title or body."""
+    existing_pr_url = "https://github.com/owner/repo/pull/42"
+    existing_pr_number = 42
+    create_response = MagicMock()
+    create_response.status_code = 422
+    create_response.json.return_value = {"message": "Validation Failed"}
+
+    mock_client = MagicMock()
+    mock_client.post = AsyncMock(return_value=create_response)
+    mock_client.patch = AsyncMock()
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=False)
+
+    with (
+        patch("httpx.AsyncClient", return_value=mock_client),
+        patch(
+            "agent.utils.github._find_existing_pr",
+            AsyncMock(return_value=(existing_pr_url, existing_pr_number)),
+        ),
+        patch("agent.utils.github._add_label", AsyncMock()),
+    ):
+        pr_url, pr_number, pr_existing = await create_github_pr(
+            repo_owner="owner",
+            repo_name="repo",
+            github_token="token",
+            title="Test PR",
+            head_branch="feature/test",
+            base_branch="main",
+            body="new generated body",
+        )
+
+    assert pr_url == existing_pr_url
+    assert pr_number == existing_pr_number
+    assert pr_existing is True
+    mock_client.patch.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_create_github_pr_http_error_falls_back_to_existing_pr():
     """When httpx.HTTPError is raised during PR creation, the function should
     fall back to _find_existing_pr and return the existing PR if one is found.

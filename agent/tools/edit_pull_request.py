@@ -18,7 +18,9 @@ def edit_pull_request(
 ) -> dict[str, Any]:
     """Edit the title and/or body of an existing GitHub Pull Request.
 
-    Use this tool to update a PR's title or description after it has been created.
+    Use this tool only when you intentionally need to update a PR's title or
+    description after it has been created. Normal code submission should use
+    `commit_and_open_pr`, which preserves existing PR metadata when reusing a PR.
     At least one of `title` or `body` must be provided.
 
     Args:
