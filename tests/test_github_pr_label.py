@@ -189,7 +189,7 @@ def test_create_pr_adds_label_on_existing_pr(monkeypatch: pytest.MonkeyPatch) ->
     assert calls[2] == (
         "PATCH",
         "https://api.github.com/repos/o/r/pulls/7",
-        {"title": "feat: test", "body": "body"},
+        {"body": "body"},
     )
     assert calls[3] == (
         "POST",
@@ -242,7 +242,7 @@ def test_create_pr_returns_failure_when_existing_pr_update_fails(
         (
             "PATCH",
             "https://api.github.com/repos/o/r/pulls/7",
-            {"title": "feat: test", "body": "body"},
+            {"body": "body"},
         ),
     ]
 

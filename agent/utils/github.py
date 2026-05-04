@@ -233,7 +233,6 @@ async def create_github_pr(
                             repo_name=repo_name,
                             github_token=token,
                             pr_number=pr_number,
-                            title=title,
                             body=body,
                         )
                         if not updated:
@@ -426,10 +425,10 @@ async def _update_github_pr(
     repo_name: str,
     github_token: str,
     pr_number: int | None,
-    title: str,
     body: str,
+    title: str | None = None,
 ) -> bool:
-    """Update an existing PR's title and body via PATCH."""
+    """Update an existing PR via PATCH."""
     if pr_number is None:
         logger.warning("Cannot update PR: pr_number is None")
         return False
@@ -439,16 +438,19 @@ async def _update_github_pr(
         "X-GitHub-Api-Version": "2022-11-28",
     }
     try:
+        payload = {"body": body}
+        if title is not None:
+            payload["title"] = title
         response = await http_client.patch(
             f"https://api.github.com/repos/{repo_owner}/{repo_name}/pulls/{pr_number}",
             headers=headers,
-            json={"title": title, "body": body},
+            json=payload,
         )
     except httpx.HTTPError:
         logger.warning("Failed to update PR #%s", pr_number, exc_info=True)
         return False
     if response.status_code == 200:  # noqa: PLR2004
-        logger.info("Updated existing PR #%s with new title and body", pr_number)
+        logger.info("Updated existing PR #%s", pr_number)
         return True
     logger.warning(
         "Failed to update PR #%s (%s): %s",

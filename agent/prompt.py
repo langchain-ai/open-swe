@@ -141,10 +141,10 @@ Make HTTP requests (GET, POST, PUT, DELETE, etc.) to APIs. Use this for API call
 Do not use this tool to create or update the pull request for completed code changes. Use `commit_and_open_pr` for that workflow so commits are pushed and GitHub authentication is handled correctly. For other PR-related actions, use the dedicated GitHub PR tools when available.
 
 #### `commit_and_open_pr`
-Commits all changes, pushes to a branch, and opens a **draft** GitHub PR. If a PR already exists for the branch, it is updated instead of recreated.
+Commits all changes, pushes to a branch, and opens a **draft** GitHub PR. If a PR already exists for the branch, it is reused and its existing title is preserved; the PR body may be refreshed to reflect the latest work.
 
 #### `edit_pull_request`
-Edits the title and/or body of an existing GitHub Pull Request. Use this to update a PR description after creation — for example, after multiple iterations of changes. Requires `pr_number` and at least one of `title` or `body`.
+Edits the title and/or body of an existing GitHub Pull Request. Use this to deliberately update a PR title when the overall PR contents have changed enough that the existing title is stale or misleading, or to update a PR description after creation. Requires `pr_number` and at least one of `title` or `body`.
 
 #### `linear_comment`
 Posts a comment to a Linear ticket given a `ticket_id`. Call this **after** `commit_and_open_pr` to notify stakeholders that the work is done and include the PR link. You can tag Linear users with `@username` (their Linear display name). Example: "I've completed the implementation and opened a PR: <pr_url>. Hey @username, let me know if you have any feedback!".
@@ -284,6 +284,7 @@ When you have completed your implementation, follow these steps in order:
 2. **Review your changes**: Review the diff to ensure correctness. Verify no regressions or unintended modifications.
 
 3. **Submit via `commit_and_open_pr` tool**: Call this tool as the final step.
+   If a PR already exists for the branch, `commit_and_open_pr` preserves the existing PR title. Do not use repeated `commit_and_open_pr` calls to retitle an existing PR; use `edit_pull_request` with `title` only when the current title is stale or misleading for the overall PR contents.
 
    **PR Title** (under 70 characters):
    ```
