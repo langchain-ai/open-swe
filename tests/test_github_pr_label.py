@@ -167,7 +167,6 @@ def test_create_pr_adds_label_on_existing_pr(monkeypatch: pytest.MonkeyPatch) ->
     responses = [
         _FakeResponse(422, {"message": "A pull request already exists"}),
         _FakeResponse(200, [{"html_url": "https://github.com/o/r/pull/7", "number": 7}]),
-        _FakeResponse(200, {"html_url": "https://github.com/o/r/pull/7", "number": 7}),
         _FakeResponse(200, [{"name": "OpenSWE"}]),
     ]
     monkeypatch.setattr(github.httpx, "AsyncClient", lambda: _FakeAsyncClient(responses, calls))
@@ -187,18 +186,14 @@ def test_create_pr_adds_label_on_existing_pr(monkeypatch: pytest.MonkeyPatch) ->
 
     assert result == ("https://github.com/o/r/pull/7", 7, True)
     assert calls[2] == (
-        "PATCH",
-        "https://api.github.com/repos/o/r/pulls/7",
-        {"body": "body"},
-    )
-    assert calls[3] == (
         "POST",
         "https://api.github.com/repos/o/r/issues/7/labels",
         {"labels": ["OpenSWE"]},
     )
+    assert [call[0] for call in calls] == ["POST", "GET", "POST"]
 
 
-def test_create_pr_returns_failure_when_existing_pr_update_fails(
+def test_create_pr_returns_existing_pr_when_existing_pr_label_fails(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls: list[tuple[str, str, dict | None]] = []
@@ -221,7 +216,7 @@ def test_create_pr_returns_failure_when_existing_pr_update_fails(
         )
     )
 
-    assert result == (None, None, False)
+    assert result == ("https://github.com/o/r/pull/7", 7, True)
     assert calls == [
         (
             "POST",
@@ -240,24 +235,20 @@ def test_create_pr_returns_failure_when_existing_pr_update_fails(
             {"head": "o:feature", "state": "open", "per_page": 1},
         ),
         (
-            "PATCH",
-            "https://api.github.com/repos/o/r/pulls/7",
-            {"body": "body"},
+            "POST",
+            "https://api.github.com/repos/o/r/issues/7/labels",
+            {"labels": ["OpenSWE"]},
         ),
     ]
 
 
-def test_create_pr_retries_existing_pr_update_with_installation_token(
+def test_create_pr_preserves_existing_pr_metadata_without_token_retry(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls: list[tuple[str, str, dict | None]] = []
     responses = [
         _FakeResponse(422, {"message": "A pull request already exists"}),
         _FakeResponse(200, [{"html_url": "https://github.com/o/r/pull/7", "number": 7}]),
-        _FakeResponse(403, {"message": "Resource not accessible by integration"}),
-        _FakeResponse(422, {"message": "A pull request already exists"}),
-        _FakeResponse(200, [{"html_url": "https://github.com/o/r/pull/7", "number": 7}]),
-        _FakeResponse(200, {"html_url": "https://github.com/o/r/pull/7", "number": 7}),
         _FakeResponse(200, [{"name": "OpenSWE"}]),
     ]
     monkeypatch.setattr(github.httpx, "AsyncClient", lambda: _FakeAsyncClient(responses, calls))
@@ -276,7 +267,7 @@ def test_create_pr_retries_existing_pr_update_with_installation_token(
     )
 
     assert result == ("https://github.com/o/r/pull/7", 7, True)
-    assert [call[0] for call in calls] == ["POST", "GET", "PATCH", "POST", "GET", "PATCH", "POST"]
+    assert [call[0] for call in calls] == ["POST", "GET", "POST"]
 
 
 def test_create_pr_succeeds_when_label_fails(monkeypatch: pytest.MonkeyPatch) -> None:
