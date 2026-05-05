@@ -1,0 +1,184 @@
+[
+  {
+    "pr_title": "FEATURE: automatically downsize large images",
+    "url": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/1",
+    "original_url": "https://github.com/discourse/discourse/commit/ffbaf8c54269df2ce510de91245760fddce09896",
+    "comments": [
+      {
+        "comment": "The downsize method is defined twice. The second definition, which expects a single dimensions string parameter, overrides the first, which expected separate max_width and max_height parameters. This makes the original method unreachable and breaks existing code that calls it with separate width and height arguments.",
+        "severity": "Medium"
+      },
+      {
+        "comment": "Hardcoding maxSizeKB = 10 * 1024 ignores Discourse.SiteSettings['max_' + type + '_size_kb'], so the client-side limit can diverge from server-side and per-type settings (also applies to the 413 handler below).",
+        "severity": "Low"
+      },
+      {
+        "comment": "Passing 80% as the dimensions can fail for animated GIFs when allow_animated_thumbnails is true, since the animated path uses gifsicle --resize-fit which expects WxH geometry, not a percentage; downsizing would then silently fail.",
+        "severity": "Medium"
+      }
+    ]
+  },
+  {
+    "pr_title": "FEATURE: per-topic unsubscribe option in emails",
+    "url": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/2",
+    "original_url": "https://github.com/discourse/discourse/commit/6669a2d94d76eea3b99b8c476d12b1eb66726b07",
+    "comments": [
+      {
+        "comment": "logic: Potential nil pointer exception - if no TopicUser record exists, tu will be nil and calling methods on it will crash",
+        "severity": "High"
+      },
+      {
+        "comment": "Typo in property name: 'stopNotificiationsText' should be 'stopNotificationsText' (missing 'n' in 'Notifications')",
+        "severity": "Low"
+      }
+    ]
+  },
+  {
+    "pr_title": "Add comprehensive email validation for blocked users",
+    "url": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/3",
+    "original_url": "https://github.com/discourse/discourse/commit/5f8a130277dbddc95d133cd2832be639baf89213",
+    "comments": [
+      {
+        "comment": "BlockedEmail.should_block_email? method has side effects during a read operation - it updates statistics even when just checking if an email should be blocked. This could cause race conditions in concurrent environments and makes the method name misleading.",
+        "severity": "Medium"
+      },
+      {
+        "comment": "Regex pattern @(#{domains}) only matches domain suffixes, not full domains. evil.example.com would match whitelist entry example.com.",
+        "severity": "Medium"
+      }
+    ]
+  },
+  {
+    "pr_title": "Enhance embed URL handling and validation system",
+    "url": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/4",
+    "original_url": "https://github.com/discourse/discourse/commit/4f8aed295a29954023b2849c060ef4fb299d1b5d",
+    "comments": [
+      {
+        "comment": "SSRF vulnerability using open(url) without validation",
+        "severity": "Critical"
+      },
+      {
+        "comment": "The current origin validation using indexOf is insufficient and can be bypassed. An attacker could use a malicious domain like evil-discourseUrl.com to pass this check.",
+        "severity": "Medium"
+      },
+      {
+        "comment": "postMessage targetOrigin should be the origin (scheme+host+port), not the full referrer URL; using the full URL will cause the message to be dropped and prevent resizing.",
+        "severity": "Medium"
+      },
+      {
+        "comment": "The code sets X-Frame-Options: ALLOWALL which completely disables clickjacking protection. The referer validation can be bypassed (referer headers are easily spoofed), and the fallback to empty string for nil referer masks validation failures.",
+        "severity": "Medium"
+      },
+      {
+        "comment": "The TopicEmbed.import method is susceptible to a NoMethodError if the contents parameter is nil when attempting to append a string, and an XSS vulnerability due to unescaped url interpolation in the generated HTML.",
+        "severity": "Medium"
+      },
+      {
+        "comment": "The ERB block closes with end if, which is invalid Ruby/ERB and will raise at render; it should just be end to close the if block.",
+        "severity": "Medium"
+      }
+    ]
+  },
+  {
+    "pr_title": "Optimize header layout performance with flexbox mixins",
+    "url": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/5",
+    "original_url": "https://github.com/discourse/discourse/commit/5b229316ee4c661836ed1161139692a3e8527444",
+    "comments": [
+      {
+        "comment": "Mixing float: left with flexbox causes layout issues. Further this PR removes the float-based right alignment for .d-header .panel, which may cause the login panel in the non-Ember/noscript header (where .panel is nested inside .row and not a flex item) to stack under the title instead of remaining right-aligned.",
+        "severity": "Low"
+      },
+      {
+        "comment": "-ms-align-items never existed in any version of IE/Edge; the correct legacy property is -ms-flex-align.",
+        "severity": "Low"
+      }
+    ]
+  },
+  {
+    "pr_title": "UX: show complete URL path if website domain is same as instance domain",
+    "url": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/6",
+    "original_url": "https://github.com/discourse/discourse/commit/267d8be1f556ed59639ced396c885bb44586da19",
+    "comments": [
+      {
+        "comment": "The include_website_name method is missing the required ? suffix. Rails serializers expect include_ methods to end with ? for conditional attribute inclusion, a convention followed by other methods in this serializer. Without it, the website_name attribute may not be conditionally included as intended. Additionally, the '.' << website_host string concatenation should be replaced with '.' + website_host or '.#{website_host}' to avoid mutating string literals, which can lead to issues.",
+        "severity": "Medium"
+      }
+    ]
+  },
+  {
+    "pr_title": "scale-color $lightness must use $secondary for dark themes",
+    "url": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/7",
+    "original_url": "https://github.com/discourse/discourse/commit/d38c4d5f7443223c81529c22470293771baf9f38",
+    "comments": [
+      {
+        "comment": "In .topic-meta-data h5 a, the original code had color: scale-color($primary, $lightness: 30%) but was changed to dark-light-choose(scale-color($primary, $lightness: 70%), scale-color($secondary, $lightness: 30%)). The lightness for the light theme changed from 30% to 70%, which is a dramatic inversion",
+        "severity": "Low"
+      },
+      {
+        "comment": "This change for desktop/user.css changes $primary from 30% to 50% for the light theme; most other changes preserve the original $primary value and move the complement to $secondary for dark. Consider reviewing this (also applies to a similar .name change in the mobile variant).",
+        "severity": "Low"
+      },
+      {
+        "comment": "In topic-post.css the original code used $lightness: 70% but the replacement uses $lightness: 30% for the light theme. This makes the text significantly darker than intended.",
+        "severity": "Low"
+      }
+    ]
+  },
+  {
+    "pr_title": "FIX: proper handling of group memberships",
+    "url": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/8",
+    "original_url": "https://github.com/discourse/discourse/commit/060cda77729cb1c4a827560e09e89a7b22078ba9",
+    "comments": [
+      {
+        "comment": " The findMembers() call is now asynchronous and unhandled. The controller may not have member data immediately available, creating a race condition.",
+        "severity": "High"
+      },
+      {
+        "comment": "In the next action, capping the next offset at user_count can produce an empty page (e.g., total equal to limit results in offset == total, showing 2/2 with no members). This can cause confusing UX on the last page.",
+        "severity": "Medium"
+      },
+      {
+        "comment": "HTTP method mismatch in .remove_member - test uses PUT but remove_member action expects DELETE",
+        "severity": "Medium"
+      }
+    ]
+  },
+  {
+    "pr_title": "FEATURE: Localization fallbacks (server-side)",
+    "url": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/9",
+    "original_url": "https://github.com/discourse/discourse/commit/ecfa17b5a79dfdc91e7a4d50b42ae78a35d0a293",
+    "comments": [
+      {
+        "comment": "Thread-safety issue with lazy @loaded_locales",
+        "severity": "Low"
+      },
+      {
+        "comment": "Consider normalizing the input locale (e.g., to a symbol) when checking/loading here to avoid double-loading if the same locale is passed as a String vs Symbol (also applies to other locations in the PR).",
+        "severity": "Low"
+      }
+    ]
+  },
+  {
+    "pr_title": "FEATURE: Can edit category/host relationships for embedding",
+    "url": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/10",
+    "original_url": "https://github.com/discourse/discourse/commit/d1c69189f3c90ecf56013a8da904da9bff9a8e19",
+    "comments": [
+      {
+        "comment": "NoMethodError before_validation in EmbeddableHost",
+        "severity": "Critical"
+      },
+      {
+        "comment": "The update and destroy methods in Admin::EmbeddableHostsController do not validate the existence of the EmbeddableHost record retrieved by ID. If EmbeddableHost.where(id: params[:id]).first returns nil (i.e., the host does not exist), attempting to call methods on the nil object (e.g., save_host or destroy) will result in a NoMethodError.",
+        "severity": "Medium"
+      },
+      {
+        "comment": "record_for_host compares lower(host) = ? but does not normalize the parameter’s case, so mixed‑case referer hosts may fail to match even though comparison intends to be case‑insensitive.",
+        "severity": "Medium"
+      },
+      {
+        "comment": "Because this migration inserts embeddable_hosts rows with raw SQL, any existing embeddable_hosts values that include http:// or /https:// or path segments won’t go through the EmbeddableHost model’s normalization, so the new host lookup (which compares only the bare host) may fail for migrated data. Consider ensuring that migrated hosts are normalized to the same format as newly created EmbeddableHost records so existing embedding configurations keep working.",
+        "severity": "High"
+      }
+    ]
+  }
+]

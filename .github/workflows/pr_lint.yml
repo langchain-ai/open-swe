@@ -35,6 +35,7 @@ jobs:
             web
             open-swe
             docs
+            deps
           requireScope: false
           ignoreLabels: |
             ignore-lint-pr-title

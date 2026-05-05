@@ -23,24 +23,20 @@ warnings.filterwarnings("ignore", message=".*Pydantic V1.*", category=UserWarnin
 # Now safe to import agent (which imports LangChain modules)
 from deepagents import create_deep_agent
 from deepagents.backends.protocol import SandboxBackendProtocol
+from langchain.agents.middleware import ModelCallLimitMiddleware
 from langsmith.sandbox import SandboxClientError
 
 from .integrations.langsmith import _configure_github_proxy
 from .middleware import (
+    SanitizeToolInputsMiddleware,
     ToolErrorMiddleware,
     check_message_queue_before_model,
     ensure_no_empty_msg,
-    open_pr_if_needed,
+    notify_step_limit_reached,
 )
 from .prompt import construct_system_prompt
 from .tools import (
-    commit_and_open_pr,
-    create_pr_review,
-    dismiss_pr_review,
     fetch_url,
-    get_branch_name,
-    get_pr_review,
-    github_comment,
     http_request,
     linear_comment,
     linear_create_issue,
@@ -49,12 +45,8 @@ from .tools import (
     linear_get_issue_comments,
     linear_list_teams,
     linear_update_issue,
-    list_pr_review_comments,
-    list_pr_reviews,
-    list_repos,
+    slack_read_thread_messages,
     slack_thread_reply,
-    submit_pr_review,
-    update_pr_review,
     web_search,
 )
 from .utils.auth import resolve_github_token
@@ -187,6 +179,7 @@ DEFAULT_LLM_MODEL_ID = "openai:gpt-5.5"
 DEFAULT_LLM_REASONING: OpenAIReasoning = {"effort": "medium"}
 DEFAULT_LLM_MAX_TOKENS = 64_000
 DEFAULT_RECURSION_LIMIT = 9_999
+MODEL_CALL_RECURSION_LIMIT = 5_000  # ~half the recursion limit to account for tool calls
 
 
 async def get_agent(config: RunnableConfig) -> Pregel:
@@ -292,9 +285,6 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             http_request,
             fetch_url,
             web_search,
-            list_repos,
-            get_branch_name,
-            commit_and_open_pr,
             linear_comment,
             linear_create_issue,
             linear_delete_issue,
@@ -302,21 +292,16 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             linear_get_issue_comments,
             linear_list_teams,
             linear_update_issue,
+            slack_read_thread_messages,
             slack_thread_reply,
-            github_comment,
-            list_pr_reviews,
-            get_pr_review,
-            create_pr_review,
-            update_pr_review,
-            dismiss_pr_review,
-            submit_pr_review,
-            list_pr_review_comments,
         ],
         backend=sandbox_backend,
         middleware=[
+            SanitizeToolInputsMiddleware(),
+            ModelCallLimitMiddleware(run_limit=MODEL_CALL_RECURSION_LIMIT, exit_behavior="end"),
             ToolErrorMiddleware(),
             check_message_queue_before_model,
             ensure_no_empty_msg,
-            open_pr_if_needed,
+            notify_step_limit_reached,
         ],
     ).with_config(config)

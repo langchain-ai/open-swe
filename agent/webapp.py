@@ -49,6 +49,7 @@ from .utils.slack import (
     get_slack_user_info,
     get_slack_user_names,
     post_slack_trace_reply,
+    resolve_slack_links_in_context,
     select_slack_context_messages,
     strip_bot_mention,
     verify_slack_signature,
@@ -753,6 +754,11 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
     )
     trigger_user = user_name or (f"<@{user_id}>" if user_id else "Unknown user")
 
+    # Auto-resolve cross-posted Slack message links in context
+    resolved_links_section, image_urls_from_links = await resolve_slack_links_in_context(
+        context_messages, user_names_by_id
+    )
+
     prompt = (
         "You were mentioned in Slack.\n\n"
         f"## Repository\n{repo_config.get('owner')}/{repo_config.get('name')}\n\n"
@@ -761,8 +767,10 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
         f"- Context starts at: {context_source}\n\n"
         f"## Conversation Context\n{context_text}\n\n"
         f"## Latest Mention Request\n{clean_text}\n\n"
-        "Use `slack_thread_reply` to communicate in this Slack thread for clarifications, "
-        "status updates, and final summaries."
+        + (f"{resolved_links_section}\n\n" if resolved_links_section else "")
+        + "Use `slack_thread_reply` to communicate in this Slack thread for clarifications, "
+        "status updates, and final summaries. Use `slack_read_thread_messages` to read any "
+        "Slack messages by providing channel_id and message_ts."
     )
     content_blocks: list[dict[str, Any]] = [create_text_block(prompt)]
 
@@ -776,6 +784,7 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
             and f.get("mimetype", "").startswith("image/")
             and f.get("url_private")
         ]
+        + image_urls_from_links
     )
     if image_urls:
         logger.info("Preparing %d image(s) for Slack mention", len(image_urls))
@@ -1136,7 +1145,8 @@ def build_github_issue_prompt(
         f"## Description:\n{formatted_body}\n"
         f"{comments_text}\n\n"
         "Please analyze this issue and implement the necessary changes. "
-        "When you need to communicate on GitHub, use `github_comment` with the issue number."
+        "When you need to communicate on GitHub, use `GH_TOKEN=dummy gh issue comment` "
+        "with the issue number."
     )
 
 

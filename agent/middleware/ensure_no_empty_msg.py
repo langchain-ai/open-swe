@@ -16,19 +16,11 @@ def get_every_message_since_last_human(state: AgentState) -> list[AnyMessage]:
     return messages[last_human_idx + 1 :]
 
 
-def check_if_model_already_called_commit_and_open_pr(messages: list[AnyMessage]) -> bool:
-    for msg in messages:
-        if msg.type == "tool" and msg.name == "commit_and_open_pr":
-            return True
-    return False
-
-
 def check_if_model_messaged_user(messages: list[AnyMessage]) -> bool:
     for msg in messages:
         if msg.type == "tool" and msg.name in [
             "slack_thread_reply",
             "linear_comment",
-            "github_comment",
         ]:
             return True
     return False
@@ -58,9 +50,7 @@ def ensure_no_empty_msg(state: AgentState, runtime: Runtime) -> dict[str, Any] |
         if check_if_no_op(messages_since_last_human):
             return None
 
-        if check_if_model_already_called_commit_and_open_pr(
-            messages_since_last_human
-        ) and check_if_model_messaged_user(messages_since_last_human):
+        if check_if_model_messaged_user(messages_since_last_human):
             return None
 
         tc_id = str(uuid4())
@@ -75,16 +65,11 @@ def ensure_no_empty_msg(state: AgentState, runtime: Runtime) -> dict[str, Any] |
         return {"messages": [last_msg, no_op_tool_msg]}
 
     if has_contents and not has_tool_calls:
-        # See if the model already called open_pr or it sent a slack/linear message
-        # First, get every message since the last human message
         messages_since_last_human = get_every_message_since_last_human(state)
 
-        # If it opened a PR, we don't need to do anything
-        if (
-            check_if_model_already_called_commit_and_open_pr(messages_since_last_human)
-            or check_if_model_messaged_user(messages_since_last_human)
-            or check_if_confirming_completion(messages_since_last_human)
-        ):
+        if check_if_model_messaged_user(
+            messages_since_last_human
+        ) or check_if_confirming_completion(messages_since_last_human):
             return None
 
         tc_id = str(uuid4())

@@ -365,6 +365,165 @@ async def fetch_slack_thread_messages(channel_id: str, thread_ts: str) -> list[d
     return messages
 
 
+SLACK_MESSAGE_URL_RE = re.compile(
+    r"https?://[a-zA-Z0-9\-]+\.slack\.com/archives/([A-Za-z0-9]+)/p(\d{16})(?:\?[^\s>]*)?"
+)
+
+
+def parse_slack_message_url(url: str) -> tuple[str, str] | None:
+    """Parse a Slack message URL into (channel_id, message_ts).
+
+    URL format: https://{workspace}.slack.com/archives/{channel_id}/p{ts_without_dot}
+    The 16-digit timestamp becomes {first_10}.{last_6} (e.g. p1776281321762829 -> 1776281321.762829).
+    """
+    match = SLACK_MESSAGE_URL_RE.search(url)
+    if not match:
+        return None
+    channel_id = match.group(1)
+    raw_ts = match.group(2)
+    message_ts = f"{raw_ts[:10]}.{raw_ts[10:]}"
+    return channel_id, message_ts
+
+
+def extract_slack_message_urls(text: str) -> list[tuple[str, str, str]]:
+    """Extract all Slack message URLs from text.
+
+    Returns list of (full_url, channel_id, message_ts) tuples.
+    """
+    results: list[tuple[str, str, str]] = []
+    for match in SLACK_MESSAGE_URL_RE.finditer(text):
+        full_url = match.group(0)
+        parsed = parse_slack_message_url(full_url)
+        if parsed:
+            results.append((full_url, parsed[0], parsed[1]))
+    return results
+
+
+async def fetch_slack_message_by_ts(channel_id: str, message_ts: str) -> dict[str, Any] | None:
+    """Fetch a single Slack message by channel and timestamp."""
+    if not SLACK_BOT_TOKEN:
+        return None
+
+    async with httpx.AsyncClient() as http_client:
+        try:
+            response = await http_client.get(
+                f"{SLACK_API_BASE_URL}/conversations.history",
+                headers=_slack_headers(),
+                params={
+                    "channel": channel_id,
+                    "latest": message_ts,
+                    "oldest": message_ts,
+                    "inclusive": "true",
+                    "limit": 1,
+                },
+            )
+            response.raise_for_status()
+            data = response.json()
+            if not data.get("ok"):
+                logger.warning(
+                    "Slack conversations.history failed for channel=%s ts=%s: %s",
+                    channel_id,
+                    message_ts,
+                    data.get("error"),
+                )
+                return None
+            messages = data.get("messages", [])
+            if messages and isinstance(messages[0], dict):
+                return messages[0]
+        except httpx.HTTPError:
+            logger.exception(
+                "Slack conversations.history request failed for channel=%s ts=%s",
+                channel_id,
+                message_ts,
+            )
+    return None
+
+
+async def resolve_slack_message_url(url: str) -> dict[str, Any] | None:
+    """Resolve a Slack message URL to its message content.
+
+    Returns a dict with keys: text, user, ts, channel_id, files, thread_ts (if threaded).
+    """
+    parsed = parse_slack_message_url(url)
+    if not parsed:
+        return None
+
+    channel_id, message_ts = parsed
+    message = await fetch_slack_message_by_ts(channel_id, message_ts)
+    if not message:
+        return None
+
+    result: dict[str, Any] = {
+        "channel_id": channel_id,
+        "ts": message.get("ts", message_ts),
+        "text": message.get("text", ""),
+        "user": message.get("user", ""),
+        "files": message.get("files", []),
+    }
+    if message.get("thread_ts"):
+        result["thread_ts"] = message["thread_ts"]
+    return result
+
+
+async def resolve_slack_links_in_context(
+    context_messages: list[dict[str, Any]],
+    user_names_by_id: dict[str, str],
+) -> tuple[str, list[str]]:
+    """Resolve cross-posted Slack message links found in context messages.
+
+    Returns (resolved_links_section, image_urls) where resolved_links_section
+    is a formatted markdown string for the prompt, and image_urls is a list
+    of image URLs from resolved message attachments.
+    """
+    all_context_text = " ".join(msg.get("text", "") for msg in context_messages)
+    slack_links = extract_slack_message_urls(all_context_text)
+    if not slack_links:
+        return "", []
+
+    resolved_parts: list[str] = []
+    image_urls: list[str] = []
+    seen_urls: set[str] = set()
+
+    for link_url, _cid, _ts in slack_links:
+        if link_url in seen_urls:
+            continue
+        seen_urls.add(link_url)
+        try:
+            resolved = await resolve_slack_message_url(link_url)
+            if resolved:
+                author_id = resolved.get("user", "")
+                author = user_names_by_id.get(author_id, author_id)
+                if author_id and author == author_id:
+                    extra_names = await get_slack_user_names([author_id])
+                    author = extra_names.get(author_id, author_id)
+                resolved_text = resolved.get("text", "(empty message)")
+                resolved_parts.append(
+                    f"**{link_url}**\n  Author: {author}\n  Message: {resolved_text}"
+                )
+                for file_info in resolved.get("files", []):
+                    if (
+                        isinstance(file_info, dict)
+                        and file_info.get("mimetype", "").startswith("image/")
+                        and file_info.get("url_private")
+                    ):
+                        image_urls.append(file_info["url_private"])
+            else:
+                resolved_parts.append(
+                    f"**{link_url}**\n  (Could not fetch — bot may not have access)"
+                )
+        except Exception:
+            logger.exception("Failed to resolve Slack link %s", link_url)
+            resolved_parts.append(f"**{link_url}**\n  (Error resolving link)")
+
+    resolved_links_section = ""
+    if resolved_parts:
+        resolved_links_section = "\n\n## Cross-posted Slack Messages\n" + "\n\n".join(
+            resolved_parts
+        )
+
+    return resolved_links_section, image_urls
+
+
 async def post_slack_trace_reply(channel_id: str, thread_ts: str, thread_id: str) -> None:
     """Post a trace URL reply in a Slack thread."""
     trace_url = get_langsmith_trace_url(thread_id)
