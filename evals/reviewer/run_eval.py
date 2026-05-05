@@ -12,9 +12,9 @@ from __future__ import annotations
 import argparse
 
 from dotenv import load_dotenv
-from langsmith import aevaluate
+from langsmith import Client, aevaluate
 
-from evals.reviewer.judge import aggregate_pr, judge_match
+from evals.reviewer.judge import judge_match
 from evals.reviewer.target import review_pr
 
 load_dotenv()
@@ -28,15 +28,19 @@ async def main() -> None:
     ap.add_argument("--limit", type=int, default=None, help="Run only the first N examples.")
     args = ap.parse_args()
 
+    if args.limit:
+        client = Client()
+        data: object = list(client.list_examples(dataset_name=args.dataset_name, limit=args.limit))
+    else:
+        data = args.dataset_name
+
     await aevaluate(
         review_pr,
-        data=args.dataset_name,
+        data=data,
         evaluators=[judge_match],
-        summary_evaluators=[aggregate_pr],
         experiment_prefix=args.experiment_prefix,
         max_concurrency=args.max_concurrency,
         num_repetitions=1,
-        **({"max_examples": args.limit} if args.limit else {}),
     )
 
 
