@@ -33,7 +33,6 @@ from .middleware import (
     check_message_queue_before_model,
     ensure_no_empty_msg,
     notify_step_limit_reached,
-    open_pr_if_needed,
 )
 from .prompt import construct_system_prompt
 from .tools import (
@@ -303,8 +302,6 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             ToolErrorMiddleware(),
             check_message_queue_before_model,
             ensure_no_empty_msg,
-            # after_agent hooks run in reverse list order; notify after the PR safety net.
             notify_step_limit_reached,
-            open_pr_if_needed,
         ],
     ).with_config(config)

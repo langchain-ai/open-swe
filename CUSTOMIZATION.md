@@ -18,7 +18,7 @@ return create_deep_agent(
         ToolErrorMiddleware(),
         check_message_queue_before_model,
         ensure_no_empty_msg,
-        open_pr_if_needed,
+        notify_step_limit_reached,
     ],
 )
 ```
@@ -447,14 +447,16 @@ Drop an `AGENTS.md` file in the root of any repository to add repo-specific inst
 
 ## 6. Middleware
 
-Middleware hooks run around the agent loop. Open SWE includes four:
+Middleware hooks run around the agent loop. Open SWE includes:
 
 | Middleware | Type | Purpose |
 |---|---|---|
 | `ToolErrorMiddleware` | Tool error handler | Catches and formats tool errors |
 | `check_message_queue_before_model` | Before model | Injects follow-up messages that arrived mid-run |
 | `ensure_no_empty_msg` | Before model | Prevents empty messages from reaching the model |
-| `open_pr_if_needed` | After agent | Safety net — opens a PR if the agent didn't |
+| `notify_step_limit_reached` | After agent | Posts a Slack reply when the agent hits the model-call limit |
+
+There is intentionally no after-agent middleware that opens a PR for the agent. The agent is responsible for committing, pushing, opening/updating the draft PR, and replying in the source channel. If you want a deterministic backstop for your fork, add an `@after_agent` hook here.
 
 Add custom middleware by appending to the middleware list in `get_agent()`. See the [LangChain middleware docs](https://python.langchain.com/docs/concepts/agents/#middleware) for the `@before_model` and `@after_agent` decorators.
 
@@ -478,7 +480,7 @@ middleware=[
     ToolErrorMiddleware(),
     check_message_queue_before_model,
     ensure_no_empty_msg,
-    open_pr_if_needed,
+    notify_step_limit_reached,
     run_ci_check,  # new middleware
 ],
 ```

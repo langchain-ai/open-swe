@@ -91,7 +91,7 @@ Open SWE's orchestration has two layers:
 **Middleware:** Deterministic middleware hooks run around the agent loop:
 
 - **`check_message_queue_before_model`** — Injects follow-up messages (Linear comments or Slack messages that arrive mid-run) before the next model call. You can message the agent while it's working and it'll pick up your input at its next step.
-- **`open_pr_if_needed`** — After-agent safety net that commits and opens a PR if the agent didn't do it itself. This is a lightweight version of Stripe's deterministic nodes — ensuring critical steps happen regardless of LLM behavior.
+- **`notify_step_limit_reached`** — After-agent hook that posts a Slack reply when the agent hits the model-call limit, so users get a clear signal instead of silence.
 - **`ToolErrorMiddleware`** — Catches and handles tool errors gracefully.
 
 ### 6. Invocation — Slack, Linear, and GitHub
@@ -104,10 +104,9 @@ All three companies in the article converge on **Slack as the primary invocation
 
 Each invocation creates a deterministic thread ID, so follow-up messages on the same issue or thread route to the same running agent.
 
-### 7. Validation — Prompt-Driven + Safety Nets
+### 7. Validation — Prompt-Driven
 
-The agent is instructed to run linters, formatters, and tests before committing. The `open_pr_if_needed` middleware acts as a backstop — if the agent finishes without opening a PR, the middleware handles it automatically.
-
+The agent is instructed to run linters, formatters, and tests before committing, and is responsible end-to-end for committing, pushing, opening/updating the draft PR, and replying in the source channel.
 This is an area where you can extend Open SWE for your org: add deterministic CI checks, visual verification, or review gates as additional middleware. See the [Customization Guide](CUSTOMIZATION.md#6-middleware) for how.
 
 ---
@@ -122,7 +121,7 @@ This is an area where you can extend Open SWE for your org: add deterministic CI
 | **Context** | AGENTS.md + issue/thread | Rule files + pre-hydration | OpenCode built-in | Linear-first + MCPs |
 | **Orchestration** | Subagents + middleware | Blueprints (deterministic + agentic) | Sessions + child sessions | Three modes |
 | **Invocation** | Slack, Linear, GitHub | Slack + embedded buttons | Slack + web + Chrome extension | Slack-native |
-| **Validation** | Prompt-driven + PR safety net | 3-layer (local + CI + 1 retry) | Visual DOM verification | Agent councils + auto-merge |
+| **Validation** | Prompt-driven | 3-layer (local + CI + 1 retry) | Visual DOM verification | Agent councils + auto-merge |
 
 ---
 
