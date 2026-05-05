@@ -49,19 +49,6 @@ For LangSmith sandboxes, Open SWE configures two GitHub proxy rules whenever a s
 
 The proxy token is minted at runtime from the GitHub App installation credentials. Do not store GitHub access tokens as deployment environment variables.
 
-### Commit author identity
-
-Every agent run applies a global git identity in the sandbox so that `git commit` invocations are authored by the bot. Defaults are `open-swe[bot]` / `open-swe@users.noreply.github.com`, which match the GitHub App's noreply email and let services like Vercel resolve the author to a GitHub account.
-
-Forks should override these to their own bot identity:
-
-```bash
-OPEN_SWE_GIT_AUTHOR_NAME="my-bot[bot]"                                  # Optional, default open-swe[bot]
-OPEN_SWE_GIT_AUTHOR_EMAIL="my-bot@users.noreply.github.com"             # Optional, default open-swe@users.noreply.github.com
-```
-
-Use the GitHub App's `<id>+<slug>@users.noreply.github.com` form (or any email associated with a real GitHub account) — third-party CI integrations reject commits whose author email cannot be resolved to a GitHub user.
-
 ### Using a different sandbox provider
 
 Set the `SANDBOX_TYPE` environment variable to switch providers. Each provider has a corresponding integration file in `agent/integrations/` and a factory function registered in `agent/utils/sandbox.py`:

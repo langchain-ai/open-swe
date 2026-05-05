@@ -5,7 +5,6 @@
 # ruff: noqa: E402
 import logging
 import os
-import shlex
 import warnings
 
 logger = logging.getLogger(__name__)
@@ -51,7 +50,6 @@ from .tools import (
     web_search,
 )
 from .utils.auth import resolve_github_token
-from .utils.authorship import OPEN_SWE_BOT_EMAIL, OPEN_SWE_BOT_NAME
 from .utils.github_app import get_github_app_installation_token
 from .utils.model import ModelKwargs, OpenAIReasoning, make_model
 from .utils.sandbox import create_sandbox
@@ -259,14 +257,9 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             metadata={"sandbox_id": sandbox_backend.id},
         )
 
-    # Re-applied on every invocation, not just on new-sandbox creation: cached or
-    # reconnected sandboxes may have stale or absent git identity, which causes Vercel
-    # preview deploys to reject commits whose author email doesn't resolve to a GitHub
-    # account. Sourced from OPEN_SWE_GIT_AUTHOR_NAME / OPEN_SWE_GIT_AUTHOR_EMAIL env vars.
     await asyncio.to_thread(
         sandbox_backend.execute,
-        f"git config --global user.name {shlex.quote(OPEN_SWE_BOT_NAME)} && "
-        f"git config --global user.email {shlex.quote(OPEN_SWE_BOT_EMAIL)}",
+        "git config --global user.name 'open-swe[bot]' && git config --global user.email 'open-swe@users.noreply.github.com'",
     )
 
     linear_issue = config["configurable"].get("linear_issue", {})
