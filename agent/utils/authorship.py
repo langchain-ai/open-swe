@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass
 from typing import Any
 
@@ -12,8 +13,11 @@ from .github_user_email_map import GITHUB_USER_EMAIL_MAP
 
 logger = logging.getLogger(__name__)
 
-OPEN_SWE_BOT_NAME = "open-swe[bot]"
-OPEN_SWE_BOT_EMAIL = "open-swe@users.noreply.github.com"
+DEFAULT_BOT_NAME = "open-swe[bot]"
+DEFAULT_BOT_EMAIL = "open-swe@users.noreply.github.com"
+
+OPEN_SWE_BOT_NAME = os.environ.get("OPEN_SWE_GIT_AUTHOR_NAME") or DEFAULT_BOT_NAME
+OPEN_SWE_BOT_EMAIL = os.environ.get("OPEN_SWE_GIT_AUTHOR_EMAIL") or DEFAULT_BOT_EMAIL
 
 
 @dataclass(frozen=True)
