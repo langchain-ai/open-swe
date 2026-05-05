@@ -14,10 +14,10 @@ import argparse
 from dotenv import load_dotenv
 from langsmith import aevaluate
 
-load_dotenv()
-
 from evals.reviewer.judge import aggregate_pr, judge_match
 from evals.reviewer.target import review_pr
+
+load_dotenv()
 
 
 async def main() -> None:

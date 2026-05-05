@@ -104,9 +104,7 @@ def judge_match(run: Run, example: Example) -> EvaluationResult:
             if gi in matched_goldens:
                 continue
             res = _judge_pair(gold, cand)
-            pair_results.append(
-                {"candidate_idx": ci, "golden_idx": gi, **res}
-            )
+            pair_results.append({"candidate_idx": ci, "golden_idx": gi, **res})
             if res.get("match"):
                 matched_goldens.add(gi)
                 matched_candidates.add(ci)

@@ -38,11 +38,17 @@ def parse_pr_url(url: str) -> tuple[str, str, int]:
 def gh_pr_view(owner: str, repo: str, pr_number: int) -> dict:
     result = subprocess.run(
         [
-            "gh", "pr", "view", str(pr_number),
-            "--repo", f"{owner}/{repo}",
-            "--json", "baseRefOid,headRefOid,baseRefName,headRefName,title,state,url",
+            "gh",
+            "pr",
+            "view",
+            str(pr_number),
+            "--repo",
+            f"{owner}/{repo}",
+            "--json",
+            "baseRefOid,headRefOid,baseRefName,headRefName,title,state,url",
         ],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     if result.returncode != 0:
         raise RuntimeError(
@@ -90,7 +96,9 @@ def upload(dataset_name: str, examples: list[dict]) -> None:
     client = Client()
     existing = next((d for d in client.list_datasets(dataset_name=dataset_name)), None)
     if existing:
-        print(f"Dataset {dataset_name!r} already exists ({existing.id}); aborting.", file=sys.stderr)
+        print(
+            f"Dataset {dataset_name!r} already exists ({existing.id}); aborting.", file=sys.stderr
+        )
         print("Delete it in the LangSmith UI or pass --dataset-name <new>.", file=sys.stderr)
         sys.exit(1)
     ds = client.create_dataset(
