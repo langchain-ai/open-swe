@@ -5,14 +5,14 @@ import os
 
 from langsmith.sandbox import SandboxClient
 
-DEFAULT_IMAGE = "johanneslangchain/open-swe-sandbox:gh-cli"
+DEFAULT_IMAGE = "johanneslangchain/open-swe-sandbox:gh-cli-amd64"
 DEFAULT_FS_CAPACITY = 32 * 1024**3  # 32 GiB
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Create a LangSmith sandbox snapshot")
     parser.add_argument(
-        "--name", default="open-swe-gh-cli", help="Snapshot name (default: open-swe-gh-cli)"
+        "--name", default="open-swe-gh-amd64", help="Snapshot name (default: open-swe-gh-amd64)"
     )
     parser.add_argument(
         "--image", default=DEFAULT_IMAGE, help=f"Docker image (default: {DEFAULT_IMAGE})"

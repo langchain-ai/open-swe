@@ -135,7 +135,26 @@ To set up per-user OAuth:
 
 LangSmith sandboxes provide the isolated execution environment for each agent run. Open SWE boots each sandbox from a pre-built **snapshot** — you build the snapshot once (from a Docker image) and then reference it by UUID.
 
-Build a snapshot in the LangSmith UI (Sandboxes → Snapshots → New), or via the SDK:
+(Optional) Build and Push a custom Docker Image to Docker hub
+First build and push the sandbox Docker image to a registry LangSmith can pull from. On Apple Silicon, force `linux/amd64`
+
+```bash
+docker buildx build \
+  --platform linux/amd64 \
+  -t <your-docker-hub>/<name-of-your-image> \
+  --push .
+```
+
+For a multi-arch tag that also runs locally on Apple Silicon:
+
+```bash
+docker buildx build \
+  --platform linux/amd64,linux/arm64 \
+  -t <your-docker-hub>/<name-of-your-image> \
+  --push .
+```
+
+Then build a snapshot in the LangSmith UI (Sandboxes → Snapshots → New), or via the SDK:
 
 ```python
 from langsmith.sandbox import SandboxClient
@@ -143,10 +162,18 @@ from langsmith.sandbox import SandboxClient
 client = SandboxClient(api_key="<your key>")
 snapshot = client.create_snapshot(
     name="open-swe",
-    docker_image="johanneslangchain/open-swe-sandbox:gh-cli",  # built from ./Dockerfile
+    docker_image="johanneslangchain/open-swe-sandbox:gh-cli-amd64",  # built from ./Dockerfile
     fs_capacity_bytes=32 * 1024**3,
 )
 print(snapshot.id)
+```
+
+You can also use the helper script:
+
+```bash
+uv run python scripts/create_sandbox_snapshot.py \
+  --name open-swe-gh-cli-amd64 \
+  --image johanneslangchain/open-swe-sandbox:gh-cli-amd64
 ```
 
 Then set the resulting UUID in your environment:
