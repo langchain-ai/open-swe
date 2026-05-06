@@ -66,6 +66,39 @@ def test_build_github_issue_followup_prompt_only_includes_comment() -> None:
     assert "## Title" not in prompt
 
 
+def test_reviewer_repo_allowlist_allows_matching_repo(monkeypatch) -> None:
+    monkeypatch.setattr(webapp, "ALLOWED_REVIEWER_GITHUB_ORGS", frozenset())
+    monkeypatch.setattr(
+        webapp, "ALLOWED_REVIEWER_GITHUB_REPOS", frozenset({"langchain-ai/open-swe"})
+    )
+
+    assert (
+        webapp._is_repo_allowed_for_reviewer({"owner": "langchain-ai", "name": "open-swe"}) is True
+    )
+
+
+def test_reviewer_repo_allowlist_blocks_non_matching_repo(monkeypatch) -> None:
+    monkeypatch.setattr(webapp, "ALLOWED_REVIEWER_GITHUB_ORGS", frozenset({"langchain-ai"}))
+    monkeypatch.setattr(
+        webapp, "ALLOWED_REVIEWER_GITHUB_REPOS", frozenset({"langchain-ai/open-swe"})
+    )
+
+    assert (
+        webapp._is_repo_allowed_for_reviewer({"owner": "langchain-ai", "name": "public-demo"})
+        is False
+    )
+
+
+def test_reviewer_org_allowlist_allows_all_repos_in_org(monkeypatch) -> None:
+    monkeypatch.setattr(webapp, "ALLOWED_REVIEWER_GITHUB_ORGS", frozenset({"langchain-ai"}))
+    monkeypatch.setattr(webapp, "ALLOWED_REVIEWER_GITHUB_REPOS", frozenset())
+
+    assert (
+        webapp._is_repo_allowed_for_reviewer({"owner": "langchain-ai", "name": "any-repo"}) is True
+    )
+    assert webapp._is_repo_allowed_for_reviewer({"owner": "other-org", "name": "any-repo"}) is False
+
+
 def test_github_webhook_accepts_issue_events(monkeypatch) -> None:
     called: dict[str, object] = {}
 
@@ -156,6 +189,183 @@ def test_github_webhook_accepts_issue_comment_events(monkeypatch) -> None:
     assert response.status_code == 200
     assert response.json()["status"] == "accepted"
     assert called["event_type"] == "issue_comment"
+
+
+def test_github_webhook_blocks_reviewer_repo_not_in_reviewer_repo_allowlist(monkeypatch) -> None:
+    called = False
+
+    async def fake_process_github_pr_review_request(payload: dict[str, object]) -> None:
+        nonlocal called
+        called = True
+
+    monkeypatch.setattr(
+        webapp, "process_github_pr_review_request", fake_process_github_pr_review_request
+    )
+    monkeypatch.setattr(webapp, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
+    monkeypatch.setattr(webapp, "ALLOWED_REVIEWER_GITHUB_ORGS", frozenset({"langchain-ai"}))
+    monkeypatch.setattr(
+        webapp, "ALLOWED_REVIEWER_GITHUB_REPOS", frozenset({"langchain-ai/open-swe"})
+    )
+
+    client = TestClient(webapp.app)
+    response = _post_github_webhook(
+        client,
+        "pull_request",
+        {
+            "action": "review_requested",
+            "requested_reviewer": {"login": "open-swe[bot]"},
+            "pull_request": {
+                "number": 1244,
+                "html_url": "https://github.com/langchain-ai/public-demo/pull/1244",
+                "base": {"sha": "base-sha"},
+                "head": {"sha": "head-sha", "ref": "feature-branch"},
+            },
+            "repository": {"owner": {"login": "langchain-ai"}, "name": "public-demo"},
+            "sender": {"login": "octocat"},
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ignored", "reason": "Repository not in allowlist"}
+    assert called is False
+
+
+def test_github_webhook_accepts_open_swe_review_requested(monkeypatch) -> None:
+    called: dict[str, object] = {}
+
+    async def fake_process_github_pr_review_request(payload: dict[str, object]) -> None:
+        called["payload"] = payload
+
+    monkeypatch.setattr(
+        webapp, "process_github_pr_review_request", fake_process_github_pr_review_request
+    )
+    monkeypatch.setattr(webapp, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
+    monkeypatch.setattr(
+        webapp, "ALLOWED_REVIEWER_GITHUB_REPOS", frozenset({"langchain-ai/open-swe"})
+    )
+
+    client = TestClient(webapp.app)
+    response = _post_github_webhook(
+        client,
+        "pull_request",
+        {
+            "action": "review_requested",
+            "requested_reviewer": {"login": "open-swe[bot]"},
+            "pull_request": {
+                "number": 1244,
+                "html_url": "https://github.com/langchain-ai/open-swe/pull/1244",
+                "base": {"sha": "base-sha"},
+                "head": {"sha": "head-sha", "ref": "feature-branch"},
+            },
+            "repository": {"owner": {"login": "langchain-ai"}, "name": "open-swe"},
+            "sender": {"login": "octocat"},
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "accepted"
+    assert called["payload"]["requested_reviewer"]["login"] == "open-swe[bot]"
+
+
+def test_github_webhook_ignores_review_requested_for_other_reviewer(monkeypatch) -> None:
+    called = False
+
+    async def fake_process_github_pr_review_request(payload: dict[str, object]) -> None:
+        nonlocal called
+        called = True
+
+    monkeypatch.setattr(
+        webapp, "process_github_pr_review_request", fake_process_github_pr_review_request
+    )
+    monkeypatch.setattr(webapp, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
+
+    client = TestClient(webapp.app)
+    response = _post_github_webhook(
+        client,
+        "pull_request",
+        {
+            "action": "review_requested",
+            "requested_reviewer": {"login": "someone-else"},
+            "pull_request": {
+                "number": 1244,
+                "html_url": "https://github.com/langchain-ai/open-swe/pull/1244",
+                "base": {"sha": "base-sha"},
+                "head": {"sha": "head-sha", "ref": "feature-branch"},
+            },
+            "repository": {"owner": {"login": "langchain-ai"}, "name": "open-swe"},
+            "sender": {"login": "octocat"},
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "ignored"
+    assert called is False
+
+
+def test_process_github_pr_review_request_creates_reviewer_run(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    async def fake_get_github_app_installation_token() -> str | None:
+        return "app-token"
+
+    async def fake_persist_encrypted_github_token(thread_id: str, token: str) -> str:
+        captured["persist_thread_id"] = thread_id
+        captured["persist_token"] = token
+        return "encrypted-token"
+
+    async def fake_is_thread_active(thread_id: str) -> bool:
+        captured["active_thread_id"] = thread_id
+        return False
+
+    class _FakeRunsClient:
+        async def create(self, thread_id: str, graph: str, **kwargs) -> None:
+            captured["thread_id"] = thread_id
+            captured["graph"] = graph
+            captured["kwargs"] = kwargs
+
+    class _FakeLangGraphClient:
+        runs = _FakeRunsClient()
+
+    monkeypatch.setattr(
+        webapp, "get_github_app_installation_token", fake_get_github_app_installation_token
+    )
+    monkeypatch.setattr(
+        webapp, "persist_encrypted_github_token", fake_persist_encrypted_github_token
+    )
+    monkeypatch.setattr(webapp, "is_thread_active", fake_is_thread_active)
+    monkeypatch.setattr(webapp, "get_client", lambda url: _FakeLangGraphClient())
+
+    asyncio.run(
+        webapp.process_github_pr_review_request(
+            {
+                "action": "review_requested",
+                "requested_reviewer": {"login": "open-swe[bot]"},
+                "pull_request": {
+                    "number": 1244,
+                    "html_url": "https://github.com/langchain-ai/open-swe/pull/1244",
+                    "base": {"sha": "base-sha"},
+                    "head": {"sha": "head-sha", "ref": "feature-branch"},
+                },
+                "repository": {"owner": {"login": "langchain-ai"}, "name": "open-swe"},
+                "sender": {"login": "octocat", "id": 123},
+            }
+        )
+    )
+
+    kwargs = captured["kwargs"]
+    prompt = kwargs["input"]["messages"][0]["content"]
+    config = kwargs["config"]["configurable"]
+
+    assert captured["graph"] == "reviewer"
+    assert captured["persist_token"] == "app-token"
+    assert captured["persist_thread_id"] == captured["thread_id"]
+    assert "https://github.com/langchain-ai/open-swe/pull/1244" in prompt
+    assert "Base SHA: base-sha" in prompt
+    assert "Head SHA: head-sha" in prompt
+    assert config["source"] == "github"
+    assert config["repo"] == {"owner": "langchain-ai", "name": "open-swe"}
+    assert config["pr_number"] == 1244
+    assert config["review_requested"] is True
 
 
 def test_process_github_issue_uses_resolved_user_token_for_reaction(monkeypatch) -> None:

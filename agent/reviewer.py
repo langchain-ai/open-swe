@@ -4,9 +4,7 @@ Mirrors `agent.server.get_agent`'s sandbox lifecycle but returns a deep agent
 configured for code review only: narrowed tool set, reviewer-specific system
 prompt, no commit/push/PR-opening.
 
-Inline review comments are recorded by the agent calling the `github_comment`
-tool — one call per distinct issue. The eval harness extracts those calls
-from the run's message stream.
+Inline review comments are submitted by the agent through the GitHub CLI.
 """
 # ruff: noqa: E402
 
@@ -39,7 +37,6 @@ from .server import (
     ensure_sandbox_for_thread,
     graph_loaded_for_execution,
 )
-from .tools import github_comment
 from .utils.auth import resolve_github_token
 from .utils.model import ModelKwargs, make_model
 from .utils.sandbox_paths import aresolve_sandbox_work_dir
@@ -70,23 +67,29 @@ You are operating in a remote Linux sandbox at `{working_dir}`.
    or use `git diff <base_sha>...<head_sha>`.
 4. Read the files the PR changes — and any related files needed to
    understand the change in context. Use `read_file`, `grep`, `glob`.
-5. For each real issue you find, call the `github_comment` tool **once**
-   with:
-   - `file`: repo-relative path
-   - `line`: 1-based line number in the new (post-PR) file
-   - `body`: a specific description of the issue
-   - `severity`: one of "Low", "Medium", "High", "Critical"
+5. For each real issue you find, submit one inline review comment with
+   `GH_TOKEN=dummy gh api`:
+
+   `GH_TOKEN=dummy gh api repos/<owner>/<repo>/pulls/<pr_number>/comments \
+     -f body='<specific review comment>' \
+     -f commit_id='<head_sha>' \
+     -f path='<repo-relative file path>' \
+     -F line=<new-file-line-number> \
+     -f side=RIGHT`
+
+   The `line` value must be a 1-based line number in the new post-PR file
+   and must be part of the PR diff. If the issue spans multiple lines, anchor
+   the comment to the most relevant changed line.
 
 ### Hard rules
 
 - **You are read-only.** Do NOT commit. Do NOT push. Do NOT open or update
-  PRs. Do NOT post comments via `gh pr comment`. The only way you record
-  findings is by calling the `github_comment` tool.
-- One `github_comment` call per distinct issue. Multiple calls per review
+  PRs. Do NOT post top-level PR comments via `gh pr comment`.
+- One inline `gh api` comment per distinct issue. Multiple comments per review
   are expected and correct.
-- Do not summarize the PR in chat. Do not write a final review essay.
-  Only `github_comment` calls are scored — anything else is ignored.
-- If you find no real issues, make zero `github_comment` calls and stop.
+- Do not summarize the PR in chat. Do not write a final review essay. Submit
+  only inline review comments for real findings.
+- If you find no real issues, submit no comments and stop.
 """
 
 
@@ -121,7 +124,7 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
     return create_deep_agent(
         model=make_model(model_id, **model_kwargs),
         system_prompt=_reviewer_system_prompt(work_dir),
-        tools=[github_comment],
+        tools=[],
         backend=sandbox_backend,
         middleware=[
             SanitizeToolInputsMiddleware(),

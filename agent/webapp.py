@@ -21,6 +21,7 @@ from .utils.auth import (
     persist_encrypted_github_token,
     resolve_github_token_from_email,
 )
+from .utils.authorship import OPEN_SWE_BOT_NAME
 from .utils.comments import get_recent_comments
 from .utils.github_app import get_github_app_installation_token
 from .utils.github_comments import (
@@ -90,6 +91,16 @@ ALLOWED_GITHUB_ORGS: frozenset[str] = frozenset(
     org.strip().lower()
     for org in os.environ.get("ALLOWED_GITHUB_ORGS", "").split(",")
     if org.strip()
+)
+ALLOWED_REVIEWER_GITHUB_ORGS: frozenset[str] = frozenset(
+    org.strip().lower()
+    for org in os.environ.get("ALLOWED_REVIEWER_GITHUB_ORGS", "").split(",")
+    if org.strip()
+)
+ALLOWED_REVIEWER_GITHUB_REPOS: frozenset[str] = frozenset(
+    repo.strip().lower()
+    for repo in os.environ.get("ALLOWED_REVIEWER_GITHUB_REPOS", "").split(",")
+    if repo.strip()
 )
 
 LINEAR_API_KEY = os.environ.get("LINEAR_API_KEY", "")
@@ -309,6 +320,20 @@ def _is_repo_org_allowed(repo_config: dict[str, str]) -> bool:
         return True
     owner = repo_config.get("owner", "").lower()
     return owner in ALLOWED_GITHUB_ORGS
+
+
+def _is_repo_allowed_for_reviewer(repo_config: dict[str, str]) -> bool:
+    """Check if a repo is allowed for reviewer-agent webhook entrypoints."""
+    owner = repo_config.get("owner", "").lower()
+    name = repo_config.get("name", "").lower()
+    full_name = f"{owner}/{name}" if owner and name else ""
+
+    if ALLOWED_REVIEWER_GITHUB_REPOS:
+        return full_name in ALLOWED_REVIEWER_GITHUB_REPOS
+
+    if not ALLOWED_REVIEWER_GITHUB_ORGS:
+        return True
+    return owner in ALLOWED_REVIEWER_GITHUB_ORGS
 
 
 async def _upsert_slack_thread_repo_metadata(
@@ -1100,9 +1125,16 @@ async def health_check() -> dict[str, str]:
 
 
 _SUPPORTED_GH_EVENTS = frozenset(
-    ["issue_comment", "issues", "pull_request_review_comment", "pull_request_review"]
+    [
+        "issue_comment",
+        "issues",
+        "pull_request",
+        "pull_request_review_comment",
+        "pull_request_review",
+    ]
 )
 _SUPPORTED_GH_ISSUE_ACTIONS = frozenset(["edited", "opened", "reopened"])
+_SUPPORTED_GH_PULL_REQUEST_ACTIONS = frozenset(["review_requested"])
 
 
 def _build_github_issue_comments_text(comments: list[dict[str, Any]]) -> str:
@@ -1203,6 +1235,99 @@ async def _trigger_or_queue_run(
         if_not_exists="create",
     )
     logger.info("LangGraph run created for thread %s from GitHub PR comment", thread_id)
+
+
+def _is_open_swe_reviewer_request(payload: dict[str, Any]) -> bool:
+    reviewer = payload.get("requested_reviewer") or {}
+    login = reviewer.get("login", "") if isinstance(reviewer, dict) else ""
+    return login.lower() == OPEN_SWE_BOT_NAME.lower()
+
+
+def build_github_pr_review_prompt(
+    repo_config: dict[str, str],
+    pr_number: int,
+    pr_url: str,
+    base_sha: str,
+    head_sha: str,
+) -> str:
+    """Build the user prompt for a reviewer-agent run."""
+    return (
+        "Please review this GitHub pull request.\n\n"
+        f"## Repository: {repo_config.get('owner')}/{repo_config.get('name')}\n\n"
+        f"## Pull Request: {pr_url}\n\n"
+        f"## PR Number: {pr_number}\n\n"
+        f"## Base SHA: {base_sha}\n\n"
+        f"## Head SHA: {head_sha}\n\n"
+        "Submit findings as inline GitHub review comments. If there are no real issues, "
+        "submit no comments."
+    )
+
+
+async def process_github_pr_review_request(payload: dict[str, Any]) -> None:
+    """Trigger the reviewer agent when the Open SWE bot is requested on a PR."""
+    repo = payload.get("repository", {})
+    pull_request = payload.get("pull_request", {})
+    repo_config = {
+        "owner": repo.get("owner", {}).get("login", ""),
+        "name": repo.get("name", ""),
+    }
+    pr_number = pull_request.get("number")
+    pr_url = pull_request.get("html_url", "") or pull_request.get("url", "")
+    branch_name = pull_request.get("head", {}).get("ref", "")
+    base_sha = pull_request.get("base", {}).get("sha", "")
+    head_sha = pull_request.get("head", {}).get("sha", "")
+    github_login = payload.get("sender", {}).get("login", "")
+    github_user_id = payload.get("sender", {}).get("id")
+
+    if not pr_number or not pr_url or not base_sha or not head_sha:
+        logger.warning("Missing PR review request context, skipping reviewer run")
+        return
+
+    owner = repo_config.get("owner", "")
+    name = repo_config.get("name", "")
+    stable_key = f"{owner}/{name}/pr/{pr_number}/reviewer"
+    thread_id = str(uuid.uuid5(uuid.NAMESPACE_URL, stable_key))
+
+    app_token = await get_github_app_installation_token()
+    if not app_token:
+        logger.warning("No GitHub App token available for PR reviewer request")
+        return
+
+    try:
+        await persist_encrypted_github_token(thread_id, app_token)
+    except Exception:
+        logger.warning("Could not persist bot token for reviewer thread %s", thread_id)
+        return
+
+    prompt = build_github_pr_review_prompt(repo_config, pr_number, pr_url, base_sha, head_sha)
+    configurable: dict[str, Any] = {
+        "source": "github",
+        "github_login": github_login,
+        "github_user_id": github_user_id,
+        "repo": repo_config,
+        "pr_number": pr_number,
+        "review_requested": True,
+    }
+
+    if branch_name:
+        configurable["branch_name"] = branch_name
+
+    thread_active = await is_thread_active(thread_id)
+    if thread_active:
+        logger.info("Reviewer thread %s is busy, queuing PR review request", thread_id)
+        await queue_message_for_thread(thread_id, prompt)
+        return
+
+    logger.info("Creating reviewer run for thread %s from GitHub PR review request", thread_id)
+    langgraph_client = get_client(url=LANGGRAPH_URL)
+    await langgraph_client.runs.create(
+        thread_id,
+        "reviewer",
+        input={"messages": [{"role": "user", "content": prompt}]},
+        config={"configurable": configurable, "metadata": _AGENT_VERSION_METADATA},
+        if_not_exists="create",
+    )
+    logger.info("Reviewer run created for thread %s from GitHub PR review request", thread_id)
 
 
 async def _get_or_resolve_thread_github_token(thread_id: str, email: str) -> str | None:
@@ -1473,23 +1598,51 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks) ->
         logger.exception("Failed to parse GitHub webhook JSON")
         return {"status": "error", "message": "Invalid JSON"}
 
-    # Check org allowlist
     webhook_repo = payload.get("repository", {})
     webhook_repo_config = {
         "owner": webhook_repo.get("owner", {}).get("login", ""),
         "name": webhook_repo.get("name", ""),
     }
+
+    issue = payload.get("issue", {})
+    is_pull_request_comment = bool(event_type == "issue_comment" and issue.get("pull_request"))
+    is_issue_comment = bool(event_type == "issue_comment" and not issue.get("pull_request"))
+    is_issue_event = event_type == "issues"
+    is_pull_request_event = event_type == "pull_request"
+
+    if is_pull_request_event:
+        action = payload.get("action", "")
+        if action not in _SUPPORTED_GH_PULL_REQUEST_ACTIONS:
+            logger.info("Ignoring unsupported GitHub pull_request action: %s", action)
+            return {
+                "status": "ignored",
+                "reason": f"Unsupported GitHub pull_request action: {action}",
+            }
+        if not _is_open_swe_reviewer_request(payload):
+            logger.info("Ignoring PR review request for a different reviewer")
+            return {"status": "ignored", "reason": "Review request is not for open-swe bot"}
+        if not _is_repo_allowed_for_reviewer(webhook_repo_config):
+            logger.warning(
+                "Rejecting GitHub reviewer webhook: repo '%s/%s' failed reviewer allowlist",
+                webhook_repo_config.get("owner"),
+                webhook_repo_config.get("name"),
+            )
+            if ALLOWED_REVIEWER_GITHUB_REPOS:
+                reason = "Repository not in allowlist"
+            else:
+                reason = "Repository org not in allowlist"
+            return {"status": "ignored", "reason": reason}
+
+        logger.info("Accepted GitHub PR review request webhook, scheduling reviewer task")
+        background_tasks.add_task(process_github_pr_review_request, payload)
+        return {"status": "accepted", "message": "Processing GitHub PR review request"}
+
     if not _is_repo_org_allowed(webhook_repo_config):
         logger.warning(
             "Rejecting GitHub webhook: org '%s' not in ALLOWED_GITHUB_ORGS",
             webhook_repo_config.get("owner"),
         )
         return {"status": "ignored", "reason": "Repository org not in allowlist"}
-
-    issue = payload.get("issue", {})
-    is_pull_request_comment = bool(event_type == "issue_comment" and issue.get("pull_request"))
-    is_issue_comment = bool(event_type == "issue_comment" and not issue.get("pull_request"))
-    is_issue_event = event_type == "issues"
 
     if is_issue_event:
         action = payload.get("action", "")
