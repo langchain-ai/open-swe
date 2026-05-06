@@ -92,6 +92,11 @@ ALLOWED_GITHUB_ORGS: frozenset[str] = frozenset(
     for org in os.environ.get("ALLOWED_GITHUB_ORGS", "").split(",")
     if org.strip()
 )
+ALLOWED_GITHUB_REPOS: frozenset[str] = frozenset(
+    repo.strip().lower()
+    for repo in os.environ.get("ALLOWED_GITHUB_REPOS", "").split(",")
+    if repo.strip()
+)
 
 LINEAR_API_KEY = os.environ.get("LINEAR_API_KEY", "")
 
@@ -300,16 +305,30 @@ def _is_not_found_error(exc: Exception) -> bool:
     return getattr(exc, "status_code", None) == 404
 
 
-def _is_repo_org_allowed(repo_config: dict[str, str]) -> bool:
-    """Check if the repo owner/org is in the allowlist.
+def _is_repo_allowed(repo_config: dict[str, str]) -> bool:
+    """Check if the repo owner/org and full repo are in the allowlists.
 
-    Returns True if no allowlist is configured (empty ALLOWED_GITHUB_ORGS),
-    or if the repo owner is in the allowlist.
+    If ALLOWED_GITHUB_REPOS is configured, it is the narrowest gate and the
+    repo must match one of its owner/name entries. Otherwise, ALLOWED_GITHUB_ORGS
+    can allow all repos owned by listed orgs. If neither allowlist is configured,
+    all repos are allowed.
     """
+    owner = repo_config.get("owner", "").lower()
+    name = repo_config.get("name", "").lower()
+    full_name = f"{owner}/{name}" if owner and name else ""
+
+    if ALLOWED_GITHUB_REPOS:
+        return full_name in ALLOWED_GITHUB_REPOS
+
     if not ALLOWED_GITHUB_ORGS:
         return True
-    owner = repo_config.get("owner", "").lower()
     return owner in ALLOWED_GITHUB_ORGS
+
+
+def _repo_allowlist_rejection_reason(repo_config: dict[str, str]) -> str:
+    if ALLOWED_GITHUB_REPOS:
+        return "Repository not in allowlist"
+    return "Repository org not in allowlist"
 
 
 async def _upsert_slack_thread_repo_metadata(
@@ -958,12 +977,14 @@ async def linear_webhook(  # noqa: PLR0911, PLR0912, PLR0915
             },
         )
 
-    if not _is_repo_org_allowed(repo_config):
+    if not _is_repo_allowed(repo_config):
+        reason = _repo_allowlist_rejection_reason(repo_config)
         logger.warning(
-            "Rejecting Linear webhook: org '%s' not in ALLOWED_GITHUB_ORGS",
+            "Rejecting Linear webhook: repo '%s/%s' failed GitHub repo allowlist",
             repo_config.get("owner"),
+            repo_config.get("name"),
         )
-        return {"status": "ignored", "reason": "Repository org not in allowlist"}
+        return {"status": "ignored", "reason": reason}
 
     repo_owner = repo_config["owner"]
     repo_name = repo_config["name"]
@@ -1076,12 +1097,14 @@ async def slack_webhook(request: Request, background_tasks: BackgroundTasks) -> 
     }
     repo_config = await get_slack_repo_config(text, channel_id, thread_ts)
 
-    if not _is_repo_org_allowed(repo_config):
+    if not _is_repo_allowed(repo_config):
+        reason = _repo_allowlist_rejection_reason(repo_config)
         logger.warning(
-            "Rejecting Slack webhook: org '%s' not in ALLOWED_GITHUB_ORGS",
+            "Rejecting Slack webhook: repo '%s/%s' failed GitHub repo allowlist",
             repo_config.get("owner"),
+            repo_config.get("name"),
         )
-        return {"status": "ignored", "reason": "Repository org not in allowlist"}
+        return {"status": "ignored", "reason": reason}
 
     background_tasks.add_task(process_slack_mention, event_data, repo_config)
 
@@ -1574,18 +1597,20 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks) ->
         logger.exception("Failed to parse GitHub webhook JSON")
         return {"status": "error", "message": "Invalid JSON"}
 
-    # Check org allowlist
+    # Check repository/org allowlist
     webhook_repo = payload.get("repository", {})
     webhook_repo_config = {
         "owner": webhook_repo.get("owner", {}).get("login", ""),
         "name": webhook_repo.get("name", ""),
     }
-    if not _is_repo_org_allowed(webhook_repo_config):
+    if not _is_repo_allowed(webhook_repo_config):
+        reason = _repo_allowlist_rejection_reason(webhook_repo_config)
         logger.warning(
-            "Rejecting GitHub webhook: org '%s' not in ALLOWED_GITHUB_ORGS",
+            "Rejecting GitHub webhook: repo '%s/%s' failed GitHub repo allowlist",
             webhook_repo_config.get("owner"),
+            webhook_repo_config.get("name"),
         )
-        return {"status": "ignored", "reason": "Repository org not in allowlist"}
+        return {"status": "ignored", "reason": reason}
 
     issue = payload.get("issue", {})
     is_pull_request_comment = bool(event_type == "issue_comment" and issue.get("pull_request"))

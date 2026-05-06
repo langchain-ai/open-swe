@@ -66,6 +66,24 @@ def test_build_github_issue_followup_prompt_only_includes_comment() -> None:
     assert "## Title" not in prompt
 
 
+def test_repo_allowlist_allows_matching_repo(monkeypatch) -> None:
+    monkeypatch.setattr(webapp, "ALLOWED_GITHUB_ORGS", frozenset())
+    monkeypatch.setattr(webapp, "ALLOWED_GITHUB_REPOS", frozenset({"langchain-ai/open-swe"}))
+
+    assert webapp._is_repo_allowed({"owner": "langchain-ai", "name": "open-swe"}) is True
+
+
+def test_repo_allowlist_blocks_non_matching_repo_even_when_org_allowed(monkeypatch) -> None:
+    monkeypatch.setattr(webapp, "ALLOWED_GITHUB_ORGS", frozenset({"langchain-ai"}))
+    monkeypatch.setattr(webapp, "ALLOWED_GITHUB_REPOS", frozenset({"langchain-ai/open-swe"}))
+
+    assert webapp._is_repo_allowed({"owner": "langchain-ai", "name": "public-demo"}) is False
+    assert (
+        webapp._repo_allowlist_rejection_reason({"owner": "langchain-ai", "name": "public-demo"})
+        == "Repository not in allowlist"
+    )
+
+
 def test_github_webhook_accepts_issue_events(monkeypatch) -> None:
     called: dict[str, object] = {}
 
@@ -156,6 +174,43 @@ def test_github_webhook_accepts_issue_comment_events(monkeypatch) -> None:
     assert response.status_code == 200
     assert response.json()["status"] == "accepted"
     assert called["event_type"] == "issue_comment"
+
+
+def test_github_webhook_blocks_repo_not_in_repo_allowlist(monkeypatch) -> None:
+    called = False
+
+    async def fake_process_github_pr_review_request(payload: dict[str, object]) -> None:
+        nonlocal called
+        called = True
+
+    monkeypatch.setattr(
+        webapp, "process_github_pr_review_request", fake_process_github_pr_review_request
+    )
+    monkeypatch.setattr(webapp, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
+    monkeypatch.setattr(webapp, "ALLOWED_GITHUB_ORGS", frozenset({"langchain-ai"}))
+    monkeypatch.setattr(webapp, "ALLOWED_GITHUB_REPOS", frozenset({"langchain-ai/open-swe"}))
+
+    client = TestClient(webapp.app)
+    response = _post_github_webhook(
+        client,
+        "pull_request",
+        {
+            "action": "review_requested",
+            "requested_reviewer": {"login": "open-swe[bot]"},
+            "pull_request": {
+                "number": 1244,
+                "html_url": "https://github.com/langchain-ai/public-demo/pull/1244",
+                "base": {"sha": "base-sha"},
+                "head": {"sha": "head-sha", "ref": "feature-branch"},
+            },
+            "repository": {"owner": {"login": "langchain-ai"}, "name": "public-demo"},
+            "sender": {"login": "octocat"},
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ignored", "reason": "Repository not in allowlist"}
+    assert called is False
 
 
 def test_github_webhook_accepts_open_swe_review_requested(monkeypatch) -> None:
