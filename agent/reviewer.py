@@ -10,7 +10,6 @@ from the run's message stream.
 """
 # ruff: noqa: E402
 
-import asyncio
 import logging
 import os
 import warnings
@@ -19,16 +18,15 @@ logger = logging.getLogger(__name__)
 
 from langgraph.graph.state import RunnableConfig
 from langgraph.pregel import Pregel
-from langgraph_sdk import get_client
 
 warnings.filterwarnings("ignore", module="langchain_core._api.deprecation")
 warnings.filterwarnings("ignore", message=".*Pydantic V1.*", category=UserWarning)
 
 from deepagents import create_deep_agent
-from deepagents.middleware._tool_exclusion import _ToolExclusionMiddleware
 from langchain.agents.middleware import ModelCallLimitMiddleware
 
 from .middleware import (
+    ExcludeToolsMiddleware,
     SanitizeToolInputsMiddleware,
     ToolErrorMiddleware,
 )
@@ -38,22 +36,13 @@ from .server import (
     DEFAULT_LLM_REASONING,
     DEFAULT_RECURSION_LIMIT,
     MODEL_CALL_RECURSION_LIMIT,
-    SANDBOX_CREATING,
-    _create_sandbox_with_proxy,
-    _refresh_github_proxy,
-    _wait_for_sandbox_id,
-    check_or_recreate_sandbox,
+    ensure_sandbox_for_thread,
     graph_loaded_for_execution,
 )
 from .tools import github_comment
 from .utils.auth import resolve_github_token
 from .utils.model import ModelKwargs, make_model
-from .utils.sandbox import create_sandbox
 from .utils.sandbox_paths import aresolve_sandbox_work_dir
-from .utils.sandbox_state import SANDBOX_BACKENDS, get_sandbox_id_from_metadata
-
-client = get_client()
-
 
 REVIEWER_PROMPT_TEMPLATE = """You are an expert code reviewer.
 
@@ -67,8 +56,8 @@ You are operating in a remote Linux sandbox at `{working_dir}`.
 
 - The `gh` CLI is installed and authenticated by a sandbox proxy. Always
   invoke it as `GH_TOKEN=dummy gh <command>`.
-- The `execute` tool runs shell commands. Default timeout is 300s; pass
-  `timeout=<seconds>` if you need longer.
+- The `execute` tool runs shell commands. The default timeout is generous
+  (~30 minutes); pass `timeout=<seconds>` only if you need to override it.
 
 ### How to review
 
@@ -115,58 +104,12 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
         logger.info("No thread_id or not for execution, returning reviewer agent without sandbox")
         return create_deep_agent(system_prompt="", tools=[]).with_config(config)
 
-    github_token, new_encrypted = await resolve_github_token(config, thread_id)
-    config["metadata"]["github_token_encrypted"] = new_encrypted
-    del github_token  # token consumed by the proxy refresh path; not used directly here
+    if config["configurable"].get("source"):
+        _token, new_encrypted = await resolve_github_token(config, thread_id)
+        config["metadata"]["github_token_encrypted"] = new_encrypted
+        del _token
 
-    sandbox_backend = SANDBOX_BACKENDS.get(thread_id)
-    sandbox_id = await get_sandbox_id_from_metadata(thread_id)
-
-    if sandbox_id == SANDBOX_CREATING and not sandbox_backend:
-        logger.info("Sandbox creation in progress, waiting...")
-        sandbox_id = await _wait_for_sandbox_id(thread_id)
-
-    if sandbox_backend:
-        await _refresh_github_proxy(sandbox_backend)
-        sandbox_backend = await check_or_recreate_sandbox(sandbox_backend, thread_id)
-    elif sandbox_id is None:
-        logger.info("Creating new reviewer sandbox for thread %s", thread_id)
-        await client.threads.update(thread_id=thread_id, metadata={"sandbox_id": SANDBOX_CREATING})
-        try:
-            sandbox_backend = await _create_sandbox_with_proxy()
-        except Exception:
-            logger.exception("Failed to create sandbox")
-            await client.threads.update(thread_id=thread_id, metadata={"sandbox_id": None})
-            raise
-    else:
-        logger.info("Connecting to existing sandbox %s", sandbox_id)
-        try:
-            sandbox_backend = await asyncio.to_thread(create_sandbox, sandbox_id)
-        except Exception:
-            logger.warning("Failed to connect to existing sandbox %s, creating new one", sandbox_id)
-            await client.threads.update(
-                thread_id=thread_id, metadata={"sandbox_id": SANDBOX_CREATING}
-            )
-            try:
-                sandbox_backend = await _create_sandbox_with_proxy()
-            except Exception:
-                logger.exception("Failed to create replacement sandbox")
-                await client.threads.update(thread_id=thread_id, metadata={"sandbox_id": None})
-                raise
-        await _refresh_github_proxy(sandbox_backend)
-        sandbox_backend = await check_or_recreate_sandbox(sandbox_backend, thread_id)
-
-    SANDBOX_BACKENDS[thread_id] = sandbox_backend
-
-    if sandbox_id != sandbox_backend.id:
-        await client.threads.update(
-            thread_id=thread_id, metadata={"sandbox_id": sandbox_backend.id}
-        )
-        await asyncio.to_thread(
-            sandbox_backend.execute,
-            "git config --global user.name 'open-swe[bot]' && "
-            "git config --global user.email 'open-swe@users.noreply.github.com'",
-        )
+    sandbox_backend = await ensure_sandbox_for_thread(thread_id)
 
     work_dir = await aresolve_sandbox_work_dir(sandbox_backend)
 
@@ -184,6 +127,6 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
             SanitizeToolInputsMiddleware(),
             ModelCallLimitMiddleware(run_limit=MODEL_CALL_RECURSION_LIMIT, exit_behavior="end"),
             ToolErrorMiddleware(),
-            _ToolExclusionMiddleware(excluded=frozenset({"task"})),
+            ExcludeToolsMiddleware(excluded=frozenset({"task"})),
         ],
     ).with_config(config)

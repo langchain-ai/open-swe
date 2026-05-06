@@ -175,6 +175,77 @@ def graph_loaded_for_execution(config: RunnableConfig) -> bool:
     )
 
 
+async def ensure_sandbox_for_thread(thread_id: str) -> SandboxBackendProtocol:
+    """Get-or-create a healthy sandbox bound to ``thread_id``.
+
+    Implements the four-state lifecycle described in AGENTS.md:
+
+    1. Cached in memory → ping; recreate on ``SandboxClientError``.
+    2. Metadata says ``__creating__`` and no cache → poll until ready.
+    3. No sandbox at all → create one and persist the id.
+    4. Metadata has an id but no cache → reconnect; recreate on failure.
+
+    For LangSmith sandboxes, also refreshes the GitHub App proxy auth.
+    Persists the resulting ``sandbox_id`` to thread metadata, and on the
+    first creation/reconnect for this thread initializes git identity.
+    """
+    sandbox_backend = SANDBOX_BACKENDS.get(thread_id)
+    sandbox_id = await get_sandbox_id_from_metadata(thread_id)
+
+    if sandbox_id == SANDBOX_CREATING and not sandbox_backend:
+        logger.info("Sandbox creation in progress for thread %s, waiting...", thread_id)
+        sandbox_id = await _wait_for_sandbox_id(thread_id)
+
+    if sandbox_backend:
+        logger.info("Using cached sandbox backend for thread %s", thread_id)
+        await _refresh_github_proxy(sandbox_backend)
+        sandbox_backend = await check_or_recreate_sandbox(sandbox_backend, thread_id)
+    elif sandbox_id is None:
+        logger.info("Creating new sandbox for thread %s", thread_id)
+        await client.threads.update(thread_id=thread_id, metadata={"sandbox_id": SANDBOX_CREATING})
+        try:
+            sandbox_backend = await _create_sandbox_with_proxy()
+            logger.info("Sandbox created: %s", sandbox_backend.id)
+        except Exception:
+            logger.exception("Failed to create sandbox")
+            try:
+                await client.threads.update(thread_id=thread_id, metadata={"sandbox_id": None})
+            except Exception:
+                logger.exception("Failed to reset sandbox_id metadata")
+            raise
+    else:
+        logger.info("Connecting to existing sandbox %s", sandbox_id)
+        try:
+            sandbox_backend = await asyncio.to_thread(create_sandbox, sandbox_id)
+        except Exception:
+            logger.warning("Failed to connect to existing sandbox %s, creating new one", sandbox_id)
+            await client.threads.update(
+                thread_id=thread_id, metadata={"sandbox_id": SANDBOX_CREATING}
+            )
+            try:
+                sandbox_backend = await _create_sandbox_with_proxy()
+            except Exception:
+                logger.exception("Failed to create replacement sandbox")
+                await client.threads.update(thread_id=thread_id, metadata={"sandbox_id": None})
+                raise
+        await _refresh_github_proxy(sandbox_backend)
+        sandbox_backend = await check_or_recreate_sandbox(sandbox_backend, thread_id)
+
+    SANDBOX_BACKENDS[thread_id] = sandbox_backend
+
+    if sandbox_id != sandbox_backend.id:
+        await client.threads.update(
+            thread_id=thread_id, metadata={"sandbox_id": sandbox_backend.id}
+        )
+        await asyncio.to_thread(
+            sandbox_backend.execute,
+            "git config --global user.name 'open-swe[bot]' && "
+            "git config --global user.email 'open-swe@users.noreply.github.com'",
+        )
+
+    return sandbox_backend
+
+
 DEFAULT_LLM_MODEL_ID = "openai:gpt-5.5"
 DEFAULT_LLM_REASONING: OpenAIReasoning = {"effort": "medium"}
 DEFAULT_LLM_MAX_TOKENS = 64_000
@@ -197,70 +268,9 @@ async def get_agent(config: RunnableConfig) -> Pregel:
 
     github_token, new_encrypted = await resolve_github_token(config, thread_id)
     config["metadata"]["github_token_encrypted"] = new_encrypted
+    del github_token
 
-    sandbox_backend = SANDBOX_BACKENDS.get(thread_id)
-    sandbox_id = await get_sandbox_id_from_metadata(thread_id)
-
-    if sandbox_id == SANDBOX_CREATING and not sandbox_backend:
-        logger.info("Sandbox creation in progress, waiting...")
-        sandbox_id = await _wait_for_sandbox_id(thread_id)
-
-    if sandbox_backend:
-        logger.info("Using cached sandbox backend for thread %s", thread_id)
-        await _refresh_github_proxy(sandbox_backend)
-        sandbox_backend = await check_or_recreate_sandbox(sandbox_backend, thread_id)
-
-    elif sandbox_id is None:
-        logger.info("Creating new sandbox for thread %s", thread_id)
-        await client.threads.update(thread_id=thread_id, metadata={"sandbox_id": SANDBOX_CREATING})
-
-        try:
-            sandbox_backend = await _create_sandbox_with_proxy()
-            logger.info("Sandbox created: %s", sandbox_backend.id)
-        except Exception:
-            logger.exception("Failed to create sandbox")
-            try:
-                await client.threads.update(thread_id=thread_id, metadata={"sandbox_id": None})
-                logger.info("Reset sandbox_id to None for thread %s", thread_id)
-            except Exception:
-                logger.exception("Failed to reset sandbox_id metadata")
-            raise
-    else:
-        logger.info("Connecting to existing sandbox %s", sandbox_id)
-        try:
-            sandbox_backend = await asyncio.to_thread(create_sandbox, sandbox_id)
-            logger.info("Connected to existing sandbox %s", sandbox_id)
-        except Exception:
-            logger.warning("Failed to connect to existing sandbox %s, creating new one", sandbox_id)
-            # Reset sandbox_id and create a new sandbox with proxy auth configured
-            await client.threads.update(
-                thread_id=thread_id,
-                metadata={"sandbox_id": SANDBOX_CREATING},
-            )
-
-            try:
-                sandbox_backend = await _create_sandbox_with_proxy()
-                logger.info("New sandbox created: %s", sandbox_backend.id)
-            except Exception:
-                logger.exception("Failed to create replacement sandbox")
-                await client.threads.update(thread_id=thread_id, metadata={"sandbox_id": None})
-                raise
-
-        await _refresh_github_proxy(sandbox_backend)
-        sandbox_backend = await check_or_recreate_sandbox(sandbox_backend, thread_id)
-
-    SANDBOX_BACKENDS[thread_id] = sandbox_backend
-
-    if sandbox_id != sandbox_backend.id:
-        await client.threads.update(
-            thread_id=thread_id,
-            metadata={"sandbox_id": sandbox_backend.id},
-        )
-
-        await asyncio.to_thread(
-            sandbox_backend.execute,
-            "git config --global user.name 'open-swe[bot]' && git config --global user.email 'open-swe@users.noreply.github.com'",
-        )
+    sandbox_backend = await ensure_sandbox_for_thread(thread_id)
 
     linear_issue = config["configurable"].get("linear_issue", {})
     linear_project_id = linear_issue.get("linear_project_id", "")
