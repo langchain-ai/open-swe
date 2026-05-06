@@ -1,5 +1,4 @@
 from .fetch_url import fetch_url
-from .github_comment import github_comment
 from .http_request import http_request
 from .linear_comment import linear_comment
 from .linear_create_issue import linear_create_issue
@@ -14,7 +13,6 @@ from .web_search import web_search
 
 __all__ = [
     "fetch_url",
-    "github_comment",
     "http_request",
     "linear_comment",
     "linear_create_issue",
