@@ -33,6 +33,7 @@ from .middleware import (
     check_message_queue_before_model,
     ensure_no_empty_msg,
     notify_step_limit_reached,
+    notify_unhandled_error,
 )
 from .prompt import construct_system_prompt
 from .tools import (
@@ -318,5 +319,6 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             check_message_queue_before_model,
             ensure_no_empty_msg,
             notify_step_limit_reached,
+            notify_unhandled_error,
         ],
     ).with_config(config)
