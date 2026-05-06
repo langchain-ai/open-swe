@@ -9,7 +9,9 @@ import logging
 import os
 import re
 import time
+from dataclasses import dataclass
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 
@@ -19,6 +21,15 @@ logger = logging.getLogger(__name__)
 
 SLACK_API_BASE_URL = "https://slack.com/api"
 SLACK_BOT_TOKEN = os.environ.get("SLACK_BOT_TOKEN", "")
+GITHUB_PR_URL_RE = re.compile(r"https?://(?:www\.)?github\.com/[^\s<>|]+/[^\s<>|]+/pull/\d+")
+
+
+@dataclass(frozen=True)
+class GitHubPrRef:
+    owner: str
+    repo: str
+    number: int
+    url: str
 
 
 def _slack_headers() -> dict[str, str]:
@@ -110,6 +121,54 @@ def strip_bot_mention(text: str, bot_user_id: str, bot_username: str = "") -> st
     if bot_username:
         stripped = stripped.replace(f"@{bot_username}", "")
     return stripped.strip()
+
+
+def parse_github_pr_url(url: str) -> GitHubPrRef | None:
+    cleaned_url = url.strip().strip("<>")
+    if "|" in cleaned_url:
+        cleaned_url = cleaned_url.split("|", 1)[0]
+
+    parsed = urlparse(cleaned_url)
+    if parsed.scheme not in {"http", "https"}:
+        return None
+    if parsed.netloc.lower() not in {"github.com", "www.github.com"}:
+        return None
+
+    path_parts = [part for part in parsed.path.split("/") if part]
+    if len(path_parts) < 4 or path_parts[2] != "pull":
+        return None
+
+    try:
+        number = int(path_parts[3])
+    except ValueError:
+        return None
+
+    owner = path_parts[0]
+    repo = path_parts[1]
+    return GitHubPrRef(
+        owner=owner,
+        repo=repo,
+        number=number,
+        url=f"https://github.com/{owner}/{repo}/pull/{number}",
+    )
+
+
+def parse_slack_review_command(text: str) -> GitHubPrRef | None:
+    stripped = text.strip()
+    command_match = re.fullmatch(r"(?is)review\s+(.+)", stripped)
+    if not command_match:
+        return None
+
+    rest = command_match.group(1).strip()
+    url_match = GITHUB_PR_URL_RE.search(rest)
+    if not url_match:
+        return None
+
+    trailing_text = rest[url_match.end() :].strip()
+    if trailing_text and not trailing_text.startswith("|"):
+        return None
+
+    return parse_github_pr_url(url_match.group(0))
 
 
 def select_slack_context_messages(
@@ -524,12 +583,12 @@ async def resolve_slack_links_in_context(
     return resolved_links_section, image_urls
 
 
-async def post_slack_trace_reply(channel_id: str, thread_ts: str, thread_id: str) -> None:
+async def post_slack_trace_reply(
+    channel_id: str, thread_ts: str, thread_id: str, message: str = "Working on it!"
+) -> None:
     """Post a trace URL reply in a Slack thread."""
     trace_url = get_langsmith_trace_url(thread_id)
     if trace_url:
-        await post_slack_thread_reply(
-            channel_id, thread_ts, f"Working on it! <{trace_url}|View trace>"
-        )
+        await post_slack_thread_reply(channel_id, thread_ts, f"{message} <{trace_url}|View trace>")
     else:
-        await post_slack_thread_reply(channel_id, thread_ts, "Working on it!")
+        await post_slack_thread_reply(channel_id, thread_ts, message)

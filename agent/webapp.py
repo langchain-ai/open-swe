@@ -44,11 +44,14 @@ from .utils.multimodal import dedupe_urls, extract_image_urls, fetch_image_block
 from .utils.repo import extract_repo_from_text
 from .utils.sandbox import validate_sandbox_startup_config
 from .utils.slack import (
+    GitHubPrRef,
     add_slack_reaction,
     fetch_slack_thread_messages,
     format_slack_messages_for_prompt,
     get_slack_user_info,
     get_slack_user_names,
+    parse_slack_review_command,
+    post_slack_thread_reply,
     post_slack_trace_reply,
     resolve_slack_links_in_context,
     select_slack_context_messages,
@@ -282,6 +285,11 @@ def generate_thread_id_from_slack_thread(channel_id: str, thread_id: str) -> str
     composite = f"{channel_id}:{thread_id}"
     md5_hex = hashlib.md5(composite.encode("utf-8")).hexdigest()
     return str(uuid.UUID(hex=md5_hex))
+
+
+def generate_reviewer_thread_id(owner: str, repo: str, pr_number: int) -> str:
+    stable_key = f"{owner}/{repo}/pr/{pr_number}/reviewer"
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, stable_key))
 
 
 def _extract_repo_config_from_thread(thread: dict[str, Any]) -> dict[str, str] | None:
@@ -864,6 +872,26 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
     await post_slack_trace_reply(channel_id, thread_ts, thread_id)
 
 
+async def process_slack_pr_review_request(
+    pr_ref: GitHubPrRef, channel_id: str, thread_ts: str
+) -> None:
+    result = await trigger_pr_review_from_ref(pr_ref, source="slack")
+    if result.get("success"):
+        thread_id = result.get("thread_id")
+        if isinstance(thread_id, str) and thread_id:
+            await post_slack_trace_reply(
+                channel_id, thread_ts, thread_id, message="Taking a look..."
+            )
+        return
+
+    await post_slack_thread_reply(
+        channel_id,
+        thread_ts,
+        f"Could not start review for <{pr_ref.url}|{pr_ref.owner}/{pr_ref.repo}#{pr_ref.number}>: "
+        f"{result.get('error', 'unknown error')}.",
+    )
+
+
 def verify_linear_signature(body: bytes, signature: str, secret: str) -> bool:
     """Verify the Linear webhook signature.
 
@@ -1090,6 +1118,23 @@ async def slack_webhook(request: Request, background_tasks: BackgroundTasks) -> 
     if bot_user_id and user_id == bot_user_id:
         return {"status": "ignored", "reason": "Event from this bot user"}
 
+    clean_text = strip_bot_mention(text, bot_user_id, bot_username=SLACK_BOT_USERNAME)
+    pr_ref = parse_slack_review_command(clean_text)
+    if pr_ref:
+        if not _is_repo_allowed_for_reviewer({"owner": pr_ref.owner, "name": pr_ref.repo}):
+            return {"status": "ignored", "reason": "Repository not in reviewer allowlist"}
+        background_tasks.add_task(process_slack_pr_review_request, pr_ref, channel_id, thread_ts)
+        return {"status": "accepted", "message": "Slack PR review request queued"}
+
+    if clean_text.strip().lower().startswith("review"):
+        background_tasks.add_task(
+            post_slack_thread_reply,
+            channel_id,
+            thread_ts,
+            "To request a PR review, use `@open-swe review https://github.com/OWNER/REPO/pull/NUMBER`.",
+        )
+        return {"status": "ignored", "reason": "Malformed Slack PR review command"}
+
     event_data = {
         "channel_id": channel_id,
         "thread_ts": thread_ts,
@@ -1263,6 +1308,97 @@ def build_github_pr_review_prompt(
     )
 
 
+async def fetch_github_pr_metadata(pr_ref: GitHubPrRef, *, token: str) -> dict[str, Any] | None:
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "Authorization": f"Bearer {token}",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    async with httpx.AsyncClient() as http_client:
+        try:
+            response = await http_client.get(
+                f"https://api.github.com/repos/{pr_ref.owner}/{pr_ref.repo}/pulls/{pr_ref.number}",
+                headers=headers,
+            )
+            response.raise_for_status()
+        except httpx.HTTPError:
+            logger.exception(
+                "Failed to fetch PR metadata for %s/%s#%s",
+                pr_ref.owner,
+                pr_ref.repo,
+                pr_ref.number,
+            )
+            return None
+    data = response.json()
+    return data if isinstance(data, dict) else None
+
+
+async def trigger_pr_review_from_ref(
+    pr_ref: GitHubPrRef,
+    *,
+    source: str,
+    github_login: str = "",
+    github_user_id: int | None = None,
+) -> dict[str, Any]:
+    repo_config = {"owner": pr_ref.owner, "name": pr_ref.repo}
+    if not _is_repo_allowed_for_reviewer(repo_config):
+        return {"success": False, "error": "Repository not allowed for reviewer"}
+
+    app_token = await get_github_app_installation_token()
+    if not app_token:
+        logger.warning("No GitHub App token available for PR reviewer request")
+        return {"success": False, "error": "No GitHub App token available"}
+
+    pr_metadata = await fetch_github_pr_metadata(pr_ref, token=app_token)
+    if not pr_metadata:
+        return {"success": False, "error": "Could not fetch pull request metadata"}
+
+    base_sha = pr_metadata.get("base", {}).get("sha", "")
+    head = pr_metadata.get("head", {})
+    head_sha = head.get("sha", "")
+    branch_name = head.get("ref", "")
+    pr_url = pr_metadata.get("html_url", "") or pr_ref.url
+    if not base_sha or not head_sha:
+        logger.warning("Missing base/head SHA for Slack PR review request")
+        return {"success": False, "error": "Pull request metadata is missing base/head SHA"}
+
+    thread_id = generate_reviewer_thread_id(pr_ref.owner, pr_ref.repo, pr_ref.number)
+    try:
+        await persist_encrypted_github_token(thread_id, app_token)
+    except Exception:
+        logger.warning("Could not persist bot token for reviewer thread %s", thread_id)
+        return {"success": False, "error": "Could not persist reviewer token"}
+
+    prompt = build_github_pr_review_prompt(repo_config, pr_ref.number, pr_url, base_sha, head_sha)
+    configurable: dict[str, Any] = {
+        "source": source,
+        "github_login": github_login,
+        "github_user_id": github_user_id,
+        "repo": repo_config,
+        "pr_number": pr_ref.number,
+        "review_requested": True,
+    }
+    if branch_name:
+        configurable["branch_name"] = branch_name
+
+    thread_active = await is_thread_active(thread_id)
+    if thread_active:
+        logger.info("Reviewer thread %s is busy, queuing PR review request", thread_id)
+        queued = await queue_message_for_thread(thread_id, prompt)
+        return {"success": queued, "queued": queued, "thread_id": thread_id, "pr_url": pr_url}
+
+    logger.info("Creating reviewer run for thread %s from %s PR review request", thread_id, source)
+    langgraph_client = get_client(url=LANGGRAPH_URL)
+    await langgraph_client.runs.create(
+        thread_id,
+        "reviewer",
+        input={"messages": [{"role": "user", "content": prompt}]},
+        config={"configurable": configurable, "metadata": _AGENT_VERSION_METADATA},
+        if_not_exists="create",
+    )
+    return {"success": True, "queued": False, "thread_id": thread_id, "pr_url": pr_url}
+
+
 async def process_github_pr_review_request(payload: dict[str, Any]) -> None:
     """Trigger the reviewer agent when the Open SWE bot is requested on a PR."""
     repo = payload.get("repository", {})
@@ -1283,10 +1419,9 @@ async def process_github_pr_review_request(payload: dict[str, Any]) -> None:
         logger.warning("Missing PR review request context, skipping reviewer run")
         return
 
-    owner = repo_config.get("owner", "")
-    name = repo_config.get("name", "")
-    stable_key = f"{owner}/{name}/pr/{pr_number}/reviewer"
-    thread_id = str(uuid.uuid5(uuid.NAMESPACE_URL, stable_key))
+    thread_id = generate_reviewer_thread_id(
+        repo_config.get("owner", ""), repo_config.get("name", ""), pr_number
+    )
 
     app_token = await get_github_app_installation_token()
     if not app_token:
