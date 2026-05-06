@@ -79,9 +79,20 @@ def test_repo_allowlist_blocks_non_matching_repo_even_when_org_allowed(monkeypat
 
     assert webapp._is_repo_allowed({"owner": "langchain-ai", "name": "public-demo"}) is False
     assert (
-        webapp._repo_allowlist_rejection_reason({"owner": "langchain-ai", "name": "public-demo"})
+        webapp._repo_allowlist_rejection_reason(allowed_repos=webapp.ALLOWED_GITHUB_REPOS)
         == "Repository not in allowlist"
     )
+
+
+def test_reviewer_repo_allowlist_is_independent_from_core_allowlist(monkeypatch) -> None:
+    monkeypatch.setattr(webapp, "ALLOWED_GITHUB_REPOS", frozenset({"langchain-ai/core-only"}))
+    monkeypatch.setattr(
+        webapp, "ALLOWED_REVIEWER_GITHUB_REPOS", frozenset({"langchain-ai/reviewer-only"})
+    )
+    repo_config = {"owner": "langchain-ai", "name": "reviewer-only"}
+
+    assert webapp._is_repo_allowed(repo_config) is False
+    assert webapp._is_repo_allowed_for_reviewer(repo_config) is True
 
 
 def test_github_webhook_accepts_issue_events(monkeypatch) -> None:
@@ -176,7 +187,7 @@ def test_github_webhook_accepts_issue_comment_events(monkeypatch) -> None:
     assert called["event_type"] == "issue_comment"
 
 
-def test_github_webhook_blocks_repo_not_in_repo_allowlist(monkeypatch) -> None:
+def test_github_webhook_blocks_reviewer_repo_not_in_reviewer_repo_allowlist(monkeypatch) -> None:
     called = False
 
     async def fake_process_github_pr_review_request(payload: dict[str, object]) -> None:
@@ -187,8 +198,12 @@ def test_github_webhook_blocks_repo_not_in_repo_allowlist(monkeypatch) -> None:
         webapp, "process_github_pr_review_request", fake_process_github_pr_review_request
     )
     monkeypatch.setattr(webapp, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
-    monkeypatch.setattr(webapp, "ALLOWED_GITHUB_ORGS", frozenset({"langchain-ai"}))
-    monkeypatch.setattr(webapp, "ALLOWED_GITHUB_REPOS", frozenset({"langchain-ai/open-swe"}))
+    monkeypatch.setattr(webapp, "ALLOWED_GITHUB_ORGS", frozenset())
+    monkeypatch.setattr(webapp, "ALLOWED_GITHUB_REPOS", frozenset())
+    monkeypatch.setattr(webapp, "ALLOWED_REVIEWER_GITHUB_ORGS", frozenset({"langchain-ai"}))
+    monkeypatch.setattr(
+        webapp, "ALLOWED_REVIEWER_GITHUB_REPOS", frozenset({"langchain-ai/open-swe"})
+    )
 
     client = TestClient(webapp.app)
     response = _post_github_webhook(
@@ -223,6 +238,10 @@ def test_github_webhook_accepts_open_swe_review_requested(monkeypatch) -> None:
         webapp, "process_github_pr_review_request", fake_process_github_pr_review_request
     )
     monkeypatch.setattr(webapp, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
+    monkeypatch.setattr(webapp, "ALLOWED_GITHUB_REPOS", frozenset({"langchain-ai/core-only"}))
+    monkeypatch.setattr(
+        webapp, "ALLOWED_REVIEWER_GITHUB_REPOS", frozenset({"langchain-ai/open-swe"})
+    )
 
     client = TestClient(webapp.app)
     response = _post_github_webhook(
