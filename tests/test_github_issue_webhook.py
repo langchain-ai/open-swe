@@ -254,7 +254,9 @@ def test_process_github_pr_review_request_creates_reviewer_run(monkeypatch) -> N
     monkeypatch.setattr(
         webapp, "get_github_app_installation_token", fake_get_github_app_installation_token
     )
-    monkeypatch.setattr(webapp, "persist_encrypted_github_token", fake_persist_encrypted_github_token)
+    monkeypatch.setattr(
+        webapp, "persist_encrypted_github_token", fake_persist_encrypted_github_token
+    )
     monkeypatch.setattr(webapp, "is_thread_active", fake_is_thread_active)
     monkeypatch.setattr(webapp, "get_client", lambda url: _FakeLangGraphClient())
 
