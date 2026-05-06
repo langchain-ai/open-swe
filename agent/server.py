@@ -237,11 +237,16 @@ async def ensure_sandbox_for_thread(thread_id: str) -> SandboxBackendProtocol:
         await client.threads.update(
             thread_id=thread_id, metadata={"sandbox_id": sandbox_backend.id}
         )
-        await asyncio.to_thread(
-            sandbox_backend.execute,
-            "git config --global user.name 'open-swe[bot]' && "
-            "git config --global user.email 'open-swe@users.noreply.github.com'",
-        )
+
+    # Re-apply git identity every run: cached/reconnected sandboxes may have
+    # lost their `--global` config (or had it overwritten), and Vercel preview
+    # deploys reject commits whose author email can't be resolved to a GitHub
+    # account.
+    await asyncio.to_thread(
+        sandbox_backend.execute,
+        "git config --global user.name 'open-swe[bot]' && "
+        "git config --global user.email 'open-swe@users.noreply.github.com'",
+    )
 
     return sandbox_backend
 

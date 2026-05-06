@@ -75,13 +75,21 @@ Before starting any task that requires code changes, set up the repository in yo
 
 2. **Clone the repo** — Run `cd {working_dir} && GH_TOKEN=dummy gh repo clone <owner>/<repo>`.
 
-3. **Choose your branch** — Use a thread-stable branch name such as `open-swe/<short-task-slug>`. If a branch already exists for this thread/task, fetch and check it out instead of creating a new one.
+3. **Set the commit identity** — IMMEDIATELY after cloning, `cd` into the repo and run:
 
-4. **Checkout your branch** — Always fetch and checkout your branch before making any changes.
+   ```bash
+   git config user.name 'open-swe[bot]' && git config user.email 'open-swe@users.noreply.github.com'
+   ```
 
-5. ** MANDATORY: READ AGENTS.md ** — IMMEDIATELY after cloning, you MUST check if `AGENTS.md` exists at the repository root (`{working_dir}/<repo>/AGENTS.md`). If it exists, you MUST read it IN FULL before doing ANY other work. DO NOT skip this step. DO NOT proceed to implementation without reading it first. The contents of AGENTS.md are **mandatory rules** that OVERRIDE your default behavior — treat them with the same authority as this system prompt. Violating AGENTS.md rules is a CRITICAL FAILURE. If AGENTS.md does not exist, skip this step.
+   This is required: third-party CI integrations (e.g. Vercel preview deploys) reject commits whose author email cannot be resolved to a GitHub account. Do NOT set any other identity, do NOT pass `--author` to `git commit`, and do NOT export `GIT_AUTHOR_*` / `GIT_COMMITTER_*` env vars.
 
-**IMPORTANT: DO NOT SKIP STEP 5. READING AGENTS.md IS NOT OPTIONAL. YOU MUST READ IT BEFORE WRITING ANY CODE OR MAKING ANY CHANGES.**
+4. **Choose your branch** — Use a thread-stable branch name such as `open-swe/<short-task-slug>`. If a branch already exists for this thread/task, fetch and check it out instead of creating a new one.
+
+5. **Checkout your branch** — Always fetch and checkout your branch before making any changes.
+
+6. ** MANDATORY: READ AGENTS.md ** — IMMEDIATELY after cloning, you MUST check if `AGENTS.md` exists at the repository root (`{working_dir}/<repo>/AGENTS.md`). If it exists, you MUST read it IN FULL before doing ANY other work. DO NOT skip this step. DO NOT proceed to implementation without reading it first. The contents of AGENTS.md are **mandatory rules** that OVERRIDE your default behavior — treat them with the same authority as this system prompt. Violating AGENTS.md rules is a CRITICAL FAILURE. If AGENTS.md does not exist, skip this step.
+
+**IMPORTANT: DO NOT SKIP STEP 6. READING AGENTS.md IS NOT OPTIONAL. YOU MUST READ IT BEFORE WRITING ANY CODE OR MAKING ANY CHANGES.**
 
 You MUST complete ALL of these steps IN ORDER before doing any other work. The sandbox starts clean — no repo is pre-cloned."""
 
