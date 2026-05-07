@@ -143,6 +143,7 @@ async def fetch_review_comments(
     *,
     owner: str,
     repo: str,
+    pr_number: int,
     review_id: int,
     token: str,
 ) -> list[dict[str, Any]]:
@@ -151,7 +152,7 @@ async def fetch_review_comments(
     GitHub's review-creation response includes a ``comments`` count but not the
     per-comment IDs in all paths; this paginates the canonical list endpoint.
     """
-    url = f"{_GITHUB_API_BASE}/repos/{owner}/{repo}/pulls/reviews/{review_id}/comments"
+    url = f"{_GITHUB_API_BASE}/repos/{owner}/{repo}/pulls/{pr_number}/reviews/{review_id}/comments"
     headers = _github_headers(token)
     out: list[dict[str, Any]] = []
     params: dict[str, Any] = {"per_page": 100, "page": 1}

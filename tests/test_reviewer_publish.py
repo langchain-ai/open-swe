@@ -121,3 +121,48 @@ async def test_resolve_review_thread_returns_false_on_graphql_errors() -> None:
     with patch("agent.reviewer_publish.httpx.AsyncClient", return_value=client_cm):
         ok = await resolve_review_thread(thread_node_id="T_1", token="t")
     assert ok is False
+
+
+@pytest.mark.asyncio
+async def test_publish_review_skips_findings_already_published() -> None:
+    """Re-runs must not re-post findings that already have a github_review_comment_id."""
+    from agent.tools.publish_review import _publish_review_async
+
+    findings = [
+        _f(id="f_old", severity="high", file="a.py", github_review_comment_id=42),
+        _f(id="f_new", severity="high", file="b.py"),
+    ]
+
+    list_async = AsyncMock(return_value=findings)
+    post_review = AsyncMock(return_value={"id": 999})
+    fetch_comments = AsyncMock(return_value=[])
+    set_metadata = AsyncMock()
+
+    with (
+        patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
+        patch("agent.tools.publish_review.list_findings_async", list_async),
+        patch("agent.tools.publish_review.post_pull_request_review", post_review),
+        patch("agent.tools.publish_review.fetch_review_comments", fetch_comments),
+        patch(
+            "agent.tools.publish_review._resolve_threads_for_resolved_findings",
+            new_callable=AsyncMock,
+            return_value=0,
+        ),
+        patch("agent.tools.publish_review.set_reviewer_thread_metadata", set_metadata),
+    ):
+        result = await _publish_review_async(
+            owner="o",
+            repo="r",
+            pr_number=7,
+            head_sha="sha",
+            token="t",
+            summary=None,
+            severity_threshold="medium",
+            cap=15,
+        )
+
+    assert result["success"] is True
+    assert result["surfaced_count"] == 1
+    posted = post_review.await_args.kwargs["inline_comments"]
+    paths = {c["path"] for c in posted}
+    assert paths == {"b.py"}

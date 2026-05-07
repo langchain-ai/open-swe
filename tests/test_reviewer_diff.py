@@ -75,3 +75,38 @@ def test_extract_diff_hunk_supports_single_line_and_range(start: int, end: int) 
     hunk = extract_diff_hunk(_TWO_FILE_DIFF, "bar.py", start, end)
     assert hunk is not None
     assert "import sys" in hunk
+
+
+@pytest.mark.asyncio
+async def test_compute_diff_in_sandbox_uses_three_dot_for_merge_base() -> None:
+    """First-review path passes merge_base=True so we use base...head, not base..head."""
+    from unittest.mock import MagicMock
+
+    from agent.reviewer_diff import compute_diff_in_sandbox
+
+    backend = MagicMock()
+    backend.execute = MagicMock(return_value="")
+
+    await compute_diff_in_sandbox(
+        backend, work_dir="/w", base_ref="base", head_ref="head", merge_base=True
+    )
+    cmd = backend.execute.call_args.args[0]
+    assert "base...head" in cmd
+    assert "base..head" not in cmd.replace("base...head", "")
+    assert "--no-prefix" not in cmd  # invalid flag must not appear
+
+
+@pytest.mark.asyncio
+async def test_compute_diff_in_sandbox_uses_two_dot_by_default() -> None:
+    """Re-review delta path passes merge_base=False so we use base..head."""
+    from unittest.mock import MagicMock
+
+    from agent.reviewer_diff import compute_diff_in_sandbox
+
+    backend = MagicMock()
+    backend.execute = MagicMock(return_value="")
+
+    await compute_diff_in_sandbox(backend, work_dir="/w", base_ref="oldsha", head_ref="newsha")
+    cmd = backend.execute.call_args.args[0]
+    assert "oldsha..newsha" in cmd
+    assert "oldsha...newsha" not in cmd

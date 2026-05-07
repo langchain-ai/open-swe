@@ -188,13 +188,25 @@ async def compute_diff_in_sandbox(
     work_dir: str,
     base_ref: str,
     head_ref: str,
+    *,
+    merge_base: bool = False,
 ) -> str:
-    """Run ``git diff <base>..<head>`` inside the sandbox and return its stdout.
+    """Run ``git diff`` inside the sandbox and return its stdout.
 
     Refs can be SHAs or branch names. Caller is responsible for ensuring both
     refs exist locally (e.g., having fetched the PR head).
+
+    Args:
+        merge_base: When ``True``, use three-dot ``base...head`` (the merge-base
+            diff — what GitHub shows on the PR's "Files changed" tab). Use this
+            for first review so we don't pick up changes that landed on the
+            base branch after the PR diverged. When ``False``, use two-dot
+            ``base..head`` — appropriate for re-review deltas where ``base`` is
+            the previously reviewed SHA and we want exactly the commits added
+            since.
     """
-    cmd = f"cd {work_dir} && git diff --no-color --no-prefix=false {base_ref}..{head_ref}"
+    operator = "..." if merge_base else ".."
+    cmd = f"cd {work_dir} && git diff --no-color {base_ref}{operator}{head_ref}"
     result = await asyncio.to_thread(sandbox_backend.execute, cmd)
     return _stdout_from_result(result)
 

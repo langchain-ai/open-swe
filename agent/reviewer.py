@@ -298,13 +298,28 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
                 base_sha=base_sha,
                 head_sha=head_sha,
             )
-            diff_base = last_reviewed_sha if is_re_review and last_reviewed_sha else base_sha
-            diff_text = await compute_diff_in_sandbox(
-                sandbox_backend,
-                work_dir=f"{work_dir}/{repo_name}",
-                base_ref=diff_base,
-                head_ref=head_sha,
-            )
+            if is_re_review and last_reviewed_sha:
+                # Re-review delta: two-dot diff = "what changed on the head
+                # branch since the previous review" (forward-push case). The
+                # agent reconciles existing findings against this slice.
+                diff_text = await compute_diff_in_sandbox(
+                    sandbox_backend,
+                    work_dir=f"{work_dir}/{repo_name}",
+                    base_ref=last_reviewed_sha,
+                    head_ref=head_sha,
+                    merge_base=False,
+                )
+            else:
+                # First review: three-dot merge-base diff so we don't include
+                # changes that landed on `base` after the PR branch diverged.
+                # Matches what GitHub's "Files changed" tab shows.
+                diff_text = await compute_diff_in_sandbox(
+                    sandbox_backend,
+                    work_dir=f"{work_dir}/{repo_name}",
+                    base_ref=base_sha,
+                    head_ref=head_sha,
+                    merge_base=True,
+                )
             diff_line_set = compute_diff_line_set(diff_text)
         except Exception:
             logger.exception("Reviewer prep failed for thread %s", thread_id)

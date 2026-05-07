@@ -121,8 +121,17 @@ async def _publish_review_async(
     thread_id = get_thread_id_from_runtime()
     findings = await list_findings_async(thread_id)
 
-    open_findings = [f for f in findings if f.get("status", "open") == "open"]
-    eligible = filter_findings_for_publish(findings, severity_threshold=severity_threshold, cap=cap)
+    # Re-reviews only post NEW findings. Anything with a github_review_comment_id
+    # already lives on GitHub from a prior publish — reposting would create
+    # duplicate inline comments and break the resolve-on-fix flow (only
+    # whichever duplicate id we'd cache last would resolve later).
+    unpublished_findings = [
+        f for f in findings if not isinstance(f.get("github_review_comment_id"), int)
+    ]
+    open_unpublished = [f for f in unpublished_findings if f.get("status", "open") == "open"]
+    eligible = filter_findings_for_publish(
+        unpublished_findings, severity_threshold=severity_threshold, cap=cap
+    )
 
     inline_comments: list[dict[str, Any]] = []
     eligible_with_payload: list[tuple[dict[str, Any], dict[str, Any]]] = []
@@ -136,7 +145,7 @@ async def _publish_review_async(
     review_body = render_review_body(
         pr_number=pr_number,
         surfaced_count=len(inline_comments),
-        total_open_count=len(open_findings),
+        total_open_count=len(open_unpublished),
         severity_threshold=severity_threshold,
         summary=summary,
     )
@@ -158,7 +167,11 @@ async def _publish_review_async(
 
     if review_id is not None and inline_comments:
         comment_records = await fetch_review_comments(
-            owner=owner, repo=repo, review_id=review_id, token=token
+            owner=owner,
+            repo=repo,
+            pr_number=pr_number,
+            review_id=review_id,
+            token=token,
         )
         await _store_comment_ids_on_findings(
             thread_id=thread_id,
@@ -181,7 +194,7 @@ async def _publish_review_async(
         "success": True,
         "review_id": review_id,
         "surfaced_count": len(inline_comments),
-        "hidden_count": max(len(open_findings) - len(inline_comments), 0),
+        "hidden_count": max(len(open_unpublished) - len(inline_comments), 0),
         "resolved_thread_count": resolved_thread_count,
     }
 
