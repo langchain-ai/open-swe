@@ -6,6 +6,9 @@ from agent import webapp
 from agent.utils.slack import (
     convert_mentions_to_slack_format,
     format_slack_messages_for_prompt,
+    looks_like_slack_pr_review_command,
+    parse_github_pr_url,
+    parse_slack_review_command,
     replace_bot_mention_with_username,
     select_slack_context_messages,
     strip_bot_mention,
@@ -128,6 +131,71 @@ def test_convert_mentions_to_slack_format_no_match() -> None:
 def test_convert_mentions_to_slack_format_preserves_existing_slack_mentions() -> None:
     text = "Already tagged <@U06KD8BFY95> correctly"
     assert convert_mentions_to_slack_format(text) == text
+
+
+def test_parse_github_pr_url_raw_url() -> None:
+    pr_ref = parse_github_pr_url("https://github.com/langchain-ai/open-swe/pull/1244")
+
+    assert pr_ref is not None
+    assert pr_ref.owner == "langchain-ai"
+    assert pr_ref.repo == "open-swe"
+    assert pr_ref.number == 1244
+    assert pr_ref.url == "https://github.com/langchain-ai/open-swe/pull/1244"
+
+
+def test_parse_github_pr_url_slack_formatted_link() -> None:
+    pr_ref = parse_github_pr_url("<https://github.com/langchain-ai/open-swe/pull/1244|PR>")
+
+    assert pr_ref is not None
+    assert pr_ref.owner == "langchain-ai"
+    assert pr_ref.repo == "open-swe"
+    assert pr_ref.number == 1244
+
+
+def test_parse_slack_review_command_requires_exact_review_command() -> None:
+    pr_ref = parse_slack_review_command("review https://github.com/langchain-ai/open-swe/pull/1244")
+
+    assert pr_ref is not None
+    assert pr_ref.owner == "langchain-ai"
+    assert pr_ref.repo == "open-swe"
+    assert pr_ref.number == 1244
+    assert (
+        parse_slack_review_command(
+            "please review https://github.com/langchain-ai/open-swe/pull/1244"
+        )
+        is None
+    )
+    assert (
+        parse_slack_review_command("review https://github.com/langchain-ai/open-swe/issues/1244")
+        is None
+    )
+
+
+def test_parse_slack_review_command_supports_slack_link() -> None:
+    pr_ref = parse_slack_review_command(
+        "review <https://github.com/langchain-ai/open-swe/pull/1244|PR>"
+    )
+
+    assert pr_ref is not None
+    assert pr_ref.url == "https://github.com/langchain-ai/open-swe/pull/1244"
+
+
+def test_parse_slack_review_command_supports_slack_wrapped_raw_link() -> None:
+    pr_ref = parse_slack_review_command(
+        "review <https://github.com/langchain-ai/open-swe/pull/1244>"
+    )
+
+    assert pr_ref is not None
+    assert pr_ref.url == "https://github.com/langchain-ai/open-swe/pull/1244"
+
+
+def test_looks_like_slack_pr_review_command_validates_github_host() -> None:
+    assert looks_like_slack_pr_review_command(
+        "review https://github.com/langchain-ai/open-swe/issues/1244"
+    )
+    assert not looks_like_slack_pr_review_command(
+        "review https://example.com/redirect?next=https://github.com/langchain-ai/open-swe/pull/1244"
+    )
 
 
 def test_format_slack_messages_for_prompt_uses_name_and_id() -> None:

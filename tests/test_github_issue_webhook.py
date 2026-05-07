@@ -3,14 +3,21 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import hmac
+import importlib
 import json
 
 from fastapi.testclient import TestClient
 
 from agent import webapp
+from agent.tools import request_pr_review as request_pr_review_tool
 from agent.utils import github_comments
+from agent.utils import slack as slack_utils
+from agent.utils.slack import GitHubPrRef
+
+request_pr_review_module = importlib.import_module("agent.tools.request_pr_review")
 
 _TEST_WEBHOOK_SECRET = "test-secret-for-webhook"
+_TEST_SLACK_SECRET = "test-slack-secret"
 
 
 def _sign_body(body: bytes, secret: str = _TEST_WEBHOOK_SECRET) -> str:
@@ -28,6 +35,26 @@ def _post_github_webhook(client: TestClient, event_type: str, payload: dict) -> 
         headers={
             "X-GitHub-Event": event_type,
             "X-Hub-Signature-256": _sign_body(body),
+            "Content-Type": "application/json",
+        },
+    )
+
+
+def _sign_slack_body(body: bytes, timestamp: str = "1700000000") -> str:
+    base_string = f"v0:{timestamp}:{body.decode()}"
+    sig = hmac.new(_TEST_SLACK_SECRET.encode(), base_string.encode(), hashlib.sha256).hexdigest()
+    return f"v0={sig}"
+
+
+def _post_slack_webhook(client: TestClient, payload: dict) -> object:
+    body = json.dumps(payload, separators=(",", ":")).encode()
+    timestamp = "1700000000"
+    return client.post(
+        "/webhooks/slack",
+        content=body,
+        headers={
+            "X-Slack-Request-Timestamp": timestamp,
+            "X-Slack-Signature": _sign_slack_body(body, timestamp),
             "Content-Type": "application/json",
         },
     )
@@ -302,6 +329,188 @@ def test_github_webhook_ignores_review_requested_for_other_reviewer(monkeypatch)
     assert called is False
 
 
+def test_slack_webhook_routes_review_command_to_reviewer(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    async def fake_process_slack_pr_review_request(
+        pr_ref: GitHubPrRef, channel_id: str, thread_ts: str
+    ) -> None:
+        captured["pr_ref"] = pr_ref
+        captured["channel_id"] = channel_id
+        captured["thread_ts"] = thread_ts
+
+    monkeypatch.setattr(webapp, "SLACK_SIGNING_SECRET", _TEST_SLACK_SECRET)
+    monkeypatch.setattr(webapp, "SLACK_BOT_USER_ID", "UBOT")
+    monkeypatch.setattr(webapp, "SLACK_BOT_USERNAME", "open-swe")
+    monkeypatch.setattr(slack_utils.time, "time", lambda: 1700000000)
+    monkeypatch.setattr(webapp, "ALLOWED_REVIEWER_GITHUB_REPOS", frozenset())
+    monkeypatch.setattr(webapp, "ALLOWED_REVIEWER_GITHUB_ORGS", frozenset())
+    monkeypatch.setattr(
+        webapp, "process_slack_pr_review_request", fake_process_slack_pr_review_request
+    )
+
+    client = TestClient(webapp.app)
+    response = _post_slack_webhook(
+        client,
+        {
+            "type": "event_callback",
+            "event": {
+                "type": "app_mention",
+                "channel": "C123",
+                "ts": "1700000000.000100",
+                "user": "U123",
+                "text": "<@UBOT> review https://github.com/langchain-ai/open-swe/pull/1244",
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["message"] == "Slack PR review request queued"
+    pr_ref = captured["pr_ref"]
+    assert isinstance(pr_ref, GitHubPrRef)
+    assert pr_ref.owner == "langchain-ai"
+    assert pr_ref.repo == "open-swe"
+    assert pr_ref.number == 1244
+    assert captured["channel_id"] == "C123"
+    assert captured["thread_ts"] == "1700000000.000100"
+
+
+def test_slack_webhook_malformed_review_command_does_not_start_agent(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    async def fake_process_slack_mention(*args, **kwargs) -> None:
+        captured["agent_started"] = True
+
+    async def fake_post_slack_thread_reply(channel_id: str, thread_ts: str, text: str) -> bool:
+        captured["reply"] = text
+        return True
+
+    monkeypatch.setattr(webapp, "SLACK_SIGNING_SECRET", _TEST_SLACK_SECRET)
+    monkeypatch.setattr(webapp, "SLACK_BOT_USER_ID", "UBOT")
+    monkeypatch.setattr(webapp, "SLACK_BOT_USERNAME", "open-swe")
+    monkeypatch.setattr(slack_utils.time, "time", lambda: 1700000000)
+    monkeypatch.setattr(webapp, "process_slack_mention", fake_process_slack_mention)
+    monkeypatch.setattr(webapp, "post_slack_thread_reply", fake_post_slack_thread_reply)
+
+    client = TestClient(webapp.app)
+    response = _post_slack_webhook(
+        client,
+        {
+            "type": "event_callback",
+            "event": {
+                "type": "app_mention",
+                "channel": "C123",
+                "ts": "1700000000.000100",
+                "user": "U123",
+                "text": "<@UBOT> review https://github.com/langchain-ai/open-swe/issues/1244",
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["reason"] == "Malformed Slack PR review command"
+    assert "agent_started" not in captured
+    assert "OWNER/REPO/pull/NUMBER" in captured["reply"]
+
+
+def test_slack_webhook_non_pr_review_request_starts_agent(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    async def fake_get_slack_repo_config(
+        text: str, channel_id: str, thread_ts: str
+    ) -> dict[str, str]:
+        captured["repo_config_request"] = {
+            "text": text,
+            "channel_id": channel_id,
+            "thread_ts": thread_ts,
+        }
+        return {"owner": "langchain-ai", "name": "open-swe"}
+
+    async def fake_process_slack_mention(
+        event_data: dict[str, object], repo_config: dict[str, str]
+    ) -> None:
+        captured["event_data"] = event_data
+        captured["repo_config"] = repo_config
+
+    monkeypatch.setattr(webapp, "SLACK_SIGNING_SECRET", _TEST_SLACK_SECRET)
+    monkeypatch.setattr(webapp, "SLACK_BOT_USER_ID", "UBOT")
+    monkeypatch.setattr(webapp, "SLACK_BOT_USERNAME", "open-swe")
+    monkeypatch.setattr(slack_utils.time, "time", lambda: 1700000000)
+    monkeypatch.setattr(webapp, "get_slack_repo_config", fake_get_slack_repo_config)
+    monkeypatch.setattr(webapp, "process_slack_mention", fake_process_slack_mention)
+
+    client = TestClient(webapp.app)
+    response = _post_slack_webhook(
+        client,
+        {
+            "type": "event_callback",
+            "event": {
+                "type": "app_mention",
+                "channel": "C123",
+                "ts": "1700000000.000100",
+                "user": "U123",
+                "text": "<@UBOT> review this branch",
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["message"] == "Slack mention queued"
+    assert captured["repo_config"] == {"owner": "langchain-ai", "name": "open-swe"}
+    event_data = captured["event_data"]
+    assert isinstance(event_data, dict)
+    assert event_data["text"] == "<@UBOT> review this branch"
+
+
+def test_process_slack_pr_review_request_posts_trace_reply(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    async def fake_trigger_pr_review_from_ref(
+        pr_ref: GitHubPrRef,
+        *,
+        source: str,
+        github_login: str = "",
+        github_user_id: int | None = None,
+    ) -> dict[str, object]:
+        captured["pr_ref"] = pr_ref
+        captured["source"] = source
+        return {"success": True, "thread_id": "reviewer-thread-id", "pr_url": pr_ref.url}
+
+    async def fake_post_slack_trace_reply(
+        channel_id: str, thread_ts: str, thread_id: str, message: str = "Working on it!"
+    ) -> None:
+        captured["trace_reply"] = {
+            "channel_id": channel_id,
+            "thread_ts": thread_ts,
+            "thread_id": thread_id,
+            "message": message,
+        }
+
+    monkeypatch.setattr(webapp, "trigger_pr_review_from_ref", fake_trigger_pr_review_from_ref)
+    monkeypatch.setattr(webapp, "post_slack_trace_reply", fake_post_slack_trace_reply)
+
+    asyncio.run(
+        webapp.process_slack_pr_review_request(
+            GitHubPrRef(
+                owner="langchain-ai",
+                repo="open-swe",
+                number=1244,
+                url="https://github.com/langchain-ai/open-swe/pull/1244",
+            ),
+            "C123",
+            "1700000000.000100",
+        )
+    )
+
+    assert captured["source"] == "slack"
+    assert captured["trace_reply"] == {
+        "channel_id": "C123",
+        "thread_ts": "1700000000.000100",
+        "thread_id": "reviewer-thread-id",
+        "message": "Taking a look...",
+    }
+
+
 def test_process_github_pr_review_request_creates_reviewer_run(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
@@ -323,8 +532,13 @@ def test_process_github_pr_review_request_creates_reviewer_run(monkeypatch) -> N
             captured["graph"] = graph
             captured["kwargs"] = kwargs
 
+    class _FakeThreadsClient:
+        async def create(self, **kwargs) -> None:
+            captured["thread_create_kwargs"] = kwargs
+
     class _FakeLangGraphClient:
         runs = _FakeRunsClient()
+        threads = _FakeThreadsClient()
 
     monkeypatch.setattr(
         webapp, "get_github_app_installation_token", fake_get_github_app_installation_token
@@ -357,6 +571,10 @@ def test_process_github_pr_review_request_creates_reviewer_run(monkeypatch) -> N
     config = kwargs["config"]["configurable"]
 
     assert captured["graph"] == "reviewer"
+    assert captured["thread_create_kwargs"] == {
+        "thread_id": captured["thread_id"],
+        "if_exists": "do_nothing",
+    }
     assert captured["persist_token"] == "app-token"
     assert captured["persist_thread_id"] == captured["thread_id"]
     assert "https://github.com/langchain-ai/open-swe/pull/1244" in prompt
@@ -366,6 +584,147 @@ def test_process_github_pr_review_request_creates_reviewer_run(monkeypatch) -> N
     assert config["repo"] == {"owner": "langchain-ai", "name": "open-swe"}
     assert config["pr_number"] == 1244
     assert config["review_requested"] is True
+
+
+def test_trigger_pr_review_from_ref_creates_reviewer_run(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    async def fake_get_github_app_installation_token() -> str | None:
+        return "app-token"
+
+    async def fake_fetch_github_pr_metadata(
+        pr_ref: GitHubPrRef, *, token: str
+    ) -> dict[str, object]:
+        captured["metadata_token"] = token
+        return {
+            "html_url": pr_ref.url,
+            "base": {"sha": "base-sha"},
+            "head": {"sha": "head-sha", "ref": "feature-branch"},
+        }
+
+    async def fake_persist_encrypted_github_token(thread_id: str, token: str) -> str:
+        captured["persist_thread_id"] = thread_id
+        captured["persist_token"] = token
+        return "encrypted-token"
+
+    async def fake_is_thread_active(thread_id: str) -> bool:
+        captured["active_thread_id"] = thread_id
+        return False
+
+    class _FakeRunsClient:
+        async def create(self, thread_id: str, graph: str, **kwargs) -> None:
+            captured["thread_id"] = thread_id
+            captured["graph"] = graph
+            captured["kwargs"] = kwargs
+
+    class _FakeThreadsClient:
+        async def create(self, **kwargs) -> None:
+            captured["thread_create_kwargs"] = kwargs
+
+    class _FakeLangGraphClient:
+        runs = _FakeRunsClient()
+        threads = _FakeThreadsClient()
+
+    monkeypatch.setattr(
+        webapp, "get_github_app_installation_token", fake_get_github_app_installation_token
+    )
+    monkeypatch.setattr(webapp, "fetch_github_pr_metadata", fake_fetch_github_pr_metadata)
+    monkeypatch.setattr(
+        webapp, "persist_encrypted_github_token", fake_persist_encrypted_github_token
+    )
+    monkeypatch.setattr(webapp, "is_thread_active", fake_is_thread_active)
+    monkeypatch.setattr(webapp, "get_client", lambda url: _FakeLangGraphClient())
+    monkeypatch.setattr(webapp, "ALLOWED_REVIEWER_GITHUB_REPOS", frozenset())
+    monkeypatch.setattr(webapp, "ALLOWED_REVIEWER_GITHUB_ORGS", frozenset())
+
+    result = asyncio.run(
+        webapp.trigger_pr_review_from_ref(
+            GitHubPrRef(
+                owner="langchain-ai",
+                repo="open-swe",
+                number=1244,
+                url="https://github.com/langchain-ai/open-swe/pull/1244",
+            ),
+            source="slack",
+        )
+    )
+
+    kwargs = captured["kwargs"]
+    prompt = kwargs["input"]["messages"][0]["content"]
+    config = kwargs["config"]["configurable"]
+    assert result["success"] is True
+    assert captured["graph"] == "reviewer"
+    assert captured["thread_create_kwargs"] == {
+        "thread_id": captured["thread_id"],
+        "if_exists": "do_nothing",
+    }
+    assert captured["metadata_token"] == "app-token"
+    assert captured["persist_token"] == "app-token"
+    assert "Base SHA: base-sha" in prompt
+    assert "Head SHA: head-sha" in prompt
+    assert config["source"] == "slack"
+    assert config["repo"] == {"owner": "langchain-ai", "name": "open-swe"}
+    assert config["pr_number"] == 1244
+    assert config["review_requested"] is True
+
+
+def test_trigger_pr_review_from_ref_respects_reviewer_allowlist(monkeypatch) -> None:
+    called = False
+
+    async def fake_get_github_app_installation_token() -> str | None:
+        nonlocal called
+        called = True
+        return "app-token"
+
+    monkeypatch.setattr(
+        webapp, "get_github_app_installation_token", fake_get_github_app_installation_token
+    )
+    monkeypatch.setattr(
+        webapp, "ALLOWED_REVIEWER_GITHUB_REPOS", frozenset({"langchain-ai/open-swe"})
+    )
+    monkeypatch.setattr(webapp, "ALLOWED_REVIEWER_GITHUB_ORGS", frozenset())
+
+    result = asyncio.run(
+        webapp.trigger_pr_review_from_ref(
+            GitHubPrRef(
+                owner="langchain-ai",
+                repo="blocked",
+                number=1,
+                url="https://github.com/langchain-ai/blocked/pull/1",
+            ),
+            source="slack",
+        )
+    )
+
+    assert result == {"success": False, "error": "Repository not allowed for reviewer"}
+    assert called is False
+
+
+def test_request_pr_review_tool_uses_shared_trigger(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    async def fake_trigger_pr_review_from_ref(
+        pr_ref: GitHubPrRef,
+        *,
+        source: str,
+        github_login: str = "",
+        github_user_id: int | None = None,
+    ) -> dict[str, object]:
+        captured["pr_ref"] = pr_ref
+        captured["source"] = source
+        return {"success": True, "thread_id": "thread-id"}
+
+    monkeypatch.setattr(
+        request_pr_review_module, "trigger_pr_review_from_ref", fake_trigger_pr_review_from_ref
+    )
+
+    result = request_pr_review_tool("https://github.com/langchain-ai/open-swe/pull/1244")
+
+    pr_ref = captured["pr_ref"]
+    assert isinstance(pr_ref, GitHubPrRef)
+    assert pr_ref.number == 1244
+    assert captured["source"] == "slack"
+    assert result["success"] is True
 
 
 def test_process_github_issue_uses_resolved_user_token_for_reaction(monkeypatch) -> None:
