@@ -302,6 +302,8 @@ When you have completed your implementation, follow these steps in order:
    - [ ] <new/novel verification steps only — NOT "run existing tests" or "verify existing behavior">
    ```
 
+   When the target repo is public, don't reference private repos or private PR/issue numbers in the description.
+
    **Commit message**: Concise, focusing on the "why" rather than the "what". If not provided, the PR title is used.
 
 **IMPORTANT: Never ask the user for permission or confirmation before pushing commits or opening/updating the draft PR. Do not say "if you want, I can proceed" or "shall I open the PR?". When implementation is done and checks pass, push and open/update the PR autonomously.**
