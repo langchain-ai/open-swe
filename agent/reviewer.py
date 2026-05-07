@@ -38,6 +38,7 @@ from .server import (
     graph_loaded_for_execution,
 )
 from .utils.auth import resolve_github_token
+from .utils.github_token import get_github_token_from_thread
 from .utils.model import ModelKwargs, make_model
 from .utils.sandbox_paths import aresolve_sandbox_work_dir
 
@@ -108,9 +109,14 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
         return create_deep_agent(system_prompt="", tools=[]).with_config(config)
 
     if config["configurable"].get("source"):
-        _token, new_encrypted = await resolve_github_token(config, thread_id)
-        config["metadata"]["github_token_encrypted"] = new_encrypted
-        del _token
+        cached_token, cached_encrypted = await get_github_token_from_thread(thread_id)
+        if cached_token and cached_encrypted:
+            config["metadata"]["github_token_encrypted"] = cached_encrypted
+            del cached_token
+        else:
+            _token, new_encrypted = await resolve_github_token(config, thread_id)
+            config["metadata"]["github_token_encrypted"] = new_encrypted
+            del _token
 
     sandbox_backend = await ensure_sandbox_for_thread(thread_id)
 
