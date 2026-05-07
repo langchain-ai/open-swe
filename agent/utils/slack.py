@@ -607,6 +607,7 @@ TRACE_REPLY_PHRASES: tuple[str, ...] = (
     "Spinning up...",
     "Looking...",
     "Time to cook. 🧑‍🍳",
+    "Running to the roar!",
 )
 
 
