@@ -733,7 +733,7 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
 
 
 async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[str, str]) -> None:
-    """Process a Slack app mention by creating or interrupting a thread run."""
+    """Process a Slack app mention by creating a run or queuing a mid-run message."""
     channel_id = event_data.get("channel_id", "")
     thread_ts = event_data.get("thread_ts", "")
     event_ts = event_data.get("event_ts", "")
@@ -871,7 +871,7 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
             "Thread %s is active, queuing Slack message for middleware pickup",
             thread_id,
         )
-        queued_payload = {"text": prompt, "image_urls": []}
+        queued_payload = {"text": prompt, "image_urls": image_urls}
         queued = await queue_message_for_thread(
             thread_id=thread_id,
             message_content=queued_payload,
@@ -889,7 +889,6 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
         input={"messages": [{"role": "user", "content": content_blocks}]},
         config={"configurable": configurable, "metadata": _AGENT_VERSION_METADATA},
         if_not_exists="create",
-        multitask_strategy="enqueue",
     )
     logger.info(
         "Slack LangGraph run %s created for thread %s",
