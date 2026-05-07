@@ -50,6 +50,7 @@ from .utils.slack import (
     format_slack_messages_for_prompt,
     get_slack_user_info,
     get_slack_user_names,
+    looks_like_slack_pr_review_command,
     parse_slack_review_command,
     post_slack_thread_reply,
     post_slack_trace_reply,
@@ -440,6 +441,17 @@ async def _thread_exists(thread_id: str) -> bool:
             return False
         logger.warning("Failed to fetch thread %s, assuming it exists", thread_id)
         return True
+
+
+async def _ensure_thread_exists_for_metadata(
+    thread_id: str, langgraph_client: LangGraphClient
+) -> bool:
+    try:
+        await langgraph_client.threads.create(thread_id=thread_id, if_exists="do_nothing")
+        return True
+    except Exception:
+        logger.exception("Failed to ensure thread %s exists before metadata update", thread_id)
+        return False
 
 
 async def queue_message_for_thread(
@@ -1126,7 +1138,7 @@ async def slack_webhook(request: Request, background_tasks: BackgroundTasks) -> 
         background_tasks.add_task(process_slack_pr_review_request, pr_ref, channel_id, thread_ts)
         return {"status": "accepted", "message": "Slack PR review request queued"}
 
-    if clean_text.strip().lower().startswith("review"):
+    if looks_like_slack_pr_review_command(clean_text):
         background_tasks.add_task(
             post_slack_thread_reply,
             channel_id,
@@ -1363,6 +1375,10 @@ async def trigger_pr_review_from_ref(
         return {"success": False, "error": "Pull request metadata is missing base/head SHA"}
 
     thread_id = generate_reviewer_thread_id(pr_ref.owner, pr_ref.repo, pr_ref.number)
+    langgraph_client = get_client(url=LANGGRAPH_URL)
+    if not await _ensure_thread_exists_for_metadata(thread_id, langgraph_client):
+        return {"success": False, "error": "Could not create reviewer thread"}
+
     try:
         await persist_encrypted_github_token(thread_id, app_token)
     except Exception:
@@ -1388,7 +1404,6 @@ async def trigger_pr_review_from_ref(
         return {"success": queued, "queued": queued, "thread_id": thread_id, "pr_url": pr_url}
 
     logger.info("Creating reviewer run for thread %s from %s PR review request", thread_id, source)
-    langgraph_client = get_client(url=LANGGRAPH_URL)
     await langgraph_client.runs.create(
         thread_id,
         "reviewer",
@@ -1428,6 +1443,10 @@ async def process_github_pr_review_request(payload: dict[str, Any]) -> None:
         logger.warning("No GitHub App token available for PR reviewer request")
         return
 
+    langgraph_client = get_client(url=LANGGRAPH_URL)
+    if not await _ensure_thread_exists_for_metadata(thread_id, langgraph_client):
+        return
+
     try:
         await persist_encrypted_github_token(thread_id, app_token)
     except Exception:
@@ -1454,7 +1473,6 @@ async def process_github_pr_review_request(payload: dict[str, Any]) -> None:
         return
 
     logger.info("Creating reviewer run for thread %s from GitHub PR review request", thread_id)
-    langgraph_client = get_client(url=LANGGRAPH_URL)
     await langgraph_client.runs.create(
         thread_id,
         "reviewer",

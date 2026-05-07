@@ -165,10 +165,17 @@ def parse_slack_review_command(text: str) -> GitHubPrRef | None:
         return None
 
     trailing_text = rest[url_match.end() :].strip()
-    if trailing_text and not trailing_text.startswith("|"):
+    if trailing_text and trailing_text != ">" and not trailing_text.startswith("|"):
         return None
 
     return parse_github_pr_url(url_match.group(0))
+
+
+def looks_like_slack_pr_review_command(text: str) -> bool:
+    stripped = text.strip()
+    if not re.match(r"(?is)^review\b", stripped):
+        return False
+    return "github.com" in stripped.lower() or "/pull/" in stripped.lower()
 
 
 def select_slack_context_messages(

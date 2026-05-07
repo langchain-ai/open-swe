@@ -402,7 +402,7 @@ def test_slack_webhook_malformed_review_command_does_not_start_agent(monkeypatch
                 "channel": "C123",
                 "ts": "1700000000.000100",
                 "user": "U123",
-                "text": "<@UBOT> review not-a-pr",
+                "text": "<@UBOT> review https://github.com/langchain-ai/open-swe/issues/1244",
             },
         },
     )
@@ -411,6 +411,55 @@ def test_slack_webhook_malformed_review_command_does_not_start_agent(monkeypatch
     assert response.json()["reason"] == "Malformed Slack PR review command"
     assert "agent_started" not in captured
     assert "OWNER/REPO/pull/NUMBER" in captured["reply"]
+
+
+def test_slack_webhook_non_pr_review_request_starts_agent(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    async def fake_get_slack_repo_config(
+        text: str, channel_id: str, thread_ts: str
+    ) -> dict[str, str]:
+        captured["repo_config_request"] = {
+            "text": text,
+            "channel_id": channel_id,
+            "thread_ts": thread_ts,
+        }
+        return {"owner": "langchain-ai", "name": "open-swe"}
+
+    async def fake_process_slack_mention(
+        event_data: dict[str, object], repo_config: dict[str, str]
+    ) -> None:
+        captured["event_data"] = event_data
+        captured["repo_config"] = repo_config
+
+    monkeypatch.setattr(webapp, "SLACK_SIGNING_SECRET", _TEST_SLACK_SECRET)
+    monkeypatch.setattr(webapp, "SLACK_BOT_USER_ID", "UBOT")
+    monkeypatch.setattr(webapp, "SLACK_BOT_USERNAME", "open-swe")
+    monkeypatch.setattr(slack_utils.time, "time", lambda: 1700000000)
+    monkeypatch.setattr(webapp, "get_slack_repo_config", fake_get_slack_repo_config)
+    monkeypatch.setattr(webapp, "process_slack_mention", fake_process_slack_mention)
+
+    client = TestClient(webapp.app)
+    response = _post_slack_webhook(
+        client,
+        {
+            "type": "event_callback",
+            "event": {
+                "type": "app_mention",
+                "channel": "C123",
+                "ts": "1700000000.000100",
+                "user": "U123",
+                "text": "<@UBOT> review this branch",
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["message"] == "Slack mention queued"
+    assert captured["repo_config"] == {"owner": "langchain-ai", "name": "open-swe"}
+    event_data = captured["event_data"]
+    assert isinstance(event_data, dict)
+    assert event_data["text"] == "<@UBOT> review this branch"
 
 
 def test_process_slack_pr_review_request_posts_trace_reply(monkeypatch) -> None:
@@ -483,8 +532,13 @@ def test_process_github_pr_review_request_creates_reviewer_run(monkeypatch) -> N
             captured["graph"] = graph
             captured["kwargs"] = kwargs
 
+    class _FakeThreadsClient:
+        async def create(self, **kwargs) -> None:
+            captured["thread_create_kwargs"] = kwargs
+
     class _FakeLangGraphClient:
         runs = _FakeRunsClient()
+        threads = _FakeThreadsClient()
 
     monkeypatch.setattr(
         webapp, "get_github_app_installation_token", fake_get_github_app_installation_token
@@ -517,6 +571,10 @@ def test_process_github_pr_review_request_creates_reviewer_run(monkeypatch) -> N
     config = kwargs["config"]["configurable"]
 
     assert captured["graph"] == "reviewer"
+    assert captured["thread_create_kwargs"] == {
+        "thread_id": captured["thread_id"],
+        "if_exists": "do_nothing",
+    }
     assert captured["persist_token"] == "app-token"
     assert captured["persist_thread_id"] == captured["thread_id"]
     assert "https://github.com/langchain-ai/open-swe/pull/1244" in prompt
@@ -559,8 +617,13 @@ def test_trigger_pr_review_from_ref_creates_reviewer_run(monkeypatch) -> None:
             captured["graph"] = graph
             captured["kwargs"] = kwargs
 
+    class _FakeThreadsClient:
+        async def create(self, **kwargs) -> None:
+            captured["thread_create_kwargs"] = kwargs
+
     class _FakeLangGraphClient:
         runs = _FakeRunsClient()
+        threads = _FakeThreadsClient()
 
     monkeypatch.setattr(
         webapp, "get_github_app_installation_token", fake_get_github_app_installation_token
@@ -591,6 +654,10 @@ def test_trigger_pr_review_from_ref_creates_reviewer_run(monkeypatch) -> None:
     config = kwargs["config"]["configurable"]
     assert result["success"] is True
     assert captured["graph"] == "reviewer"
+    assert captured["thread_create_kwargs"] == {
+        "thread_id": captured["thread_id"],
+        "if_exists": "do_nothing",
+    }
     assert captured["metadata_token"] == "app-token"
     assert captured["persist_token"] == "app-token"
     assert "Base SHA: base-sha" in prompt

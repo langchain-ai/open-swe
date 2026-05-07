@@ -179,6 +179,15 @@ def test_parse_slack_review_command_supports_slack_link() -> None:
     assert pr_ref.url == "https://github.com/langchain-ai/open-swe/pull/1244"
 
 
+def test_parse_slack_review_command_supports_slack_wrapped_raw_link() -> None:
+    pr_ref = parse_slack_review_command(
+        "review <https://github.com/langchain-ai/open-swe/pull/1244>"
+    )
+
+    assert pr_ref is not None
+    assert pr_ref.url == "https://github.com/langchain-ai/open-swe/pull/1244"
+
+
 def test_format_slack_messages_for_prompt_uses_name_and_id() -> None:
     formatted = format_slack_messages_for_prompt(
         [{"ts": "1.0", "text": "hello", "user": "U123"}],
