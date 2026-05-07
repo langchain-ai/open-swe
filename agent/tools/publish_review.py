@@ -31,7 +31,7 @@ from ..utils.github_token import get_github_token
 def publish_review(
     summary: str | None = None,
     severity_threshold: str = "medium",
-    cap: int = 15,
+    cap: int = 4,
 ) -> dict[str, Any]:
     """Post all current findings to the PR as a GitHub Review.
 
@@ -59,7 +59,7 @@ def publish_review(
         severity_threshold: Lowest severity to surface to GitHub (default
             ``medium``). Lower-severity findings stay in state and surface in
             the future UI but not on the PR.
-        cap: Maximum number of inline comments to publish (default 15).
+        cap: Maximum number of inline comments to publish (default 4).
 
     Returns:
         Dictionary with ``success``, ``review_id``, ``surfaced_count``,

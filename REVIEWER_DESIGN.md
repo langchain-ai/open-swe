@@ -85,7 +85,7 @@ Findings with a `suggestion` get the suggestion appended to the comment body as 
 
 Severity ladder (matching Devin Review): `informational` < `low` < `medium` < `high` < `critical`. `informational` is for purely contextual / FYI observations (e.g. "this codebase uses pattern X elsewhere") — not flaws. It still supports suggestions; the agent can use it for stylistic nudges that aren't actually wrong.
 
-Severity-threshold filter (not pure top-K): publish all findings with severity ≥ `medium` by default, with a hard cap (e.g. 15) to avoid review spam. Pure top-K means a clean PR with one critical issue gets four filler findings appended — bad UX. `informational` and `low` findings are produced into state and visible in the eventual UI / full list, but not surfaced to the GitHub PR by default.
+Severity-threshold filter (not pure top-K): publish all findings with severity ≥ `medium` by default, with a hard cap of 4 to avoid review spam. Pure top-K means a clean PR with one critical issue gets four filler findings appended — bad UX. `informational` and `low` findings are produced into state and visible in the eventual UI / full list, but not surfaced to the GitHub PR by default.
 
 **Mechanism: a `publish_review` tool the agent calls deliberately** at the end of its run. Why a tool, not after-agent middleware:
 
@@ -197,7 +197,7 @@ reviewer_graph:
 
 ## Open questions
 
-1. **Severity threshold for default surfacing.** Default to `medium`+? `high`+? Worth tuning against the eval set. Independent of the cap (e.g. 15 max). `informational` is always below the threshold by design — it's a UI-only tier.
+1. **Severity threshold for default surfacing.** Default to `medium`+? `high`+? Worth tuning against the eval set. Independent of the cap (currently 4). `informational` is always below the threshold by design — it's a UI-only tier.
 2. **Pre-existing-bug findings.** Drop entirely from the review (clean), or surface in the review body for `high`/`critical` only (more complete)? Currently leaning drop, with a system prompt instruction telling the agent not to report them in the first place.
 3. **Findings dedup across runs.** When the agent calls `add_finding` on a re-review, do we trust it not to duplicate, or do we do server-side dedup based on (file, line, category, description-similarity)? Probably trust the agent for now (it sees existing findings in the prompt) and add server-side dedup only if we observe duplicates in eval.
 4. **Updated-but-not-resolved findings on re-review.** When a finding stays open but the agent revises its suggestion (e.g. new commits made the original fix obsolete but the issue stands), do we leave the existing GitHub thread alone, post a follow-up reply, or close + repost? Leaning leave-alone for v1.

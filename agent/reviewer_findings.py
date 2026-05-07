@@ -249,7 +249,7 @@ def filter_findings_for_publish(
     findings: list[Finding],
     *,
     severity_threshold: Severity = "medium",
-    cap: int = 15,
+    cap: int = 4,
 ) -> list[Finding]:
     """Return findings to surface to GitHub.
 
