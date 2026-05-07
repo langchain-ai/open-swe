@@ -663,6 +663,9 @@ def test_process_github_pr_review_request_creates_reviewer_run(monkeypatch) -> N
         runs = _FakeRunsClient()
         threads = _FakeThreadsClient()
 
+    async def fake_set_reviewer_thread_metadata(thread_id: str, **_kwargs: object) -> None:
+        captured["set_metadata_thread_id"] = thread_id
+
     monkeypatch.setattr(
         webapp, "get_github_app_installation_token", fake_get_github_app_installation_token
     )
@@ -670,6 +673,7 @@ def test_process_github_pr_review_request_creates_reviewer_run(monkeypatch) -> N
         webapp, "persist_encrypted_github_token", fake_persist_encrypted_github_token
     )
     monkeypatch.setattr(webapp, "is_thread_active", fake_is_thread_active)
+    monkeypatch.setattr(webapp, "set_reviewer_thread_metadata", fake_set_reviewer_thread_metadata)
     monkeypatch.setattr(webapp, "get_client", lambda url: _FakeLangGraphClient())
 
     asyncio.run(
@@ -680,7 +684,7 @@ def test_process_github_pr_review_request_creates_reviewer_run(monkeypatch) -> N
                 "pull_request": {
                     "number": 1244,
                     "html_url": "https://github.com/langchain-ai/open-swe/pull/1244",
-                    "base": {"sha": "base-sha"},
+                    "base": {"sha": "base-sha", "ref": "main"},
                     "head": {"sha": "head-sha", "ref": "feature-branch"},
                 },
                 "repository": {"owner": {"login": "langchain-ai"}, "name": "open-swe"},
@@ -748,6 +752,9 @@ def test_trigger_pr_review_from_ref_creates_reviewer_run(monkeypatch) -> None:
         runs = _FakeRunsClient()
         threads = _FakeThreadsClient()
 
+    async def fake_set_reviewer_thread_metadata(thread_id: str, **_kwargs: object) -> None:
+        captured["set_metadata_thread_id"] = thread_id
+
     monkeypatch.setattr(
         webapp, "get_github_app_installation_token", fake_get_github_app_installation_token
     )
@@ -756,6 +763,7 @@ def test_trigger_pr_review_from_ref_creates_reviewer_run(monkeypatch) -> None:
         webapp, "persist_encrypted_github_token", fake_persist_encrypted_github_token
     )
     monkeypatch.setattr(webapp, "is_thread_active", fake_is_thread_active)
+    monkeypatch.setattr(webapp, "set_reviewer_thread_metadata", fake_set_reviewer_thread_metadata)
     monkeypatch.setattr(webapp, "get_client", lambda url: _FakeLangGraphClient())
     monkeypatch.setattr(webapp, "ALLOWED_REVIEWER_GITHUB_REPOS", frozenset())
     monkeypatch.setattr(webapp, "ALLOWED_REVIEWER_GITHUB_ORGS", frozenset())

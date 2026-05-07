@@ -1,0 +1,77 @@
+"""Unit tests for the unified-diff parsing helpers."""
+
+from __future__ import annotations
+
+import pytest
+
+from agent.reviewer_diff import (
+    compute_diff_line_set,
+    extract_diff_hunk,
+    is_range_in_diff,
+    parse_unified_diff,
+)
+
+_TWO_FILE_DIFF = """diff --git a/foo.py b/foo.py
+index 1111111..2222222 100644
+--- a/foo.py
++++ b/foo.py
+@@ -10,3 +10,4 @@ def existing():
+     pass
++    new_line_13 = 1
++    new_line_14 = 2
+     return 1
+diff --git a/bar.py b/bar.py
+index 3333333..4444444 100644
+--- a/bar.py
++++ b/bar.py
+@@ -1,2 +1,3 @@
+ import os
++import sys
+ print(os.getcwd())
+@@ -50,3 +51,4 @@ def other():
+     line_a = 1
++    line_b = 2
+     line_c = 3
+"""
+
+
+def test_parse_unified_diff_extracts_hunks_per_file() -> None:
+    files = parse_unified_diff(_TWO_FILE_DIFF)
+    assert [fd.file for fd in files] == ["foo.py", "bar.py"]
+    assert len(files[0].hunks) == 1
+    assert len(files[1].hunks) == 2
+
+
+def test_compute_diff_line_set_covers_each_hunks_new_lines() -> None:
+    line_set = compute_diff_line_set(_TWO_FILE_DIFF)
+    assert line_set["foo.py"] == {10, 11, 12, 13}
+    assert line_set["bar.py"] == {1, 2, 3, 51, 52, 53, 54}
+
+
+def test_is_range_in_diff_for_inline_and_file_level() -> None:
+    line_set = compute_diff_line_set(_TWO_FILE_DIFF)
+    assert is_range_in_diff(line_set, "foo.py", 11, 12) is True
+    assert is_range_in_diff(line_set, "foo.py", 11, 99) is False
+    assert is_range_in_diff(line_set, "missing.py", 1, 1) is False
+    assert is_range_in_diff(line_set, "foo.py", None, None) is True
+
+
+def test_extract_diff_hunk_returns_overlapping_hunk_body() -> None:
+    hunk = extract_diff_hunk(_TWO_FILE_DIFF, "bar.py", 51, 52)
+    assert hunk is not None
+    assert "@@ -50,3 +51,4 @@" in hunk
+    assert "line_b" in hunk
+
+
+def test_extract_diff_hunk_returns_none_for_unknown_file() -> None:
+    assert extract_diff_hunk(_TWO_FILE_DIFF, "unknown.py", 1, 1) is None
+
+
+@pytest.mark.parametrize(
+    ("start", "end"),
+    [(1, 1), (1, 3)],
+)
+def test_extract_diff_hunk_supports_single_line_and_range(start: int, end: int) -> None:
+    hunk = extract_diff_hunk(_TWO_FILE_DIFF, "bar.py", start, end)
+    assert hunk is not None
+    assert "import sys" in hunk
