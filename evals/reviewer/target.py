@@ -1,8 +1,10 @@
 """Target function for the reviewer eval.
 
 Spawns the reviewer graph over `langgraph_sdk` for one PR, waits for
-completion, and returns every `github_comment` tool call the agent made as
-the structured output for the eval.
+completion, and returns every `add_finding` tool call the agent made as the
+structured output for the eval. Findings are normalized into the legacy
+``{file, line, body, severity}`` shape so the judge prompt can stay the
+verbatim form martian published.
 """
 
 from __future__ import annotations
@@ -48,9 +50,23 @@ def _build_user_message(inputs: dict[str, Any]) -> str:
         f"- head_sha: {inputs['head_sha']}\n"
         f"- base_ref: {inputs.get('base_ref', '')}\n"
         f"- head_ref: {inputs.get('head_ref', '')}\n\n"
-        f"Clone the repo, check out the base SHA, fetch the PR head, and review "
-        f"the diff. Record each issue you find with the `github_comment` tool."
+        f"Record each issue you find with the `add_finding` tool, then call "
+        f"`publish_review` once at the end."
     )
+
+
+def _build_configurable(inputs: dict[str, Any]) -> dict[str, Any]:
+    repo = inputs.get("repo", "")
+    owner, _, name = repo.partition("/") if isinstance(repo, str) else ("", "", "")
+    return {
+        "__is_for_execution__": True,
+        "repo": {"owner": owner, "name": name},
+        "pr_number": inputs.get("pr_number"),
+        "pr_url": inputs.get("pr_url", ""),
+        "base_sha": inputs.get("base_sha", ""),
+        "head_sha": inputs.get("head_sha", ""),
+        "branch_name": inputs.get("head_ref", ""),
+    }
 
 
 async def review_pr(inputs: dict[str, Any]) -> dict[str, Any]:
@@ -63,13 +79,18 @@ async def review_pr(inputs: dict[str, Any]) -> dict[str, Any]:
         thread_id,
         assistant_id=REVIEWER_ASSISTANT_ID,
         input={"messages": [{"role": "user", "content": _build_user_message(inputs)}]},
-        config={"configurable": {"__is_for_execution__": True}},
+        config={"configurable": _build_configurable(inputs)},
     )
     return {"comments": _extract_comments(result)}
 
 
 def _extract_comments(result: Any) -> list[dict[str, Any]]:
-    """Collect every `github_comment` tool call from the run's message stream."""
+    """Collect every ``add_finding`` tool call from the run's message stream.
+
+    Normalizes the new finding shape (``start_line``/``end_line``/``description``)
+    into the legacy ``{file, line, body, severity}`` shape the judge prompt
+    consumes verbatim from martian's benchmark.
+    """
     if not isinstance(result, dict):
         return []
     comments: list[dict[str, Any]] = []
@@ -77,16 +98,23 @@ def _extract_comments(result: Any) -> list[dict[str, Any]]:
         if not isinstance(msg, dict):
             continue
         for tc in msg.get("tool_calls") or []:
-            if tc.get("name") != "github_comment":
+            if tc.get("name") != "add_finding":
                 continue
             args = tc.get("args") or {}
-            if {"file", "line", "body", "severity"} <= args.keys():
-                comments.append(
-                    {
-                        "file": args["file"],
-                        "line": args["line"],
-                        "body": args["body"],
-                        "severity": args["severity"],
-                    }
-                )
+            file = args.get("file")
+            severity = args.get("severity")
+            description = args.get("description") or args.get("body") or ""
+            line = args.get("end_line")
+            if line is None:
+                line = args.get("start_line")
+            if not file or not severity:
+                continue
+            comments.append(
+                {
+                    "file": file,
+                    "line": line,
+                    "body": description,
+                    "severity": severity,
+                }
+            )
     return comments

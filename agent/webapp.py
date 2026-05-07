@@ -16,6 +16,11 @@ from langchain_core.messages.content import create_text_block
 from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
 
+from .reviewer_findings import (
+    REVIEWER_THREAD_KIND,
+    ReviewerPRMeta,
+    set_reviewer_thread_metadata,
+)
 from .utils.auth import (
     is_bot_token_only_mode,
     persist_encrypted_github_token,
@@ -1209,10 +1214,11 @@ _SUPPORTED_GH_EVENTS = frozenset(
         "pull_request",
         "pull_request_review_comment",
         "pull_request_review",
+        "push",
     ]
 )
 _SUPPORTED_GH_ISSUE_ACTIONS = frozenset(["edited", "opened", "reopened"])
-_SUPPORTED_GH_PULL_REQUEST_ACTIONS = frozenset(["review_requested"])
+_SUPPORTED_GH_PULL_REQUEST_ACTIONS = frozenset(["review_requested", "closed", "reopened"])
 _SUPPORTED_GH_COMMENT_ACTIONS = {
     "issue_comment": frozenset(["created", "edited"]),
     "pull_request_review_comment": frozenset(["created", "edited"]),
@@ -1395,6 +1401,8 @@ async def trigger_pr_review_from_ref(
     head = pr_metadata.get("head", {})
     head_sha = head.get("sha", "")
     branch_name = head.get("ref", "")
+    base_ref = pr_metadata.get("base", {}).get("ref", "")
+    pr_title = pr_metadata.get("title", "")
     pr_url = pr_metadata.get("html_url", "") or pr_ref.url
     if not base_sha or not head_sha:
         logger.warning("Missing base/head SHA for Slack PR review request")
@@ -1411,17 +1419,29 @@ async def trigger_pr_review_from_ref(
         logger.warning("Could not persist bot token for reviewer thread %s", thread_id)
         return {"success": False, "error": "Could not persist reviewer token"}
 
-    prompt = build_github_pr_review_prompt(repo_config, pr_ref.number, pr_url, base_sha, head_sha)
-    configurable: dict[str, Any] = {
-        "source": source,
-        "github_login": github_login,
-        "github_user_id": github_user_id,
-        "repo": repo_config,
-        "pr_number": pr_ref.number,
-        "review_requested": True,
+    pr_meta: ReviewerPRMeta = {
+        "owner": pr_ref.owner,
+        "name": pr_ref.repo,
+        "number": pr_ref.number,
+        "url": pr_url,
+        "title": pr_title,
+        "head_ref": branch_name,
+        "base_ref": base_ref,
     }
-    if branch_name:
-        configurable["branch_name"] = branch_name
+    await set_reviewer_thread_metadata(thread_id, pr=pr_meta, watch=True)
+
+    prompt = build_github_pr_review_prompt(repo_config, pr_ref.number, pr_url, base_sha, head_sha)
+    configurable = _build_reviewer_configurable(
+        source=source,
+        github_login=github_login,
+        github_user_id=github_user_id,
+        repo_config=repo_config,
+        pr_number=pr_ref.number,
+        pr_url=pr_url,
+        base_sha=base_sha,
+        head_sha=head_sha,
+        branch_name=branch_name,
+    )
 
     thread_active = await is_thread_active(thread_id)
     if thread_active:
@@ -1440,6 +1460,40 @@ async def trigger_pr_review_from_ref(
     return {"success": True, "queued": False, "thread_id": thread_id, "pr_url": pr_url}
 
 
+def _build_reviewer_configurable(
+    *,
+    source: str,
+    github_login: str,
+    github_user_id: int | None,
+    repo_config: dict[str, str],
+    pr_number: int,
+    pr_url: str,
+    base_sha: str,
+    head_sha: str,
+    branch_name: str,
+    re_review: bool = False,
+    last_reviewed_sha: str = "",
+) -> dict[str, Any]:
+    """Assemble the runnable-config ``configurable`` dict for a reviewer run."""
+    configurable: dict[str, Any] = {
+        "source": source,
+        "github_login": github_login,
+        "github_user_id": github_user_id,
+        "repo": repo_config,
+        "pr_number": pr_number,
+        "pr_url": pr_url,
+        "base_sha": base_sha,
+        "head_sha": head_sha,
+        "review_requested": True,
+        "re_review": re_review,
+    }
+    if branch_name:
+        configurable["branch_name"] = branch_name
+    if last_reviewed_sha:
+        configurable["last_reviewed_sha"] = last_reviewed_sha
+    return configurable
+
+
 async def process_github_pr_review_request(payload: dict[str, Any]) -> None:
     """Trigger the reviewer agent when the Open SWE bot is requested on a PR."""
     repo = payload.get("repository", {})
@@ -1451,8 +1505,10 @@ async def process_github_pr_review_request(payload: dict[str, Any]) -> None:
     pr_number = pull_request.get("number")
     pr_url = pull_request.get("html_url", "") or pull_request.get("url", "")
     branch_name = pull_request.get("head", {}).get("ref", "")
+    base_ref = pull_request.get("base", {}).get("ref", "")
     base_sha = pull_request.get("base", {}).get("sha", "")
     head_sha = pull_request.get("head", {}).get("sha", "")
+    pr_title = pull_request.get("title", "")
     github_login = payload.get("sender", {}).get("login", "")
     github_user_id = payload.get("sender", {}).get("id")
 
@@ -1479,18 +1535,29 @@ async def process_github_pr_review_request(payload: dict[str, Any]) -> None:
         logger.warning("Could not persist bot token for reviewer thread %s", thread_id)
         return
 
-    prompt = build_github_pr_review_prompt(repo_config, pr_number, pr_url, base_sha, head_sha)
-    configurable: dict[str, Any] = {
-        "source": "github",
-        "github_login": github_login,
-        "github_user_id": github_user_id,
-        "repo": repo_config,
-        "pr_number": pr_number,
-        "review_requested": True,
+    pr_meta: ReviewerPRMeta = {
+        "owner": repo_config.get("owner", ""),
+        "name": repo_config.get("name", ""),
+        "number": pr_number,
+        "url": pr_url,
+        "title": pr_title,
+        "head_ref": branch_name,
+        "base_ref": base_ref,
     }
+    await set_reviewer_thread_metadata(thread_id, pr=pr_meta, watch=True)
 
-    if branch_name:
-        configurable["branch_name"] = branch_name
+    prompt = build_github_pr_review_prompt(repo_config, pr_number, pr_url, base_sha, head_sha)
+    configurable = _build_reviewer_configurable(
+        source="github",
+        github_login=github_login,
+        github_user_id=github_user_id,
+        repo_config=repo_config,
+        pr_number=pr_number,
+        pr_url=pr_url,
+        base_sha=base_sha,
+        head_sha=head_sha,
+        branch_name=branch_name,
+    )
 
     thread_active = await is_thread_active(thread_id)
     if thread_active:
@@ -1507,6 +1574,192 @@ async def process_github_pr_review_request(payload: dict[str, Any]) -> None:
         if_not_exists="create",
     )
     logger.info("Reviewer run created for thread %s from GitHub PR review request", thread_id)
+
+
+async def _fetch_open_pr_for_branch(
+    repo_config: dict[str, str], head_ref: str, *, token: str
+) -> dict[str, Any] | None:
+    """Find the open PR whose head ref matches ``head_ref``, if one exists."""
+    owner = repo_config.get("owner", "")
+    repo = repo_config.get("name", "")
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "Authorization": f"Bearer {token}",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    params = {"state": "open", "head": f"{owner}:{head_ref}", "per_page": 1}
+    async with httpx.AsyncClient() as http_client:
+        try:
+            response = await http_client.get(
+                f"https://api.github.com/repos/{owner}/{repo}/pulls",
+                headers=headers,
+                params=params,
+            )
+            response.raise_for_status()
+        except httpx.HTTPError:
+            logger.exception("Failed to look up open PR for %s/%s head=%s", owner, repo, head_ref)
+            return None
+    data = response.json()
+    if not isinstance(data, list) or not data:
+        return None
+    pr = data[0]
+    return pr if isinstance(pr, dict) else None
+
+
+async def _get_thread_metadata_safe(thread_id: str) -> dict[str, Any] | None:
+    """Fetch a thread's metadata; return ``None`` if the thread doesn't exist."""
+    langgraph_client = get_client(url=LANGGRAPH_URL)
+    try:
+        thread = await langgraph_client.threads.get(thread_id)
+    except Exception as exc:  # noqa: BLE001
+        if _is_not_found_error(exc):
+            return None
+        logger.warning("Failed to fetch reviewer thread metadata for %s", thread_id)
+        return None
+    metadata = thread.get("metadata") if isinstance(thread, dict) else None
+    return metadata if isinstance(metadata, dict) else {}
+
+
+async def process_github_pr_close(payload: dict[str, Any]) -> None:
+    """Disable watch on the canonical reviewer thread when the PR closes/reopens."""
+    repo = payload.get("repository", {})
+    pull_request = payload.get("pull_request", {})
+    repo_config = {
+        "owner": repo.get("owner", {}).get("login", ""),
+        "name": repo.get("name", ""),
+    }
+    pr_number = pull_request.get("number")
+    if not pr_number or not isinstance(pr_number, int):
+        return
+    if not _is_repo_allowed_for_reviewer(repo_config):
+        return
+
+    thread_id = generate_reviewer_thread_id(
+        repo_config.get("owner", ""), repo_config.get("name", ""), pr_number
+    )
+    metadata = await _get_thread_metadata_safe(thread_id)
+    if metadata is None or metadata.get("kind") != REVIEWER_THREAD_KIND:
+        # No reviewer thread for this PR, nothing to do.
+        return
+    action = payload.get("action", "")
+    desired_watch = action == "reopened"
+    if metadata.get("watch") == desired_watch:
+        return
+    await set_reviewer_thread_metadata(thread_id, watch=desired_watch)
+    logger.info("Set watch=%s on reviewer thread %s after PR %s", desired_watch, thread_id, action)
+
+
+async def process_github_push_event(payload: dict[str, Any]) -> None:
+    """Re-trigger the reviewer for a watched PR when its head branch is pushed to."""
+    ref = payload.get("ref", "")
+    after_sha = payload.get("after", "")
+    if not ref.startswith("refs/heads/"):
+        return
+    if not isinstance(after_sha, str) or not after_sha or set(after_sha) == {"0"}:
+        # Branch deletion or missing SHA — nothing to review.
+        return
+    head_ref = ref[len("refs/heads/") :]
+
+    repo = payload.get("repository", {})
+    repo_config = {
+        "owner": repo.get("owner", {}).get("login", "") or repo.get("owner", {}).get("name", ""),
+        "name": repo.get("name", ""),
+    }
+    if not repo_config["owner"] or not repo_config["name"]:
+        return
+    if not _is_repo_allowed_for_reviewer(repo_config):
+        return
+
+    app_token = await get_github_app_installation_token()
+    if not app_token:
+        logger.warning("No GitHub App token for push re-review on %s", head_ref)
+        return
+
+    pr = await _fetch_open_pr_for_branch(repo_config, head_ref, token=app_token)
+    if not pr:
+        logger.debug(
+            "No open PR found for push to %s/%s head=%s",
+            repo_config["owner"],
+            repo_config["name"],
+            head_ref,
+        )
+        return
+
+    pr_number = pr.get("number")
+    pr_url = pr.get("html_url") or pr.get("url") or ""
+    base_sha = pr.get("base", {}).get("sha", "")
+    base_ref = pr.get("base", {}).get("ref", "")
+    head_sha = pr.get("head", {}).get("sha", after_sha)
+    pr_title = pr.get("title", "")
+    if not isinstance(pr_number, int) or not base_sha or not head_sha:
+        return
+
+    thread_id = generate_reviewer_thread_id(repo_config["owner"], repo_config["name"], pr_number)
+    metadata = await _get_thread_metadata_safe(thread_id)
+    if metadata is None or metadata.get("kind") != REVIEWER_THREAD_KIND:
+        return
+    if not metadata.get("watch"):
+        logger.info("Push to %s ignored: reviewer thread %s is not watching", head_ref, thread_id)
+        return
+
+    last_reviewed_sha = metadata.get("last_reviewed_sha")
+    if isinstance(last_reviewed_sha, str) and last_reviewed_sha == head_sha:
+        logger.info("Push to %s ignored: head_sha unchanged from last_reviewed_sha", head_ref)
+        return
+
+    langgraph_client = get_client(url=LANGGRAPH_URL)
+    if not await _ensure_thread_exists_for_metadata(thread_id, langgraph_client):
+        return
+    try:
+        await persist_encrypted_github_token(thread_id, app_token)
+    except Exception:
+        logger.warning("Could not persist bot token for reviewer thread %s", thread_id)
+        return
+
+    pr_meta: ReviewerPRMeta = {
+        "owner": repo_config["owner"],
+        "name": repo_config["name"],
+        "number": pr_number,
+        "url": pr_url,
+        "title": pr_title,
+        "head_ref": head_ref,
+        "base_ref": base_ref,
+    }
+    await set_reviewer_thread_metadata(thread_id, pr=pr_meta, watch=True)
+
+    re_review_prompt = (
+        f"A new commit has been pushed to PR #{pr_number}. The new HEAD is "
+        f"{head_sha}. Reconcile existing findings against the new diff, add any "
+        f"net-new findings, and call `publish_review` once you're done."
+    )
+    configurable = _build_reviewer_configurable(
+        source="github_push",
+        github_login=payload.get("sender", {}).get("login", "") or "",
+        github_user_id=payload.get("sender", {}).get("id"),
+        repo_config=repo_config,
+        pr_number=pr_number,
+        pr_url=pr_url,
+        base_sha=base_sha,
+        head_sha=head_sha,
+        branch_name=head_ref,
+        re_review=True,
+        last_reviewed_sha=last_reviewed_sha if isinstance(last_reviewed_sha, str) else "",
+    )
+
+    thread_active = await is_thread_active(thread_id)
+    if thread_active:
+        logger.info("Reviewer thread %s busy, queuing push re-review", thread_id)
+        await queue_message_for_thread(thread_id, re_review_prompt)
+        return
+
+    logger.info("Creating push re-review run for thread %s", thread_id)
+    await langgraph_client.runs.create(
+        thread_id,
+        "reviewer",
+        input={"messages": [{"role": "user", "content": re_review_prompt}]},
+        config={"configurable": configurable, "metadata": _AGENT_VERSION_METADATA},
+        if_not_exists="create",
+    )
 
 
 async def _get_or_resolve_thread_github_token(thread_id: str, email: str) -> str | None:
@@ -1797,6 +2050,12 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks) ->
                 "status": "ignored",
                 "reason": f"Unsupported GitHub pull_request action: {action}",
             }
+        if action in {"closed", "reopened"}:
+            if not _is_repo_allowed_for_reviewer(webhook_repo_config):
+                return {"status": "ignored", "reason": "Repository not in reviewer allowlist"}
+            logger.info("Accepted GitHub PR %s webhook, scheduling reviewer watch update", action)
+            background_tasks.add_task(process_github_pr_close, payload)
+            return {"status": "accepted", "message": f"Processing PR {action} for reviewer watch"}
         if not _is_open_swe_reviewer_request(payload):
             logger.info("Ignoring PR review request for a different reviewer")
             return {"status": "ignored", "reason": "Review request is not for open-swe bot"}
@@ -1815,6 +2074,13 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks) ->
         logger.info("Accepted GitHub PR review request webhook, scheduling reviewer task")
         background_tasks.add_task(process_github_pr_review_request, payload)
         return {"status": "accepted", "message": "Processing GitHub PR review request"}
+
+    if event_type == "push":
+        if not _is_repo_allowed_for_reviewer(webhook_repo_config):
+            return {"status": "ignored", "reason": "Repository not in reviewer allowlist"}
+        logger.info("Accepted GitHub push webhook, scheduling reviewer watch evaluation")
+        background_tasks.add_task(process_github_push_event, payload)
+        return {"status": "accepted", "message": "Processing GitHub push for reviewer watch"}
 
     if not _is_repo_org_allowed(webhook_repo_config):
         logger.warning(
