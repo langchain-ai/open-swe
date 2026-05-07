@@ -11,6 +11,8 @@ from ..reviewer_findings import (
     Severity,
     filter_findings_for_publish,
     get_thread_id_from_runtime,
+    get_thread_metadata,
+    get_thread_slack_ref,
     replace_findings,
     set_reviewer_thread_metadata,
 )
@@ -26,6 +28,7 @@ from ..reviewer_publish import (
     resolve_review_thread,
 )
 from ..utils.github_token import get_github_token
+from ..utils.slack import post_slack_thread_reply
 
 
 def publish_review(
@@ -70,6 +73,7 @@ def publish_review(
     repo_config = configurable.get("repo") if isinstance(configurable, dict) else None
     pr_number = configurable.get("pr_number") if isinstance(configurable, dict) else None
     head_sha = configurable.get("head_sha") if isinstance(configurable, dict) else None
+    is_re_review = bool(configurable.get("re_review")) if isinstance(configurable, dict) else False
 
     if (
         not isinstance(repo_config, dict)
@@ -95,6 +99,7 @@ def publish_review(
             token=token,
             severity_threshold=_cast_severity(severity_threshold),
             cap=cap,
+            is_re_review=is_re_review,
         )
     )
 
@@ -112,6 +117,7 @@ async def _publish_review_async(
     token: str,
     severity_threshold: Severity,
     cap: int,
+    is_re_review: bool,
 ) -> dict[str, Any]:
     thread_id = get_thread_id_from_runtime()
     findings = await list_findings_async(thread_id)
@@ -178,6 +184,16 @@ async def _publish_review_async(
         findings=await list_findings_async(thread_id),
     )
 
+    if not is_re_review:
+        await _maybe_post_slack_completion_reply(
+            thread_id=thread_id,
+            owner=owner,
+            repo=repo,
+            pr_number=pr_number,
+            review_id=review_id,
+            surfaced_count=len(inline_comments),
+        )
+
     await set_reviewer_thread_metadata(thread_id, last_reviewed_sha=head_sha)
 
     return {
@@ -187,6 +203,40 @@ async def _publish_review_async(
         "hidden_count": max(len(open_unpublished) - len(inline_comments), 0),
         "resolved_thread_count": resolved_thread_count,
     }
+
+
+async def _maybe_post_slack_completion_reply(
+    *,
+    thread_id: str,
+    owner: str,
+    repo: str,
+    pr_number: int,
+    review_id: int | None,
+    surfaced_count: int,
+) -> None:
+    """Post a one-line completion summary to the Slack thread that started this review.
+
+    Only fires for first reviews (gated by the caller). No-op if the reviewer
+    thread has no ``slack_thread`` metadata — i.e. the review wasn't started
+    from Slack.
+    """
+    metadata = await get_thread_metadata(thread_id)
+    slack_ref = get_thread_slack_ref(metadata)
+    if slack_ref is None:
+        return
+
+    if surfaced_count == 0:
+        headline = "*Open SWE Review*: No issues found."
+    else:
+        issue_word = "issue" if surfaced_count == 1 else "issues"
+        headline = f"*Open SWE Review* found {surfaced_count} potential {issue_word}."
+
+    review_url = f"https://github.com/{owner}/{repo}/pull/{pr_number}"
+    if isinstance(review_id, int):
+        review_url = f"{review_url}#pullrequestreview-{review_id}"
+    text = f"{headline} <{review_url}|View review>"
+
+    await post_slack_thread_reply(slack_ref["channel_id"], slack_ref["thread_ts"], text)
 
 
 async def _store_comment_ids_on_findings(
