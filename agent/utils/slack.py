@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 SLACK_API_BASE_URL = "https://slack.com/api"
 SLACK_BOT_TOKEN = os.environ.get("SLACK_BOT_TOKEN", "")
 GITHUB_PR_URL_RE = re.compile(r"https?://(?:www\.)?github\.com/[^\s<>|]+/[^\s<>|]+/pull/\d+")
+URL_RE = re.compile(r"https?://[^\s<>|]+")
 
 
 @dataclass(frozen=True)
@@ -175,14 +176,10 @@ def looks_like_slack_pr_review_command(text: str) -> bool:
     stripped = text.strip()
     if not re.match(r"(?is)^review\b", stripped):
         return False
-    for match in GITHUB_PR_URL_RE.finditer(stripped):
+    for match in URL_RE.finditer(stripped):
         parsed = urlparse(match.group(0).strip("<>"))
         host = (parsed.hostname or "").lower()
-        if (
-            parsed.scheme in {"http", "https"}
-            and host in {"github.com", "www.github.com"}
-            and "/pull/" in parsed.path
-        ):
+        if parsed.scheme in {"http", "https"} and host in {"github.com", "www.github.com"}:
             return True
     return False
 
