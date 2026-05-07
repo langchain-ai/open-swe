@@ -7,6 +7,7 @@ import hashlib
 import hmac
 import logging
 import os
+import random
 import re
 import time
 from dataclasses import dataclass
@@ -596,10 +597,25 @@ async def resolve_slack_links_in_context(
     return resolved_links_section, image_urls
 
 
+TRACE_REPLY_PHRASES: tuple[str, ...] = (
+    "Working on it!",
+    "On it!",
+    "Diving in!",
+    "Powering up!",
+    "Heads down.",
+    "Cracking knuckles...",
+    "Spinning up...",
+    "Looking...",
+    "Time to cook. 🧑‍🍳",
+)
+
+
 async def post_slack_trace_reply(
-    channel_id: str, thread_ts: str, thread_id: str, message: str = "Working on it!"
+    channel_id: str, thread_ts: str, thread_id: str, message: str | None = None
 ) -> None:
     """Post a trace URL reply in a Slack thread."""
+    if message is None:
+        message = random.choice(TRACE_REPLY_PHRASES)
     trace_url = get_langsmith_trace_url(thread_id)
     if trace_url:
         await post_slack_thread_reply(channel_id, thread_ts, f"{message} <{trace_url}|View trace>")
