@@ -863,6 +863,7 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
     }
 
     langgraph_client = get_client(url=LANGGRAPH_URL)
+    is_first_mention = not await _thread_exists(thread_id)
     await _upsert_slack_thread_repo_metadata(thread_id, repo_config, langgraph_client)
 
     thread_active = await is_thread_active(thread_id)
@@ -896,7 +897,13 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
         _run_id_for_logging(run),
         thread_id,
     )
-    await post_slack_trace_reply(channel_id, thread_ts, thread_id)
+    if is_first_mention:
+        await post_slack_trace_reply(channel_id, thread_ts, thread_id)
+    else:
+        logger.info(
+            "Skipping Slack trace reply for thread %s — agent will reply when run completes",
+            thread_id,
+        )
 
 
 async def process_slack_pr_review_request(
