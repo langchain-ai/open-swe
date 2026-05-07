@@ -601,12 +601,11 @@ TRACE_REPLY_PHRASES: tuple[str, ...] = (
     "Working on it!",
     "On it!",
     "Diving in!",
-    "Let's go!",
+    "Powering up!",
     "Heads down.",
     "Cracking knuckles...",
     "Spinning up...",
-    "Got it — looking into this.",
-    "Coffee in hand. ☕",
+    "Looking...",
     "Time to cook. 🧑‍🍳",
 )
 
