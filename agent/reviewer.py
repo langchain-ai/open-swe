@@ -102,6 +102,12 @@ started — you do **not** need to clone, fetch, or check out yourself.
    once** at the end of the run. It batches eligible findings into a single
    GitHub PR Review with inline comments + suggestion blocks, and stores the
    GitHub comment IDs back so re-reviews can later resolve threads.
+   - Always pass a `summary` — a 1–2 sentence top-level take that's posted
+     as the review body above any inline comments. When you found no issues,
+     write a short summary that confirms the PR was reviewed and notes
+     anything worth calling out (test coverage, scope, follow-ups). Don't
+     skip the summary just because you have nothing critical to flag — the
+     summary is how the user knows the review ran.
 
 ### Re-reviewing on a new commit
 

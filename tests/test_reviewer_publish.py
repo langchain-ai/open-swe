@@ -77,7 +77,8 @@ def test_render_review_body_includes_summary_and_marker() -> None:
     )
     assert "LGTM with two notes" in body
     assert "<!-- open-swe-reviewer pr=123 -->" in body
-    assert "1 lower-severity finding hidden" in body
+    assert "Found 2 findings" in body
+    assert "1 lower-severity finding" in body
 
 
 def test_render_review_body_surfaces_no_findings_message() -> None:
@@ -88,7 +89,32 @@ def test_render_review_body_surfaces_no_findings_message() -> None:
         severity_threshold="medium",
         summary=None,
     )
-    assert "No issues at or above" in body
+    assert "No issues found" in body
+    assert "<!-- open-swe-reviewer pr=99 -->" in body
+
+
+def test_render_review_body_no_findings_keeps_agent_summary() -> None:
+    body = render_review_body(
+        pr_number=42,
+        surfaced_count=0,
+        total_open_count=0,
+        severity_threshold="medium",
+        summary="Reviewed PR — clean refactor, well-tested.",
+    )
+    assert "No issues found" in body
+    assert "Reviewed PR — clean refactor, well-tested." in body
+
+
+def test_render_review_body_no_surfaced_with_hidden_lower_severity() -> None:
+    body = render_review_body(
+        pr_number=7,
+        surfaced_count=0,
+        total_open_count=2,
+        severity_threshold="medium",
+        summary=None,
+    )
+    assert "No issues at or above `medium` severity" in body
+    assert "2 lower-severity findings hidden" in body
 
 
 @pytest.mark.asyncio
@@ -166,3 +192,46 @@ async def test_publish_review_skips_findings_already_published() -> None:
     posted = post_review.await_args.kwargs["inline_comments"]
     paths = {c["path"] for c in posted}
     assert paths == {"b.py"}
+
+
+@pytest.mark.asyncio
+async def test_publish_review_posts_summary_when_no_findings() -> None:
+    """An empty findings list must still post a review so the user sees feedback."""
+    from agent.tools.publish_review import _publish_review_async
+
+    list_async = AsyncMock(return_value=[])
+    post_review = AsyncMock(return_value={"id": 555})
+    fetch_comments = AsyncMock(return_value=[])
+    set_metadata = AsyncMock()
+
+    with (
+        patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
+        patch("agent.tools.publish_review.list_findings_async", list_async),
+        patch("agent.tools.publish_review.post_pull_request_review", post_review),
+        patch("agent.tools.publish_review.fetch_review_comments", fetch_comments),
+        patch(
+            "agent.tools.publish_review._resolve_threads_for_resolved_findings",
+            new_callable=AsyncMock,
+            return_value=0,
+        ),
+        patch("agent.tools.publish_review.set_reviewer_thread_metadata", set_metadata),
+    ):
+        result = await _publish_review_async(
+            owner="o",
+            repo="r",
+            pr_number=7,
+            head_sha="sha",
+            token="t",
+            summary=None,
+            severity_threshold="medium",
+            cap=15,
+        )
+
+    assert result["success"] is True
+    assert result["surfaced_count"] == 0
+    assert result["review_id"] == 555
+    post_review.assert_awaited_once()
+    posted_body = post_review.await_args.kwargs["body"]
+    posted_inline = post_review.await_args.kwargs["inline_comments"]
+    assert posted_inline == []
+    assert "No issues found" in posted_body

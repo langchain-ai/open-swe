@@ -150,20 +150,18 @@ async def _publish_review_async(
         summary=summary,
     )
 
-    review_id: int | None = None
-    if inline_comments or summary:
-        review_response = await post_pull_request_review(
-            owner=owner,
-            repo=repo,
-            pr_number=pr_number,
-            head_sha=head_sha,
-            body=review_body,
-            inline_comments=inline_comments,
-            token=token,
-        )
-        if review_response is None:
-            return {"success": False, "error": "Failed to POST PR review"}
-        review_id = review_response.get("id") if isinstance(review_response, dict) else None
+    review_response = await post_pull_request_review(
+        owner=owner,
+        repo=repo,
+        pr_number=pr_number,
+        head_sha=head_sha,
+        body=review_body,
+        inline_comments=inline_comments,
+        token=token,
+    )
+    if review_response is None:
+        return {"success": False, "error": "Failed to POST PR review"}
+    review_id = review_response.get("id") if isinstance(review_response, dict) else None
 
     if review_id is not None and inline_comments:
         comment_records = await fetch_review_comments(
