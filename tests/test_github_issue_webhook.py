@@ -5,6 +5,7 @@ import hashlib
 import hmac
 import importlib
 import json
+import logging
 
 from fastapi.testclient import TestClient
 
@@ -206,6 +207,7 @@ def test_github_webhook_accepts_issue_comment_events(monkeypatch) -> None:
         client,
         "issue_comment",
         {
+            "action": "created",
             "issue": {"id": 12345, "number": 42, "title": "Fix the flaky test"},
             "comment": {"body": "@openswe please handle this"},
             "repository": {"owner": {"login": "langchain-ai"}, "name": "open-swe"},
@@ -216,6 +218,72 @@ def test_github_webhook_accepts_issue_comment_events(monkeypatch) -> None:
     assert response.status_code == 200
     assert response.json()["status"] == "accepted"
     assert called["event_type"] == "issue_comment"
+
+
+def test_github_webhook_ignores_unmentioned_comment_without_info_log(monkeypatch, caplog) -> None:
+    async def fake_process_github_pr_comment(payload: dict[str, object], event_type: str) -> None:
+        raise AssertionError("process_github_pr_comment should not be called")
+
+    monkeypatch.setattr(webapp, "process_github_pr_comment", fake_process_github_pr_comment)
+    monkeypatch.setattr(webapp, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
+    caplog.set_level(logging.INFO, logger=webapp.logger.name)
+
+    client = TestClient(webapp.app)
+    response = _post_github_webhook(
+        client,
+        "pull_request_review_comment",
+        {
+            "action": "created",
+            "pull_request": {
+                "number": 1244,
+                "html_url": "https://github.com/langchain-ai/open-swe/pull/1244",
+                "base": {"sha": "base-sha"},
+                "head": {"sha": "head-sha", "ref": "feature-branch"},
+            },
+            "comment": {"body": "Looks good to me"},
+            "repository": {"owner": {"login": "langchain-ai"}, "name": "open-swe"},
+            "sender": {"login": "octocat"},
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "status": "ignored",
+        "reason": "Comment does not mention @openswe or @open-swe",
+    }
+    assert "does not mention @openswe or @open-swe" not in caplog.text
+
+
+def test_github_webhook_ignores_unsupported_comment_action(monkeypatch) -> None:
+    async def fake_process_github_pr_comment(payload: dict[str, object], event_type: str) -> None:
+        raise AssertionError("process_github_pr_comment should not be called")
+
+    monkeypatch.setattr(webapp, "process_github_pr_comment", fake_process_github_pr_comment)
+    monkeypatch.setattr(webapp, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
+
+    client = TestClient(webapp.app)
+    response = _post_github_webhook(
+        client,
+        "pull_request_review",
+        {
+            "action": "dismissed",
+            "review": {"body": "@openswe please check this"},
+            "pull_request": {
+                "number": 1244,
+                "html_url": "https://github.com/langchain-ai/open-swe/pull/1244",
+                "base": {"sha": "base-sha"},
+                "head": {"sha": "head-sha", "ref": "feature-branch"},
+            },
+            "repository": {"owner": {"login": "langchain-ai"}, "name": "open-swe"},
+            "sender": {"login": "octocat"},
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "status": "ignored",
+        "reason": "Unsupported GitHub pull_request_review action: dismissed",
+    }
 
 
 def test_github_webhook_blocks_reviewer_repo_not_in_reviewer_repo_allowlist(monkeypatch) -> None:

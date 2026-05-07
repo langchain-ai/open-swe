@@ -1192,6 +1192,11 @@ _SUPPORTED_GH_EVENTS = frozenset(
 )
 _SUPPORTED_GH_ISSUE_ACTIONS = frozenset(["edited", "opened", "reopened"])
 _SUPPORTED_GH_PULL_REQUEST_ACTIONS = frozenset(["review_requested"])
+_SUPPORTED_GH_COMMENT_ACTIONS = {
+    "issue_comment": frozenset(["created", "edited"]),
+    "pull_request_review_comment": frozenset(["created", "edited"]),
+    "pull_request_review": frozenset(["submitted", "edited"]),
+}
 
 
 def _build_github_issue_comments_text(comments: list[dict[str, Any]]) -> str:
@@ -1817,10 +1822,23 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks) ->
         background_tasks.add_task(process_github_issue, payload, event_type)
         return {"status": "accepted", "message": "Processing GitHub issue event"}
 
+    action = payload.get("action", "")
+    supported_comment_actions = _SUPPORTED_GH_COMMENT_ACTIONS.get(event_type)
+    if supported_comment_actions is None:
+        logger.info("Ignoring unsupported GitHub payload shape for event=%s", event_type)
+        return {"status": "ignored", "reason": f"Unsupported payload for event type: {event_type}"}
+    if action and action not in supported_comment_actions:
+        logger.debug("Ignoring unsupported GitHub %s action: %s", event_type, action)
+        return {"status": "ignored", "reason": f"Unsupported GitHub {event_type} action: {action}"}
+
     comment = payload.get("comment") or payload.get("review", {})
     comment_body = (comment.get("body") or "") if comment else ""
     if not any(tag in comment_body.lower() for tag in OPEN_SWE_TAGS):
-        logger.info("Ignoring comment that does not mention @openswe or @open-swe")
+        logger.debug(
+            "Ignoring GitHub %s%s that does not mention @openswe or @open-swe",
+            event_type,
+            f" action={action}" if action else "",
+        )
         return {"status": "ignored", "reason": "Comment does not mention @openswe or @open-swe"}
 
     logger.info("Accepted GitHub webhook: event=%s, scheduling background task", event_type)
