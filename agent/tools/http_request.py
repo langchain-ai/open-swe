@@ -121,7 +121,15 @@ def _pinned_dns_resolution(target_hostname: str, pinned_ips: list[str]) -> Itera
     serialises overlapping pin scopes within the same process so two pin-issuing
     threads can't clobber each other's installed resolver mid-request.
     """
-    target = target_hostname.lower()
+    raw_target = target_hostname.lower()
+    targets = {raw_target}
+    # urllib3 IDNA-encodes IDN hostnames before calling socket.getaddrinfo.
+    # The validator path saw the raw Unicode form; the connect path will see
+    # the ASCII-compatible encoding. Accept either so the pin matches both.
+    try:
+        targets.add(raw_target.encode("idna").decode("ascii"))
+    except (UnicodeError, UnicodeDecodeError):
+        pass
     pin_owner_tid = threading.get_ident()
 
     addr_infos_cache: dict[int, list[tuple]] = {}
@@ -147,7 +155,7 @@ def _pinned_dns_resolution(target_hostname: str, pinned_ips: list[str]) -> Itera
             # fall through to the original resolver as if no pin existed, so the
             # process-wide swap of socket.getaddrinfo doesn't leak pinning into
             # unrelated DNS work running concurrently.
-            if threading.get_ident() == pin_owner_tid and host and str(host).lower() == target:
+            if threading.get_ident() == pin_owner_tid and host and str(host).lower() in targets:
                 infos = _build_for_port(int(port) if port else 0)
                 if infos:
                     return infos

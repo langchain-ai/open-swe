@@ -198,6 +198,26 @@ def test_dns_rebinding_attack_uses_pinned_ip_during_connect(monkeypatch) -> None
     assert captured_resolutions == [_PUBLIC_IP]
 
 
+def test_pin_matches_idna_encoded_hostname_for_idn_targets() -> None:
+    """urllib3 IDNA-encodes IDN hostnames before calling socket.getaddrinfo, so
+    the validator records ``例え.jp`` while the connect step looks up
+    ``xn--r8jz45g.jp``. The pin must accept both spellings — otherwise the
+    hostname-equality check fails, the pin falls through, and the connect step
+    re-resolves through the system DNS, re-opening the rebinding window this
+    module is meant to close."""
+    idn_host = "例え.jp"
+    ascii_host = idn_host.encode("idna").decode("ascii")  # "xn--r8jz45g.jp"
+
+    with http_request_tool._pinned_dns_resolution(idn_host, [_PUBLIC_IP]):
+        # urllib3 connect path: getaddrinfo called with the ASCII (Punycode) form.
+        ascii_lookup = socket.getaddrinfo(ascii_host, 443)
+        # Validator-equivalent path (or callers that did not IDNA-encode): raw form.
+        unicode_lookup = socket.getaddrinfo(idn_host, 443)
+
+    assert ascii_lookup == [_addr_info(_PUBLIC_IP, 443)]
+    assert unicode_lookup == [_addr_info(_PUBLIC_IP, 443)]
+
+
 def test_redirect_repins_to_new_target_host(monkeypatch) -> None:
     """Each redirect target gets its own validation + pin — a redirect to a fresh
     hostname must use the new hostname's validated IPs, not the previous host's."""
