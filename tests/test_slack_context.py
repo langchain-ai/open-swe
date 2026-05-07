@@ -414,3 +414,135 @@ def test_get_slack_repo_config_repo_name_only_space_syntax(
     repo = asyncio.run(webapp.get_slack_repo_config("fix bug in repo open-swe", "C123", "1.234"))
 
     assert repo == {"owner": "langchain-ai", "name": "open-swe"}
+
+
+def test_process_slack_mention_creates_thread_followup_run_with_enqueue(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    async def fake_add_slack_reaction(channel_id: str, message_ts: str, emoji: str) -> bool:
+        captured["reaction"] = {
+            "channel_id": channel_id,
+            "message_ts": message_ts,
+            "emoji": emoji,
+        }
+        return True
+
+    async def fake_get_slack_user_info(user_id: str) -> dict:
+        return {
+            "profile": {
+                "email": "mason@example.com",
+                "display_name": "Mason",
+            }
+        }
+
+    async def fake_fetch_slack_thread_messages(channel_id: str, thread_ts: str) -> list[dict]:
+        captured["fetch_thread"] = {"channel_id": channel_id, "thread_ts": thread_ts}
+        return [
+            {"ts": "1700000000.000100", "text": "<@UBOT> first request", "user": "U123"},
+            {"ts": "1700000000.000150", "text": "context", "user": "U456"},
+            {
+                "ts": "1700000000.000200",
+                "text": "<@UBOT> continue on the branch",
+                "user": "U123",
+            },
+        ]
+
+    async def fake_get_slack_user_names(user_ids: list[str]) -> dict[str, str]:
+        captured["user_ids"] = user_ids
+        return {"U123": "Mason", "U456": "Teammate"}
+
+    async def fake_resolve_slack_links_in_context(
+        context_messages: list[dict], user_names_by_id: dict[str, str]
+    ) -> tuple[str, list[str]]:
+        captured["context_messages"] = context_messages
+        captured["user_names_by_id"] = user_names_by_id
+        return "", []
+
+    async def fake_is_thread_active(thread_id: str) -> bool:
+        captured["active_thread_id"] = thread_id
+        return False
+
+    async def fake_post_slack_trace_reply(
+        channel_id: str, thread_ts: str, thread_id: str, message: str = "Working on it!"
+    ) -> None:
+        captured["trace_reply"] = {
+            "channel_id": channel_id,
+            "thread_ts": thread_ts,
+            "thread_id": thread_id,
+            "message": message,
+        }
+
+    class _FakeRunsClient:
+        async def create(self, thread_id: str, graph: str, **kwargs) -> dict[str, str]:
+            captured["run_create"] = {
+                "thread_id": thread_id,
+                "graph": graph,
+                "kwargs": kwargs,
+            }
+            return {"run_id": "run-123"}
+
+    class _FakeThreadsClientForProcess:
+        async def update(self, *, thread_id: str, metadata: dict) -> None:
+            captured["metadata_update"] = {"thread_id": thread_id, "metadata": metadata}
+
+    class _FakeLangGraphClientForProcess:
+        runs = _FakeRunsClient()
+        threads = _FakeThreadsClientForProcess()
+
+    monkeypatch.setattr(webapp, "SLACK_BOT_USERNAME", "open-swe")
+    monkeypatch.setattr(webapp, "add_slack_reaction", fake_add_slack_reaction)
+    monkeypatch.setattr(webapp, "get_slack_user_info", fake_get_slack_user_info)
+    monkeypatch.setattr(webapp, "fetch_slack_thread_messages", fake_fetch_slack_thread_messages)
+    monkeypatch.setattr(webapp, "get_slack_user_names", fake_get_slack_user_names)
+    monkeypatch.setattr(
+        webapp, "resolve_slack_links_in_context", fake_resolve_slack_links_in_context
+    )
+    monkeypatch.setattr(webapp, "is_thread_active", fake_is_thread_active)
+    monkeypatch.setattr(webapp, "post_slack_trace_reply", fake_post_slack_trace_reply)
+    monkeypatch.setattr(webapp, "get_client", lambda url: _FakeLangGraphClientForProcess())
+
+    thread_ts = "1700000000.000100"
+    event_ts = "1700000000.000200"
+    expected_thread_id = generate_thread_id_from_slack_thread("C123", thread_ts)
+
+    asyncio.run(
+        webapp.process_slack_mention(
+            {
+                "channel_id": "C123",
+                "thread_ts": thread_ts,
+                "event_ts": event_ts,
+                "user_id": "U123",
+                "text": "<@UBOT> continue on the branch",
+                "bot_user_id": "UBOT",
+            },
+            {"owner": "langchain-ai", "name": "open-swe"},
+        )
+    )
+
+    assert captured["fetch_thread"] == {"channel_id": "C123", "thread_ts": thread_ts}
+    assert captured["active_thread_id"] == expected_thread_id
+    assert captured["metadata_update"] == {
+        "thread_id": expected_thread_id,
+        "metadata": {"repo": {"owner": "langchain-ai", "name": "open-swe"}},
+    }
+    assert captured["trace_reply"] == {
+        "channel_id": "C123",
+        "thread_ts": thread_ts,
+        "thread_id": expected_thread_id,
+        "message": "Working on it!",
+    }
+
+    run_create = captured["run_create"]
+    assert isinstance(run_create, dict)
+    assert run_create["thread_id"] == expected_thread_id
+    assert run_create["graph"] == "agent"
+    kwargs = run_create["kwargs"]
+    assert kwargs["if_not_exists"] == "create"
+    assert kwargs["multitask_strategy"] == "enqueue"
+    assert kwargs["config"]["configurable"]["slack_thread"]["thread_ts"] == thread_ts
+    prompt_block = kwargs["input"]["messages"][0]["content"][0]
+    assert prompt_block["text"].count("## Slack Thread") == 1
+    assert f"Thread TS: {thread_ts}" in prompt_block["text"]
+    assert "## Latest Mention Request\ncontinue on the branch" in prompt_block["text"]

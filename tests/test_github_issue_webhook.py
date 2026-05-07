@@ -530,6 +530,61 @@ def test_slack_webhook_non_pr_review_request_starts_agent(monkeypatch) -> None:
     assert event_data["text"] == "<@UBOT> review this branch"
 
 
+def test_slack_webhook_threaded_followup_uses_parent_thread_ts(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    async def fake_get_slack_repo_config(
+        text: str, channel_id: str, thread_ts: str
+    ) -> dict[str, str]:
+        captured["repo_config_request"] = {
+            "text": text,
+            "channel_id": channel_id,
+            "thread_ts": thread_ts,
+        }
+        return {"owner": "langchain-ai", "name": "open-swe"}
+
+    async def fake_process_slack_mention(
+        event_data: dict[str, object], repo_config: dict[str, str]
+    ) -> None:
+        captured["event_data"] = event_data
+        captured["repo_config"] = repo_config
+
+    monkeypatch.setattr(webapp, "SLACK_SIGNING_SECRET", _TEST_SLACK_SECRET)
+    monkeypatch.setattr(webapp, "SLACK_BOT_USER_ID", "UBOT")
+    monkeypatch.setattr(webapp, "SLACK_BOT_USERNAME", "open-swe")
+    monkeypatch.setattr(slack_utils.time, "time", lambda: 1700000000)
+    monkeypatch.setattr(webapp, "get_slack_repo_config", fake_get_slack_repo_config)
+    monkeypatch.setattr(webapp, "process_slack_mention", fake_process_slack_mention)
+
+    client = TestClient(webapp.app)
+    response = _post_slack_webhook(
+        client,
+        {
+            "type": "event_callback",
+            "event": {
+                "type": "app_mention",
+                "channel": "C123",
+                "ts": "1700000000.000200",
+                "thread_ts": "1700000000.000100",
+                "user": "U123",
+                "text": "<@UBOT> continue on the branch",
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["message"] == "Slack mention queued"
+    assert captured["repo_config_request"] == {
+        "text": "<@UBOT> continue on the branch",
+        "channel_id": "C123",
+        "thread_ts": "1700000000.000100",
+    }
+    event_data = captured["event_data"]
+    assert isinstance(event_data, dict)
+    assert event_data["thread_ts"] == "1700000000.000100"
+    assert event_data["event_ts"] == "1700000000.000200"
+
+
 def test_process_slack_pr_review_request_posts_trace_reply(monkeypatch) -> None:
     captured: dict[str, object] = {}
 

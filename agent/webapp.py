@@ -319,6 +319,15 @@ def _is_not_found_error(exc: Exception) -> bool:
     return getattr(exc, "status_code", None) == 404
 
 
+def _run_id_for_logging(run: Any) -> str:
+    """Extract a run id from SDK response shapes for log messages."""
+    if isinstance(run, dict):
+        run_id = run.get("run_id")
+    else:
+        run_id = getattr(run, "run_id", None)
+    return run_id if isinstance(run_id, str) and run_id else "<unknown>"
+
+
 def _is_repo_org_allowed(repo_config: dict[str, str]) -> bool:
     """Check if the repo owner/org is in the allowlist.
 
@@ -873,13 +882,19 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
             logger.error("Failed to queue Slack message for thread %s", thread_id)
         return
 
-    await langgraph_client.runs.create(
+    logger.info("Creating Slack LangGraph run for thread %s", thread_id)
+    run = await langgraph_client.runs.create(
         thread_id,
         "agent",
         input={"messages": [{"role": "user", "content": content_blocks}]},
         config={"configurable": configurable, "metadata": _AGENT_VERSION_METADATA},
         if_not_exists="create",
-        multitask_strategy="interrupt",
+        multitask_strategy="enqueue",
+    )
+    logger.info(
+        "Slack LangGraph run %s created for thread %s",
+        _run_id_for_logging(run),
+        thread_id,
     )
     await post_slack_trace_reply(channel_id, thread_ts, thread_id)
 
