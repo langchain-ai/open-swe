@@ -143,6 +143,10 @@ async def test_publish_review_skips_findings_already_published() -> None:
             return_value=0,
         ),
         patch("agent.tools.publish_review.set_reviewer_thread_metadata", set_metadata),
+        patch(
+            "agent.tools.publish_review._maybe_post_slack_completion_reply",
+            new_callable=AsyncMock,
+        ),
     ):
         result = await _publish_review_async(
             owner="o",
@@ -152,6 +156,7 @@ async def test_publish_review_skips_findings_already_published() -> None:
             token="t",
             severity_threshold="medium",
             cap=15,
+            is_re_review=False,
         )
 
     assert result["success"] is True
@@ -182,6 +187,10 @@ async def test_publish_review_posts_summary_when_no_findings() -> None:
             return_value=0,
         ),
         patch("agent.tools.publish_review.set_reviewer_thread_metadata", set_metadata),
+        patch(
+            "agent.tools.publish_review._maybe_post_slack_completion_reply",
+            new_callable=AsyncMock,
+        ),
     ):
         result = await _publish_review_async(
             owner="o",
@@ -191,6 +200,7 @@ async def test_publish_review_posts_summary_when_no_findings() -> None:
             token="t",
             severity_threshold="medium",
             cap=15,
+            is_re_review=False,
         )
 
     assert result["success"] is True
@@ -201,3 +211,193 @@ async def test_publish_review_posts_summary_when_no_findings() -> None:
     posted_inline = post_review.await_args.kwargs["inline_comments"]
     assert posted_inline == []
     assert "No issues found" in posted_body
+
+
+@pytest.mark.asyncio
+async def test_publish_review_posts_slack_reply_on_first_review_with_slack_ref() -> None:
+    """A first review with a slack_thread metadata ref posts a one-line summary."""
+    from agent.tools.publish_review import _publish_review_async
+
+    metadata = {
+        "kind": "reviewer",
+        "slack_thread": {"channel_id": "C1", "thread_ts": "1234.5"},
+    }
+    slack_post = AsyncMock(return_value=True)
+
+    with (
+        patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
+        patch("agent.tools.publish_review.list_findings_async", AsyncMock(return_value=[])),
+        patch(
+            "agent.tools.publish_review.post_pull_request_review",
+            AsyncMock(return_value={"id": 42}),
+        ),
+        patch("agent.tools.publish_review.fetch_review_comments", AsyncMock(return_value=[])),
+        patch(
+            "agent.tools.publish_review._resolve_threads_for_resolved_findings",
+            new_callable=AsyncMock,
+            return_value=0,
+        ),
+        patch("agent.tools.publish_review.set_reviewer_thread_metadata", new_callable=AsyncMock),
+        patch(
+            "agent.tools.publish_review.get_thread_metadata",
+            new_callable=AsyncMock,
+            return_value=metadata,
+        ),
+        patch("agent.tools.publish_review.post_slack_thread_reply", slack_post),
+    ):
+        await _publish_review_async(
+            owner="o",
+            repo="r",
+            pr_number=7,
+            head_sha="sha",
+            token="t",
+            severity_threshold="medium",
+            cap=15,
+            is_re_review=False,
+        )
+
+    slack_post.assert_awaited_once()
+    args = slack_post.await_args.args
+    assert args[0] == "C1"
+    assert args[1] == "1234.5"
+    assert "No issues found" in args[2]
+    assert "https://github.com/o/r/pull/7#pullrequestreview-42" in args[2]
+
+
+@pytest.mark.asyncio
+async def test_publish_review_uses_plural_findings_in_slack_reply() -> None:
+    """Surfaced count > 1 should pluralize 'issues' in the slack summary."""
+    from agent.tools.publish_review import _publish_review_async
+
+    findings = [
+        _f(id="f1", file="a.py", start_line=1, end_line=1),
+        _f(id="f2", file="b.py", start_line=2, end_line=2),
+    ]
+    metadata = {
+        "kind": "reviewer",
+        "slack_thread": {"channel_id": "C1", "thread_ts": "1234.5"},
+    }
+    slack_post = AsyncMock(return_value=True)
+
+    with (
+        patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
+        patch("agent.tools.publish_review.list_findings_async", AsyncMock(return_value=findings)),
+        patch(
+            "agent.tools.publish_review.post_pull_request_review",
+            AsyncMock(return_value={"id": 99}),
+        ),
+        patch("agent.tools.publish_review.fetch_review_comments", AsyncMock(return_value=[])),
+        patch(
+            "agent.tools.publish_review._resolve_threads_for_resolved_findings",
+            new_callable=AsyncMock,
+            return_value=0,
+        ),
+        patch("agent.tools.publish_review.set_reviewer_thread_metadata", new_callable=AsyncMock),
+        patch(
+            "agent.tools.publish_review.get_thread_metadata",
+            new_callable=AsyncMock,
+            return_value=metadata,
+        ),
+        patch("agent.tools.publish_review.post_slack_thread_reply", slack_post),
+    ):
+        await _publish_review_async(
+            owner="o",
+            repo="r",
+            pr_number=7,
+            head_sha="sha",
+            token="t",
+            severity_threshold="medium",
+            cap=15,
+            is_re_review=False,
+        )
+
+    slack_post.assert_awaited_once()
+    text = slack_post.await_args.args[2]
+    assert "found 2 potential issues" in text
+
+
+@pytest.mark.asyncio
+async def test_publish_review_skips_slack_reply_on_re_review() -> None:
+    """Re-reviews must NOT post to Slack even when slack_thread metadata is set."""
+    from agent.tools.publish_review import _publish_review_async
+
+    metadata = {
+        "kind": "reviewer",
+        "slack_thread": {"channel_id": "C1", "thread_ts": "1234.5"},
+    }
+    slack_post = AsyncMock(return_value=True)
+    get_metadata = AsyncMock(return_value=metadata)
+
+    with (
+        patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
+        patch("agent.tools.publish_review.list_findings_async", AsyncMock(return_value=[])),
+        patch(
+            "agent.tools.publish_review.post_pull_request_review",
+            AsyncMock(return_value={"id": 1}),
+        ),
+        patch("agent.tools.publish_review.fetch_review_comments", AsyncMock(return_value=[])),
+        patch(
+            "agent.tools.publish_review._resolve_threads_for_resolved_findings",
+            new_callable=AsyncMock,
+            return_value=0,
+        ),
+        patch("agent.tools.publish_review.set_reviewer_thread_metadata", new_callable=AsyncMock),
+        patch("agent.tools.publish_review.get_thread_metadata", get_metadata),
+        patch("agent.tools.publish_review.post_slack_thread_reply", slack_post),
+    ):
+        await _publish_review_async(
+            owner="o",
+            repo="r",
+            pr_number=7,
+            head_sha="sha",
+            token="t",
+            severity_threshold="medium",
+            cap=15,
+            is_re_review=True,
+        )
+
+    slack_post.assert_not_awaited()
+    # Re-review path should also avoid even fetching the slack metadata.
+    get_metadata.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_publish_review_skips_slack_reply_when_no_slack_ref() -> None:
+    """A review started from GitHub (no slack_thread metadata) must not post to Slack."""
+    from agent.tools.publish_review import _publish_review_async
+
+    slack_post = AsyncMock(return_value=True)
+
+    with (
+        patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
+        patch("agent.tools.publish_review.list_findings_async", AsyncMock(return_value=[])),
+        patch(
+            "agent.tools.publish_review.post_pull_request_review",
+            AsyncMock(return_value={"id": 1}),
+        ),
+        patch("agent.tools.publish_review.fetch_review_comments", AsyncMock(return_value=[])),
+        patch(
+            "agent.tools.publish_review._resolve_threads_for_resolved_findings",
+            new_callable=AsyncMock,
+            return_value=0,
+        ),
+        patch("agent.tools.publish_review.set_reviewer_thread_metadata", new_callable=AsyncMock),
+        patch(
+            "agent.tools.publish_review.get_thread_metadata",
+            new_callable=AsyncMock,
+            return_value={"kind": "reviewer"},
+        ),
+        patch("agent.tools.publish_review.post_slack_thread_reply", slack_post),
+    ):
+        await _publish_review_async(
+            owner="o",
+            repo="r",
+            pr_number=7,
+            head_sha="sha",
+            token="t",
+            severity_threshold="medium",
+            cap=15,
+            is_re_review=False,
+        )
+
+    slack_post.assert_not_awaited()

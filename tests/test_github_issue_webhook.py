@@ -594,9 +594,13 @@ def test_process_slack_pr_review_request_posts_trace_reply(monkeypatch) -> None:
         source: str,
         github_login: str = "",
         github_user_id: int | None = None,
+        slack_channel_id: str = "",
+        slack_thread_ts: str = "",
     ) -> dict[str, object]:
         captured["pr_ref"] = pr_ref
         captured["source"] = source
+        captured["slack_channel_id"] = slack_channel_id
+        captured["slack_thread_ts"] = slack_thread_ts
         return {"success": True, "thread_id": "reviewer-thread-id", "pr_url": pr_ref.url}
 
     async def fake_post_slack_trace_reply(
@@ -626,6 +630,8 @@ def test_process_slack_pr_review_request_posts_trace_reply(monkeypatch) -> None:
     )
 
     assert captured["source"] == "slack"
+    assert captured["slack_channel_id"] == "C123"
+    assert captured["slack_thread_ts"] == "1700000000.000100"
     assert captured["trace_reply"] == {
         "channel_id": "C123",
         "thread_ts": "1700000000.000100",

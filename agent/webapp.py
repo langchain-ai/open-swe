@@ -19,6 +19,7 @@ from langgraph_sdk.client import LangGraphClient
 from .reviewer_findings import (
     REVIEWER_THREAD_KIND,
     ReviewerPRMeta,
+    ReviewerSlackThread,
     set_reviewer_thread_metadata,
 )
 from .utils.auth import (
@@ -913,7 +914,12 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
 async def process_slack_pr_review_request(
     pr_ref: GitHubPrRef, channel_id: str, thread_ts: str
 ) -> None:
-    result = await trigger_pr_review_from_ref(pr_ref, source="slack")
+    result = await trigger_pr_review_from_ref(
+        pr_ref,
+        source="slack",
+        slack_channel_id=channel_id,
+        slack_thread_ts=thread_ts,
+    )
     if result.get("success"):
         thread_id = result.get("thread_id")
         if isinstance(thread_id, str) and thread_id:
@@ -1383,6 +1389,8 @@ async def trigger_pr_review_from_ref(
     source: str,
     github_login: str = "",
     github_user_id: int | None = None,
+    slack_channel_id: str = "",
+    slack_thread_ts: str = "",
 ) -> dict[str, Any]:
     repo_config = {"owner": pr_ref.owner, "name": pr_ref.repo}
     if not _is_repo_allowed_for_reviewer(repo_config):
@@ -1428,7 +1436,15 @@ async def trigger_pr_review_from_ref(
         "head_ref": branch_name,
         "base_ref": base_ref,
     }
-    await set_reviewer_thread_metadata(thread_id, pr=pr_meta, watch=True)
+    slack_thread_meta: ReviewerSlackThread | None = None
+    if slack_channel_id and slack_thread_ts:
+        slack_thread_meta = {
+            "channel_id": slack_channel_id,
+            "thread_ts": slack_thread_ts,
+        }
+    await set_reviewer_thread_metadata(
+        thread_id, pr=pr_meta, watch=True, slack_thread=slack_thread_meta
+    )
 
     prompt = build_github_pr_review_prompt(repo_config, pr_ref.number, pr_url, base_sha, head_sha)
     configurable = _build_reviewer_configurable(

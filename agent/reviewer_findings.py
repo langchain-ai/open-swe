@@ -71,6 +71,13 @@ class ReviewerPRMeta(TypedDict, total=False):
     base_ref: str
 
 
+class ReviewerSlackThread(TypedDict, total=False):
+    """Slack thread that initiated this review — used to post a completion reply."""
+
+    channel_id: str
+    thread_ts: str
+
+
 def new_finding_id() -> str:
     """Return a stable, short, URL-friendly finding id (``f_<hex>``)."""
     return f"f_{uuid.uuid4().hex[:10]}"
@@ -206,6 +213,7 @@ async def set_reviewer_thread_metadata(
     last_reviewed_sha: str | None = None,
     watch: bool | None = None,
     findings: list[Finding] | None = None,
+    slack_thread: ReviewerSlackThread | None = None,
     extra: dict[str, Any] | None = None,
 ) -> None:
     """Persist reviewer-thread-level metadata.
@@ -224,6 +232,8 @@ async def set_reviewer_thread_metadata(
         metadata["watch"] = watch
     if findings is not None:
         metadata["findings"] = findings
+    if slack_thread is not None:
+        metadata["slack_thread"] = slack_thread
     if extra:
         metadata.update(extra)
     await client.threads.update(thread_id=thread_id, metadata=metadata)
@@ -243,6 +253,19 @@ def get_thread_pr_meta(metadata: dict[str, Any]) -> ReviewerPRMeta | None:
     if not isinstance(pr, dict):
         return None
     return cast(ReviewerPRMeta, pr)
+
+
+def get_thread_slack_ref(metadata: dict[str, Any]) -> ReviewerSlackThread | None:
+    slack_thread = metadata.get("slack_thread")
+    if not isinstance(slack_thread, dict):
+        return None
+    channel_id = slack_thread.get("channel_id")
+    thread_ts = slack_thread.get("thread_ts")
+    if not isinstance(channel_id, str) or not isinstance(thread_ts, str):
+        return None
+    if not channel_id or not thread_ts:
+        return None
+    return cast(ReviewerSlackThread, slack_thread)
 
 
 def filter_findings_for_publish(
