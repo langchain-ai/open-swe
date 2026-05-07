@@ -93,18 +93,25 @@ def render_review_body(
     when findings were filtered out below the surfacing threshold.
     """
     parts: list[str] = []
-    if summary:
-        parts.append(summary.strip())
-    if surfaced_count == 0:
-        parts.append("_No issues at or above the configured severity threshold._")
+    if surfaced_count == 0 and total_open_count == 0:
+        parts.append("**No issues found.**")
+    elif surfaced_count == 0:
+        parts.append(
+            f"**No issues at or above `{severity_threshold}` severity.** "
+            f"({total_open_count} lower-severity finding"
+            f"{'s' if total_open_count != 1 else ''} hidden.)"
+        )
     else:
+        finding_word = "finding" if surfaced_count == 1 else "findings"
+        parts.append(f"**Found {surfaced_count} {finding_word}.**")
         hidden = total_open_count - surfaced_count
         if hidden > 0:
             parts.append(
-                f"_Showing {surfaced_count} finding{'s' if surfaced_count != 1 else ''} "
-                f"at severity ≥ `{severity_threshold}`; {hidden} lower-severity "
-                f"finding{'s' if hidden != 1 else ''} hidden._"
+                f"_{hidden} lower-severity finding{'s' if hidden != 1 else ''} "
+                f"below `{severity_threshold}` hidden._"
             )
+    if summary:
+        parts.append(summary.strip())
     parts.append(f"<!-- open-swe-reviewer pr={pr_number} -->")
     return "\n\n".join(p for p in parts if p)
 
