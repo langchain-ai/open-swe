@@ -4,7 +4,8 @@ The reviewer agent calls ``publish_review`` at the end of a run. That tool
 batches eligible findings (severity ≥ threshold, status=open, capped) into a
 single GitHub PR Review:
 
-- Review body: agent-authored summary line.
+- Review body: a fixed, host-formatted summary line. The agent never writes
+  prose here — it's either "no issues found" or "found N potential issue(s)".
 - Inline comments: one per surfaced finding, anchored to ``path`` + ``line``
   (+ ``start_line`` for ranges) + ``side``.
 - Suggestion: when ``finding.suggestion`` is set, appended to the comment body
@@ -79,41 +80,23 @@ def render_inline_comment_payload(finding: Finding) -> dict[str, Any] | None:
     return payload
 
 
-def render_review_body(
-    *,
-    pr_number: int,
-    surfaced_count: int,
-    total_open_count: int,
-    severity_threshold: str,
-    summary: str | None,
-) -> str:
+def render_review_body(*, pr_number: int, surfaced_count: int) -> str:
     """Compose the top-level review body.
 
-    Includes the agent's summary (if any) and a footer line so reviewers know
-    when findings were filtered out below the surfacing threshold.
+    Two fixed shapes — no agent prose:
+
+    - 0 surfaced findings: a single "no issues" line.
+    - N surfaced findings: a single "found N potential issue(s)" line.
     """
-    parts: list[str] = []
-    if surfaced_count == 0 and total_open_count == 0:
-        parts.append("**No issues found.**")
-    elif surfaced_count == 0:
-        parts.append(
-            f"**No issues at or above `{severity_threshold}` severity.** "
-            f"({total_open_count} lower-severity finding"
-            f"{'s' if total_open_count != 1 else ''} hidden.)"
+    if surfaced_count == 0:
+        headline = (
+            "## ✅ Open SWE Review: No issues found\n\n"
+            "Open SWE reviewed this PR and found no potential bugs to report."
         )
     else:
-        finding_word = "finding" if surfaced_count == 1 else "findings"
-        parts.append(f"**Found {surfaced_count} {finding_word}.**")
-        hidden = total_open_count - surfaced_count
-        if hidden > 0:
-            parts.append(
-                f"_{hidden} lower-severity finding{'s' if hidden != 1 else ''} "
-                f"below `{severity_threshold}` hidden._"
-            )
-    if summary:
-        parts.append(summary.strip())
-    parts.append(f"<!-- open-swe-reviewer pr={pr_number} -->")
-    return "\n\n".join(p for p in parts if p)
+        issue_word = "issue" if surfaced_count == 1 else "issues"
+        headline = f"**Open SWE Review** found {surfaced_count} potential {issue_word}."
+    return f"{headline}\n\n<!-- open-swe-reviewer pr={pr_number} -->"
 
 
 async def post_pull_request_review(
