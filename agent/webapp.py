@@ -38,6 +38,7 @@ from .utils.github_comments import (
     fetch_pr_comments_since_last_tag,
     format_github_comment_body_for_prompt,
     get_thread_id_from_branch,
+    parse_github_review_command,
     react_to_github_comment,
     sanitize_github_comment_body,
     verify_github_signature,
@@ -57,6 +58,7 @@ from .utils.slack import (
     get_slack_user_info,
     get_slack_user_names,
     looks_like_slack_pr_review_command,
+    parse_github_pr_url,
     parse_slack_review_command,
     post_slack_thread_reply,
     post_slack_trace_reply,
@@ -1592,6 +1594,75 @@ async def process_github_pr_review_request(payload: dict[str, Any]) -> None:
     logger.info("Reviewer run created for thread %s from GitHub PR review request", thread_id)
 
 
+async def process_github_pr_review_command(
+    payload: dict[str, Any],
+    event_type: str,
+    pr_url_override: str | None,
+) -> None:
+    """Trigger the reviewer when a PR comment contains ``@open-swe review``.
+
+    ``pr_url_override`` is the optional URL token that followed ``review``. If
+    set, the review targets that PR; otherwise the comment's own PR is used.
+    """
+    repo = payload.get("repository", {})
+    repo_config = {
+        "owner": repo.get("owner", {}).get("login", ""),
+        "name": repo.get("name", ""),
+    }
+    pr_data = payload.get("pull_request") or payload.get("issue", {})
+    sender = payload.get("sender", {})
+    github_login = sender.get("login", "")
+    github_user_id = sender.get("id")
+
+    pr_ref: GitHubPrRef | None = None
+    if pr_url_override:
+        pr_ref = parse_github_pr_url(pr_url_override)
+        if pr_ref is None:
+            logger.info("Ignoring @open-swe review with unparseable URL %s", pr_url_override)
+            return
+    else:
+        pr_number = pr_data.get("number")
+        if not pr_number:
+            logger.warning("@open-swe review command missing pr_number, skipping")
+            return
+        pr_ref = GitHubPrRef(
+            owner=repo_config["owner"],
+            repo=repo_config["name"],
+            number=pr_number,
+            url=pr_data.get("html_url", "") or pr_data.get("url", ""),
+        )
+
+    comment = payload.get("comment") or payload.get("review", {})
+    comment_id = comment.get("id")
+    node_id = comment.get("node_id") if event_type == "pull_request_review" else None
+    if comment_id:
+        app_token = await get_github_app_installation_token()
+        if app_token:
+            await react_to_github_comment(
+                repo_config,
+                comment_id,
+                event_type=event_type,
+                token=app_token,
+                pull_number=pr_data.get("number"),
+                node_id=node_id,
+            )
+
+    result = await trigger_pr_review_from_ref(
+        pr_ref,
+        source="github",
+        github_login=github_login,
+        github_user_id=github_user_id,
+    )
+    if not result.get("success"):
+        logger.warning(
+            "Failed to trigger reviewer from @open-swe review on %s/%s#%s: %s",
+            pr_ref.owner,
+            pr_ref.repo,
+            pr_ref.number,
+            result.get("error"),
+        )
+
+
 async def _fetch_open_pr_for_branch(
     repo_config: dict[str, str], head_ref: str, *, token: str
 ) -> dict[str, Any] | None:
@@ -2177,6 +2248,14 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks) ->
         "pull_request_review_comment",
         "pull_request_review",
     }:
+        is_review_command, pr_url_override = parse_github_review_command(comment_body)
+        if is_review_command:
+            if not _is_repo_allowed_for_reviewer(webhook_repo_config):
+                return {"status": "ignored", "reason": "Repository not in reviewer allowlist"}
+            background_tasks.add_task(
+                process_github_pr_review_command, payload, event_type, pr_url_override
+            )
+            return {"status": "accepted", "message": "Processing GitHub PR review command"}
         background_tasks.add_task(process_github_pr_comment, payload, event_type)
         return {"status": "accepted", "message": f"Processing {event_type} event"}
 

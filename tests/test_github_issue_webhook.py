@@ -1019,3 +1019,216 @@ def test_process_github_issue_existing_thread_uses_followup_prompt(monkeypatch) 
 
     assert captured["prompt"] == "**octocat:**\n@openswe please handle this"
     assert "## Repository" not in captured["prompt"]
+
+
+def test_parse_github_review_command_standalone() -> None:
+    is_review, url = github_comments.parse_github_review_command("@open-swe review")
+    assert is_review is True
+    assert url is None
+
+
+def test_parse_github_review_command_with_url() -> None:
+    is_review, url = github_comments.parse_github_review_command(
+        "@open-swe review https://github.com/langchain-ai/open-swe/pull/1244"
+    )
+    assert is_review is True
+    assert url == "https://github.com/langchain-ai/open-swe/pull/1244"
+
+
+def test_parse_github_review_command_case_insensitive_and_aliases() -> None:
+    assert github_comments.parse_github_review_command("@OpenSWE Review") == (True, None)
+    assert github_comments.parse_github_review_command("@openswe review") == (True, None)
+    assert github_comments.parse_github_review_command("@openswe-dev review") == (True, None)
+
+
+def test_parse_github_review_command_freeform_does_not_match() -> None:
+    assert github_comments.parse_github_review_command("@open-swe review my code") == (False, None)
+    assert github_comments.parse_github_review_command("@open-swe please review") == (False, None)
+    assert github_comments.parse_github_review_command("@open-swe fix this") == (False, None)
+    assert github_comments.parse_github_review_command("") == (False, None)
+
+
+def test_github_webhook_routes_pr_comment_review_to_reviewer(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    async def fake_process_pr_comment(payload: dict[str, object], event_type: str) -> None:
+        raise AssertionError("process_github_pr_comment should not be called for review command")
+
+    async def fake_process_review_command(
+        payload: dict[str, object], event_type: str, pr_url_override: str | None
+    ) -> None:
+        captured["payload"] = payload
+        captured["event_type"] = event_type
+        captured["pr_url_override"] = pr_url_override
+
+    monkeypatch.setattr(webapp, "process_github_pr_comment", fake_process_pr_comment)
+    monkeypatch.setattr(webapp, "process_github_pr_review_command", fake_process_review_command)
+    monkeypatch.setattr(webapp, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
+    monkeypatch.setattr(
+        webapp, "ALLOWED_REVIEWER_GITHUB_REPOS", frozenset({"langchain-ai/open-swe"})
+    )
+    monkeypatch.setattr(webapp, "ALLOWED_GITHUB_ORGS", frozenset({"langchain-ai"}))
+
+    client = TestClient(webapp.app)
+    response = _post_github_webhook(
+        client,
+        "issue_comment",
+        {
+            "action": "created",
+            "issue": {
+                "id": 12345,
+                "number": 1244,
+                "pull_request": {"url": "https://api.github.com/repos/x/y/pulls/1244"},
+            },
+            "comment": {"id": 9, "body": "@open-swe review"},
+            "repository": {"owner": {"login": "langchain-ai"}, "name": "open-swe"},
+            "sender": {"login": "octocat"},
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "status": "accepted",
+        "message": "Processing GitHub PR review command",
+    }
+    assert captured["event_type"] == "issue_comment"
+    assert captured["pr_url_override"] is None
+
+
+def test_github_webhook_blocks_pr_review_command_outside_reviewer_allowlist(monkeypatch) -> None:
+    async def fake_process_review_command(
+        payload: dict[str, object], event_type: str, pr_url_override: str | None
+    ) -> None:
+        raise AssertionError("process_github_pr_review_command should not run")
+
+    monkeypatch.setattr(webapp, "process_github_pr_review_command", fake_process_review_command)
+    monkeypatch.setattr(webapp, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
+    monkeypatch.setattr(
+        webapp, "ALLOWED_REVIEWER_GITHUB_REPOS", frozenset({"langchain-ai/open-swe"})
+    )
+    monkeypatch.setattr(webapp, "ALLOWED_GITHUB_ORGS", frozenset({"langchain-ai"}))
+
+    client = TestClient(webapp.app)
+    response = _post_github_webhook(
+        client,
+        "issue_comment",
+        {
+            "action": "created",
+            "issue": {
+                "id": 12345,
+                "number": 1244,
+                "pull_request": {"url": "https://api.github.com/repos/x/y/pulls/1244"},
+            },
+            "comment": {"id": 9, "body": "@open-swe review"},
+            "repository": {"owner": {"login": "langchain-ai"}, "name": "public-demo"},
+            "sender": {"login": "octocat"},
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "status": "ignored",
+        "reason": "Repository not in reviewer allowlist",
+    }
+
+
+def test_process_github_pr_review_command_uses_payload_pr(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    async def fake_get_app_token() -> str:
+        return "app-token"
+
+    async def fake_react(*args, **kwargs) -> None:
+        captured["reacted"] = True
+
+    async def fake_trigger(
+        pr_ref: GitHubPrRef,
+        *,
+        source: str,
+        github_login: str = "",
+        github_user_id: int | None = None,
+        slack_channel_id: str = "",
+        slack_thread_ts: str = "",
+    ) -> dict[str, object]:
+        captured["pr_ref"] = pr_ref
+        captured["source"] = source
+        captured["github_login"] = github_login
+        captured["github_user_id"] = github_user_id
+        return {"success": True, "thread_id": "tid", "pr_url": pr_ref.url}
+
+    monkeypatch.setattr(webapp, "get_github_app_installation_token", fake_get_app_token)
+    monkeypatch.setattr(webapp, "react_to_github_comment", fake_react)
+    monkeypatch.setattr(webapp, "trigger_pr_review_from_ref", fake_trigger)
+
+    asyncio.run(
+        webapp.process_github_pr_review_command(
+            {
+                "issue": {
+                    "number": 1244,
+                    "html_url": "https://github.com/langchain-ai/open-swe/pull/1244",
+                    "pull_request": {"url": "..."},
+                },
+                "comment": {"id": 9, "body": "@open-swe review"},
+                "repository": {"owner": {"login": "langchain-ai"}, "name": "open-swe"},
+                "sender": {"login": "octocat", "id": 123},
+            },
+            "issue_comment",
+            None,
+        )
+    )
+
+    pr_ref = captured["pr_ref"]
+    assert isinstance(pr_ref, GitHubPrRef)
+    assert pr_ref.owner == "langchain-ai"
+    assert pr_ref.repo == "open-swe"
+    assert pr_ref.number == 1244
+    assert pr_ref.url == "https://github.com/langchain-ai/open-swe/pull/1244"
+    assert captured["source"] == "github"
+    assert captured["github_login"] == "octocat"
+    assert captured["github_user_id"] == 123
+    assert captured.get("reacted") is True
+
+
+def test_process_github_pr_review_command_uses_url_override(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    async def fake_get_app_token() -> str:
+        return "app-token"
+
+    async def fake_react(*args, **kwargs) -> None:
+        return None
+
+    async def fake_trigger(
+        pr_ref: GitHubPrRef,
+        *,
+        source: str,
+        github_login: str = "",
+        github_user_id: int | None = None,
+        slack_channel_id: str = "",
+        slack_thread_ts: str = "",
+    ) -> dict[str, object]:
+        captured["pr_ref"] = pr_ref
+        return {"success": True, "thread_id": "tid", "pr_url": pr_ref.url}
+
+    monkeypatch.setattr(webapp, "get_github_app_installation_token", fake_get_app_token)
+    monkeypatch.setattr(webapp, "react_to_github_comment", fake_react)
+    monkeypatch.setattr(webapp, "trigger_pr_review_from_ref", fake_trigger)
+
+    asyncio.run(
+        webapp.process_github_pr_review_command(
+            {
+                "issue": {"number": 99, "pull_request": {"url": "..."}},
+                "comment": {"id": 1, "body": "@open-swe review https://github.com/x/y/pull/7"},
+                "repository": {"owner": {"login": "x"}, "name": "y"},
+                "sender": {"login": "octocat", "id": 1},
+            },
+            "issue_comment",
+            "https://github.com/x/y/pull/7",
+        )
+    )
+
+    pr_ref = captured["pr_ref"]
+    assert isinstance(pr_ref, GitHubPrRef)
+    assert pr_ref.number == 7
+    assert pr_ref.owner == "x"
+    assert pr_ref.repo == "y"
