@@ -3,12 +3,15 @@ import asyncio
 import pytest
 
 from agent import webapp
+from agent.utils import slack as slack_utils
 from agent.utils.slack import (
+    TRACE_REPLY_PHRASES,
     convert_mentions_to_slack_format,
     format_slack_messages_for_prompt,
     looks_like_slack_pr_review_command,
     parse_github_pr_url,
     parse_slack_review_command,
+    post_slack_trace_reply,
     replace_bot_mention_with_username,
     select_slack_context_messages,
     strip_bot_mention,
@@ -216,6 +219,39 @@ def test_format_slack_messages_for_prompt_replaces_bot_id_mention_in_text() -> N
     )
 
     assert formatted == "@alice(U123): @open-swe status update?"
+
+
+def test_post_slack_trace_reply_picks_random_phrase_when_no_message(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    posted: list[str] = []
+
+    async def fake_post_slack_thread_reply(channel_id: str, thread_ts: str, text: str) -> None:
+        posted.append(text)
+
+    monkeypatch.setattr(slack_utils, "post_slack_thread_reply", fake_post_slack_thread_reply)
+    monkeypatch.setattr(slack_utils, "get_langsmith_trace_url", lambda thread_id: None)
+
+    asyncio.run(post_slack_trace_reply("C123", "1.0", "thread-id"))
+
+    assert len(posted) == 1
+    assert posted[0] in TRACE_REPLY_PHRASES
+
+
+def test_post_slack_trace_reply_uses_explicit_message_when_provided(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    posted: list[str] = []
+
+    async def fake_post_slack_thread_reply(channel_id: str, thread_ts: str, text: str) -> None:
+        posted.append(text)
+
+    monkeypatch.setattr(slack_utils, "post_slack_thread_reply", fake_post_slack_thread_reply)
+    monkeypatch.setattr(slack_utils, "get_langsmith_trace_url", lambda thread_id: None)
+
+    asyncio.run(post_slack_trace_reply("C123", "1.0", "thread-id", message="Taking a look..."))
+
+    assert posted == ["Taking a look..."]
 
 
 def test_select_slack_context_messages_detects_username_mention() -> None:
@@ -463,7 +499,7 @@ def _setup_slack_mention_fakes(
         return False
 
     async def fake_post_slack_trace_reply(
-        channel_id: str, thread_ts: str, thread_id: str, message: str = "Working on it!"
+        channel_id: str, thread_ts: str, thread_id: str, message: str | None = None
     ) -> None:
         captured["trace_reply"] = {
             "channel_id": channel_id,
@@ -543,7 +579,7 @@ def test_process_slack_mention_creates_thread_first_run_with_trace_reply(
         "channel_id": "C123",
         "thread_ts": thread_ts,
         "thread_id": expected_thread_id,
-        "message": "Working on it!",
+        "message": None,
     }
 
     run_create = captured["run_create"]
