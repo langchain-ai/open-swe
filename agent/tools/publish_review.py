@@ -29,7 +29,6 @@ from ..utils.github_token import get_github_token
 
 
 def publish_review(
-    summary: str | None = None,
     severity_threshold: str = "medium",
     cap: int = 4,
 ) -> dict[str, Any]:
@@ -44,7 +43,8 @@ def publish_review(
        at ``cap`` to avoid review spam.
     3. POST a single GitHub PR Review with the eligible findings as inline
        comments. ``finding.suggestion`` becomes a ```suggestion``` block
-       (the "Commit suggestion" UX).
+       (the "Commit suggestion" UX). The review body is a fixed,
+       host-formatted summary line — you do not write it.
     4. Store the returned per-comment IDs back on each finding so a future
        re-review can resolve those threads on GitHub when the issues are fixed.
     5. For findings whose status moved ``open`` → ``resolved`` since the last
@@ -53,9 +53,6 @@ def publish_review(
     6. Update ``last_reviewed_sha`` on the thread to the current head SHA.
 
     Args:
-        summary: Optional 1–2 sentence top-level take on the PR. Rendered as
-            the review body. Skip if you have nothing useful to say beyond
-            the per-finding comments.
         severity_threshold: Lowest severity to surface to GitHub (default
             ``medium``). Lower-severity findings stay in state and surface in
             the future UI but not on the PR.
@@ -96,7 +93,6 @@ def publish_review(
             pr_number=pr_number,
             head_sha=head_sha,
             token=token,
-            summary=summary,
             severity_threshold=_cast_severity(severity_threshold),
             cap=cap,
         )
@@ -114,7 +110,6 @@ async def _publish_review_async(
     pr_number: int,
     head_sha: str,
     token: str,
-    summary: str | None,
     severity_threshold: Severity,
     cap: int,
 ) -> dict[str, Any]:
@@ -145,9 +140,6 @@ async def _publish_review_async(
     review_body = render_review_body(
         pr_number=pr_number,
         surfaced_count=len(inline_comments),
-        total_open_count=len(open_unpublished),
-        severity_threshold=severity_threshold,
-        summary=summary,
     )
 
     review_response = await post_pull_request_review(

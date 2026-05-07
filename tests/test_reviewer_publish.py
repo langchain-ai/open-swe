@@ -67,54 +67,22 @@ def test_render_inline_comment_payload_returns_none_for_file_level() -> None:
     assert payload is None
 
 
-def test_render_review_body_includes_summary_and_marker() -> None:
-    body = render_review_body(
-        pr_number=123,
-        surfaced_count=2,
-        total_open_count=3,
-        severity_threshold="medium",
-        summary="LGTM with two notes",
-    )
-    assert "LGTM with two notes" in body
+def test_render_review_body_with_findings_uses_potential_issue_phrasing() -> None:
+    body = render_review_body(pr_number=123, surfaced_count=2)
+    assert body.startswith("**Open SWE Review** found 2 potential issues.")
     assert "<!-- open-swe-reviewer pr=123 -->" in body
-    assert "Found 2 findings" in body
-    assert "1 lower-severity finding" in body
 
 
-def test_render_review_body_surfaces_no_findings_message() -> None:
-    body = render_review_body(
-        pr_number=99,
-        surfaced_count=0,
-        total_open_count=0,
-        severity_threshold="medium",
-        summary=None,
-    )
-    assert "No issues found" in body
+def test_render_review_body_singular_finding() -> None:
+    body = render_review_body(pr_number=123, surfaced_count=1)
+    assert body.startswith("**Open SWE Review** found 1 potential issue.")
+
+
+def test_render_review_body_no_findings_message() -> None:
+    body = render_review_body(pr_number=99, surfaced_count=0)
+    assert "## ✅ Open SWE Review: No issues found" in body
+    assert "Open SWE reviewed this PR and found no potential bugs to report." in body
     assert "<!-- open-swe-reviewer pr=99 -->" in body
-
-
-def test_render_review_body_no_findings_keeps_agent_summary() -> None:
-    body = render_review_body(
-        pr_number=42,
-        surfaced_count=0,
-        total_open_count=0,
-        severity_threshold="medium",
-        summary="Reviewed PR — clean refactor, well-tested.",
-    )
-    assert "No issues found" in body
-    assert "Reviewed PR — clean refactor, well-tested." in body
-
-
-def test_render_review_body_no_surfaced_with_hidden_lower_severity() -> None:
-    body = render_review_body(
-        pr_number=7,
-        surfaced_count=0,
-        total_open_count=2,
-        severity_threshold="medium",
-        summary=None,
-    )
-    assert "No issues at or above `medium` severity" in body
-    assert "2 lower-severity findings hidden" in body
 
 
 @pytest.mark.asyncio
@@ -182,7 +150,6 @@ async def test_publish_review_skips_findings_already_published() -> None:
             pr_number=7,
             head_sha="sha",
             token="t",
-            summary=None,
             severity_threshold="medium",
             cap=15,
         )
@@ -222,7 +189,6 @@ async def test_publish_review_posts_summary_when_no_findings() -> None:
             pr_number=7,
             head_sha="sha",
             token="t",
-            summary=None,
             severity_threshold="medium",
             cap=15,
         )
