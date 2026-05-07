@@ -1640,6 +1640,12 @@ async def process_github_pr_close(payload: dict[str, Any]) -> None:
     metadata = await _get_thread_metadata_safe(thread_id)
     if metadata is None or metadata.get("kind") != REVIEWER_THREAD_KIND:
         # No reviewer thread for this PR, nothing to do.
+        logger.debug(
+            "PR %s/%s#%s closed/reopened: no reviewer thread, skipping watch update",
+            repo_config.get("owner"),
+            repo_config.get("name"),
+            pr_number,
+        )
         return
     action = payload.get("action", "")
     desired_watch = action == "reopened"
@@ -1654,9 +1660,10 @@ async def process_github_push_event(payload: dict[str, Any]) -> None:
     ref = payload.get("ref", "")
     after_sha = payload.get("after", "")
     if not ref.startswith("refs/heads/"):
+        logger.debug("Push ignored: ref %s is not a branch", ref)
         return
     if not isinstance(after_sha, str) or not after_sha or set(after_sha) == {"0"}:
-        # Branch deletion or missing SHA — nothing to review.
+        logger.debug("Push to %s ignored: branch deletion or missing SHA", ref)
         return
     head_ref = ref[len("refs/heads/") :]
 
@@ -1666,8 +1673,15 @@ async def process_github_push_event(payload: dict[str, Any]) -> None:
         "name": repo.get("name", ""),
     }
     if not repo_config["owner"] or not repo_config["name"]:
+        logger.warning("Push to %s ignored: repository owner/name missing from payload", head_ref)
         return
     if not _is_repo_allowed_for_reviewer(repo_config):
+        logger.info(
+            "Push to %s/%s head=%s ignored: repo not in reviewer allowlist",
+            repo_config["owner"],
+            repo_config["name"],
+            head_ref,
+        )
         return
 
     app_token = await get_github_app_installation_token()
@@ -1692,11 +1706,25 @@ async def process_github_push_event(payload: dict[str, Any]) -> None:
     head_sha = pr.get("head", {}).get("sha", after_sha)
     pr_title = pr.get("title", "")
     if not isinstance(pr_number, int) or not base_sha or not head_sha:
+        logger.warning(
+            "Push to %s/%s head=%s ignored: PR metadata missing number/base/head SHA",
+            repo_config["owner"],
+            repo_config["name"],
+            head_ref,
+        )
         return
 
     thread_id = generate_reviewer_thread_id(repo_config["owner"], repo_config["name"], pr_number)
     metadata = await _get_thread_metadata_safe(thread_id)
     if metadata is None or metadata.get("kind") != REVIEWER_THREAD_KIND:
+        logger.info(
+            "Push to %s/%s#%s ignored: no reviewer thread for this PR. "
+            "Trigger a first review (Slack `@open-swe review <url>` or request "
+            "open-swe[bot] as a GitHub reviewer) to start watching.",
+            repo_config["owner"],
+            repo_config["name"],
+            pr_number,
+        )
         return
     if not metadata.get("watch"):
         logger.info("Push to %s ignored: reviewer thread %s is not watching", head_ref, thread_id)
