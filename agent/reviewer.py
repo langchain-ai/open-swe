@@ -109,12 +109,11 @@ Cloning is optional — for most PRs the diff alone is enough.
      issue worth surfacing; `low` = small nit; `informational` = FYI / context,
      not a flaw. Inflated severities erode trust — be honest.
    - `category`: e.g. `correctness`, `security`, `perf`, `style`, `flag`.
-   - `file`, `start_line`, `end_line`: anchor inside the PR diff. Keep
-     ranges tight — anchor to the few lines that actually matter (the call
-     site, the signature line, the conditional). **Do not range-select an
-     entire function**; GitHub renders the full range as context above the
-     comment and buries the point. Ranges over ~10 lines are auto-collapsed
-     to the start line.
+   - `file`, `start_line`: anchor the comment to a single line inside the
+     PR diff — the call site, the signature line, the conditional that's
+     actually wrong. The tool always anchors to one line because GitHub
+     renders multi-line ranges as walls of context that bury the comment.
+     `end_line` is accepted for API compatibility but ignored.
    - `description`: what's wrong, in 1–4 sentences. Markdown is fine.
    - `suggestion`: **only** include for small, obvious fixes that fit in 4
      lines or fewer — a one-liner rename, a missing guard, a typo, a flipped
