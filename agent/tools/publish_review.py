@@ -27,7 +27,11 @@ from ..reviewer_publish import (
     render_review_body,
     resolve_review_thread,
 )
-from ..utils.github_token import get_github_token
+from ..utils.github_token import (
+    GitHubAuthError,
+    get_github_token,
+    invalidate_cached_github_token,
+)
 from ..utils.slack import post_slack_thread_reply
 
 
@@ -90,18 +94,31 @@ def publish_review(
     if not token:
         return {"success": False, "error": "No GitHub token available"}
 
-    return asyncio.run(
-        _publish_review_async(
-            owner=str(repo_config["owner"]),
-            repo=str(repo_config["name"]),
-            pr_number=pr_number,
-            head_sha=head_sha,
-            token=token,
-            severity_threshold=_cast_severity(severity_threshold),
-            cap=cap,
-            is_re_review=is_re_review,
+    try:
+        return asyncio.run(
+            _publish_review_async(
+                owner=str(repo_config["owner"]),
+                repo=str(repo_config["name"]),
+                pr_number=pr_number,
+                head_sha=head_sha,
+                token=token,
+                severity_threshold=_cast_severity(severity_threshold),
+                cap=cap,
+                is_re_review=is_re_review,
+            )
         )
-    )
+    except GitHubAuthError as exc:
+        thread_id = get_thread_id_from_runtime()
+        if thread_id:
+            asyncio.run(invalidate_cached_github_token(thread_id))
+        return {
+            "success": False,
+            "error": (
+                "GitHub returned 401 — the cached OAuth token is invalid or revoked. "
+                "Please re-authenticate and trigger the review again."
+            ),
+            "auth_error": str(exc),
+        }
 
 
 def _cast_severity(value: str) -> Severity:

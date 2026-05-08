@@ -34,9 +34,19 @@ async def get_github_app_installation_token() -> str | None:
     Returns:
         Installation access token string, or None if unavailable.
     """
+    token, _ = await get_github_app_installation_token_with_expiry()
+    return token
+
+
+async def get_github_app_installation_token_with_expiry() -> tuple[str | None, str | None]:
+    """Exchange the GitHub App JWT for an installation access token and its expiry.
+
+    Returns ``(token, expires_at)`` where ``expires_at`` is the ISO-8601 string
+    returned by GitHub (typically 1 hour out). Either value may be ``None``.
+    """
     if not GITHUB_APP_ID or not GITHUB_APP_PRIVATE_KEY or not GITHUB_APP_INSTALLATION_ID:
         logger.debug("GitHub App env vars not fully configured, skipping app token")
-        return None
+        return None, None
 
     try:
         app_jwt = _generate_app_jwt()
@@ -50,7 +60,8 @@ async def get_github_app_installation_token() -> str | None:
                 },
             )
             response.raise_for_status()
-            return response.json().get("token")
+            data = response.json()
+            return data.get("token"), data.get("expires_at")
     except Exception:
         logger.exception("Failed to get GitHub App installation token")
-        return None
+        return None, None

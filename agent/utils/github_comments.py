@@ -11,9 +11,27 @@ from typing import Any
 
 import httpx
 
+from .github_token import GitHubAuthError
 from .github_user_email_map import GITHUB_USER_EMAIL_MAP
 
 logger = logging.getLogger(__name__)
+
+__all__ = [
+    "GitHubAuthError",
+    "OPEN_SWE_TAGS",
+    "build_pr_prompt",
+    "extract_pr_context",
+    "fetch_issue_comments",
+    "fetch_pr_branch",
+    "fetch_pr_comments_since_last_tag",
+    "format_github_comment_body_for_prompt",
+    "get_thread_id_from_branch",
+    "parse_github_review_command",
+    "post_github_comment",
+    "react_to_github_comment",
+    "sanitize_github_comment_body",
+    "verify_github_signature",
+]
 
 OPEN_SWE_TAGS = ("@openswe", "@open-swe", "@openswe-dev")
 _OPEN_SWE_MENTION_RE = re.compile(r"(?i)@(?:openswe-dev|open-swe|openswe)\b")
@@ -134,8 +152,12 @@ async def react_to_github_comment(
                 },
                 json={"content": "eyes"},
             )
+            if response.status_code == 401:
+                raise GitHubAuthError(f"GitHub returned 401 reacting to comment {comment_id}")
             # 200 = already reacted, 201 = just created
             return response.status_code in (200, 201)
+        except GitHubAuthError:
+            raise
         except Exception:
             logger.exception("Failed to react to GitHub comment %s", comment_id)
             return False
@@ -161,11 +183,17 @@ async def _react_via_graphql(node_id: str | None, *, token: str) -> bool:
                 headers={"Authorization": f"Bearer {token}"},
                 json={"query": query, "variables": {"subjectId": node_id}},
             )
+            if response.status_code == 401:
+                raise GitHubAuthError(
+                    f"GitHub returned 401 reacting via GraphQL for node {node_id}"
+                )
             data = response.json()
             if "errors" in data:
                 logger.warning("GraphQL reaction errors: %s", data["errors"])
                 return False
             return True
+        except GitHubAuthError:
+            raise
         except Exception:
             logger.exception("Failed to react via GraphQL for node_id %s", node_id)
             return False
@@ -458,6 +486,8 @@ async def _fetch_paginated(
     while True:
         try:
             response = await client.get(url, headers=headers, params=params)
+            if response.status_code == 401:
+                raise GitHubAuthError(f"GitHub returned 401 fetching {url}")
             if response.status_code != 200:  # noqa: PLR2004
                 logger.warning("GitHub API returned %s for %s", response.status_code, url)
                 break
@@ -468,6 +498,8 @@ async def _fetch_paginated(
             if len(page_data) < 100:  # noqa: PLR2004
                 break
             params["page"] += 1
+        except GitHubAuthError:
+            raise
         except Exception:
             logger.exception("Failed to fetch %s", url)
             break

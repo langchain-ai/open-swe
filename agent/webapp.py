@@ -29,9 +29,13 @@ from .utils.auth import (
 )
 from .utils.authorship import OPEN_SWE_BOT_NAME
 from .utils.comments import get_recent_comments
-from .utils.github_app import get_github_app_installation_token
+from .utils.github_app import (
+    get_github_app_installation_token,
+    get_github_app_installation_token_with_expiry,
+)
 from .utils.github_comments import (
     OPEN_SWE_TAGS,
+    GitHubAuthError,
     build_pr_prompt,
     extract_pr_context,
     fetch_issue_comments,
@@ -44,7 +48,7 @@ from .utils.github_comments import (
     verify_github_signature,
 )
 from .utils.github_org_membership import INTERNAL_BOT_LOGINS, is_user_active_org_member
-from .utils.github_token import get_github_token_from_thread
+from .utils.github_token import get_github_token_from_thread, invalidate_cached_github_token
 from .utils.github_user_email_map import GITHUB_USER_EMAIL_MAP
 from .utils.linear import post_linear_trace_comment
 from .utils.linear_team_repo_map import LINEAR_TEAM_TO_REPO
@@ -1514,7 +1518,7 @@ async def trigger_pr_review_from_ref(
     if not _is_repo_allowed_for_reviewer(repo_config):
         return {"success": False, "error": "Repository not allowed for reviewer"}
 
-    app_token = await get_github_app_installation_token()
+    app_token, app_token_expires_at = await get_github_app_installation_token_with_expiry()
     if not app_token:
         logger.warning("No GitHub App token available for PR reviewer request")
         return {"success": False, "error": "No GitHub App token available"}
@@ -1540,7 +1544,7 @@ async def trigger_pr_review_from_ref(
         return {"success": False, "error": "Could not create reviewer thread"}
 
     try:
-        await persist_encrypted_github_token(thread_id, app_token)
+        await persist_encrypted_github_token(thread_id, app_token, expires_at=app_token_expires_at)
     except Exception:
         logger.warning("Could not persist bot token for reviewer thread %s", thread_id)
         return {"success": False, "error": "Could not persist reviewer token"}
@@ -1663,7 +1667,7 @@ async def process_github_pr_review_request(payload: dict[str, Any]) -> None:
         repo_config.get("owner", ""), repo_config.get("name", ""), pr_number
     )
 
-    app_token = await get_github_app_installation_token()
+    app_token, app_token_expires_at = await get_github_app_installation_token_with_expiry()
     if not app_token:
         logger.warning("No GitHub App token available for PR reviewer request")
         return
@@ -1673,7 +1677,7 @@ async def process_github_pr_review_request(payload: dict[str, Any]) -> None:
         return
 
     try:
-        await persist_encrypted_github_token(thread_id, app_token)
+        await persist_encrypted_github_token(thread_id, app_token, expires_at=app_token_expires_at)
     except Exception:
         logger.warning("Could not persist bot token for reviewer thread %s", thread_id)
         return
@@ -1896,7 +1900,7 @@ async def process_github_push_event(payload: dict[str, Any]) -> None:
         )
         return
 
-    app_token = await get_github_app_installation_token()
+    app_token, app_token_expires_at = await get_github_app_installation_token_with_expiry()
     if not app_token:
         logger.warning("No GitHub App token for push re-review on %s", head_ref)
         return
@@ -1951,7 +1955,7 @@ async def process_github_push_event(payload: dict[str, Any]) -> None:
     if not await _ensure_thread_exists_for_metadata(thread_id, langgraph_client):
         return
     try:
-        await persist_encrypted_github_token(thread_id, app_token)
+        await persist_encrypted_github_token(thread_id, app_token, expires_at=app_token_expires_at)
     except Exception:
         logger.warning("Could not persist bot token for reviewer thread %s", thread_id)
         return
@@ -2002,24 +2006,35 @@ async def process_github_push_event(payload: dict[str, Any]) -> None:
     )
 
 
+async def _refresh_thread_github_token_after_401(thread_id: str, email: str) -> str | None:
+    """Invalidate the cached token after a 401 and try to resolve a fresh one."""
+    logger.warning(
+        "GitHub returned 401 for thread %s; invalidating cached token and re-resolving",
+        thread_id,
+    )
+    await invalidate_cached_github_token(thread_id)
+    return await _get_or_resolve_thread_github_token(thread_id, email)
+
+
 async def _get_or_resolve_thread_github_token(thread_id: str, email: str) -> str | None:
     """Resolve and persist a GitHub token for a thread when available.
 
+    Skips the cached ciphertext when its ``github_token_expires_at`` is past.
     In bot-token-only mode, returns a fresh GitHub App installation token
     instead of resolving per-user OAuth tokens.
     """
     if is_bot_token_only_mode():
-        bot_token = await get_github_app_installation_token()
+        bot_token, expires_at = await get_github_app_installation_token_with_expiry()
         if bot_token:
             try:
-                await persist_encrypted_github_token(thread_id, bot_token)
+                await persist_encrypted_github_token(thread_id, bot_token, expires_at=expires_at)
             except Exception:
                 logger.warning("Could not persist bot token for thread %s", thread_id)
             return bot_token
         logger.warning("Bot-token-only mode but GitHub App token unavailable")
         return None
 
-    github_token, _encrypted_token = await get_github_token_from_thread(thread_id)
+    github_token, _encrypted_token, _expires_at = await get_github_token_from_thread(thread_id)
     if github_token:
         return github_token
 
@@ -2029,7 +2044,9 @@ async def _get_or_resolve_thread_github_token(thread_id: str, email: str) -> str
         return None
 
     try:
-        await persist_encrypted_github_token(thread_id, github_token)
+        await persist_encrypted_github_token(
+            thread_id, github_token, expires_at=auth_result.get("expires_at")
+        )
     except Exception:
         logger.warning("Could not persist GitHub token for thread %s", thread_id)
     return github_token
@@ -2101,20 +2118,45 @@ async def process_github_pr_comment(payload: dict[str, Any], event_type: str) ->
         return
 
     if comment_id:
-        await react_to_github_comment(
-            repo_config,
-            comment_id,
-            event_type=event_type,
-            token=github_token,
-            pull_number=pr_number,
-            node_id=node_id,
-        )
+        try:
+            await react_to_github_comment(
+                repo_config,
+                comment_id,
+                event_type=event_type,
+                token=github_token,
+                pull_number=pr_number,
+                node_id=node_id,
+            )
+        except GitHubAuthError:
+            github_token = await _refresh_thread_github_token_after_401(thread_id, email)
+            if not github_token:
+                logger.warning("Re-auth failed for thread %s after 401; skipping", thread_id)
+                return
+            await react_to_github_comment(
+                repo_config,
+                comment_id,
+                event_type=event_type,
+                token=github_token,
+                pull_number=pr_number,
+                node_id=node_id,
+            )
 
     if not pr_number:
         logger.warning("No PR number found in payload, skipping")
         return
 
-    comments = await fetch_pr_comments_since_last_tag(repo_config, pr_number, token=github_token)
+    try:
+        comments = await fetch_pr_comments_since_last_tag(
+            repo_config, pr_number, token=github_token
+        )
+    except GitHubAuthError:
+        github_token = await _refresh_thread_github_token_after_401(thread_id, email)
+        if not github_token:
+            logger.warning("Re-auth failed for thread %s after 401; skipping", thread_id)
+            return
+        comments = await fetch_pr_comments_since_last_tag(
+            repo_config, pr_number, token=github_token
+        )
     if not comments:
         logger.info("No comments found since last @open-swe tag for PR %s", pr_number)
         return
@@ -2176,12 +2218,31 @@ async def process_github_issue(payload: dict[str, Any], event_type: str) -> None
         if not reaction_token:
             logger.warning("No GitHub token available to react to issue comment %s", comment_id)
         else:
-            reacted = await react_to_github_comment(
-                repo_config,
-                comment_id,
-                event_type="issue_comment",
-                token=reaction_token,
-            )
+            try:
+                reacted = await react_to_github_comment(
+                    repo_config,
+                    comment_id,
+                    event_type="issue_comment",
+                    token=reaction_token,
+                )
+            except GitHubAuthError:
+                github_token = await _refresh_thread_github_token_after_401(thread_id, email)
+                reaction_token = github_token or app_token
+                reacted = False
+                if reaction_token:
+                    try:
+                        reacted = await react_to_github_comment(
+                            repo_config,
+                            comment_id,
+                            event_type="issue_comment",
+                            token=reaction_token,
+                        )
+                    except GitHubAuthError:
+                        logger.warning(
+                            "Re-auth still produced 401 reacting to issue comment %s",
+                            comment_id,
+                        )
+                        reacted = False
             if not reacted:
                 logger.warning("Failed to react to GitHub issue comment %s", comment_id)
 
@@ -2194,9 +2255,15 @@ async def process_github_issue(payload: dict[str, Any], event_type: str) -> None
         else:
             prompt = build_github_issue_update_prompt(github_login, title, description)
     else:
-        comments = await fetch_issue_comments(
-            repo_config, issue_number, token=github_token or app_token
-        )
+        try:
+            comments = await fetch_issue_comments(
+                repo_config, issue_number, token=github_token or app_token
+            )
+        except GitHubAuthError:
+            github_token = await _refresh_thread_github_token_after_401(thread_id, email)
+            comments = await fetch_issue_comments(
+                repo_config, issue_number, token=github_token or app_token
+            )
         if comment_id and not any(item.get("comment_id") == comment_id for item in comments):
             comments.append(
                 {

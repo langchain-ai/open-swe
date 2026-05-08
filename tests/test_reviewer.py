@@ -31,7 +31,7 @@ async def test_reviewer_uses_cached_thread_token_for_slack_review_request() -> N
         patch(
             "agent.reviewer.get_github_token_from_thread",
             new_callable=AsyncMock,
-            return_value=("app-token", "encrypted-token"),
+            return_value=("app-token", "encrypted-token", None),
         ) as mock_get_thread_token,
         patch("agent.reviewer.resolve_github_token", new_callable=AsyncMock) as mock_resolve_token,
         patch(
