@@ -176,6 +176,11 @@ async def _publish_review_async(
     )
     if review_response is None:
         return {"success": False, "error": "Failed to POST PR review"}
+    if isinstance(review_response, dict) and "_error" in review_response:
+        return {
+            "success": False,
+            "error": f"Failed to POST PR review: {review_response['_error']}",
+        }
     review_id = review_response.get("id") if isinstance(review_response, dict) else None
 
     if review_id is not None and inline_comments:

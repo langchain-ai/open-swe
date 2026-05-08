@@ -651,9 +651,15 @@ def test_process_github_pr_review_request_creates_reviewer_run(monkeypatch) -> N
     async def fake_get_github_app_installation_token() -> str | None:
         return "app-token"
 
-    async def fake_persist_encrypted_github_token(thread_id: str, token: str) -> str:
+    async def fake_get_github_app_installation_token_with_expiry() -> tuple[str | None, str | None]:
+        return "app-token", None
+
+    async def fake_persist_encrypted_github_token(
+        thread_id: str, token: str, *, expires_at: str | None = None
+    ) -> str:
         captured["persist_thread_id"] = thread_id
         captured["persist_token"] = token
+        captured["persist_expires_at"] = expires_at
         return "encrypted-token"
 
     async def fake_is_thread_active(thread_id: str) -> bool:
@@ -679,6 +685,11 @@ def test_process_github_pr_review_request_creates_reviewer_run(monkeypatch) -> N
 
     monkeypatch.setattr(
         webapp, "get_github_app_installation_token", fake_get_github_app_installation_token
+    )
+    monkeypatch.setattr(
+        webapp,
+        "get_github_app_installation_token_with_expiry",
+        fake_get_github_app_installation_token_with_expiry,
     )
     monkeypatch.setattr(
         webapp, "persist_encrypted_github_token", fake_persist_encrypted_github_token
@@ -730,6 +741,9 @@ def test_trigger_pr_review_from_ref_creates_reviewer_run(monkeypatch) -> None:
     async def fake_get_github_app_installation_token() -> str | None:
         return "app-token"
 
+    async def fake_get_github_app_installation_token_with_expiry() -> tuple[str | None, str | None]:
+        return "app-token", None
+
     async def fake_fetch_github_pr_metadata(
         pr_ref: GitHubPrRef, *, token: str
     ) -> dict[str, object]:
@@ -740,9 +754,12 @@ def test_trigger_pr_review_from_ref_creates_reviewer_run(monkeypatch) -> None:
             "head": {"sha": "head-sha", "ref": "feature-branch"},
         }
 
-    async def fake_persist_encrypted_github_token(thread_id: str, token: str) -> str:
+    async def fake_persist_encrypted_github_token(
+        thread_id: str, token: str, *, expires_at: str | None = None
+    ) -> str:
         captured["persist_thread_id"] = thread_id
         captured["persist_token"] = token
+        captured["persist_expires_at"] = expires_at
         return "encrypted-token"
 
     async def fake_is_thread_active(thread_id: str) -> bool:
@@ -768,6 +785,11 @@ def test_trigger_pr_review_from_ref_creates_reviewer_run(monkeypatch) -> None:
 
     monkeypatch.setattr(
         webapp, "get_github_app_installation_token", fake_get_github_app_installation_token
+    )
+    monkeypatch.setattr(
+        webapp,
+        "get_github_app_installation_token_with_expiry",
+        fake_get_github_app_installation_token_with_expiry,
     )
     monkeypatch.setattr(webapp, "fetch_github_pr_metadata", fake_fetch_github_pr_metadata)
     monkeypatch.setattr(

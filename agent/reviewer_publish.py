@@ -129,9 +129,20 @@ async def post_pull_request_review(
             response.raise_for_status()
         except GitHubAuthError:
             raise
-        except httpx.HTTPError:
+        except httpx.HTTPStatusError as e:
+            body = (e.response.text or "")[:500]
+            logger.exception(
+                "Failed to POST PR review for %s/%s#%s: %s %s",
+                owner,
+                repo,
+                pr_number,
+                e.response.status_code,
+                body,
+            )
+            return {"_error": f"HTTP {e.response.status_code}: {body}"}
+        except httpx.HTTPError as e:
             logger.exception("Failed to POST PR review for %s/%s#%s", owner, repo, pr_number)
-            return None
+            return {"_error": f"{type(e).__name__}: {e}"}
     data = response.json()
     return data if isinstance(data, dict) else None
 

@@ -2034,7 +2034,7 @@ async def _get_or_resolve_thread_github_token(thread_id: str, email: str) -> str
         logger.warning("Bot-token-only mode but GitHub App token unavailable")
         return None
 
-    github_token, _encrypted_token = await get_github_token_from_thread(thread_id)
+    github_token, _encrypted_token, _expires_at = await get_github_token_from_thread(thread_id)
     if github_token:
         return github_token
 

@@ -95,6 +95,11 @@ async def test_push_event_triggers_re_review_run_when_watching() -> None:
             return_value="t",
         ),
         patch(
+            "agent.webapp.get_github_app_installation_token_with_expiry",
+            new_callable=AsyncMock,
+            return_value=("t", None),
+        ),
+        patch(
             "agent.webapp._fetch_open_pr_for_branch",
             new_callable=AsyncMock,
             return_value=pr,

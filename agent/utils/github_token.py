@@ -99,34 +99,39 @@ def get_github_token(run_config: Mapping[str, Any] | None = None) -> str | None:
     return _read_token_if_fresh(resolved.get("metadata", {}))
 
 
-async def get_github_token_from_thread(thread_id: str) -> tuple[str | None, str | None]:
+async def get_github_token_from_thread(
+    thread_id: str,
+) -> tuple[str | None, str | None, str | None]:
     """Resolve a GitHub token from LangGraph thread metadata.
 
-    Returns ``(None, None)`` when no token is cached or when the cached token's
-    ``github_token_expires_at`` has elapsed — callers must treat the cache as
-    missing in that case and re-resolve.
+    Returns ``(None, None, None)`` when no token is cached or when the cached
+    token's ``github_token_expires_at`` has elapsed — callers must treat the
+    cache as missing in that case and re-resolve. On a fresh hit, returns the
+    decrypted token, its ciphertext, and the persisted expiry (or ``None``).
     """
     try:
         thread = await client.threads.get(thread_id)
     except NotFoundError:
         logger.debug("Thread %s not found while looking up GitHub token", thread_id)
-        return None, None
+        return None, None, None
     except Exception:  # noqa: BLE001
         logger.exception("Failed to fetch thread metadata for %s", thread_id)
-        return None, None
+        return None, None, None
 
     metadata = (thread or {}).get("metadata", {})
     encrypted_token = _read_encrypted_github_token(metadata)
     if not encrypted_token:
-        return None, None
-    if _is_expired(metadata.get(_GITHUB_TOKEN_EXPIRES_AT_METADATA_KEY)):
+        return None, None, None
+    expires_at_raw = metadata.get(_GITHUB_TOKEN_EXPIRES_AT_METADATA_KEY)
+    if _is_expired(expires_at_raw):
         logger.info("Cached GitHub token for thread %s has expired; re-resolving", thread_id)
-        return None, None
+        return None, None, None
 
     token = _decrypt_github_token(encrypted_token)
     if token:
         logger.info("Found GitHub token in thread metadata for thread %s", thread_id)
-    return token, encrypted_token
+    expires_at = expires_at_raw if isinstance(expires_at_raw, str) else None
+    return token, encrypted_token, expires_at
 
 
 async def invalidate_cached_github_token(thread_id: str) -> None:

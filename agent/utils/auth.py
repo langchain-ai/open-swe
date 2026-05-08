@@ -298,7 +298,7 @@ async def persist_encrypted_github_token(
 async def save_encrypted_token_from_email(
     email: str | None,
     source: str,
-) -> tuple[str, str]:
+) -> tuple[str, str, str | None]:
     """Resolve, encrypt, and store a GitHub token based on user email."""
     config = get_config()
     configurable = config.get("configurable", {})
@@ -359,10 +359,10 @@ async def save_encrypted_token_from_email(
 
     expires_at = auth_result.get("expires_at") if isinstance(auth_result, dict) else None
     encrypted = await persist_encrypted_github_token(thread_id, token, expires_at=expires_at)
-    return token, encrypted
+    return token, encrypted, expires_at
 
 
-async def _resolve_bot_installation_token(thread_id: str) -> tuple[str, str]:
+async def _resolve_bot_installation_token(thread_id: str) -> tuple[str, str, str | None]:
     """Get a GitHub App installation token and persist it for the thread."""
     bot_token, expires_at = await get_github_app_installation_token_with_expiry()
     if not bot_token:
@@ -375,10 +375,12 @@ async def _resolve_bot_installation_token(thread_id: str) -> tuple[str, str]:
         "Using GitHub App installation token for thread %s (bot-token-only mode)", thread_id
     )
     encrypted = await persist_encrypted_github_token(thread_id, bot_token, expires_at=expires_at)
-    return bot_token, encrypted
+    return bot_token, encrypted, expires_at
 
 
-async def resolve_github_token(config: RunnableConfig, thread_id: str) -> tuple[str, str]:
+async def resolve_github_token(
+    config: RunnableConfig, thread_id: str
+) -> tuple[str, str, str | None]:
     """Resolve a GitHub token from the run config based on the source.
 
     Routes to the correct auth method depending on whether the run was
@@ -389,7 +391,8 @@ async def resolve_github_token(config: RunnableConfig, thread_id: str) -> tuple[
     for all operations instead of per-user OAuth tokens.
 
     Returns:
-        (github_token, new_encrypted) tuple.
+        (github_token, new_encrypted, expires_at) tuple. ``expires_at`` is the
+        ISO-8601 expiry persisted alongside the ciphertext, or ``None``.
 
     Raises:
         RuntimeError: If source is missing or token resolution fails.
@@ -405,9 +408,11 @@ async def resolve_github_token(config: RunnableConfig, thread_id: str) -> tuple[
 
     try:
         if source == "github":
-            cached_token, cached_encrypted = await get_github_token_from_thread(thread_id)
+            cached_token, cached_encrypted, cached_expires_at = await get_github_token_from_thread(
+                thread_id
+            )
             if cached_token and cached_encrypted:
-                return cached_token, cached_encrypted
+                return cached_token, cached_encrypted, cached_expires_at
             github_login = configurable.get("github_login")
             email = GITHUB_USER_EMAIL_MAP.get(github_login or "")
             if not email:

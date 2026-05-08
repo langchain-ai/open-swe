@@ -91,9 +91,10 @@ async def test_get_github_token_from_thread_skips_expired() -> None:
         }
     }
     with patch.object(github_token, "client", fake_client):
-        token, encrypted = await github_token.get_github_token_from_thread("tid")
+        token, encrypted, expires_at = await github_token.get_github_token_from_thread("tid")
     assert token is None
     assert encrypted is None
+    assert expires_at is None
 
 
 @pytest.mark.asyncio
@@ -108,9 +109,10 @@ async def test_get_github_token_from_thread_returns_fresh() -> None:
         }
     }
     with patch.object(github_token, "client", fake_client):
-        token, encrypted = await github_token.get_github_token_from_thread("tid")
+        token, encrypted, expires_at = await github_token.get_github_token_from_thread("tid")
     assert token == "ghp_live"
     assert encrypted == enc
+    assert expires_at == future
 
 
 @pytest.mark.asyncio
