@@ -613,8 +613,13 @@ def test_process_slack_pr_review_request_posts_trace_reply(monkeypatch) -> None:
             "message": message,
         }
 
+    async def fake_set_slack_assistant_status(channel_id: str, thread_ts: str) -> bool:
+        captured.setdefault("status_calls", []).append((channel_id, thread_ts))
+        return True
+
     monkeypatch.setattr(webapp, "trigger_pr_review_from_ref", fake_trigger_pr_review_from_ref)
     monkeypatch.setattr(webapp, "post_slack_trace_reply", fake_post_slack_trace_reply)
+    monkeypatch.setattr(webapp, "set_slack_assistant_status", fake_set_slack_assistant_status)
 
     asyncio.run(
         webapp.process_slack_pr_review_request(
@@ -638,6 +643,10 @@ def test_process_slack_pr_review_request_posts_trace_reply(monkeypatch) -> None:
         "thread_id": "reviewer-thread-id",
         "message": "Taking a look...",
     }
+    assert captured["status_calls"] == [
+        ("C123", "1700000000.000100"),
+        ("C123", "1700000000.000100"),
+    ]
 
 
 def test_process_github_pr_review_request_creates_reviewer_run(monkeypatch) -> None:
@@ -783,6 +792,8 @@ def test_trigger_pr_review_from_ref_creates_reviewer_run(monkeypatch) -> None:
                 url="https://github.com/langchain-ai/open-swe/pull/1244",
             ),
             source="slack",
+            slack_channel_id="C123",
+            slack_thread_ts="1700000000.000100",
         )
     )
 
@@ -803,6 +814,10 @@ def test_trigger_pr_review_from_ref_creates_reviewer_run(monkeypatch) -> None:
     assert config["repo"] == {"owner": "langchain-ai", "name": "open-swe"}
     assert config["pr_number"] == 1244
     assert config["review_requested"] is True
+    assert config["slack_thread"] == {
+        "channel_id": "C123",
+        "thread_ts": "1700000000.000100",
+    }
 
 
 def test_trigger_pr_review_from_ref_respects_reviewer_allowlist(monkeypatch) -> None:
