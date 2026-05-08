@@ -6,6 +6,7 @@
 import logging
 import os
 import warnings
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +30,7 @@ from langsmith.sandbox import SandboxClientError
 
 from .integrations.langsmith import _configure_github_proxy
 from .middleware import (
+    ModelFallbackMiddleware,
     SandboxCircuitBreakerMiddleware,
     SanitizeToolInputsMiddleware,
     SlackAssistantStatusMiddleware,
@@ -56,7 +58,7 @@ from .tools import (
 from .utils.auth import resolve_github_token
 from .utils.authorship import resolve_triggering_user_identity
 from .utils.github_app import get_github_app_installation_token
-from .utils.model import ModelKwargs, OpenAIReasoning, make_model
+from .utils.model import ModelKwargs, OpenAIReasoning, fallback_model_id_for, make_model
 from .utils.sandbox import create_sandbox
 from .utils.sandbox_paths import aresolve_sandbox_work_dir
 
@@ -362,6 +364,17 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     if model_id == DEFAULT_LLM_MODEL_ID:
         model_kwargs["reasoning"] = DEFAULT_LLM_REASONING
 
+    fallback_model_id = os.environ.get("LLM_FALLBACK_MODEL_ID") or fallback_model_id_for(model_id)
+    fallback_middleware: list[Any] = []
+    if fallback_model_id and fallback_model_id != model_id:
+        fallback_kwargs: ModelKwargs = {"max_tokens": DEFAULT_LLM_MAX_TOKENS}
+        if fallback_model_id.startswith("openai:"):
+            fallback_kwargs["reasoning"] = DEFAULT_LLM_REASONING
+        fallback_middleware.append(
+            ModelFallbackMiddleware(make_model(fallback_model_id, **fallback_kwargs))
+        )
+        logger.info("Configured model fallback %s -> %s", model_id, fallback_model_id)
+
     logger.info("Returning agent with sandbox for thread %s", thread_id)
     return create_deep_agent(
         model=make_model(model_id, **model_kwargs),
@@ -396,5 +409,6 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             ensure_no_empty_msg,
             notify_step_limit_reached,
             SandboxCircuitBreakerMiddleware(),
+            *fallback_middleware,
         ],
     ).with_config(config)
