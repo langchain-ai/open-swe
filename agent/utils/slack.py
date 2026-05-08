@@ -610,6 +610,24 @@ TRACE_REPLY_PHRASES: tuple[str, ...] = (
     "Running to the roar!",
 )
 
+TRACE_REPLY_TIPS: tuple[str, ...] = (
+    "You can message me in this thread while I'm running — I'll pick up your follow-up before my next step.",
+    "Kick off another task in parallel — each one runs in its own isolated sandbox, no queuing.",
+    "Add `repo:owner/name` to your message to point me at a different repo for this task.",
+    "Drop an `AGENTS.md` at your repo root and I'll read it on every run — it's the easiest way to teach me your conventions.",
+    "I'll open a draft PR automatically when I'm done and link it back here.",
+    "Tag me on a PR comment of an open-swe PR to have me address review feedback on the same branch.",
+    "I can spawn subagents for independent subtasks — useful for parallel research or fan-out work.",
+    "Click `View trace` above to watch every tool call and model response live in LangSmith.",
+)
+
+
+def _format_trace_reply(message: str, trace_url: str | None) -> str:
+    """Format the initial trace reply with a randomly selected tip."""
+    tip = random.choice(TRACE_REPLY_TIPS)
+    head = f"{message} <{trace_url}|View trace>" if trace_url else message
+    return f"{head}\n_Tip: {tip}_"
+
 
 async def post_slack_trace_reply(
     channel_id: str, thread_ts: str, thread_id: str, message: str | None = None
@@ -618,7 +636,4 @@ async def post_slack_trace_reply(
     if message is None:
         message = random.choice(TRACE_REPLY_PHRASES)
     trace_url = get_langsmith_trace_url(thread_id)
-    if trace_url:
-        await post_slack_thread_reply(channel_id, thread_ts, f"{message} <{trace_url}|View trace>")
-    else:
-        await post_slack_thread_reply(channel_id, thread_ts, message)
+    await post_slack_thread_reply(channel_id, thread_ts, _format_trace_reply(message, trace_url))
