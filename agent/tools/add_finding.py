@@ -9,11 +9,13 @@ from langgraph.config import get_config
 
 from ..reviewer_diff import is_range_in_diff
 from ..reviewer_findings import (
+    MAX_FINDING_RANGE_LINES,
     MAX_SUGGESTION_LINES,
     DiffSide,
     Finding,
     Severity,
     append_finding,
+    clip_finding_range,
     clip_suggestion,
     get_thread_id_from_runtime,
     new_finding,
@@ -56,6 +58,11 @@ def add_finding(
             ``end_line`` for single-line findings; less than ``end_line`` for
             ranges. Omit (with ``end_line``) for file-level findings.
         end_line: 1-based end line, inclusive. Defaults to ``start_line``.
+            Keep ranges tight — anchor to the few lines that actually matter
+            for the comment. Ranges over 10 lines are auto-collapsed to a
+            single line because GitHub renders the full range as context
+            above the comment, which buries the point. Don't anchor to an
+            entire function; pick the call site or signature line instead.
         suggestion: Replacement text for ``start_line..end_line``. When set,
             the published GitHub comment includes a ```suggestion``` block so
             the user can click "Commit suggestion". **Only set this for small,
@@ -99,6 +106,8 @@ def add_finding(
             ),
         }
 
+    start_line, end_line, range_collapsed = clip_finding_range(start_line, end_line)
+
     diff_hunk: str | None = None
     if isinstance(diff_text, str) and diff_text:
         from ..reviewer_diff import extract_diff_hunk
@@ -129,6 +138,14 @@ def add_finding(
             f"Suggestion exceeded the {MAX_SUGGESTION_LINES}-line cap and was "
             "dropped — the finding was recorded with description only. Only "
             "include `suggestion` for small, obvious fixes."
+        )
+    if range_collapsed:
+        result["range_collapsed"] = True
+        result["range_warning"] = (
+            f"Range exceeded the {MAX_FINDING_RANGE_LINES}-line cap and was "
+            f"collapsed to a single line ({start_line}). Anchor findings to "
+            "the most relevant line — GitHub renders large ranges as walls "
+            "of context that bury the comment."
         )
     return result
 

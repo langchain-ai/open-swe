@@ -29,6 +29,13 @@ REVIEWER_THREAD_KIND = "reviewer"
 # longer suggestions; the description still gets posted on its own.
 MAX_SUGGESTION_LINES = 4
 
+# Anchoring a finding to a giant range (e.g. an entire function) makes the
+# GitHub comment dump dozens of lines of context above the actual review
+# text, which buries the point. When the range exceeds this, collapse it to
+# the first line — the comment still anchors near the issue without showing
+# the whole block. ~5-line ranges are still useful, so the cap is generous.
+MAX_FINDING_RANGE_LINES = 10
+
 
 def clip_suggestion(suggestion: str | None) -> tuple[str | None, bool]:
     """Return (suggestion_or_none, was_dropped). Drops if over the line cap."""
@@ -37,6 +44,18 @@ def clip_suggestion(suggestion: str | None) -> tuple[str | None, bool]:
     if suggestion.count("\n") + 1 > MAX_SUGGESTION_LINES:
         return None, True
     return suggestion, False
+
+
+def clip_finding_range(
+    start_line: int | None,
+    end_line: int | None,
+) -> tuple[int | None, int | None, bool]:
+    """Return (start, end, was_collapsed). Collapses end→start if over cap."""
+    if start_line is None or end_line is None:
+        return start_line, end_line, False
+    if end_line - start_line + 1 > MAX_FINDING_RANGE_LINES:
+        return start_line, start_line, True
+    return start_line, end_line, False
 
 
 Severity = Literal["informational", "low", "medium", "high", "critical"]

@@ -16,7 +16,7 @@ def _config(**configurable_overrides: Any) -> dict[str, Any]:
             "thread_id": "tid-1",
             "head_sha": "sha-head",
             "diff_text": "",
-            "diff_line_set": {"foo.py": [10, 11, 12]},
+            "diff_line_set": {"foo.py": list(range(10, 41))},
         },
         "metadata": {},
     }
@@ -173,6 +173,61 @@ def test_add_finding_keeps_short_suggestion() -> None:
     assert result["success"] is True
     assert "suggestion_dropped" not in result
     assert captured[0]["suggestion"] == short_suggestion
+
+
+def test_add_finding_collapses_oversized_range() -> None:
+    captured: list[Any] = []
+
+    async def fake_append(thread_id: str, finding: Any) -> Any:
+        captured.append(finding)
+        return finding
+
+    with (
+        patch("agent.tools.add_finding.get_config", return_value=_config()),
+        patch("agent.tools.add_finding.get_thread_id_from_runtime", return_value="tid-1"),
+        patch("agent.tools.add_finding.append_finding", side_effect=fake_append),
+    ):
+        result = add_finding(
+            severity="medium",
+            category="correctness",
+            file="foo.py",
+            description="big function",
+            start_line=15,
+            end_line=40,  # 26 lines — well over the cap
+        )
+
+    assert result["success"] is True
+    assert result.get("range_collapsed") is True
+    assert "range_warning" in result
+    assert captured[0]["start_line"] == 15
+    assert captured[0]["end_line"] == 15
+
+
+def test_add_finding_keeps_small_range() -> None:
+    captured: list[Any] = []
+
+    async def fake_append(thread_id: str, finding: Any) -> Any:
+        captured.append(finding)
+        return finding
+
+    with (
+        patch("agent.tools.add_finding.get_config", return_value=_config()),
+        patch("agent.tools.add_finding.get_thread_id_from_runtime", return_value="tid-1"),
+        patch("agent.tools.add_finding.append_finding", side_effect=fake_append),
+    ):
+        result = add_finding(
+            severity="low",
+            category="style",
+            file="foo.py",
+            description="five lines",
+            start_line=15,
+            end_line=19,  # 5 lines — within the cap
+        )
+
+    assert result["success"] is True
+    assert "range_collapsed" not in result
+    assert captured[0]["start_line"] == 15
+    assert captured[0]["end_line"] == 19
 
 
 def test_update_finding_rejects_long_suggestion_without_clobbering() -> None:
