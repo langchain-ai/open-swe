@@ -7,8 +7,12 @@ import hashlib
 import hmac
 import logging
 import os
+import random
+import re
 import time
+from dataclasses import dataclass
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 
@@ -18,6 +22,40 @@ logger = logging.getLogger(__name__)
 
 SLACK_API_BASE_URL = "https://slack.com/api"
 SLACK_BOT_TOKEN = os.environ.get("SLACK_BOT_TOKEN", "")
+GITHUB_PR_URL_RE = re.compile(r"https?://(?:www\.)?github\.com/[^\s<>|]+/[^\s<>|]+/pull/\d+")
+URL_RE = re.compile(r"https?://[^\s<>|]+")
+
+
+def _is_slack_assistants_api_enabled() -> bool:
+    """Whether the Slack Assistants API integration is enabled.
+
+    Read at call time so tests and runtime can toggle via env without reimports.
+    """
+    return os.environ.get("SLACK_ASSISTANTS_API_ENABLED", "").lower() in {"1", "true", "yes"}
+
+
+DEFAULT_ASSISTANT_STATUS = "is thinking…"
+
+# Curated rotating loading strings shown by Slack while the indicator is active.
+# Capped at 10 by Slack's API.
+DEFAULT_LOADING_MESSAGES: tuple[str, ...] = (
+    "reading the repo…",
+    "tracing call sites…",
+    "thinking through edge cases…",
+    "running commands…",
+    "drafting changes…",
+    "double-checking the diff…",
+    "writing tests…",
+    "tidying up…",
+)
+
+
+@dataclass(frozen=True)
+class GitHubPrRef:
+    owner: str
+    repo: str
+    number: int
+    url: str
 
 
 def _slack_headers() -> dict[str, str]:
@@ -66,6 +104,11 @@ def replace_bot_mention_with_username(text: str, bot_user_id: str, bot_username:
     return text
 
 
+def convert_mentions_to_slack_format(text: str) -> str:
+    """Convert @Name(USER_ID) patterns to Slack's <@USER_ID> mention format."""
+    return re.sub(r"@[^()]+\(([A-Z0-9]+)\)", r"<@\1>", text)
+
+
 def verify_slack_signature(
     body: bytes,
     timestamp: str,
@@ -104,6 +147,66 @@ def strip_bot_mention(text: str, bot_user_id: str, bot_username: str = "") -> st
     if bot_username:
         stripped = stripped.replace(f"@{bot_username}", "")
     return stripped.strip()
+
+
+def parse_github_pr_url(url: str) -> GitHubPrRef | None:
+    cleaned_url = url.strip().strip("<>")
+    if "|" in cleaned_url:
+        cleaned_url = cleaned_url.split("|", 1)[0]
+
+    parsed = urlparse(cleaned_url)
+    if parsed.scheme not in {"http", "https"}:
+        return None
+    if parsed.netloc.lower() not in {"github.com", "www.github.com"}:
+        return None
+
+    path_parts = [part for part in parsed.path.split("/") if part]
+    if len(path_parts) < 4 or path_parts[2] != "pull":
+        return None
+
+    try:
+        number = int(path_parts[3])
+    except ValueError:
+        return None
+
+    owner = path_parts[0]
+    repo = path_parts[1]
+    return GitHubPrRef(
+        owner=owner,
+        repo=repo,
+        number=number,
+        url=f"https://github.com/{owner}/{repo}/pull/{number}",
+    )
+
+
+def parse_slack_review_command(text: str) -> GitHubPrRef | None:
+    stripped = text.strip()
+    command_match = re.fullmatch(r"(?is)review\s+(.+)", stripped)
+    if not command_match:
+        return None
+
+    rest = command_match.group(1).strip()
+    url_match = GITHUB_PR_URL_RE.search(rest)
+    if not url_match:
+        return None
+
+    trailing_text = rest[url_match.end() :].strip()
+    if trailing_text and trailing_text != ">" and not trailing_text.startswith("|"):
+        return None
+
+    return parse_github_pr_url(url_match.group(0))
+
+
+def looks_like_slack_pr_review_command(text: str) -> bool:
+    stripped = text.strip()
+    if not re.match(r"(?is)^review\b", stripped):
+        return False
+    for match in URL_RE.finditer(stripped):
+        parsed = urlparse(match.group(0).strip("<>"))
+        host = (parsed.hostname or "").lower()
+        if parsed.scheme in {"http", "https"} and host in {"github.com", "www.github.com"}:
+            return True
+    return False
 
 
 def select_slack_context_messages(
@@ -174,6 +277,58 @@ def format_slack_messages_for_prompt(
             author = f"@{bot_name}(bot)"
         lines.append(f"{author}: {text}")
     return "\n".join(lines)
+
+
+async def set_slack_assistant_status(
+    channel_id: str,
+    thread_ts: str,
+    status: str = DEFAULT_ASSISTANT_STATUS,
+    loading_messages: list[str] | tuple[str, ...] | None = None,
+) -> bool:
+    """Set the assistant typing/status indicator on a Slack thread.
+
+    Wraps Slack's `assistant.threads.setStatus` API. The `chat:write` scope
+    on the bot token is sufficient. Status auto-clears when the bot posts to
+    the thread, and Slack itself expires it after ~2 minutes — callers that
+    want it visible across longer runs must refresh it periodically.
+
+    `loading_messages` is an optional list (max 10) of strings Slack rotates
+    through while the indicator is visible.
+
+    No-op (returning False) when the assistants feature flag is disabled,
+    the bot token is missing, or the channel/thread is not provided.
+    Failures are logged but never raised — the indicator is a UX nicety,
+    not a correctness requirement.
+    """
+    if not _is_slack_assistants_api_enabled():
+        return False
+    if not SLACK_BOT_TOKEN or not channel_id or not thread_ts:
+        return False
+
+    payload: dict[str, Any] = {
+        "channel_id": channel_id,
+        "thread_ts": thread_ts,
+        "status": status,
+    }
+    if loading_messages:
+        payload["loading_messages"] = list(loading_messages)[:10]
+
+    async with httpx.AsyncClient() as http_client:
+        try:
+            response = await http_client.post(
+                f"{SLACK_API_BASE_URL}/assistant.threads.setStatus",
+                headers=_slack_headers(),
+                json=payload,
+            )
+            response.raise_for_status()
+            data = response.json()
+            if not data.get("ok"):
+                logger.warning("Slack assistant.threads.setStatus failed: %s", data.get("error"))
+                return False
+            return True
+        except httpx.HTTPError:
+            logger.exception("Slack assistant.threads.setStatus request failed")
+            return False
 
 
 async def post_slack_thread_reply(channel_id: str, thread_ts: str, text: str) -> bool:
@@ -359,10 +514,202 @@ async def fetch_slack_thread_messages(channel_id: str, thread_ts: str) -> list[d
     return messages
 
 
-async def post_slack_trace_reply(channel_id: str, thread_ts: str, run_id: str) -> None:
-    """Post a trace URL reply in a Slack thread."""
-    trace_url = get_langsmith_trace_url(run_id)
-    if trace_url:
-        await post_slack_thread_reply(
-            channel_id, thread_ts, f"Working on it! <{trace_url}|View trace>"
+SLACK_MESSAGE_URL_RE = re.compile(
+    r"https?://[a-zA-Z0-9\-]+\.slack\.com/archives/([A-Za-z0-9]+)/p(\d{16})(?:\?[^\s>]*)?"
+)
+
+
+def parse_slack_message_url(url: str) -> tuple[str, str] | None:
+    """Parse a Slack message URL into (channel_id, message_ts).
+
+    URL format: https://{workspace}.slack.com/archives/{channel_id}/p{ts_without_dot}
+    The 16-digit timestamp becomes {first_10}.{last_6} (e.g. p1776281321762829 -> 1776281321.762829).
+    """
+    match = SLACK_MESSAGE_URL_RE.search(url)
+    if not match:
+        return None
+    channel_id = match.group(1)
+    raw_ts = match.group(2)
+    message_ts = f"{raw_ts[:10]}.{raw_ts[10:]}"
+    return channel_id, message_ts
+
+
+def extract_slack_message_urls(text: str) -> list[tuple[str, str, str]]:
+    """Extract all Slack message URLs from text.
+
+    Returns list of (full_url, channel_id, message_ts) tuples.
+    """
+    results: list[tuple[str, str, str]] = []
+    for match in SLACK_MESSAGE_URL_RE.finditer(text):
+        full_url = match.group(0)
+        parsed = parse_slack_message_url(full_url)
+        if parsed:
+            results.append((full_url, parsed[0], parsed[1]))
+    return results
+
+
+async def fetch_slack_message_by_ts(channel_id: str, message_ts: str) -> dict[str, Any] | None:
+    """Fetch a single Slack message by channel and timestamp."""
+    if not SLACK_BOT_TOKEN:
+        return None
+
+    async with httpx.AsyncClient() as http_client:
+        try:
+            response = await http_client.get(
+                f"{SLACK_API_BASE_URL}/conversations.history",
+                headers=_slack_headers(),
+                params={
+                    "channel": channel_id,
+                    "latest": message_ts,
+                    "oldest": message_ts,
+                    "inclusive": "true",
+                    "limit": 1,
+                },
+            )
+            response.raise_for_status()
+            data = response.json()
+            if not data.get("ok"):
+                logger.warning(
+                    "Slack conversations.history failed for channel=%s ts=%s: %s",
+                    channel_id,
+                    message_ts,
+                    data.get("error"),
+                )
+                return None
+            messages = data.get("messages", [])
+            if messages and isinstance(messages[0], dict):
+                return messages[0]
+        except httpx.HTTPError:
+            logger.exception(
+                "Slack conversations.history request failed for channel=%s ts=%s",
+                channel_id,
+                message_ts,
+            )
+    return None
+
+
+async def resolve_slack_message_url(url: str) -> dict[str, Any] | None:
+    """Resolve a Slack message URL to its message content.
+
+    Returns a dict with keys: text, user, ts, channel_id, files, thread_ts (if threaded).
+    """
+    parsed = parse_slack_message_url(url)
+    if not parsed:
+        return None
+
+    channel_id, message_ts = parsed
+    message = await fetch_slack_message_by_ts(channel_id, message_ts)
+    if not message:
+        return None
+
+    result: dict[str, Any] = {
+        "channel_id": channel_id,
+        "ts": message.get("ts", message_ts),
+        "text": message.get("text", ""),
+        "user": message.get("user", ""),
+        "files": message.get("files", []),
+    }
+    if message.get("thread_ts"):
+        result["thread_ts"] = message["thread_ts"]
+    return result
+
+
+async def resolve_slack_links_in_context(
+    context_messages: list[dict[str, Any]],
+    user_names_by_id: dict[str, str],
+) -> tuple[str, list[str]]:
+    """Resolve cross-posted Slack message links found in context messages.
+
+    Returns (resolved_links_section, image_urls) where resolved_links_section
+    is a formatted markdown string for the prompt, and image_urls is a list
+    of image URLs from resolved message attachments.
+    """
+    all_context_text = " ".join(msg.get("text", "") for msg in context_messages)
+    slack_links = extract_slack_message_urls(all_context_text)
+    if not slack_links:
+        return "", []
+
+    resolved_parts: list[str] = []
+    image_urls: list[str] = []
+    seen_urls: set[str] = set()
+
+    for link_url, _cid, _ts in slack_links:
+        if link_url in seen_urls:
+            continue
+        seen_urls.add(link_url)
+        try:
+            resolved = await resolve_slack_message_url(link_url)
+            if resolved:
+                author_id = resolved.get("user", "")
+                author = user_names_by_id.get(author_id, author_id)
+                if author_id and author == author_id:
+                    extra_names = await get_slack_user_names([author_id])
+                    author = extra_names.get(author_id, author_id)
+                resolved_text = resolved.get("text", "(empty message)")
+                resolved_parts.append(
+                    f"**{link_url}**\n  Author: {author}\n  Message: {resolved_text}"
+                )
+                for file_info in resolved.get("files", []):
+                    if (
+                        isinstance(file_info, dict)
+                        and file_info.get("mimetype", "").startswith("image/")
+                        and file_info.get("url_private")
+                    ):
+                        image_urls.append(file_info["url_private"])
+            else:
+                resolved_parts.append(
+                    f"**{link_url}**\n  (Could not fetch — bot may not have access)"
+                )
+        except Exception:
+            logger.exception("Failed to resolve Slack link %s", link_url)
+            resolved_parts.append(f"**{link_url}**\n  (Error resolving link)")
+
+    resolved_links_section = ""
+    if resolved_parts:
+        resolved_links_section = "\n\n## Cross-posted Slack Messages\n" + "\n\n".join(
+            resolved_parts
         )
+
+    return resolved_links_section, image_urls
+
+
+TRACE_REPLY_PHRASES: tuple[str, ...] = (
+    "Working on it!",
+    "On it!",
+    "Diving in!",
+    "Powering up!",
+    "Heads down.",
+    "Cracking knuckles...",
+    "Spinning up...",
+    "Looking...",
+    "Time to cook. 🧑‍🍳",
+    "Running to the roar!",
+)
+
+TRACE_REPLY_TIPS: tuple[str, ...] = (
+    "You can message me in this thread while I'm running — I'll pick up your follow-up before my next step.",
+    "Kick off another task in parallel — each one runs in its own isolated sandbox, no queuing.",
+    "Add `repo:owner/name` to your message to point me at a different repo for this task.",
+    "Drop an `AGENTS.md` at your repo root and I'll read it on every run — it's the easiest way to teach me your conventions.",
+    "I'll open a draft PR automatically when I'm done and link it back here.",
+    "Tag me on a PR comment of an open-swe PR to have me address review feedback on the same branch.",
+    "I can spawn subagents for independent subtasks — useful for parallel research or fan-out work.",
+    "Click `View trace` above to watch every tool call and model response live in LangSmith.",
+)
+
+
+def _format_trace_reply(message: str, trace_url: str | None) -> str:
+    """Format the initial trace reply with a randomly selected tip."""
+    tip = random.choice(TRACE_REPLY_TIPS)
+    head = f"{message} <{trace_url}|View trace>" if trace_url else message
+    return f"{head}\n_Tip: {tip}_"
+
+
+async def post_slack_trace_reply(
+    channel_id: str, thread_ts: str, thread_id: str, message: str | None = None
+) -> None:
+    """Post a trace URL reply in a Slack thread."""
+    if message is None:
+        message = random.choice(TRACE_REPLY_PHRASES)
+    trace_url = get_langsmith_trace_url(thread_id)
+    await post_slack_thread_reply(channel_id, thread_ts, _format_trace_reply(message, trace_url))

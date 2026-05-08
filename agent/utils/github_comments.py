@@ -16,6 +16,8 @@ from .github_user_email_map import GITHUB_USER_EMAIL_MAP
 logger = logging.getLogger(__name__)
 
 OPEN_SWE_TAGS = ("@openswe", "@open-swe", "@openswe-dev")
+_OPEN_SWE_MENTION_RE = re.compile(r"(?i)@(?:openswe-dev|open-swe|openswe)\b")
+_REVIEW_COMMAND_RE = re.compile(r"(?i)\Areview(?:\s+(https?://\S+))?\s*\Z")
 UNTRUSTED_GITHUB_COMMENT_OPEN_TAG = "<dangerous-external-untrusted-users-comment>"
 UNTRUSTED_GITHUB_COMMENT_CLOSE_TAG = "</dangerous-external-untrusted-users-comment>"
 _SANITIZED_UNTRUSTED_GITHUB_COMMENT_OPEN_TAG = "[blocked-untrusted-comment-tag-open]"
@@ -55,6 +57,23 @@ def get_thread_id_from_branch(branch_name: str) -> str | None:
         re.IGNORECASE,
     )
     return match.group(0) if match else None
+
+
+def parse_github_review_command(body: str) -> tuple[bool, str | None]:
+    """Detect ``@open-swe review [URL]`` in a GitHub comment body.
+
+    Returns ``(is_review_command, optional_pr_url)``. When ``is_review_command``
+    is True and the URL is None, the command applies to the PR being commented
+    on. The URL — if present — is returned as-is so the caller can validate it
+    with ``parse_github_pr_url``.
+    """
+    if not body:
+        return False, None
+    stripped = _OPEN_SWE_MENTION_RE.sub("", body).strip()
+    match = _REVIEW_COMMAND_RE.match(stripped)
+    if not match:
+        return False, None
+    return True, match.group(1) or None
 
 
 def sanitize_github_comment_body(body: str) -> str:
@@ -383,7 +402,11 @@ async def extract_pr_context(
     return repo_config, pr_number, branch_name, github_login, pr_url, comment_id, node_id
 
 
-def build_pr_prompt(comments: list[dict[str, Any]], pr_url: str) -> str:
+def build_pr_prompt(
+    comments: list[dict[str, Any]],
+    pr_url: str,
+    repo_config: dict[str, str] | None = None,
+) -> str:
     """Format PR comments into a human message for the agent."""
     lines: list[str] = []
     for c in comments:
@@ -398,17 +421,21 @@ def build_pr_prompt(comments: list[dict[str, Any]], pr_url: str) -> str:
             lines.append(f"\n**{author}**:\n{body}\n")
 
     comments_text = "".join(lines)
+    repo_line = ""
+    if repo_config:
+        repo_line = f"## Repository: {repo_config.get('owner')}/{repo_config.get('name')}\n\n"
     return (
         "You've been tagged in GitHub PR comments. Please resolve them.\n\n"
+        f"{repo_line}"
         f"PR: {pr_url}\n\n"
         f"## Comments:\n{comments_text}\n\n"
         "If code changes are needed:\n"
         "1. Make the changes in the sandbox\n"
-        "2. Call `commit_and_open_pr` to push them to GitHub — this is REQUIRED, do NOT skip it\n"
-        "3. Call `github_comment` with the PR number to post a summary on GitHub\n\n"
+        "2. Push them and open/update a draft PR with `GH_TOKEN=dummy gh` — this is REQUIRED, do NOT skip it\n"
+        "3. Use `GH_TOKEN=dummy gh pr comment` to post a summary on GitHub\n\n"
         "If no code changes are needed:\n"
-        "1. Call `github_comment` with the PR number to explain your answer — this is REQUIRED, never end silently\n\n"
-        "**You MUST always call `github_comment` before finishing — whether or not changes were made.**"
+        "1. Use `GH_TOKEN=dummy gh pr comment` to explain your answer — this is REQUIRED, never end silently\n\n"
+        "**You MUST always comment on GitHub before finishing — whether or not changes were made.**"
     )
 
 

@@ -8,10 +8,10 @@ all: help
 ######################
 
 dev:
-	langgraph dev
+	uv run langgraph dev
 
 run:
-	uvicorn agent.webapp:app --reload --port 8000
+	uv run uvicorn agent.webapp:app --reload --port 8000
 
 install:
 	uv pip install -e .

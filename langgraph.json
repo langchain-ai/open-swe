@@ -2,7 +2,8 @@
   "$schema": "https://langgra.ph/schema.json",
   "python_version": "3.12",
   "graphs": {
-    "agent": "agent.server:get_agent"
+    "agent": "agent.server:get_agent",
+    "reviewer": "agent.reviewer:get_reviewer_agent"
   },
   "dependencies": ["."],
   "http": {

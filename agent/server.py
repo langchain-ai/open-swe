@@ -4,12 +4,11 @@
 # Suppress deprecation warnings from langchain_core (e.g., Pydantic V1 on Python 3.14+)
 # ruff: noqa: E402
 import logging
-import shlex
+import os
 import warnings
 
 logger = logging.getLogger(__name__)
 
-from langgraph.config import get_config
 from langgraph.graph.state import RunnableConfig
 from langgraph.pregel import Pregel
 from langgraph_sdk import get_client
@@ -23,27 +22,43 @@ warnings.filterwarnings("ignore", message=".*Pydantic V1.*", category=UserWarnin
 
 # Now safe to import agent (which imports LangChain modules)
 from deepagents import create_deep_agent
+from deepagents.backends import LangSmithSandbox
 from deepagents.backends.protocol import SandboxBackendProtocol
+from langchain.agents.middleware import ModelCallLimitMiddleware
 from langsmith.sandbox import SandboxClientError
 
+from .integrations.langsmith import _configure_github_proxy
 from .middleware import (
+    SandboxCircuitBreakerMiddleware,
+    SanitizeToolInputsMiddleware,
+    SlackAssistantStatusMiddleware,
     ToolErrorMiddleware,
     check_message_queue_before_model,
     ensure_no_empty_msg,
-    open_pr_if_needed,
+    notify_step_limit_reached,
 )
 from .prompt import construct_system_prompt
 from .tools import (
-    commit_and_open_pr,
     fetch_url,
-    github_comment,
     http_request,
     linear_comment,
+    linear_create_issue,
+    linear_delete_issue,
+    linear_get_issue,
+    linear_get_issue_comments,
+    linear_list_teams,
+    linear_update_issue,
+    request_pr_review,
+    slack_read_thread_messages,
     slack_thread_reply,
+    web_search,
 )
 from .utils.auth import resolve_github_token
-from .utils.model import make_model
+from .utils.authorship import resolve_triggering_user_identity
+from .utils.github_app import get_github_app_installation_token
+from .utils.model import ModelKwargs, OpenAIReasoning, make_model
 from .utils.sandbox import create_sandbox
+from .utils.sandbox_paths import aresolve_sandbox_work_dir
 
 client = get_client()
 
@@ -51,138 +66,104 @@ SANDBOX_CREATING = "__creating__"
 SANDBOX_CREATION_TIMEOUT = 180
 SANDBOX_POLL_INTERVAL = 1.0
 
-from .utils.agents_md import read_agents_md_in_sandbox
-from .utils.github import (
-    _CRED_FILE_PATH,
-    cleanup_git_credentials,
-    git_has_uncommitted_changes,
-    is_valid_git_repo,
-    remove_directory,
-    setup_git_credentials,
-)
-from .utils.sandbox_paths import aresolve_repo_dir, aresolve_sandbox_work_dir
 from .utils.sandbox_state import SANDBOX_BACKENDS, get_sandbox_id_from_metadata
 
 
-async def _clone_or_pull_repo_in_sandbox(  # noqa: PLR0915
-    sandbox_backend: SandboxBackendProtocol,
-    owner: str,
-    repo: str,
-    github_token: str | None = None,
-) -> str:
-    """Clone a GitHub repo into the sandbox, or pull if it already exists.
+async def _start_langsmith_sandbox_if_needed(sandbox_backend: SandboxBackendProtocol) -> None:
+    """Start a LangSmith sandbox before operations that require it to be running."""
+    if os.getenv("SANDBOX_TYPE", "langsmith") != "langsmith":
+        return
+    if not isinstance(sandbox_backend, LangSmithSandbox):
+        return
 
-    Args:
-        sandbox_backend: The sandbox backend to execute commands in (LangSmithBackend)
-        owner: GitHub repo owner
-        repo: GitHub repo name
-        github_token: GitHub access token (from agent auth or env var)
+    sandbox = sandbox_backend._sandbox  # noqa: SLF001
+    status = await asyncio.to_thread(sandbox._client.get_sandbox_status, sandbox.name)  # noqa: SLF001
+    status_name = getattr(status, "status", status)
+    status_name = getattr(status_name, "value", status_name)
+    status_text = str(status_name or "").lower()
+    if status_text in {"running", "ready"}:
+        return
 
-    Returns:
-        Path to the cloned/updated repo directory
+    logger.info(
+        "Starting LangSmith sandbox %s before proxy refresh (status=%s)",
+        sandbox_backend.id,
+        status_text or "unknown",
+    )
+    await asyncio.to_thread(sandbox.start)
+
+
+async def _create_sandbox_with_proxy() -> SandboxBackendProtocol:
+    """Create a new sandbox with GitHub proxy auth configured.
+
+    Uses create_sandbox (generic factory) so non-langsmith providers still work.
+    For langsmith sandboxes, configures the proxy with the installation token.
     """
-    logger.info("_clone_or_pull_repo_in_sandbox called for %s/%s", owner, repo)
-    loop = asyncio.get_event_loop()
+    sandbox_backend = await asyncio.to_thread(create_sandbox)
 
-    token = github_token
-    if not token:
-        msg = "No GitHub token provided"
-        logger.error(msg)
-        raise ValueError(msg)
+    sandbox_type = os.getenv("SANDBOX_TYPE", "langsmith")
+    if sandbox_type == "langsmith":
+        installation_token = await get_github_app_installation_token()
+        if not installation_token:
+            msg = "Cannot configure proxy: GitHub App installation token is unavailable"
+            logger.error(msg)
+            raise ValueError(msg)
+        await _start_langsmith_sandbox_if_needed(sandbox_backend)
+        await asyncio.to_thread(_configure_github_proxy, sandbox_backend.id, installation_token)
 
-    work_dir = await aresolve_sandbox_work_dir(sandbox_backend)
-    repo_dir = await aresolve_repo_dir(sandbox_backend, repo)
-    clean_url = f"https://github.com/{owner}/{repo}.git"
-    cred_helper_arg = f"-c credential.helper='store --file={_CRED_FILE_PATH}'"
-    safe_repo_dir = shlex.quote(repo_dir)
-    safe_clean_url = shlex.quote(clean_url)
+    return sandbox_backend
 
-    logger.info("Resolved sandbox work dir to %s", work_dir)
 
-    is_git_repo = await loop.run_in_executor(None, is_valid_git_repo, sandbox_backend, repo_dir)
+async def _refresh_github_proxy(
+    sandbox_backend: SandboxBackendProtocol,
+) -> None:
+    """Refresh GitHub proxy credentials for reused LangSmith sandboxes."""
+    if os.getenv("SANDBOX_TYPE", "langsmith") != "langsmith":
+        return
 
-    if not is_git_repo:
-        logger.warning("Repo directory missing or not a valid git repo at %s, removing", repo_dir)
-        try:
-            removed = await loop.run_in_executor(None, remove_directory, sandbox_backend, repo_dir)
-            if not removed:
-                msg = f"Failed to remove invalid directory at {repo_dir}"
-                logger.error(msg)
-                raise RuntimeError(msg)
-            logger.info("Removed invalid directory, will clone fresh repo")
-        except Exception:
-            logger.exception("Failed to remove invalid directory")
-            raise
-    else:
-        logger.info("Repo exists at %s, checking for uncommitted changes", repo_dir)
-        has_changes = await loop.run_in_executor(
-            None, git_has_uncommitted_changes, sandbox_backend, repo_dir
+    installation_token = await get_github_app_installation_token()
+    if not installation_token:
+        logger.warning(
+            "Skipping GitHub proxy refresh for sandbox %s: installation token unavailable",
+            sandbox_backend.id,
         )
+        return
 
-        if has_changes:
-            logger.warning("Repo has uncommitted changes at %s, skipping pull", repo_dir)
-            return repo_dir
-
-        logger.info("Repo is clean, pulling latest changes from %s/%s", owner, repo)
-
-        await loop.run_in_executor(None, setup_git_credentials, sandbox_backend, token)
-        try:
-            pull_result = await loop.run_in_executor(
-                None,
-                sandbox_backend.execute,
-                f"cd {repo_dir} && git {cred_helper_arg} pull origin $(git rev-parse --abbrev-ref HEAD)",
-            )
-            logger.debug("Git pull result: exit_code=%s", pull_result.exit_code)
-            if pull_result.exit_code != 0:
-                logger.warning(
-                    "Git pull failed with exit code %s: %s",
-                    pull_result.exit_code,
-                    pull_result.output[:200] if pull_result.output else "",
-                )
-        except Exception:
-            logger.exception("Failed to execute git pull")
-            raise
-        finally:
-            await loop.run_in_executor(None, cleanup_git_credentials, sandbox_backend)
-
-        logger.info("Repo updated at %s", repo_dir)
-        return repo_dir
-
-    logger.info("Cloning repo %s/%s to %s", owner, repo, repo_dir)
-    await loop.run_in_executor(None, setup_git_credentials, sandbox_backend, token)
-    try:
-        result = await loop.run_in_executor(
-            None,
-            sandbox_backend.execute,
-            f"git {cred_helper_arg} clone {safe_clean_url} {safe_repo_dir}",
-        )
-        logger.debug("Git clone result: exit_code=%s", result.exit_code)
-    except Exception:
-        logger.exception("Failed to execute git clone")
-        raise
-    finally:
-        await loop.run_in_executor(None, cleanup_git_credentials, sandbox_backend)
-
-    if result.exit_code != 0:
-        msg = f"Failed to clone repo {owner}/{repo}: {result.output}"
-        logger.error(msg)
-        raise RuntimeError(msg)
-
-    logger.info("Repo cloned successfully at %s", repo_dir)
-    return repo_dir
+    await _start_langsmith_sandbox_if_needed(sandbox_backend)
+    await asyncio.to_thread(_configure_github_proxy, sandbox_backend.id, installation_token)
 
 
-async def _recreate_sandbox(
+async def _refresh_github_proxy_or_recreate(
+    sandbox_backend: SandboxBackendProtocol,
     thread_id: str,
-    repo_owner: str,
-    repo_name: str,
-    *,
-    github_token: str | None,
-) -> tuple[SandboxBackendProtocol, str]:
-    """Recreate a sandbox and clone the repo after a connection failure.
+) -> SandboxBackendProtocol:
+    """Refresh proxy credentials, recreating stale LangSmith sandboxes on failure."""
+    try:
+        await _refresh_github_proxy(sandbox_backend)
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "Failed to refresh GitHub proxy for sandbox %s on thread %s, recreating sandbox",
+            sandbox_backend.id,
+            thread_id,
+            exc_info=True,
+        )
+        return await _recreate_sandbox(thread_id)
+    return sandbox_backend
+
+
+async def _configure_git_identity(sandbox_backend: SandboxBackendProtocol) -> None:
+    await asyncio.to_thread(
+        sandbox_backend.execute,
+        "git config --global user.name 'open-swe[bot]' && "
+        "git config --global user.email 'open-swe@users.noreply.github.com'",
+    )
+
+
+async def _recreate_sandbox(thread_id: str) -> SandboxBackendProtocol:
+    """Recreate a sandbox after a connection failure.
 
     Clears the stale cache entry, sets the SANDBOX_CREATING sentinel,
-    creates a fresh sandbox, and clones the repo.
+    and creates a fresh sandbox (with proxy auth configured).
+    The agent is responsible for cloning repos via tools.
     """
     SANDBOX_BACKENDS.pop(thread_id, None)
     await client.threads.update(
@@ -190,15 +171,34 @@ async def _recreate_sandbox(
         metadata={"sandbox_id": SANDBOX_CREATING},
     )
     try:
-        sandbox_backend = await asyncio.to_thread(create_sandbox)
-        repo_dir = await _clone_or_pull_repo_in_sandbox(
-            sandbox_backend, repo_owner, repo_name, github_token
-        )
+        sandbox_backend = await _create_sandbox_with_proxy()
     except Exception:
         logger.exception("Failed to recreate sandbox after connection failure")
         await client.threads.update(thread_id=thread_id, metadata={"sandbox_id": None})
         raise
-    return sandbox_backend, repo_dir
+    return sandbox_backend
+
+
+async def check_or_recreate_sandbox(
+    sandbox_backend: SandboxBackendProtocol, thread_id: str
+) -> SandboxBackendProtocol:
+    """Check if a cached sandbox is reachable; recreate it if not.
+
+    Pings the sandbox with a lightweight command. If the sandbox is
+    unreachable (SandboxClientError), it is torn down and a fresh one
+    is created via _recreate_sandbox.
+
+    Returns the original backend if healthy, or a new one if recreated.
+    """
+    try:
+        await asyncio.to_thread(sandbox_backend.execute, "echo ok")
+    except SandboxClientError:
+        logger.warning(
+            "Cached sandbox is no longer reachable for thread %s, recreating",
+            thread_id,
+        )
+        sandbox_backend = await _recreate_sandbox(thread_id)
+    return sandbox_backend
 
 
 async def _wait_for_sandbox_id(thread_id: str) -> str:
@@ -231,18 +231,106 @@ def graph_loaded_for_execution(config: RunnableConfig) -> bool:
     )
 
 
-DEFAULT_RECURSION_LIMIT = 1_000
+async def ensure_sandbox_for_thread(thread_id: str) -> SandboxBackendProtocol:
+    """Get-or-create a healthy sandbox bound to ``thread_id``.
+
+    Implements the four-state lifecycle described in AGENTS.md:
+
+    1. Cached in memory → ping; recreate on ``SandboxClientError``.
+    2. Metadata says ``__creating__`` and no cache → poll until ready.
+    3. No sandbox at all → create one and persist the id.
+    4. Metadata has an id but no cache → reconnect; recreate on failure.
+
+    For LangSmith sandboxes, also refreshes the GitHub App proxy auth.
+    Persists the resulting ``sandbox_id`` to thread metadata, and on the
+    first creation/reconnect for this thread initializes git identity.
+    """
+    sandbox_backend = SANDBOX_BACKENDS.get(thread_id)
+    sandbox_id = await get_sandbox_id_from_metadata(thread_id)
+
+    if sandbox_id == SANDBOX_CREATING and not sandbox_backend:
+        logger.info("Sandbox creation in progress for thread %s, waiting...", thread_id)
+        sandbox_id = await _wait_for_sandbox_id(thread_id)
+
+    if sandbox_backend:
+        logger.info("Using cached sandbox backend for thread %s", thread_id)
+        original_sandbox_id = sandbox_backend.id
+        sandbox_backend = await check_or_recreate_sandbox(sandbox_backend, thread_id)
+        if sandbox_backend.id == original_sandbox_id:
+            sandbox_backend = await _refresh_github_proxy_or_recreate(sandbox_backend, thread_id)
+    elif sandbox_id is None:
+        logger.info("Creating new sandbox for thread %s", thread_id)
+        await client.threads.update(thread_id=thread_id, metadata={"sandbox_id": SANDBOX_CREATING})
+        try:
+            sandbox_backend = await _create_sandbox_with_proxy()
+            logger.info("Sandbox created: %s", sandbox_backend.id)
+        except Exception:
+            logger.exception("Failed to create sandbox")
+            try:
+                await client.threads.update(thread_id=thread_id, metadata={"sandbox_id": None})
+            except Exception:
+                logger.exception("Failed to reset sandbox_id metadata")
+            raise
+    else:
+        logger.info("Connecting to existing sandbox %s", sandbox_id)
+        created_replacement_sandbox = False
+        try:
+            sandbox_backend = await asyncio.to_thread(create_sandbox, sandbox_id)
+        except Exception:
+            logger.warning("Failed to connect to existing sandbox %s, creating new one", sandbox_id)
+            await client.threads.update(
+                thread_id=thread_id, metadata={"sandbox_id": SANDBOX_CREATING}
+            )
+            try:
+                sandbox_backend = await _create_sandbox_with_proxy()
+                created_replacement_sandbox = True
+            except Exception:
+                logger.exception("Failed to create replacement sandbox")
+                await client.threads.update(thread_id=thread_id, metadata={"sandbox_id": None})
+                raise
+        if not created_replacement_sandbox:
+            original_sandbox_id = sandbox_backend.id
+            sandbox_backend = await check_or_recreate_sandbox(sandbox_backend, thread_id)
+            if sandbox_backend.id == original_sandbox_id:
+                sandbox_backend = await _refresh_github_proxy_or_recreate(
+                    sandbox_backend, thread_id
+                )
+
+    SANDBOX_BACKENDS[thread_id] = sandbox_backend
+
+    if sandbox_id != sandbox_backend.id:
+        await client.threads.update(
+            thread_id=thread_id, metadata={"sandbox_id": sandbox_backend.id}
+        )
+
+    # Re-apply git identity every run: cached/reconnected sandboxes may have
+    # lost their `--global` config (or had it overwritten), and Vercel preview
+    # deploys reject commits whose author email can't be resolved to a GitHub
+    # account.
+    await _configure_git_identity(sandbox_backend)
+
+    return sandbox_backend
 
 
-async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
+DEFAULT_LLM_MODEL_ID = "openai:gpt-5.5"
+DEFAULT_LLM_REASONING: OpenAIReasoning = {"effort": "medium"}
+DEFAULT_LLM_MAX_TOKENS = 64_000
+DEFAULT_RECURSION_LIMIT = 9_999
+MODEL_CALL_RECURSION_LIMIT = 5_000  # ~half the recursion limit to account for tool calls
+
+
+def _get_cached_sandbox_backend(thread_id: str) -> SandboxBackendProtocol:
+    sandbox_backend = SANDBOX_BACKENDS.get(thread_id)
+    if sandbox_backend is None:
+        raise RuntimeError(f"No sandbox backend cached for thread {thread_id}")
+    return sandbox_backend
+
+
+async def get_agent(config: RunnableConfig) -> Pregel:
     """Get or create an agent with a sandbox for the given thread."""
     thread_id = config["configurable"].get("thread_id", None)
 
     config["recursion_limit"] = DEFAULT_RECURSION_LIMIT
-
-    repo_config = config["configurable"].get("repo", {})
-    repo_owner = repo_config.get("owner")
-    repo_name = repo_config.get("name")
 
     if thread_id is None or not graph_loaded_for_execution(config):
         logger.info("No thread_id or not for execution, returning agent without sandbox")
@@ -253,142 +341,60 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
 
     github_token, new_encrypted = await resolve_github_token(config, thread_id)
     config["metadata"]["github_token_encrypted"] = new_encrypted
+    triggering_user_identity = await asyncio.to_thread(
+        resolve_triggering_user_identity, config, github_token
+    )
+    del github_token
 
-    sandbox_backend = SANDBOX_BACKENDS.get(thread_id)
-    sandbox_id = await get_sandbox_id_from_metadata(thread_id)
-
-    if sandbox_id == SANDBOX_CREATING and not sandbox_backend:
-        logger.info("Sandbox creation in progress, waiting...")
-        sandbox_id = await _wait_for_sandbox_id(thread_id)
-
-    if sandbox_backend:
-        logger.info("Using cached sandbox backend for thread %s", thread_id)
-        metadata = get_config().get("metadata", {})
-        repo_dir = metadata.get("repo_dir")
-
-        if repo_owner and repo_name:
-            logger.info("Pulling latest changes for repo %s/%s", repo_owner, repo_name)
-            try:
-                repo_dir = await _clone_or_pull_repo_in_sandbox(
-                    sandbox_backend, repo_owner, repo_name, github_token
-                )
-            except SandboxClientError:
-                logger.warning(
-                    "Cached sandbox is no longer reachable for thread %s, recreating sandbox",
-                    thread_id,
-                )
-                sandbox_backend, repo_dir = await _recreate_sandbox(
-                    thread_id, repo_owner, repo_name, github_token=github_token
-                )
-            except Exception:
-                logger.exception("Failed to pull repo in cached sandbox")
-                raise
-
-    elif sandbox_id is None:
-        logger.info("Creating new sandbox for thread %s", thread_id)
-        await client.threads.update(thread_id=thread_id, metadata={"sandbox_id": SANDBOX_CREATING})
-
-        try:
-            # Create sandbox without context manager cleanup (sandbox persists)
-            sandbox_backend = await asyncio.to_thread(create_sandbox)
-            logger.info("Sandbox created: %s", sandbox_backend.id)
-
-            repo_dir = None
-            if repo_owner and repo_name:
-                logger.info("Cloning repo %s/%s into sandbox", repo_owner, repo_name)
-                repo_dir = await _clone_or_pull_repo_in_sandbox(
-                    sandbox_backend, repo_owner, repo_name, github_token
-                )
-                logger.info("Repo cloned to %s", repo_dir)
-
-                await client.threads.update(
-                    thread_id=thread_id,
-                    metadata={"repo_dir": repo_dir},
-                )
-        except Exception:
-            logger.exception("Failed to create sandbox or clone repo")
-            try:
-                await client.threads.update(thread_id=thread_id, metadata={"sandbox_id": None})
-                logger.info("Reset sandbox_id to None for thread %s", thread_id)
-            except Exception:
-                logger.exception("Failed to reset sandbox_id metadata")
-            raise
-    else:
-        logger.info("Connecting to existing sandbox %s", sandbox_id)
-        try:
-            # Connect to existing sandbox without context manager cleanup
-            sandbox_backend = await asyncio.to_thread(create_sandbox, sandbox_id)
-            logger.info("Connected to existing sandbox %s", sandbox_id)
-        except Exception:
-            logger.warning("Failed to connect to existing sandbox %s, creating new one", sandbox_id)
-            # Reset sandbox_id and create a new sandbox
-            await client.threads.update(
-                thread_id=thread_id,
-                metadata={"sandbox_id": SANDBOX_CREATING},
-            )
-
-            try:
-                sandbox_backend = await asyncio.to_thread(create_sandbox)
-                logger.info("New sandbox created: %s", sandbox_backend.id)
-            except Exception:
-                logger.exception("Failed to create replacement sandbox")
-                await client.threads.update(thread_id=thread_id, metadata={"sandbox_id": None})
-                raise
-
-        metadata = get_config().get("metadata", {})
-        repo_dir = metadata.get("repo_dir")
-
-        if repo_owner and repo_name:
-            logger.info("Pulling latest changes for repo %s/%s", repo_owner, repo_name)
-            try:
-                repo_dir = await _clone_or_pull_repo_in_sandbox(
-                    sandbox_backend, repo_owner, repo_name, github_token
-                )
-            except SandboxClientError:
-                logger.warning(
-                    "Existing sandbox is no longer reachable for thread %s, recreating sandbox",
-                    thread_id,
-                )
-                sandbox_backend, repo_dir = await _recreate_sandbox(
-                    thread_id, repo_owner, repo_name, github_token=github_token
-                )
-            except Exception:
-                logger.exception("Failed to pull repo in existing sandbox")
-                raise
-
-    SANDBOX_BACKENDS[thread_id] = sandbox_backend
-
-    if not repo_dir:
-        msg = "Cannot proceed: no repo was cloned. Set 'repo.owner' and 'repo.name' in the configurable config"
-        raise RuntimeError(msg)
+    sandbox_backend = await ensure_sandbox_for_thread(thread_id)
 
     linear_issue = config["configurable"].get("linear_issue", {})
     linear_project_id = linear_issue.get("linear_project_id", "")
     linear_issue_number = linear_issue.get("linear_issue_number", "")
-    agents_md = await read_agents_md_in_sandbox(sandbox_backend, repo_dir)
+
+    work_dir = await aresolve_sandbox_work_dir(sandbox_backend)
+
+    def backend_factory(_runtime: object, _thread_id: str = thread_id) -> SandboxBackendProtocol:
+        return _get_cached_sandbox_backend(_thread_id)
+
+    model_id = os.environ.get("LLM_MODEL_ID", DEFAULT_LLM_MODEL_ID)
+    model_kwargs: ModelKwargs = {"max_tokens": DEFAULT_LLM_MAX_TOKENS}
+    if model_id == DEFAULT_LLM_MODEL_ID:
+        model_kwargs["reasoning"] = DEFAULT_LLM_REASONING
 
     logger.info("Returning agent with sandbox for thread %s", thread_id)
     return create_deep_agent(
-        model=make_model("anthropic:claude-opus-4-6", temperature=0, max_tokens=20_000),
+        model=make_model(model_id, **model_kwargs),
         system_prompt=construct_system_prompt(
-            repo_dir,
+            working_dir=work_dir,
             linear_project_id=linear_project_id,
             linear_issue_number=linear_issue_number,
-            agents_md=agents_md,
+            triggering_user_identity=triggering_user_identity,
         ),
         tools=[
             http_request,
             fetch_url,
-            commit_and_open_pr,
+            web_search,
             linear_comment,
+            linear_create_issue,
+            linear_delete_issue,
+            linear_get_issue,
+            linear_get_issue_comments,
+            linear_list_teams,
+            linear_update_issue,
+            request_pr_review,
+            slack_read_thread_messages,
             slack_thread_reply,
-            github_comment,
         ],
-        backend=sandbox_backend,
+        backend=backend_factory,
         middleware=[
+            SanitizeToolInputsMiddleware(),
+            ModelCallLimitMiddleware(run_limit=MODEL_CALL_RECURSION_LIMIT, exit_behavior="end"),
             ToolErrorMiddleware(),
             check_message_queue_before_model,
+            SlackAssistantStatusMiddleware(),
             ensure_no_empty_msg,
-            open_pr_if_needed,
+            notify_step_limit_reached,
+            SandboxCircuitBreakerMiddleware(),
         ],
     ).with_config(config)
