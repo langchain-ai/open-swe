@@ -142,6 +142,19 @@ LLM_MODEL_ID="anthropic:claude-sonnet-4-6"
 
 If `LLM_MODEL_ID` is not set, the default model (`openai:gpt-5.5`) is used.
 
+### Per-run override
+
+`get_agent()` also reads `config["configurable"]["model_id"]` and prefers it over `LLM_MODEL_ID`. This lets callers pick a model per LangGraph run.
+
+For Slack-triggered runs, the agent parses a `model=<provider:model>` (or `model: <provider:model>`) token out of the mention text and forwards it as `configurable.model_id`. Examples:
+
+```
+@open-swe model=anthropic:claude-sonnet-4-6 fix the failing test in foo.py
+@open-swe model: openai:gpt-5.5 review this PR
+```
+
+The override applies to new runs only; queued mid-run messages do not change the model of the in-flight agent. The token must include a provider prefix (`provider:model`) — bare model names are ignored. Providers other than `openai` / `anthropic` require the matching `langchain-<provider>` package to be installed.
+
 `max_tokens` is a maximum completion/output token budget, not the model's total context window. For OpenAI reasoning models, this budget can include both internal reasoning tokens and final response tokens.
 
 ### Switching models

@@ -337,12 +337,14 @@ async def get_agent(config: RunnableConfig) -> Pregel:
 
     work_dir = await aresolve_sandbox_work_dir(sandbox_backend)
 
-    model_id = os.environ.get("LLM_MODEL_ID", DEFAULT_LLM_MODEL_ID)
+    model_id = config["configurable"].get("model_id") or os.environ.get(
+        "LLM_MODEL_ID", DEFAULT_LLM_MODEL_ID
+    )
     model_kwargs: ModelKwargs = {"max_tokens": DEFAULT_LLM_MAX_TOKENS}
     if model_id == DEFAULT_LLM_MODEL_ID:
         model_kwargs["reasoning"] = DEFAULT_LLM_REASONING
 
-    logger.info("Returning agent with sandbox for thread %s", thread_id)
+    logger.info("Returning agent with sandbox for thread %s using model %s", thread_id, model_id)
     return create_deep_agent(
         model=make_model(model_id, **model_kwargs),
         system_prompt=construct_system_prompt(

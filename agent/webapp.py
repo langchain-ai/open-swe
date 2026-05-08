@@ -59,6 +59,7 @@ from .utils.slack import (
     get_slack_user_names,
     looks_like_slack_pr_review_command,
     parse_github_pr_url,
+    parse_model_override,
     parse_slack_review_command,
     post_slack_thread_reply,
     post_slack_trace_reply,
@@ -814,6 +815,12 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
         strip_bot_mention(text, bot_user_id, bot_username=SLACK_BOT_USERNAME)
         or "(no text in mention)"
     )
+    model_override: str | None = None
+    parsed_override = parse_model_override(clean_text)
+    if parsed_override is not None:
+        model_override, stripped = parsed_override
+        clean_text = stripped or "(no text in mention)"
+        logger.info("Slack mention requested model override: %s", model_override)
     trigger_user = user_name or (f"<@{user_id}>" if user_id else "Unknown user")
 
     # Auto-resolve cross-posted Slack message links in context
@@ -869,6 +876,8 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
         "user_email": user_email,
         "source": "slack",
     }
+    if model_override:
+        configurable["model_id"] = model_override
 
     langgraph_client = get_client(url=LANGGRAPH_URL)
     is_first_mention = not await _thread_exists(thread_id)

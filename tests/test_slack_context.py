@@ -10,6 +10,7 @@ from agent.utils.slack import (
     format_slack_messages_for_prompt,
     looks_like_slack_pr_review_command,
     parse_github_pr_url,
+    parse_model_override,
     parse_slack_review_command,
     post_slack_trace_reply,
     replace_bot_mention_with_username,
@@ -743,3 +744,35 @@ def test_process_slack_mention_queues_active_thread_message(
     queued_payload = captured["queued"]["message_content"]
     assert queued_payload["image_urls"] == ["https://example.com/image.png"]
     assert "## Latest Mention Request\ninclude this screenshot" in queued_payload["text"]
+
+
+def test_parse_model_override_equals() -> None:
+    result = parse_model_override("hey, please use model=anthropic:claude-sonnet-4-6 thx")
+    assert result is not None
+    model_id, cleaned = result
+    assert model_id == "anthropic:claude-sonnet-4-6"
+    assert cleaned == "hey, please use thx"
+
+
+def test_parse_model_override_colon_and_backticks() -> None:
+    result = parse_model_override("model: `openai:gpt-5.5` please")
+    assert result is not None
+    model_id, cleaned = result
+    assert model_id == "openai:gpt-5.5"
+    assert cleaned == "please"
+
+
+def test_parse_model_override_uppercase_with_slash() -> None:
+    result = parse_model_override("MODEL=fireworks:accounts/fireworks/models/llama-v3p1-70b run it")
+    assert result is not None
+    assert result[0] == "fireworks:accounts/fireworks/models/llama-v3p1-70b"
+
+
+def test_parse_model_override_none_when_no_provider_prefix() -> None:
+    assert parse_model_override("model=gpt-5.5") is None
+    assert parse_model_override("just a regular message") is None
+    assert parse_model_override("") is None
+
+
+def test_parse_model_override_does_not_match_inside_word() -> None:
+    assert parse_model_override("submodel=anthropic:claude") is None

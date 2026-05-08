@@ -324,7 +324,9 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
                 head_sha=head_sha,
             )
 
-    model_id = os.environ.get("LLM_MODEL_ID", DEFAULT_LLM_MODEL_ID)
+    model_id = config["configurable"].get("model_id") or os.environ.get(
+        "LLM_MODEL_ID", DEFAULT_LLM_MODEL_ID
+    )
     model_kwargs: ModelKwargs = {"max_tokens": DEFAULT_LLM_MAX_TOKENS}
     if model_id == DEFAULT_LLM_MODEL_ID:
         model_kwargs["reasoning"] = DEFAULT_LLM_REASONING

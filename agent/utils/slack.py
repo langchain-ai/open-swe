@@ -24,6 +24,10 @@ SLACK_API_BASE_URL = "https://slack.com/api"
 SLACK_BOT_TOKEN = os.environ.get("SLACK_BOT_TOKEN", "")
 GITHUB_PR_URL_RE = re.compile(r"https?://(?:www\.)?github\.com/[^\s<>|]+/[^\s<>|]+/pull/\d+")
 URL_RE = re.compile(r"https?://[^\s<>|]+")
+MODEL_OVERRIDE_RE = re.compile(
+    r"(?<![A-Za-z0-9_])model\s*[:=]\s*`?([A-Za-z0-9_]+:[A-Za-z0-9._\-/]+)`?",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -153,6 +157,19 @@ def parse_github_pr_url(url: str) -> GitHubPrRef | None:
         number=number,
         url=f"https://github.com/{owner}/{repo}/pull/{number}",
     )
+
+
+def parse_model_override(text: str) -> tuple[str, str] | None:
+    """Find a `model=provider:model` override in text. Returns (model_id, cleaned_text) or None."""
+    if not text:
+        return None
+    match = MODEL_OVERRIDE_RE.search(text)
+    if not match:
+        return None
+    model_id = match.group(1)
+    cleaned = (text[: match.start()] + text[match.end() :]).strip()
+    cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
+    return model_id, cleaned
 
 
 def parse_slack_review_command(text: str) -> GitHubPrRef | None:
