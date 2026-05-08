@@ -53,7 +53,7 @@ from .tools import (
 )
 from .utils.auth import resolve_github_token
 from .utils.github_app import get_github_app_installation_token
-from .utils.model import ModelKwargs, OpenAIReasoning, make_model
+from .utils.model import DEFAULT_MODEL_ID, ModelKwargs, OpenAIReasoning, get_model_id, make_model
 from .utils.sandbox import create_sandbox
 from .utils.sandbox_paths import aresolve_sandbox_work_dir
 
@@ -305,7 +305,7 @@ async def ensure_sandbox_for_thread(thread_id: str) -> SandboxBackendProtocol:
     return sandbox_backend
 
 
-DEFAULT_LLM_MODEL_ID = "openai:gpt-5.5"
+DEFAULT_LLM_MODEL_ID = DEFAULT_MODEL_ID
 DEFAULT_LLM_REASONING: OpenAIReasoning = {"effort": "medium"}
 DEFAULT_LLM_MAX_TOKENS = 64_000
 DEFAULT_RECURSION_LIMIT = 9_999
@@ -337,7 +337,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
 
     work_dir = await aresolve_sandbox_work_dir(sandbox_backend)
 
-    model_id = os.environ.get("LLM_MODEL_ID", DEFAULT_LLM_MODEL_ID)
+    model_id = get_model_id()
     model_kwargs: ModelKwargs = {"max_tokens": DEFAULT_LLM_MAX_TOKENS}
     if model_id == DEFAULT_LLM_MODEL_ID:
         model_kwargs["reasoning"] = DEFAULT_LLM_REASONING
