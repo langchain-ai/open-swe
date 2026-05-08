@@ -53,6 +53,7 @@ from .tools import (
     web_search,
 )
 from .utils.auth import resolve_github_token
+from .utils.authorship import resolve_triggering_user_identity
 from .utils.github_app import get_github_app_installation_token
 from .utils.model import ModelKwargs, OpenAIReasoning, make_model
 from .utils.sandbox import create_sandbox
@@ -328,6 +329,9 @@ async def get_agent(config: RunnableConfig) -> Pregel:
 
     github_token, new_encrypted = await resolve_github_token(config, thread_id)
     config["metadata"]["github_token_encrypted"] = new_encrypted
+    triggering_user_identity = await asyncio.to_thread(
+        resolve_triggering_user_identity, config, github_token
+    )
     del github_token
 
     sandbox_backend = await ensure_sandbox_for_thread(thread_id)
@@ -350,6 +354,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             working_dir=work_dir,
             linear_project_id=linear_project_id,
             linear_issue_number=linear_issue_number,
+            triggering_user_identity=triggering_user_identity,
         ),
         tools=[
             http_request,
