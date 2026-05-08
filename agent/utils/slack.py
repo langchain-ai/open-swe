@@ -708,9 +708,9 @@ TRACE_REPLY_TIPS: tuple[str, ...] = (
     "I also pick up `@openswe` mentions in GitHub issue bodies and comments — not just on PRs.",
     "On a GitHub PR, comment `@open-swe review` to trigger the reviewer agent and get inline review comments.",
     "Each thread keeps a persistent sandbox — follow-up runs reuse the same workspace, so my context sticks around.",
-    "When I review a PR, small fixes come back as `suggestion` blocks you can apply with one click on GitHub.",
-    "If my sandbox gets disconnected mid-run, I'll auto-recreate it and keep going — you don't have to retrigger.",
-    "I authenticate to GitHub as you (via OAuth) or fall back to the GitHub App, so I only touch repos you can access.",
+    "Paste a Slack message link from another thread and I'll fetch its content (and any images) as extra context.",
+    "Ask me to search the web — I have a `web_search` tool for finding docs, examples, and GitHub repos mid-task.",
+    "I can read, update, and create Linear issues directly — useful for filing follow-up tickets or linking work back to a project.",
 )
 
 
