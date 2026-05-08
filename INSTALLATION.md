@@ -418,7 +418,31 @@ DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS=""  # Delete N seconds after stop (def
 
 # === Token Encryption ===
 TOKEN_ENCRYPTION_KEY=""                # Generate with: openssl rand -base64 32
+                                       # Supports key rotation: see "Rotating TOKEN_ENCRYPTION_KEY" below
 ```
+
+### Rotating TOKEN_ENCRYPTION_KEY
+
+`TOKEN_ENCRYPTION_KEY` accepts either a single Fernet key or a comma- or
+newline-separated **ordered list of keys, most-recent-first**. New writes always
+encrypt under the first key; reads try every key in order. To rotate without
+invalidating already-stored GitHub tokens:
+
+1. Generate a new key: `openssl rand -base64 32`.
+2. Prepend it to `TOKEN_ENCRYPTION_KEY`, keeping the old key second:
+   ```
+   TOKEN_ENCRYPTION_KEY="<new_key>,<old_key>"
+   ```
+   Restart the server. New encryptions use `<new_key>`; existing ciphertexts
+   still decrypt against `<old_key>`.
+3. Let active threads cycle (each fresh OAuth flow re-encrypts under the new
+   key). After every active thread has re-authed, drop the old key:
+   ```
+   TOKEN_ENCRYPTION_KEY="<new_key>"
+   ```
+   Any thread still holding ciphertext under `<old_key>` will fail to decrypt
+   and the user will be re-prompted to authenticate — same UX as if the thread
+   had never authed.
 
 ## 7. Start the server
 
@@ -523,3 +547,5 @@ The `langgraph.json` at the project root already defines the graph entry point a
 
 - Ensure `TOKEN_ENCRYPTION_KEY` is set (generate with `openssl rand -base64 32`)
 - The key must be a valid 32-byte Fernet-compatible base64 string
+- For key rotation, `TOKEN_ENCRYPTION_KEY` may be a comma- or newline-separated
+  list of keys (most-recent-first). See "Rotating TOKEN_ENCRYPTION_KEY" above.
