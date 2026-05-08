@@ -118,6 +118,83 @@ def test_update_finding_rejects_empty_update() -> None:
     assert "No fields" in result["error"]
 
 
+def test_add_finding_drops_long_suggestion() -> None:
+    captured: list[Any] = []
+
+    async def fake_append(thread_id: str, finding: Any) -> Any:
+        captured.append(finding)
+        return finding
+
+    long_suggestion = "\n".join(f"line_{i}" for i in range(6))
+    with (
+        patch("agent.tools.add_finding.get_config", return_value=_config()),
+        patch("agent.tools.add_finding.get_thread_id_from_runtime", return_value="tid-1"),
+        patch("agent.tools.add_finding.append_finding", side_effect=fake_append),
+    ):
+        result = add_finding(
+            severity="medium",
+            category="style",
+            file="foo.py",
+            description="rewrite",
+            start_line=11,
+            end_line=12,
+            suggestion=long_suggestion,
+        )
+
+    assert result["success"] is True
+    assert result.get("suggestion_dropped") is True
+    assert "warning" in result
+    assert captured[0]["suggestion"] is None
+
+
+def test_add_finding_keeps_short_suggestion() -> None:
+    captured: list[Any] = []
+
+    async def fake_append(thread_id: str, finding: Any) -> Any:
+        captured.append(finding)
+        return finding
+
+    short_suggestion = "a\nb\nc\nd"  # exactly 4 lines — at the cap
+    with (
+        patch("agent.tools.add_finding.get_config", return_value=_config()),
+        patch("agent.tools.add_finding.get_thread_id_from_runtime", return_value="tid-1"),
+        patch("agent.tools.add_finding.append_finding", side_effect=fake_append),
+    ):
+        result = add_finding(
+            severity="medium",
+            category="style",
+            file="foo.py",
+            description="rename",
+            start_line=11,
+            end_line=12,
+            suggestion=short_suggestion,
+        )
+
+    assert result["success"] is True
+    assert "suggestion_dropped" not in result
+    assert captured[0]["suggestion"] == short_suggestion
+
+
+def test_update_finding_drops_long_suggestion() -> None:
+    captured: list[Any] = []
+
+    async def fake_update(thread_id: str, finding_id: str, updates: Any) -> Any:
+        captured.append(updates)
+        return {"id": finding_id, **updates}
+
+    long_suggestion = "\n".join(f"line_{i}" for i in range(6))
+    with (
+        patch("agent.tools.update_finding.get_config", return_value=_config()),
+        patch("agent.tools.update_finding.get_thread_id_from_runtime", return_value="tid-1"),
+        patch("agent.tools.update_finding.update_finding_fields", side_effect=fake_update),
+    ):
+        result = update_finding(finding_id="f_a", suggestion=long_suggestion)
+
+    assert result["success"] is True
+    assert result.get("suggestion_dropped") is True
+    assert captured[0]["suggestion"] is None
+
+
 def test_update_finding_passes_through_fields() -> None:
     captured: list[Any] = []
 

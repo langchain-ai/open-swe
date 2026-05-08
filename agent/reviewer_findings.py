@@ -23,6 +23,22 @@ logger = logging.getLogger(__name__)
 
 REVIEWER_THREAD_KIND = "reviewer"
 
+# Suggestions are only useful when the reader can scan them at a glance and
+# accept with one click. Anything longer reads as the reviewer rewriting the
+# code for the author and clutters the comment. We cap at 4 lines and drop
+# longer suggestions; the description still gets posted on its own.
+MAX_SUGGESTION_LINES = 4
+
+
+def clip_suggestion(suggestion: str | None) -> tuple[str | None, bool]:
+    """Return (suggestion_or_none, was_dropped). Drops if over the line cap."""
+    if not suggestion:
+        return suggestion, False
+    if suggestion.count("\n") + 1 > MAX_SUGGESTION_LINES:
+        return None, True
+    return suggestion, False
+
+
 Severity = Literal["informational", "low", "medium", "high", "critical"]
 FindingStatus = Literal["open", "resolved", "dismissed"]
 DiffSide = Literal["LEFT", "RIGHT"]

@@ -8,6 +8,8 @@ from typing import Any
 from langgraph.config import get_config
 
 from ..reviewer_findings import (
+    MAX_SUGGESTION_LINES,
+    clip_suggestion,
     get_thread_id_from_runtime,
     update_finding_fields,
 )
@@ -35,6 +37,8 @@ def update_finding(
         severity: New severity, if reassessing.
         description: New description body, if revising.
         suggestion: New replacement text. Pass an empty string to clear it.
+            Capped at 4 lines — longer values are dropped (the finding keeps
+            its description). Only set this for small, obvious fixes.
         note: Optional free-form note explaining the change. Persisted on the
             finding under ``last_update_note``.
 
@@ -53,6 +57,7 @@ def update_finding(
         return {"success": False, "error": f"Invalid severity: {severity}"}
 
     updates: dict[str, Any] = {}
+    suggestion_dropped = False
     if status is not None:
         updates["status"] = status
     if severity is not None:
@@ -60,7 +65,8 @@ def update_finding(
     if description is not None:
         updates["description"] = description
     if suggestion is not None:
-        updates["suggestion"] = suggestion or None
+        clipped, suggestion_dropped = clip_suggestion(suggestion or None)
+        updates["suggestion"] = clipped
     if note is not None:
         updates["last_update_note"] = note
 
@@ -77,4 +83,12 @@ def update_finding(
     updated = asyncio.run(update_finding_fields(thread_id, finding_id, updates))
     if updated is None:
         return {"success": False, "error": f"No finding found with id {finding_id}"}
-    return {"success": True, "finding": updated}
+    result: dict[str, Any] = {"success": True, "finding": updated}
+    if suggestion_dropped:
+        result["suggestion_dropped"] = True
+        result["warning"] = (
+            f"Suggestion exceeded the {MAX_SUGGESTION_LINES}-line cap and was "
+            "dropped — the finding kept its prior description. Only include "
+            "`suggestion` for small, obvious fixes."
+        )
+    return result
