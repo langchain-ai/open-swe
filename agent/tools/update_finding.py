@@ -65,8 +65,12 @@ def update_finding(
     if description is not None:
         updates["description"] = description
     if suggestion is not None:
-        clipped, suggestion_dropped = clip_suggestion(suggestion or None)
-        updates["suggestion"] = clipped
+        if suggestion == "":
+            updates["suggestion"] = None
+        else:
+            clipped, suggestion_dropped = clip_suggestion(suggestion)
+            if not suggestion_dropped:
+                updates["suggestion"] = clipped
     if note is not None:
         updates["last_update_note"] = note
 
@@ -77,6 +81,17 @@ def update_finding(
         updates["last_confirmed_sha"] = head_sha
 
     if not updates:
+        if suggestion_dropped:
+            return {
+                "success": False,
+                "suggestion_dropped": True,
+                "error": (
+                    f"Suggestion exceeded the {MAX_SUGGESTION_LINES}-line cap "
+                    "and was rejected; no other fields were provided, so "
+                    "nothing was updated. Only include `suggestion` for "
+                    "small, obvious fixes."
+                ),
+            }
         return {"success": False, "error": "No fields provided to update"}
 
     thread_id = get_thread_id_from_runtime()
@@ -88,7 +103,8 @@ def update_finding(
         result["suggestion_dropped"] = True
         result["warning"] = (
             f"Suggestion exceeded the {MAX_SUGGESTION_LINES}-line cap and was "
-            "dropped — the finding kept its prior description. Only include "
+            "rejected — the finding's prior `suggestion` was left unchanged "
+            "and other fields were updated normally. Only include "
             "`suggestion` for small, obvious fixes."
         )
     return result
