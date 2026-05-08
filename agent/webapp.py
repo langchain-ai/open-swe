@@ -279,6 +279,35 @@ def generate_thread_id_from_slack_thread(channel_id: str, thread_id: str) -> str
     return str(uuid.UUID(hex=md5_hex))
 
 
+async def _is_bot_slack_thread_participant(
+    channel_id: str, thread_ts: str, bot_user_id: str
+) -> bool:
+    """Fast in-memory check; on miss, walk the thread via Slack API.
+
+    The in-memory cache is wiped on every process restart. If we miss, pull
+    conversations.replies and look for any message authored by the bot. Record
+    a hit back in the cache so subsequent events in the same thread short-circuit.
+    Negative results are NOT cached — the bot may participate later.
+    """
+    if not channel_id or not thread_ts:
+        return False
+    if has_slack_thread_participation(channel_id, thread_ts):
+        return True
+    if not bot_user_id:
+        return False
+    try:
+        messages = await fetch_slack_thread_messages(channel_id, thread_ts)
+    except Exception:  # noqa: BLE001
+        logger.exception("Failed to fetch Slack thread %s/%s for participation check",
+                         channel_id, thread_ts)
+        return False
+    for m in messages:
+        if m.get("user") == bot_user_id:
+            record_slack_thread_participation(channel_id, thread_ts)
+            return True
+    return False
+
+
 def _extract_repo_config_from_thread(thread: dict[str, Any]) -> dict[str, str] | None:
     """Extract repo config from persisted thread data."""
     metadata = thread.get("metadata")
@@ -884,6 +913,9 @@ async def process_slack_mention(
             logger.info("Slack message queued for thread %s", thread_id)
         else:
             logger.error("Failed to queue Slack message for thread %s", thread_id)
+        # Intentionally no trace reply here — it was already posted when the
+        # in-flight run was created. Follow-ups get the `report_status`
+        # shimmer instead of flooding the thread with duplicate links.
         return
 
     run = await langgraph_client.runs.create(
@@ -894,7 +926,20 @@ async def process_slack_mention(
         if_not_exists="create",
         multitask_strategy="interrupt",
     )
-    await post_slack_trace_reply(channel_id, thread_ts, run["run_id"])
+    # Post the "View trace" link at most once per Slack thread — flagged in
+    # LangGraph thread metadata so follow-up re-runs don't re-post it.
+    already_posted = False
+    try:
+        existing = await langgraph_client.threads.get(thread_id)
+        already_posted = bool((existing.get("metadata") or {}).get("trace_posted"))
+    except Exception:  # noqa: BLE001
+        logger.exception("Failed to check trace_posted flag for thread %s", thread_id)
+    if not already_posted:
+        await post_slack_trace_reply(channel_id, thread_ts, run["run_id"])
+        try:
+            await langgraph_client.threads.update(thread_id, metadata={"trace_posted": True})
+        except Exception:  # noqa: BLE001
+            logger.exception("Failed to set trace_posted flag for thread %s", thread_id)
 
 
 def verify_linear_signature(body: bytes, signature: str, secret: str) -> bool:
@@ -1118,9 +1163,11 @@ async def slack_webhook(request: Request, background_tasks: BackgroundTasks) -> 
     has_username_mention = bool(SLACK_BOT_USERNAME and f"@{SLACK_BOT_USERNAME}" in text)
     has_id_mention = bool(bot_user_id and f"<@{bot_user_id}>" in text)
     reply_to_bot = bool(is_thread_reply and bot_user_id and parent_user_id == bot_user_id)
-    thread_participant = bool(
-        is_thread_reply and has_slack_thread_participation(channel_id, incoming_thread_ts)
-    )
+    thread_participant = False
+    if is_thread_reply:
+        thread_participant = await _is_bot_slack_thread_participant(
+            channel_id, incoming_thread_ts, bot_user_id
+        )
 
     # DMs from a human go straight through — in an IM with the bot, every
     # message is addressed to the bot by definition, so requiring an @mention

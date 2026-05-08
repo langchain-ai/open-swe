@@ -1,4 +1,4 @@
-.PHONY: all format format-check lint test tests integration_tests help run dev dev-test fake-deps slack-socket test-e2e up up-test stop restart logs-dev logs-fake dump-fake-data
+.PHONY: all format format-check lint test tests integration_tests help run dev dev-test fake-deps slack-socket test-e2e up up-test stop restart logs-dev logs-fake dump-fake-data dump-thread
 
 # Default target executed when no arguments are given to make.
 all: help
@@ -113,6 +113,11 @@ dump-fake-data:
 	@uv run python -m hack.fake_deps.dump > logs/fake-data.md
 	@echo "wrote logs/fake-data.md"
 
+# Dump the most-recently-updated LangGraph thread (or a specific one via
+# THREAD=<id>) as readable text to stdout. Pair with `| less` for browsing.
+dump-thread:
+	@uv run python -m hack.dump_thread $(THREAD)
+
 install:
 	uv pip install -e .
 
@@ -170,6 +175,7 @@ help:
 	@echo 'restart                      - stop + up'
 	@echo 'logs-dev / logs-fake         - tail the backgrounded process logs'
 	@echo 'dump-fake-data               - dump fake-deps SQLite state to logs/fake-data.md'
+	@echo 'dump-thread [THREAD=<id>]    - dump most recent LangGraph thread as readable text'
 	@echo 'install                      - install dependencies'
 	@echo 'format                       - run code formatters'
 	@echo 'lint                         - run linters'

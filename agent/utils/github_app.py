@@ -41,6 +41,20 @@ def _generate_app_jwt() -> str:
     return jwt.encode(payload, private_key, algorithm="RS256")
 
 
+async def get_github_bot_token() -> str | None:
+    """Return a GitHub token suitable for bot-mode API calls.
+
+    Precedence mirrors ``_resolve_bot_installation_token`` in auth.py:
+    ``GITHUB_PAT`` first (handy for local dev without an App), otherwise
+    mint an installation token from the configured GitHub App. Returns
+    ``None`` if neither is configured.
+    """
+    pat = os.environ.get("GITHUB_PAT", "").strip()
+    if pat:
+        return pat
+    return await get_github_app_installation_token()
+
+
 async def get_github_app_installation_token() -> str | None:
     """Exchange the GitHub App JWT for an installation access token.
 

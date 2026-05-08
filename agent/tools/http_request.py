@@ -1,4 +1,5 @@
 import ipaddress
+import os
 import socket
 from typing import Any
 from urllib.parse import urljoin, urlparse
@@ -6,6 +7,29 @@ from urllib.parse import urljoin, urlparse
 import requests
 
 _MAX_REDIRECTS = 5
+_GITHUB_HOSTS = {"api.github.com", "raw.githubusercontent.com"}
+
+
+def _maybe_inject_github_auth(url: str, headers: dict[str, str] | None) -> dict[str, str] | None:
+    """Attach a GitHub bearer token for api.github.com calls.
+
+    Only injects the caller-friendly ``GITHUB_PAT`` (sync-safe). If the caller
+    already supplied an Authorization header, it's left alone. App-installation
+    tokens require async JWT exchange and are handled by dedicated tools, not here.
+    """
+    try:
+        host = urlparse(url).hostname or ""
+    except Exception:  # noqa: BLE001
+        return headers
+    if host not in _GITHUB_HOSTS:
+        return headers
+    merged = dict(headers or {})
+    if any(k.lower() == "authorization" for k in merged):
+        return merged
+    pat = os.environ.get("GITHUB_PAT", "").strip()
+    if pat:
+        merged["Authorization"] = f"Bearer {pat}"
+    return merged
 
 
 def _is_url_safe(url: str) -> tuple[bool, str]:
@@ -121,6 +145,7 @@ def http_request(
     try:
         kwargs: dict[str, Any] = {}
 
+        headers = _maybe_inject_github_auth(url, headers)
         if headers:
             kwargs["headers"] = headers
         if params:

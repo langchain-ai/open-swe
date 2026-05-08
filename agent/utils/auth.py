@@ -342,13 +342,25 @@ async def save_encrypted_token_from_email(
 
 
 async def _resolve_bot_installation_token(thread_id: str) -> tuple[str, str]:
-    """Get a GitHub App installation token and persist it for the thread."""
+    """Get a GitHub token for the bot and persist it for the thread.
+
+    Prefers ``GITHUB_PAT`` (a personal access token) when set — handy for
+    local dev without setting up a full GitHub App. Otherwise falls back to
+    minting an installation token from the configured App.
+    """
+    pat = os.environ.get("GITHUB_PAT", "").strip()
+    if pat:
+        logger.info("Using GITHUB_PAT for thread %s (bot-token-only mode)", thread_id)
+        encrypted = await persist_encrypted_github_token(thread_id, pat)
+        return pat, encrypted
+
     bot_token = await get_github_app_installation_token()
     if not bot_token:
         raise RuntimeError(
             "Bot-token-only mode is active (LANGSMITH_API_KEY_PROD set without "
-            "X_SERVICE_AUTH_JWT_SECRET) but the GitHub App is not configured. "
-            "Set GITHUB_APP_ID, GITHUB_APP_PRIVATE_KEY, and GITHUB_APP_INSTALLATION_ID."
+            "X_SERVICE_AUTH_JWT_SECRET) but neither GITHUB_PAT nor the GitHub "
+            "App is configured. Set GITHUB_PAT, or set GITHUB_APP_ID, "
+            "GITHUB_APP_PRIVATE_KEY, and GITHUB_APP_INSTALLATION_ID."
         )
     logger.info(
         "Using GitHub App installation token for thread %s (bot-token-only mode)", thread_id

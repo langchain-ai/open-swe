@@ -4,7 +4,7 @@ from typing import Any
 
 import httpx
 
-from ..utils.github_app import get_github_app_installation_token
+from ..utils.github_app import get_github_bot_token
 
 GITHUB_API_BASE_URL = os.environ.get("GITHUB_API_BASE_URL", "https://api.github.com").rstrip("/")
 
@@ -37,7 +37,7 @@ async def list_repos(
     """
     try:
         headers = {"Accept": "application/vnd.github+json"}
-        token = await get_github_app_installation_token()
+        token = await get_github_bot_token()
         if token:
             headers["Authorization"] = f"Bearer {token}"
         path_prefix = "orgs" if is_organization else "users"

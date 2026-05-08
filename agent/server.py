@@ -53,15 +53,16 @@ from .tools import (
     list_pr_review_comments,
     list_pr_reviews,
     list_repos,
+    report_status,
     slack_thread_reply,
     submit_pr_review,
     update_pr_review,
     web_search,
 )
 from .utils.auth import resolve_github_token
-from .utils.github_app import get_github_app_installation_token
+from .utils.github_app import get_github_bot_token
 from .utils.model import make_model
-from .utils.options import nofixedrepo_enabled
+from .utils.options import nofixedrepo_enabled, slackv2_enabled
 from .utils.sandbox import create_sandbox
 from .utils.sandbox_paths import aresolve_sandbox_work_dir
 
@@ -84,7 +85,7 @@ async def _create_sandbox_with_proxy() -> SandboxBackendProtocol:
 
     sandbox_type = os.getenv("SANDBOX_TYPE", "langsmith")
     if sandbox_type == "langsmith":
-        installation_token = await get_github_app_installation_token()
+        installation_token = await get_github_bot_token()
         if not installation_token:
             msg = "Cannot configure proxy: GitHub App installation token is unavailable"
             logger.error(msg)
@@ -101,7 +102,7 @@ async def _refresh_github_proxy(
     if os.getenv("SANDBOX_TYPE", "langsmith") != "langsmith":
         return
 
-    installation_token = await get_github_app_installation_token()
+    installation_token = await get_github_bot_token()
     if not installation_token:
         logger.warning(
             "Skipping GitHub proxy refresh for sandbox %s: installation token unavailable",
@@ -295,6 +296,8 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         linear_update_issue,
         slack_thread_reply,
     ]
+    if slackv2_enabled():
+        tools.append(report_status)
     if not nofixedrepo:
         tools.extend([
             commit_and_open_pr,

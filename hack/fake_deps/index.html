@@ -44,7 +44,8 @@
   .msg .reactions .pill { display: inline-flex; align-items: center; gap: 4px; padding: 2px 7px; border: 1px solid #c8dcef; background: #e8f5fa; border-radius: 12px; font-size: 12px; color: #1264a3; }
   .thread-status { padding: 6px 14px; font-size: 12px; color: #616061; font-style: italic; border-top: 1px solid #e0e0e0; background: #f8f8f8; display: none; }
   .thread-status.on { display: block; }
-  .thread-status .shimmer { background: linear-gradient(90deg, #616061 0%, #c8c8c8 50%, #616061 100%); background-size: 200% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: shimmer 1.6s linear infinite; }
+  .thread-status .shimmer, .msg .inline-status .shimmer { background: linear-gradient(90deg, #616061 0%, #c8c8c8 50%, #616061 100%); background-size: 200% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: shimmer 1.6s linear infinite; }
+  .msg .inline-status { margin-top: 4px; font-size: 12px; font-style: italic; }
   @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
   .composer-shell { position: relative; padding: 10px 12px; border-top: 1px solid #e0e0e0; background: #fff; }
   .composer-shell textarea { width: 100%; min-height: 44px; padding: 8px; border: 1px solid #c8c8c8; border-radius: 4px; font-family: inherit; font-size: 14px; resize: vertical; }
@@ -63,6 +64,8 @@
   .mention-item .name { font-weight: 600; }
   .mention-item .id { opacity: 0.55; font-family: ui-monospace, monospace; font-size: 11px; margin-left: auto; }
   .mention-pill { background: #e8f1fa; color: #1264a3; padding: 0 4px; border-radius: 3px; font-weight: 600; }
+  .msg .body a { color: #1264a3; text-decoration: underline; }
+  .msg .body a:hover { color: #0b4d82; }
 
   /* GitHub ------------------------------------------------------------- */
   #gh-panel { display: none; grid-template-columns: 260px 340px 1fr; width: 100%; }
@@ -238,14 +241,23 @@ activateTab(location.hash.slice(1));
 // ===================================================================
 
 function slackRenderBody(text) {
+  // Handles Slack mrkdwn: <@USERID>, <url>, <url|label>.
   const frag = document.createDocumentFragment();
-  const re = /<@([A-Za-z0-9_-]+)>/g;
+  const re = /<(@([A-Za-z0-9_-]+)|([a-z][a-z0-9+.-]*:[^|>]+)(?:\|([^>]+))?)>/g;
   let last = 0, m;
   while ((m = re.exec(text)) !== null) {
     if (m.index > last) frag.appendChild(document.createTextNode(text.slice(last, m.index)));
-    const u = state.slack.users[m[1]];
-    const display = u ? (u.profile?.display_name || u.name) : m[1];
-    frag.appendChild(el('span', { class: 'mention-pill' }, `@${display}`));
+    if (m[2]) {
+      const u = state.slack.users[m[2]];
+      const display = u ? (u.profile?.display_name || u.name) : m[2];
+      frag.appendChild(el('span', { class: 'mention-pill' }, `@${display}`));
+    } else {
+      const url = m[3];
+      const label = m[4] || url;
+      frag.appendChild(el('a', {
+        href: url, target: '_blank', rel: 'noopener noreferrer',
+      }, label));
+    }
     last = m.index + m[0].length;
   }
   if (last < text.length) frag.appendChild(document.createTextNode(text.slice(last)));
@@ -279,6 +291,15 @@ function slackRenderMessage(m, inThread=false) {
     if (replies.length) {
       right.appendChild(el('div', { class: 'replies', onclick: () => openSlackThread(m.ts) },
         `${replies.length} ${replies.length === 1 ? 'reply' : 'replies'}`));
+    }
+    // Inline "bot is thinking..." status under the parent message in the
+    // channel feed — matches real Slack's Assistant-API indicator placement.
+    const statusKey = `${m.channel_id || state.slack.activeChannelId}/${m.ts}`;
+    const inlineStatus = state.slack.threadStatuses[statusKey];
+    if (inlineStatus) {
+      const botName = state.slack.bot_username || 'app';
+      right.appendChild(el('div', { class: 'inline-status' },
+        [el('span', { class: 'shimmer' }, `${botName} ${inlineStatus}`)]));
     }
   }
   const actions = el('div', { class: 'actions' },
@@ -738,7 +759,10 @@ function connectEvents() {
       if (d.status) state.slack.threadStatuses[key] = d.status;
       else delete state.slack.threadStatuses[key];
       setActivity(`slack thread status [${d.channel}/${d.thread_ts}] → ${d.status || '(cleared)'}`);
-      if (state.slack.threadTs === d.thread_ts) slackRenderThread();
+      // Refresh both views so the shimmer shows whether the user is looking
+      // at the channel feed or has the thread pane open.
+      slackRender();
+      if (state.slack.threadTs) slackRenderThread();
     } else if (d.type === 'webhook_result') {
       setStatus(`[${d.target}] webhook ${d.status ?? 'ERR'} — ${JSON.stringify(d.response)}`);
     } else if (d.type === 'slack_reaction') {

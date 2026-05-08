@@ -100,7 +100,42 @@ TASK_EXECUTION_SECTION = """---
 
 ### Task Execution
 
-If you make changes, communicate updates in the source channel:
+**`report_status` is your running narration — use it constantly.**
+Call `report_status` before every other tool call (shell commands, file
+reads, API calls, searches, etc.). Treat it as a heartbeat: if the user
+refreshed Slack at any moment, the shimmer should tell them exactly what
+you are doing right now. One update per step, not per batch — if you're
+about to run three `execute` calls, emit three `report_status` calls
+first, each with its own phrase.
+
+Good rhythm:
+```
+report_status("is cloning langchainplus...")
+execute("git clone ...")
+report_status("is reading hello.py to find the greeting...")
+execute("cat hello.py")
+report_status("is editing hello.py to add French greeting...")
+execute("sed -i ...")
+report_status("is running the tests...")
+execute("pytest -q")
+report_status("is committing and pushing the branch...")
+execute("git commit && git push ...")
+report_status("is opening the pull request...")
+execute("gh pr create ...")
+slack_thread_reply("Done — PR #123")
+```
+
+Rules:
+- Short, present-tense, starts mid-sentence ("is …"). The bot name is
+  prepended automatically.
+- Status text itself is the only user-visible feedback during the run —
+  it replaces any "acknowledgement" or "thinking out loud" messages you
+  might otherwise post.
+- Do NOT post progress in `slack_thread_reply`. Reserve that (and
+  `github_comment` / `linear_comment`) for the final result or for a
+  clarifying question. Progress belongs in `report_status`.
+- No-op on non-Slack triggers, so safe to always call.
+
 - Use `linear_comment` for Linear-triggered tasks.
 - Use `slack_thread_reply` for Slack-triggered tasks.
 - Use `github_comment` for GitHub-triggered tasks.
@@ -146,8 +181,11 @@ Commits all changes, pushes to a branch, and opens a **draft** GitHub PR. If a P
 #### `linear_comment`
 Posts a comment to a Linear ticket given a `ticket_id`. Call this **after** `commit_and_open_pr` to notify stakeholders that the work is done and include the PR link. You can tag Linear users with `@username` (their Linear display name). Example: "I've completed the implementation and opened a PR: <pr_url>. Hey @username, let me know if you have any feedback!".
 
+#### `report_status`
+Sets the shimmery status line under the Slack composer (via Slack's Assistant API). **Call this before every other tool call** — file reads, shell commands, API calls, searches — with a short present-tense phrase (5–10 words) describing what you are about to do. Examples: "is cloning langchainplus...", "is reading hello.py...", "is running the tests...", "is drafting the PR description...". This is the user's only live feedback during the run, so update aggressively; stale statuses are worse than verbose ones. It does NOT post a message in the thread and auto-clears when you send a real `slack_thread_reply`. Safe to call on non-Slack triggers (no-op).
+
 #### `slack_thread_reply`
-Posts a message to the active Slack thread. Use this for clarifying questions, status updates, and final summaries when the task was triggered from Slack. Follow-up messages from the user in the same thread are routed to you automatically — they do not need to re-@mention you, so keep the conversation natural and inline in the thread.
+Posts a message to the active Slack thread. Use this for clarifying questions and final summaries when the task was triggered from Slack — NOT for progress updates (use `report_status` for those). Follow-up messages from the user in the same thread are routed to you automatically — they do not need to re-@mention you, so keep the conversation natural and inline in the thread.
 
 Slack formatting rules (applies to every `slack_thread_reply` message):
 - Use Slack mrkdwn, not standard Markdown.
