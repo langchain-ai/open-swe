@@ -186,6 +186,10 @@ DEFAULT_SANDBOX_SNAPSHOT_FS_CAPACITY_BYTES="34359738368"
 DEFAULT_SANDBOX_VCPUS="4"
 # Optional; memory in bytes per sandbox. Default is 15 GiB.
 DEFAULT_SANDBOX_MEM_BYTES="16106127360"
+# Optional; auto-stop a sandbox after this many seconds of inactivity. Default is 600 (10 min). 0 disables.
+DEFAULT_SANDBOX_IDLE_TTL_SECONDS="600"
+# Optional; delete a stopped sandbox after this many seconds. Default is 86400 (24 hours). 0 disables.
+DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS="86400"
 ```
 
 `DEFAULT_SANDBOX_SNAPSHOT_ID` is required when `SANDBOX_TYPE=langsmith`. The server validates this at startup and refuses to boot if it's missing. The snapshot should include the GitHub CLI from the project Dockerfile; Open SWE authenticates `git` and `gh` through the LangSmith sandbox proxy using runtime-minted GitHub App installation tokens, not deployment-stored GitHub access tokens.
@@ -400,6 +404,8 @@ DEFAULT_SANDBOX_SNAPSHOT_ID=""         # Required when SANDBOX_TYPE=langsmith (s
 DEFAULT_SANDBOX_SNAPSHOT_FS_CAPACITY_BYTES=""  # Root FS size in bytes (default: 32 GiB)
 DEFAULT_SANDBOX_VCPUS=""               # vCPUs per sandbox (default: 4)
 DEFAULT_SANDBOX_MEM_BYTES=""           # Memory in bytes per sandbox (default: 15 GiB)
+DEFAULT_SANDBOX_IDLE_TTL_SECONDS=""    # Auto-stop after N seconds idle (default: 600; 0 disables)
+DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS=""  # Delete N seconds after stop (default: 86400; 0 disables)
 
 # === Token Encryption ===
 TOKEN_ENCRYPTION_KEY=""                # Generate with: openssl rand -base64 32
