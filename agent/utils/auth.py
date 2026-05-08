@@ -14,7 +14,7 @@ from langgraph.graph.state import RunnableConfig
 from langgraph_sdk import get_client
 
 from ..encryption import encrypt_token
-from .github_app import get_github_app_installation_token
+from .github_app import get_github_app_installation_token_with_expiry
 from .github_token import get_github_token_from_thread
 from .github_user_email_map import GITHUB_USER_EMAIL_MAP
 from .linear import comment_on_linear_issue
@@ -122,6 +122,19 @@ async def get_ls_user_id_from_email(email: str) -> dict[str, str | None]:
         return {"ls_user_id": None, "tenant_id": None}
 
 
+def _extract_expires_at(response_data: dict[str, Any]) -> str | None:
+    """Pull an expiry from a LangSmith auth response in any of its known shapes."""
+    expires_at = response_data.get("expires_at") or response_data.get("expiresAt")
+    if isinstance(expires_at, str) and expires_at:
+        return expires_at
+    if isinstance(expires_at, int | float):
+        return datetime.fromtimestamp(float(expires_at), tz=UTC).isoformat()
+    expires_in = response_data.get("expires_in") or response_data.get("expiresIn")
+    if isinstance(expires_in, int | float) and expires_in > 0:
+        return (datetime.now(UTC) + timedelta(seconds=int(expires_in))).isoformat()
+    return None
+
+
 async def get_github_token_for_user(ls_user_id: str, tenant_id: str) -> dict[str, Any]:
     """Get GitHub OAuth token for a user via LangSmith agent auth."""
     if not GITHUB_OAUTH_PROVIDER_ID:
@@ -159,7 +172,11 @@ async def get_github_token_for_user(ls_user_id: str, tenant_id: str) -> dict[str
             auth_url = response_data.get("url")
 
             if token:
-                return {"token": token}
+                result: dict[str, Any] = {"token": token}
+                expires_at = _extract_expires_at(response_data)
+                if expires_at:
+                    result["expires_at"] = expires_at
+                return result
             if auth_url:
                 return {"auth_url": auth_url}
             return {"error": f"Unexpected auth result: {response_data}"}
@@ -265,13 +282,16 @@ async def leave_failure_comment(
     raise ValueError(f"Unknown source: {source}")
 
 
-async def persist_encrypted_github_token(thread_id: str, token: str) -> str:
-    """Encrypt a GitHub token and store it on the thread metadata."""
+async def persist_encrypted_github_token(
+    thread_id: str, token: str, expires_at: str | None = None
+) -> str:
+    """Encrypt a GitHub token and store it (and its expiry) on the thread metadata."""
     encrypted = encrypt_token(token)
-    await client.threads.update(
-        thread_id=thread_id,
-        metadata={"github_token_encrypted": encrypted},
-    )
+    metadata: dict[str, Any] = {
+        "github_token_encrypted": encrypted,
+        "github_token_expires_at": expires_at,
+    }
+    await client.threads.update(thread_id=thread_id, metadata=metadata)
     return encrypted
 
 
@@ -337,13 +357,14 @@ async def save_encrypted_token_from_email(
         await leave_failure_comment(source, message)
         raise ValueError(f"No token found: {error}")
 
-    encrypted = await persist_encrypted_github_token(thread_id, token)
+    expires_at = auth_result.get("expires_at") if isinstance(auth_result, dict) else None
+    encrypted = await persist_encrypted_github_token(thread_id, token, expires_at=expires_at)
     return token, encrypted
 
 
 async def _resolve_bot_installation_token(thread_id: str) -> tuple[str, str]:
     """Get a GitHub App installation token and persist it for the thread."""
-    bot_token = await get_github_app_installation_token()
+    bot_token, expires_at = await get_github_app_installation_token_with_expiry()
     if not bot_token:
         raise RuntimeError(
             "Bot-token-only mode is active (LANGSMITH_API_KEY_PROD set without "
@@ -353,7 +374,7 @@ async def _resolve_bot_installation_token(thread_id: str) -> tuple[str, str]:
     logger.info(
         "Using GitHub App installation token for thread %s (bot-token-only mode)", thread_id
     )
-    encrypted = await persist_encrypted_github_token(thread_id, bot_token)
+    encrypted = await persist_encrypted_github_token(thread_id, bot_token, expires_at=expires_at)
     return bot_token, encrypted
 
 

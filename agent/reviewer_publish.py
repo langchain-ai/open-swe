@@ -26,6 +26,7 @@ from typing import Any
 import httpx
 
 from .reviewer_findings import Finding
+from .utils.github_token import GitHubAuthError
 
 logger = logging.getLogger(__name__)
 
@@ -121,7 +122,13 @@ async def post_pull_request_review(
     async with httpx.AsyncClient() as client:
         try:
             response = await client.post(url, headers=headers, json=payload, timeout=30)
+            if response.status_code == 401:
+                raise GitHubAuthError(
+                    f"GitHub returned 401 posting PR review for {owner}/{repo}#{pr_number}"
+                )
             response.raise_for_status()
+        except GitHubAuthError:
+            raise
         except httpx.HTTPError:
             logger.exception("Failed to POST PR review for %s/%s#%s", owner, repo, pr_number)
             return None
