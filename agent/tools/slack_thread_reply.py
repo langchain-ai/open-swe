@@ -1,9 +1,19 @@
 import asyncio
+import os
 from typing import Any
 
 from langgraph.config import get_config
+from langgraph_sdk import get_client
 
-from ..utils.slack import convert_mentions_to_slack_format, post_slack_thread_reply
+from ..utils.slack import (
+    convert_mentions_to_slack_format,
+    post_slack_thread_reply_with_ts,
+    store_slack_message_run_mapping,
+)
+
+LANGGRAPH_URL = os.environ.get("LANGGRAPH_URL") or os.environ.get(
+    "LANGGRAPH_URL_PROD", "http://localhost:2024"
+)
 
 
 def slack_thread_reply(message: str) -> dict[str, Any]:
@@ -39,5 +49,13 @@ def slack_thread_reply(message: str) -> dict[str, Any]:
         return {"success": False, "error": "Message cannot be empty"}
 
     message = convert_mentions_to_slack_format(message)
-    success = asyncio.run(post_slack_thread_reply(channel_id, thread_ts, message))
-    return {"success": success}
+    message_ts = asyncio.run(_post_and_store_mapping(channel_id, thread_ts, message))
+    return {"success": message_ts is not None}
+
+
+async def _post_and_store_mapping(channel_id: str, thread_ts: str, message: str) -> str | None:
+    message_ts = await post_slack_thread_reply_with_ts(channel_id, thread_ts, message)
+    if message_ts:
+        langgraph_client = get_client(url=LANGGRAPH_URL)
+        await store_slack_message_run_mapping(langgraph_client, channel_id, thread_ts, message_ts)
+    return message_ts

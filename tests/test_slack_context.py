@@ -227,10 +227,15 @@ def test_post_slack_trace_reply_picks_random_phrase_when_no_message(
 ) -> None:
     posted: list[str] = []
 
-    async def fake_post_slack_thread_reply(channel_id: str, thread_ts: str, text: str) -> None:
+    async def fake_post_slack_thread_reply_with_ts(
+        channel_id: str, thread_ts: str, text: str
+    ) -> str | None:
         posted.append(text)
+        return "1.1"
 
-    monkeypatch.setattr(slack_utils, "post_slack_thread_reply", fake_post_slack_thread_reply)
+    monkeypatch.setattr(
+        slack_utils, "post_slack_thread_reply_with_ts", fake_post_slack_thread_reply_with_ts
+    )
     monkeypatch.setattr(slack_utils, "get_langsmith_trace_url", lambda thread_id: None)
 
     asyncio.run(post_slack_trace_reply("C123", "1.0", "thread-id"))
@@ -247,10 +252,15 @@ def test_post_slack_trace_reply_uses_explicit_message_when_provided(
 ) -> None:
     posted: list[str] = []
 
-    async def fake_post_slack_thread_reply(channel_id: str, thread_ts: str, text: str) -> None:
+    async def fake_post_slack_thread_reply_with_ts(
+        channel_id: str, thread_ts: str, text: str
+    ) -> str | None:
         posted.append(text)
+        return "1.1"
 
-    monkeypatch.setattr(slack_utils, "post_slack_thread_reply", fake_post_slack_thread_reply)
+    monkeypatch.setattr(
+        slack_utils, "post_slack_thread_reply_with_ts", fake_post_slack_thread_reply_with_ts
+    )
     monkeypatch.setattr(slack_utils, "get_langsmith_trace_url", lambda thread_id: None)
 
     asyncio.run(post_slack_trace_reply("C123", "1.0", "thread-id", message="Taking a look..."))

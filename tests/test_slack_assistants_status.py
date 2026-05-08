@@ -11,7 +11,7 @@ from agent.utils import slack as slack_utils
 
 def _ok_response() -> MagicMock:
     response = MagicMock()
-    response.json.return_value = {"ok": True}
+    response.json.return_value = {"ok": True, "ts": "1.0"}
     response.raise_for_status.return_value = None
     return response
 

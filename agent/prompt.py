@@ -138,6 +138,8 @@ For tasks that require code changes, follow this order:
 
 **Strict requirement:** Never claim "PR updated/opened" unless `gh` returned success and you have the PR URL from command output or `GH_TOKEN=dummy gh pr view --json url --jq .url`. If push or PR creation fails, state that explicitly.
 
+For Slack-triggered tasks, end your final `slack_thread_reply` completion summary by asking the user to react with `:+1:` or `:-1:` to provide feedback.
+
 For questions or status checks (no code changes needed):
 
 1. **Answer** — Gather the information needed to respond.

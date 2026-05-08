@@ -66,8 +66,14 @@ from .utils.slack import (
     resolve_slack_links_in_context,
     select_slack_context_messages,
     set_slack_assistant_status,
+    store_slack_run_mapping,
     strip_bot_mention,
     verify_slack_signature,
+)
+from .utils.slack_feedback import (
+    FEEDBACK_REACTIONS,
+    process_slack_reaction_added,
+    process_slack_reaction_removed,
 )
 
 logger = logging.getLogger(__name__)
@@ -974,14 +980,32 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
         _run_id_for_logging(run),
         thread_id,
     )
+    run_id = run.get("run_id")
     if is_first_mention:
-        await post_slack_trace_reply(channel_id, thread_ts, thread_id)
+        trace_message_ts = await post_slack_trace_reply(channel_id, thread_ts, thread_id)
         await set_slack_assistant_status(channel_id, thread_ts)
+        if isinstance(run_id, str) and run_id:
+            await store_slack_run_mapping(
+                langgraph_client,
+                channel_id,
+                thread_ts,
+                run_id,
+                message_ts=trace_message_ts,
+                triggering_user_id=user_id,
+            )
     else:
         logger.info(
             "Skipping Slack trace reply for thread %s — agent will reply when run completes",
             thread_id,
         )
+        if isinstance(run_id, str) and run_id:
+            await store_slack_run_mapping(
+                langgraph_client,
+                channel_id,
+                thread_ts,
+                run_id,
+                triggering_user_id=user_id,
+            )
 
 
 async def process_slack_pr_review_request(
@@ -1195,6 +1219,25 @@ async def slack_webhook(request: Request, background_tasks: BackgroundTasks) -> 
         return {"status": "ignored", "reason": "Not an event callback"}
 
     event = payload.get("event", {})
+
+    if event.get("type") == "reaction_added":
+        reaction = event.get("reaction")
+        if reaction in FEEDBACK_REACTIONS:
+            background_tasks.add_task(
+                process_slack_reaction_added, event, payload.get("event_id", "")
+            )
+            return {"status": "accepted", "message": "Reaction feedback queued"}
+        return {"status": "ignored", "reason": "Reaction not tracked for feedback"}
+
+    if event.get("type") == "reaction_removed":
+        reaction = event.get("reaction")
+        if reaction in FEEDBACK_REACTIONS:
+            background_tasks.add_task(
+                process_slack_reaction_removed, event, payload.get("event_id", "")
+            )
+            return {"status": "accepted", "message": "Reaction removal queued"}
+        return {"status": "ignored", "reason": "Reaction not tracked for feedback"}
+
     if event.get("type") != "app_mention":
         message_text = event.get("text", "")
         has_username_mention = bool(
