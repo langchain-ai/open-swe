@@ -29,6 +29,7 @@ from langsmith.sandbox import SandboxClientError
 
 from .integrations.langsmith import _configure_github_proxy
 from .middleware import (
+    SandboxCircuitBreakerMiddleware,
     SanitizeToolInputsMiddleware,
     SlackAssistantStatusMiddleware,
     ToolErrorMiddleware,
@@ -147,6 +148,14 @@ async def _refresh_github_proxy_or_recreate(
         )
         return await _recreate_sandbox(thread_id)
     return sandbox_backend
+
+
+async def _configure_git_identity(sandbox_backend: SandboxBackendProtocol) -> None:
+    await asyncio.to_thread(
+        sandbox_backend.execute,
+        "git config --global user.name 'open-swe[bot]' && "
+        "git config --global user.email 'open-swe@users.noreply.github.com'",
+    )
 
 
 async def _recreate_sandbox(thread_id: str) -> SandboxBackendProtocol:
@@ -298,11 +307,7 @@ async def ensure_sandbox_for_thread(thread_id: str) -> SandboxBackendProtocol:
     # lost their `--global` config (or had it overwritten), and Vercel preview
     # deploys reject commits whose author email can't be resolved to a GitHub
     # account.
-    await asyncio.to_thread(
-        sandbox_backend.execute,
-        "git config --global user.name 'open-swe[bot]' && "
-        "git config --global user.email 'open-swe@users.noreply.github.com'",
-    )
+    await _configure_git_identity(sandbox_backend)
 
     return sandbox_backend
 
@@ -312,6 +317,13 @@ DEFAULT_LLM_REASONING: OpenAIReasoning = {"effort": "medium"}
 DEFAULT_LLM_MAX_TOKENS = 64_000
 DEFAULT_RECURSION_LIMIT = 9_999
 MODEL_CALL_RECURSION_LIMIT = 5_000  # ~half the recursion limit to account for tool calls
+
+
+def _get_cached_sandbox_backend(thread_id: str) -> SandboxBackendProtocol:
+    sandbox_backend = SANDBOX_BACKENDS.get(thread_id)
+    if sandbox_backend is None:
+        raise RuntimeError(f"No sandbox backend cached for thread {thread_id}")
+    return sandbox_backend
 
 
 async def get_agent(config: RunnableConfig) -> Pregel:
@@ -342,6 +354,9 @@ async def get_agent(config: RunnableConfig) -> Pregel:
 
     work_dir = await aresolve_sandbox_work_dir(sandbox_backend)
 
+    def backend_factory(_runtime: object, _thread_id: str = thread_id) -> SandboxBackendProtocol:
+        return _get_cached_sandbox_backend(_thread_id)
+
     model_id = os.environ.get("LLM_MODEL_ID", DEFAULT_LLM_MODEL_ID)
     model_kwargs: ModelKwargs = {"max_tokens": DEFAULT_LLM_MAX_TOKENS}
     if model_id == DEFAULT_LLM_MODEL_ID:
@@ -371,7 +386,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             slack_read_thread_messages,
             slack_thread_reply,
         ],
-        backend=sandbox_backend,
+        backend=backend_factory,
         middleware=[
             SanitizeToolInputsMiddleware(),
             ModelCallLimitMiddleware(run_limit=MODEL_CALL_RECURSION_LIMIT, exit_behavior="end"),
@@ -380,5 +395,6 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             SlackAssistantStatusMiddleware(),
             ensure_no_empty_msg,
             notify_step_limit_reached,
+            SandboxCircuitBreakerMiddleware(),
         ],
     ).with_config(config)

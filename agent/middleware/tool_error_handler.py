@@ -6,17 +6,21 @@ returned as error ToolMessages instead of crashing the agent run.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
+from typing import Any
 
 from langchain.agents.middleware.types import (
     AgentMiddleware,
     AgentState,
 )
 from langchain_core.messages import ToolMessage
+from langgraph.config import get_config
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
+from langsmith.sandbox import SandboxClientError
 
 logger = logging.getLogger(__name__)
 
@@ -55,10 +59,90 @@ def _to_error_payload(e: Exception, request: ToolCallRequest | None = None) -> d
     return data
 
 
+def _to_sandbox_recreated_payload(
+    sandbox_id: str,
+    request: ToolCallRequest | None = None,
+) -> dict[str, str]:
+    data: dict[str, str] = {
+        "status": "error",
+        "error": (
+            "The previous sandbox became unreachable mid-run. A fresh sandbox "
+            f"({sandbox_id}) has been created and cached for this thread. "
+            "Retry the last tool call; if repository files are missing, re-clone or "
+            "reinitialize the workspace first."
+        ),
+    }
+    tool_name = _extract_tool_name(request)
+    if tool_name:
+        data["name"] = tool_name
+    return data
+
+
 def _get_tool_call_id(request: ToolCallRequest) -> str | None:
     if isinstance(request.tool_call, dict):
         return request.tool_call.get("id")
     return None
+
+
+def _get_thread_id(request: ToolCallRequest) -> str | None:
+    runtime_config = getattr(getattr(request, "runtime", None), "config", None)
+    config: Mapping[str, Any] | None = (
+        runtime_config if isinstance(runtime_config, Mapping) else None
+    )
+    if config is None:
+        try:
+            maybe_config = get_config()
+        except Exception:
+            logger.exception("Failed to read runnable config while handling sandbox error")
+            return None
+        config = maybe_config if isinstance(maybe_config, Mapping) else None
+    if config is None:
+        return None
+
+    configurable = config.get("configurable", {})
+    if not isinstance(configurable, Mapping):
+        return None
+    thread_id = configurable.get("thread_id")
+    return thread_id if isinstance(thread_id, str) and thread_id else None
+
+
+async def _recreate_sandbox_for_thread(thread_id: str) -> str:
+    from agent.server import _configure_git_identity, _recreate_sandbox, client
+    from agent.utils.sandbox_state import SANDBOX_BACKENDS
+
+    sandbox_backend = await _recreate_sandbox(thread_id)
+    SANDBOX_BACKENDS[thread_id] = sandbox_backend
+    await client.threads.update(thread_id=thread_id, metadata={"sandbox_id": sandbox_backend.id})
+    await _configure_git_identity(sandbox_backend)
+    return sandbox_backend.id
+
+
+def _recreate_sandbox_for_thread_sync(thread_id: str) -> str:
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(_recreate_sandbox_for_thread(thread_id))
+    raise RuntimeError(
+        "Cannot recreate sandbox from a sync tool call while an event loop is running"
+    )
+
+
+def _sandbox_recreated_tool_message(sandbox_id: str, request: ToolCallRequest) -> ToolMessage:
+    data = _to_sandbox_recreated_payload(sandbox_id, request)
+    return ToolMessage(
+        content=json.dumps(data),
+        tool_call_id=_get_tool_call_id(request),
+        status="error",
+    )
+
+
+def _generic_error_tool_message(e: Exception, request: ToolCallRequest) -> ToolMessage:
+    data = _to_error_payload(e, request)
+    return ToolMessage(
+        content=json.dumps(data),
+        tool_call_id=_get_tool_call_id(request),
+        status="error",
+    )
 
 
 class ToolErrorMiddleware(AgentMiddleware):
@@ -78,14 +162,19 @@ class ToolErrorMiddleware(AgentMiddleware):
     ) -> ToolMessage | Command:
         try:
             return handler(request)
+        except SandboxClientError as e:
+            logger.exception("Sandbox error during tool call handling; request=%r", request)
+            thread_id = _get_thread_id(request)
+            if thread_id:
+                try:
+                    sandbox_id = _recreate_sandbox_for_thread_sync(thread_id)
+                    return _sandbox_recreated_tool_message(sandbox_id, request)
+                except Exception:
+                    logger.exception("Failed to recreate sandbox for thread %s", thread_id)
+            return _generic_error_tool_message(e, request)
         except Exception as e:
             logger.exception("Error during tool call handling; request=%r", request)
-            data = _to_error_payload(e, request)
-            return ToolMessage(
-                content=json.dumps(data),
-                tool_call_id=_get_tool_call_id(request),
-                status="error",
-            )
+            return _generic_error_tool_message(e, request)
 
     async def awrap_tool_call(
         self,
@@ -94,11 +183,16 @@ class ToolErrorMiddleware(AgentMiddleware):
     ) -> ToolMessage | Command:
         try:
             return await handler(request)
+        except SandboxClientError as e:
+            logger.exception("Sandbox error during tool call handling; request=%r", request)
+            thread_id = _get_thread_id(request)
+            if thread_id:
+                try:
+                    sandbox_id = await _recreate_sandbox_for_thread(thread_id)
+                    return _sandbox_recreated_tool_message(sandbox_id, request)
+                except Exception:
+                    logger.exception("Failed to recreate sandbox for thread %s", thread_id)
+            return _generic_error_tool_message(e, request)
         except Exception as e:
             logger.exception("Error during tool call handling; request=%r", request)
-            data = _to_error_payload(e, request)
-            return ToolMessage(
-                content=json.dumps(data),
-                tool_call_id=_get_tool_call_id(request),
-                status="error",
-            )
+            return _generic_error_tool_message(e, request)
