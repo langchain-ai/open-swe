@@ -28,17 +28,12 @@ warnings.filterwarnings("ignore", module="langchain_core._api.deprecation")
 warnings.filterwarnings("ignore", message=".*Pydantic V1.*", category=UserWarning)
 
 from deepagents import create_deep_agent
-from deepagents.backends.protocol import SandboxBackendProtocol
 from langchain.agents.middleware import ModelCallLimitMiddleware
 
 from .middleware import (
     ExcludeToolsMiddleware,
     SanitizeToolInputsMiddleware,
     ToolErrorMiddleware,
-)
-from .reviewer_diff import (
-    compute_diff_in_sandbox,
-    compute_diff_line_set,
 )
 from .reviewer_findings import (
     list_findings as list_findings_async,
@@ -72,19 +67,40 @@ possible so the user can click "Commit suggestion".
 
 ### Working environment
 
-You are operating in a remote Linux sandbox at `{working_dir}`. The repository
-has already been cloned and checked out to the PR head SHA before this run
-started — you do **not** need to clone, fetch, or check out yourself.
+You are operating in a remote Linux sandbox at `{working_dir}`.
 
 - The `gh` CLI is installed and authenticated by a sandbox proxy. Always
   invoke it as `GH_TOKEN=dummy gh <command>`.
 - The `execute` tool runs shell commands. Default timeout ~30 minutes.
 - `read_file`, `grep`, `glob` are available for code exploration.
 
+### Fetching the diff
+
+**Your first step is to fetch the PR diff yourself.** Run:
+
+```
+GH_TOKEN=dummy gh pr diff {pr_number} --repo {repo_owner}/{repo_name}
+```
+
+For a re-review (the user message says "A new commit has been pushed"), fetch
+the diff between the previously reviewed SHA and the new HEAD instead:
+
+```
+GH_TOKEN=dummy gh api repos/{repo_owner}/{repo_name}/compare/<last_reviewed_sha>...<head_sha> -H "Accept: application/vnd.github.v3.diff"
+```
+
+If you want to read full file context to validate a finding, clone the repo:
+
+```
+GH_TOKEN=dummy gh repo clone {repo_owner}/{repo_name} && cd {repo_name} && git checkout <head_sha>
+```
+
+Cloning is optional — for most PRs the diff alone is enough.
+
 ### How to review
 
-1. The user message tells you which PR to review and includes the unified
-   diff. **Review the diff that's there. Don't review pre-existing code.**
+1. Fetch the diff (above). **Review the diff that's there. Don't review
+   pre-existing code.**
 2. For each real issue you find in the diff, call **`add_finding`** with:
    - `severity`: one of `informational`, `low`, `medium`, `high`, `critical`.
      Calibrate strictly: `critical` = bug that breaks production or a security
@@ -132,7 +148,7 @@ You may use `list_findings()` at any time to inspect what's persisted.
   PRs. Do NOT use `gh pr review` or `gh api ... /reviews` directly — use the
   `publish_review` tool instead so the findings list and GitHub stay in sync.
 - **Only review the diff.** Do not flag pre-existing code that the PR didn't
-  touch. `add_finding` will reject ranges outside the PR diff.
+  touch. Anchor every finding to a line that the PR actually changes.
 - **One finding per distinct issue.** Don't split one bug into three findings,
   and don't merge unrelated issues into one.
 - **Prefer suggestions where you have one.** A description without a fix is
@@ -145,48 +161,19 @@ You may use `list_findings()` at any time to inspect what's persisted.
 """
 
 
-def _reviewer_system_prompt(working_dir: str) -> str:
-    return REVIEWER_PROMPT_TEMPLATE.format(working_dir=working_dir)
-
-
-async def _ensure_repo_checked_out(
-    sandbox_backend: SandboxBackendProtocol,
+def _reviewer_system_prompt(
+    working_dir: str,
     *,
-    work_dir: str,
-    owner: str,
-    repo: str,
-    base_sha: str,
-    head_sha: str,
-) -> None:
-    """Clone-or-fetch + checkout the PR head into the sandbox.
-
-    Idempotent: warm sandboxes that already have ``<work_dir>/<repo>`` just
-    fetch new objects and re-check out; cold sandboxes clone from scratch.
-    """
-    repo_dir = f"{work_dir}/{repo}"
-    script = (
-        f"set -e; "
-        f"if [ -d {repo_dir}/.git ]; then "
-        f"  cd {repo_dir} && "
-        f"  git fetch --no-tags origin {base_sha} {head_sha} && "
-        f"  git checkout --force {head_sha}; "
-        f"else "
-        f"  GH_TOKEN=dummy gh repo clone {owner}/{repo} {repo_dir} -- --quiet && "
-        f"  cd {repo_dir} && "
-        f"  git fetch --no-tags origin {base_sha} {head_sha} && "
-        f"  git checkout --force {head_sha}; "
-        f"fi"
+    repo_owner: str,
+    repo_name: str,
+    pr_number: int | str,
+) -> str:
+    return REVIEWER_PROMPT_TEMPLATE.format(
+        working_dir=working_dir,
+        repo_owner=repo_owner or "<owner>",
+        repo_name=repo_name or "<repo>",
+        pr_number=pr_number if pr_number != "" else "<pr_number>",
     )
-    import asyncio
-
-    result = await asyncio.to_thread(sandbox_backend.execute, script)
-    exit_code = getattr(result, "exit_code", None)
-    if exit_code not in (0, None):
-        output = getattr(result, "output", "") or ""
-        raise RuntimeError(
-            f"Repo checkout failed (exit {exit_code}) for {owner}/{repo} "
-            f"@ {head_sha} (base {base_sha}). Script output:\n{output}"
-        )
 
 
 def _build_first_review_context(
@@ -197,7 +184,6 @@ def _build_first_review_context(
     pr_number: int,
     base_sha: str,
     head_sha: str,
-    diff_text: str,
 ) -> str:
     return (
         f"## Pull request to review\n\n"
@@ -206,8 +192,9 @@ def _build_first_review_context(
         f"- url: {pr_url}\n"
         f"- base_sha: {base_sha}\n"
         f"- head_sha: {head_sha}\n\n"
-        f"## Unified diff (review only what's here)\n\n"
-        f"```diff\n{diff_text}\n```\n\n"
+        f"Fetch the diff yourself with "
+        f"`GH_TOKEN=dummy gh pr diff {pr_number} --repo {repo_owner}/{repo_name}`, "
+        f"then review only what's in that diff.\n\n"
         f"This is a first review — there are no existing findings. Record real "
         f"issues with `add_finding` (one per issue, with concrete `suggestion` "
         f"text whenever you can offer one), then call `publish_review` once at "
@@ -223,7 +210,6 @@ def _build_re_review_context(
     pr_number: int,
     last_reviewed_sha: str,
     head_sha: str,
-    diff_since_last_review: str,
     existing_findings_block: str,
 ) -> str:
     return (
@@ -234,8 +220,10 @@ def _build_re_review_context(
         f"- previous reviewed SHA: {last_reviewed_sha}\n"
         f"- new HEAD SHA: {head_sha}\n\n"
         f"## Existing findings\n\n{existing_findings_block}\n\n"
-        f"## Diff since the previous reviewed SHA\n\n"
-        f"```diff\n{diff_since_last_review}\n```\n\n"
+        f"Fetch the diff since the previous reviewed SHA yourself with "
+        f"`GH_TOKEN=dummy gh api repos/{repo_owner}/{repo_name}/compare/"
+        f'{last_reviewed_sha}...{head_sha} -H "Accept: application/vnd.github.v3.diff"`, '
+        f"then review only what's in that diff.\n\n"
         f"For each open finding above, decide whether the new commits resolved "
         f'it (`update_finding(id, status="resolved")`), left it unchanged '
         f"(no action), or changed it materially (`update_finding` with new "
@@ -297,52 +285,13 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
     last_reviewed_sha = str(config["configurable"].get("last_reviewed_sha", "") or "")
     is_re_review = bool(config["configurable"].get("re_review"))
 
-    diff_text = ""
-    diff_line_set: dict[str, set[int]] = {}
-    if repo_owner and repo_name and base_sha and head_sha:
-        try:
-            await _ensure_repo_checked_out(
-                sandbox_backend,
-                work_dir=work_dir,
-                owner=repo_owner,
-                repo=repo_name,
-                base_sha=base_sha,
-                head_sha=head_sha,
-            )
-            if is_re_review and last_reviewed_sha:
-                # Re-review delta: two-dot diff = "what changed on the head
-                # branch since the previous review" (forward-push case). The
-                # agent reconciles existing findings against this slice.
-                diff_text = await compute_diff_in_sandbox(
-                    sandbox_backend,
-                    work_dir=f"{work_dir}/{repo_name}",
-                    base_ref=last_reviewed_sha,
-                    head_ref=head_sha,
-                    merge_base=False,
-                )
-            else:
-                # First review: three-dot merge-base diff so we don't include
-                # changes that landed on `base` after the PR branch diverged.
-                # Matches what GitHub's "Files changed" tab shows.
-                diff_text = await compute_diff_in_sandbox(
-                    sandbox_backend,
-                    work_dir=f"{work_dir}/{repo_name}",
-                    base_ref=base_sha,
-                    head_ref=head_sha,
-                    merge_base=True,
-                )
-            diff_line_set = compute_diff_line_set(diff_text)
-        except Exception:
-            # Don't swallow: an empty diff makes the agent emit a misleading
-            # "no issues found" review. Re-raise so the failure surfaces in
-            # the LangSmith trace with stderr from the sandbox commands.
-            logger.exception("Reviewer prep failed for thread %s", thread_id)
-            raise
-
-    config["configurable"]["diff_text"] = diff_text
-    config["configurable"]["diff_line_set"] = {
-        path: sorted(lines) for path, lines in diff_line_set.items()
-    }
+    # Hotfix: prep was producing empty diffs for some PRs and the agent
+    # silently published "no issues found". The agent now fetches the diff
+    # itself via `gh pr diff` (or `gh api ...compare...` on re-review).
+    # `add_finding`'s in-diff line-range validation is skipped when no
+    # diff_line_set is set in config — we trust the agent's anchors.
+    config["configurable"]["diff_text"] = ""
+    config["configurable"]["diff_line_set"] = None
 
     review_context = ""
     if pr_number is not None and isinstance(pr_number, int):
@@ -355,7 +304,6 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
                 pr_number=pr_number,
                 last_reviewed_sha=last_reviewed_sha,
                 head_sha=head_sha,
-                diff_since_last_review=diff_text,
                 existing_findings_block=_format_existing_findings(existing_findings),
             )
         else:
@@ -366,7 +314,6 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
                 pr_number=pr_number,
                 base_sha=base_sha,
                 head_sha=head_sha,
-                diff_text=diff_text,
             )
 
     model_id = os.environ.get("LLM_MODEL_ID", DEFAULT_LLM_MODEL_ID)
@@ -374,7 +321,12 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
     if model_id == DEFAULT_LLM_MODEL_ID:
         model_kwargs["reasoning"] = DEFAULT_LLM_REASONING
 
-    system_prompt = _reviewer_system_prompt(f"{work_dir}/{repo_name}" if repo_name else work_dir)
+    system_prompt = _reviewer_system_prompt(
+        f"{work_dir}/{repo_name}" if repo_name else work_dir,
+        repo_owner=repo_owner,
+        repo_name=repo_name,
+        pr_number=pr_number if isinstance(pr_number, int) else "",
+    )
     if review_context:
         system_prompt = f"{system_prompt}\n\n{review_context}"
 
