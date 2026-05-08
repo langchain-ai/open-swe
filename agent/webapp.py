@@ -43,6 +43,7 @@ from .utils.github_comments import (
     sanitize_github_comment_body,
     verify_github_signature,
 )
+from .utils.github_org_membership import INTERNAL_BOT_LOGINS, is_user_active_org_member
 from .utils.github_token import get_github_token_from_thread
 from .utils.github_user_email_map import GITHUB_USER_EMAIL_MAP
 from .utils.linear import post_linear_trace_comment
@@ -64,6 +65,7 @@ from .utils.slack import (
     post_slack_trace_reply,
     resolve_slack_links_in_context,
     select_slack_context_messages,
+    set_slack_assistant_status,
     strip_bot_mention,
     verify_slack_signature,
 )
@@ -114,6 +116,9 @@ ALLOWED_REVIEWER_GITHUB_REPOS: frozenset[str] = frozenset(
     for repo in os.environ.get("ALLOWED_REVIEWER_GITHUB_REPOS", "").split(",")
     if repo.strip()
 )
+# Org whose members are allowed to tag @open-swe on public repos. When empty,
+# the public-repo gate is disabled (back-compat).
+PUBLIC_REPO_ORG_GATE: str = os.environ.get("PUBLIC_REPO_ORG_GATE", "").strip()
 
 LINEAR_API_KEY = os.environ.get("LINEAR_API_KEY", "")
 
@@ -360,6 +365,57 @@ def _is_repo_allowed_for_reviewer(repo_config: dict[str, str]) -> bool:
     if not ALLOWED_REVIEWER_GITHUB_ORGS:
         return True
     return owner in ALLOWED_REVIEWER_GITHUB_ORGS
+
+
+_PUBLIC_REPO_GATE_REJECTION = {
+    "status": "ignored",
+    "reason": "Sender is not a member of the allowed organization for public-repo triggers",
+}
+
+
+async def _is_sender_allowed_for_public_repo(payload: dict[str, Any]) -> bool:
+    """Public-repo gate: only ``PUBLIC_REPO_ORG_GATE`` org members may trigger.
+
+    Returns True (allowed) when:
+    - The gate is disabled (``PUBLIC_REPO_ORG_GATE`` empty), OR
+    - The repo is private (gate only applies to public repos), OR
+    - The sender is a known internal bot, OR
+    - The sender is an active member of ``PUBLIC_REPO_ORG_GATE``.
+    """
+    if not PUBLIC_REPO_ORG_GATE:
+        return True
+
+    repository = payload.get("repository") or {}
+    if repository.get("private", False):
+        return True
+
+    sender = payload.get("sender") or {}
+    sender_login = sender.get("login", "") or ""
+    if sender_login in INTERNAL_BOT_LOGINS:
+        return True
+
+    if not sender_login:
+        return False
+
+    return await is_user_active_org_member(sender_login, PUBLIC_REPO_ORG_GATE)
+
+
+async def _enforce_public_repo_org_gate(
+    payload: dict[str, Any], event_type: str
+) -> dict[str, str] | None:
+    """Return a rejection response if the public-repo org gate blocks this event."""
+    if await _is_sender_allowed_for_public_repo(payload):
+        return None
+    sender_login = (payload.get("sender") or {}).get("login", "")
+    repo = payload.get("repository") or {}
+    logger.warning(
+        "Blocking GitHub %s from non-org-member sender '%s' on public repo '%s/%s'",
+        event_type,
+        sender_login,
+        (repo.get("owner") or {}).get("login", ""),
+        repo.get("name", ""),
+    )
+    return _PUBLIC_REPO_GATE_REJECTION
 
 
 async def _upsert_slack_thread_repo_metadata(
@@ -766,6 +822,8 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
             channel_id,
         )
 
+    await set_slack_assistant_status(channel_id, thread_ts)
+
     thread_id = generate_thread_id_from_slack_thread(channel_id, thread_ts)
 
     user_email = None
@@ -906,6 +964,7 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
     )
     if is_first_mention:
         await post_slack_trace_reply(channel_id, thread_ts, thread_id)
+        await set_slack_assistant_status(channel_id, thread_ts)
     else:
         logger.info(
             "Skipping Slack trace reply for thread %s — agent will reply when run completes",
@@ -916,6 +975,7 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
 async def process_slack_pr_review_request(
     pr_ref: GitHubPrRef, channel_id: str, thread_ts: str
 ) -> None:
+    await set_slack_assistant_status(channel_id, thread_ts)
     result = await trigger_pr_review_from_ref(
         pr_ref,
         source="slack",
@@ -928,6 +988,7 @@ async def process_slack_pr_review_request(
             await post_slack_trace_reply(
                 channel_id, thread_ts, thread_id, message="Taking a look..."
             )
+            await set_slack_assistant_status(channel_id, thread_ts)
         return
 
     await post_slack_thread_reply(
@@ -1459,6 +1520,8 @@ async def trigger_pr_review_from_ref(
         base_sha=base_sha,
         head_sha=head_sha,
         branch_name=branch_name,
+        slack_channel_id=slack_channel_id,
+        slack_thread_ts=slack_thread_ts,
     )
 
     thread_active = await is_thread_active(thread_id)
@@ -1491,6 +1554,8 @@ def _build_reviewer_configurable(
     branch_name: str,
     re_review: bool = False,
     last_reviewed_sha: str = "",
+    slack_channel_id: str = "",
+    slack_thread_ts: str = "",
 ) -> dict[str, Any]:
     """Assemble the runnable-config ``configurable`` dict for a reviewer run."""
     configurable: dict[str, Any] = {
@@ -1509,6 +1574,11 @@ def _build_reviewer_configurable(
         configurable["branch_name"] = branch_name
     if last_reviewed_sha:
         configurable["last_reviewed_sha"] = last_reviewed_sha
+    if slack_channel_id and slack_thread_ts:
+        configurable["slack_thread"] = {
+            "channel_id": slack_channel_id,
+            "thread_ts": slack_thread_ts,
+        }
     return configurable
 
 
@@ -2186,6 +2256,10 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks) ->
                 reason = "Repository org not in allowlist"
             return {"status": "ignored", "reason": reason}
 
+        gate_rejection = await _enforce_public_repo_org_gate(payload, "pull_request")
+        if gate_rejection is not None:
+            return gate_rejection
+
         logger.info("Accepted GitHub PR review request webhook, scheduling reviewer task")
         background_tasks.add_task(process_github_pr_review_request, payload)
         return {"status": "accepted", "message": "Processing GitHub PR review request"}
@@ -2220,6 +2294,10 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks) ->
             logger.info("Ignoring issue that does not mention @openswe or @open-swe")
             return {"status": "ignored", "reason": "Issue does not mention @openswe or @open-swe"}
 
+        gate_rejection = await _enforce_public_repo_org_gate(payload, event_type)
+        if gate_rejection is not None:
+            return gate_rejection
+
         logger.info("Accepted GitHub issue webhook, scheduling background task")
         background_tasks.add_task(process_github_issue, payload, event_type)
         return {"status": "accepted", "message": "Processing GitHub issue event"}
@@ -2242,6 +2320,10 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks) ->
             f" action={action}" if action else "",
         )
         return {"status": "ignored", "reason": "Comment does not mention @openswe or @open-swe"}
+
+    gate_rejection = await _enforce_public_repo_org_gate(payload, event_type)
+    if gate_rejection is not None:
+        return gate_rejection
 
     logger.info("Accepted GitHub webhook: event=%s, scheduling background task", event_type)
     if is_pull_request_comment or event_type in {

@@ -6,6 +6,7 @@ from agent import webapp
 from agent.utils import slack as slack_utils
 from agent.utils.slack import (
     TRACE_REPLY_PHRASES,
+    TRACE_REPLY_TIPS,
     convert_mentions_to_slack_format,
     format_slack_messages_for_prompt,
     looks_like_slack_pr_review_command,
@@ -235,7 +236,10 @@ def test_post_slack_trace_reply_picks_random_phrase_when_no_message(
     asyncio.run(post_slack_trace_reply("C123", "1.0", "thread-id"))
 
     assert len(posted) == 1
-    assert posted[0] in TRACE_REPLY_PHRASES
+    head, _, tip_line = posted[0].partition("\n")
+    assert head in TRACE_REPLY_PHRASES
+    assert tip_line.startswith("_Tip: ") and tip_line.endswith("_")
+    assert any(tip in tip_line for tip in TRACE_REPLY_TIPS)
 
 
 def test_post_slack_trace_reply_uses_explicit_message_when_provided(
@@ -251,7 +255,11 @@ def test_post_slack_trace_reply_uses_explicit_message_when_provided(
 
     asyncio.run(post_slack_trace_reply("C123", "1.0", "thread-id", message="Taking a look..."))
 
-    assert posted == ["Taking a look..."]
+    assert len(posted) == 1
+    head, _, tip_line = posted[0].partition("\n")
+    assert head == "Taking a look..."
+    assert tip_line.startswith("_Tip: ") and tip_line.endswith("_")
+    assert any(tip in tip_line for tip in TRACE_REPLY_TIPS)
 
 
 def test_select_slack_context_messages_detects_username_mention() -> None:

@@ -26,6 +26,30 @@ GITHUB_PR_URL_RE = re.compile(r"https?://(?:www\.)?github\.com/[^\s<>|]+/[^\s<>|
 URL_RE = re.compile(r"https?://[^\s<>|]+")
 
 
+def _is_slack_assistants_api_enabled() -> bool:
+    """Whether the Slack Assistants API integration is enabled.
+
+    Read at call time so tests and runtime can toggle via env without reimports.
+    """
+    return os.environ.get("SLACK_ASSISTANTS_API_ENABLED", "").lower() in {"1", "true", "yes"}
+
+
+DEFAULT_ASSISTANT_STATUS = "is thinking…"
+
+# Curated rotating loading strings shown by Slack while the indicator is active.
+# Capped at 10 by Slack's API.
+DEFAULT_LOADING_MESSAGES: tuple[str, ...] = (
+    "reading the repo…",
+    "tracing call sites…",
+    "thinking through edge cases…",
+    "running commands…",
+    "drafting changes…",
+    "double-checking the diff…",
+    "writing tests…",
+    "tidying up…",
+)
+
+
 @dataclass(frozen=True)
 class GitHubPrRef:
     owner: str
@@ -253,6 +277,58 @@ def format_slack_messages_for_prompt(
             author = f"@{bot_name}(bot)"
         lines.append(f"{author}: {text}")
     return "\n".join(lines)
+
+
+async def set_slack_assistant_status(
+    channel_id: str,
+    thread_ts: str,
+    status: str = DEFAULT_ASSISTANT_STATUS,
+    loading_messages: list[str] | tuple[str, ...] | None = None,
+) -> bool:
+    """Set the assistant typing/status indicator on a Slack thread.
+
+    Wraps Slack's `assistant.threads.setStatus` API. The `chat:write` scope
+    on the bot token is sufficient. Status auto-clears when the bot posts to
+    the thread, and Slack itself expires it after ~2 minutes — callers that
+    want it visible across longer runs must refresh it periodically.
+
+    `loading_messages` is an optional list (max 10) of strings Slack rotates
+    through while the indicator is visible.
+
+    No-op (returning False) when the assistants feature flag is disabled,
+    the bot token is missing, or the channel/thread is not provided.
+    Failures are logged but never raised — the indicator is a UX nicety,
+    not a correctness requirement.
+    """
+    if not _is_slack_assistants_api_enabled():
+        return False
+    if not SLACK_BOT_TOKEN or not channel_id or not thread_ts:
+        return False
+
+    payload: dict[str, Any] = {
+        "channel_id": channel_id,
+        "thread_ts": thread_ts,
+        "status": status,
+    }
+    if loading_messages:
+        payload["loading_messages"] = list(loading_messages)[:10]
+
+    async with httpx.AsyncClient() as http_client:
+        try:
+            response = await http_client.post(
+                f"{SLACK_API_BASE_URL}/assistant.threads.setStatus",
+                headers=_slack_headers(),
+                json=payload,
+            )
+            response.raise_for_status()
+            data = response.json()
+            if not data.get("ok"):
+                logger.warning("Slack assistant.threads.setStatus failed: %s", data.get("error"))
+                return False
+            return True
+        except httpx.HTTPError:
+            logger.exception("Slack assistant.threads.setStatus request failed")
+            return False
 
 
 async def post_slack_thread_reply(channel_id: str, thread_ts: str, text: str) -> bool:
@@ -610,6 +686,24 @@ TRACE_REPLY_PHRASES: tuple[str, ...] = (
     "Running to the roar!",
 )
 
+TRACE_REPLY_TIPS: tuple[str, ...] = (
+    "You can message me in this thread while I'm running — I'll pick up your follow-up before my next step.",
+    "Kick off another task in parallel — each one runs in its own isolated sandbox, no queuing.",
+    "Add `repo:owner/name` to your message to point me at a different repo for this task.",
+    "Drop an `AGENTS.md` at your repo root and I'll read it on every run — it's the easiest way to teach me your conventions.",
+    "I'll open a draft PR automatically when I'm done and link it back here.",
+    "Tag me on a PR comment of an open-swe PR to have me address review feedback on the same branch.",
+    "I can spawn subagents for independent subtasks — useful for parallel research or fan-out work.",
+    "Click `View trace` above to watch every tool call and model response live in LangSmith.",
+)
+
+
+def _format_trace_reply(message: str, trace_url: str | None) -> str:
+    """Format the initial trace reply with a randomly selected tip."""
+    tip = random.choice(TRACE_REPLY_TIPS)
+    head = f"{message} <{trace_url}|View trace>" if trace_url else message
+    return f"{head}\n_Tip: {tip}_"
+
 
 async def post_slack_trace_reply(
     channel_id: str, thread_ts: str, thread_id: str, message: str | None = None
@@ -618,7 +712,4 @@ async def post_slack_trace_reply(
     if message is None:
         message = random.choice(TRACE_REPLY_PHRASES)
     trace_url = get_langsmith_trace_url(thread_id)
-    if trace_url:
-        await post_slack_thread_reply(channel_id, thread_ts, f"{message} <{trace_url}|View trace>")
-    else:
-        await post_slack_thread_reply(channel_id, thread_ts, message)
+    await post_slack_thread_reply(channel_id, thread_ts, _format_trace_reply(message, trace_url))

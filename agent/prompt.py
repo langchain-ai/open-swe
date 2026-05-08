@@ -2,6 +2,7 @@ import logging
 import os
 from pathlib import Path
 
+from .utils.authorship import CollaboratorIdentity
 from .utils.github_comments import UNTRUSTED_GITHUB_COMMENT_OPEN_TAG
 
 logger = logging.getLogger(__name__)
@@ -345,6 +346,37 @@ When you have completed your implementation, follow these steps in order:
 Always push, open/update the draft PR with `gh`, and notify the appropriate source once implementation is complete and code quality checks pass."""
 
 
+COLLABORATION_TEMPLATE = """---
+
+### Collaborative Attribution
+
+This run was triggered by **{display_name}**. Credit them on every commit and PR you create:
+
+- **Commits**: append this trailer (verbatim, on its own line, separated from the message body by a blank line) to every commit message you author. Add it to both the first commit and any follow-up commits in this run:
+
+  ```
+  Co-authored-by: {commit_name} <{commit_email}>
+  ```
+
+- **PR body**: append this line to the bottom of the PR description (separated from the body by a blank line) when you open or update the draft PR. Do not duplicate it if it is already present:
+
+  ```
+  _Opened collaboratively by {display_name} and open-swe._
+  ```
+
+If you forget the trailer on a commit, fix it with `git commit --amend` (or rebase) before pushing — do not push without it."""
+
+
+def _render_collaboration_section(identity: CollaboratorIdentity | None) -> str:
+    if identity is None:
+        return ""
+    return COLLABORATION_TEMPLATE.format(
+        display_name=identity.display_name,
+        commit_name=identity.commit_name,
+        commit_email=identity.commit_email,
+    )
+
+
 SYSTEM_PROMPT_TEMPLATE = (
     WORKING_ENV_SECTION
     + TASK_OVERVIEW_SECTION
@@ -362,6 +394,7 @@ SYSTEM_PROMPT_TEMPLATE = (
     + COMMUNICATION_SECTION
     + EXTERNAL_UNTRUSTED_COMMENTS_SECTION
     + COMMIT_PR_SECTION
+    + "{collaboration_section}"
 )
 
 
@@ -369,6 +402,7 @@ def construct_system_prompt(
     working_dir: str,
     linear_project_id: str = "",
     linear_issue_number: str = "",
+    triggering_user_identity: CollaboratorIdentity | None = None,
 ) -> str:
     default_prompt_section = _load_default_prompt()
     return SYSTEM_PROMPT_TEMPLATE.format(
@@ -376,4 +410,5 @@ def construct_system_prompt(
         linear_project_id=linear_project_id or "<PROJECT_ID>",
         linear_issue_number=linear_issue_number or "<ISSUE_NUMBER>",
         default_prompt_section=default_prompt_section,
+        collaboration_section=_render_collaboration_section(triggering_user_identity),
     )

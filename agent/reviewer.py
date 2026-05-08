@@ -33,6 +33,7 @@ from langchain.agents.middleware import ModelCallLimitMiddleware
 from .middleware import (
     ExcludeToolsMiddleware,
     SanitizeToolInputsMiddleware,
+    SlackAssistantStatusMiddleware,
     ToolErrorMiddleware,
 )
 from .reviewer_findings import (
@@ -347,6 +348,7 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
             SanitizeToolInputsMiddleware(),
             ModelCallLimitMiddleware(run_limit=MODEL_CALL_RECURSION_LIMIT, exit_behavior="end"),
             ToolErrorMiddleware(),
+            SlackAssistantStatusMiddleware(),
             ExcludeToolsMiddleware(excluded=frozenset({"task"})),
         ],
     ).with_config(config)
