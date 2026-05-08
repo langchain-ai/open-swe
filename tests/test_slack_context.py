@@ -5,7 +5,6 @@ import pytest
 from agent import webapp
 from agent.utils import slack as slack_utils
 from agent.utils.slack import (
-    TRACE_REPLY_PHRASES,
     TRACE_REPLY_TIPS,
     convert_mentions_to_slack_format,
     format_slack_messages_for_prompt,
@@ -222,15 +221,20 @@ def test_format_slack_messages_for_prompt_replaces_bot_id_mention_in_text() -> N
     assert formatted == "@alice(U123): @open-swe status update?"
 
 
-def test_post_slack_trace_reply_picks_random_phrase_when_no_message(
+def test_post_slack_trace_reply_emits_tip_only_when_no_trace_url(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    posted: list[str] = []
+    posted: list[dict] = []
 
     async def fake_post_slack_thread_reply_with_ts(
-        channel_id: str, thread_ts: str, text: str
+        channel_id: str,
+        thread_ts: str,
+        text: str,
+        *,
+        unfurl_links: bool = True,
+        unfurl_media: bool = True,
     ) -> str | None:
-        posted.append(text)
+        posted.append({"text": text, "unfurl_links": unfurl_links, "unfurl_media": unfurl_media})
         return "1.1"
 
     monkeypatch.setattr(
@@ -241,35 +245,44 @@ def test_post_slack_trace_reply_picks_random_phrase_when_no_message(
     asyncio.run(post_slack_trace_reply("C123", "1.0", "thread-id"))
 
     assert len(posted) == 1
-    head, _, tip_line = posted[0].partition("\n")
-    assert head in TRACE_REPLY_PHRASES
-    assert tip_line.startswith("_Tip: ") and tip_line.endswith("_")
-    assert any(tip in tip_line for tip in TRACE_REPLY_TIPS)
+    text = posted[0]["text"]
+    assert text.startswith("_Tip: ") and text.endswith("_")
+    assert any(tip in text for tip in TRACE_REPLY_TIPS)
+    assert posted[0]["unfurl_links"] is False
+    assert posted[0]["unfurl_media"] is False
 
 
-def test_post_slack_trace_reply_uses_explicit_message_when_provided(
+def test_post_slack_trace_reply_includes_trace_link_and_tip(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    posted: list[str] = []
+    posted: list[dict] = []
 
     async def fake_post_slack_thread_reply_with_ts(
-        channel_id: str, thread_ts: str, text: str
+        channel_id: str,
+        thread_ts: str,
+        text: str,
+        *,
+        unfurl_links: bool = True,
+        unfurl_media: bool = True,
     ) -> str | None:
-        posted.append(text)
+        posted.append({"text": text, "unfurl_links": unfurl_links, "unfurl_media": unfurl_media})
         return "1.1"
 
     monkeypatch.setattr(
         slack_utils, "post_slack_thread_reply_with_ts", fake_post_slack_thread_reply_with_ts
     )
-    monkeypatch.setattr(slack_utils, "get_langsmith_trace_url", lambda thread_id: None)
+    monkeypatch.setattr(slack_utils, "get_langsmith_trace_url", lambda thread_id: "https://smith/x")
 
-    asyncio.run(post_slack_trace_reply("C123", "1.0", "thread-id", message="Taking a look..."))
+    asyncio.run(post_slack_trace_reply("C123", "1.0", "thread-id"))
 
     assert len(posted) == 1
-    head, _, tip_line = posted[0].partition("\n")
-    assert head == "Taking a look..."
+    text = posted[0]["text"]
+    head, _, tip_line = text.partition("\n")
+    assert head == "<https://smith/x|View trace>"
     assert tip_line.startswith("_Tip: ") and tip_line.endswith("_")
     assert any(tip in tip_line for tip in TRACE_REPLY_TIPS)
+    assert posted[0]["unfurl_links"] is False
+    assert posted[0]["unfurl_media"] is False
 
 
 def test_select_slack_context_messages_detects_username_mention() -> None:
@@ -516,14 +529,11 @@ def _setup_slack_mention_fakes(
         captured["active_thread_id"] = thread_id
         return False
 
-    async def fake_post_slack_trace_reply(
-        channel_id: str, thread_ts: str, thread_id: str, message: str | None = None
-    ) -> None:
+    async def fake_post_slack_trace_reply(channel_id: str, thread_ts: str, thread_id: str) -> None:
         captured["trace_reply"] = {
             "channel_id": channel_id,
             "thread_ts": thread_ts,
             "thread_id": thread_id,
-            "message": message,
         }
 
     class _FakeRunsClient:
@@ -597,7 +607,6 @@ def test_process_slack_mention_creates_thread_first_run_with_trace_reply(
         "channel_id": "C123",
         "thread_ts": thread_ts,
         "thread_id": expected_thread_id,
-        "message": None,
     }
 
     run_create = captured["run_create"]

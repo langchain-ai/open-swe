@@ -603,14 +603,11 @@ def test_process_slack_pr_review_request_posts_trace_reply(monkeypatch) -> None:
         captured["slack_thread_ts"] = slack_thread_ts
         return {"success": True, "thread_id": "reviewer-thread-id", "pr_url": pr_ref.url}
 
-    async def fake_post_slack_trace_reply(
-        channel_id: str, thread_ts: str, thread_id: str, message: str = "Working on it!"
-    ) -> None:
+    async def fake_post_slack_trace_reply(channel_id: str, thread_ts: str, thread_id: str) -> None:
         captured["trace_reply"] = {
             "channel_id": channel_id,
             "thread_ts": thread_ts,
             "thread_id": thread_id,
-            "message": message,
         }
 
     async def fake_set_slack_assistant_status(channel_id: str, thread_ts: str) -> bool:
@@ -641,7 +638,6 @@ def test_process_slack_pr_review_request_posts_trace_reply(monkeypatch) -> None:
         "channel_id": "C123",
         "thread_ts": "1700000000.000100",
         "thread_id": "reviewer-thread-id",
-        "message": "Taking a look...",
     }
     assert captured["status_calls"] == [
         ("C123", "1700000000.000100"),

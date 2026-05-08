@@ -334,15 +334,24 @@ async def set_slack_assistant_status(
             return False
 
 
-async def post_slack_thread_reply_with_ts(channel_id: str, thread_ts: str, text: str) -> str | None:
+async def post_slack_thread_reply_with_ts(
+    channel_id: str,
+    thread_ts: str,
+    text: str,
+    *,
+    unfurl_links: bool = True,
+    unfurl_media: bool = True,
+) -> str | None:
     """Post a reply in a Slack thread and return its Slack timestamp."""
     if not SLACK_BOT_TOKEN:
         return None
 
-    payload = {
+    payload: dict[str, Any] = {
         "channel": channel_id,
         "thread_ts": thread_ts,
         "text": text,
+        "unfurl_links": unfurl_links,
+        "unfurl_media": unfurl_media,
     }
 
     async with httpx.AsyncClient() as http_client:
@@ -682,19 +691,6 @@ async def resolve_slack_links_in_context(
     return resolved_links_section, image_urls
 
 
-TRACE_REPLY_PHRASES: tuple[str, ...] = (
-    "Working on it!",
-    "On it!",
-    "Diving in!",
-    "Powering up!",
-    "Heads down.",
-    "Cracking knuckles...",
-    "Spinning up...",
-    "Looking...",
-    "Time to cook. 🧑‍🍳",
-    "Running to the roar!",
-)
-
 TRACE_REPLY_TIPS: tuple[str, ...] = (
     "You can message me in this thread while I'm running — I'll pick up your follow-up before my next step.",
     "Kick off another task in parallel — each one runs in its own isolated sandbox, no queuing.",
@@ -707,22 +703,22 @@ TRACE_REPLY_TIPS: tuple[str, ...] = (
 )
 
 
-def _format_trace_reply(message: str, trace_url: str | None) -> str:
+def _format_trace_reply(trace_url: str | None) -> str:
     """Format the initial trace reply with a randomly selected tip."""
     tip = random.choice(TRACE_REPLY_TIPS)
-    head = f"{message} <{trace_url}|View trace>" if trace_url else message
-    return f"{head}\n_Tip: {tip}_"
+    head = f"<{trace_url}|View trace>\n" if trace_url else ""
+    return f"{head}_Tip: {tip}_"
 
 
-async def post_slack_trace_reply(
-    channel_id: str, thread_ts: str, thread_id: str, message: str | None = None
-) -> str | None:
+async def post_slack_trace_reply(channel_id: str, thread_ts: str, thread_id: str) -> str | None:
     """Post a trace URL reply in a Slack thread and return its Slack timestamp."""
-    if message is None:
-        message = random.choice(TRACE_REPLY_PHRASES)
     trace_url = get_langsmith_trace_url(thread_id)
     return await post_slack_thread_reply_with_ts(
-        channel_id, thread_ts, _format_trace_reply(message, trace_url)
+        channel_id,
+        thread_ts,
+        _format_trace_reply(trace_url),
+        unfurl_links=False,
+        unfurl_media=False,
     )
 
 
