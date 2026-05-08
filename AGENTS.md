@@ -39,7 +39,7 @@ make format             # ruff format + ruff check --fix
 3. No sandbox at all → create one, set `__creating__` sentinel, then real id.
 4. Metadata has an id but no cache → reconnect; fall back to recreate on failure.
 
-For `SANDBOX_TYPE=langsmith` (default), every sandbox creation/refresh also calls `_configure_github_proxy` with a fresh GitHub App installation token (`get_github_app_installation_token`). Other providers (modal, daytona, runloop, local) skip the proxy step. Provider is selected via `SANDBOX_TYPE` env var; factory is `agent/utils/sandbox.py:create_sandbox`.
+For `SANDBOX_TYPE=langsmith` (default), every sandbox creation/refresh also calls `_configure_github_proxy` with a fresh GitHub App installation token (`get_github_app_installation_token`). The proxy injects Basic auth for `github.com` git traffic and Bearer auth for `api.github.com` so sandbox commands can use `GH_TOKEN=dummy gh ...` without storing real tokens in the sandbox. Other providers (modal, daytona, runloop, local) skip the proxy step. Provider is selected via `SANDBOX_TYPE` env var; factory is `agent/utils/sandbox.py:create_sandbox`.
 
 ### Middleware stack (order matters)
 
@@ -48,7 +48,9 @@ Configured in `get_agent`, runs around every model call:
 1. `ToolErrorMiddleware` — catches tool exceptions.
 2. `check_message_queue_before_model` — pulls Linear comments / Slack messages that arrived mid-run from the thread queue and injects them as user messages before the next LLM call. This is what makes "message the agent while it's working" work.
 3. `ensure_no_empty_msg` — guards against empty assistant messages that some providers reject.
-4. `open_pr_if_needed` — **after-agent safety net**: if the agent finishes without committing, this commits and opens a draft PR. Don't remove or reorder lightly — much of the system relies on a PR existing at end-of-run.
+4. `notify_step_limit_reached` — after-agent hook that posts a Slack reply when the agent hits the step limit, so the user gets a clear signal instead of silence.
+
+There is intentionally no after-agent safety net that opens a PR for the agent. The agent itself is responsible for committing, pushing, opening/updating the draft PR, and replying in the source channel — all via `GH_TOKEN=dummy gh` and `slack_thread_reply` / `linear_comment`.
 
 ### Tools
 

@@ -10,7 +10,7 @@ def linear_comment(comment_body: str, ticket_id: str) -> dict[str, Any]:
     Use this tool to communicate progress and completion to stakeholders on Linear.
 
     **When to use:**
-    - After calling `commit_and_open_pr`, post a comment on the Linear ticket to let
+    - After opening/updating a draft PR, post a comment on the Linear ticket to let
       stakeholders know the task is complete and include the PR link. For example:
       "I've completed the implementation and opened a PR: <pr_url>"
     - When answering a question or sharing an update (no code changes needed).

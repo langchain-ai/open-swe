@@ -1,0 +1,186 @@
+[
+  {
+    "pr_title": "Async import of the appStore packages",
+    "url": "https://github.com/calcom/cal.com/pull/8087",
+    "comments": [
+      {
+        "comment": "Consider adding try-catch around the await to handle import failures gracefully",
+        "severity": "Low"
+      },
+      {
+        "comment": "The code uses forEach with async callbacks, which causes asynchronous operations (e.g., calendar/video event deletions, payment refunds) to run concurrently without being awaited. This 'fire-and-forget' behavior leads to unhandled promise rejections, race conditions, and incomplete cleanup, as surrounding try-catch blocks cannot properly handle errors from these unawaited promises. Replace forEach with for...of loops or Promise.all() with map() to ensure proper sequential execution and error handling.",
+        "severity": "Critical"
+      }
+    ]
+  },
+  {
+    "pr_title": "feat: 2fa backup codes",
+    "url": "https://github.com/calcom/cal.com/pull/10600",
+    "comments": [
+      {
+        "comment": "The exported function TwoFactor handles backup codes and is in BackupCode.tsx. Inconsistent naming.",
+        "severity": "Low"
+      },
+      {
+        "comment": "Error message mentions 'backup code login' but this is a disable endpoint, not login",
+        "severity": "Low"
+      },
+      {
+        "comment": "Backup code validation is case-sensitive due to the use of indexOf(). This causes validation to fail if a user enters uppercase hex characters, as backup codes should be case-insensitive for a better user experience.",
+        "severity": "Medium"
+      },
+      {
+        "comment": "Because backupCodes are decrypted and mutated in memory before being written back, two concurrent login requests using the same backupCode could both pass this check and update, so a single backup code may effectively be accepted more than once if used concurrently, weakening the intended one-time-use semantics.",
+        "severity": "High"
+      }
+    ]
+  },
+  {
+    "pr_title": "fix: handle collective multiple host on destinationCalendar",
+    "url": "https://github.com/calcom/cal.com/pull/10967",
+    "comments": [
+      {
+        "comment": "Potential null reference if mainHostDestinationCalendar is undefined if evt.destinationCalendar is null or an empty array ",
+        "severity": "High"
+      },
+      {
+        "comment": "The optional chaining on mainHostDestinationCalendar?.integration is redundant since you already check mainHostDestinationCalendar in the ternary condition.",
+        "severity": "Low"
+      },
+      {
+        "comment": "Logic error: when externalCalendarId is provided, you're searching for a calendar where externalId === externalCalendarId, but this will always fail since you're looking for a calendar that matches itself. Should likely find by credentialId or use different logic.",
+        "severity": "High"
+      },
+      {
+        "comment": "Logic inversion in organization creation: The slug property is now conditionally set when IS_TEAM_BILLING_ENABLED is true, instead of when it's false as originally intended. This change, combined with requestedSlug still being set when IS_TEAM_BILLING_ENABLED is true, results in both properties being set when billing is enabled, and neither when disabled",
+        "severity": "Medium"
+      },
+      {
+        "comment": "The Calendar interface now requires createEvent(event, credentialId), but some implementations (e.g., Lark/Office365) still declare createEvent(event) only—this breaks the interface contract (also applies to other locations in the PR).",
+        "severity": "Low"
+      }
+    ]
+  },
+  {
+    "pr_title": "feat: convert InsightsBookingService to use Prisma.sql raw queries",
+    "url": "https://github.com/calcom/cal.com/pull/22345",
+    "comments": [
+      {
+        "comment": "In getBaseConditions(), the else if (filterConditions) and final else branches are unreachable. This is because getAuthorizationConditions() always returns a non-null Prisma.Sql object, making authConditions always truthy, which means only the first two if/else if conditions are ever evaluated.",
+        "severity": "Low"
+      },
+      {
+        "comment": "Fetching userIdsFromOrg only when teamsFromOrg.length > 0 can exclude org-level members for orgs without child teams; consider deriving from teamIds (which includes orgId) or removing the guard so org-only orgs still include member user bookings.",
+        "severity": "Medium"
+      }
+    ]
+  },
+  {
+    "pr_title": "Comprehensive workflow reminder management for booking lifecycle events",
+    "url": "https://github.com/calcom/cal.com/pull/7232",
+    "comments": [
+      {
+        "comment": "Asynchronous functions deleteScheduledEmailReminder and deleteScheduledSMSReminder are called without await inside forEach loops. This occurs during booking rescheduling/cancellation, and workflow/workflow step deletion/updates. Consequently, scheduled workflow reminders may not be reliably cancelled, potentially leaving them active.",
+        "severity": "Medium"
+      },
+      {
+        "comment": "When immediateDelete is true, the deleteScheduledEmailReminder function cancels the SendGrid email but fails to delete the corresponding WorkflowReminder record from the database. This creates orphaned database entries and is inconsistent with the immediateDelete: false path, which marks the record as cancelled. The SendGrid DELETE API call is also omitted in this path.",
+        "severity": "High"
+      }
+    ]
+  },
+  {
+    "pr_title": "Advanced date override handling and timezone compatibility improvements",
+    "url": "https://github.com/calcom/cal.com/pull/8330",
+    "comments": [
+      {
+        "comment": "Incorrect end time calculation using slotStartTime instead of slotEndTime",
+        "severity": "Medium"
+      },
+      {
+        "comment": "Using === for dayjs object comparison will always return false as it compares object references, not values. Use .isSame() method instead: dayjs(date.start).add(utcOffset, 'minutes').isSame(dayjs(date.end).add(utcOffset, minutes))",
+        "severity": "Medium"
+      }
+    ]
+  },
+  {
+    "pr_title": "OAuth credential sync and app integration enhancements",
+    "url": "https://github.com/calcom/cal.com/pull/11059",
+    "comments": [
+      {
+        "comment": "The parseRefreshTokenResponse function incorrectly sets refresh_token to the hardcoded string 'refresh_token' when it's missing from the OAuth refresh token response. This invalidates the token, breaking subsequent token refreshes and causing authentication failures.",
+        "severity": "High"
+      },
+      {
+        "comment": "Invalid Zod schema syntax. Computed property keys like [z.string().toString()] are not valid in Zod object schemas and will cause runtime errors. ",
+        "severity": "High"
+      },
+      {
+        "comment": "parseRefreshTokenResponse returns a Zod safeParse result ({ success, data, error }), not the credential key object. Persisting that as key stores the wrapper instead of the token payload; we should store the parsed data or use schema parse.",
+        "severity": "High"
+      },
+      {
+        "comment": "When APP_CREDENTIAL_SHARING_ENABLED and CALCOM_CREDENTIAL_SYNC_ENDPOINT are set, the refreshFunction helper returns the fetch Response, but several callers (for example GoogleCalendarService.refreshAccessToken expecting res.data, and HubspotCalendarService.refreshAccessToken expecting a HubspotToken) assume it returns the integration-specific token object. That mismatch will cause runtime errors in the sync-enabled path unless the return type or those call sites are adjusted.",
+        "severity": "High"
+      },
+      {
+        "comment": "When the sync endpoint path is used, res is a fetch Response and has no .data; res?.data will be undefined and token.access_token will throw at runtime. This relies on a consistent return shape from refreshOAuthTokens, which isn’t guaranteed currently.",
+        "severity": "High"
+      }
+    ]
+  },
+  {
+    "pr_title": "SMS workflow reminder retry count tracking",
+    "url": "https://github.com/calcom/cal.com/pull/14943",
+    "comments": [
+      {
+        "comment": "Using retryCount: reminder.retryCount + 1 reads a possibly stale value and can lose increments under concurrency; consider an atomic increment via Prisma (increment: 1) to avoid race conditions (also applies to the similar update in the catch block).",
+        "severity": "High"
+      },
+      {
+        "comment": "The deletion logic in scheduleSMSReminders.ts incorrectly deletes non-SMS workflow reminders (e.g., Email, WhatsApp) that have retryCount > 1. This occurs because the retryCount condition within the OR clause for deletion lacks a method: WorkflowMethods.SMS filter, causing it to apply to all reminder types instead of only SMS reminders, which is the intended scope of this function.",
+        "severity": "High"
+      }
+    ]
+  },
+  {
+    "pr_title": "Add guest management functionality to existing bookings",
+    "url": "https://github.com/calcom/cal.com/pull/14740",
+    "comments": [
+      {
+        "comment": "Case sensitivity bypass in email blacklist",
+        "severity": "High"
+      },
+      {
+        "comment": "The logic for checking team admin/owner permissions is incorrect. This condition uses AND (&&) which requires both isTeamAdmin AND isTeamOwner to be true, but it should use OR (||) since a user needs to be either an admin OR an owner to have permission.",
+        "severity": "Critical"
+      },
+      {
+        "comment": "This calls the email sender with the original guests, so existing attendees included in the input will be treated as new when sending notifications, leading to incorrect emails.",
+        "severity": "Medium"
+      },
+      {
+        "comment": "uniqueGuests filters out existing attendees and blacklisted emails but does not deduplicate duplicates within the input; createMany can insert duplicate attendee rows if the client submits repeated emails.",
+        "severity": "Medium"
+      },
+      {
+        "comment": "Starting with an array containing an empty string may cause validation issues. Consider starting with an empty array [] and handling the empty state in the MultiEmail component instead.",
+        "severity": "Low"
+      }
+    ]
+  },
+  {
+    "pr_title": "feat: add calendar cache status and actions (#22532)",
+    "url": "https://github.com/calcom/cal.com/pull/22532",
+    "comments": [
+      {
+        "comment": "The updateManyByCredentialId call uses an empty data object, which prevents Prisma's @updatedAt decorator from updating the updatedAt timestamp. This results in inaccurate cache status tracking, as the timestamp isn't updated when the cache is refreshed. To fix this, explicitly set the updatedAt field.",
+        "severity": "Medium"
+      },
+      {
+        "comment": "logic: macOS-specific sed syntax with empty string after -i flag will fail on Linux systems",
+        "severity": "Low"
+      }
+    ]
+  }
+]

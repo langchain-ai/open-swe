@@ -1,0 +1,192 @@
+[
+  {
+    "pr_title": "Enhanced Pagination Performance for High-Volume Audit Logs",
+    "url": "https://github.com/ai-code-review-evaluation/sentry-greptile/pull/1",
+    "az_comment": "reviewed commit is not in the repo",
+    "comments": [
+      {
+        "comment": "Django querysets do not support negative slicing",
+        "severity": "High"
+      },
+      {
+        "comment": "When requests are authenticated with API keys or org auth tokens (which have user_id=None), organization_context.member is None. Line 71 attempts to access organization_context.member.has_global_access without checking if member is None, causing an AttributeError crash when optimized_pagination=true is used, even though the request passed all permission checks with valid org:write scope.",
+        "severity": "High"
+      },
+      {
+        "comment": "get_item_key assumes a numeric key, but the paginator is used with order_by=-datetime in the audit logs endpoint; calling math.floor/ceil on a datetime will raise a TypeError.",
+        "severity": "High"
+      }
+    ]
+  },
+  {
+    "pr_title": "Optimize spans buffer insertion with eviction during insert",
+    "url": "https://github.com/ai-code-review-evaluation/sentry-greptile/pull/2",
+    "original_url": "https://github.com/getsentry/sentry/pull/92393",
+    "az_comment": "reviewed commit is not in the repo",
+    "comments": [
+      {
+        "comment": "OptimizedCursorPaginator negative-offset branch slices QuerySet with a negative start index",
+        "severity": "Critical"
+      },
+      {
+        "comment": "BasePaginator negative-offset branch slices QuerySet with a negative start index",
+        "severity": "High"
+      },
+      {
+        "comment": "OptimizedCursorPaginator.get_item_key uses floor/ceil on a datetime key (order_by='-datetime'), causing TypeError.",
+        "severity": "High"
+      }
+    ]
+  },
+  {
+    "pr_title": "feat(upsampling) - Support upsampled error count with performance optimizations",
+    "url": "https://github.com/ai-code-review-evaluation/sentry-greptile/pull/3",
+    "original_url": "https://github.com/getsentry/sentry/pull/94376",
+    "az_comment": "reviewed commit is not in the repo",
+    "comments": [
+      {
+        "comment": "sample_rate = 0.0 is falsy and skipped",
+        "severity": "Low"
+      },
+      {
+        "comment": "Using Python’s built-in hash() to build cache keys is non-deterministic across processes (hash randomization), so keys won’t match across workers and invalidate_upsampling_cache may fail to delete them. Use a deterministic serialization of project_ids for the cache key.",
+        "severity": "Low"
+      },
+      {
+        "comment": "The upsampling eligibility check passes the outer dataset instead of the actual dataset used by scoped_dataset. In paths where the query ultimately runs against discover (e.g., dashboard split) while the original dataset is metrics, upsampling may be skipped even when all projects are allowlisted.",
+        "severity": "Medium"
+      }
+    ]
+  },
+  {
+    "pr_title": "GitHub OAuth Security Enhancement",
+    "url": "https://github.com/getsentry/sentry/pull/67876",
+    "comments": [
+      {
+        "comment": "Null reference if github_authenticated_user state is missing",
+        "severity": "Medium"
+      },
+      {
+        "comment": "OAuth state uses pipeline.signature (static) instead of a per-request random value",
+        "severity": "Medium"
+      },
+      {
+        "comment": "The code attempts to access integration.metadata[sender][login] without checking for the existence of the sender key. This causes a KeyError for integrations where the sender metadata was not set during creation",
+        "severity": "High"
+      }
+    ]
+  },
+  {
+    "pr_title": "Replays Self-Serve Bulk Delete System",
+    "url": "https://github.com/ai-code-review-evaluation/sentry-greptile/pull/5",
+    "az_comment": "there is no such PR, it is a mix of many PRs",
+    "comments": [
+      {
+        "comment": "Breaking changes in error response format",
+        "severity": "Medium"
+      },
+      {
+        "comment": "Detector validator uses wrong key when updating type",
+        "severity": "Medium"
+      },
+      {
+        "comment": "Using zip(error_ids, events.values()) assumes the get_multi result preserves the input order; dict value order is not guaranteed to match error_ids, so event data can be paired with the wrong ID (missing nodes also shift alignment).",
+        "severity": "Low"
+      }
+    ]
+  },
+  {
+    "pr_title": "Span Buffer Multiprocess Enhancement with Health Monitoring",
+    "url": "https://github.com/getsentry/sentry/pull/93824",
+    "comments": [
+      {
+        "comment": "Inconsistent metric tagging with 'shard' and 'shards'",
+        "severity": "Medium"
+      },
+      {
+        "comment": "Fixed sleep in tests can be flaky; wait on condition instead",
+        "severity": "Low"
+      },
+      {
+        "comment": "Because flusher processes are created via multiprocessing.get_context('spawn').Process, they are instances of multiprocessing.context.SpawnProcess, which on POSIX is not a subclass of multiprocessing.Process, so this isinstance check will always be false and hung processes won't be killed here.",
+        "severity": "High"
+      },
+      {
+        "comment": "Sleep in test_consumer.py won’t actually wait because time.sleep was monkeypatched above; consider restoring sleep or using a different sync to ensure the flusher has time to process.",
+        "severity": "Medium"
+      },
+      {
+        "comment": "Breaking out of the loop when the deadline has elapsed can skip terminating remaining flusher processes, potentially leaving them running after shutdown; consider ensuring termination is attempted even if the deadline is exceeded.",
+        "severity": "Medium"
+      }
+    ]
+  },
+  {
+    "pr_title": "feat(ecosystem): Implement cross-system issue synchronization",
+    "url": "https://github.com/getsentry/sentry/pull/77754",
+    "comments": [
+      {
+        "comment": "Shared mutable default in dataclass timestamp",
+        "severity": "Medium"
+      },
+      {
+        "comment": "The method name has a typo: test_from_dict_inalid_data should be test_from_dict_invalid_data.",
+        "severity": "Low"
+      },
+      {
+        "comment": "Method name says 'empty_array' but tests empty dict - consider renaming to 'test_from_dict_empty_dict' for clarity.",
+        "severity": "Low"
+      },
+      {
+        "comment": "to_dict() returns a datetime for queued; if this dict is passed in task kwargs (e.g., via apply_async), JSON serialization may fail depending on the serializer, which can cause enqueue errors.",
+        "severity": "Medium"
+      }
+    ]
+  },
+  {
+    "pr_title": "ref(crons): Reorganize incident creation / issue occurrence logic",
+    "url": "https://github.com/getsentry/sentry/pull/80528",
+    "comments": [
+      {
+        "comment": "The function modifies the config variable to include display values but then returns the original monitor.config instead of the modified version.",
+        "severity": "High"
+      },
+      {
+        "comment": "The code fetches MonitorCheckIn objects by ID when the required data already exists in previous_checkins. This creates an unnecessary database query.",
+        "severity": "Low"
+      }
+    ]
+  },
+  {
+    "pr_title": "feat(uptime): Add ability to use queues to manage parallelism",
+    "url": "https://github.com/getsentry/sentry/pull/95633",
+    "comments": [
+      {
+        "comment": "The queue.shutdown() method with 'immediate=False' parameter may not exist in the standard Python queue module. This could cause AttributeError at runtime. Verify the correct API or implement a custom shutdown mechanism.",
+        "severity": "High"
+      },
+      {
+        "comment": "The magic number 50 for max_wait is used repeatedly throughout the tests. Consider extracting this as a named constant to improve maintainability.",
+        "severity": "Low"
+      },
+      {
+        "comment": "The test test_thread_queue_parallel_error_handling has a docstring that doesn't match the test implementation.",
+        "severity": "Low"
+      }
+    ]
+  },
+  {
+    "pr_title": "feat(workflow_engine): Add in hook for producing occurrences from the stateful detector",
+    "url": "https://github.com/getsentry/sentry/pull/80168",
+    "comments": [
+      {
+        "comment": "MetricAlertDetectorHandler inherits from StatefulDetectorHandler but only contains pass, failing to implement its required abstract methods: counter_names (property), get_dedupe_value(), get_group_key_values(), and build_occurrence_and_event_data(). This will cause a TypeError at runtime when the class is instantiated.",
+        "severity": "High"
+      },
+      {
+        "comment": "Docstring says this returns a list of DetectorEvaluationResult, but the method now returns a dict keyed by DetectorGroupKey. Consider updating the docstring to match the new return type.",
+        "severity": "Low"
+      }
+    ]
+  }
+]

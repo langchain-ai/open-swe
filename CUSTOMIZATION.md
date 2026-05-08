@@ -12,13 +12,13 @@ if model_id == DEFAULT_LLM_MODEL_ID:
 return create_deep_agent(
     model=make_model(model_id, **model_kwargs),
     system_prompt=construct_system_prompt(...),
-    tools=[http_request, fetch_url, list_repos, get_branch_name, commit_and_open_pr, linear_comment, slack_thread_reply],
+    tools=[http_request, fetch_url, linear_comment, slack_thread_reply],
     backend=sandbox_backend,
     middleware=[
         ToolErrorMiddleware(),
         check_message_queue_before_model,
         ensure_no_empty_msg,
-        open_pr_if_needed,
+        notify_step_limit_reached,
     ],
 )
 ```
@@ -38,9 +38,18 @@ DEFAULT_SANDBOX_SNAPSHOT_ID="<snapshot-uuid>"                      # Required
 DEFAULT_SANDBOX_SNAPSHOT_FS_CAPACITY_BYTES="34359738368"           # Optional, default 32 GiB
 DEFAULT_SANDBOX_VCPUS="4"                                          # Optional, default 4
 DEFAULT_SANDBOX_MEM_BYTES="16106127360"                            # Optional, default 15 GiB
+DEFAULT_SANDBOX_IDLE_TTL_SECONDS="600"                             # Optional, default 600 (10 min); 0 disables
+DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS="86400"                  # Optional, default 86400 (24 h); 0 disables
 ```
 
-This is useful for pre-installing languages, frameworks, or internal tools that your repos depend on — reducing setup time per agent run.
+This is useful for pre-installing languages, frameworks, or internal tools that your repos depend on — reducing setup time per agent run. The default snapshot includes the GitHub CLI; agents invoke it as `GH_TOKEN=dummy gh <command>` and rely on the LangSmith proxy for the real credentials.
+
+For LangSmith sandboxes, Open SWE configures two GitHub proxy rules whenever a sandbox is created or reattached to a run:
+
+- `github.com` / `*.github.com` receive Basic auth for git-over-HTTPS operations.
+- `api.github.com` receives Bearer auth for `gh` and REST API operations.
+
+The proxy token is minted at runtime from the GitHub App installation credentials. Do not store GitHub access tokens as deployment environment variables.
 
 ### Using a different sandbox provider
 
@@ -185,11 +194,10 @@ async def get_agent(config: RunnableConfig) -> Pregel:
 
 ## 3. Tools
 
-Open SWE ships with five custom tools on top of the built-in Deep Agents tools (file operations, shell execution, subagents, todos):
+Open SWE ships with a small set of custom tools on top of the built-in Deep Agents tools (file operations, shell execution, subagents, todos). GitHub operations are handled by `GH_TOKEN=dummy gh` inside the sandbox.
 
 | Tool | File | Purpose |
 |---|---|---|
-| `commit_and_open_pr` | `agent/tools/commit_and_open_pr.py` | Git commit + GitHub draft PR |
 | `fetch_url` | `agent/tools/fetch_url.py` | Fetch web pages as markdown |
 | `http_request` | `agent/tools/http_request.py` | HTTP API calls |
 | `linear_comment` | `agent/tools/linear_comment.py` | Post comments on Linear tickets |
@@ -223,13 +231,13 @@ def datadog_search(query: str, time_range: str = "1h") -> dict[str, Any]:
 Then register it in `agent/server.py`:
 
 ```python
-from .tools import commit_and_open_pr, fetch_url, http_request, linear_comment, slack_thread_reply
+from .tools import fetch_url, http_request, linear_comment, slack_thread_reply
 from .tools.datadog_search import datadog_search
 
 return create_deep_agent(
     ...
     tools=[
-        http_request, fetch_url, commit_and_open_pr,
+        http_request, fetch_url,
         linear_comment, slack_thread_reply,
         datadog_search,  # new tool
     ],
@@ -241,14 +249,14 @@ The agent will automatically see the tool's name, docstring, and parameter types
 
 ### Removing tools
 
-If you only use Linear (not Slack), remove `slack_thread_reply` from the tools list and vice versa. If you don't need web fetching, remove `fetch_url`. The only tool that's essential to the core workflow is `commit_and_open_pr`.
+If you only use Linear (not Slack), remove `slack_thread_reply` from the tools list and vice versa. If you don't need web fetching, remove `fetch_url`.
 
 ### Conditional tools
 
 You can vary the toolset based on the trigger source:
 
 ```python
-base_tools = [http_request, fetch_url, commit_and_open_pr]
+base_tools = [http_request, fetch_url]
 source = config["configurable"].get("source")
 
 if source == "linear":
@@ -441,14 +449,16 @@ Drop an `AGENTS.md` file in the root of any repository to add repo-specific inst
 
 ## 6. Middleware
 
-Middleware hooks run around the agent loop. Open SWE includes four:
+Middleware hooks run around the agent loop. Open SWE includes:
 
 | Middleware | Type | Purpose |
 |---|---|---|
 | `ToolErrorMiddleware` | Tool error handler | Catches and formats tool errors |
 | `check_message_queue_before_model` | Before model | Injects follow-up messages that arrived mid-run |
 | `ensure_no_empty_msg` | Before model | Prevents empty messages from reaching the model |
-| `open_pr_if_needed` | After agent | Safety net — opens a PR if the agent didn't |
+| `notify_step_limit_reached` | After agent | Posts a Slack reply when the agent hits the model-call limit |
+
+There is intentionally no after-agent middleware that opens a PR for the agent. The agent is responsible for committing, pushing, opening/updating the draft PR, and replying in the source channel. If you want a deterministic backstop for your fork, add an `@after_agent` hook here.
 
 Add custom middleware by appending to the middleware list in `get_agent()`. See the [LangChain middleware docs](https://python.langchain.com/docs/concepts/agents/#middleware) for the `@before_model` and `@after_agent` decorators.
 
@@ -472,7 +482,7 @@ middleware=[
     ToolErrorMiddleware(),
     check_message_queue_before_model,
     ensure_no_empty_msg,
-    open_pr_if_needed,
+    notify_step_limit_reached,
     run_ci_check,  # new middleware
 ],
 ```

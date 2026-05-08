@@ -18,6 +18,8 @@ logger = logging.getLogger(__name__)
 DEFAULT_SNAPSHOT_FS_CAPACITY_BYTES = 32 * 1024**3
 DEFAULT_SANDBOX_VCPUS = 2
 DEFAULT_SANDBOX_MEM_BYTES = 7936 * 1024**2  # 7936 MiB ("large" tier cap)
+DEFAULT_SANDBOX_IDLE_TTL_SECONDS = 10 * 60  # 10 minutes
+DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS = 24 * 60 * 60  # 24 hours
 
 
 def _get_langsmith_api_key() -> str | None:
@@ -29,20 +31,72 @@ def _get_langsmith_api_key() -> str | None:
     return os.environ.get("LANGSMITH_API_KEY") or os.environ.get("LANGSMITH_API_KEY_PROD")
 
 
-def _get_sandbox_snapshot_config() -> tuple[str | None, int, int, int]:
+def _parse_optional_int(name: str, default: int) -> int:
+    raw = os.environ.get(name)
+    if not raw:
+        return default
+    try:
+        return int(raw)
+    except ValueError as e:
+        msg = f"{name} must be an integer, got {raw!r}"
+        raise ValueError(msg) from e
+
+
+def _get_sandbox_snapshot_config() -> tuple[str | None, int, int, int, int, int]:
     """Get sandbox snapshot configuration from environment."""
     snapshot_id = os.environ.get("DEFAULT_SANDBOX_SNAPSHOT_ID")
-    raw_capacity = os.environ.get("DEFAULT_SANDBOX_SNAPSHOT_FS_CAPACITY_BYTES")
-    fs_capacity_bytes = int(raw_capacity) if raw_capacity else DEFAULT_SNAPSHOT_FS_CAPACITY_BYTES
-    raw_vcpus = os.environ.get("DEFAULT_SANDBOX_VCPUS")
-    vcpus = int(raw_vcpus) if raw_vcpus else DEFAULT_SANDBOX_VCPUS
-    raw_mem = os.environ.get("DEFAULT_SANDBOX_MEM_BYTES")
-    mem_bytes = int(raw_mem) if raw_mem else DEFAULT_SANDBOX_MEM_BYTES
-    return snapshot_id, fs_capacity_bytes, vcpus, mem_bytes
+    fs_capacity_bytes = _parse_optional_int(
+        "DEFAULT_SANDBOX_SNAPSHOT_FS_CAPACITY_BYTES", DEFAULT_SNAPSHOT_FS_CAPACITY_BYTES
+    )
+    vcpus = _parse_optional_int("DEFAULT_SANDBOX_VCPUS", DEFAULT_SANDBOX_VCPUS)
+    mem_bytes = _parse_optional_int("DEFAULT_SANDBOX_MEM_BYTES", DEFAULT_SANDBOX_MEM_BYTES)
+    idle_ttl_seconds = _parse_optional_int(
+        "DEFAULT_SANDBOX_IDLE_TTL_SECONDS", DEFAULT_SANDBOX_IDLE_TTL_SECONDS
+    )
+    delete_after_stop_seconds = _parse_optional_int(
+        "DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS",
+        DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS,
+    )
+    return (
+        snapshot_id,
+        fs_capacity_bytes,
+        vcpus,
+        mem_bytes,
+        idle_ttl_seconds,
+        delete_after_stop_seconds,
+    )
+
+
+def _github_proxy_rules(github_token: str) -> list[dict[str, Any]]:
+    basic_auth = base64.b64encode(f"x-access-token:{github_token}".encode()).decode()
+    return [
+        {
+            "name": "github-api",
+            "match_hosts": ["api.github.com"],
+            "headers": [
+                {
+                    "name": "Authorization",
+                    "type": "opaque",
+                    "value": f"Bearer {github_token}",
+                }
+            ],
+        },
+        {
+            "name": "github",
+            "match_hosts": ["github.com", "*.github.com"],
+            "headers": [
+                {
+                    "name": "Authorization",
+                    "type": "opaque",
+                    "value": f"Basic {basic_auth}",
+                }
+            ],
+        },
+    ]
 
 
 def _configure_github_proxy(sandbox_name: str, github_token: str) -> None:
-    """Configure sandbox proxy to inject GitHub auth for all github.com requests.
+    """Configure sandbox proxy to inject GitHub auth for GitHub traffic.
 
     Uses the LangSmith proxy-config API to set up header injection so that
     git operations (clone, pull, push) authenticate via the proxy rather than
@@ -58,24 +112,7 @@ def _configure_github_proxy(sandbox_name: str, github_token: str) -> None:
         return
     langsmith_endpoint = os.environ.get("LANGSMITH_ENDPOINT", "https://api.smith.langchain.com")
     url = f"{langsmith_endpoint}/v2/sandboxes/boxes/{sandbox_name}"
-    basic_auth = base64.b64encode(f"x-access-token:{github_token}".encode()).decode()
-    payload = {
-        "proxy_config": {
-            "rules": [
-                {
-                    "name": "github",
-                    "match_hosts": ["github.com", "*.github.com"],
-                    "headers": [
-                        {
-                            "name": "Authorization",
-                            "type": "opaque",
-                            "value": f"Basic {basic_auth}",
-                        }
-                    ],
-                }
-            ]
-        }
-    }
+    payload = {"proxy_config": {"rules": _github_proxy_rules(github_token)}}
     with httpx.Client() as client:
         response = client.patch(
             url,
@@ -106,7 +143,14 @@ def create_langsmith_sandbox(
         SandboxBackendProtocol instance
     """
     api_key = _get_langsmith_api_key()
-    snapshot_id, fs_capacity_bytes, vcpus, mem_bytes = _get_sandbox_snapshot_config()
+    (
+        snapshot_id,
+        fs_capacity_bytes,
+        vcpus,
+        mem_bytes,
+        idle_ttl_seconds,
+        delete_after_stop_seconds,
+    ) = _get_sandbox_snapshot_config()
 
     provider = LangSmithProvider(api_key=api_key)
     backend = provider.get_or_create(
@@ -115,6 +159,8 @@ def create_langsmith_sandbox(
         fs_capacity_bytes=fs_capacity_bytes,
         vcpus=vcpus,
         mem_bytes=mem_bytes,
+        idle_ttl_seconds=idle_ttl_seconds,
+        delete_after_stop_seconds=delete_after_stop_seconds,
     )
     _update_thread_sandbox_metadata(backend.id)
 
@@ -196,16 +242,31 @@ class LangSmithProvider(SandboxProvider):
         if not os.environ.get("DEFAULT_SANDBOX_SNAPSHOT_ID"):
             msg = "DEFAULT_SANDBOX_SNAPSHOT_ID must be set when SANDBOX_TYPE=langsmith"
             raise ValueError(msg)
-        raw_capacity = os.environ.get("DEFAULT_SANDBOX_SNAPSHOT_FS_CAPACITY_BYTES")
-        if raw_capacity:
+        for name in (
+            "DEFAULT_SANDBOX_SNAPSHOT_FS_CAPACITY_BYTES",
+            "DEFAULT_SANDBOX_VCPUS",
+            "DEFAULT_SANDBOX_MEM_BYTES",
+            "DEFAULT_SANDBOX_IDLE_TTL_SECONDS",
+            "DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS",
+        ):
+            raw = os.environ.get(name)
+            if raw is None or raw == "":
+                continue
             try:
-                int(raw_capacity)
+                value = int(raw)
             except ValueError as e:
-                msg = (
-                    "DEFAULT_SANDBOX_SNAPSHOT_FS_CAPACITY_BYTES must be an integer, "
-                    f"got {raw_capacity!r}"
-                )
+                msg = f"{name} must be an integer, got {raw!r}"
                 raise ValueError(msg) from e
+            if (
+                name
+                in {
+                    "DEFAULT_SANDBOX_IDLE_TTL_SECONDS",
+                    "DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS",
+                }
+                and value < 0
+            ):
+                msg = f"{name} must be >= 0, got {value}"
+                raise ValueError(msg)
 
     def get_or_create(
         self,
@@ -216,6 +277,8 @@ class LangSmithProvider(SandboxProvider):
         fs_capacity_bytes: int | None = None,
         vcpus: int | None = None,
         mem_bytes: int | None = None,
+        idle_ttl_seconds: int | None = None,
+        delete_after_stop_seconds: int | None = None,
         **kwargs: Any,
     ) -> SandboxBackendProtocol:
         """Get existing or create new LangSmith sandbox."""
@@ -240,6 +303,8 @@ class LangSmithProvider(SandboxProvider):
                 fs_capacity_bytes=fs_capacity_bytes,
                 vcpus=vcpus,
                 mem_bytes=mem_bytes,
+                idle_ttl_seconds=idle_ttl_seconds,
+                delete_after_stop_seconds=delete_after_stop_seconds,
                 timeout=timeout,
             )
         except Exception as e:

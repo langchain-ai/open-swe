@@ -43,7 +43,7 @@ Rather than forking an existing agent or building from scratch, Open SWE **compo
 create_deep_agent(
     model="openai:gpt-5.5",
     system_prompt=construct_system_prompt(...),
-    tools=[http_request, fetch_url, list_repos, get_branch_name, commit_and_open_pr, linear_comment, slack_thread_reply],
+    tools=[http_request, fetch_url, linear_comment, slack_thread_reply],
     backend=sandbox_backend,
     middleware=[ToolErrorMiddleware(), check_message_queue_before_model, ...],
 )
@@ -70,11 +70,10 @@ Stripe's key insight: *tool curation matters more than tool quantity.* Open SWE 
 | `execute` | Shell commands in the sandbox |
 | `fetch_url` | Fetch web pages as markdown |
 | `http_request` | API calls (GET, POST, etc.) |
-| `commit_and_open_pr` | Git commit + open a GitHub draft PR |
 | `linear_comment` | Post updates to Linear tickets |
 | `slack_thread_reply` | Reply in Slack threads |
 
-Plus the built-in Deep Agents tools: `read_file`, `write_file`, `edit_file`, `ls`, `glob`, `grep`, `write_todos`, and `task` (subagent spawning).
+GitHub operations are performed with `GH_TOKEN=dummy gh` inside the sandbox, backed by the LangSmith proxy. Plus the built-in Deep Agents tools: `read_file`, `write_file`, `edit_file`, `ls`, `glob`, `grep`, `write_todos`, and `task` (subagent spawning).
 
 ### 4. Context Engineering — AGENTS.md + Source Context
 
@@ -92,7 +91,7 @@ Open SWE's orchestration has two layers:
 **Middleware:** Deterministic middleware hooks run around the agent loop:
 
 - **`check_message_queue_before_model`** — Injects follow-up messages (Linear comments or Slack messages that arrive mid-run) before the next model call. You can message the agent while it's working and it'll pick up your input at its next step.
-- **`open_pr_if_needed`** — After-agent safety net that commits and opens a PR if the agent didn't do it itself. This is a lightweight version of Stripe's deterministic nodes — ensuring critical steps happen regardless of LLM behavior.
+- **`notify_step_limit_reached`** — After-agent hook that posts a Slack reply when the agent hits the model-call limit, so users get a clear signal instead of silence.
 - **`ToolErrorMiddleware`** — Catches and handles tool errors gracefully.
 
 ### 6. Invocation — Slack, Linear, and GitHub
@@ -105,10 +104,9 @@ All three companies in the article converge on **Slack as the primary invocation
 
 Each invocation creates a deterministic thread ID, so follow-up messages on the same issue or thread route to the same running agent.
 
-### 7. Validation — Prompt-Driven + Safety Nets
+### 7. Validation — Prompt-Driven
 
-The agent is instructed to run linters, formatters, and tests before committing. The `open_pr_if_needed` middleware acts as a backstop — if the agent finishes without opening a PR, the middleware handles it automatically.
-
+The agent is instructed to run linters, formatters, and tests before committing, and is responsible end-to-end for committing, pushing, opening/updating the draft PR, and replying in the source channel.
 This is an area where you can extend Open SWE for your org: add deterministic CI checks, visual verification, or review gates as additional middleware. See the [Customization Guide](CUSTOMIZATION.md#6-middleware) for how.
 
 ---
@@ -123,7 +121,7 @@ This is an area where you can extend Open SWE for your org: add deterministic CI
 | **Context** | AGENTS.md + issue/thread | Rule files + pre-hydration | OpenCode built-in | Linear-first + MCPs |
 | **Orchestration** | Subagents + middleware | Blueprints (deterministic + agentic) | Sessions + child sessions | Three modes |
 | **Invocation** | Slack, Linear, GitHub | Slack + embedded buttons | Slack + web + Chrome extension | Slack-native |
-| **Validation** | Prompt-driven + PR safety net | 3-layer (local + CI + 1 retry) | Visual DOM verification | Agent councils + auto-merge |
+| **Validation** | Prompt-driven | 3-layer (local + CI + 1 retry) | Visual DOM verification | Agent councils + auto-merge |
 
 ---
 
