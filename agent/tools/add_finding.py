@@ -9,10 +9,12 @@ from langgraph.config import get_config
 
 from ..reviewer_diff import is_range_in_diff
 from ..reviewer_findings import (
+    MAX_SUGGESTION_LINES,
     DiffSide,
     Finding,
     Severity,
     append_finding,
+    clip_suggestion,
     get_thread_id_from_runtime,
     new_finding,
 )
@@ -56,7 +58,12 @@ def add_finding(
         end_line: 1-based end line, inclusive. Defaults to ``start_line``.
         suggestion: Replacement text for ``start_line..end_line``. When set,
             the published GitHub comment includes a ```suggestion``` block so
-            the user can click "Commit suggestion".
+            the user can click "Commit suggestion". **Only set this for small,
+            obvious fixes that fit in 4 lines or fewer** (e.g. a one-liner
+            rename, a missing guard, a typo). Longer suggestions are dropped
+            because they read as rewrites rather than reviews — leave those
+            cases as a description-only finding so the author can decide how
+            to fix it.
         side: ``RIGHT`` (post-PR file, default) or ``LEFT`` (base file). Almost
             always ``RIGHT``.
 
@@ -98,6 +105,8 @@ def add_finding(
 
         diff_hunk = extract_diff_hunk(diff_text, file, start_line, end_line)
 
+    clipped_suggestion, suggestion_dropped = clip_suggestion(suggestion)
+
     finding: Finding = new_finding(
         severity=_cast_severity(severity),
         category=category,
@@ -107,13 +116,21 @@ def add_finding(
         description=description,
         sha=str(head_sha) if isinstance(head_sha, str) else "",
         side=_cast_side(side),
-        suggestion=suggestion,
+        suggestion=clipped_suggestion,
         diff_hunk=diff_hunk,
     )
 
     thread_id = get_thread_id_from_runtime()
     asyncio.run(append_finding(thread_id, finding))
-    return {"success": True, "finding_id": finding["id"]}
+    result: dict[str, Any] = {"success": True, "finding_id": finding["id"]}
+    if suggestion_dropped:
+        result["suggestion_dropped"] = True
+        result["warning"] = (
+            f"Suggestion exceeded the {MAX_SUGGESTION_LINES}-line cap and was "
+            "dropped — the finding was recorded with description only. Only "
+            "include `suggestion` for small, obvious fixes."
+        )
+    return result
 
 
 def _cast_severity(value: str) -> Severity:

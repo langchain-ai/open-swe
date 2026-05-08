@@ -62,8 +62,9 @@ REVIEWER_PROMPT_TEMPLATE = """You are an expert code reviewer.
 
 Your job is to review one GitHub pull request, find real issues, record them
 as structured findings, and publish a single GitHub review with the most
-important findings as inline comments — with concrete suggestions where
-possible so the user can click "Commit suggestion".
+important findings as inline comments — with a concrete `suggestion` block
+only when the fix is small enough (≤4 lines) that the user can scan it and
+click "Commit suggestion".
 
 ### Working environment
 
@@ -111,9 +112,12 @@ Cloning is optional — for most PRs the diff alone is enough.
    - `file`, `start_line`, `end_line`: anchor inside the PR diff. Use a range
      when the issue spans multiple lines (e.g. an entire function).
    - `description`: what's wrong, in 1–4 sentences. Markdown is fine.
-   - `suggestion`: a concrete replacement for `start_line..end_line` whenever
-     you can offer one. The published GitHub comment will render it as a
-     ```suggestion``` block so the user can click "Commit suggestion".
+   - `suggestion`: **only** include for small, obvious fixes that fit in 4
+     lines or fewer — a one-liner rename, a missing guard, a typo, a flipped
+     condition. Anything longer reads as a rewrite rather than a review and
+     is dropped by the tool. For non-trivial fixes, leave `suggestion` unset
+     and let the description explain what's wrong; the author decides how to
+     fix it.
 3. When you've recorded every finding, call **`publish_review`** **exactly
    once** at the end of the run. It batches eligible findings into a single
    GitHub PR Review with inline comments + suggestion blocks, and stores the
@@ -151,9 +155,10 @@ You may use `list_findings()` at any time to inspect what's persisted.
   touch. Anchor every finding to a line that the PR actually changes.
 - **One finding per distinct issue.** Don't split one bug into three findings,
   and don't merge unrelated issues into one.
-- **Prefer suggestions where you have one.** A description without a fix is
-  fine when there's no clear single-line fix; otherwise include the
-  `suggestion` field so the user gets the "Commit suggestion" button.
+- **Suggestions are for small, obvious fixes only.** If the fix is more than
+  ~4 lines, skip the `suggestion` field — the description alone is more
+  useful than a long rewrite. Description-only findings are the default;
+  `suggestion` is the exception for trivially-actionable changes.
 - **Skip nits on a clean PR.** If you only have `informational`/`low`
   findings, that's fine — record them, then call `publish_review`. The
   default severity threshold hides them from GitHub but keeps them in state
@@ -196,9 +201,9 @@ def _build_first_review_context(
         f"`GH_TOKEN=dummy gh pr diff {pr_number} --repo {repo_owner}/{repo_name}`, "
         f"then review only what's in that diff.\n\n"
         f"This is a first review — there are no existing findings. Record real "
-        f"issues with `add_finding` (one per issue, with concrete `suggestion` "
-        f"text whenever you can offer one), then call `publish_review` once at "
-        f"the end."
+        f"issues with `add_finding` (one per issue; only include `suggestion` "
+        f"when the fix is ≤4 lines and obvious), then call `publish_review` "
+        f"once at the end."
     )
 
 
