@@ -92,7 +92,7 @@ class TestLinearWebhookRepoOverride:
                     "comments": {"nodes": []},
                 },
             ),
-            patch("agent.webapp._is_repo_org_allowed", return_value=True),
+            patch("agent.webapp._is_repo_allowed", return_value=True),
             patch("agent.webapp.BackgroundTasks"),
         ):
             mock_request = AsyncMock()
@@ -142,7 +142,7 @@ class TestLinearWebhookRepoOverride:
                     "comments": {"nodes": []},
                 },
             ),
-            patch("agent.webapp._is_repo_org_allowed", return_value=True),
+            patch("agent.webapp._is_repo_allowed", return_value=True),
         ):
             mock_request = AsyncMock()
             mock_request.body.return_value = json.dumps(payload).encode()
