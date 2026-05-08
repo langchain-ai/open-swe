@@ -39,14 +39,16 @@ DEFAULT_ASSISTANT_STATUS = "is thinking…"
 # Curated rotating loading strings shown by Slack while the indicator is active.
 # Capped at 10 by Slack's API.
 DEFAULT_LOADING_MESSAGES: tuple[str, ...] = (
-    "reading the repo…",
-    "tracing call sites…",
-    "thinking through edge cases…",
-    "running commands…",
-    "drafting changes…",
-    "double-checking the diff…",
-    "writing tests…",
-    "tidying up…",
+    "Pondering…",
+    "Cogitating…",
+    "Ruminating…",
+    "Noodling…",
+    "Percolating…",
+    "Marinating…",
+    "Simmering…",
+    "Conjuring…",
+    "Tinkering…",
+    "Schlepping…",
 )
 
 
