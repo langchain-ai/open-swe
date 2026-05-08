@@ -30,6 +30,7 @@ from langsmith.sandbox import SandboxClientError
 from .integrations.langsmith import _configure_github_proxy
 from .middleware import (
     SanitizeToolInputsMiddleware,
+    SlackAssistantStatusMiddleware,
     ToolErrorMiddleware,
     check_message_queue_before_model,
     ensure_no_empty_msg,
@@ -371,6 +372,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             ModelCallLimitMiddleware(run_limit=MODEL_CALL_RECURSION_LIMIT, exit_behavior="end"),
             ToolErrorMiddleware(),
             check_message_queue_before_model,
+            SlackAssistantStatusMiddleware(),
             ensure_no_empty_msg,
             notify_step_limit_reached,
         ],

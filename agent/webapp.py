@@ -64,6 +64,7 @@ from .utils.slack import (
     post_slack_trace_reply,
     resolve_slack_links_in_context,
     select_slack_context_messages,
+    set_slack_assistant_status,
     strip_bot_mention,
     verify_slack_signature,
 )
@@ -766,6 +767,8 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
             channel_id,
         )
 
+    await set_slack_assistant_status(channel_id, thread_ts)
+
     thread_id = generate_thread_id_from_slack_thread(channel_id, thread_ts)
 
     user_email = None
@@ -906,6 +909,7 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
     )
     if is_first_mention:
         await post_slack_trace_reply(channel_id, thread_ts, thread_id)
+        await set_slack_assistant_status(channel_id, thread_ts)
     else:
         logger.info(
             "Skipping Slack trace reply for thread %s — agent will reply when run completes",
@@ -916,6 +920,7 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
 async def process_slack_pr_review_request(
     pr_ref: GitHubPrRef, channel_id: str, thread_ts: str
 ) -> None:
+    await set_slack_assistant_status(channel_id, thread_ts)
     result = await trigger_pr_review_from_ref(
         pr_ref,
         source="slack",
@@ -928,6 +933,7 @@ async def process_slack_pr_review_request(
             await post_slack_trace_reply(
                 channel_id, thread_ts, thread_id, message="Taking a look..."
             )
+            await set_slack_assistant_status(channel_id, thread_ts)
         return
 
     await post_slack_thread_reply(
@@ -1459,6 +1465,8 @@ async def trigger_pr_review_from_ref(
         base_sha=base_sha,
         head_sha=head_sha,
         branch_name=branch_name,
+        slack_channel_id=slack_channel_id,
+        slack_thread_ts=slack_thread_ts,
     )
 
     thread_active = await is_thread_active(thread_id)
@@ -1491,6 +1499,8 @@ def _build_reviewer_configurable(
     branch_name: str,
     re_review: bool = False,
     last_reviewed_sha: str = "",
+    slack_channel_id: str = "",
+    slack_thread_ts: str = "",
 ) -> dict[str, Any]:
     """Assemble the runnable-config ``configurable`` dict for a reviewer run."""
     configurable: dict[str, Any] = {
@@ -1509,6 +1519,11 @@ def _build_reviewer_configurable(
         configurable["branch_name"] = branch_name
     if last_reviewed_sha:
         configurable["last_reviewed_sha"] = last_reviewed_sha
+    if slack_channel_id and slack_thread_ts:
+        configurable["slack_thread"] = {
+            "channel_id": slack_channel_id,
+            "thread_ts": slack_thread_ts,
+        }
     return configurable
 
 
