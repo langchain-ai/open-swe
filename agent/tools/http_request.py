@@ -7,13 +7,14 @@ from typing import Any
 from urllib.parse import urljoin, urlparse
 
 import requests
+from urllib3.util import connection as urllib3_connection
 
 _MAX_REDIRECTS = 5
 
-_real_getaddrinfo = socket.getaddrinfo
 _pin_state = threading.local()
-_patch_lock = threading.Lock()
-_patch_installed = False
+_install_lock = threading.Lock()
+_install_count = 0
+_original_create_connection = None
 
 
 def _get_pin_stack() -> list[dict[str, list]]:
@@ -24,54 +25,87 @@ def _get_pin_stack() -> list[dict[str, list]]:
     return stack
 
 
-def _pinned_getaddrinfo(host, port, *args, **kwargs):
+def _pinned_create_connection(address, *args, **kwargs):
+    """Drop-in for urllib3.util.connection.create_connection that honors DNS pins.
+
+    When the calling thread has an active _pin_dns context for this host, the
+    connection uses the pre-validated addresses instead of calling
+    socket.getaddrinfo again — closing the DNS-rebinding race.
+    """
+    host, port = address
+    if host.startswith("[") and host.endswith("]"):
+        host = host[1:-1]
+
     stack = _get_pin_stack()
-    if stack:
-        pins = stack[-1]
-        if host in pins:
-            results = []
-            for family, socktype, proto, canonname, sockaddr in pins[host]:
-                if port is None:
-                    new_sockaddr = sockaddr
-                elif family == socket.AF_INET:
-                    new_sockaddr = (sockaddr[0], int(port))
-                elif family == socket.AF_INET6:
-                    rest = sockaddr[2:] if len(sockaddr) >= 4 else (0, 0)
-                    new_sockaddr = (sockaddr[0], int(port), *rest)
-                else:
-                    new_sockaddr = sockaddr
-                results.append((family, socktype, proto, canonname, new_sockaddr))
-            return results
-    return _real_getaddrinfo(host, port, *args, **kwargs)
+    pins = stack[-1] if stack else None
+    pinned = pins.get(host) if pins else None
 
+    if pinned is None:
+        return _original_create_connection(address, *args, **kwargs)
 
-def _ensure_dns_patch_installed() -> None:
-    global _patch_installed
-    if _patch_installed:
-        return
-    with _patch_lock:
-        if _patch_installed:
-            return
-        socket.getaddrinfo = _pinned_getaddrinfo
-        _patch_installed = True
+    err = None
+    for family, socktype, proto, _canonname, sockaddr in pinned:
+        if family == socket.AF_INET:
+            target = (sockaddr[0], port)
+        elif family == socket.AF_INET6:
+            rest = sockaddr[2:] if len(sockaddr) >= 4 else (0, 0)
+            target = (sockaddr[0], port, *rest)
+        else:
+            continue
+
+        sock = None
+        try:
+            sock = socket.socket(family, socktype, proto)
+            timeout = kwargs.get("timeout", socket._GLOBAL_DEFAULT_TIMEOUT)
+            if timeout is not socket._GLOBAL_DEFAULT_TIMEOUT:
+                sock.settimeout(timeout)
+            source_address = kwargs.get("source_address")
+            if source_address:
+                sock.bind(source_address)
+            sock.connect(target)
+            return sock
+        except OSError as e:
+            err = e
+            if sock is not None:
+                sock.close()
+
+    if err is not None:
+        raise err
+    raise OSError("DNS pin produced no usable addresses")
 
 
 @contextlib.contextmanager
 def _pin_dns(hostname: str, addr_infos: list) -> Iterator[None]:
-    """Force socket.getaddrinfo(hostname, ...) to return the pre-validated addresses.
+    """Pin DNS resolution for `hostname` to `addr_infos` for the duration of the block.
 
-    Other hostnames pass through to the real resolver. Scope is per-thread, so
-    concurrent requests on other threads are unaffected.
+    The patch is scoped to urllib3's connection helper (not socket-wide) and is
+    installed on first entry / removed on last exit via reference counting, so
+    no global mutation persists once no http_request calls are in flight.
+    Other hostnames pass through to the original resolver. Per-thread scope
+    (`threading.local`) keeps concurrent requests on other threads unaffected.
     """
-    _ensure_dns_patch_installed()
+    global _install_count, _original_create_connection
+
+    with _install_lock:
+        if _install_count == 0:
+            _original_create_connection = urllib3_connection.create_connection
+            urllib3_connection.create_connection = _pinned_create_connection
+        _install_count += 1
+
     stack = _get_pin_stack()
     pins: dict[str, list] = dict(stack[-1]) if stack else {}
     pins[hostname] = addr_infos
     stack.append(pins)
+
     try:
         yield
     finally:
         stack.pop()
+        with _install_lock:
+            _install_count -= 1
+            if _install_count == 0 and _original_create_connection is not None:
+                urllib3_connection.create_connection = _original_create_connection
+                _original_create_connection = None
 
 
 def _resolve_and_validate(url: str) -> tuple[bool, str, str | None, list | None]:
@@ -91,7 +125,7 @@ def _resolve_and_validate(url: str) -> tuple[bool, str, str | None, list | None]
             return False, "Could not parse hostname from URL", None, None
 
         try:
-            addr_infos = _real_getaddrinfo(hostname, None)
+            addr_infos = socket.getaddrinfo(hostname, None)
         except socket.gaierror:
             return False, f"Could not resolve hostname: {hostname}", hostname, None
 
@@ -138,10 +172,10 @@ def _request_with_safe_redirects(
 ) -> tuple[requests.Response | None, dict[str, Any] | None]:
     """Issue a request while validating every redirect target before following it.
 
-    The hostname is resolved once per hop and every subsequent DNS lookup for
-    that hostname (inside requests/urllib3) is pinned to the validated
-    addresses. This closes the DNS-rebinding race where a controlled resolver
-    returns a public IP at validation time and a private IP at connect time.
+    The hostname is resolved once per hop and the connection is forced to use
+    the validated addresses, closing the DNS-rebinding race where a controlled
+    resolver returns a public IP at validation time and a private IP at connect
+    time.
     """
     current_method = method.upper()
     current_url = url
