@@ -45,7 +45,7 @@ Open SWE authenticates as a [GitHub App](https://docs.github.com/en/apps/creatin
 Before creating the app you need to decide on an **OAuth provider ID** — this is a short string you'll use in both GitHub and LangSmith to link the two. Pick something memorable, for example:
 
 ```
-github-oauth-provider
+your-org-github-oauth
 ```
 
 Write this down. You'll use it in the callback URL below and again in step 4 when configuring LangSmith.
@@ -56,7 +56,7 @@ Write this down. You'll use it in the callback URL below and again in step 4 whe
 2. Fill in:
    - **App name**: `open-swe` (or your preferred name)
    - **Homepage URL**: This can be any valid URL — it's only shown on the GitHub Marketplace page (which you won't be using). Use something like `https://github.com/langchain-ai/open-swe`
-   - **Callback URL**: `https://smith.langchain.com/host-oauth-callback/<your-provider-id>` — replace `<your-provider-id>` with the ID you chose in step 3a (e.g. `https://smith.langchain.com/host-oauth-callback/github-oauth-provider`)
+   - **Callback URL**: `https://smith.langchain.com/host-oauth-callback/<your-provider-id>` — replace `<your-provider-id>` with the ID you chose in step 3a (e.g. `https://smith.langchain.com/host-oauth-callback/your-org-github-oauth`)
    - **Request user authorization (OAuth) during installation**: ✅ Enable this
    - **Webhook URL**: `https://<your-ngrok-url>/webhooks/github` — use the ngrok URL from step 2
    - **Webhook secret**: generate one and save it — you'll need it later as `GITHUB_WEBHOOK_SECRET`:
@@ -125,15 +125,36 @@ This lets each user authenticate with their own GitHub account. Without it, all 
 To set up per-user OAuth:
 
 1. In LangSmith, go to **Settings → OAuth Providers → Add Provider**
-2. Set the **Provider ID** to the same string you chose in step 3a (e.g. `github-oauth-provider`)
+2. Set the **Provider ID** to the same string you chose in step 3a (e.g. `your-org-github-oauth`)
 3. Enter the **Client ID** and **Client Secret** from your GitHub App (found on the GitHub App settings page under **OAuth credentials**)
-4. Save. You'll reference this Provider ID as `GITHUB_OAUTH_PROVIDER_ID` in your environment variables.
+4. Enter the **Authorization URL** as `https://github.com/login/oauth/authorize` and the **Token URL** as `https://github.com/login/oauth/access_token`.
+5. Leave "Enable PKCE" unchecked.
+6. Save. You'll reference this Provider ID as `GITHUB_OAUTH_PROVIDER_ID` in your environment variables.
 
 ### 4c. Sandbox snapshots
 
 LangSmith sandboxes provide the isolated execution environment for each agent run. Open SWE boots each sandbox from a pre-built **snapshot** — you build the snapshot once (from a Docker image) and then reference it by UUID.
 
-Build a snapshot in the LangSmith UI (Sandboxes → Snapshots → New), or via the SDK:
+(Optional) Build and Push a custom Docker Image to Docker hub
+First build and push the sandbox Docker image to a registry LangSmith can pull from. On Apple Silicon, force `linux/amd64`
+
+```bash
+docker buildx build \
+  --platform linux/amd64 \
+  -t <your-docker-hub>/<name-of-your-image> \
+  --push .
+```
+
+For a multi-arch tag that also runs locally on Apple Silicon:
+
+```bash
+docker buildx build \
+  --platform linux/amd64,linux/arm64 \
+  -t <your-docker-hub>/<name-of-your-image> \
+  --push .
+```
+
+Then build a snapshot in the LangSmith UI (Sandboxes → Snapshots → New), or via the SDK:
 
 ```python
 from langsmith.sandbox import SandboxClient
@@ -141,10 +162,18 @@ from langsmith.sandbox import SandboxClient
 client = SandboxClient(api_key="<your key>")
 snapshot = client.create_snapshot(
     name="open-swe",
-    docker_image="bracelangchain/deepagents-sandbox:v1",  # built from ./Dockerfile
+    docker_image="johanneslangchain/open-swe-sandbox:gh-cli-amd64",  # built from ./Dockerfile
     fs_capacity_bytes=32 * 1024**3,
 )
 print(snapshot.id)
+```
+
+You can also use the helper script:
+
+```bash
+uv run python scripts/create_sandbox_snapshot.py \
+  --name open-swe-gh-cli-amd64 \
+  --image johanneslangchain/open-swe-sandbox:gh-cli-amd64
 ```
 
 Then set the resulting UUID in your environment:
@@ -157,9 +186,13 @@ DEFAULT_SANDBOX_SNAPSHOT_FS_CAPACITY_BYTES="34359738368"
 DEFAULT_SANDBOX_VCPUS="4"
 # Optional; memory in bytes per sandbox. Default is 15 GiB.
 DEFAULT_SANDBOX_MEM_BYTES="16106127360"
+# Optional; auto-stop a sandbox after this many seconds of inactivity. Default is 600 (10 min). 0 disables.
+DEFAULT_SANDBOX_IDLE_TTL_SECONDS="600"
+# Optional; delete a stopped sandbox after this many seconds. Default is 86400 (24 hours). 0 disables.
+DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS="86400"
 ```
 
-`DEFAULT_SANDBOX_SNAPSHOT_ID` is required when `SANDBOX_TYPE=langsmith`. The server validates this at startup and refuses to boot if it's missing.
+`DEFAULT_SANDBOX_SNAPSHOT_ID` is required when `SANDBOX_TYPE=langsmith`. The server validates this at startup and refuses to boot if it's missing. The snapshot should include the GitHub CLI from the project Dockerfile; Open SWE authenticates `git` and `gh` through the LangSmith sandbox proxy using runtime-minted GitHub App installation tokens, not deployment-stored GitHub access tokens.
 
 ## 5. Set up triggers
 
@@ -180,12 +213,17 @@ GITHUB_USER_EMAIL_MAP = {
 }
 ```
 
-You should also add the GitHub organization which should be allowed to be triggered from in GitHub:
+You should also configure which GitHub organizations and/or repositories the agent is allowed to operate on. You can specify allowed orgs, specific `owner/repo` pairs, or both:
 
-`agent/webapp.py`
-```python
-ALLOWED_GITHUB_ORGS = "langchain-ai,anthropics"
+```bash
+# Allow all repos in these orgs
+ALLOWED_GITHUB_ORGS="langchain-ai,anthropics"
+
+# Allow specific repos (owner/repo format)
+ALLOWED_GITHUB_REPOS="some-user/their-repo,another-org/specific-repo"
 ```
+
+A webhook is accepted if the repo's org is in `ALLOWED_GITHUB_ORGS` **or** the `owner/repo` is in `ALLOWED_GITHUB_REPOS`. If both are empty, all repos are allowed.
 
 ### Linear (optional)
 
@@ -343,10 +381,14 @@ GITHUB_WEBHOOK_SECRET=""               # The secret you generated in step 3b
 # With these, each user authenticates with their own GitHub account.
 GITHUB_OAUTH_PROVIDER_ID=""            # The provider ID from steps 3a / 4b
 
-# === Org Allowlist (optional) ===
+# === Repo Allowlist (optional) ===
 # Comma-separated list of GitHub orgs the agent is allowed to operate on.
 # Leave empty to allow all orgs.
 ALLOWED_GITHUB_ORGS=""                 # e.g. "my-org,my-other-org"
+# Comma-separated list of specific owner/repo pairs the agent is allowed to operate on.
+# A repo is allowed if its org is in ALLOWED_GITHUB_ORGS OR its owner/repo is in ALLOWED_GITHUB_REPOS.
+# Leave both empty to allow all repos.
+ALLOWED_GITHUB_REPOS=""                # e.g. "some-user/their-repo,another-org/specific-repo"
 
 # === Default Repository ===
 # Used across all triggers when no repo is specified.
@@ -371,6 +413,8 @@ DEFAULT_SANDBOX_SNAPSHOT_ID=""         # Required when SANDBOX_TYPE=langsmith (s
 DEFAULT_SANDBOX_SNAPSHOT_FS_CAPACITY_BYTES=""  # Root FS size in bytes (default: 32 GiB)
 DEFAULT_SANDBOX_VCPUS=""               # vCPUs per sandbox (default: 4)
 DEFAULT_SANDBOX_MEM_BYTES=""           # Memory in bytes per sandbox (default: 15 GiB)
+DEFAULT_SANDBOX_IDLE_TTL_SECONDS=""    # Auto-stop after N seconds idle (default: 600; 0 disables)
+DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS=""  # Delete N seconds after stop (default: 86400; 0 disables)
 
 # === Token Encryption ===
 TOKEN_ENCRYPTION_KEY=""                # Generate with: openssl rand -base64 32

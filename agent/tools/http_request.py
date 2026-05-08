@@ -107,10 +107,8 @@ def http_request(
 ) -> dict[str, Any]:
     """Make HTTP requests to APIs and web services.
 
-    Do not use this tool to create or update the pull request for completed code
-    changes. Use `commit_and_open_pr` for that workflow so commits are pushed and
-    GitHub authentication is handled correctly. For other PR-related actions, use
-    the dedicated GitHub PR tools when available.
+    Do not use this tool for GitHub API calls. Use `GH_TOKEN=dummy gh` in the
+    sandbox so GitHub authentication is handled by the sandbox proxy.
 
     Args:
         url: Target URL

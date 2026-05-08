@@ -1,0 +1,150 @@
+[
+  {
+    "pr_title": "Anonymous: Add configurable device limit",
+    "url": "https://github.com/grafana/grafana/pull/79265",
+    "comments": [
+      {
+        "comment": "Race condition: Multiple concurrent requests could pass the device count check simultaneously and create devices beyond the limit. Consider using a database transaction or lock.",
+        "severity": "High"
+      },
+      {
+        "comment": "Anonymous authentication now fails entirely if anonDeviceService.TagDevice returns ErrDeviceLimitReached. Previously, device tagging was asynchronous and non-blocking. This change prevents anonymous users from authenticating when the device limit is reached.",
+        "severity": "Medium"
+      },
+      {
+        "comment": "This call won’t compile: dbSession.Exec(args...) is given a []interface{} where the first element is the query, but Exec’s signature requires a first parameter of type string (not an interface{} splat).",
+        "severity": "Medium"
+      },
+      {
+        "comment": "Returning ErrDeviceLimitReached when no rows were updated is misleading; the device might not exist.",
+        "severity": "Low"
+      },
+      {
+        "comment": "Time window calculation inconsistency: Using device.UpdatedAt.UTC().Add(-anonymousDeviceExpiration) as the lower bound but device.UpdatedAt as the current time may not match the intended logic. Consider using time.Now().UTC() consistently.",
+        "severity": "Low"
+      }
+    ]
+  },
+  {
+    "pr_title": "AuthZService: improve authz caching",
+    "url": "https://github.com/grafana/grafana/pull/103633",
+    "comments": [
+      {
+        "comment": "The Check operation exhibits asymmetric cache trust logic: cached permission grants are trusted and returned immediately, but cached denials from the same permission cache are ignored, leading to a fresh database lookup. This allows stale cached grants to provide access to revoked resources, posing a security risk. ",
+        "severity": "High"
+      },
+      {
+        "comment": "The test comment says the cached permissions 'allow access', but the map stores false for dashboards:uid:dash1, so checkPermission will still treat this scope as not allowed.",
+        "severity": "Low"
+      }
+    ]
+  },
+  {
+    "pr_title": "Plugins: Chore: Renamed instrumentation middleware to metrics middleware",
+    "url": "https://github.com/grafana/grafana/pull/76186",
+    "comments": [
+      {
+        "comment": "The ContextualLoggerMiddleware methods (QueryData, CallResource, CheckHealth, CollectMetrics) panic when a nil request is received. This occurs because they directly access req.PluginContext (via the instrumentContext function) without first checking if req is nil. This is a regression, as previous middleware layers gracefully handled nil requests.",
+        "severity": "High"
+      },
+      {
+        "comment": "The traceID is no longer logged for plugin requests. During a refactoring, the tracing import and the logic to extract and add traceID from the context to log parameters were removed from the LoggerMiddleware. The newly introduced ContextualLoggerMiddleware does not add this information, resulting in missing traceID in plugin request logs and impacting debugging and request tracing capabilities.",
+        "severity": "Low"
+      }
+    ]
+  },
+  {
+    "pr_title": "Advanced Query Processing Architecture",
+    "url": "https://github.com/grafana/grafana/pull/107534",
+    "comments": [
+      {
+        "comment": "The applyTemplateVariables method is called with request.filters as the third parameter, but this parameter is not used in the corresponding test setup.",
+        "severity": "Low"
+      }
+    ]
+  },
+  {
+    "pr_title": "Notification Rule Processing Engine",
+    "url": "https://github.com/grafana/grafana/pull/106778",
+    "comments": [
+      {
+        "comment": "The rendered GrafanaRuleListItem is missing the required key prop for React list items. This can cause rendering issues when the list order changes.",
+        "severity": "Medium"
+      },
+      {
+        "comment": "RuleActionsButtons is invoked with only promRule, but SilenceGrafanaRuleDrawer inside RuleActionsButtons still depends on a Grafana Ruler rule being present, so for Grafana rules coming from list views the 'Silence notifications' menu entry (now driven by Grafana Prom abilities) will toggle showSilenceDrawer without ever rendering the drawer. This means clicking 'Silence notifications' for these rules has no visible effect, even when abilities indicate silencing is allowed.",
+        "severity": "High"
+      }
+    ]
+  },
+  {
+    "pr_title": "Dual Storage Architecture",
+    "url": "https://github.com/grafana/grafana/pull/90045",
+    "comments": [
+      {
+        "comment": "The context is being created with d.Log instead of the log variable that was initialized with additional context values (name, kind, method). This means those values won't be propagated to the logging context.",
+        "severity": "Medium"
+      },
+      {
+        "comment": "Bug: calling recordLegacyDuration when storage operation fails should be recordStorageDuration.",
+        "severity": "High"
+      },
+      {
+        "comment": "Inconsistency: using name instead of options.Kind for metrics recording differs from other methods.",
+        "severity": "Medium"
+      }
+    ]
+  },
+  {
+    "pr_title": "Database Performance Optimizations",
+    "url": "https://github.com/grafana/grafana/pull/80329",
+    "comments": [
+      {
+        "comment": "The code uses Error log level for what appears to be debugging information. This will pollute error logs in production. Consider using Debug or Info level instead.",
+        "severity": "Low"
+      }
+    ]
+  },
+  {
+    "pr_title": "Frontend Asset Optimization",
+    "url": "https://github.com/grafana/grafana/pull/90939",
+    "comments": [
+      {
+        "comment": "The GetWebAssets function implements an incomplete double-checked locking pattern for caching web assets. The function first checks if the cache is populated using a read lock (RLock), and if the cache is empty, it acquires a write lock to populate it. However, it fails to re-check whether the cache was populated by another goroutine while waiting to acquire the write lock.",
+        "severity": "Medium"
+      },
+      {
+        "comment": "In addition to the missing double-check, the function has a critical flaw in its error handling: it unconditionally assigns the fetch result to the cache (line 69: entryPointAssetsCache = result) regardless of whether the fetch succeeded or failed. When an error occurs during asset fetching, result is nil, and this nil value overwrites any previously valid cache entry.",
+        "severity": "High"
+      }
+    ]
+  },
+  {
+    "pr_title": "Advanced SQL Analytics Framework",
+    "url": "https://github.com/grafana/grafana/pull/94942",
+    "comments": [
+      {
+        "comment": "The enableSqlExpressions function has flawed logic that always returns false, effectively disabling SQL expressions unconditionally:",
+        "severity": "Critical"
+      },
+      {
+        "comment": "Several methods such as NewInMemoryDB().RunCommands and db.QueryFramesInto return 'not implemented'.",
+        "severity": "High"
+      }
+    ]
+  },
+  {
+    "pr_title": "Unified Storage Performance Optimizations",
+    "url": "https://github.com/grafana/grafana/pull/97529",
+    "comments": [
+      {
+        "comment": "A race condition in BuildIndex allows multiple goroutines to concurrently build the same expensive index for the same key. This is caused by moving the b.cacheMu lock from protecting the entire function to only protecting the final cache assignment. ",
+        "severity": "High"
+      },
+      {
+        "comment": "Calling s.search.TotalDocs() here may race with concurrent index creation: TotalDocs iterates b.cache without synchronization, and the event watcher goroutine started just above could trigger BuildIndex writes concurrently, potentially causing a concurrent map read/write panic.",
+        "severity": "High"
+      }
+    ]
+  }
+]

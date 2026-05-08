@@ -4,6 +4,7 @@ ARG DOCKER_CLI_VERSION=5:29.1.5-1~debian.13~trixie
 ARG NODEJS_VERSION=22.22.0-1nodesource1
 ARG UV_VERSION=0.9.26
 ARG YARN_VERSION=4.12.0
+ARG GH_VERSION=2.83.1
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -29,6 +30,18 @@ RUN install -m 0755 -d /etc/apt/keyrings \
     && apt-get update \
     && apt-get install -y "docker-ce-cli=${DOCKER_CLI_VERSION}" \
     && rm -rf /var/lib/apt/lists/*
+
+RUN set -eux; \
+    arch="$(dpkg --print-architecture)"; \
+    case "${arch}" in \
+      amd64) gh_arch="amd64" ;; \
+      arm64) gh_arch="arm64" ;; \
+      *) echo "unsupported architecture: ${arch}" >&2; exit 1 ;; \
+    esac; \
+    curl -fsSL "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_${gh_arch}.deb" -o /tmp/gh.deb; \
+    apt-get update; \
+    apt-get install -y /tmp/gh.deb; \
+    rm -rf /tmp/gh.deb /var/lib/apt/lists/*
 
 RUN set -eux; \
     arch="$(dpkg --print-architecture)"; \
@@ -70,4 +83,5 @@ RUN echo "=== Installed versions ===" \
     && yarn --version \
     && go version \
     && docker --version \
-    && git --version
+    && git --version \
+    && gh --version

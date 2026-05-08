@@ -19,6 +19,12 @@ LANGGRAPH_URL = os.environ.get("LANGGRAPH_URL") or os.environ.get(
 def slack_thread_reply(message: str) -> dict[str, Any]:
     """Post a message to the current Slack thread.
 
+    Use this for clarifying questions, mid-run progress updates, and the final
+    summary. You can call this multiple times during a run — if you're about to
+    do long-running work (cloning, large refactors, big test runs) consider
+    posting a brief status update first so the user knows what's happening.
+    Always end the run with a final reply summarizing what you did.
+
     Format messages using Slack's mrkdwn format, NOT standard Markdown.
     Key differences: *bold*, _italic_, ~strikethrough~, <url|link text>,
     bullet lists with "• ", ```code blocks```, > blockquotes.
