@@ -24,6 +24,8 @@ from langsmith.sandbox import SandboxClientError
 
 logger = logging.getLogger(__name__)
 
+SANDBOX_RECREATED_AFTER_CLIENT_ERROR = "sandbox_recreated_after_client_error"
+
 
 def _get_name(candidate: object) -> str | None:
     if not candidate:
@@ -60,11 +62,16 @@ def _to_error_payload(e: Exception, request: ToolCallRequest | None = None) -> d
 
 
 def _to_sandbox_recreated_payload(
+    e: SandboxClientError,
     sandbox_id: str,
     request: ToolCallRequest | None = None,
 ) -> dict[str, str]:
     data: dict[str, str] = {
         "status": "error",
+        "error_type": e.__class__.__name__,
+        "previous_error": str(e),
+        "recovery": SANDBOX_RECREATED_AFTER_CLIENT_ERROR,
+        "sandbox_id": sandbox_id,
         "error": (
             "The previous sandbox became unreachable mid-run. A fresh sandbox "
             f"({sandbox_id}) has been created and cached for this thread. "
@@ -127,8 +134,12 @@ def _recreate_sandbox_for_thread_sync(thread_id: str) -> str:
     )
 
 
-def _sandbox_recreated_tool_message(sandbox_id: str, request: ToolCallRequest) -> ToolMessage:
-    data = _to_sandbox_recreated_payload(sandbox_id, request)
+def _sandbox_recreated_tool_message(
+    e: SandboxClientError,
+    sandbox_id: str,
+    request: ToolCallRequest,
+) -> ToolMessage:
+    data = _to_sandbox_recreated_payload(e, sandbox_id, request)
     return ToolMessage(
         content=json.dumps(data),
         tool_call_id=_get_tool_call_id(request),
@@ -168,7 +179,7 @@ class ToolErrorMiddleware(AgentMiddleware):
             if thread_id:
                 try:
                     sandbox_id = _recreate_sandbox_for_thread_sync(thread_id)
-                    return _sandbox_recreated_tool_message(sandbox_id, request)
+                    return _sandbox_recreated_tool_message(e, sandbox_id, request)
                 except Exception:
                     logger.exception("Failed to recreate sandbox for thread %s", thread_id)
             return _generic_error_tool_message(e, request)
@@ -189,7 +200,7 @@ class ToolErrorMiddleware(AgentMiddleware):
             if thread_id:
                 try:
                     sandbox_id = await _recreate_sandbox_for_thread(thread_id)
-                    return _sandbox_recreated_tool_message(sandbox_id, request)
+                    return _sandbox_recreated_tool_message(e, sandbox_id, request)
                 except Exception:
                     logger.exception("Failed to recreate sandbox for thread %s", thread_id)
             return _generic_error_tool_message(e, request)

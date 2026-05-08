@@ -6,7 +6,7 @@ import logging
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 from langchain.agents.middleware import AgentMiddleware, AgentState, hook_config
 from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
@@ -25,12 +25,14 @@ SANDBOX_CIRCUIT_BREAKER_THRESHOLD = 2
 SANDBOX_UNRECOVERABLE_MESSAGE = "Sandbox became unrecoverable mid-task. Please retrigger."
 
 _CIRCUIT_BREAKER_MARKER = "Sandbox circuit breaker triggered"
+_SANDBOX_RECREATED_AFTER_CLIENT_ERROR = "sandbox_recreated_after_client_error"
 _SANDBOX_ID_RE = re.compile(r"\bsb-[A-Za-z0-9-]+\b")
 
 
 @dataclass(frozen=True)
 class SandboxErrorStreak:
-    sandbox_id: str
+    reason: Literal["client_error", "recreated"]
+    sandbox_id: str | None
     count: int
 
 
@@ -64,17 +66,27 @@ def _last_message_has_circuit_breaker_marker(messages: Sequence[BaseMessage]) ->
 
 def _sandbox_error_streak(messages: Sequence[BaseMessage]) -> SandboxErrorStreak | None:
     sandbox_id: str | None = None
+    reason: Literal["client_error", "recreated"] | None = None
     count = 0
 
     for message in reversed(messages):
         if isinstance(message, ToolMessage):
             text = _content_to_text(message.content)
+            if _SANDBOX_RECREATED_AFTER_CLIENT_ERROR in text:
+                if reason is None:
+                    reason = "recreated"
+                elif reason != "recreated":
+                    break
+                count += 1
+                continue
+
             message_sandbox_id = _extract_sandbox_id(text)
             if "SandboxClientError" not in text or message_sandbox_id is None:
                 break
-            if sandbox_id is None:
+            if reason is None:
+                reason = "client_error"
                 sandbox_id = message_sandbox_id
-            elif message_sandbox_id != sandbox_id:
+            elif reason != "client_error" or message_sandbox_id != sandbox_id:
                 break
             count += 1
             continue
@@ -85,9 +97,9 @@ def _sandbox_error_streak(messages: Sequence[BaseMessage]) -> SandboxErrorStreak
         if getattr(message, "type", "") in {"human", "system"}:
             break
 
-    if sandbox_id is None:
+    if reason is None:
         return None
-    return SandboxErrorStreak(sandbox_id=sandbox_id, count=count)
+    return SandboxErrorStreak(reason=reason, sandbox_id=sandbox_id, count=count)
 
 
 def _get_slack_target(configurable: Mapping[str, Any]) -> tuple[str, str] | None:
@@ -209,10 +221,13 @@ class SandboxCircuitBreakerMiddleware(AgentMiddleware[AgentState, Any]):
         if streak is None or streak.count <= self.threshold:
             return None
 
-        content = (
-            f"{_CIRCUIT_BREAKER_MARKER}: {streak.count} consecutive sandbox tool "
-            f"failures against {streak.sandbox_id}. {SANDBOX_UNRECOVERABLE_MESSAGE}"
-        )
+        if streak.reason == "recreated":
+            detail = (
+                f"{streak.count} consecutive sandbox recreations did not recover tool execution"
+            )
+        else:
+            detail = f"{streak.count} consecutive sandbox tool failures against {streak.sandbox_id}"
+        content = f"{_CIRCUIT_BREAKER_MARKER}: {detail}. {SANDBOX_UNRECOVERABLE_MESSAGE}"
         return {"jump_to": "end", "messages": [AIMessage(content=content)]}
 
     @hook_config(can_jump_to=["end"])

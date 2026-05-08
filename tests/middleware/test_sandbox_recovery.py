@@ -74,8 +74,10 @@ async def test_sandbox_client_error_recreates_sandbox() -> None:
 
         payload = json.loads(result.content)
         assert payload["status"] == "error"
+        assert payload["error_type"] == "SandboxClientError"
+        assert payload["recovery"] == "sandbox_recreated_after_client_error"
+        assert payload["previous_error"] == "Sandbox request timed out: sb-dead"
         assert "sb-new" in payload["error"]
-        assert "SandboxClientError" not in payload["error"]
     finally:
         SANDBOX_BACKENDS.pop("thread-1", None)
 
@@ -104,6 +106,61 @@ def test_repeated_sandbox_errors_trigger_circuit_breaker_once() -> None:
         MagicMock(),
     )
     assert repeated is None
+
+
+def test_repeated_sandbox_recreations_trigger_circuit_breaker() -> None:
+    middleware = SandboxCircuitBreakerMiddleware(threshold=2)
+    messages = [
+        HumanMessage(content="please fix this"),
+        AIMessage(content="", tool_calls=[{"name": "ls", "args": {}, "id": "tc1"}]),
+        ToolMessage(
+            content=json.dumps(
+                {
+                    "error_type": "SandboxClientError",
+                    "previous_error": "Sandbox request timed out: sb-old-1",
+                    "recovery": "sandbox_recreated_after_client_error",
+                    "sandbox_id": "sb-new-1",
+                    "status": "error",
+                }
+            ),
+            tool_call_id="tc1",
+            status="error",
+        ),
+        AIMessage(content="", tool_calls=[{"name": "grep", "args": {}, "id": "tc2"}]),
+        ToolMessage(
+            content=json.dumps(
+                {
+                    "error_type": "SandboxClientError",
+                    "previous_error": "Sandbox request timed out: sb-new-1",
+                    "recovery": "sandbox_recreated_after_client_error",
+                    "sandbox_id": "sb-new-2",
+                    "status": "error",
+                }
+            ),
+            tool_call_id="tc2",
+            status="error",
+        ),
+        AIMessage(content="", tool_calls=[{"name": "execute", "args": {}, "id": "tc3"}]),
+        ToolMessage(
+            content=json.dumps(
+                {
+                    "error_type": "SandboxClientError",
+                    "previous_error": "Sandbox request timed out: sb-new-2",
+                    "recovery": "sandbox_recreated_after_client_error",
+                    "sandbox_id": "sb-new-3",
+                    "status": "error",
+                }
+            ),
+            tool_call_id="tc3",
+            status="error",
+        ),
+    ]
+
+    result = middleware.before_model({"messages": messages}, MagicMock())
+
+    assert result is not None
+    assert result["jump_to"] == "end"
+    assert "consecutive sandbox recreations" in result["messages"][0].content
 
 
 @pytest.mark.asyncio
