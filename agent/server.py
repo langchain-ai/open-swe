@@ -34,6 +34,7 @@ from .middleware import (
     check_message_queue_before_model,
     ensure_no_empty_msg,
     notify_step_limit_reached,
+    refresh_slack_assistant_status_before_model,
 )
 from .prompt import construct_system_prompt
 from .tools import (
@@ -371,6 +372,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             ModelCallLimitMiddleware(run_limit=MODEL_CALL_RECURSION_LIMIT, exit_behavior="end"),
             ToolErrorMiddleware(),
             check_message_queue_before_model,
+            refresh_slack_assistant_status_before_model,
             ensure_no_empty_msg,
             notify_step_limit_reached,
         ],

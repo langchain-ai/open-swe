@@ -271,10 +271,15 @@ async def set_slack_assistant_status(
 ) -> bool:
     """Set the assistant typing/status indicator on a Slack thread.
 
-    Wraps Slack's `assistants.threads.setStatus` API. No-op (returning False)
-    when the assistants feature flag is disabled, the bot token is missing, or
-    the channel/thread is not provided. Failures are logged but never raised —
-    the status indicator is a UX nicety, not a correctness requirement.
+    Wraps Slack's `assistants.threads.setStatus` API. The `chat:write` scope
+    on the bot token is sufficient. Status auto-clears when the bot posts to
+    the thread, and Slack itself expires it after ~2 minutes — callers that
+    want it visible across longer runs must refresh it periodically.
+
+    No-op (returning False) when the assistants feature flag is disabled,
+    the bot token is missing, or the channel/thread is not provided.
+    Failures are logged but never raised — the indicator is a UX nicety,
+    not a correctness requirement.
     """
     if not _is_slack_assistants_api_enabled():
         return False
@@ -305,11 +310,6 @@ async def set_slack_assistant_status(
             return False
 
 
-async def clear_slack_assistant_status(channel_id: str, thread_ts: str) -> bool:
-    """Clear the assistant typing/status indicator on a Slack thread."""
-    return await set_slack_assistant_status(channel_id, thread_ts, status="")
-
-
 async def post_slack_thread_reply(channel_id: str, thread_ts: str, text: str) -> bool:
     """Post a reply in a Slack thread."""
     if not SLACK_BOT_TOKEN:
@@ -333,13 +333,10 @@ async def post_slack_thread_reply(channel_id: str, thread_ts: str, text: str) ->
             if not data.get("ok"):
                 logger.warning("Slack chat.postMessage failed: %s", data.get("error"))
                 return False
+            return True
         except httpx.HTTPError:
             logger.exception("Slack chat.postMessage request failed")
             return False
-
-    if _is_slack_assistants_api_enabled():
-        await clear_slack_assistant_status(channel_id, thread_ts)
-    return True
 
 
 async def post_slack_ephemeral_message(

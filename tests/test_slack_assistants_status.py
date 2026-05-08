@@ -97,45 +97,11 @@ async def test_set_slack_assistant_status_returns_false_on_slack_error(
 
 
 @pytest.mark.asyncio
-async def test_clear_slack_assistant_status_sends_empty_status(
+async def test_post_slack_thread_reply_does_not_call_set_status(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Slack auto-clears the indicator on post; no extra setStatus call needed."""
     monkeypatch.setenv("SLACK_ASSISTANTS_API_ENABLED", "true")
-    monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
-
-    client_cm = _async_client_cm(_ok_response())
-    with patch.object(slack_utils.httpx, "AsyncClient", return_value=client_cm):
-        ok = await slack_utils.clear_slack_assistant_status("C1", "1.0")
-
-    assert ok is True
-    _, kwargs = client_cm.post.call_args
-    assert kwargs["json"]["status"] == ""
-
-
-@pytest.mark.asyncio
-async def test_post_slack_thread_reply_clears_status_when_flag_enabled(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("SLACK_ASSISTANTS_API_ENABLED", "true")
-    monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
-
-    client_cm = _async_client_cm(_ok_response())
-    with patch.object(slack_utils.httpx, "AsyncClient", return_value=client_cm):
-        ok = await slack_utils.post_slack_thread_reply("C1", "1.0", "hello")
-
-    assert ok is True
-    # 1 call for chat.postMessage, 1 for assistants.threads.setStatus (clear)
-    assert client_cm.post.await_count == 2
-    endpoints = [call.args[0] for call in client_cm.post.await_args_list]
-    assert any(url.endswith("/chat.postMessage") for url in endpoints)
-    assert any(url.endswith("/assistants.threads.setStatus") for url in endpoints)
-
-
-@pytest.mark.asyncio
-async def test_post_slack_thread_reply_skips_clear_when_flag_disabled(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.delenv("SLACK_ASSISTANTS_API_ENABLED", raising=False)
     monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
 
     client_cm = _async_client_cm(_ok_response())
@@ -145,21 +111,6 @@ async def test_post_slack_thread_reply_skips_clear_when_flag_disabled(
     assert ok is True
     assert client_cm.post.await_count == 1
     assert client_cm.post.call_args.args[0].endswith("/chat.postMessage")
-
-
-@pytest.mark.asyncio
-async def test_post_slack_thread_reply_does_not_clear_on_failure(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("SLACK_ASSISTANTS_API_ENABLED", "true")
-    monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
-
-    client_cm = _async_client_cm(_err_response("channel_not_found"))
-    with patch.object(slack_utils.httpx, "AsyncClient", return_value=client_cm):
-        ok = await slack_utils.post_slack_thread_reply("C1", "1.0", "hello")
-
-    assert ok is False
-    assert client_cm.post.await_count == 1
 
 
 def test_is_slack_assistants_api_enabled_truthy_values(
