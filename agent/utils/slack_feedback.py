@@ -11,7 +11,7 @@ from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
 
 from .langsmith import create_langsmith_feedback, delete_langsmith_feedback
-from .slack import lookup_run_id_for_slack_message
+from .slack import lookup_slack_run_mapping
 
 logger = logging.getLogger(__name__)
 
@@ -42,8 +42,8 @@ def _read_active_reactions(item: dict[str, Any] | None) -> set[str]:
     return {reaction for reaction in reactions if isinstance(reaction, str)}
 
 
-def _feedback_key(user_id: str, message_ts: str) -> str:
-    return f"slack_reaction:{user_id}:{message_ts}"
+def _feedback_key(channel_id: str, user_id: str, message_ts: str) -> str:
+    return f"slack_reaction:{channel_id}:{user_id}:{message_ts}"
 
 
 def _reaction_state_key(run_id: str, user_id: str, message_ts: str) -> str:
@@ -103,12 +103,17 @@ async def _update_reaction_state(
 
 
 def _score_reactions(reactions: set[str]) -> float | None:
-    scores = [
+    scores = {
         FEEDBACK_REACTIONS[reaction] for reaction in reactions if reaction in FEEDBACK_REACTIONS
-    ]
+    }
     if not scores:
         return None
-    return sum(scores) / len(scores)
+    if len(scores) > 1:
+        # Conflicting positive + negative reactions from the same user — treat
+        # as ambiguous and clear feedback rather than recording a misleading
+        # average score.
+        return None
+    return next(iter(scores))
 
 
 async def process_slack_reaction(
@@ -142,12 +147,27 @@ async def process_slack_reaction(
     if await _event_was_processed(langgraph_client, channel_id, event_id):
         return
 
-    run_id = await lookup_run_id_for_slack_message(langgraph_client, channel_id, message_ts)
-    if not run_id:
+    mapping = await lookup_slack_run_mapping(langgraph_client, channel_id, message_ts)
+    if not mapping:
         logger.debug(
             "No run mapping for Slack reaction on channel=%s message=%s",
             channel_id,
             message_ts,
+        )
+        return
+    run_id_value = mapping.get("run_id")
+    if not isinstance(run_id_value, str) or not run_id_value:
+        return
+    run_id = run_id_value
+
+    triggering_user_id = mapping.get("triggering_user_id")
+    if isinstance(triggering_user_id, str) and triggering_user_id and triggering_user_id != user_id:
+        # Only the user who triggered the run may give feedback on it. Other
+        # reactors are ignored to keep eval signal clean in shared channels.
+        logger.debug(
+            "Ignoring Slack reaction from non-triggering user=%s on run=%s",
+            user_id,
+            run_id,
         )
         return
 
@@ -161,7 +181,7 @@ async def process_slack_reaction(
         added=added,
     )
 
-    key = _feedback_key(user_id, message_ts)
+    key = _feedback_key(channel_id, user_id, message_ts)
     source_info = {
         "source": "slack_reaction",
         "channel_id": channel_id,

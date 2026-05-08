@@ -991,6 +991,7 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
                 thread_ts,
                 run_id,
                 message_ts=trace_message_ts,
+                triggering_user_id=user_id,
             )
     else:
         logger.info(
@@ -1003,6 +1004,7 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
                 channel_id,
                 thread_ts,
                 run_id,
+                triggering_user_id=user_id,
             )
 
 

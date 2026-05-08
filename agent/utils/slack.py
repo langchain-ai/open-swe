@@ -746,10 +746,13 @@ async def store_slack_run_mapping(
     run_id: str,
     *,
     message_ts: str | None = None,
+    triggering_user_id: str | None = None,
 ) -> None:
     """Persist Slack thread/message to LangGraph run mapping."""
     namespace = (_SLACK_RUN_MAP_NAMESPACE, channel_id)
-    value = {"run_id": run_id, "thread_ts": thread_ts}
+    value: dict[str, Any] = {"run_id": run_id, "thread_ts": thread_ts}
+    if triggering_user_id:
+        value["triggering_user_id"] = triggering_user_id
     try:
         await langgraph_client.store.put_item(
             namespace, f"{_THREAD_RUN_KEY_PREFIX}{thread_ts}", value
@@ -789,12 +792,20 @@ async def store_slack_message_run_mapping(
                 thread_ts,
             )
             return
+        triggering_user_id: str | None = None
+        if isinstance(item, dict):
+            value = item.get("value")
+            if isinstance(value, dict):
+                candidate = value.get("triggering_user_id")
+                if isinstance(candidate, str) and candidate:
+                    triggering_user_id = candidate
         await store_slack_run_mapping(
             langgraph_client,
             channel_id,
             thread_ts,
             run_id,
             message_ts=message_ts,
+            triggering_user_id=triggering_user_id,
         )
     except Exception:
         logger.exception(
@@ -804,18 +815,17 @@ async def store_slack_message_run_mapping(
         )
 
 
-async def lookup_run_id_for_slack_message(
+async def lookup_slack_run_mapping(
     langgraph_client: LangGraphClient,
     channel_id: str,
     message_ts: str,
-) -> str | None:
-    """Look up the LangGraph run mapped to a specific Slack bot message."""
+) -> dict[str, Any] | None:
+    """Return the stored mapping value for a Slack bot message, or None."""
     namespace = (_SLACK_RUN_MAP_NAMESPACE, channel_id)
     try:
         item = await langgraph_client.store.get_item(
             namespace, f"{_MESSAGE_RUN_KEY_PREFIX}{message_ts}"
         )
-        return _extract_run_id_from_store_item(item)
     except Exception:
         logger.exception(
             "Failed to look up Slack message run mapping for channel=%s message=%s",
@@ -823,3 +833,20 @@ async def lookup_run_id_for_slack_message(
             message_ts,
         )
         return None
+    if not item:
+        return None
+    value = item.get("value")
+    return value if isinstance(value, dict) else None
+
+
+async def lookup_run_id_for_slack_message(
+    langgraph_client: LangGraphClient,
+    channel_id: str,
+    message_ts: str,
+) -> str | None:
+    """Look up the LangGraph run mapped to a specific Slack bot message."""
+    value = await lookup_slack_run_mapping(langgraph_client, channel_id, message_ts)
+    if not value:
+        return None
+    run_id = value.get("run_id")
+    return run_id if isinstance(run_id, str) and run_id else None

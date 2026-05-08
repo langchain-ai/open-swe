@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-import functools
 import logging
 import os
 import uuid
 from typing import Any
 
 from langsmith import Client as LangSmithClient
+from langsmith.utils import LangSmithNotFoundError
 
 logger = logging.getLogger(__name__)
 
@@ -37,10 +37,11 @@ def get_langsmith_trace_url(thread_id: str) -> str | None:
         return None
 
 
-@functools.lru_cache(maxsize=1)
 def _build_langsmith_feedback_clients() -> tuple[LangSmithClient, ...]:
+    """Build feedback clients from current env. Re-read each call so rotated
+    keys / late secret hydration are picked up."""
     clients: list[LangSmithClient] = []
-    seen_keys: set[str] = set()
+    seen: set[tuple[str, str]] = set()
 
     api_endpoint = os.environ.get("LANGSMITH_ENDPOINT", "https://api.smith.langchain.com")
     client_configs = (
@@ -55,10 +56,13 @@ def _build_langsmith_feedback_clients() -> tuple[LangSmithClient, ...]:
     )
 
     for api_key, api_url in client_configs:
-        if not api_key or api_key in seen_keys:
+        if not api_key or not api_url:
+            continue
+        identity = (api_key, api_url)
+        if identity in seen:
             continue
         clients.append(LangSmithClient(api_key=api_key, api_url=api_url))
-        seen_keys.add(api_key)
+        seen.add(identity)
 
     return tuple(clients)
 
@@ -116,6 +120,8 @@ def delete_langsmith_feedback(run_id: str, key: str) -> bool:
     for client in clients:
         try:
             client.delete_feedback(feedback_id)
+            any_success = True
+        except LangSmithNotFoundError:
             any_success = True
         except Exception:
             logger.exception("Failed to delete LangSmith feedback for run %s", run_id)
