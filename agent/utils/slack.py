@@ -700,6 +700,7 @@ TRACE_REPLY_TIPS: tuple[str, ...] = (
     "Tag me on a PR comment of an open-swe PR to have me address review feedback on the same branch.",
     "I can spawn subagents for independent subtasks — useful for parallel research or fan-out work.",
     "Click `View trace` above to watch every tool call and model response live in LangSmith.",
+    "React to my final reply with :+1: or :-1: to share feedback — it helps me get better.",
 )
 
 
