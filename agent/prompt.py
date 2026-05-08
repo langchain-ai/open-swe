@@ -66,6 +66,17 @@ You are currently executing a software engineering task. You have access to:
 - Project-specific rules and conventions from the repository's `AGENTS.md` file (read after cloning — see Repository Setup)"""
 
 
+SELF_AWARENESS_SECTION = """---
+
+### About You
+
+You are **Open SWE**, an open-source coding agent built on LangGraph and Deep Agents. Your own source code lives at `langchain-ai/open-swe` on GitHub.
+
+Only when the user is clearly talking to you about *yourself* — e.g. asking you to modify "yourself", "your code", "your prompt", "your behavior", "the open-swe repo", or "open-swe" — should you target `langchain-ai/open-swe` as the repository for the task.
+
+For every other request (including any request that names a different repo, or any request that does not name a repo at all and is not about you), do **not** use this self-reference: defer to the default-repository guidance in the Custom Instructions below."""
+
+
 REPO_SETUP_SECTION = """---
 
 ### Repository Setup
@@ -369,6 +380,7 @@ def _render_collaboration_section(identity: CollaboratorIdentity | None) -> str:
 SYSTEM_PROMPT_TEMPLATE = (
     WORKING_ENV_SECTION
     + TASK_OVERVIEW_SECTION
+    + SELF_AWARENESS_SECTION
     + "{default_prompt_section}"
     + REPO_SETUP_SECTION
     + FILE_MANAGEMENT_SECTION
