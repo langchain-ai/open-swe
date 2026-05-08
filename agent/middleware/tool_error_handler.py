@@ -17,6 +17,7 @@ from langchain.agents.middleware.types import (
 from langchain_core.messages import ToolMessage
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
+from langsmith.sandbox import SandboxClientError
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +62,44 @@ def _get_tool_call_id(request: ToolCallRequest) -> str | None:
     return None
 
 
+def _get_thread_id(request: ToolCallRequest) -> str | None:
+    config = getattr(request, "config", None)
+    if not isinstance(config, dict):
+        return None
+    configurable = config.get("configurable")
+    if not isinstance(configurable, dict):
+        return None
+    thread_id = configurable.get("thread_id")
+    return thread_id if isinstance(thread_id, str) and thread_id else None
+
+
+def _sandbox_recreated_message(
+    new_backend_id: str | None,
+    original_error: Exception,
+    request: ToolCallRequest,
+) -> ToolMessage:
+    """Build a ToolMessage instructing the LLM to retry after sandbox recreation."""
+    new_id_text = new_backend_id or "<unknown>"
+    payload: dict[str, str] = {
+        "status": "error",
+        "error_type": "SandboxClientError",
+        "error": (
+            f"Sandbox was unreachable and has been recreated as sb-{new_id_text}. "
+            f"Retry the last call. ({original_error})"
+        ),
+        "sandbox_recreated": "true",
+        "new_sandbox_id": new_id_text,
+    }
+    tool_name = _extract_tool_name(request)
+    if tool_name:
+        payload["name"] = tool_name
+    return ToolMessage(
+        content=json.dumps(payload),
+        tool_call_id=_get_tool_call_id(request),
+        status="error",
+    )
+
+
 class ToolErrorMiddleware(AgentMiddleware):
     """Normalize tool execution errors into predictable payloads.
 
@@ -78,6 +117,24 @@ class ToolErrorMiddleware(AgentMiddleware):
     ) -> ToolMessage | Command:
         try:
             return handler(request)
+        except SandboxClientError as e:
+            # Mid-run sandbox death — try to recreate the backend before falling
+            # through to the generic ToolMessage path. Otherwise the agent will
+            # retry against the same dead sb-<id> indefinitely (see issue
+            # 7a78d721 / open-swe-v3 traces 019e0420, 019e04fd, 019e050e).
+            recreated = self._recreate_sandbox_sync(request)
+            if recreated is not None:
+                return _sandbox_recreated_message(recreated, e, request)
+            logger.exception(
+                "SandboxClientError during tool call and recreation failed; request=%r",
+                request,
+            )
+            data = _to_error_payload(e, request)
+            return ToolMessage(
+                content=json.dumps(data),
+                tool_call_id=_get_tool_call_id(request),
+                status="error",
+            )
         except Exception as e:
             logger.exception("Error during tool call handling; request=%r", request)
             data = _to_error_payload(e, request)
@@ -94,6 +151,21 @@ class ToolErrorMiddleware(AgentMiddleware):
     ) -> ToolMessage | Command:
         try:
             return await handler(request)
+        except SandboxClientError as e:
+            # Mid-run sandbox death — see wrap_tool_call comment above.
+            recreated = await self._arecreate_sandbox(request)
+            if recreated is not None:
+                return _sandbox_recreated_message(recreated, e, request)
+            logger.exception(
+                "SandboxClientError during tool call and recreation failed; request=%r",
+                request,
+            )
+            data = _to_error_payload(e, request)
+            return ToolMessage(
+                content=json.dumps(data),
+                tool_call_id=_get_tool_call_id(request),
+                status="error",
+            )
         except Exception as e:
             logger.exception("Error during tool call handling; request=%r", request)
             data = _to_error_payload(e, request)
@@ -102,3 +174,56 @@ class ToolErrorMiddleware(AgentMiddleware):
                 tool_call_id=_get_tool_call_id(request),
                 status="error",
             )
+
+    @staticmethod
+    async def _arecreate_sandbox(request: ToolCallRequest) -> str | None:
+        """Recreate the sandbox for this thread; return new sandbox id or None."""
+        thread_id = _get_thread_id(request)
+        if not thread_id:
+            logger.warning(
+                "Cannot recover from SandboxClientError: thread_id missing from request config"
+            )
+            return None
+        # Local import to avoid circular import (server.py imports this module).
+        try:
+            from agent.server import _recreate_sandbox  # noqa: PLC0415
+        except Exception:
+            logger.exception("Failed to import _recreate_sandbox for mid-run recovery")
+            return None
+        try:
+            new_backend = await _recreate_sandbox(thread_id)
+        except Exception:
+            logger.exception(
+                "Sandbox recreation failed mid-run for thread %s", thread_id
+            )
+            return None
+        # Update the shared cache so subsequent calls (and the next agent step)
+        # pick up the new handle.
+        try:
+            from agent.utils.sandbox_state import SANDBOX_BACKENDS  # noqa: PLC0415
+
+            SANDBOX_BACKENDS[thread_id] = new_backend
+        except Exception:
+            logger.exception("Failed to update SANDBOX_BACKENDS cache after recreation")
+        return getattr(new_backend, "id", None)
+
+    @staticmethod
+    def _recreate_sandbox_sync(request: ToolCallRequest) -> str | None:
+        """Sync wrapper for _arecreate_sandbox."""
+        import asyncio  # noqa: PLC0415
+
+        try:
+            return asyncio.run(ToolErrorMiddleware._arecreate_sandbox(request))
+        except RuntimeError:
+            # Already inside an event loop — fall back to a fresh loop.
+            try:
+                loop = asyncio.new_event_loop()
+                try:
+                    return loop.run_until_complete(
+                        ToolErrorMiddleware._arecreate_sandbox(request)
+                    )
+                finally:
+                    loop.close()
+            except Exception:
+                logger.exception("Failed sync sandbox recreation")
+                return None
