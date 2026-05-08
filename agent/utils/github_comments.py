@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 OPEN_SWE_TAGS = ("@openswe", "@open-swe", "@openswe-dev")
 _OPEN_SWE_MENTION_RE = re.compile(r"(?i)@(?:openswe-dev|open-swe|openswe)\b")
-_REVIEW_COMMAND_RE = re.compile(r"(?is)\Areview(?:\s+(\S+))?\s*\Z")
+_REVIEW_COMMAND_RE = re.compile(r"(?i)\Areview(?:\s+(https?://\S+))?\s*\Z")
 UNTRUSTED_GITHUB_COMMENT_OPEN_TAG = "<dangerous-external-untrusted-users-comment>"
 UNTRUSTED_GITHUB_COMMENT_CLOSE_TAG = "</dangerous-external-untrusted-users-comment>"
 _SANITIZED_UNTRUSTED_GITHUB_COMMENT_OPEN_TAG = "[blocked-untrusted-comment-tag-open]"

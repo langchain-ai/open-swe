@@ -1048,6 +1048,23 @@ def test_parse_github_review_command_freeform_does_not_match() -> None:
     assert github_comments.parse_github_review_command("") == (False, None)
 
 
+def test_parse_github_review_command_does_not_swallow_trailing_text() -> None:
+    # Trailing text after `review` (on a new line, with punctuation, or extra
+    # words) must NOT be parsed as a URL — otherwise the comment would be
+    # silently dropped instead of falling through to the regular handler.
+    assert github_comments.parse_github_review_command("@open-swe review\nthanks!") == (
+        False,
+        None,
+    )
+    assert github_comments.parse_github_review_command("@open-swe review please") == (False, None)
+    assert github_comments.parse_github_review_command("@open-swe review now") == (False, None)
+    # Non-http schemes are not URLs we can route to a PR.
+    assert github_comments.parse_github_review_command("@open-swe review ftp://x/y/pull/1") == (
+        False,
+        None,
+    )
+
+
 def test_github_webhook_routes_pr_comment_review_to_reviewer(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
