@@ -119,11 +119,16 @@ class _FakeSocket:
         self.socktype = socktype
         self.proto = proto
         self.connected_to = None
+        self.timeout = None
+        self.sockopts: list = []
         self.closed = False
         _FakeSocket.instances.append(self)
 
-    def settimeout(self, _t):
-        pass
+    def settimeout(self, t):
+        self.timeout = t
+
+    def setsockopt(self, *opt):
+        self.sockopts.append(opt)
 
     def bind(self, _addr):
         pass
@@ -257,3 +262,34 @@ def test_pin_install_count_unwinds() -> None:
     assert http_request_tool.urllib3_connection.create_connection is sentinel_original
     assert http_request_tool._install_count == 0
     assert http_request_tool._original_create_connection is None
+
+
+def test_pinned_connection_propagates_timeout_and_socket_options(monkeypatch) -> None:
+    """urllib3 calls create_connection with a positional timeout and keyword
+    socket_options; the pinned wrapper must forward both to the underlying socket
+    so connect timeouts and TCP options aren't silently dropped.
+    """
+    hostname = "pinned.example.com"
+    public_addr = "93.184.216.34"
+    addr_infos = [_addr_info(public_addr)]
+
+    _FakeSocket.instances = []
+    monkeypatch.setattr(http_request_tool.socket, "socket", _FakeSocket)
+
+    sock_opts = [(real_socket.IPPROTO_TCP, real_socket.TCP_NODELAY, 1)]
+
+    with http_request_tool._pin_dns(hostname, addr_infos):
+        # Match how urllib3.connection calls create_connection:
+        # positional timeout, keyword source_address + socket_options.
+        http_request_tool._pinned_create_connection(
+            (hostname, 80),
+            7.5,
+            source_address=None,
+            socket_options=sock_opts,
+        )
+
+    assert len(_FakeSocket.instances) == 1
+    sock = _FakeSocket.instances[0]
+    assert sock.connected_to == (public_addr, 80)
+    assert sock.timeout == 7.5, f"connect timeout was dropped: {sock.timeout!r}"
+    assert sock.sockopts == sock_opts, f"socket_options were dropped: {sock.sockopts!r}"

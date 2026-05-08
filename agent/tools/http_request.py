@@ -25,12 +25,21 @@ def _get_pin_stack() -> list[dict[str, list]]:
     return stack
 
 
-def _pinned_create_connection(address, *args, **kwargs):
+def _pinned_create_connection(
+    address,
+    timeout=socket._GLOBAL_DEFAULT_TIMEOUT,
+    source_address=None,
+    socket_options=None,
+):
     """Drop-in for urllib3.util.connection.create_connection that honors DNS pins.
 
     When the calling thread has an active _pin_dns context for this host, the
     connection uses the pre-validated addresses instead of calling
     socket.getaddrinfo again — closing the DNS-rebinding race.
+
+    `timeout` and `socket_options` are accepted positionally because urllib3
+    calls create_connection with timeout positional; reading them from kwargs
+    only would silently drop the caller's connect timeout and TCP options.
     """
     host, port = address
     if host.startswith("[") and host.endswith("]"):
@@ -41,7 +50,12 @@ def _pinned_create_connection(address, *args, **kwargs):
     pinned = pins.get(host) if pins else None
 
     if pinned is None:
-        return _original_create_connection(address, *args, **kwargs)
+        return _original_create_connection(
+            address,
+            timeout,
+            source_address=source_address,
+            socket_options=socket_options,
+        )
 
     err = None
     for family, socktype, proto, _canonname, sockaddr in pinned:
@@ -56,10 +70,10 @@ def _pinned_create_connection(address, *args, **kwargs):
         sock = None
         try:
             sock = socket.socket(family, socktype, proto)
-            timeout = kwargs.get("timeout", socket._GLOBAL_DEFAULT_TIMEOUT)
+            for opt in socket_options or ():
+                sock.setsockopt(*opt)
             if timeout is not socket._GLOBAL_DEFAULT_TIMEOUT:
                 sock.settimeout(timeout)
-            source_address = kwargs.get("source_address")
             if source_address:
                 sock.bind(source_address)
             sock.connect(target)
