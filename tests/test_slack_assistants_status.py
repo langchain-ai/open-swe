@@ -83,6 +83,57 @@ async def test_set_slack_assistant_status_calls_correct_endpoint(
 
 
 @pytest.mark.asyncio
+async def test_set_slack_assistant_status_passes_loading_messages(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SLACK_ASSISTANTS_API_ENABLED", "true")
+    monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
+
+    client_cm = _async_client_cm(_ok_response())
+    with patch.object(slack_utils.httpx, "AsyncClient", return_value=client_cm):
+        await slack_utils.set_slack_assistant_status(
+            "C1", "1.0", "thinking…", loading_messages=["a", "b", "c"]
+        )
+
+    _, kwargs = client_cm.post.call_args
+    assert kwargs["json"]["loading_messages"] == ["a", "b", "c"]
+
+
+@pytest.mark.asyncio
+async def test_set_slack_assistant_status_caps_loading_messages_at_10(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SLACK_ASSISTANTS_API_ENABLED", "true")
+    monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
+
+    client_cm = _async_client_cm(_ok_response())
+    with patch.object(slack_utils.httpx, "AsyncClient", return_value=client_cm):
+        await slack_utils.set_slack_assistant_status(
+            "C1", "1.0", loading_messages=[f"m{i}" for i in range(15)]
+        )
+
+    _, kwargs = client_cm.post.call_args
+    assert len(kwargs["json"]["loading_messages"]) == 10
+    assert kwargs["json"]["loading_messages"][0] == "m0"
+    assert kwargs["json"]["loading_messages"][-1] == "m9"
+
+
+@pytest.mark.asyncio
+async def test_set_slack_assistant_status_omits_loading_messages_when_unset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SLACK_ASSISTANTS_API_ENABLED", "true")
+    monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
+
+    client_cm = _async_client_cm(_ok_response())
+    with patch.object(slack_utils.httpx, "AsyncClient", return_value=client_cm):
+        await slack_utils.set_slack_assistant_status("C1", "1.0", "thinking…")
+
+    _, kwargs = client_cm.post.call_args
+    assert "loading_messages" not in kwargs["json"]
+
+
+@pytest.mark.asyncio
 async def test_set_slack_assistant_status_returns_false_on_slack_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -36,6 +36,19 @@ def _is_slack_assistants_api_enabled() -> bool:
 
 DEFAULT_ASSISTANT_STATUS = "is thinking…"
 
+# Curated rotating loading strings shown by Slack while the indicator is active.
+# Capped at 10 by Slack's API.
+DEFAULT_LOADING_MESSAGES: tuple[str, ...] = (
+    "reading the repo…",
+    "tracing call sites…",
+    "thinking through edge cases…",
+    "running commands…",
+    "drafting changes…",
+    "double-checking the diff…",
+    "writing tests…",
+    "tidying up…",
+)
+
 
 @dataclass(frozen=True)
 class GitHubPrRef:
@@ -267,7 +280,10 @@ def format_slack_messages_for_prompt(
 
 
 async def set_slack_assistant_status(
-    channel_id: str, thread_ts: str, status: str = DEFAULT_ASSISTANT_STATUS
+    channel_id: str,
+    thread_ts: str,
+    status: str = DEFAULT_ASSISTANT_STATUS,
+    loading_messages: list[str] | tuple[str, ...] | None = None,
 ) -> bool:
     """Set the assistant typing/status indicator on a Slack thread.
 
@@ -275,6 +291,9 @@ async def set_slack_assistant_status(
     on the bot token is sufficient. Status auto-clears when the bot posts to
     the thread, and Slack itself expires it after ~2 minutes — callers that
     want it visible across longer runs must refresh it periodically.
+
+    `loading_messages` is an optional list (max 10) of strings Slack rotates
+    through while the indicator is visible.
 
     No-op (returning False) when the assistants feature flag is disabled,
     the bot token is missing, or the channel/thread is not provided.
@@ -286,11 +305,13 @@ async def set_slack_assistant_status(
     if not SLACK_BOT_TOKEN or not channel_id or not thread_ts:
         return False
 
-    payload = {
+    payload: dict[str, Any] = {
         "channel_id": channel_id,
         "thread_ts": thread_ts,
         "status": status,
     }
+    if loading_messages:
+        payload["loading_messages"] = list(loading_messages)[:10]
 
     async with httpx.AsyncClient() as http_client:
         try:
