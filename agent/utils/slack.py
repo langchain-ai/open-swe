@@ -701,6 +701,16 @@ TRACE_REPLY_TIPS: tuple[str, ...] = (
     "I can spawn subagents for independent subtasks — useful for parallel research or fan-out work.",
     "Click `View trace` above to watch every tool call and model response live in LangSmith.",
     "React to my final reply with :+1: or :-1: to share feedback — it helps me get better.",
+    "Send me `review <github-pr-url>` in Slack and I'll spin up the reviewer agent to leave inline comments on that PR.",
+    "Pasting a GitHub URL into your message also works to point me at a repo — no `repo:` prefix needed.",
+    "Attach screenshots or images directly in Slack or Linear — I'll read them as part of the task context.",
+    "Tag `@openswe` on a Linear issue and I'll pull in the full title, description, and comment thread before starting.",
+    "I also pick up `@openswe` mentions in GitHub issue bodies and comments — not just on PRs.",
+    "On a GitHub PR, comment `@open-swe review` to trigger the reviewer agent and get inline review comments.",
+    "Each thread keeps a persistent sandbox — follow-up runs reuse the same workspace, so my context sticks around.",
+    "When I review a PR, small fixes come back as `suggestion` blocks you can apply with one click on GitHub.",
+    "If my sandbox gets disconnected mid-run, I'll auto-recreate it and keep going — you don't have to retrigger.",
+    "I authenticate to GitHub as you (via OAuth) or fall back to the GitHub App, so I only touch repos you can access.",
 )
 
 
