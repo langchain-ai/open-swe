@@ -26,6 +26,17 @@ GITHUB_PR_URL_RE = re.compile(r"https?://(?:www\.)?github\.com/[^\s<>|]+/[^\s<>|
 URL_RE = re.compile(r"https?://[^\s<>|]+")
 
 
+def _is_slack_assistants_api_enabled() -> bool:
+    """Whether the Slack Assistants API integration is enabled.
+
+    Read at call time so tests and runtime can toggle via env without reimports.
+    """
+    return os.environ.get("SLACK_ASSISTANTS_API_ENABLED", "").lower() in {"1", "true", "yes"}
+
+
+DEFAULT_ASSISTANT_STATUS = "is thinking…"
+
+
 @dataclass(frozen=True)
 class GitHubPrRef:
     owner: str
@@ -255,6 +266,50 @@ def format_slack_messages_for_prompt(
     return "\n".join(lines)
 
 
+async def set_slack_assistant_status(
+    channel_id: str, thread_ts: str, status: str = DEFAULT_ASSISTANT_STATUS
+) -> bool:
+    """Set the assistant typing/status indicator on a Slack thread.
+
+    Wraps Slack's `assistants.threads.setStatus` API. No-op (returning False)
+    when the assistants feature flag is disabled, the bot token is missing, or
+    the channel/thread is not provided. Failures are logged but never raised —
+    the status indicator is a UX nicety, not a correctness requirement.
+    """
+    if not _is_slack_assistants_api_enabled():
+        return False
+    if not SLACK_BOT_TOKEN or not channel_id or not thread_ts:
+        return False
+
+    payload = {
+        "channel_id": channel_id,
+        "thread_ts": thread_ts,
+        "status": status,
+    }
+
+    async with httpx.AsyncClient() as http_client:
+        try:
+            response = await http_client.post(
+                f"{SLACK_API_BASE_URL}/assistants.threads.setStatus",
+                headers=_slack_headers(),
+                json=payload,
+            )
+            response.raise_for_status()
+            data = response.json()
+            if not data.get("ok"):
+                logger.warning("Slack assistants.threads.setStatus failed: %s", data.get("error"))
+                return False
+            return True
+        except httpx.HTTPError:
+            logger.exception("Slack assistants.threads.setStatus request failed")
+            return False
+
+
+async def clear_slack_assistant_status(channel_id: str, thread_ts: str) -> bool:
+    """Clear the assistant typing/status indicator on a Slack thread."""
+    return await set_slack_assistant_status(channel_id, thread_ts, status="")
+
+
 async def post_slack_thread_reply(channel_id: str, thread_ts: str, text: str) -> bool:
     """Post a reply in a Slack thread."""
     if not SLACK_BOT_TOKEN:
@@ -278,10 +333,13 @@ async def post_slack_thread_reply(channel_id: str, thread_ts: str, text: str) ->
             if not data.get("ok"):
                 logger.warning("Slack chat.postMessage failed: %s", data.get("error"))
                 return False
-            return True
         except httpx.HTTPError:
             logger.exception("Slack chat.postMessage request failed")
             return False
+
+    if _is_slack_assistants_api_enabled():
+        await clear_slack_assistant_status(channel_id, thread_ts)
+    return True
 
 
 async def post_slack_ephemeral_message(

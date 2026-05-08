@@ -64,6 +64,7 @@ from .utils.slack import (
     post_slack_trace_reply,
     resolve_slack_links_in_context,
     select_slack_context_messages,
+    set_slack_assistant_status,
     strip_bot_mention,
     verify_slack_signature,
 )
@@ -766,6 +767,8 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
             channel_id,
         )
 
+    await set_slack_assistant_status(channel_id, thread_ts)
+
     thread_id = generate_thread_id_from_slack_thread(channel_id, thread_ts)
 
     user_email = None
@@ -916,6 +919,7 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
 async def process_slack_pr_review_request(
     pr_ref: GitHubPrRef, channel_id: str, thread_ts: str
 ) -> None:
+    await set_slack_assistant_status(channel_id, thread_ts)
     result = await trigger_pr_review_from_ref(
         pr_ref,
         source="slack",
