@@ -208,6 +208,13 @@ async def compute_diff_in_sandbox(
     operator = "..." if merge_base else ".."
     cmd = f"cd {work_dir} && git diff --no-color {base_ref}{operator}{head_ref}"
     result = await asyncio.to_thread(sandbox_backend.execute, cmd)
+    exit_code = getattr(result, "exit_code", None)
+    if exit_code not in (0, None):
+        output = _stdout_from_result(result)
+        raise RuntimeError(
+            f"git diff failed (exit {exit_code}) for "
+            f"{base_ref}{operator}{head_ref} in {work_dir}. Output:\n{output}"
+        )
     return _stdout_from_result(result)
 
 

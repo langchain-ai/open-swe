@@ -179,7 +179,14 @@ async def _ensure_repo_checked_out(
     )
     import asyncio
 
-    await asyncio.to_thread(sandbox_backend.execute, script)
+    result = await asyncio.to_thread(sandbox_backend.execute, script)
+    exit_code = getattr(result, "exit_code", None)
+    if exit_code not in (0, None):
+        output = getattr(result, "output", "") or ""
+        raise RuntimeError(
+            f"Repo checkout failed (exit {exit_code}) for {owner}/{repo} "
+            f"@ {head_sha} (base {base_sha}). Script output:\n{output}"
+        )
 
 
 def _build_first_review_context(
@@ -326,7 +333,11 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
                 )
             diff_line_set = compute_diff_line_set(diff_text)
         except Exception:
+            # Don't swallow: an empty diff makes the agent emit a misleading
+            # "no issues found" review. Re-raise so the failure surfaces in
+            # the LangSmith trace with stderr from the sandbox commands.
             logger.exception("Reviewer prep failed for thread %s", thread_id)
+            raise
 
     config["configurable"]["diff_text"] = diff_text
     config["configurable"]["diff_line_set"] = {
