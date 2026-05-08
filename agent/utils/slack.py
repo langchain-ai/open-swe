@@ -287,7 +287,7 @@ async def set_slack_assistant_status(
 ) -> bool:
     """Set the assistant typing/status indicator on a Slack thread.
 
-    Wraps Slack's `assistants.threads.setStatus` API. The `chat:write` scope
+    Wraps Slack's `assistant.threads.setStatus` API. The `chat:write` scope
     on the bot token is sufficient. Status auto-clears when the bot posts to
     the thread, and Slack itself expires it after ~2 minutes — callers that
     want it visible across longer runs must refresh it periodically.
@@ -316,18 +316,18 @@ async def set_slack_assistant_status(
     async with httpx.AsyncClient() as http_client:
         try:
             response = await http_client.post(
-                f"{SLACK_API_BASE_URL}/assistants.threads.setStatus",
+                f"{SLACK_API_BASE_URL}/assistant.threads.setStatus",
                 headers=_slack_headers(),
                 json=payload,
             )
             response.raise_for_status()
             data = response.json()
             if not data.get("ok"):
-                logger.warning("Slack assistants.threads.setStatus failed: %s", data.get("error"))
+                logger.warning("Slack assistant.threads.setStatus failed: %s", data.get("error"))
                 return False
             return True
         except httpx.HTTPError:
-            logger.exception("Slack assistants.threads.setStatus request failed")
+            logger.exception("Slack assistant.threads.setStatus request failed")
             return False
 
 

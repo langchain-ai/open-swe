@@ -74,7 +74,7 @@ async def test_set_slack_assistant_status_calls_correct_endpoint(
     assert ok is True
     client_cm.post.assert_awaited_once()
     args, kwargs = client_cm.post.call_args
-    assert args[0].endswith("/assistants.threads.setStatus")
+    assert args[0].endswith("/assistant.threads.setStatus")
     assert kwargs["json"] == {
         "channel_id": "C1",
         "thread_ts": "1.0",
