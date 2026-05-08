@@ -86,6 +86,9 @@ def add_finding(
     if start_line is not None and end_line is not None and end_line < start_line:
         return {"success": False, "error": "end_line must be >= start_line"}
 
+    if start_line is not None:
+        end_line = start_line
+
     config = get_config()
     configurable = config.get("configurable", {}) if isinstance(config, dict) else {}
     diff_line_set = configurable.get("diff_line_set") if isinstance(configurable, dict) else None
@@ -102,9 +105,6 @@ def add_finding(
                 "Only review changes the PR introduces; do not flag pre-existing code."
             ),
         }
-
-    if start_line is not None:
-        end_line = start_line
 
     diff_hunk: str | None = None
     if isinstance(diff_text, str) and diff_text:
