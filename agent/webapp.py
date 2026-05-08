@@ -1518,7 +1518,7 @@ async def trigger_pr_review_from_ref(
     if not _is_repo_allowed_for_reviewer(repo_config):
         return {"success": False, "error": "Repository not allowed for reviewer"}
 
-    app_token = await get_github_app_installation_token()
+    app_token, app_token_expires_at = await get_github_app_installation_token_with_expiry()
     if not app_token:
         logger.warning("No GitHub App token available for PR reviewer request")
         return {"success": False, "error": "No GitHub App token available"}
@@ -1544,7 +1544,7 @@ async def trigger_pr_review_from_ref(
         return {"success": False, "error": "Could not create reviewer thread"}
 
     try:
-        await persist_encrypted_github_token(thread_id, app_token)
+        await persist_encrypted_github_token(thread_id, app_token, expires_at=app_token_expires_at)
     except Exception:
         logger.warning("Could not persist bot token for reviewer thread %s", thread_id)
         return {"success": False, "error": "Could not persist reviewer token"}
@@ -1667,7 +1667,7 @@ async def process_github_pr_review_request(payload: dict[str, Any]) -> None:
         repo_config.get("owner", ""), repo_config.get("name", ""), pr_number
     )
 
-    app_token = await get_github_app_installation_token()
+    app_token, app_token_expires_at = await get_github_app_installation_token_with_expiry()
     if not app_token:
         logger.warning("No GitHub App token available for PR reviewer request")
         return
@@ -1677,7 +1677,7 @@ async def process_github_pr_review_request(payload: dict[str, Any]) -> None:
         return
 
     try:
-        await persist_encrypted_github_token(thread_id, app_token)
+        await persist_encrypted_github_token(thread_id, app_token, expires_at=app_token_expires_at)
     except Exception:
         logger.warning("Could not persist bot token for reviewer thread %s", thread_id)
         return
@@ -1900,7 +1900,7 @@ async def process_github_push_event(payload: dict[str, Any]) -> None:
         )
         return
 
-    app_token = await get_github_app_installation_token()
+    app_token, app_token_expires_at = await get_github_app_installation_token_with_expiry()
     if not app_token:
         logger.warning("No GitHub App token for push re-review on %s", head_ref)
         return
@@ -1955,7 +1955,7 @@ async def process_github_push_event(payload: dict[str, Any]) -> None:
     if not await _ensure_thread_exists_for_metadata(thread_id, langgraph_client):
         return
     try:
-        await persist_encrypted_github_token(thread_id, app_token)
+        await persist_encrypted_github_token(thread_id, app_token, expires_at=app_token_expires_at)
     except Exception:
         logger.warning("Could not persist bot token for reviewer thread %s", thread_id)
         return
