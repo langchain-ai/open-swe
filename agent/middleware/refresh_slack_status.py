@@ -1,6 +1,6 @@
 """Middleware that keeps Slack's assistant status current during agent work.
 
-Slack's ``assistants.threads.setStatus`` indicator expires after two minutes
+Slack's ``assistant.threads.setStatus`` indicator expires after two minutes
 if no message is sent. This middleware refreshes the indicator while model and
 tool calls are actively running, then clears it when the run exits without
 relying on the model to post a final Slack reply.
