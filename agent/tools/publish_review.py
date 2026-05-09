@@ -174,12 +174,17 @@ async def _publish_review_async(
         inline_comments=inline_comments,
         token=token,
     )
-    if review_response is None:
-        return {"success": False, "error": "Failed to POST PR review"}
     if isinstance(review_response, dict) and "_error" in review_response:
         return {
             "success": False,
             "error": f"Failed to POST PR review: {review_response['_error']}",
+        }
+    if review_response is None:
+        # Defensive guard: with the upstream change this should never happen,
+        # but keep a clear signal if it does so the agent doesn't retry blindly.
+        return {
+            "success": False,
+            "error": "Failed to POST PR review: no response from GitHub",
         }
     review_id = review_response.get("id") if isinstance(review_response, dict) else None
 
