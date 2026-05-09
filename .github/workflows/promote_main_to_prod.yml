@@ -1,0 +1,25 @@
+name: Promote main to prod
+
+permissions:
+  contents: write
+
+on:
+  schedule:
+    - cron: "0 8 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: promote-main-to-prod
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: Force-push main to prod
+        run: |
+          git push --force origin HEAD:refs/heads/prod
