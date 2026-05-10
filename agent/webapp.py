@@ -317,6 +317,19 @@ def generate_thread_id_from_slack_thread(channel_id: str, thread_id: str) -> str
     return str(uuid.UUID(hex=md5_hex))
 
 
+def _is_slack_dm_event(event: dict[str, Any]) -> bool:
+    """Return True for Slack events originating from a 1:1 or group DM."""
+    if event.get("channel_type") in {"im", "mpim"}:
+        return True
+    item = event.get("item")
+    if isinstance(item, dict) and item.get("channel_type") in {"im", "mpim"}:
+        return True
+    channel_id = event.get("channel", "")
+    if not channel_id and isinstance(item, dict):
+        channel_id = item.get("channel", "") or ""
+    return isinstance(channel_id, str) and channel_id.startswith("D")
+
+
 def generate_reviewer_thread_id(owner: str, repo: str, pr_number: int) -> str:
     stable_key = f"{owner}/{repo}/pr/{pr_number}/reviewer"
     return str(uuid.uuid5(uuid.NAMESPACE_URL, stable_key))
@@ -1221,6 +1234,9 @@ async def slack_webhook(request: Request, background_tasks: BackgroundTasks) -> 
         return {"status": "ignored", "reason": "Not an event callback"}
 
     event = payload.get("event", {})
+
+    if _is_slack_dm_event(event):
+        return {"status": "ignored", "reason": "Direct messages are not supported"}
 
     if event.get("type") == "reaction_added":
         reaction = event.get("reaction")
