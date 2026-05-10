@@ -606,6 +606,307 @@ async def fetch_slack_message_by_ts(channel_id: str, message_ts: str) -> dict[st
     return None
 
 
+# Slack file mimetypes/filetypes that should be inlined as text snippets.
+TEXT_LIKE_MIMETYPE_PREFIXES: tuple[str, ...] = ("text/",)
+TEXT_LIKE_MIMETYPES: frozenset[str] = frozenset(
+    {
+        "application/json",
+        "application/xml",
+        "application/x-yaml",
+        "application/yaml",
+        "application/x-toml",
+        "application/toml",
+        "application/x-sh",
+        "application/x-shellscript",
+        "application/javascript",
+        "application/x-javascript",
+        "application/typescript",
+        "application/x-typescript",
+        "application/x-python",
+        "application/x-httpd-php",
+        "application/sql",
+        "application/x-sql",
+        "application/graphql",
+    }
+)
+TEXT_LIKE_FILETYPES: frozenset[str] = frozenset(
+    {
+        "text",
+        "post",
+        "snippet",
+        "diff",
+        "patch",
+        "csv",
+        "tsv",
+        "json",
+        "xml",
+        "yaml",
+        "toml",
+        "ini",
+        "conf",
+        "config",
+        "log",
+        "markdown",
+        "md",
+        "rst",
+        "tex",
+        "html",
+        "css",
+        "scss",
+        "less",
+        "javascript",
+        "typescript",
+        "jsx",
+        "tsx",
+        "python",
+        "ruby",
+        "go",
+        "rust",
+        "java",
+        "kotlin",
+        "scala",
+        "swift",
+        "objc",
+        "csharp",
+        "fsharp",
+        "vbnet",
+        "perl",
+        "php",
+        "r",
+        "bash",
+        "shell",
+        "powershell",
+        "dockerfile",
+        "makefile",
+        "cmake",
+        "sql",
+        "graphql",
+        "lua",
+        "groovy",
+        "dart",
+        "elixir",
+        "erlang",
+        "haskell",
+        "ocaml",
+        "clojure",
+        "lisp",
+        "vbscript",
+        "batchfile",
+        "applescript",
+        "cpp",
+        "c",
+        "h",
+        "hpp",
+    }
+)
+
+# Per-file and aggregate caps for inlined Slack text attachments.
+SLACK_TEXT_FILE_MAX_BYTES = 256 * 1024
+SLACK_TEXT_FILES_TOTAL_MAX_BYTES = 1024 * 1024
+
+
+def is_text_like_slack_file(file_info: dict[str, Any]) -> bool:
+    """Whether a Slack file dict is a text snippet we should inline in the prompt."""
+    if not isinstance(file_info, dict):
+        return False
+    if not file_info.get("url_private"):
+        return False
+    mimetype = (file_info.get("mimetype") or "").lower()
+    if any(mimetype.startswith(prefix) for prefix in TEXT_LIKE_MIMETYPE_PREFIXES):
+        return True
+    if mimetype in TEXT_LIKE_MIMETYPES:
+        return True
+    filetype = (file_info.get("filetype") or "").lower()
+    if filetype in TEXT_LIKE_FILETYPES:
+        return True
+    mode = (file_info.get("mode") or "").lower()
+    if mode in {"snippet", "post"}:
+        return True
+    return False
+
+
+def _slack_file_display_name(file_info: dict[str, Any]) -> str:
+    name = file_info.get("name") or file_info.get("title") or file_info.get("id") or "snippet"
+    return str(name)
+
+
+def _slack_file_code_fence_lang(file_info: dict[str, Any]) -> str:
+    """Pick a markdown code-fence language hint for a Slack file."""
+    filetype = (file_info.get("filetype") or "").lower()
+    mapping = {
+        "javascript": "javascript",
+        "typescript": "typescript",
+        "jsx": "jsx",
+        "tsx": "tsx",
+        "python": "python",
+        "ruby": "ruby",
+        "go": "go",
+        "rust": "rust",
+        "java": "java",
+        "kotlin": "kotlin",
+        "scala": "scala",
+        "swift": "swift",
+        "csharp": "csharp",
+        "cpp": "cpp",
+        "c": "c",
+        "shell": "bash",
+        "bash": "bash",
+        "powershell": "powershell",
+        "sql": "sql",
+        "html": "html",
+        "css": "css",
+        "scss": "scss",
+        "less": "less",
+        "json": "json",
+        "xml": "xml",
+        "yaml": "yaml",
+        "toml": "toml",
+        "ini": "ini",
+        "markdown": "markdown",
+        "md": "markdown",
+        "diff": "diff",
+        "patch": "diff",
+        "dockerfile": "dockerfile",
+        "makefile": "makefile",
+        "graphql": "graphql",
+        "lua": "lua",
+        "perl": "perl",
+        "php": "php",
+        "r": "r",
+        "dart": "dart",
+        "elixir": "elixir",
+        "erlang": "erlang",
+        "haskell": "haskell",
+        "clojure": "clojure",
+    }
+    if filetype in mapping:
+        return mapping[filetype]
+    mimetype = (file_info.get("mimetype") or "").lower()
+    if mimetype == "application/json":
+        return "json"
+    if mimetype in {"application/x-yaml", "application/yaml"}:
+        return "yaml"
+    if mimetype in {"application/xml", "text/xml"}:
+        return "xml"
+    if mimetype in {"application/x-toml", "application/toml"}:
+        return "toml"
+    if mimetype.startswith("text/x-"):
+        return mimetype[len("text/x-") :]
+    return ""
+
+
+async def fetch_slack_file_text(
+    file_info: dict[str, Any],
+    http_client: httpx.AsyncClient,
+    *,
+    max_bytes: int = SLACK_TEXT_FILE_MAX_BYTES,
+) -> str | None:
+    """Download a Slack text-like file and return its decoded contents.
+
+    Returns None if the file is missing, the bot token is not configured, the
+    download fails, or the contents cannot be decoded as text.
+    """
+    url = file_info.get("url_private")
+    if not isinstance(url, str) or not url:
+        return None
+    if not SLACK_BOT_TOKEN:
+        logger.debug("SLACK_BOT_TOKEN not set; skipping Slack file fetch for %s", url)
+        return None
+    try:
+        response = await http_client.get(
+            url,
+            headers={"Authorization": f"Bearer {SLACK_BOT_TOKEN}"},
+            follow_redirects=True,
+        )
+        response.raise_for_status()
+        content = response.content
+        truncated = False
+        if len(content) > max_bytes:
+            content = content[:max_bytes]
+            truncated = True
+        try:
+            text = content.decode("utf-8")
+        except UnicodeDecodeError:
+            try:
+                text = content.decode("utf-8", errors="replace")
+            except Exception:
+                logger.warning("Could not decode Slack file %s as text", url)
+                return None
+        if truncated:
+            text += "\n\n…[truncated]"
+        return text
+    except httpx.HTTPError:
+        logger.exception("Failed to fetch Slack file %s", url)
+        return None
+
+
+def format_slack_file_snippet(file_info: dict[str, Any], content: str) -> str:
+    """Format a downloaded Slack text file as a markdown snippet for the prompt."""
+    name = _slack_file_display_name(file_info)
+    lang = _slack_file_code_fence_lang(file_info)
+    pretty_type = file_info.get("pretty_type") or file_info.get("filetype") or ""
+    header_bits = [f"`{name}`"]
+    if pretty_type:
+        header_bits.append(f"({pretty_type})")
+    header = " ".join(header_bits)
+    fence_open = f"```{lang}" if lang else "```"
+    return f"**{header}**\n{fence_open}\n{content}\n```"
+
+
+async def extract_slack_text_files_from_messages(
+    messages: list[dict[str, Any]],
+    http_client: httpx.AsyncClient,
+    *,
+    total_max_bytes: int = SLACK_TEXT_FILES_TOTAL_MAX_BYTES,
+) -> str:
+    """Download text-like Slack file attachments and format them as a prompt section.
+
+    Files are deduplicated by id (or url_private as a fallback). Returns an empty
+    string when there are no text attachments or none could be downloaded.
+    """
+    if not messages:
+        return ""
+
+    seen: set[str] = set()
+    queue: list[dict[str, Any]] = []
+    for message in messages:
+        files = message.get("files", [])
+        if not isinstance(files, list):
+            continue
+        for file_info in files:
+            if not is_text_like_slack_file(file_info):
+                continue
+            key = str(file_info.get("id") or file_info.get("url_private") or id(file_info))
+            if key in seen:
+                continue
+            seen.add(key)
+            queue.append(file_info)
+
+    if not queue:
+        return ""
+
+    snippets: list[str] = []
+    used_bytes = 0
+    for file_info in queue:
+        if used_bytes >= total_max_bytes:
+            snippets.append(
+                f"_Skipped `{_slack_file_display_name(file_info)}` — total snippet size cap reached._"
+            )
+            continue
+        remaining = total_max_bytes - used_bytes
+        per_file_cap = min(SLACK_TEXT_FILE_MAX_BYTES, remaining)
+        content = await fetch_slack_file_text(file_info, http_client, max_bytes=per_file_cap)
+        if content is None:
+            snippets.append(f"_Could not fetch `{_slack_file_display_name(file_info)}`._")
+            continue
+        used_bytes += len(content.encode("utf-8", errors="replace"))
+        snippets.append(format_slack_file_snippet(file_info, content))
+
+    if not snippets:
+        return ""
+    return "\n\n## Attached Snippets\n" + "\n\n".join(snippets)
+
+
 async def resolve_slack_message_url(url: str) -> dict[str, Any] | None:
     """Resolve a Slack message URL to its message content.
 
@@ -649,6 +950,7 @@ async def resolve_slack_links_in_context(
 
     resolved_parts: list[str] = []
     image_urls: list[str] = []
+    resolved_messages: list[dict[str, Any]] = []
     seen_urls: set[str] = set()
 
     for link_url, _cid, _ts in slack_links:
@@ -667,6 +969,7 @@ async def resolve_slack_links_in_context(
                 resolved_parts.append(
                     f"**{link_url}**\n  Author: {author}\n  Message: {resolved_text}"
                 )
+                resolved_messages.append(resolved)
                 for file_info in resolved.get("files", []):
                     if (
                         isinstance(file_info, dict)
@@ -687,6 +990,18 @@ async def resolve_slack_links_in_context(
         resolved_links_section = "\n\n## Cross-posted Slack Messages\n" + "\n\n".join(
             resolved_parts
         )
+
+    if resolved_messages:
+        try:
+            async with httpx.AsyncClient() as http_client:
+                snippet_section = await extract_slack_text_files_from_messages(
+                    resolved_messages, http_client
+                )
+        except Exception:
+            logger.exception("Failed to extract text files from cross-posted Slack messages")
+            snippet_section = ""
+        if snippet_section:
+            resolved_links_section += snippet_section
 
     return resolved_links_section, image_urls
 

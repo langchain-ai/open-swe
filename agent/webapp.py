@@ -58,6 +58,7 @@ from .utils.sandbox import validate_sandbox_startup_config
 from .utils.slack import (
     GitHubPrRef,
     add_slack_reaction,
+    extract_slack_text_files_from_messages,
     fetch_slack_thread_messages,
     format_slack_messages_for_prompt,
     get_slack_user_info,
@@ -901,21 +902,6 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
         context_messages, user_names_by_id
     )
 
-    prompt = (
-        "You were mentioned in Slack.\n\n"
-        f"## Repository\n{repo_config.get('owner')}/{repo_config.get('name')}\n\n"
-        f"## Triggered by\n{trigger_user}\n\n"
-        f"## Slack Thread\n- Channel: {channel_id}\n- Thread TS: {thread_ts}\n"
-        f"- Context starts at: {context_source}\n\n"
-        f"## Conversation Context\n{context_text}\n\n"
-        f"## Latest Mention Request\n{clean_text}\n\n"
-        + (f"{resolved_links_section}\n\n" if resolved_links_section else "")
-        + "Use `slack_thread_reply` to communicate in this Slack thread for clarifications, "
-        "status updates, and final summaries. Use `slack_read_thread_messages` to read any "
-        "Slack messages by providing channel_id and message_ts."
-    )
-    content_blocks: list[dict[str, Any]] = [create_text_block(prompt)]
-
     image_urls = dedupe_urls(
         [url for msg in context_messages for url in extract_image_urls(msg.get("text", ""))]
         + [
@@ -928,13 +914,36 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
         ]
         + image_urls_from_links
     )
-    if image_urls:
-        logger.info("Preparing %d image(s) for Slack mention", len(image_urls))
+
+    snippets_section = ""
+    image_blocks: list[dict[str, Any]] = []
+    if image_urls or any(msg.get("files") for msg in context_messages):
         async with httpx.AsyncClient() as http_client:
-            for image_url in image_urls:
-                image_block = await fetch_image_block(image_url, http_client)
-                if image_block:
-                    content_blocks.append(image_block)
+            snippets_section = await extract_slack_text_files_from_messages(
+                context_messages, http_client
+            )
+            if image_urls:
+                logger.info("Preparing %d image(s) for Slack mention", len(image_urls))
+                for image_url in image_urls:
+                    image_block = await fetch_image_block(image_url, http_client)
+                    if image_block:
+                        image_blocks.append(image_block)
+
+    prompt = (
+        "You were mentioned in Slack.\n\n"
+        f"## Repository\n{repo_config.get('owner')}/{repo_config.get('name')}\n\n"
+        f"## Triggered by\n{trigger_user}\n\n"
+        f"## Slack Thread\n- Channel: {channel_id}\n- Thread TS: {thread_ts}\n"
+        f"- Context starts at: {context_source}\n\n"
+        f"## Conversation Context\n{context_text}\n\n"
+        f"## Latest Mention Request\n{clean_text}\n\n"
+        + (f"{resolved_links_section}\n\n" if resolved_links_section else "")
+        + (f"{snippets_section}\n\n" if snippets_section else "")
+        + "Use `slack_thread_reply` to communicate in this Slack thread for clarifications, "
+        "status updates, and final summaries. Use `slack_read_thread_messages` to read any "
+        "Slack messages by providing channel_id and message_ts."
+    )
+    content_blocks: list[dict[str, Any]] = [create_text_block(prompt), *image_blocks]
 
     configurable: dict[str, Any] = {
         "repo": repo_config,
