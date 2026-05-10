@@ -57,7 +57,6 @@ from .utils.repo import extract_repo_from_text
 from .utils.sandbox import validate_sandbox_startup_config
 from .utils.slack import (
     GitHubPrRef,
-    add_slack_reaction,
     fetch_slack_thread_messages,
     format_slack_messages_for_prompt,
     get_slack_user_info,
@@ -835,14 +834,6 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
             event_ts,
         )
         return
-
-    reacted = await add_slack_reaction(channel_id, event_ts, "eyes")
-    if not reacted:
-        logger.debug(
-            "Unable to add eyes reaction for Slack message ts=%s in channel=%s",
-            event_ts,
-            channel_id,
-        )
 
     await set_slack_assistant_status(channel_id, thread_ts)
 
