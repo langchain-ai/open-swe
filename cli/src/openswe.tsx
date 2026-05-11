@@ -1,8 +1,9 @@
 import { render } from 'ink';
-import { App } from './tui/App.js';
+import { RootScreen } from './tui/screens.js';
 import { getStoredApiKeys, deleteAllApiKeys, getStoredModelConfig } from '@lib/storage';
 import { clearLog } from '@lib/logger';
 import { useStore } from '@app/store.js';
+import { parseArgs } from '@lib/cli-args.js';
 
 const clearTerminal = () => {
   if (process.stdout.isTTY) {
@@ -26,6 +27,8 @@ export async function main() {
   // Belt-and-suspenders: also clear bracketed-paste mode on hard exit
   // (Ctrl+C / uncaught) so the user's shell doesn't inherit it.
   process.on('exit', disableBracketedPaste);
+
+  const args = parseArgs(process.argv.slice(2));
 
   const storedModelConfig = await getStoredModelConfig();
   if (storedModelConfig) {
@@ -62,7 +65,7 @@ export async function main() {
     }, 120);
 
     enableBracketedPaste();
-    const instance = render(<App />);
+    const instance = render(<RootScreen args={args} />);
     try {
       await instance.waitUntilExit();
     } finally {

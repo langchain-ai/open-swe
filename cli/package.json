@@ -1,12 +1,12 @@
 {
-  "name": "coda",
+  "name": "open-swe-cli",
   "version": "0.1.0",
   "packageManager": "bun",
-  "description": "coda - Your AI Coding Agent",
+  "description": "Open SWE CLI - Terminal client for Open SWE local and cloud agent runs",
   "type": "module",
   "main": "dist/index.js",
   "bin": {
-    "coda": "dist/index.js"
+    "openswe": "dist/index.js"
   },
   "scripts": {
     "build": "tsc && tsc-alias -p tsconfig.json",
@@ -30,6 +30,7 @@
     "ink-spinner": "^5.0.0",
     "langchain": "^1.4.0",
     "langsmith": "^0.6.3",
+    "open": "^10.1.0",
     "openevals": "^0.1.1",
     "react": "^19.1.0",
     "string-width": "^8.2.1",

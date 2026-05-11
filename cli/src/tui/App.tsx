@@ -1,13 +1,28 @@
-import { Box, Static } from "ink";
+import { useEffect, useState } from "react";
+import { Box, Static, Text } from "ink";
 import { Welcome } from "./components/Welcome.js";
 import { Message } from "./components/Message.js";
 import { PromptInput } from "./components/PromptInput.js";
 import { StatusLine } from "./components/StatusLine.js";
 import { BusyLine } from "./components/BusyLine.js";
 import { useAppState } from "./hooks/useAppState.js";
+import { themeColor } from "./theme.js";
+import { getActiveDeployment } from "@lib/config.js";
+import type { DeploymentConfig } from "@lib/api-types.js";
 
 export const App = () => {
   const appState = useAppState();
+  const [deployment, setDeployment] = useState<DeploymentConfig | null>(null);
+  useEffect(() => {
+    void (async () => {
+      try {
+        const d = await getActiveDeployment();
+        setDeployment(d);
+      } catch {
+        // best-effort; local mode works fine without a deployment.
+      }
+    })();
+  }, []);
 
   // Split messages: all messages except the last one go in <Static> scrollback
   // (they never re-render, which is what we want for tool results, etc.).
@@ -19,6 +34,13 @@ export const App = () => {
 
   return (
     <Box flexDirection="column">
+      {deployment ? (
+        <Box paddingX={1}>
+          <Text color={themeColor("subtle")}>
+            logged in as {deployment.github_login} @ {deployment.backend_url}
+          </Text>
+        </Box>
+      ) : null}
       <Static
         items={[
           { kind: "welcome" as const, key: "welcome" },

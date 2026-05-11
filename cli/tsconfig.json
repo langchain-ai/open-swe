@@ -27,6 +27,12 @@
       "@lib/time": ["src/lib/time.ts"],
       "@lib/constants": ["src/lib/constants.ts"],
       "@lib/tool-result": ["src/lib/tool-result.ts"],
+      "@lib/api-types": ["src/lib/api-types.ts"],
+      "@lib/api-client": ["src/lib/api-client.ts"],
+      "@lib/sse": ["src/lib/sse.ts"],
+      "@lib/auth-flow": ["src/lib/auth-flow.ts"],
+      "@lib/cli-args": ["src/lib/cli-args.ts"],
+      "@lib/config": ["src/lib/config.ts"],
       "@config/*": ["src/config/*"],
       "@types": ["src/types/index.ts"],
       "@types/*": ["src/types/*"]
