@@ -217,7 +217,7 @@ export async function getMacOSClipboardImage(): Promise<ClipboardImage | null> {
 
   const screenshotPath = join(
     tmpdir(),
-    `coda_clipboard_${randomBytes(4).toString("hex")}.png`,
+    `openswe_clipboard_${randomBytes(4).toString("hex")}.png`,
   );
 
   try {

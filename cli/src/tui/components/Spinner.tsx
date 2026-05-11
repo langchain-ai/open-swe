@@ -9,7 +9,7 @@ type Props = {
 };
 
 /**
- * Tiny spinner driven by the global tick set up in `coda.tsx`. Avoids
+ * Tiny spinner driven by the global tick set up in `openswe.tsx`. Avoids
  * per-instance timers so many spinners can render cheaply side-by-side.
  */
 export const Spinner = ({ color, frames = TEXT_SPINNER_FRAMES }: Props) => {

@@ -2,9 +2,9 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import os from 'os';
 
-const STORAGE_DIR = path.join(os.homedir(), '.coda');
+const STORAGE_DIR = path.join(os.homedir(), '.openswe');
 const LOGS_DIR = path.join(STORAGE_DIR, 'logs');
-const LOG_FILE = path.join(LOGS_DIR, 'coda.log');
+const LOG_FILE = path.join(LOGS_DIR, 'openswe.log');
 
 export async function ensureLogDir(): Promise<void> {
   await fs.mkdir(LOGS_DIR, { recursive: true });

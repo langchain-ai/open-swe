@@ -52,8 +52,8 @@ const placeholderForMode = (
 ): string => {
   if (showApiKeysMenu) return "Manage API keys…";
   if (showModelMenu) return "Filter models by name or ID…";
-  if (mode === "plan") return "Plan something with coda…";
-  return "Ask coda anything…";
+  if (mode === "plan") return "Plan something with Open SWE…";
+  return "Ask Open SWE anything…";
 };
 
 const borderColorForMode = (

@@ -6,7 +6,7 @@ import type { ModelConfig, Provider, ApiKeys } from '@types';
 import { logError } from '@lib/logger';
 import { isKnownModelConfig } from '@lib/models.js';
 
-const STORAGE_DIR = path.join(os.homedir(), '.coda');
+const STORAGE_DIR = path.join(os.homedir(), '.openswe');
 const AUTH_FILE = path.join(STORAGE_DIR, 'auth.json');
 const CONFIG_FILE = path.join(STORAGE_DIR, 'config.json');
 const SESSIONS_DIR = path.join(STORAGE_DIR, 'sessions');

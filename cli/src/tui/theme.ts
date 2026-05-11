@@ -1,5 +1,5 @@
 /**
- * Theme tokens for the coda TUI.
+ * Theme tokens for the Open SWE CLI TUI.
  *
  * The palette is intentionally restrained: a warm cream foreground sits on top
  * of the terminal's own dark background, with a single amber/gold brand accent

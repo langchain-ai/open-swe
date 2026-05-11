@@ -21,7 +21,7 @@ async function withTempHome<T>(fn: (homeDir: string, storage: typeof import('../
 describe('storage utils', () => {
   it('stores, reads, and deletes API keys by provider', async () => {
     await withTempHome(async (home, storage) => {
-      const authPath = path.join(home, '.coda', 'auth.json');
+      const authPath = path.join(home, '.openswe', 'auth.json');
 
       await expect(storage.getStoredApiKey('openai')).resolves.toBeNull();
       await expect(storage.getStoredApiKey('anthropic')).resolves.toBeNull();
@@ -59,7 +59,7 @@ describe('storage utils', () => {
 
   it('stores and retrieves model configuration; missing returns null', async () => {
     await withTempHome(async (home, storage) => {
-      const configPath = path.join(home, '.coda', 'config.json');
+      const configPath = path.join(home, '.openswe', 'config.json');
 
       await expect(storage.getStoredModelConfig()).resolves.toBeNull();
 
@@ -74,7 +74,7 @@ describe('storage utils', () => {
   it('saves and loads sessions; missing session returns empty array', async () => {
     await withTempHome(async (home, storage) => {
       const sessionId = 'abc123';
-      const sessionPath = path.join(home, '.coda', 'sessions', `${sessionId}.json`);
+      const sessionPath = path.join(home, '.openswe', 'sessions', `${sessionId}.json`);
 
       await expect(storage.loadSession(sessionId)).resolves.toEqual([]);
 

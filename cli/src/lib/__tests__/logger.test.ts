@@ -21,7 +21,7 @@ async function withTempHome<T>(fn: (homeDir: string, logger: typeof import('../l
 describe('logger utils', () => {
   it('creates logs directory with ensureLogDir', async () => {
     await withTempHome(async (home, logger) => {
-      const logsDir = path.join(home, '.coda', 'logs');
+      const logsDir = path.join(home, '.openswe', 'logs');
       await logger.ensureLogDir();
       const stat = await fs.stat(logsDir);
       expect(stat.isDirectory()).toBe(true);
@@ -30,7 +30,7 @@ describe('logger utils', () => {
 
   it('appends info and error entries and clears log', async () => {
     await withTempHome(async (home, logger) => {
-      const logFile = path.join(home, '.coda', 'logs', 'coda.log');
+      const logFile = path.join(home, '.openswe', 'logs', 'openswe.log');
 
       // Deterministic timestamps
       vi.useFakeTimers();

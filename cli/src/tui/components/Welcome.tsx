@@ -35,7 +35,7 @@ export const Welcome = ({ modelConfig, cwd }: Props) => {
     >
       <Box>
         <Text color={brand}>{ARROW_RIGHT_THIN}_ </Text>
-        <Text bold>coda</Text>
+        <Text bold>Open SWE CLI</Text>
       </Box>
       <Text> </Text>
       <Box>
