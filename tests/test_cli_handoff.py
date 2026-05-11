@@ -325,3 +325,63 @@ def test_adopt_creates_new_thread(monkeypatch) -> None:
     assert "adopted_from_local_at" in metadata
     # Run was created.
     assert fake.runs.create.await_count == 1
+
+
+# ---------------------------------------------------------------------------
+# Defensive guards
+# ---------------------------------------------------------------------------
+
+
+def test_is_unsafe_path_rejects_escapes() -> None:
+    """apply_bundle_to_sandbox must refuse to write outside the repo dir."""
+    from agent.utils.handoff import _is_unsafe_path
+
+    assert _is_unsafe_path("../../etc/passwd") is True
+    assert _is_unsafe_path("/etc/passwd") is True
+    assert _is_unsafe_path("a/../../b") is True
+    assert _is_unsafe_path("") is True
+    assert _is_unsafe_path("src/foo.py") is False
+    assert _is_unsafe_path("./src/foo.py") is False
+    assert _is_unsafe_path("a/b/../c") is False  # net depth = 2, safe
+
+
+def test_adopt_rolls_back_thread_on_apply_failure(monkeypatch) -> None:
+    """If apply_bundle_to_sandbox fails, the half-created thread is deleted."""
+    _mock_membership(monkeypatch, member=True)
+
+    fake = _make_fake_client()
+    fake.threads.delete = AsyncMock(return_value=None)
+    monkeypatch.setattr(webapp, "get_client", lambda url: fake)
+
+    fake_sandbox = object()
+
+    async def fake_ensure(thread_id):  # noqa: ARG001
+        return fake_sandbox
+
+    async def fake_workdir(sandbox):  # noqa: ARG001
+        return "/workspace"
+
+    async def failing_apply(sandbox, work_dir, bundle, token):  # noqa: ARG001
+        raise RuntimeError("git apply blew up")
+
+    async def fake_token():
+        return "ghs_dummy"
+
+    import agent.server as server_module
+
+    monkeypatch.setattr(server_module, "ensure_sandbox_for_thread", fake_ensure)
+    monkeypatch.setattr("agent.utils.sandbox_paths.aresolve_sandbox_work_dir", fake_workdir)
+    monkeypatch.setattr("agent.utils.handoff.apply_bundle_to_sandbox", failing_apply)
+    monkeypatch.setattr("agent.utils.github_app.get_github_app_installation_token", fake_token)
+
+    token = _issue_token("octocat")
+    client = TestClient(webapp.app)
+    response = client.post(
+        "/cli/runs/adopt",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"bundle": _sample_bundle()},
+    )
+    assert response.status_code == 500
+    # The thread should have been created and then rolled back.
+    assert fake.threads.create.await_count == 1
+    assert fake.threads.delete.await_count == 1

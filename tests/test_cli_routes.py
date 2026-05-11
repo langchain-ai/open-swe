@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import importlib
 import time
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import jwt
 import pytest
@@ -190,3 +190,97 @@ def test_cli_auth_callback_no_email_skips_upsert(monkeypatch) -> None:
     )
     assert response.status_code == 200
     upsert_mock.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
+# /cli/runs/{id}/interrupt
+# ---------------------------------------------------------------------------
+
+
+def _mock_member_and_thread(monkeypatch, *, login: str, owner: str = "octocat") -> None:
+    async def fake_is_member(username: str, org: str) -> bool:  # noqa: ARG001
+        return True
+
+    monkeypatch.setattr(cli_auth_module, "is_user_active_org_member", fake_is_member)
+
+    async def fake_identity(github_login: str):  # noqa: ARG001
+        return None
+
+    monkeypatch.setattr(webapp, "get_identities_for_github_login", fake_identity)
+
+    async def fake_metadata(thread_id: str):  # noqa: ARG001
+        return {"cli_owner_login": owner, "github_login": owner}
+
+    monkeypatch.setattr(webapp, "_get_thread_metadata_safe", fake_metadata)
+    # Sanity: we want the test caller to be authorized for the thread.
+    _ = login
+
+
+def test_cli_interrupt_calls_runs_cancel(monkeypatch) -> None:
+    _mock_member_and_thread(monkeypatch, login="octocat")
+
+    fake_client = MagicMock()
+    fake_client.runs = MagicMock()
+    fake_client.runs.list = AsyncMock(return_value=[{"run_id": "r-1"}])
+    fake_client.runs.cancel = AsyncMock(return_value=None)
+    monkeypatch.setattr(webapp, "get_client", lambda url: fake_client)
+
+    token = _issue_token("octocat")
+    client = TestClient(webapp.app)
+    response = client.post("/cli/runs/t-1/interrupt", headers={"Authorization": f"Bearer {token}"})
+    assert response.status_code == 200
+    assert response.json() == {"interrupted": True}
+    fake_client.runs.cancel.assert_awaited_once()
+    args, kwargs = fake_client.runs.cancel.call_args
+    assert args[0] == "t-1"
+    assert args[1] == "r-1"
+    assert kwargs.get("action") == "interrupt"
+
+
+def test_cli_interrupt_no_active_run_returns_false(monkeypatch) -> None:
+    _mock_member_and_thread(monkeypatch, login="octocat")
+    fake_client = MagicMock()
+    fake_client.runs = MagicMock()
+    fake_client.runs.list = AsyncMock(return_value=[])
+    fake_client.runs.cancel = AsyncMock(return_value=None)
+    monkeypatch.setattr(webapp, "get_client", lambda url: fake_client)
+
+    token = _issue_token("octocat")
+    client = TestClient(webapp.app)
+    response = client.post("/cli/runs/t-1/interrupt", headers={"Authorization": f"Bearer {token}"})
+    assert response.status_code == 200
+    assert response.json() == {"interrupted": False}
+    fake_client.runs.cancel.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
+# Multi-user attach rejection (DESIGN.md §"intentionally does not include")
+# ---------------------------------------------------------------------------
+
+
+def test_concurrent_attach_rejected_with_holder_login(monkeypatch) -> None:
+    _mock_member_and_thread(monkeypatch, login="octocat")
+
+    # Claim the slot for someone else.
+    webapp._CLI_STREAM_HOLDERS["t-1"] = "other-user"
+    try:
+        token = _issue_token("octocat")
+        client = TestClient(webapp.app)
+        response = client.get("/cli/runs/t-1/stream", headers={"Authorization": f"Bearer {token}"})
+        assert response.status_code == 409
+        assert "other-user" in response.text
+    finally:
+        webapp._CLI_STREAM_HOLDERS.pop("t-1", None)
+
+
+def test_same_user_can_reattach(monkeypatch) -> None:
+    """Reattach as the same login replaces the holder rather than rejecting."""
+    _mock_member_and_thread(monkeypatch, login="octocat")
+    webapp._CLI_STREAM_HOLDERS["t-1"] = "octocat"
+    try:
+        # _claim_stream_holder returns None for same login.
+        assert webapp._claim_stream_holder("t-1", "octocat") is None
+        # And rejects a different login.
+        assert webapp._claim_stream_holder("t-1", "other") == "octocat"
+    finally:
+        webapp._CLI_STREAM_HOLDERS.pop("t-1", None)

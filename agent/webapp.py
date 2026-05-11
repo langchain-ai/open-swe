@@ -258,6 +258,16 @@ async def fetch_linear_issue_details(issue_id: str) -> dict[str, Any] | None:
                 name
                 key
             }
+            creator {
+                id
+                name
+                email
+            }
+            assignee {
+                id
+                name
+                email
+            }
             comments {
                 nodes {
                     id
@@ -3047,8 +3057,32 @@ def _sse_event(payload: Any) -> str:
 _SSE_KEEPALIVE_INTERVAL_SECONDS = 20.0
 _SSE_KEEPALIVE_FRAME = ":keepalive\n\n"
 
+# Per-process map of thread_id -> currently-attached CLI user. DESIGN.md
+# §"What this design intentionally does not include": "only one CLI may be
+# attached to a thread at a time. Concurrent attach is rejected with the
+# github_login of the current holder." Multi-worker deployments accept that
+# this is process-local; the second worker's check would let the second user
+# through. Sufficient for the typical single-worker LangGraph deploy.
+_CLI_STREAM_HOLDERS: dict[str, str] = {}
 
-async def _stream_thread_events(thread_id: str, since: str | None) -> AsyncIterator[str]:
+
+def _claim_stream_holder(thread_id: str, github_login: str) -> str | None:
+    """Atomically claim the holder slot. Returns the current holder if denied."""
+    existing = _CLI_STREAM_HOLDERS.get(thread_id)
+    if existing and existing != github_login:
+        return existing
+    _CLI_STREAM_HOLDERS[thread_id] = github_login
+    return None
+
+
+def _release_stream_holder(thread_id: str, github_login: str) -> None:
+    if _CLI_STREAM_HOLDERS.get(thread_id) == github_login:
+        _CLI_STREAM_HOLDERS.pop(thread_id, None)
+
+
+async def _stream_thread_events(
+    thread_id: str, since: str | None, holder_login: str | None = None
+) -> AsyncIterator[str]:
     client = get_client(url=LANGGRAPH_URL)
     try:
         runs = await client.runs.list(thread_id, limit=1)
@@ -3090,6 +3124,9 @@ async def _stream_thread_events(thread_id: str, since: str | None) -> AsyncItera
     except Exception:
         logger.exception("Error streaming events for thread %s run %s", thread_id, run_id)
         yield _sse_event({"event": "error", "message": "Stream interrupted"})
+    finally:
+        if holder_login is not None:
+            _release_stream_holder(thread_id, holder_login)
 
 
 @app.get("/cli/runs/{thread_id}/stream")
@@ -3099,8 +3136,17 @@ async def cli_stream(
     user: CliUser = _CLI_USER_DEP,
 ) -> StreamingResponse:
     await _authorize_thread_for_user(thread_id, user)
+    existing = _claim_stream_holder(thread_id, user.github_login)
+    if existing:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Thread is currently attached by {existing}. "
+                "Ask them to /detach, or retry once they have."
+            ),
+        )
     return StreamingResponse(
-        _stream_thread_events(thread_id, since),
+        _stream_thread_events(thread_id, since, holder_login=user.github_login),
         media_type="text/event-stream",
     )
 
@@ -3131,6 +3177,14 @@ async def cli_interrupt(thread_id: str, user: CliUser = _CLI_USER_DEP) -> dict[s
 # ---------------------------------------------------------------------------
 # CLI handoff routes
 # ---------------------------------------------------------------------------
+
+
+async def _delete_thread_quiet(client: Any, thread_id: str) -> None:
+    """Delete a thread, swallowing errors. Used to roll back failed adopts."""
+    try:
+        await client.threads.delete(thread_id)
+    except Exception:
+        logger.exception("Failed to roll back thread %s after adopt failure", thread_id)
 
 
 def _require_handoff_supported() -> None:
@@ -3284,9 +3338,12 @@ async def cli_handoff_adopt(body: _CliAdoptBody, user: CliUser = _CLI_USER_DEP) 
         work_dir = await aresolve_sandbox_work_dir(sandbox)
     except Exception:
         logger.exception("Failed to create sandbox for adopted thread %s", thread_id)
+        await _delete_thread_quiet(client, thread_id)
         raise HTTPException(status_code=500, detail="Failed to create sandbox") from None
 
-    # Materialize the git state. TODO(handoff): verify against real sandbox.
+    # Materialize the git state. On failure roll back the thread so we don't
+    # leave half-applied state lingering — the user can retry the adopt
+    # without colliding with an orphan thread.
     try:
         from .utils.github_app import get_github_app_installation_token
 
@@ -3294,6 +3351,7 @@ async def cli_handoff_adopt(body: _CliAdoptBody, user: CliUser = _CLI_USER_DEP) 
         await apply_bundle_to_sandbox(sandbox, work_dir, bundle, token)
     except Exception as exc:
         logger.exception("Failed to apply bundle to sandbox for thread %s", thread_id)
+        await _delete_thread_quiet(client, thread_id)
         raise HTTPException(
             status_code=500, detail=f"Failed to materialize git state: {exc}"
         ) from None

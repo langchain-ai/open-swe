@@ -1,6 +1,17 @@
 import crypto from 'crypto';
 import { ApiClient } from '@lib/api-client';
-import type { DeploymentConfig } from '@lib/api-types';
+import type { CliServerConfig, DeploymentConfig } from '@lib/api-types';
+import { CLIENT_CLI_API_VERSION } from '@lib/constants';
+
+export function assertServerCompatible(config: CliServerConfig): void {
+  if (config.cli_api_version > CLIENT_CLI_API_VERSION) {
+    throw new Error(
+      `This Open SWE deployment speaks cli_api_version=${config.cli_api_version}, ` +
+        `but this CLI only understands ${CLIENT_CLI_API_VERSION}. ` +
+        `Run \`openswe upgrade\` to get a newer client.`,
+    );
+  }
+}
 
 const CALLBACK_TIMEOUT_MS = 5 * 60 * 1000;
 
@@ -97,7 +108,8 @@ export async function login(
   const api = new ApiClient(backend_url);
   // Surface backend reachability early; also confirms it's an Open SWE deployment.
   status('Fetching deployment config');
-  await api.getConfig();
+  const serverConfig = await api.getConfig();
+  assertServerCompatible(serverConfig);
 
   const state = crypto.randomUUID();
   const result = defer<CallbackPayload>();

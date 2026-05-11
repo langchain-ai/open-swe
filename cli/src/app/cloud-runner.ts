@@ -44,13 +44,19 @@ export class CloudRunner {
     }
   }
 
-  async attach(): Promise<void> {
+  async attach(opts: { since?: string | null } = {}): Promise<void> {
     if (this.abortController) {
       throw new Error('CloudRunner is already attached');
     }
     this.abortController = new AbortController();
     const signal = this.abortController.signal;
-    const url = this.api.streamUrl(this.thread_id);
+    // Seed the resume cursor before opening the stream. Without this, an
+    // `openswe attach <id>` after a prior detach replays from the start of
+    // the run instead of backfilling missed events (DESIGN.md §attach view).
+    if (opts.since) {
+      this.lastEventIso = opts.since;
+    }
+    const url = this.api.streamUrl(this.thread_id, opts.since ?? undefined);
 
     this.emit({ kind: 'connecting' });
     this.deps.setBusy(true);

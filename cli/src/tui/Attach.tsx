@@ -11,6 +11,7 @@ import type { ApiClient } from "@lib/api-client";
 import type { DeploymentConfig } from "@lib/api-types";
 import { nowTime } from "@lib/time";
 import { applyToLocal, validateBundle, type HandoffBundle } from "@lib/handoff";
+import { loadCursor, saveCursor } from "@lib/cursor-store";
 
 type Props = {
   api: ApiClient;
@@ -90,8 +91,14 @@ export const Attach = ({ api, thread_id, deployment, onDetach }: Props) => {
       },
     });
     runnerRef.current = runner;
-    void runner.attach();
+    void (async () => {
+      const since = await loadCursor(thread_id);
+      await runner.attach({ since });
+    })();
     return () => {
+      // Persist the latest observed cursor so the next attach can backfill.
+      const last = runner.getLastEventIso();
+      if (last) void saveCursor(thread_id, last);
       runner.detach();
       runnerRef.current = null;
     };

@@ -13,6 +13,7 @@ import { getActiveDeployment } from "@lib/config";
 import type { DeploymentConfig } from "@lib/api-types";
 import type { ParsedArgs } from "@lib/cli-args";
 import { ExpiredAuthContext, wrapApi } from "./ExpiredAuthContext.js";
+import { assertServerCompatible } from "@lib/auth-flow";
 
 export type Screen =
   | "local"
@@ -28,6 +29,7 @@ type Props = {
 
 type ResolvedState =
   | { kind: "loading" }
+  | { kind: "incompatible"; message: string }
   | { kind: "screen"; screen: Screen; deployment: DeploymentConfig | null; thread_id?: string };
 
 const screenFromArgs = (args: ParsedArgs): Screen => {
@@ -87,6 +89,23 @@ export const RootScreen = ({ args }: Props) => {
         setState({ kind: "screen", screen: "login", deployment: null });
         return;
       }
+      // Best-effort cli_api_version handshake. Refuse to proceed if the
+      // server is forward-incompatible. Network failures fall through
+      // (the request will surface a clearer error later).
+      try {
+        const probe = new ApiClient(deployment.backend_url, deployment.session_token);
+        const cfg = await probe.getConfig();
+        assertServerCompatible(cfg);
+      } catch (err) {
+        if (err instanceof Error && err.message.startsWith("This Open SWE deployment speaks")) {
+          if (!cancelled) {
+            setState({ kind: "incompatible", message: err.message });
+          }
+          return;
+        }
+        // Other errors (offline, deployment down) — let the screen surface them.
+      }
+      if (cancelled) return;
       setState({
         kind: "screen",
         screen: requested,
@@ -180,6 +199,17 @@ export const RootScreen = ({ args }: Props) => {
       <Box>
         <Spinner />
         <Text color={themeColor("subtle")}> Loading…</Text>
+      </Box>
+    );
+  }
+
+  if (state.kind === "incompatible") {
+    return (
+      <Box flexDirection="column" paddingY={1}>
+        <Text color={themeColor("error")} bold>
+          Incompatible CLI version
+        </Text>
+        <Text color={themeColor("subtle")}>{state.message}</Text>
       </Box>
     );
   }

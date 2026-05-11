@@ -326,6 +326,13 @@ async def apply_bundle_to_sandbox(
     safe_repo = shlex.quote(repo_dir)
     safe_work = shlex.quote(work_dir)
 
+    # Ensure work_dir exists. Real LangSmith sandboxes seed it at boot, but
+    # other providers might not — fail loudly here rather than letting the
+    # clone fail with a cryptic message.
+    ec, out = await _exec(sandbox, f"mkdir -p {safe_work} && [ -d {safe_work} ]")
+    if ec not in (0, None):
+        raise RuntimeError(f"work_dir {work_dir!r} not usable: {out[:500]}")
+
     # Clone via gh (proxy handles auth in langsmith).
     clone_cmd = (
         f"cd {safe_work} && "
@@ -360,6 +367,12 @@ async def apply_bundle_to_sandbox(
         encoding = entry.get("encoding", "utf-8")
         if not isinstance(rel_path, str) or not rel_path:
             continue
+        # Reject paths that would escape the repo dir. The bundle is
+        # untrusted (anyone with a CLI session can POST it to /cli/runs/adopt),
+        # so "../../etc/passwd"-style entries must not write outside repo_dir.
+        if _is_unsafe_path(rel_path):
+            logger.warning("Skipping unsafe untracked path in bundle: %r", rel_path)
+            continue
         if encoding == "utf-8":
             raw = content.encode("utf-8")
         else:
@@ -373,3 +386,21 @@ async def apply_bundle_to_sandbox(
         ec, out = await _exec(sandbox, write_cmd)
         if ec not in (0, None):
             raise RuntimeError(f"write untracked {rel_path} failed: {out[:500]}")
+
+
+def _is_unsafe_path(rel_path: str) -> bool:
+    """Reject absolute paths or paths whose normalized form escapes ``.``."""
+    if not rel_path or rel_path.startswith("/"):
+        return True
+    parts = rel_path.replace("\\", "/").split("/")
+    depth = 0
+    for part in parts:
+        if part in ("", "."):
+            continue
+        if part == "..":
+            depth -= 1
+            if depth < 0:
+                return True
+        else:
+            depth += 1
+    return False

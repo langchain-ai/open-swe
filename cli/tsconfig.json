@@ -35,6 +35,7 @@
       "@lib/config": ["src/lib/config.ts"],
       "@lib/upgrade": ["src/lib/upgrade.ts"],
       "@lib/handoff": ["src/lib/handoff.ts"],
+      "@lib/cursor-store": ["src/lib/cursor-store.ts"],
       "@config/*": ["src/config/*"],
       "@types": ["src/types/index.ts"],
       "@types/*": ["src/types/*"]
