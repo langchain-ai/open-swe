@@ -7,8 +7,8 @@ import { StatusLine } from "./components/StatusLine.js";
 import { BusyLine } from "./components/BusyLine.js";
 import { useAppState } from "./hooks/useAppState.js";
 import { themeColor } from "./theme.js";
-import { getActiveDeployment } from "@lib/config.js";
-import type { DeploymentConfig } from "@lib/api-types.js";
+import { getActiveDeployment } from "@lib/config";
+import type { DeploymentConfig } from "@lib/api-types";
 
 export const App = () => {
   const appState = useAppState();

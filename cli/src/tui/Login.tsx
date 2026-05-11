@@ -4,9 +4,9 @@ import { TextInput } from "./components/TextInput/index.js";
 import { Spinner } from "./components/Spinner.js";
 import { themeColor } from "./theme.js";
 import { ARROW_RIGHT_THIN, CHECK, CROSS } from "./figures.js";
-import { setDeployment } from "@lib/config.js";
-import { login as runLogin } from "@lib/auth-flow.js";
-import type { DeploymentConfig } from "@lib/api-types.js";
+import { setDeployment } from "@lib/config";
+import { login as runLogin } from "@lib/auth-flow";
+import type { DeploymentConfig } from "@lib/api-types";
 
 type Phase = "input" | "running" | "error" | "done";
 

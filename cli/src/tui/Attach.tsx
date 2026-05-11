@@ -7,9 +7,9 @@ import { Spinner } from "./components/Spinner.js";
 import { themeColor } from "./theme.js";
 import { useStore } from "@app/store.js";
 import { CloudRunner } from "@app/cloud-runner.js";
-import type { ApiClient } from "@lib/api-client.js";
-import type { DeploymentConfig } from "@lib/api-types.js";
-import { nowTime } from "@lib/time.js";
+import type { ApiClient } from "@lib/api-client";
+import type { DeploymentConfig } from "@lib/api-types";
+import { nowTime } from "@lib/time";
 
 type Props = {
   api: ApiClient;

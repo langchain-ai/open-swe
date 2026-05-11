@@ -3,7 +3,7 @@ import { RootScreen } from './tui/screens.js';
 import { getStoredApiKeys, deleteAllApiKeys, getStoredModelConfig } from '@lib/storage';
 import { clearLog } from '@lib/logger';
 import { useStore } from '@app/store.js';
-import { parseArgs } from '@lib/cli-args.js';
+import { parseArgs } from '@lib/cli-args';
 
 const clearTerminal = () => {
   if (process.stdout.isTTY) {

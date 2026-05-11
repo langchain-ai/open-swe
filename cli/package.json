@@ -9,7 +9,7 @@
     "openswe": "dist/index.js"
   },
   "scripts": {
-    "build": "tsc && tsc-alias -p tsconfig.json",
+    "build": "tsc && tsc-alias -p tsconfig.json && chmod +x dist/index.js",
     "start": "bun run dist/index.js",
     "dev": "tsc --watch",
     "test": "vitest run --exclude '**/evals/**'",

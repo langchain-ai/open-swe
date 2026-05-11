@@ -6,10 +6,10 @@ import { RunsList } from "./RunsList.js";
 import { Attach } from "./Attach.js";
 import { Spinner } from "./components/Spinner.js";
 import { themeColor } from "./theme.js";
-import { ApiClient } from "@lib/api-client.js";
-import { getActiveDeployment } from "@lib/config.js";
-import type { DeploymentConfig } from "@lib/api-types.js";
-import type { ParsedArgs } from "@lib/cli-args.js";
+import { ApiClient } from "@lib/api-client";
+import { getActiveDeployment } from "@lib/config";
+import type { DeploymentConfig } from "@lib/api-types";
+import type { ParsedArgs } from "@lib/cli-args";
 
 export type Screen = "local" | "login" | "runs" | "attach" | "new-cloud";
 

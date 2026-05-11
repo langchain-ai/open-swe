@@ -3,8 +3,8 @@ import { Box, Text, useInput } from "ink";
 import { Spinner } from "./components/Spinner.js";
 import { themeColor } from "./theme.js";
 import { ARROW_RIGHT_THIN } from "./figures.js";
-import type { ApiClient } from "@lib/api-client.js";
-import type { RunSource, RunStatus, RunSummary } from "@lib/api-types.js";
+import type { ApiClient } from "@lib/api-client";
+import type { RunSource, RunStatus, RunSummary } from "@lib/api-types";
 
 type Props = {
   api: ApiClient;
