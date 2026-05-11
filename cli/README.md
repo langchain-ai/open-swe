@@ -1,60 +1,65 @@
 ```bash
-  ░██████    ░██████   ░███████      ░███    
- ░██   ░██  ░██   ░██  ░██   ░██    ░██░██   
-░██        ░██     ░██ ░██    ░██  ░██  ░██  
-░██        ░██     ░██ ░██    ░██ ░█████████ 
-░██        ░██     ░██ ░██    ░██ ░██    ░██ 
- ░██   ░██  ░██   ░██  ░██   ░██  ░██    ░██ 
-  ░██████    ░██████   ░███████   ░██    ░██ 
+  ░██████    ░██████   ░███████      ░███
+ ░██   ░██  ░██   ░██  ░██   ░██    ░██░██
+░██        ░██     ░██ ░██    ░██  ░██  ░██
+░██        ░██     ░██ ░██    ░██ ░█████████
+░██        ░██     ░██ ░██    ░██ ░██    ░██
+ ░██   ░██  ░██   ░██  ░██   ░██  ░██    ░██
+  ░██████    ░██████   ░███████   ░██    ░██
 ```
-AI coding agent CLI: Interact with LLM (via OpenRouter) for filesystem ops, shell commands, and code tasks. Built with Ink (TUI), LangGraph (agent graph), TypeScript.
+
+Open SWE CLI: a terminal client for the Open SWE agent. Built with Ink (TUI), LangGraph, and TypeScript.
+
+The CLI runs in two modes:
+
+- **Local mode** — runs the agent loop in-process against a model provider of your choice. Useful for offline iteration and quick local edits. No deployment required.
+- **Cloud mode** — talks to a deployed Open SWE backend over HTTPS. Same backend that Slack, Linear, and GitHub webhooks use, so a CLI-started run shows up next to runs from any other surface and can be resumed from any of them.
+
+See [`DESIGN.md`](DESIGN.md) for the full design.
 
 ## Setup
 
 1. Install Bun: `curl -fsSL https://bun.sh/install | bash`
-2. Clone: `git clone <repo> && cd coda`
-3. Deps: `bun install`
-4. Set up LangSmith (optional, for tracing):
-   - Sign up at [LangSmith](https://smith.langchain.com)
-   - Create API key in Settings
-   - Add to `.env`:
-     ```bash
-     LANGSMITH_TRACING=true
-     LANGSMITH_API_KEY=your_api_key_here
-     LANGSMITH_PROJECT=coda
-     ```
+2. Clone the repo and `cd cli`
+3. Install deps: `bun install`
 
-## Dev
+## Cloud mode
 
-- Build: `bun run build`
-- Watch: `bun run dev`
-- Run: `bun run start`
-- Test: `bun run test`
-- Logs (debug): `bun run logs:tail` (tail `~/.coda/logs/coda.log` in separate terminal)
+Cloud mode requires a running Open SWE deployment with `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET`, `ALLOWED_GITHUB_ORG`, `CLI_SESSION_SECRET`, and `CLI_PUBLIC_BASE_URL` configured (see the repo-root [`INSTALLATION.md`](../INSTALLATION.md)).
 
+- `openswe login` — start GitHub OAuth flow and store a session token locally.
+- `openswe runs` — list your runs across all surfaces (CLI, Slack, Linear, GitHub).
+- `openswe attach <thread-id>` — stream events for an existing run and send follow-up messages.
+- `openswe new --cloud "<prompt>" --repo owner/name --branch <branch>` — start a new cloud run.
 
-## Link
-- Build: `bun run build`
-- Link: `bun link`
+## Local mode
 
-In your working directory:
-- Run: `coda`
+Run the interactive CLI with `bun run start`. On first run, it prompts for an API key for whatever model provider you've configured.
 
-## Usage
+Common slash commands: `/help`, `/status`, `/model`, `/review`, `/reset`, `/clear`, `/quit`. Press `Tab` to switch modes (agent/plan), `Esc` to interrupt or exit.
 
-Run the interactive CLI with: `bun run start`.
+## Development
 
-The application will prompt for an OpenRouter API key on the first run.
+- `bun run dev` — TypeScript watch mode for local iteration.
+- `bun run build` — emits ESM output to `dist/`.
+- `bun run start` — runs the compiled CLI from `dist/`.
+- `bun run test` — runs vitest.
 
-**Commands**: `/help`, `/status`, `/model`, `/review`, `/reset`, `/clear`, `/quit`.
-**Keys**: `Tab` to switch modes (agent/plan). `Esc` to interrupt/exit.
+## Global install from source
+
+```bash
+bun run build
+bun link
+```
+
+Then `openswe` is available globally from your shell.
 
 ## Structure
 
-- `src/coda.tsx`: Main entrypoint, Ink renderer setup.
-- `src/app/`: Core application logic (agent runner, command executor, state store).
-- `src/agent/`: LangGraph agent, tools (fs, shell), and prompts.
-- `src/tui/`: TUI components and hooks built with Ink.
-- `src/lib/`: Shared utilities (storage, logger, diff).
+- `index.ts` — executable entry point, forwards to `src/coda.tsx`.
+- `src/app/` — agent runner, command executor, Zustand store.
+- `src/agent/` — LangGraph agent, tools, prompts (local mode).
+- `src/tui/` — Ink-based UI components and hooks.
+- `src/lib/` — framework-agnostic helpers.
 
-See `AGENTS.md` for detailed contributor guidelines.
+See `AGENTS.md` for contributor guidelines and `DESIGN.md` for the full CLI design.

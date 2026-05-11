@@ -10,7 +10,11 @@ export type CliCommand =
   | 'runs'
   | 'attach'
   | 'new-cloud'
-  | 'new-local';
+  | 'new-local'
+  | 'upgrade'
+  | 'handoff';
+
+export type HandoffDirection = 'local' | 'cloud';
 
 export type ParsedArgs = {
   command: CliCommand;
@@ -22,6 +26,8 @@ export type ParsedArgs = {
   model?: string;
   agent?: string;
   cloud?: boolean;
+  version?: string;
+  handoff_to?: HandoffDirection;
 };
 
 type FlagSpec = {
@@ -38,6 +44,9 @@ const FLAG_SPECS: FlagSpec[] = [
   { long: 'model', takesValue: true },
   { long: 'agent', takesValue: true },
   { long: 'backend', takesValue: true },
+  { long: 'version', takesValue: true },
+  { long: 'to', takesValue: true },
+  { long: 'thread', takesValue: true },
 ];
 
 type ParsedFlags = {
@@ -99,6 +108,7 @@ export const parseArgs = (argv: string[] = process.argv.slice(2)): ParsedArgs =>
     model: asString(flags.model),
     agent: asString(flags.agent),
     cloud: flags.cloud === true,
+    version: asString(flags.version),
   };
 
   if (!sub) return base;
@@ -115,6 +125,20 @@ export const parseArgs = (argv: string[] = process.argv.slice(2)): ParsedArgs =>
     case 'attach': {
       const tid = positionals[1];
       return { ...base, command: 'attach', thread_id: tid };
+    }
+    case 'upgrade':
+      return { ...base, command: 'upgrade', version: base.version ?? positionals[1] };
+    case 'handoff': {
+      const toVal = asString(flags.to);
+      const direction: HandoffDirection | undefined =
+        toVal === 'local' || toVal === 'cloud' ? toVal : undefined;
+      const threadId = asString(flags.thread) ?? positionals[1];
+      return {
+        ...base,
+        command: 'handoff',
+        handoff_to: direction,
+        thread_id: threadId,
+      };
     }
     case 'new': {
       const isCloud = flags.cloud === true || flags.local !== true;

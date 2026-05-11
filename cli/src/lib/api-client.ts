@@ -122,6 +122,20 @@ export class ApiClient {
     );
   }
 
+  exportHandoff(thread_id: string): Promise<unknown> {
+    return this.request<unknown>(
+      `/cli/runs/${encodeURIComponent(thread_id)}/handoff`,
+      { method: 'POST' },
+    );
+  }
+
+  adoptHandoff(bundle: unknown): Promise<CreateRunResponse> {
+    return this.request<CreateRunResponse>('/cli/runs/adopt', {
+      method: 'POST',
+      body: { bundle },
+    });
+  }
+
   streamUrl(thread_id: string, since?: string): string {
     return this.buildUrl(`/cli/runs/${encodeURIComponent(thread_id)}/stream`, { since });
   }

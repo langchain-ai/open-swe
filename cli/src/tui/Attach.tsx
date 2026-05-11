@@ -10,6 +10,7 @@ import { CloudRunner } from "@app/cloud-runner.js";
 import type { ApiClient } from "@lib/api-client";
 import type { DeploymentConfig } from "@lib/api-types";
 import { nowTime } from "@lib/time";
+import { applyToLocal, validateBundle, type HandoffBundle } from "@lib/handoff";
 
 type Props = {
   api: ApiClient;
@@ -21,8 +22,7 @@ type Props = {
 const HELP_LINES = [
   "/detach            — close stream, leave run running",
   "/interrupt         — interrupt current step",
-  "/handoff cloud     — (not yet available)",
-  "/handoff local     — (not yet available)",
+  "/handoff local     — move this run to your local workdir",
   "/whoami            — show logged-in user",
   "/help              — show this help",
 ];
@@ -119,15 +119,71 @@ export const Attach = ({ api, thread_id, deployment, onDetach }: Props) => {
           return true;
         }
         case "handoff": {
-          addMessage({
-            author: "system",
-            chunks: [
-              {
-                kind: "text",
-                text: `Handoff${argsLine ? ` (${argsLine})` : ""} is not yet available in this version.`,
-              },
-            ],
-          });
+          const target = argsLine.trim().toLowerCase();
+          if (target !== "local") {
+            addMessage({
+              author: "system",
+              chunks: [
+                {
+                  kind: "text",
+                  text:
+                    target === "cloud"
+                      ? "You are already in a cloud session. Use /handoff local to bring it down."
+                      : "Usage: /handoff local",
+                },
+              ],
+            });
+            return true;
+          }
+          void (async () => {
+            addMessage({
+              author: "system",
+              chunks: [{ kind: "text", text: "Pausing cloud run and exporting state…" }],
+            });
+            let bundle: HandoffBundle;
+            try {
+              bundle = (await api.exportHandoff(thread_id)) as HandoffBundle;
+            } catch (err) {
+              const message = err instanceof Error ? err.message : String(err);
+              addMessage({
+                author: "system",
+                chunks: [{ kind: "error", text: `Handoff failed: ${message}` }],
+              });
+              return;
+            }
+            const v = validateBundle(bundle);
+            if (!v.ok) {
+              addMessage({
+                author: "system",
+                chunks: [{ kind: "error", text: `Server returned an invalid bundle: ${v.error}` }],
+              });
+              return;
+            }
+            try {
+              await applyToLocal(bundle, process.cwd());
+            } catch (err) {
+              const message = err instanceof Error ? err.message : String(err);
+              addMessage({
+                author: "system",
+                chunks: [{ kind: "error", text: `Could not apply to local workdir: ${message}` }],
+              });
+              return;
+            }
+            addMessage({
+              author: "system",
+              chunks: [
+                {
+                  kind: "text",
+                  text:
+                    "Cloud state applied to your working directory. " +
+                    "The cloud sandbox is paused (not destroyed). " +
+                    "Detaching — continue locally with `openswe` in this directory.",
+                },
+              ],
+            });
+            runnerRef.current?.detach();
+            onDetach();
+          })();
           return true;
         }
         case "whoami": {

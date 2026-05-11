@@ -513,6 +513,30 @@ The `langgraph.json` at the project root already defines the graph entry point a
 }
 ```
 
+## Configuring the deployment for the CLI
+
+If you want users to log in to the Open SWE CLI against this deployment (cloud mode: `openswe login`, `openswe runs`, `openswe attach`, `openswe new --cloud`), the deployment needs a few additional env vars and one GitHub App setting.
+
+Environment variables:
+
+| Variable | Purpose |
+|---|---|
+| `GITHUB_APP_CLIENT_ID` | OAuth client id from your GitHub App. Used for the CLI's user-to-server OAuth flow. |
+| `GITHUB_APP_CLIENT_SECRET` | OAuth client secret from your GitHub App. |
+| `ALLOWED_GITHUB_ORG` | GitHub org whose active members are allowed to use the CLI. Logins from outside this org are rejected. |
+| `CLI_SESSION_SECRET` | Random secret used to sign CLI session JWTs. Generate with `openssl rand -hex 32`. |
+| `CLI_PUBLIC_BASE_URL` | Public base URL of the deployment (e.g. `https://open-swe.your-org.com`). The CLI uses this for OAuth redirects. |
+
+GitHub App setting:
+
+In your GitHub App configuration, add the deployment's callback URL to the **User authorization callback URL** field:
+
+```
+https://<deployment>/cli/auth/callback
+```
+
+The OAuth flow is user-to-server only — no extra installation step is required.
+
 ## Troubleshooting
 
 ### Webhook not receiving events

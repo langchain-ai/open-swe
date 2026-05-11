@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib
 import time
+from unittest.mock import AsyncMock
 
 import jwt
 import pytest
@@ -22,6 +23,7 @@ def _reset_state(monkeypatch):
     monkeypatch.setenv("CLI_SESSION_SECRET", _TEST_SECRET)
     monkeypatch.setenv("ALLOWED_GITHUB_ORG", "langchain-ai")
     monkeypatch.setenv("GITHUB_APP_CLIENT_ID", "Iv1.test")
+    monkeypatch.setenv("GITHUB_APP_CLIENT_SECRET", "secret")
     importlib.reload(cli_session_module)
     importlib.reload(cli_auth_module)
     importlib.reload(webapp)
@@ -48,7 +50,8 @@ def test_cli_config_is_public() -> None:
     assert body["allowed_org"] == "langchain-ai"
     assert body["github_app_client_id"] == "Iv1.test"
     assert body["cli_api_version"] == 1
-    assert body["supports_handoff"] is False
+    # Defaults to langsmith sandbox, which supports handoff.
+    assert body["supports_handoff"] is True
 
 
 def test_cli_me_unauthenticated_returns_401() -> None:
@@ -103,3 +106,87 @@ def test_cli_me_invalid_token_returns_401() -> None:
     client = TestClient(webapp.app)
     response = client.get("/cli/me", headers={"Authorization": "Bearer not-a-real-jwt"})
     assert response.status_code == 401
+
+
+def test_cli_auth_callback_uses_user_emails_when_user_email_null(monkeypatch) -> None:
+    """If /user returns email=null, the callback should fall back to /user/emails."""
+    monkeypatch.setattr(
+        webapp, "_exchange_oauth_code", AsyncMock(return_value="user-to-server-token")
+    )
+    monkeypatch.setattr(
+        webapp,
+        "_fetch_github_user",
+        AsyncMock(return_value={"login": "octocat", "email": None}),
+    )
+    monkeypatch.setattr(
+        webapp,
+        "_fetch_github_primary_email",
+        AsyncMock(return_value="octocat@example.com"),
+    )
+    monkeypatch.setattr(webapp, "is_user_active_org_member", AsyncMock(return_value=True))
+    upsert_mock = AsyncMock(return_value=None)
+    monkeypatch.setattr(webapp, "upsert_identity", upsert_mock)
+
+    client = TestClient(webapp.app)
+    response = client.get(
+        "/cli/auth/callback",
+        params={
+            "code": "abc",
+            "state": "xyz",
+            "redirect_uri": "http://127.0.0.1:8765/cb",
+        },
+    )
+    assert response.status_code == 200
+    upsert_mock.assert_awaited_once()
+    args, kwargs = upsert_mock.call_args
+    assert args[0] == "octocat@example.com"
+    assert kwargs.get("github_login") == "octocat"
+    assert kwargs.get("surface") == "cli"
+
+
+def test_cli_auth_callback_uses_user_email_when_present(monkeypatch) -> None:
+    """If /user returns an email, no /user/emails fallback is needed."""
+    monkeypatch.setattr(webapp, "_exchange_oauth_code", AsyncMock(return_value="tok"))
+    monkeypatch.setattr(
+        webapp,
+        "_fetch_github_user",
+        AsyncMock(return_value={"login": "octocat", "email": "public@example.com"}),
+    )
+    fallback_mock = AsyncMock(return_value=None)
+    monkeypatch.setattr(webapp, "_fetch_github_primary_email", fallback_mock)
+    monkeypatch.setattr(webapp, "is_user_active_org_member", AsyncMock(return_value=True))
+    upsert_mock = AsyncMock(return_value=None)
+    monkeypatch.setattr(webapp, "upsert_identity", upsert_mock)
+
+    client = TestClient(webapp.app)
+    response = client.get(
+        "/cli/auth/callback",
+        params={"code": "abc", "state": "xyz", "redirect_uri": "http://127.0.0.1:8765/cb"},
+    )
+    assert response.status_code == 200
+    fallback_mock.assert_not_awaited()
+    upsert_mock.assert_awaited_once()
+    args, _ = upsert_mock.call_args
+    assert args[0] == "public@example.com"
+
+
+def test_cli_auth_callback_no_email_skips_upsert(monkeypatch) -> None:
+    """If neither /user nor /user/emails returns an email, login still works."""
+    monkeypatch.setattr(webapp, "_exchange_oauth_code", AsyncMock(return_value="tok"))
+    monkeypatch.setattr(
+        webapp,
+        "_fetch_github_user",
+        AsyncMock(return_value={"login": "octocat", "email": None}),
+    )
+    monkeypatch.setattr(webapp, "_fetch_github_primary_email", AsyncMock(return_value=None))
+    monkeypatch.setattr(webapp, "is_user_active_org_member", AsyncMock(return_value=True))
+    upsert_mock = AsyncMock(return_value=None)
+    monkeypatch.setattr(webapp, "upsert_identity", upsert_mock)
+
+    client = TestClient(webapp.app)
+    response = client.get(
+        "/cli/auth/callback",
+        params={"code": "abc", "state": "xyz", "redirect_uri": "http://127.0.0.1:8765/cb"},
+    )
+    assert response.status_code == 200
+    upsert_mock.assert_not_awaited()

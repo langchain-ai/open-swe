@@ -142,6 +142,20 @@ This is an area where you can extend Open SWE for your org: add deterministic CI
 - **[Installation Guide](INSTALLATION.md)** — GitHub App creation, LangSmith, Linear/Slack/GitHub triggers, and production deployment
 - **[Customization Guide](CUSTOMIZATION.md)** — swap the sandbox, model, tools, triggers, system prompt, and middleware for your org
 
+---
+
+## CLI
+
+Open SWE ships with an optional command-line client (`openswe`) for interacting with the agent locally and from a deployed instance. Cloud mode (`login`, `runs`, `attach`, `new --cloud`) talks to the same backend that Slack, Linear, and GitHub use, so a CLI-started run shows up alongside runs triggered from any other surface. Local mode runs the agent loop in-process for offline use.
+
+Install:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/langchain-ai/open-swe/main/cli/scripts/install.sh | sh
+```
+
+See [`cli/DESIGN.md`](cli/DESIGN.md) for the full design and [`cli/README.md`](cli/README.md) for building from source.
+
 ## License
 
 MIT

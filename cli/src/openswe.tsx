@@ -4,6 +4,7 @@ import { getStoredApiKeys, deleteAllApiKeys, getStoredModelConfig } from '@lib/s
 import { clearLog } from '@lib/logger';
 import { useStore } from '@app/store.js';
 import { parseArgs } from '@lib/cli-args';
+import { runUpgrade } from '@lib/upgrade';
 
 const clearTerminal = () => {
   if (process.stdout.isTTY) {
@@ -29,6 +30,28 @@ export async function main() {
   process.on('exit', disableBracketedPaste);
 
   const args = parseArgs(process.argv.slice(2));
+
+  // `upgrade` is a side-effect command: stream the install script directly to
+  // the terminal, then exit. We must not enter the Ink renderer because the
+  // installer expects raw stdout.
+  if (args.command === 'upgrade') {
+    try {
+      const { exitCode, resolvedVersion } = await runUpgrade({ version: args.version });
+      if (exitCode === 0) {
+        // eslint-disable-next-line no-console
+        console.log(
+          `Upgraded to ${resolvedVersion}. Re-run \`openswe\` to use the new version.`,
+        );
+        process.exit(0);
+      }
+      process.exit(exitCode);
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      // eslint-disable-next-line no-console
+      console.error(detail);
+      process.exit(1);
+    }
+  }
 
   const storedModelConfig = await getStoredModelConfig();
   if (storedModelConfig) {

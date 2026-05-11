@@ -1,17 +1,26 @@
-import { useEffect, useState } from "react";
-import { Box, Text, useApp } from "ink";
+import React, { useEffect, useState } from "react";
+import { Box, Text, useApp, useInput } from "ink";
 import { App } from "./App.js";
 import { Login } from "./Login.js";
 import { RunsList } from "./RunsList.js";
 import { Attach } from "./Attach.js";
+import { NewCloud } from "./NewCloud.js";
+import { HandoffScreen } from "./HandoffScreen.js";
 import { Spinner } from "./components/Spinner.js";
 import { themeColor } from "./theme.js";
 import { ApiClient } from "@lib/api-client";
 import { getActiveDeployment } from "@lib/config";
 import type { DeploymentConfig } from "@lib/api-types";
 import type { ParsedArgs } from "@lib/cli-args";
+import { ExpiredAuthContext, wrapApi } from "./ExpiredAuthContext.js";
 
-export type Screen = "local" | "login" | "runs" | "attach" | "new-cloud";
+export type Screen =
+  | "local"
+  | "login"
+  | "runs"
+  | "attach"
+  | "new-cloud"
+  | "handoff";
 
 type Props = {
   args: ParsedArgs;
@@ -31,6 +40,8 @@ const screenFromArgs = (args: ParsedArgs): Screen => {
       return "attach";
     case "new-cloud":
       return "new-cloud";
+    case "handoff":
+      return "handoff";
     case "local":
     default:
       return "local";
@@ -45,6 +56,10 @@ export const RootScreen = ({ args }: Props) => {
   );
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string>("");
+  const [expiredDeployment, setExpiredDeployment] =
+    useState<DeploymentConfig | null>(null);
+  const [prevState, setPrevState] = useState<ResolvedState | null>(null);
+  const [reloginActive, setReloginActive] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -83,6 +98,82 @@ export const RootScreen = ({ args }: Props) => {
       cancelled = true;
     };
   }, [args]);
+
+  const markExpired = (d: DeploymentConfig) => {
+    setExpiredDeployment((prev) => prev ?? d);
+    if (state.kind === "screen" && !prevState) {
+      setPrevState(state);
+    }
+  };
+
+  useInput(
+    (input, key) => {
+      if (!expiredDeployment || reloginActive) return;
+      if (input === "r" || input === "R" || key.return) {
+        setReloginActive(true);
+      } else if (input === "q" || input === "Q" || key.escape) {
+        exit();
+      }
+    },
+    { isActive: expiredDeployment !== null && !reloginActive },
+  );
+
+  if (expiredDeployment && reloginActive) {
+    return (
+      <ExpiredAuthContext.Provider value={{ markExpired }}>
+        <Login
+          initialBackendUrl={expiredDeployment.backend_url}
+          onComplete={(d) => {
+            setExpiredDeployment(null);
+            setReloginActive(false);
+            const restore = prevState;
+            setPrevState(null);
+            if (restore && restore.kind === "screen") {
+              setState({ ...restore, deployment: d });
+            } else {
+              setState({ kind: "screen", screen: "runs", deployment: d });
+            }
+          }}
+        />
+      </ExpiredAuthContext.Provider>
+    );
+  }
+
+  if (expiredDeployment) {
+    const brand = themeColor("brand");
+    const subtle = themeColor("subtle");
+    return (
+      <Box flexDirection="column" paddingY={1}>
+        <Box
+          borderStyle="round"
+          borderColor={brand}
+          paddingX={2}
+          flexDirection="column"
+        >
+          <Text bold color={brand}>
+            Session expired
+          </Text>
+          <Text color={subtle}>
+            Your session for {expiredDeployment.backend_url} has expired.
+          </Text>
+          <Box marginTop={1}>
+            <Text>Re-login to </Text>
+            <Text bold>{expiredDeployment.backend_url}</Text>
+            <Text>?</Text>
+          </Box>
+          <Box marginTop={1}>
+            <Text color={subtle}>Press </Text>
+            <Text bold>r</Text>
+            <Text color={subtle}> or </Text>
+            <Text bold>Enter</Text>
+            <Text color={subtle}> to re-login, </Text>
+            <Text bold>q</Text>
+            <Text color={subtle}> to quit.</Text>
+          </Box>
+        </Box>
+      </Box>
+    );
+  }
 
   if (state.kind === "loading") {
     return (
@@ -132,10 +223,17 @@ export const RootScreen = ({ args }: Props) => {
     );
   }
 
-  const api = new ApiClient(deployment.backend_url, deployment.session_token);
+  const rawApi = new ApiClient(deployment.backend_url, deployment.session_token);
+  const api = wrapApi(rawApi, deployment, markExpired);
+
+  const wrapped = (children: React.ReactNode) => (
+    <ExpiredAuthContext.Provider value={{ markExpired }}>
+      {children}
+    </ExpiredAuthContext.Provider>
+  );
 
   if (screen === "runs") {
-    return (
+    return wrapped(
       <RunsList
         api={api}
         onAttach={(tid) => {
@@ -155,14 +253,15 @@ export const RootScreen = ({ args }: Props) => {
           });
         }}
         onQuit={() => exit()}
-      />
+      />,
     );
   }
 
   if (screen === "new-cloud") {
-    // If the user provided enough args, kick off creation; otherwise show
-    // a small notice (a richer form is out of scope for this PR).
-    if (!creating && args.repo && args.branch && args.prompt) {
+    // Fast-path: if all three args were provided on the command line, kick
+    // off creation immediately without showing the form.
+    const haveAllArgs = !!(args.repo && args.branch && args.prompt);
+    if (haveAllArgs && !creating && !createError) {
       setCreating(true);
       void (async () => {
         try {
@@ -186,26 +285,45 @@ export const RootScreen = ({ args }: Props) => {
           setCreating(false);
         }
       })();
-    }
-    return (
-      <Box flexDirection="column" paddingY={1}>
-        {creating ? (
+      return wrapped(
+        <Box flexDirection="column" paddingY={1}>
           <Box>
             <Spinner />
             <Text color={themeColor("subtle")}> Creating cloud run…</Text>
           </Box>
-        ) : null}
-        {createError ? (
-          <Text color={themeColor("error")}>
-            Failed to create run: {createError}
-          </Text>
-        ) : null}
-        {!creating && !args.repo ? (
-          <Text color={themeColor("subtle")}>
-            Usage: openswe new --cloud --repo owner/repo --branch foo &quot;prompt&quot;
-          </Text>
-        ) : null}
-      </Box>
+        </Box>,
+      );
+    }
+    return wrapped(
+      <NewCloud
+        api={api}
+        initialRepo={args.repo}
+        initialBranch={args.branch ?? "main"}
+        initialPrompt={args.prompt}
+        model={args.model}
+        agent={args.agent}
+        onCreated={(tid) => {
+          setState({
+            kind: "screen",
+            screen: "attach",
+            deployment,
+            thread_id: tid,
+          });
+        }}
+        onCancel={() => {
+          setState({ kind: "screen", screen: "runs", deployment });
+        }}
+      />,
+    );
+  }
+
+  if (screen === "handoff") {
+    return wrapped(
+      <HandoffScreen
+        api={api}
+        direction={args.handoff_to ?? "local"}
+        thread_id={args.thread_id}
+      />,
     );
   }
 
@@ -220,7 +338,7 @@ export const RootScreen = ({ args }: Props) => {
         </Box>
       );
     }
-    return (
+    return wrapped(
       <Attach
         api={api}
         thread_id={tid}
@@ -232,7 +350,7 @@ export const RootScreen = ({ args }: Props) => {
             deployment,
           });
         }}
-      />
+      />,
     );
   }
 

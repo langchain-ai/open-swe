@@ -1,0 +1,92 @@
+name: CLI Release
+
+on:
+  push:
+    tags:
+      - "cli-v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: darwin-arm64
+            os: macos-latest
+          - target: darwin-x64
+            os: macos-latest
+          - target: linux-x64
+            os: ubuntu-latest
+          - target: linux-arm64
+            os: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: latest
+
+      - name: Install CLI dependencies
+        working-directory: cli
+        run: bun install --frozen-lockfile
+
+      - name: Compile binary
+        working-directory: cli
+        run: bun build --compile --target=bun-${{ matrix.target }} ./index.ts --outfile openswe-${{ matrix.target }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: openswe-${{ matrix.target }}
+          path: cli/openswe-${{ matrix.target }}
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    name: Publish Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Collect binaries
+        run: |
+          mkdir -p dist
+          for target in darwin-arm64 darwin-x64 linux-x64 linux-arm64; do
+            cp "artifacts/openswe-${target}/openswe-${target}" "dist/openswe-${target}"
+            chmod +x "dist/openswe-${target}"
+          done
+          ls -la dist
+
+      - name: Generate SHA256SUMS
+        working-directory: dist
+        run: |
+          sha256sum openswe-* > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: |
+            dist/openswe-darwin-arm64
+            dist/openswe-darwin-x64
+            dist/openswe-linux-x64
+            dist/openswe-linux-arm64
+            dist/SHA256SUMS
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

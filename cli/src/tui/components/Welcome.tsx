@@ -1,7 +1,6 @@
 import { Box, Text } from 'ink';
-import path from 'path';
 import { themeColor } from '@tui/theme.js';
-import { ARROW_RIGHT_THIN } from '@tui/figures.js';
+import { Logo } from './Logo.js';
 import type { ModelConfig } from '@types';
 
 type Props = {
@@ -33,10 +32,7 @@ export const Welcome = ({ modelConfig, cwd }: Props) => {
       paddingY={0}
       marginBottom={1}
     >
-      <Box>
-        <Text color={brand}>{ARROW_RIGHT_THIN}_ </Text>
-        <Text bold>Open SWE CLI</Text>
-      </Box>
+      <Logo />
       <Text> </Text>
       <Box>
         <Text color={inactive}>{'model:     '}</Text>

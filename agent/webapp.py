@@ -1,5 +1,6 @@
 """Custom FastAPI routes for LangGraph server."""
 
+import asyncio
 import hashlib
 import hmac
 import json
@@ -2601,13 +2602,18 @@ def _server_version() -> str:
         return "unknown"
 
 
+def _handoff_supported() -> bool:
+    """Handoff currently requires the langsmith sandbox provider."""
+    return os.getenv("SANDBOX_TYPE", "langsmith") == "langsmith"
+
+
 @app.get("/cli/config")
 async def cli_config() -> dict[str, Any]:
     return {
         "github_app_client_id": GITHUB_APP_CLIENT_ID,
         "allowed_org": ALLOWED_GITHUB_ORG,
         "server_version": _server_version(),
-        "supports_handoff": False,
+        "supports_handoff": _handoff_supported(),
         "cli_api_version": CLI_API_VERSION,
     }
 
@@ -2665,6 +2671,46 @@ async def _fetch_github_user(token: str) -> dict[str, Any] | None:
     return data if isinstance(data, dict) else None
 
 
+async def _fetch_github_primary_email(token: str) -> str | None:
+    """Fetch the user's primary verified email via the OAuth user-to-server token."""
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            response = await client.get(
+                "https://api.github.com/user/emails",
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Accept": "application/vnd.github+json",
+                    "X-GitHub-Api-Version": "2022-11-28",
+                },
+            )
+    except Exception:
+        logger.exception("Failed to call /user/emails during CLI login")
+        return None
+    if response.status_code != 200:
+        return None
+    try:
+        items = response.json()
+    except Exception:
+        return None
+    if not isinstance(items, list):
+        return None
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        if item.get("primary") and item.get("verified"):
+            email = item.get("email")
+            if isinstance(email, str) and email:
+                return email
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        if item.get("verified"):
+            email = item.get("email")
+            if isinstance(email, str) and email:
+                return email
+    return None
+
+
 def _render_callback_html(redirect_uri: str, payload: dict[str, str]) -> str:
     import html
     import json as _json
@@ -2710,12 +2756,20 @@ async def cli_auth_callback(code: str, state: str, redirect_uri: str) -> HTMLRes
     if not is_member:
         raise HTTPException(status_code=403, detail="Not an org member")
 
-    email = user.get("email")
-    if isinstance(email, str) and email:
+    email_value = user.get("email")
+    email: str | None = email_value if isinstance(email_value, str) and email_value else None
+    if not email:
+        email = await _fetch_github_primary_email(token)
+    if email:
         try:
             await upsert_identity(email, github_login=github_login, surface="cli")
         except Exception:
             logger.exception("Identity upsert failed during CLI login for %s", github_login)
+    else:
+        logger.warning(
+            "No usable email found for GitHub user %s during CLI login; skipping identity upsert",
+            github_login,
+        )
 
     session_token = issue_cli_session_token(github_login)
     body = _render_callback_html(
@@ -2990,6 +3044,10 @@ def _sse_event(payload: Any) -> str:
     return f"data: {json.dumps(payload, default=str)}\n\n"
 
 
+_SSE_KEEPALIVE_INTERVAL_SECONDS = 20.0
+_SSE_KEEPALIVE_FRAME = ":keepalive\n\n"
+
+
 async def _stream_thread_events(thread_id: str, since: str | None) -> AsyncIterator[str]:
     client = get_client(url=LANGGRAPH_URL)
     try:
@@ -3009,7 +3067,19 @@ async def _stream_thread_events(thread_id: str, since: str | None) -> AsyncItera
         return
 
     try:
-        async for part in client.runs.join_stream(thread_id, run_id, last_event_id=since):
+        stream = client.runs.join_stream(thread_id, run_id, last_event_id=since)
+        iterator = stream.__aiter__()
+
+        while True:
+            try:
+                part = await asyncio.wait_for(
+                    iterator.__anext__(), timeout=_SSE_KEEPALIVE_INTERVAL_SECONDS
+                )
+            except TimeoutError:
+                yield _SSE_KEEPALIVE_FRAME
+                continue
+            except StopAsyncIteration:
+                break
             event = getattr(part, "event", None) or (
                 part.get("event") if isinstance(part, dict) else None
             )
@@ -3056,3 +3126,212 @@ async def cli_interrupt(thread_id: str, user: CliUser = _CLI_USER_DEP) -> dict[s
         logger.exception("Failed to interrupt thread %s run %s", thread_id, run_id)
         raise HTTPException(status_code=500, detail="Failed to interrupt run") from None
     return {"interrupted": True}
+
+
+# ---------------------------------------------------------------------------
+# CLI handoff routes
+# ---------------------------------------------------------------------------
+
+
+def _require_handoff_supported() -> None:
+    if not _handoff_supported():
+        raise HTTPException(
+            status_code=501,
+            detail=(
+                "Handoff is only supported with SANDBOX_TYPE=langsmith. "
+                "This deployment uses a different sandbox provider."
+            ),
+        )
+
+
+@app.post("/cli/runs/{thread_id}/handoff")
+async def cli_handoff_export(thread_id: str, user: CliUser = _CLI_USER_DEP) -> dict[str, Any]:
+    """Export an in-flight cloud run's state as a handoff bundle."""
+    _require_handoff_supported()
+    metadata = await _authorize_thread_for_user(thread_id, user)
+
+    # Lazy imports to keep the auth-only branches cheap.
+    from .server import ensure_sandbox_for_thread
+    from .utils.handoff import (
+        MAX_BUNDLE_BYTES,
+        build_bundle,
+        build_git_state,
+        bundle_size_bytes,
+        fetch_thread_conversation,
+        wait_for_run_pause,
+    )
+    from .utils.sandbox_paths import aresolve_sandbox_work_dir
+
+    client = get_client(url=LANGGRAPH_URL)
+
+    paused = await wait_for_run_pause(client, thread_id)
+    if not paused:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Run did not pause within 30s. The agent may be in a long tool "
+                "call — retry shortly."
+            ),
+        )
+
+    try:
+        sandbox = await ensure_sandbox_for_thread(thread_id)
+    except Exception:
+        logger.exception("Failed to ensure sandbox for handoff on thread %s", thread_id)
+        raise HTTPException(status_code=500, detail="Failed to obtain sandbox") from None
+
+    try:
+        work_dir = await aresolve_sandbox_work_dir(sandbox)
+    except Exception:
+        logger.exception("Failed to resolve work_dir for thread %s", thread_id)
+        raise HTTPException(status_code=500, detail="Failed to resolve sandbox work_dir") from None
+
+    try:
+        git_state = await build_git_state(sandbox, work_dir)
+    except Exception as exc:
+        logger.exception("Failed to capture git state for thread %s", thread_id)
+        raise HTTPException(status_code=500, detail=f"Failed to capture git state: {exc}") from None
+
+    conversation, pending = await fetch_thread_conversation(client, thread_id)
+
+    agent_meta: dict[str, Any] = {}
+    for key in ("model", "agent"):
+        value = metadata.get(key)
+        if isinstance(value, str):
+            agent_meta[key] = value
+
+    bundle = build_bundle(
+        thread_id=thread_id,
+        source="cloud",
+        conversation=conversation,
+        pending_queue=pending,
+        git_state=git_state,
+        agent_meta=agent_meta,
+    )
+
+    size = bundle_size_bytes(bundle)
+    if size > MAX_BUNDLE_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=(
+                f"Handoff bundle is {size} bytes, exceeding the {MAX_BUNDLE_BYTES}-byte limit. "
+                "Commit your changes and retry."
+            ),
+        )
+
+    try:
+        await client.threads.update(
+            thread_id=thread_id,
+            metadata={"handed_off_to_local_at": datetime.now(tz=UTC).isoformat()},
+        )
+    except Exception:
+        logger.exception("Failed to stamp handoff timestamp on %s", thread_id)
+
+    return bundle
+
+
+class _CliAdoptBody(BaseModel):
+    bundle: dict[str, Any]
+
+
+@app.post("/cli/runs/adopt")
+async def cli_handoff_adopt(body: _CliAdoptBody, user: CliUser = _CLI_USER_DEP) -> dict[str, str]:
+    """Adopt a handoff bundle into a fresh cloud thread."""
+    _require_handoff_supported()
+
+    from .server import ensure_sandbox_for_thread
+    from .utils.handoff import (
+        MAX_BUNDLE_BYTES,
+        apply_bundle_to_sandbox,
+        bundle_size_bytes,
+        parse_repo_from_remote,
+        validate_bundle_shape,
+    )
+    from .utils.sandbox_paths import aresolve_sandbox_work_dir
+
+    bundle = body.bundle
+    ok, err = validate_bundle_shape(bundle)
+    if not ok:
+        raise HTTPException(status_code=400, detail=f"Invalid bundle: {err}")
+    if bundle_size_bytes(bundle) > MAX_BUNDLE_BYTES:
+        raise HTTPException(status_code=413, detail="Bundle exceeds 5 MB limit")
+
+    git = bundle.get("git") or {}
+    repo_info = parse_repo_from_remote(git.get("remote_url", ""))
+    if not repo_info:
+        raise HTTPException(status_code=400, detail="Could not parse git.remote_url")
+
+    thread_id = str(uuid.uuid4())
+    metadata = {
+        "cli_owner_login": user.github_login,
+        "github_login": user.github_login,
+        "repo": repo_info,
+        "branch": git.get("branch", ""),
+        "source": "cli",
+        "adopted_from_local_at": datetime.now(tz=UTC).isoformat(),
+    }
+
+    client = get_client(url=LANGGRAPH_URL)
+    try:
+        await client.threads.create(thread_id=thread_id, metadata=metadata, if_exists="do_nothing")
+    except Exception:
+        logger.exception("Failed to create adopted CLI thread %s", thread_id)
+        raise HTTPException(status_code=500, detail="Failed to create thread") from None
+
+    # Create the sandbox under the new thread.
+    try:
+        sandbox = await ensure_sandbox_for_thread(thread_id)
+        work_dir = await aresolve_sandbox_work_dir(sandbox)
+    except Exception:
+        logger.exception("Failed to create sandbox for adopted thread %s", thread_id)
+        raise HTTPException(status_code=500, detail="Failed to create sandbox") from None
+
+    # Materialize the git state. TODO(handoff): verify against real sandbox.
+    try:
+        from .utils.github_app import get_github_app_installation_token
+
+        token = await get_github_app_installation_token()
+        await apply_bundle_to_sandbox(sandbox, work_dir, bundle, token)
+    except Exception as exc:
+        logger.exception("Failed to apply bundle to sandbox for thread %s", thread_id)
+        raise HTTPException(
+            status_code=500, detail=f"Failed to materialize git state: {exc}"
+        ) from None
+
+    # Seed pending-queue messages so check_message_queue_before_model picks them up.
+    pending = bundle.get("pending_queue") or []
+    for item in pending:
+        if isinstance(item, dict):
+            content = item.get("content")
+            if content is not None:
+                await queue_message_for_thread(thread_id, content)
+
+    # Seed the conversation history. We pass it as the initial state.
+    conversation = bundle.get("conversation") or []
+    configurable: dict[str, Any] = {
+        "source": "cli",
+        "repo": repo_info,
+        "branch": git.get("branch", ""),
+        "cli_owner_login": user.github_login,
+        "github_login": user.github_login,
+    }
+    agent_meta = bundle.get("agent") or {}
+    if isinstance(agent_meta, dict):
+        if isinstance(agent_meta.get("model"), str):
+            configurable["model"] = agent_meta["model"]
+        if isinstance(agent_meta.get("agent"), str):
+            configurable["agent"] = agent_meta["agent"]
+
+    try:
+        await client.runs.create(
+            thread_id,
+            configurable.get("agent", "agent"),
+            input={"messages": conversation} if conversation else None,
+            config={"configurable": configurable, "metadata": _AGENT_VERSION_METADATA},
+            if_not_exists="create",
+        )
+    except Exception:
+        logger.exception("Failed to create adopted run for thread %s", thread_id)
+        raise HTTPException(status_code=500, detail="Failed to trigger run") from None
+
+    return {"thread_id": thread_id}

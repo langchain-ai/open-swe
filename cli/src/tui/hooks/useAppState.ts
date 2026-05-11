@@ -21,6 +21,9 @@ import { useApiKeysMenu } from "@tui/hooks/useApiKeysMenu.js";
 import { runAgentStream } from "@app/agent-runner.js";
 import { executeSlashCommand } from "@app/command-executor.js";
 import { resolveSlashCommand } from "@app/slash-command.js";
+import { exportLocal } from "@lib/handoff";
+import { ApiClient } from "@lib/api-client";
+import { getActiveDeployment } from "@lib/config";
 import { augmentPromptWithFiles } from "@lib/prompt-augmentation.js";
 import { validateApiKey } from "@lib/api-key-format.js";
 import {
@@ -624,6 +627,86 @@ export function useAppState(): AppState {
         setCursorOffset(0);
         resetCommandMenu();
         return;
+      }
+
+      // Intercept /handoff cloud — not part of the regular slash registry
+      // because it needs deployment + conversation context that the
+      // command-executor doesn't have.
+      if (trimmedValue.toLowerCase().startsWith("/handoff")) {
+        const arg = trimmedValue.slice("/handoff".length).trim().toLowerCase();
+        if (arg === "cloud") {
+          setQuery("");
+          setCursorOffset(0);
+          resetCommandMenu();
+          addMessage({
+            author: "system",
+            chunks: [
+              { kind: "text", text: "Exporting local state for cloud handoff…" },
+            ],
+          });
+          try {
+            const deployment = await getActiveDeployment();
+            if (!deployment) {
+              addMessage({
+                author: "system",
+                chunks: [
+                  {
+                    kind: "error",
+                    text: "No backend configured. Run `openswe login <url>` first.",
+                  },
+                ],
+              });
+              return;
+            }
+            const conversation = conversationHistory.current.map((m) =>
+              typeof (m as { toDict?: () => unknown }).toDict === "function"
+                ? (m as { toDict: () => unknown }).toDict()
+                : m,
+            );
+            const bundle = await exportLocal(
+              { conversation, agent: { model: currentModel.name } },
+              { workdir: process.cwd() },
+            );
+            const api = new ApiClient(
+              deployment.backend_url,
+              deployment.session_token,
+            );
+            const res = await api.adoptHandoff(bundle);
+            addMessage({
+              author: "system",
+              chunks: [
+                {
+                  kind: "text",
+                  text:
+                    `Cloud thread created: ${res.thread_id}\n` +
+                    `Attach with: openswe attach ${res.thread_id}`,
+                },
+              ],
+            });
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            addMessage({
+              author: "system",
+              chunks: [{ kind: "error", text: `Handoff failed: ${message}` }],
+            });
+          }
+          return;
+        }
+        if (arg === "local") {
+          setQuery("");
+          setCursorOffset(0);
+          resetCommandMenu();
+          addMessage({
+            author: "system",
+            chunks: [
+              {
+                kind: "text",
+                text: "Already in a local session. Use /handoff cloud to push to the cloud.",
+              },
+            ],
+          });
+          return;
+        }
       }
 
       const slashCommand = resolveSlashCommand(trimmedValue);

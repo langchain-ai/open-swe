@@ -33,6 +33,8 @@
       "@lib/auth-flow": ["src/lib/auth-flow.ts"],
       "@lib/cli-args": ["src/lib/cli-args.ts"],
       "@lib/config": ["src/lib/config.ts"],
+      "@lib/upgrade": ["src/lib/upgrade.ts"],
+      "@lib/handoff": ["src/lib/handoff.ts"],
       "@config/*": ["src/config/*"],
       "@types": ["src/types/index.ts"],
       "@types/*": ["src/types/*"]
