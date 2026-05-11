@@ -487,9 +487,7 @@ The server runs on `http://localhost:2024` with these endpoints:
 
 1. In any channel where the bot is invited, start a thread
 2. Mention the bot: `@open-swe what's in the repo?`
-3. You should see:
-   - An 👀 reaction on your message
-   - A reply in the thread with the agent's response
+3. You should see a reply in the thread with the agent's response.
 
 ## 9. Production deployment
 

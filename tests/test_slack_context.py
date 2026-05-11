@@ -486,14 +486,6 @@ def test_get_slack_repo_config_repo_name_only_space_syntax(
 def _setup_slack_mention_fakes(
     monkeypatch: pytest.MonkeyPatch, captured: dict[str, object]
 ) -> None:
-    async def fake_add_slack_reaction(channel_id: str, message_ts: str, emoji: str) -> bool:
-        captured["reaction"] = {
-            "channel_id": channel_id,
-            "message_ts": message_ts,
-            "emoji": emoji,
-        }
-        return True
-
     async def fake_get_slack_user_info(user_id: str) -> dict:
         return {
             "profile": {
@@ -554,7 +546,6 @@ def _setup_slack_mention_fakes(
         threads = _FakeThreadsClientForProcess()
 
     monkeypatch.setattr(webapp, "SLACK_BOT_USERNAME", "open-swe")
-    monkeypatch.setattr(webapp, "add_slack_reaction", fake_add_slack_reaction)
     monkeypatch.setattr(webapp, "get_slack_user_info", fake_get_slack_user_info)
     monkeypatch.setattr(webapp, "fetch_slack_thread_messages", fake_fetch_slack_thread_messages)
     monkeypatch.setattr(webapp, "get_slack_user_names", fake_get_slack_user_names)
@@ -666,14 +657,6 @@ def test_process_slack_mention_queues_active_thread_message(
 ) -> None:
     captured: dict[str, object] = {}
 
-    async def fake_add_slack_reaction(channel_id: str, message_ts: str, emoji: str) -> bool:
-        captured["reaction"] = {
-            "channel_id": channel_id,
-            "message_ts": message_ts,
-            "emoji": emoji,
-        }
-        return True
-
     async def fake_get_slack_user_info(user_id: str) -> dict:
         return {
             "profile": {
@@ -733,7 +716,6 @@ def test_process_slack_mention_queues_active_thread_message(
         threads = _FakeThreadsClientForProcess()
 
     monkeypatch.setattr(webapp, "SLACK_BOT_USERNAME", "open-swe")
-    monkeypatch.setattr(webapp, "add_slack_reaction", fake_add_slack_reaction)
     monkeypatch.setattr(webapp, "get_slack_user_info", fake_get_slack_user_info)
     monkeypatch.setattr(webapp, "fetch_slack_thread_messages", fake_fetch_slack_thread_messages)
     monkeypatch.setattr(webapp, "get_slack_user_names", fake_get_slack_user_names)
