@@ -8,14 +8,18 @@ import os
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from typing import Any
 
 import httpx
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request
+from fastapi.responses import HTMLResponse, StreamingResponse
 from langchain_core.messages.content import create_text_block
 from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
+from pydantic import BaseModel
 
+from .middleware.cli_auth import CliUser, require_cli_user
 from .reviewer_findings import (
     REVIEWER_THREAD_KIND,
     ReviewerPRMeta,
@@ -28,6 +32,7 @@ from .utils.auth import (
     resolve_github_token_from_email,
 )
 from .utils.authorship import OPEN_SWE_BOT_NAME
+from .utils.cli_session import issue_cli_session_token, should_renew
 from .utils.comments import get_recent_comments
 from .utils.github_app import (
     get_github_app_installation_token,
@@ -78,6 +83,10 @@ from .utils.slack_feedback import (
     FEEDBACK_REACTIONS,
     process_slack_reaction_added,
     process_slack_reaction_removed,
+)
+from .utils.user_identity_map import (
+    get_identities_for_github_login,
+    upsert_identity,
 )
 
 logger = logging.getLogger(__name__)
@@ -780,6 +789,37 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
         "source": "linear",
     }
 
+    # Stamp identity metadata + upsert identity map (purely additive, never raises).
+    try:
+        linear_actor_id = None
+        if isinstance(comment_author, dict):
+            linear_actor_id = comment_author.get("id")
+        if not linear_actor_id:
+            creator = full_issue.get("creator", {}) or {}
+            if isinstance(creator, dict):
+                linear_actor_id = creator.get("id")
+        identity_metadata: dict[str, Any] = {}
+        if linear_actor_id:
+            identity_metadata["linear_user_id"] = linear_actor_id
+        if user_email:
+            identity_metadata["linear_actor_email"] = user_email
+        if identity_metadata:
+            try:
+                _identity_client = get_client(url=LANGGRAPH_URL)
+                await _identity_client.threads.create(
+                    thread_id=thread_id, if_exists="do_nothing", metadata=identity_metadata
+                )
+            except Exception:
+                logger.exception("Failed to stamp linear identity metadata on thread %s", thread_id)
+        if user_email:
+            await upsert_identity(
+                user_email,
+                linear_user_id=linear_actor_id if linear_actor_id else None,
+                surface="linear",
+            )
+    except Exception:
+        logger.exception("Linear identity stamping failed for thread %s", thread_id)
+
     logger.info("Checking if thread %s is active before creating run", thread_id)
     thread_active = await is_thread_active(thread_id)
     logger.info("Thread %s active status: %s", thread_id, thread_active)
@@ -953,6 +993,32 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
     langgraph_client = get_client(url=LANGGRAPH_URL)
     is_first_mention = not await _thread_exists(thread_id)
     await _upsert_slack_thread_repo_metadata(thread_id, repo_config, langgraph_client)
+
+    # Stamp identity metadata + upsert identity map (purely additive).
+    try:
+        slack_team_id = event_data.get("team_id", "")
+        identity_metadata: dict[str, Any] = {}
+        if user_id:
+            identity_metadata["slack_user_id"] = user_id
+        if slack_team_id:
+            identity_metadata["slack_team_id"] = slack_team_id
+        if identity_metadata:
+            try:
+                await langgraph_client.threads.create(
+                    thread_id=thread_id,
+                    if_exists="do_nothing",
+                    metadata=identity_metadata,
+                )
+            except Exception:
+                logger.exception("Failed to stamp Slack identity metadata on thread %s", thread_id)
+        if user_email:
+            await upsert_identity(
+                user_email,
+                slack_user_id=user_id if user_id else None,
+                surface="slack",
+            )
+    except Exception:
+        logger.exception("Slack identity stamping failed for thread %s", thread_id)
 
     thread_active = await is_thread_active(thread_id)
     if thread_active:
@@ -2162,6 +2228,27 @@ async def process_github_pr_comment(payload: dict[str, Any], event_type: str) ->
         return
 
     prompt = build_pr_prompt(comments, pr_url, repo_config=repo_config)
+
+    # Stamp identity metadata + upsert identity map (purely additive).
+    try:
+        identity_metadata: dict[str, Any] = {}
+        if github_login:
+            identity_metadata["github_login"] = github_login
+        if github_user_id:
+            identity_metadata["github_sender_id"] = github_user_id
+        if identity_metadata:
+            try:
+                _identity_client = get_client(url=LANGGRAPH_URL)
+                await _identity_client.threads.create(
+                    thread_id=thread_id, if_exists="do_nothing", metadata=identity_metadata
+                )
+            except Exception:
+                logger.exception("Failed to stamp GitHub identity metadata on thread %s", thread_id)
+        if email and github_login:
+            await upsert_identity(email, github_login=github_login, surface="github")
+    except Exception:
+        logger.exception("GitHub identity stamping failed for thread %s", thread_id)
+
     await _trigger_or_queue_run(
         thread_id,
         prompt,
@@ -2297,6 +2384,26 @@ async def process_github_issue(payload: dict[str, Any], event_type: str) -> None
             "url": issue_url,
         },
     }
+
+    # Stamp identity metadata + upsert identity map (purely additive).
+    try:
+        identity_metadata: dict[str, Any] = {}
+        if github_login:
+            identity_metadata["github_login"] = github_login
+        if github_user_id:
+            identity_metadata["github_sender_id"] = github_user_id
+        if identity_metadata:
+            try:
+                _identity_client = get_client(url=LANGGRAPH_URL)
+                await _identity_client.threads.create(
+                    thread_id=thread_id, if_exists="do_nothing", metadata=identity_metadata
+                )
+            except Exception:
+                logger.exception("Failed to stamp GitHub identity metadata on thread %s", thread_id)
+        if email and github_login:
+            await upsert_identity(email, github_login=github_login, surface="github")
+    except Exception:
+        logger.exception("GitHub identity stamping failed for thread %s", thread_id)
 
     thread_active = await is_thread_active(thread_id)
     if thread_active:
@@ -2470,3 +2577,482 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks) ->
 
     logger.info("Ignoring unsupported GitHub payload shape for event=%s", event_type)
     return {"status": "ignored", "reason": f"Unsupported payload for event type: {event_type}"}
+
+
+# ---------------------------------------------------------------------------
+# CLI routes (/cli/*)
+# ---------------------------------------------------------------------------
+
+GITHUB_APP_CLIENT_ID = os.environ.get("GITHUB_APP_CLIENT_ID", "")
+GITHUB_APP_CLIENT_SECRET = os.environ.get("GITHUB_APP_CLIENT_SECRET", "")
+ALLOWED_GITHUB_ORG = os.environ.get("ALLOWED_GITHUB_ORG", "").strip()
+CLI_API_VERSION = 1
+
+# Module-level Depends singleton (avoids ruff B008 on the routes).
+_CLI_USER_DEP = Depends(require_cli_user)
+
+
+def _server_version() -> str:
+    try:
+        from importlib.metadata import version
+
+        return version("open-swe-agent")
+    except Exception:
+        return "unknown"
+
+
+@app.get("/cli/config")
+async def cli_config() -> dict[str, Any]:
+    return {
+        "github_app_client_id": GITHUB_APP_CLIENT_ID,
+        "allowed_org": ALLOWED_GITHUB_ORG,
+        "server_version": _server_version(),
+        "supports_handoff": False,
+        "cli_api_version": CLI_API_VERSION,
+    }
+
+
+@app.get("/cli/auth/start")
+async def cli_auth_start(redirect_uri: str, state: str) -> dict[str, str]:
+    if not GITHUB_APP_CLIENT_ID:
+        raise HTTPException(status_code=503, detail="GITHUB_APP_CLIENT_ID not configured")
+    from urllib.parse import urlencode
+
+    params = {
+        "client_id": GITHUB_APP_CLIENT_ID,
+        "redirect_uri": redirect_uri,
+        "state": state,
+    }
+    return {"authorize_url": f"https://github.com/login/oauth/authorize?{urlencode(params)}"}
+
+
+async def _exchange_oauth_code(code: str) -> str | None:
+    if not GITHUB_APP_CLIENT_ID or not GITHUB_APP_CLIENT_SECRET:
+        return None
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        response = await client.post(
+            "https://github.com/login/oauth/access_token",
+            headers={"Accept": "application/json"},
+            data={
+                "client_id": GITHUB_APP_CLIENT_ID,
+                "client_secret": GITHUB_APP_CLIENT_SECRET,
+                "code": code,
+            },
+        )
+        if response.status_code != 200:
+            logger.warning("GitHub OAuth code exchange returned %s", response.status_code)
+            return None
+        data = response.json()
+    if not isinstance(data, dict):
+        return None
+    token = data.get("access_token")
+    return token if isinstance(token, str) and token else None
+
+
+async def _fetch_github_user(token: str) -> dict[str, Any] | None:
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        response = await client.get(
+            "https://api.github.com/user",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Accept": "application/vnd.github+json",
+                "X-GitHub-Api-Version": "2022-11-28",
+            },
+        )
+        if response.status_code != 200:
+            return None
+        data = response.json()
+    return data if isinstance(data, dict) else None
+
+
+def _render_callback_html(redirect_uri: str, payload: dict[str, str]) -> str:
+    import html
+    import json as _json
+
+    safe_redirect = html.escape(redirect_uri, quote=True)
+    payload_json = html.escape(_json.dumps(payload), quote=True)
+    return (
+        "<!doctype html><html><body>"
+        "<p>Signing you in to Open SWE CLI...</p>"
+        '<form id="f" method="post" '
+        f'action="{safe_redirect}" enctype="application/json">'
+        f'<input type="hidden" name="payload" value="{payload_json}" />'
+        "</form>"
+        "<script>"
+        f"fetch({_json.dumps(redirect_uri)}, {{method:'POST', "
+        f"headers:{{'Content-Type':'application/json'}}, body:{_json.dumps(_json.dumps(payload))}}})"
+        ".then(function(){document.body.innerText='You can close this tab.';})"
+        ".catch(function(){document.body.innerText="
+        "'Could not deliver token to CLI. You can close this tab.';});"
+        "</script>"
+        "</body></html>"
+    )
+
+
+@app.get("/cli/auth/callback")
+async def cli_auth_callback(code: str, state: str, redirect_uri: str) -> HTMLResponse:
+    if not ALLOWED_GITHUB_ORG:
+        raise HTTPException(status_code=503, detail="ALLOWED_GITHUB_ORG not configured")
+
+    token = await _exchange_oauth_code(code)
+    if not token:
+        raise HTTPException(status_code=401, detail="OAuth code exchange failed")
+
+    user = await _fetch_github_user(token)
+    if not user:
+        raise HTTPException(status_code=401, detail="Could not fetch GitHub user")
+
+    github_login = user.get("login")
+    if not isinstance(github_login, str) or not github_login:
+        raise HTTPException(status_code=401, detail="GitHub user missing login")
+
+    is_member = await is_user_active_org_member(github_login, ALLOWED_GITHUB_ORG)
+    if not is_member:
+        raise HTTPException(status_code=403, detail="Not an org member")
+
+    email = user.get("email")
+    if isinstance(email, str) and email:
+        try:
+            await upsert_identity(email, github_login=github_login, surface="cli")
+        except Exception:
+            logger.exception("Identity upsert failed during CLI login for %s", github_login)
+
+    session_token = issue_cli_session_token(github_login)
+    body = _render_callback_html(
+        redirect_uri,
+        {"session_token": session_token, "github_login": github_login, "state": state},
+    )
+    return HTMLResponse(content=body)
+
+
+@app.get("/cli/me")
+async def cli_me(user: CliUser = _CLI_USER_DEP) -> dict[str, Any]:
+    email: str | None = None
+    try:
+        row = await get_identities_for_github_login(user.github_login)
+        if row:
+            email = row.get("email")
+    except Exception:
+        logger.exception("Failed to look up identity row for %s", user.github_login)
+
+    response: dict[str, Any] = {
+        "github_login": user.github_login,
+        "email": email,
+    }
+    if should_renew(user.token_claims):
+        response["renewed_session_token"] = issue_cli_session_token(user.github_login)
+    return response
+
+
+def _thread_matches_user(thread: dict[str, Any], user: CliUser, identity_row: dict | None) -> bool:
+    metadata = thread.get("metadata") or {}
+    if not isinstance(metadata, dict):
+        return False
+    if metadata.get("cli_owner_login") == user.github_login:
+        return True
+    if metadata.get("github_login") == user.github_login:
+        return True
+    if not identity_row:
+        return False
+    slack_uid = metadata.get("slack_user_id")
+    if isinstance(slack_uid, str) and slack_uid in identity_row.get("slack_user_ids", []):
+        return True
+    linear_uid = metadata.get("linear_user_id")
+    if isinstance(linear_uid, str) and linear_uid in identity_row.get("linear_user_ids", []):
+        return True
+    return False
+
+
+def _derive_source(metadata: dict[str, Any]) -> str:
+    src = metadata.get("source")
+    if src in {"github", "slack", "linear", "cli"}:
+        return src
+    if metadata.get("cli_owner_login"):
+        return "cli"
+    if metadata.get("slack_user_id") or metadata.get("slack_thread"):
+        return "slack"
+    if metadata.get("linear_user_id") or metadata.get("linear_issue"):
+        return "linear"
+    if metadata.get("github_login") or metadata.get("github_issue"):
+        return "github"
+    return "cli"
+
+
+def _derive_status(thread: dict[str, Any]) -> str:
+    status = thread.get("status")
+    if status == "busy":
+        return "running"
+    if status == "error":
+        return "error"
+    if status == "idle":
+        return "idle"
+    if status == "interrupted":
+        return "idle"
+    return "completed" if status else "idle"
+
+
+def _thread_last_event_at(thread: dict[str, Any]) -> str:
+    for key in ("updated_at", "created_at"):
+        value = thread.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return datetime.now(tz=UTC).isoformat()
+
+
+def _thread_title(thread: dict[str, Any], metadata: dict[str, Any]) -> str:
+    for key in ("title", "prompt"):
+        value = metadata.get(key)
+        if isinstance(value, str) and value:
+            return value[:200]
+    repo = metadata.get("repo")
+    if isinstance(repo, dict):
+        owner = repo.get("owner", "")
+        name = repo.get("name", "")
+        if owner and name:
+            return f"{owner}/{name}"
+    return thread.get("thread_id", "thread")
+
+
+def _thread_repo(metadata: dict[str, Any]) -> str | None:
+    repo = metadata.get("repo")
+    if isinstance(repo, dict):
+        owner = repo.get("owner", "")
+        name = repo.get("name", "")
+        if owner and name:
+            return f"{owner}/{name}"
+    return None
+
+
+def _thread_source_url(metadata: dict[str, Any]) -> str | None:
+    for outer_key in ("linear_issue", "github_issue"):
+        inner = metadata.get(outer_key)
+        if isinstance(inner, dict):
+            url = inner.get("url")
+            if isinstance(url, str) and url:
+                return url
+    return None
+
+
+@app.get("/cli/runs")
+async def cli_runs(user: CliUser = _CLI_USER_DEP) -> list[dict[str, Any]]:
+    identity_row = None
+    try:
+        identity_row = await get_identities_for_github_login(user.github_login)
+    except Exception:
+        logger.exception("Identity lookup failed for %s", user.github_login)
+
+    client = get_client(url=LANGGRAPH_URL)
+    matched: list[dict[str, Any]] = []
+
+    # Prefer to fetch CLI-owned threads explicitly (cheap, indexed by metadata).
+    try:
+        cli_owned = await client.threads.search(
+            metadata={"cli_owner_login": user.github_login}, limit=100
+        )
+    except Exception:
+        logger.exception("Failed to search CLI-owned threads for %s", user.github_login)
+        cli_owned = []
+    for thread in cli_owned or []:
+        if isinstance(thread, dict):
+            matched.append(thread)
+
+    seen_ids = {t.get("thread_id") for t in matched}
+
+    # Then walk recent threads and filter by identity.
+    try:
+        recent = await client.threads.search(limit=200, sort_by="updated_at", sort_order="desc")
+    except Exception:
+        logger.exception("Failed to list recent threads")
+        recent = []
+
+    for thread in recent or []:
+        if not isinstance(thread, dict):
+            continue
+        if thread.get("thread_id") in seen_ids:
+            continue
+        if _thread_matches_user(thread, user, identity_row):
+            matched.append(thread)
+            seen_ids.add(thread.get("thread_id"))
+
+    out: list[dict[str, Any]] = []
+    for thread in matched:
+        metadata = thread.get("metadata") or {}
+        if not isinstance(metadata, dict):
+            metadata = {}
+        out.append(
+            {
+                "thread_id": thread.get("thread_id"),
+                "source": _derive_source(metadata),
+                "title": _thread_title(thread, metadata),
+                "status": _derive_status(thread),
+                "last_event_at": _thread_last_event_at(thread),
+                "repo": _thread_repo(metadata),
+                "branch": metadata.get("branch") or metadata.get("branch_name"),
+                "source_url": _thread_source_url(metadata),
+            }
+        )
+
+    out.sort(key=lambda row: row["last_event_at"], reverse=True)
+    return out[:50]
+
+
+class _CliCreateRunBody(BaseModel):
+    repo: str
+    branch: str
+    prompt: str
+    model: str | None = None
+    agent: str | None = None
+
+
+@app.post("/cli/runs")
+async def cli_create_run(body: _CliCreateRunBody, user: CliUser = _CLI_USER_DEP) -> dict[str, str]:
+    repo_parts = body.repo.split("/", 1)
+    if len(repo_parts) != 2 or not repo_parts[0] or not repo_parts[1]:
+        raise HTTPException(status_code=400, detail="repo must be 'owner/name'")
+    repo_config = {"owner": repo_parts[0], "name": repo_parts[1]}
+
+    thread_id = str(uuid.uuid4())
+    metadata = {
+        "cli_owner_login": user.github_login,
+        "github_login": user.github_login,
+        "repo": repo_config,
+        "branch": body.branch,
+        "source": "cli",
+    }
+
+    configurable: dict[str, Any] = {
+        "source": "cli",
+        "repo": repo_config,
+        "branch": body.branch,
+        "cli_owner_login": user.github_login,
+        "github_login": user.github_login,
+    }
+    if body.model:
+        configurable["model"] = body.model
+    if body.agent:
+        configurable["agent"] = body.agent
+
+    client = get_client(url=LANGGRAPH_URL)
+    try:
+        await client.threads.create(thread_id=thread_id, metadata=metadata, if_exists="do_nothing")
+    except Exception:
+        logger.exception("Failed to create CLI thread %s", thread_id)
+        raise HTTPException(status_code=500, detail="Failed to create thread") from None
+
+    try:
+        await client.runs.create(
+            thread_id,
+            body.agent or "agent",
+            input={"messages": [{"role": "user", "content": body.prompt}]},
+            config={"configurable": configurable, "metadata": _AGENT_VERSION_METADATA},
+            if_not_exists="create",
+        )
+    except Exception:
+        logger.exception("Failed to create CLI run for thread %s", thread_id)
+        raise HTTPException(status_code=500, detail="Failed to start run") from None
+
+    return {"thread_id": thread_id}
+
+
+async def _authorize_thread_for_user(thread_id: str, user: CliUser) -> dict[str, Any]:
+    metadata = await _get_thread_metadata_safe(thread_id)
+    if metadata is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+    identity_row = None
+    try:
+        identity_row = await get_identities_for_github_login(user.github_login)
+    except Exception:
+        logger.exception("Identity lookup failed during authz for %s", user.github_login)
+    pseudo_thread = {"metadata": metadata}
+    if not _thread_matches_user(pseudo_thread, user, identity_row):
+        raise HTTPException(status_code=403, detail="Not authorized for this thread")
+    return metadata
+
+
+class _CliMessageBody(BaseModel):
+    content: str
+
+
+@app.post("/cli/runs/{thread_id}/messages")
+async def cli_send_message(
+    thread_id: str,
+    body: _CliMessageBody,
+    user: CliUser = _CLI_USER_DEP,
+) -> dict[str, str]:
+    await _authorize_thread_for_user(thread_id, user)
+    queued = await queue_message_for_thread(thread_id, body.content)
+    if not queued:
+        raise HTTPException(status_code=500, detail="Failed to queue message")
+    return {"queued_at": datetime.now(tz=UTC).isoformat()}
+
+
+def _sse_event(payload: Any) -> str:
+    return f"data: {json.dumps(payload, default=str)}\n\n"
+
+
+async def _stream_thread_events(thread_id: str, since: str | None) -> AsyncIterator[str]:
+    client = get_client(url=LANGGRAPH_URL)
+    try:
+        runs = await client.runs.list(thread_id, limit=1)
+    except Exception:
+        logger.exception("Failed to list runs for thread %s", thread_id)
+        yield _sse_event({"event": "error", "message": "Could not list runs"})
+        return
+
+    run_id = None
+    if runs:
+        first = runs[0]
+        if isinstance(first, dict):
+            run_id = first.get("run_id")
+    if not run_id:
+        yield _sse_event({"event": "no_active_run"})
+        return
+
+    try:
+        async for part in client.runs.join_stream(thread_id, run_id, last_event_id=since):
+            event = getattr(part, "event", None) or (
+                part.get("event") if isinstance(part, dict) else None
+            )
+            data = getattr(part, "data", None)
+            if data is None and isinstance(part, dict):
+                data = part.get("data")
+            yield _sse_event({"event": event, "data": data})
+    except Exception:
+        logger.exception("Error streaming events for thread %s run %s", thread_id, run_id)
+        yield _sse_event({"event": "error", "message": "Stream interrupted"})
+
+
+@app.get("/cli/runs/{thread_id}/stream")
+async def cli_stream(
+    thread_id: str,
+    since: str | None = None,
+    user: CliUser = _CLI_USER_DEP,
+) -> StreamingResponse:
+    await _authorize_thread_for_user(thread_id, user)
+    return StreamingResponse(
+        _stream_thread_events(thread_id, since),
+        media_type="text/event-stream",
+    )
+
+
+@app.post("/cli/runs/{thread_id}/interrupt")
+async def cli_interrupt(thread_id: str, user: CliUser = _CLI_USER_DEP) -> dict[str, bool]:
+    await _authorize_thread_for_user(thread_id, user)
+    client = get_client(url=LANGGRAPH_URL)
+    try:
+        runs = await client.runs.list(thread_id, limit=1)
+    except Exception:
+        logger.exception("Failed to list runs for thread %s during interrupt", thread_id)
+        raise HTTPException(status_code=500, detail="Failed to list runs") from None
+    if not runs:
+        return {"interrupted": False}
+    run = runs[0]
+    run_id = run.get("run_id") if isinstance(run, dict) else None
+    if not isinstance(run_id, str) or not run_id:
+        return {"interrupted": False}
+    try:
+        await client.runs.cancel(thread_id, run_id, action="interrupt")
+    except Exception:
+        logger.exception("Failed to interrupt thread %s run %s", thread_id, run_id)
+        raise HTTPException(status_code=500, detail="Failed to interrupt run") from None
+    return {"interrupted": True}
