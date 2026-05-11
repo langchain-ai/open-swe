@@ -97,11 +97,11 @@ async function qualityEvaluator(run: Run, example?: any) {
 }
 
 async function runEvaluation() {
-  console.log("Starting coda agent evaluation with LangSmith...\n");
+  console.log("Starting Open SWE agent evaluation with LangSmith...\n");
 
   const client = new Client();
 
-  const datasetName = "coda-agent-eval";
+  const datasetName = "openswe-agent-eval";
 
   try {
     let dataset;
@@ -111,7 +111,7 @@ async function runEvaluation() {
     } catch {
       console.log(`Creating new dataset: ${datasetName}`);
       dataset = await client.createDataset(datasetName, {
-        description: "Evaluation dataset for coda coding agent",
+        description: "Evaluation dataset for Open SWE coding agent",
       });
 
       for (const example of examples) {
@@ -134,14 +134,14 @@ async function runEvaluation() {
       {
         data: datasetName,
         evaluators: [hasResponse, qualityEvaluator],
-        experimentPrefix: "coda-agent",
+        experimentPrefix: "openswe-agent",
         maxConcurrency: 1,
       }
     );
 
     console.log("\nEvaluation complete!");
     console.log("View results in your LangSmith dashboard");
-    console.log(`Project: ${process.env.LANGSMITH_PROJECT || "coda"}`);
+    console.log(`Project: ${process.env.LANGSMITH_PROJECT || "openswe"}`);
   } catch (error) {
     console.error("Evaluation failed:", error);
     process.exit(1);
