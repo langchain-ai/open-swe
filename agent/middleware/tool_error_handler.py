@@ -115,10 +115,10 @@ def _get_thread_id(request: ToolCallRequest) -> str | None:
 
 async def _recreate_sandbox_for_thread(thread_id: str) -> str:
     from agent.server import _configure_git_identity, _recreate_sandbox, client
-    from agent.utils.sandbox_state import SANDBOX_BACKENDS
+    from agent.utils.sandbox_state import set_sandbox_backend
 
     sandbox_backend = await _recreate_sandbox(thread_id)
-    SANDBOX_BACKENDS[thread_id] = sandbox_backend
+    sandbox_backend = set_sandbox_backend(thread_id, sandbox_backend)
     await client.threads.update(thread_id=thread_id, metadata={"sandbox_id": sandbox_backend.id})
     await _configure_git_identity(sandbox_backend)
     return sandbox_backend.id

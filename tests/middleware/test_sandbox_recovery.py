@@ -2,6 +2,7 @@ import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from deepagents.backends.protocol import ExecuteResponse, SandboxBackendProtocol
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langsmith.sandbox import SandboxClientError
@@ -11,14 +12,14 @@ from agent.middleware.sandbox_circuit_breaker import (
     SandboxCircuitBreakerMiddleware,
 )
 from agent.middleware.tool_error_handler import ToolErrorMiddleware
-from agent.utils.sandbox_state import SANDBOX_BACKENDS
+from agent.utils.sandbox_state import SANDBOX_BACKENDS, clear_sandbox_backend, set_sandbox_backend
 
 
-class FakeSandboxBackend:
+class FakeSandboxBackend(SandboxBackendProtocol):
     id = "sb-new"
 
-    def execute(self, _command: str) -> None:
-        return None
+    def execute(self, command: str, *, timeout: int | None = None) -> ExecuteResponse:
+        return ExecuteResponse(output=f"{self.id}: {command}: {timeout}", exit_code=0)
 
 
 def _tool_request(thread_id: str = "thread-1") -> ToolCallRequest:
@@ -49,7 +50,11 @@ def _sandbox_error_message(tool_call_id: str, sandbox_id: str = "sb-dead") -> To
 async def test_sandbox_client_error_recreates_sandbox() -> None:
     middleware = ToolErrorMiddleware()
     request = _tool_request()
+    old_backend = FakeSandboxBackend()
     backend = FakeSandboxBackend()
+    old_backend.id = "sb-old"
+    backend.id = "sb-new"
+    proxy = set_sandbox_backend("thread-1", old_backend)
 
     async def handler(_request: ToolCallRequest) -> ToolMessage:
         raise SandboxClientError("Sandbox request timed out: sb-dead")
@@ -70,7 +75,10 @@ async def test_sandbox_client_error_recreates_sandbox() -> None:
             thread_id="thread-1",
             metadata={"sandbox_id": "sb-new"},
         )
-        assert SANDBOX_BACKENDS["thread-1"] is backend
+        assert SANDBOX_BACKENDS["thread-1"] is proxy
+        assert proxy.current is backend
+        assert proxy.id == "sb-new"
+        assert proxy.execute("echo ok").output == "sb-new: echo ok: None"
 
         payload = json.loads(result.content)
         assert payload["status"] == "error"
@@ -79,7 +87,7 @@ async def test_sandbox_client_error_recreates_sandbox() -> None:
         assert payload["previous_error"] == "Sandbox request timed out: sb-dead"
         assert "sb-new" in payload["error"]
     finally:
-        SANDBOX_BACKENDS.pop("thread-1", None)
+        clear_sandbox_backend("thread-1")
 
 
 def test_repeated_sandbox_errors_trigger_circuit_breaker_once() -> None:
