@@ -187,7 +187,27 @@ export const RootScreen = ({ args }: Props) => {
   const { screen, deployment } = state;
 
   if (screen === "local") {
-    return <App />;
+    return (
+      <App
+        onHandoffToCloud={(tid) => {
+          // After a successful /handoff cloud the local agent is done; jump
+          // to attach on the new cloud thread. RootScreen does not preload
+          // the deployment in local mode, so fetch it now — useAppState
+          // already verified one is configured before calling us.
+          void (async () => {
+            const d = deployment ?? (await getActiveDeployment());
+            if (!d) return;
+            setPendingThreadId(tid);
+            setState({
+              kind: "screen",
+              screen: "attach",
+              deployment: d,
+              thread_id: tid,
+            });
+          })();
+        }}
+      />
+    );
   }
 
   if (screen === "login") {

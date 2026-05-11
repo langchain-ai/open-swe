@@ -76,7 +76,15 @@ function prunePastedTexts(
   }
 }
 
-export function useAppState(): AppState {
+export type UseAppStateOptions = {
+  // Called after a successful in-session `/handoff cloud`. Receives the new
+  // cloud thread_id so the surrounding screen can swap to the attach view.
+  // The DESIGN.md contract: the local agent is terminated and the CLI
+  // transitions to attach mode on the new thread.
+  onHandoffToCloud?: (thread_id: string) => void;
+};
+
+export function useAppState(options: UseAppStateOptions = {}): AppState {
   const { exit } = useApp();
   const cols = useStore((store) => store.terminalCols);
   const apiKeys = useStore((store) => store.apiKeys);
@@ -672,6 +680,25 @@ export function useAppState(): AppState {
               deployment.session_token,
             );
             const res = await api.adoptHandoff(bundle);
+            if (options.onHandoffToCloud) {
+              addMessage({
+                author: "system",
+                chunks: [
+                  {
+                    kind: "text",
+                    text:
+                      `Cloud thread created: ${res.thread_id}. ` +
+                      `Switching to cloud attach…`,
+                  },
+                ],
+              });
+              // Terminate the local agent by handing off the screen — the
+              // local stream loop, if any, will be GC'd with the unmounted
+              // App. (The /handoff intercept already runs only when !busy,
+              // so there's no in-flight LLM call to race with.)
+              options.onHandoffToCloud(res.thread_id);
+              return;
+            }
             addMessage({
               author: "system",
               chunks: [
@@ -707,6 +734,17 @@ export function useAppState(): AppState {
           });
           return;
         }
+        // Bare `/handoff` or unknown arg: show usage and stop. Without this
+        // the slash-registry would dispatch into command-executor, which has
+        // no handler and would silently no-op.
+        setQuery("");
+        setCursorOffset(0);
+        resetCommandMenu();
+        addMessage({
+          author: "system",
+          chunks: [{ kind: "text", text: "Usage: /handoff cloud" }],
+        });
+        return;
       }
 
       const slashCommand = resolveSlashCommand(trimmedValue);

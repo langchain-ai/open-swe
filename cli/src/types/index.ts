@@ -9,7 +9,8 @@ export type SlashCommandName =
   | "clear"
   | "model"
   | "review"
-  | "apikeys";
+  | "apikeys"
+  | "handoff";
 export type Provider = "openai" | "anthropic" | "google";
 export type Effort = "low" | "medium" | "high" | "xhigh";
 

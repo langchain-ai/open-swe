@@ -10,8 +10,12 @@ import { themeColor } from "./theme.js";
 import { getActiveDeployment } from "@lib/config";
 import type { DeploymentConfig } from "@lib/api-types";
 
-export const App = () => {
-  const appState = useAppState();
+type AppProps = {
+  onHandoffToCloud?: (thread_id: string) => void;
+};
+
+export const App = ({ onHandoffToCloud }: AppProps = {}) => {
+  const appState = useAppState({ onHandoffToCloud });
   const [deployment, setDeployment] = useState<DeploymentConfig | null>(null);
   useEffect(() => {
     void (async () => {
