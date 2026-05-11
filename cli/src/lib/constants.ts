@@ -1,0 +1,2 @@
+export const SEARCH_RESULTS_LIMIT = 10;
+export const AGENT_RECURSION_LIMIT = 9999;

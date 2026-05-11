@@ -1,0 +1,44 @@
+{
+  "compilerOptions": {
+    "module": "node16",
+    "target": "es2022",
+    "moduleResolution": "node16",
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "strict": true,
+    "skipLibCheck": true,
+    "outDir": "dist",
+    "rootDir": ".",
+    "jsx": "react-jsx",
+    "lib": ["DOM", "ES2023"],
+    "types": ["node", "vitest/globals"],
+    "baseUrl": ".",
+    "paths": {
+      "@app/*": ["src/app/*"],
+      "@tui/*": ["src/tui/*"],
+      "@agent/*": ["src/agent/*"],
+      "@agent/tools": ["src/agent/tools/index.ts"],
+      "@agent/prompts": ["src/agent/prompts.ts"],
+      "@agent/graph": ["src/agent/graph.ts"],
+      "@lib/*": ["src/lib/*"],
+      "@lib/logger": ["src/lib/logger.ts"],
+      "@lib/storage": ["src/lib/storage.ts"],
+      "@lib/diff": ["src/lib/diff.ts"],
+      "@lib/time": ["src/lib/time.ts"],
+      "@lib/constants": ["src/lib/constants.ts"],
+      "@lib/tool-result": ["src/lib/tool-result.ts"],
+      "@config/*": ["src/config/*"],
+      "@types": ["src/types/index.ts"],
+      "@types/*": ["src/types/*"]
+    }
+  },
+  "include": [
+    "index.ts",
+    "src/**/*.ts",
+    "src/**/*.tsx"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist"
+  ]
+}
