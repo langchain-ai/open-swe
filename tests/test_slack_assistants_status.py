@@ -1,4 +1,4 @@
-"""Tests for the Slack Assistants API integration (feature-flagged)."""
+"""Tests for the Slack Assistants API integration."""
 
 from __future__ import annotations
 
@@ -31,25 +31,9 @@ def _async_client_cm(post_response: MagicMock) -> AsyncMock:
 
 
 @pytest.mark.asyncio
-async def test_set_slack_assistant_status_noop_when_flag_disabled(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.delenv("SLACK_ASSISTANTS_API_ENABLED", raising=False)
-    monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
-
-    client_cm = _async_client_cm(_ok_response())
-    with patch.object(slack_utils.httpx, "AsyncClient", return_value=client_cm):
-        ok = await slack_utils.set_slack_assistant_status("C1", "1.0", "thinking…")
-
-    assert ok is False
-    client_cm.post.assert_not_called()
-
-
-@pytest.mark.asyncio
 async def test_set_slack_assistant_status_noop_when_no_token(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("SLACK_ASSISTANTS_API_ENABLED", "true")
     monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "")
 
     client_cm = _async_client_cm(_ok_response())
@@ -64,7 +48,6 @@ async def test_set_slack_assistant_status_noop_when_no_token(
 async def test_set_slack_assistant_status_calls_correct_endpoint(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("SLACK_ASSISTANTS_API_ENABLED", "true")
     monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
 
     client_cm = _async_client_cm(_ok_response())
@@ -86,7 +69,6 @@ async def test_set_slack_assistant_status_calls_correct_endpoint(
 async def test_set_slack_assistant_status_passes_loading_messages(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("SLACK_ASSISTANTS_API_ENABLED", "true")
     monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
 
     client_cm = _async_client_cm(_ok_response())
@@ -103,7 +85,6 @@ async def test_set_slack_assistant_status_passes_loading_messages(
 async def test_set_slack_assistant_status_caps_loading_messages_at_10(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("SLACK_ASSISTANTS_API_ENABLED", "true")
     monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
 
     client_cm = _async_client_cm(_ok_response())
@@ -122,7 +103,6 @@ async def test_set_slack_assistant_status_caps_loading_messages_at_10(
 async def test_set_slack_assistant_status_omits_loading_messages_when_unset(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("SLACK_ASSISTANTS_API_ENABLED", "true")
     monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
 
     client_cm = _async_client_cm(_ok_response())
@@ -137,7 +117,6 @@ async def test_set_slack_assistant_status_omits_loading_messages_when_unset(
 async def test_set_slack_assistant_status_returns_false_on_slack_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("SLACK_ASSISTANTS_API_ENABLED", "true")
     monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
 
     client_cm = _async_client_cm(_err_response("invalid_thread"))
@@ -152,7 +131,6 @@ async def test_post_slack_thread_reply_does_not_call_set_status(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Slack auto-clears the indicator on post; no extra setStatus call needed."""
-    monkeypatch.setenv("SLACK_ASSISTANTS_API_ENABLED", "true")
     monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
 
     client_cm = _async_client_cm(_ok_response())
@@ -162,15 +140,3 @@ async def test_post_slack_thread_reply_does_not_call_set_status(
     assert ok is True
     assert client_cm.post.await_count == 1
     assert client_cm.post.call_args.args[0].endswith("/chat.postMessage")
-
-
-def test_is_slack_assistants_api_enabled_truthy_values(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    for truthy in ("1", "true", "TRUE", "yes", "Yes"):
-        monkeypatch.setenv("SLACK_ASSISTANTS_API_ENABLED", truthy)
-        assert slack_utils._is_slack_assistants_api_enabled() is True
-
-    for falsy in ("0", "false", "no", "", "off"):
-        monkeypatch.setenv("SLACK_ASSISTANTS_API_ENABLED", falsy)
-        assert slack_utils._is_slack_assistants_api_enabled() is False

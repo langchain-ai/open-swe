@@ -27,14 +27,6 @@ GITHUB_PR_URL_RE = re.compile(r"https?://(?:www\.)?github\.com/[^\s<>|]+/[^\s<>|
 URL_RE = re.compile(r"https?://[^\s<>|]+")
 
 
-def _is_slack_assistants_api_enabled() -> bool:
-    """Whether the Slack Assistants API integration is enabled.
-
-    Read at call time so tests and runtime can toggle via env without reimports.
-    """
-    return os.environ.get("SLACK_ASSISTANTS_API_ENABLED", "").lower() in {"1", "true", "yes"}
-
-
 DEFAULT_ASSISTANT_STATUS = "is thinking…"
 
 # Curated rotating loading strings shown by Slack while the indicator is active.
@@ -298,13 +290,10 @@ async def set_slack_assistant_status(
     `loading_messages` is an optional list (max 10) of strings Slack rotates
     through while the indicator is visible.
 
-    No-op (returning False) when the assistants feature flag is disabled,
-    the bot token is missing, or the channel/thread is not provided.
-    Failures are logged but never raised — the indicator is a UX nicety,
-    not a correctness requirement.
+    No-op (returning False) when the bot token is missing or the
+    channel/thread is not provided. Failures are logged but never raised —
+    the indicator is a UX nicety, not a correctness requirement.
     """
-    if not _is_slack_assistants_api_enabled():
-        return False
     if not SLACK_BOT_TOKEN or not channel_id or not thread_ts:
         return False
 
