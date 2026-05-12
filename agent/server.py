@@ -68,17 +68,23 @@ SANDBOX_CREATING = "__creating__"
 SANDBOX_CREATION_TIMEOUT = 180
 SANDBOX_POLL_INTERVAL = 1.0
 
-from .utils.sandbox_state import SANDBOX_BACKENDS, get_sandbox_id_from_metadata
+from .utils.sandbox_state import (
+    SANDBOX_BACKENDS,
+    get_sandbox_id_from_metadata,
+    set_sandbox_backend,
+    unwrap_sandbox_backend,
+)
 
 
 async def _start_langsmith_sandbox_if_needed(sandbox_backend: SandboxBackendProtocol) -> None:
     """Start a LangSmith sandbox before operations that require it to be running."""
     if os.getenv("SANDBOX_TYPE", "langsmith") != "langsmith":
         return
-    if not isinstance(sandbox_backend, LangSmithSandbox):
+    current_backend = unwrap_sandbox_backend(sandbox_backend)
+    if not isinstance(current_backend, LangSmithSandbox):
         return
 
-    sandbox = sandbox_backend._sandbox  # noqa: SLF001
+    sandbox = current_backend._sandbox  # noqa: SLF001
     status = await asyncio.to_thread(sandbox._client.get_sandbox_status, sandbox.name)  # noqa: SLF001
     status_name = getattr(status, "status", status)
     status_name = getattr(status_name, "value", status_name)
@@ -88,7 +94,7 @@ async def _start_langsmith_sandbox_if_needed(sandbox_backend: SandboxBackendProt
 
     logger.info(
         "Starting LangSmith sandbox %s before proxy refresh (status=%s)",
-        sandbox_backend.id,
+        current_backend.id,
         status_text or "unknown",
     )
     await asyncio.to_thread(sandbox.start)
@@ -130,8 +136,9 @@ async def _refresh_github_proxy(
         )
         return
 
-    await _start_langsmith_sandbox_if_needed(sandbox_backend)
-    await asyncio.to_thread(_configure_github_proxy, sandbox_backend.id, installation_token)
+    current_backend = unwrap_sandbox_backend(sandbox_backend)
+    await _start_langsmith_sandbox_if_needed(current_backend)
+    await asyncio.to_thread(_configure_github_proxy, current_backend.id, installation_token)
 
 
 async def _refresh_github_proxy_or_recreate(
@@ -163,17 +170,16 @@ async def _configure_git_identity(sandbox_backend: SandboxBackendProtocol) -> No
 async def _recreate_sandbox(thread_id: str) -> SandboxBackendProtocol:
     """Recreate a sandbox after a connection failure.
 
-    Clears the stale cache entry, sets the SANDBOX_CREATING sentinel,
-    and creates a fresh sandbox (with proxy auth configured).
+    Sets the SANDBOX_CREATING sentinel and creates a fresh sandbox
+    (with proxy auth configured), swapping the per-thread proxy target.
     The agent is responsible for cloning repos via tools.
     """
-    SANDBOX_BACKENDS.pop(thread_id, None)
     await client.threads.update(
         thread_id=thread_id,
         metadata={"sandbox_id": SANDBOX_CREATING},
     )
     try:
-        sandbox_backend = await _create_sandbox_with_proxy()
+        sandbox_backend = set_sandbox_backend(thread_id, await _create_sandbox_with_proxy())
     except Exception:
         logger.exception("Failed to recreate sandbox after connection failure")
         await client.threads.update(thread_id=thread_id, metadata={"sandbox_id": None})
@@ -298,7 +304,7 @@ async def ensure_sandbox_for_thread(thread_id: str) -> SandboxBackendProtocol:
                     sandbox_backend, thread_id
                 )
 
-    SANDBOX_BACKENDS[thread_id] = sandbox_backend
+    sandbox_backend = set_sandbox_backend(thread_id, sandbox_backend)
 
     if sandbox_id != sandbox_backend.id:
         await client.threads.update(

@@ -1,5 +1,7 @@
 import os
 
+from deepagents.backends.protocol import SandboxBackendProtocol
+
 from agent.integrations.daytona import create_daytona_sandbox
 from agent.integrations.langsmith import create_langsmith_sandbox
 from agent.integrations.local import create_local_sandbox
@@ -15,7 +17,7 @@ SANDBOX_FACTORIES = {
 }
 
 
-def create_sandbox(sandbox_id: str | None = None):
+def create_sandbox(sandbox_id: str | None = None) -> SandboxBackendProtocol:
     """Create or reconnect to a sandbox using the configured provider.
 
     The provider is selected via the SANDBOX_TYPE environment variable.
