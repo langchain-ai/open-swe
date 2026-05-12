@@ -2623,30 +2623,36 @@ async def cli_config() -> dict[str, Any]:
 async def cli_auth_start(request: Request, redirect_uri: str, state: str) -> dict[str, str]:
     if not GITHUB_APP_CLIENT_ID:
         raise HTTPException(status_code=503, detail="GITHUB_APP_CLIENT_ID not configured")
-    # The inner loopback URL is the CLI's local HTTP server. We validate it
-    # here, but the URL we hand to GitHub is THIS deployment's own callback
+    # The redirect_uri we send to GitHub is THIS deployment's own callback
     # endpoint — GitHub redirects there after auth so we can exchange the
-    # code (the loopback has no client secret). The loopback is preserved
-    # as a query param so /cli/auth/callback knows where to POST the
-    # session token back.
+    # code (the loopback has no client secret). GitHub Apps require the
+    # redirect_uri to match the registered callback URL EXACTLY including
+    # query string (unlike OAuth Apps which prefix-match), so we cannot
+    # append `?redirect_uri=…`. Instead we pack the original state + the
+    # loopback URL into the GitHub `state` parameter, which GitHub passes
+    # back verbatim.
     loopback = _validate_cli_redirect_uri(redirect_uri)
-    from urllib.parse import quote, urlencode
+    import base64
+    import json as _json
+    from urllib.parse import urlencode
 
     # LangGraph's TLS-terminating proxy leaves request.url.scheme as "http"
-    # inside the container, so we honor X-Forwarded-Proto. The registered
-    # GitHub callback URL is https, and GitHub does a prefix match — a bare
-    # `http://` here triggers "redirect_uri is not associated".
+    # inside the container, so we honor X-Forwarded-Proto.
     forwarded_proto = request.headers.get("x-forwarded-proto", "").split(",")[0].strip()
     scheme = forwarded_proto or request.url.scheme
     forwarded_host = request.headers.get("x-forwarded-host", "").split(",")[0].strip()
     host = forwarded_host or request.url.netloc
     base = f"{scheme}://{host}"
-    github_redirect = f"{base}/cli/auth/callback?redirect_uri={quote(loopback, safe='')}"
+    github_redirect = f"{base}/cli/auth/callback"
+
+    packed_state = base64.urlsafe_b64encode(
+        _json.dumps({"s": state, "r": loopback}).encode("utf-8")
+    ).decode("ascii").rstrip("=")
 
     params = {
         "client_id": GITHUB_APP_CLIENT_ID,
         "redirect_uri": github_redirect,
-        "state": state,
+        "state": packed_state,
     }
     return {"authorize_url": f"https://github.com/login/oauth/authorize?{urlencode(params)}"}
 
@@ -2795,9 +2801,23 @@ def _render_callback_html(redirect_uri: str, payload: dict[str, str]) -> str:
 
 
 @app.get("/cli/auth/callback")
-async def cli_auth_callback(code: str, state: str, redirect_uri: str) -> HTMLResponse:
+async def cli_auth_callback(code: str, state: str) -> HTMLResponse:
     if not ALLOWED_GITHUB_ORG:
         raise HTTPException(status_code=503, detail="ALLOWED_GITHUB_ORG not configured")
+    # State was packed by /cli/auth/start as base64(urlsafe)-encoded JSON
+    # containing the original CLI state and the loopback redirect URI.
+    import base64
+    import json as _json
+
+    try:
+        padding = "=" * (-len(state) % 4)
+        unpacked = _json.loads(base64.urlsafe_b64decode(state + padding).decode("utf-8"))
+        original_state = unpacked["s"]
+        redirect_uri = unpacked["r"]
+        if not isinstance(original_state, str) or not isinstance(redirect_uri, str):
+            raise ValueError("state payload missing fields")
+    except Exception as err:
+        raise HTTPException(status_code=400, detail="Invalid state parameter") from err
     redirect_uri = _validate_cli_redirect_uri(redirect_uri)
 
     token = await _exchange_oauth_code(code)
@@ -2834,7 +2854,7 @@ async def cli_auth_callback(code: str, state: str, redirect_uri: str) -> HTMLRes
     session_token = issue_cli_session_token(github_login)
     body = _render_callback_html(
         redirect_uri,
-        {"session_token": session_token, "github_login": github_login, "state": state},
+        {"session_token": session_token, "github_login": github_login, "state": original_state},
     )
     return HTMLResponse(content=body)
 
