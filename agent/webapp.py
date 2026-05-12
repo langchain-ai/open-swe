@@ -3459,16 +3459,21 @@ async def cli_handoff_adopt(body: _CliAdoptBody, user: CliUser = _CLI_USER_DEP) 
         if isinstance(agent_meta.get("agent"), str):
             configurable["agent"] = agent_meta["agent"]
 
-    try:
-        await client.runs.create(
-            thread_id,
-            configurable.get("agent", "agent"),
-            input={"messages": conversation} if conversation else None,
-            config={"configurable": configurable, "metadata": _AGENT_VERSION_METADATA},
-            if_not_exists="create",
-        )
-    except Exception:
-        logger.exception("Failed to create adopted run for thread %s", thread_id)
-        raise HTTPException(status_code=500, detail="Failed to trigger run") from None
+    # Only trigger an initial run if we have something to seed the graph with.
+    # Passing input=None makes LangGraph raise EmptyInputError at __start__,
+    # which surfaces as a failed run instead of a fresh thread the user can
+    # interact with via the attach view.
+    if conversation:
+        try:
+            await client.runs.create(
+                thread_id,
+                configurable.get("agent", "agent"),
+                input={"messages": conversation},
+                config={"configurable": configurable, "metadata": _AGENT_VERSION_METADATA},
+                if_not_exists="create",
+            )
+        except Exception:
+            logger.exception("Failed to create adopted run for thread %s", thread_id)
+            raise HTTPException(status_code=500, detail="Failed to trigger run") from None
 
     return {"thread_id": thread_id}
