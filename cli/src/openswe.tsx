@@ -1,7 +1,7 @@
 import { render } from 'ink';
 import { RootScreen } from './tui/screens.js';
 import { getStoredApiKeys, deleteAllApiKeys, getStoredModelConfig } from '@lib/storage';
-import { clearLog } from '@lib/logger';
+import { initSessionLog } from '@lib/logger';
 import { useStore } from '@app/store.js';
 import { parseArgs } from '@lib/cli-args';
 import { runUpgrade } from '@lib/upgrade';
@@ -23,7 +23,7 @@ const disableBracketedPaste = () => {
 };
 
 export async function main() {
-  await clearLog();
+  await initSessionLog();
 
   // Belt-and-suspenders: also clear bracketed-paste mode on hard exit
   // (Ctrl+C / uncaught) so the user's shell doesn't inherit it.

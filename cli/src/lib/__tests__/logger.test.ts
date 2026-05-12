@@ -2,57 +2,46 @@ import { describe, it, expect, vi } from 'vitest';
 import { promises as fs } from 'fs';
 import path from 'path';
 
-async function withTempHome<T>(fn: (homeDir: string, logger: typeof import('../logger.js')) => Promise<T>): Promise<T> {
+async function withTempCwd<T>(
+  fn: (cwd: string, logger: typeof import('../logger.js')) => Promise<T>,
+): Promise<T> {
   const base = path.join(process.cwd(), '.tmp');
-  const tempHome = path.join(base, `home-${Date.now()}-${Math.random().toString(16).slice(2)}`);
-  await fs.mkdir(base, { recursive: true });
-  await fs.mkdir(tempHome, { recursive: true });
+  const tempCwd = path.join(base, `cwd-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+  await fs.mkdir(tempCwd, { recursive: true });
+  const origCwd = process.cwd();
   try {
-    vi.stubEnv('HOME', tempHome);
+    process.chdir(tempCwd);
     vi.resetModules();
     const logger = await import('../logger.js');
-    return await fn(tempHome, logger);
+    return await fn(tempCwd, logger);
   } finally {
-    vi.unstubAllEnvs();
-    await fs.rm(tempHome, { recursive: true, force: true });
+    process.chdir(origCwd);
+    await fs.rm(tempCwd, { recursive: true, force: true });
   }
 }
 
 describe('logger utils', () => {
-  it('creates logs directory with ensureLogDir', async () => {
-    await withTempHome(async (home, logger) => {
-      const logsDir = path.join(home, '.openswe', 'logs');
-      await logger.ensureLogDir();
+  it('initSessionLog creates logs dir and a self-ignoring .gitignore', async () => {
+    await withTempCwd(async (cwd, logger) => {
+      await logger.initSessionLog();
+      const logsDir = path.join(cwd, '.openswe', 'logs');
       const stat = await fs.stat(logsDir);
       expect(stat.isDirectory()).toBe(true);
+      const ignore = await fs.readFile(path.join(cwd, '.openswe', '.gitignore'), 'utf8');
+      expect(ignore.trim()).toBe('*');
     });
   });
 
-  it('appends info and error entries and clears log', async () => {
-    await withTempHome(async (home, logger) => {
-      const logFile = path.join(home, '.openswe', 'logs', 'openswe.log');
-
-      // Deterministic timestamps
-      vi.useFakeTimers();
-      vi.setSystemTime(new Date('2025-01-02T03:04:05.000Z'));
-
-      await logger.ensureLogDir();
-      await logger.clearLog();
-
+  it('appends info and error entries to the session log file', async () => {
+    await withTempCwd(async (_cwd, logger) => {
       await logger.logInfo('hello world');
       await logger.logError('boom');
 
-      const contents = await fs.readFile(logFile, 'utf-8');
+      const logPath = logger.getLogPath();
+      const contents = await fs.readFile(logPath, 'utf-8');
       expect(contents).toContain('INFO: hello world');
       expect(contents).toContain('ERROR: boom');
-      expect(contents).toMatch(/\[2025-01-02T03:04:05\.000Z\]/);
-
-      // Clear should truncate
-      await logger.clearLog();
-      const afterClear = await fs.readFile(logFile, 'utf-8');
-      expect(afterClear).toBe('');
-
-      vi.useRealTimers();
+      expect(contents).toMatch(/openswe session [0-9a-f]+ started/);
     });
   });
 });

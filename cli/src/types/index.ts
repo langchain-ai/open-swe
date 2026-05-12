@@ -10,7 +10,8 @@ export type SlashCommandName =
   | "model"
   | "review"
   | "apikeys"
-  | "handoff";
+  | "cloud"
+  | "logs";
 export type Provider = "openai" | "anthropic" | "google";
 export type Effort = "low" | "medium" | "high" | "xhigh";
 

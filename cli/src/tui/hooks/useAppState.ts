@@ -77,10 +77,9 @@ function prunePastedTexts(
 }
 
 export type UseAppStateOptions = {
-  // Called after a successful in-session `/handoff cloud`. Receives the new
-  // cloud thread_id so the surrounding screen can swap to the attach view.
-  // The DESIGN.md contract: the local agent is terminated and the CLI
-  // transitions to attach mode on the new thread.
+  // Called after a successful in-session `/cloud`. Receives the new cloud
+  // thread_id so the surrounding screen can swap to the attach view. The
+  // local agent is terminated and the CLI transitions to attach mode.
   onHandoffToCloud?: (thread_id: string) => void;
 };
 
@@ -637,12 +636,31 @@ export function useAppState(options: UseAppStateOptions = {}): AppState {
         return;
       }
 
-      // Intercept /handoff cloud — not part of the regular slash registry
-      // because it needs deployment + conversation context that the
-      // command-executor doesn't have.
-      if (trimmedValue.toLowerCase().startsWith("/handoff")) {
-        const arg = trimmedValue.slice("/handoff".length).trim().toLowerCase();
-        if (arg === "cloud") {
+      // Intercept /logs — prints the current session log path.
+      if (trimmedValue.toLowerCase() === "/logs") {
+        setQuery("");
+        setCursorOffset(0);
+        resetCommandMenu();
+        const { getLogPath } = await import("@lib/logger");
+        addMessage({
+          author: "system",
+          chunks: [
+            {
+              kind: "text",
+              text: `Session log: ${getLogPath()}\nTail it with: tail -f "${getLogPath()}"`,
+            },
+          ],
+        });
+        return;
+      }
+
+      // Intercept /cloud — moves this local conversation into a fresh cloud
+      // thread (export-and-adopt) and switches the UI to attach. Not part of
+      // the regular slash registry because it needs deployment + conversation
+      // context that the command-executor doesn't have.
+      if (trimmedValue.toLowerCase().startsWith("/cloud")) {
+        const arg = trimmedValue.slice("/cloud".length).trim().toLowerCase();
+        if (arg === "" || arg === "new") {
           setQuery("");
           setCursorOffset(0);
           resetCommandMenu();
@@ -692,9 +710,9 @@ export function useAppState(options: UseAppStateOptions = {}): AppState {
                   },
                 ],
               });
-              // Terminate the local agent by handing off the screen — the
+              // Terminate the local agent by swapping the screen — the
               // local stream loop, if any, will be GC'd with the unmounted
-              // App. (The /handoff intercept already runs only when !busy,
+              // App. (The /cloud intercept already runs only when !busy,
               // so there's no in-flight LLM call to race with.)
               options.onHandoffToCloud(res.thread_id);
               return;
@@ -714,35 +732,18 @@ export function useAppState(options: UseAppStateOptions = {}): AppState {
             const message = err instanceof Error ? err.message : String(err);
             addMessage({
               author: "system",
-              chunks: [{ kind: "error", text: `Handoff failed: ${message}` }],
+              chunks: [{ kind: "error", text: `Cloud switch failed: ${message}` }],
             });
           }
           return;
         }
-        if (arg === "local") {
-          setQuery("");
-          setCursorOffset(0);
-          resetCommandMenu();
-          addMessage({
-            author: "system",
-            chunks: [
-              {
-                kind: "text",
-                text: "Already in a local session. Use /handoff cloud to push to the cloud.",
-              },
-            ],
-          });
-          return;
-        }
-        // Bare `/handoff` or unknown arg: show usage and stop. Without this
-        // the slash-registry would dispatch into command-executor, which has
-        // no handler and would silently no-op.
+        // Unknown /cloud arg.
         setQuery("");
         setCursorOffset(0);
         resetCommandMenu();
         addMessage({
           author: "system",
-          chunks: [{ kind: "text", text: "Usage: /handoff cloud" }],
+          chunks: [{ kind: "text", text: "Usage: /cloud" }],
         });
         return;
       }

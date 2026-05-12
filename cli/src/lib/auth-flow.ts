@@ -79,6 +79,11 @@ function defer<T>(): Deferred<T> {
   return { promise, resolve, reject };
 }
 
+type CallbackServer = {
+  port: number;
+  stop: () => void;
+};
+
 type BunServer = {
   port: number;
   stop: (closeActive?: boolean) => void;
@@ -91,6 +96,61 @@ type BunGlobal = {
   }) => BunServer;
 };
 
+type FetchHandler = (req: Request) => Response | Promise<Response>;
+
+async function startCallbackServer(handler: FetchHandler): Promise<CallbackServer> {
+  const bunGlobal = (globalThis as unknown as { Bun?: BunGlobal }).Bun;
+  if (bunGlobal?.serve) {
+    const server = bunGlobal.serve({ port: 0, fetch: handler });
+    return { port: server.port, stop: () => server.stop(true) };
+  }
+  // Node fallback: works under `#!/usr/bin/env node`, which is how `bun link`
+  // installs the binary on PATH. We adapt http.IncomingMessage <-> Request
+  // because the rest of this module is written against the WHATWG types.
+  const http = await import('node:http');
+  return await new Promise<CallbackServer>((resolve, reject) => {
+    const server = http.createServer((req, res) => {
+      void (async () => {
+        try {
+          const chunks: Buffer[] = [];
+          for await (const c of req as AsyncIterable<Buffer>) chunks.push(c);
+          const body = Buffer.concat(chunks);
+          const host = req.headers.host ?? '127.0.0.1';
+          const url = `http://${host}${req.url ?? '/'}`;
+          const init: RequestInit = {
+            method: req.method,
+            headers: req.headers as Record<string, string>,
+          };
+          if (body.length > 0 && req.method && req.method !== 'GET' && req.method !== 'HEAD') {
+            init.body = body;
+          }
+          const request = new Request(url, init);
+          const response = await handler(request);
+          const headers: Record<string, string> = {};
+          response.headers.forEach((v, k) => { headers[k] = v; });
+          res.writeHead(response.status, headers);
+          const text = await response.text();
+          res.end(text);
+        } catch (err) {
+          res.writeHead(500);
+          res.end(err instanceof Error ? err.message : String(err));
+        }
+      })();
+    });
+    server.on('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const addr = server.address();
+      const port = typeof addr === 'object' && addr ? addr.port : 0;
+      resolve({
+        port,
+        stop: () => {
+          try { server.close(); } catch { /* best effort */ }
+        },
+      });
+    });
+  });
+}
+
 export type LoginOptions = {
   onStatus?: (message: string) => void;
 };
@@ -100,10 +160,6 @@ export async function login(
   opts: LoginOptions = {},
 ): Promise<DeploymentConfig> {
   const status = opts.onStatus ?? (() => undefined);
-  const bunGlobal = (globalThis as unknown as { Bun?: BunGlobal }).Bun;
-  if (!bunGlobal?.serve) {
-    throw new Error('Login requires the Bun runtime (Bun.serve is unavailable).');
-  }
 
   const api = new ApiClient(backend_url);
   // Surface backend reachability early; also confirms it's an Open SWE deployment.
@@ -114,9 +170,7 @@ export async function login(
   const state = crypto.randomUUID();
   const result = defer<CallbackPayload>();
 
-  const server: BunServer = bunGlobal.serve({
-    port: 0,
-    fetch: async (req: Request) => {
+  const server = await startCallbackServer(async (req: Request) => {
       const url = new URL(req.url);
       if (req.method === 'OPTIONS') {
         return new Response(null, {
@@ -157,7 +211,6 @@ export async function login(
         status: 200,
         headers: { 'Content-Type': 'application/json', ...corsHeaders() },
       });
-    },
   });
 
   const port = server.port;
@@ -185,7 +238,7 @@ export async function login(
     };
   } finally {
     try {
-      server.stop(true);
+      server.stop();
     } catch {
       // ignore
     }

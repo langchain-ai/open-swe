@@ -21,6 +21,22 @@ export const Login = ({ initialBackendUrl, onComplete }: Props) => {
   const [cursorOffset, setCursorOffset] = useState<number>(
     (initialBackendUrl ?? "").length,
   );
+
+  // Without an onPaste handler, the bracketed-paste markers (\x1b[200~ …
+  // \x1b[201~) that openswe.tsx enables globally leak into the input as
+  // literal `[200~` / `[201~`. Insert pasted text at the cursor instead.
+  const onPaste = useCallback(
+    (text: string) => {
+      setBackendUrl((prev) => {
+        const before = prev.slice(0, cursorOffset);
+        const after = prev.slice(cursorOffset);
+        const next = before + text + after;
+        setCursorOffset(before.length + text.length);
+        return next;
+      });
+    },
+    [cursorOffset],
+  );
   const [phase, setPhase] = useState<Phase>(
     initialBackendUrl && initialBackendUrl.length > 0 ? "running" : "input",
   );
@@ -122,6 +138,7 @@ export const Login = ({ initialBackendUrl, onComplete }: Props) => {
                 onSubmit={(v) => void startLogin(v)}
                 cursorOffset={cursorOffset}
                 onChangeCursorOffset={setCursorOffset}
+                onPaste={onPaste}
                 onExit={exit}
                 placeholder="https://open-swe.example.com"
                 multiline={false}

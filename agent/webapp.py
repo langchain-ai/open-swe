@@ -2620,15 +2620,24 @@ async def cli_config() -> dict[str, Any]:
 
 
 @app.get("/cli/auth/start")
-async def cli_auth_start(redirect_uri: str, state: str) -> dict[str, str]:
+async def cli_auth_start(request: Request, redirect_uri: str, state: str) -> dict[str, str]:
     if not GITHUB_APP_CLIENT_ID:
         raise HTTPException(status_code=503, detail="GITHUB_APP_CLIENT_ID not configured")
-    redirect_uri = _validate_cli_redirect_uri(redirect_uri)
-    from urllib.parse import urlencode
+    # The inner loopback URL is the CLI's local HTTP server. We validate it
+    # here, but the URL we hand to GitHub is THIS deployment's own callback
+    # endpoint — GitHub redirects there after auth so we can exchange the
+    # code (the loopback has no client secret). The loopback is preserved
+    # as a query param so /cli/auth/callback knows where to POST the
+    # session token back.
+    loopback = _validate_cli_redirect_uri(redirect_uri)
+    from urllib.parse import quote, urlencode
+
+    base = str(request.base_url).rstrip("/")
+    github_redirect = f"{base}/cli/auth/callback?redirect_uri={quote(loopback, safe='')}"
 
     params = {
         "client_id": GITHUB_APP_CLIENT_ID,
-        "redirect_uri": redirect_uri,
+        "redirect_uri": github_redirect,
         "state": state,
     }
     return {"authorize_url": f"https://github.com/login/oauth/authorize?{urlencode(params)}"}

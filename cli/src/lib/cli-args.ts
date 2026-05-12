@@ -47,6 +47,7 @@ const FLAG_SPECS: FlagSpec[] = [
   { long: 'version', takesValue: true },
   { long: 'to', takesValue: true },
   { long: 'thread', takesValue: true },
+  { long: 'login', takesValue: true },
 ];
 
 type ParsedFlags = {
@@ -97,6 +98,23 @@ const asString = (v: string | true | undefined): string | undefined =>
 export const parseArgs = (argv: string[] = process.argv.slice(2)): ParsedArgs => {
   const { flags, positionals } = parseFlags(argv);
   const backend = asString(flags.backend) ?? process.env.OPENSWE_BACKEND;
+  // `openswe --login <url>` is an ergonomic alias for `openswe login <url>`.
+  // Without this the URL gets swallowed as a positional and the parser falls
+  // back to local mode, which silently skips the OAuth flow.
+  const loginFlagUrl = asString(flags.login);
+  if (loginFlagUrl !== undefined) {
+    return {
+      command: 'login',
+      backend_url: loginFlagUrl,
+      repo: asString(flags.repo),
+      branch: asString(flags.branch),
+      prompt: asString(flags.prompt),
+      model: asString(flags.model),
+      agent: asString(flags.agent),
+      cloud: flags.cloud === true,
+      version: asString(flags.version),
+    };
+  }
   const sub = positionals[0];
 
   const base: ParsedArgs = {
