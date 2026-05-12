@@ -2588,6 +2588,14 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks) ->
 GITHUB_APP_CLIENT_ID = os.environ.get("GITHUB_APP_CLIENT_ID", "")
 GITHUB_APP_CLIENT_SECRET = os.environ.get("GITHUB_APP_CLIENT_SECRET", "")
 ALLOWED_GITHUB_ORG = os.environ.get("ALLOWED_GITHUB_ORG", "").strip()
+# Opt-in: skip org membership check and accept any authenticated GitHub
+# user. Intended for personal/test deployments where the deployer is the
+# only user. Must be set explicitly ("1" / "true") — defaults to gated.
+ALLOW_ANY_GITHUB_USER = os.environ.get("ALLOW_ANY_GITHUB_USER", "").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+)
 CLI_API_VERSION = 1
 
 # Module-level Depends singleton (avoids ruff B008 on the routes).
@@ -2802,7 +2810,7 @@ def _render_callback_html(redirect_uri: str, payload: dict[str, str]) -> str:
 
 @app.get("/cli/auth/callback")
 async def cli_auth_callback(code: str, state: str) -> HTMLResponse:
-    if not ALLOWED_GITHUB_ORG:
+    if not ALLOWED_GITHUB_ORG and not ALLOW_ANY_GITHUB_USER:
         raise HTTPException(status_code=503, detail="ALLOWED_GITHUB_ORG not configured")
     # State was packed by /cli/auth/start as base64(urlsafe)-encoded JSON
     # containing the original CLI state and the loopback redirect URI.
@@ -2832,9 +2840,10 @@ async def cli_auth_callback(code: str, state: str) -> HTMLResponse:
     if not isinstance(github_login, str) or not github_login:
         raise HTTPException(status_code=401, detail="GitHub user missing login")
 
-    is_member = await is_user_active_org_member(github_login, ALLOWED_GITHUB_ORG)
-    if not is_member:
-        raise HTTPException(status_code=403, detail="Not an org member")
+    if not ALLOW_ANY_GITHUB_USER:
+        is_member = await is_user_active_org_member(github_login, ALLOWED_GITHUB_ORG)
+        if not is_member:
+            raise HTTPException(status_code=403, detail="Not an org member")
 
     email_value = user.get("email")
     email: str | None = email_value if isinstance(email_value, str) and email_value else None
