@@ -2632,7 +2632,15 @@ async def cli_auth_start(request: Request, redirect_uri: str, state: str) -> dic
     loopback = _validate_cli_redirect_uri(redirect_uri)
     from urllib.parse import quote, urlencode
 
-    base = str(request.base_url).rstrip("/")
+    # LangGraph's TLS-terminating proxy leaves request.url.scheme as "http"
+    # inside the container, so we honor X-Forwarded-Proto. The registered
+    # GitHub callback URL is https, and GitHub does a prefix match — a bare
+    # `http://` here triggers "redirect_uri is not associated".
+    forwarded_proto = request.headers.get("x-forwarded-proto", "").split(",")[0].strip()
+    scheme = forwarded_proto or request.url.scheme
+    forwarded_host = request.headers.get("x-forwarded-host", "").split(",")[0].strip()
+    host = forwarded_host or request.url.netloc
+    base = f"{scheme}://{host}"
     github_redirect = f"{base}/cli/auth/callback?redirect_uri={quote(loopback, safe='')}"
 
     params = {
