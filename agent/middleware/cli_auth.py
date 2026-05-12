@@ -38,6 +38,14 @@ def _allowed_org() -> str:
     return os.environ.get("ALLOWED_GITHUB_ORG", "").strip()
 
 
+def _allow_any_user() -> bool:
+    return os.environ.get("ALLOW_ANY_GITHUB_USER", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+
+
 def _extract_bearer_token(request: Request) -> str | None:
     auth = request.headers.get("Authorization", "")
     if not auth.lower().startswith("bearer "):
@@ -80,14 +88,15 @@ async def require_cli_user(request: Request) -> CliUser:
     if not github_login:
         raise HTTPException(status_code=401, detail="Token missing subject")
 
-    org = _allowed_org()
-    if not org:
-        logger.error("ALLOWED_GITHUB_ORG is not configured; refusing CLI request")
-        raise HTTPException(status_code=503, detail="CLI auth not configured")
+    if not _allow_any_user():
+        org = _allowed_org()
+        if not org:
+            logger.error("ALLOWED_GITHUB_ORG is not configured; refusing CLI request")
+            raise HTTPException(status_code=503, detail="CLI auth not configured")
 
-    is_member = await _check_org_membership(github_login, org)
-    if not is_member:
-        raise HTTPException(status_code=403, detail="Not an org member")
+        is_member = await _check_org_membership(github_login, org)
+        if not is_member:
+            raise HTTPException(status_code=403, detail="Not an org member")
 
     user = CliUser(github_login=github_login, token_claims=claims)
     request.state.cli_user = user
