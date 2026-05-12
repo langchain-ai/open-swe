@@ -108,6 +108,68 @@ def test_cli_me_invalid_token_returns_401() -> None:
     assert response.status_code == 401
 
 
+@pytest.mark.parametrize(
+    "bad_uri",
+    [
+        "javascript:alert(1)",
+        "https://attacker.example.com/cb",
+        "http://attacker.example.com/cb",
+        "http://127.0.0.1.evil.com/cb",  # hostname trick
+        "http://127.0.0.1/cb",  # missing port
+        "ftp://127.0.0.1:8765/cb",
+    ],
+)
+def test_cli_auth_start_rejects_non_loopback(bad_uri: str) -> None:
+    client = TestClient(webapp.app)
+    response = client.get("/cli/auth/start", params={"redirect_uri": bad_uri, "state": "s"})
+    # 400 for malformed; 503 only if config is missing (which it isn't here).
+    assert response.status_code == 400, response.text
+
+
+def test_cli_auth_start_accepts_loopback() -> None:
+    client = TestClient(webapp.app)
+    response = client.get(
+        "/cli/auth/start",
+        params={"redirect_uri": "http://127.0.0.1:8765/callback", "state": "s"},
+    )
+    assert response.status_code == 200
+    assert "github.com/login/oauth/authorize" in response.json()["authorize_url"]
+
+
+def test_cli_auth_callback_rejects_non_loopback() -> None:
+    client = TestClient(webapp.app)
+    response = client.get(
+        "/cli/auth/callback",
+        params={"code": "c", "state": "s", "redirect_uri": "https://attacker.example.com/cb"},
+    )
+    assert response.status_code == 400
+
+
+def test_cli_auth_callback_html_does_not_interpolate_redirect_into_script(monkeypatch) -> None:
+    """A redirect_uri containing </script> must not break out of the script block."""
+    monkeypatch.setattr(webapp, "_exchange_oauth_code", AsyncMock(return_value="tok"))
+    monkeypatch.setattr(
+        webapp,
+        "_fetch_github_user",
+        AsyncMock(return_value={"login": "octocat", "email": "octocat@example.com"}),
+    )
+    monkeypatch.setattr(webapp, "is_user_active_org_member", AsyncMock(return_value=True))
+    monkeypatch.setattr(webapp, "upsert_identity", AsyncMock(return_value=None))
+
+    # Loopback URL whose fragment contains an HTML-breakout payload.
+    hostile = "http://127.0.0.1:8765/cb#</script><img src=x>"
+    client = TestClient(webapp.app)
+    response = client.get(
+        "/cli/auth/callback",
+        params={"code": "c", "state": "s", "redirect_uri": hostile},
+    )
+    assert response.status_code == 200
+    # The hostile substring must appear only as an html-escaped attribute,
+    # never as live markup that could break out of the page.
+    assert "<img src=x>" not in response.text
+    assert "&lt;/script&gt;" in response.text or "</script&gt;" in response.text
+
+
 def test_cli_auth_callback_uses_user_emails_when_user_email_null(monkeypatch) -> None:
     """If /user returns email=null, the callback should fall back to /user/emails."""
     monkeypatch.setattr(

@@ -2623,6 +2623,7 @@ async def cli_config() -> dict[str, Any]:
 async def cli_auth_start(redirect_uri: str, state: str) -> dict[str, str]:
     if not GITHUB_APP_CLIENT_ID:
         raise HTTPException(status_code=503, detail="GITHUB_APP_CLIENT_ID not configured")
+    redirect_uri = _validate_cli_redirect_uri(redirect_uri)
     from urllib.parse import urlencode
 
     params = {
@@ -2712,25 +2713,65 @@ async def _fetch_github_primary_email(token: str) -> str | None:
     return None
 
 
+_ALLOWED_CALLBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+
+
+def _validate_cli_redirect_uri(redirect_uri: str) -> str:
+    """Reject anything that isn't an http loopback URL.
+
+    The CLI's OAuth listener (cli/src/lib/auth-flow.ts) always binds to
+    127.0.0.1 on an ephemeral port and posts the session token back to
+    /callback there. Anything else here is either an attacker pointing the
+    token at their own server or an XSS vector via crafted schemes (e.g.
+    ``javascript:`` or values containing ``</script>`` to break out of the
+    rendered HTML).
+    """
+    from urllib.parse import urlparse
+
+    try:
+        parsed = urlparse(redirect_uri)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Invalid redirect_uri") from exc
+    if parsed.scheme != "http":
+        raise HTTPException(status_code=400, detail="redirect_uri must use http")
+    if (parsed.hostname or "") not in _ALLOWED_CALLBACK_HOSTS:
+        raise HTTPException(status_code=400, detail="redirect_uri must point at loopback")
+    if parsed.port is None:
+        raise HTTPException(status_code=400, detail="redirect_uri must include a port")
+    return redirect_uri
+
+
 def _render_callback_html(redirect_uri: str, payload: dict[str, str]) -> str:
+    """Render the post-OAuth landing page.
+
+    ``redirect_uri`` is validated to a loopback URL upstream, but we still
+    treat it as untrusted: the payload is embedded inside a JSON ``<script>``
+    block and read via ``textContent`` instead of being interpolated into JS
+    source. The fetch target is read from a ``data-`` attribute on a static
+    element so a hostile value can't break out of the script context.
+    """
     import html
     import json as _json
 
-    safe_redirect = html.escape(redirect_uri, quote=True)
-    payload_json = html.escape(_json.dumps(payload), quote=True)
+    safe_redirect_attr = html.escape(redirect_uri, quote=True)
+    payload_json = _json.dumps(payload)
     return (
         "<!doctype html><html><body>"
         "<p>Signing you in to Open SWE CLI...</p>"
-        '<form id="f" method="post" '
-        f'action="{safe_redirect}" enctype="application/json">'
-        f'<input type="hidden" name="payload" value="{payload_json}" />'
-        "</form>"
+        f'<div id="cli-target" data-url="{safe_redirect_attr}" hidden></div>'
+        '<script id="cli-payload" type="application/json">'
+        f"{html.escape(payload_json, quote=False)}"
+        "</script>"
         "<script>"
-        f"fetch({_json.dumps(redirect_uri)}, {{method:'POST', "
-        f"headers:{{'Content-Type':'application/json'}}, body:{_json.dumps(_json.dumps(payload))}}})"
+        "(function(){"
+        "var u=document.getElementById('cli-target').getAttribute('data-url');"
+        "var p=document.getElementById('cli-payload').textContent;"
+        "fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:p})"
         ".then(function(){document.body.innerText='You can close this tab.';})"
-        ".catch(function(){document.body.innerText="
-        "'Could not deliver token to CLI. You can close this tab.';});"
+        ".catch(function(){"
+        "document.body.innerText='Could not deliver token to CLI. You can close this tab.';"
+        "});"
+        "})();"
         "</script>"
         "</body></html>"
     )
@@ -2740,6 +2781,7 @@ def _render_callback_html(redirect_uri: str, payload: dict[str, str]) -> str:
 async def cli_auth_callback(code: str, state: str, redirect_uri: str) -> HTMLResponse:
     if not ALLOWED_GITHUB_ORG:
         raise HTTPException(status_code=503, detail="ALLOWED_GITHUB_ORG not configured")
+    redirect_uri = _validate_cli_redirect_uri(redirect_uri)
 
     token = await _exchange_oauth_code(code)
     if not token:
