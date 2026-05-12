@@ -9,6 +9,7 @@ import pytest
 
 from agent.reviewer_findings import Finding, new_finding
 from agent.reviewer_publish import (
+    post_pull_request_review,
     render_inline_comment_body,
     render_inline_comment_payload,
     render_review_body,
@@ -100,6 +101,42 @@ async def test_resolve_review_thread_returns_true_on_success() -> None:
     with patch("agent.reviewer_publish.httpx.AsyncClient", return_value=client_cm):
         ok = await resolve_review_thread(thread_node_id="T_1", token="t")
     assert ok is True
+
+
+@pytest.mark.asyncio
+async def test_post_pull_request_review_non_dict_body_surfaces_status_and_excerpt() -> None:
+    """A non-dict GitHub response body must surface status code + body excerpt
+    via ``_error`` rather than collapsing to a bare ``None`` (which the
+    user-facing tool would render as the unhelpful ``Failed to POST PR review``)."""
+    response = MagicMock()
+    response.status_code = 200
+    response.json.return_value = ["unexpected", "list", "body"]
+    response.text = '["unexpected", "list", "body"]'
+    response.raise_for_status.return_value = None
+
+    client_cm = AsyncMock()
+    client_cm.__aenter__.return_value = client_cm
+    client_cm.post = AsyncMock(return_value=response)
+
+    with patch("agent.reviewer_publish.httpx.AsyncClient", return_value=client_cm):
+        result = await post_pull_request_review(
+            owner="o",
+            repo="r",
+            pr_number=1,
+            head_sha="sha",
+            body="b",
+            inline_comments=[],
+            token="t",
+        )
+
+    assert isinstance(result, dict)
+    assert "_error" in result
+    err = result["_error"]
+    assert "HTTP 200" in err
+    assert "non-dict" in err
+    assert "unexpected" in err
+    # The bare legacy string must not be the only signal anymore.
+    assert err != "Failed to POST PR review"
 
 
 @pytest.mark.asyncio
