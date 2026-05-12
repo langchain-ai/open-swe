@@ -349,10 +349,19 @@ async def save_encrypted_token_from_email(
     token = auth_result.get("token")
     if not token:
         error = auth_result.get("error", "unknown")
+        # Do not leak internal error details (which may contain upstream HTTP
+        # response bodies, internal URLs, or stack traces) to external users
+        # via Linear/Slack comments. Log the detailed error server-side only
+        # and surface a generic message to the user.
+        logger.error(
+            "GitHub auth failed for thread (source=%s): %s",
+            source,
+            error,
+        )
         message = (
             "❌ **GitHub Auth Error**\n\n"
-            f"Failed to authenticate with GitHub: {error}\n\n"
-            "Please try again or contact support."
+            "Failed to authenticate with GitHub. "
+            "Please try again or contact support if this persists."
         )
         await leave_failure_comment(source, message)
         raise ValueError(f"No token found: {error}")
