@@ -154,11 +154,7 @@ async def post_pull_request_review(
         pr_number,
         body_excerpt,
     )
-    return {
-        "_error": (
-            f"HTTP {response.status_code}: non-dict response body: {body_excerpt}"
-        )
-    }
+    return {"_error": (f"HTTP {response.status_code}: non-dict response body: {body_excerpt}")}
 
 
 async def fetch_review_comments(
