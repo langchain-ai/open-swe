@@ -144,7 +144,17 @@ async def post_pull_request_review(
             logger.exception("Failed to POST PR review for %s/%s#%s", owner, repo, pr_number)
             return {"_error": f"{type(e).__name__}: {e}"}
     data = response.json()
-    return data if isinstance(data, dict) else None
+    if isinstance(data, dict):
+        return data
+    body_excerpt = (response.text or "")[:500]
+    logger.error(
+        "POST PR review for %s/%s#%s returned non-dict body: %s",
+        owner,
+        repo,
+        pr_number,
+        body_excerpt,
+    )
+    return {"_error": (f"HTTP {response.status_code}: non-dict response body: {body_excerpt}")}
 
 
 async def fetch_review_comments(
