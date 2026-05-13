@@ -255,3 +255,87 @@ async def test_slack_webhook_ignores_untracked_reaction(monkeypatch: pytest.Monk
 
     assert response == {"status": "ignored", "reason": "Reaction not tracked for feedback"}
     assert background_tasks.tasks == []
+
+
+@pytest.mark.asyncio
+async def test_slack_webhook_ignores_dm_app_mention(monkeypatch: pytest.MonkeyPatch) -> None:
+    event = {
+        "type": "app_mention",
+        "channel_type": "im",
+        "channel": "D0DM00001",
+        "ts": "10.000",
+        "thread_ts": "10.000",
+        "user": "U123",
+        "text": "<@U999> hi",
+    }
+    payload = {"type": "event_callback", "event_id": "EvDM1", "event": event}
+    background_tasks = _FakeBackgroundTasks()
+
+    monkeypatch.setattr(webapp, "verify_slack_signature", lambda **kwargs: True)
+
+    response = await webapp.slack_webhook(_FakeRequest(payload), background_tasks)
+
+    assert response == {"status": "ignored", "reason": "Direct messages are not supported"}
+    assert background_tasks.tasks == []
+
+
+@pytest.mark.asyncio
+async def test_slack_webhook_ignores_dm_message(monkeypatch: pytest.MonkeyPatch) -> None:
+    event = {
+        "type": "message",
+        "channel_type": "im",
+        "channel": "D0DM00002",
+        "ts": "11.000",
+        "user": "U123",
+        "text": "hello",
+    }
+    payload = {"type": "event_callback", "event_id": "EvDM2", "event": event}
+    background_tasks = _FakeBackgroundTasks()
+
+    monkeypatch.setattr(webapp, "verify_slack_signature", lambda **kwargs: True)
+
+    response = await webapp.slack_webhook(_FakeRequest(payload), background_tasks)
+
+    assert response == {"status": "ignored", "reason": "Direct messages are not supported"}
+    assert background_tasks.tasks == []
+
+
+@pytest.mark.asyncio
+async def test_slack_webhook_ignores_group_dm(monkeypatch: pytest.MonkeyPatch) -> None:
+    event = {
+        "type": "app_mention",
+        "channel_type": "mpim",
+        "channel": "C111",
+        "ts": "12.000",
+        "thread_ts": "12.000",
+        "user": "U123",
+        "text": "<@U999> hi",
+    }
+    payload = {"type": "event_callback", "event_id": "EvDM3", "event": event}
+    background_tasks = _FakeBackgroundTasks()
+
+    monkeypatch.setattr(webapp, "verify_slack_signature", lambda **kwargs: True)
+
+    response = await webapp.slack_webhook(_FakeRequest(payload), background_tasks)
+
+    assert response == {"status": "ignored", "reason": "Direct messages are not supported"}
+    assert background_tasks.tasks == []
+
+
+@pytest.mark.asyncio
+async def test_slack_webhook_ignores_dm_reaction(monkeypatch: pytest.MonkeyPatch) -> None:
+    event = {
+        "type": "reaction_added",
+        "reaction": "thumbsup",
+        "user": "U123",
+        "item": {"type": "message", "channel": "D0DM00003", "ts": "13.000"},
+    }
+    payload = {"type": "event_callback", "event_id": "EvDM4", "event": event}
+    background_tasks = _FakeBackgroundTasks()
+
+    monkeypatch.setattr(webapp, "verify_slack_signature", lambda **kwargs: True)
+
+    response = await webapp.slack_webhook(_FakeRequest(payload), background_tasks)
+
+    assert response == {"status": "ignored", "reason": "Direct messages are not supported"}
+    assert background_tasks.tasks == []
