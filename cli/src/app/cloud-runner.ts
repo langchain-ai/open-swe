@@ -1,4 +1,3 @@
-import type { BaseMessage } from '@langchain/core/messages';
 import { ApiClient } from '@lib/api-client';
 import { consumeSSE } from '@lib/sse';
 import { processCloudEvent } from '@app/cloud-stream-processor.js';
@@ -26,7 +25,7 @@ export class CloudRunner {
   private thread_id: string;
   private deps: CloudRunnerDeps;
   private abortController?: AbortController;
-  private conversation: { current: BaseMessage[] } = { current: [] };
+  private conversation: { current: unknown[] } = { current: [] };
   private lastEventIso: string | null = null;
   private connected = false;
 

@@ -1,5 +1,4 @@
 import { processStreamUpdate } from '@app/stream-processor.js';
-import type { BaseMessage } from '@langchain/core/messages';
 import type { StreamProcessorActions } from '@types';
 import type { SSEEvent } from '@lib/api-types';
 
@@ -21,7 +20,7 @@ export type CloudStreamMeta =
 
 export async function processCloudEvent(
   ev: SSEEvent,
-  conversationHistory: { current: BaseMessage[] },
+  conversationHistory: { current: unknown[] },
   actions: StreamProcessorActions,
 ): Promise<CloudStreamMeta> {
   const eventName = (ev.event ?? 'message').toLowerCase();

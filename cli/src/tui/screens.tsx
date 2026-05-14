@@ -1,11 +1,10 @@
 import React, { useEffect, useState } from "react";
 import { Box, Text, useApp, useInput } from "ink";
-import { App } from "./App.js";
 import { Login } from "./Login.js";
 import { RunsList } from "./RunsList.js";
 import { Attach } from "./Attach.js";
 import { NewCloud } from "./NewCloud.js";
-import { HandoffScreen } from "./HandoffScreen.js";
+import { MainMenu, type MenuSelection } from "./MainMenu.js";
 import { Spinner } from "./components/Spinner.js";
 import { themeColor } from "./theme.js";
 import { ApiClient } from "@lib/api-client";
@@ -16,12 +15,11 @@ import { ExpiredAuthContext, wrapApi } from "./ExpiredAuthContext.js";
 import { assertServerCompatible } from "@lib/auth-flow";
 
 export type Screen =
-  | "local"
+  | "menu"
   | "login"
   | "runs"
   | "attach"
-  | "new-cloud"
-  | "handoff";
+  | "new-cloud";
 
 type Props = {
   args: ParsedArgs;
@@ -42,11 +40,9 @@ const screenFromArgs = (args: ParsedArgs): Screen => {
       return "attach";
     case "new-cloud":
       return "new-cloud";
-    case "handoff":
-      return "handoff";
-    case "local":
+    case "menu":
     default:
-      return "local";
+      return "menu";
   }
 };
 
@@ -67,13 +63,6 @@ export const RootScreen = ({ args }: Props) => {
     let cancelled = false;
     void (async () => {
       const requested = screenFromArgs(args);
-      // Local mode needs no deployment.
-      if (requested === "local") {
-        if (!cancelled) {
-          setState({ kind: "screen", screen: "local", deployment: null });
-        }
-        return;
-      }
       const deployment = await getActiveDeployment(args.backend_url);
       if (cancelled) return;
       if (requested === "login") {
@@ -85,13 +74,12 @@ export const RootScreen = ({ args }: Props) => {
         return;
       }
       if (!deployment) {
-        // No deployment for a cloud action: force login first.
+        // Every screen requires a deployment now — bounce to login.
         setState({ kind: "screen", screen: "login", deployment: null });
         return;
       }
       // Best-effort cli_api_version handshake. Refuse to proceed if the
-      // server is forward-incompatible. Network failures fall through
-      // (the request will surface a clearer error later).
+      // server is forward-incompatible. Network failures fall through.
       try {
         const probe = new ApiClient(deployment.backend_url, deployment.session_token);
         const cfg = await probe.getConfig();
@@ -150,7 +138,7 @@ export const RootScreen = ({ args }: Props) => {
             if (restore && restore.kind === "screen") {
               setState({ ...restore, deployment: d });
             } else {
-              setState({ kind: "screen", screen: "runs", deployment: d });
+              setState({ kind: "screen", screen: "menu", deployment: d });
             }
           }}
         />
@@ -216,42 +204,14 @@ export const RootScreen = ({ args }: Props) => {
 
   const { screen, deployment } = state;
 
-  if (screen === "local") {
-    return (
-      <App
-        onHandoffToCloud={(tid) => {
-          // After a successful /handoff cloud the local agent is done; jump
-          // to attach on the new cloud thread. RootScreen does not preload
-          // the deployment in local mode, so fetch it now — useAppState
-          // already verified one is configured before calling us.
-          void (async () => {
-            const d = deployment ?? (await getActiveDeployment());
-            if (!d) return;
-            setPendingThreadId(tid);
-            setState({
-              kind: "screen",
-              screen: "attach",
-              deployment: d,
-              thread_id: tid,
-            });
-          })();
-        }}
-      />
-    );
-  }
-
   if (screen === "login") {
     return (
       <Login
         initialBackendUrl={args.backend_url ?? deployment?.backend_url}
         onComplete={(d) => {
-          // After login, advance to the originally-requested cloud screen
-          // (or runs if just `login`).
           const next = screenFromArgs(args);
           if (next === "login") {
-            setState({ kind: "screen", screen: "runs", deployment: d });
-          } else if (next === "local") {
-            setState({ kind: "screen", screen: "local", deployment: d });
+            setState({ kind: "screen", screen: "menu", deployment: d });
           } else {
             setState({
               kind: "screen",
@@ -282,6 +242,23 @@ export const RootScreen = ({ args }: Props) => {
     </ExpiredAuthContext.Provider>
   );
 
+  if (screen === "menu") {
+    return wrapped(
+      <MainMenu
+        deployment={deployment}
+        onSelect={(sel: MenuSelection) => {
+          if (sel === "new") {
+            setState({ kind: "screen", screen: "new-cloud", deployment });
+          } else if (sel === "active-runs") {
+            setState({ kind: "screen", screen: "runs", deployment });
+          } else if (sel === "switch-deployment") {
+            setState({ kind: "screen", screen: "login", deployment: null });
+          }
+        }}
+      />,
+    );
+  }
+
   if (screen === "runs") {
     return wrapped(
       <RunsList
@@ -302,7 +279,9 @@ export const RootScreen = ({ args }: Props) => {
             deployment,
           });
         }}
-        onQuit={() => exit()}
+        onQuit={() =>
+          setState({ kind: "screen", screen: "menu", deployment })
+        }
       />,
     );
   }
@@ -361,18 +340,8 @@ export const RootScreen = ({ args }: Props) => {
           });
         }}
         onCancel={() => {
-          setState({ kind: "screen", screen: "runs", deployment });
+          setState({ kind: "screen", screen: "menu", deployment });
         }}
-      />,
-    );
-  }
-
-  if (screen === "handoff") {
-    return wrapped(
-      <HandoffScreen
-        api={api}
-        direction={args.handoff_to ?? "local"}
-        thread_id={args.thread_id}
       />,
     );
   }
@@ -396,7 +365,7 @@ export const RootScreen = ({ args }: Props) => {
         onDetach={() => {
           setState({
             kind: "screen",
-            screen: "runs",
+            screen: "menu",
             deployment,
           });
         }}

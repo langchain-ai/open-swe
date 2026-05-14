@@ -8,9 +8,9 @@ import {
 
 describe("slash command parsing", () => {
   it("parses a slash command and arguments", () => {
-    expect(parseSlashCommand("/review main")).toEqual({
-      commandName: "review",
-      args: "main",
+    expect(parseSlashCommand("/logs tail")).toEqual({
+      commandName: "logs",
+      args: "tail",
     });
   });
 
@@ -38,12 +38,12 @@ describe("slash command parsing", () => {
 
   it("suggests commands only while editing the command token", () => {
     expect(getSlashCommandSuggestions("/").length).toBeGreaterThan(0);
-    expect(getSlashCommandSuggestions("/st").map((command) => command.name)).toEqual([
-      "status",
+    expect(getSlashCommandSuggestions("/log").map((command) => command.name)).toEqual([
+      "logs",
     ]);
     expect(getSlashCommandSuggestions("/new").map((command) => command.name)).toEqual([
       "clear",
     ]);
-    expect(getSlashCommandSuggestions("/status now")).toEqual([]);
+    expect(getSlashCommandSuggestions("/logs now")).toEqual([]);
   });
 });

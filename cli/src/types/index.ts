@@ -1,25 +1,12 @@
 export type Author = "user" | "agent" | "system" | "tool";
 export type ChunkKind = "text" | "code" | "error" | "list" | "tool-execution";
-export type Mode = "agent" | "plan";
 export type SlashCommandName =
   | "help"
   | "quit"
-  | "reset"
-  | "status"
   | "clear"
-  | "model"
-  | "review"
-  | "apikeys"
-  | "cloud"
   | "logs";
 export type Provider = "openai" | "anthropic" | "google";
 export type Effort = "low" | "medium" | "high" | "xhigh";
-
-export type ApiKeys = {
-  openai?: string;
-  anthropic?: string;
-  google?: string;
-};
 
 export type SlashCommand = {
   name: SlashCommandName;
@@ -40,15 +27,6 @@ export type ModelConfig = {
   name: string;
   provider: Provider;
   effort: Effort;
-};
-
-export type ApiKeyAction = "set" | "delete";
-
-export type ApiKeyMenuItem = {
-  provider: Provider;
-  action: ApiKeyAction;
-  label: string;
-  detail: string;
 };
 
 export type ToolExecutionStatus = "running" | "success" | "error";
@@ -87,31 +65,6 @@ export type StructuredPatchHunk = {
   newStart: number;
   newLines: number;
   lines: string[];
-};
-
-export type RunnerDeps = {
-  apiKeys: ApiKeys;
-  modelConfig: ModelConfig;
-  addMessage: (message: Omit<Message, "id">) => void;
-  updateToolExecution: (toolExecution: ToolExecution) => void;
-  updateTokenUsage: (usage: TokenUsage) => void;
-  setBusy: (busy: boolean) => void;
-};
-
-export type CommandCtx = {
-  addMessage: (message: Omit<Message, "id">) => void;
-  resetMessages: () => void;
-  clearApiKeys: () => void;
-  setShowModelMenu: (v: boolean) => void;
-  setFilteredModels: (v: ModelOption[]) => void;
-  setModelSelectionIndex: (i: number) => void;
-  setQuery: (v: string) => void;
-  exit: () => void;
-  requestUiClear?: () => void;
-  openApiKeysMenu?: () => void;
-  apiKeys: ApiKeys;
-  currentModel: ModelConfig;
-  sessionId: string;
 };
 
 export type StreamProcessorActions = {

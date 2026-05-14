@@ -1,6 +1,5 @@
 import { render } from 'ink';
 import { RootScreen } from './tui/screens.js';
-import { getStoredApiKeys, deleteAllApiKeys, getStoredModelConfig } from '@lib/storage';
 import { initSessionLog } from '@lib/logger';
 import { useStore } from '@app/store.js';
 import { parseArgs } from '@lib/cli-args';
@@ -53,14 +52,6 @@ export async function main() {
     }
   }
 
-  const storedModelConfig = await getStoredModelConfig();
-  if (storedModelConfig) {
-    useStore.setState({ modelConfig: storedModelConfig });
-  }
-
-  const storedApiKeys = await getStoredApiKeys();
-  useStore.setState({ apiKeys: storedApiKeys });
-
   let running = true;
   while (running) {
 
@@ -98,15 +89,8 @@ export async function main() {
       disableBracketedPaste();
     }
 
-    const { resetRequested, clearRequested } = useStore.getState();
-    if (resetRequested) {
-      useStore.setState({
-        resetRequested: false,
-        apiKeys: {},
-        messages: [],
-      });
-      await deleteAllApiKeys();
-    } else if (clearRequested) {
+    const { clearRequested } = useStore.getState();
+    if (clearRequested) {
       useStore.setState({ clearRequested: false });
       clearTerminal();
     } else {

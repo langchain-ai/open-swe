@@ -50,8 +50,6 @@ def test_cli_config_is_public() -> None:
     assert body["allowed_org"] == "langchain-ai"
     assert body["github_app_client_id"] == "Iv1.test"
     assert body["cli_api_version"] == 1
-    # Defaults to langsmith sandbox, which supports handoff.
-    assert body["supports_handoff"] is True
 
 
 def test_cli_me_unauthenticated_returns_401() -> None:

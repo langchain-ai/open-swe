@@ -13,7 +13,6 @@ export type CliServerConfig = {
   github_app_client_id: string;
   allowed_org: string;
   server_version: string;
-  supports_handoff: boolean;
   cli_api_version: number;
 };
 

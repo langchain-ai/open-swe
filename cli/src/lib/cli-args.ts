@@ -3,18 +3,14 @@
 // the Ink renderer takes over.
 
 export type CliCommand =
-  | 'local'
+  | 'menu'
   | 'login'
   | 'logout'
   | 'whoami'
   | 'runs'
   | 'attach'
   | 'new-cloud'
-  | 'new-local'
-  | 'upgrade'
-  | 'handoff';
-
-export type HandoffDirection = 'local' | 'cloud';
+  | 'upgrade';
 
 export type ParsedArgs = {
   command: CliCommand;
@@ -25,9 +21,7 @@ export type ParsedArgs = {
   prompt?: string;
   model?: string;
   agent?: string;
-  cloud?: boolean;
   version?: string;
-  handoff_to?: HandoffDirection;
 };
 
 type FlagSpec = {
@@ -36,8 +30,6 @@ type FlagSpec = {
 };
 
 const FLAG_SPECS: FlagSpec[] = [
-  { long: 'cloud', takesValue: false },
-  { long: 'local', takesValue: false },
   { long: 'repo', takesValue: true },
   { long: 'branch', takesValue: true },
   { long: 'prompt', takesValue: true },
@@ -45,8 +37,6 @@ const FLAG_SPECS: FlagSpec[] = [
   { long: 'agent', takesValue: true },
   { long: 'backend', takesValue: true },
   { long: 'version', takesValue: true },
-  { long: 'to', takesValue: true },
-  { long: 'thread', takesValue: true },
   { long: 'login', takesValue: true },
 ];
 
@@ -66,7 +56,6 @@ const parseFlags = (argv: string[]): ParsedFlags => {
       const inlineValue = eq === -1 ? undefined : a.slice(eq + 1);
       const spec = FLAG_SPECS.find((s) => s.long === name);
       if (!spec) {
-        // Unknown flag — treat as a boolean toggle so we don't crash on extras.
         flags[name] = inlineValue ?? true;
         continue;
       }
@@ -99,8 +88,6 @@ export const parseArgs = (argv: string[] = process.argv.slice(2)): ParsedArgs =>
   const { flags, positionals } = parseFlags(argv);
   const backend = asString(flags.backend) ?? process.env.OPENSWE_BACKEND;
   // `openswe --login <url>` is an ergonomic alias for `openswe login <url>`.
-  // Without this the URL gets swallowed as a positional and the parser falls
-  // back to local mode, which silently skips the OAuth flow.
   const loginFlagUrl = asString(flags.login);
   if (loginFlagUrl !== undefined) {
     return {
@@ -111,21 +98,19 @@ export const parseArgs = (argv: string[] = process.argv.slice(2)): ParsedArgs =>
       prompt: asString(flags.prompt),
       model: asString(flags.model),
       agent: asString(flags.agent),
-      cloud: flags.cloud === true,
       version: asString(flags.version),
     };
   }
   const sub = positionals[0];
 
   const base: ParsedArgs = {
-    command: 'local',
+    command: 'menu',
     backend_url: backend,
     repo: asString(flags.repo),
     branch: asString(flags.branch),
     prompt: asString(flags.prompt),
     model: asString(flags.model),
     agent: asString(flags.agent),
-    cloud: flags.cloud === true,
     version: asString(flags.version),
   };
 
@@ -146,27 +131,10 @@ export const parseArgs = (argv: string[] = process.argv.slice(2)): ParsedArgs =>
     }
     case 'upgrade':
       return { ...base, command: 'upgrade', version: base.version ?? positionals[1] };
-    case 'handoff': {
-      const toVal = asString(flags.to);
-      const direction: HandoffDirection | undefined =
-        toVal === 'local' || toVal === 'cloud' ? toVal : undefined;
-      const threadId = asString(flags.thread) ?? positionals[1];
-      return {
-        ...base,
-        command: 'handoff',
-        handoff_to: direction,
-        thread_id: threadId,
-      };
-    }
     case 'new': {
-      const isCloud = flags.cloud === true || flags.local !== true;
       const positionalPrompt = positionals.slice(1).join(' ').trim();
       const prompt = base.prompt ?? (positionalPrompt.length > 0 ? positionalPrompt : undefined);
-      return {
-        ...base,
-        command: isCloud ? 'new-cloud' : 'new-local',
-        prompt,
-      };
+      return { ...base, command: 'new-cloud', prompt };
     }
     default:
       return base;

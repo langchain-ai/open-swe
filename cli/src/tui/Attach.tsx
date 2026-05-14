@@ -10,7 +10,6 @@ import { CloudRunner } from "@app/cloud-runner.js";
 import type { ApiClient } from "@lib/api-client";
 import type { DeploymentConfig } from "@lib/api-types";
 import { nowTime } from "@lib/time";
-import { applyToLocal, validateBundle, type HandoffBundle } from "@lib/handoff";
 import { loadCursor, saveCursor } from "@lib/cursor-store";
 
 type Props = {
@@ -22,16 +21,10 @@ type Props = {
 
 const HELP_LINES = [
   "/detach            — close stream, leave run running",
-  "/interrupt         — interrupt current step",
-  "/handoff local     — move this run to your local workdir",
+  "/interrupt         — interrupt current step (or press Esc while busy)",
   "/whoami            — show logged-in user",
   "/help              — show this help",
 ];
-
-const truncateThreadId = (id: string): string => {
-  if (id.length <= 12) return id;
-  return `${id.slice(0, 8)}…${id.slice(-3)}`;
-};
 
 export const Attach = ({ api, thread_id, deployment, onDetach }: Props) => {
   const { exit } = useApp();
@@ -46,8 +39,6 @@ export const Attach = ({ api, thread_id, deployment, onDetach }: Props) => {
   const [query, setQuery] = useState("");
   const [cursorOffset, setCursorOffset] = useState(0);
   const [queuedAt, setQueuedAt] = useState<number | null>(null);
-  const [topRepoBranch, setTopRepoBranch] = useState<string>("");
-  const [topSource, setTopSource] = useState<string>("cli");
   const [streamStatus, setStreamStatus] = useState<
     "connecting" | "live" | "error" | "closed"
   >("connecting");
@@ -56,11 +47,8 @@ export const Attach = ({ api, thread_id, deployment, onDetach }: Props) => {
   const runnerRef = useRef<CloudRunner | null>(null);
 
   const subtle = themeColor("subtle");
-  const success = themeColor("success");
   const warning = themeColor("warning");
   const errColor = themeColor("error");
-  const inactive = themeColor("inactive");
-  const brand = themeColor("brand");
 
   useEffect(() => {
     const runner = new CloudRunner(api, thread_id, {
@@ -73,9 +61,6 @@ export const Attach = ({ api, thread_id, deployment, onDetach }: Props) => {
           setStreamStatus("connecting");
         } else if (s.kind === "connected") {
           setStreamStatus("live");
-          if (s.source) setTopSource(s.source);
-          if (s.repo && s.branch) setTopRepoBranch(`${s.repo}:${s.branch}`);
-          else if (s.repo) setTopRepoBranch(s.repo);
         } else if (s.kind === "event") {
           setQueuedAt((prev) => {
             if (prev === null) return prev;
@@ -96,7 +81,6 @@ export const Attach = ({ api, thread_id, deployment, onDetach }: Props) => {
       await runner.attach({ since });
     })();
     return () => {
-      // Persist the latest observed cursor so the next attach can backfill.
       const last = runner.getLastEventIso();
       if (last) void saveCursor(thread_id, last);
       runner.detach();
@@ -109,8 +93,7 @@ export const Attach = ({ api, thread_id, deployment, onDetach }: Props) => {
     (raw: string): boolean => {
       const cmd = raw.trim();
       if (!cmd.startsWith("/")) return false;
-      const [head, ...rest] = cmd.slice(1).split(/\s+/);
-      const argsLine = rest.join(" ");
+      const [head] = cmd.slice(1).split(/\s+/);
       switch (head) {
         case "detach": {
           runnerRef.current?.detach();
@@ -123,74 +106,6 @@ export const Attach = ({ api, thread_id, deployment, onDetach }: Props) => {
             author: "system",
             chunks: [{ kind: "text", text: "Interrupt requested." }],
           });
-          return true;
-        }
-        case "handoff": {
-          const target = argsLine.trim().toLowerCase();
-          if (target !== "local") {
-            addMessage({
-              author: "system",
-              chunks: [
-                {
-                  kind: "text",
-                  text:
-                    target === "cloud"
-                      ? "You are already in a cloud session. Use /handoff local to bring it down."
-                      : "Usage: /handoff local",
-                },
-              ],
-            });
-            return true;
-          }
-          void (async () => {
-            addMessage({
-              author: "system",
-              chunks: [{ kind: "text", text: "Pausing cloud run and exporting state…" }],
-            });
-            let bundle: HandoffBundle;
-            try {
-              bundle = (await api.exportHandoff(thread_id)) as HandoffBundle;
-            } catch (err) {
-              const message = err instanceof Error ? err.message : String(err);
-              addMessage({
-                author: "system",
-                chunks: [{ kind: "error", text: `Handoff failed: ${message}` }],
-              });
-              return;
-            }
-            const v = validateBundle(bundle);
-            if (!v.ok) {
-              addMessage({
-                author: "system",
-                chunks: [{ kind: "error", text: `Server returned an invalid bundle: ${v.error}` }],
-              });
-              return;
-            }
-            try {
-              await applyToLocal(bundle, process.cwd());
-            } catch (err) {
-              const message = err instanceof Error ? err.message : String(err);
-              addMessage({
-                author: "system",
-                chunks: [{ kind: "error", text: `Could not apply to local workdir: ${message}` }],
-              });
-              return;
-            }
-            addMessage({
-              author: "system",
-              chunks: [
-                {
-                  kind: "text",
-                  text:
-                    "Cloud state applied to your working directory. " +
-                    "The cloud sandbox is paused (not destroyed). " +
-                    "Detaching — continue locally with `openswe` in this directory.",
-                },
-              ],
-            });
-            runnerRef.current?.detach();
-            onDetach();
-          })();
           return true;
         }
         case "whoami": {
@@ -258,7 +173,7 @@ export const Attach = ({ api, thread_id, deployment, onDetach }: Props) => {
     [addMessage, handleSlashCommand],
   );
 
-  useInput((input, key) => {
+  useInput((_input, key) => {
     if (key.escape && busy) {
       void runnerRef.current?.interrupt();
     }
@@ -268,44 +183,8 @@ export const Attach = ({ api, thread_id, deployment, onDetach }: Props) => {
   const liveMessage =
     messages.length > 0 ? messages[messages.length - 1] : null;
 
-  const streamIndicator = (() => {
-    if (streamStatus === "connecting") return { label: "connecting", color: warning };
-    if (streamStatus === "live") return { label: "live", color: success };
-    if (streamStatus === "closed") return { label: "closed", color: inactive };
-    return { label: "error", color: errColor };
-  })();
-
   return (
     <Box flexDirection="column">
-      <Box
-        borderStyle="round"
-        borderColor={brand}
-        paddingX={1}
-        marginBottom={1}
-        flexDirection="row"
-      >
-        <Text color={brand} bold>
-          attach
-        </Text>
-        <Text color={subtle}>  ·  </Text>
-        <Text color={subtle}>thread </Text>
-        <Text>{truncateThreadId(thread_id)}</Text>
-        <Text color={subtle}>  ·  source </Text>
-        <Text>{topSource}</Text>
-        {topRepoBranch ? (
-          <>
-            <Text color={subtle}>  ·  </Text>
-            <Text>{topRepoBranch}</Text>
-          </>
-        ) : null}
-        <Text color={subtle}>  ·  </Text>
-        <Text color={streamIndicator.color}>{streamIndicator.label}</Text>
-        <Text color={subtle}>  ·  </Text>
-        <Text color={subtle}>
-          {deployment.github_login} @ {deployment.backend_url}
-        </Text>
-      </Box>
-
       <Static
         items={staticMessages.map((message) => ({
           kind: "message" as const,
@@ -343,25 +222,9 @@ export const Attach = ({ api, thread_id, deployment, onDetach }: Props) => {
             setQuery((q) => q + text);
             setCursorOffset((c) => c + text.length);
           }}
-          onImagePaste={() => {
-            /* not supported in cloud attach yet */
-          }}
           onExit={exit}
           columns={cols}
-          mode="agent"
-          showCommandMenu={false}
-          filteredCommands={[]}
-          commandSelectionIndex={0}
-          showFileSearchMenu={false}
-          fileSearchMatches={[]}
-          fileSearchSelectionIndex={0}
-          showModelMenu={false}
-          filteredModels={[]}
-          modelSelectionIndex={0}
-          currentModelId={1}
-          showApiKeysMenu={false}
-          apiKeyItems={[]}
-          apiKeysSelectionIndex={0}
+          placeholder="Send a follow-up message…"
         />
         <Box paddingX={1}>
           {queuedAt !== null ? (
