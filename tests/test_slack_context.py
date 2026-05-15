@@ -301,7 +301,7 @@ def test_select_slack_context_messages_detects_username_mention() -> None:
     assert [item["ts"] for item in selected] == ["1.0", "2.0", "3.0"]
 
 
-def test_get_slack_repo_config_message_repo_overrides_existing_thread_repo(
+def test_get_slack_repo_config_uses_existing_thread_repo(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     threads_client = _FakeThreadsClient(
@@ -320,27 +320,27 @@ def test_get_slack_repo_config_message_repo_overrides_existing_thread_repo(
         webapp, "post_slack_thread_reply", fake_post_slack_thread_reply, raising=False
     )
 
-    repo = asyncio.run(
-        webapp.get_slack_repo_config("please use repo:new-owner/new-repo", "C123", "1.234")
-    )
+    repo = asyncio.run(webapp.get_slack_repo_config("C123", "1.234"))
 
-    assert repo == {"owner": "new-owner", "name": "new-repo"}
-    assert threads_client.requested_thread_id is None
+    assert repo == {"owner": "saved-owner", "name": "saved-repo"}
+    assert threads_client.requested_thread_id == generate_thread_id_from_slack_thread(
+        "C123", "1.234"
+    )
     assert not posted
 
 
-def test_get_slack_repo_config_parses_message_for_new_thread(
+def test_get_slack_repo_config_new_thread_uses_default(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     threads_client = _FakeThreadsClient(raise_not_found=True)
+    monkeypatch.setattr(webapp, "SLACK_REPO_OWNER", "default-owner")
+    monkeypatch.setattr(webapp, "SLACK_REPO_NAME", "default-repo")
 
     monkeypatch.setattr(webapp, "get_client", lambda url: _FakeClient(threads_client))
 
-    repo = asyncio.run(
-        webapp.get_slack_repo_config("please use repo:new-owner/new-repo", "C123", "1.234")
-    )
+    repo = asyncio.run(webapp.get_slack_repo_config("C123", "1.234"))
 
-    assert repo == {"owner": "new-owner", "name": "new-repo"}
+    assert repo == {"owner": "default-owner", "name": "default-repo"}
 
 
 def test_get_slack_repo_config_existing_thread_without_repo_uses_default(
@@ -352,7 +352,7 @@ def test_get_slack_repo_config_existing_thread_without_repo_uses_default(
 
     monkeypatch.setattr(webapp, "get_client", lambda url: _FakeClient(threads_client))
 
-    repo = asyncio.run(webapp.get_slack_repo_config("please help", "C123", "1.234"))
+    repo = asyncio.run(webapp.get_slack_repo_config("C123", "1.234"))
 
     assert repo == {"owner": "default-owner", "name": "default-repo"}
     assert threads_client.requested_thread_id == generate_thread_id_from_slack_thread(
@@ -360,127 +360,43 @@ def test_get_slack_repo_config_existing_thread_without_repo_uses_default(
     )
 
 
-def test_get_slack_repo_config_space_syntax_detected(
+def test_get_slack_repo_config_ignores_repo_syntax_in_message(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """repo owner/name (space instead of colon) should be detected correctly."""
-    threads_client = _FakeThreadsClient(raise_not_found=True)
-
-    monkeypatch.setattr(webapp, "get_client", lambda url: _FakeClient(threads_client))
-
-    repo = asyncio.run(
-        webapp.get_slack_repo_config(
-            "please fix the bug in repo langchain-ai/langchainjs", "C123", "1.234"
-        )
-    )
-
-    assert repo == {"owner": "langchain-ai", "name": "langchainjs"}
-
-
-def test_get_slack_repo_config_github_url_extracted(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """GitHub URL in message should be used to detect the repo."""
-    threads_client = _FakeThreadsClient(raise_not_found=True)
-
-    monkeypatch.setattr(webapp, "get_client", lambda url: _FakeClient(threads_client))
-
-    repo = asyncio.run(
-        webapp.get_slack_repo_config(
-            "I found a bug in https://github.com/langchain-ai/langgraph-api please fix it",
-            "C123",
-            "1.234",
-        )
-    )
-
-    assert repo == {"owner": "langchain-ai", "name": "langgraph-api"}
-
-
-def test_get_slack_repo_config_explicit_repo_beats_github_url(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Explicit repo: syntax takes priority over a GitHub URL also present in the message."""
-    threads_client = _FakeThreadsClient(raise_not_found=True)
-
-    monkeypatch.setattr(webapp, "get_client", lambda url: _FakeClient(threads_client))
-
-    repo = asyncio.run(
-        webapp.get_slack_repo_config(
-            "see https://github.com/langchain-ai/langgraph-api but use repo:my-org/my-repo",
-            "C123",
-            "1.234",
-        )
-    )
-
-    assert repo == {"owner": "my-org", "name": "my-repo"}
-
-
-def test_get_slack_repo_config_explicit_space_syntax_beats_thread_metadata(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Explicit repo owner/name (space syntax) takes priority over saved thread metadata."""
     threads_client = _FakeThreadsClient(
         thread={"metadata": {"repo": {"owner": "saved-owner", "name": "saved-repo"}}}
     )
 
     monkeypatch.setattr(webapp, "get_client", lambda url: _FakeClient(threads_client))
 
-    repo = asyncio.run(
-        webapp.get_slack_repo_config(
-            "actually use repo langchain-ai/langchainjs today", "C123", "1.234"
-        )
-    )
+    repo = asyncio.run(webapp.get_slack_repo_config("C123", "1.234"))
 
-    assert repo == {"owner": "langchain-ai", "name": "langchainjs"}
+    assert repo == {"owner": "saved-owner", "name": "saved-repo"}
 
 
-def test_get_slack_repo_config_github_url_beats_thread_metadata(
+def test_get_slack_repo_config_applies_profile_default_repo(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A GitHub URL in the message takes priority over saved thread metadata."""
-    threads_client = _FakeThreadsClient(
-        thread={"metadata": {"repo": {"owner": "saved-owner", "name": "saved-repo"}}}
-    )
+    threads_client = _FakeThreadsClient(thread={"metadata": {}})
+
+    async def fake_get_slack_user_info(user_id: str) -> dict:
+        return {"profile": {"email": "mason@example.com"}}
+
+    def fake_resolve_login_from_email(email: str | None) -> str | None:
+        return "mason"
+
+    async def fake_get_profile_default_repo(login: str | None) -> dict[str, str] | None:
+        assert login == "mason"
+        return {"owner": "profile-owner", "name": "profile-repo"}
 
     monkeypatch.setattr(webapp, "get_client", lambda url: _FakeClient(threads_client))
+    monkeypatch.setattr(webapp, "get_slack_user_info", fake_get_slack_user_info)
+    monkeypatch.setattr(webapp, "resolve_login_from_email", fake_resolve_login_from_email)
+    monkeypatch.setattr(webapp, "get_profile_default_repo", fake_get_profile_default_repo)
 
-    repo = asyncio.run(
-        webapp.get_slack_repo_config(
-            "I found a bug in https://github.com/langchain-ai/langgraph-api",
-            "C123",
-            "1.234",
-        )
-    )
+    repo = asyncio.run(webapp.get_slack_repo_config("C123", "1.234", slack_user_id="U123"))
 
-    assert repo == {"owner": "langchain-ai", "name": "langgraph-api"}
-
-
-def test_get_slack_repo_config_repo_name_only_defaults_org(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """repo:name without org should default owner to langchain-ai."""
-    threads_client = _FakeThreadsClient(raise_not_found=True)
-
-    monkeypatch.setattr(webapp, "get_client", lambda url: _FakeClient(threads_client))
-
-    repo = asyncio.run(
-        webapp.get_slack_repo_config("fix bug in repo:langchainplus", "C123", "1.234")
-    )
-
-    assert repo == {"owner": "langchain-ai", "name": "langchainplus"}
-
-
-def test_get_slack_repo_config_repo_name_only_space_syntax(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """repo name (space syntax, no org) should default owner to langchain-ai."""
-    threads_client = _FakeThreadsClient(raise_not_found=True)
-
-    monkeypatch.setattr(webapp, "get_client", lambda url: _FakeClient(threads_client))
-
-    repo = asyncio.run(webapp.get_slack_repo_config("fix bug in repo open-swe", "C123", "1.234"))
-
-    assert repo == {"owner": "langchain-ai", "name": "open-swe"}
+    assert repo == {"owner": "profile-owner", "name": "profile-repo"}
 
 
 def _setup_slack_mention_fakes(
@@ -609,6 +525,11 @@ def test_process_slack_mention_creates_thread_first_run_with_trace_reply(
     assert "multitask_strategy" not in kwargs
     assert kwargs["config"]["configurable"]["slack_thread"]["thread_ts"] == thread_ts
     prompt_block = kwargs["input"]["messages"][0]["content"][0]
+    assert "## Default Repository Hint\nlangchain-ai/open-swe" in prompt_block["text"]
+    assert (
+        "Use this only if the Slack conversation does not identify a different repository."
+        in (prompt_block["text"])
+    )
     assert prompt_block["text"].count("## Slack Thread") == 1
     assert f"Thread TS: {thread_ts}" in prompt_block["text"]
     assert "## Latest Mention Request\ncontinue on the branch" in prompt_block["text"]
