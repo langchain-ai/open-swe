@@ -2,6 +2,14 @@ import { useEffect, useState } from "react";
 
 import type { ModelOption, Profile, ProfileUpdate, Repository } from "@/lib/api";
 import { Button } from "@/components/ui/button";
+import {
+  Combobox,
+  ComboboxContent,
+  ComboboxEmpty,
+  ComboboxInput,
+  ComboboxItem,
+  ComboboxList,
+} from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -82,23 +90,26 @@ export function ProfileForm({ models, repos, initial, onSubmit, saving, error }:
       <div className="flex flex-col gap-2">
         <Label htmlFor="repo">Default repo</Label>
         {repos.length > 0 ? (
-          <Select
-            value={defaultRepo || "__none__"}
-            onValueChange={(v) => setDefaultRepo(!v || v === "__none__" ? "" : v)}
+          <Combobox
+            items={repos.map((r) => r.full_name)}
+            value={defaultRepo}
+            onValueChange={(v) => setDefaultRepo(typeof v === "string" ? v : "")}
           >
-            <SelectTrigger id="repo">
-              <SelectValue placeholder="Pick a default repo" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="__none__">(none)</SelectItem>
-              {repos.map((r) => (
-                <SelectItem key={r.full_name} value={r.full_name}>
-                  {r.full_name}
-                  {r.private ? " · private" : ""}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+            <ComboboxInput id="repo" placeholder="Search repos…" showClear />
+            <ComboboxContent className="min-w-[28rem]">
+              <ComboboxList className="max-h-80">
+                <ComboboxEmpty>No repos match</ComboboxEmpty>
+                {repos.map((r) => (
+                  <ComboboxItem key={r.full_name} value={r.full_name}>
+                    <span className="truncate">{r.full_name}</span>
+                    {r.private && (
+                      <span className="text-muted-foreground ml-auto pr-5 text-[10px]">private</span>
+                    )}
+                  </ComboboxItem>
+                ))}
+              </ComboboxList>
+            </ComboboxContent>
+          </Combobox>
         ) : (
           <Input
             id="repo"
