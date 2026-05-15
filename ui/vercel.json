@@ -2,7 +2,7 @@
   "rewrites": [
     {
       "source": "/dashboard/api/:path*",
-      "destination": "https://open-swe-test-3c1f9e43498f5f4ebe6b59a83263e931.us.langgraph.app/dashboard/api/:path*"
+      "destination": "https://open-swe-v3-f2834ffc0df05a46a10262a9690e8490.us.langgraph.app/dashboard/api/:path*"
     }
   ]
 }
