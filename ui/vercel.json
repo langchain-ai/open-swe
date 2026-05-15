@@ -1,0 +1,8 @@
+{
+  "rewrites": [
+    {
+      "source": "/dashboard/api/:path*",
+      "destination": "https://open-swe-test-3c1f9e43498f5f4ebe6b59a83263e931.us.langgraph.app/dashboard/api/:path*"
+    }
+  ]
+}
