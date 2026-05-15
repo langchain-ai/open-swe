@@ -1,4 +1,14 @@
-"""User profile schema and LangGraph Store CRUD."""
+"""User profile schema and LangGraph Store CRUD.
+
+Storage is split into two namespaces to avoid the read-modify-write race
+between profile-edit writes and OAuth-callback token refreshes:
+
+* ``["profiles"]`` — user-editable settings (model, effort, default_repo).
+* ``["oauth_tokens"]`` — encrypted GitHub OAuth access token + email.
+
+Each upsert only touches its own namespace, so the two flows can't clobber
+each other's fields even when they interleave.
+"""
 
 from __future__ import annotations
 
@@ -16,6 +26,7 @@ from .options import SUPPORTED_MODEL_IDS, model_supports_effort
 logger = logging.getLogger(__name__)
 
 PROFILES_NAMESPACE: list[str] = ["profiles"]
+OAUTH_TOKENS_NAMESPACE: list[str] = ["oauth_tokens"]
 
 
 class ProfileUpdate(BaseModel):
@@ -41,9 +52,9 @@ def _client():
     return get_client()
 
 
-async def _get_value(key: str) -> dict[str, Any] | None:
+async def _get_value(namespace: list[str], key: str) -> dict[str, Any] | None:
     try:
-        item = await _client().store.get_item(PROFILES_NAMESPACE, key)
+        item = await _client().store.get_item(namespace, key)
     except httpx.HTTPStatusError as e:
         if e.response.status_code == 404:
             return None
@@ -51,14 +62,20 @@ async def _get_value(key: str) -> dict[str, Any] | None:
     if item is None:
         return None
     value = item.get("value") if isinstance(item, dict) else getattr(item, "value", None)
-    return value
+    return value if isinstance(value, dict) else None
 
 
 async def get_profile(login: str) -> dict[str, Any] | None:
-    return await _get_value(login)
+    return await _get_value(PROFILES_NAMESPACE, login)
 
 
 async def upsert_profile(login: str, email: str, update: ProfileUpdate) -> dict[str, Any]:
+    """Write the user's editable settings.
+
+    Only touches ``["profiles"]`` — the OAuth token in ``["oauth_tokens"]``
+    is untouched, so a concurrent re-login can't be clobbered by this write
+    and vice versa.
+    """
     existing = await get_profile(login) or {}
     value: dict[str, Any] = {
         **existing,
@@ -70,27 +87,31 @@ async def upsert_profile(login: str, email: str, update: ProfileUpdate) -> dict[
         "updated_at": datetime.now(UTC).isoformat(),
     }
     await _client().store.put_item(PROFILES_NAMESPACE, login, value)
-    return _redact(value)
+    return value
 
 
 async def upsert_access_token(login: str, email: str, access_token: str) -> None:
-    """Persist (or refresh) the user's encrypted GitHub OAuth token on the profile."""
-    existing = await get_profile(login) or {}
+    """Persist (or refresh) the user's encrypted GitHub OAuth token.
+
+    Only touches ``["oauth_tokens"]`` — the user-editable profile is left
+    intact even if a save is in flight in another request.
+    """
+    if not access_token:
+        return
     value: dict[str, Any] = {
-        **existing,
         "login": login,
-        "email": email or existing.get("email", ""),
-        "encrypted_gh_token": encrypt_token(access_token) if access_token else "",
+        "email": email,
+        "encrypted_gh_token": encrypt_token(access_token),
         "updated_at": datetime.now(UTC).isoformat(),
     }
-    await _client().store.put_item(PROFILES_NAMESPACE, login, value)
+    await _client().store.put_item(OAUTH_TOKENS_NAMESPACE, login, value)
 
 
 async def get_access_token(login: str) -> str | None:
-    profile = await get_profile(login)
-    if not profile:
+    record = await _get_value(OAUTH_TOKENS_NAMESPACE, login)
+    if not record:
         return None
-    encrypted = profile.get("encrypted_gh_token")
+    encrypted = record.get("encrypted_gh_token")
     if not encrypted:
         return None
     return decrypt_token(encrypted) or None
@@ -102,12 +123,6 @@ async def list_profiles() -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for item in items or []:
         value = item.get("value") if isinstance(item, dict) else getattr(item, "value", None)
-        if value:
-            out.append(_redact(value))
+        if isinstance(value, dict):
+            out.append(value)
     return out
-
-
-def _redact(value: dict[str, Any]) -> dict[str, Any]:
-    redacted = dict(value)
-    redacted.pop("encrypted_gh_token", None)
-    return redacted

@@ -15,6 +15,17 @@ from .profiles import PROFILES_NAMESPACE
 logger = logging.getLogger(__name__)
 
 
+def resolve_login_from_email(email: str | None) -> str | None:
+    """Reverse-lookup ``GITHUB_USER_EMAIL_MAP`` for the GitHub login of an email."""
+    if not isinstance(email, str) or not email.strip():
+        return None
+    normalized = email.strip().lower()
+    for gh_login, mapped in GITHUB_USER_EMAIL_MAP.items():
+        if mapped.lower() == normalized:
+            return gh_login
+    return None
+
+
 def resolve_github_login(config: dict[str, Any]) -> str | None:
     """Best-effort resolution of the triggering user's GitHub login from config."""
     configurable = (config or {}).get("configurable") or {}
@@ -25,12 +36,26 @@ def resolve_github_login(config: dict[str, Any]) -> str | None:
 
     slack_thread = configurable.get("slack_thread") or {}
     email = configurable.get("user_email") or slack_thread.get("triggering_user_email")
-    if isinstance(email, str) and email.strip():
-        normalized = email.strip().lower()
-        for gh_login, mapped in GITHUB_USER_EMAIL_MAP.items():
-            if mapped.lower() == normalized:
-                return gh_login
-    return None
+    return resolve_login_from_email(email if isinstance(email, str) else None)
+
+
+async def get_profile_default_repo(login: str | None) -> dict[str, str] | None:
+    """Return ``{"owner", "name"}`` for the user's profile default_repo, if set."""
+    if not login:
+        return None
+    profile = await load_profile(login)
+    if not profile:
+        return None
+    default_repo = profile.get("default_repo")
+    if not isinstance(default_repo, str):
+        return None
+    parts = default_repo.strip().split("/", 1)
+    if len(parts) != 2:
+        return None
+    owner, name = parts[0].strip(), parts[1].strip()
+    if not owner or not name:
+        return None
+    return {"owner": owner, "name": name}
 
 
 async def load_profile(login: str) -> dict[str, Any] | None:

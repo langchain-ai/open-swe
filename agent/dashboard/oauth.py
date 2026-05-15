@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import logging
 import os
 import secrets
 import time
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 import jwt
@@ -15,6 +18,7 @@ from fastapi import HTTPException, Request
 logger = logging.getLogger(__name__)
 
 COOKIE_NAME = "osw_session"
+STATE_COOKIE_NAME = "osw_oauth_state"
 SESSION_TTL_SECONDS = 7 * 24 * 60 * 60
 STATE_TTL_SECONDS = 600
 JWT_ALG = "HS256"
@@ -28,6 +32,51 @@ def _secret() -> str:
     if not s:
         raise HTTPException(500, "DASHBOARD_JWT_SECRET not configured")
     return s
+
+
+def _allowed_redirect_origins() -> set[str]:
+    """Origins permitted for the post-login redirect.
+
+    Built from DASHBOARD_BASE_URL plus any DASHBOARD_ALLOWED_ORIGINS entries
+    so the dashboard itself and its preview deploys can all be redirect
+    targets — but nothing else.
+    """
+    origins: set[str] = set()
+    base = os.environ.get("DASHBOARD_BASE_URL", "").strip()
+    if base:
+        origins.add(_origin_of(base))
+    for entry in os.environ.get("DASHBOARD_ALLOWED_ORIGINS", "").split(","):
+        entry = entry.strip()
+        if entry:
+            origins.add(_origin_of(entry))
+    origins.discard("")
+    return origins
+
+
+def _origin_of(url: str) -> str:
+    parsed = urlparse(url)
+    if not parsed.scheme or not parsed.netloc:
+        return ""
+    return f"{parsed.scheme}://{parsed.netloc}"
+
+
+def sanitize_redirect_to(redirect_to: str | None) -> str:
+    """Return a safe post-login redirect URL.
+
+    Falls back to DASHBOARD_BASE_URL when the supplied URL's origin isn't
+    explicitly allowed. This blocks the open-redirect / phishing primitive
+    where an attacker drops their own URL into `?redirect_to=`.
+    """
+    fallback = os.environ.get("DASHBOARD_BASE_URL", "").strip()
+    if not redirect_to:
+        return fallback
+    candidate_origin = _origin_of(redirect_to)
+    if not candidate_origin:
+        return fallback
+    if candidate_origin in _allowed_redirect_origins():
+        return redirect_to
+    logger.warning("Rejected redirect_to=%r — origin not in allowlist", redirect_to)
+    return fallback
 
 
 def issue_session(*, login: str, email: str | None, avatar_url: str | None) -> str:
@@ -49,10 +98,26 @@ def decode_session(token: str) -> dict[str, Any]:
         raise HTTPException(401, f"invalid session: {e}") from e
 
 
-def issue_state(*, redirect_to: str) -> str:
+def new_state_nonce() -> str:
+    """A fresh random nonce used to bind state JWT ↔ browser cookie."""
+    return secrets.token_urlsafe(32)
+
+
+def hash_state_nonce(nonce: str) -> str:
+    """HMAC the nonce so the value stored on the wire isn't reversible.
+
+    We compare ``hash_state_nonce(cookie_nonce) == state.nonce_hash`` at
+    callback time. Using HMAC over a constant-time digest also gives us
+    timing-attack resistance via :func:`hmac.compare_digest` at the call
+    site.
+    """
+    return hmac.new(_secret().encode(), nonce.encode(), hashlib.sha256).hexdigest()
+
+
+def issue_state(*, redirect_to: str, nonce_hash: str) -> str:
     now = int(time.time())
     payload = {
-        "nonce": secrets.token_urlsafe(16),
+        "nonce_hash": nonce_hash,
         "redirect_to": redirect_to,
         "iat": now,
         "exp": now + STATE_TTL_SECONDS,
