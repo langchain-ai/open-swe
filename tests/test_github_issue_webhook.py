@@ -485,12 +485,13 @@ def test_slack_webhook_non_pr_review_request_starts_agent(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
     async def fake_get_slack_repo_config(
-        text: str, channel_id: str, thread_ts: str
+        text: str, channel_id: str, thread_ts: str, slack_user_id: str | None = None
     ) -> dict[str, str]:
         captured["repo_config_request"] = {
             "text": text,
             "channel_id": channel_id,
             "thread_ts": thread_ts,
+            "slack_user_id": slack_user_id,
         }
         return {"owner": "langchain-ai", "name": "open-swe"}
 
@@ -534,12 +535,13 @@ def test_slack_webhook_threaded_followup_uses_parent_thread_ts(monkeypatch) -> N
     captured: dict[str, object] = {}
 
     async def fake_get_slack_repo_config(
-        text: str, channel_id: str, thread_ts: str
+        text: str, channel_id: str, thread_ts: str, slack_user_id: str | None = None
     ) -> dict[str, str]:
         captured["repo_config_request"] = {
             "text": text,
             "channel_id": channel_id,
             "thread_ts": thread_ts,
+            "slack_user_id": slack_user_id,
         }
         return {"owner": "langchain-ai", "name": "open-swe"}
 
@@ -578,6 +580,7 @@ def test_slack_webhook_threaded_followup_uses_parent_thread_ts(monkeypatch) -> N
         "text": "<@UBOT> continue on the branch",
         "channel_id": "C123",
         "thread_ts": "1700000000.000100",
+        "slack_user_id": "U123",
     }
     event_data = captured["event_data"]
     assert isinstance(event_data, dict)

@@ -12,10 +12,16 @@ from typing import Any
 
 import httpx
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
 from langchain_core.messages.content import create_text_block
 from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
 
+from .dashboard import router as dashboard_router
+from .dashboard.agent_overrides import (
+    get_profile_default_repo,
+    resolve_login_from_email,
+)
 from .reviewer_findings import (
     REVIEWER_THREAD_KIND,
     ReviewerPRMeta,
@@ -89,6 +95,20 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(lifespan=lifespan)
+
+DASHBOARD_ALLOWED_ORIGINS: list[str] = [
+    o.strip() for o in os.environ.get("DASHBOARD_ALLOWED_ORIGINS", "").split(",") if o.strip()
+]
+if DASHBOARD_ALLOWED_ORIGINS:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=DASHBOARD_ALLOWED_ORIGINS,
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        allow_headers=["*"],
+    )
+
+app.include_router(dashboard_router)
 
 LINEAR_WEBHOOK_SECRET = os.environ.get("LINEAR_WEBHOOK_SECRET", "")
 GITHUB_WEBHOOK_SECRET = os.environ.get("GITHUB_WEBHOOK_SECRET", "")
@@ -465,8 +485,21 @@ async def _upsert_slack_thread_repo_metadata(
         )
 
 
-async def get_slack_repo_config(message: str, channel_id: str, thread_ts: str) -> dict[str, str]:
-    """Resolve repository configuration for Slack-triggered runs."""
+async def get_slack_repo_config(
+    message: str,
+    channel_id: str,
+    thread_ts: str,
+    slack_user_id: str | None = None,
+) -> dict[str, str]:
+    """Resolve repository configuration for Slack-triggered runs.
+
+    Priority:
+        1. Explicit ``owner/repo`` mention in the message body.
+        2. Repo carried over from the existing Slack thread's metadata.
+        3. The triggering user's dashboard ``default_repo`` (if they have a
+           profile and their Slack email maps to a known GitHub login).
+        4. ``SLACK_REPO_*`` env defaults.
+    """
     default_owner = SLACK_REPO_OWNER.strip() or DEFAULT_REPO_OWNER
     default_name = SLACK_REPO_NAME.strip() or DEFAULT_REPO_NAME
     thread_id = generate_thread_id_from_slack_thread(channel_id, thread_ts)
@@ -486,6 +519,26 @@ async def get_slack_repo_config(message: str, channel_id: str, thread_ts: str) -
                     "Failed to fetch Slack thread %s for repo resolution",
                     thread_id,
                 )
+
+    if not repo_config and slack_user_id:
+        try:
+            slack_user = await get_slack_user_info(slack_user_id)
+            slack_email = (
+                (slack_user or {}).get("profile", {}).get("email")
+                if isinstance(slack_user, dict)
+                else None
+            )
+            profile_repo = await get_profile_default_repo(resolve_login_from_email(slack_email))
+            if profile_repo:
+                logger.info(
+                    "Applying dashboard default_repo for Slack user %s: %s/%s",
+                    slack_user_id,
+                    profile_repo["owner"],
+                    profile_repo["name"],
+                )
+                repo_config = profile_repo
+        except Exception:  # noqa: BLE001
+            logger.exception("Failed to apply dashboard default_repo for Slack user")
 
     if not repo_config:
         repo_config = {"owner": default_owner, "name": default_name}
@@ -1127,6 +1180,24 @@ async def linear_webhook(  # noqa: PLR0911, PLR0912, PLR0915
             repo_config["name"],
         )
     else:
+        comment_user_email = (data.get("user") or {}).get("email")
+        try:
+            profile_repo = await get_profile_default_repo(
+                resolve_login_from_email(comment_user_email)
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception("Failed to apply dashboard default_repo for Linear user")
+            profile_repo = None
+        if profile_repo:
+            logger.info(
+                "Applying dashboard default_repo for Linear user %s: %s/%s",
+                comment_user_email,
+                profile_repo["owner"],
+                profile_repo["name"],
+            )
+            repo_config = profile_repo
+
+    if not repo_config:
         team = full_issue.get("team", {})
         team_name = team.get("name", "") if team else ""
         project = full_issue.get("project")
@@ -1299,7 +1370,7 @@ async def slack_webhook(request: Request, background_tasks: BackgroundTasks) -> 
         "text": text,
         "bot_user_id": bot_user_id,
     }
-    repo_config = await get_slack_repo_config(text, channel_id, thread_ts)
+    repo_config = await get_slack_repo_config(text, channel_id, thread_ts, slack_user_id=user_id)
 
     if not _is_repo_allowed(repo_config):
         logger.warning(
