@@ -485,10 +485,9 @@ def test_slack_webhook_non_pr_review_request_starts_agent(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
     async def fake_get_slack_repo_config(
-        text: str, channel_id: str, thread_ts: str, slack_user_id: str | None = None
+        channel_id: str, thread_ts: str, slack_user_id: str | None = None
     ) -> dict[str, str]:
         captured["repo_config_request"] = {
-            "text": text,
             "channel_id": channel_id,
             "thread_ts": thread_ts,
             "slack_user_id": slack_user_id,
@@ -507,6 +506,13 @@ def test_slack_webhook_non_pr_review_request_starts_agent(monkeypatch) -> None:
     monkeypatch.setattr(slack_utils.time, "time", lambda: 1700000000)
     monkeypatch.setattr(webapp, "get_slack_repo_config", fake_get_slack_repo_config)
     monkeypatch.setattr(webapp, "process_slack_mention", fake_process_slack_mention)
+    monkeypatch.setattr(
+        webapp,
+        "_is_repo_allowed",
+        lambda repo_config: (_ for _ in ()).throw(
+            AssertionError("Slack webhook should not gate inferred repos with allowlists")
+        ),
+    )
 
     client = TestClient(webapp.app)
     response = _post_slack_webhook(
@@ -535,10 +541,9 @@ def test_slack_webhook_threaded_followup_uses_parent_thread_ts(monkeypatch) -> N
     captured: dict[str, object] = {}
 
     async def fake_get_slack_repo_config(
-        text: str, channel_id: str, thread_ts: str, slack_user_id: str | None = None
+        channel_id: str, thread_ts: str, slack_user_id: str | None = None
     ) -> dict[str, str]:
         captured["repo_config_request"] = {
-            "text": text,
             "channel_id": channel_id,
             "thread_ts": thread_ts,
             "slack_user_id": slack_user_id,
@@ -577,7 +582,6 @@ def test_slack_webhook_threaded_followup_uses_parent_thread_ts(monkeypatch) -> N
     assert response.status_code == 200
     assert response.json()["message"] == "Slack mention queued"
     assert captured["repo_config_request"] == {
-        "text": "<@UBOT> continue on the branch",
         "channel_id": "C123",
         "thread_ts": "1700000000.000100",
         "slack_user_id": "U123",

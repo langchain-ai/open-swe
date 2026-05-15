@@ -486,7 +486,6 @@ async def _upsert_slack_thread_repo_metadata(
 
 
 async def get_slack_repo_config(
-    message: str,
     channel_id: str,
     thread_ts: str,
     slack_user_id: str | None = None,
@@ -494,31 +493,29 @@ async def get_slack_repo_config(
     """Resolve repository configuration for Slack-triggered runs.
 
     Priority:
-        1. Explicit ``owner/repo`` mention in the message body.
-        2. Repo carried over from the existing Slack thread's metadata.
-        3. The triggering user's dashboard ``default_repo`` (if they have a
+        1. Repo carried over from the existing Slack thread's metadata.
+        2. The triggering user's dashboard ``default_repo`` (if they have a
            profile and their Slack email maps to a known GitHub login).
-        4. ``SLACK_REPO_*`` env defaults.
+        3. ``SLACK_REPO_*`` env defaults.
     """
     default_owner = SLACK_REPO_OWNER.strip() or DEFAULT_REPO_OWNER
     default_name = SLACK_REPO_NAME.strip() or DEFAULT_REPO_NAME
     thread_id = generate_thread_id_from_slack_thread(channel_id, thread_ts)
     langgraph_client = get_client(url=LANGGRAPH_URL)
 
-    repo_config = extract_repo_from_text(message, default_owner=default_owner)
+    repo_config: dict[str, str] | None = None
 
-    if not repo_config:
-        try:
-            thread = await langgraph_client.threads.get(thread_id)
-            thread_repo_config = _extract_repo_config_from_thread(thread)
-            if thread_repo_config:
-                repo_config = thread_repo_config
-        except Exception as exc:  # noqa: BLE001
-            if not _is_not_found_error(exc):
-                logger.exception(
-                    "Failed to fetch Slack thread %s for repo resolution",
-                    thread_id,
-                )
+    try:
+        thread = await langgraph_client.threads.get(thread_id)
+        thread_repo_config = _extract_repo_config_from_thread(thread)
+        if thread_repo_config:
+            repo_config = thread_repo_config
+    except Exception as exc:  # noqa: BLE001
+        if not _is_not_found_error(exc):
+            logger.exception(
+                "Failed to fetch Slack thread %s for repo resolution",
+                thread_id,
+            )
 
     if not repo_config and slack_user_id:
         try:
@@ -947,7 +944,9 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
 
     prompt = (
         "You were mentioned in Slack.\n\n"
-        f"## Repository\n{repo_config.get('owner')}/{repo_config.get('name')}\n\n"
+        "## Default Repository Hint\n"
+        f"{repo_config.get('owner')}/{repo_config.get('name')}\n"
+        "Use this only if the Slack conversation does not identify a different repository.\n\n"
         f"## Triggered by\n{trigger_user}\n\n"
         f"## Slack Thread\n- Channel: {channel_id}\n- Thread TS: {thread_ts}\n"
         f"- Context starts at: {context_source}\n\n"
@@ -1370,15 +1369,7 @@ async def slack_webhook(request: Request, background_tasks: BackgroundTasks) -> 
         "text": text,
         "bot_user_id": bot_user_id,
     }
-    repo_config = await get_slack_repo_config(text, channel_id, thread_ts, slack_user_id=user_id)
-
-    if not _is_repo_allowed(repo_config):
-        logger.warning(
-            "Rejecting Slack webhook: repo '%s/%s' not in allowlist",
-            repo_config.get("owner"),
-            repo_config.get("name"),
-        )
-        return {"status": "ignored", "reason": "Repository not in allowlist"}
+    repo_config = await get_slack_repo_config(channel_id, thread_ts, slack_user_id=user_id)
 
     background_tasks.add_task(process_slack_mention, event_data, repo_config)
 
