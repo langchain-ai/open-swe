@@ -59,7 +59,6 @@ from .utils.github_user_email_map import GITHUB_USER_EMAIL_MAP
 from .utils.linear import post_linear_trace_comment
 from .utils.linear_team_repo_map import LINEAR_TEAM_TO_REPO
 from .utils.multimodal import dedupe_urls, extract_image_urls, fetch_image_block
-from .utils.repo import extract_repo_from_text
 from .utils.sandbox import validate_sandbox_startup_config
 from .utils.slack import (
     GitHubPrRef,
@@ -494,31 +493,29 @@ async def get_slack_repo_config(
     """Resolve repository configuration for Slack-triggered runs.
 
     Priority:
-        1. Explicit ``owner/repo`` mention in the message body.
-        2. Repo carried over from the existing Slack thread's metadata.
-        3. The triggering user's dashboard ``default_repo`` (if they have a
+        1. Repo carried over from the existing Slack thread's metadata.
+        2. The triggering user's dashboard ``default_repo`` (if they have a
            profile and their Slack email maps to a known GitHub login).
-        4. ``SLACK_REPO_*`` env defaults.
+        3. ``SLACK_REPO_*`` env defaults.
     """
     default_owner = SLACK_REPO_OWNER.strip() or DEFAULT_REPO_OWNER
     default_name = SLACK_REPO_NAME.strip() or DEFAULT_REPO_NAME
     thread_id = generate_thread_id_from_slack_thread(channel_id, thread_ts)
     langgraph_client = get_client(url=LANGGRAPH_URL)
 
-    repo_config = extract_repo_from_text(message, default_owner=default_owner)
+    repo_config: dict[str, str] | None = None
 
-    if not repo_config:
-        try:
-            thread = await langgraph_client.threads.get(thread_id)
-            thread_repo_config = _extract_repo_config_from_thread(thread)
-            if thread_repo_config:
-                repo_config = thread_repo_config
-        except Exception as exc:  # noqa: BLE001
-            if not _is_not_found_error(exc):
-                logger.exception(
-                    "Failed to fetch Slack thread %s for repo resolution",
-                    thread_id,
-                )
+    try:
+        thread = await langgraph_client.threads.get(thread_id)
+        thread_repo_config = _extract_repo_config_from_thread(thread)
+        if thread_repo_config:
+            repo_config = thread_repo_config
+    except Exception as exc:  # noqa: BLE001
+        if not _is_not_found_error(exc):
+            logger.exception(
+                "Failed to fetch Slack thread %s for repo resolution",
+                thread_id,
+            )
 
     if not repo_config and slack_user_id:
         try:
@@ -1171,31 +1168,21 @@ async def linear_webhook(  # noqa: PLR0911, PLR0912, PLR0915
         logger.warning("Failed to fetch full issue details, using webhook data")
         full_issue = issue
 
-    repo_config = extract_repo_from_text(comment_body, default_owner=DEFAULT_REPO_OWNER)
-
-    if repo_config:
-        logger.debug(
-            "Using repo from comment body: %s/%s",
-            repo_config["owner"],
-            repo_config["name"],
+    repo_config: dict[str, str] | None = None
+    comment_user_email = (data.get("user") or {}).get("email")
+    try:
+        profile_repo = await get_profile_default_repo(resolve_login_from_email(comment_user_email))
+    except Exception:  # noqa: BLE001
+        logger.exception("Failed to apply dashboard default_repo for Linear user")
+        profile_repo = None
+    if profile_repo:
+        logger.info(
+            "Applying dashboard default_repo for Linear user %s: %s/%s",
+            comment_user_email,
+            profile_repo["owner"],
+            profile_repo["name"],
         )
-    else:
-        comment_user_email = (data.get("user") or {}).get("email")
-        try:
-            profile_repo = await get_profile_default_repo(
-                resolve_login_from_email(comment_user_email)
-            )
-        except Exception:  # noqa: BLE001
-            logger.exception("Failed to apply dashboard default_repo for Linear user")
-            profile_repo = None
-        if profile_repo:
-            logger.info(
-                "Applying dashboard default_repo for Linear user %s: %s/%s",
-                comment_user_email,
-                profile_repo["owner"],
-                profile_repo["name"],
-            )
-            repo_config = profile_repo
+        repo_config = profile_repo
 
     if not repo_config:
         team = full_issue.get("team", {})
