@@ -28,6 +28,11 @@ from deepagents.backends.protocol import SandboxBackendProtocol
 from langchain.agents.middleware import ModelCallLimitMiddleware
 from langsmith.sandbox import SandboxClientError
 
+from .dashboard.agent_overrides import (
+    load_profile,
+    normalize_profile_overrides,
+    resolve_github_login,
+)
 from .integrations.langsmith import _configure_github_proxy
 from .middleware import (
     ModelFallbackMiddleware,
@@ -327,6 +332,27 @@ DEFAULT_RECURSION_LIMIT = 9_999
 MODEL_CALL_RECURSION_LIMIT = 5_000  # ~half the recursion limit to account for tool calls
 
 
+def _openai_reasoning_for(profile_effort: str | None) -> OpenAIReasoning | None:
+    """Return an OpenAI reasoning kwarg from a (validated) profile effort.
+
+    Anthropic-only efforts like ``"max"`` are dropped — OpenAI's effort
+    Literal doesn't accept them. Falls back to the default effort when the
+    profile didn't override.
+    """
+    effort = profile_effort or DEFAULT_LLM_REASONING.get("effort")
+    if effort == "none":
+        return {"effort": "none"}
+    if effort == "low":
+        return {"effort": "low"}
+    if effort == "medium":
+        return {"effort": "medium"}
+    if effort == "high":
+        return {"effort": "high"}
+    if effort == "xhigh":
+        return {"effort": "xhigh"}
+    return None
+
+
 def _get_cached_sandbox_backend(thread_id: str) -> SandboxBackendProtocol:
     sandbox_backend = SANDBOX_BACKENDS.get(thread_id)
     if sandbox_backend is None:
@@ -367,9 +393,27 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         return _get_cached_sandbox_backend(_thread_id)
 
     model_id = os.environ.get("LLM_MODEL_ID", DEFAULT_LLM_MODEL_ID)
+    profile_effort: str | None = None
+    profile_login = resolve_github_login(config)
+    if profile_login:
+        profile = await load_profile(profile_login)
+        if profile:
+            overridden_model, overridden_effort = normalize_profile_overrides(profile)
+            if overridden_model:
+                logger.info(
+                    "Applying dashboard profile override for %s: model=%s effort=%s",
+                    profile_login,
+                    overridden_model,
+                    overridden_effort,
+                )
+                model_id = overridden_model
+                profile_effort = overridden_effort
+
     model_kwargs: ModelKwargs = {"max_tokens": DEFAULT_LLM_MAX_TOKENS}
-    if model_id == DEFAULT_LLM_MODEL_ID:
-        model_kwargs["reasoning"] = DEFAULT_LLM_REASONING
+    if model_id.startswith("openai:"):
+        reasoning = _openai_reasoning_for(profile_effort)
+        if reasoning is not None:
+            model_kwargs["reasoning"] = reasoning
 
     fallback_model_id = os.environ.get("LLM_FALLBACK_MODEL_ID") or fallback_model_id_for(model_id)
     fallback_middleware: list[Any] = []
