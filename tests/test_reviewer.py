@@ -129,7 +129,5 @@ async def test_reviewer_applies_eval_model_and_effort_overrides() -> None:
         await reviewer.get_reviewer_agent(config)
 
     assert make_model.call_args.args == ("anthropic:claude-opus-4-7",)
-    assert make_model.call_args.kwargs["thinking"] == {
-        "type": "enabled",
-        "budget_tokens": 12_000,
-    }
+    assert make_model.call_args.kwargs["thinking"] == {"type": "adaptive"}
+    assert make_model.call_args.kwargs["effort"] == "high"

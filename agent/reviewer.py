@@ -45,6 +45,7 @@ from .server import (
     DEFAULT_LLM_REASONING,
     DEFAULT_RECURSION_LIMIT,
     MODEL_CALL_RECURSION_LIMIT,
+    _anthropic_effort_for,
     _anthropic_thinking_for,
     _openai_reasoning_for,
     ensure_sandbox_for_thread,
@@ -359,9 +360,12 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
         reasoning = _openai_reasoning_for(reasoning_effort)
         model_kwargs["reasoning"] = reasoning if reasoning is not None else DEFAULT_LLM_REASONING
     elif model_id.startswith("anthropic:"):
-        thinking = _anthropic_thinking_for(reasoning_effort)
+        thinking = _anthropic_thinking_for(model_id, reasoning_effort)
         if thinking is not None:
             model_kwargs["thinking"] = thinking
+        effort = _anthropic_effort_for(model_id, reasoning_effort)
+        if effort is not None:
+            model_kwargs["effort"] = effort
 
     system_prompt = _reviewer_system_prompt(
         f"{work_dir}/{repo_name}" if repo_name else work_dir,
