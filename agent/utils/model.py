@@ -10,7 +10,7 @@ DEFAULT_MAX_RETRIES = 6
 
 
 OpenAIReasoningEffort = Literal["none", "low", "medium", "high", "xhigh"]
-AnthropicThinkingType = Literal["enabled", "disabled", "adaptive"]
+AnthropicThinkingType = Literal["adaptive"]
 AnthropicEffort = Literal["low", "medium", "high", "xhigh", "max"]
 
 
@@ -20,7 +20,6 @@ class OpenAIReasoning(TypedDict, total=False):
 
 class AnthropicThinking(TypedDict, total=False):
     type: AnthropicThinkingType
-    budget_tokens: int
 
 
 class ModelKwargs(TypedDict, total=False):

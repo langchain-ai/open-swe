@@ -360,10 +360,10 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
         reasoning = _openai_reasoning_for(reasoning_effort)
         model_kwargs["reasoning"] = reasoning if reasoning is not None else DEFAULT_LLM_REASONING
     elif model_id.startswith("anthropic:"):
-        thinking = _anthropic_thinking_for(model_id, reasoning_effort)
+        thinking = _anthropic_thinking_for(reasoning_effort)
         if thinking is not None:
             model_kwargs["thinking"] = thinking
-        effort = _anthropic_effort_for(model_id, reasoning_effort)
+        effort = _anthropic_effort_for(reasoning_effort)
         if effort is not None:
             model_kwargs["effort"] = effort
 

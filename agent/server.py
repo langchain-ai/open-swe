@@ -360,49 +360,21 @@ def _openai_reasoning_for(profile_effort: str | None) -> OpenAIReasoning | None:
     return None
 
 
-# Mapping mirrors Claude Code's effort levels for Opus 4.7. Numbers are tuned
-# so each level meaningfully separates from the next while leaving headroom
-# under DEFAULT_LLM_MAX_TOKENS (64k) for the model's actual output.
-_ANTHROPIC_THINKING_BUDGETS: dict[str, int] = {
-    "low": 1_024,
-    "medium": 4_000,
-    "high": 12_000,
-    "xhigh": 32_000,
-    "max": 60_000,
-}
-
-
-_ANTHROPIC_ADAPTIVE_THINKING_MODELS = ("claude-opus-4-7",)
-
 _ANTHROPIC_EFFORTS: set[AnthropicEffort] = {"low", "medium", "high", "xhigh", "max"}
 
 
-def _uses_anthropic_adaptive_thinking(model_id: str) -> bool:
-    return any(model_name in model_id for model_name in _ANTHROPIC_ADAPTIVE_THINKING_MODELS)
-
-
-def _anthropic_thinking_for(
-    model_id: str,
-    profile_effort: str | None,
-) -> AnthropicThinking | None:
+def _anthropic_thinking_for(profile_effort: str | None) -> AnthropicThinking | None:
     """Map a profile effort string to an Anthropic thinking kwarg.
 
-    Returns ``None`` when the effort doesn't have a known budget so we leave
-    the model's default thinking behaviour alone.
+    Latest Claude models use adaptive thinking with an effort hint instead of
+    manual thinking token budgets.
     """
-    if _uses_anthropic_adaptive_thinking(model_id) and profile_effort in _ANTHROPIC_EFFORTS:
+    if profile_effort in _ANTHROPIC_EFFORTS:
         return {"type": "adaptive"}
-    if not profile_effort:
-        return None
-    budget = _ANTHROPIC_THINKING_BUDGETS.get(profile_effort)
-    if budget is None:
-        return None
-    return {"type": "enabled", "budget_tokens": budget}
+    return None
 
 
-def _anthropic_effort_for(model_id: str, profile_effort: str | None) -> AnthropicEffort | None:
-    if not _uses_anthropic_adaptive_thinking(model_id):
-        return None
+def _anthropic_effort_for(profile_effort: str | None) -> AnthropicEffort | None:
     if profile_effort in _ANTHROPIC_EFFORTS:
         return profile_effort
     return None
@@ -470,10 +442,10 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         if reasoning is not None:
             model_kwargs["reasoning"] = reasoning
     elif model_id.startswith("anthropic:"):
-        thinking = _anthropic_thinking_for(model_id, profile_effort)
+        thinking = _anthropic_thinking_for(profile_effort)
         if thinking is not None:
             model_kwargs["thinking"] = thinking
-        effort = _anthropic_effort_for(model_id, profile_effort)
+        effort = _anthropic_effort_for(profile_effort)
         if effort is not None:
             model_kwargs["effort"] = effort
 
