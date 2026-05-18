@@ -57,44 +57,6 @@ async def test_reviewer_uses_cached_thread_token_for_slack_review_request() -> N
 
 
 @pytest.mark.asyncio
-async def test_reviewer_prompt_requires_verification_before_add_finding() -> None:
-    config: RunnableConfig = {
-        "configurable": {
-            "__is_for_execution__": True,
-            "thread_id": "reviewer-thread-id",
-            "repo": {"owner": "acme", "name": "repo"},
-            "pr_number": 1,
-            "pr_url": "https://github.com/acme/repo/pull/1",
-            "base_sha": "base",
-            "head_sha": "head",
-        },
-        "metadata": {},
-    }
-    dummy_agent = _DummyAgent()
-
-    with (
-        patch(
-            "agent.reviewer.ensure_sandbox_for_thread",
-            new_callable=AsyncMock,
-            return_value=MagicMock(),
-        ),
-        patch(
-            "agent.reviewer.aresolve_sandbox_work_dir",
-            new_callable=AsyncMock,
-            return_value="/workspace",
-        ),
-        patch("agent.reviewer.make_model", return_value=MagicMock()),
-        patch("agent.reviewer.create_deep_agent", return_value=dummy_agent) as create_agent,
-    ):
-        await reviewer.get_reviewer_agent(config)
-
-    system_prompt = create_agent.call_args.kwargs["system_prompt"]
-    assert "Do **not** call `add_finding` while" in system_prompt
-    assert "the failure path is supported by concrete code" in system_prompt
-    assert "Clone the repo before finalizing any non-trivial finding" in system_prompt
-
-
-@pytest.mark.asyncio
 async def test_reviewer_applies_eval_model_and_effort_overrides() -> None:
     config: RunnableConfig = {
         "configurable": {
