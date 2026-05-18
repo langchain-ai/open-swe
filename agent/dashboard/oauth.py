@@ -19,8 +19,10 @@ logger = logging.getLogger(__name__)
 
 COOKIE_NAME = "osw_session"
 STATE_COOKIE_NAME = "osw_oauth_state"
+LINK_STATE_COOKIE_NAME = "osw_link_state"
 SESSION_TTL_SECONDS = 7 * 24 * 60 * 60
 STATE_TTL_SECONDS = 600
+LINK_STATE_TTL_SECONDS = 600
 JWT_ALG = "HS256"
 
 GITHUB_APP_CLIENT_ID = os.environ.get("GITHUB_APP_CLIENT_ID", "")
@@ -132,6 +134,38 @@ def decode_state(state: str) -> dict[str, Any]:
         raise HTTPException(400, f"invalid state: {e}") from e
 
 
+def issue_link_state(
+    *,
+    provider: str,
+    github_login: str,
+    redirect_to: str,
+    nonce_hash: str,
+) -> str:
+    """State JWT for the Slack/Linear account-linking OAuth round-trip.
+
+    Carries the originating dashboard ``github_login`` so the callback can
+    attach the verified provider identity to the right user, independent of
+    the session cookie's presence at callback time.
+    """
+    now = int(time.time())
+    payload = {
+        "provider": provider,
+        "github_login": github_login,
+        "redirect_to": redirect_to,
+        "nonce_hash": nonce_hash,
+        "iat": now,
+        "exp": now + LINK_STATE_TTL_SECONDS,
+    }
+    return jwt.encode(payload, _secret(), algorithm=JWT_ALG)
+
+
+def decode_link_state(state: str) -> dict[str, Any]:
+    try:
+        return jwt.decode(state, _secret(), algorithms=[JWT_ALG])
+    except jwt.PyJWTError as e:
+        raise HTTPException(400, f"invalid link state: {e}") from e
+
+
 def require_session(request: Request) -> dict[str, Any]:
     token = request.cookies.get(COOKIE_NAME)
     if not token:
@@ -162,7 +196,14 @@ async def exchange_code(code: str) -> str:
 
 
 async def fetch_github_user(access_token: str) -> tuple[dict[str, Any], str | None]:
-    """Return ``(user, primary_email)`` for the authenticated user."""
+    """Return ``(user, work_email)`` for the authenticated user.
+
+    Picks the most useful email by scanning verified addresses on the account:
+    when ``WORK_EMAIL_DOMAIN`` is set, the first verified address in that
+    domain wins; otherwise we fall back to the primary, then to the public
+    email on the user profile. This avoids seeding e.g. ``foo@gmail.com``
+    when the user has their work address on GitHub but not as primary.
+    """
     headers = {
         "Authorization": f"Bearer {access_token}",
         "Accept": "application/vnd.github+json",
@@ -172,11 +213,34 @@ async def fetch_github_user(access_token: str) -> tuple[dict[str, Any], str | No
         u = await client.get("https://api.github.com/user", headers=headers)
         u.raise_for_status()
         user = u.json()
-        email = user.get("email")
-        if not email:
-            e = await client.get("https://api.github.com/user/emails", headers=headers)
-            if e.status_code == 200:
-                primary = next((x for x in e.json() if x.get("primary")), None)
-                if primary:
-                    email = primary.get("email")
-    return user, email
+        emails: list[dict[str, Any]] = []
+        e = await client.get("https://api.github.com/user/emails", headers=headers)
+        if e.status_code == 200:
+            payload = e.json()
+            if isinstance(payload, list):
+                emails = [x for x in payload if isinstance(x, dict)]
+
+    return user, _pick_work_email(emails) or user.get("email")
+
+
+def _pick_work_email(emails: list[dict[str, Any]]) -> str | None:
+    """Pick the best email from GitHub's ``/user/emails`` response."""
+    if not emails:
+        return None
+    work_domain = os.environ.get("WORK_EMAIL_DOMAIN", "").strip().lower()
+    verified = [e for e in emails if e.get("verified")]
+    if work_domain:
+        for entry in verified:
+            address = entry.get("email")
+            if isinstance(address, str) and address.lower().endswith(f"@{work_domain}"):
+                return address
+    primary = next((x for x in verified if x.get("primary")), None)
+    if primary:
+        address = primary.get("email")
+        if isinstance(address, str) and address:
+            return address
+    if verified:
+        address = verified[0].get("email")
+        if isinstance(address, str) and address:
+            return address
+    return None

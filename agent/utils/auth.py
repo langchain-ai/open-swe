@@ -13,10 +13,11 @@ from langgraph.config import get_config
 from langgraph.graph.state import RunnableConfig
 from langgraph_sdk import get_client
 
+from ..dashboard.account_links import get_linear_link_by_user, get_slack_link_by_user
+from ..dashboard.profiles import get_access_token, get_email_for_github_login
 from ..encryption import encrypt_token
 from .github_app import get_github_app_installation_token_with_expiry
 from .github_token import get_github_token_from_thread
-from .github_user_email_map import GITHUB_USER_EMAIL_MAP
 from .linear import comment_on_linear_issue
 from .slack import post_slack_ephemeral_message, post_slack_thread_reply
 
@@ -319,14 +320,35 @@ async def save_encrypted_token_from_email(
     tenant_id = user_info.get("tenant_id")
     if not ls_user_id or not tenant_id:
         account_label = _source_account_label(source)
+        configurable = config.get("configurable", {})
+        provider_user_id: str | None = None
+        if source == "slack":
+            slack_thread = configurable.get("slack_thread") or {}
+            if isinstance(slack_thread, dict):
+                tid = slack_thread.get("triggering_user_id")
+                if isinstance(tid, str):
+                    provider_user_id = tid
+        elif source == "linear":
+            linear_issue = configurable.get("linear_issue") or {}
+            if isinstance(linear_issue, dict):
+                tid = linear_issue.get("triggering_user_id")
+                if isinstance(tid, str):
+                    provider_user_id = tid
+        deep_link = _account_links_deep_link(source, provider_user_id)
+        link_block = (
+            f"\n\nIf you've already linked your {account_label} account in the dashboard, "
+            "you should not see this message — let an admin know.\n\n"
+            f"Otherwise, sign in here to link your accounts:\n{deep_link}"
+            if deep_link
+            else ""
+        )
         message = (
             "🔐 **GitHub Authentication Required**\n\n"
             f"Could not find a LangSmith account for **{email}**.\n\n"
-            "Please ensure this email is invited to the main LangSmith organization. "
-            f"If your {account_label} account uses a different email than your LangSmith account, "
-            "you may need to update one of them to match.\n\n"
-            "Once your email is added to LangSmith, "
-            f"{_retry_instruction(source)}"
+            "Please ensure this email is invited to the main LangSmith organization, "
+            f"or link your {account_label} account to a GitHub identity via the dashboard."
+            f"{link_block}\n\n"
+            f"Once linked, {_retry_instruction(source)}"
         )
         await leave_failure_comment(source, message)
         raise ValueError(f"No ls_user_id found from email {email}")
@@ -378,6 +400,69 @@ async def _resolve_bot_installation_token(thread_id: str) -> tuple[str, str, str
     return bot_token, encrypted, expires_at
 
 
+async def _resolve_token_via_account_link(
+    configurable: dict[str, Any], thread_id: str
+) -> tuple[str, str, str | None] | None:
+    """Try to fulfil auth via an explicit dashboard account link.
+
+    Looks up the provider's user_id against the corresponding link namespace;
+    if a link is found and the linked GitHub user has an OAuth token stored
+    via the dashboard, that token is used directly. Returns ``None`` when
+    no link / no stored token is found, in which case callers should fall
+    through to the source-specific email-based resolution path.
+    """
+    source = configurable.get("source")
+    if source == "slack":
+        slack_thread = configurable.get("slack_thread") or {}
+        provider_user_id = (
+            slack_thread.get("triggering_user_id") if isinstance(slack_thread, dict) else None
+        )
+        if not isinstance(provider_user_id, str) or not provider_user_id:
+            return None
+        link = await get_slack_link_by_user(provider_user_id)
+    elif source == "linear":
+        linear_issue = configurable.get("linear_issue") or {}
+        provider_user_id = (
+            linear_issue.get("triggering_user_id") if isinstance(linear_issue, dict) else None
+        )
+        if not isinstance(provider_user_id, str) or not provider_user_id:
+            return None
+        link = await get_linear_link_by_user(provider_user_id)
+    else:
+        return None
+
+    if not link:
+        return None
+    github_login = link.get("github_login")
+    if not isinstance(github_login, str) or not github_login:
+        return None
+    token = await get_access_token(github_login)
+    if not token:
+        logger.info(
+            "Found %s link for user %s → github_login=%s but no stored OAuth token",
+            source,
+            provider_user_id,
+            github_login,
+        )
+        return None
+    encrypted = await persist_encrypted_github_token(thread_id, token, expires_at=None)
+    logger.info(
+        "Resolved GitHub token via %s account link for github_login=%s", source, github_login
+    )
+    return token, encrypted, None
+
+
+def _account_links_deep_link(source: str, provider_user_id: str | None) -> str | None:
+    """Build a deep link into the dashboard's account-links page."""
+    base = os.environ.get("DASHBOARD_BASE_URL", "").rstrip("/")
+    if not base:
+        return None
+    url = f"{base}/account-links?source={source}"
+    if provider_user_id:
+        url = f"{url}&user_id={provider_user_id}"
+    return url
+
+
 async def resolve_github_token(
     config: RunnableConfig, thread_id: str
 ) -> tuple[str, str, str | None]:
@@ -414,10 +499,17 @@ async def resolve_github_token(
             if cached_token and cached_encrypted:
                 return cached_token, cached_encrypted, cached_expires_at
             github_login = configurable.get("github_login")
-            email = GITHUB_USER_EMAIL_MAP.get(github_login or "")
+            email = await get_email_for_github_login(github_login or "")
             if not email:
-                raise ValueError(f"No email mapping found for GitHub user '{github_login}'")
+                raise ValueError(
+                    f"No stored email for GitHub user '{github_login}'. "
+                    "Ask them to log in to the dashboard once."
+                )
             return await save_encrypted_token_from_email(email, source)
+
+        via_link = await _resolve_token_via_account_link(configurable, thread_id)
+        if via_link is not None:
+            return via_link
         return await save_encrypted_token_from_email(configurable.get("user_email"), source)
     except ValueError as exc:
         logger.error("GitHub auth failed for thread %s: %s", thread_id, str(exc))

@@ -86,6 +86,29 @@ export interface ReposPayload {
   repositories: Array<Repository>;
 }
 
+export interface SlackLink {
+  github_login: string;
+  slack_user_id: string;
+  slack_team_id: string;
+  slack_email: string;
+  linked_at: string;
+}
+
+export interface LinearLink {
+  github_login: string;
+  linear_user_id: string;
+  linear_workspace_id: string;
+  linear_email: string;
+  linked_at: string;
+}
+
+export interface AccountLinks {
+  slack: SlackLink | null;
+  linear: LinearLink | null;
+}
+
+export type LinkProvider = "slack" | "linear";
+
 export const api = {
   me: () => request<SessionUser>("/me"),
   options: () => request<{ models: Array<ModelOption> }>("/options"),
@@ -93,6 +116,9 @@ export const api = {
   saveProfile: (body: ProfileUpdate) =>
     request<Profile>("/profile", { method: "PUT", body: JSON.stringify(body) }),
   repos: () => request<ReposPayload>("/repos"),
+  accountLinks: () => request<AccountLinks>("/account-links"),
+  deleteAccountLink: (provider: LinkProvider) =>
+    request<void>(`/account-links/${provider}`, { method: "DELETE" }),
   adminListProfiles: () => request<Array<Profile>>("/admin/profiles"),
   adminSaveProfile: (login: string, body: ProfileUpdate & { email?: string }) =>
     request<Profile>(`/admin/profiles/${encodeURIComponent(login)}`, {
@@ -106,4 +132,10 @@ export function loginUrl(redirectTo?: string): string {
   const target = redirectTo ?? (typeof window !== "undefined" ? window.location.origin : "");
   const qs = target ? `?redirect_to=${encodeURIComponent(target)}` : "";
   return `${API_BASE}/dashboard/api/auth/login${qs}`;
+}
+
+export function providerLinkUrl(provider: LinkProvider, redirectTo?: string): string {
+  const target = redirectTo ?? (typeof window !== "undefined" ? window.location.href : "");
+  const qs = target ? `?redirect_to=${encodeURIComponent(target)}` : "";
+  return `${API_BASE}/dashboard/api/auth/${provider}/login${qs}`;
 }

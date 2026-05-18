@@ -408,9 +408,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     github_token, new_encrypted, new_expires_at = await resolve_github_token(config, thread_id)
     config["metadata"]["github_token_encrypted"] = new_encrypted
     config["metadata"]["github_token_expires_at"] = new_expires_at
-    triggering_user_identity = await asyncio.to_thread(
-        resolve_triggering_user_identity, config, github_token
-    )
+    triggering_user_identity = await resolve_triggering_user_identity(config, github_token)
     del github_token
 
     sandbox_backend = await ensure_sandbox_for_thread(thread_id)
@@ -426,7 +424,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
 
     model_id = os.environ.get("LLM_MODEL_ID", DEFAULT_LLM_MODEL_ID)
     profile_effort: str | None = None
-    profile_login = resolve_github_login(config)
+    profile_login = await resolve_github_login(config)
     if profile_login:
         profile = await load_profile(profile_login)
         if profile:

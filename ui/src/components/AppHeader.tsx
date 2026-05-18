@@ -32,6 +32,13 @@ export function AppHeader({ user }: { user: SessionUser }) {
           >
             Profile
           </Link>
+          <Link
+            to="/account-links"
+            className="text-muted-foreground hover:text-foreground"
+            activeProps={{ className: "text-foreground font-medium" }}
+          >
+            Linked accounts
+          </Link>
           {user.is_admin && (
             <Link
               to="/admin"

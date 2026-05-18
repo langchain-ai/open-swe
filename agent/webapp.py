@@ -22,6 +22,7 @@ from .dashboard.agent_overrides import (
     get_profile_default_repo,
     resolve_login_from_email,
 )
+from .dashboard.profiles import get_email_for_github_login
 from .reviewer_findings import (
     REVIEWER_THREAD_KIND,
     ReviewerPRMeta,
@@ -50,13 +51,14 @@ from .utils.github_comments import (
     get_thread_id_from_branch,
     parse_github_review_command,
     react_to_github_comment,
+    resolve_trusted_authors,
     sanitize_github_comment_body,
     verify_github_signature,
 )
 from .utils.github_org_membership import INTERNAL_BOT_LOGINS, is_user_active_org_member
 from .utils.github_token import get_github_token_from_thread, invalidate_cached_github_token
-from .utils.github_user_email_map import GITHUB_USER_EMAIL_MAP
 from .utils.linear import post_linear_trace_comment
+from .utils.linear_app_token import get_linear_app_token, invalidate_linear_app_token
 from .utils.linear_team_repo_map import LINEAR_TEAM_TO_REPO
 from .utils.multimodal import dedupe_urls, extract_image_urls, fetch_image_block
 from .utils.repo import extract_repo_from_text
@@ -155,7 +157,6 @@ ALLOWED_GITHUB_REPOS: frozenset[str] = frozenset(
     if repo.strip()
 )
 
-LINEAR_API_KEY = os.environ.get("LINEAR_API_KEY", "")
 
 _GITHUB_BOT_MESSAGE_PREFIXES = (
     "🔐 **GitHub Authentication Required**",
@@ -193,21 +194,45 @@ def get_repo_config_from_team_mapping(
     return fallback
 
 
+async def _linear_graphql_call(payload: dict[str, Any]) -> dict[str, Any] | None:
+    """Issue a Linear GraphQL request with the OAuth app token, retrying on 401."""
+    try:
+        token = await get_linear_app_token()
+    except RuntimeError as exc:
+        logger.warning("Linear app token unavailable: %s", exc)
+        return None
+
+    async with httpx.AsyncClient() as client:
+        for attempt in range(2):
+            try:
+                response = await client.post(
+                    "https://api.linear.app/graphql",
+                    headers={
+                        "Authorization": f"Bearer {token}",
+                        "Content-Type": "application/json",
+                    },
+                    json=payload,
+                )
+            except httpx.HTTPError:
+                return None
+
+            if response.status_code == 401 and attempt == 0:
+                invalidate_linear_app_token()
+                try:
+                    token = await get_linear_app_token(force_refresh=True)
+                except RuntimeError:
+                    return None
+                continue
+            try:
+                response.raise_for_status()
+            except httpx.HTTPError:
+                return None
+            return response.json()
+    return None
+
+
 async def react_to_linear_comment(comment_id: str, emoji: str = "👀") -> bool:
-    """Add an emoji reaction to a Linear comment.
-
-    Args:
-        comment_id: The Linear comment ID
-        emoji: The emoji to react with (default: eyes 👀)
-
-    Returns:
-        True if successful, False otherwise
-    """
-    if not LINEAR_API_KEY:
-        return False
-
-    url = "https://api.linear.app/graphql"
-
+    """Add an emoji reaction to a Linear comment."""
     mutation = """
     mutation ReactionCreate($commentId: String!, $emoji: String!) {
         reactionCreate(input: { commentId: $commentId, emoji: $emoji }) {
@@ -215,41 +240,16 @@ async def react_to_linear_comment(comment_id: str, emoji: str = "👀") -> bool:
         }
     }
     """
-
-    async with httpx.AsyncClient() as client:
-        try:
-            response = await client.post(
-                url,
-                headers={
-                    "Authorization": LINEAR_API_KEY,
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "query": mutation,
-                    "variables": {"commentId": comment_id, "emoji": emoji},
-                },
-            )
-            response.raise_for_status()
-            result = response.json()
-            return bool(result.get("data", {}).get("reactionCreate", {}).get("success"))
-        except Exception:  # noqa: BLE001
-            return False
+    result = await _linear_graphql_call(
+        {"query": mutation, "variables": {"commentId": comment_id, "emoji": emoji}}
+    )
+    if not result:
+        return False
+    return bool(result.get("data", {}).get("reactionCreate", {}).get("success"))
 
 
 async def fetch_linear_issue_details(issue_id: str) -> dict[str, Any] | None:
-    """Fetch full issue details from Linear API including description and comments.
-
-    Args:
-        issue_id: The Linear issue ID
-
-    Returns:
-        Full issue data dict, or None if fetch failed
-    """
-    if not LINEAR_API_KEY:
-        return None
-
-    url = "https://api.linear.app/graphql"
-
+    """Fetch full issue details from Linear API including description and comments."""
     query = """
     query GetIssue($issueId: String!) {
         issue(id: $issueId) {
@@ -282,26 +282,10 @@ async def fetch_linear_issue_details(issue_id: str) -> dict[str, Any] | None:
         }
     }
     """
-
-    async with httpx.AsyncClient() as client:
-        try:
-            response = await client.post(
-                url,
-                headers={
-                    "Authorization": LINEAR_API_KEY,
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "query": query,
-                    "variables": {"issueId": issue_id},
-                },
-            )
-            response.raise_for_status()
-            result = response.json()
-
-            return result.get("data", {}).get("issue")
-        except httpx.HTTPError:
-            return None
+    result = await _linear_graphql_call({"query": query, "variables": {"issueId": issue_id}})
+    if not result:
+        return None
+    return result.get("data", {}).get("issue")
 
 
 def generate_thread_id_from_issue(issue_id: str) -> str:
@@ -525,7 +509,9 @@ async def get_slack_repo_config(
                 if isinstance(slack_user, dict)
                 else None
             )
-            profile_repo = await get_profile_default_repo(resolve_login_from_email(slack_email))
+            profile_repo = await get_profile_default_repo(
+                await resolve_login_from_email(slack_email)
+            )
             if profile_repo:
                 logger.info(
                     "Applying dashboard default_repo for Slack user %s: %s/%s",
@@ -674,20 +660,24 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
 
     user_email = None
     user_name = None
+    triggering_user_id = ""
     comment_author = issue_data.get("comment_author", {})
     if comment_author:
         user_email = comment_author.get("email")
         user_name = comment_author.get("name")
+        triggering_user_id = comment_author.get("id", "") or ""
     if not user_email:
         creator = full_issue.get("creator", {})
         if creator:
             user_email = creator.get("email")
             user_name = user_name or creator.get("name")
+            triggering_user_id = triggering_user_id or (creator.get("id", "") or "")
     if not user_email:
         assignee = full_issue.get("assignee", {})
         if assignee:
             user_email = assignee.get("email")
             user_name = user_name or assignee.get("name")
+            triggering_user_id = triggering_user_id or (assignee.get("id", "") or "")
 
     logger.info("User email for issue %s: %s", issue_id, user_email)
 
@@ -823,6 +813,7 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
             "identifier": identifier,
             "linear_project_id": linear_project_id,
             "linear_issue_number": linear_issue_number,
+            "triggering_user_id": triggering_user_id,
             "triggering_user_name": user_name or "",
         },
         "user_email": user_email,
@@ -1182,7 +1173,7 @@ async def linear_webhook(  # noqa: PLR0911, PLR0912, PLR0915
         comment_user_email = (data.get("user") or {}).get("email")
         try:
             profile_repo = await get_profile_default_repo(
-                resolve_login_from_email(comment_user_email)
+                await resolve_login_from_email(comment_user_email)
             )
         except Exception:  # noqa: BLE001
             logger.exception("Failed to apply dashboard default_repo for Linear user")
@@ -1407,14 +1398,18 @@ _SUPPORTED_GH_COMMENT_ACTIONS = {
 }
 
 
-def _build_github_issue_comments_text(comments: list[dict[str, Any]]) -> str:
+def _build_github_issue_comments_text(
+    comments: list[dict[str, Any]], *, trusted_authors: set[str] | None = None
+) -> str:
     lines: list[str] = []
     for comment in comments:
         body = comment.get("body", "")
         if not body or any(body.startswith(prefix) for prefix in _GITHUB_BOT_MESSAGE_PREFIXES):
             continue
         author = comment.get("author", "unknown")
-        formatted_body = format_github_comment_body_for_prompt(author, body)
+        formatted_body = format_github_comment_body_for_prompt(
+            author, body, trusted_authors=trusted_authors
+        )
         lines.append(f"\n**{author}:**\n{formatted_body}\n")
 
     if not lines:
@@ -1432,12 +1427,15 @@ def build_github_issue_prompt(
     *,
     github_login: str,
     issue_author: str = "",
+    trusted_authors: set[str] | None = None,
 ) -> str:
     """Build the user prompt for a GitHub issue-triggered run."""
     triggered_by_line = f"## Triggered by: {github_login}\n\n" if github_login else ""
-    comments_text = _build_github_issue_comments_text(comments)
+    comments_text = _build_github_issue_comments_text(comments, trusted_authors=trusted_authors)
     sanitized_title = sanitize_github_comment_body(title)
-    formatted_body = format_github_comment_body_for_prompt(issue_author or github_login, body)
+    formatted_body = format_github_comment_body_for_prompt(
+        issue_author or github_login, body, trusted_authors=trusted_authors
+    )
     return (
         "Please work on the following GitHub issue:\n\n"
         f"## Repository: {repo_config.get('owner')}/{repo_config.get('name')}\n\n"
@@ -1452,17 +1450,24 @@ def build_github_issue_prompt(
     )
 
 
-def build_github_issue_followup_prompt(github_login: str, comment_body: str) -> str:
+def build_github_issue_followup_prompt(
+    github_login: str, comment_body: str, *, trusted_authors: set[str] | None = None
+) -> str:
     """Build the prompt for a follow-up GitHub issue comment."""
-    return (
-        f"**{github_login}:**\n{format_github_comment_body_for_prompt(github_login, comment_body)}"
+    formatted = format_github_comment_body_for_prompt(
+        github_login, comment_body, trusted_authors=trusted_authors
     )
+    return f"**{github_login}:**\n{formatted}"
 
 
-def build_github_issue_update_prompt(github_login: str, title: str, body: str) -> str:
+def build_github_issue_update_prompt(
+    github_login: str, title: str, body: str, *, trusted_authors: set[str] | None = None
+) -> str:
     """Build the prompt for a follow-up GitHub issue title/body update."""
     sanitized_title = sanitize_github_comment_body(title)
-    formatted_body = format_github_comment_body_for_prompt(github_login, body)
+    formatted_body = format_github_comment_body_for_prompt(
+        github_login, body, trusted_authors=trusted_authors
+    )
     return (
         f"**{github_login}:** updated the GitHub issue title/body.\n\n"
         f"Title: {sanitized_title}\n\n"
@@ -2160,9 +2165,9 @@ async def process_github_pr_comment(payload: dict[str, Any], event_type: str) ->
             else:
                 logger.warning("Failed to persist branch_name metadata for thread %s", thread_id)
 
-    email = GITHUB_USER_EMAIL_MAP.get(github_login, "")
+    email = await get_email_for_github_login(github_login) or ""
     if not email:
-        logger.warning("No email mapping for GitHub user '%s', skipping", github_login)
+        logger.warning("No stored email for GitHub user '%s', skipping", github_login)
         return
 
     github_token = await _get_or_resolve_thread_github_token(thread_id, email)
@@ -2214,7 +2219,10 @@ async def process_github_pr_comment(payload: dict[str, Any], event_type: str) ->
         logger.info("No comments found since last @open-swe tag for PR %s", pr_number)
         return
 
-    prompt = build_pr_prompt(comments, pr_url, repo_config=repo_config)
+    trusted_authors = await resolve_trusted_authors(c.get("author", "") for c in comments)
+    prompt = build_pr_prompt(
+        comments, pr_url, repo_config=repo_config, trusted_authors=trusted_authors
+    )
     await _trigger_or_queue_run(
         thread_id,
         prompt,
@@ -2255,9 +2263,9 @@ async def process_github_issue(payload: dict[str, Any], event_type: str) -> None
         logger.warning("Missing GitHub issue id/number, skipping")
         return
 
-    email = GITHUB_USER_EMAIL_MAP.get(github_login, "")
+    email = await get_email_for_github_login(github_login) or ""
     if not email:
-        logger.warning("No email mapping for GitHub user '%s', skipping", github_login)
+        logger.warning("No stored email for GitHub user '%s', skipping", github_login)
         return
 
     thread_id = generate_thread_id_from_github_issue(issue_id)
@@ -2301,12 +2309,18 @@ async def process_github_issue(payload: dict[str, Any], event_type: str) -> None
 
     if existing_thread:
         if event_type == "issue_comment":
+            follow_up_author = comment.get("user", {}).get("login", github_login) or github_login
+            trusted_authors = await resolve_trusted_authors([follow_up_author])
             prompt = build_github_issue_followup_prompt(
-                comment.get("user", {}).get("login", github_login) or github_login,
+                follow_up_author,
                 comment.get("body", ""),
+                trusted_authors=trusted_authors,
             )
         else:
-            prompt = build_github_issue_update_prompt(github_login, title, description)
+            trusted_authors = await resolve_trusted_authors([github_login])
+            prompt = build_github_issue_update_prompt(
+                github_login, title, description, trusted_authors=trusted_authors
+            )
     else:
         try:
             comments = await fetch_issue_comments(
@@ -2328,6 +2342,9 @@ async def process_github_issue(payload: dict[str, Any], event_type: str) -> None
             )
             comments.sort(key=lambda item: item.get("created_at", ""))
 
+        trusted_authors = await resolve_trusted_authors(
+            [issue_author or github_login, github_login, *(c.get("author", "") for c in comments)]
+        )
         prompt = build_github_issue_prompt(
             repo_config,
             issue_number,
@@ -2337,6 +2354,7 @@ async def process_github_issue(payload: dict[str, Any], event_type: str) -> None
             comments,
             github_login=github_login,
             issue_author=issue_author,
+            trusted_authors=trusted_authors,
         )
     configurable: dict[str, Any] = {
         "source": "github",

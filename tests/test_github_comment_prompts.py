@@ -104,6 +104,7 @@ def test_build_github_issue_prompt_only_wraps_external_comments() -> None:
             },
         ],
         github_login="octocat",
+        trusted_authors={"bracesproul"},
     )
 
     assert "**bracesproul:**\nInternal guidance" in prompt
@@ -111,3 +112,24 @@ def test_build_github_issue_prompt_only_wraps_external_comments() -> None:
     assert github_comments.UNTRUSTED_GITHUB_COMMENT_OPEN_TAG in prompt
     assert github_comments.UNTRUSTED_GITHUB_COMMENT_CLOSE_TAG in prompt
     assert "External Untrusted Comments" not in prompt
+
+
+def test_build_github_issue_prompt_wraps_all_when_no_trust_set() -> None:
+    prompt = webapp.build_github_issue_prompt(
+        {"owner": "langchain-ai", "name": "open-swe"},
+        42,
+        "12345",
+        "Fix the flaky test",
+        "The test is failing intermittently.",
+        [
+            {
+                "author": "bracesproul",
+                "body": "Internal guidance",
+                "created_at": "2026-03-09T00:00:00Z",
+            },
+        ],
+        github_login="octocat",
+    )
+
+    assert "Internal guidance" in prompt
+    assert github_comments.UNTRUSTED_GITHUB_COMMENT_OPEN_TAG in prompt

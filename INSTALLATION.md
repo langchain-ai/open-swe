@@ -205,12 +205,20 @@ GitHub triggering works automatically once your GitHub App is set up (step 3). U
 - Tag `@openswe` in issue comments for follow-up instructions
 - Tag `@openswe` in PR review comments to have it address review feedback
 
-To control which GitHub users can trigger the agent, add them to the `GITHUB_USER_EMAIL_MAP` in `agent/utils/github_user_email_map.py`:
+Users authorize the agent by signing into the dashboard once with their GitHub account (`/login`). Their email + encrypted GitHub OAuth token are stored in the LangGraph Store, and every subsequent webhook (GitHub PR/issue, Slack, Linear) resolves their identity from there. There is no per-user mapping file to maintain.
 
-```python
-GITHUB_USER_EMAIL_MAP = {
-    "their-github-username": "their-email@example.com",
-}
+To restrict dashboard logins to members of a specific GitHub organization, set:
+
+```bash
+ALLOWED_AUTH_ORG="langchain-ai"      # leave empty to allow any GitHub user
+```
+
+When set, non-members are redirected to a "not authorized" page instead of getting a session cookie.
+
+If your team's work email domain isn't the user's primary email on GitHub, set:
+
+```bash
+WORK_EMAIL_DOMAIN="langchain.dev"    # prefer this domain when scanning verified emails
 ```
 
 You should also configure which GitHub organizations and/or repositories the agent is allowed to operate on. You can specify allowed orgs, specific `owner/repo` pairs, or both:
@@ -227,9 +235,24 @@ A GitHub or Linear webhook is accepted if the resolved repo's org is in `ALLOWED
 
 ### Linear (optional)
 
-Open SWE listens for Linear comments that mention `@openswe`.
+Open SWE listens for Linear comments that mention `@openswe`. Linear access has two parts: a webhook (for incoming events) and an **OAuth application** (used both as a workspace service account and for end-user account linking).
 
-**Create a webhook:**
+**Create the OAuth app:**
+
+1. In Linear, go to **Settings → API → Applications → New application**
+2. Fill in:
+   - **Name**: `Open SWE`
+   - **Callback URLs**: `https://<your-api-base>/dashboard/api/auth/linear/callback` (used by individual user account-linking from the dashboard)
+   - **Public** vs **Private** doesn't matter for an internal workspace install
+3. Save the application, then copy the **Client ID** and **Client Secret** — these become `LINEAR_CLIENT_ID` and `LINEAR_CLIENT_SECRET`.
+4. **Install the app as an agent into your workspace.** From the application page in Linear, visit the install URL with `actor=app` appended:
+   ```
+   https://linear.app/oauth/authorize?response_type=code&client_id=<LINEAR_CLIENT_ID>&redirect_uri=<your-callback>&scope=read,write,app:assignable,app:mentionable&actor=app
+   ```
+   Approve the install as a workspace admin. This registers Open SWE as an in-workspace agent — comments it posts will be attributed to the app, not to the installing user.
+5. Once the app is installed, server-side API calls fetch a token automatically via the `client_credentials` grant. No long-lived token to copy or rotate manually — `LINEAR_CLIENT_ID` + `LINEAR_CLIENT_SECRET` are enough.
+
+**Create the webhook:**
 
 1. In Linear, go to **Settings → API → Webhooks → New webhook**
 2. Fill in:
@@ -238,12 +261,6 @@ Open SWE listens for Linear comments that mention `@openswe`.
    - **Secret**: generate with `openssl rand -hex 32` — save this as `LINEAR_WEBHOOK_SECRET`
 3. Under **Data change events**, enable **Comments → Create** only
 4. Click **Create webhook**
-
-**Get your API key:**
-
-1. Go to **Settings → API → Personal API keys → New API key**
-2. Name it `open-swe`, select **All access**, and copy the key
-3. Save it as `LINEAR_API_KEY`
 
 **Configure team-to-repo mapping:**
 
@@ -296,7 +313,8 @@ Users can also override the team/project mapping per-comment by including `repo:
     },
     "oauth_config": {
         "redirect_urls": [
-            "https://smith.langchain.com/host-oauth-callback/<your-provider-id>"
+            "https://smith.langchain.com/host-oauth-callback/<your-provider-id>",
+            "https://<your-api-base>/dashboard/api/auth/slack/callback"
         ],
         "scopes": {
             "bot": [
@@ -315,6 +333,11 @@ Users can also override the team/project mapping per-comment by including `repo:
                 "team:read",
                 "users:read",
                 "users:read.email"
+            ],
+            "user": [
+                "openid",
+                "email",
+                "profile"
             ]
         }
     },
@@ -337,6 +360,7 @@ Users can also override the team/project mapping per-comment by including `repo:
 </details>
 
 3. Install the app to your workspace and copy the **Bot User OAuth Token** (`xoxb-...`)
+4. Under **Basic Information → App Credentials** copy the **Client ID** and **Client Secret**. These are used for the dashboard's "Sign in with Slack" account-linking flow.
 
 **Credentials you'll need:**
 
@@ -344,6 +368,7 @@ Users can also override the team/project mapping per-comment by including `repo:
 - `SLACK_SIGNING_SECRET`: found under **Basic Information → App Credentials**
 - `SLACK_BOT_USER_ID`: the bot's user ID (find it in Slack by clicking the bot's profile)
 - `SLACK_BOT_USERNAME`: the bot's display name (e.g. `open-swe`)
+- `SLACK_CLIENT_ID` / `SLACK_CLIENT_SECRET`: used by the dashboard's account-linking flow. Same Slack app — these are pulled from **Basic Information → App Credentials**.
 
 **Default repo:**
 
@@ -397,7 +422,8 @@ DEFAULT_REPO_OWNER=""                  # Default GitHub org (e.g. "my-org")
 DEFAULT_REPO_NAME=""                   # Default GitHub repo (e.g. "my-repo")
 
 # === Linear (if using Linear trigger) ===
-LINEAR_API_KEY=""                      # From step 5
+LINEAR_CLIENT_ID=""                    # OAuth app client id (replaces legacy LINEAR_API_KEY)
+LINEAR_CLIENT_SECRET=""                # OAuth app client secret
 LINEAR_WEBHOOK_SECRET=""               # From step 5
 
 # === Slack (if using Slack trigger) ===
@@ -405,6 +431,15 @@ SLACK_BOT_TOKEN=""                     # From step 5
 SLACK_BOT_USER_ID=""
 SLACK_BOT_USERNAME=""
 SLACK_SIGNING_SECRET=""
+SLACK_CLIENT_ID=""                     # From Slack app Basic Information — enables dashboard account linking
+SLACK_CLIENT_SECRET=""
+
+# === Dashboard / Identity (optional) ===
+ALLOWED_AUTH_ORG=""                    # Restrict dashboard login to active members of this GitHub org
+WORK_EMAIL_DOMAIN=""                   # Prefer this verified email domain on GitHub OAuth (e.g. langchain.dev)
+DASHBOARD_BASE_URL=""                  # Public URL of the dashboard frontend (required for auth-failure deep links)
+DASHBOARD_API_BASE_URL=""              # Public URL of the agent server (used to build OAuth redirect URIs)
+DASHBOARD_JWT_SECRET=""                # HMAC secret for dashboard session JWTs — `openssl rand -base64 64`
 
 # === Exa (optional — enables web search tool) ===
 EXA_API_KEY=""                         # From https://dashboard.exa.ai
@@ -537,10 +572,23 @@ The `langgraph.json` at the project root already defines the graph entry point a
 
 ### Agent not responding to comments
 
-- For GitHub: ensure the comment or issue contains `@openswe` (case-insensitive), and the commenter's GitHub username is in `GITHUB_USER_EMAIL_MAP`
-- For Linear: ensure the comment contains `@openswe` (case-insensitive)
-- For Slack: ensure the bot is invited to the channel and the message is an `@mention`
+- For GitHub: ensure the comment or issue contains `@openswe` (case-insensitive), and that the commenter has signed in to the dashboard at least once so their GitHub identity is in the store (`["oauth_tokens"]`)
+- For Linear: ensure the comment contains `@openswe` (case-insensitive). If the commenter's Linear email doesn't match a LangSmith account, they need to **Connect Linear** from the dashboard's "Linked accounts" page first
+- For Slack: ensure the bot is invited to the channel and the message is an `@mention`. Same caveat about Slack-email mismatches — direct users to "Connect Slack" in the dashboard
 - Check server logs for webhook processing errors
+
+### Migrating from `LINEAR_API_KEY` / `GITHUB_USER_EMAIL_MAP`
+
+If you're upgrading from a previous deploy that used the hardcoded `GITHUB_USER_EMAIL_MAP` and personal `LINEAR_API_KEY`:
+
+1. Create the Linear OAuth app (see Linear section) and set `LINEAR_CLIENT_ID` / `LINEAR_CLIENT_SECRET`. The personal `LINEAR_API_KEY` is no longer read — delete it from your environment.
+2. Set `DASHBOARD_BASE_URL`, `DASHBOARD_API_BASE_URL`, and `DASHBOARD_JWT_SECRET` if you haven't already.
+3. Deploy the new code.
+4. Run the seed migration script once to backfill the email side of the OAuth-tokens namespace for users who haven't logged in to the dashboard yet:
+   ```bash
+   LANGGRAPH_URL=https://your-deployment uv run python -m scripts.seed_email_map
+   ```
+   This ensures existing users keep working without each having to log in to the dashboard before their next agent invocation.
 
 ### Token encryption errors
 
