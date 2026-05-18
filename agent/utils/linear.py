@@ -3,45 +3,60 @@
 from __future__ import annotations
 
 import logging
-import os
 from typing import Any
 
 import httpx
 
 from agent.utils.langsmith import get_langsmith_trace_url
+from agent.utils.linear_app_token import get_linear_app_token, invalidate_linear_app_token
 
 logger = logging.getLogger(__name__)
 
-LINEAR_API_KEY = os.environ.get("LINEAR_API_KEY", "")
 LINEAR_API_URL = "https://api.linear.app/graphql"
 
 
-def _headers() -> dict[str, str]:
-    return {
-        "Authorization": LINEAR_API_KEY,
-        "Content-Type": "application/json",
-    }
-
-
 async def _graphql_request(query: str, variables: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Execute a GraphQL request against the Linear API."""
-    if not LINEAR_API_KEY:
-        return {"error": "LINEAR_API_KEY is not set"}
+    """Execute a GraphQL request against the Linear API.
+
+    Uses the workspace OAuth-app token (auto-refreshed when expired). A 401
+    response invalidates the cached token and retries once before giving up.
+    """
+    payload = {"query": query, "variables": variables or {}}
+    try:
+        token = await get_linear_app_token()
+    except RuntimeError as exc:
+        return {"error": str(exc)}
 
     async with httpx.AsyncClient() as http_client:
-        try:
-            response = await http_client.post(
-                LINEAR_API_URL,
-                headers=_headers(),
-                json={"query": query, "variables": variables or {}},
-            )
-            response.raise_for_status()
+        for attempt in range(2):
+            try:
+                response = await http_client.post(
+                    LINEAR_API_URL,
+                    headers={
+                        "Authorization": f"Bearer {token}",
+                        "Content-Type": "application/json",
+                    },
+                    json=payload,
+                )
+            except Exception as e:  # noqa: BLE001
+                return {"error": str(e)}
+
+            if response.status_code == 401 and attempt == 0:
+                invalidate_linear_app_token()
+                try:
+                    token = await get_linear_app_token(force_refresh=True)
+                except RuntimeError as exc:
+                    return {"error": str(exc)}
+                continue
+            try:
+                response.raise_for_status()
+            except Exception as e:  # noqa: BLE001
+                return {"error": str(e)}
             result = response.json()
             if result.get("errors"):
                 return {"error": result["errors"]}
             return result.get("data", {})
-        except Exception as e:  # noqa: BLE001
-            return {"error": str(e)}
+    return {"error": "Linear API request retry exhausted"}
 
 
 async def comment_on_linear_issue(

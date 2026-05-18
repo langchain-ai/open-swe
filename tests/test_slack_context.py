@@ -382,7 +382,7 @@ def test_get_slack_repo_config_applies_profile_default_repo(
     async def fake_get_slack_user_info(user_id: str) -> dict:
         return {"profile": {"email": "mason@example.com"}}
 
-    def fake_resolve_login_from_email(email: str | None) -> str | None:
+    async def fake_resolve_login_from_email(email: str | None) -> str | None:
         return "mason"
 
     async def fake_get_profile_default_repo(login: str | None) -> dict[str, str] | None:

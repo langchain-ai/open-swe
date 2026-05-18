@@ -8,7 +8,7 @@ from typing import Any
 
 import httpx
 
-from .github_user_email_map import GITHUB_USER_EMAIL_MAP
+from ..dashboard.profiles import get_email_for_github_login
 
 logger = logging.getLogger(__name__)
 
@@ -40,20 +40,20 @@ def _github_noreply_email(login: str, user_id: Any = None) -> str:
     return f"{normalized_login}@users.noreply.github.com"
 
 
-def _identity_from_github_token(github_token: str | None) -> CollaboratorIdentity | None:
+async def _identity_from_github_token(github_token: str | None) -> CollaboratorIdentity | None:
     if not github_token:
         return None
 
     try:
-        response = httpx.get(
-            "https://api.github.com/user",
-            headers={
-                "Authorization": f"Bearer {github_token}",
-                "Accept": "application/vnd.github+json",
-                "X-GitHub-Api-Version": "2022-11-28",
-            },
-            timeout=5.0,
-        )
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            response = await client.get(
+                "https://api.github.com/user",
+                headers={
+                    "Authorization": f"Bearer {github_token}",
+                    "Accept": "application/vnd.github+json",
+                    "X-GitHub-Api-Version": "2022-11-28",
+                },
+            )
         if response.status_code != 200:  # noqa: PLR2004
             logger.debug("GitHub user lookup returned %s", response.status_code)
             return None
@@ -78,15 +78,16 @@ def _identity_from_github_token(github_token: str | None) -> CollaboratorIdentit
         return None
 
 
-def _identity_from_config(config: dict[str, Any]) -> CollaboratorIdentity | None:
+async def _identity_from_config(config: dict[str, Any]) -> CollaboratorIdentity | None:
     configurable = config.get("configurable", {})
 
     github_login = _normalize_text(configurable.get("github_login"))
     if github_login:
         github_user_id = configurable.get("github_user_id")
-        commit_email = _github_noreply_email(github_login, github_user_id) or _normalize_text(
-            GITHUB_USER_EMAIL_MAP.get(github_login)
-        )
+        commit_email = _github_noreply_email(github_login, github_user_id)
+        if not commit_email:
+            mapped = await get_email_for_github_login(github_login)
+            commit_email = _normalize_text(mapped)
         if commit_email:
             return CollaboratorIdentity(
                 display_name=github_login,
@@ -114,7 +115,7 @@ def _identity_from_config(config: dict[str, Any]) -> CollaboratorIdentity | None
     return None
 
 
-def resolve_triggering_user_identity(
+async def resolve_triggering_user_identity(
     config: dict[str, Any],
     github_token: str | None = None,
 ) -> CollaboratorIdentity | None:
@@ -125,7 +126,10 @@ def resolve_triggering_user_identity(
     Slack/Linear supplied an explicit user name and email.
     """
 
-    return _identity_from_github_token(github_token) or _identity_from_config(config)
+    via_token = await _identity_from_github_token(github_token)
+    if via_token is not None:
+        return via_token
+    return await _identity_from_config(config)
 
 
 def add_user_coauthor_trailer(

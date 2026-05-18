@@ -87,7 +87,9 @@ def test_build_github_issue_prompt_includes_issue_context() -> None:
 
 
 def test_build_github_issue_followup_prompt_only_includes_comment() -> None:
-    prompt = webapp.build_github_issue_followup_prompt("bracesproul", "Please handle this")
+    prompt = webapp.build_github_issue_followup_prompt(
+        "bracesproul", "Please handle this", trusted_authors={"bracesproul"}
+    )
 
     assert prompt == "**bracesproul:**\nPlease handle this"
     assert "## Repository" not in prompt
@@ -955,7 +957,16 @@ def test_process_github_issue_uses_resolved_user_token_for_reaction(monkeypatch)
     monkeypatch.setattr(webapp, "fetch_issue_comments", fake_fetch_issue_comments)
     monkeypatch.setattr(webapp, "is_thread_active", fake_is_thread_active)
     monkeypatch.setattr(webapp, "get_client", lambda url: _FakeLangGraphClient())
-    monkeypatch.setattr(webapp, "GITHUB_USER_EMAIL_MAP", {"octocat": "octocat@example.com"})
+
+    async def fake_email_lookup(login: str) -> str | None:
+        return "octocat@example.com" if login == "octocat" else None
+
+    monkeypatch.setattr(webapp, "get_email_for_github_login", fake_email_lookup)
+
+    async def fake_trusted_authors(authors):
+        return set()
+
+    monkeypatch.setattr(webapp, "resolve_trusted_authors", fake_trusted_authors)
 
     asyncio.run(
         webapp.process_github_issue(
@@ -1030,10 +1041,16 @@ def test_process_github_issue_existing_thread_uses_followup_prompt(monkeypatch) 
     monkeypatch.setattr(webapp, "fetch_issue_comments", fake_fetch_issue_comments)
     monkeypatch.setattr(webapp, "is_thread_active", fake_is_thread_active)
     monkeypatch.setattr(webapp, "get_client", lambda url: _FakeLangGraphClient())
-    monkeypatch.setattr(webapp, "GITHUB_USER_EMAIL_MAP", {"octocat": "octocat@example.com"})
-    monkeypatch.setattr(
-        github_comments, "GITHUB_USER_EMAIL_MAP", {"octocat": "octocat@example.com"}
-    )
+
+    async def fake_email_lookup(login: str) -> str | None:
+        return "octocat@example.com" if login == "octocat" else None
+
+    monkeypatch.setattr(webapp, "get_email_for_github_login", fake_email_lookup)
+
+    async def fake_trusted_authors(authors):
+        return {"octocat"}
+
+    monkeypatch.setattr(webapp, "resolve_trusted_authors", fake_trusted_authors)
 
     asyncio.run(
         webapp.process_github_issue(

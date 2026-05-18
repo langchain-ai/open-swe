@@ -10,13 +10,20 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as ProfileRouteImport } from './routes/profile'
+import { Route as NotAuthorizedRouteImport } from './routes/not-authorized'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as AdminRouteImport } from './routes/admin'
+import { Route as AccountLinksRouteImport } from './routes/account-links'
 import { Route as IndexRouteImport } from './routes/index'
 
 const ProfileRoute = ProfileRouteImport.update({
   id: '/profile',
   path: '/profile',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const NotAuthorizedRoute = NotAuthorizedRouteImport.update({
+  id: '/not-authorized',
+  path: '/not-authorized',
   getParentRoute: () => rootRouteImport,
 } as any)
 const LoginRoute = LoginRouteImport.update({
@@ -29,6 +36,11 @@ const AdminRoute = AdminRouteImport.update({
   path: '/admin',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AccountLinksRoute = AccountLinksRouteImport.update({
+  id: '/account-links',
+  path: '/account-links',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
@@ -37,35 +49,62 @@ const IndexRoute = IndexRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/account-links': typeof AccountLinksRoute
   '/admin': typeof AdminRoute
   '/login': typeof LoginRoute
+  '/not-authorized': typeof NotAuthorizedRoute
   '/profile': typeof ProfileRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/account-links': typeof AccountLinksRoute
   '/admin': typeof AdminRoute
   '/login': typeof LoginRoute
+  '/not-authorized': typeof NotAuthorizedRoute
   '/profile': typeof ProfileRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/account-links': typeof AccountLinksRoute
   '/admin': typeof AdminRoute
   '/login': typeof LoginRoute
+  '/not-authorized': typeof NotAuthorizedRoute
   '/profile': typeof ProfileRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/admin' | '/login' | '/profile'
+  fullPaths:
+    | '/'
+    | '/account-links'
+    | '/admin'
+    | '/login'
+    | '/not-authorized'
+    | '/profile'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/admin' | '/login' | '/profile'
-  id: '__root__' | '/' | '/admin' | '/login' | '/profile'
+  to:
+    | '/'
+    | '/account-links'
+    | '/admin'
+    | '/login'
+    | '/not-authorized'
+    | '/profile'
+  id:
+    | '__root__'
+    | '/'
+    | '/account-links'
+    | '/admin'
+    | '/login'
+    | '/not-authorized'
+    | '/profile'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AccountLinksRoute: typeof AccountLinksRoute
   AdminRoute: typeof AdminRoute
   LoginRoute: typeof LoginRoute
+  NotAuthorizedRoute: typeof NotAuthorizedRoute
   ProfileRoute: typeof ProfileRoute
 }
 
@@ -76,6 +115,13 @@ declare module '@tanstack/react-router' {
       path: '/profile'
       fullPath: '/profile'
       preLoaderRoute: typeof ProfileRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/not-authorized': {
+      id: '/not-authorized'
+      path: '/not-authorized'
+      fullPath: '/not-authorized'
+      preLoaderRoute: typeof NotAuthorizedRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/login': {
@@ -92,6 +138,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/account-links': {
+      id: '/account-links'
+      path: '/account-links'
+      fullPath: '/account-links'
+      preLoaderRoute: typeof AccountLinksRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/': {
       id: '/'
       path: '/'
@@ -104,8 +157,10 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AccountLinksRoute: AccountLinksRoute,
   AdminRoute: AdminRoute,
   LoginRoute: LoginRoute,
+  NotAuthorizedRoute: NotAuthorizedRoute,
   ProfileRoute: ProfileRoute,
 }
 export const routeTree = rootRouteImport

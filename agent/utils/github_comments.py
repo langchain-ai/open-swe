@@ -6,13 +6,15 @@ import asyncio
 import hashlib
 import hmac
 import logging
+import os
 import re
+from collections.abc import Iterable
 from typing import Any
 
 import httpx
 
+from .github_org_membership import INTERNAL_BOT_LOGINS, is_user_active_org_member
 from .github_token import GitHubAuthError
-from .github_user_email_map import GITHUB_USER_EMAIL_MAP
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +31,7 @@ __all__ = [
     "parse_github_review_command",
     "post_github_comment",
     "react_to_github_comment",
+    "resolve_trusted_authors",
     "sanitize_github_comment_body",
     "verify_github_signature",
 ]
@@ -108,10 +111,21 @@ def sanitize_github_comment_body(body: str) -> str:
     return sanitized
 
 
-def format_github_comment_body_for_prompt(author: str, body: str) -> str:
-    """Format a GitHub comment body for prompt inclusion."""
+def format_github_comment_body_for_prompt(
+    author: str,
+    body: str,
+    *,
+    trusted_authors: set[str] | None = None,
+) -> str:
+    """Format a GitHub comment body for prompt inclusion.
+
+    When ``trusted_authors`` is provided and contains ``author``, the body is
+    passed through untouched. Otherwise it's wrapped in the untrusted-comment
+    tags so the agent treats it as adversarial input. The trust set is meant
+    to be computed once per webhook via :func:`resolve_trusted_authors`.
+    """
     sanitized_body = sanitize_github_comment_body(body)
-    if author in GITHUB_USER_EMAIL_MAP:
+    if trusted_authors and author in trusted_authors:
         return sanitized_body
 
     return (
@@ -119,6 +133,37 @@ def format_github_comment_body_for_prompt(author: str, body: str) -> str:
         f"{sanitized_body}\n"
         f"{UNTRUSTED_GITHUB_COMMENT_CLOSE_TAG}"
     )
+
+
+async def resolve_trusted_authors(authors: Iterable[str]) -> set[str]:
+    """Return the subset of authors trusted to author prompt-included comments.
+
+    Trust = active membership in ``ALLOWED_AUTH_ORG`` (or the internal-bot
+    allowlist). If ``ALLOWED_AUTH_ORG`` is unset, every author is treated as
+    untrusted — the safe default for OSS deployments.
+    """
+    org = os.environ.get("ALLOWED_AUTH_ORG", "").strip()
+    if not org:
+        return set()
+    unique = {a for a in authors if isinstance(a, str) and a}
+    if not unique:
+        return set()
+    trusted: set[str] = set()
+    to_check: list[str] = []
+    for author in unique:
+        if author in INTERNAL_BOT_LOGINS:
+            trusted.add(author)
+        else:
+            to_check.append(author)
+    if to_check:
+        results = await asyncio.gather(
+            *(is_user_active_org_member(a, org) for a in to_check),
+            return_exceptions=False,
+        )
+        for author, ok in zip(to_check, results, strict=True):
+            if ok:
+                trusted.add(author)
+    return trusted
 
 
 async def react_to_github_comment(
@@ -434,12 +479,16 @@ def build_pr_prompt(
     comments: list[dict[str, Any]],
     pr_url: str,
     repo_config: dict[str, str] | None = None,
+    *,
+    trusted_authors: set[str] | None = None,
 ) -> str:
     """Format PR comments into a human message for the agent."""
     lines: list[str] = []
     for c in comments:
         author = c.get("author", "unknown")
-        body = format_github_comment_body_for_prompt(author, c.get("body", ""))
+        body = format_github_comment_body_for_prompt(
+            author, c.get("body", ""), trusted_authors=trusted_authors
+        )
         if c.get("type") == "review_comment":
             path = c.get("path", "")
             line = c.get("line", "")

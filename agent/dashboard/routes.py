@@ -11,16 +11,29 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import RedirectResponse, Response
 
+from ..utils.github_org_membership import is_user_active_org_member
+from . import linear_oauth, slack_oauth
+from .account_links import (
+    Provider,
+    delete_link_for_login,
+    get_links_for_login,
+    upsert_linear_link,
+    upsert_slack_link,
+)
 from .admin import is_admin
 from .oauth import (
     COOKIE_NAME,
+    LINK_STATE_COOKIE_NAME,
+    LINK_STATE_TTL_SECONDS,
     SESSION_TTL_SECONDS,
     STATE_COOKIE_NAME,
     STATE_TTL_SECONDS,
+    decode_link_state,
     decode_state,
     exchange_code,
     fetch_github_user,
     hash_state_nonce,
+    issue_link_state,
     issue_session,
     issue_state,
     new_state_nonce,
@@ -105,6 +118,24 @@ def _clear_state_cookie(response: Response) -> None:
     )
 
 
+def _set_link_state_cookie(response: Response, nonce: str) -> None:
+    response.set_cookie(
+        key=LINK_STATE_COOKIE_NAME,
+        value=nonce,
+        max_age=LINK_STATE_TTL_SECONDS,
+        httponly=True,
+        secure=True,
+        samesite="lax",
+        path="/dashboard/api/auth",
+    )
+
+
+def _clear_link_state_cookie(response: Response) -> None:
+    response.delete_cookie(
+        LINK_STATE_COOKIE_NAME, path="/dashboard/api/auth", samesite="lax", secure=True
+    )
+
+
 @router.get("/auth/login")
 async def auth_login(request: Request, redirect_to: str | None = None) -> RedirectResponse:
     client_id = os.environ.get("GITHUB_APP_CLIENT_ID", "")
@@ -148,6 +179,18 @@ async def auth_callback(request: Request, code: str, state: str) -> RedirectResp
     if not login:
         raise HTTPException(400, "could not resolve GitHub login")
 
+    allowed_org = os.environ.get("ALLOWED_AUTH_ORG", "").strip()
+    if allowed_org and not await is_user_active_org_member(login, allowed_org):
+        logger.warning(
+            "Rejecting dashboard login for %s — not an active member of %s",
+            login,
+            allowed_org,
+        )
+        denied_url = f"{_frontend_base_url()}/not-authorized?org={allowed_org}"
+        response = RedirectResponse(denied_url, status_code=302)
+        _clear_state_cookie(response)
+        return response
+
     await upsert_access_token(login, email or "", access_token)
 
     session_jwt = issue_session(login=login, email=email, avatar_url=user.get("avatar_url"))
@@ -172,6 +215,189 @@ async def me(session: dict[str, Any] = _SESSION_DEP) -> dict[str, Any]:
         "avatar_url": session.get("avatar_url"),
         "is_admin": is_admin(session.get("email")),
     }
+
+
+def _provider_callback_uri(provider: Provider) -> str:
+    return f"{_api_base_url()}/dashboard/api/auth/{provider}/callback"
+
+
+def _provider_client_creds(provider: Provider) -> tuple[str, str]:
+    if provider == "slack":
+        return (
+            os.environ.get("SLACK_CLIENT_ID", "").strip(),
+            os.environ.get("SLACK_CLIENT_SECRET", "").strip(),
+        )
+    return (
+        os.environ.get("LINEAR_CLIENT_ID", "").strip(),
+        os.environ.get("LINEAR_CLIENT_SECRET", "").strip(),
+    )
+
+
+def _start_link_flow(
+    *,
+    provider: Provider,
+    github_login: str,
+    redirect_to: str | None,
+) -> RedirectResponse:
+    client_id, client_secret = _provider_client_creds(provider)
+    if not client_id or not client_secret:
+        raise HTTPException(500, f"{provider} OAuth client credentials not configured")
+    safe_redirect = sanitize_redirect_to(redirect_to) or _frontend_base_url()
+    nonce = new_state_nonce()
+    state = issue_link_state(
+        provider=provider,
+        github_login=github_login,
+        redirect_to=safe_redirect,
+        nonce_hash=hash_state_nonce(nonce),
+    )
+    redirect_uri = _provider_callback_uri(provider)
+    if provider == "slack":
+        url = slack_oauth.build_authorize_url(
+            client_id=client_id, redirect_uri=redirect_uri, state=state
+        )
+    else:
+        url = linear_oauth.build_authorize_url(
+            client_id=client_id, redirect_uri=redirect_uri, state=state
+        )
+    response = RedirectResponse(url, status_code=302)
+    _set_link_state_cookie(response, nonce)
+    return response
+
+
+def _validate_link_state(
+    *,
+    provider: Provider,
+    state: str,
+    cookie_nonce: str | None,
+) -> dict[str, Any]:
+    payload = decode_link_state(state)
+    if payload.get("provider") != provider:
+        raise HTTPException(400, "link state provider mismatch")
+    state_nonce_hash = payload.get("nonce_hash")
+    if (
+        not isinstance(state_nonce_hash, str)
+        or not cookie_nonce
+        or not hmac.compare_digest(hash_state_nonce(cookie_nonce), state_nonce_hash)
+    ):
+        raise HTTPException(400, "link state mismatch — please retry")
+    return payload
+
+
+@router.get("/auth/slack/login")
+async def slack_link_login(
+    request: Request,
+    redirect_to: str | None = None,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> RedirectResponse:
+    return _start_link_flow(
+        provider="slack",
+        github_login=session["sub"],
+        redirect_to=redirect_to,
+    )
+
+
+@router.get("/auth/slack/callback")
+async def slack_link_callback(
+    request: Request,
+    code: str,
+    state: str,
+) -> RedirectResponse:
+    payload = _validate_link_state(
+        provider="slack",
+        state=state,
+        cookie_nonce=request.cookies.get(LINK_STATE_COOKIE_NAME),
+    )
+    github_login = payload.get("github_login")
+    if not isinstance(github_login, str) or not github_login:
+        raise HTTPException(400, "missing github_login in link state")
+
+    access_token = await slack_oauth.exchange_code(
+        code=code, redirect_uri=_provider_callback_uri("slack")
+    )
+    identity = await slack_oauth.fetch_userinfo(access_token)
+
+    await upsert_slack_link(
+        github_login=github_login,
+        slack_user_id=identity["slack_user_id"],
+        slack_team_id=identity["slack_team_id"],
+        slack_email=identity.get("slack_email"),
+    )
+
+    redirect_to = sanitize_redirect_to(payload.get("redirect_to")) or _frontend_base_url()
+    response = RedirectResponse(f"{redirect_to}?linked=slack", status_code=302)
+    _clear_link_state_cookie(response)
+    return response
+
+
+@router.get("/auth/linear/login")
+async def linear_link_login(
+    request: Request,
+    redirect_to: str | None = None,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> RedirectResponse:
+    return _start_link_flow(
+        provider="linear",
+        github_login=session["sub"],
+        redirect_to=redirect_to,
+    )
+
+
+@router.get("/auth/linear/callback")
+async def linear_link_callback(
+    request: Request,
+    code: str,
+    state: str,
+) -> RedirectResponse:
+    payload = _validate_link_state(
+        provider="linear",
+        state=state,
+        cookie_nonce=request.cookies.get(LINK_STATE_COOKIE_NAME),
+    )
+    github_login = payload.get("github_login")
+    if not isinstance(github_login, str) or not github_login:
+        raise HTTPException(400, "missing github_login in link state")
+
+    access_token = await linear_oauth.exchange_code(
+        code=code, redirect_uri=_provider_callback_uri("linear")
+    )
+    identity = await linear_oauth.fetch_viewer_identity(access_token)
+
+    await upsert_linear_link(
+        github_login=github_login,
+        linear_user_id=identity["linear_user_id"],
+        linear_workspace_id=identity["linear_workspace_id"],
+        linear_email=identity.get("linear_email"),
+    )
+
+    redirect_to = sanitize_redirect_to(payload.get("redirect_to")) or _frontend_base_url()
+    response = RedirectResponse(f"{redirect_to}?linked=linear", status_code=302)
+    _clear_link_state_cookie(response)
+    return response
+
+
+@router.get("/account-links")
+async def list_account_links(
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    return await get_links_for_login(session["sub"])
+
+
+@router.delete("/account-links/{provider}")
+async def delete_account_link(
+    provider: str,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> Response:
+    provider_typed: Provider
+    if provider == "slack":
+        provider_typed = "slack"
+    elif provider == "linear":
+        provider_typed = "linear"
+    else:
+        raise HTTPException(400, "unknown provider")
+    removed = await delete_link_for_login(provider_typed, session["sub"])
+    if not removed:
+        raise HTTPException(404, f"no {provider} link to delete")
+    return Response(status_code=204)
 
 
 @router.get("/options")

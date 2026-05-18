@@ -8,25 +8,20 @@ from typing import Any
 import httpx
 from langgraph_sdk import get_client
 
-from ..utils.github_user_email_map import GITHUB_USER_EMAIL_MAP
 from .options import SUPPORTED_MODEL_IDS, model_supports_effort
-from .profiles import PROFILES_NAMESPACE
+from .profiles import PROFILES_NAMESPACE, get_login_for_email
 
 logger = logging.getLogger(__name__)
 
 
-def resolve_login_from_email(email: str | None) -> str | None:
-    """Reverse-lookup ``GITHUB_USER_EMAIL_MAP`` for the GitHub login of an email."""
+async def resolve_login_from_email(email: str | None) -> str | None:
+    """Look up the GitHub login linked to a verified email in the store."""
     if not isinstance(email, str) or not email.strip():
         return None
-    normalized = email.strip().lower()
-    for gh_login, mapped in GITHUB_USER_EMAIL_MAP.items():
-        if mapped.lower() == normalized:
-            return gh_login
-    return None
+    return await get_login_for_email(email)
 
 
-def resolve_github_login(config: dict[str, Any]) -> str | None:
+async def resolve_github_login(config: dict[str, Any]) -> str | None:
     """Best-effort resolution of the triggering user's GitHub login from config."""
     configurable = (config or {}).get("configurable") or {}
 
@@ -36,7 +31,7 @@ def resolve_github_login(config: dict[str, Any]) -> str | None:
 
     slack_thread = configurable.get("slack_thread") or {}
     email = configurable.get("user_email") or slack_thread.get("triggering_user_email")
-    return resolve_login_from_email(email if isinstance(email, str) else None)
+    return await resolve_login_from_email(email if isinstance(email, str) else None)
 
 
 async def get_profile_default_repo(login: str | None) -> dict[str, str] | None:

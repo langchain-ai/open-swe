@@ -13,6 +13,8 @@ from urllib.parse import urlparse
 import httpx
 from langchain_core.messages.content import create_image_block
 
+from .linear_app_token import get_linear_app_token
+
 logger = logging.getLogger(__name__)
 
 IMAGE_MARKDOWN_RE = re.compile(r"!\[[^\]]*\]\((https?://[^\s)]+)\)")
@@ -47,12 +49,15 @@ async def fetch_image_block(
         headers = None
         host = (urlparse(image_url).hostname or "").lower()
         if host == "uploads.linear.app" or host.endswith(".uploads.linear.app"):
-            linear_api_key = os.environ.get("LINEAR_API_KEY", "")
-            if linear_api_key:
-                headers = {"Authorization": linear_api_key}
+            try:
+                linear_token = await get_linear_app_token()
+            except RuntimeError:
+                linear_token = ""
+            if linear_token:
+                headers = {"Authorization": f"Bearer {linear_token}"}
             else:
                 logger.warning(
-                    "LINEAR_API_KEY not set; cannot authenticate image fetch for %s",
+                    "Linear app token unavailable; cannot authenticate image fetch for %s",
                     image_url,
                 )
         elif host == "files.slack.com" or host.endswith(".files.slack.com"):

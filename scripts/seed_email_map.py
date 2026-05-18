@@ -1,10 +1,36 @@
-"""Mapping of GitHub usernames to LangSmith email addresses.
+"""Seed `["oauth_tokens"]` + `["email_to_login"]` from the legacy hardcoded map.
 
-Add entries here as:
-    "github-username": "user@example.com",
+This is a one-shot migration. Once the dashboard's GitHub OAuth login is wired
+up, every user who logs in will refresh their own record automatically — but
+existing users would otherwise get the "no stored email" auth-required prompt
+the first time they trigger the agent from Slack / Linear / GitHub. Run this
+once at deploy time to backfill the email side of those records (tokens
+remain empty until each user logs in to the dashboard).
+
+Idempotent: running it twice leaves the same final state. Existing records
+are merged, so a previously-saved encrypted token is preserved.
+
+Usage::
+
+    LANGGRAPH_URL=https://your-deployment uv run python -m scripts.seed_email_map
 """
 
-GITHUB_USER_EMAIL_MAP: dict[str, str] = {
+from __future__ import annotations
+
+import asyncio
+import logging
+import os
+import sys
+from typing import Any
+
+import httpx
+from langgraph_sdk import get_client
+
+logger = logging.getLogger(__name__)
+
+# Snapshot of the legacy `GITHUB_USER_EMAIL_MAP` taken at migration time. The
+# source-of-truth moves to the LangGraph Store after this script runs.
+LEGACY_GITHUB_USER_EMAIL_MAP: dict[str, str] = {
     "aran-yogesh": "yogesh.mahendran@langchain.dev",
     "AaryanPotdar": "aaryan.potdar@langchain.dev",
     "agola11": "ankush@langchain.dev",
@@ -126,3 +152,82 @@ GITHUB_USER_EMAIL_MAP: dict[str, str] = {
     "SumedhArani": "sumedh@langchain.dev",
     "suraj-langchain": "suraj@langchain.dev",
 }
+
+
+def _load_dotenv_if_available() -> None:
+    try:
+        from dotenv import load_dotenv
+    except ImportError:
+        return
+    load_dotenv()
+
+
+async def seed_all() -> None:
+    from agent.dashboard.profiles import upsert_email_record
+
+    client = get_client()
+    seeded = 0
+    skipped = 0
+    errors = 0
+
+    for raw_login, email in LEGACY_GITHUB_USER_EMAIL_MAP.items():
+        login = raw_login.strip()
+        if not login or not email:
+            skipped += 1
+            continue
+        try:
+            await upsert_email_record(login, email)
+            seeded += 1
+        except httpx.HTTPError as exc:
+            logger.error("Failed to seed %s → %s: %s", login, email, exc)
+            errors += 1
+            continue
+
+    logger.info("Seeded %d records; skipped %d; errors %d", seeded, skipped, errors)
+    # Touch the client so it doesn't sit unused (and to surface connection errors).
+    _ = client
+
+
+def _resolve_value(item: Any) -> dict[str, Any] | None:
+    if item is None:
+        return None
+    value = item.get("value") if isinstance(item, dict) else getattr(item, "value", None)
+    return value if isinstance(value, dict) else None
+
+
+async def verify_seed() -> None:
+    """Spot-check that records made it into the store."""
+    client = get_client()
+    sample_logins = list(LEGACY_GITHUB_USER_EMAIL_MAP.keys())[:5]
+    for raw_login in sample_logins:
+        login = raw_login.strip()
+        try:
+            item = await client.store.get_item(["oauth_tokens"], login)
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                logger.warning("Spot check: %s not found in oauth_tokens", login)
+                continue
+            raise
+        record = _resolve_value(item)
+        if record is None:
+            logger.warning("Spot check: %s value missing/invalid", login)
+            continue
+        logger.info("Spot check: %s → %s", login, record.get("email"))
+
+
+def main() -> None:
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    _load_dotenv_if_available()
+    if not os.environ.get("LANGGRAPH_URL") and not os.environ.get("LANGGRAPH_URL_PROD"):
+        logger.error("LANGGRAPH_URL (or LANGGRAPH_URL_PROD) must be set")
+        sys.exit(1)
+    asyncio.run(_run())
+
+
+async def _run() -> None:
+    await seed_all()
+    await verify_seed()
+
+
+if __name__ == "__main__":
+    main()
