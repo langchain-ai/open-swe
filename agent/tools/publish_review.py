@@ -90,6 +90,15 @@ def publish_review(
     if not isinstance(head_sha, str) or not head_sha:
         return {"success": False, "error": "Missing head_sha in run config"}
 
+    if _is_reviewer_eval_mode(configurable):
+        return asyncio.run(
+            _publish_review_eval_dry_run_async(
+                head_sha=head_sha,
+                severity_threshold=_cast_severity(severity_threshold),
+                cap=cap,
+            )
+        )
+
     token = get_github_token()
     if not token:
         return {"success": False, "error": "No GitHub token available"}
@@ -123,6 +132,46 @@ def publish_review(
 
 def _cast_severity(value: str) -> Severity:
     return value  # type: ignore[return-value]
+
+
+def _is_reviewer_eval_mode(configurable: dict[str, Any]) -> bool:
+    return configurable.get("reviewer_eval") is True or configurable.get("eval") is True
+
+
+async def _publish_review_eval_dry_run_async(
+    *,
+    head_sha: str,
+    severity_threshold: Severity,
+    cap: int,
+) -> dict[str, Any]:
+    """Simulate publish_review for benchmark runs without posting to GitHub."""
+    thread_id = get_thread_id_from_runtime()
+    findings = await list_findings_async(thread_id)
+    unpublished_findings = [
+        f for f in findings if not isinstance(f.get("github_review_comment_id"), int)
+    ]
+    open_unpublished = [f for f in unpublished_findings if f.get("status", "open") == "open"]
+    eligible = filter_findings_for_publish(
+        unpublished_findings,
+        severity_threshold=severity_threshold,
+        cap=cap,
+    )
+    inline_comments = [
+        payload
+        for finding in eligible
+        if (payload := render_inline_comment_payload(finding)) is not None
+    ]
+
+    await set_reviewer_thread_metadata(thread_id, last_reviewed_sha=head_sha)
+
+    return {
+        "success": True,
+        "dry_run": True,
+        "review_id": None,
+        "surfaced_count": len(inline_comments),
+        "hidden_count": max(len(open_unpublished) - len(inline_comments), 0),
+        "resolved_thread_count": 0,
+    }
 
 
 async def _publish_review_async(

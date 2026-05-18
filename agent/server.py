@@ -64,6 +64,7 @@ from .utils.auth import resolve_github_token
 from .utils.authorship import resolve_triggering_user_identity
 from .utils.github_app import get_github_app_installation_token
 from .utils.model import (
+    AnthropicEffort,
     AnthropicThinking,
     ModelKwargs,
     OpenAIReasoning,
@@ -359,30 +360,24 @@ def _openai_reasoning_for(profile_effort: str | None) -> OpenAIReasoning | None:
     return None
 
 
-# Mapping mirrors Claude Code's effort levels for Opus 4.7. Numbers are tuned
-# so each level meaningfully separates from the next while leaving headroom
-# under DEFAULT_LLM_MAX_TOKENS (64k) for the model's actual output.
-_ANTHROPIC_THINKING_BUDGETS: dict[str, int] = {
-    "low": 1_024,
-    "medium": 4_000,
-    "high": 12_000,
-    "xhigh": 32_000,
-    "max": 60_000,
-}
+_ANTHROPIC_EFFORTS: set[AnthropicEffort] = {"low", "medium", "high", "xhigh", "max"}
 
 
 def _anthropic_thinking_for(profile_effort: str | None) -> AnthropicThinking | None:
     """Map a profile effort string to an Anthropic thinking kwarg.
 
-    Returns ``None`` when the effort doesn't have a known budget so we leave
-    the model's default thinking behaviour alone.
+    Latest Claude models use adaptive thinking with an effort hint instead of
+    manual thinking token budgets.
     """
-    if not profile_effort:
-        return None
-    budget = _ANTHROPIC_THINKING_BUDGETS.get(profile_effort)
-    if budget is None:
-        return None
-    return {"type": "enabled", "budget_tokens": budget}
+    if profile_effort in _ANTHROPIC_EFFORTS:
+        return {"type": "adaptive"}
+    return None
+
+
+def _anthropic_effort_for(profile_effort: str | None) -> AnthropicEffort | None:
+    if profile_effort in _ANTHROPIC_EFFORTS:
+        return profile_effort
+    return None
 
 
 def _get_cached_sandbox_backend(thread_id: str) -> SandboxBackendProtocol:
@@ -450,6 +445,9 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         thinking = _anthropic_thinking_for(profile_effort)
         if thinking is not None:
             model_kwargs["thinking"] = thinking
+        effort = _anthropic_effort_for(profile_effort)
+        if effort is not None:
+            model_kwargs["effort"] = effort
 
     fallback_model_id = os.environ.get("LLM_FALLBACK_MODEL_ID") or fallback_model_id_for(model_id)
     fallback_middleware: list[Any] = []

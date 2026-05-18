@@ -1,17 +1,18 @@
 """Run the reviewer eval against the LangSmith dataset.
 
 Usage:
-    uv run python -m evals.reviewer.run_eval \\
-        --dataset-name openswe-reviewer-v1 \\
-        --experiment-prefix openswe-reviewer-baseline \\
-        --max-concurrency 5
+    uv run python -m evals.reviewer.run_eval
 """
 
 from __future__ import annotations
 
 import argparse
 import logging
+import os
+import tomllib
 from collections.abc import Iterable
+from pathlib import Path
+from typing import Any, Literal, TypedDict
 
 from dotenv import load_dotenv
 from langgraph_sdk import get_client
@@ -19,11 +20,96 @@ from langsmith import Client, aevaluate
 from langsmith.schemas import Example
 
 from evals.reviewer.judge import aggregate_pr, judge_match
-from evals.reviewer.target import LANGGRAPH_URL, drain_thread_ids, review_pr
+from evals.reviewer.target import drain_thread_ids, get_langgraph_url, review_pr
 
 load_dotenv()
 
 logger = logging.getLogger(__name__)
+
+CONFIG_PATH = Path(__file__).with_name("config.toml")
+ScoreMode = Literal["all_findings", "surfaced_findings"]
+Severity = Literal["informational", "low", "medium", "high", "critical"]
+
+
+class ReviewerEvalConfig(TypedDict, total=False):
+    dataset_name: str
+    experiment_prefix: str
+    max_concurrency: int
+    langgraph_url: str
+    assistant_id: str
+    model_id: str
+    reasoning_effort: str
+    score_mode: ScoreMode
+    severity_threshold: Severity
+    cap: int
+
+
+def _load_config() -> ReviewerEvalConfig:
+    if not CONFIG_PATH.exists():
+        return {}
+    with CONFIG_PATH.open("rb") as f:
+        raw = tomllib.load(f)
+    return _coerce_config(raw)
+
+
+def _coerce_config(raw: dict[str, Any]) -> ReviewerEvalConfig:
+    config: ReviewerEvalConfig = {}
+    dataset_name = raw.get("dataset_name")
+    if isinstance(dataset_name, str) and dataset_name:
+        config["dataset_name"] = dataset_name
+
+    experiment_prefix = raw.get("experiment_prefix")
+    if isinstance(experiment_prefix, str) and experiment_prefix:
+        config["experiment_prefix"] = experiment_prefix
+
+    langgraph_url = raw.get("langgraph_url")
+    if isinstance(langgraph_url, str) and langgraph_url:
+        config["langgraph_url"] = langgraph_url
+
+    assistant_id = raw.get("assistant_id")
+    if isinstance(assistant_id, str) and assistant_id:
+        config["assistant_id"] = assistant_id
+
+    model_id = raw.get("model_id")
+    if isinstance(model_id, str) and model_id:
+        config["model_id"] = model_id
+
+    reasoning_effort = raw.get("reasoning_effort")
+    if isinstance(reasoning_effort, str) and reasoning_effort:
+        config["reasoning_effort"] = reasoning_effort
+
+    max_concurrency = raw.get("max_concurrency")
+    if isinstance(max_concurrency, int) and max_concurrency > 0:
+        config["max_concurrency"] = max_concurrency
+
+    score_mode = raw.get("score_mode")
+    if score_mode in {"all_findings", "surfaced_findings"}:
+        config["score_mode"] = score_mode
+
+    severity_threshold = raw.get("severity_threshold")
+    if severity_threshold in {"informational", "low", "medium", "high", "critical"}:
+        config["severity_threshold"] = severity_threshold
+
+    cap = raw.get("cap")
+    if isinstance(cap, int) and cap >= 0:
+        config["cap"] = cap
+    return config
+
+
+def _apply_config_to_env(config: ReviewerEvalConfig) -> None:
+    env_mapping = {
+        "langgraph_url": "LANGGRAPH_URL",
+        "assistant_id": "REVIEWER_ASSISTANT_ID",
+        "model_id": "REVIEWER_EVAL_MODEL_ID",
+        "reasoning_effort": "REVIEWER_EVAL_REASONING_EFFORT",
+        "score_mode": "REVIEWER_EVAL_SCORE_MODE",
+        "severity_threshold": "REVIEWER_EVAL_SEVERITY_THRESHOLD",
+        "cap": "REVIEWER_EVAL_CAP",
+    }
+    for config_key, env_key in env_mapping.items():
+        value = config.get(config_key)
+        if value is not None:
+            os.environ[env_key] = str(value)
 
 
 async def _cleanup_threads(thread_ids: Iterable[str]) -> None:
@@ -32,7 +118,7 @@ async def _cleanup_threads(thread_ids: Iterable[str]) -> None:
     Underlying sandboxes are reclaimed by the provider's TTL — this only
     drops the LangGraph checkpoint/metadata records.
     """
-    sdk = get_client(url=LANGGRAPH_URL)
+    sdk = get_client(url=get_langgraph_url())
     for tid in thread_ids:
         try:
             await sdk.threads.delete(tid)
@@ -41,10 +127,10 @@ async def _cleanup_threads(thread_ids: Iterable[str]) -> None:
 
 
 async def main() -> None:
+    config = _load_config()
+    _apply_config_to_env(config)
+
     ap = argparse.ArgumentParser()
-    ap.add_argument("--dataset-name", default="openswe-reviewer-v1")
-    ap.add_argument("--experiment-prefix", default="openswe-reviewer-baseline")
-    ap.add_argument("--max-concurrency", type=int, default=5)
     ap.add_argument("--limit", type=int, default=None, help="Run only the first N examples.")
     ap.add_argument(
         "--no-cleanup",
@@ -53,12 +139,16 @@ async def main() -> None:
     )
     args = ap.parse_args()
 
+    dataset_name = config.get("dataset_name", "openswe-reviewer-v1")
+    experiment_prefix = config.get("experiment_prefix", "openswe-reviewer-baseline")
+    max_concurrency = config.get("max_concurrency", 5)
+
     data: str | list[Example]
     if args.limit:
         client = Client()
-        data = list(client.list_examples(dataset_name=args.dataset_name, limit=args.limit))
+        data = list(client.list_examples(dataset_name=dataset_name, limit=args.limit))
     else:
-        data = args.dataset_name
+        data = dataset_name
 
     try:
         await aevaluate(
@@ -66,8 +156,8 @@ async def main() -> None:
             data=data,
             evaluators=[judge_match],
             summary_evaluators=[aggregate_pr],
-            experiment_prefix=args.experiment_prefix,
-            max_concurrency=args.max_concurrency,
+            experiment_prefix=experiment_prefix,
+            max_concurrency=max_concurrency,
             num_repetitions=1,
         )
     finally:
