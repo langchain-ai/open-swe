@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 from collections.abc import Iterable
 
 from dotenv import load_dotenv
@@ -19,7 +20,7 @@ from langsmith import Client, aevaluate
 from langsmith.schemas import Example
 
 from evals.reviewer.judge import aggregate_pr, judge_match
-from evals.reviewer.target import LANGGRAPH_URL, drain_thread_ids, review_pr
+from evals.reviewer.target import drain_thread_ids, get_langgraph_url, review_pr
 
 load_dotenv()
 
@@ -32,7 +33,7 @@ async def _cleanup_threads(thread_ids: Iterable[str]) -> None:
     Underlying sandboxes are reclaimed by the provider's TTL — this only
     drops the LangGraph checkpoint/metadata records.
     """
-    sdk = get_client(url=LANGGRAPH_URL)
+    sdk = get_client(url=get_langgraph_url())
     for tid in thread_ids:
         try:
             await sdk.threads.delete(tid)
@@ -47,11 +48,50 @@ async def main() -> None:
     ap.add_argument("--max-concurrency", type=int, default=5)
     ap.add_argument("--limit", type=int, default=None, help="Run only the first N examples.")
     ap.add_argument(
+        "--langgraph-url",
+        default=None,
+        help="Deployed LangGraph URL. Defaults to LANGGRAPH_URL or local dev.",
+    )
+    ap.add_argument(
+        "--assistant-id",
+        default=None,
+        help="Reviewer assistant/graph id. Defaults to REVIEWER_ASSISTANT_ID or reviewer.",
+    )
+    ap.add_argument(
+        "--score-mode",
+        choices=("all_findings", "surfaced_findings"),
+        default=None,
+        help="Score all final add_finding calls, or only findings surfaced by threshold/cap.",
+    )
+    ap.add_argument(
+        "--severity-threshold",
+        choices=("informational", "low", "medium", "high", "critical"),
+        default=None,
+        help="Severity threshold used when --score-mode=surfaced_findings.",
+    )
+    ap.add_argument(
+        "--cap",
+        type=int,
+        default=None,
+        help="Comment cap used when --score-mode=surfaced_findings.",
+    )
+    ap.add_argument(
         "--no-cleanup",
         action="store_true",
         help="Skip deleting LangGraph threads after the experiment finishes.",
     )
     args = ap.parse_args()
+
+    if args.langgraph_url:
+        os.environ["LANGGRAPH_URL"] = args.langgraph_url
+    if args.assistant_id:
+        os.environ["REVIEWER_ASSISTANT_ID"] = args.assistant_id
+    if args.score_mode:
+        os.environ["REVIEWER_EVAL_SCORE_MODE"] = args.score_mode
+    if args.severity_threshold:
+        os.environ["REVIEWER_EVAL_SEVERITY_THRESHOLD"] = args.severity_threshold
+    if args.cap is not None:
+        os.environ["REVIEWER_EVAL_CAP"] = str(args.cap)
 
     data: str | list[Example]
     if args.limit:

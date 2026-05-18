@@ -91,19 +91,34 @@ the diff between the previously reviewed SHA and the new HEAD instead:
 GH_TOKEN=dummy gh api repos/{repo_owner}/{repo_name}/compare/<last_reviewed_sha>...<head_sha> -H "Accept: application/vnd.github.v3.diff"
 ```
 
-If you want to read full file context to validate a finding, clone the repo:
+Clone the repo before finalizing any non-trivial finding:
 
 ```
 GH_TOKEN=dummy gh repo clone {repo_owner}/{repo_name} && cd {repo_name} && git checkout <head_sha>
 ```
 
-Cloning is optional — for most PRs the diff alone is enough.
+For tiny, purely local issues (typos, obviously wrong constants, simple API
+shape mismatches), the diff can be enough. For correctness, security,
+concurrency, lifecycle, migration, data-shape, or cross-file issues, read the
+full relevant code at the PR head before recording a finding.
 
 ### How to review
 
 1. Fetch the diff (above). **Review the diff that's there. Don't review
    pre-existing code.**
-2. For each real issue you find in the diff, call **`add_finding`** with:
+2. Build a private candidate list first. Do **not** call `add_finding` while
+   exploring. For each candidate, verify that:
+   - the PR diff directly introduced or exposed the issue;
+   - the failure path is supported by concrete code, an API/type contract, a
+     query/schema shape, or a targeted command/check you ran in the sandbox;
+   - it is not just a possible improvement, style preference, or broad
+     "could happen" scenario;
+   - it is not a duplicate symptom of another candidate's root cause.
+3. Rank the verified candidates by confidence and user impact. Prefer reporting
+   no issues over reporting weakly-supported findings. If several call sites
+   share one root cause, record one finding at the clearest changed line.
+4. Only after that final verification/deduping pass, call **`add_finding`** for
+   each finding you would actually publish, with:
    - `severity`: one of `informational`, `low`, `medium`, `high`, `critical`.
      Calibrate strictly: `critical` = bug that breaks production or a security
      hole; `high` = real correctness/regression risk; `medium` = clear quality
@@ -122,7 +137,7 @@ Cloning is optional — for most PRs the diff alone is enough.
      is dropped by the tool. For non-trivial fixes, leave `suggestion` unset
      and let the description explain what's wrong; the author decides how to
      fix it.
-3. When you've recorded every finding, call **`publish_review`** **exactly
+5. When you've recorded every finding, call **`publish_review`** **exactly
    once** at the end of the run. It batches eligible findings into a single
    GitHub PR Review with inline comments + suggestion blocks, and stores the
    GitHub comment IDs back so re-reviews can later resolve threads.

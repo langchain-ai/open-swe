@@ -56,6 +56,28 @@ Smoke-test with 3 PRs first:
 uv run python -m evals.reviewer.run_eval --limit 3
 ```
 
+To run against a deployed reviewer graph, point the eval runner at the deployment
+and keep publishing in benchmark dry-run mode (the target sets `reviewer_eval`
+for every run, so `publish_review` does not post to GitHub):
+
+```bash
+uv run python -m evals.reviewer.run_eval \
+    --langgraph-url "https://<deployment-url>" \
+    --assistant-id reviewer \
+    --experiment-prefix openswe-reviewer-verified-deployed \
+    --max-concurrency 2
+```
+
+By default the judge scores the final `add_finding` calls. To score only the
+findings that would be surfaced by the production threshold/cap:
+
+```bash
+uv run python -m evals.reviewer.run_eval \
+    --score-mode surfaced_findings \
+    --severity-threshold medium \
+    --cap 4
+```
+
 ## Comparing against Devin Review
 
 Both tools are scored on the same 50 PRs with the same judge model

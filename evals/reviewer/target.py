@@ -11,12 +11,20 @@ from __future__ import annotations
 
 import os
 import threading
-from typing import Any
+from typing import Any, Literal, cast
 
+from dotenv import load_dotenv
 from langgraph_sdk import get_client
 
-REVIEWER_ASSISTANT_ID = os.getenv("REVIEWER_ASSISTANT_ID", "reviewer")
-LANGGRAPH_URL = os.getenv("LANGGRAPH_URL", "http://localhost:2024")
+from agent.reviewer_findings import Finding, Severity, filter_findings_for_publish
+
+load_dotenv()
+
+DEFAULT_REVIEWER_ASSISTANT_ID = "reviewer"
+DEFAULT_LANGGRAPH_URL = "http://localhost:2024"
+ScoreMode = Literal["all_findings", "surfaced_findings"]
+_VALID_SCORE_MODES: set[ScoreMode] = {"all_findings", "surfaced_findings"}
+_VALID_SEVERITIES: set[Severity] = {"informational", "low", "medium", "high", "critical"}
 
 _THREAD_IDS: set[str] = set()
 _THREAD_IDS_LOCK = threading.Lock()
@@ -40,6 +48,21 @@ def drain_thread_ids() -> set[str]:
     return snapshot
 
 
+def get_langgraph_url() -> str:
+    return os.getenv("LANGGRAPH_URL", DEFAULT_LANGGRAPH_URL)
+
+
+def get_reviewer_assistant_id() -> str:
+    return os.getenv("REVIEWER_ASSISTANT_ID", DEFAULT_REVIEWER_ASSISTANT_ID)
+
+
+def get_score_mode() -> ScoreMode:
+    value = os.getenv("REVIEWER_EVAL_SCORE_MODE", "all_findings")
+    if value in _VALID_SCORE_MODES:
+        return cast(ScoreMode, value)
+    return "all_findings"
+
+
 def _build_user_message(inputs: dict[str, Any]) -> str:
     return (
         f"Review pull request {inputs['pr_url']}.\n\n"
@@ -60,6 +83,8 @@ def _build_configurable(inputs: dict[str, Any]) -> dict[str, Any]:
     owner, _, name = repo.partition("/") if isinstance(repo, str) else ("", "", "")
     return {
         "__is_for_execution__": True,
+        "reviewer_eval": True,
+        "eval": True,
         "repo": {"owner": owner, "name": name},
         "pr_number": inputs.get("pr_number"),
         "pr_url": inputs.get("pr_url", ""),
@@ -71,16 +96,18 @@ def _build_configurable(inputs: dict[str, Any]) -> dict[str, Any]:
 
 async def review_pr(inputs: dict[str, Any]) -> dict[str, Any]:
     """LangSmith target: run the reviewer agent on one PR."""
-    client = get_client(url=LANGGRAPH_URL)
+    client = get_client(url=get_langgraph_url())
     thread = await client.threads.create()
     thread_id: str = thread["thread_id"]
     _record_thread_id(thread_id)
     result = await client.runs.wait(
         thread_id,
-        assistant_id=REVIEWER_ASSISTANT_ID,
+        assistant_id=get_reviewer_assistant_id(),
         input={"messages": [{"role": "user", "content": _build_user_message(inputs)}]},
         config={"configurable": _build_configurable(inputs)},
     )
+    if get_score_mode() == "surfaced_findings":
+        return {"comments": await _extract_surfaced_comments(client, thread_id)}
     return {"comments": _extract_comments(result)}
 
 
@@ -118,3 +145,57 @@ def _extract_comments(result: Any) -> list[dict[str, Any]]:
                 }
             )
     return comments
+
+
+async def _extract_surfaced_comments(client: Any, thread_id: str) -> list[dict[str, Any]]:
+    thread = await client.threads.get(thread_id)
+    metadata = thread.get("metadata") if isinstance(thread, dict) else None
+    findings_value = metadata.get("findings") if isinstance(metadata, dict) else None
+    findings = _coerce_findings(findings_value)
+    surfaced = filter_findings_for_publish(
+        findings,
+        severity_threshold=_score_severity_threshold(),
+        cap=_score_cap(),
+    )
+    return [_normalize_finding(finding) for finding in surfaced]
+
+
+def _coerce_findings(value: Any) -> list[Finding]:
+    if not isinstance(value, list):
+        return []
+    findings: list[Finding] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        if not isinstance(item.get("id"), str):
+            continue
+        findings.append(cast(Finding, item))
+    return findings
+
+
+def _normalize_finding(finding: Finding) -> dict[str, Any]:
+    line = finding.get("end_line")
+    if line is None:
+        line = finding.get("start_line")
+    return {
+        "file": finding.get("file"),
+        "line": line,
+        "body": finding.get("description", ""),
+        "severity": finding.get("severity"),
+    }
+
+
+def _score_severity_threshold() -> Severity:
+    value = os.getenv("REVIEWER_EVAL_SEVERITY_THRESHOLD", "medium")
+    if value in _VALID_SEVERITIES:
+        return cast(Severity, value)
+    return "medium"
+
+
+def _score_cap() -> int:
+    raw = os.getenv("REVIEWER_EVAL_CAP", "4")
+    try:
+        cap = int(raw)
+    except ValueError:
+        return 4
+    return max(cap, 0)
