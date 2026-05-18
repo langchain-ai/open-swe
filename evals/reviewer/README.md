@@ -64,6 +64,10 @@ By default the judge scores final `add_finding` calls. Set
 `score_mode = "surfaced_findings"` in the config to score only findings that
 would pass the production threshold/cap.
 
+`model_id` and `reasoning_effort` in the config are passed to the reviewer run,
+so isolated benchmark deployments can test a specific model/effort without
+changing deployment-wide defaults.
+
 ## Comparing against Devin Review
 
 Both tools are scored on the same 50 PRs with the same judge model

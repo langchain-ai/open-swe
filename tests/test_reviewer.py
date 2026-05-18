@@ -92,3 +92,44 @@ async def test_reviewer_prompt_requires_verification_before_add_finding() -> Non
     assert "Do **not** call `add_finding` while" in system_prompt
     assert "the failure path is supported by concrete code" in system_prompt
     assert "Clone the repo before finalizing any non-trivial finding" in system_prompt
+
+
+@pytest.mark.asyncio
+async def test_reviewer_applies_eval_model_and_effort_overrides() -> None:
+    config: RunnableConfig = {
+        "configurable": {
+            "__is_for_execution__": True,
+            "thread_id": "reviewer-thread-id",
+            "repo": {"owner": "acme", "name": "repo"},
+            "pr_number": 1,
+            "pr_url": "https://github.com/acme/repo/pull/1",
+            "base_sha": "base",
+            "head_sha": "head",
+            "reviewer_model_id": "anthropic:claude-opus-4-7",
+            "reviewer_reasoning_effort": "high",
+        },
+        "metadata": {},
+    }
+    dummy_agent = _DummyAgent()
+
+    with (
+        patch(
+            "agent.reviewer.ensure_sandbox_for_thread",
+            new_callable=AsyncMock,
+            return_value=MagicMock(),
+        ),
+        patch(
+            "agent.reviewer.aresolve_sandbox_work_dir",
+            new_callable=AsyncMock,
+            return_value="/workspace",
+        ),
+        patch("agent.reviewer.make_model", return_value=MagicMock()) as make_model,
+        patch("agent.reviewer.create_deep_agent", return_value=dummy_agent),
+    ):
+        await reviewer.get_reviewer_agent(config)
+
+    assert make_model.call_args.args == ("anthropic:claude-opus-4-7",)
+    assert make_model.call_args.kwargs["thinking"] == {
+        "type": "enabled",
+        "budget_tokens": 12_000,
+    }

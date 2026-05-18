@@ -45,6 +45,8 @@ from .server import (
     DEFAULT_LLM_REASONING,
     DEFAULT_RECURSION_LIMIT,
     MODEL_CALL_RECURSION_LIMIT,
+    _anthropic_thinking_for,
+    _openai_reasoning_for,
     ensure_sandbox_for_thread,
     graph_loaded_for_execution,
 )
@@ -344,10 +346,22 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
                 head_sha=head_sha,
             )
 
-    model_id = os.environ.get("LLM_MODEL_ID", DEFAULT_LLM_MODEL_ID)
+    configured_model_id = config["configurable"].get("reviewer_model_id")
+    model_id = (
+        configured_model_id
+        if isinstance(configured_model_id, str) and configured_model_id
+        else os.environ.get("LLM_MODEL_ID", DEFAULT_LLM_MODEL_ID)
+    )
+    configured_effort = config["configurable"].get("reviewer_reasoning_effort")
+    reasoning_effort = configured_effort if isinstance(configured_effort, str) else None
     model_kwargs: ModelKwargs = {"max_tokens": DEFAULT_LLM_MAX_TOKENS}
-    if model_id == DEFAULT_LLM_MODEL_ID:
-        model_kwargs["reasoning"] = DEFAULT_LLM_REASONING
+    if model_id.startswith("openai:"):
+        reasoning = _openai_reasoning_for(reasoning_effort)
+        model_kwargs["reasoning"] = reasoning if reasoning is not None else DEFAULT_LLM_REASONING
+    elif model_id.startswith("anthropic:"):
+        thinking = _anthropic_thinking_for(reasoning_effort)
+        if thinking is not None:
+            model_kwargs["thinking"] = thinking
 
     system_prompt = _reviewer_system_prompt(
         f"{work_dir}/{repo_name}" if repo_name else work_dir,

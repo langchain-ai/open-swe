@@ -37,6 +37,8 @@ class ReviewerEvalConfig(TypedDict, total=False):
     max_concurrency: int
     langgraph_url: str
     assistant_id: str
+    model_id: str
+    reasoning_effort: str
     score_mode: ScoreMode
     severity_threshold: Severity
     cap: int
@@ -68,6 +70,14 @@ def _coerce_config(raw: dict[str, Any]) -> ReviewerEvalConfig:
     if isinstance(assistant_id, str) and assistant_id:
         config["assistant_id"] = assistant_id
 
+    model_id = raw.get("model_id")
+    if isinstance(model_id, str) and model_id:
+        config["model_id"] = model_id
+
+    reasoning_effort = raw.get("reasoning_effort")
+    if isinstance(reasoning_effort, str) and reasoning_effort:
+        config["reasoning_effort"] = reasoning_effort
+
     max_concurrency = raw.get("max_concurrency")
     if isinstance(max_concurrency, int) and max_concurrency > 0:
         config["max_concurrency"] = max_concurrency
@@ -90,6 +100,8 @@ def _apply_config_to_env(config: ReviewerEvalConfig) -> None:
     env_mapping = {
         "langgraph_url": "LANGGRAPH_URL",
         "assistant_id": "REVIEWER_ASSISTANT_ID",
+        "model_id": "REVIEWER_EVAL_MODEL_ID",
+        "reasoning_effort": "REVIEWER_EVAL_REASONING_EFFORT",
         "score_mode": "REVIEWER_EVAL_SCORE_MODE",
         "severity_threshold": "REVIEWER_EVAL_SEVERITY_THRESHOLD",
         "cap": "REVIEWER_EVAL_CAP",

@@ -63,6 +63,16 @@ def get_score_mode() -> ScoreMode:
     return "all_findings"
 
 
+def get_reviewer_model_id() -> str | None:
+    value = os.getenv("REVIEWER_EVAL_MODEL_ID")
+    return value if value else None
+
+
+def get_reviewer_reasoning_effort() -> str | None:
+    value = os.getenv("REVIEWER_EVAL_REASONING_EFFORT")
+    return value if value else None
+
+
 def _build_user_message(inputs: dict[str, Any]) -> str:
     return (
         f"Review pull request {inputs['pr_url']}.\n\n"
@@ -81,7 +91,7 @@ def _build_user_message(inputs: dict[str, Any]) -> str:
 def _build_configurable(inputs: dict[str, Any]) -> dict[str, Any]:
     repo = inputs.get("repo", "")
     owner, _, name = repo.partition("/") if isinstance(repo, str) else ("", "", "")
-    return {
+    configurable: dict[str, Any] = {
         "__is_for_execution__": True,
         "reviewer_eval": True,
         "eval": True,
@@ -92,6 +102,13 @@ def _build_configurable(inputs: dict[str, Any]) -> dict[str, Any]:
         "head_sha": inputs.get("head_sha", ""),
         "branch_name": inputs.get("head_ref", ""),
     }
+    model_id = get_reviewer_model_id()
+    if model_id:
+        configurable["reviewer_model_id"] = model_id
+    reasoning_effort = get_reviewer_reasoning_effort()
+    if reasoning_effort:
+        configurable["reviewer_reasoning_effort"] = reasoning_effort
+    return configurable
 
 
 async def review_pr(inputs: dict[str, Any]) -> dict[str, Any]:

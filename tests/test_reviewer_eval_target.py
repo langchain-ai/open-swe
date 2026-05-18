@@ -8,7 +8,9 @@ from agent.reviewer_findings import new_finding
 from evals.reviewer import target
 
 
-def test_eval_target_marks_runs_as_eval_dry_run() -> None:
+def test_eval_target_marks_runs_as_eval_dry_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("REVIEWER_EVAL_MODEL_ID", raising=False)
+    monkeypatch.delenv("REVIEWER_EVAL_REASONING_EFFORT", raising=False)
     configurable = target._build_configurable(
         {
             "repo": "acme/repo",
@@ -24,6 +26,25 @@ def test_eval_target_marks_runs_as_eval_dry_run() -> None:
     assert configurable["eval"] is True
     assert configurable["__is_for_execution__"] is True
     assert "source" not in configurable
+
+
+def test_eval_target_passes_model_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("REVIEWER_EVAL_MODEL_ID", "anthropic:claude-opus-4-7")
+    monkeypatch.setenv("REVIEWER_EVAL_REASONING_EFFORT", "high")
+
+    configurable = target._build_configurable(
+        {
+            "repo": "acme/repo",
+            "pr_number": 1,
+            "pr_url": "https://github.com/acme/repo/pull/1",
+            "base_sha": "base",
+            "head_sha": "head",
+            "head_ref": "branch",
+        }
+    )
+
+    assert configurable["reviewer_model_id"] == "anthropic:claude-opus-4-7"
+    assert configurable["reviewer_reasoning_effort"] == "high"
 
 
 @pytest.mark.asyncio

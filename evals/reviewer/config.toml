@@ -5,6 +5,8 @@ max_concurrency = 2
 # Leave blank to use LANGGRAPH_URL or local dev.
 langgraph_url = ""
 assistant_id = "reviewer"
+model_id = "anthropic:claude-opus-4-7"
+reasoning_effort = "high"
 
 # Use "surfaced_findings" to score only findings that pass the production
 # severity threshold and cap.
