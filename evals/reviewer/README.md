@@ -10,6 +10,7 @@ root for the full design.
 evals/reviewer/
 ├── golden_comments/      # 50 PRs × golden comments (copied from martian benchmark)
 ├── build_dataset.py      # martian JSON → LangSmith dataset (resolves SHAs via gh)
+├── config.toml           # default benchmark run config
 ├── judge.py              # claude-opus-4-5 pairwise match evaluator + aggregate
 ├── target.py             # invokes the reviewer graph over langgraph_sdk
 └── run_eval.py           # client.aevaluate entrypoint
@@ -45,9 +46,7 @@ example schema, and must emit a `submit_review` tool call (or set
 `state["review"]["comments"]`) with `[{file, line, severity, body}, ...]`.
 
 ```bash
-uv run python -m evals.reviewer.run_eval \
-    --experiment-prefix openswe-reviewer-baseline \
-    --max-concurrency 5
+uv run python -m evals.reviewer.run_eval
 ```
 
 Smoke-test with 3 PRs first:
@@ -56,27 +55,14 @@ Smoke-test with 3 PRs first:
 uv run python -m evals.reviewer.run_eval --limit 3
 ```
 
-To run against a deployed reviewer graph, point the eval runner at the deployment
-and keep publishing in benchmark dry-run mode (the target sets `reviewer_eval`
-for every run, so `publish_review` does not post to GitHub):
+The runner reads benchmark settings from `evals/reviewer/config.toml`. Set the
+deployment URL there (or leave it blank to use `LANGGRAPH_URL` / local dev).
+The target sets `reviewer_eval` for every run, so `publish_review` does not post
+to GitHub.
 
-```bash
-uv run python -m evals.reviewer.run_eval \
-    --langgraph-url "https://<deployment-url>" \
-    --assistant-id reviewer \
-    --experiment-prefix openswe-reviewer-verified-deployed \
-    --max-concurrency 2
-```
-
-By default the judge scores the final `add_finding` calls. To score only the
-findings that would be surfaced by the production threshold/cap:
-
-```bash
-uv run python -m evals.reviewer.run_eval \
-    --score-mode surfaced_findings \
-    --severity-threshold medium \
-    --cap 4
-```
+By default the judge scores final `add_finding` calls. Set
+`score_mode = "surfaced_findings"` in the config to score only findings that
+would pass the production threshold/cap.
 
 ## Comparing against Devin Review
 
