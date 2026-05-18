@@ -10,6 +10,7 @@ from .linear_list_teams import linear_list_teams
 from .linear_update_issue import linear_update_issue
 from .list_findings import list_findings
 from .publish_review import publish_review
+from .request_mr_review import request_mr_review
 from .request_pr_review import request_pr_review
 from .slack_read_thread_messages import slack_read_thread_messages
 from .slack_thread_reply import slack_thread_reply
@@ -29,6 +30,7 @@ __all__ = [
     "linear_update_issue",
     "list_findings",
     "publish_review",
+    "request_mr_review",
     "request_pr_review",
     "slack_read_thread_messages",
     "slack_thread_reply",
