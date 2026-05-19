@@ -96,8 +96,12 @@ nothing. Add net-new findings with `add_finding`.
 Rules:
 - Read-only. Do not commit, push, or use `gh pr review` / `gh api .../reviews`.
 - One finding per issue. Include `suggestion` only when the fix is ≤4 lines.
+- Rate `confidence` (`low` | `medium` | `high`) on every finding.
+  `high` = you traced the path and the bug clearly manifests;
+  `medium` = plausible but unconfirmed
+  `low` = hunch or pattern-match
 
-We want to optimize for both precision and recall. Be aggressive in the initial pass, and then utilize subagents to reflect on the findings and determine if they are worth surfacing.
+Be aggressive and be thorough, submit as many findings as you can.
 """
 
 

@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from agent.reviewer_findings import (
+    CONFIDENCE_ORDER,
     SEVERITY_ORDER,
     Finding,
     append_finding,
@@ -59,6 +60,25 @@ def test_severity_order_monotonic() -> None:
         < SEVERITY_ORDER["high"]
         < SEVERITY_ORDER["critical"]
     )
+
+
+def test_confidence_order_monotonic() -> None:
+    assert CONFIDENCE_ORDER["low"] < CONFIDENCE_ORDER["medium"] < CONFIDENCE_ORDER["high"]
+
+
+def test_filter_findings_for_publish_drops_below_confidence_threshold() -> None:
+    findings = [
+        _f(id="f_high_conf", severity="high", file="a.py", start_line=1, confidence="high"),
+        _f(id="f_med_conf", severity="high", file="b.py", start_line=1, confidence="medium"),
+        _f(id="f_low_conf", severity="critical", file="c.py", start_line=1, confidence="low"),
+    ]
+    surfaced = filter_findings_for_publish(
+        findings,
+        severity_threshold="medium",
+        cap=10,
+        confidence_threshold="medium",
+    )
+    assert sorted(f["id"] for f in surfaced) == ["f_high_conf", "f_med_conf"]
 
 
 def test_filter_findings_for_publish_drops_below_threshold_and_resolved() -> None:
