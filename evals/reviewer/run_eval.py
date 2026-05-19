@@ -27,7 +27,7 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 CONFIG_PATH = Path(__file__).with_name("config.toml")
-ScoreMode = Literal["all_findings", "surfaced_findings"]
+ScoreMode = Literal["all_findings", "surfaced_findings", "confidence_filtered"]
 Severity = Literal["informational", "low", "medium", "high", "critical"]
 
 
@@ -83,7 +83,7 @@ def _coerce_config(raw: dict[str, Any]) -> ReviewerEvalConfig:
         config["max_concurrency"] = max_concurrency
 
     score_mode = raw.get("score_mode")
-    if score_mode in {"all_findings", "surfaced_findings"}:
+    if score_mode in {"all_findings", "surfaced_findings", "confidence_filtered"}:
         config["score_mode"] = score_mode
 
     severity_threshold = raw.get("severity_threshold")
