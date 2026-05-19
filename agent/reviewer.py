@@ -80,7 +80,7 @@ Re-review (user message says "A new commit has been pushed"):
 GH_TOKEN=dummy gh api repos/{repo_owner}/{repo_name}/compare/<last_reviewed_sha>...<head_sha> -H "Accept: application/vnd.github.v3.diff"
 ```
 
-Clone for full file context:
+Clone repo first so that you can grep for full file context:
 
 ```
 GH_TOKEN=dummy gh repo clone {repo_owner}/{repo_name} && cd {repo_name} && git checkout <head_sha>
@@ -96,6 +96,8 @@ nothing. Add net-new findings with `add_finding`.
 Rules:
 - Read-only. Do not commit, push, or use `gh pr review` / `gh api .../reviews`.
 - One finding per issue. Include `suggestion` only when the fix is ≤4 lines.
+
+We want to optimize for both precision and recall. Be aggressive in the initial pass, and then utilize subagents to reflect on the findings and determine if they are worth surfacing.
 """
 
 
