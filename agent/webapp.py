@@ -56,6 +56,18 @@ from .utils.github_comments import (
 from .utils.github_org_membership import INTERNAL_BOT_LOGINS, is_user_active_org_member
 from .utils.github_token import get_github_token_from_thread, invalidate_cached_github_token
 from .utils.github_user_email_map import GITHUB_USER_EMAIL_MAP
+from .utils.gitlab import (
+    GITLAB_TOKEN,
+    GITLAB_WEBHOOK_SECRET,
+    GitLabMrRef,
+    build_mr_prompt,
+    fetch_mr_branch,
+    fetch_mr_comments,
+    fetch_project_id,
+    get_thread_id_from_mr,
+    verify_gitlab_webhook,
+    verify_gitlab_webhook_signature,
+)
 from .utils.linear import post_linear_trace_comment
 from .utils.linear_team_repo_map import LINEAR_TEAM_TO_REPO
 from .utils.multimodal import dedupe_urls, extract_image_urls, fetch_image_block
@@ -1653,6 +1665,32 @@ async def trigger_pr_review_from_ref(
     return {"success": True, "queued": False, "thread_id": thread_id, "pr_url": pr_url}
 
 
+async def trigger_mr_review_from_ref(
+    mr_ref: GitLabMrRef,
+    *,
+    source: str,
+    gitlab_login: str = "",
+) -> dict[str, Any]:
+    """Trigger the reviewer agent for a GitLab MR."""
+    project_path = mr_ref.project_path
+    project_id = await fetch_project_id(project_path, token=GITLAB_TOKEN)
+    if not project_id:
+        return {"success": False, "error": f"Could not resolve GitLab project {project_path}"}
+
+    mr_branch = await fetch_mr_branch(project_path, mr_ref.mr_iid, token=GITLAB_TOKEN)
+    mr_comments = await fetch_mr_comments(project_path, mr_ref.mr_iid, token=GITLAB_TOKEN)
+    prompt = build_mr_prompt(mr_comments, mr_ref.url, project_path)
+
+    thread_id = get_thread_id_from_mr(mr_ref.mr_iid)
+    return {
+        "success": True,
+        "thread_id": thread_id,
+        "mr_url": mr_ref.url,
+        "prompt": prompt,
+        "branch": mr_branch,
+    }
+
+
 def _build_reviewer_configurable(
     *,
     source: str,
@@ -2523,3 +2561,118 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks) ->
 
     logger.info("Ignoring unsupported GitHub payload shape for event=%s", event_type)
     return {"status": "ignored", "reason": f"Unsupported payload for event type: {event_type}"}
+
+
+@app.post("/webhooks/gitlab")
+async def gitlab_webhook(
+    request: Request, background_tasks: BackgroundTasks
+) -> dict[str, str]:
+    """Handle GitLab webhooks for merge request and note events."""
+    # GitLab sends the webhook secret as X-Gitlab-Token header
+    gitlab_token_header = request.headers.get("X-Gitlab-Token", "")
+    if not verify_gitlab_webhook(b"", gitlab_token_header):
+        if not verify_gitlab_webhook_signature(
+            await request.body(),
+            request.headers.get("X-Gitlab-Event-Signature", ""),
+            secret=GITLAB_WEBHOOK_SECRET,
+        ):
+            logger.warning("Invalid GitLab webhook authentication")
+            return {"status": "ignored", "reason": "Invalid authentication"}
+
+    body = await request.body()
+    try:
+        payload = json.loads(body)
+    except json.JSONDecodeError:
+        logger.exception("Failed to parse GitLab webhook JSON")
+        return {"status": "error", "message": "Invalid JSON"}
+
+    event_type = request.headers.get("X-Gitlab-Event", "")
+    logger.info(
+        "Received GitLab webhook: event=%s project=%s",
+        event_type,
+        payload.get("project", {}).get("path_with_namespace", "unknown"),
+    )
+
+    if event_type == "Merge Request Hook":
+        action = payload.get("object_attributes", {}).get("action", "")
+        if action not in ("open", "reopen"):
+            return {
+                "status": "ignored",
+                "reason": f"Unsupported MR action: {action}",
+            }
+        background_tasks.add_task(process_gitlab_mr_event, payload)
+        return {"status": "accepted", "message": "Processing GitLab MR event"}
+
+    if event_type == "Note Hook":
+        mr_iid = (
+            payload.get("merge_request", {})
+            .get("iid")
+        )
+        if not mr_iid:
+            return {
+                "status": "ignored",
+                "reason": "Note is not on a merge request",
+            }
+
+        comment_body = (
+            payload.get("object_attributes", {}).get("description", "")
+            or payload.get("object_attributes", {}).get("note", "")
+        )
+        if "@openswe" not in comment_body.lower():
+            return {
+                "status": "ignored",
+                "reason": "Comment does not mention @openswe",
+            }
+
+        background_tasks.add_task(process_gitlab_note_event, payload)
+        return {
+            "status": "accepted",
+            "message": "Processing GitLab MR note event",
+        }
+
+    return {"status": "ignored", "reason": f"Unsupported event type: {event_type}"}
+
+
+@app.get("/webhooks/gitlab")
+async def gitlab_webhook_verify() -> dict[str, str]:
+    """GitLab webhook verification endpoint."""
+    return {"status": "ok", "message": "GitLab webhook endpoint ready"}
+
+
+async def process_gitlab_mr_event(payload: dict[str, Any]) -> None:
+    """Process a GitLab MR open event."""
+    project_path = payload.get("project", {}).get("path_with_namespace", "")
+    mr_iid = payload.get("object_attributes", {}).get("iid")
+    mr_url = payload.get("object_attributes", {}).get("url", "")
+
+    if not project_path or not mr_iid:
+        logger.warning("Missing GitLab MR event context")
+        return
+
+    mr_ref = GitLabMrRef(project_path=project_path, mr_iid=mr_iid, url=mr_url)
+    result = await trigger_mr_review_from_ref(mr_ref, source="gitlab_webhook")
+    logger.info(
+        "GitLab MR event processed: %s - %s",
+        mr_url,
+        "success" if result.get("success") else result.get("error", "unknown error"),
+    )
+
+
+async def process_gitlab_note_event(payload: dict[str, Any]) -> None:
+    """Process a GitLab note (comment) event that mentions @openswe."""
+    project_path = payload.get("project", {}).get("path_with_namespace", "")
+    mr = payload.get("merge_request", {})
+    mr_iid = mr.get("iid")
+    mr_url = mr.get("url", "")
+
+    if not project_path or not mr_iid:
+        logger.warning("Missing GitLab note event context")
+        return
+
+    mr_ref = GitLabMrRef(project_path=project_path, mr_iid=mr_iid, url=mr_url)
+    result = await trigger_mr_review_from_ref(mr_ref, source="gitlab_webhook")
+    logger.info(
+        "GitLab note event processed: %s - %s",
+        mr_url,
+        "success" if result.get("success") else result.get("error", "unknown error"),
+    )
