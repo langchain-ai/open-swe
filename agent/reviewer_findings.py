@@ -61,7 +61,7 @@ CONFIDENCE_ORDER: dict[Confidence, int] = {
 # Hidden from the agent: a precision lever applied at publish time so the
 # reviewer can self-rate confidence without being able to game the threshold.
 # Findings below this rating are kept in state but never surfaced to GitHub.
-CONFIDENCE_THRESHOLD: Confidence = "medium"
+CONFIDENCE_THRESHOLD: Confidence = "high"
 
 
 class Finding(TypedDict, total=False):
