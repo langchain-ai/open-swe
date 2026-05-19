@@ -48,15 +48,7 @@ def test_eval_target_passes_model_overrides(monkeypatch: pytest.MonkeyPatch) -> 
 
 
 def _result_with_findings(findings: list[dict[str, Any]]) -> dict[str, Any]:
-    return {
-        "messages": [
-            {
-                "tool_calls": [
-                    {"name": "add_finding", "args": f} for f in findings
-                ]
-            }
-        ]
-    }
+    return {"messages": [{"tool_calls": [{"name": "add_finding", "args": f} for f in findings]}]}
 
 
 def test_extract_comments_no_filter_includes_all_confidences() -> None:
@@ -132,6 +124,7 @@ async def test_extract_surfaced_comments_uses_publish_filter(
 ) -> None:
     high = new_finding(
         severity="high",
+        confidence="high",
         category="correctness",
         file="a.py",
         start_line=10,
@@ -142,6 +135,7 @@ async def test_extract_surfaced_comments_uses_publish_filter(
     )
     low = new_finding(
         severity="low",
+        confidence="high",
         category="style",
         file="b.py",
         start_line=20,

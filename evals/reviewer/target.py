@@ -141,9 +141,7 @@ async def review_pr(inputs: dict[str, Any]) -> dict[str, Any]:
     return {"comments": _extract_comments(result)}
 
 
-def _extract_comments(
-    result: Any, *, min_confidence: str | None = None
-) -> list[dict[str, Any]]:
+def _extract_comments(result: Any, *, min_confidence: str | None = None) -> list[dict[str, Any]]:
     """Collect every ``add_finding`` tool call from the run's message stream.
 
     Normalizes the new finding shape (``start_line``/``end_line``/``description``)

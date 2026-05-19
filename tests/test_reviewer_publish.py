@@ -20,6 +20,7 @@ from agent.reviewer_publish import (
 def _f(**overrides: Any) -> Finding:
     base = new_finding(
         severity="high",
+        confidence="high",
         category="correctness",
         file="src/foo.py",
         start_line=10,
