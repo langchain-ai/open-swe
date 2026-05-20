@@ -39,17 +39,21 @@ def clip_suggestion(suggestion: str | None) -> tuple[str | None, bool]:
     return suggestion, False
 
 
-Severity = Literal["informational", "low", "medium", "high", "critical"]
+Severity = Literal["low", "medium", "high", "critical"]
+Confidence = Literal["low", "medium", "high"]
 FindingStatus = Literal["open", "resolved", "dismissed"]
 DiffSide = Literal["LEFT", "RIGHT"]
 
 SEVERITY_ORDER: dict[Severity, int] = {
-    "informational": 0,
-    "low": 1,
-    "medium": 2,
-    "high": 3,
-    "critical": 4,
+    "low": 0,
+    "medium": 1,
+    "high": 2,
+    "critical": 3,
 }
+
+# Confidence is recorded on every finding for post-hoc calibration analysis
+# but does not gate publication — the system prompt's defensibility bar is
+# the discipline.
 
 
 class Finding(TypedDict, total=False):
@@ -61,6 +65,7 @@ class Finding(TypedDict, total=False):
 
     id: str
     severity: Severity
+    confidence: Confidence
     category: str
     file: str
     start_line: int | None
@@ -108,6 +113,7 @@ def new_finding(
     end_line: int | None,
     description: str,
     sha: str,
+    confidence: Confidence = "medium",
     side: DiffSide = "RIGHT",
     suggestion: str | None = None,
     diff_hunk: str | None = None,
@@ -117,6 +123,7 @@ def new_finding(
     return {
         "id": finding_id or new_finding_id(),
         "severity": severity,
+        "confidence": confidence,
         "category": category,
         "file": file,
         "start_line": start_line,
@@ -297,16 +304,16 @@ def filter_findings_for_publish(
     - sorted by severity descending, then file/start_line for stable ordering
     - capped at ``cap`` to avoid review spam
     """
-    threshold_rank = SEVERITY_ORDER[severity_threshold]
+    severity_rank = SEVERITY_ORDER[severity_threshold]
     eligible = [
         finding
         for finding in findings
         if finding.get("status", "open") == "open"
-        and SEVERITY_ORDER.get(finding.get("severity", "informational"), 0) >= threshold_rank
+        and SEVERITY_ORDER.get(finding.get("severity", "low"), 0) >= severity_rank
     ]
     eligible.sort(
         key=lambda f: (
-            -SEVERITY_ORDER.get(f.get("severity", "informational"), 0),
+            -SEVERITY_ORDER.get(f.get("severity", "low"), 0),
             f.get("file", ""),
             f.get("start_line") or 0,
         )

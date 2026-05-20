@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 CONFIG_PATH = Path(__file__).with_name("config.toml")
 ScoreMode = Literal["all_findings", "surfaced_findings"]
-Severity = Literal["informational", "low", "medium", "high", "critical"]
+Severity = Literal["low", "medium", "high", "critical"]
 
 
 class ReviewerEvalConfig(TypedDict, total=False):
@@ -87,7 +87,7 @@ def _coerce_config(raw: dict[str, Any]) -> ReviewerEvalConfig:
         config["score_mode"] = score_mode
 
     severity_threshold = raw.get("severity_threshold")
-    if severity_threshold in {"informational", "low", "medium", "high", "critical"}:
+    if severity_threshold in {"low", "medium", "high", "critical"}:
         config["severity_threshold"] = severity_threshold
 
     cap = raw.get("cap")

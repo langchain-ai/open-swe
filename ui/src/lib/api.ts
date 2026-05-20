@@ -86,6 +86,26 @@ export interface ReposPayload {
   repositories: Array<Repository>;
 }
 
+export type ReviewStyleStatus = "idle" | "running" | "completed" | "failed";
+
+export interface ReviewStyle {
+  full_name: string;
+  owner?: string;
+  name?: string;
+  status: ReviewStyleStatus;
+  custom_prompt: string | null;
+  analysis_summary: string | null;
+  top_reviewers: Array<string>;
+  prs_sampled: number;
+  reviews_sampled: number;
+  analysis_thread_id: string | null;
+  analysis_run_id: string | null;
+  error: string | null;
+  created_by?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
 export const api = {
   me: () => request<SessionUser>("/me"),
   options: () => request<{ models: Array<ModelOption> }>("/options"),
@@ -93,6 +113,23 @@ export const api = {
   saveProfile: (body: ProfileUpdate) =>
     request<Profile>("/profile", { method: "PUT", body: JSON.stringify(body) }),
   repos: () => request<ReposPayload>("/repos"),
+  listReviewStyles: () => request<Array<ReviewStyle>>("/review-styles"),
+  createReviewStyle: (full_name: string) =>
+    request<ReviewStyle>("/review-styles", {
+      method: "POST",
+      body: JSON.stringify({ full_name }),
+    }),
+  getReviewStyle: (full_name: string) =>
+    request<ReviewStyle>(`/review-styles/${encodeURIComponent(full_name)}`),
+  saveReviewStylePrompt: (full_name: string, custom_prompt: string) =>
+    request<ReviewStyle>(`/review-styles/${encodeURIComponent(full_name)}`, {
+      method: "PUT",
+      body: JSON.stringify({ custom_prompt }),
+    }),
+  analyzeReviewStyle: (full_name: string) =>
+    request<ReviewStyle>(`/review-styles/${encodeURIComponent(full_name)}/analyze`, {
+      method: "POST",
+    }),
   adminListProfiles: () => request<Array<Profile>>("/admin/profiles"),
   adminSaveProfile: (login: string, body: ProfileUpdate & { email?: string }) =>
     request<Profile>(`/admin/profiles/${encodeURIComponent(login)}`, {

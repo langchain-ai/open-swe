@@ -60,6 +60,25 @@ deployment URL there (or leave it blank to use `LANGGRAPH_URL` / local dev).
 The target sets `reviewer_eval` for every run, so `publish_review` does not post
 to GitHub.
 
+## Per-repo review style prompts
+
+At runtime the reviewer loads a custom style guide from LangGraph Store when
+`configurable.repo` is set (`owner` + `name` → store key `owner/name`). This
+applies to **eval runs too**, as long as a completed style profile exists for
+that repo.
+
+The Martian benchmark uses these upstream repos (10 PRs each):
+
+- `getsentry/sentry`
+- `keycloak/keycloak`
+- `grafana/grafana`
+- `discourse/discourse`
+- `calcom/cal.com`
+
+Before scoring with repo-specific styles, run **Review styles** analysis in the
+dashboard for each repo (or copy prompts into store). Re-run `make dev` so the
+reviewer graph sees the same store.
+
 By default the judge scores final `add_finding` calls. Set
 `score_mode = "surfaced_findings"` in the config to score only findings that
 would pass the production threshold/cap.

@@ -69,7 +69,7 @@ def publish_review(
         Dictionary with ``success``, ``review_id``, ``surfaced_count``,
         ``hidden_count``, ``resolved_thread_count``.
     """
-    if severity_threshold not in {"informational", "low", "medium", "high", "critical"}:
+    if severity_threshold not in {"low", "medium", "high", "critical"}:
         return {"success": False, "error": f"Invalid severity_threshold: {severity_threshold}"}
 
     config = get_config()

@@ -24,6 +24,7 @@ from agent.reviewer_findings import (
 def _f(**overrides: Any) -> Finding:
     base = new_finding(
         severity="high",
+        confidence="high",
         category="correctness",
         file="foo.py",
         start_line=10,
@@ -53,8 +54,7 @@ def test_new_finding_defaults() -> None:
 
 def test_severity_order_monotonic() -> None:
     assert (
-        SEVERITY_ORDER["informational"]
-        < SEVERITY_ORDER["low"]
+        SEVERITY_ORDER["low"]
         < SEVERITY_ORDER["medium"]
         < SEVERITY_ORDER["high"]
         < SEVERITY_ORDER["critical"]
@@ -67,7 +67,6 @@ def test_filter_findings_for_publish_drops_below_threshold_and_resolved() -> Non
         _f(id="f_b", severity="low", file="b.py"),
         _f(id="f_c", severity="critical", file="c.py", start_line=2, end_line=2),
         _f(id="f_d", severity="high", file="d.py", status="resolved"),
-        _f(id="f_e", severity="informational", file="e.py"),
     ]
     surfaced = filter_findings_for_publish(findings, severity_threshold="medium", cap=10)
     assert [f["id"] for f in surfaced] == ["f_c", "f_a"]

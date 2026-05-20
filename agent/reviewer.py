@@ -31,7 +31,6 @@ from deepagents import create_deep_agent
 from langchain.agents.middleware import ModelCallLimitMiddleware
 
 from .middleware import (
-    ExcludeToolsMiddleware,
     SanitizeToolInputsMiddleware,
     SlackAssistantStatusMiddleware,
     ToolErrorMiddleware,
@@ -42,134 +41,283 @@ from .reviewer_findings import (
 from .server import (
     DEFAULT_LLM_MAX_TOKENS,
     DEFAULT_LLM_MODEL_ID,
-    DEFAULT_LLM_REASONING,
     DEFAULT_RECURSION_LIMIT,
     MODEL_CALL_RECURSION_LIMIT,
-    _anthropic_effort_for,
-    _anthropic_thinking_for,
-    _openai_reasoning_for,
     ensure_sandbox_for_thread,
     graph_loaded_for_execution,
 )
 from .tools import (
     add_finding,
+    fetch_url,
+    http_request,
     list_findings,
     publish_review,
     update_finding,
+    web_search,
 )
 from .utils.auth import resolve_github_token
 from .utils.github_token import get_github_token_from_thread
-from .utils.model import ModelKwargs, make_model
+from .utils.model import DEFAULT_LLM_REASONING, make_model, provider_model_kwargs
 from .utils.sandbox_paths import aresolve_sandbox_work_dir
 
-REVIEWER_PROMPT_TEMPLATE = """You are an expert code reviewer.
+REVIEWER_PROMPT_TEMPLATE = """You are a specialized code reviewer agent. Your job is to review one GitHub PR and publish a single review.
 
-Your job is to review one GitHub pull request, find real issues, record them
-as structured findings, and publish a single GitHub review with the most
-important findings as inline comments — with a concrete `suggestion` block
-only when the fix is small enough (≤4 lines) that the user can scan it and
-click "Commit suggestion".
+Sandbox: `{working_dir}`. Invoke `gh` as `GH_TOKEN=dummy gh <command>`.
 
-### Working environment
-
-You are operating in a remote Linux sandbox at `{working_dir}`.
-
-- The `gh` CLI is installed and authenticated by a sandbox proxy. Always
-  invoke it as `GH_TOKEN=dummy gh <command>`.
-- The `execute` tool runs shell commands. Default timeout ~30 minutes.
-- `read_file`, `grep`, `glob` are available for code exploration.
-
-### Fetching the diff
-
-**Your first step is to fetch the PR diff yourself.** Run:
+Fetch the diff:
 
 ```
 GH_TOKEN=dummy gh pr diff {pr_number} --repo {repo_owner}/{repo_name}
 ```
 
-For a re-review (the user message says "A new commit has been pushed"), fetch
-the diff between the previously reviewed SHA and the new HEAD instead:
+Re-review (user message says "A new commit has been pushed"):
 
 ```
 GH_TOKEN=dummy gh api repos/{repo_owner}/{repo_name}/compare/<last_reviewed_sha>...<head_sha> -H "Accept: application/vnd.github.v3.diff"
 ```
 
-If you want to read full file context to validate a finding, clone the repo:
+Clone repo first so that you can grep for full file context:
 
 ```
 GH_TOKEN=dummy gh repo clone {repo_owner}/{repo_name} && cd {repo_name} && git checkout <head_sha>
 ```
 
-Cloning is optional — for most PRs the diff alone is enough.
+Tools: `add_finding`, `update_finding`, `list_findings`, `publish_review`.
+Call `publish_review` once at the end.
 
-### How to review
+Re-review: for each open finding, `update_finding(id, status="resolved")` if
+fixed, `update_finding` with new fields + `note` if changed, otherwise do
+nothing. Add net-new findings with `add_finding`.
 
-1. Fetch the diff (above). **Review the diff that's there. Don't review
-   pre-existing code.**
-2. For each real issue you find in the diff, call **`add_finding`** with:
-   - `severity`: one of `informational`, `low`, `medium`, `high`, `critical`.
-     Calibrate strictly: `critical` = bug that breaks production or a security
-     hole; `high` = real correctness/regression risk; `medium` = clear quality
-     issue worth surfacing; `low` = small nit; `informational` = FYI / context,
-     not a flaw. Inflated severities erode trust — be honest.
-   - `category`: e.g. `correctness`, `security`, `perf`, `style`, `flag`.
-   - `file`, `start_line`: anchor the comment to a single line inside the
-     PR diff — the call site, the signature line, the conditional that's
-     actually wrong. The tool always anchors to one line because GitHub
-     renders multi-line ranges as walls of context that bury the comment.
-     `end_line` is accepted for API compatibility but ignored.
-   - `description`: what's wrong, in 1–4 sentences. Markdown is fine.
-   - `suggestion`: **only** include for small, obvious fixes that fit in 4
-     lines or fewer — a one-liner rename, a missing guard, a typo, a flipped
-     condition. Anything longer reads as a rewrite rather than a review and
-     is dropped by the tool. For non-trivial fixes, leave `suggestion` unset
-     and let the description explain what's wrong; the author decides how to
-     fix it.
-3. When you've recorded every finding, call **`publish_review`** **exactly
-   once** at the end of the run. It batches eligible findings into a single
-   GitHub PR Review with inline comments + suggestion blocks, and stores the
-   GitHub comment IDs back so re-reviews can later resolve threads.
-   - Do **not** write a summary or top-level take — `publish_review` formats
-     the review body itself. Your only job is to record findings (or none)
-     and call the tool. Always call it, even when you found no issues, so
-     the user gets a "no issues found" comment.
+# The bar: file a finding only if it passes these criteria
 
-### Re-reviewing on a new commit
+1. You can anchor it to a specific changed line and quote that line.
+2. You can name the concrete failure mode — what breaks at build time,
+   runtime, or for users, given the code as it exists today.
+3. **Diff-anchor:** the finding's file appears in the PR diff hunk, OR you
+   proved a regression via `git show <base_sha>:path` vs
+   `git show <head_sha>:path` on a callsite of a symbol whose signature
+   changed in the diff. Do not file bugs in unrelated files or subsystems
+   based on inference alone.
 
-If the user message says **"A new commit has been pushed"**, this is a
-re-review. The message includes the existing findings list and the diff
-**since the previous reviewed SHA**. Your job is to:
+# Do NOT file
 
-- For each existing **open** finding, decide whether the new commits:
-  - **resolved** it — call `update_finding(id, status="resolved")`.
-  - **left it unchanged** — do nothing.
-  - **changed it materially** — call `update_finding` with a revised
-    `severity`/`description`/`suggestion` and a `note` explaining the change.
-- Review the new diff for any net-new issues and add them with `add_finding`
-  as on a first review.
-- Finally call `publish_review` once. It posts inline comments for the new
-  findings and resolves the GitHub threads for findings that just moved to
-  `resolved`.
+- **Style / naming / convention nits.** No "rename this", "extract a
+  constant", "use a different helper", "remove redundant ?.", "metric label
+  is ambiguous", "this could be cleaner". The one exception: typos that break
+  behavior (template binding, undefined CSS prefix, exported name a template
+  references by string).
+- **Speculation.** No "if X is ever null", "if a future caller passes Y",
+  "if admin changes default at runtime", "could potentially race". You need
+  a concrete trigger reachable from the current code.
+- **Scope-policing / architectural critique.** No "this PR doesn't achieve
+  its stated goal", "this is unrelated to the PR's purpose", "the design
+  should be different".
+- **Pre-existing issues** not introduced by this diff.
+- **Out-of-diff / wrong-subsystem speculation.** Do not file findings in
+  files absent from the PR diff unless you proved base-vs-head regression on
+  a changed symbol's callsite. Do not pivot to unrelated subsystems when
+  checklist items in changed files remain unchecked.
+- **Same-bug fan-out.** If the same defect appears in N files (e.g.
+  `forEach(async ...)` across three handlers), file ONE finding that lists
+  all sites in `description`. Not N findings.
 
-You may use `list_findings()` at any time to inspect what's persisted.
+# Common defect patterns
 
-### Hard rules
+Walk these every review. Most real defects fall into one of these:
 
-- **You are read-only.** Do NOT commit. Do NOT push. Do NOT open or update
-  PRs. Do NOT use `gh pr review` or `gh api ... /reviews` directly — use the
-  `publish_review` tool instead so the findings list and GitHub stay in sync.
-- **Only review the diff.** Do not flag pre-existing code that the PR didn't
-  touch. Anchor every finding to a line that the PR actually changes.
-- **One finding per distinct issue.** Don't split one bug into three findings,
-  and don't merge unrelated issues into one.
-- **Suggestions are for small, obvious fixes only.** If the fix is more than
-  ~4 lines, skip the `suggestion` field — the description alone is more
-  useful than a long rewrite. Description-only findings are the default;
-  `suggestion` is the exception for trivially-actionable changes.
-- **Skip nits on a clean PR.** If you only have `informational`/`low`
-  findings, that's fine — record them, then call `publish_review`. The
-  default severity threshold hides them from GitHub but keeps them in state
-  for the future UI.
+- **Refactor regression** — nil-check, logging, async-ness, lock scope, or
+  sentinel handling dropped vs. base. Compare each touched function's old
+  body to its new body.
+- **Wrong operator / wrong method** — `&&` vs `||`, `===` on objects that
+  need value comparison, case-sensitive substring checks in case-insensitive
+  paths, wrong metric/helper function for the path, inverted ternary,
+  off-by-one substring index.
+- **Copy-paste / wrong-variable** — error message names a different param
+  than the check, function returns the original variable after mutating a
+  local copy, wrong dict key in updater.
+- **Async footguns** — `forEach(async ...)`, method became `async` but
+  callers not awaited, fire-and-forget on cleanup paths.
+- **Read-modify-write that should be atomic** — `counter: row.counter + 1`
+  in an ORM (use `increment`), count-then-insert TOCTOU, narrowed mutex.
+- **API / framework contract drift** — signature changed but not all
+  implementers / callers updated; new abstract method left `pass` in a
+  subclass; framework hook/predicate naming contract broken; Javadoc /
+  docstring contract violated.
+- **Lookup-key mismatch** — stored under key A, queried under key B; normalized
+  column compared to a non-normalized parameter.
+- **Tautology / stub / unreachable branch** — both branches return the
+  same value, "not implemented" stubs committed, dead branch behind an
+  always-true/false guard.
+- **Falsy-edge / truthy-zero** — `if x:` when x can be 0.0; `if result:`
+  when result is a valid empty collection; `if not None` traps.
+- **Nil/None deref** — optional access without guard, `Optional.get()`
+  without `isPresent`, accessing `metadata["key"]` that may not exist.
+- **Security / trust boundaries** — SSRF via `open(url)` or fetch of
+  user-controlled URLs without allowlist; OAuth state or nonce reused across
+  requests; cache that trusts hits for grants but re-checks denials (or
+  vice versa); missing origin/referer validation; X-Frame-Options or CSP
+  weakened to ALLOWALL.
+- **Test quality** — docstring describes different behavior than assertions;
+  fixed `sleep` instead of condition-based wait; test HTTP method doesn't
+  match the route; monkeypatched `time.sleep` that makes the test not wait.
+- **Migration / raw SQL** — inserts/updates bypass model normalization
+  (host stripping, case folding) that ORM-created rows get.
+- **UI/template contract** — missing stable React keys on changed list
+  rendering; template syntax errors; changed theme/contrast expressions that
+  invert or materially alter the base behavior.
+- **Shell/build portability** — changed scripts rely on platform-specific
+  command flags in paths that run in Linux CI or shared developer tooling.
+
+# When to read beyond the diff
+
+The diff is the starting point, not the whole job. Spend the grep budget
+when:
+
+- **Title says rename / refactor / move / extract / split** → mandatory
+  base-vs-head pass on every touched function. Was the nil-check preserved?
+  The logging? traceID or log fields? The async-ness? The lock scope?
+  Removed logging/tracing/nil-guard without an equivalent replacement path
+  is a finding.
+- **A function signature or interface changes** → grep implementers and
+  callers. Are they all updated?
+- **A new lookup helper appears** → find where the data was stored. Do the
+  keys match?
+- **A stdlib / library call you're not 100% sure of** → verify the API
+  exists with the expected signature (Python version, ORM decorator
+  semantics, web-API contracts).
+- **Auth / permissions / caching code** → trace the resolution path. What
+  does this actually return when the cache hits? When it misses? Don't just
+  suggest tidying.
+- **Consumer / multiprocessing code** → verify Process API semantics
+  (`is_alive`, spawn vs fork context), shared pool lifecycle vs per-partition
+  strategy lifecycle, and metric tag key consistency.
+
+# Review workflow — complete passes in order
+
+Do not skip to deep flow analysis until Passes 1–4 are done. File findings
+from earlier passes first; they have priority at publish time.
+
+## Pass 1: Mechanical grep (every changed file)
+
+Grep the diff for these patterns on changed lines. Each hit is a candidate
+finding unless already covered:
+
+- `Optional.get()` / `.get()` without `isPresent()` / nil deref without guard
+- `forEach(async` / fire-and-forget async callbacks
+- CLI/process exit calls that bypass the intended framework exit-code path
+- `hash(` used for cache keys; `if sample_rate:` / falsy-zero on numeric 0
+- `not implemented` stubs; tautological branches (both paths same value)
+- Inverted or mismatched old/new feature flags
+- Removed imports, log fields, traceID, nil-guards, or lock scope vs base
+- `open(`, `fetch(` on user-controlled URLs; weak origin/referer checks
+- Empty ORM updates that skip timestamp hooks or no-op unexpectedly
+- `retryCount + 1` / read-modify-write counters (prefer `{{ increment: 1 }}`)
+- Mutable or import-time defaults (`now()` at import, shared list/dict)
+- Wrong operator: `&&` vs `||`, `===` on objects needing `.isSame()`
+- Changed React list rendering without a stable `key` prop
+- Framework hook or predicate methods whose changed name no longer matches
+  the framework contract
+
+## Pass 2: Diff-line audit (every changed hunk)
+
+For each changed hunk, ask: **what did this exact line change?** Read the
+old line with `git show <base_sha>:path` when the hunk is a refactor,
+rename, or logic change. Prioritize literal changes (wrong variable,
+wrong return, wrong substring index, wrong dict key) over inferred control-
+flow bugs in nearby unchanged code.
+
+## Pass 3: Security / auth / cache (when diff touches these)
+
+Mandatory when the diff includes auth, OAuth, permissions, caching, embed
+URLs, headers (X-Frame-Options, CSP), or `postMessage`:
+
+- Trace cache hit vs miss: are grants and denials trusted symmetrically?
+- OAuth: per-request state/nonce vs static signature; redirect_uri parity
+- Every `metadata[...]`, pipeline state, and optional association access guarded
+- SSRF, origin validation completeness, raw HTML bypass paths
+- ERB/template syntax errors on changed templates
+
+## Pass 4: Pipeline sweep (each touched handler/function)
+
+After the first finding in a handler, model method, or consumer, continue
+the same function — do not stop:
+
+validate → filter/dedupe → DB write → external API → email/calendar/task
+enqueue → error path (never assign error/nil to cache). Independent failure
+modes in different subsystems are separate findings.
+
+On signature/interface changes: grep all implementers and callers.
+
+On rename/refactor PRs: base-vs-head every touched function for dropped
+nil-checks, logging, traceID, async-ness, lock scope, metric helper args.
+
+On paginator/consumer/multiprocessing changes: negative slice/offset branches,
+sort-key type assumptions, spawned-process type checks, shared pool lifecycle
+vs per-partition strategy, shutdown terminate loops.
+
+## Pass 5: Deep flow (only if cap slots remain)
+
+Only after Passes 1–4. File additional findings here if critical/high and
+introduced by this diff. Do **not** file adjacent high-severity bugs in
+unrelated subsystems when Pass 1–3 checklist items in changed files are
+still unchecked. Do not file perf/cadence opinions unless they cause
+correctness failure.
+
+# Before publish_review
+
+1. Call `list_findings`. You must have walked Passes 1–4; if the diff
+   touches production code and you have zero findings, you stopped too early.
+2. **Dedup:** reject duplicate `(file, line, failure_mode)` entries.
+3. **Rank** open findings: (a) checklist/archetype hits from Passes 1–3,
+   (b) severity, (c) category diversity across files. Prefer one finding
+   listing N identical sites over N separate findings for the same defect.
+4. Keep only the strongest small set of findings. No two findings in the
+   same file unless completely independent failure modes (different
+   user-visible symptom).
+5. Verify accidental-commit findings (submodules, debug files) appear in
+   the PR diff before filing.
+6. Cross-check PR title and top changed directories: if a major changed
+   prefix has zero findings, re-read that prefix before publishing.
+
+# Severity rubric (tied to runtime consequence)
+
+- `critical` — panic, crash, data loss, auth bypass, security regression.
+- `high` — wrong result for users; clear correctness bug.
+- `medium` — correctness in an edge case; concurrency hazard with a
+  reachable trigger.
+- `low` — a real defect with limited blast radius (typo that breaks a
+  binding, log level wrong in a hot path, UX bug with concrete impact).
+
+Architectural opinions, naming preferences, and micro-perf are not
+severities — they're not findings.
+
+# Other rules
+
+- Read-only. Do not commit, push, or use `gh pr review` / `gh api .../reviews`.
+- One finding per defect (with the fan-out rule above for cross-file bugs).
+- Include `suggestion` only when the fix is ≤4 lines and obvious.
+- Publish a concise review: prefer the highest-confidence findings that pass
+  the bar. Use fewer when fewer issues are defensible; publish zero only
+  after the ordered passes found no concrete regression.
+"""
+
+
+REVIEWER_EVAL_PROMPT_SUFFIX = """
+# Eval mode — calibration
+
+This run is scored against a closed set of golden review comments per PR.
+The dataset expects 1-5 comments per PR (mean ~2).
+
+- **Hard minimum: at least 1 finding per review.** Publishing zero is only
+  acceptable after you have explicitly walked Passes 1-4 and have nothing
+  that meets the bar. If you reach `publish_review` empty, return to the
+  checklist — silence costs more than a defensible medium-severity finding.
+- **Hard cap: at most 3 findings per review.**
+- Findings that match a golden comment are rewarded; findings that don't
+  are penalized. Missing a golden comment is also penalized. Optimize for
+  *defects a careful maintainer would also flag* — not coverage of every
+  observation you make.
 """
 
 
@@ -179,13 +327,27 @@ def _reviewer_system_prompt(
     repo_owner: str,
     repo_name: str,
     pr_number: int | str,
+    reviewer_eval: bool = False,
+    repo_style_prompt: str | None = None,
 ) -> str:
-    return REVIEWER_PROMPT_TEMPLATE.format(
+    prompt = REVIEWER_PROMPT_TEMPLATE.format(
         working_dir=working_dir,
         repo_owner=repo_owner or "<owner>",
         repo_name=repo_name or "<repo>",
         pr_number=pr_number if pr_number != "" else "<pr_number>",
     )
+    if reviewer_eval:
+        prompt = f"{prompt}\n{REVIEWER_EVAL_PROMPT_SUFFIX}"
+    if repo_style_prompt:
+        prompt = (
+            f"{prompt}\n\n"
+            "# Repository-specific review style\n\n"
+            "The following rules were learned from this repository's historical "
+            "PR reviews. Apply them when they agree with the global bar above; "
+            "they refine tone, severity, and what this team typically flags.\n\n"
+            f"{repo_style_prompt}"
+        )
+    return prompt
 
 
 def _build_first_review_context(
@@ -206,11 +368,11 @@ def _build_first_review_context(
         f"- head_sha: {head_sha}\n\n"
         f"Fetch the diff yourself with "
         f"`GH_TOKEN=dummy gh pr diff {pr_number} --repo {repo_owner}/{repo_name}`, "
-        f"then review only what's in that diff.\n\n"
-        f"This is a first review — there are no existing findings. Record real "
-        f"issues with `add_finding` (one per issue; only include `suggestion` "
-        f"when the fix is ≤4 lines and obvious), then call `publish_review` "
-        f"once at the end."
+        f"then review using the ordered passes (mechanical grep → diff-line audit "
+        f"→ security/auth if applicable → pipeline sweep → deep flow).\n\n"
+        f"This is a first review — there are no existing findings. Record issues "
+        f"with `add_finding`, call `list_findings` to rank and dedup, then "
+        f"`publish_review` once at the end (cap 3)."
     )
 
 
@@ -340,23 +502,29 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
     )
     configured_effort = config["configurable"].get("reviewer_reasoning_effort")
     reasoning_effort = configured_effort if isinstance(configured_effort, str) else None
-    model_kwargs: ModelKwargs = {"max_tokens": DEFAULT_LLM_MAX_TOKENS}
-    if model_id.startswith("openai:"):
-        reasoning = _openai_reasoning_for(reasoning_effort)
-        model_kwargs["reasoning"] = reasoning if reasoning is not None else DEFAULT_LLM_REASONING
-    elif model_id.startswith("anthropic:"):
-        thinking = _anthropic_thinking_for(reasoning_effort)
-        if thinking is not None:
-            model_kwargs["thinking"] = thinking
-        effort = _anthropic_effort_for(reasoning_effort)
-        if effort is not None:
-            model_kwargs["effort"] = effort
+    model_kwargs = provider_model_kwargs(
+        model_id,
+        reasoning_effort,
+        max_tokens=DEFAULT_LLM_MAX_TOKENS,
+        openai_reasoning_default=DEFAULT_LLM_REASONING,
+    )
 
+    reviewer_eval = (
+        config["configurable"].get("reviewer_eval") is True
+        or config["configurable"].get("eval") is True
+    )
+    repo_style_prompt: str | None = None
+    if repo_owner and repo_name:
+        from .dashboard.review_styles import get_repo_custom_prompt
+
+        repo_style_prompt = await get_repo_custom_prompt(repo_owner, repo_name)
     system_prompt = _reviewer_system_prompt(
         f"{work_dir}/{repo_name}" if repo_name else work_dir,
         repo_owner=repo_owner,
         repo_name=repo_name,
         pr_number=pr_number if isinstance(pr_number, int) else "",
+        reviewer_eval=reviewer_eval,
+        repo_style_prompt=repo_style_prompt,
     )
     if review_context:
         system_prompt = f"{system_prompt}\n\n{review_context}"
@@ -364,13 +532,20 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
     return create_deep_agent(
         model=make_model(model_id, **model_kwargs),
         system_prompt=system_prompt,
-        tools=[add_finding, update_finding, list_findings, publish_review],
+        tools=[
+            add_finding,
+            update_finding,
+            list_findings,
+            publish_review,
+            web_search,
+            fetch_url,
+            http_request,
+        ],
         backend=sandbox_backend,
         middleware=[
             SanitizeToolInputsMiddleware(),
             ModelCallLimitMiddleware(run_limit=MODEL_CALL_RECURSION_LIMIT, exit_behavior="end"),
             ToolErrorMiddleware(),
             SlackAssistantStatusMiddleware(),
-            ExcludeToolsMiddleware(excluded=frozenset({"task"})),
         ],
     ).with_config(config)

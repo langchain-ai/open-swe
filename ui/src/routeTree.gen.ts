@@ -9,11 +9,17 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as ReviewStylesRouteImport } from './routes/review-styles'
 import { Route as ProfileRouteImport } from './routes/profile'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as AdminRouteImport } from './routes/admin'
 import { Route as IndexRouteImport } from './routes/index'
 
+const ReviewStylesRoute = ReviewStylesRouteImport.update({
+  id: '/review-styles',
+  path: '/review-styles',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ProfileRoute = ProfileRouteImport.update({
   id: '/profile',
   path: '/profile',
@@ -40,12 +46,14 @@ export interface FileRoutesByFullPath {
   '/admin': typeof AdminRoute
   '/login': typeof LoginRoute
   '/profile': typeof ProfileRoute
+  '/review-styles': typeof ReviewStylesRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
   '/login': typeof LoginRoute
   '/profile': typeof ProfileRoute
+  '/review-styles': typeof ReviewStylesRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -53,13 +61,14 @@ export interface FileRoutesById {
   '/admin': typeof AdminRoute
   '/login': typeof LoginRoute
   '/profile': typeof ProfileRoute
+  '/review-styles': typeof ReviewStylesRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/admin' | '/login' | '/profile'
+  fullPaths: '/' | '/admin' | '/login' | '/profile' | '/review-styles'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/admin' | '/login' | '/profile'
-  id: '__root__' | '/' | '/admin' | '/login' | '/profile'
+  to: '/' | '/admin' | '/login' | '/profile' | '/review-styles'
+  id: '__root__' | '/' | '/admin' | '/login' | '/profile' | '/review-styles'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -67,10 +76,18 @@ export interface RootRouteChildren {
   AdminRoute: typeof AdminRoute
   LoginRoute: typeof LoginRoute
   ProfileRoute: typeof ProfileRoute
+  ReviewStylesRoute: typeof ReviewStylesRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/review-styles': {
+      id: '/review-styles'
+      path: '/review-styles'
+      fullPath: '/review-styles'
+      preLoaderRoute: typeof ReviewStylesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/profile': {
       id: '/profile'
       path: '/profile'
@@ -107,6 +124,7 @@ const rootRouteChildren: RootRouteChildren = {
   AdminRoute: AdminRoute,
   LoginRoute: LoginRoute,
   ProfileRoute: ProfileRoute,
+  ReviewStylesRoute: ReviewStylesRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

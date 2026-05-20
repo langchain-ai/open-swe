@@ -24,7 +24,7 @@ DEFAULT_REVIEWER_ASSISTANT_ID = "reviewer"
 DEFAULT_LANGGRAPH_URL = "http://localhost:2024"
 ScoreMode = Literal["all_findings", "surfaced_findings"]
 _VALID_SCORE_MODES: set[ScoreMode] = {"all_findings", "surfaced_findings"}
-_VALID_SEVERITIES: set[Severity] = {"informational", "low", "medium", "high", "critical"}
+_VALID_SEVERITIES: set[Severity] = {"low", "medium", "high", "critical"}
 
 _THREAD_IDS: set[str] = set()
 _THREAD_IDS_LOCK = threading.Lock()

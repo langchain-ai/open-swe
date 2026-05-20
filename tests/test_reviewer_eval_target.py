@@ -47,12 +47,42 @@ def test_eval_target_passes_model_overrides(monkeypatch: pytest.MonkeyPatch) -> 
     assert configurable["reviewer_reasoning_effort"] == "high"
 
 
+def _result_with_findings(findings: list[dict[str, Any]]) -> dict[str, Any]:
+    return {"messages": [{"tool_calls": [{"name": "add_finding", "args": f} for f in findings]}]}
+
+
+def test_extract_comments_includes_all_confidences() -> None:
+    result = _result_with_findings(
+        [
+            {
+                "file": "a.py",
+                "severity": "high",
+                "confidence": "low",
+                "description": "lo",
+                "start_line": 1,
+                "end_line": 1,
+            },
+            {
+                "file": "b.py",
+                "severity": "high",
+                "confidence": "high",
+                "description": "hi",
+                "start_line": 2,
+                "end_line": 2,
+            },
+        ]
+    )
+    comments = target._extract_comments(result)
+    assert {c["file"] for c in comments} == {"a.py", "b.py"}
+
+
 @pytest.mark.asyncio
 async def test_extract_surfaced_comments_uses_publish_filter(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     high = new_finding(
         severity="high",
+        confidence="high",
         category="correctness",
         file="a.py",
         start_line=10,
@@ -63,6 +93,7 @@ async def test_extract_surfaced_comments_uses_publish_filter(
     )
     low = new_finding(
         severity="low",
+        confidence="high",
         category="style",
         file="b.py",
         start_line=20,

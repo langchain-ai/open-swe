@@ -10,6 +10,7 @@ from langgraph.config import get_config
 from ..reviewer_diff import is_range_in_diff
 from ..reviewer_findings import (
     MAX_SUGGESTION_LINES,
+    Confidence,
     DiffSide,
     Finding,
     Severity,
@@ -22,6 +23,7 @@ from ..reviewer_findings import (
 
 def add_finding(
     severity: str,
+    confidence: str,
     category: str,
     file: str,
     description: str,
@@ -47,7 +49,8 @@ def add_finding(
     issue truly isn't anchored to a line.
 
     Args:
-        severity: One of ``informational``, ``low``, ``medium``, ``high``, ``critical``.
+        severity: One of ``low``, ``medium``, ``high``, ``critical``.
+        confidence: One of ``low``, ``medium``, ``high``.
         category: Short category label (``correctness``, ``security``, ``perf``,
             ``style``, ``flag``, etc.). Free-form; used for grouping in the UI.
         file: Repo-relative path of the file the finding refers to.
@@ -79,8 +82,10 @@ def add_finding(
     if start_line is None and end_line is not None:
         start_line = end_line
 
-    if severity not in {"informational", "low", "medium", "high", "critical"}:
+    if severity not in {"low", "medium", "high", "critical"}:
         return {"success": False, "error": f"Invalid severity: {severity}"}
+    if confidence not in {"low", "medium", "high"}:
+        return {"success": False, "error": f"Invalid confidence: {confidence}"}
     if side not in {"LEFT", "RIGHT"}:
         return {"success": False, "error": f"Invalid side: {side}"}
     if start_line is not None and end_line is not None and end_line < start_line:
@@ -116,6 +121,7 @@ def add_finding(
 
     finding: Finding = new_finding(
         severity=_cast_severity(severity),
+        confidence=_cast_confidence(confidence),
         category=category,
         file=file,
         start_line=start_line,
@@ -141,6 +147,10 @@ def add_finding(
 
 
 def _cast_severity(value: str) -> Severity:
+    return value  # type: ignore[return-value]
+
+
+def _cast_confidence(value: str) -> Confidence:
     return value  # type: ignore[return-value]
 
 

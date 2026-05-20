@@ -36,6 +36,16 @@ from .profiles import (
     upsert_access_token,
     upsert_profile,
 )
+from .review_style_jobs import start_review_style_analysis, sync_review_style_run_status
+from .review_styles import (
+    ReviewStyleCreate,
+    ReviewStylePromptUpdate,
+    create_review_style,
+    get_review_style,
+    list_review_styles,
+    normalize_repo_full_name,
+    set_custom_prompt,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -325,3 +335,109 @@ async def list_repos(
             if r.get("full_name")
         ],
     }
+
+
+async def _assert_repo_available_for_style_analysis(full_name: str, token: str) -> None:
+    """Ensure the repo exists and is readable for style learning.
+
+    Public repositories are allowed without the GitHub App installed on them.
+    Private repositories require the authenticated user to have read access.
+    """
+    full_name = normalize_repo_full_name(full_name)
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    owner, name = full_name.split("/", 1)
+    async with httpx.AsyncClient() as client:
+        r = await client.get(
+            f"https://api.github.com/repos/{owner}/{name}",
+            headers=headers,
+        )
+        if r.status_code == 404:
+            raise HTTPException(404, "repository not found")
+        if r.status_code == 403:
+            raise HTTPException(403, "no access to this private repository")
+        if r.status_code != 200:
+            raise HTTPException(502, f"github API error ({r.status_code})")
+        body = r.json()
+        if body.get("private") is not True:
+            return
+        # Private repo: 200 from GitHub implies the user's token can read it.
+
+
+@router.get("/review-styles")
+async def api_list_review_styles(
+    session: dict[str, Any] = _SESSION_DEP,
+) -> list[dict[str, Any]]:
+    records = await list_review_styles()
+    out: list[dict[str, Any]] = []
+    for record in records:
+        if record.get("status") == "running":
+            synced = await sync_review_style_run_status(record["full_name"])
+            out.append(synced)
+        else:
+            out.append(record)
+    return out
+
+
+@router.post("/review-styles")
+async def api_create_review_style(
+    body: ReviewStyleCreate,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    token = await get_access_token(session["sub"])
+    if not token:
+        raise HTTPException(401, "github token unavailable, re-login required")
+    await _assert_repo_available_for_style_analysis(body.full_name, token)
+    return await create_review_style(body.full_name, session["sub"])
+
+
+@router.get("/review-styles/{full_name:path}")
+async def api_get_review_style(
+    full_name: str,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    full_name = normalize_repo_full_name(full_name)
+    record = await get_review_style(full_name)
+    if not record:
+        raise HTTPException(404, "review style not found")
+    if record.get("status") == "running":
+        record = await sync_review_style_run_status(full_name)
+    return record
+
+
+@router.put("/review-styles/{full_name:path}")
+async def api_update_review_style_prompt(
+    full_name: str,
+    body: ReviewStylePromptUpdate,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    full_name = normalize_repo_full_name(full_name)
+    record = await get_review_style(full_name)
+    if not record:
+        raise HTTPException(404, "review style not found")
+    return await set_custom_prompt(full_name, body.custom_prompt)
+
+
+@router.post("/review-styles/{full_name:path}/analyze")
+async def api_analyze_review_style(
+    full_name: str,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    full_name = normalize_repo_full_name(full_name)
+    token = await get_access_token(session["sub"])
+    if not token:
+        raise HTTPException(401, "github token unavailable, re-login required")
+    await _assert_repo_available_for_style_analysis(full_name, token)
+    record = await get_review_style(full_name)
+    if not record:
+        record = await create_review_style(full_name, session["sub"])
+    if record.get("status") == "running":
+        raise HTTPException(409, "analysis already running")
+    return await start_review_style_analysis(
+        full_name,
+        github_token=token,
+        created_by=session["sub"],
+    )
