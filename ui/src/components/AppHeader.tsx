@@ -32,6 +32,13 @@ export function AppHeader({ user }: { user: SessionUser }) {
           >
             Profile
           </Link>
+          <Link
+            to="/review-styles"
+            className="text-muted-foreground hover:text-foreground"
+            activeProps={{ className: "text-foreground font-medium" }}
+          >
+            Review styles
+          </Link>
           {user.is_admin && (
             <Link
               to="/admin"

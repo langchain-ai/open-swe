@@ -303,6 +303,24 @@ severities — they're not findings.
 """
 
 
+REVIEWER_EVAL_PROMPT_SUFFIX = """
+# Eval mode — calibration
+
+This run is scored against a closed set of golden review comments per PR.
+The dataset expects 1-5 comments per PR (mean ~2).
+
+- **Hard minimum: at least 1 finding per review.** Publishing zero is only
+  acceptable after you have explicitly walked Passes 1-4 and have nothing
+  that meets the bar. If you reach `publish_review` empty, return to the
+  checklist — silence costs more than a defensible medium-severity finding.
+- **Hard cap: at most 3 findings per review.**
+- Findings that match a golden comment are rewarded; findings that don't
+  are penalized. Missing a golden comment is also penalized. Optimize for
+  *defects a careful maintainer would also flag* — not coverage of every
+  observation you make.
+"""
+
+
 def _reviewer_system_prompt(
     working_dir: str,
     *,
@@ -310,6 +328,7 @@ def _reviewer_system_prompt(
     repo_name: str,
     pr_number: int | str,
     reviewer_eval: bool = False,
+    repo_style_prompt: str | None = None,
 ) -> str:
     prompt = REVIEWER_PROMPT_TEMPLATE.format(
         working_dir=working_dir,
@@ -317,6 +336,17 @@ def _reviewer_system_prompt(
         repo_name=repo_name or "<repo>",
         pr_number=pr_number if pr_number != "" else "<pr_number>",
     )
+    if reviewer_eval:
+        prompt = f"{prompt}\n{REVIEWER_EVAL_PROMPT_SUFFIX}"
+    if repo_style_prompt:
+        prompt = (
+            f"{prompt}\n\n"
+            "# Repository-specific review style\n\n"
+            "The following rules were learned from this repository's historical "
+            "PR reviews. Apply them when they agree with the global bar above; "
+            "they refine tone, severity, and what this team typically flags.\n\n"
+            f"{repo_style_prompt}"
+        )
     return prompt
 
 
@@ -483,12 +513,18 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
         config["configurable"].get("reviewer_eval") is True
         or config["configurable"].get("eval") is True
     )
+    repo_style_prompt: str | None = None
+    if repo_owner and repo_name:
+        from .dashboard.review_styles import get_repo_custom_prompt
+
+        repo_style_prompt = await get_repo_custom_prompt(repo_owner, repo_name)
     system_prompt = _reviewer_system_prompt(
         f"{work_dir}/{repo_name}" if repo_name else work_dir,
         repo_owner=repo_owner,
         repo_name=repo_name,
         pr_number=pr_number if isinstance(pr_number, int) else "",
         reviewer_eval=reviewer_eval,
+        repo_style_prompt=repo_style_prompt,
     )
     if review_context:
         system_prompt = f"{system_prompt}\n\n{review_context}"
