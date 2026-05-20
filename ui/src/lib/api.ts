@@ -61,6 +61,15 @@ export interface Profile {
   default_model?: string;
   reasoning_effort?: string;
   default_repo?: string | null;
+  first_name?: string | null;
+  last_name?: string | null;
+  base_branch?: string | null;
+  branch_prefix?: string | null;
+  auto_fix_ci?: boolean;
+  create_prs?: boolean;
+  allow_artifacts?: boolean;
+  slack_notifications?: boolean;
+  preferred_pr_destination?: string | null;
   updated_at?: string;
 }
 
@@ -68,6 +77,27 @@ export interface ProfileUpdate {
   default_model: string;
   reasoning_effort: string;
   default_repo?: string | null;
+  first_name?: string | null;
+  last_name?: string | null;
+  base_branch?: string | null;
+  branch_prefix?: string | null;
+  auto_fix_ci?: boolean;
+  create_prs?: boolean;
+  allow_artifacts?: boolean;
+  slack_notifications?: boolean;
+  preferred_pr_destination?: string | null;
+}
+
+export type TriggerMode = "every_push" | "ready_for_review" | "manual";
+export type AutofixMode = "off" | "low" | "medium" | "high";
+
+export interface TeamSettings {
+  trigger_mode: TriggerMode;
+  review_draft_prs: boolean;
+  pr_summaries: boolean;
+  autofix_mode: AutofixMode;
+  autofix_severity_threshold: AutofixMode;
+  updated_at?: string | null;
 }
 
 export interface Repository {
@@ -130,6 +160,9 @@ export const api = {
     request<ReviewStyle>(`/review-styles/${encodeURIComponent(full_name)}/analyze`, {
       method: "POST",
     }),
+  getTeamSettings: () => request<TeamSettings>("/team-settings"),
+  saveTeamSettings: (body: TeamSettings) =>
+    request<TeamSettings>("/team-settings", { method: "PUT", body: JSON.stringify(body) }),
   adminListProfiles: () => request<Array<Profile>>("/admin/profiles"),
   adminSaveProfile: (login: string, body: ProfileUpdate & { email?: string }) =>
     request<Profile>(`/admin/profiles/${encodeURIComponent(login)}`, {

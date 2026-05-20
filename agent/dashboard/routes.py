@@ -46,6 +46,11 @@ from .review_styles import (
     normalize_repo_full_name,
     set_custom_prompt,
 )
+from .team_settings import (
+    TeamSettingsUpdate,
+    get_team_settings,
+    upsert_team_settings,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -226,12 +231,30 @@ async def admin_put_profile(
     update.validate_pairing()
     existing = await get_profile(login) or {}
     email = update.email or existing.get("email") or ""
+    # Overlay only fields that were explicitly sent so the admin form (which
+    # only sends model/effort/repo) can't reset other fields the target user
+    # configured via My Settings / Cloud Agents to ProfileUpdate's defaults.
+    incoming = update.model_dump(exclude={"email"}, exclude_unset=True)
+    merged = {**existing, **incoming}
     base = ProfileUpdate(
-        default_model=update.default_model,
-        reasoning_effort=update.reasoning_effort,
-        default_repo=update.default_repo,
+        **{k: v for k, v in merged.items() if k in ProfileUpdate.model_fields},
     )
     return await upsert_profile(login, email, base)
+
+
+@router.get("/team-settings")
+async def api_get_team_settings(
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    return await get_team_settings()
+
+
+@router.put("/team-settings")
+async def api_put_team_settings(
+    update: TeamSettingsUpdate,
+    _admin: dict[str, Any] = _ADMIN_DEP,
+) -> dict[str, Any]:
+    return await upsert_team_settings(update)
 
 
 def _next_link_url(link_header: str | None) -> str | None:
