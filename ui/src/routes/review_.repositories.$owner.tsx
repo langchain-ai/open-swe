@@ -1,13 +1,16 @@
 import { Navigate, createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import type { ReposPayload } from "@/lib/api";
 import { AppShell } from "@/components/AppShell";
+import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { ApiError, api } from "@/lib/api";
 import { useSession } from "@/lib/session";
+
+const PAGE_SIZE = 20;
 
 export const Route = createFileRoute("/review_/repositories/$owner")({
   component: RepositoriesOwnerPage,
@@ -59,6 +62,15 @@ function RepositoriesOwnerPage() {
     [enabled.data?.repos],
   );
 
+  const [page, setPage] = useState(0);
+  useEffect(() => setPage(0), [owner]);
+
+  const totalPages = Math.max(1, Math.ceil(ownerRepos.length / PAGE_SIZE));
+  const safePage = Math.min(page, totalPages - 1);
+  const pageStart = safePage * PAGE_SIZE;
+  const pageEnd = Math.min(pageStart + PAGE_SIZE, ownerRepos.length);
+  const pageRepos = ownerRepos.slice(pageStart, pageEnd);
+
   if (session.isLoading) {
     return (
       <main className="p-6">
@@ -104,7 +116,7 @@ function RepositoriesOwnerPage() {
             </p>
           )}
           <ul className="divide-y divide-border">
-            {ownerRepos.map((r) => {
+            {pageRepos.map((r) => {
               const isEnabled = enabledSet.has(r.full_name);
               return (
                 <li
@@ -142,6 +154,34 @@ function RepositoriesOwnerPage() {
               );
             })}
           </ul>
+          {ownerRepos.length > PAGE_SIZE && (
+            <div className="flex items-center justify-between gap-4 border-t border-border px-4 py-2 text-xs">
+              <span className="text-muted-foreground">
+                Showing {pageStart + 1}-{pageEnd} of {ownerRepos.length}
+              </span>
+              <div className="flex items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={safePage === 0}
+                  onClick={() => setPage((p) => Math.max(0, p - 1))}
+                >
+                  Prev
+                </Button>
+                <span className="text-muted-foreground">
+                  {safePage + 1} / {totalPages}
+                </span>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={safePage >= totalPages - 1}
+                  onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+                >
+                  Next
+                </Button>
+              </div>
+            </div>
+          )}
         </div>
       </section>
     </AppShell>
