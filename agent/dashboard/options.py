@@ -30,6 +30,7 @@ SUPPORTED_MODELS: list[ModelOption] = [
 SUPPORTED_MODEL_IDS: frozenset[str] = frozenset(m["id"] for m in SUPPORTED_MODELS)
 
 DEFAULT_MODEL_ID: str = "openai:gpt-5.5"
+DEFAULT_MODEL_EFFORT: str = "medium"
 
 
 def model_supports_effort(model_id: str, effort: str) -> bool:
@@ -41,8 +42,9 @@ def model_supports_effort(model_id: str, effort: str) -> bool:
 
 def default_model_pair() -> tuple[str, str]:
     """Hardcoded fallback (model_id, reasoning_effort) used when no team default is set."""
-    for m in SUPPORTED_MODELS:
-        if m["id"] == DEFAULT_MODEL_ID:
-            return m["id"], m["default_effort"]
+    if DEFAULT_MODEL_ID in SUPPORTED_MODEL_IDS and model_supports_effort(
+        DEFAULT_MODEL_ID, DEFAULT_MODEL_EFFORT
+    ):
+        return DEFAULT_MODEL_ID, DEFAULT_MODEL_EFFORT
     first = SUPPORTED_MODELS[0]
     return first["id"], first["default_effort"]
