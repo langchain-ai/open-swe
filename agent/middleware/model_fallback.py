@@ -37,6 +37,44 @@ _TRANSIENT_EXCEPTIONS: tuple[type[BaseException], ...] = (
     openai.InternalServerError,
 )
 
+# google-genai errors are detected by type-name + message string so we don't
+# require ``langchain_google_genai`` at import time. ``ChatGoogleGenerativeAIError``
+# wraps upstream HTTP errors; for quota / rate-limit cases the message contains
+# ``RESOURCE_EXHAUSTED`` or the HTTP status ``429``.
+_GOOGLE_GENAI_ERROR_TYPE_NAMES = frozenset(
+    {
+        "ChatGoogleGenerativeAIError",
+        "GoogleGenerativeAIError",
+        "ResourceExhausted",
+    }
+)
+_GOOGLE_GENAI_RETRYABLE_MESSAGE_TOKENS = (
+    "RESOURCE_EXHAUSTED",
+    "429",
+    "quota",
+    "rate limit",
+    "503",
+    "UNAVAILABLE",
+    "500",
+    "INTERNAL",
+    "504",
+    "DEADLINE_EXCEEDED",
+)
+
+
+def _is_google_genai_transient(exc: BaseException) -> bool:
+    """Detect retryable google-genai errors without importing the SDK."""
+    type_name = type(exc).__name__
+    if type_name not in _GOOGLE_GENAI_ERROR_TYPE_NAMES:
+        # Walk the MRO so subclasses are caught too (e.g. provider-specific
+        # subclasses of ChatGoogleGenerativeAIError).
+        if not any(
+            base.__name__ in _GOOGLE_GENAI_ERROR_TYPE_NAMES for base in type(exc).__mro__
+        ):
+            return False
+    message = str(exc)
+    return any(token in message for token in _GOOGLE_GENAI_RETRYABLE_MESSAGE_TOKENS)
+
 
 def _should_fallback(exc: BaseException) -> bool:
     if isinstance(exc, _TRANSIENT_EXCEPTIONS):
@@ -46,6 +84,11 @@ def _should_fallback(exc: BaseException) -> bool:
         status = getattr(exc, "status_code", None)
         if isinstance(status, int) and status in _RETRYABLE_STATUS_CODES:
             return True
+    # google-genai surfaces 429 / RESOURCE_EXHAUSTED as ChatGoogleGenerativeAIError
+    # with the status code embedded in the message rather than as a typed
+    # attribute, so match by type name + message.
+    if _is_google_genai_transient(exc):
+        return True
     return False
 
 

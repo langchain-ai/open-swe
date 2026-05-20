@@ -53,4 +53,10 @@ def fallback_model_id_for(primary_model_id: str) -> str | None:
         return "openai:gpt-5.5"
     if primary_model_id.startswith("openai:"):
         return "anthropic:claude-opus-4-5"
+    if primary_model_id.startswith("google_genai:"):
+        # Route Gemini primaries to an Anthropic fallback when upstream
+        # returns 429 / RESOURCE_EXHAUSTED so the root run can still
+        # produce a result instead of erroring out. Mirrors the existing
+        # OpenAI -> Anthropic fallback shape.
+        return "anthropic:claude-opus-4-5"
     return None
