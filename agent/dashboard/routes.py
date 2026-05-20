@@ -10,8 +10,13 @@ from typing import Any
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import RedirectResponse, Response
+from pydantic import BaseModel
 
 from .admin import is_admin
+from .enabled_repos import (
+    list_enabled_review_repos,
+    set_review_repo_enabled,
+)
 from .oauth import (
     COOKIE_NAME,
     SESSION_TTL_SECONDS,
@@ -255,6 +260,27 @@ async def api_put_team_settings(
     _admin: dict[str, Any] = _ADMIN_DEP,
 ) -> dict[str, Any]:
     return await upsert_team_settings(update)
+
+
+class EnabledReviewRepoUpdate(BaseModel):
+    full_name: str
+    enabled: bool
+
+
+@router.get("/enabled-review-repos")
+async def api_list_enabled_review_repos(
+    _session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, list[str]]:
+    return {"repos": await list_enabled_review_repos()}
+
+
+@router.put("/enabled-review-repos")
+async def api_set_enabled_review_repo(
+    update: EnabledReviewRepoUpdate,
+    _admin: dict[str, Any] = _ADMIN_DEP,
+) -> dict[str, list[str]]:
+    repos = await set_review_repo_enabled(update.full_name, update.enabled)
+    return {"repos": repos}
 
 
 def _next_link_url(link_header: str | None) -> str | None:

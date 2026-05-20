@@ -16,6 +16,8 @@ import { Route as IntegrationsRouteImport } from './routes/integrations'
 import { Route as CloudAgentsRouteImport } from './routes/cloud-agents'
 import { Route as AdminRouteImport } from './routes/admin'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as ReviewStylesRouteImport } from './routes/review_.styles'
+import { Route as ReviewRepositoriesOwnerRouteImport } from './routes/review_.repositories.$owner'
 
 const ReviewRoute = ReviewRouteImport.update({
   id: '/review',
@@ -52,6 +54,16 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ReviewStylesRoute = ReviewStylesRouteImport.update({
+  id: '/review_/styles',
+  path: '/review/styles',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ReviewRepositoriesOwnerRoute = ReviewRepositoriesOwnerRouteImport.update({
+  id: '/review_/repositories/$owner',
+  path: '/review/repositories/$owner',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -61,6 +73,8 @@ export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute
   '/my-settings': typeof MySettingsRoute
   '/review': typeof ReviewRoute
+  '/review/styles': typeof ReviewStylesRoute
+  '/review/repositories/$owner': typeof ReviewRepositoriesOwnerRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -70,6 +84,8 @@ export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/my-settings': typeof MySettingsRoute
   '/review': typeof ReviewRoute
+  '/review/styles': typeof ReviewStylesRoute
+  '/review/repositories/$owner': typeof ReviewRepositoriesOwnerRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -80,6 +96,8 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/my-settings': typeof MySettingsRoute
   '/review': typeof ReviewRoute
+  '/review_/styles': typeof ReviewStylesRoute
+  '/review_/repositories/$owner': typeof ReviewRepositoriesOwnerRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -91,6 +109,8 @@ export interface FileRouteTypes {
     | '/login'
     | '/my-settings'
     | '/review'
+    | '/review/styles'
+    | '/review/repositories/$owner'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -100,6 +120,8 @@ export interface FileRouteTypes {
     | '/login'
     | '/my-settings'
     | '/review'
+    | '/review/styles'
+    | '/review/repositories/$owner'
   id:
     | '__root__'
     | '/'
@@ -109,6 +131,8 @@ export interface FileRouteTypes {
     | '/login'
     | '/my-settings'
     | '/review'
+    | '/review_/styles'
+    | '/review_/repositories/$owner'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -119,6 +143,8 @@ export interface RootRouteChildren {
   LoginRoute: typeof LoginRoute
   MySettingsRoute: typeof MySettingsRoute
   ReviewRoute: typeof ReviewRoute
+  ReviewStylesRoute: typeof ReviewStylesRoute
+  ReviewRepositoriesOwnerRoute: typeof ReviewRepositoriesOwnerRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -172,6 +198,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/review_/styles': {
+      id: '/review_/styles'
+      path: '/review/styles'
+      fullPath: '/review/styles'
+      preLoaderRoute: typeof ReviewStylesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/review_/repositories/$owner': {
+      id: '/review_/repositories/$owner'
+      path: '/review/repositories/$owner'
+      fullPath: '/review/repositories/$owner'
+      preLoaderRoute: typeof ReviewRepositoriesOwnerRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -183,6 +223,8 @@ const rootRouteChildren: RootRouteChildren = {
   LoginRoute: LoginRoute,
   MySettingsRoute: MySettingsRoute,
   ReviewRoute: ReviewRoute,
+  ReviewStylesRoute: ReviewStylesRoute,
+  ReviewRepositoriesOwnerRoute: ReviewRepositoriesOwnerRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

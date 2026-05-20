@@ -2,8 +2,6 @@ import { Navigate, createFileRoute } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 
 import { AppShell, SettingsRow, SettingsSection } from "@/components/AppShell";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -23,8 +21,6 @@ function MySettingsPage() {
   const options = useOptions();
   const save = useSaveProfile();
 
-  const [firstName, setFirstName] = useState("");
-  const [lastName, setLastName] = useState("");
   const [prDestination, setPrDestination] = useState<string>("team_default");
   const [error, setError] = useState<string | null>(null);
   const initialized = useRef(false);
@@ -32,8 +28,6 @@ function MySettingsPage() {
   useEffect(() => {
     if (!profile.data || initialized.current) return;
     initialized.current = true;
-    setFirstName(profile.data.first_name ?? "");
-    setLastName(profile.data.last_name ?? "");
     setPrDestination(profile.data.preferred_pr_destination ?? "team_default");
   }, [profile.data]);
 
@@ -47,18 +41,6 @@ function MySettingsPage() {
   if (!session.data) return <Navigate to="/login" />;
 
   const firstModel = options.data?.models[0];
-  const handleSaveProfile = () => {
-    setError(null);
-    const body = buildProfileUpdate(
-      profile.data,
-      { first_name: firstName || null, last_name: lastName || null },
-      firstModel?.id ?? "",
-      firstModel?.default_effort ?? "",
-    );
-    save
-      .mutateAsync(body)
-      .catch((e: Error) => setError(e.message));
-  };
 
   const handleSavePrDestination = (value: string | null) => {
     if (!value) return;
@@ -75,45 +57,14 @@ function MySettingsPage() {
   return (
     <AppShell user={session.data} title="My Settings">
       <SettingsSection title="Profile">
-        <div className="divide-y divide-border">
-          <SettingsRow
-            label="Email"
-            control={
-              <span className="text-xs text-muted-foreground">
-                {session.data.email ?? "—"}
-              </span>
-            }
-          />
-          <SettingsRow
-            label="First Name"
-            htmlFor="first-name"
-            control={
-              <Input
-                id="first-name"
-                className="w-56"
-                value={firstName}
-                onChange={(e) => setFirstName(e.target.value)}
-              />
-            }
-          />
-          <SettingsRow
-            label="Last Name"
-            htmlFor="last-name"
-            control={
-              <Input
-                id="last-name"
-                className="w-56"
-                value={lastName}
-                onChange={(e) => setLastName(e.target.value)}
-              />
-            }
-          />
-          <div className="flex justify-end px-4 py-3">
-            <Button size="sm" onClick={handleSaveProfile} disabled={save.isPending}>
-              {save.isPending ? "Saving…" : "Save"}
-            </Button>
-          </div>
-        </div>
+        <SettingsRow
+          label="Email"
+          control={
+            <span className="text-xs text-muted-foreground">
+              {session.data.email ?? "—"}
+            </span>
+          }
+        />
       </SettingsSection>
 
       <SettingsSection title="PR Preferences">

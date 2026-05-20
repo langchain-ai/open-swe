@@ -31,6 +31,7 @@ from langsmith.sandbox import SandboxClientError
 from .dashboard.agent_overrides import (
     load_profile,
     normalize_profile_overrides,
+    profile_create_prs,
     resolve_github_login,
 )
 from .integrations.langsmith import _configure_github_proxy
@@ -378,6 +379,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
 
     model_id = os.environ.get("LLM_MODEL_ID", DEFAULT_LLM_MODEL_ID)
     profile_effort: str | None = None
+    profile: dict[str, Any] | None = None
     profile_login = resolve_github_login(config)
     if profile_login:
         profile = await load_profile(profile_login)
@@ -392,6 +394,10 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 )
                 model_id = overridden_model
                 profile_effort = overridden_effort
+
+    create_prs = profile_create_prs(profile)
+    if not create_prs:
+        logger.info("PR creation disabled by profile for %s", profile_login)
 
     model_kwargs = provider_model_kwargs(
         model_id,
@@ -418,6 +424,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             linear_project_id=linear_project_id,
             linear_issue_number=linear_issue_number,
             triggering_user_identity=triggering_user_identity,
+            create_prs=create_prs,
         ),
         tools=[
             http_request,

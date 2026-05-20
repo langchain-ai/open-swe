@@ -22,6 +22,7 @@ from .dashboard.agent_overrides import (
     get_profile_default_repo,
     resolve_login_from_email,
 )
+from .dashboard.enabled_repos import is_review_repo_enabled
 from .reviewer_findings import (
     REVIEWER_THREAD_KIND,
     ReviewerPRMeta,
@@ -406,6 +407,18 @@ def _is_repo_allowed_for_reviewer(repo_config: dict[str, str]) -> bool:
     if not ALLOWED_REVIEWER_GITHUB_ORGS:
         return True
     return owner in ALLOWED_REVIEWER_GITHUB_ORGS
+
+
+async def _is_repo_enabled_for_review(repo_config: dict[str, str]) -> bool:
+    """Combined gate: operator allowlist + team opt-in list from the dashboard.
+
+    Both checks must pass. The opt-in list is empty by default, so repos
+    are off until an admin enables them in the dashboard's Open SWE Review
+    tab.
+    """
+    if not _is_repo_allowed_for_reviewer(repo_config):
+        return False
+    return await is_review_repo_enabled(repo_config.get("owner", ""), repo_config.get("name", ""))
 
 
 _PUBLIC_REPO_GATE_REJECTION = {
@@ -1347,8 +1360,8 @@ async def slack_webhook(request: Request, background_tasks: BackgroundTasks) -> 
     clean_text = strip_bot_mention(text, bot_user_id, bot_username=SLACK_BOT_USERNAME)
     pr_ref = parse_slack_review_command(clean_text)
     if pr_ref:
-        if not _is_repo_allowed_for_reviewer({"owner": pr_ref.owner, "name": pr_ref.repo}):
-            return {"status": "ignored", "reason": "Repository not in reviewer allowlist"}
+        if not await _is_repo_enabled_for_review({"owner": pr_ref.owner, "name": pr_ref.repo}):
+            return {"status": "ignored", "reason": "Repository not enabled for review"}
         background_tasks.add_task(process_slack_pr_review_request, pr_ref, channel_id, thread_ts)
         return {"status": "accepted", "message": "Slack PR review request queued"}
 
@@ -1568,8 +1581,8 @@ async def trigger_pr_review_from_ref(
     slack_thread_ts: str = "",
 ) -> dict[str, Any]:
     repo_config = {"owner": pr_ref.owner, "name": pr_ref.repo}
-    if not _is_repo_allowed_for_reviewer(repo_config):
-        return {"success": False, "error": "Repository not allowed for reviewer"}
+    if not await _is_repo_enabled_for_review(repo_config):
+        return {"success": False, "error": "Repository not enabled for review"}
 
     app_token, app_token_expires_at = await get_github_app_installation_token_with_expiry()
     if not app_token:
@@ -1900,7 +1913,7 @@ async def process_github_pr_close(payload: dict[str, Any]) -> None:
     pr_number = pull_request.get("number")
     if not pr_number or not isinstance(pr_number, int):
         return
-    if not _is_repo_allowed_for_reviewer(repo_config):
+    if not await _is_repo_enabled_for_review(repo_config):
         return
 
     thread_id = generate_reviewer_thread_id(
@@ -1944,9 +1957,9 @@ async def process_github_push_event(payload: dict[str, Any]) -> None:
     if not repo_config["owner"] or not repo_config["name"]:
         logger.warning("Push to %s ignored: repository owner/name missing from payload", head_ref)
         return
-    if not _is_repo_allowed_for_reviewer(repo_config):
+    if not await _is_repo_enabled_for_review(repo_config):
         logger.info(
-            "Push to %s/%s head=%s ignored: repo not in reviewer allowlist",
+            "Push to %s/%s head=%s ignored: repo not enabled for review",
             repo_config["owner"],
             repo_config["name"],
             head_ref,
@@ -2411,25 +2424,21 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks) ->
                 "reason": f"Unsupported GitHub pull_request action: {action}",
             }
         if action in {"closed", "reopened"}:
-            if not _is_repo_allowed_for_reviewer(webhook_repo_config):
-                return {"status": "ignored", "reason": "Repository not in reviewer allowlist"}
+            if not await _is_repo_enabled_for_review(webhook_repo_config):
+                return {"status": "ignored", "reason": "Repository not enabled for review"}
             logger.info("Accepted GitHub PR %s webhook, scheduling reviewer watch update", action)
             background_tasks.add_task(process_github_pr_close, payload)
             return {"status": "accepted", "message": f"Processing PR {action} for reviewer watch"}
         if not _is_open_swe_reviewer_request(payload):
             logger.info("Ignoring PR review request for a different reviewer")
             return {"status": "ignored", "reason": "Review request is not for open-swe bot"}
-        if not _is_repo_allowed_for_reviewer(webhook_repo_config):
+        if not await _is_repo_enabled_for_review(webhook_repo_config):
             logger.warning(
-                "Rejecting GitHub reviewer webhook: repo '%s/%s' failed reviewer allowlist",
+                "Rejecting GitHub reviewer webhook: repo '%s/%s' not enabled for review",
                 webhook_repo_config.get("owner"),
                 webhook_repo_config.get("name"),
             )
-            if ALLOWED_REVIEWER_GITHUB_REPOS:
-                reason = "Repository not in allowlist"
-            else:
-                reason = "Repository org not in allowlist"
-            return {"status": "ignored", "reason": reason}
+            return {"status": "ignored", "reason": "Repository not enabled for review"}
 
         gate_rejection = await _enforce_public_repo_org_gate(payload, "pull_request")
         if gate_rejection is not None:
@@ -2440,8 +2449,8 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks) ->
         return {"status": "accepted", "message": "Processing GitHub PR review request"}
 
     if event_type == "push":
-        if not _is_repo_allowed_for_reviewer(webhook_repo_config):
-            return {"status": "ignored", "reason": "Repository not in reviewer allowlist"}
+        if not await _is_repo_enabled_for_review(webhook_repo_config):
+            return {"status": "ignored", "reason": "Repository not enabled for review"}
         logger.info("Accepted GitHub push webhook, scheduling reviewer watch evaluation")
         background_tasks.add_task(process_github_push_event, payload)
         return {"status": "accepted", "message": "Processing GitHub push for reviewer watch"}
@@ -2508,8 +2517,8 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks) ->
     }:
         is_review_command, pr_url_override = parse_github_review_command(comment_body)
         if is_review_command:
-            if not _is_repo_allowed_for_reviewer(webhook_repo_config):
-                return {"status": "ignored", "reason": "Repository not in reviewer allowlist"}
+            if not await _is_repo_enabled_for_review(webhook_repo_config):
+                return {"status": "ignored", "reason": "Repository not enabled for review"}
             background_tasks.add_task(
                 process_github_pr_review_command, payload, event_type, pr_url_override
             )

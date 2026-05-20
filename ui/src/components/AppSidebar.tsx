@@ -69,7 +69,11 @@ export function AppSidebar({ user }: { user: SessionUser }) {
   return (
     <aside className="flex h-svh w-60 shrink-0 flex-col border-r border-border bg-sidebar text-sidebar-foreground">
       <div className="px-4 pt-5 pb-4">
-        <Link to="/my-settings" className="font-heading text-sm font-medium tracking-tight">
+        <Link
+          to="/my-settings"
+          className="flex items-center gap-2 font-heading text-sm font-medium tracking-tight"
+        >
+          <img src="/logo-mark.png" alt="" className="size-5" />
           open-swe
         </Link>
       </div>
