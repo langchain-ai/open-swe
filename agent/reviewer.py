@@ -103,8 +103,8 @@ nothing. Add net-new findings with `add_finding`.
 # Do NOT file
 
 - **Style / naming / convention nits.** No "rename this", "extract a
-  constant", "use Prisma.join", "remove redundant ?.", "metric label is
-  ambiguous", "this could be cleaner". The one exception: typos that break
+  constant", "use a different helper", "remove redundant ?.", "metric label
+  is ambiguous", "this could be cleaner". The one exception: typos that break
   behavior (template binding, undefined CSS prefix, exported name a template
   references by string).
 - **Speculation.** No "if X is ever null", "if a future caller passes Y",
@@ -205,15 +205,15 @@ finding unless already covered:
 
 - `Optional.get()` / `.get()` without `isPresent()` / nil deref without guard
 - `forEach(async` / fire-and-forget async callbacks
-- `.exit(`, `System.exit`, `picocli` misuse
+- CLI/process exit calls that bypass the intended framework exit-code path
 - `hash(` used for cache keys; `if sample_rate:` / falsy-zero on numeric 0
 - `not implemented` stubs; tautological branches (both paths same value)
 - Inverted or mismatched old/new feature flags
 - Removed imports, log fields, traceID, nil-guards, or lock scope vs base
 - `open(`, `fetch(` on user-controlled URLs; weak origin/referer checks
-- `updateMany`/`update` with empty `data` (blocks `@updatedAt`)
+- Empty ORM updates that skip timestamp hooks or no-op unexpectedly
 - `retryCount + 1` / read-modify-write counters (prefer `{{ increment: 1 }}`)
-- Dataclass mutable defaults (`timezone.now()` at import, shared list/dict)
+- Mutable or import-time defaults (`now()` at import, shared list/dict)
 - Wrong operator: `&&` vs `||`, `===` on objects needing `.isSame()`
 - Changed React list rendering without a stable `key` prop
 - Framework hook or predicate methods whose changed name no longer matches
@@ -272,8 +272,9 @@ correctness failure.
 3. **Rank** open findings: (a) checklist/archetype hits from Passes 1–3,
    (b) severity, (c) category diversity across files. Prefer one finding
    listing N identical sites over N separate findings for the same defect.
-4. **Cap at 3.** No two findings in the same file unless completely
-   independent failure modes (different user-visible symptom).
+4. Keep only the strongest small set of findings. No two findings in the
+   same file unless completely independent failure modes (different
+   user-visible symptom).
 5. Verify accidental-commit findings (submodules, debug files) appear in
    the PR diff before filing.
 6. Cross-check PR title and top changed directories: if a major changed
@@ -296,9 +297,9 @@ severities — they're not findings.
 - Read-only. Do not commit, push, or use `gh pr review` / `gh api .../reviews`.
 - One finding per defect (with the fan-out rule above for cross-file bugs).
 - Include `suggestion` only when the fix is ≤4 lines and obvious.
-- Publish a concise review: prefer the best 1-3 findings that pass the bar.
-  Use fewer when fewer issues are defensible; publish zero only after the
-  ordered passes found no concrete regression.
+- Publish a concise review: prefer the highest-confidence findings that pass
+  the bar. Use fewer when fewer issues are defensible; publish zero only
+  after the ordered passes found no concrete regression.
 """
 
 
