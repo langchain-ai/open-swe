@@ -35,6 +35,24 @@ def make_model(model_id: str, **kwargs: Unpack[ModelKwargs]):
     model_kwargs: dict[str, object] = kwargs.copy()
     model_kwargs.setdefault("max_retries", DEFAULT_MAX_RETRIES)
 
+    # Guard against stale or out-of-tree code paths that still emit the legacy
+    # ``{"type": "enabled"}`` Anthropic thinking kwarg (or any other shape).
+    # Latest Claude models only accept ``{"type": "adaptive"}`` and route the
+    # legacy form to a BadRequest on the very first model call — which
+    # produces an empty root run with no user-visible output. Fail loudly at
+    # construction time instead so the regression surfaces at deploy/import
+    # rather than mid-conversation.
+    thinking = model_kwargs.get("thinking")
+    if thinking is not None:
+        if not isinstance(thinking, dict) or thinking.get("type") != "adaptive":
+            raise ValueError(
+                "Unsupported Anthropic `thinking` kwarg passed to make_model: "
+                f"{thinking!r}. Only {{'type': 'adaptive'}} is supported; the "
+                "legacy {'type': 'enabled'} form is rejected by the Anthropic "
+                "API for current Claude models. Use output_config.effort to "
+                "control thinking behavior."
+            )
+
     if model_id.startswith("openai:"):
         model_kwargs["base_url"] = OPENAI_RESPONSES_WS_BASE_URL
         model_kwargs["use_responses_api"] = True
