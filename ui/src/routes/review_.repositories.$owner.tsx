@@ -122,13 +122,22 @@ function RepositoriesOwnerPage() {
                       <span className="text-[10px] text-muted-foreground">private</span>
                     )}
                   </div>
-                  <Switch
-                    checked={isEnabled}
-                    disabled={!canEdit || toggle.isPending}
-                    onCheckedChange={(v) =>
-                      toggle.mutate({ full_name: r.full_name, on: v })
+                  <span
+                    title={
+                      !canEdit
+                        ? "Only team admins can modify enabled repositories"
+                        : undefined
                     }
-                  />
+                    className={!canEdit ? "cursor-not-allowed" : undefined}
+                  >
+                    <Switch
+                      checked={isEnabled}
+                      disabled={!canEdit || toggle.isPending}
+                      onCheckedChange={(v) =>
+                        toggle.mutate({ full_name: r.full_name, on: v })
+                      }
+                    />
+                  </span>
                 </li>
               );
             })}
