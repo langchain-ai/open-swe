@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any
 
 from langgraph_sdk import get_client
@@ -22,7 +23,14 @@ from .review_styles import (
 logger = logging.getLogger(__name__)
 
 _ASSISTANT_ID = "review_style_analyzer"
-_LANGGRAPH_URL = "http://localhost:2024"
+
+
+def _client():
+    """LangGraph SDK client for the current deployment (same resolution as webapp)."""
+    url = os.environ.get("LANGGRAPH_URL") or os.environ.get("LANGGRAPH_URL_PROD")
+    if url:
+        return get_client(url=url)
+    return get_client()
 
 
 async def start_review_style_analysis(
@@ -48,7 +56,7 @@ async def start_review_style_analysis(
     samples_text = format_samples_for_analyzer(samples)
     thread_id = generate_review_style_thread_id(owner, repo)
 
-    client = get_client(url=_LANGGRAPH_URL)
+    client = _client()
     configurable: dict[str, Any] = {
         "thread_id": thread_id,
         "review_style_full_name": full_name,
@@ -121,7 +129,7 @@ async def sync_review_style_run_status(full_name: str) -> dict[str, Any]:
     if not isinstance(thread_id, str) or not thread_id:
         return record
 
-    client = get_client(url=_LANGGRAPH_URL)
+    client = _client()
     try:
         if isinstance(run_id, str) and run_id:
             run = await client.runs.get(thread_id, run_id)
