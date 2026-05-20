@@ -981,6 +981,83 @@ def test_process_github_issue_uses_resolved_user_token_for_reaction(monkeypatch)
     assert captured["run_created"] is True
 
 
+def test_process_github_issue_without_email_mapping_uses_bot_token(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    async def fake_get_or_resolve_thread_github_token(
+        thread_id: str, email: str | None
+    ) -> str | None:
+        captured["email"] = email
+        return "bot-token"
+
+    async def fake_get_github_app_installation_token() -> str | None:
+        return "bot-token"
+
+    async def fake_react_to_github_comment(
+        repo_config: dict[str, str],
+        comment_id: int,
+        *,
+        event_type: str,
+        token: str,
+        pull_number: int | None = None,
+        node_id: str | None = None,
+    ) -> bool:
+        captured["reaction_token"] = token
+        return True
+
+    async def fake_fetch_issue_comments(
+        repo_config: dict[str, str], issue_number: int, *, token: str | None = None
+    ) -> list[dict[str, object]]:
+        captured["fetch_token"] = token
+        return []
+
+    async def fake_is_thread_active(thread_id: str) -> bool:
+        return False
+
+    class _FakeRunsClient:
+        async def create(self, *args, **kwargs) -> None:
+            captured["run_config"] = kwargs["config"]["configurable"]
+
+    class _FakeLangGraphClient:
+        runs = _FakeRunsClient()
+
+    monkeypatch.setattr(
+        webapp, "_get_or_resolve_thread_github_token", fake_get_or_resolve_thread_github_token
+    )
+    monkeypatch.setattr(
+        webapp, "get_github_app_installation_token", fake_get_github_app_installation_token
+    )
+    monkeypatch.setattr(webapp, "_thread_exists", lambda thread_id: asyncio.sleep(0, result=False))
+    monkeypatch.setattr(webapp, "react_to_github_comment", fake_react_to_github_comment)
+    monkeypatch.setattr(webapp, "fetch_issue_comments", fake_fetch_issue_comments)
+    monkeypatch.setattr(webapp, "is_thread_active", fake_is_thread_active)
+    monkeypatch.setattr(webapp, "get_client", lambda url: _FakeLangGraphClient())
+    monkeypatch.setattr(webapp, "GITHUB_USER_EMAIL_MAP", {"octocat": "octocat@example.com"})
+
+    asyncio.run(
+        webapp.process_github_issue(
+            {
+                "issue": {
+                    "id": 12345,
+                    "number": 42,
+                    "title": "Fix the flaky test",
+                    "body": "The test is failing intermittently.",
+                    "html_url": "https://github.com/langchain-ai/open-swe/issues/42",
+                },
+                "comment": {"id": 999, "body": "@openswe please handle this"},
+                "repository": {"owner": {"login": "langchain-ai"}, "name": "open-swe"},
+                "sender": {"login": "external-user"},
+            },
+            "issue_comment",
+        )
+    )
+
+    assert captured["email"] == ""
+    assert captured["reaction_token"] == "bot-token"
+    assert captured["fetch_token"] == "bot-token"
+    assert captured["run_config"]["github_login"] == "external-user"
+
+
 def test_process_github_issue_existing_thread_uses_followup_prompt(monkeypatch) -> None:
     captured: dict[str, object] = {}
 

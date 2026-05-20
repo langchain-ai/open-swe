@@ -416,7 +416,11 @@ async def resolve_github_token(
             github_login = configurable.get("github_login")
             email = GITHUB_USER_EMAIL_MAP.get(github_login or "")
             if not email:
-                raise ValueError(f"No email mapping found for GitHub user '{github_login}'")
+                logger.info(
+                    "No email mapping found for GitHub user %r; using GitHub App token",
+                    github_login,
+                )
+                return await _resolve_bot_installation_token(thread_id)
             return await save_encrypted_token_from_email(email, source)
         return await save_encrypted_token_from_email(configurable.get("user_email"), source)
     except ValueError as exc:

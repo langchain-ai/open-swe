@@ -85,3 +85,35 @@ def test_leave_failure_comment_falls_back_to_slack_thread_when_ephemeral_fails(
     asyncio.run(auth.leave_failure_comment("slack", "auth failed"))
 
     assert thread_called == {"channel_id": "C123", "thread_ts": "1.2", "message": "auth failed"}
+
+
+def test_github_source_without_email_mapping_uses_bot_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_get_github_token_from_thread(thread_id: str) -> tuple[None, None, None]:
+        return None, None, None
+
+    async def fake_resolve_bot_installation_token(thread_id: str) -> tuple[str, str, str]:
+        return "bot-token", "encrypted-bot-token", "2026-05-20T00:00:00+00:00"
+
+    async def fake_save_encrypted_token_from_email(email: str | None, source: str):
+        raise AssertionError("unmapped GitHub users should not resolve a user token")
+
+    monkeypatch.setattr(auth, "is_bot_token_only_mode", lambda: False)
+    monkeypatch.setattr(auth, "get_github_token_from_thread", fake_get_github_token_from_thread)
+    monkeypatch.setattr(
+        auth, "_resolve_bot_installation_token", fake_resolve_bot_installation_token
+    )
+    monkeypatch.setattr(
+        auth, "save_encrypted_token_from_email", fake_save_encrypted_token_from_email
+    )
+    monkeypatch.setattr(auth, "GITHUB_USER_EMAIL_MAP", {"octocat": "octocat@example.com"})
+
+    result = asyncio.run(
+        auth.resolve_github_token(
+            {"configurable": {"source": "github", "github_login": "external-user"}},
+            "thread-id",
+        )
+    )
+
+    assert result == ("bot-token", "encrypted-bot-token", "2026-05-20T00:00:00+00:00")

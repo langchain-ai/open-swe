@@ -2059,7 +2059,7 @@ async def process_github_push_event(payload: dict[str, Any]) -> None:
     )
 
 
-async def _refresh_thread_github_token_after_401(thread_id: str, email: str) -> str | None:
+async def _refresh_thread_github_token_after_401(thread_id: str, email: str | None) -> str | None:
     """Invalidate the cached token after a 401 and try to resolve a fresh one."""
     logger.warning(
         "GitHub returned 401 for thread %s; invalidating cached token and re-resolving",
@@ -2069,7 +2069,7 @@ async def _refresh_thread_github_token_after_401(thread_id: str, email: str) -> 
     return await _get_or_resolve_thread_github_token(thread_id, email)
 
 
-async def _get_or_resolve_thread_github_token(thread_id: str, email: str) -> str | None:
+async def _get_or_resolve_thread_github_token(thread_id: str, email: str | None) -> str | None:
     """Resolve and persist a GitHub token for a thread when available.
 
     Skips the cached ciphertext when its ``github_token_expires_at`` is past.
@@ -2090,6 +2090,17 @@ async def _get_or_resolve_thread_github_token(thread_id: str, email: str) -> str
     github_token, _encrypted_token, _expires_at = await get_github_token_from_thread(thread_id)
     if github_token:
         return github_token
+
+    if not email:
+        bot_token, expires_at = await get_github_app_installation_token_with_expiry()
+        if bot_token:
+            try:
+                await persist_encrypted_github_token(thread_id, bot_token, expires_at=expires_at)
+            except Exception:
+                logger.warning("Could not persist bot token for thread %s", thread_id)
+            return bot_token
+        logger.warning("No email mapping and GitHub App token unavailable for thread %s", thread_id)
+        return None
 
     auth_result = await resolve_github_token_from_email(email)
     github_token = auth_result.get("token")
@@ -2162,8 +2173,7 @@ async def process_github_pr_comment(payload: dict[str, Any], event_type: str) ->
 
     email = GITHUB_USER_EMAIL_MAP.get(github_login, "")
     if not email:
-        logger.warning("No email mapping for GitHub user '%s', skipping", github_login)
-        return
+        logger.info("No email mapping for GitHub user %r; using GitHub App token", github_login)
 
     github_token = await _get_or_resolve_thread_github_token(thread_id, email)
     if not github_token:
@@ -2257,8 +2267,7 @@ async def process_github_issue(payload: dict[str, Any], event_type: str) -> None
 
     email = GITHUB_USER_EMAIL_MAP.get(github_login, "")
     if not email:
-        logger.warning("No email mapping for GitHub user '%s', skipping", github_login)
-        return
+        logger.info("No email mapping for GitHub user %r; using GitHub App token", github_login)
 
     thread_id = generate_thread_id_from_github_issue(issue_id)
     existing_thread = await _thread_exists(thread_id)
