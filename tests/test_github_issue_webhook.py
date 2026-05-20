@@ -94,6 +94,18 @@ def test_build_github_issue_followup_prompt_only_includes_comment() -> None:
     assert "## Title" not in prompt
 
 
+def test_parse_github_babysit_command_accepts_github_pr_url() -> None:
+    assert webapp.parse_github_babysit_command(
+        "@open-swe babysit https://github.com/langchain-ai/open-swe/pull/1314"
+    ) == ("start", "https://github.com/langchain-ai/open-swe/pull/1314")
+
+
+def test_parse_github_babysit_command_rejects_embedded_github_pr_url() -> None:
+    assert webapp.parse_github_babysit_command(
+        "@open-swe babysit https://example.com/github.com/langchain-ai/open-swe/pull/1314"
+    ) == ("start", None)
+
+
 def test_reviewer_repo_allowlist_allows_matching_repo(monkeypatch) -> None:
     monkeypatch.setattr(webapp, "ALLOWED_REVIEWER_GITHUB_ORGS", frozenset())
     monkeypatch.setattr(

@@ -2019,8 +2019,9 @@ def parse_github_babysit_command(body: str) -> tuple[str | None, str | None]:
     if "babysit" not in lowered:
         return None, None
     for token in body.split():
-        if "github.com/" in token and "/pull/" in token:
-            return "start", token.strip("<>()[]{}.,")
+        candidate = token.strip("<>()[]{}.,")
+        if parse_github_pr_url(candidate) is not None:
+            return "start", candidate
     return "start", None
 
 
@@ -2345,7 +2346,11 @@ async def _maybe_run_babysitter_for_thread(
     owner = pr.get("owner")
     repo_name = pr.get("name")
     pr_number = pr.get("number")
-    if not isinstance(owner, str) or not isinstance(repo_name, str) or not isinstance(pr_number, int):
+    if (
+        not isinstance(owner, str)
+        or not isinstance(repo_name, str)
+        or not isinstance(pr_number, int)
+    ):
         return
 
     repo_config = {"owner": owner, "name": repo_name}
@@ -2411,10 +2416,10 @@ async def _maybe_run_babysitter_for_thread(
     )
     await persist_encrypted_github_token(thread_id, app_token)
 
-    reason = (
-        f"failed checks: {', '.join(failed_checks)}" if failed_checks else "PR head changed"
+    reason = f"failed checks: {', '.join(failed_checks)}" if failed_checks else "PR head changed"
+    prompt = build_github_pr_babysit_prompt(
+        repo_config, pr_number, pr_meta["url"], head_sha, reason
     )
-    prompt = build_github_pr_babysit_prompt(repo_config, pr_number, pr_meta["url"], head_sha, reason)
     configurable = _build_babysitter_configurable(
         source="babysitter_cron",
         github_login="",

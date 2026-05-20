@@ -140,7 +140,9 @@ async def get_babysitter_agent(config: RunnableConfig) -> Pregel:
 
     return create_deep_agent(
         model=make_model(model_id, **model_kwargs),
-        system_prompt=_system_prompt(f"{work_dir}/{repo_name}" if repo_name else work_dir, configurable),
+        system_prompt=_system_prompt(
+            f"{work_dir}/{repo_name}" if repo_name else work_dir, configurable
+        ),
         tools=[],
         backend=sandbox_backend,
         middleware=[
