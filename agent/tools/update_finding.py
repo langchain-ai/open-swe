@@ -6,6 +6,7 @@ import asyncio
 from typing import Any
 
 from langgraph.config import get_config
+from langgraph_sdk.errors import NotFoundError
 
 from ..reviewer_findings import (
     MAX_SUGGESTION_LINES,
@@ -95,7 +96,20 @@ def update_finding(
         return {"success": False, "error": "No fields provided to update"}
 
     thread_id = get_thread_id_from_runtime()
-    updated = asyncio.run(update_finding_fields(thread_id, finding_id, updates))
+    try:
+        updated = asyncio.run(update_finding_fields(thread_id, finding_id, updates))
+    except NotFoundError as exc:
+        # Reviewer thread state is gone; the underlying update against
+        # langgraph thread metadata cannot succeed. Surface a non-retryable
+        # failure so the model doesn't loop on the same call.
+        return {
+            "success": False,
+            "retryable": False,
+            "error": (
+                f"Reviewer thread state is unavailable ({exc}). Do not retry "
+                "update_finding on this run — the finding cannot be persisted."
+            ),
+        }
     if updated is None:
         return {"success": False, "error": f"No finding found with id {finding_id}"}
     result: dict[str, Any] = {"success": True, "finding": updated}

@@ -86,6 +86,47 @@ def test_render_review_body_no_findings_message() -> None:
     assert "<!-- open-swe-reviewer pr=99 -->" in body
 
 
+def test_publish_review_returns_non_retryable_on_missing_thread() -> None:
+    """publish_review must not let NotFoundError escape as a transient error.
+
+    The reviewer's underlying thread-metadata store raises ``NotFoundError``
+    when the canonical reviewer thread is gone. The model interprets the
+    raised exception as transient and retries the same call repeatedly,
+    burning the whole diff context per turn. The fix returns a structured
+    non-retryable failure so the model stops after one call.
+    """
+    from langgraph_sdk.errors import NotFoundError
+
+    from agent.tools.publish_review import publish_review
+
+    with (
+        patch(
+            "agent.tools.publish_review.get_config",
+            return_value={
+                "configurable": {
+                    "thread_id": "tid",
+                    "repo": {"owner": "o", "name": "r"},
+                    "pr_number": 7,
+                    "head_sha": "sha",
+                },
+                "metadata": {},
+            },
+        ),
+        patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
+        patch("agent.tools.publish_review.get_github_token", return_value="tok"),
+        patch(
+            "agent.tools.publish_review.list_findings_async",
+            AsyncMock(side_effect=NotFoundError("thread tid not found")),
+        ),
+    ):
+        result = publish_review()
+
+    assert result["success"] is False
+    assert result["retryable"] is False
+    assert "Do not retry" in result["error"]
+    assert "thread tid not found" in result["error"]
+
+
 def test_publish_review_eval_mode_does_not_call_github() -> None:
     from agent.tools.publish_review import publish_review
 

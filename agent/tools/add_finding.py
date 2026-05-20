@@ -6,6 +6,7 @@ import asyncio
 from typing import Any
 
 from langgraph.config import get_config
+from langgraph_sdk.errors import NotFoundError
 
 from ..reviewer_diff import is_range_in_diff
 from ..reviewer_findings import (
@@ -128,7 +129,24 @@ def add_finding(
     )
 
     thread_id = get_thread_id_from_runtime()
-    asyncio.run(append_finding(thread_id, finding))
+    try:
+        asyncio.run(append_finding(thread_id, finding))
+    except NotFoundError as exc:
+        # The reviewer thread state is missing — the underlying langgraph SDK
+        # raised NotFoundError. This is not a transient failure: retrying the
+        # same call will fail the same way. Return a structured non-retryable
+        # error so the model stops the retry loop instead of burning turns
+        # against the diff context.
+        return {
+            "success": False,
+            "retryable": False,
+            "error": (
+                f"Reviewer thread state is unavailable ({exc}). Do not retry "
+                "add_finding or publish_review on this run — the review cannot "
+                "be persisted. Report this to the user and stop calling the "
+                "reviewer tools."
+            ),
+        }
     result: dict[str, Any] = {"success": True, "finding_id": finding["id"]}
     if suggestion_dropped:
         result["suggestion_dropped"] = True

@@ -5,6 +5,8 @@ from __future__ import annotations
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
+from langgraph_sdk.errors import NotFoundError
+
 from agent.tools.add_finding import add_finding
 from agent.tools.list_findings import list_findings
 from agent.tools.update_finding import update_finding
@@ -320,3 +322,52 @@ def test_list_findings_returns_all_when_filter_omitted() -> None:
         result = list_findings()
 
     assert result["count"] == 2
+
+
+def test_add_finding_returns_non_retryable_on_missing_thread() -> None:
+    """If the reviewer thread is gone, surface a non-retryable error.
+
+    The bug: ``append_finding`` raises ``NotFoundError`` when the backing
+    thread is missing, which propagated out of the tool. The model treats it
+    as transient and retries 5–11 times, burning the diff context each turn.
+    Wrapping the call and returning ``{"success": False, "retryable": False}``
+    stops the loop after one call.
+    """
+
+    async def boom(_thread_id: str, _finding: Any) -> Any:
+        raise NotFoundError("thread tid-1 not found")
+
+    with (
+        patch("agent.tools.add_finding.get_config", return_value=_config()),
+        patch("agent.tools.add_finding.get_thread_id_from_runtime", return_value="tid-1"),
+        patch("agent.tools.add_finding.append_finding", side_effect=boom),
+    ):
+        result = add_finding(
+            severity="medium",
+            category="style",
+            file="foo.py",
+            description="rename",
+            start_line=11,
+            end_line=11,
+        )
+
+    assert result["success"] is False
+    assert result["retryable"] is False
+    assert "Do not retry" in result["error"]
+    assert "thread tid-1 not found" in result["error"]
+
+
+def test_update_finding_returns_non_retryable_on_missing_thread() -> None:
+    async def boom(_thread_id: str, _fid: str, _updates: Any) -> Any:
+        raise NotFoundError("thread tid-1 not found")
+
+    with (
+        patch("agent.tools.update_finding.get_config", return_value=_config()),
+        patch("agent.tools.update_finding.get_thread_id_from_runtime", return_value="tid-1"),
+        patch("agent.tools.update_finding.update_finding_fields", side_effect=boom),
+    ):
+        result = update_finding(finding_id="f_a", status="resolved")
+
+    assert result["success"] is False
+    assert result["retryable"] is False
+    assert "Do not retry" in result["error"]

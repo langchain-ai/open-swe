@@ -6,6 +6,7 @@ import asyncio
 from typing import Any
 
 from langgraph.config import get_config
+from langgraph_sdk.errors import NotFoundError
 
 from ..reviewer_findings import (
     Severity,
@@ -91,13 +92,16 @@ def publish_review(
         return {"success": False, "error": "Missing head_sha in run config"}
 
     if _is_reviewer_eval_mode(configurable):
-        return asyncio.run(
-            _publish_review_eval_dry_run_async(
-                head_sha=head_sha,
-                severity_threshold=_cast_severity(severity_threshold),
-                cap=cap,
+        try:
+            return asyncio.run(
+                _publish_review_eval_dry_run_async(
+                    head_sha=head_sha,
+                    severity_threshold=_cast_severity(severity_threshold),
+                    cap=cap,
+                )
             )
-        )
+        except NotFoundError as exc:
+            return _thread_state_unavailable_result(exc)
 
     token = get_github_token()
     if not token:
@@ -116,6 +120,11 @@ def publish_review(
                 is_re_review=is_re_review,
             )
         )
+    except NotFoundError as exc:
+        # The reviewer thread metadata store is missing — the publish path
+        # can't persist comment ids or last_reviewed_sha. Return a
+        # non-retryable failure so the model doesn't loop on publish_review.
+        return _thread_state_unavailable_result(exc)
     except GitHubAuthError as exc:
         thread_id = get_thread_id_from_runtime()
         if thread_id:
@@ -132,6 +141,25 @@ def publish_review(
 
 def _cast_severity(value: str) -> Severity:
     return value  # type: ignore[return-value]
+
+
+def _thread_state_unavailable_result(exc: Exception) -> dict[str, Any]:
+    """Structured non-retryable error when the reviewer thread store is missing.
+
+    The langgraph SDK raises ``NotFoundError`` when the thread metadata row
+    backing this reviewer run no longer exists. That is not transient —
+    retrying the same call will fail the same way and burn an LLM turn against
+    the diff context. Return a result the model can read once and stop.
+    """
+    return {
+        "success": False,
+        "retryable": False,
+        "error": (
+            f"Reviewer thread state is unavailable ({exc}). Do not retry "
+            "publish_review on this run — the review cannot be persisted. "
+            "Report this to the user and stop calling the reviewer tools."
+        ),
+    }
 
 
 def _is_reviewer_eval_mode(configurable: dict[str, Any]) -> bool:
