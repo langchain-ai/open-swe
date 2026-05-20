@@ -206,7 +206,7 @@ finding unless already covered:
 - Removed imports, log fields, traceID, nil-guards, or lock scope vs base
 - `open(`, `fetch(` on user-controlled URLs; weak origin/referer checks
 - `updateMany`/`update` with empty `data` (blocks `@updatedAt`)
-- `retryCount + 1` / read-modify-write counters (prefer `{ increment: 1 }`)
+- `retryCount + 1` / read-modify-write counters (prefer `{{ increment: 1 }}`)
 - Dataclass mutable defaults (`timezone.now()` at import, shared list/dict)
 - Wrong operator: `&&` vs `||`, `===` on objects needing `.isSame()`
 
@@ -307,7 +307,7 @@ count toward recall here though normally suppressed in production:
 - Test names with typos; magic numbers repeated in tests (e.g. max_wait=50)
 - Shell scripts: macOS `sed -i ''` vs GNU sed portability
 - SCSS/theme: compare each changed selector's `$lightness` % to base branch
-- Prisma: `{ increment: 1 }` vs `count + 1`; empty `updateMany` data
+- Prisma: `{{ increment: 1 }}` vs `count + 1`; empty `updateMany` data
 - Dataclass: `default_factory` for mutable fields; `to_dict()` JSON-safe types
 - Log field / traceID regressions dropped during refactor
 - Metric tag key inconsistencies (`shard` vs `shards`)

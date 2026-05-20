@@ -8,6 +8,19 @@ from langgraph.graph.state import RunnableConfig
 from agent import reviewer
 
 
+def test_reviewer_system_prompt_formats_without_keyerror() -> None:
+    prompt = reviewer._reviewer_system_prompt(
+        "/workspace/repo",
+        repo_owner="acme",
+        repo_name="repo",
+        pr_number=42,
+        reviewer_eval=True,
+    )
+    assert "acme/repo" in prompt
+    assert "{ increment: 1 }" in prompt
+    assert "Eval mode: convention checklist" in prompt
+
+
 class _DummyAgent:
     def with_config(self, config: dict[str, object]) -> _DummyAgent:
         self.config = config
