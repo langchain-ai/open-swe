@@ -36,6 +36,14 @@ const AUTOFIX_MODES: Array<{ value: AutofixMode; label: string }> = [
   { value: "high", label: "High" },
 ];
 
+const DEFAULT_SETTINGS: TeamSettings = {
+  trigger_mode: "every_push",
+  review_draft_prs: false,
+  pr_summaries: true,
+  autofix_mode: "off",
+  autofix_severity_threshold: "medium",
+};
+
 function ReviewPage() {
   const session = useSession();
   const qc = useQueryClient();
@@ -44,7 +52,7 @@ function ReviewPage() {
     queryFn: api.getTeamSettings,
     enabled: !!session.data,
   });
-  const [local, setLocal] = useState<TeamSettings | null>(null);
+  const [local, setLocal] = useState<TeamSettings>(DEFAULT_SETTINGS);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -69,19 +77,18 @@ function ReviewPage() {
   }
   if (!session.data) return <Navigate to="/login" />;
 
-  const current = local ?? settings.data;
+  const current: TeamSettings = local;
   const canEdit = session.data.is_admin;
 
   const persist = (patch: Partial<TeamSettings>) => {
-    if (!current) return;
     const next: TeamSettings = { ...current, ...patch };
     setLocal(next);
     if (canEdit) save.mutate(next);
   };
 
   const triggerDescription =
-    TRIGGER_MODES.find((m) => m.value === current?.trigger_mode)?.description ??
-    "Bugbot will automatically review every push to a PR";
+    TRIGGER_MODES.find((m) => m.value === current.trigger_mode)?.description ??
+    "Open SWE Review will automatically review every push to a PR";
 
   return (
     <AppShell
@@ -96,9 +103,9 @@ function ReviewPage() {
             description={triggerDescription}
             control={
               <Select
-                value={current?.trigger_mode}
+                value={current.trigger_mode}
                 onValueChange={(v) => persist({ trigger_mode: v as TriggerMode })}
-                disabled={!canEdit || !current}
+                disabled={!canEdit}
               >
                 <SelectTrigger className="w-40">
                   <SelectValue />
@@ -118,9 +125,9 @@ function ReviewPage() {
             description="Allow Open SWE Review to automatically review draft pull requests"
             control={
               <Switch
-                checked={current?.review_draft_prs ?? false}
+                checked={current.review_draft_prs}
                 onCheckedChange={(v) => persist({ review_draft_prs: v })}
-                disabled={!canEdit || !current}
+                disabled={!canEdit}
               />
             }
           />
@@ -129,9 +136,9 @@ function ReviewPage() {
             description="Generate descriptions on pull requests"
             control={
               <Switch
-                checked={current?.pr_summaries ?? true}
+                checked={current.pr_summaries}
                 onCheckedChange={(v) => persist({ pr_summaries: v })}
-                disabled={!canEdit || !current}
+                disabled={!canEdit}
               />
             }
           />
@@ -140,9 +147,9 @@ function ReviewPage() {
             description="When enabled, the reviewer will propose fixes. Billed at plan rates."
             control={
               <Select
-                value={current?.autofix_mode}
+                value={current.autofix_mode}
                 onValueChange={(v) => persist({ autofix_mode: v as AutofixMode })}
-                disabled={!canEdit || !current}
+                disabled={!canEdit}
               >
                 <SelectTrigger className="w-32">
                   <SelectValue />
@@ -162,11 +169,11 @@ function ReviewPage() {
             description="Findings at this severity or higher are auto-fixed"
             control={
               <Select
-                value={current?.autofix_severity_threshold}
+                value={current.autofix_severity_threshold}
                 onValueChange={(v) =>
                   persist({ autofix_severity_threshold: v as AutofixMode })
                 }
-                disabled={!canEdit || !current}
+                disabled={!canEdit}
               >
                 <SelectTrigger className="w-32">
                   <SelectValue />

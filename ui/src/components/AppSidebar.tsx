@@ -8,11 +8,11 @@ import {
   SignOutIcon,
   SlidersHorizontalIcon,
 } from "@phosphor-icons/react";
-import type { ComponentType } from "react";
+import {  useEffect, useRef, useState } from "react";
+import type {ComponentType} from "react";
 
 import type { SessionUser } from "@/lib/api";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Menu, MenuContent, MenuItem, MenuTrigger } from "@/components/ui/menu";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -36,8 +36,29 @@ const NAV: Array<NavItem> = [
 export function AppSidebar({ user }: { user: SessionUser }) {
   const qc = useQueryClient();
   const navigate = useNavigate();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onClickOutside = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+      }
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onClickOutside);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onClickOutside);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [menuOpen]);
 
   const onLogout = async () => {
+    setMenuOpen(false);
     await api.logout();
     qc.setQueryData(["session"], null);
     navigate({ to: "/login" });
@@ -75,34 +96,41 @@ export function AppSidebar({ user }: { user: SessionUser }) {
         })}
       </nav>
 
-      <div className="border-t border-border p-2">
-        <Menu>
-          <MenuTrigger
-            render={(props) => (
-              <button
-                {...props}
-                className="flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left outline-none hover:bg-sidebar-accent"
-              />
+      <div ref={menuRef} className="relative border-t border-border p-2">
+        <button
+          type="button"
+          aria-haspopup="menu"
+          aria-expanded={menuOpen}
+          onClick={() => setMenuOpen((o) => !o)}
+          className="flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left outline-none hover:bg-sidebar-accent"
+        >
+          <Avatar className="size-7">
+            {user.avatar_url && <AvatarImage src={user.avatar_url} alt={user.login} />}
+            <AvatarFallback>{initials}</AvatarFallback>
+          </Avatar>
+          <div className="flex min-w-0 flex-1 flex-col">
+            <span className="truncate text-xs font-medium">{user.login}</span>
+            {user.email && (
+              <span className="truncate text-[10px] text-muted-foreground">{user.email}</span>
             )}
+          </div>
+        </button>
+        {menuOpen && (
+          <div
+            role="menu"
+            className="absolute bottom-full left-2 right-2 mb-2 overflow-hidden rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md"
           >
-            <Avatar className="size-7">
-              {user.avatar_url && <AvatarImage src={user.avatar_url} alt={user.login} />}
-              <AvatarFallback>{initials}</AvatarFallback>
-            </Avatar>
-            <div className="flex min-w-0 flex-1 flex-col">
-              <span className="truncate text-xs font-medium">{user.login}</span>
-              {user.email && (
-                <span className="truncate text-[10px] text-muted-foreground">{user.email}</span>
-              )}
-            </div>
-          </MenuTrigger>
-          <MenuContent align="end" sideOffset={8} className="min-w-[12rem]">
-            <MenuItem onClick={() => void onLogout()}>
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => void onLogout()}
+              className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-xs/relaxed hover:bg-muted"
+            >
               <SignOutIcon className="size-3.5" />
               Sign out
-            </MenuItem>
-          </MenuContent>
-        </Menu>
+            </button>
+          </div>
+        )}
       </div>
     </aside>
   );
