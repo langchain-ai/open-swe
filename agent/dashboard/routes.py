@@ -46,6 +46,11 @@ from .review_styles import (
     normalize_repo_full_name,
     set_custom_prompt,
 )
+from .team_settings import (
+    TeamSettingsUpdate,
+    get_team_settings,
+    upsert_team_settings,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -227,11 +232,24 @@ async def admin_put_profile(
     existing = await get_profile(login) or {}
     email = update.email or existing.get("email") or ""
     base = ProfileUpdate(
-        default_model=update.default_model,
-        reasoning_effort=update.reasoning_effort,
-        default_repo=update.default_repo,
+        **update.model_dump(exclude={"email"}),
     )
     return await upsert_profile(login, email, base)
+
+
+@router.get("/team-settings")
+async def api_get_team_settings(
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    return await get_team_settings()
+
+
+@router.put("/team-settings")
+async def api_put_team_settings(
+    update: TeamSettingsUpdate,
+    _admin: dict[str, Any] = _ADMIN_DEP,
+) -> dict[str, Any]:
+    return await upsert_team_settings(update)
 
 
 def _next_link_url(link_header: str | None) -> str | None:

@@ -2,13 +2,12 @@ import { Navigate, createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
-import type {Profile, ProfileUpdate} from "@/lib/api";
-import { AppHeader } from "@/components/AppHeader";
+import type { Profile, ProfileUpdate } from "@/lib/api";
+import { AppShell, SettingsSection } from "@/components/AppShell";
 import { ProfileForm } from "@/components/ProfileForm";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import {   api } from "@/lib/api";
+import { api } from "@/lib/api";
 import { useSession } from "@/lib/session";
 
 export const Route = createFileRoute("/admin")({ component: AdminPage });
@@ -43,27 +42,26 @@ function AdminPage() {
 
   if (session.isLoading) {
     return (
-      <main className="container mx-auto p-6">
+      <main className="p-6">
         <Skeleton className="h-64 w-full" />
       </main>
     );
   }
   if (!session.data) return <Navigate to="/login" />;
-  if (!session.data.is_admin) return <Navigate to="/profile" />;
+  if (!session.data.is_admin) return <Navigate to="/my-settings" />;
 
   const activeProfile: Profile | null =
     (selected && profiles.data?.find((p) => p.login === selected)) || null;
 
   return (
-    <div className="min-h-svh">
-      <AppHeader user={session.data} />
-      <main className="container mx-auto grid grid-cols-1 gap-6 p-6 md:grid-cols-[280px_1fr]">
-        <Card>
-          <CardHeader>
-            <CardTitle>All users</CardTitle>
-            <CardDescription>{profiles.data?.length ?? 0} profiles</CardDescription>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-1">
+    <AppShell
+      user={session.data}
+      title="Admin"
+      description="Edit any user's profile defaults."
+    >
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-[260px_1fr]">
+        <SettingsSection title={`Users · ${profiles.data?.length ?? 0}`}>
+          <div className="flex flex-col gap-0.5 p-2">
             {profiles.isLoading ? (
               <Skeleton className="h-32" />
             ) : (
@@ -78,17 +76,18 @@ function AdminPage() {
                 </Button>
               ))
             )}
-          </CardContent>
-        </Card>
+          </div>
+        </SettingsSection>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>{activeProfile?.login ?? "Select a user"}</CardTitle>
-            <CardDescription>{activeProfile?.email ?? ""}</CardDescription>
-          </CardHeader>
-          <CardContent>
+        <SettingsSection
+          title={activeProfile?.login ?? "Select a user"}
+          description={activeProfile?.email ?? undefined}
+        >
+          <div className="p-4">
             {!activeProfile ? (
-              <p className="text-muted-foreground text-sm">Pick a user on the left to edit.</p>
+              <p className="text-xs text-muted-foreground">
+                Pick a user on the left to edit.
+              </p>
             ) : options.isLoading ? (
               <Skeleton className="h-48" />
             ) : (
@@ -103,9 +102,9 @@ function AdminPage() {
                 error={error}
               />
             )}
-          </CardContent>
-        </Card>
-      </main>
-    </div>
+          </div>
+        </SettingsSection>
+      </div>
+    </AppShell>
   );
 }

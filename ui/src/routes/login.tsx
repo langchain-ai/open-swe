@@ -21,7 +21,7 @@ function Login() {
   }
 
   if (session.data) {
-    return <Navigate to="/profile" />;
+    return <Navigate to="/my-settings" />;
   }
 
   return (

@@ -1,0 +1,260 @@
+import { Navigate, createFileRoute } from "@tanstack/react-router";
+import { useEffect, useState } from "react";
+
+import type { ModelOption } from "@/lib/api";
+import { AppShell, SettingsRow, SettingsSection } from "@/components/AppShell";
+import { Button } from "@/components/ui/button";
+import {
+  Combobox,
+  ComboboxContent,
+  ComboboxEmpty,
+  ComboboxInput,
+  ComboboxItem,
+  ComboboxList,
+} from "@/components/ui/combobox";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Switch } from "@/components/ui/switch";
+import { buildProfileUpdate, useOptions, useProfile, useRepos, useSaveProfile } from "@/lib/profile";
+import { useSession } from "@/lib/session";
+
+export const Route = createFileRoute("/cloud-agents")({ component: CloudAgentsPage });
+
+function CloudAgentsPage() {
+  const session = useSession();
+  const profile = useProfile();
+  const options = useOptions();
+  const repos = useRepos();
+  const save = useSaveProfile();
+
+  const [modelId, setModelId] = useState("");
+  const [effort, setEffort] = useState("");
+  const [defaultRepo, setDefaultRepo] = useState("");
+  const [baseBranch, setBaseBranch] = useState("");
+  const [branchPrefix, setBranchPrefix] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  const firstModel: ModelOption | undefined = options.data?.models[0];
+  const currentModel: ModelOption | undefined =
+    options.data?.models.find((m) => m.id === modelId) ?? firstModel;
+
+  useEffect(() => {
+    if (!profile.data) return;
+    setModelId(profile.data.default_model ?? firstModel?.id ?? "");
+    setEffort(profile.data.reasoning_effort ?? firstModel?.default_effort ?? "");
+    setDefaultRepo(profile.data.default_repo ?? "");
+    setBaseBranch(profile.data.base_branch ?? "");
+    setBranchPrefix(profile.data.branch_prefix ?? "");
+  }, [profile.data, firstModel?.id, firstModel?.default_effort]);
+
+  useEffect(() => {
+    if (currentModel && !currentModel.efforts.includes(effort)) {
+      setEffort(currentModel.default_effort);
+    }
+  }, [currentModel, effort]);
+
+  if (session.isLoading) {
+    return (
+      <main className="p-6">
+        <Skeleton className="h-64 w-full" />
+      </main>
+    );
+  }
+  if (!session.data) return <Navigate to="/login" />;
+
+  const fallbackModel = firstModel?.id ?? "";
+  const fallbackEffort = firstModel?.default_effort ?? "";
+
+  const persist = (patch: Parameters<typeof buildProfileUpdate>[1]) => {
+    setError(null);
+    save
+      .mutateAsync(
+        buildProfileUpdate(profile.data, patch, fallbackModel, fallbackEffort),
+      )
+      .catch((e: Error) => setError(e.message));
+  };
+
+  const persistDefaults = () => {
+    persist({
+      default_model: modelId,
+      reasoning_effort: effort,
+      default_repo: defaultRepo || null,
+      base_branch: baseBranch || null,
+      branch_prefix: branchPrefix || null,
+    });
+  };
+
+  return (
+    <AppShell
+      user={session.data}
+      title="Cloud Agents"
+      description="Configure how Cloud Agents pick a model, repository, and PR defaults."
+    >
+      <SettingsSection title="Defaults">
+        <div className="divide-y divide-border">
+          <SettingsRow
+            label="Default Model"
+            description="Used when no model is specified"
+            control={
+              <Select value={modelId} onValueChange={(v) => v && setModelId(v)}>
+                <SelectTrigger className="w-40">
+                  <SelectValue placeholder="Pick a model" />
+                </SelectTrigger>
+                <SelectContent>
+                  {options.data?.models.map((m) => (
+                    <SelectItem key={m.id} value={m.id}>
+                      {m.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            }
+          />
+          <SettingsRow
+            label="Reasoning Effort"
+            description="How hard the model thinks before answering"
+            control={
+              <Select value={effort} onValueChange={(v) => v && setEffort(v)}>
+                <SelectTrigger className="w-32">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {currentModel?.efforts.map((e) => (
+                    <SelectItem key={e} value={e}>
+                      {e}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            }
+          />
+          <SettingsRow
+            label="Default Repository"
+            description="Used when no repository is specified"
+            control={
+              <div className="w-64">
+                {repos.data && repos.data.repositories.length > 0 ? (
+                  <Combobox
+                    items={repos.data.repositories.map((r) => r.full_name)}
+                    value={defaultRepo}
+                    onValueChange={(v) =>
+                      setDefaultRepo(typeof v === "string" ? v : "")
+                    }
+                  >
+                    <ComboboxInput placeholder="Pick a repository…" showClear className="w-full" />
+                    <ComboboxContent className="min-w-[var(--anchor-width)]">
+                      <ComboboxList className="max-h-64">
+                        <ComboboxEmpty>No matches</ComboboxEmpty>
+                        {repos.data.repositories.map((r) => (
+                          <ComboboxItem key={r.full_name} value={r.full_name}>
+                            <span className="truncate">{r.full_name}</span>
+                          </ComboboxItem>
+                        ))}
+                      </ComboboxList>
+                    </ComboboxContent>
+                  </Combobox>
+                ) : (
+                  <Input
+                    placeholder="owner/repo"
+                    value={defaultRepo}
+                    onChange={(e) => setDefaultRepo(e.target.value)}
+                  />
+                )}
+              </div>
+            }
+          />
+          <SettingsRow
+            label="Base Branch"
+            description="When empty, Cloud Agent will use a repository's default branch (recommended)"
+            htmlFor="base-branch"
+            control={
+              <Input
+                id="base-branch"
+                className="w-56"
+                placeholder="Branch name…"
+                value={baseBranch}
+                onChange={(e) => setBaseBranch(e.target.value)}
+              />
+            }
+          />
+          <SettingsRow
+            label="Branch Prefix"
+            description="Prefix for branch names created by Cloud Agent"
+            htmlFor="branch-prefix"
+            control={
+              <Input
+                id="branch-prefix"
+                className="w-56"
+                placeholder="open-swe/"
+                value={branchPrefix}
+                onChange={(e) => setBranchPrefix(e.target.value)}
+              />
+            }
+          />
+          <div className="flex justify-end px-4 py-3">
+            <Button size="sm" onClick={persistDefaults} disabled={save.isPending}>
+              {save.isPending ? "Saving…" : "Save defaults"}
+            </Button>
+          </div>
+        </div>
+      </SettingsSection>
+
+      <SettingsSection title="Pull Requests">
+        <div className="divide-y divide-border">
+          <SettingsRow
+            label="Automatically fix CI failures"
+            description="Agent will attempt to fix failing CI checks on PRs it opens."
+            control={
+              <Switch
+                checked={profile.data?.auto_fix_ci ?? true}
+                onCheckedChange={(v) => persist({ auto_fix_ci: v })}
+              />
+            }
+          />
+          <SettingsRow
+            label="Create PRs"
+            description="Automatically create a pull request when a Cloud Agent completes."
+            control={
+              <Switch
+                checked={profile.data?.create_prs ?? true}
+                onCheckedChange={(v) => persist({ create_prs: v })}
+              />
+            }
+          />
+          <SettingsRow
+            label="Allow posting artifacts to GitHub"
+            description="Allow cloud agents to embed images directly in PR descriptions using hard-to-guess public URLs."
+            control={
+              <Switch
+                checked={profile.data?.allow_artifacts ?? false}
+                onCheckedChange={(v) => persist({ allow_artifacts: v })}
+              />
+            }
+          />
+        </div>
+      </SettingsSection>
+
+      <SettingsSection title="Notifications">
+        <SettingsRow
+          label="Slack Notifications"
+          description="Get notified in Slack when a Cloud Agent completes a task."
+          control={
+            <Switch
+              checked={profile.data?.slack_notifications ?? true}
+              onCheckedChange={(v) => persist({ slack_notifications: v })}
+            />
+          }
+        />
+      </SettingsSection>
+
+      {error && <p className="text-xs text-destructive">{error}</p>}
+    </AppShell>
+  );
+}
