@@ -51,7 +51,7 @@ def _result_with_findings(findings: list[dict[str, Any]]) -> dict[str, Any]:
     return {"messages": [{"tool_calls": [{"name": "add_finding", "args": f} for f in findings]}]}
 
 
-def test_extract_comments_no_filter_includes_all_confidences() -> None:
+def test_extract_comments_includes_all_confidences() -> None:
     result = _result_with_findings(
         [
             {
@@ -74,48 +74,6 @@ def test_extract_comments_no_filter_includes_all_confidences() -> None:
     )
     comments = target._extract_comments(result)
     assert {c["file"] for c in comments} == {"a.py", "b.py"}
-
-
-def test_extract_comments_with_min_confidence_drops_below_threshold() -> None:
-    result = _result_with_findings(
-        [
-            {
-                "file": "low.py",
-                "severity": "high",
-                "confidence": "low",
-                "description": "lo",
-                "start_line": 1,
-                "end_line": 1,
-            },
-            {
-                "file": "med.py",
-                "severity": "low",
-                "confidence": "medium",
-                "description": "med",
-                "start_line": 2,
-                "end_line": 2,
-            },
-            {
-                "file": "high.py",
-                "severity": "informational",
-                "confidence": "high",
-                "description": "hi",
-                "start_line": 3,
-                "end_line": 3,
-            },
-            {
-                "file": "missing.py",
-                "severity": "high",
-                "description": "no confidence arg",
-                "start_line": 4,
-                "end_line": 4,
-            },
-        ]
-    )
-    comments = target._extract_comments(result, min_confidence="medium")
-    # Confidence-only filter — severity is ignored. Missing confidence defaults
-    # to "medium" and passes the bar.
-    assert {c["file"] for c in comments} == {"med.py", "high.py", "missing.py"}
 
 
 @pytest.mark.asyncio

@@ -49,7 +49,7 @@ def add_finding(
     issue truly isn't anchored to a line.
 
     Args:
-        severity: One of ``informational``, ``low``, ``medium``, ``high``, ``critical``.
+        severity: One of ``low``, ``medium``, ``high``, ``critical``.
         confidence: One of ``low``, ``medium``, ``high``.
         category: Short category label (``correctness``, ``security``, ``perf``,
             ``style``, ``flag``, etc.). Free-form; used for grouping in the UI.
@@ -82,7 +82,7 @@ def add_finding(
     if start_line is None and end_line is not None:
         start_line = end_line
 
-    if severity not in {"informational", "low", "medium", "high", "critical"}:
+    if severity not in {"low", "medium", "high", "critical"}:
         return {"success": False, "error": f"Invalid severity: {severity}"}
     if confidence not in {"low", "medium", "high"}:
         return {"success": False, "error": f"Invalid confidence: {confidence}"}

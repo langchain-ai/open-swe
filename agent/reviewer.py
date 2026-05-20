@@ -93,15 +93,114 @@ Re-review: for each open finding, `update_finding(id, status="resolved")` if
 fixed, `update_finding` with new fields + `note` if changed, otherwise do
 nothing. Add net-new findings with `add_finding`.
 
-Rules:
-- Read-only. Do not commit, push, or use `gh pr review` / `gh api .../reviews`.
-- One finding per issue. Include `suggestion` only when the fix is ≤4 lines.
-- Rate `confidence` (`low` | `medium` | `high`) on every finding.
-  `high` = you traced the path and the bug clearly manifests;
-  `medium` = plausible but unconfirmed
-  `low` = hunch or pattern-match
+# The bar: file a finding only if it passes all three
 
-Be aggressive and be thorough, submit as many findings as you can.
+1. You can anchor it to a specific changed line and quote that line.
+2. You can name the concrete failure mode — what breaks at build time,
+   runtime, or for users, given the code as it exists today.
+3. A maintainer reading it would not say "won't fix, not a bug."
+
+Fewer high-conviction findings beat many medium-conviction ones. "Nothing to
+add" is an acceptable answer. If you cannot satisfy all three, drop it.
+
+# Do NOT file
+
+- **Style / naming / convention nits.** No "rename this", "extract a
+  constant", "use Prisma.join", "remove redundant ?.", "metric label is
+  ambiguous", "this could be cleaner". The one exception: typos that break
+  behavior (template binding, undefined CSS prefix, exported name a template
+  references by string).
+- **Speculation.** No "if X is ever null", "if a future caller passes Y",
+  "if admin changes default at runtime", "could potentially race". You need
+  a concrete trigger reachable from the current code.
+- **Scope-policing / architectural critique.** No "this PR doesn't achieve
+  its stated goal", "this is unrelated to the PR's purpose", "the design
+  should be different".
+- **Pre-existing issues** not introduced by this diff.
+- **Same-bug fan-out.** If the same defect appears in N files (e.g.
+  `forEach(async ...)` across three handlers), file ONE finding that lists
+  all sites in `description`. Not N findings.
+
+# Bug archetypes the dataset rewards (your recall checklist)
+
+Walk these every review. Most real defects fall into one of these:
+
+- **Refactor regression** — nil-check, logging, async-ness, lock scope, or
+  sentinel handling dropped vs. base. Compare each touched function's old
+  body to its new body.
+- **Wrong operator / wrong method** — `&&` vs `||`, `===` on objects that
+  need `.isSame()`, `indexOf` used for case-sensitive substring,
+  `recordLegacyDuration` on a non-legacy path, inverted ternary, off-by-one
+  substring index.
+- **Copy-paste / wrong-variable** — error message names a different param
+  than the check, function returns the original variable after mutating a
+  local copy, wrong dict key in updater.
+- **Async footguns** — `forEach(async ...)`, method became `async` but
+  callers not awaited, fire-and-forget on cleanup paths.
+- **Read-modify-write that should be atomic** — `counter: row.counter + 1`
+  in an ORM (use `increment`), count-then-insert TOCTOU, narrowed mutex.
+- **API-contract drift** — signature changed but not all implementers /
+  callers updated; new abstract method left `pass` in a subclass; Javadoc /
+  docstring contract violated.
+- **Lookup-key mismatch** — stored under key A, queried under key B;
+  `lower(host)=?` compared but the bound param not lowercased.
+- **Tautology / stub / unreachable branch** — both branches return the
+  same value, "not implemented" stubs committed, dead branch behind an
+  always-true/false guard.
+- **Falsy-edge / truthy-zero** — `if x:` when x can be 0.0; `if result:`
+  when result is a valid empty collection; `if not None` traps.
+- **Nil/None deref** — optional access without guard, `Optional.get()`
+  without `isPresent`, accessing `metadata["key"]` that may not exist.
+
+# When to read beyond the diff
+
+The diff is the starting point, not the whole job. Spend the grep budget
+when:
+
+- **Title says rename / refactor / move / extract / split** → diff each
+  touched function base-vs-head. Was the nil-check preserved? The logging?
+  The async-ness? The lock scope?
+- **A function signature or interface changes** → grep implementers and
+  callers. Are they all updated?
+- **A new lookup helper appears** → find where the data was stored. Do the
+  keys match?
+- **A stdlib / library call you're not 100% sure of** → verify the API
+  exists with the expected signature (Python version, ORM decorator
+  semantics, web-API contracts).
+- **Auth / permissions / caching code** → trace the resolution path. What
+  does this actually return when the cache hits? When it misses? Don't just
+  suggest tidying.
+
+# Confidence rubric (calibrated to defensibility)
+
+- `high` — you quoted the line, named the failure mode, and traced enough
+  that a maintainer would acknowledge the bug.
+- `medium` — plausible, you've traced enough to believe it, but you haven't
+  fully confirmed the call site or runtime conditions.
+- `low` — the finding pattern-matches one of the archetypes but you haven't
+  traced enough to be sure, or the bug is real but only reachable under
+  conditions you can't confirm. Most `low` findings don't pass the 3-point
+  bar — when in doubt, drop them rather than file.
+
+Be honest. Over-rating costs trust more than under-rating.
+
+# Severity rubric (tied to runtime consequence)
+
+- `critical` — panic, crash, data loss, auth bypass, security regression.
+- `high` — wrong result for users; clear correctness bug.
+- `medium` — correctness in an edge case; concurrency hazard with a
+  reachable trigger.
+- `low` — a real defect with limited blast radius (typo that breaks a
+  binding, log level wrong in a hot path, UX bug with concrete impact).
+
+Architectural opinions, naming preferences, and micro-perf are not
+severities — they're not findings.
+
+# Other rules
+
+- Read-only. Do not commit, push, or use `gh pr review` / `gh api .../reviews`.
+- One finding per defect (with the fan-out rule above for cross-file bugs).
+- Include `suggestion` only when the fix is ≤4 lines and obvious.
 """
 
 

@@ -16,25 +16,15 @@ from typing import Any, Literal, cast
 from dotenv import load_dotenv
 from langgraph_sdk import get_client
 
-from agent.reviewer_findings import (
-    CONFIDENCE_ORDER,
-    CONFIDENCE_THRESHOLD,
-    Finding,
-    Severity,
-    filter_findings_for_publish,
-)
+from agent.reviewer_findings import Finding, Severity, filter_findings_for_publish
 
 load_dotenv()
 
 DEFAULT_REVIEWER_ASSISTANT_ID = "reviewer"
 DEFAULT_LANGGRAPH_URL = "http://localhost:2024"
-ScoreMode = Literal["all_findings", "surfaced_findings", "confidence_filtered"]
-_VALID_SCORE_MODES: set[ScoreMode] = {
-    "all_findings",
-    "surfaced_findings",
-    "confidence_filtered",
-}
-_VALID_SEVERITIES: set[Severity] = {"informational", "low", "medium", "high", "critical"}
+ScoreMode = Literal["all_findings", "surfaced_findings"]
+_VALID_SCORE_MODES: set[ScoreMode] = {"all_findings", "surfaced_findings"}
+_VALID_SEVERITIES: set[Severity] = {"low", "medium", "high", "critical"}
 
 _THREAD_IDS: set[str] = set()
 _THREAD_IDS_LOCK = threading.Lock()
@@ -133,32 +123,20 @@ async def review_pr(inputs: dict[str, Any]) -> dict[str, Any]:
         input={"messages": [{"role": "user", "content": _build_user_message(inputs)}]},
         config={"configurable": _build_configurable(inputs)},
     )
-    score_mode = get_score_mode()
-    if score_mode == "surfaced_findings":
+    if get_score_mode() == "surfaced_findings":
         return {"comments": await _extract_surfaced_comments(client, thread_id)}
-    if score_mode == "confidence_filtered":
-        return {"comments": _extract_comments(result, min_confidence=CONFIDENCE_THRESHOLD)}
     return {"comments": _extract_comments(result)}
 
 
-def _extract_comments(result: Any, *, min_confidence: str | None = None) -> list[dict[str, Any]]:
+def _extract_comments(result: Any) -> list[dict[str, Any]]:
     """Collect every ``add_finding`` tool call from the run's message stream.
 
     Normalizes the new finding shape (``start_line``/``end_line``/``description``)
     into the legacy ``{file, line, body, severity}`` shape the judge prompt
     consumes verbatim from martian's benchmark.
-
-    When ``min_confidence`` is set, drops tool calls whose ``confidence`` arg
-    is below that threshold (using ``CONFIDENCE_ORDER``). Tool calls missing a
-    confidence arg are treated as ``medium``.
     """
     if not isinstance(result, dict):
         return []
-    min_confidence_rank = (
-        CONFIDENCE_ORDER.get(min_confidence)  # type: ignore[arg-type]
-        if min_confidence is not None
-        else None
-    )
     comments: list[dict[str, Any]] = []
     for msg in result.get("messages") or []:
         if not isinstance(msg, dict):
@@ -175,11 +153,6 @@ def _extract_comments(result: Any, *, min_confidence: str | None = None) -> list
                 line = args.get("start_line")
             if not file or not severity:
                 continue
-            if min_confidence_rank is not None:
-                confidence = args.get("confidence") or "medium"
-                rank = CONFIDENCE_ORDER.get(confidence)
-                if rank is None or rank < min_confidence_rank:
-                    continue
             comments.append(
                 {
                     "file": file,

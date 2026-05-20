@@ -39,29 +39,21 @@ def clip_suggestion(suggestion: str | None) -> tuple[str | None, bool]:
     return suggestion, False
 
 
-Severity = Literal["informational", "low", "medium", "high", "critical"]
+Severity = Literal["low", "medium", "high", "critical"]
 Confidence = Literal["low", "medium", "high"]
 FindingStatus = Literal["open", "resolved", "dismissed"]
 DiffSide = Literal["LEFT", "RIGHT"]
 
 SEVERITY_ORDER: dict[Severity, int] = {
-    "informational": 0,
-    "low": 1,
-    "medium": 2,
-    "high": 3,
-    "critical": 4,
-}
-
-CONFIDENCE_ORDER: dict[Confidence, int] = {
     "low": 0,
     "medium": 1,
     "high": 2,
+    "critical": 3,
 }
 
-# Hidden from the agent: a precision lever applied at publish time so the
-# reviewer can self-rate confidence without being able to game the threshold.
-# Findings below this rating are kept in state but never surfaced to GitHub.
-CONFIDENCE_THRESHOLD: Confidence = "high"
+# Confidence is recorded on every finding for post-hoc calibration analysis
+# but does not gate publication — the system prompt's defensibility bar is
+# the discipline.
 
 
 class Finding(TypedDict, total=False):
@@ -304,29 +296,24 @@ def filter_findings_for_publish(
     *,
     severity_threshold: Severity = "medium",
     cap: int = 4,
-    confidence_threshold: Confidence = CONFIDENCE_THRESHOLD,
 ) -> list[Finding]:
     """Return findings to surface to GitHub.
 
     - status must be ``open``
     - severity must be at or above ``severity_threshold``
-    - confidence must be at or above ``confidence_threshold`` (hidden precision
-      lever, defaults to the module-level ``CONFIDENCE_THRESHOLD``)
     - sorted by severity descending, then file/start_line for stable ordering
     - capped at ``cap`` to avoid review spam
     """
     severity_rank = SEVERITY_ORDER[severity_threshold]
-    confidence_rank = CONFIDENCE_ORDER[confidence_threshold]
     eligible = [
         finding
         for finding in findings
         if finding.get("status", "open") == "open"
-        and SEVERITY_ORDER.get(finding.get("severity", "informational"), 0) >= severity_rank
-        and CONFIDENCE_ORDER.get(finding.get("confidence", "medium"), 1) >= confidence_rank
+        and SEVERITY_ORDER.get(finding.get("severity", "low"), 0) >= severity_rank
     ]
     eligible.sort(
         key=lambda f: (
-            -SEVERITY_ORDER.get(f.get("severity", "informational"), 0),
+            -SEVERITY_ORDER.get(f.get("severity", "low"), 0),
             f.get("file", ""),
             f.get("start_line") or 0,
         )

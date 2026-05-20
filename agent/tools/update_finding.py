@@ -50,13 +50,7 @@ def update_finding(
     """
     if status is not None and status not in {"open", "resolved", "dismissed"}:
         return {"success": False, "error": f"Invalid status: {status}"}
-    if severity is not None and severity not in {
-        "informational",
-        "low",
-        "medium",
-        "high",
-        "critical",
-    }:
+    if severity is not None and severity not in {"low", "medium", "high", "critical"}:
         return {"success": False, "error": f"Invalid severity: {severity}"}
     if confidence is not None and confidence not in {"low", "medium", "high"}:
         return {"success": False, "error": f"Invalid confidence: {confidence}"}
