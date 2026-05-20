@@ -494,14 +494,26 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
                 head_sha=head_sha,
             )
 
+    from .dashboard.team_settings import get_team_model_override
+
     configured_model_id = config["configurable"].get("reviewer_model_id")
-    model_id = (
-        configured_model_id
-        if isinstance(configured_model_id, str) and configured_model_id
-        else os.environ.get("LLM_MODEL_ID", DEFAULT_LLM_MODEL_ID)
-    )
     configured_effort = config["configurable"].get("reviewer_reasoning_effort")
-    reasoning_effort = configured_effort if isinstance(configured_effort, str) else None
+    if isinstance(configured_model_id, str) and configured_model_id:
+        model_id = configured_model_id
+        reasoning_effort = configured_effort if isinstance(configured_effort, str) else None
+    else:
+        team_model, team_effort = await get_team_model_override("reviewer")
+        if team_model:
+            logger.info(
+                "Applying team default reviewer model override: model=%s effort=%s",
+                team_model,
+                team_effort,
+            )
+            model_id = team_model
+            reasoning_effort = team_effort
+        else:
+            model_id = os.environ.get("LLM_MODEL_ID", DEFAULT_LLM_MODEL_ID)
+            reasoning_effort = configured_effort if isinstance(configured_effort, str) else None
     model_kwargs = provider_model_kwargs(
         model_id,
         reasoning_effort,

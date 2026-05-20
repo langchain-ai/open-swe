@@ -89,6 +89,10 @@ export interface TeamSettings {
   pr_summaries: boolean;
   autofix_mode: AutofixMode;
   autofix_severity_threshold: AutofixMode;
+  default_agent_model?: string | null;
+  default_agent_reasoning_effort?: string | null;
+  default_reviewer_model?: string | null;
+  default_reviewer_reasoning_effort?: string | null;
   updated_at?: string | null;
 }
 

@@ -12,7 +12,9 @@ from datetime import UTC, datetime
 from typing import Any, Literal
 
 from langgraph_sdk import get_client
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
+
+from .options import SUPPORTED_MODEL_IDS, model_supports_effort
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +31,31 @@ class TeamSettingsUpdate(BaseModel):
     pr_summaries: bool = True
     autofix_mode: AutofixMode = "off"
     autofix_severity_threshold: AutofixMode = "medium"
+    default_agent_model: str | None = None
+    default_agent_reasoning_effort: str | None = None
+    default_reviewer_model: str | None = None
+    default_reviewer_reasoning_effort: str | None = None
+
+    @model_validator(mode="after")
+    def _validate_model_pairs(self) -> TeamSettingsUpdate:
+        _validate_model_effort_pair(
+            self.default_agent_model, self.default_agent_reasoning_effort, "agent"
+        )
+        _validate_model_effort_pair(
+            self.default_reviewer_model, self.default_reviewer_reasoning_effort, "reviewer"
+        )
+        return self
+
+
+def _validate_model_effort_pair(model: str | None, effort: str | None, role: str) -> None:
+    if model is None and effort is None:
+        return
+    if model is None:
+        raise ValueError(f"{role} reasoning effort set without a model")
+    if model not in SUPPORTED_MODEL_IDS:
+        raise ValueError(f"unsupported {role} model: {model}")
+    if effort is None or not model_supports_effort(model, effort):
+        raise ValueError(f"effort {effort!r} not supported by {role} model {model!r}")
 
 
 def _client():
@@ -42,6 +69,10 @@ def _default_settings() -> dict[str, Any]:
         "pr_summaries": True,
         "autofix_mode": "off",
         "autofix_severity_threshold": "medium",
+        "default_agent_model": None,
+        "default_agent_reasoning_effort": None,
+        "default_reviewer_model": None,
+        "default_reviewer_reasoning_effort": None,
         "updated_at": None,
     }
 
@@ -67,7 +98,32 @@ async def upsert_team_settings(update: TeamSettingsUpdate) -> dict[str, Any]:
         "pr_summaries": update.pr_summaries,
         "autofix_mode": update.autofix_mode,
         "autofix_severity_threshold": update.autofix_severity_threshold,
+        "default_agent_model": update.default_agent_model,
+        "default_agent_reasoning_effort": update.default_agent_reasoning_effort,
+        "default_reviewer_model": update.default_reviewer_model,
+        "default_reviewer_reasoning_effort": update.default_reviewer_reasoning_effort,
         "updated_at": datetime.now(UTC).isoformat(),
     }
     await _client().store.put_item(TEAM_SETTINGS_NAMESPACE, TEAM_SETTINGS_KEY, value)
     return value
+
+
+async def get_team_model_override(
+    role: Literal["agent", "reviewer"],
+) -> tuple[str | None, str | None]:
+    """Return ``(model_id, reasoning_effort)`` for the team-wide default, or ``(None, None)``.
+
+    Returns the override only when both fields are valid and form a supported pair.
+    """
+    settings = await get_team_settings()
+    if role == "agent":
+        model = settings.get("default_agent_model")
+        effort = settings.get("default_agent_reasoning_effort")
+    else:
+        model = settings.get("default_reviewer_model")
+        effort = settings.get("default_reviewer_reasoning_effort")
+    if not isinstance(model, str) or model not in SUPPORTED_MODEL_IDS:
+        return None, None
+    if not isinstance(effort, str) or not model_supports_effort(model, effort):
+        return None, None
+    return model, effort

@@ -42,6 +42,10 @@ const DEFAULT_SETTINGS: TeamSettings = {
   pr_summaries: true,
   autofix_mode: "off",
   autofix_severity_threshold: "medium",
+  default_agent_model: null,
+  default_agent_reasoning_effort: null,
+  default_reviewer_model: null,
+  default_reviewer_reasoning_effort: null,
 };
 
 function ReviewPage() {

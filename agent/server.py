@@ -34,6 +34,7 @@ from .dashboard.agent_overrides import (
     profile_create_prs,
     resolve_github_login,
 )
+from .dashboard.team_settings import get_team_model_override
 from .integrations.langsmith import _configure_github_proxy
 from .middleware import (
     ModelFallbackMiddleware,
@@ -379,6 +380,17 @@ async def get_agent(config: RunnableConfig) -> Pregel:
 
     model_id = os.environ.get("LLM_MODEL_ID", DEFAULT_LLM_MODEL_ID)
     profile_effort: str | None = None
+
+    team_model, team_effort = await get_team_model_override("agent")
+    if team_model:
+        logger.info(
+            "Applying team default agent model override: model=%s effort=%s",
+            team_model,
+            team_effort,
+        )
+        model_id = team_model
+        profile_effort = team_effort
+
     profile: dict[str, Any] | None = None
     profile_login = resolve_github_login(config)
     if profile_login:
