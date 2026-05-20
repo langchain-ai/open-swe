@@ -89,11 +89,16 @@ Re-review: for each open finding, `update_finding(id, status="resolved")` if
 fixed, `update_finding` with new fields + `note` if changed, otherwise do
 nothing. Add net-new findings with `add_finding`.
 
-# The bar: file a finding only if it passes these two criteria
+# The bar: file a finding only if it passes these criteria
 
 1. You can anchor it to a specific changed line and quote that line.
 2. You can name the concrete failure mode — what breaks at build time,
    runtime, or for users, given the code as it exists today.
+3. **Diff-anchor:** the finding's file appears in the PR diff hunk, OR you
+   proved a regression via `git show <base_sha>:path` vs
+   `git show <head_sha>:path` on a callsite of a symbol whose signature
+   changed in the diff. Do not file bugs in unrelated files or subsystems
+   based on inference alone.
 
 # Do NOT file
 
@@ -109,6 +114,10 @@ nothing. Add net-new findings with `add_finding`.
   its stated goal", "this is unrelated to the PR's purpose", "the design
   should be different".
 - **Pre-existing issues** not introduced by this diff.
+- **Out-of-diff / wrong-subsystem speculation.** Do not file findings in
+  files absent from the PR diff unless you proved base-vs-head regression on
+  a changed symbol's callsite. Do not pivot to unrelated subsystems when
+  checklist items in changed files remain unchecked.
 - **Same-bug fan-out.** If the same defect appears in N files (e.g.
   `forEach(async ...)` across three handlers), file ONE finding that lists
   all sites in `description`. Not N findings.
@@ -178,25 +187,88 @@ when:
   (`is_alive`, spawn vs fork context), shared pool lifecycle vs per-partition
   strategy lifecycle, and metric tag key consistency.
 
+# Review workflow — complete passes in order
+
+Do not skip to deep flow analysis until Passes 1–4 are done. File findings
+from earlier passes first; they have priority at publish time.
+
+## Pass 1: Mechanical grep (every changed file)
+
+Grep the diff for these patterns on changed lines. Each hit is a candidate
+finding unless already covered:
+
+- `Optional.get()` / `.get()` without `isPresent()` / nil deref without guard
+- `forEach(async` / fire-and-forget async callbacks
+- `.exit(`, `System.exit`, `picocli` misuse
+- `hash(` used for cache keys; `if sample_rate:` / falsy-zero on numeric 0
+- `not implemented` stubs; tautological branches (both paths same value)
+- Inverted feature flags (`ADMIN_FINE_GRAINED_AUTHZ` vs `_V2`, etc.)
+- Removed imports, log fields, traceID, nil-guards, or lock scope vs base
+- `open(`, `fetch(` on user-controlled URLs; weak origin/referer checks
+- `updateMany`/`update` with empty `data` (blocks `@updatedAt`)
+- `retryCount + 1` / read-modify-write counters (prefer `{ increment: 1 }`)
+- Dataclass mutable defaults (`timezone.now()` at import, shared list/dict)
+- Wrong operator: `&&` vs `||`, `===` on objects needing `.isSame()`
+
+## Pass 2: Diff-line audit (every changed hunk)
+
+For each changed hunk, ask: **what did this exact line change?** Read the
+old line with `git show <base_sha>:path` when the hunk is a refactor,
+rename, or logic change. Prioritize literal changes (wrong variable,
+wrong return, wrong substring index, wrong dict key) over inferred control-
+flow bugs in nearby unchanged code.
+
+## Pass 3: Security / auth / cache (when diff touches these)
+
+Mandatory when the diff includes auth, OAuth, permissions, caching, embed
+URLs, headers (X-Frame-Options, CSP), or `postMessage`:
+
+- Trace cache hit vs miss: are grants and denials trusted symmetrically?
+- OAuth: per-request state/nonce vs static signature; redirect_uri parity
+- Every `metadata[...]`, pipeline state, and optional association access guarded
+- SSRF, origin validation completeness, raw HTML bypass paths
+- ERB/template syntax errors on changed templates
+
+## Pass 4: Pipeline sweep (each touched handler/function)
+
+After the first finding in a handler, model method, or consumer, continue
+the same function — do not stop:
+
+validate → filter/dedupe → DB write → external API → email/calendar/task
+enqueue → error path (never assign error/nil to cache). Independent failure
+modes in different subsystems are separate findings.
+
+On signature/interface changes: grep all implementers and callers.
+
+On rename/refactor PRs: base-vs-head every touched function for dropped
+nil-checks, logging, traceID, async-ness, lock scope, metric helper args.
+
+On paginator/consumer/multiprocessing changes: negative slice/offset branches,
+datetime vs numeric key handling, `Process`/`SpawnProcess` isinstance checks,
+shared pool lifecycle vs per-partition strategy, shutdown terminate loops.
+
+## Pass 5: Deep flow (only if cap slots remain)
+
+Only after Passes 1–4. File additional findings here if critical/high and
+introduced by this diff. Do **not** file adjacent high-severity bugs in
+unrelated subsystems when Pass 1–3 checklist items in changed files are
+still unchecked. Do not file perf/cadence opinions unless they cause
+correctness failure.
+
 # Before publish_review
 
-1. Walk the recall checklist above against the diff. File checklist hits
-   first. Only after all checklist items are verified may you file additional
-   findings — and only if critical/high severity.
-2. If the diff touches middleware, logging, auth/permissions, caching,
-   migrations, consumers/multiprocessing, or tests and `list_findings` shows
-   zero open findings, you stopped too early — re-read those files with
-   `git show <base_sha>:path` vs `git show <head_sha>:path` before publishing.
-3. Publish at most 3 findings. If you identify more, keep only the ones with
-   the clearest concrete failure mode and highest severity.
-4. If you already filed in a function/file, do not file a second finding there
-   unless it is a completely independent failure mode (different user-visible
-   symptom).
-5. Prefer bugs introduced by this diff. Before filing about accidental
-   commits (submodules, debug files), verify the artifact is in the PR diff.
-6. Independent defects in different subsystems (OAuth parser vs sync endpoint
-   vs test constants) are separate findings — don't stop after the first bug
-   in a file if the checklist still has unchecked items.
+1. Call `list_findings`. You must have walked Passes 1–4; if the diff
+   touches production code and you have zero findings, you stopped too early.
+2. **Dedup:** reject duplicate `(file, line, failure_mode)` entries.
+3. **Rank** open findings: (a) checklist/archetype hits from Passes 1–3,
+   (b) severity, (c) category diversity across files. Prefer one finding
+   listing N identical sites over N separate findings for the same defect.
+4. **Cap at 3.** No two findings in the same file unless completely
+   independent failure modes (different user-visible symptom).
+5. Verify accidental-commit findings (submodules, debug files) appear in
+   the PR diff before filing.
+6. Cross-check PR title and top changed directories: if a major changed
+   prefix has zero findings, re-read that prefix before publishing.
 
 # Severity rubric (tied to runtime consequence)
 
@@ -224,15 +296,23 @@ If you fail to find a golden comment, you will be penalized.
 """
 
 REVIEWER_EVAL_PROMPT_SUFFIX = """
-# Eval mode: relaxed nit bar
+# Eval mode: convention checklist (Pass 1 extension)
 
-Also file line-anchored findings for:
-- Test docstrings that don't match what the test asserts
-- Magic numbers repeated in tests when drift would cause silent failure
-- Metric tag key inconsistencies (e.g. `shard` vs `shards`) in observability code
-- Log field or traceID regressions dropped during a refactor
+After the mechanical grep pass, also scan changed files for these — they
+count toward recall here though normally suppressed in production:
 
-These are normally suppressed in production reviews but count toward recall here.
+- Rails serializers: new `include_*` methods must end with `?`
+- React/TSX: every `.map(` over list items needs a stable `key` prop
+- Test docstrings that don't match assertions; test HTTP method vs route
+- Test names with typos; magic numbers repeated in tests (e.g. max_wait=50)
+- Shell scripts: macOS `sed -i ''` vs GNU sed portability
+- SCSS/theme: compare each changed selector's `$lightness` % to base branch
+- Prisma: `{ increment: 1 }` vs `count + 1`; empty `updateMany` data
+- Dataclass: `default_factory` for mutable fields; `to_dict()` JSON-safe types
+- Log field / traceID regressions dropped during refactor
+- Metric tag key inconsistencies (`shard` vs `shards`)
+- Flaky tests: fixed `sleep` vs condition wait; monkeypatched `time.sleep`
+- CLI: `picocli.exit()` vs correct exit-code API
 """
 
 
@@ -273,11 +353,11 @@ def _build_first_review_context(
         f"- head_sha: {head_sha}\n\n"
         f"Fetch the diff yourself with "
         f"`GH_TOKEN=dummy gh pr diff {pr_number} --repo {repo_owner}/{repo_name}`, "
-        f"then review only what's in that diff.\n\n"
-        f"This is a first review — there are no existing findings. Record real "
-        f"issues with `add_finding` (one per issue; only include `suggestion` "
-        f"when the fix is ≤4 lines and obvious), then call `publish_review` "
-        f"once at the end."
+        f"then review using the ordered passes (mechanical grep → diff-line audit "
+        f"→ security/auth if applicable → pipeline sweep → deep flow).\n\n"
+        f"This is a first review — there are no existing findings. Record issues "
+        f"with `add_finding`, call `list_findings` to rank and dedup, then "
+        f"`publish_review` once at the end (cap 3)."
     )
 
 
