@@ -15,7 +15,7 @@ interface AppShellProps {
 
 export function AppShell({ user, title, description, backTo, children }: AppShellProps) {
   return (
-    <div className="flex min-h-svh bg-background text-foreground">
+    <div className="flex h-svh overflow-hidden bg-background text-foreground">
       <AppSidebar user={user} />
       <main className="flex-1 overflow-y-auto">
         <div className="mx-auto max-w-3xl px-8 py-10">
