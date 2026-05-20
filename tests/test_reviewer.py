@@ -14,11 +14,12 @@ def test_reviewer_system_prompt_formats_without_keyerror() -> None:
         repo_owner="acme",
         repo_name="repo",
         pr_number=42,
-        reviewer_eval=True,
     )
     assert "acme/repo" in prompt
-    assert "{ increment: 1 }" in prompt
-    assert "Eval mode: convention checklist" in prompt
+    assert "Common defect patterns" in prompt
+    assert "benchmark" not in prompt.lower()
+    assert "golden" not in prompt.lower()
+    assert "at least 1 finding" not in prompt.lower()
 
 
 class _DummyAgent:
