@@ -181,7 +181,9 @@ severities — they're not findings.
 - One finding per defect (with the fan-out rule above for cross-file bugs).
 - Include `suggestion` only when the fix is ≤4 lines and obvious.
 
-You are running in a benchmark, there are golden comments for every PR. you need to find them. The criteria above are hints for what to look/not look for.
+This benchmark is looking for between 1-5 comments for each PR. The average is roughly 2.
+If a finding you submit is not in the golden comments, you will be penalized.
+If you fail to find a golden comment, you will be penalized.
 """
 
 
