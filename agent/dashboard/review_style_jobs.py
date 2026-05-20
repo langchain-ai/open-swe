@@ -35,11 +35,15 @@ async def start_review_style_analysis(
     owner, repo = full_name.split("/", 1)
     try:
         samples = await collect_review_samples(github_token, owner, repo)
-    except Exception as e:
+    except Exception:
         logger.exception("Failed to collect review samples for %s", full_name)
-        await mark_analysis_failed(full_name, f"sample collection failed: {e}")
+        await mark_analysis_failed(full_name, "sample collection failed")
         record = await get_review_style(full_name)
-        return record or {"full_name": full_name, "status": "failed", "error": str(e)}
+        return record or {
+            "full_name": full_name,
+            "status": "failed",
+            "error": "Sample collection failed. Please retry later.",
+        }
 
     samples_text = format_samples_for_analyzer(samples)
     thread_id = generate_review_style_thread_id(owner, repo)
@@ -95,11 +99,15 @@ async def start_review_style_analysis(
             {"analysis_run_id": run_id, "created_by": created_by},
         )
         return record
-    except Exception as e:
+    except Exception:
         logger.exception("Failed to start review style analyzer for %s", full_name)
-        await mark_analysis_failed(full_name, f"run start failed: {e}")
+        await mark_analysis_failed(full_name, "run start failed")
         record = await get_review_style(full_name)
-        return record or {"full_name": full_name, "status": "failed", "error": str(e)}
+        return record or {
+            "full_name": full_name,
+            "status": "failed",
+            "error": "Failed to start analysis. Please retry later.",
+        }
 
 
 async def sync_review_style_run_status(full_name: str) -> dict[str, Any]:
@@ -127,11 +135,11 @@ async def sync_review_style_run_status(full_name: str) -> dict[str, Any]:
         if status in ("success", "completed"):
             return await get_review_style(full_name) or record
         if status in ("error", "failed", "timeout", "interrupted"):
-            err = run.get("error") if isinstance(run, dict) else getattr(run, "error", None)
+            logger.warning("Review style analyzer run failed for %s (status=%s)", full_name, status)
             return await mark_analysis_failed(
                 full_name,
-                str(err or f"analyzer run {status}"),
+                "Analysis run failed. Please retry later.",
             )
-    except Exception as e:
-        logger.debug("Could not sync run status for %s: %s", full_name, e)
+    except Exception:
+        logger.debug("Could not sync run status for %s", full_name, exc_info=True)
     return record
