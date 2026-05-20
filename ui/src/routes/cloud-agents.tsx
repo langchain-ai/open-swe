@@ -1,5 +1,5 @@
 import { Navigate, createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import type { ModelOption } from "@/lib/api";
 import { AppShell, SettingsRow, SettingsSection } from "@/components/AppShell";
@@ -40,19 +40,25 @@ function CloudAgentsPage() {
   const [baseBranch, setBaseBranch] = useState("");
   const [branchPrefix, setBranchPrefix] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const initialized = useRef(false);
 
   const firstModel: ModelOption | undefined = options.data?.models[0];
   const currentModel: ModelOption | undefined =
     options.data?.models.find((m) => m.id === modelId) ?? firstModel;
 
   useEffect(() => {
-    if (!profile.data) return;
+    if (!profile.data || initialized.current) return;
+    // For users with no saved profile, wait until the options API has loaded
+    // so the model/effort selects can initialise to the first available option.
+    const hasModel = !!profile.data.default_model || !!firstModel;
+    if (!hasModel) return;
+    initialized.current = true;
     setModelId(profile.data.default_model ?? firstModel?.id ?? "");
     setEffort(profile.data.reasoning_effort ?? firstModel?.default_effort ?? "");
     setDefaultRepo(profile.data.default_repo ?? "");
     setBaseBranch(profile.data.base_branch ?? "");
     setBranchPrefix(profile.data.branch_prefix ?? "");
-  }, [profile.data, firstModel?.id, firstModel?.default_effort]);
+  }, [profile.data, firstModel?.id, firstModel?.default_effort, firstModel]);
 
   useEffect(() => {
     if (currentModel && !currentModel.efforts.includes(effort)) {

@@ -1,5 +1,5 @@
 import { Navigate, createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { AppShell, SettingsRow, SettingsSection } from "@/components/AppShell";
 import { Button } from "@/components/ui/button";
@@ -27,9 +27,11 @@ function MySettingsPage() {
   const [lastName, setLastName] = useState("");
   const [prDestination, setPrDestination] = useState<string>("team_default");
   const [error, setError] = useState<string | null>(null);
+  const initialized = useRef(false);
 
   useEffect(() => {
-    if (!profile.data) return;
+    if (!profile.data || initialized.current) return;
+    initialized.current = true;
     setFirstName(profile.data.first_name ?? "");
     setLastName(profile.data.last_name ?? "");
     setPrDestination(profile.data.preferred_pr_destination ?? "team_default");

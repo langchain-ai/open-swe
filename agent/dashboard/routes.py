@@ -231,8 +231,13 @@ async def admin_put_profile(
     update.validate_pairing()
     existing = await get_profile(login) or {}
     email = update.email or existing.get("email") or ""
+    # Overlay only fields that were explicitly sent so the admin form (which
+    # only sends model/effort/repo) can't reset other fields the target user
+    # configured via My Settings / Cloud Agents to ProfileUpdate's defaults.
+    incoming = update.model_dump(exclude={"email"}, exclude_unset=True)
+    merged = {**existing, **incoming}
     base = ProfileUpdate(
-        **update.model_dump(exclude={"email"}),
+        **{k: v for k, v in merged.items() if k in ProfileUpdate.model_fields},
     )
     return await upsert_profile(login, email, base)
 
