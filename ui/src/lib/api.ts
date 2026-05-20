@@ -86,6 +86,21 @@ export interface ReposPayload {
   repositories: Array<Repository>;
 }
 
+export interface ActiveAgent {
+  thread_id: string;
+  run_id: string;
+  status: string;
+  assistant_id?: string;
+  created_at?: string;
+  metadata: Record<string, unknown>;
+}
+
+export interface BabysitterConfig {
+  enabled: boolean;
+  poll_interval_seconds: number;
+  max_attempts_per_sha: number;
+}
+
 export const api = {
   me: () => request<SessionUser>("/me"),
   options: () => request<{ models: Array<ModelOption> }>("/options"),
@@ -93,6 +108,18 @@ export const api = {
   saveProfile: (body: ProfileUpdate) =>
     request<Profile>("/profile", { method: "PUT", body: JSON.stringify(body) }),
   repos: () => request<ReposPayload>("/repos"),
+  activeAgents: () => request<Array<ActiveAgent>>("/agents/active"),
+  cancelRun: (threadId: string, runId: string) =>
+    request<void>(
+      `/agents/${encodeURIComponent(threadId)}/runs/${encodeURIComponent(runId)}/cancel`,
+      { method: "POST" },
+    ),
+  babysitterConfig: () => request<BabysitterConfig>("/babysitter/config"),
+  saveBabysitterConfig: (body: BabysitterConfig) =>
+    request<BabysitterConfig>("/babysitter/config", {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
   adminListProfiles: () => request<Array<Profile>>("/admin/profiles"),
   adminSaveProfile: (login: string, body: ProfileUpdate & { email?: string }) =>
     request<Profile>(`/admin/profiles/${encodeURIComponent(login)}`, {

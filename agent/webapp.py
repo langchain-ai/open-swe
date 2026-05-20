@@ -1,5 +1,6 @@
 """Custom FastAPI routes for LangGraph server."""
 
+import asyncio
 import hashlib
 import hmac
 import json
@@ -8,6 +9,7 @@ import os
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from typing import Any
 
 import httpx
@@ -17,11 +19,17 @@ from langchain_core.messages.content import create_text_block
 from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
 
+from .babysitter_state import (
+    BABYSITTER_THREAD_KIND,
+    BabysitterPRMeta,
+    set_babysitter_thread_metadata,
+)
 from .dashboard import router as dashboard_router
 from .dashboard.agent_overrides import (
     get_profile_default_repo,
     resolve_login_from_email,
 )
+from .dashboard.routes import get_babysitter_runtime_config
 from .reviewer_findings import (
     REVIEWER_THREAD_KIND,
     ReviewerPRMeta,
@@ -91,7 +99,18 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     validate_sandbox_startup_config()
-    yield
+    task: asyncio.Task[None] | None = None
+    if os.environ.get("BABYSITTER_CRON_ENABLED", "").lower() in {"1", "true", "yes"}:
+        task = asyncio.create_task(_babysitter_cron_loop())
+    try:
+        yield
+    finally:
+        if task is not None:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
 
 
 app = FastAPI(lifespan=lifespan)
@@ -338,6 +357,11 @@ def generate_thread_id_from_slack_thread(channel_id: str, thread_id: str) -> str
 
 def generate_reviewer_thread_id(owner: str, repo: str, pr_number: int) -> str:
     stable_key = f"{owner}/{repo}/pr/{pr_number}/reviewer"
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, stable_key))
+
+
+def generate_babysitter_thread_id(owner: str, repo: str, pr_number: int) -> str:
+    stable_key = f"{owner}/{repo}/pr/{pr_number}/babysitter"
     return str(uuid.uuid5(uuid.NAMESPACE_URL, stable_key))
 
 
@@ -1653,6 +1677,146 @@ async def trigger_pr_review_from_ref(
     return {"success": True, "queued": False, "thread_id": thread_id, "pr_url": pr_url}
 
 
+def build_github_pr_babysit_prompt(
+    repo_config: dict[str, str],
+    pr_number: int,
+    pr_url: str,
+    head_sha: str,
+    reason: str,
+) -> str:
+    return (
+        "Babysit this GitHub pull request.\n\n"
+        f"## Repository: {repo_config.get('owner')}/{repo_config.get('name')}\n\n"
+        f"## Pull Request: {pr_url}\n\n"
+        f"## PR Number: {pr_number}\n\n"
+        f"## Head SHA: {head_sha}\n\n"
+        f"## Trigger: {reason}\n\n"
+        "Inspect failed checks and actionable review comments, make a focused fix if appropriate, "
+        "push to the PR branch, and comment with the outcome."
+    )
+
+
+def _build_babysitter_configurable(
+    *,
+    source: str,
+    github_login: str,
+    github_user_id: int | None,
+    repo_config: dict[str, str],
+    pr_number: int,
+    pr_url: str,
+    base_sha: str,
+    head_sha: str,
+    branch_name: str,
+    reason: str,
+) -> dict[str, Any]:
+    configurable: dict[str, Any] = {
+        "source": source,
+        "github_login": github_login,
+        "github_user_id": github_user_id,
+        "repo": repo_config,
+        "pr_number": pr_number,
+        "pr_url": pr_url,
+        "base_sha": base_sha,
+        "head_sha": head_sha,
+        "babysit_reason": reason,
+    }
+    if branch_name:
+        configurable["branch_name"] = branch_name
+    return configurable
+
+
+async def trigger_pr_babysitter_from_ref(
+    pr_ref: GitHubPrRef,
+    *,
+    source: str,
+    github_login: str = "",
+    github_user_id: int | None = None,
+    reason: str = "manual",
+    create_run: bool = True,
+) -> dict[str, Any]:
+    repo_config = {"owner": pr_ref.owner, "name": pr_ref.repo}
+    if not _is_repo_allowed_for_reviewer(repo_config):
+        return {"success": False, "error": "Repository not allowed for babysitter"}
+
+    app_token, app_token_expires_at = await get_github_app_installation_token_with_expiry()
+    if not app_token:
+        return {"success": False, "error": "No GitHub App token available"}
+
+    pr_metadata = await fetch_github_pr_metadata(pr_ref, token=app_token)
+    if not pr_metadata:
+        return {"success": False, "error": "Could not fetch pull request metadata"}
+
+    base = pr_metadata.get("base", {})
+    head = pr_metadata.get("head", {})
+    base_sha = base.get("sha", "")
+    head_sha = head.get("sha", "")
+    branch_name = head.get("ref", "")
+    base_ref = base.get("ref", "")
+    pr_url = pr_metadata.get("html_url", "") or pr_ref.url
+    pr_title = pr_metadata.get("title", "")
+    if not base_sha or not head_sha:
+        return {"success": False, "error": "Pull request metadata is missing base/head SHA"}
+
+    thread_id = generate_babysitter_thread_id(pr_ref.owner, pr_ref.repo, pr_ref.number)
+    langgraph_client = get_client(url=LANGGRAPH_URL)
+    if not await _ensure_thread_exists_for_metadata(thread_id, langgraph_client):
+        return {"success": False, "error": "Could not create babysitter thread"}
+
+    try:
+        await persist_encrypted_github_token(thread_id, app_token, expires_at=app_token_expires_at)
+    except Exception:
+        logger.warning("Could not persist bot token for babysitter thread %s", thread_id)
+        return {"success": False, "error": "Could not persist babysitter token"}
+
+    pr_meta: BabysitterPRMeta = {
+        "owner": pr_ref.owner,
+        "name": pr_ref.repo,
+        "number": pr_ref.number,
+        "url": pr_url,
+        "title": pr_title,
+        "head_ref": branch_name,
+        "base_ref": base_ref,
+        "head_sha": head_sha,
+        "base_sha": base_sha,
+    }
+    await set_babysitter_thread_metadata(
+        thread_id,
+        pr=pr_meta,
+        watch=True,
+        last_seen_head_sha=head_sha,
+    )
+
+    if not create_run:
+        return {"success": True, "queued": False, "thread_id": thread_id, "pr_url": pr_url}
+
+    prompt = build_github_pr_babysit_prompt(repo_config, pr_ref.number, pr_url, head_sha, reason)
+    configurable = _build_babysitter_configurable(
+        source=source,
+        github_login=github_login,
+        github_user_id=github_user_id,
+        repo_config=repo_config,
+        pr_number=pr_ref.number,
+        pr_url=pr_url,
+        base_sha=base_sha,
+        head_sha=head_sha,
+        branch_name=branch_name,
+        reason=reason,
+    )
+
+    if await is_thread_active(thread_id):
+        queued = await queue_message_for_thread(thread_id, prompt)
+        return {"success": queued, "queued": queued, "thread_id": thread_id, "pr_url": pr_url}
+
+    await langgraph_client.runs.create(
+        thread_id,
+        "babysitter",
+        input={"messages": [{"role": "user", "content": prompt}]},
+        config={"configurable": configurable, "metadata": _AGENT_VERSION_METADATA},
+        if_not_exists="create",
+    )
+    return {"success": True, "queued": False, "thread_id": thread_id, "pr_url": pr_url}
+
+
 def _build_reviewer_configurable(
     *,
     source: str,
@@ -1843,6 +2007,83 @@ async def process_github_pr_review_command(
             pr_ref.number,
             result.get("error"),
         )
+
+
+def parse_github_babysit_command(body: str) -> tuple[str | None, str | None]:
+    """Return (command, optional_pr_url) for @open-swe babysit commands."""
+    lowered = body.lower()
+    if not any(tag in lowered for tag in OPEN_SWE_TAGS):
+        return None, None
+    if "stop babysitting" in lowered or "stop babysit" in lowered:
+        return "stop", None
+    if "babysit" not in lowered:
+        return None, None
+    for token in body.split():
+        if "github.com/" in token and "/pull/" in token:
+            return "start", token.strip("<>()[]{}.,")
+    return "start", None
+
+
+async def process_github_pr_babysit_command(
+    payload: dict[str, Any],
+    event_type: str,
+    command: str,
+    pr_url_override: str | None,
+) -> None:
+    repo = payload.get("repository", {})
+    repo_config = {
+        "owner": repo.get("owner", {}).get("login", ""),
+        "name": repo.get("name", ""),
+    }
+    pr_data = payload.get("pull_request") or payload.get("issue", {})
+    sender = payload.get("sender", {})
+    github_login = sender.get("login", "")
+    github_user_id = sender.get("id")
+
+    if pr_url_override:
+        pr_ref = parse_github_pr_url(pr_url_override)
+        if pr_ref is None:
+            return
+    else:
+        pr_number = pr_data.get("number")
+        if not pr_number:
+            return
+        pr_ref = GitHubPrRef(
+            owner=repo_config["owner"],
+            repo=repo_config["name"],
+            number=pr_number,
+            url=pr_data.get("html_url", "") or pr_data.get("url", ""),
+        )
+
+    comment = payload.get("comment") or payload.get("review", {})
+    comment_id = comment.get("id")
+    node_id = comment.get("node_id") if event_type == "pull_request_review" else None
+    app_token = await get_github_app_installation_token()
+    if comment_id and app_token:
+        await react_to_github_comment(
+            repo_config,
+            comment_id,
+            event_type=event_type,
+            token=app_token,
+            pull_number=pr_data.get("number"),
+            node_id=node_id,
+        )
+
+    thread_id = generate_babysitter_thread_id(pr_ref.owner, pr_ref.repo, pr_ref.number)
+    if command == "stop":
+        metadata = await _get_thread_metadata_safe(thread_id)
+        if metadata is not None and metadata.get("kind") == BABYSITTER_THREAD_KIND:
+            await set_babysitter_thread_metadata(thread_id, watch=False)
+        return
+
+    await trigger_pr_babysitter_from_ref(
+        pr_ref,
+        source="github",
+        github_login=github_login,
+        github_user_id=github_user_id,
+        reason="manual babysit command",
+        create_run=True,
+    )
 
 
 async def _fetch_open_pr_for_branch(
@@ -2057,6 +2298,173 @@ async def process_github_push_event(payload: dict[str, Any]) -> None:
         config={"configurable": configurable, "metadata": _AGENT_VERSION_METADATA},
         if_not_exists="create",
     )
+
+
+async def _fetch_pr_check_runs(
+    repo_config: dict[str, str], head_sha: str, *, token: str
+) -> list[dict[str, Any]]:
+    owner = repo_config.get("owner", "")
+    repo = repo_config.get("name", "")
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "Authorization": f"Bearer {token}",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    async with httpx.AsyncClient() as http_client:
+        response = await http_client.get(
+            f"https://api.github.com/repos/{owner}/{repo}/commits/{head_sha}/check-runs",
+            headers=headers,
+            params={"per_page": "100"},
+        )
+        response.raise_for_status()
+    data = response.json()
+    runs = data.get("check_runs") if isinstance(data, dict) else None
+    return [r for r in runs or [] if isinstance(r, dict)]
+
+
+def _failed_check_names(check_runs: list[dict[str, Any]]) -> list[str]:
+    failed: list[str] = []
+    for run in check_runs:
+        conclusion = run.get("conclusion")
+        status = run.get("status")
+        if status == "completed" and conclusion in {"failure", "timed_out", "action_required"}:
+            name = run.get("name")
+            failed.append(str(name or run.get("id") or "unknown"))
+    return failed
+
+
+async def _maybe_run_babysitter_for_thread(
+    thread_id: str,
+    metadata: dict[str, Any],
+    *,
+    app_token: str,
+) -> None:
+    pr = metadata.get("pr")
+    if not isinstance(pr, dict):
+        return
+    owner = pr.get("owner")
+    repo_name = pr.get("name")
+    pr_number = pr.get("number")
+    if not isinstance(owner, str) or not isinstance(repo_name, str) or not isinstance(pr_number, int):
+        return
+
+    repo_config = {"owner": owner, "name": repo_name}
+    pr_ref = GitHubPrRef(
+        owner=owner,
+        repo=repo_name,
+        number=pr_number,
+        url=str(pr.get("url") or ""),
+    )
+    pr_metadata = await fetch_github_pr_metadata(pr_ref, token=app_token)
+    if not pr_metadata:
+        return
+    if pr_metadata.get("state") != "open" or pr_metadata.get("merged"):
+        await set_babysitter_thread_metadata(thread_id, watch=False)
+        return
+
+    head = pr_metadata.get("head", {})
+    base = pr_metadata.get("base", {})
+    head_sha = str(head.get("sha") or "")
+    if not head_sha:
+        return
+    check_runs = await _fetch_pr_check_runs(repo_config, head_sha, token=app_token)
+    failed_checks = _failed_check_names(check_runs)
+    head_changed = metadata.get("last_seen_head_sha") not in {None, head_sha}
+    if not failed_checks and not head_changed:
+        await set_babysitter_thread_metadata(
+            thread_id,
+            last_checked_at=datetime.now(UTC).isoformat(),
+            last_seen_head_sha=head_sha,
+        )
+        return
+
+    action_key = f"{head_sha}:{','.join(sorted(failed_checks)) or 'head_changed'}"
+    if metadata.get("last_action_key") == action_key:
+        return
+    runtime_config = get_babysitter_runtime_config()
+    max_attempts = int(runtime_config.get("max_attempts_per_sha", 2))
+    attempts = int(metadata.get("fix_attempt_count") or 0)
+    if metadata.get("last_seen_head_sha") == head_sha and attempts >= max_attempts:
+        return
+    if await is_thread_active(thread_id):
+        return
+
+    pr_meta: BabysitterPRMeta = {
+        "owner": owner,
+        "name": repo_name,
+        "number": pr_number,
+        "url": pr_metadata.get("html_url", "") or pr_ref.url,
+        "title": pr_metadata.get("title", ""),
+        "head_ref": head.get("ref", ""),
+        "base_ref": base.get("ref", ""),
+        "head_sha": head_sha,
+        "base_sha": base.get("sha", ""),
+    }
+    await set_babysitter_thread_metadata(
+        thread_id,
+        pr=pr_meta,
+        watch=True,
+        last_checked_at=datetime.now(UTC).isoformat(),
+        last_seen_head_sha=head_sha,
+        last_action_key=action_key,
+        fix_attempt_count=attempts + 1,
+    )
+    await persist_encrypted_github_token(thread_id, app_token)
+
+    reason = (
+        f"failed checks: {', '.join(failed_checks)}" if failed_checks else "PR head changed"
+    )
+    prompt = build_github_pr_babysit_prompt(repo_config, pr_number, pr_meta["url"], head_sha, reason)
+    configurable = _build_babysitter_configurable(
+        source="babysitter_cron",
+        github_login="",
+        github_user_id=None,
+        repo_config=repo_config,
+        pr_number=pr_number,
+        pr_url=pr_meta["url"],
+        base_sha=str(base.get("sha") or ""),
+        head_sha=head_sha,
+        branch_name=str(head.get("ref") or ""),
+        reason=reason,
+    )
+    langgraph_client = get_client(url=LANGGRAPH_URL)
+    await langgraph_client.runs.create(
+        thread_id,
+        "babysitter",
+        input={"messages": [{"role": "user", "content": prompt}]},
+        config={"configurable": configurable, "metadata": _AGENT_VERSION_METADATA},
+        if_not_exists="create",
+    )
+
+
+async def run_babysitter_cron_once() -> None:
+    if not get_babysitter_runtime_config().get("enabled"):
+        return
+    app_token = await get_github_app_installation_token()
+    if not app_token:
+        logger.warning("No GitHub App token available for babysitter cron")
+        return
+    langgraph_client = get_client(url=LANGGRAPH_URL)
+    threads = await langgraph_client.threads.search(
+        metadata={"kind": BABYSITTER_THREAD_KIND, "watch": True},
+        limit=int(os.environ.get("BABYSITTER_CRON_THREAD_LIMIT", "50")),
+    )
+    for thread in threads:
+        thread_id = thread.get("thread_id") if isinstance(thread, dict) else None
+        metadata = thread.get("metadata") if isinstance(thread, dict) else None
+        if not isinstance(thread_id, str) or not isinstance(metadata, dict):
+            continue
+        try:
+            await _maybe_run_babysitter_for_thread(thread_id, metadata, app_token=app_token)
+        except Exception:
+            logger.exception("Babysitter cron failed for thread %s", thread_id)
+
+
+async def _babysitter_cron_loop() -> None:
+    while True:
+        await run_babysitter_cron_once()
+        interval = int(get_babysitter_runtime_config().get("poll_interval_seconds", 600))
+        await asyncio.sleep(interval)
 
 
 async def _refresh_thread_github_token_after_401(thread_id: str, email: str) -> str | None:
@@ -2506,6 +2914,18 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks) ->
         "pull_request_review_comment",
         "pull_request_review",
     }:
+        babysit_command, babysit_pr_url = parse_github_babysit_command(comment_body)
+        if babysit_command:
+            if not _is_repo_allowed_for_reviewer(webhook_repo_config):
+                return {"status": "ignored", "reason": "Repository not in reviewer allowlist"}
+            background_tasks.add_task(
+                process_github_pr_babysit_command,
+                payload,
+                event_type,
+                babysit_command,
+                babysit_pr_url,
+            )
+            return {"status": "accepted", "message": "Processing GitHub PR babysit command"}
         is_review_command, pr_url_override = parse_github_review_command(comment_body)
         if is_review_command:
             if not _is_repo_allowed_for_reviewer(webhook_repo_config):

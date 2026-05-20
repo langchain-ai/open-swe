@@ -41,6 +41,15 @@ export function AppHeader({ user }: { user: SessionUser }) {
               Admin
             </Link>
           )}
+          {user.is_admin && (
+            <Link
+              to="/agents"
+              className="text-muted-foreground hover:text-foreground"
+              activeProps={{ className: "text-foreground font-medium" }}
+            >
+              Active agents
+            </Link>
+          )}
         </nav>
         <div className="ml-auto flex items-center gap-3">
           {user.is_admin && <Badge variant="secondary">admin</Badge>}

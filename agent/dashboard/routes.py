@@ -10,6 +10,8 @@ from typing import Any
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import RedirectResponse, Response
+from langgraph_sdk import get_client
+from pydantic import BaseModel
 
 from .admin import is_admin
 from .oauth import (
@@ -40,6 +42,9 @@ from .profiles import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/dashboard/api", tags=["dashboard"])
+LANGGRAPH_URL = os.environ.get("LANGGRAPH_URL") or os.environ.get(
+    "LANGGRAPH_URL_PROD", "http://localhost:2024"
+)
 
 
 def _require_admin(session: dict[str, Any]) -> dict[str, Any]:
@@ -207,6 +212,23 @@ class AdminProfileUpdate(ProfileUpdate):
     email: str | None = None
 
 
+class BabysitterConfigUpdate(BaseModel):
+    enabled: bool
+    poll_interval_seconds: int = 600
+    max_attempts_per_sha: int = 2
+
+
+_BABYSITTER_CONFIG: dict[str, Any] = {
+    "enabled": os.environ.get("BABYSITTER_CRON_ENABLED", "").lower() in {"1", "true", "yes"},
+    "poll_interval_seconds": int(os.environ.get("BABYSITTER_POLL_INTERVAL_SECONDS", "600")),
+    "max_attempts_per_sha": int(os.environ.get("BABYSITTER_MAX_ATTEMPTS_PER_SHA", "2")),
+}
+
+
+def get_babysitter_runtime_config() -> dict[str, Any]:
+    return dict(_BABYSITTER_CONFIG)
+
+
 @router.put("/admin/profiles/{login}")
 async def admin_put_profile(
     login: str,
@@ -222,6 +244,72 @@ async def admin_put_profile(
         default_repo=update.default_repo,
     )
     return await upsert_profile(login, email, base)
+
+
+@router.get("/agents/active")
+async def list_active_agents(
+    _admin: dict[str, Any] = _ADMIN_DEP,
+) -> list[dict[str, Any]]:
+    """List currently active LangGraph threads/runs for dashboard controls."""
+    client = get_client(url=LANGGRAPH_URL)
+    threads = await client.threads.search(status="busy", limit=100)
+    out: list[dict[str, Any]] = []
+    for thread in threads:
+        if not isinstance(thread, dict):
+            continue
+        thread_id = thread.get("thread_id")
+        if not isinstance(thread_id, str):
+            continue
+        metadata = thread.get("metadata") if isinstance(thread.get("metadata"), dict) else {}
+        runs = await client.runs.list(thread_id, limit=5)
+        for run in runs:
+            if not isinstance(run, dict):
+                continue
+            status = run.get("status")
+            if status not in {"pending", "running"}:
+                continue
+            out.append(
+                {
+                    "thread_id": thread_id,
+                    "run_id": run.get("run_id"),
+                    "status": status,
+                    "assistant_id": run.get("assistant_id"),
+                    "created_at": run.get("created_at"),
+                    "metadata": metadata,
+                }
+            )
+    return out
+
+
+@router.post("/agents/{thread_id}/runs/{run_id}/cancel")
+async def cancel_agent_run(
+    thread_id: str,
+    run_id: str,
+    _admin: dict[str, Any] = _ADMIN_DEP,
+) -> Response:
+    client = get_client(url=LANGGRAPH_URL)
+    await client.runs.cancel(thread_id, run_id, wait=False, action="interrupt")
+    return Response(status_code=204)
+
+
+@router.get("/babysitter/config")
+async def get_babysitter_config(
+    _admin: dict[str, Any] = _ADMIN_DEP,
+) -> dict[str, Any]:
+    return dict(_BABYSITTER_CONFIG)
+
+
+@router.put("/babysitter/config")
+async def put_babysitter_config(
+    update: BabysitterConfigUpdate,
+    _admin: dict[str, Any] = _ADMIN_DEP,
+) -> dict[str, Any]:
+    if update.poll_interval_seconds < 60:
+        raise HTTPException(400, "poll interval must be at least 60 seconds")
+    if update.max_attempts_per_sha < 0:
+        raise HTTPException(400, "max attempts must be non-negative")
+    _BABYSITTER_CONFIG.update(update.model_dump())
+    return dict(_BABYSITTER_CONFIG)
 
 
 def _next_link_url(link_header: str | None) -> str | None:
