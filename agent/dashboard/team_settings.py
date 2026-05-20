@@ -14,7 +14,7 @@ from typing import Any, Literal
 from langgraph_sdk import get_client
 from pydantic import BaseModel, model_validator
 
-from .options import SUPPORTED_MODEL_IDS, model_supports_effort
+from .options import SUPPORTED_MODEL_IDS, default_model_pair, model_supports_effort
 
 logger = logging.getLogger(__name__)
 
@@ -63,32 +63,37 @@ def _client():
 
 
 def _default_settings() -> dict[str, Any]:
+    fallback_model, fallback_effort = default_model_pair()
     return {
         "trigger_mode": "every_push",
         "review_draft_prs": False,
         "pr_summaries": True,
         "autofix_mode": "off",
         "autofix_severity_threshold": "medium",
-        "default_agent_model": None,
-        "default_agent_reasoning_effort": None,
-        "default_reviewer_model": None,
-        "default_reviewer_reasoning_effort": None,
+        "default_agent_model": fallback_model,
+        "default_agent_reasoning_effort": fallback_effort,
+        "default_reviewer_model": fallback_model,
+        "default_reviewer_reasoning_effort": fallback_effort,
         "updated_at": None,
     }
 
 
 async def get_team_settings() -> dict[str, Any]:
+    defaults = _default_settings()
     try:
         item = await _client().store.get_item(TEAM_SETTINGS_NAMESPACE, TEAM_SETTINGS_KEY)
     except Exception as e:
         logger.debug("team settings lookup failed: %s", e)
-        return _default_settings()
+        return defaults
     if item is None:
-        return _default_settings()
+        return defaults
     value = item.get("value") if isinstance(item, dict) else getattr(item, "value", None)
     if not isinstance(value, dict):
-        return _default_settings()
-    return {**_default_settings(), **value}
+        return defaults
+    # Skip None-valued model fields so legacy records (or PUTs that cleared the
+    # selection) still surface the hardcoded default instead of a null.
+    overlay = {k: v for k, v in value.items() if v is not None}
+    return {**defaults, **overlay}
 
 
 async def upsert_team_settings(update: TeamSettingsUpdate) -> dict[str, Any]:
@@ -108,12 +113,15 @@ async def upsert_team_settings(update: TeamSettingsUpdate) -> dict[str, Any]:
     return value
 
 
-async def get_team_model_override(
+async def get_team_default_model(
     role: Literal["agent", "reviewer"],
-) -> tuple[str | None, str | None]:
-    """Return ``(model_id, reasoning_effort)`` for the team-wide default, or ``(None, None)``.
+) -> tuple[str, str]:
+    """Return the team-wide default ``(model_id, reasoning_effort)`` for ``role``.
 
-    Returns the override only when both fields are valid and form a supported pair.
+    Always returns a valid pair: the admin-configured pair if set, otherwise the
+    hardcoded fallback from :func:`agent.dashboard.options.default_model_pair`.
+    Invalid stored pairs (unsupported model or mismatched effort) fall back to
+    the hardcoded default rather than propagating bad data.
     """
     settings = await get_team_settings()
     if role == "agent":
@@ -122,8 +130,11 @@ async def get_team_model_override(
     else:
         model = settings.get("default_reviewer_model")
         effort = settings.get("default_reviewer_reasoning_effort")
-    if not isinstance(model, str) or model not in SUPPORTED_MODEL_IDS:
-        return None, None
-    if not isinstance(effort, str) or not model_supports_effort(model, effort):
-        return None, None
-    return model, effort
+    if (
+        isinstance(model, str)
+        and model in SUPPORTED_MODEL_IDS
+        and isinstance(effort, str)
+        and model_supports_effort(model, effort)
+    ):
+        return model, effort
+    return default_model_pair()

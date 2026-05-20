@@ -34,7 +34,8 @@ from .dashboard.agent_overrides import (
     profile_create_prs,
     resolve_github_login,
 )
-from .dashboard.team_settings import get_team_model_override
+from .dashboard.options import DEFAULT_MODEL_ID
+from .dashboard.team_settings import get_team_default_model
 from .integrations.langsmith import _configure_github_proxy
 from .middleware import (
     ModelFallbackMiddleware,
@@ -333,7 +334,7 @@ async def ensure_sandbox_for_thread(thread_id: str) -> SandboxBackendProtocol:
     return sandbox_backend
 
 
-DEFAULT_LLM_MODEL_ID = "openai:gpt-5.5"
+DEFAULT_LLM_MODEL_ID = DEFAULT_MODEL_ID
 DEFAULT_LLM_MAX_TOKENS = 64_000
 DEFAULT_RECURSION_LIMIT = 9_999
 MODEL_CALL_RECURSION_LIMIT = 5_000  # ~half the recursion limit to account for tool calls
@@ -378,18 +379,8 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     def backend_factory(_runtime: object, _thread_id: str = thread_id) -> SandboxBackendProtocol:
         return _get_cached_sandbox_backend(_thread_id)
 
-    model_id = os.environ.get("LLM_MODEL_ID", DEFAULT_LLM_MODEL_ID)
-    profile_effort: str | None = None
-
-    team_model, team_effort = await get_team_model_override("agent")
-    if team_model:
-        logger.info(
-            "Applying team default agent model override: model=%s effort=%s",
-            team_model,
-            team_effort,
-        )
-        model_id = team_model
-        profile_effort = team_effort
+    model_id, profile_effort = await get_team_default_model("agent")
+    logger.info("Using team default agent model: model=%s effort=%s", model_id, profile_effort)
 
     profile: dict[str, Any] | None = None
     profile_login = resolve_github_login(config)

@@ -19,8 +19,6 @@ import { useSession } from "@/lib/session";
 
 export const Route = createFileRoute("/admin")({ component: AdminPage });
 
-const INHERIT = "__inherit__";
-
 function AdminPage() {
   const session = useSession();
   const qc = useQueryClient();
@@ -134,7 +132,7 @@ function GlobalDefaultsSection({ models }: { models: Array<ModelOption> }) {
   return (
     <SettingsSection
       title="Global defaults"
-      description="Workspace-wide model defaults. Per-user selections override these. Choose 'Inherit from env' to fall back to the LLM_MODEL_ID environment variable."
+      description="Workspace-wide model defaults. Per-user Cloud Agent selections override these for the agent."
     >
       <div className="divide-y divide-border">
         <RolePicker
@@ -181,7 +179,7 @@ interface RolePickerProps {
   models: Array<ModelOption>;
   model: string | null;
   effort: string | null;
-  onChange: (model: string | null, effort: string | null) => void;
+  onChange: (model: string, effort: string) => void;
   disabled: boolean;
 }
 
@@ -194,11 +192,11 @@ function RolePicker({
   onChange,
   disabled,
 }: RolePickerProps) {
-  const [localModel, setLocalModel] = useState<string>(model ?? INHERIT);
+  const [localModel, setLocalModel] = useState<string>(model ?? "");
   const [localEffort, setLocalEffort] = useState<string>(effort ?? "");
 
   useEffect(() => {
-    setLocalModel(model ?? INHERIT);
+    setLocalModel(model ?? "");
     setLocalEffort(effort ?? "");
   }, [model, effort]);
 
@@ -206,12 +204,7 @@ function RolePicker({
   const availableEfforts = selectedModel?.efforts ?? [];
 
   const handleModelChange = (value: string | null) => {
-    if (!value || value === INHERIT) {
-      setLocalModel(INHERIT);
-      setLocalEffort("");
-      onChange(null, null);
-      return;
-    }
+    if (!value) return;
     const nextModel = models.find((m) => m.id === value);
     if (!nextModel) return;
     const nextEffort = nextModel.efforts.includes(localEffort)
@@ -223,7 +216,7 @@ function RolePicker({
   };
 
   const handleEffortChange = (value: string | null) => {
-    if (!value || localModel === INHERIT) return;
+    if (!value || !localModel) return;
     setLocalEffort(value);
     onChange(localModel, value);
   };
@@ -239,7 +232,6 @@ function RolePicker({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value={INHERIT}>Inherit from env</SelectItem>
               {models.map((m) => (
                 <SelectItem key={m.id} value={m.id}>
                   {m.label}
@@ -250,7 +242,7 @@ function RolePicker({
           <Select
             value={localEffort}
             onValueChange={handleEffortChange}
-            disabled={disabled || localModel === INHERIT}
+            disabled={disabled || !localModel}
           >
             <SelectTrigger className="w-28">
               <SelectValue placeholder="effort" />

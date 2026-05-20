@@ -16,7 +16,6 @@ agent for code review only:
 # ruff: noqa: E402
 
 import logging
-import os
 import warnings
 
 logger = logging.getLogger(__name__)
@@ -40,7 +39,6 @@ from .reviewer_findings import (
 )
 from .server import (
     DEFAULT_LLM_MAX_TOKENS,
-    DEFAULT_LLM_MODEL_ID,
     DEFAULT_RECURSION_LIMIT,
     MODEL_CALL_RECURSION_LIMIT,
     ensure_sandbox_for_thread,
@@ -494,7 +492,7 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
                 head_sha=head_sha,
             )
 
-    from .dashboard.team_settings import get_team_model_override
+    from .dashboard.team_settings import get_team_default_model
 
     configured_model_id = config["configurable"].get("reviewer_model_id")
     configured_effort = config["configurable"].get("reviewer_reasoning_effort")
@@ -502,18 +500,12 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
         model_id = configured_model_id
         reasoning_effort = configured_effort if isinstance(configured_effort, str) else None
     else:
-        team_model, team_effort = await get_team_model_override("reviewer")
-        if team_model:
-            logger.info(
-                "Applying team default reviewer model override: model=%s effort=%s",
-                team_model,
-                team_effort,
-            )
-            model_id = team_model
-            reasoning_effort = team_effort
-        else:
-            model_id = os.environ.get("LLM_MODEL_ID", DEFAULT_LLM_MODEL_ID)
-            reasoning_effort = configured_effort if isinstance(configured_effort, str) else None
+        model_id, reasoning_effort = await get_team_default_model("reviewer")
+        logger.info(
+            "Using team default reviewer model: model=%s effort=%s",
+            model_id,
+            reasoning_effort,
+        )
     model_kwargs = provider_model_kwargs(
         model_id,
         reasoning_effort,
