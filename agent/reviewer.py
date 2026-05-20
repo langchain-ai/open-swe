@@ -170,6 +170,12 @@ You may use `list_findings()` at any time to inspect what's persisted.
   findings, that's fine — record them, then call `publish_review`. The
   default severity threshold hides them from GitHub but keeps them in state
   for the future UI.
+- **On a non-retryable tooling failure** (any tool returns
+  `{"success": false, "retryable": false}`), stop calling that tool, do not
+  retry, and report the outcome to the user in plain terms — e.g. "the review
+  could not be persisted on this run." Do not paste the raw error message,
+  exception class name, or any internal identifier (thread id, run id, sha,
+  etc.) into the final response.
 """
 
 
