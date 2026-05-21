@@ -58,3 +58,32 @@ async def test_reconcile_running_marks_completed_when_run_missing_but_prompt_exi
         )
     mock_up.assert_awaited_once()
     assert out["status"] == "completed"
+
+
+@pytest.mark.asyncio
+async def test_sync_preserves_running_when_langgraph_errors() -> None:
+    from agent.dashboard.review_style_jobs import sync_review_style_run_status
+
+    record = {
+        "full_name": "acme/repo",
+        "status": "running",
+        "analysis_thread_id": "thread-1",
+        "analysis_run_id": "run-1",
+    }
+    mock_client = AsyncMock()
+    mock_client.runs.get = AsyncMock(side_effect=RuntimeError("network blip"))
+    with (
+        patch(
+            "agent.dashboard.review_style_jobs.get_review_style",
+            new_callable=AsyncMock,
+            return_value=record,
+        ),
+        patch("agent.dashboard.review_style_jobs._client", return_value=mock_client),
+        patch(
+            "agent.dashboard.review_style_jobs.reconcile_running_status",
+            new_callable=AsyncMock,
+        ) as mock_reconcile,
+    ):
+        out = await sync_review_style_run_status("acme/repo")
+    assert out == record
+    mock_reconcile.assert_not_called()

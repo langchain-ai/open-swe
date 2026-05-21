@@ -129,7 +129,7 @@ async def sync_review_style_run_status(full_name: str) -> dict[str, Any]:
     thread_id = record.get("analysis_thread_id")
     run_id = record.get("analysis_run_id")
     if not isinstance(thread_id, str) or not thread_id:
-        return await reconcile_running_status(full_name, record, run_status=None, run_missing=True)
+        return record
 
     client = _client()
     run_status: str | None = None
@@ -148,7 +148,7 @@ async def sync_review_style_run_status(full_name: str) -> dict[str, Any]:
             run_status = raw.lower() if isinstance(raw, str) else None
     except Exception:
         logger.debug("Could not sync run status for %s", full_name, exc_info=True)
-        run_missing = True
+        return record
 
     return await reconcile_running_status(
         full_name, record, run_status=run_status, run_missing=run_missing
