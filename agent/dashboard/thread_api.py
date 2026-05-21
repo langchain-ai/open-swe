@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import HTTPException
+from langgraph_sdk.errors import InternalServerError
 from pydantic import BaseModel, Field
 
 from ..utils.auth import persist_encrypted_github_token
@@ -188,10 +189,18 @@ async def get_dashboard_thread(thread_id: str, login: str) -> dict[str, Any]:
     metadata = thread.get("metadata") if isinstance(thread.get("metadata"), dict) else {}
     _assert_thread_owner(metadata, login)
 
-    state = await client.threads.get_state(thread_id)
-    values = state.get("values") if isinstance(state, dict) else {}
-    raw_messages = values.get("messages") if isinstance(values, dict) else []
-    messages = state_messages_to_ui(raw_messages if isinstance(raw_messages, list) else [])
+    messages: list[dict[str, Any]] = []
+    try:
+        state = await client.threads.get_state(thread_id)
+    except InternalServerError:
+        logger.warning(
+            "Thread state unavailable for %s (checkpoint replay failed); returning metadata only",
+            thread_id,
+        )
+    else:
+        values = state.get("values") if isinstance(state, dict) else {}
+        raw_messages = values.get("messages") if isinstance(values, dict) else []
+        messages = state_messages_to_ui(raw_messages if isinstance(raw_messages, list) else [])
 
     latest_run_status = await _latest_run_status(thread_id)
     if latest_run_status and latest_run_status != metadata.get("latest_run_status"):

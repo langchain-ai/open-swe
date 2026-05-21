@@ -68,7 +68,7 @@ export const CloudPromptBar = memo(function CloudPromptBar({
       <div
         className={cn(
           "relative flex flex-col rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface)] shadow-sm",
-          compact ? "px-4 pt-3 pb-2" : "min-h-[106px] px-4 py-3.5",
+          compact ? "min-h-[88px] px-4 pt-3.5 pb-2.5" : "min-h-[120px] px-4 py-3.5",
         )}
       >
         <textarea
@@ -81,7 +81,7 @@ export const CloudPromptBar = memo(function CloudPromptBar({
           disabled={disabled}
           className={cn(
             "w-full min-w-0 resize-none overflow-hidden bg-transparent leading-[1.45] text-[color:var(--ui-text)] outline-none placeholder:text-[color:var(--ui-text-dim)]",
-            compact ? "min-h-[28px]" : "min-h-[52px]",
+            compact ? "min-h-[44px]" : "min-h-[64px]",
           )}
           style={{ maxHeight: PROMPT_TEXTAREA_MAX_HEIGHT }}
         />

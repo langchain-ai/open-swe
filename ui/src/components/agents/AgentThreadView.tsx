@@ -1,5 +1,4 @@
 import { useMemo, useRef, useState } from "react";
-import { CheckCircleIcon, ClockIcon } from "@phosphor-icons/react";
 import { ChevronDown } from "lucide-react";
 
 import { AgentPromptBar } from "@/components/agents/AgentPromptBar";
@@ -19,7 +18,7 @@ interface AgentThreadViewProps {
   thread: AgentThread;
 }
 
-const PROMPT_OVERLAY_INSET = 112;
+const PROMPT_OVERLAY_INSET = 128;
 
 export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
   const sendMessage = useSendAgentMessage(thread.id);
@@ -42,18 +41,7 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
         <div className="flex min-h-0 flex-1 flex-col">
           {hasMessages ? (
             <div className="relative flex min-h-0 flex-1 flex-col">
-              <div className="flex min-h-0 flex-1 flex-col overflow-hidden pt-6">
-                <div className="mx-auto mb-4 flex w-full max-w-3xl shrink-0 items-center gap-3 px-6 text-xs text-[var(--ui-text-dim)]">
-                  <span className="inline-flex items-center gap-1 rounded-full border border-[var(--ui-border)] px-2 py-0.5">
-                    <CheckCircleIcon className="size-3.5 text-[var(--ui-success)]" />
-                    Environment ready
-                  </span>
-                  <span className="inline-flex items-center gap-1">
-                    <ClockIcon className="size-3.5" />
-                    Worked for 3m 24s
-                  </span>
-                </div>
-
+              <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
                 <MessageView
                   messages={thread.messages}
                   isStreaming={isStreaming}

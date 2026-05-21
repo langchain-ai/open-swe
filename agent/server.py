@@ -22,6 +22,11 @@ import asyncio
 warnings.filterwarnings("ignore", message=".*Pydantic V1.*", category=UserWarning)
 
 # Now safe to import agent (which imports LangChain modules)
+from . import _patch_messages_reducer
+from ._patch_messages_reducer import _apply as _apply_messages_reducer_patch
+
+_apply_messages_reducer_patch()
+
 from deepagents import create_deep_agent
 from deepagents.backends import LangSmithSandbox
 from deepagents.backends.protocol import SandboxBackendProtocol
