@@ -1,10 +1,14 @@
-import { useMemo } from "react";
+import { useMemo, useRef, useState } from "react";
 import { CheckCircleIcon, ClockIcon } from "@phosphor-icons/react";
+import { ChevronDown } from "lucide-react";
 
-import { AgentGitPanel } from "@/components/agents/AgentGitPanel";
 import { AgentPromptBar } from "@/components/agents/AgentPromptBar";
-import { AgentsPageHeader, AgentsShell } from "@/components/agents/AgentsSidebar";
-import { MessageView, summarizeChangedFiles } from "@/components/agents/ported";
+import { AgentsShell } from "@/components/agents/AgentsSidebar";
+import {
+  MessageView,
+  summarizeChangedFiles,
+  type MessageViewScrollControl,
+} from "@/components/agents/ported";
 import type { SessionUser } from "@/lib/api";
 import type { AgentThread } from "@/lib/agents/types";
 import { useSendAgentMessage } from "@/lib/agents/queries";
@@ -15,9 +19,13 @@ interface AgentThreadViewProps {
   thread: AgentThread;
 }
 
+const PROMPT_OVERLAY_INSET = 112;
+
 export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
   const sendMessage = useSendAgentMessage(thread.id);
   useAgentThreadStream(thread.id, thread.status === "running");
+  const scrollControlRef = useRef<MessageViewScrollControl | null>(null);
+  const [showScrollToBottom, setShowScrollToBottom] = useState(false);
 
   const changedFiles = useMemo(() => {
     const agentMessages = thread.messages.filter((m) => m.author === "agent");
@@ -29,38 +37,36 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
   const isStreaming = thread.status === "running";
 
   return (
-    <AgentsShell
-      user={user}
-      activeThreadId={thread.id}
-      rightPanel={<AgentGitPanel thread={thread} />}
-    >
+    <AgentsShell user={user} activeThreadId={thread.id}>
       <div className="flex min-w-0 flex-1 flex-col">
-        <AgentsPageHeader title={thread.title} subtitle={thread.repoFullName} />
-
         <div className="flex min-h-0 flex-1 flex-col">
           {hasMessages ? (
-            <>
-              <div className="min-h-0 flex-1 overflow-hidden px-6">
-                <div className="mx-auto flex h-full max-w-3xl flex-col py-6">
-                  <div className="mb-4 flex items-center gap-3 text-xs text-[var(--ui-text-dim)]">
-                    <span className="inline-flex items-center gap-1 rounded-full border border-[var(--ui-border)] px-2 py-0.5">
-                      <CheckCircleIcon className="size-3.5 text-[var(--ui-success)]" />
-                      Environment ready
-                    </span>
-                    <span className="inline-flex items-center gap-1">
-                      <ClockIcon className="size-3.5" />
-                      Worked for 3m 24s
-                    </span>
-                  </div>
+            <div className="relative flex min-h-0 flex-1 flex-col">
+              <div className="flex min-h-0 flex-1 flex-col overflow-hidden pt-6">
+                <div className="mx-auto mb-4 flex w-full max-w-3xl shrink-0 items-center gap-3 px-6 text-xs text-[var(--ui-text-dim)]">
+                  <span className="inline-flex items-center gap-1 rounded-full border border-[var(--ui-border)] px-2 py-0.5">
+                    <CheckCircleIcon className="size-3.5 text-[var(--ui-success)]" />
+                    Environment ready
+                  </span>
+                  <span className="inline-flex items-center gap-1">
+                    <ClockIcon className="size-3.5" />
+                    Worked for 3m 24s
+                  </span>
+                </div>
 
-                  <MessageView
-                    messages={thread.messages}
-                    isStreaming={isStreaming}
-                    contentWidthClass="max-w-3xl"
-                  />
+                <MessageView
+                  messages={thread.messages}
+                  isStreaming={isStreaming}
+                  contentWidthClass="max-w-3xl"
+                  bottomInset={PROMPT_OVERLAY_INSET}
+                  scrollButtonSlot="external"
+                  scrollControlRef={scrollControlRef}
+                  onShowScrollToBottomChange={setShowScrollToBottom}
+                />
 
-                  {changedFiles.length > 0 && (
-                    <div className="mt-4 rounded-lg border border-[var(--ui-border)] bg-[var(--ui-panel)] p-3">
+                {changedFiles.length > 0 && (
+                  <div className="mx-auto mt-4 w-full max-w-3xl shrink-0 px-6">
+                    <div className="rounded-lg border border-[var(--ui-border)] bg-[var(--ui-panel)] p-3">
                       <div className="mb-2 text-xs font-medium text-[var(--ui-text-muted)]">
                         {changedFiles.length} Files Changed
                       </div>
@@ -76,21 +82,33 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
                         ))}
                       </div>
                     </div>
-                  )}
-                </div>
+                  </div>
+                )}
               </div>
 
-              <div className="shrink-0 border-t border-[var(--ui-border)] bg-[var(--ui-surface)] px-6 py-4">
-                <div className="mx-auto max-w-3xl">
+              <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 px-6 pb-4">
+                <div className="pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-[var(--ui-bg)] via-[var(--ui-bg)]/80 to-transparent" />
+                <div className="pointer-events-auto relative mx-auto max-w-3xl">
+                  {showScrollToBottom && (
+                    <button
+                      type="button"
+                      onClick={() => scrollControlRef.current?.scrollToBottom()}
+                      aria-label="Scroll to bottom"
+                      className="absolute bottom-full left-1/2 z-30 mb-2 inline-flex h-8 w-8 -translate-x-1/2 items-center justify-center rounded-full bg-[var(--ui-panel-2)] text-[color:var(--ui-text-muted)] shadow-md transition-colors hover:bg-[var(--ui-panel)] hover:text-[color:var(--ui-text)]"
+                    >
+                      <ChevronDown className="h-3.5 w-3.5" />
+                    </button>
+                  )}
                   <AgentPromptBar
                     placeholder="Add a follow up"
                     compact
+                    busy={isStreaming}
                     disabled={sendMessage.isPending}
                     onSubmit={(content) => sendMessage.mutate(content)}
                   />
                 </div>
               </div>
-            </>
+            </div>
           ) : (
             <div className="flex flex-1 flex-col items-center justify-center gap-4 px-6">
               <p className="text-sm text-[var(--ui-text-dim)]">
@@ -101,6 +119,7 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
                   <AgentPromptBar
                     placeholder="Send the first message"
                     compact
+                    busy={isStreaming}
                     disabled={sendMessage.isPending}
                     onSubmit={(content) => sendMessage.mutate(content)}
                   />

@@ -11,5 +11,9 @@ export function Logo() {
     "         ░░░░░                                                                     ",
   ].join("\n");
 
-  return <pre className="m-0 max-w-full overflow-x-auto text-[#87CEEB] leading-none font-mono text-[6px]">{ascii}</pre>;
+  return (
+    <pre className="m-0 max-w-full overflow-x-auto font-mono text-[7px] leading-none text-[#87CEEB]">
+      {ascii}
+    </pre>
+  );
 }

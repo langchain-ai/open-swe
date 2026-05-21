@@ -1,13 +1,5 @@
-import { Link, useRouterState } from "@tanstack/react-router";
-import {
-  BugIcon,
-  ChartLineUpIcon,
-  FunnelIcon,
-  GearIcon,
-  MagnifyingGlassIcon,
-  PlusIcon,
-  RobotIcon,
-} from "@phosphor-icons/react";
+import { Link } from "@tanstack/react-router";
+import { ChartLineUpIcon, GearIcon, PlusIcon } from "@phosphor-icons/react";
 import { useEffect, useRef, useState } from "react";
 
 import type { SessionUser } from "@/lib/api";
@@ -22,16 +14,7 @@ interface AgentsSidebarProps {
   activeThreadId?: string;
 }
 
-const NAV: Array<{
-  to: string;
-  label: string;
-  icon: typeof RobotIcon;
-  disabled?: boolean;
-}> = [
-  { to: "/agents/automations", label: "Automations", icon: RobotIcon, disabled: true },
-  { to: "/agents/bugbot", label: "Bugbot", icon: BugIcon, disabled: true },
-  { to: "/my-settings", label: "Dashboard", icon: ChartLineUpIcon },
-];
+const NAV = [{ to: "/my-settings", label: "Dashboard", icon: ChartLineUpIcon }] as const;
 
 export function AgentsSidebar({ user, activeThreadId }: AgentsSidebarProps) {
   const threadsQuery = useAgentThreads();
@@ -41,24 +24,7 @@ export function AgentsSidebar({ user, activeThreadId }: AgentsSidebarProps) {
 
   return (
     <aside className="flex h-full w-[260px] shrink-0 flex-col border-r border-[var(--ui-border)] bg-[var(--ui-sidebar)]">
-      <div className="flex items-center gap-1 px-3 pt-4 pb-2">
-        <button
-          type="button"
-          className="flex size-8 items-center justify-center rounded-md text-[var(--ui-text-dim)] hover:bg-[var(--ui-sidebar-hover)] hover:text-[var(--ui-text)]"
-          aria-label="Search"
-        >
-          <MagnifyingGlassIcon className="size-4" />
-        </button>
-        <button
-          type="button"
-          className="flex size-8 items-center justify-center rounded-md text-[var(--ui-text-dim)] hover:bg-[var(--ui-sidebar-hover)] hover:text-[var(--ui-text)]"
-          aria-label="Filter"
-        >
-          <FunnelIcon className="size-4" />
-        </button>
-      </div>
-
-      <div className="px-3 pb-3">
+      <div className="px-3 pt-4 pb-3">
         <Link
           to="/agents"
           className="flex w-full items-center gap-2 rounded-lg border border-[var(--ui-border)] bg-[var(--ui-surface)] px-3 py-2 text-sm font-medium text-[var(--ui-text)] shadow-sm transition-colors hover:bg-[var(--ui-panel-2)]"
@@ -71,17 +37,6 @@ export function AgentsSidebar({ user, activeThreadId }: AgentsSidebarProps) {
       <nav className="flex flex-col gap-0.5 px-2 pb-4">
         {NAV.map((item) => {
           const Icon = item.icon;
-          if (item.disabled) {
-            return (
-              <span
-                key={item.label}
-                className="flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-xs text-[var(--ui-text-dim)] opacity-50"
-              >
-                <Icon className="size-4" />
-                {item.label}
-              </span>
-            );
-          }
           return (
             <Link
               key={item.to}
@@ -217,67 +172,15 @@ export function AgentsShell({
   user,
   activeThreadId,
   children,
-  rightPanel,
 }: {
   user: SessionUser;
   activeThreadId?: string;
   children: React.ReactNode;
-  rightPanel?: React.ReactNode;
 }) {
   return (
     <div className="agents-ui flex h-svh overflow-hidden bg-[var(--ui-bg)]">
       <AgentsSidebar user={user} activeThreadId={activeThreadId} />
       <div className="flex min-w-0 flex-1">{children}</div>
-      {rightPanel}
-    </div>
-  );
-}
-
-export function AgentsPageHeader({
-  title,
-  subtitle,
-}: {
-  title?: string;
-  subtitle?: string;
-}) {
-  const router = useRouterState();
-
-  return (
-    <header className="flex h-11 shrink-0 items-center justify-center border-b border-[var(--ui-border)] bg-[var(--ui-surface)] px-4">
-      {title ? (
-        <div className="text-center">
-          <div className="text-sm font-medium text-[var(--ui-text)]">{title}</div>
-          {subtitle && (
-            <div className="text-[11px] text-[var(--ui-text-dim)]">{subtitle}</div>
-          )}
-        </div>
-      ) : (
-        <div className="flex items-center gap-2 text-xs text-[var(--ui-text-muted)]">
-          <RepoBranchPicker />
-          {!router.location.pathname.startsWith("/agents/file-comments") && (
-            <span className="text-[var(--ui-text-dim)]">·</span>
-          )}
-        </div>
-      )}
-    </header>
-  );
-}
-
-function RepoBranchPicker() {
-  return (
-    <div className="flex items-center gap-1.5">
-      <button
-        type="button"
-        className="rounded-md border border-[var(--ui-border)] bg-[var(--ui-surface)] px-2.5 py-1 text-xs hover:bg-[var(--ui-panel-2)]"
-      >
-        chat-studio
-      </button>
-      <button
-        type="button"
-        className="rounded-md border border-[var(--ui-border)] bg-[var(--ui-surface)] px-2.5 py-1 text-xs hover:bg-[var(--ui-panel-2)]"
-      >
-        main
-      </button>
     </div>
   );
 }

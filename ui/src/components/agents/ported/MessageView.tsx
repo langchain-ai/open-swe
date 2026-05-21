@@ -282,11 +282,23 @@ interface ApprovalCallbacks {
   onOpenDiff?: (diffData: { filePath: string; originalContent: string; modifiedContent: string }) => void;
 }
 
+export type MessageViewScrollControl = {
+  scrollToBottom: () => void;
+};
+
 interface MessageViewProps extends ApprovalCallbacks {
   messages: Message[];
   isStreaming: boolean;
   project?: Project | null;
   contentWidthClass?: string;
+  /** Horizontal padding on centered content (scroll track stays edge-to-edge). */
+  contentPaddingClass?: string;
+  /** Extra scroll padding so content can scroll under a bottom overlay (e.g. floating prompt). */
+  bottomInset?: number;
+  /** When "external", parent renders the scroll button (e.g. above a floating prompt). */
+  scrollButtonSlot?: "internal" | "external";
+  onShowScrollToBottomChange?: (show: boolean) => void;
+  scrollControlRef?: React.MutableRefObject<MessageViewScrollControl | null>;
 }
 
 const BUSY_TEXTS: { present: string; past: string }[] = [
@@ -681,6 +693,11 @@ export const MessageView = memo(function MessageView({
   isStreaming,
   project,
   contentWidthClass = "max-w-[42rem]",
+  contentPaddingClass = "px-6",
+  bottomInset = 0,
+  scrollButtonSlot = "internal",
+  onShowScrollToBottomChange,
+  scrollControlRef,
   onApprove,
   onReject,
   onAutoApprove,
@@ -818,13 +835,29 @@ export const MessageView = memo(function MessageView({
     scrollToBottomNow();
   }, [clearScheduledScroll, scrollToBottomNow]);
 
+  useEffect(() => {
+    if (!scrollControlRef) return;
+    scrollControlRef.current = { scrollToBottom: handleScrollToBottom };
+    return () => {
+      scrollControlRef.current = null;
+    };
+  }, [handleScrollToBottom, scrollControlRef]);
+
+  useEffect(() => {
+    onShowScrollToBottomChange?.(showScrollToBottom);
+  }, [onShowScrollToBottomChange, showScrollToBottom]);
+
   return (
     <div className="relative flex-1 min-h-0 min-w-0">
       <div
         ref={scrollRef}
-        className="h-full min-h-0 min-w-0 overflow-y-auto overflow-x-hidden px-3 py-5 text-[13px] leading-6 font-sans antialiased sm:px-5"
+        className="h-full min-h-0 min-w-0 overflow-y-auto overflow-x-hidden py-5 text-[13px] leading-6 font-sans antialiased"
       >
-        <div ref={contentRef} className={`w-full ${contentWidthClass} mx-auto min-w-0`}>
+        <div
+          ref={contentRef}
+          className={`w-full ${contentWidthClass} mx-auto min-w-0 ${contentPaddingClass}`}
+          style={bottomInset > 0 ? { paddingBottom: bottomInset } : undefined}
+        >
           {visibleMessages.map((message, index) => (
             <MessageBubble
               key={message.id}
@@ -841,12 +874,13 @@ export const MessageView = memo(function MessageView({
         </div>
       </div>
 
-      {showScrollToBottom && (
+      {scrollButtonSlot === "internal" && showScrollToBottom && (
         <button
           type="button"
           onClick={handleScrollToBottom}
           aria-label="Scroll to bottom"
-          className="absolute bottom-4 left-1/2 z-30 inline-flex h-8 w-8 -translate-x-1/2 items-center justify-center rounded-full bg-[var(--ui-panel-2)] text-[color:var(--ui-text-muted)] shadow-md transition-colors hover:bg-[var(--ui-panel)] hover:text-[color:var(--ui-text)]"
+          className="absolute left-1/2 z-30 inline-flex h-8 w-8 -translate-x-1/2 items-center justify-center rounded-full bg-[var(--ui-panel-2)] text-[color:var(--ui-text-muted)] shadow-md transition-colors hover:bg-[var(--ui-panel)] hover:text-[color:var(--ui-text)]"
+          style={{ bottom: bottomInset > 0 ? bottomInset + 8 : 16 }}
         >
           <ChevronDown className="h-3.5 w-3.5" />
         </button>
