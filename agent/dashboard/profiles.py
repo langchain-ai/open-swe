@@ -37,7 +37,6 @@ class ProfileUpdate(BaseModel):
     branch_prefix: str | None = None
     auto_fix_ci: bool = True
     create_prs: bool = True
-    preferred_pr_destination: str | None = None
 
     @field_validator("default_model")
     @classmethod
@@ -93,7 +92,6 @@ async def upsert_profile(login: str, email: str, update: ProfileUpdate) -> dict[
         "branch_prefix": update.branch_prefix,
         "auto_fix_ci": update.auto_fix_ci,
         "create_prs": update.create_prs,
-        "preferred_pr_destination": update.preferred_pr_destination,
         "updated_at": datetime.now(UTC).isoformat(),
     }
     for stale_field in (
@@ -101,6 +99,7 @@ async def upsert_profile(login: str, email: str, update: ProfileUpdate) -> dict[
         "last_name",
         "allow_artifacts",
         "slack_notifications",
+        "preferred_pr_destination",
     ):
         value.pop(stale_field, None)
     await _client().store.put_item(PROFILES_NAMESPACE, login, value)

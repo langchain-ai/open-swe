@@ -72,18 +72,38 @@ interface SettingsRowProps {
   description?: string;
   control: ReactNode;
   htmlFor?: string;
+  comingSoon?: boolean;
 }
 
-export function SettingsRow({ label, description, control, htmlFor }: SettingsRowProps) {
+export function SettingsRow({
+  label,
+  description,
+  control,
+  htmlFor,
+  comingSoon,
+}: SettingsRowProps) {
   return (
     <div className="flex items-center justify-between gap-6 border-b border-border px-4 py-3 last:border-b-0">
       <label className="flex flex-col gap-0.5" htmlFor={htmlFor}>
-        <span className="text-xs font-medium text-foreground">{label}</span>
+        <span className="flex items-center gap-2">
+          <span
+            className={`text-xs font-medium ${
+              comingSoon ? "text-muted-foreground" : "text-foreground"
+            }`}
+          >
+            {label}
+          </span>
+          {comingSoon && (
+            <span className="rounded-sm border border-border bg-muted px-1.5 py-0.5 text-[10px] font-normal text-muted-foreground">
+              Coming soon
+            </span>
+          )}
+        </span>
         {description && (
           <span className="text-xs text-muted-foreground">{description}</span>
         )}
       </label>
-      <div className="shrink-0">{control}</div>
+      <div className={`shrink-0 ${comingSoon ? "opacity-50" : ""}`}>{control}</div>
     </div>
   );
 }

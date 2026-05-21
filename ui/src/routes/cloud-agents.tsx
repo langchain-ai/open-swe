@@ -217,10 +217,12 @@ function CloudAgentsPage() {
           <SettingsRow
             label="Automatically fix CI failures"
             description="Agent will attempt to fix failing CI checks on PRs it opens."
+            comingSoon
             control={
               <Switch
                 checked={profile.data?.auto_fix_ci ?? true}
                 onCheckedChange={(v) => persist({ auto_fix_ci: v })}
+                disabled
               />
             }
           />

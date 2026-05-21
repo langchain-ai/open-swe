@@ -65,7 +65,6 @@ export interface Profile {
   branch_prefix?: string | null;
   auto_fix_ci?: boolean;
   create_prs?: boolean;
-  preferred_pr_destination?: string | null;
   updated_at?: string;
 }
 
@@ -77,10 +76,9 @@ export interface ProfileUpdate {
   branch_prefix?: string | null;
   auto_fix_ci?: boolean;
   create_prs?: boolean;
-  preferred_pr_destination?: string | null;
 }
 
-export type TriggerMode = "every_push" | "ready_for_review" | "manual";
+export type TriggerMode = "every_push" | "once_per_pr" | "manual";
 export type AutofixMode = "off" | "low" | "medium" | "high";
 
 export interface TeamSettings {

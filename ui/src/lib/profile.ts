@@ -68,7 +68,6 @@ export function buildProfileUpdate(
     branch_prefix: current?.branch_prefix ?? null,
     auto_fix_ci: current?.auto_fix_ci ?? true,
     create_prs: current?.create_prs ?? true,
-    preferred_pr_destination: current?.preferred_pr_destination ?? null,
     ...patch,
   };
 }

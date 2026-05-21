@@ -1,35 +1,18 @@
-import { Navigate, createFileRoute } from "@tanstack/react-router";
-import { useEffect, useRef, useState } from "react";
+import { Navigate, createFileRoute, useNavigate } from "@tanstack/react-router";
+import { useQueryClient } from "@tanstack/react-query";
 
 import { AppShell, SettingsRow, SettingsSection } from "@/components/AppShell";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { buildProfileUpdate, useOptions, useProfile, useSaveProfile } from "@/lib/profile";
+import { api } from "@/lib/api";
 import { useSession } from "@/lib/session";
 
 export const Route = createFileRoute("/my-settings")({ component: MySettingsPage });
 
 function MySettingsPage() {
   const session = useSession();
-  const profile = useProfile();
-  const options = useOptions();
-  const save = useSaveProfile();
-
-  const [prDestination, setPrDestination] = useState<string>("team_default");
-  const [error, setError] = useState<string | null>(null);
-  const initialized = useRef(false);
-
-  useEffect(() => {
-    if (!profile.data || initialized.current) return;
-    initialized.current = true;
-    setPrDestination(profile.data.preferred_pr_destination ?? "team_default");
-  }, [profile.data]);
+  const qc = useQueryClient();
+  const navigate = useNavigate();
 
   if (session.isLoading) {
     return (
@@ -40,18 +23,10 @@ function MySettingsPage() {
   }
   if (!session.data) return <Navigate to="/login" />;
 
-  const firstModel = options.data?.models[0];
-
-  const handleSavePrDestination = (value: string | null) => {
-    if (!value) return;
-    setPrDestination(value);
-    const body = buildProfileUpdate(
-      profile.data,
-      { preferred_pr_destination: value === "team_default" ? null : value },
-      firstModel?.id ?? "",
-      firstModel?.default_effort ?? "",
-    );
-    save.mutateAsync(body).catch((e: Error) => setError(e.message));
+  const handleLogout = async () => {
+    await api.logout();
+    qc.setQueryData(["session"], null);
+    void navigate({ to: "/login" });
   };
 
   return (
@@ -67,27 +42,17 @@ function MySettingsPage() {
         />
       </SettingsSection>
 
-      <SettingsSection title="PR Preferences">
+      <SettingsSection title="Account">
         <SettingsRow
-          label="Preferred PR destination"
-          description="Choose where PR links open across web, the desktop app and IDE."
+          label="Sign out"
+          description="End your dashboard session."
           control={
-            <Select value={prDestination} onValueChange={handleSavePrDestination}>
-              <SelectTrigger className="w-40">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="team_default">Team default</SelectItem>
-                <SelectItem value="web">Web</SelectItem>
-                <SelectItem value="desktop">Desktop App</SelectItem>
-                <SelectItem value="ide">IDE</SelectItem>
-              </SelectContent>
-            </Select>
+            <Button size="sm" variant="outline" onClick={() => void handleLogout()}>
+              Sign out
+            </Button>
           }
         />
       </SettingsSection>
-
-      {error && <p className="text-xs text-destructive">{error}</p>}
     </AppShell>
   );
 }

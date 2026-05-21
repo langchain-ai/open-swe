@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 TEAM_SETTINGS_NAMESPACE: list[str] = ["team_settings"]
 TEAM_SETTINGS_KEY = "default"
 
-TriggerMode = Literal["every_push", "ready_for_review", "manual"]
+TriggerMode = Literal["every_push", "once_per_pr", "manual"]
 AutofixMode = Literal["off", "low", "medium", "high"]
 
 
@@ -93,7 +93,12 @@ async def get_team_settings() -> dict[str, Any]:
     # Skip None-valued model fields so legacy records (or PUTs that cleared the
     # selection) still surface the hardcoded default instead of a null.
     overlay = {k: v for k, v in value.items() if v is not None}
-    return {**defaults, **overlay}
+    merged = {**defaults, **overlay}
+    # Drop obsolete trigger mode values so a legacy record doesn't surface a
+    # value the new TriggerMode literal would reject on the next PUT.
+    if merged.get("trigger_mode") not in {"every_push", "once_per_pr", "manual"}:
+        merged["trigger_mode"] = defaults["trigger_mode"]
+    return merged
 
 
 async def upsert_team_settings(update: TeamSettingsUpdate) -> dict[str, Any]:

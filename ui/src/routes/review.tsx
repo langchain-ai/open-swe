@@ -20,13 +20,21 @@ import { useSession } from "@/lib/session";
 export const Route = createFileRoute("/review")({ component: ReviewPage });
 
 const TRIGGER_MODES: Array<{ value: TriggerMode; label: string; description: string }> = [
-  { value: "every_push", label: "Every Push", description: "Review every push to a PR" },
   {
-    value: "ready_for_review",
-    label: "Ready For Review",
-    description: "Only when the PR is marked ready for review",
+    value: "every_push",
+    label: "Every Push",
+    description: "Review on every push to the PR",
   },
-  { value: "manual", label: "Manual", description: "Review only when explicitly invoked" },
+  {
+    value: "once_per_pr",
+    label: "Once Per PR",
+    description: "Review once when the PR is opened, skip subsequent pushes",
+  },
+  {
+    value: "manual",
+    label: "Manual Only",
+    description: "Only review when '@open-swe review' is commented",
+  },
 ];
 
 const AUTOFIX_MODES: Array<{ value: AutofixMode; label: string }> = [
@@ -122,11 +130,12 @@ function ReviewPage() {
           <SettingsRow
             label="Trigger Mode"
             description={triggerDescription}
+            comingSoon
             control={
               <Select
                 value={current.trigger_mode}
                 onValueChange={(v) => persist({ trigger_mode: v as TriggerMode })}
-                disabled={!canEdit}
+                disabled
               >
                 <SelectTrigger className="w-40">
                   <SelectValue />
@@ -166,11 +175,12 @@ function ReviewPage() {
           <SettingsRow
             label="Autofix Mode"
             description="When enabled, the reviewer will propose fixes. Billed at plan rates."
+            comingSoon
             control={
               <Select
                 value={current.autofix_mode}
                 onValueChange={(v) => persist({ autofix_mode: v as AutofixMode })}
-                disabled={!canEdit}
+                disabled
               >
                 <SelectTrigger className="w-32">
                   <SelectValue />
@@ -188,13 +198,14 @@ function ReviewPage() {
           <SettingsRow
             label="Autofix Severity Threshold"
             description="Findings at this severity or higher are auto-fixed"
+            comingSoon
             control={
               <Select
                 value={current.autofix_severity_threshold}
                 onValueChange={(v) =>
                   persist({ autofix_severity_threshold: v as AutofixMode })
                 }
-                disabled={!canEdit}
+                disabled
               >
                 <SelectTrigger className="w-32">
                   <SelectValue />
