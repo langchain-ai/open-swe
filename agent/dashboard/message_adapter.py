@@ -13,6 +13,7 @@ _READ_TOOLS = frozenset({"read_file", "read", "glob", "grep"})
 _EDIT_TOOLS = frozenset({"write_file", "edit_file", "str_replace", "write", "edit", "patch"})
 _EXECUTE_TOOLS = frozenset({"execute", "bash", "shell", "run_terminal_cmd"})
 _SEARCH_TOOLS = frozenset({"glob", "grep", "web_search", "fetch_url", "search"})
+_INTERNAL_TOOLS = frozenset({"confirming_completion", "no_op"})
 
 
 def _now_iso() -> str:
@@ -93,10 +94,43 @@ def _maybe_diff_from_args(name: str, args: dict[str, Any]) -> dict[str, Any] | N
     }
 
 
+def _is_internal_tool(name: str) -> bool:
+    return name in _INTERNAL_TOOLS
+
+
+def _append_agent_chunks(
+    agent_turn: dict[str, Any] | None,
+    *,
+    msg_id: str,
+    timestamp: str,
+    chunks: list[dict[str, Any]],
+) -> dict[str, Any]:
+    if agent_turn is None:
+        return {
+            "id": msg_id,
+            "author": "agent",
+            "timestamp": timestamp,
+            "chunks": list(chunks),
+        }
+    agent_turn["timestamp"] = timestamp
+    agent_turn["chunks"].extend(chunks)
+    return agent_turn
+
+
+def _merge_text_chunks(chunks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Keep only the latest text chunk when middleware produced a follow-up AI message."""
+    text_indices = [i for i, chunk in enumerate(chunks) if chunk.get("kind") == "text"]
+    if len(text_indices) <= 1:
+        return chunks
+    last_text = text_indices[-1]
+    return [chunk for i, chunk in enumerate(chunks) if chunk.get("kind") != "text" or i == last_text]
+
+
 def state_messages_to_ui(messages: list[Any]) -> list[dict[str, Any]]:
     """Map LangGraph state ``messages`` to the dashboard ``Message`` JSON shape."""
     pending_tools: dict[str, dict[str, Any]] = {}
     ui_messages: list[dict[str, Any]] = []
+    agent_turn: dict[str, Any] | None = None
 
     for index, raw in enumerate(messages):
         if not isinstance(raw, dict):
@@ -106,6 +140,10 @@ def state_messages_to_ui(messages: list[Any]) -> list[dict[str, Any]]:
         timestamp = raw.get("created_at") if isinstance(raw.get("created_at"), str) else _now_iso()
 
         if msg_type in {"human", "user"}:
+            if agent_turn is not None:
+                agent_turn["chunks"] = _merge_text_chunks(agent_turn["chunks"])
+                ui_messages.append(agent_turn)
+                agent_turn = None
             text = extract_text_content(raw.get("content", ""))
             if not text:
                 continue
@@ -128,12 +166,14 @@ def state_messages_to_ui(messages: list[Any]) -> list[dict[str, Any]]:
             for tool_call in raw.get("tool_calls") or []:
                 if not isinstance(tool_call, dict):
                     continue
-                tool_call_id = tool_call.get("id") or tool_call.get("tool_call_id")
-                if not isinstance(tool_call_id, str) or not tool_call_id:
-                    tool_call_id = f"tool-{uuid.uuid4().hex[:8]}"
                 name = tool_call.get("name")
                 if not isinstance(name, str) or not name:
                     name = "tool"
+                if _is_internal_tool(name):
+                    continue
+                tool_call_id = tool_call.get("id") or tool_call.get("tool_call_id")
+                if not isinstance(tool_call_id, str) or not tool_call_id:
+                    tool_call_id = f"tool-{uuid.uuid4().hex[:8]}"
                 args = _parse_tool_args(tool_call.get("args"))
                 chunk: dict[str, Any] = {
                     "kind": "tool-execution",
@@ -150,19 +190,18 @@ def state_messages_to_ui(messages: list[Any]) -> list[dict[str, Any]]:
                 pending_tools[tool_call_id] = chunk
 
             if chunks:
-                ui_messages.append(
-                    {
-                        "id": msg_id,
-                        "author": "agent",
-                        "timestamp": timestamp,
-                        "chunks": chunks,
-                    }
+                agent_turn = _append_agent_chunks(
+                    agent_turn, msg_id=msg_id, timestamp=timestamp, chunks=chunks
                 )
             continue
 
         if msg_type == "tool":
             tool_call_id = raw.get("tool_call_id")
             if not isinstance(tool_call_id, str):
+                continue
+            name = raw.get("name") if isinstance(raw.get("name"), str) else "tool"
+            if _is_internal_tool(name):
+                pending_tools.pop(tool_call_id, None)
                 continue
             chunk = pending_tools.get(tool_call_id)
             output = extract_text_content(raw.get("content", ""))
@@ -172,23 +211,26 @@ def state_messages_to_ui(messages: list[Any]) -> list[dict[str, Any]]:
                     chunk["output"] = output
                 continue
 
-            name = raw.get("name") if isinstance(raw.get("name"), str) else "tool"
-            ui_messages.append(
-                {
+            if agent_turn is None:
+                agent_turn = {
                     "id": msg_id,
-                    "author": "tool",
+                    "author": "agent",
                     "timestamp": timestamp,
-                    "chunks": [
-                        {
-                            "kind": "tool-execution",
-                            "toolCallId": tool_call_id,
-                            "title": name,
-                            "toolKind": _tool_kind(name),
-                            "status": "completed",
-                            "output": output,
-                        }
-                    ],
+                    "chunks": [],
+                }
+            agent_turn["chunks"].append(
+                {
+                    "kind": "tool-execution",
+                    "toolCallId": tool_call_id,
+                    "title": name,
+                    "toolKind": _tool_kind(name),
+                    "status": "completed",
+                    "output": output,
                 }
             )
+
+    if agent_turn is not None:
+        agent_turn["chunks"] = _merge_text_chunks(agent_turn["chunks"])
+        ui_messages.append(agent_turn)
 
     return ui_messages

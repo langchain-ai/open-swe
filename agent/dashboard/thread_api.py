@@ -271,7 +271,7 @@ async def _start_agent_run(
 
 async def create_dashboard_thread(login: str, body: ThreadCreateBody) -> dict[str, Any]:
     repo_config = await _resolve_repo_config(login, body.repo)
-    thread_id = f"dashboard-{uuid.uuid4()}"
+    thread_id = str(uuid.uuid4())
     return await _start_agent_run(
         thread_id,
         login=login,

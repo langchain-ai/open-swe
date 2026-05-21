@@ -37,3 +37,33 @@ def test_state_messages_to_ui_maps_user_and_tool_calls() -> None:
     assert tool_chunk["toolCallId"] == "call-1"
     assert tool_chunk["status"] == "completed"
     assert tool_chunk["output"] == "print('hi')"
+
+
+def test_state_messages_to_ui_merges_agent_turn_and_hides_internal_tools() -> None:
+    messages = [
+        {"type": "human", "id": "u1", "content": "hello"},
+        {
+            "type": "ai",
+            "id": "a1",
+            "content": "Hi! What would you like me to work on?",
+            "tool_calls": [{"id": "call-cc", "name": "confirming_completion", "args": {}}],
+        },
+        {
+            "type": "tool",
+            "tool_call_id": "call-cc",
+            "name": "confirming_completion",
+            "content": "Confirming task completion.",
+        },
+        {
+            "type": "ai",
+            "id": "a2",
+            "content": "Hi! What would you like me to work on? Let me know the task.",
+        },
+    ]
+
+    ui = state_messages_to_ui(messages)
+
+    assert len(ui) == 2
+    assert ui[0]["author"] == "user"
+    assert len(ui[1]["chunks"]) == 1
+    assert ui[1]["chunks"][0]["text"] == "Hi! What would you like me to work on? Let me know the task."
