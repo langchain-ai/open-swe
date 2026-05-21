@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
-import type {ReviewStyle} from "@/lib/api";
+import type { ReviewStyle } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -16,8 +16,14 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
-import { ApiError,  api } from "@/lib/api";
+import { ApiError, api, isGithubReauthError, loginUrl } from "@/lib/api";
 import { normalizeRepoFullName } from "@/lib/repo";
+
+function formatMutationError(e: Error): string {
+  return isGithubReauthError(e)
+    ? "GitHub token expired — sign in again using the link above."
+    : e.message;
+}
 
 function statusVariant(status: ReviewStyle["status"]) {
   switch (status) {
@@ -83,7 +89,7 @@ export function ReviewStylesPanel() {
       setSelected(record.full_name);
       setError(null);
     },
-    onError: (e: Error) => setError(e.message),
+    onError: (e: Error) => setError(formatMutationError(e)),
   });
 
   const analyze = useMutation({
@@ -93,7 +99,7 @@ export function ReviewStylesPanel() {
       void qc.invalidateQueries({ queryKey: ["reviewStyle", selected] });
       setError(null);
     },
-    onError: (e: Error) => setError(e.message),
+    onError: (e: Error) => setError(formatMutationError(e)),
   });
 
   const savePrompt = useMutation({
@@ -104,7 +110,30 @@ export function ReviewStylesPanel() {
       void qc.invalidateQueries({ queryKey: ["reviewStyle", selected] });
       setError(null);
     },
-    onError: (e: Error) => setError(e.message),
+    onError: (e: Error) => setError(formatMutationError(e)),
+  });
+
+  const cancelAnalysis = useMutation({
+    mutationFn: (full_name: string) => api.cancelReviewStyle(full_name),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["reviewStyles"] });
+      void qc.invalidateQueries({ queryKey: ["reviewStyle", selected] });
+      setError(null);
+    },
+    onError: (e: Error) => setError(formatMutationError(e)),
+  });
+
+  const removeStyle = useMutation({
+    mutationFn: (full_name: string) => api.deleteReviewStyle(full_name),
+    onSuccess: (_data, full_name) => {
+      void qc.invalidateQueries({ queryKey: ["reviewStyles"] });
+      if (selected === full_name) {
+        setSelected(null);
+        setDraftPrompt("");
+      }
+      setError(null);
+    },
+    onError: (e: Error) => setError(formatMutationError(e)),
   });
 
   if (styles.isLoading) {
@@ -121,26 +150,53 @@ export function ReviewStylesPanel() {
 
   const handleAdd = () => {
     if (!normalizedAddRepo || !canAdd) return;
-    void createStyle.mutateAsync(normalizedAddRepo).then(() => setAddRepo(""));
+    void createStyle
+      .mutateAsync(normalizedAddRepo)
+      .then(() => setAddRepo(""))
+      .catch(() => undefined);
   };
 
+  const githubReauth =
+    (repos.isError && isGithubReauthError(repos.error)) ||
+    (error !== null && /github token|re-login required/i.test(error));
+
   return (
-    <div className="grid grid-cols-1 gap-4 p-4 md:grid-cols-[260px_1fr]">
-      <div className="space-y-4">
+    <div className="flex flex-col gap-6 p-4">
+      {githubReauth && (
+        <div className="rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+          Your GitHub connection expired.{" "}
+          <a href={loginUrl()} className="font-medium underline underline-offset-2">
+            Sign in with GitHub again
+          </a>{" "}
+          to list installed repos and run style analysis.
+        </div>
+      )}
+      <section className="space-y-4">
         <div className="space-y-2">
           <Label htmlFor="add-repo">Add repository</Label>
-          <Input
-            id="add-repo"
-            placeholder="owner/repo"
-            value={addRepo}
-            onChange={(e) => setAddRepo(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
-                handleAdd();
-              }
-            }}
-          />
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+            <Input
+              id="add-repo"
+              placeholder="owner/repo"
+              value={addRepo}
+              onChange={(e) => setAddRepo(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  handleAdd();
+                }
+              }}
+              className="sm:flex-1"
+            />
+            <Button
+              size="sm"
+              className="shrink-0 sm:w-auto"
+              disabled={!canAdd || createStyle.isPending}
+              onClick={handleAdd}
+            >
+              Add
+            </Button>
+          </div>
           {suggestedRepos.length > 0 && (
             <Combobox
               items={suggestedRepos.map((r) => r.full_name)}
@@ -169,45 +225,47 @@ export function ReviewStylesPanel() {
               </ComboboxContent>
             </Combobox>
           )}
-          <Button
-            size="sm"
-            className="w-full"
-            disabled={!canAdd || createStyle.isPending}
-            onClick={handleAdd}
-          >
-            Add
-          </Button>
         </div>
-        <ul className="space-y-1">
-          {(styles.data ?? []).map((s) => (
-            <li key={s.full_name}>
-              <button
-                type="button"
-                className={`flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-xs hover:bg-muted ${
-                  selected === s.full_name ? "bg-muted font-medium" : ""
-                }`}
-                onClick={() => setSelected(s.full_name)}
-              >
-                <span className="truncate">{s.full_name}</span>
-                <Badge variant={statusVariant(s.status)} className="ml-2 shrink-0">
-                  {s.status}
-                </Badge>
-              </button>
-            </li>
-          ))}
-          {(styles.data ?? []).length === 0 && (
-            <li className="px-2 py-1 text-xs text-muted-foreground">No repositories yet.</li>
-          )}
-        </ul>
-      </div>
 
-      <div className="space-y-3">
+        <div className="space-y-2">
+          <p className="text-xs font-medium text-foreground">Repositories</p>
+          {(styles.data ?? []).length === 0 ? (
+            <p className="text-xs text-muted-foreground">No repositories yet.</p>
+          ) : (
+            <ul className="flex flex-wrap gap-2">
+              {(styles.data ?? []).map((s) => (
+                <li key={s.full_name}>
+                  <button
+                    type="button"
+                    className={`inline-flex max-w-full items-center gap-2 rounded-md border px-2.5 py-1.5 text-left text-xs transition-colors hover:bg-muted ${
+                      selected === s.full_name
+                        ? "border-primary bg-muted font-medium"
+                        : "border-border"
+                    }`}
+                    onClick={() => setSelected(s.full_name)}
+                  >
+                    <span className="truncate">{s.full_name}</span>
+                    <Badge variant={statusVariant(s.status)} className="shrink-0">
+                      {s.status}
+                    </Badge>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </section>
+
+      <div className="border-t border-border" />
+
+      <section className="space-y-3">
         {!selected || !active ? (
           <p className="text-xs text-muted-foreground">
-            Select a repository on the left to view or edit its review style prompt.
+            Select a repository above to view or edit its review style prompt.
           </p>
         ) : (
           <>
+            <p className="text-sm font-medium text-foreground">{active.full_name}</p>
             <div className="flex flex-wrap items-center gap-2 text-xs">
               <Badge variant={statusVariant(active.status)}>{active.status}</Badge>
               {active.top_reviewers.length > 0 && (
@@ -225,15 +283,27 @@ export function ReviewStylesPanel() {
               <p className="text-xs text-muted-foreground">{active.analysis_summary}</p>
             )}
             {active.error && <p className="text-xs text-destructive">{active.error}</p>}
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               <Button
                 size="sm"
                 variant="secondary"
                 disabled={active.status === "running" || analyze.isPending}
-                onClick={() => void analyze.mutateAsync(active.full_name)}
+                onClick={() => {
+                  void analyze.mutateAsync(active.full_name).catch(() => undefined);
+                }}
               >
                 {active.status === "running" ? "Analyzing…" : "Run analysis"}
               </Button>
+              {active.status === "running" && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={cancelAnalysis.isPending}
+                  onClick={() => void cancelAnalysis.mutateAsync(active.full_name)}
+                >
+                  Cancel
+                </Button>
+              )}
               <Button
                 size="sm"
                 disabled={!draftPrompt.trim() || savePrompt.isPending}
@@ -246,9 +316,26 @@ export function ReviewStylesPanel() {
               >
                 Save prompt
               </Button>
+              <Button
+                size="sm"
+                variant="destructive"
+                disabled={removeStyle.isPending}
+                onClick={() => {
+                  if (
+                    !window.confirm(
+                      `Remove ${active.full_name} from review style prompts? This cannot be undone.`,
+                    )
+                  ) {
+                    return;
+                  }
+                  void removeStyle.mutateAsync(active.full_name);
+                }}
+              >
+                Remove
+              </Button>
             </div>
             <Textarea
-              className="min-h-[320px] font-mono text-xs"
+              className="min-h-[320px] w-full font-mono text-xs"
               value={draftPrompt}
               onChange={(e) => setDraftPrompt(e.target.value)}
               placeholder={
@@ -261,7 +348,7 @@ export function ReviewStylesPanel() {
           </>
         )}
         {error && <p className="text-xs text-destructive">{error}</p>}
-      </div>
+      </section>
     </div>
   );
 }
