@@ -4,10 +4,12 @@ import { CommandIcon, RobotIcon } from "@phosphor-icons/react";
 import { AgentPromptBar } from "@/components/agents/AgentPromptBar";
 import { AgentRunCard } from "@/components/agents/AgentRunCard";
 import { AgentsPageHeader } from "@/components/agents/AgentsSidebar";
-import { MOCK_THREADS } from "@/lib/agents/mock-data";
+import { useAgentThreads, useCreateAgentThread } from "@/lib/agents/queries";
 
 export function AgentsHome() {
-  const recentRuns = [...MOCK_THREADS].sort((a, b) => b.updatedAt - a.updatedAt);
+  const threadsQuery = useAgentThreads();
+  const createThread = useCreateAgentThread();
+  const recentRuns = threadsQuery.data ?? [];
 
   return (
     <div className="flex min-w-0 flex-1 flex-col">
@@ -15,7 +17,10 @@ export function AgentsHome() {
 
       <div className="flex min-h-0 flex-1 flex-col items-center overflow-y-auto px-6 py-10">
         <div className="flex w-full max-w-2xl flex-col items-center">
-          <AgentPromptBar />
+          <AgentPromptBar
+            onSubmit={(prompt) => createThread.mutate({ prompt })}
+            disabled={createThread.isPending}
+          />
 
           <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
             <button
@@ -37,9 +42,13 @@ export function AgentsHome() {
         </div>
 
         <div className="mt-10 w-full max-w-2xl space-y-2">
-          {recentRuns.map((thread) => (
-            <AgentRunCard key={thread.id} thread={thread} />
-          ))}
+          {threadsQuery.isLoading ? (
+            <p className="text-center text-sm text-[var(--ui-text-dim)]">Loading agents…</p>
+          ) : recentRuns.length === 0 ? (
+            <AgentsHomeEmptyState />
+          ) : (
+            recentRuns.map((thread) => <AgentRunCard key={thread.id} thread={thread} />)
+          )}
         </div>
       </div>
     </div>

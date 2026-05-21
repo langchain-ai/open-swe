@@ -1,0 +1,99 @@
+import type { AgentThread, Message } from "./types";
+
+export type { AgentThread, Message };
+
+export interface ThreadCreateRequest {
+  prompt: string;
+  repo?: string | null;
+}
+
+export interface ThreadMessageRequest {
+  content: string;
+}
+
+const API_BASE = (import.meta.env.VITE_DASHBOARD_API_BASE_URL ?? "").replace(/\/$/, "");
+
+async function agentsRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const res = await fetch(`${API_BASE}/dashboard/api${path}`, {
+    ...init,
+    credentials: "include",
+    headers: {
+      "Content-Type": "application/json",
+      ...(init.headers ?? {}),
+    },
+  });
+  if (!res.ok) {
+    let message = res.statusText;
+    try {
+      const body = await res.json();
+      if (body?.detail) {
+        message = typeof body.detail === "string" ? body.detail : JSON.stringify(body.detail);
+      }
+    } catch {
+      /* ignore */
+    }
+    throw new Error(message);
+  }
+  if (res.status === 204) return undefined as T;
+  return (await res.json()) as T;
+}
+
+export const agentsApi = {
+  listThreads: () => agentsRequest<AgentThread[]>("/threads"),
+  getThread: (threadId: string) =>
+    agentsRequest<AgentThread>(`/threads/${encodeURIComponent(threadId)}`),
+  createThread: (body: ThreadCreateRequest) =>
+    agentsRequest<AgentThread>("/threads", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  sendMessage: (threadId: string, body: ThreadMessageRequest) =>
+    agentsRequest<AgentThread>(`/threads/${encodeURIComponent(threadId)}/messages`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  cancelThread: (threadId: string) =>
+    agentsRequest<AgentThread>(`/threads/${encodeURIComponent(threadId)}/cancel`, {
+      method: "POST",
+    }),
+  streamUrl: (threadId: string) =>
+    `${API_BASE}/dashboard/api/threads/${encodeURIComponent(threadId)}/stream`,
+};
+
+export function formatRelativeTime(ts: number): string {
+  const diff = Date.now() - ts;
+  const mins = Math.floor(diff / 60000);
+  if (mins < 60) return `${mins}m`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days}d`;
+  const weeks = Math.floor(days / 7);
+  return `${weeks}w`;
+}
+
+export type ThreadGroup = "today" | "last30" | "older";
+
+export function groupThreads(threads: AgentThread[]): Record<ThreadGroup, AgentThread[]> {
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+  const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
+
+  const groups: Record<ThreadGroup, AgentThread[]> = {
+    today: [],
+    last30: [],
+    older: [],
+  };
+
+  for (const thread of [...threads].sort((a, b) => b.updatedAt - a.updatedAt)) {
+    if (thread.updatedAt >= todayStart.getTime()) {
+      groups.today.push(thread);
+    } else if (thread.updatedAt >= thirtyDaysAgo) {
+      groups.last30.push(thread);
+    } else {
+      groups.older.push(thread);
+    }
+  }
+
+  return groups;
+}

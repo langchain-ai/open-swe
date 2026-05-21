@@ -7,6 +7,8 @@ import { AgentsPageHeader, AgentsShell } from "@/components/agents/AgentsSidebar
 import { MessageView, summarizeChangedFiles } from "@/components/agents/ported";
 import type { SessionUser } from "@/lib/api";
 import type { AgentThread } from "@/lib/agents/types";
+import { useSendAgentMessage } from "@/lib/agents/queries";
+import { useAgentThreadStream } from "@/lib/agents/useThreadStream";
 
 interface AgentThreadViewProps {
   user: SessionUser;
@@ -14,6 +16,9 @@ interface AgentThreadViewProps {
 }
 
 export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
+  const sendMessage = useSendAgentMessage(thread.id);
+  useAgentThreadStream(thread.id, thread.status === "running");
+
   const changedFiles = useMemo(() => {
     const agentMessages = thread.messages.filter((m) => m.author === "agent");
     const allChunks = agentMessages.flatMap((m) => m.chunks);
@@ -21,6 +26,7 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
   }, [thread.messages]);
 
   const hasMessages = thread.messages.length > 0;
+  const isStreaming = thread.status === "running";
 
   return (
     <AgentsShell
@@ -49,7 +55,7 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
 
                   <MessageView
                     messages={thread.messages}
-                    isStreaming={false}
+                    isStreaming={isStreaming}
                     contentWidthClass="max-w-3xl"
                   />
 
@@ -76,13 +82,30 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
 
               <div className="shrink-0 border-t border-[var(--ui-border)] bg-[var(--ui-surface)] px-6 py-4">
                 <div className="mx-auto max-w-3xl">
-                  <AgentPromptBar placeholder="Add a follow up" compact />
+                  <AgentPromptBar
+                    placeholder="Add a follow up"
+                    compact
+                    disabled={sendMessage.isPending}
+                    onSubmit={(content) => sendMessage.mutate(content)}
+                  />
                 </div>
               </div>
             </>
           ) : (
-            <div className="flex flex-1 items-center justify-center text-sm text-[var(--ui-text-dim)]">
-              This thread has no messages yet.
+            <div className="flex flex-1 flex-col items-center justify-center gap-4 px-6">
+              <p className="text-sm text-[var(--ui-text-dim)]">
+                {isStreaming ? "Agent is starting…" : "This thread has no messages yet."}
+              </p>
+              {!isStreaming && (
+                <div className="w-full max-w-3xl">
+                  <AgentPromptBar
+                    placeholder="Send the first message"
+                    compact
+                    disabled={sendMessage.isPending}
+                    onSubmit={(content) => sendMessage.mutate(content)}
+                  />
+                </div>
+              )}
             </div>
           )}
         </div>

@@ -16,12 +16,14 @@ const MODELS = ["GPT-5.5 High", "Opus 4.6 High", "Composer 2.5 Fast"];
 interface AgentPromptBarProps {
   placeholder?: string;
   compact?: boolean;
+  disabled?: boolean;
   onSubmit?: (value: string) => void;
 }
 
 export function AgentPromptBar({
   placeholder = "Ask Cursor to build, fix bugs, explore",
   compact = false,
+  disabled = false,
   onSubmit,
 }: AgentPromptBarProps) {
   const [value, setValue] = useState("");
@@ -29,7 +31,7 @@ export function AgentPromptBar({
 
   const handleSubmit = () => {
     const trimmed = value.trim();
-    if (!trimmed) return;
+    if (!trimmed || disabled) return;
     onSubmit?.(trimmed);
     setValue("");
   };
@@ -47,6 +49,7 @@ export function AgentPromptBar({
           onChange={(e) => setValue(e.target.value)}
           placeholder={placeholder}
           rows={compact ? 1 : 3}
+          disabled={disabled}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();

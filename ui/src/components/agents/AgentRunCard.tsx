@@ -1,7 +1,7 @@
 import { Link } from "@tanstack/react-router";
 import { CheckCircleIcon, GitBranchIcon, GitPullRequestIcon } from "@phosphor-icons/react";
 
-import { formatRelativeTime } from "@/lib/agents/mock-data";
+import { formatRelativeTime } from "@/lib/agents/api";
 import type { AgentThread } from "@/lib/agents/types";
 import { cn } from "@/lib/utils";
 

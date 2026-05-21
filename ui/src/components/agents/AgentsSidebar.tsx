@@ -12,7 +12,8 @@ import { useEffect, useRef, useState } from "react";
 
 import type { SessionUser } from "@/lib/api";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { MOCK_THREADS, groupThreads } from "@/lib/agents/mock-data";
+import { groupThreads } from "@/lib/agents/api";
+import { useAgentThreads } from "@/lib/agents/queries";
 import type { AgentThread } from "@/lib/agents/types";
 import { cn } from "@/lib/utils";
 
@@ -33,7 +34,9 @@ const NAV: Array<{
 ];
 
 export function AgentsSidebar({ user, activeThreadId }: AgentsSidebarProps) {
-  const groups = groupThreads(MOCK_THREADS);
+  const threadsQuery = useAgentThreads();
+  const threads = threadsQuery.data ?? [];
+  const groups = groupThreads(threads);
   const initials = (user.login || "?").slice(0, 2).toUpperCase();
 
   return (
