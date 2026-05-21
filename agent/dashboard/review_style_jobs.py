@@ -15,8 +15,10 @@ from ..review_style_collector import (
 )
 from .review_styles import (
     get_review_style,
+    has_saved_prompt,
     mark_analysis_failed,
     mark_analysis_running,
+    reconcile_running_status,
     update_review_style,
 )
 
@@ -130,6 +132,8 @@ async def sync_review_style_run_status(full_name: str) -> dict[str, Any]:
         return record
 
     client = _client()
+    run_status: str | None = None
+    run_missing = False
     try:
         if isinstance(run_id, str) and run_id:
             run = await client.runs.get(thread_id, run_id)
@@ -138,16 +142,39 @@ async def sync_review_style_run_status(full_name: str) -> dict[str, Any]:
             items = runs if isinstance(runs, list) else (runs.get("runs") or [])
             run = items[0] if items else None
         if not run:
-            return record
-        status = run.get("status") if isinstance(run, dict) else getattr(run, "status", None)
-        if status in ("success", "completed"):
-            return await get_review_style(full_name) or record
-        if status in ("error", "failed", "timeout", "interrupted"):
-            logger.warning("Review style analyzer run failed for %s (status=%s)", full_name, status)
-            return await mark_analysis_failed(
-                full_name,
-                "Analysis run failed. Please retry later.",
-            )
+            run_missing = True
+        else:
+            raw = run.get("status") if isinstance(run, dict) else getattr(run, "status", None)
+            run_status = raw.lower() if isinstance(raw, str) else None
     except Exception:
         logger.debug("Could not sync run status for %s", full_name, exc_info=True)
-    return record
+        return record
+
+    return await reconcile_running_status(
+        full_name, record, run_status=run_status, run_missing=run_missing
+    )
+
+
+async def cancel_review_style_analysis(full_name: str) -> dict[str, Any]:
+    """Stop an in-flight analyzer run and clear stale ``running`` status."""
+    record = await get_review_style(full_name)
+    if not record:
+        return {}
+
+    if record.get("status") != "running":
+        return record
+
+    thread_id = record.get("analysis_thread_id")
+    run_id = record.get("analysis_run_id")
+    if isinstance(thread_id, str) and isinstance(run_id, str) and thread_id and run_id:
+        try:
+            await _client().runs.cancel(thread_id, run_id, wait=False)
+        except Exception:
+            logger.debug("Could not cancel review style run for %s", full_name, exc_info=True)
+
+    if has_saved_prompt(record):
+        return await update_review_style(full_name, {"status": "completed", "error": None})
+    return await update_review_style(
+        full_name,
+        {"status": "idle", "error": None, "analysis_run_id": None},
+    )

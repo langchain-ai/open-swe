@@ -130,8 +130,60 @@ async def update_review_style(full_name: str, patch: dict[str, Any]) -> dict[str
     return value
 
 
+def has_saved_prompt(record: dict[str, Any]) -> bool:
+    prompt = record.get("custom_prompt")
+    return isinstance(prompt, str) and bool(prompt.strip())
+
+
 async def set_custom_prompt(full_name: str, custom_prompt: str) -> dict[str, Any]:
-    return await update_review_style(full_name, {"custom_prompt": custom_prompt})
+    existing = await get_review_style(full_name)
+    patch: dict[str, Any] = {"custom_prompt": custom_prompt}
+    if existing and existing.get("status") == "running":
+        patch["status"] = "completed"
+        patch["error"] = None
+    return await update_review_style(full_name, patch)
+
+
+async def reconcile_running_status(
+    full_name: str,
+    record: dict[str, Any],
+    *,
+    run_status: str | None,
+    run_missing: bool = False,
+) -> dict[str, Any]:
+    """Clear stale ``running`` when the analyzer run is done or unreachable."""
+    if record.get("status") != "running":
+        return record
+
+    terminal_success = frozenset({"success", "completed"})
+    terminal_failure = frozenset({"error", "failed", "timeout", "interrupted", "cancelled"})
+
+    if run_status in terminal_success:
+        if has_saved_prompt(record):
+            return await update_review_style(full_name, {"status": "completed", "error": None})
+        return await mark_analysis_failed(
+            full_name,
+            "Analysis finished without saving a prompt. Please retry.",
+        )
+
+    if run_status in terminal_failure:
+        if has_saved_prompt(record):
+            return await update_review_style(full_name, {"status": "completed", "error": None})
+        return await mark_analysis_failed(full_name, "Analysis run ended. Please retry.")
+
+    if run_missing:
+        if has_saved_prompt(record):
+            return await update_review_style(full_name, {"status": "completed", "error": None})
+        return await mark_analysis_failed(
+            full_name,
+            "Analysis was interrupted or the run is no longer available. Please retry.",
+        )
+
+    return record
+
+
+async def delete_review_style(full_name: str) -> None:
+    await _client().store.delete_item(REVIEW_STYLES_NAMESPACE, full_name)
 
 
 async def mark_analysis_running(

@@ -8,6 +8,7 @@ import logging
 import os
 import secrets
 import time
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import urlparse
 
@@ -139,26 +140,61 @@ def require_session(request: Request) -> dict[str, Any]:
     return decode_session(token)
 
 
-async def exchange_code(code: str) -> str:
-    """Exchange an OAuth authorization code for a user-to-server access token."""
+def expires_at_from_github_response(data: dict[str, Any], *, field: str) -> str | None:
+    """Convert GitHub ``expires_in`` / ``refresh_token_expires_in`` to an ISO timestamp."""
+    raw = data.get(field)
+    if not isinstance(raw, int | float) or raw <= 0:
+        return None
+    return (datetime.now(UTC) + timedelta(seconds=int(raw))).isoformat()
+
+
+async def _request_github_tokens(body: dict[str, str]) -> dict[str, Any]:
     if not GITHUB_APP_CLIENT_ID or not GITHUB_APP_CLIENT_SECRET:
         raise HTTPException(500, "GitHub App OAuth not configured")
     async with httpx.AsyncClient() as client:
         resp = await client.post(
             "https://github.com/login/oauth/access_token",
             headers={"Accept": "application/json"},
-            data={
-                "client_id": GITHUB_APP_CLIENT_ID,
-                "client_secret": GITHUB_APP_CLIENT_SECRET,
-                "code": code,
-            },
+            data=body,
         )
     resp.raise_for_status()
     data = resp.json()
-    token = data.get("access_token")
-    if not token:
+    if not isinstance(data, dict):
+        raise HTTPException(502, "unexpected GitHub OAuth response")
+    if data.get("error"):
+        raise HTTPException(
+            400, f"github oauth error: {data.get('error_description') or data['error']}"
+        )
+    return data
+
+
+async def exchange_code(code: str) -> dict[str, Any]:
+    """Exchange an OAuth authorization code for user-to-server tokens."""
+    data = await _request_github_tokens(
+        {
+            "client_id": GITHUB_APP_CLIENT_ID,
+            "client_secret": GITHUB_APP_CLIENT_SECRET,
+            "code": code,
+        }
+    )
+    if not data.get("access_token"):
         raise HTTPException(400, f"oauth exchange failed: {data}")
-    return token
+    return data
+
+
+async def refresh_user_access_token(refresh_token: str) -> dict[str, Any]:
+    """Rotate an expiring user access token using its refresh token."""
+    data = await _request_github_tokens(
+        {
+            "client_id": GITHUB_APP_CLIENT_ID,
+            "client_secret": GITHUB_APP_CLIENT_SECRET,
+            "grant_type": "refresh_token",
+            "refresh_token": refresh_token,
+        }
+    )
+    if not data.get("access_token"):
+        raise HTTPException(400, f"oauth refresh failed: {data}")
+    return data
 
 
 async def fetch_github_user(access_token: str) -> tuple[dict[str, Any], str | None]:

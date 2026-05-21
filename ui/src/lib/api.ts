@@ -18,6 +18,12 @@ export class ApiError extends Error {
   }
 }
 
+export function isGithubReauthError(error: unknown): boolean {
+  if (!(error instanceof ApiError)) return false;
+  if (error.status === 401) return true;
+  return /github token|re-login required/i.test(error.message);
+}
+
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const res = await fetch(`${API_BASE}/dashboard/api${path}`, {
     ...init,
@@ -153,6 +159,14 @@ export const api = {
   analyzeReviewStyle: (full_name: string) =>
     request<ReviewStyle>(`/review-styles/${encodeURIComponent(full_name)}/analyze`, {
       method: "POST",
+    }),
+  cancelReviewStyle: (full_name: string) =>
+    request<ReviewStyle>(`/review-styles/${encodeURIComponent(full_name)}/cancel`, {
+      method: "POST",
+    }),
+  deleteReviewStyle: (full_name: string) =>
+    request<void>(`/review-styles/${encodeURIComponent(full_name)}`, {
+      method: "DELETE",
     }),
   getTeamSettings: () => request<TeamSettings>("/team-settings"),
   saveTeamSettings: (body: TeamSettings) =>

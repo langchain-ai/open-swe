@@ -35,17 +35,22 @@ from .oauth import (
 from .options import SUPPORTED_MODELS
 from .profiles import (
     ProfileUpdate,
-    get_access_token,
     get_profile,
+    get_valid_access_token,
     list_profiles,
-    upsert_access_token,
+    upsert_access_token_from_github_response,
     upsert_profile,
 )
-from .review_style_jobs import start_review_style_analysis, sync_review_style_run_status
+from .review_style_jobs import (
+    cancel_review_style_analysis,
+    start_review_style_analysis,
+    sync_review_style_run_status,
+)
 from .review_styles import (
     ReviewStyleCreate,
     ReviewStylePromptUpdate,
     create_review_style,
+    delete_review_style,
     get_review_style,
     list_review_styles,
     normalize_repo_full_name,
@@ -162,13 +167,16 @@ async def auth_callback(request: Request, code: str, state: str) -> RedirectResp
 
     redirect_to = sanitize_redirect_to(state_payload.get("redirect_to")) or _frontend_base_url()
 
-    access_token = await exchange_code(code)
+    token_data = await exchange_code(code)
+    access_token = token_data.get("access_token")
+    if not isinstance(access_token, str):
+        raise HTTPException(400, "oauth exchange missing access_token")
     user, email = await fetch_github_user(access_token)
     login = user.get("login")
     if not login:
         raise HTTPException(400, "could not resolve GitHub login")
 
-    await upsert_access_token(login, email or "", access_token)
+    await upsert_access_token_from_github_response(login, email or "", token_data)
 
     session_jwt = issue_session(login=login, email=email, avatar_url=user.get("avatar_url"))
     response = RedirectResponse(redirect_to, status_code=302)
@@ -337,7 +345,8 @@ async def list_repos(
     ``/user/installations/{id}/repositories`` so users with multiple
     installations or >30 accessible repos get the complete set.
     """
-    token = await get_access_token(session["sub"])
+    login = session["sub"]
+    token = await get_valid_access_token(login)
     if not token:
         raise HTTPException(401, "github token unavailable, re-login required")
     headers = {
@@ -346,12 +355,26 @@ async def list_repos(
         "X-GitHub-Api-Version": "2022-11-28",
     }
     async with httpx.AsyncClient() as client:
-        installations = await _paginate(
-            client,
-            "https://api.github.com/user/installations",
-            headers=headers,
-            items_key="installations",
-        )
+        try:
+            installations = await _paginate(
+                client,
+                "https://api.github.com/user/installations",
+                headers=headers,
+                items_key="installations",
+            )
+        except HTTPException as exc:
+            if exc.status_code != 401:
+                raise
+            token = await get_valid_access_token(login, force_refresh=True)
+            if not token:
+                raise HTTPException(401, "github token expired, re-login required") from exc
+            headers["Authorization"] = f"Bearer {token}"
+            installations = await _paginate(
+                client,
+                "https://api.github.com/user/installations",
+                headers=headers,
+                items_key="installations",
+            )
         repositories: list[dict[str, Any]] = []
         for inst in installations:
             inst_id = inst.get("id")
@@ -386,6 +409,17 @@ async def list_repos(
     }
 
 
+def _raise_for_github_repo_status(status_code: int) -> None:
+    if status_code == 401:
+        raise HTTPException(401, "github token expired, re-login required")
+    if status_code == 404:
+        raise HTTPException(404, "repository not found")
+    if status_code == 403:
+        raise HTTPException(403, "no access to this private repository")
+    if status_code != 200:
+        raise HTTPException(502, f"github API error ({status_code})")
+
+
 async def _assert_repo_available_for_style_analysis(full_name: str, token: str) -> None:
     """Ensure the repo exists and is readable for style learning.
 
@@ -404,16 +438,28 @@ async def _assert_repo_available_for_style_analysis(full_name: str, token: str) 
             f"https://api.github.com/repos/{owner}/{name}",
             headers=headers,
         )
-        if r.status_code == 404:
-            raise HTTPException(404, "repository not found")
-        if r.status_code == 403:
-            raise HTTPException(403, "no access to this private repository")
-        if r.status_code != 200:
-            raise HTTPException(502, f"github API error ({r.status_code})")
+        _raise_for_github_repo_status(r.status_code)
         body = r.json()
         if body.get("private") is not True:
             return
         # Private repo: 200 from GitHub implies the user's token can read it.
+
+
+async def _require_repo_access_for_user(login: str, full_name: str) -> str:
+    """Verify the user can read ``full_name`` on GitHub; return a valid access token."""
+    token = await get_valid_access_token(login)
+    if not token:
+        raise HTTPException(401, "github token unavailable, re-login required")
+    try:
+        await _assert_repo_available_for_style_analysis(full_name, token)
+    except HTTPException as exc:
+        if exc.status_code != 401:
+            raise
+        token = await get_valid_access_token(login, force_refresh=True)
+        if not token:
+            raise HTTPException(401, "github token expired, re-login required") from exc
+        await _assert_repo_available_for_style_analysis(full_name, token)
+    return token
 
 
 @router.get("/review-styles")
@@ -436,10 +482,7 @@ async def api_create_review_style(
     body: ReviewStyleCreate,
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
-    token = await get_access_token(session["sub"])
-    if not token:
-        raise HTTPException(401, "github token unavailable, re-login required")
-    await _assert_repo_available_for_style_analysis(body.full_name, token)
+    await _require_repo_access_for_user(session["sub"], body.full_name)
     return await create_review_style(body.full_name, session["sub"])
 
 
@@ -467,6 +510,7 @@ async def api_update_review_style_prompt(
     record = await get_review_style(full_name)
     if not record:
         raise HTTPException(404, "review style not found")
+    await _require_repo_access_for_user(session["sub"], full_name)
     return await set_custom_prompt(full_name, body.custom_prompt)
 
 
@@ -476,17 +520,45 @@ async def api_analyze_review_style(
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
     full_name = normalize_repo_full_name(full_name)
-    token = await get_access_token(session["sub"])
-    if not token:
-        raise HTTPException(401, "github token unavailable, re-login required")
-    await _assert_repo_available_for_style_analysis(full_name, token)
+    token = await _require_repo_access_for_user(session["sub"], full_name)
     record = await get_review_style(full_name)
     if not record:
         record = await create_review_style(full_name, session["sub"])
     if record.get("status") == "running":
-        raise HTTPException(409, "analysis already running")
+        record = await sync_review_style_run_status(full_name)
+        if record.get("status") == "running":
+            raise HTTPException(409, "analysis already running")
     return await start_review_style_analysis(
         full_name,
         github_token=token,
         created_by=session["sub"],
     )
+
+
+@router.post("/review-styles/{full_name:path}/cancel")
+async def api_cancel_review_style(
+    full_name: str,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    del session
+    full_name = normalize_repo_full_name(full_name)
+    record = await get_review_style(full_name)
+    if not record:
+        raise HTTPException(404, "review style not found")
+    return await cancel_review_style_analysis(full_name)
+
+
+@router.delete("/review-styles/{full_name:path}")
+async def api_delete_review_style(
+    full_name: str,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> Response:
+    del session
+    full_name = normalize_repo_full_name(full_name)
+    record = await get_review_style(full_name)
+    if not record:
+        raise HTTPException(404, "review style not found")
+    if record.get("status") == "running":
+        await cancel_review_style_analysis(full_name)
+    await delete_review_style(full_name)
+    return Response(status_code=204)
