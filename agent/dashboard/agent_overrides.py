@@ -72,6 +72,16 @@ async def load_profile(login: str) -> dict[str, Any] | None:
     return value if isinstance(value, dict) else None
 
 
+def profile_create_prs(profile: dict[str, Any] | None) -> bool:
+    """Return whether the agent should automatically open a PR. Defaults to True."""
+    if not isinstance(profile, dict):
+        return True
+    value = profile.get("create_prs")
+    if isinstance(value, bool):
+        return value
+    return True
+
+
 def normalize_profile_overrides(profile: dict[str, Any]) -> tuple[str | None, str | None]:
     """Return ``(model_id, reasoning_effort)`` if both are valid, else ``(None, None)``."""
     model_id = profile.get("default_model")

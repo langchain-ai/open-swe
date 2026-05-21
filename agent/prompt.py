@@ -377,6 +377,13 @@ def _render_collaboration_section(identity: CollaboratorIdentity | None) -> str:
     )
 
 
+NO_PR_OVERRIDE_SECTION = """---
+
+### Pull Request Policy Override
+
+The user has disabled automatic PR creation. After implementation, **commit and push your branch** so the work is preserved, then notify the source channel with the branch URL (e.g. `https://github.com/<owner>/<repo>/tree/<branch>`) and a summary. **Do not** run `gh pr create` or `gh pr edit`. Ignore any instructions elsewhere in this prompt that tell you to open or update a draft pull request."""
+
+
 SYSTEM_PROMPT_TEMPLATE = (
     WORKING_ENV_SECTION
     + TASK_OVERVIEW_SECTION
@@ -394,6 +401,7 @@ SYSTEM_PROMPT_TEMPLATE = (
     + COMMUNICATION_SECTION
     + EXTERNAL_UNTRUSTED_COMMENTS_SECTION
     + COMMIT_PR_SECTION
+    + "{pr_policy_override_section}"
     + "{collaboration_section}"
 )
 
@@ -403,6 +411,7 @@ def construct_system_prompt(
     linear_project_id: str = "",
     linear_issue_number: str = "",
     triggering_user_identity: CollaboratorIdentity | None = None,
+    create_prs: bool = True,
 ) -> str:
     default_prompt_section = _load_default_prompt()
     return SYSTEM_PROMPT_TEMPLATE.format(
@@ -410,5 +419,6 @@ def construct_system_prompt(
         linear_project_id=linear_project_id or "<PROJECT_ID>",
         linear_issue_number=linear_issue_number or "<ISSUE_NUMBER>",
         default_prompt_section=default_prompt_section,
+        pr_policy_override_section="" if create_prs else NO_PR_OVERRIDE_SECTION,
         collaboration_section=_render_collaboration_section(triggering_user_identity),
     )

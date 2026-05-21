@@ -31,8 +31,11 @@ from langsmith.sandbox import SandboxClientError
 from .dashboard.agent_overrides import (
     load_profile,
     normalize_profile_overrides,
+    profile_create_prs,
     resolve_github_login,
 )
+from .dashboard.options import DEFAULT_MODEL_ID
+from .dashboard.team_settings import get_team_default_model
 from .integrations.langsmith import _configure_github_proxy
 from .middleware import (
     ModelFallbackMiddleware,
@@ -331,7 +334,7 @@ async def ensure_sandbox_for_thread(thread_id: str) -> SandboxBackendProtocol:
     return sandbox_backend
 
 
-DEFAULT_LLM_MODEL_ID = "openai:gpt-5.5"
+DEFAULT_LLM_MODEL_ID = DEFAULT_MODEL_ID
 DEFAULT_LLM_MAX_TOKENS = 64_000
 DEFAULT_RECURSION_LIMIT = 9_999
 MODEL_CALL_RECURSION_LIMIT = 5_000  # ~half the recursion limit to account for tool calls
@@ -376,8 +379,10 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     def backend_factory(_runtime: object, _thread_id: str = thread_id) -> SandboxBackendProtocol:
         return _get_cached_sandbox_backend(_thread_id)
 
-    model_id = os.environ.get("LLM_MODEL_ID", DEFAULT_LLM_MODEL_ID)
-    profile_effort: str | None = None
+    model_id, profile_effort = await get_team_default_model("agent")
+    logger.info("Using team default agent model: model=%s effort=%s", model_id, profile_effort)
+
+    profile: dict[str, Any] | None = None
     profile_login = resolve_github_login(config)
     if profile_login:
         profile = await load_profile(profile_login)
@@ -392,6 +397,10 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 )
                 model_id = overridden_model
                 profile_effort = overridden_effort
+
+    create_prs = profile_create_prs(profile)
+    if not create_prs:
+        logger.info("PR creation disabled by profile for %s", profile_login)
 
     model_kwargs = provider_model_kwargs(
         model_id,
@@ -418,6 +427,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             linear_project_id=linear_project_id,
             linear_issue_number=linear_issue_number,
             triggering_user_identity=triggering_user_identity,
+            create_prs=create_prs,
         ),
         tools=[
             http_request,

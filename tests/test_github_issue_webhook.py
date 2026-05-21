@@ -321,7 +321,7 @@ def test_github_webhook_blocks_reviewer_repo_not_in_reviewer_repo_allowlist(monk
     )
 
     assert response.status_code == 200
-    assert response.json() == {"status": "ignored", "reason": "Repository not in allowlist"}
+    assert response.json() == {"status": "ignored", "reason": "Repository not enabled for review"}
     assert called is False
 
 
@@ -873,7 +873,7 @@ def test_trigger_pr_review_from_ref_respects_reviewer_allowlist(monkeypatch) -> 
         )
     )
 
-    assert result == {"success": False, "error": "Repository not allowed for reviewer"}
+    assert result == {"success": False, "error": "Repository not enabled for review"}
     assert called is False
 
 
@@ -1185,7 +1185,7 @@ def test_github_webhook_blocks_pr_review_command_outside_reviewer_allowlist(monk
     assert response.status_code == 200
     assert response.json() == {
         "status": "ignored",
-        "reason": "Repository not in reviewer allowlist",
+        "reason": "Repository not enabled for review",
     }
 
 

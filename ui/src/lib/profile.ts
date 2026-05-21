@@ -64,15 +64,10 @@ export function buildProfileUpdate(
     default_model: current?.default_model ?? fallbackModel,
     reasoning_effort: current?.reasoning_effort ?? fallbackEffort,
     default_repo: current?.default_repo ?? null,
-    first_name: current?.first_name ?? null,
-    last_name: current?.last_name ?? null,
     base_branch: current?.base_branch ?? null,
     branch_prefix: current?.branch_prefix ?? null,
     auto_fix_ci: current?.auto_fix_ci ?? true,
     create_prs: current?.create_prs ?? true,
-    allow_artifacts: current?.allow_artifacts ?? false,
-    slack_notifications: current?.slack_notifications ?? true,
-    preferred_pr_destination: current?.preferred_pr_destination ?? null,
     ...patch,
   };
 }

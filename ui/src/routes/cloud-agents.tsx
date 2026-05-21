@@ -217,16 +217,18 @@ function CloudAgentsPage() {
           <SettingsRow
             label="Automatically fix CI failures"
             description="Agent will attempt to fix failing CI checks on PRs it opens."
+            comingSoon
             control={
               <Switch
                 checked={profile.data?.auto_fix_ci ?? true}
                 onCheckedChange={(v) => persist({ auto_fix_ci: v })}
+                disabled
               />
             }
           />
           <SettingsRow
             label="Create PRs"
-            description="Automatically create a pull request when a Cloud Agent completes."
+            description="Automatically create a pull request when a Cloud Agent completes. When disabled, the branch is still pushed."
             control={
               <Switch
                 checked={profile.data?.create_prs ?? true}
@@ -234,30 +236,7 @@ function CloudAgentsPage() {
               />
             }
           />
-          <SettingsRow
-            label="Allow posting artifacts to GitHub"
-            description="Allow cloud agents to embed images directly in PR descriptions using hard-to-guess public URLs."
-            control={
-              <Switch
-                checked={profile.data?.allow_artifacts ?? false}
-                onCheckedChange={(v) => persist({ allow_artifacts: v })}
-              />
-            }
-          />
         </div>
-      </SettingsSection>
-
-      <SettingsSection title="Notifications">
-        <SettingsRow
-          label="Slack Notifications"
-          description="Get notified in Slack when a Cloud Agent completes a task."
-          control={
-            <Switch
-              checked={profile.data?.slack_notifications ?? true}
-              onCheckedChange={(v) => persist({ slack_notifications: v })}
-            />
-          }
-        />
       </SettingsSection>
 
       {error && <p className="text-xs text-destructive">{error}</p>}

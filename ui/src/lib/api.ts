@@ -61,15 +61,10 @@ export interface Profile {
   default_model?: string;
   reasoning_effort?: string;
   default_repo?: string | null;
-  first_name?: string | null;
-  last_name?: string | null;
   base_branch?: string | null;
   branch_prefix?: string | null;
   auto_fix_ci?: boolean;
   create_prs?: boolean;
-  allow_artifacts?: boolean;
-  slack_notifications?: boolean;
-  preferred_pr_destination?: string | null;
   updated_at?: string;
 }
 
@@ -77,18 +72,13 @@ export interface ProfileUpdate {
   default_model: string;
   reasoning_effort: string;
   default_repo?: string | null;
-  first_name?: string | null;
-  last_name?: string | null;
   base_branch?: string | null;
   branch_prefix?: string | null;
   auto_fix_ci?: boolean;
   create_prs?: boolean;
-  allow_artifacts?: boolean;
-  slack_notifications?: boolean;
-  preferred_pr_destination?: string | null;
 }
 
-export type TriggerMode = "every_push" | "ready_for_review" | "manual";
+export type TriggerMode = "every_push" | "once_per_pr" | "manual";
 export type AutofixMode = "off" | "low" | "medium" | "high";
 
 export interface TeamSettings {
@@ -97,6 +87,10 @@ export interface TeamSettings {
   pr_summaries: boolean;
   autofix_mode: AutofixMode;
   autofix_severity_threshold: AutofixMode;
+  default_agent_model?: string | null;
+  default_agent_reasoning_effort?: string | null;
+  default_reviewer_model?: string | null;
+  default_reviewer_reasoning_effort?: string | null;
   updated_at?: string | null;
 }
 
@@ -163,6 +157,13 @@ export const api = {
   getTeamSettings: () => request<TeamSettings>("/team-settings"),
   saveTeamSettings: (body: TeamSettings) =>
     request<TeamSettings>("/team-settings", { method: "PUT", body: JSON.stringify(body) }),
+  listEnabledReviewRepos: () =>
+    request<{ repos: Array<string> }>("/enabled-review-repos"),
+  setEnabledReviewRepo: (full_name: string, enabled: boolean) =>
+    request<{ repos: Array<string> }>("/enabled-review-repos", {
+      method: "PUT",
+      body: JSON.stringify({ full_name, enabled }),
+    }),
   adminListProfiles: () => request<Array<Profile>>("/admin/profiles"),
   adminSaveProfile: (login: string, body: ProfileUpdate & { email?: string }) =>
     request<Profile>(`/admin/profiles/${encodeURIComponent(login)}`, {

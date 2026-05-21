@@ -1,3 +1,5 @@
+import { Link } from "@tanstack/react-router";
+import { ArrowLeftIcon } from "@phosphor-icons/react";
 import type { ReactNode } from "react";
 
 import type { SessionUser } from "@/lib/api";
@@ -7,15 +9,25 @@ interface AppShellProps {
   user: SessionUser;
   title: string;
   description?: string;
+  backTo?: { to: string; label: string };
   children: ReactNode;
 }
 
-export function AppShell({ user, title, description, children }: AppShellProps) {
+export function AppShell({ user, title, description, backTo, children }: AppShellProps) {
   return (
-    <div className="flex min-h-svh bg-background text-foreground">
+    <div className="flex h-svh overflow-hidden bg-background text-foreground">
       <AppSidebar user={user} />
       <main className="flex-1 overflow-y-auto">
         <div className="mx-auto max-w-3xl px-8 py-10">
+          {backTo && (
+            <Link
+              to={backTo.to}
+              className="mb-4 inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+            >
+              <ArrowLeftIcon className="size-3.5" />
+              {backTo.label}
+            </Link>
+          )}
           <header className="mb-8">
             <h1 className="font-heading text-lg font-medium">{title}</h1>
             {description && (
@@ -60,18 +72,38 @@ interface SettingsRowProps {
   description?: string;
   control: ReactNode;
   htmlFor?: string;
+  comingSoon?: boolean;
 }
 
-export function SettingsRow({ label, description, control, htmlFor }: SettingsRowProps) {
+export function SettingsRow({
+  label,
+  description,
+  control,
+  htmlFor,
+  comingSoon,
+}: SettingsRowProps) {
   return (
     <div className="flex items-center justify-between gap-6 border-b border-border px-4 py-3 last:border-b-0">
       <label className="flex flex-col gap-0.5" htmlFor={htmlFor}>
-        <span className="text-xs font-medium text-foreground">{label}</span>
+        <span className="flex items-center gap-2">
+          <span
+            className={`text-xs font-medium ${
+              comingSoon ? "text-muted-foreground" : "text-foreground"
+            }`}
+          >
+            {label}
+          </span>
+          {comingSoon && (
+            <span className="rounded-sm border border-border bg-muted px-1.5 py-0.5 text-[10px] font-normal text-muted-foreground">
+              Coming soon
+            </span>
+          )}
+        </span>
         {description && (
           <span className="text-xs text-muted-foreground">{description}</span>
         )}
       </label>
-      <div className="shrink-0">{control}</div>
+      <div className={`shrink-0 ${comingSoon ? "opacity-50" : ""}`}>{control}</div>
     </div>
   );
 }

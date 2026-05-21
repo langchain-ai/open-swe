@@ -1,10 +1,10 @@
-import { Navigate, createFileRoute } from "@tanstack/react-router";
+import { Link, Navigate, createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { CaretRightIcon, GithubLogoIcon } from "@phosphor-icons/react";
+import { useEffect, useMemo, useState } from "react";
 
-import type { AutofixMode, TeamSettings, TriggerMode } from "@/lib/api";
+import type { AutofixMode, ReposPayload, TeamSettings, TriggerMode } from "@/lib/api";
 import { AppShell, SettingsRow, SettingsSection } from "@/components/AppShell";
-import { ReviewStylesPanel } from "@/components/ReviewStylesPanel";
 import {
   Select,
   SelectContent,
@@ -14,19 +14,27 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
-import { api } from "@/lib/api";
+import { ApiError, api } from "@/lib/api";
 import { useSession } from "@/lib/session";
 
 export const Route = createFileRoute("/review")({ component: ReviewPage });
 
 const TRIGGER_MODES: Array<{ value: TriggerMode; label: string; description: string }> = [
-  { value: "every_push", label: "Every Push", description: "Review every push to a PR" },
   {
-    value: "ready_for_review",
-    label: "Ready For Review",
-    description: "Only when the PR is marked ready for review",
+    value: "every_push",
+    label: "Every Push",
+    description: "Review on every push to the PR",
   },
-  { value: "manual", label: "Manual", description: "Review only when explicitly invoked" },
+  {
+    value: "once_per_pr",
+    label: "Once Per PR",
+    description: "Review once when the PR is opened, skip subsequent pushes",
+  },
+  {
+    value: "manual",
+    label: "Manual Only",
+    description: "Only review when '@open-swe review' is commented",
+  },
 ];
 
 const AUTOFIX_MODES: Array<{ value: AutofixMode; label: string }> = [
@@ -42,6 +50,10 @@ const DEFAULT_SETTINGS: TeamSettings = {
   pr_summaries: true,
   autofix_mode: "off",
   autofix_severity_threshold: "medium",
+  default_agent_model: null,
+  default_agent_reasoning_effort: null,
+  default_reviewer_model: null,
+  default_reviewer_reasoning_effort: null,
 };
 
 function ReviewPage() {
@@ -96,16 +108,34 @@ function ReviewPage() {
       title="Open SWE Review"
       description="Automatically review pull requests for bugs and issues. Runs are billed based on underlying agent usage."
     >
+      <RepositoriesSection canEdit={canEdit} />
+
+      <SettingsSection title="Rules">
+        <Link
+          to="/review/styles"
+          className="flex items-center justify-between gap-6 px-4 py-3 hover:bg-muted/40"
+        >
+          <div className="flex flex-col gap-0.5">
+            <span className="text-xs font-medium text-foreground">Review Style Prompts</span>
+            <span className="text-xs text-muted-foreground">
+              Per-repo style guides learned from past PR review feedback.
+            </span>
+          </div>
+          <CaretRightIcon className="size-3.5 shrink-0 text-muted-foreground" />
+        </Link>
+      </SettingsSection>
+
       <SettingsSection title="Configuration">
         <div className="divide-y divide-border">
           <SettingsRow
             label="Trigger Mode"
             description={triggerDescription}
+            comingSoon
             control={
               <Select
                 value={current.trigger_mode}
                 onValueChange={(v) => persist({ trigger_mode: v as TriggerMode })}
-                disabled={!canEdit}
+                disabled
               >
                 <SelectTrigger className="w-40">
                   <SelectValue />
@@ -145,11 +175,12 @@ function ReviewPage() {
           <SettingsRow
             label="Autofix Mode"
             description="When enabled, the reviewer will propose fixes. Billed at plan rates."
+            comingSoon
             control={
               <Select
                 value={current.autofix_mode}
                 onValueChange={(v) => persist({ autofix_mode: v as AutofixMode })}
-                disabled={!canEdit}
+                disabled
               >
                 <SelectTrigger className="w-32">
                   <SelectValue />
@@ -167,13 +198,14 @@ function ReviewPage() {
           <SettingsRow
             label="Autofix Severity Threshold"
             description="Findings at this severity or higher are auto-fixed"
+            comingSoon
             control={
               <Select
                 value={current.autofix_severity_threshold}
                 onValueChange={(v) =>
                   persist({ autofix_severity_threshold: v as AutofixMode })
                 }
-                disabled={!canEdit}
+                disabled
               >
                 <SelectTrigger className="w-32">
                   <SelectValue />
@@ -197,14 +229,95 @@ function ReviewPage() {
         </p>
       )}
 
-      <SettingsSection
-        title="Review Style Prompts"
-        description="An agent browses recent merged PR review feedback on GitHub, then writes a per-repo style guide for the reviewer."
-      >
-        <ReviewStylesPanel />
-      </SettingsSection>
-
       {error && <p className="text-xs text-destructive">{error}</p>}
     </AppShell>
   );
 }
+
+function RepositoriesSection({ canEdit: _canEdit }: { canEdit: boolean }) {
+  const repos = useQuery<ReposPayload>({
+    queryKey: ["repos"],
+    queryFn: async () => {
+      try {
+        return await api.repos();
+      } catch (e) {
+        if (e instanceof ApiError && e.status === 401)
+          return { installations: [], repositories: [] };
+        throw e;
+      }
+    },
+  });
+
+  const enabled = useQuery({
+    queryKey: ["enabledReviewRepos"],
+    queryFn: api.listEnabledReviewRepos,
+  });
+
+  const enabledSet = useMemo(
+    () => new Set(enabled.data?.repos ?? []),
+    [enabled.data?.repos],
+  );
+
+  const grouped = useMemo(() => {
+    const byOwner = new Map<string, Array<{ full_name: string; private: boolean }>>();
+    for (const r of repos.data?.repositories ?? []) {
+      const [owner] = r.full_name.split("/");
+      if (!owner) continue;
+      const arr = byOwner.get(owner) ?? [];
+      arr.push(r);
+      byOwner.set(owner, arr);
+    }
+    return Array.from(byOwner.entries()).sort(([a], [b]) => a.localeCompare(b));
+  }, [repos.data?.repositories]);
+
+  const loading = repos.isLoading || enabled.isLoading;
+
+  return (
+    <SettingsSection
+      title="Repositories"
+      description="Source-control installations. Click into one to enable repos for automatic review."
+    >
+      <div className="divide-y divide-border">
+        {loading && (
+          <div className="p-4">
+            <Skeleton className="h-16 w-full" />
+          </div>
+        )}
+        {!loading && grouped.length === 0 && (
+          <p className="px-4 py-3 text-xs text-muted-foreground">
+            No GitHub App installations found. Install the open-swe GitHub App on an
+            account or org to manage repos here.
+          </p>
+        )}
+        {grouped.map(([owner, list]) => {
+          const enabledCount = list.filter((r) => enabledSet.has(r.full_name)).length;
+          return (
+            <Link
+              key={owner}
+              to="/review/repositories/$owner"
+              params={{ owner }}
+              className="flex items-center justify-between gap-4 px-4 py-3 hover:bg-muted/40"
+            >
+              <div className="flex items-center gap-3">
+                <GithubLogoIcon className="size-5 shrink-0 text-muted-foreground" />
+                <div className="flex flex-col gap-0.5">
+                  <div className="flex items-center gap-2 text-xs">
+                    <span className="font-medium text-foreground">{owner}</span>
+                  </div>
+                  <span className="text-xs text-muted-foreground">GitHub</span>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <span>
+                  {enabledCount}/{list.length} Repositories Enabled
+                </span>
+                <CaretRightIcon className="size-3.5" />
+              </div>
+            </Link>
+          );
+        })}
+      </div>
+    </SettingsSection>
+  );
+}
+
