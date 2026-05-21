@@ -1,22 +1,22 @@
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import {
-  CloudIcon,
-  GearSixIcon,
-  PlugsIcon,
-  ShieldCheckIcon,
-  SignOutIcon,
-  SlidersHorizontalIcon,
-} from "@phosphor-icons/react";
+  IoCloudOutline,
+  IoExtensionPuzzleOutline,
+  IoGitPullRequestOutline,
+  IoLogOutOutline,
+  IoOptionsOutline,
+  IoSettingsOutline,
+} from "react-icons/io5";
 import {  useEffect, useRef, useState } from "react";
-import type {ComponentType} from "react";
+import type {ComponentType, SVGProps} from "react";
 
 import type { SessionUser } from "@/lib/api";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
-type IconType = ComponentType<{ className?: string; weight?: "regular" | "fill" | "duotone" }>;
+type IconType = ComponentType<SVGProps<SVGSVGElement>>;
 
 interface NavItem {
   to: string;
@@ -26,11 +26,11 @@ interface NavItem {
 }
 
 const NAV: Array<NavItem> = [
-  { to: "/my-settings", label: "My Settings", icon: SlidersHorizontalIcon },
-  { to: "/cloud-agents", label: "Cloud Agents", icon: CloudIcon },
-  { to: "/review", label: "Open SWE Review", icon: ShieldCheckIcon },
-  { to: "/integrations", label: "Integrations", icon: PlugsIcon },
-  { to: "/admin", label: "Admin", icon: GearSixIcon, adminOnly: true },
+  { to: "/my-settings", label: "My Settings", icon: IoOptionsOutline },
+  { to: "/cloud-agents", label: "Cloud Agents", icon: IoCloudOutline },
+  { to: "/review", label: "Open SWE Review", icon: IoGitPullRequestOutline },
+  { to: "/integrations", label: "Integrations", icon: IoExtensionPuzzleOutline },
+  { to: "/admin", label: "Admin", icon: IoSettingsOutline, adminOnly: true },
 ];
 
 export function AppSidebar({ user }: { user: SessionUser }) {
@@ -130,7 +130,7 @@ export function AppSidebar({ user }: { user: SessionUser }) {
               onClick={() => void onLogout()}
               className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-xs/relaxed hover:bg-muted"
             >
-              <SignOutIcon className="size-3.5" />
+              <IoLogOutOutline className="size-3.5" />
               Sign out
             </button>
           </div>
