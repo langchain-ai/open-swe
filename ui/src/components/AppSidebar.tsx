@@ -1,6 +1,8 @@
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import {
+  IoArrowBackOutline,
+  IoChatbubblesOutline,
   IoCloudOutline,
   IoExtensionPuzzleOutline,
   IoGitPullRequestOutline,
@@ -26,6 +28,7 @@ interface NavItem {
 }
 
 const NAV: Array<NavItem> = [
+  { to: "/agents", label: "Agents", icon: IoChatbubblesOutline },
   { to: "/my-settings", label: "My Settings", icon: IoOptionsOutline },
   { to: "/cloud-agents", label: "Cloud Agents", icon: IoCloudOutline },
   { to: "/review", label: "Open SWE Review", icon: IoGitPullRequestOutline },
@@ -68,7 +71,14 @@ export function AppSidebar({ user }: { user: SessionUser }) {
 
   return (
     <aside className="flex h-svh w-60 shrink-0 flex-col border-r border-border bg-sidebar text-sidebar-foreground">
-      <div className="px-4 pt-5 pb-4">
+      <div className="space-y-3 px-4 pt-5 pb-4">
+        <Link
+          to="/agents"
+          className="flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+        >
+          <IoArrowBackOutline className="size-3.5" />
+          Back to Agents
+        </Link>
         <Link
           to="/my-settings"
           className="flex items-center gap-2 font-heading text-sm font-medium tracking-tight"
