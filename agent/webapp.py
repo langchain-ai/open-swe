@@ -23,6 +23,8 @@ from .dashboard.agent_overrides import (
     resolve_login_from_email,
 )
 from .dashboard.enabled_repos import is_review_repo_enabled
+from .dashboard.profiles import get_profile
+from .dashboard.team_settings import get_team_settings
 from .reviewer_findings import (
     REVIEWER_THREAD_KIND,
     ReviewerPRMeta,
@@ -1335,7 +1337,18 @@ _SUPPORTED_GH_EVENTS = frozenset(
     ]
 )
 _SUPPORTED_GH_ISSUE_ACTIONS = frozenset(["edited", "opened", "reopened"])
-_SUPPORTED_GH_PULL_REQUEST_ACTIONS = frozenset(["review_requested", "closed", "reopened"])
+_SUPPORTED_GH_PULL_REQUEST_ACTIONS = frozenset(
+    [
+        "review_requested",
+        "opened",
+        "ready_for_review",
+        "converted_to_draft",
+        "closed",
+        "reopened",
+    ]
+)
+_GH_PR_WATCH_TOGGLE_ACTIONS = frozenset(["closed", "reopened", "converted_to_draft"])
+_GH_PR_FIRST_REVIEW_ACTIONS = frozenset(["opened", "ready_for_review"])
 _SUPPORTED_GH_COMMENT_ACTIONS = {
     "issue_comment": frozenset(["created", "edited"]),
     "pull_request_review_comment": frozenset(["created", "edited"]),
@@ -1630,8 +1643,25 @@ def _build_reviewer_configurable(
     return configurable
 
 
-async def process_github_pr_review_request(payload: dict[str, Any]) -> None:
-    """Trigger the reviewer agent when the Open SWE bot is requested on a PR."""
+async def _draft_review_enabled_for_author(author_login: str) -> bool:
+    """Return whether draft PRs by ``author_login`` should auto-review.
+
+    Tri-state: the PR author's profile ``review_draft_prs`` wins when set to
+    True/False; ``None`` (or no profile, e.g. external contributors) falls
+    back to the team-wide default.
+    """
+    if author_login:
+        profile = await get_profile(author_login)
+        if isinstance(profile, dict):
+            override = profile.get("review_draft_prs")
+            if isinstance(override, bool):
+                return override
+    team = await get_team_settings()
+    return bool(team.get("review_draft_prs"))
+
+
+async def _dispatch_first_review_from_pr_payload(payload: dict[str, Any], *, source: str) -> None:
+    """Trigger a first-review run on the canonical reviewer thread for a PR."""
     repo = payload.get("repository", {})
     pull_request = payload.get("pull_request", {})
     repo_config = {
@@ -1649,7 +1679,7 @@ async def process_github_pr_review_request(payload: dict[str, Any]) -> None:
     github_user_id = payload.get("sender", {}).get("id")
 
     if not pr_number or not pr_url or not base_sha or not head_sha:
-        logger.warning("Missing PR review request context, skipping reviewer run")
+        logger.warning("Missing PR context for reviewer dispatch, skipping run")
         return
 
     thread_id = generate_reviewer_thread_id(
@@ -1658,7 +1688,7 @@ async def process_github_pr_review_request(payload: dict[str, Any]) -> None:
 
     app_token, app_token_expires_at = await get_github_app_installation_token_with_expiry()
     if not app_token:
-        logger.warning("No GitHub App token available for PR reviewer request")
+        logger.warning("No GitHub App token available for reviewer dispatch")
         return
 
     langgraph_client = get_client(url=LANGGRAPH_URL)
@@ -1684,7 +1714,7 @@ async def process_github_pr_review_request(payload: dict[str, Any]) -> None:
 
     prompt = build_github_pr_review_prompt(repo_config, pr_number, pr_url, base_sha, head_sha)
     configurable = _build_reviewer_configurable(
-        source="github",
+        source=source,
         github_login=github_login,
         github_user_id=github_user_id,
         repo_config=repo_config,
@@ -1697,11 +1727,11 @@ async def process_github_pr_review_request(payload: dict[str, Any]) -> None:
 
     thread_active = await is_thread_active(thread_id)
     if thread_active:
-        logger.info("Reviewer thread %s is busy, queuing PR review request", thread_id)
+        logger.info("Reviewer thread %s is busy, queuing PR review (source=%s)", thread_id, source)
         await queue_message_for_thread(thread_id, prompt)
         return
 
-    logger.info("Creating reviewer run for thread %s from GitHub PR review request", thread_id)
+    logger.info("Creating reviewer run for thread %s (source=%s)", thread_id, source)
     await langgraph_client.runs.create(
         thread_id,
         "reviewer",
@@ -1709,7 +1739,35 @@ async def process_github_pr_review_request(payload: dict[str, Any]) -> None:
         config={"configurable": configurable, "metadata": _AGENT_VERSION_METADATA},
         if_not_exists="create",
     )
-    logger.info("Reviewer run created for thread %s from GitHub PR review request", thread_id)
+    logger.info("Reviewer run created for thread %s (source=%s)", thread_id, source)
+
+
+async def process_github_pr_review_request(payload: dict[str, Any]) -> None:
+    """Trigger the reviewer agent when the Open SWE bot is requested on a PR."""
+    await _dispatch_first_review_from_pr_payload(payload, source="github")
+
+
+async def process_github_pr_ready(payload: dict[str, Any]) -> None:
+    """Auto-review a PR that has just been opened or marked ready-for-review.
+
+    Drafts are gated by the PR author's ``review_draft_prs`` profile flag
+    (with the team-wide setting as a fallback).
+    """
+    pull_request = payload.get("pull_request", {})
+    is_draft = bool(pull_request.get("draft"))
+    if is_draft:
+        author = pull_request.get("user") or {}
+        author_login = author.get("login", "") if isinstance(author, dict) else ""
+        if not await _draft_review_enabled_for_author(author_login):
+            logger.info(
+                "Skipping auto-review of draft PR by %s: review_draft_prs is disabled",
+                author_login or "<unknown>",
+            )
+            return
+    # Use source="github" so the auth resolver finds the bot token persisted on
+    # the thread; "github_auto" would fall through to the email-based path,
+    # which has no user_email to route on for webhook-triggered runs.
+    await _dispatch_first_review_from_pr_payload(payload, source="github")
 
 
 async def process_github_pr_review_command(
@@ -1826,7 +1884,13 @@ async def _get_thread_metadata_safe(thread_id: str) -> dict[str, Any] | None:
 
 
 async def process_github_pr_close(payload: dict[str, Any]) -> None:
-    """Disable watch on the canonical reviewer thread when the PR closes/reopens."""
+    """Toggle watch on the canonical reviewer thread on close/reopen/draft transitions.
+
+    ``reopened`` re-enables watch; ``closed`` always disables it.
+    ``converted_to_draft`` disables watch only when the PR author's effective
+    draft-review setting is off — if drafts should be reviewed, watch stays on
+    so subsequent pushes still trigger re-reviews while the PR is in draft.
+    """
     repo = payload.get("repository", {})
     pull_request = payload.get("pull_request", {})
     repo_config = {
@@ -1853,7 +1917,21 @@ async def process_github_pr_close(payload: dict[str, Any]) -> None:
         )
         return
     action = payload.get("action", "")
-    desired_watch = action == "reopened"
+    if action == "converted_to_draft":
+        author = pull_request.get("user") or {}
+        author_login = author.get("login", "") if isinstance(author, dict) else ""
+        if await _draft_review_enabled_for_author(author_login):
+            logger.info(
+                "PR %s/%s#%s converted to draft but author %s has draft reviews enabled; keeping watch",
+                repo_config.get("owner"),
+                repo_config.get("name"),
+                pr_number,
+                author_login or "<unknown>",
+            )
+            return
+        desired_watch = False
+    else:
+        desired_watch = action == "reopened"
     if metadata.get("watch") == desired_watch:
         return
     await set_reviewer_thread_metadata(thread_id, watch=desired_watch)
@@ -2346,12 +2424,21 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks) ->
                 "status": "ignored",
                 "reason": f"Unsupported GitHub pull_request action: {action}",
             }
-        if action in {"closed", "reopened"}:
+        if action in _GH_PR_WATCH_TOGGLE_ACTIONS:
             if not await _is_repo_enabled_for_review(webhook_repo_config):
                 return {"status": "ignored", "reason": "Repository not enabled for review"}
             logger.info("Accepted GitHub PR %s webhook, scheduling reviewer watch update", action)
             background_tasks.add_task(process_github_pr_close, payload)
             return {"status": "accepted", "message": f"Processing PR {action} for reviewer watch"}
+        if action in _GH_PR_FIRST_REVIEW_ACTIONS:
+            if not await _is_repo_enabled_for_review(webhook_repo_config):
+                return {"status": "ignored", "reason": "Repository not enabled for review"}
+            gate_rejection = await _enforce_public_repo_org_gate(payload, "pull_request")
+            if gate_rejection is not None:
+                return gate_rejection
+            logger.info("Accepted GitHub PR %s webhook, scheduling auto-review task", action)
+            background_tasks.add_task(process_github_pr_ready, payload)
+            return {"status": "accepted", "message": f"Processing PR {action} for auto-review"}
         if not _is_open_swe_reviewer_request(payload):
             logger.info("Ignoring PR review request for a different reviewer")
             return {"status": "ignored", "reason": "Review request is not for open-swe bot"}
