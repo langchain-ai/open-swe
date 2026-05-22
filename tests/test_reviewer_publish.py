@@ -244,6 +244,71 @@ async def test_publish_review_skips_findings_already_published() -> None:
 
 
 @pytest.mark.asyncio
+async def test_publish_review_skips_post_on_re_review_with_no_new_findings() -> None:
+    """Re-review with nothing new to surface must not spam another comment."""
+    from agent.tools.publish_review import _publish_review_async
+
+    # All findings already have github_review_comment_id from the prior publish
+    # (so none are "unpublished"), plus one previously-resolved finding whose
+    # thread still needs to be resolved on GitHub.
+    findings = [
+        {
+            "id": "f_old",
+            "severity": "high",
+            "category": "correctness",
+            "file": "a.py",
+            "start_line": 1,
+            "end_line": 1,
+            "side": "RIGHT",
+            "description": "x",
+            "suggestion": None,
+            "status": "resolved",
+            "first_seen_sha": "s",
+            "last_confirmed_sha": "s",
+            "github_review_comment_id": 100,
+        },
+    ]
+    list_async = AsyncMock(return_value=findings)
+    post_review = AsyncMock()
+    set_metadata = AsyncMock()
+    resolve_threads = AsyncMock(return_value=1)
+
+    with (
+        patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
+        patch("agent.tools.publish_review.list_findings_async", list_async),
+        patch("agent.tools.publish_review.post_pull_request_review", post_review),
+        patch(
+            "agent.tools.publish_review._resolve_threads_for_resolved_findings",
+            resolve_threads,
+        ),
+        patch("agent.tools.publish_review.set_reviewer_thread_metadata", set_metadata),
+        patch(
+            "agent.tools.publish_review._maybe_post_slack_completion_reply",
+            new_callable=AsyncMock,
+        ),
+    ):
+        result = await _publish_review_async(
+            owner="o",
+            repo="r",
+            pr_number=7,
+            head_sha="newsha",
+            token="t",
+            severity_threshold="medium",
+            cap=15,
+            is_re_review=True,
+        )
+
+    post_review.assert_not_called()
+    resolve_threads.assert_awaited_once()
+    set_metadata.assert_awaited_once()
+    assert result["success"] is True
+    assert result["review_id"] is None
+    assert result["surfaced_count"] == 0
+    assert result["resolved_thread_count"] == 1
+    assert result["skipped_empty_re_review"] is True
+
+
+@pytest.mark.asyncio
 async def test_publish_review_posts_summary_when_no_findings() -> None:
     """An empty findings list must still post a review so the user sees feedback."""
     from agent.tools.publish_review import _publish_review_async
