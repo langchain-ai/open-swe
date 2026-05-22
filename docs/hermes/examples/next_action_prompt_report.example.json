@@ -1,0 +1,26 @@
+{
+  "schema_version": "hermes.next_action_prompt.v1",
+  "owner_agent_role": "next_action_prompt_agent",
+  "decision": "START_QA_AGENT",
+  "reason": "Independent review returned NEEDS_FOLLOWUP because typecheck was skipped and VAT/reporting UAT/API smoke evidence is missing. The correct next owner is QA, not builder, because no implementation defect is proven yet.",
+  "generated_prompt_for_next_agent": "You are the QA Agent for Northstar VAT/reporting task NS-VAT-001. Do not edit production code. Work only in the supplied branch/worktree. Verify the current diff against github/main, run npm run typecheck, run the targeted VAT/reporting unit test, and run one focused UAT/API smoke covering the changed VAT reporting path. Stop on secrets, forbidden paths, tenant migration/provisioning inconsistency, or runtime claim without raw evidence. Return an evidence-first report with GATE=PASS|WARN|FAIL.",
+  "next_agent_role": "qa_agent",
+  "allowed_paths": ["apps/core-api/src/vat/**", "apps/core-api/test/**", "e2e/**"],
+  "forbidden_paths": [".env", "**/*.pem", "**/*secret*", "infra/prod/**", "apps/web-client/**"],
+  "required_tests": ["git diff --name-only github/main...HEAD", "npm run typecheck", "targeted VAT/reporting unit test", "focused VAT/reporting UAT/API smoke"],
+  "stop_conditions": [
+    "secret or credential exposure",
+    "diff outside VAT/reporting QA scope",
+    "UAT/API smoke requires production deploy",
+    "tenant-impacting migration discovered without provisioning evidence",
+    "test failure not attributable to current task"
+  ],
+  "expected_evidence": [
+    "raw command names",
+    "exit status for each command",
+    "short raw output summary",
+    "exact UAT/API smoke request and response summary",
+    "GATE=PASS|WARN|FAIL with reason"
+  ],
+  "human_review_required": true
+}

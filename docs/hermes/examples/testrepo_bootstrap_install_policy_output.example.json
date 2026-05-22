@@ -1,0 +1,18 @@
+{
+  "INSTALL_ALLOWED": true,
+  "allowed_actions": [
+    "dry_run_testrepo_bootstrap_install"
+  ],
+  "allowed_test_repos": [
+    "ollehillbom1/hermes-open-swe-testrepo"
+  ],
+  "approval_text_echoed": false,
+  "block_reasons": [],
+  "gate": "PASS",
+  "install_allowed": true,
+  "required_exact_approval": "ALLOW_BOOTSTRAP_INSTALL=YES",
+  "schema_version": "hermes.bootstrap-install-policy.v1",
+  "side_effects": [],
+  "status": "POLICY_EVALUATED",
+  "target_repo": "ollehillbom1/hermes-open-swe-testrepo"
+}

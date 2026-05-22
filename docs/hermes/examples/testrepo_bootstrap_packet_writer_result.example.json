@@ -1,0 +1,12 @@
+{
+  "TASK_ID": "GH-REVIEW-42-9001",
+  "absolute_path": "/home/olle/northstar-agent-harness/open-swe-hermes/docs/bootstrap/BOOTSTRAP_PACKET_GH-REVIEW-42-9001.md",
+  "bytes_written": 1329,
+  "gate": "PASS",
+  "relative_path": "docs/bootstrap/BOOTSTRAP_PACKET_GH-REVIEW-42-9001.md",
+  "schema_version": "hermes.bootstrap-packet-writer.v1",
+  "side_effects": [
+    "wrote_markdown_file"
+  ],
+  "status": "WROTE_DRY_RUN_PACKET"
+}

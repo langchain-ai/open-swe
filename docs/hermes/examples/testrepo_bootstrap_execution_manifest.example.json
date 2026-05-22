@@ -1,0 +1,25 @@
+{
+  "TASK_ID": "GH-REVIEW-42-9001",
+  "gate": "WARN",
+  "hard_disabled_actions": {
+    "may_configure_webhook": false,
+    "may_create_github_app": false,
+    "may_deploy_prod": false,
+    "may_push_or_pr": false,
+    "may_start_server": false
+  },
+  "manual_steps_requiring_allow_bootstrap_install": [
+    "Create GitHub App with minimum issue/comment/metadata permissions for the testrepo only.",
+    "Configure webhook delivery URL and signature secret after a non-public local/dev endpoint is chosen.",
+    "Configure token encryption and secret storage without printing or copying secret values into logs.",
+    "Start Open SWE server or worker processes in local dev mode after bootstrap install approval.",
+    "Connect the allowlisted testrepo before any Northstar production repository connection.",
+    "Push branch or open PR only after a separate source-diff, reviewer, and human approval gate."
+  ],
+  "markdown": "# Hermes Bootstrap Execution Manifest\n\nVerification evidence:\n- Manifest schema: hermes.bootstrap-execution-manifest.v1\n- Source writer schema: hermes.bootstrap-packet-writer.v1\n- Source writer status: WROTE_DRY_RUN_PACKET\n- Source dry-run packet: docs/bootstrap/BOOTSTRAP_PACKET_GH-REVIEW-42-9001.md\n- Side effects performed by manifest: none\n- Execution mode: dry-run human approval checklist only\n\nStatus: READY_FOR_HUMAN_APPROVAL_CHECKLIST\nTASK_ID: GH-REVIEW-42-9001\nRequired exact approval before any install/bootstrap side effect: ALLOW_BOOTSTRAP_INSTALL=YES\n\nHard disabled actions in this manifest:\n- may_create_github_app: false\n- may_configure_webhook: false\n- may_start_server: false\n- may_push_or_pr: false\n- may_deploy_prod: false\n\nManual steps still requiring ALLOW_BOOTSTRAP_INSTALL=YES:\n- [ ] Create GitHub App with minimum issue/comment/metadata permissions for the testrepo only. Requires: ALLOW_BOOTSTRAP_INSTALL=YES\n- [ ] Configure webhook delivery URL and signature secret after a non-public local/dev endpoint is chosen. Requires: ALLOW_BOOTSTRAP_INSTALL=YES\n- [ ] Configure token encryption and secret storage without printing or copying secret values into logs. Requires: ALLOW_BOOTSTRAP_INSTALL=YES\n- [ ] Start Open SWE server or worker processes in local dev mode after bootstrap install approval. Requires: ALLOW_BOOTSTRAP_INSTALL=YES\n- [ ] Connect the allowlisted testrepo before any Northstar production repository connection. Requires: ALLOW_BOOTSTRAP_INSTALL=YES\n- [ ] Push branch or open PR only after a separate source-diff, reviewer, and human approval gate. Requires: ALLOW_BOOTSTRAP_INSTALL=YES\n\nExplicitly not performed:\n- No GitHub App created.\n- No webhook configured.\n- No server or worker started.\n- No branch pushed and no PR opened.\n- No production deploy performed.\n- No /erp product code edited.\n\nGATE=WARN\nGATE_REASON=Dry-run execution manifest produced a human checklist only; bootstrap side effects remain blocked until explicit ALLOW_BOOTSTRAP_INSTALL=YES.\n",
+  "required_exact_approval": "ALLOW_BOOTSTRAP_INSTALL=YES",
+  "schema_version": "hermes.bootstrap-execution-manifest.v1",
+  "side_effects": [],
+  "source_packet": "docs/bootstrap/BOOTSTRAP_PACKET_GH-REVIEW-42-9001.md",
+  "status": "READY_FOR_HUMAN_APPROVAL_CHECKLIST"
+}

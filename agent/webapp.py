@@ -86,6 +86,7 @@ from .utils.slack_feedback import (
     process_slack_reaction_removed,
 )
 from .utils.thread_ops import is_thread_active, queue_message_for_thread
+from .utils.tool_policy import is_webhook_disabled
 
 logger = logging.getLogger(__name__)
 
@@ -1044,6 +1045,9 @@ async def linear_webhook(  # noqa: PLR0911, PLR0912, PLR0915
 
     Triggers a new LangGraph run when an issue gets the 'open-swe' label added.
     """
+    if is_webhook_disabled("linear"):
+        return {"status": "ignored", "reason": "Linear webhook disabled by profile"}
+
     logger.info("Received Linear webhook")
     body = await request.body()
 
@@ -1185,12 +1189,17 @@ async def linear_webhook(  # noqa: PLR0911, PLR0912, PLR0915
 @app.get("/webhooks/linear")
 async def linear_webhook_verify() -> dict[str, str]:
     """Verify endpoint for Linear webhook setup."""
+    if is_webhook_disabled("linear"):
+        return {"status": "disabled", "message": "Linear webhook disabled by profile"}
     return {"status": "ok", "message": "Linear webhook endpoint is active"}
 
 
 @app.post("/webhooks/slack")
 async def slack_webhook(request: Request, background_tasks: BackgroundTasks) -> dict[str, str]:
     """Handle Slack Event API webhooks for app mentions."""
+    if is_webhook_disabled("slack"):
+        return {"status": "ignored", "reason": "Slack webhook disabled by profile"}
+
     body = await request.body()
 
     signature = request.headers.get("X-Slack-Signature", "")
@@ -1315,6 +1324,8 @@ async def slack_webhook(request: Request, background_tasks: BackgroundTasks) -> 
 @app.get("/webhooks/slack")
 async def slack_webhook_verify() -> dict[str, str]:
     """Verify endpoint for Slack webhook setup."""
+    if is_webhook_disabled("slack"):
+        return {"status": "disabled", "message": "Slack webhook disabled by profile"}
     return {"status": "ok", "message": "Slack webhook endpoint is active"}
 
 

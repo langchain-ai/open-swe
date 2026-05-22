@@ -1,0 +1,43 @@
+{
+  "schema_version": "hermes.independent_review.v1",
+  "event": "independent review recommended",
+  "owner_agent_role": "independent_review_agent",
+  "verdict": "NEEDS_FOLLOWUP",
+  "confidence": "HIGH",
+  "summary": "Builder PASS is not enough for a medium-risk VAT/reporting change because typecheck was skipped and UAT/API smoke evidence is missing. No production-code mutation should happen in review mode.",
+  "evidence_checked": [
+    {
+      "name": "quick baseline",
+      "status": "PASS",
+      "details": "./b.sh --quick reported PASS in supplied evidence log."
+    },
+    {
+      "name": "typecheck",
+      "status": "MISSING",
+      "details": "npm run typecheck was skipped despite API/domain logic changes."
+    },
+    {
+      "name": "targeted VAT unit test",
+      "status": "PASS",
+      "details": "VAT reporting spec passed in supplied evidence log."
+    },
+    {
+      "name": "UAT/API smoke",
+      "status": "MISSING",
+      "details": "Runtime path was not smoked; PASS is not allowed for medium VAT/reporting risk until covered."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "MEDIUM",
+      "area": "VAT/reporting verification",
+      "claim": "Evidence is incomplete for accounting-domain logic.",
+      "evidence": "typecheck=SKIPPED and UAT/API smoke=MISSING in evidence log.",
+      "required_followup": "Run npm run typecheck and a focused VAT/reporting API or UAT smoke, then re-run independent review."
+    }
+  ],
+  "stop_conditions_hit": ["runtime PASS claim without UAT/API smoke evidence"],
+  "next_agent_role_recommendation": "qa_agent",
+  "next_action_hint": "Start a bounded QA agent to run missing typecheck and VAT/reporting smoke only.",
+  "verification_required_before_pass": ["npm run typecheck", "focused VAT/reporting API or UAT smoke", "updated evidence log"]
+}

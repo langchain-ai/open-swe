@@ -1,0 +1,25 @@
+{
+  "target_repo": "ollehillbom1/northstar-agent-harness-testrepo",
+  "allowed_repos": [
+    "ollehillbom1/northstar-agent-harness-testrepo"
+  ],
+  "allowed_trigger_users": [
+    "ollehillbom1"
+  ],
+  "sandbox_type": "daytona",
+  "disabled_integrations": [
+    "slack",
+    "linear"
+  ],
+  "disabled_tools": [
+    "http_request",
+    "fetch_url",
+    "web_search"
+  ],
+  "external_setup_requested": [
+    "github_app",
+    "webhook",
+    "docker_build"
+  ],
+  "human_approval": null
+}

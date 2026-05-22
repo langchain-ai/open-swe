@@ -79,6 +79,7 @@ from .utils.model import (
 )
 from .utils.sandbox import create_sandbox
 from .utils.sandbox_paths import aresolve_sandbox_work_dir
+from .utils.tool_policy import filter_disabled_tools
 
 client = get_client()
 
@@ -450,21 +451,23 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             triggering_user_identity=triggering_user_identity,
             create_prs=create_prs,
         ),
-        tools=[
-            http_request,
-            fetch_url,
-            web_search,
-            linear_comment,
-            linear_create_issue,
-            linear_delete_issue,
-            linear_get_issue,
-            linear_get_issue_comments,
-            linear_list_teams,
-            linear_update_issue,
-            request_pr_review,
-            slack_read_thread_messages,
-            slack_thread_reply,
-        ],
+        tools=filter_disabled_tools(
+            [
+                http_request,
+                fetch_url,
+                web_search,
+                linear_comment,
+                linear_create_issue,
+                linear_delete_issue,
+                linear_get_issue,
+                linear_get_issue_comments,
+                linear_list_teams,
+                linear_update_issue,
+                request_pr_review,
+                slack_read_thread_messages,
+                slack_thread_reply,
+            ]
+        ),
         backend=backend_factory,
         middleware=[
             SanitizeToolInputsMiddleware(),

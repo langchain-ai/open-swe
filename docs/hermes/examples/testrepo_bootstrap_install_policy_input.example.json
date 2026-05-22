@@ -1,0 +1,7 @@
+{
+  "approval_text": "I approve the dry-run testrepo bootstrap only.\nALLOW_BOOTSTRAP_INSTALL=YES",
+  "target_repo": "ollehillbom1/hermes-open-swe-testrepo",
+  "allowed_test_repos": [
+    "ollehillbom1/hermes-open-swe-testrepo"
+  ]
+}

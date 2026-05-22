@@ -61,6 +61,7 @@ from .utils.auth import resolve_github_token
 from .utils.github_token import get_github_token_from_thread
 from .utils.model import DEFAULT_LLM_REASONING, make_model, provider_model_kwargs
 from .utils.sandbox_paths import aresolve_sandbox_work_dir
+from .utils.tool_policy import filter_disabled_tools
 
 REVIEWER_PROMPT_TEMPLATE = """You are a specialized code reviewer agent. Your job is to review one GitHub PR and publish a single review.
 
@@ -540,15 +541,17 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
     return create_deep_agent(
         model=make_model(model_id, **model_kwargs),
         system_prompt=system_prompt,
-        tools=[
-            add_finding,
-            update_finding,
-            list_findings,
-            publish_review,
-            web_search,
-            fetch_url,
-            http_request,
-        ],
+        tools=filter_disabled_tools(
+            [
+                add_finding,
+                update_finding,
+                list_findings,
+                publish_review,
+                web_search,
+                fetch_url,
+                http_request,
+            ]
+        ),
         backend=sandbox_backend,
         middleware=[
             SanitizeToolInputsMiddleware(),

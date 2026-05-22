@@ -39,6 +39,7 @@ yarn-error.log*
 .env*.local
 .env
 .env.*
+!.env.example
 
 # vercel
 .vercel
@@ -68,4 +69,4 @@ __pycache__/
 *.egg-info/
 .eggs/
 
-# 
+#

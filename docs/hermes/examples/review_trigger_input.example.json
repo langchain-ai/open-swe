@@ -1,0 +1,74 @@
+{
+  "schema_version": "hermes.review_trigger_input.v1",
+  "event": {
+    "type": "independent review recommended",
+    "source": "hermes_orchestrator",
+    "id": "evt_dummy_vat_review_001",
+    "created_at": "2026-05-21T21:30:00+02:00"
+  },
+  "owner_agent_role": "trigger_router",
+  "input_context": {
+    "reality_state": {
+      "schema_version": "northstar.reality_state.v1",
+      "repo": "ollehillbom1/north-star-erp",
+      "branch": "feature/vat-reporting-adjustment",
+      "task_id": "NS-VAT-001",
+      "runtime_state": "source_only",
+      "dirty_scope": [
+        "apps/core-api/src/vat/reporting.ts",
+        "apps/core-api/src/vat/reporting.spec.ts"
+      ],
+      "known_gaps": ["UAT/API smoke missing"],
+      "last_verified_at": "2026-05-21T21:29:00+02:00"
+    },
+    "task_card": {
+      "id": "NS-VAT-001",
+      "title": "Adjust VAT reporting logic",
+      "owner_session": "builder-codex-001",
+      "agent_scope": "apps/core-api/src/vat/**",
+      "claim": "Builder reports PASS after unit tests",
+      "risk": "medium"
+    },
+    "git_diff_summary": {
+      "base": "github/main",
+      "head": "feature/vat-reporting-adjustment",
+      "files_changed": [
+        "apps/core-api/src/vat/reporting.ts",
+        "apps/core-api/src/vat/reporting.spec.ts"
+      ],
+      "summary": "VAT reporting calculation and related unit tests changed. No tenant provisioning or migration changes. No UI files."
+    },
+    "evidence_log": [
+      {
+        "command": "./b.sh --quick",
+        "status": "PASS",
+        "raw_summary": "quick build/test passed"
+      },
+      {
+        "command": "npm run typecheck",
+        "status": "SKIPPED",
+        "raw_summary": "not run in builder pass"
+      },
+      {
+        "command": "targeted VAT unit test",
+        "status": "PASS",
+        "raw_summary": "VAT reporting spec passed"
+      },
+      {
+        "command": "UAT/API smoke for VAT reporting path",
+        "status": "MISSING",
+        "raw_summary": "not run"
+      }
+    ]
+  },
+  "allowed_paths": ["apps/core-api/src/vat/**", "apps/core-api/test/**"],
+  "forbidden_paths": [".env", "**/*.pem", "**/*secret*", "apps/web-client/**", "infra/prod/**"],
+  "required_tests": ["./b.sh --quick", "npm run typecheck", "targeted VAT unit test", "UAT/API smoke if runtime claim exists"],
+  "stop_conditions": [
+    "secret or credential exposure",
+    "diff outside allowed paths",
+    "tenant-impacting migration without provisioning evidence",
+    "runtime PASS claim without UAT/API smoke evidence",
+    "missing current git diff summary"
+  ]
+}

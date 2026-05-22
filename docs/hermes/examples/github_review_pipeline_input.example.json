@@ -1,0 +1,58 @@
+{
+  "comment_event": {
+    "repo": "ollehillbom1/north-star-erp",
+    "comment_author": "ollehillbom1",
+    "comment_body": "@openswe review https://github.com/ollehillbom1/north-star-erp/pull/123",
+    "issue_number": 42,
+    "comment_id": 9001,
+    "allowed_paths": [
+      "apps/core-api/src/**",
+      "tests/**"
+    ],
+    "forbidden_paths": [
+      ".env",
+      "**/.env",
+      "**/secrets/**"
+    ],
+    "required_tests": [
+      "./b.sh --quick",
+      "npm run typecheck"
+    ]
+  },
+  "review_report": {
+    "schema_version": "hermes.independent_review.v1",
+    "owner_agent_role": "independent_review_agent",
+    "reviewer_identity": "claude-reviewer-1",
+    "verdict": "NEEDS_FOLLOWUP",
+    "confidence": "HIGH",
+    "summary": "Runtime evidence is incomplete.",
+    "evidence_checked": [
+      {
+        "name": "quick baseline",
+        "status": "PASS",
+        "details": "./b.sh --quick PASS"
+      },
+      {
+        "name": "runtime smoke",
+        "status": "MISSING",
+        "details": "missing UAT/API smoke"
+      }
+    ],
+    "findings": [
+      {
+        "severity": "MEDIUM",
+        "area": "runtime evidence",
+        "claim": "Runtime claim lacks UAT/API smoke.",
+        "required_followup": "Run bounded QA smoke."
+      }
+    ],
+    "stop_conditions_hit": [
+      "runtime PASS claim without UAT/API smoke evidence"
+    ],
+    "next_agent_role_recommendation": "qa_agent",
+    "verification_required_before_pass": [
+      "focused UAT/API smoke"
+    ]
+  },
+  "requested_final_gate": "WARN"
+}

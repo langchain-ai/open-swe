@@ -1,0 +1,19 @@
+title = "Northstar Hermes Open SWE gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Known upstream documentation placeholders and deterministic test fixtures"
+regexTarget = "line"
+paths = [
+  '''^\.venv/''',
+  '''^node_modules/''',
+  '''^\.pnpm-store/''',
+  '''^dist/''',
+  '''^build/''',
+]
+regexes = [
+  '''GITHUB_APP_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----''',
+  '''_TEST_FERNET_KEY = "GMI8FNqVnhFzVfKDUTpGAUq8a2cm14kU0SyXzMTM4Yc="''',
+]

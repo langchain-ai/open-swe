@@ -1,0 +1,9 @@
+{
+  "TASK_ID": "GH-REVIEW-42-9001",
+  "gate": "WARN",
+  "markdown": "# Hermes Northstar Testrepo Bootstrap Packet\n\nVerification evidence:\n- Renderer schema: hermes.bootstrap-packet-renderer.v1\n- Source approval schema: hermes.testrepo-bootstrap-approval.v1\n- Source pipeline schema: hermes.review-pipeline.v1\n- Side effects performed by renderer: none\n- Output type: file-only Markdown approval packet\n\nStatus: READY_FOR_HUMAN_APPROVAL\nTASK_ID: GH-REVIEW-42-9001\nTarget repo: ollehillbom1/northstar-agent-harness-testrepo\nSource pipeline gate: WARN\nSource next action: START_QA_AGENT\nSandbox type: daytona\n\nRequired exact approval:\nALLOW_TESTREPO_BOOTSTRAP=YES repo=ollehillbom1/northstar-agent-harness-testrepo\n\nAllowed trigger users:\n- ollehillbom1\n\nRequested external setup (not executed by this packet):\n- github_app\n- webhook\n- docker_build\n\nVerification required before final PASS:\n- focused UAT/API smoke\n\nHard disabled actions:\n- may_create_github_app: false\n- may_configure_webhook: false\n- may_push_or_pr: false\n- may_start_server: false\n- may_edit_erp: false\n\nRecommended next prompt:\nEfter separat approval, kör endast testrepo bootstrap dry-run mot allowlistat testrepo. \nSkapa ingen GitHub App/webhook/push/PR/server utan explicit ALLOW_BOOTSTRAP_INSTALL=YES.\n\nGATE=WARN\nGATE_REASON=File-only bootstrap approval packet rendered without side effects; external setup remains disabled.\n",
+  "recommended_filename": "docs/bootstrap/BOOTSTRAP_PACKET_GH-REVIEW-42-9001.md",
+  "schema_version": "hermes.bootstrap-packet-renderer.v1",
+  "side_effects": [],
+  "status": "READY_FOR_HUMAN_APPROVAL"
+}

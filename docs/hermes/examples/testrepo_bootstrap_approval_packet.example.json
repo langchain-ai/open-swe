@@ -1,0 +1,33 @@
+{
+  "TASK_ID": "GH-REVIEW-42-9001",
+  "approval_packet": {
+    "allowed_trigger_users": [
+      "ollehillbom1"
+    ],
+    "dry_run_only": true,
+    "may_configure_webhook": false,
+    "may_create_github_app": false,
+    "may_edit_erp": false,
+    "may_push_or_pr": false,
+    "may_start_server": false,
+    "requested_external_setup": [
+      "github_app",
+      "webhook",
+      "docker_build"
+    ],
+    "required_exact_approval": "ALLOW_TESTREPO_BOOTSTRAP=YES repo=ollehillbom1/northstar-agent-harness-testrepo",
+    "sandbox_type": "daytona",
+    "source_next_action": "START_QA_AGENT",
+    "source_pipeline_gate": "WARN",
+    "source_pipeline_schema": "hermes.review-pipeline.v1",
+    "target_repo": "ollehillbom1/northstar-agent-harness-testrepo",
+    "verification_required_before_pass": [
+      "focused UAT/API smoke"
+    ]
+  },
+  "gate": "WARN",
+  "schema_version": "hermes.testrepo-bootstrap-approval.v1",
+  "side_effects": [],
+  "status": "READY_FOR_HUMAN_APPROVAL",
+  "target_repo": "ollehillbom1/northstar-agent-harness-testrepo"
+}
