@@ -8,7 +8,7 @@ import { useAgentThreads, useCreateAgentThread } from "@/lib/agents/queries";
 export function AgentsHome() {
   const threadsQuery = useAgentThreads();
   const createThread = useCreateAgentThread();
-  const recentRuns = threadsQuery.data ?? [];
+  const recentRuns = (threadsQuery.data ?? []).slice(0, 5);
 
   return (
     <div className="flex min-w-0 flex-1 flex-col overflow-y-auto px-6 py-8">

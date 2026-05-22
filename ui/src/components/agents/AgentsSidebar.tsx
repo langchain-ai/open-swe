@@ -1,9 +1,8 @@
 import { Link } from "@tanstack/react-router";
-import { ChartLineUpIcon, GearIcon, PlusIcon } from "@phosphor-icons/react";
-import { useEffect, useRef, useState } from "react";
+import { ChartLineUpIcon, PlusIcon } from "@phosphor-icons/react";
 
 import type { SessionUser } from "@/lib/api";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { SidebarUserMenu } from "@/components/SidebarUserMenu";
 import { groupThreads } from "@/lib/agents/api";
 import { useAgentThreads } from "@/lib/agents/queries";
 import type { AgentThread } from "@/lib/agents/types";
@@ -20,16 +19,25 @@ export function AgentsSidebar({ user, activeThreadId }: AgentsSidebarProps) {
   const threadsQuery = useAgentThreads();
   const threads = threadsQuery.data ?? [];
   const groups = groupThreads(threads);
-  const initials = (user.login || "?").slice(0, 2).toUpperCase();
 
   return (
     <aside className="flex h-full w-[260px] shrink-0 flex-col border-r border-[var(--ui-border)] bg-[var(--ui-sidebar)]">
-      <div className="px-3 pt-4 pb-3">
+      <div className="px-4 pt-5 pb-4">
+        <Link
+          to="/my-settings"
+          className="flex items-center gap-2 font-heading text-sm font-medium tracking-tight text-[var(--ui-text)]"
+        >
+          <img src="/logo-mark.png" alt="" className="size-5" />
+          open-swe
+        </Link>
+      </div>
+
+      <div className="px-2 pb-1">
         <Link
           to="/agents"
-          className="flex w-full items-center gap-2 rounded-lg border border-[var(--ui-border)] bg-[var(--ui-surface)] px-3 py-2 text-sm font-medium text-[var(--ui-text)] shadow-sm transition-colors hover:bg-[var(--ui-panel-2)]"
+          className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-[var(--ui-text)] transition-colors hover:bg-[var(--ui-sidebar-hover)]"
         >
-          <PlusIcon className="size-4" weight="bold" />
+          <PlusIcon className="size-4" />
           New Agent
         </Link>
       </div>
@@ -56,8 +64,8 @@ export function AgentsSidebar({ user, activeThreadId }: AgentsSidebarProps) {
         <ThreadGroup label="Older" threads={groups.older} activeThreadId={activeThreadId} />
       </div>
 
-      <div className="border-t border-[var(--ui-border)] p-3">
-        <UserMenu user={user} initials={initials} />
+      <div className="p-2">
+        <SidebarUserMenu user={user} showSettingsLink />
       </div>
     </aside>
   );
@@ -120,51 +128,6 @@ function ThreadRow({ thread, isActive }: { thread: AgentThread; isActive: boolea
         </span>
       )}
     </Link>
-  );
-}
-
-function UserMenu({ user, initials }: { user: SessionUser; initials: string }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const onClick = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", onClick);
-    return () => document.removeEventListener("mousedown", onClick);
-  }, [open]);
-
-  return (
-    <div ref={ref} className="relative">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center gap-2.5 rounded-md px-1 py-1 text-left hover:bg-[var(--ui-sidebar-hover)]"
-      >
-        <Avatar className="size-7">
-          {user.avatar_url && <AvatarImage src={user.avatar_url} alt={user.login} />}
-          <AvatarFallback className="text-[10px]">{initials}</AvatarFallback>
-        </Avatar>
-        <div className="min-w-0 flex-1">
-          <div className="truncate text-xs font-medium">{user.login}</div>
-          <div className="truncate text-[10px] text-[var(--ui-text-dim)]">Team</div>
-        </div>
-        <GearIcon className="size-4 shrink-0 text-[var(--ui-text-dim)]" />
-      </button>
-      {open && (
-        <div className="absolute right-0 bottom-full left-0 mb-2 overflow-hidden rounded-md border border-[var(--ui-border)] bg-[var(--ui-surface)] p-1 shadow-md">
-          <Link
-            to="/my-settings"
-            className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-xs hover:bg-[var(--ui-panel-2)]"
-            onClick={() => setOpen(false)}
-          >
-            Dashboard settings
-          </Link>
-        </div>
-      )}
-    </div>
   );
 }
 
