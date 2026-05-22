@@ -34,7 +34,7 @@ export function useCreateAgentThread() {
   return useMutation({
     mutationFn: agentsApi.createThread,
     onSuccess: (thread, variables) => {
-      addPendingPrompt(thread.id, variables.prompt);
+      addPendingPrompt(thread.id, variables.prompt, thread.messages.length);
       queryClient.setQueryData(agentThreadKeys.detail(thread.id), {
         ...thread,
         status: thread.status === "idle" ? "running" : thread.status,
@@ -51,7 +51,11 @@ export function useSendAgentMessage(threadId: string) {
   return useMutation({
     mutationFn: (content: string) => agentsApi.sendMessage(threadId, { content }),
     onMutate: (content) => {
-      addPendingPrompt(threadId, content);
+      const cached = queryClient.getQueryData<{ messages?: unknown[] }>(
+        agentThreadKeys.detail(threadId),
+      );
+      const insertAt = Array.isArray(cached?.messages) ? cached.messages.length : 0;
+      addPendingPrompt(threadId, content, insertAt);
     },
     onSuccess: (thread) => {
       queryClient.setQueryData(agentThreadKeys.detail(threadId), (prev: typeof thread | undefined) => {

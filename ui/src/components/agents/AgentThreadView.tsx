@@ -11,7 +11,11 @@ import {
 import type { SessionUser } from "@/lib/api";
 import type { AgentThread, Message } from "@/lib/agents/types";
 import { useSendAgentMessage } from "@/lib/agents/queries";
-import { dropPendingPrompts, getPendingPrompts } from "@/lib/agents/pendingPrompts";
+import {
+  dropPendingPrompts,
+  getPendingPrompts,
+  type PendingPrompt,
+} from "@/lib/agents/pendingPrompts";
 import { useAgentThreadStream } from "@/lib/agents/useThreadStream";
 
 interface AgentThreadViewProps {
@@ -26,7 +30,7 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
   useAgentThreadStream(thread.id, thread.status === "running");
   const scrollControlRef = useRef<MessageViewScrollControl | null>(null);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
-  const [pendingPrompts, setPendingPrompts] = useState<string[]>(() =>
+  const [pendingPrompts, setPendingPrompts] = useState<PendingPrompt[]>(() =>
     getPendingPrompts(thread.id),
   );
 
@@ -46,7 +50,9 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
   useEffect(() => {
     setPendingPrompts((prev) => {
       if (prev.length === 0) return prev;
-      const next = dropPendingPrompts(thread.id, (p) => userMessageTexts.has(p));
+      const next = dropPendingPrompts(thread.id, (entry) =>
+        userMessageTexts.has(entry.prompt),
+      );
       return next.length === prev.length ? prev : next;
     });
   }, [thread.id, userMessageTexts]);
@@ -54,13 +60,18 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
   const displayMessages = useMemo<Message[]>(() => {
     if (pendingPrompts.length === 0) return thread.messages;
     const baseTimestamp = new Date().toISOString();
-    const synth: Message[] = pendingPrompts.map((prompt, i) => ({
-      id: `pending-user-${i}`,
-      author: "user",
-      timestamp: baseTimestamp,
-      chunks: [{ kind: "text", text: prompt }],
-    }));
-    return [...thread.messages, ...synth];
+    const result = thread.messages.slice();
+    pendingPrompts.forEach((entry, i) => {
+      const synth: Message = {
+        id: `pending-user-${i}`,
+        author: "user",
+        timestamp: baseTimestamp,
+        chunks: [{ kind: "text", text: entry.prompt }],
+      };
+      const at = Math.min(Math.max(entry.insertAt, 0), result.length);
+      result.splice(at, 0, synth);
+    });
+    return result;
   }, [thread.messages, pendingPrompts]);
 
   const changedFiles = useMemo(() => {
