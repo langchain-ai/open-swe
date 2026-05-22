@@ -200,7 +200,7 @@ async def test_reviewer_inlines_agents_md_into_system_prompt() -> None:
             "repo": {"owner": "acme", "name": "repo"},
             "pr_number": 7,
             "pr_url": "https://github.com/acme/repo/pull/7",
-            "base_sha": "base",
+            "base_sha": "base-sha-xyz",
             "head_sha": "head-sha-abc",
         },
         "metadata": {},
@@ -238,8 +238,6 @@ async def test_reviewer_inlines_agents_md_into_system_prompt() -> None:
     ):
         await reviewer.get_reviewer_agent(config)
 
-    mock_fetch_agents_md.assert_awaited_once_with(
-        "acme", "repo", "head-sha-abc", token="gh-token"
-    )
+    mock_fetch_agents_md.assert_awaited_once_with("acme", "repo", "base-sha-xyz", token="gh-token")
     assert "Repository conventions (AGENTS.md)" in captured["system_prompt"]
     assert "Always use the design system IconButton." in captured["system_prompt"]

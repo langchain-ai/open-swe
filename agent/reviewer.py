@@ -240,12 +240,13 @@ def _reviewer_system_prompt(
         prompt = (
             f"{prompt}\n\n"
             "# Repository conventions (AGENTS.md)\n\n"
-            "The following is the `AGENTS.md` file from the repository at the "
-            "PR's HEAD. It documents the project's conventions, architecture, "
-            "and rules. Treat violations of these conventions as candidate "
-            "findings when they meet the global bar above (anchored to a "
-            "changed line, concrete failure mode, in-diff). Do not file "
-            "findings for pre-existing violations outside the diff.\n\n"
+            "The following is the `AGENTS.md` file from the target branch "
+            "(the PR's base), not from the PR head. It documents the "
+            "project's conventions, architecture, and rules. Treat "
+            "violations of these conventions as candidate findings when "
+            "they meet the global bar above (anchored to a changed line, "
+            "concrete failure mode, in-diff). Do not file findings for "
+            "pre-existing violations outside the diff.\n\n"
             "```\n"
             f"{agents_md_content}\n"
             "```"
@@ -429,12 +430,17 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
 
         repo_style_prompt = await get_repo_custom_prompt(repo_owner, repo_name)
 
+    # Fetch AGENTS.md from base_sha (the target branch's state before this
+    # PR's changes), not head_sha. The contents are inlined into the system
+    # prompt, so reading from head would let a PR author smuggle reviewer
+    # instructions ("ignore all bugs", "publish no findings") into the
+    # review. base_sha is the trusted ref.
     agents_md_content: str | None = None
-    if repo_owner and repo_name and head_sha:
+    if repo_owner and repo_name and base_sha:
         agents_md_content = await fetch_agents_md(
             repo_owner,
             repo_name,
-            head_sha,
+            base_sha,
             token=github_token,
         )
         if agents_md_content:
@@ -443,7 +449,7 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
                 len(agents_md_content),
                 repo_owner,
                 repo_name,
-                head_sha,
+                base_sha,
             )
     del github_token
 
