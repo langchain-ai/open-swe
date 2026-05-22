@@ -444,7 +444,6 @@ async def stream_dashboard_thread(
 
     stream = await langgraph_client().threads.join_stream(
         thread_id,
-        stream_mode=list(_DASHBOARD_STREAM_MODES),
         last_event_id=last_event_id,
     )
     async for part in stream:
