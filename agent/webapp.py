@@ -85,6 +85,7 @@ from .utils.slack_feedback import (
     process_slack_reaction_added,
     process_slack_reaction_removed,
 )
+from .utils.thread_ops import is_thread_active, queue_message_for_thread
 
 logger = logging.getLogger(__name__)
 
@@ -556,37 +557,6 @@ async def get_slack_repo_config(
     return repo_config
 
 
-async def is_thread_active(thread_id: str) -> bool:
-    """Check if a thread is currently active (has a running run).
-
-    Args:
-        thread_id: The LangGraph thread ID
-
-    Returns:
-        True if the thread status is "busy", False otherwise
-    """
-    langgraph_client = get_client(url=LANGGRAPH_URL)
-    try:
-        logger.debug("Fetching thread status for %s from %s", thread_id, LANGGRAPH_URL)
-        thread = await langgraph_client.threads.get(thread_id)
-        status = thread.get("status", "idle")
-        logger.info(
-            "Thread %s status check: status=%s, is_busy=%s",
-            thread_id,
-            status,
-            status == "busy",
-        )
-    except Exception as e:  # noqa: BLE001
-        logger.warning(
-            "Failed to get thread status for %s: %s (type: %s) - assuming not active",
-            thread_id,
-            e,
-            type(e).__name__,
-        )
-        status = "idle"
-    return status == "busy"
-
-
 async def _thread_exists(thread_id: str) -> bool:
     """Return whether a LangGraph thread already exists."""
     langgraph_client = get_client(url=LANGGRAPH_URL)
@@ -608,53 +578,6 @@ async def _ensure_thread_exists_for_metadata(
         return True
     except Exception:
         logger.exception("Failed to ensure thread %s exists before metadata update", thread_id)
-        return False
-
-
-async def queue_message_for_thread(
-    thread_id: str, message_content: str | list[dict[str, Any]] | dict[str, Any]
-) -> bool:
-    """Queue a message for a thread that is currently active.
-
-    Stores the message in the langgraph store, namespaced to the thread.
-    Supports multiple queued messages by storing them as a list (FIFO order).
-    The before_model middleware will pick them up and inject them into state.
-
-    Args:
-        thread_id: The LangGraph thread ID
-        message_content: The message content to queue (text or content blocks)
-
-    Returns:
-        True if successfully queued, False otherwise
-    """
-    langgraph_client = get_client(url=LANGGRAPH_URL)
-    try:
-        namespace = ("queue", thread_id)
-        key = "pending_messages"
-
-        new_message = {"content": message_content}
-
-        existing_messages: list[dict[str, Any]] = []
-        try:
-            existing_item = await langgraph_client.store.get_item(namespace, key)
-            if existing_item and existing_item.get("value"):
-                existing_messages = existing_item["value"].get("messages", [])
-        except Exception:  # noqa: BLE001
-            logger.debug("No existing queued messages for thread %s", thread_id)
-
-        existing_messages.append(new_message)
-        value = {"messages": existing_messages}
-
-        logger.info(
-            "Attempting to queue message for thread %s (total queued: %d)",
-            thread_id,
-            len(existing_messages),
-        )
-        await langgraph_client.store.put_item(namespace, key, value)
-        logger.info("Successfully queued message for thread %s", thread_id)
-        return True  # noqa: TRY300
-    except Exception:
-        logger.exception("Failed to queue message for thread %s", thread_id)
         return False
 
 

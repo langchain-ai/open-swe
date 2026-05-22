@@ -22,6 +22,10 @@ import asyncio
 warnings.filterwarnings("ignore", message=".*Pydantic V1.*", category=UserWarning)
 
 # Now safe to import agent (which imports LangChain modules)
+from ._patch_messages_reducer import _apply as _apply_messages_reducer_patch
+
+_apply_messages_reducer_patch()
+
 from deepagents import create_deep_agent
 from deepagents.backends import LangSmithSandbox
 from deepagents.backends.protocol import SandboxBackendProtocol
@@ -34,7 +38,7 @@ from .dashboard.agent_overrides import (
     profile_create_prs,
     resolve_github_login,
 )
-from .dashboard.options import DEFAULT_MODEL_ID
+from .dashboard.options import DEFAULT_MODEL_ID, SUPPORTED_MODEL_IDS, model_supports_effort
 from .dashboard.team_settings import get_team_default_model
 from .integrations.langsmith import _configure_github_proxy
 from .middleware import (
@@ -397,6 +401,23 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 )
                 model_id = overridden_model
                 profile_effort = overridden_effort
+
+    configurable = (config or {}).get("configurable") or {}
+    per_thread_model = configurable.get("agent_model_id")
+    per_thread_effort = configurable.get("agent_effort")
+    if (
+        isinstance(per_thread_model, str)
+        and per_thread_model in SUPPORTED_MODEL_IDS
+        and isinstance(per_thread_effort, str)
+        and model_supports_effort(per_thread_model, per_thread_effort)
+    ):
+        logger.info(
+            "Applying per-thread model override: model=%s effort=%s",
+            per_thread_model,
+            per_thread_effort,
+        )
+        model_id = per_thread_model
+        profile_effort = per_thread_effort
 
     create_prs = profile_create_prs(profile)
     if not create_prs:

@@ -9,7 +9,7 @@ from typing import Any
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import RedirectResponse, Response
+from fastapi.responses import RedirectResponse, Response, StreamingResponse
 from pydantic import BaseModel
 
 from .admin import is_admin
@@ -60,6 +60,17 @@ from .team_settings import (
     TeamSettingsUpdate,
     get_team_settings,
     upsert_team_settings,
+)
+from .thread_api import (
+    ThreadCreateBody,
+    ThreadMessageBody,
+    cancel_dashboard_thread,
+    create_dashboard_thread,
+    delete_dashboard_thread,
+    get_dashboard_thread,
+    list_dashboard_threads,
+    send_dashboard_message,
+    stream_dashboard_thread,
 )
 
 logger = logging.getLogger(__name__)
@@ -562,3 +573,68 @@ async def api_delete_review_style(
         await cancel_review_style_analysis(full_name)
     await delete_review_style(full_name)
     return Response(status_code=204)
+
+
+@router.get("/threads")
+async def api_list_threads(
+    session: dict[str, Any] = _SESSION_DEP,
+) -> list[dict[str, Any]]:
+    return await list_dashboard_threads(session["sub"])
+
+
+@router.post("/threads")
+async def api_create_thread(
+    body: ThreadCreateBody,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    return await create_dashboard_thread(session["sub"], body)
+
+
+@router.get("/threads/{thread_id}")
+async def api_get_thread(
+    thread_id: str,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    return await get_dashboard_thread(thread_id, session["sub"])
+
+
+@router.post("/threads/{thread_id}/messages")
+async def api_send_thread_message(
+    thread_id: str,
+    body: ThreadMessageBody,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    return await send_dashboard_message(thread_id, session["sub"], body)
+
+
+@router.post("/threads/{thread_id}/cancel")
+async def api_cancel_thread(
+    thread_id: str,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    return await cancel_dashboard_thread(thread_id, session["sub"])
+
+
+@router.delete("/threads/{thread_id}")
+async def api_delete_thread(
+    thread_id: str,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> Response:
+    await delete_dashboard_thread(thread_id, session["sub"])
+    return Response(status_code=204)
+
+
+@router.get("/threads/{thread_id}/stream")
+async def api_stream_thread(
+    thread_id: str,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> StreamingResponse:
+    async def event_generator():
+        async for chunk in stream_dashboard_thread(thread_id, session["sub"]):
+            yield chunk
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
+    )

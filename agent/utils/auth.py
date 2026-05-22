@@ -418,6 +418,29 @@ async def resolve_github_token(
             if not email:
                 raise ValueError(f"No email mapping found for GitHub user '{github_login}'")
             return await save_encrypted_token_from_email(email, source)
+        if source == "dashboard":
+            cached_token, cached_encrypted, cached_expires_at = await get_github_token_from_thread(
+                thread_id
+            )
+            if cached_token and cached_encrypted:
+                return cached_token, cached_encrypted, cached_expires_at
+            github_login = configurable.get("github_login")
+            if not isinstance(github_login, str) or not github_login.strip():
+                raise ValueError("missing github_login for dashboard run")
+            from ..dashboard.profiles import OAUTH_TOKENS_NAMESPACE, get_valid_access_token
+            from ..dashboard.profiles import _get_value as get_oauth_record
+
+            token = await get_valid_access_token(github_login.strip())
+            if not token:
+                raise ValueError("github token unavailable, re-login required")
+            record = await get_oauth_record(OAUTH_TOKENS_NAMESPACE, github_login.strip())
+            expires_at = record.get("token_expires_at") if isinstance(record, dict) else None
+            encrypted = await persist_encrypted_github_token(
+                thread_id,
+                token,
+                expires_at=expires_at if isinstance(expires_at, str) else None,
+            )
+            return token, encrypted, expires_at if isinstance(expires_at, str) else None
         return await save_encrypted_token_from_email(configurable.get("user_email"), source)
     except ValueError as exc:
         logger.error("GitHub auth failed for thread %s: %s", thread_id, str(exc))
