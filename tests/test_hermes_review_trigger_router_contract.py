@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import copy
+import json
+import subprocess
+import sys
 
 from docs.hermes.pseudo_router import review_trigger_router as router
 
@@ -55,6 +58,35 @@ def test_route_review_trigger_blocks_unknown_repo_before_prompt_generation() -> 
     assert result["gate"] == "FAIL"
     assert result["block_reason"] == "repo_not_allowed"
     assert "generated_review_prompt" not in result
+
+
+def test_route_review_trigger_normalizes_repo_before_allowlist_check() -> None:
+    payload = copy.deepcopy(BASE_PAYLOAD)
+    payload["event"]["repo"] = "Example-Owner/Example-TestRepo"
+
+    result = router.route_review_trigger(payload)
+
+    assert result["status"] == "OK"
+    assert result["review_request"]["repo"] == "example-owner/example-testrepo"
+
+
+def test_cli_uses_router_policy_and_fails_blocked_repo(tmp_path) -> None:
+    payload = copy.deepcopy(BASE_PAYLOAD)
+    payload["event"]["repo"] = "someone-else/repo"
+    payload_path = tmp_path / "review-trigger.json"
+    payload_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    completed = subprocess.run(
+        [sys.executable, str(router.Path(router.__file__)), str(payload_path)],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 1
+    result = json.loads(completed.stderr)
+    assert result["status"] == "BLOCKED"
+    assert result["block_reason"] == "repo_not_allowed"
 
 
 def test_route_review_trigger_blocks_forbidden_path_overlap() -> None:

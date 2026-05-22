@@ -152,6 +152,10 @@ def _find_blocked_tools(payload: dict) -> list[str]:
     ]
 
 
+def _normalize_repo(value: object) -> str:
+    return str(value or "").strip().lower()
+
+
 def route_review_trigger(payload: dict) -> dict:
     """Pure dry-run contract for the Hermes Northstar review loop.
 
@@ -165,7 +169,7 @@ def route_review_trigger(payload: dict) -> dict:
         return _blocked("invalid_payload", errors=errors)
 
     event = payload["event"]
-    repo = str(event.get("repo", ""))
+    repo = _normalize_repo(event.get("repo"))
     if repo not in DEFAULT_ALLOWED_REPOS:
         return _blocked("repo_not_allowed", repo=repo, allowed_repos=sorted(DEFAULT_ALLOWED_REPOS))
 
@@ -217,6 +221,10 @@ def main(argv: list[str]) -> int:
     errors = validate(payload)
     if errors:
         print(json.dumps({"status": "INVALID", "errors": errors}, indent=2), file=sys.stderr)
+        return 1
+    route_result = route_review_trigger(payload)
+    if route_result.get("status") != "OK":
+        print(json.dumps(route_result, indent=2, ensure_ascii=False), file=sys.stderr)
         return 1
     review_report = _load_json(SIM_REVIEW)
     next_report = _load_json(SIM_NEXT)
