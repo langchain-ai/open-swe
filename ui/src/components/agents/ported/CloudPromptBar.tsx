@@ -1,4 +1,3 @@
-import { ArrowUpIcon } from "@phosphor-icons/react";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import type { ModelOption } from "@/lib/api";
@@ -89,8 +88,8 @@ export const CloudPromptBar = memo(function CloudPromptBar({
     <div className={cn("relative w-full font-sans text-[13px]", compact ? "max-w-none" : "max-w-2xl")}>
       <div
         className={cn(
-          "relative flex flex-col rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface)] shadow-sm",
-          compact ? "min-h-[88px] px-4 pt-3.5 pb-2.5" : "min-h-[120px] px-4 py-3.5",
+          "relative flex min-h-[106px] flex-col rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface)] px-4 py-3.5 shadow-sm",
+          compact && "min-h-[88px]",
         )}
       >
         <textarea
@@ -103,17 +102,12 @@ export const CloudPromptBar = memo(function CloudPromptBar({
           disabled={disabled}
           className={cn(
             "w-full min-w-0 resize-none overflow-hidden bg-transparent leading-[1.45] text-[color:var(--ui-text)] outline-none placeholder:text-[color:var(--ui-text-dim)]",
-            compact ? "min-h-[44px]" : "min-h-[64px]",
+            compact ? "min-h-[36px]" : "min-h-[52px]",
           )}
           style={{ maxHeight: PROMPT_TEXTAREA_MAX_HEIGHT }}
         />
 
-        <div
-          className={cn(
-            "flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0 text-xs text-[color:var(--ui-text-dim)]",
-            compact ? "pt-1.5" : "mt-auto pt-2",
-          )}
-        >
+        <div className="mt-auto flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 pt-2 text-xs text-[color:var(--ui-text-dim)]">
           <div ref={modelDropdownRef} className="relative min-w-0 shrink">
             <button
               type="button"
@@ -124,7 +118,7 @@ export const CloudPromptBar = memo(function CloudPromptBar({
               {selectionLabel}
             </button>
             {modelDropdownOpen && combos.length > 0 && (
-              <div className="absolute bottom-full left-0 z-50 mb-1 max-h-72 overflow-y-auto rounded border border-[var(--ui-border)] bg-[var(--ui-surface)] shadow-lg">
+              <div className="absolute bottom-full left-0 z-50 mb-1 max-h-72 overflow-hidden overflow-y-auto rounded border border-[var(--ui-border)] bg-[var(--ui-surface)] shadow-lg">
                 {combos.map((combo) => {
                   const selected =
                     !!selection &&
@@ -155,18 +149,6 @@ export const CloudPromptBar = memo(function CloudPromptBar({
               </div>
             )}
           </div>
-
-          <span className="ml-auto" />
-
-          <button
-            type="button"
-            onClick={handleSubmit}
-            disabled={disabled || !value.trim()}
-            className="flex size-8 shrink-0 items-center justify-center rounded-full bg-[#87CEEB] text-slate-700 hover:brightness-95 disabled:opacity-50"
-            aria-label="Send"
-          >
-            <ArrowUpIcon className="size-4" weight="bold" />
-          </button>
         </div>
       </div>
     </div>
