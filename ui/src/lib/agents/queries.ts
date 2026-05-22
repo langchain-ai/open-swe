@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 
 import { agentsApi } from "./api";
+import { addPendingPrompt } from "./pendingPrompts";
 
 export const agentThreadKeys = {
   all: ["agent-threads"] as const,
@@ -32,7 +33,12 @@ export function useCreateAgentThread() {
 
   return useMutation({
     mutationFn: agentsApi.createThread,
-    onSuccess: (thread) => {
+    onSuccess: (thread, variables) => {
+      addPendingPrompt(thread.id, variables.prompt);
+      queryClient.setQueryData(agentThreadKeys.detail(thread.id), {
+        ...thread,
+        status: thread.status === "idle" ? "running" : thread.status,
+      });
       queryClient.invalidateQueries({ queryKey: agentThreadKeys.all });
       navigate({ to: "/agents/$threadId", params: { threadId: thread.id } });
     },
@@ -44,8 +50,17 @@ export function useSendAgentMessage(threadId: string) {
 
   return useMutation({
     mutationFn: (content: string) => agentsApi.sendMessage(threadId, { content }),
+    onMutate: (content) => {
+      addPendingPrompt(threadId, content);
+    },
     onSuccess: (thread) => {
-      queryClient.setQueryData(agentThreadKeys.detail(threadId), thread);
+      queryClient.setQueryData(agentThreadKeys.detail(threadId), (prev: typeof thread | undefined) => {
+        if (!prev) return thread;
+        return {
+          ...thread,
+          messages: thread.messages.length > 0 ? thread.messages : prev.messages,
+        };
+      });
       queryClient.invalidateQueries({ queryKey: agentThreadKeys.all });
     },
   });
