@@ -1,0 +1,197 @@
+"""Tests for the opened / ready_for_review auto-review webhook handlers."""
+
+from __future__ import annotations
+
+from typing import Any
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
+from agent import webapp
+
+
+def _pr_payload(*, action: str, draft: bool, author: str = "alice") -> dict[str, Any]:
+    return {
+        "action": action,
+        "repository": {"owner": {"login": "lc"}, "name": "repo"},
+        "pull_request": {
+            "number": 7,
+            "html_url": "https://github.com/lc/repo/pull/7",
+            "title": "T",
+            "draft": draft,
+            "user": {"login": author},
+            "head": {"sha": "headsha", "ref": "feat-x"},
+            "base": {"sha": "basesha", "ref": "main"},
+        },
+        "sender": {"login": author, "id": 1},
+    }
+
+
+def _patch_dispatch_deps(monkeypatch: pytest.MonkeyPatch, fake_client: Any) -> None:
+    monkeypatch.setattr(
+        webapp,
+        "get_github_app_installation_token_with_expiry",
+        AsyncMock(return_value=("token", None)),
+    )
+    monkeypatch.setattr(webapp, "_ensure_thread_exists_for_metadata", AsyncMock(return_value=True))
+    monkeypatch.setattr(webapp, "persist_encrypted_github_token", AsyncMock(return_value="enc"))
+    monkeypatch.setattr(webapp, "set_reviewer_thread_metadata", AsyncMock())
+    monkeypatch.setattr(webapp, "is_thread_active", AsyncMock(return_value=False))
+    monkeypatch.setattr(webapp, "get_client", lambda url: fake_client)
+
+
+@pytest.mark.asyncio
+async def test_pr_ready_non_draft_triggers_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_client = MagicMock()
+    fake_client.runs.create = AsyncMock()
+    _patch_dispatch_deps(monkeypatch, fake_client)
+    monkeypatch.setattr(webapp, "get_profile", AsyncMock(return_value=None))
+    monkeypatch.setattr(webapp, "get_team_settings", AsyncMock(return_value={}))
+
+    await webapp.process_github_pr_ready(_pr_payload(action="opened", draft=False))
+
+    fake_client.runs.create.assert_awaited_once()
+    _, kwargs = fake_client.runs.create.await_args
+    assert kwargs["config"]["configurable"]["source"] == "github_auto"
+    assert kwargs["config"]["configurable"]["pr_number"] == 7
+
+
+@pytest.mark.asyncio
+async def test_pr_ready_for_review_triggers_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_client = MagicMock()
+    fake_client.runs.create = AsyncMock()
+    _patch_dispatch_deps(monkeypatch, fake_client)
+    monkeypatch.setattr(webapp, "get_profile", AsyncMock(return_value=None))
+    monkeypatch.setattr(webapp, "get_team_settings", AsyncMock(return_value={}))
+
+    await webapp.process_github_pr_ready(_pr_payload(action="ready_for_review", draft=False))
+
+    fake_client.runs.create.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_pr_ready_draft_user_override_off_wins_over_team_on(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_client = MagicMock()
+    fake_client.runs.create = AsyncMock()
+    _patch_dispatch_deps(monkeypatch, fake_client)
+    monkeypatch.setattr(
+        webapp,
+        "get_profile",
+        AsyncMock(return_value={"login": "alice", "review_draft_prs": False}),
+    )
+    monkeypatch.setattr(
+        webapp, "get_team_settings", AsyncMock(return_value={"review_draft_prs": True})
+    )
+
+    await webapp.process_github_pr_ready(_pr_payload(action="opened", draft=True))
+
+    fake_client.runs.create.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_pr_ready_draft_user_override_on_wins_over_team_off(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_client = MagicMock()
+    fake_client.runs.create = AsyncMock()
+    _patch_dispatch_deps(monkeypatch, fake_client)
+    monkeypatch.setattr(
+        webapp,
+        "get_profile",
+        AsyncMock(return_value={"login": "alice", "review_draft_prs": True}),
+    )
+    monkeypatch.setattr(
+        webapp,
+        "get_team_settings",
+        AsyncMock(return_value={"review_draft_prs": False}),
+    )
+
+    await webapp.process_github_pr_ready(_pr_payload(action="opened", draft=True))
+
+    fake_client.runs.create.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_pr_ready_draft_user_default_falls_back_to_team_on(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_client = MagicMock()
+    fake_client.runs.create = AsyncMock()
+    _patch_dispatch_deps(monkeypatch, fake_client)
+    # User profile exists but review_draft_prs is None — inherit team default.
+    monkeypatch.setattr(
+        webapp,
+        "get_profile",
+        AsyncMock(return_value={"login": "alice", "review_draft_prs": None}),
+    )
+    monkeypatch.setattr(
+        webapp, "get_team_settings", AsyncMock(return_value={"review_draft_prs": True})
+    )
+
+    await webapp.process_github_pr_ready(_pr_payload(action="opened", draft=True))
+
+    fake_client.runs.create.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_pr_ready_draft_no_profile_falls_back_to_team_off(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_client = MagicMock()
+    fake_client.runs.create = AsyncMock()
+    _patch_dispatch_deps(monkeypatch, fake_client)
+    # External contributor — inherit team default (off).
+    monkeypatch.setattr(webapp, "get_profile", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        webapp,
+        "get_team_settings",
+        AsyncMock(return_value={"review_draft_prs": False}),
+    )
+
+    await webapp.process_github_pr_ready(_pr_payload(action="opened", draft=True))
+
+    fake_client.runs.create.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_pr_ready_draft_no_profile_falls_back_to_team_on(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_client = MagicMock()
+    fake_client.runs.create = AsyncMock()
+    _patch_dispatch_deps(monkeypatch, fake_client)
+    monkeypatch.setattr(webapp, "get_profile", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        webapp, "get_team_settings", AsyncMock(return_value={"review_draft_prs": True})
+    )
+
+    await webapp.process_github_pr_ready(_pr_payload(action="opened", draft=True))
+
+    fake_client.runs.create.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_converted_to_draft_disables_watch(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: list[Any] = []
+
+    async def fake_set(thread_id: str, **kwargs: Any) -> None:
+        captured.append((thread_id, kwargs))
+
+    payload = {
+        "action": "converted_to_draft",
+        "repository": {"owner": {"login": "lc"}, "name": "repo"},
+        "pull_request": {"number": 7, "head": {"ref": "feat-x"}},
+    }
+    with (
+        patch("agent.webapp._is_repo_allowed_for_reviewer", return_value=True),
+        patch(
+            "agent.webapp._get_thread_metadata_safe",
+            new_callable=AsyncMock,
+            return_value={"kind": "reviewer", "watch": True},
+        ),
+        patch("agent.webapp.set_reviewer_thread_metadata", side_effect=fake_set),
+    ):
+        await webapp.process_github_pr_close(payload)
+    assert captured and captured[0][1]["watch"] is False

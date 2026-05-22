@@ -152,7 +152,7 @@ function ReviewPage() {
           />
           <SettingsRow
             label="Review Draft PRs"
-            description="Allow Open SWE Review to automatically review draft pull requests"
+            description="Org-wide default for whether Open SWE Review runs on draft PRs. Each user can override this in My Settings."
             control={
               <Switch
                 checked={current.review_draft_prs}
