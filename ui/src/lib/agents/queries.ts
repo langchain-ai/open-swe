@@ -62,3 +62,20 @@ export function useCancelAgentThread(threadId: string) {
     },
   });
 }
+
+export function useDeleteAgentThread() {
+  const queryClient = useQueryClient();
+  const navigate = useNavigate();
+
+  return useMutation({
+    mutationFn: (threadId: string) => agentsApi.deleteThread(threadId),
+    onSuccess: (_, threadId) => {
+      queryClient.removeQueries({ queryKey: agentThreadKeys.detail(threadId) });
+      queryClient.invalidateQueries({ queryKey: agentThreadKeys.all });
+      const path = window.location.pathname;
+      if (path.includes(`/agents/${threadId}`)) {
+        navigate({ to: "/agents" });
+      }
+    },
+  });
+}

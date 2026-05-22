@@ -370,6 +370,26 @@ async def cancel_dashboard_thread(thread_id: str, login: str) -> dict[str, Any]:
     )
 
 
+async def delete_dashboard_thread(thread_id: str, login: str) -> None:
+    client = langgraph_client()
+    try:
+        thread = await client.threads.get(thread_id)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(404, "thread not found") from exc
+
+    metadata = thread.get("metadata") if isinstance(thread.get("metadata"), dict) else {}
+    _assert_thread_owner(metadata, login)
+
+    run_id = metadata.get("latest_run_id")
+    if isinstance(run_id, str) and run_id:
+        try:
+            await client.runs.cancel(thread_id, run_id, wait=False)
+        except Exception:
+            logger.debug("Could not cancel run %s for thread %s", run_id, thread_id, exc_info=True)
+
+    await client.threads.delete(thread_id)
+
+
 async def stream_dashboard_thread(thread_id: str, login: str) -> AsyncIterator[str]:
     try:
         thread = await langgraph_client().threads.get(thread_id)

@@ -56,6 +56,10 @@ export const agentsApi = {
     agentsRequest<AgentThread>(`/threads/${encodeURIComponent(threadId)}/cancel`, {
       method: "POST",
     }),
+  deleteThread: (threadId: string) =>
+    agentsRequest<void>(`/threads/${encodeURIComponent(threadId)}`, {
+      method: "DELETE",
+    }),
   streamUrl: (threadId: string) =>
     `${API_BASE}/dashboard/api/threads/${encodeURIComponent(threadId)}/stream`,
 };

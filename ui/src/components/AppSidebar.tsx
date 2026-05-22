@@ -11,6 +11,11 @@ import type { ComponentType, SVGProps } from "react";
 
 import type { SessionUser } from "@/lib/api";
 import { SidebarUserMenu } from "@/components/SidebarUserMenu";
+import {
+  SidebarCollapseButton,
+  SidebarFrame,
+  useSidebarLayout,
+} from "@/components/sidebar-layout";
 import { cn } from "@/lib/utils";
 
 type IconType = ComponentType<SVGProps<SVGSVGElement>>;
@@ -31,9 +36,10 @@ const NAV: Array<NavItem> = [
 ];
 
 export function AppSidebar({ user }: { user: SessionUser }) {
+  const layout = useSidebarLayout();
   return (
-    <aside className="flex h-svh w-60 shrink-0 flex-col border-r border-border bg-sidebar text-sidebar-foreground">
-      <div className="px-4 pt-5 pb-4">
+    <SidebarFrame {...layout} className="border-r border-border bg-sidebar text-sidebar-foreground">
+      <div className="flex items-center justify-between px-4 pt-5 pb-4">
         <Link
           to="/my-settings"
           className="flex items-center gap-2 font-heading text-sm font-medium tracking-tight"
@@ -41,6 +47,7 @@ export function AppSidebar({ user }: { user: SessionUser }) {
           <img src="/logo-mark.png" alt="" className="size-5" />
           open-swe
         </Link>
+        <SidebarCollapseButton onToggle={layout.toggle} />
       </div>
 
       <nav className="flex flex-1 flex-col gap-0.5 px-2">
@@ -78,6 +85,6 @@ export function AppSidebar({ user }: { user: SessionUser }) {
       <div className="p-2">
         <SidebarUserMenu user={user} />
       </div>
-    </aside>
+    </SidebarFrame>
   );
 }

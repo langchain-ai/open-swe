@@ -66,6 +66,7 @@ from .thread_api import (
     ThreadMessageBody,
     cancel_dashboard_thread,
     create_dashboard_thread,
+    delete_dashboard_thread,
     get_dashboard_thread,
     list_dashboard_threads,
     send_dashboard_message,
@@ -612,6 +613,15 @@ async def api_cancel_thread(
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
     return await cancel_dashboard_thread(thread_id, session["sub"])
+
+
+@router.delete("/threads/{thread_id}")
+async def api_delete_thread(
+    thread_id: str,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> Response:
+    await delete_dashboard_thread(thread_id, session["sub"])
+    return Response(status_code=204)
 
 
 @router.get("/threads/{thread_id}/stream")

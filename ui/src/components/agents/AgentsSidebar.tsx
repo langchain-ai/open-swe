@@ -1,10 +1,15 @@
 import { Link } from "@tanstack/react-router";
-import { ChartLineUpIcon, PlusIcon } from "@phosphor-icons/react";
+import { ChartLineUpIcon, PlusIcon, XIcon } from "@phosphor-icons/react";
 
 import type { SessionUser } from "@/lib/api";
 import { SidebarUserMenu } from "@/components/SidebarUserMenu";
+import {
+  SidebarCollapseButton,
+  SidebarFrame,
+  useSidebarLayout,
+} from "@/components/sidebar-layout";
 import { groupThreads } from "@/lib/agents/api";
-import { useAgentThreads } from "@/lib/agents/queries";
+import { useAgentThreads, useDeleteAgentThread } from "@/lib/agents/queries";
 import type { AgentThread } from "@/lib/agents/types";
 import { cn } from "@/lib/utils";
 
@@ -19,10 +24,11 @@ export function AgentsSidebar({ user, activeThreadId }: AgentsSidebarProps) {
   const threadsQuery = useAgentThreads();
   const threads = threadsQuery.data ?? [];
   const groups = groupThreads(threads);
+  const layout = useSidebarLayout();
 
   return (
-    <aside className="flex h-full w-[260px] shrink-0 flex-col border-r border-[var(--ui-border)] bg-[var(--ui-sidebar)]">
-      <div className="px-4 pt-5 pb-4">
+    <SidebarFrame {...layout} className="border-r border-[var(--ui-border)] bg-[var(--ui-sidebar)]">
+      <div className="flex items-center justify-between px-4 pt-5 pb-4">
         <Link
           to="/my-settings"
           className="flex items-center gap-2 font-heading text-sm font-medium tracking-tight text-[var(--ui-text)]"
@@ -30,6 +36,7 @@ export function AgentsSidebar({ user, activeThreadId }: AgentsSidebarProps) {
           <img src="/logo-mark.png" alt="" className="size-5" />
           open-swe
         </Link>
+        <SidebarCollapseButton onToggle={layout.toggle} />
       </div>
 
       <div className="px-2 pb-1">
@@ -67,7 +74,7 @@ export function AgentsSidebar({ user, activeThreadId }: AgentsSidebarProps) {
       <div className="p-2">
         <SidebarUserMenu user={user} showSettingsLink />
       </div>
-    </aside>
+    </SidebarFrame>
   );
 }
 
@@ -95,10 +102,20 @@ function ThreadGroup({
 }
 
 function ThreadRow({ thread, isActive }: { thread: AgentThread; isActive: boolean }) {
+  const deleteThread = useDeleteAgentThread();
   const badge =
     thread.diffStats && thread.diffStats.additions > 0
       ? `+${thread.diffStats.additions}`
       : null;
+  const isDeleting = deleteThread.isPending && deleteThread.variables === thread.id;
+
+  const onDelete = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (isDeleting) return;
+    if (!window.confirm(`Delete "${thread.title}"? This cannot be undone.`)) return;
+    deleteThread.mutate(thread.id);
+  };
 
   return (
     <Link
@@ -109,6 +126,7 @@ function ThreadRow({ thread, isActive }: { thread: AgentThread; isActive: boolea
         isActive
           ? "bg-[var(--ui-accent-bubble)] text-[var(--ui-text)]"
           : "text-[var(--ui-text-muted)] hover:bg-[var(--ui-sidebar-hover)]",
+        isDeleting && "opacity-50",
       )}
     >
       <span
@@ -123,10 +141,19 @@ function ThreadRow({ thread, isActive }: { thread: AgentThread; isActive: boolea
       />
       <span className="min-w-0 flex-1 truncate text-xs">{thread.title}</span>
       {badge && (
-        <span className="shrink-0 rounded bg-[var(--ui-panel-2)] px-1.5 py-0.5 text-[10px] text-[var(--ui-text-dim)]">
+        <span className="shrink-0 rounded bg-[var(--ui-panel-2)] px-1.5 py-0.5 text-[10px] text-[var(--ui-text-dim)] group-hover:hidden">
           {badge}
         </span>
       )}
+      <button
+        type="button"
+        aria-label="Delete thread"
+        onClick={onDelete}
+        disabled={isDeleting}
+        className="hidden size-4 shrink-0 items-center justify-center rounded text-[var(--ui-text-dim)] hover:bg-[var(--ui-panel-2)] hover:text-[var(--ui-text)] group-hover:flex"
+      >
+        <XIcon className="size-3" weight="bold" />
+      </button>
     </Link>
   );
 }
