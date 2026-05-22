@@ -57,6 +57,7 @@ from .tools import (
     update_finding,
     web_search,
 )
+from .utils.agents_md import fetch_agents_md
 from .utils.auth import resolve_github_token
 from .utils.github_token import get_github_token_from_thread
 from .utils.model import DEFAULT_LLM_REASONING, make_model, provider_model_kwargs
@@ -216,6 +217,7 @@ def _reviewer_system_prompt(
     pr_number: int | str,
     reviewer_eval: bool = False,
     repo_style_prompt: str | None = None,
+    agents_md_content: str | None = None,
 ) -> str:
     prompt = REVIEWER_PROMPT_TEMPLATE.format(
         working_dir=working_dir,
@@ -233,6 +235,20 @@ def _reviewer_system_prompt(
             "PR reviews. Apply them when they agree with the global bar above; "
             "they refine tone, severity, and what this team typically flags.\n\n"
             f"{repo_style_prompt}"
+        )
+    if agents_md_content:
+        prompt = (
+            f"{prompt}\n\n"
+            "# Repository conventions (AGENTS.md)\n\n"
+            "The following is the `AGENTS.md` file from the repository at the "
+            "PR's HEAD. It documents the project's conventions, architecture, "
+            "and rules. Treat violations of these conventions as candidate "
+            "findings when they meet the global bar above (anchored to a "
+            "changed line, concrete failure mode, in-diff). Do not file "
+            "findings for pre-existing violations outside the diff.\n\n"
+            "```\n"
+            f"{agents_md_content}\n"
+            "```"
         )
     return prompt
 
@@ -322,6 +338,7 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
         logger.info("No thread_id or not for execution, returning reviewer agent without sandbox")
         return create_deep_agent(system_prompt="", tools=[]).with_config(config)
 
+    github_token: str | None = None
     if config["configurable"].get("source"):
         cached_token, cached_encrypted, cached_expires_at = await get_github_token_from_thread(
             thread_id
@@ -329,12 +346,12 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
         if cached_token and cached_encrypted:
             config["metadata"]["github_token_encrypted"] = cached_encrypted
             config["metadata"]["github_token_expires_at"] = cached_expires_at
-            del cached_token
+            github_token = cached_token
         else:
             _token, new_encrypted, new_expires_at = await resolve_github_token(config, thread_id)
             config["metadata"]["github_token_encrypted"] = new_encrypted
             config["metadata"]["github_token_expires_at"] = new_expires_at
-            del _token
+            github_token = _token
 
     sandbox_backend = await ensure_sandbox_for_thread(thread_id)
 
@@ -411,6 +428,25 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
         from .dashboard.review_styles import get_repo_custom_prompt
 
         repo_style_prompt = await get_repo_custom_prompt(repo_owner, repo_name)
+
+    agents_md_content: str | None = None
+    if repo_owner and repo_name and head_sha:
+        agents_md_content = await fetch_agents_md(
+            repo_owner,
+            repo_name,
+            head_sha,
+            token=github_token,
+        )
+        if agents_md_content:
+            logger.info(
+                "Loaded AGENTS.md (%d chars) from %s/%s@%s into reviewer prompt",
+                len(agents_md_content),
+                repo_owner,
+                repo_name,
+                head_sha,
+            )
+    del github_token
+
     system_prompt = _reviewer_system_prompt(
         f"{work_dir}/{repo_name}" if repo_name else work_dir,
         repo_owner=repo_owner,
@@ -418,6 +454,7 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
         pr_number=pr_number if isinstance(pr_number, int) else "",
         reviewer_eval=reviewer_eval,
         repo_style_prompt=repo_style_prompt,
+        agents_md_content=agents_md_content,
     )
     if review_context:
         system_prompt = f"{system_prompt}\n\n{review_context}"

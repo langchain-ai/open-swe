@@ -113,6 +113,11 @@ async def test_reviewer_applies_eval_model_and_effort_overrides() -> None:
         ),
         patch("agent.reviewer.make_model", return_value=MagicMock()) as make_model,
         patch("agent.reviewer.create_deep_agent", return_value=dummy_agent),
+        patch(
+            "agent.reviewer.fetch_agents_md",
+            new_callable=AsyncMock,
+            return_value=None,
+        ),
     ):
         await reviewer.get_reviewer_agent(config)
 
@@ -161,8 +166,80 @@ async def test_reviewer_injects_repo_style_during_eval() -> None:
         ),
         patch("agent.reviewer.make_model", return_value=MagicMock()),
         patch("agent.reviewer.create_deep_agent", side_effect=fake_create_deep_agent),
+        patch(
+            "agent.reviewer.fetch_agents_md",
+            new_callable=AsyncMock,
+            return_value=None,
+        ),
     ):
         await reviewer.get_reviewer_agent(config)
 
     assert "Repository-specific review style" in captured["system_prompt"]
     assert "Flag table rerender regressions" in captured["system_prompt"]
+
+
+def test_reviewer_system_prompt_includes_agents_md_section() -> None:
+    prompt = reviewer._reviewer_system_prompt(
+        "/workspace/repo",
+        repo_owner="acme",
+        repo_name="repo",
+        pr_number=42,
+        agents_md_content="Use snake_case for all Python identifiers.",
+    )
+    assert "Repository conventions (AGENTS.md)" in prompt
+    assert "Use snake_case for all Python identifiers." in prompt
+
+
+@pytest.mark.asyncio
+async def test_reviewer_inlines_agents_md_into_system_prompt() -> None:
+    config: RunnableConfig = {
+        "configurable": {
+            "__is_for_execution__": True,
+            "thread_id": "reviewer-thread-id",
+            "source": "github",
+            "repo": {"owner": "acme", "name": "repo"},
+            "pr_number": 7,
+            "pr_url": "https://github.com/acme/repo/pull/7",
+            "base_sha": "base",
+            "head_sha": "head-sha-abc",
+        },
+        "metadata": {},
+    }
+    captured: dict[str, str] = {}
+
+    def fake_create_deep_agent(*, system_prompt: str, **kwargs: object) -> _DummyAgent:
+        captured["system_prompt"] = system_prompt
+        return _DummyAgent()
+
+    with (
+        patch(
+            "agent.reviewer.get_github_token_from_thread",
+            new_callable=AsyncMock,
+            return_value=("gh-token", "encrypted-token", None),
+        ),
+        patch("agent.reviewer.resolve_github_token", new_callable=AsyncMock),
+        patch(
+            "agent.reviewer.ensure_sandbox_for_thread",
+            new_callable=AsyncMock,
+            return_value=MagicMock(),
+        ),
+        patch(
+            "agent.reviewer.aresolve_sandbox_work_dir",
+            new_callable=AsyncMock,
+            return_value="/workspace",
+        ),
+        patch(
+            "agent.reviewer.fetch_agents_md",
+            new_callable=AsyncMock,
+            return_value="Always use the design system IconButton.",
+        ) as mock_fetch_agents_md,
+        patch("agent.reviewer.make_model", return_value=MagicMock()),
+        patch("agent.reviewer.create_deep_agent", side_effect=fake_create_deep_agent),
+    ):
+        await reviewer.get_reviewer_agent(config)
+
+    mock_fetch_agents_md.assert_awaited_once_with(
+        "acme", "repo", "head-sha-abc", token="gh-token"
+    )
+    assert "Repository conventions (AGENTS.md)" in captured["system_prompt"]
+    assert "Always use the design system IconButton." in captured["system_prompt"]
