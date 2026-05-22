@@ -627,10 +627,15 @@ async def api_delete_thread(
 @router.get("/threads/{thread_id}/stream")
 async def api_stream_thread(
     thread_id: str,
+    request: Request,
     session: dict[str, Any] = _SESSION_DEP,
 ) -> StreamingResponse:
+    last_event_id = request.headers.get("last-event-id")
+
     async def event_generator():
-        async for chunk in stream_dashboard_thread(thread_id, session["sub"]):
+        async for chunk in stream_dashboard_thread(
+            thread_id, session["sub"], last_event_id=last_event_id
+        ):
             yield chunk
 
     return StreamingResponse(

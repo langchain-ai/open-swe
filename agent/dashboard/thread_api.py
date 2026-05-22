@@ -26,6 +26,7 @@ logger = logging.getLogger(__name__)
 
 _ASSISTANT_ID = "agent"
 _DASHBOARD_SOURCE = "dashboard"
+_DASHBOARD_STREAM_MODES: tuple[str, ...] = ("values", "updates", "messages-tuple")
 
 
 def _agent_version_metadata() -> dict[str, str]:
@@ -292,6 +293,8 @@ async def _start_agent_run(
         input={"messages": [{"role": "user", "content": prompt}]},
         config={"configurable": configurable, "metadata": _agent_version_metadata()},
         if_not_exists="create",
+        stream_mode=list(_DASHBOARD_STREAM_MODES),
+        stream_resumable=True,
     )
     run_id = run.get("run_id") if isinstance(run, dict) else getattr(run, "run_id", None)
     await client.threads.update(
@@ -367,6 +370,8 @@ async def send_dashboard_message(
         _ASSISTANT_ID,
         input={"messages": [{"role": "user", "content": prompt}]},
         config={"configurable": configurable, "metadata": _agent_version_metadata()},
+        stream_mode=list(_DASHBOARD_STREAM_MODES),
+        stream_resumable=True,
     )
     run_id = run.get("run_id") if isinstance(run, dict) else getattr(run, "run_id", None)
     await client.threads.update(
@@ -426,7 +431,9 @@ async def delete_dashboard_thread(thread_id: str, login: str) -> None:
     await client.threads.delete(thread_id)
 
 
-async def stream_dashboard_thread(thread_id: str, login: str) -> AsyncIterator[str]:
+async def stream_dashboard_thread(
+    thread_id: str, login: str, *, last_event_id: str | None = None
+) -> AsyncIterator[str]:
     try:
         thread = await langgraph_client().threads.get(thread_id)
     except Exception as exc:  # noqa: BLE001
@@ -435,7 +442,21 @@ async def stream_dashboard_thread(thread_id: str, login: str) -> AsyncIterator[s
     metadata = thread.get("metadata") if isinstance(thread.get("metadata"), dict) else {}
     _assert_thread_owner(metadata, login)
 
-    stream = await langgraph_client().threads.join_stream(thread_id)
+    stream = await langgraph_client().threads.join_stream(
+        thread_id,
+        stream_mode=list(_DASHBOARD_STREAM_MODES),
+        last_event_id=last_event_id,
+    )
     async for part in stream:
-        payload = part if isinstance(part, dict) else {"event": str(part)}
-        yield f"data: {json.dumps(payload, default=str)}\n\n"
+        event = getattr(part, "event", None) or (
+            part.get("event") if isinstance(part, dict) else None
+        )
+        data = getattr(part, "data", None) if not isinstance(part, dict) else part.get("data")
+        event_id = getattr(part, "id", None) if not isinstance(part, dict) else part.get("id")
+        payload: dict[str, Any] = {"event": event, "data": data}
+        if event_id is not None:
+            payload["id"] = event_id
+        chunk = f"data: {json.dumps(payload, default=str)}\n\n"
+        if event_id is not None:
+            chunk = f"id: {event_id}\n{chunk}"
+        yield chunk
