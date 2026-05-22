@@ -403,6 +403,7 @@ async def stream_dashboard_thread(thread_id: str, login: str) -> AsyncIterator[s
     metadata = thread.get("metadata") if isinstance(thread.get("metadata"), dict) else {}
     _assert_thread_owner(metadata, login)
 
-    async for part in langgraph_client().threads.join_stream(thread_id):
+    stream = await langgraph_client().threads.join_stream(thread_id)
+    async for part in stream:
         payload = part if isinstance(part, dict) else {"event": str(part)}
         yield f"data: {json.dumps(payload, default=str)}\n\n"
