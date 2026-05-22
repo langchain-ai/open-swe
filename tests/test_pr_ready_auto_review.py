@@ -52,7 +52,7 @@ async def test_pr_ready_non_draft_triggers_run(monkeypatch: pytest.MonkeyPatch) 
 
     fake_client.runs.create.assert_awaited_once()
     _, kwargs = fake_client.runs.create.await_args
-    assert kwargs["config"]["configurable"]["source"] == "github_auto"
+    assert kwargs["config"]["configurable"]["source"] == "github"
     assert kwargs["config"]["configurable"]["pr_number"] == 7
 
 
@@ -172,18 +172,27 @@ async def test_pr_ready_draft_no_profile_falls_back_to_team_on(
     fake_client.runs.create.assert_awaited_once()
 
 
+def _converted_to_draft_payload(author: str = "alice") -> dict[str, Any]:
+    return {
+        "action": "converted_to_draft",
+        "repository": {"owner": {"login": "lc"}, "name": "repo"},
+        "pull_request": {
+            "number": 7,
+            "head": {"ref": "feat-x"},
+            "user": {"login": author},
+        },
+    }
+
+
 @pytest.mark.asyncio
-async def test_converted_to_draft_disables_watch(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_converted_to_draft_disables_watch_when_drafts_off(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     captured: list[Any] = []
 
     async def fake_set(thread_id: str, **kwargs: Any) -> None:
         captured.append((thread_id, kwargs))
 
-    payload = {
-        "action": "converted_to_draft",
-        "repository": {"owner": {"login": "lc"}, "name": "repo"},
-        "pull_request": {"number": 7, "head": {"ref": "feat-x"}},
-    }
     with (
         patch("agent.webapp._is_repo_allowed_for_reviewer", return_value=True),
         patch(
@@ -191,7 +200,74 @@ async def test_converted_to_draft_disables_watch(monkeypatch: pytest.MonkeyPatch
             new_callable=AsyncMock,
             return_value={"kind": "reviewer", "watch": True},
         ),
+        patch(
+            "agent.webapp.get_profile",
+            new_callable=AsyncMock,
+            return_value={"login": "alice", "review_draft_prs": False},
+        ),
+        patch(
+            "agent.webapp.get_team_settings",
+            new_callable=AsyncMock,
+            return_value={"review_draft_prs": False},
+        ),
         patch("agent.webapp.set_reviewer_thread_metadata", side_effect=fake_set),
     ):
-        await webapp.process_github_pr_close(payload)
+        await webapp.process_github_pr_close(_converted_to_draft_payload())
     assert captured and captured[0][1]["watch"] is False
+
+
+@pytest.mark.asyncio
+async def test_converted_to_draft_keeps_watch_when_author_drafts_on(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_set = AsyncMock()
+    with (
+        patch("agent.webapp._is_repo_allowed_for_reviewer", return_value=True),
+        patch(
+            "agent.webapp._get_thread_metadata_safe",
+            new_callable=AsyncMock,
+            return_value={"kind": "reviewer", "watch": True},
+        ),
+        patch(
+            "agent.webapp.get_profile",
+            new_callable=AsyncMock,
+            return_value={"login": "alice", "review_draft_prs": True},
+        ),
+        patch(
+            "agent.webapp.get_team_settings",
+            new_callable=AsyncMock,
+            return_value={"review_draft_prs": False},
+        ),
+        patch("agent.webapp.set_reviewer_thread_metadata", new=fake_set),
+    ):
+        await webapp.process_github_pr_close(_converted_to_draft_payload())
+    fake_set.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_converted_to_draft_keeps_watch_when_team_default_drafts_on(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_set = AsyncMock()
+    with (
+        patch("agent.webapp._is_repo_allowed_for_reviewer", return_value=True),
+        patch(
+            "agent.webapp._get_thread_metadata_safe",
+            new_callable=AsyncMock,
+            return_value={"kind": "reviewer", "watch": True},
+        ),
+        # Author inherits team default — team has drafts on.
+        patch(
+            "agent.webapp.get_profile",
+            new_callable=AsyncMock,
+            return_value={"login": "alice", "review_draft_prs": None},
+        ),
+        patch(
+            "agent.webapp.get_team_settings",
+            new_callable=AsyncMock,
+            return_value={"review_draft_prs": True},
+        ),
+        patch("agent.webapp.set_reviewer_thread_metadata", new=fake_set),
+    ):
+        await webapp.process_github_pr_close(_converted_to_draft_payload())
+    fake_set.assert_not_called()

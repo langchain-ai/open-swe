@@ -1764,7 +1764,10 @@ async def process_github_pr_ready(payload: dict[str, Any]) -> None:
                 author_login or "<unknown>",
             )
             return
-    await _dispatch_first_review_from_pr_payload(payload, source="github_auto")
+    # Use source="github" so the auth resolver finds the bot token persisted on
+    # the thread; "github_auto" would fall through to the email-based path,
+    # which has no user_email to route on for webhook-triggered runs.
+    await _dispatch_first_review_from_pr_payload(payload, source="github")
 
 
 async def process_github_pr_review_command(
@@ -1883,7 +1886,10 @@ async def _get_thread_metadata_safe(thread_id: str) -> dict[str, Any] | None:
 async def process_github_pr_close(payload: dict[str, Any]) -> None:
     """Toggle watch on the canonical reviewer thread on close/reopen/draft transitions.
 
-    ``reopened`` re-enables watch; ``closed`` and ``converted_to_draft`` disable it.
+    ``reopened`` re-enables watch; ``closed`` always disables it.
+    ``converted_to_draft`` disables watch only when the PR author's effective
+    draft-review setting is off — if drafts should be reviewed, watch stays on
+    so subsequent pushes still trigger re-reviews while the PR is in draft.
     """
     repo = payload.get("repository", {})
     pull_request = payload.get("pull_request", {})
@@ -1911,7 +1917,21 @@ async def process_github_pr_close(payload: dict[str, Any]) -> None:
         )
         return
     action = payload.get("action", "")
-    desired_watch = action == "reopened"
+    if action == "converted_to_draft":
+        author = pull_request.get("user") or {}
+        author_login = author.get("login", "") if isinstance(author, dict) else ""
+        if await _draft_review_enabled_for_author(author_login):
+            logger.info(
+                "PR %s/%s#%s converted to draft but author %s has draft reviews enabled; keeping watch",
+                repo_config.get("owner"),
+                repo_config.get("name"),
+                pr_number,
+                author_login or "<unknown>",
+            )
+            return
+        desired_watch = False
+    else:
+        desired_watch = action == "reopened"
     if metadata.get("watch") == desired_watch:
         return
     await set_reviewer_thread_metadata(thread_id, watch=desired_watch)
