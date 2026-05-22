@@ -265,8 +265,6 @@ async def _start_agent_run(
         _ASSISTANT_ID,
         input={"messages": [{"role": "user", "content": prompt}]},
         config={"configurable": configurable, "metadata": _agent_version_metadata()},
-        stream_mode=["values", "messages-tuple", "updates"],
-        stream_resumable=True,
         if_not_exists="create",
     )
     run_id = run.get("run_id") if isinstance(run, dict) else getattr(run, "run_id", None)
@@ -333,8 +331,6 @@ async def send_dashboard_message(
         _ASSISTANT_ID,
         input={"messages": [{"role": "user", "content": prompt}]},
         config={"configurable": configurable, "metadata": _agent_version_metadata()},
-        stream_mode=["values", "messages-tuple", "updates"],
-        stream_resumable=True,
     )
     run_id = run.get("run_id") if isinstance(run, dict) else getattr(run, "run_id", None)
     await client.threads.update(
