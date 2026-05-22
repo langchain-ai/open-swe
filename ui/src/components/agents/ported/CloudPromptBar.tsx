@@ -1,9 +1,13 @@
 import { ArrowUpIcon } from "@phosphor-icons/react";
-import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
+import type { ModelOption } from "@/lib/api";
+import {
+  formatModelSelection,
+  type ModelSelection,
+} from "@/lib/agents/useModelOptions";
 import { cn } from "@/lib/utils";
 
-const MODELS = ["GPT-5.5 High", "Opus 4.6 High", "Composer 2.5 Fast"];
 const PROMPT_TEXTAREA_MAX_HEIGHT = 200;
 
 export interface CloudPromptBarProps {
@@ -12,6 +16,9 @@ export interface CloudPromptBarProps {
   disabled?: boolean;
   busy?: boolean;
   onSubmit?: (value: string) => void;
+  models?: ModelOption[];
+  selection?: ModelSelection | null;
+  onSelectionChange?: (next: ModelSelection) => void;
 }
 
 /** Web-adapted PromptBar from open-swe-app — local state, no Electron/Zustand deps. */
@@ -21,13 +28,26 @@ export const CloudPromptBar = memo(function CloudPromptBar({
   disabled = false,
   busy = false,
   onSubmit,
+  models = [],
+  selection = null,
+  onSelectionChange,
 }: CloudPromptBarProps) {
   const [value, setValue] = useState("");
-  const [model, setModel] = useState(MODELS[0]);
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
-  const [modelDropdownIndex, setModelDropdownIndex] = useState(0);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const modelDropdownRef = useRef<HTMLDivElement>(null);
+
+  const combos = useMemo<ModelSelection[]>(() => {
+    const list: ModelSelection[] = [];
+    for (const model of models) {
+      for (const effort of model.efforts) {
+        list.push({ modelId: model.id, effort });
+      }
+    }
+    return list;
+  }, [models]);
+
+  const selectionLabel = formatModelSelection(models, selection);
 
   const handleSubmit = useCallback(() => {
     const trimmed = value.trim();
@@ -63,6 +83,8 @@ export const CloudPromptBar = memo(function CloudPromptBar({
     }
   };
 
+  const pickerDisabled = combos.length === 0 || !onSelectionChange;
+
   return (
     <div className={cn("relative w-full font-sans text-[13px]", compact ? "max-w-none" : "max-w-2xl")}>
       <div
@@ -95,37 +117,38 @@ export const CloudPromptBar = memo(function CloudPromptBar({
           <div ref={modelDropdownRef} className="relative min-w-0 shrink">
             <button
               type="button"
-              onClick={() => {
-                setModelDropdownOpen((open) => !open);
-                setModelDropdownIndex(0);
-              }}
-              className="max-w-[180px] cursor-pointer truncate text-[color:var(--ui-text-muted)] transition-opacity hover:opacity-80"
+              disabled={pickerDisabled}
+              onClick={() => setModelDropdownOpen((open) => !open)}
+              className="max-w-[220px] cursor-pointer truncate text-[color:var(--ui-text-muted)] transition-opacity hover:opacity-80 disabled:cursor-default disabled:opacity-60"
             >
-              {model}
+              {selectionLabel}
             </button>
-            {modelDropdownOpen && (
-              <div className="absolute bottom-full left-0 z-50 mb-1 overflow-hidden rounded border border-[var(--ui-border)] bg-[var(--ui-surface)] shadow-lg">
-                {MODELS.map((option, idx) => {
-                  const selected = option === model;
+            {modelDropdownOpen && combos.length > 0 && (
+              <div className="absolute bottom-full left-0 z-50 mb-1 max-h-72 overflow-y-auto rounded border border-[var(--ui-border)] bg-[var(--ui-surface)] shadow-lg">
+                {combos.map((combo) => {
+                  const selected =
+                    !!selection &&
+                    selection.modelId === combo.modelId &&
+                    selection.effort === combo.effort;
                   return (
                     <button
-                      key={option}
+                      key={`${combo.modelId}::${combo.effort}`}
                       type="button"
                       onClick={() => {
-                        setModel(option);
+                        onSelectionChange?.(combo);
                         setModelDropdownOpen(false);
                       }}
-                      onMouseEnter={() => setModelDropdownIndex(idx)}
                       className={cn(
-                        "flex w-full items-center gap-2 whitespace-nowrap px-3 py-1.5 text-left transition-colors",
-                        idx === modelDropdownIndex
-                          ? "bg-[var(--ui-panel-2)]"
-                          : "hover:bg-[var(--ui-panel-2)]",
-                        selected ? "text-[color:var(--ui-text)]" : "text-[color:var(--ui-text-muted)]",
+                        "flex w-full items-center gap-2 whitespace-nowrap px-3 py-1.5 text-left transition-colors hover:bg-[var(--ui-panel-2)]",
+                        selected
+                          ? "text-[color:var(--ui-text)]"
+                          : "text-[color:var(--ui-text-muted)]",
                       )}
                     >
-                      {option}
-                      {selected && <span className="ml-auto pl-3 text-[color:var(--ui-text-dim)]">✓</span>}
+                      {formatModelSelection(models, combo)}
+                      {selected && (
+                        <span className="ml-auto pl-3 text-[color:var(--ui-text-dim)]">✓</span>
+                      )}
                     </button>
                   );
                 })}

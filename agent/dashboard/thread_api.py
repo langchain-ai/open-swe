@@ -18,6 +18,7 @@ from ..utils.auth import persist_encrypted_github_token
 from ..utils.thread_ops import is_thread_active, langgraph_client, queue_message_for_thread
 from .agent_overrides import get_profile_default_repo
 from .message_adapter import state_messages_to_ui
+from .options import SUPPORTED_MODEL_IDS, model_supports_effort
 from .profiles import OAUTH_TOKENS_NAMESPACE, get_profile, get_valid_access_token
 from .profiles import _get_value as get_oauth_record
 
@@ -35,10 +36,24 @@ def _agent_version_metadata() -> dict[str, str]:
 class ThreadCreateBody(BaseModel):
     prompt: str = Field(min_length=1, max_length=20_000)
     repo: str | None = None
+    model_id: str | None = None
+    effort: str | None = None
 
 
 class ThreadMessageBody(BaseModel):
     content: str = Field(min_length=1, max_length=20_000)
+    model_id: str | None = None
+    effort: str | None = None
+
+
+def _normalize_model_choice(
+    model_id: str | None, effort: str | None
+) -> tuple[str | None, str | None]:
+    if not isinstance(model_id, str) or model_id not in SUPPORTED_MODEL_IDS:
+        return None, None
+    if not isinstance(effort, str) or not model_supports_effort(model_id, effort):
+        return None, None
+    return model_id, effort
 
 
 def _now_ms() -> int:
@@ -116,6 +131,7 @@ def _thread_summary(
     updated_at = metadata.get("updated_at_ms")
     title = metadata.get("title") if isinstance(metadata.get("title"), str) else "Untitled agent"
     model = metadata.get("model") if isinstance(metadata.get("model"), str) else "Default"
+    effort = metadata.get("effort") if isinstance(metadata.get("effort"), str) else None
     thread_status = thread.get("status") if isinstance(thread.get("status"), str) else "idle"
     latest_run_status = metadata.get("latest_run_status")
     status = _run_status_to_agent_status(
@@ -135,6 +151,7 @@ def _thread_summary(
         "repoFullName": full_name or "unknown/unknown",
         "branch": metadata.get("branch_name") or metadata.get("base_branch") or "main",
         "model": model,
+        "effort": effort,
         "status": status,
         "createdAt": int(created_at) if isinstance(created_at, (int, float)) else _now_ms(),
         "updatedAt": int(updated_at) if isinstance(updated_at, (int, float)) else _now_ms(),
@@ -231,9 +248,14 @@ async def _start_agent_run(
     repo_config: dict[str, str],
     prompt: str,
     title: str | None = None,
+    model_id: str | None = None,
+    effort: str | None = None,
 ) -> dict[str, Any]:
     profile = await get_profile(login) or {}
     now_ms = _now_ms()
+    chosen_model, chosen_effort = _normalize_model_choice(model_id, effort)
+    metadata_model = chosen_model or profile.get("default_model") or "Default"
+    metadata_effort = chosen_effort or profile.get("reasoning_effort")
     metadata = {
         "source": _DASHBOARD_SOURCE,
         "github_login": login,
@@ -242,7 +264,8 @@ async def _start_agent_run(
         "repo_name": repo_config["name"],
         "base_branch": profile.get("base_branch") or "main",
         "branch_prefix": profile.get("branch_prefix"),
-        "model": profile.get("default_model") or "Default",
+        "model": metadata_model,
+        "effort": metadata_effort,
         "created_at_ms": now_ms,
         "updated_at_ms": now_ms,
     }
@@ -259,6 +282,9 @@ async def _start_agent_run(
         "repo": repo_config,
         "user_email": profile.get("email"),
     }
+    if chosen_model and chosen_effort:
+        configurable["agent_model_id"] = chosen_model
+        configurable["agent_effort"] = chosen_effort
 
     run = await client.runs.create(
         thread_id,
@@ -286,6 +312,8 @@ async def create_dashboard_thread(login: str, body: ThreadCreateBody) -> dict[st
         login=login,
         repo_config=repo_config,
         prompt=body.prompt.strip(),
+        model_id=body.model_id,
+        effort=body.effort,
     )
 
 
@@ -306,7 +334,12 @@ async def send_dashboard_message(
 
     prompt = body.content.strip()
     now_ms = _now_ms()
-    await client.threads.update(thread_id=thread_id, metadata={"updated_at_ms": now_ms})
+    chosen_model, chosen_effort = _normalize_model_choice(body.model_id, body.effort)
+    metadata_update: dict[str, Any] = {"updated_at_ms": now_ms}
+    if chosen_model and chosen_effort:
+        metadata_update["model"] = chosen_model
+        metadata_update["effort"] = chosen_effort
+    await client.threads.update(thread_id=thread_id, metadata=metadata_update)
 
     if await is_thread_active(thread_id):
         queued = await queue_message_for_thread(thread_id, prompt)
@@ -326,6 +359,9 @@ async def send_dashboard_message(
         "repo": {"owner": owner, "name": name},
         "user_email": profile.get("email"),
     }
+    if chosen_model and chosen_effort:
+        configurable["agent_model_id"] = chosen_model
+        configurable["agent_effort"] = chosen_effort
     run = await client.runs.create(
         thread_id,
         _ASSISTANT_ID,

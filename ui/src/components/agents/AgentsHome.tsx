@@ -1,14 +1,22 @@
 import { Link } from "@tanstack/react-router";
+import { useEffect, useState } from "react";
 
 import { AgentPromptBar } from "@/components/agents/AgentPromptBar";
 import { AgentRunCard } from "@/components/agents/AgentRunCard";
 import { Logo } from "@/components/agents/ported/Logo";
 import { useAgentThreads, useCreateAgentThread } from "@/lib/agents/queries";
+import { useModelOptions, type ModelSelection } from "@/lib/agents/useModelOptions";
 
 export function AgentsHome() {
   const threadsQuery = useAgentThreads();
   const createThread = useCreateAgentThread();
   const recentRuns = (threadsQuery.data ?? []).slice(0, 5);
+  const { models, defaultSelection } = useModelOptions();
+  const [selection, setSelection] = useState<ModelSelection | null>(null);
+
+  useEffect(() => {
+    if (selection === null && defaultSelection) setSelection(defaultSelection);
+  }, [defaultSelection, selection]);
 
   return (
     <div className="flex min-w-0 flex-1 flex-col overflow-y-auto px-6 py-8">
@@ -16,8 +24,17 @@ export function AgentsHome() {
         <div className="flex w-full flex-col items-center gap-6">
           <Logo />
           <AgentPromptBar
-            onSubmit={(prompt) => createThread.mutate({ prompt })}
+            onSubmit={(prompt) =>
+              createThread.mutate({
+                prompt,
+                model_id: selection?.modelId ?? null,
+                effort: selection?.effort ?? null,
+              })
+            }
             disabled={createThread.isPending}
+            models={models}
+            selection={selection ?? defaultSelection}
+            onSelectionChange={setSelection}
           />
         </div>
 

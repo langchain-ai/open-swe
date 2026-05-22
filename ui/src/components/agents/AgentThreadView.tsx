@@ -17,6 +17,7 @@ import {
   type PendingPrompt,
 } from "@/lib/agents/pendingPrompts";
 import { useAgentThreadStream } from "@/lib/agents/useThreadStream";
+import { useModelOptions, type ModelSelection } from "@/lib/agents/useModelOptions";
 
 interface AgentThreadViewProps {
   user: SessionUser;
@@ -33,6 +34,23 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
   const [pendingPrompts, setPendingPrompts] = useState<PendingPrompt[]>(() =>
     getPendingPrompts(thread.id),
   );
+
+  const { models, defaultSelection } = useModelOptions();
+  const threadSelection = useMemo<ModelSelection | null>(() => {
+    if (!thread.model || !thread.effort) return null;
+    const supported = models.some(
+      (m) => m.id === thread.model && m.efforts.includes(thread.effort ?? ""),
+    );
+    if (!supported) return null;
+    return { modelId: thread.model, effort: thread.effort };
+  }, [models, thread.model, thread.effort]);
+  const [selection, setSelection] = useState<ModelSelection | null>(null);
+
+  useEffect(() => {
+    if (selection !== null) return;
+    if (threadSelection) setSelection(threadSelection);
+    else if (defaultSelection) setSelection(defaultSelection);
+  }, [defaultSelection, selection, threadSelection]);
 
   const userMessageTexts = useMemo(() => {
     return new Set(
@@ -140,7 +158,16 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
                     compact
                     busy={isStreaming}
                     disabled={sendMessage.isPending}
-                    onSubmit={(content) => sendMessage.mutate(content)}
+                    onSubmit={(content) =>
+                      sendMessage.mutate({
+                        content,
+                        model_id: selection?.modelId ?? null,
+                        effort: selection?.effort ?? null,
+                      })
+                    }
+                    models={models}
+                    selection={selection ?? threadSelection ?? defaultSelection}
+                    onSelectionChange={setSelection}
                   />
                 </div>
               </div>
@@ -154,7 +181,16 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
                   compact
                   busy={isStreaming}
                   disabled={sendMessage.isPending}
-                  onSubmit={(content) => sendMessage.mutate(content)}
+                  onSubmit={(content) =>
+                    sendMessage.mutate({
+                      content,
+                      model_id: selection?.modelId ?? null,
+                      effort: selection?.effort ?? null,
+                    })
+                  }
+                  models={models}
+                  selection={selection ?? threadSelection ?? defaultSelection}
+                  onSelectionChange={setSelection}
                 />
               </div>
             </div>

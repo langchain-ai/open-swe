@@ -127,6 +127,7 @@ export interface AgentThread {
   repoFullName: string;
   branch: string;
   model: string;
+  effort?: string | null;
   status: AgentStatus;
   createdAt: number;
   updatedAt: number;

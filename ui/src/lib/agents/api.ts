@@ -5,10 +5,14 @@ export type { AgentThread, Message };
 export interface ThreadCreateRequest {
   prompt: string;
   repo?: string | null;
+  model_id?: string | null;
+  effort?: string | null;
 }
 
 export interface ThreadMessageRequest {
   content: string;
+  model_id?: string | null;
+  effort?: string | null;
 }
 
 const API_BASE = (import.meta.env.VITE_DASHBOARD_API_BASE_URL ?? "").replace(/\/$/, "");

@@ -45,17 +45,28 @@ export function useCreateAgentThread() {
   });
 }
 
+export interface SendAgentMessageVariables {
+  content: string;
+  model_id?: string | null;
+  effort?: string | null;
+}
+
 export function useSendAgentMessage(threadId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (content: string) => agentsApi.sendMessage(threadId, { content }),
-    onMutate: (content) => {
+    mutationFn: (vars: SendAgentMessageVariables) =>
+      agentsApi.sendMessage(threadId, {
+        content: vars.content,
+        model_id: vars.model_id,
+        effort: vars.effort,
+      }),
+    onMutate: (vars) => {
       const cached = queryClient.getQueryData<{ messages?: unknown[] }>(
         agentThreadKeys.detail(threadId),
       );
       const insertAt = Array.isArray(cached?.messages) ? cached.messages.length : 0;
-      addPendingPrompt(threadId, content, insertAt);
+      addPendingPrompt(threadId, vars.content, insertAt);
     },
     onSuccess: (thread) => {
       queryClient.setQueryData(agentThreadKeys.detail(threadId), (prev: typeof thread | undefined) => {
