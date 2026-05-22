@@ -123,7 +123,9 @@ def _merge_text_chunks(chunks: list[dict[str, Any]]) -> list[dict[str, Any]]:
     if len(text_indices) <= 1:
         return chunks
     last_text = text_indices[-1]
-    return [chunk for i, chunk in enumerate(chunks) if chunk.get("kind") != "text" or i == last_text]
+    return [
+        chunk for i, chunk in enumerate(chunks) if chunk.get("kind") != "text" or i == last_text
+    ]
 
 
 def state_messages_to_ui(messages: list[Any]) -> list[dict[str, Any]]:

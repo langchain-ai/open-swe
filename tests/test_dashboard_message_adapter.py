@@ -66,4 +66,6 @@ def test_state_messages_to_ui_merges_agent_turn_and_hides_internal_tools() -> No
     assert len(ui) == 2
     assert ui[0]["author"] == "user"
     assert len(ui[1]["chunks"]) == 1
-    assert ui[1]["chunks"][0]["text"] == "Hi! What would you like me to work on? Let me know the task."
+    assert (
+        ui[1]["chunks"][0]["text"] == "Hi! What would you like me to work on? Let me know the task."
+    )

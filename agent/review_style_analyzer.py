@@ -19,7 +19,6 @@ from langgraph.pregel import Pregel
 warnings.filterwarnings("ignore", module="langchain_core._api.deprecation")
 warnings.filterwarnings("ignore", message=".*Pydantic V1.*", category=UserWarning)
 
-from . import _patch_messages_reducer
 from ._patch_messages_reducer import _apply as _apply_messages_reducer_patch
 
 _apply_messages_reducer_patch()
