@@ -16,7 +16,7 @@ def test_reviewer_system_prompt_formats_without_keyerror() -> None:
         pr_number=42,
     )
     assert "acme/repo" in prompt
-    assert "Common defect patterns" in prompt
+    assert "The bar" in prompt
     assert "benchmark" not in prompt.lower()
     assert "golden" not in prompt.lower()
     assert "at least 1 finding" not in prompt.lower()

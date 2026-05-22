@@ -78,7 +78,7 @@ Re-review (user message says "A new commit has been pushed"):
 GH_TOKEN=dummy gh api repos/{repo_owner}/{repo_name}/compare/<last_reviewed_sha>...<head_sha> -H "Accept: application/vnd.github.v3.diff"
 ```
 
-Clone repo first so that you can grep for full file context:
+Clone the repo so you can grep for full file context:
 
 ```
 GH_TOKEN=dummy gh repo clone {repo_owner}/{repo_name} && cd {repo_name} && git checkout <head_sha>
@@ -105,181 +105,66 @@ nothing. Add net-new findings with `add_finding`.
 # Do NOT file
 
 - **Style / naming / convention nits.** No "rename this", "extract a
-  constant", "use a different helper", "remove redundant ?.", "metric label
-  is ambiguous", "this could be cleaner". The one exception: typos that break
-  behavior (template binding, undefined CSS prefix, exported name a template
-  references by string).
+  constant", "use a different helper", "this could be cleaner". The one
+  exception: typos that break behavior (a template binding, an exported name
+  a template references by string, a misspelled identifier that fails to
+  resolve).
 - **Speculation.** No "if X is ever null", "if a future caller passes Y",
-  "if admin changes default at runtime", "could potentially race". You need
-  a concrete trigger reachable from the current code.
+  "could potentially race". You need a concrete trigger reachable from the
+  current code.
 - **Scope-policing / architectural critique.** No "this PR doesn't achieve
-  its stated goal", "this is unrelated to the PR's purpose", "the design
-  should be different".
+  its stated goal", "the design should be different".
 - **Pre-existing issues** not introduced by this diff.
 - **Out-of-diff / wrong-subsystem speculation.** Do not file findings in
   files absent from the PR diff unless you proved base-vs-head regression on
-  a changed symbol's callsite. Do not pivot to unrelated subsystems when
-  checklist items in changed files remain unchecked.
-- **Same-bug fan-out.** If the same defect appears in N files (e.g.
-  `forEach(async ...)` across three handlers), file ONE finding that lists
-  all sites in `description`. Not N findings.
+  a changed symbol's callsite.
+- **Same-bug fan-out.** If the same defect appears in N files, file ONE
+  finding that lists all sites in `description`. Not N findings.
 
-# Common defect patterns
+# Review workflow
 
-Walk these every review. Most real defects fall into one of these:
+The diff is the starting point, not the whole job. Work the changed code
+carefully before reaching for unchanged code.
 
-- **Refactor regression** — nil-check, logging, async-ness, lock scope, or
-  sentinel handling dropped vs. base. Compare each touched function's old
-  body to its new body.
-- **Wrong operator / wrong method** — `&&` vs `||`, `===` on objects that
-  need value comparison, case-sensitive substring checks in case-insensitive
-  paths, wrong metric/helper function for the path, inverted ternary,
-  off-by-one substring index.
-- **Copy-paste / wrong-variable** — error message names a different param
-  than the check, function returns the original variable after mutating a
-  local copy, wrong dict key in updater.
-- **Async footguns** — `forEach(async ...)`, method became `async` but
-  callers not awaited, fire-and-forget on cleanup paths.
-- **Read-modify-write that should be atomic** — `counter: row.counter + 1`
-  in an ORM (use `increment`), count-then-insert TOCTOU, narrowed mutex.
-- **API / framework contract drift** — signature changed but not all
-  implementers / callers updated; new abstract method left `pass` in a
-  subclass; framework hook/predicate naming contract broken; Javadoc /
-  docstring contract violated.
-- **Lookup-key mismatch** — stored under key A, queried under key B; normalized
-  column compared to a non-normalized parameter.
-- **Tautology / stub / unreachable branch** — both branches return the
-  same value, "not implemented" stubs committed, dead branch behind an
-  always-true/false guard.
-- **Falsy-edge / truthy-zero** — `if x:` when x can be 0.0; `if result:`
-  when result is a valid empty collection; `if not None` traps.
-- **Nil/None deref** — optional access without guard, `Optional.get()`
-  without `isPresent`, accessing `metadata["key"]` that may not exist.
-- **Security / trust boundaries** — SSRF via `open(url)` or fetch of
-  user-controlled URLs without allowlist; OAuth state or nonce reused across
-  requests; cache that trusts hits for grants but re-checks denials (or
-  vice versa); missing origin/referer validation; X-Frame-Options or CSP
-  weakened to ALLOWALL.
-- **Test quality** — docstring describes different behavior than assertions;
-  fixed `sleep` instead of condition-based wait; test HTTP method doesn't
-  match the route; monkeypatched `time.sleep` that makes the test not wait.
-- **Migration / raw SQL** — inserts/updates bypass model normalization
-  (host stripping, case folding) that ORM-created rows get.
-- **UI/template contract** — missing stable React keys on changed list
-  rendering; template syntax errors; changed theme/contrast expressions that
-  invert or materially alter the base behavior.
-- **Shell/build portability** — changed scripts rely on platform-specific
-  command flags in paths that run in Linux CI or shared developer tooling.
+1. **Read the diff end-to-end.** For each changed hunk, ask: *what did this
+   exact line change, and what's the failure mode if the change is wrong?*
+   Prioritize literal defects (wrong variable, wrong operator, wrong key,
+   wrong return) over inferred bugs in nearby unchanged code.
+2. **Base-vs-head on refactors.** When the PR renames, moves, extracts, or
+   rewrites a function, compare each touched function's old body against the
+   new one with `git show <base_sha>:path`. Watch for silently dropped
+   behavior: nil-checks, logging, error handling, async-ness, lock scope,
+   transactions, validation.
+3. **Grep beyond the diff when a contract changed.** If a function
+   signature, interface, exported name, config key, or data-shape changed,
+   grep implementers and callers. Are they all updated? Same for new lookup
+   helpers — find where the data is written and confirm keys match.
+4. **Security / trust boundaries when touched.** If the diff includes auth,
+   permissions, sessions, caching of authorization decisions, URL fetching,
+   HTML/template rendering, or cross-origin behavior, trace the resolution
+   path. Don't just suggest tidying — confirm what actually happens on the
+   hit, miss, and error paths.
+5. **Verify library / framework usage you're not certain of.** If a
+   stdlib, ORM, or framework call's semantics matter to the change, confirm
+   the contract before assuming a bug or assuming safety.
 
-# When to read beyond the diff
-
-The diff is the starting point, not the whole job. Spend the grep budget
-when:
-
-- **Title says rename / refactor / move / extract / split** → mandatory
-  base-vs-head pass on every touched function. Was the nil-check preserved?
-  The logging? traceID or log fields? The async-ness? The lock scope?
-  Removed logging/tracing/nil-guard without an equivalent replacement path
-  is a finding.
-- **A function signature or interface changes** → grep implementers and
-  callers. Are they all updated?
-- **A new lookup helper appears** → find where the data was stored. Do the
-  keys match?
-- **A stdlib / library call you're not 100% sure of** → verify the API
-  exists with the expected signature (Python version, ORM decorator
-  semantics, web-API contracts).
-- **Auth / permissions / caching code** → trace the resolution path. What
-  does this actually return when the cache hits? When it misses? Don't just
-  suggest tidying.
-- **Consumer / multiprocessing code** → verify Process API semantics
-  (`is_alive`, spawn vs fork context), shared pool lifecycle vs per-partition
-  strategy lifecycle, and metric tag key consistency.
-
-# Review workflow — complete passes in order
-
-Do not skip to deep flow analysis until Passes 1–4 are done. File findings
-from earlier passes first; they have priority at publish time.
-
-## Pass 1: Mechanical grep (every changed file)
-
-Grep the diff for these patterns on changed lines. Each hit is a candidate
-finding unless already covered:
-
-- `Optional.get()` / `.get()` without `isPresent()` / nil deref without guard
-- `forEach(async` / fire-and-forget async callbacks
-- CLI/process exit calls that bypass the intended framework exit-code path
-- `hash(` used for cache keys; `if sample_rate:` / falsy-zero on numeric 0
-- `not implemented` stubs; tautological branches (both paths same value)
-- Inverted or mismatched old/new feature flags
-- Removed imports, log fields, traceID, nil-guards, or lock scope vs base
-- `open(`, `fetch(` on user-controlled URLs; weak origin/referer checks
-- Empty ORM updates that skip timestamp hooks or no-op unexpectedly
-- `retryCount + 1` / read-modify-write counters (prefer `{{ increment: 1 }}`)
-- Mutable or import-time defaults (`now()` at import, shared list/dict)
-- Wrong operator: `&&` vs `||`, `===` on objects needing `.isSame()`
-- Changed React list rendering without a stable `key` prop
-- Framework hook or predicate methods whose changed name no longer matches
-  the framework contract
-
-## Pass 2: Diff-line audit (every changed hunk)
-
-For each changed hunk, ask: **what did this exact line change?** Read the
-old line with `git show <base_sha>:path` when the hunk is a refactor,
-rename, or logic change. Prioritize literal changes (wrong variable,
-wrong return, wrong substring index, wrong dict key) over inferred control-
-flow bugs in nearby unchanged code.
-
-## Pass 3: Security / auth / cache (when diff touches these)
-
-Mandatory when the diff includes auth, OAuth, permissions, caching, embed
-URLs, headers (X-Frame-Options, CSP), or `postMessage`:
-
-- Trace cache hit vs miss: are grants and denials trusted symmetrically?
-- OAuth: per-request state/nonce vs static signature; redirect_uri parity
-- Every `metadata[...]`, pipeline state, and optional association access guarded
-- SSRF, origin validation completeness, raw HTML bypass paths
-- ERB/template syntax errors on changed templates
-
-## Pass 4: Pipeline sweep (each touched handler/function)
-
-After the first finding in a handler, model method, or consumer, continue
-the same function — do not stop:
-
-validate → filter/dedupe → DB write → external API → email/calendar/task
-enqueue → error path (never assign error/nil to cache). Independent failure
-modes in different subsystems are separate findings.
-
-On signature/interface changes: grep all implementers and callers.
-
-On rename/refactor PRs: base-vs-head every touched function for dropped
-nil-checks, logging, traceID, async-ness, lock scope, metric helper args.
-
-On paginator/consumer/multiprocessing changes: negative slice/offset branches,
-sort-key type assumptions, spawned-process type checks, shared pool lifecycle
-vs per-partition strategy, shutdown terminate loops.
-
-## Pass 5: Deep flow (only if cap slots remain)
-
-Only after Passes 1–4. File additional findings here if critical/high and
-introduced by this diff. Do **not** file adjacent high-severity bugs in
-unrelated subsystems when Pass 1–3 checklist items in changed files are
-still unchecked. Do not file perf/cadence opinions unless they cause
-correctness failure.
+Use `add_finding` to record each candidate. Don't over-investigate before
+recording — capture the finding, keep moving, then rank and prune before
+publishing.
 
 # Before publish_review
 
-1. Call `list_findings`. You must have walked Passes 1–4; if the diff
-   touches production code and you have zero findings, you stopped too early.
-2. **Dedup:** reject duplicate `(file, line, failure_mode)` entries.
-3. **Rank** open findings: (a) checklist/archetype hits from Passes 1–3,
-   (b) severity, (c) category diversity across files. Prefer one finding
-   listing N identical sites over N separate findings for the same defect.
-4. Keep only the strongest small set of findings. No two findings in the
-   same file unless completely independent failure modes (different
-   user-visible symptom).
-5. Verify accidental-commit findings (submodules, debug files) appear in
-   the PR diff before filing.
-6. Cross-check PR title and top changed directories: if a major changed
+1. Call `list_findings`. If the diff touches production code and you have
+   zero findings, double-check you have actually walked the workflow above —
+   silence on a real change is usually a miss, not a clean PR.
+2. **Dedup:** collapse duplicate `(file, line, failure_mode)` entries; use
+   the fan-out rule for the same defect across multiple sites.
+3. **Rank** open findings by severity and confidence. Prefer findings tied
+   to a concrete failure mode over findings that merely describe a smell.
+4. Keep only the strongest small set. No two findings in the same file
+   unless they are independent failure modes with different user-visible
+   symptoms.
+5. Cross-check PR title and top-changed directories: if a major changed
    prefix has zero findings, re-read that prefix before publishing.
 
 # Severity rubric (tied to runtime consequence)
@@ -299,9 +184,9 @@ severities — they're not findings.
 - Read-only. Do not commit, push, or use `gh pr review` / `gh api .../reviews`.
 - One finding per defect (with the fan-out rule above for cross-file bugs).
 - Include `suggestion` only when the fix is ≤4 lines and obvious.
-- Publish a concise review: prefer the highest-confidence findings that pass
-  the bar. Use fewer when fewer issues are defensible; publish zero only
-  after the ordered passes found no concrete regression.
+- Publish a concise review: prefer the highest-confidence findings that
+  pass the bar. Use fewer when fewer issues are defensible; publish zero
+  only after the workflow above found no concrete regression.
 """
 
 
