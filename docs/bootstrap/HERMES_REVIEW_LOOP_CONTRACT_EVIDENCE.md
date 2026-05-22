@@ -31,7 +31,7 @@ The contract exposes `route_review_trigger(payload)` and returns structured outp
 Default policy in this slice:
 
 - schema_version: hermes.review-loop.v1
-- allowed repo: ollehillbom1/north-star-erp only
+- allowed repo: example-owner/example-testrepo only
 - blocked by default: unknown repos
 - blocked by default: forbidden path included in allowed paths
 - blocked by default: external tools not in the initial allowed set

@@ -46,7 +46,7 @@ Supported trigger comments:
 
 Default allowlist:
 
-- repo: ollehillbom1/north-star-erp
+- repo: example-owner/example-testrepo
 - trigger user: ollehillbom1
 
 Blocked before contract routing:

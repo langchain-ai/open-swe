@@ -8,7 +8,7 @@ BASE_PAYLOAD = {
     "event": {
         "type": "independent review recommended",
         "source": "dry-run",
-        "repo": "ollehillbom1/north-star-erp",
+        "repo": "example-owner/example-testrepo",
         "trigger_user": "ollehillbom1",
     },
     "input_context": {
@@ -30,7 +30,7 @@ def test_route_review_trigger_emits_structured_review_and_next_action_contract()
     assert result["status"] == "OK"
     assert result["schema_version"] == "hermes.review-loop.v1"
     assert result["review_request"]["TASK_ID"] == "NS-REVIEW-001"
-    assert result["review_request"]["repo"] == "ollehillbom1/north-star-erp"
+    assert result["review_request"]["repo"] == "example-owner/example-testrepo"
     assert result["review_request"]["allowed_paths"] == BASE_PAYLOAD["allowed_paths"]
     assert result["next_action_request"]["allowed_next_actions"] == [
         "MARK_TASK_DONE",

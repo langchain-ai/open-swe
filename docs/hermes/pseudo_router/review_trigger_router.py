@@ -23,7 +23,7 @@ REQUIRED_INPUT_KEYS = {
 }
 REQUIRED_CONTEXT_KEYS = {"reality_state", "task_card", "git_diff_summary", "evidence_log"}
 SCHEMA_VERSION = "hermes.review-loop.v1"
-DEFAULT_ALLOWED_REPOS = frozenset({"ollehillbom1/north-star-erp"})
+DEFAULT_ALLOWED_REPOS = frozenset({"example-owner/example-testrepo"})
 DEFAULT_ALLOWED_TOOLS = frozenset(
     {
         "execute",

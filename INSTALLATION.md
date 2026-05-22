@@ -369,10 +369,7 @@ GOOGLE_API_KEY=""                      # Google AI API key (when using google_ge
 
 # === GitHub App (required) ===
 GITHUB_APP_ID=""                       # From step 3c
-GITHUB_APP_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----
-...
------END RSA PRIVATE KEY-----
-"
+GITHUB_APP_PRIVATE_KEY="REPLACE_WITH_GITHUB_APP_PRIVATE_KEY_PLACEHOLDER"
 GITHUB_APP_INSTALLATION_ID=""          # From step 3d
 
 # === GitHub Webhook (required) ===
@@ -527,7 +524,7 @@ The `langgraph.json` at the project root already defines the graph entry point a
 
 - Verify `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY`, and `GITHUB_APP_INSTALLATION_ID` are set correctly
 - Ensure the GitHub App is installed on the target repositories
-- Check that the private key includes the full `-----BEGIN RSA PRIVATE KEY-----` and `-----END RSA PRIVATE KEY-----` lines
+- Check that the private key environment variable contains the complete GitHub App key material
 
 ### Sandbox creation failures
 

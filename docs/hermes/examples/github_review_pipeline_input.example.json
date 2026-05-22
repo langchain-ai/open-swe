@@ -1,8 +1,8 @@
 {
   "comment_event": {
-    "repo": "ollehillbom1/north-star-erp",
+    "repo": "example-owner/example-testrepo",
     "comment_author": "ollehillbom1",
-    "comment_body": "@openswe review https://github.com/ollehillbom1/north-star-erp/pull/123",
+    "comment_body": "@openswe review https://github.com/example-owner/example-testrepo/pull/123",
     "issue_number": 42,
     "comment_id": 9001,
     "allowed_paths": [

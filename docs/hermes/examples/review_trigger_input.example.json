@@ -10,7 +10,7 @@
   "input_context": {
     "reality_state": {
       "schema_version": "northstar.reality_state.v1",
-      "repo": "ollehillbom1/north-star-erp",
+      "repo": "example-owner/example-testrepo",
       "branch": "feature/vat-reporting-adjustment",
       "task_id": "NS-VAT-001",
       "runtime_state": "source_only",

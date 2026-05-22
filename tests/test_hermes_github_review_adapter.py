@@ -5,7 +5,7 @@ from docs.hermes.pseudo_router.github_review_adapter import route_github_review_
 
 def base_event(**overrides: object) -> dict:
     event = {
-        "repo": "ollehillbom1/north-star-erp",
+        "repo": "example-owner/example-testrepo",
         "comment_author": "ollehillbom1",
         "comment_body": "@openswe review",
         "issue_number": 42,
@@ -24,7 +24,7 @@ def test_openswe_review_comment_routes_to_contract_without_side_effects() -> Non
     assert result["status"] == "OK"
     assert result["schema_version"] == "hermes.review-loop.v1"
     assert result["review_request"]["TASK_ID"] == "GH-REVIEW-42-9001"
-    assert result["review_request"]["repo"] == "ollehillbom1/north-star-erp"
+    assert result["review_request"]["repo"] == "example-owner/example-testrepo"
     assert result["review_request"]["trigger_user"] == "ollehillbom1"
     assert result["source_event"] == {
         "command": "review",
@@ -38,7 +38,7 @@ def test_openswe_review_comment_routes_to_contract_without_side_effects() -> Non
 
 
 def test_open_swe_review_comment_with_pr_url_preserves_url_for_later_validation() -> None:
-    pr_url = "https://github.com/ollehillbom1/north-star-erp/pull/123"
+    pr_url = "https://github.com/example-owner/example-testrepo/pull/123"
     result = route_github_review_comment(base_event(comment_body=f"@open-swe review {pr_url}"))
 
     assert result["status"] == "OK"

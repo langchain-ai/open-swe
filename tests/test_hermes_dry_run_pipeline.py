@@ -8,9 +8,9 @@ from pathlib import Path
 from docs.hermes.pseudo_router.dry_run_pipeline import run_pipeline
 
 BASE_COMMENT_EVENT = {
-    "repo": "ollehillbom1/north-star-erp",
+    "repo": "example-owner/example-testrepo",
     "comment_author": "ollehillbom1",
-    "comment_body": "@openswe review https://github.com/ollehillbom1/north-star-erp/pull/123",
+    "comment_body": "@openswe review https://github.com/example-owner/example-testrepo/pull/123",
     "issue_number": 42,
     "comment_id": 9001,
     "allowed_paths": ["apps/core-api/src/**", "tests/**"],
@@ -66,7 +66,7 @@ def test_pipeline_composes_comment_router_and_next_action_policy_without_side_ef
     assert result["final_decision"]["final_pass_eligible"] is False
     assert (
         result["source_event"]["pr_url"]
-        == "https://github.com/ollehillbom1/north-star-erp/pull/123"
+        == "https://github.com/example-owner/example-testrepo/pull/123"
     )
 
 
