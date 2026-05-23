@@ -117,6 +117,9 @@ def _execution_manifest_ready(execution_manifest: dict[str, Any], block_reasons:
     if not isinstance(hard_disabled, dict):
         block_reasons.append("execution_manifest_missing_hard_disabled_actions")
         return False
+    if any(key not in hard_disabled for key in _EXECUTION_LIVE_ACTION_KEYS):
+        block_reasons.append("execution_manifest_missing_live_action_disable_evidence")
+        ready = False
     live_keys = [key for key in _EXECUTION_LIVE_ACTION_KEYS if _bool_true(hard_disabled.get(key))]
     if live_keys:
         block_reasons.append("execution_manifest_live_actions_enabled")
@@ -145,6 +148,14 @@ def _install_policy_allowed(install_policy: dict[str, Any], block_reasons: list[
     ):
         block_reasons.append("install_policy_not_allowed")
         allowed = False
+
+    allowed_actions = install_policy.get("allowed_actions")
+    if not isinstance(allowed_actions, list) or not allowed_actions:
+        block_reasons.append("install_policy_missing_allowed_actions")
+        allowed = False
+    elif any(not str(action).startswith("dry_run_") for action in allowed_actions):
+        block_reasons.append("install_policy_allows_non_dry_run_actions")
+        allowed = False
     return allowed
 
 
@@ -166,6 +177,10 @@ def _scanners_and_audits_green(readiness_status: dict[str, Any], block_reasons: 
         section = readiness_status.get(section_name, {})
         if not isinstance(section, dict):
             block_reasons.append(f"{section_name}_status_invalid")
+            green = False
+            continue
+        if not section:
+            block_reasons.append(f"{section_name}_status_missing")
             green = False
             continue
         failing = [
@@ -197,6 +212,9 @@ def _testrepo_gate_ok(testrepo_gate: dict[str, Any], block_reasons: list[str]) -
     if not isinstance(live_flags, dict):
         block_reasons.append("testrepo_gate_live_actions_invalid")
         return False
+    if any(key not in live_flags for key in _TESTREPO_LIVE_FLAG_KEYS):
+        block_reasons.append("testrepo_gate_missing_live_action_disable_evidence")
+        ok = False
     if [key for key in _TESTREPO_LIVE_FLAG_KEYS if _bool_true(live_flags.get(key))]:
         block_reasons.append("testrepo_gate_live_actions_enabled")
         ok = False

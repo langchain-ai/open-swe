@@ -171,6 +171,57 @@ def test_blocks_when_any_live_action_is_enabled_or_testrepo_is_not_allowlisted()
     assert decision["side_effects"] == []
 
 
+def test_blocks_when_install_policy_allows_non_dry_run_action():
+    decision = aggregate_bootstrap_readiness(
+        execution_manifest=_execution_manifest(),
+        install_policy=_install_policy(
+            allowed_actions=["dry_run_testrepo_bootstrap_install", "prod_deploy"]
+        ),
+        readiness_status=_readiness(),
+        testrepo_gate=_testrepo_gate(),
+    )
+
+    assert decision["BOOTSTRAP_READY"] is False
+    assert "install_policy_allows_non_dry_run_actions" in decision["block_reasons"]
+    assert decision["checks"]["install_allowed"] is False
+    assert decision["side_effects"] == []
+
+
+def test_blocks_when_scanner_or_audit_evidence_is_missing():
+    decision = aggregate_bootstrap_readiness(
+        execution_manifest=_execution_manifest(),
+        install_policy=_install_policy(),
+        readiness_status={
+            "schema_version": "northstar.local-readiness.v1",
+            "gate": "PASS",
+            "side_effects": [],
+        },
+        testrepo_gate=_testrepo_gate(),
+    )
+
+    assert decision["BOOTSTRAP_READY"] is False
+    assert "scanners_status_missing" in decision["block_reasons"]
+    assert "audits_status_missing" in decision["block_reasons"]
+    assert decision["checks"]["scanners_and_audits_green"] is False
+    assert decision["side_effects"] == []
+
+
+def test_blocks_when_live_action_disable_evidence_is_incomplete():
+    decision = aggregate_bootstrap_readiness(
+        execution_manifest=_execution_manifest(hard_disabled_actions={}),
+        install_policy=_install_policy(),
+        readiness_status=_readiness(),
+        testrepo_gate=_testrepo_gate(live_actions_enabled={}),
+    )
+
+    assert decision["BOOTSTRAP_READY"] is False
+    assert "execution_manifest_missing_live_action_disable_evidence" in decision["block_reasons"]
+    assert "testrepo_gate_missing_live_action_disable_evidence" in decision["block_reasons"]
+    assert decision["checks"]["execution_manifest_ready_checklist"] is False
+    assert decision["checks"]["live_actions_disabled"] is False
+    assert decision["side_effects"] == []
+
+
 def test_cli_reads_four_json_inputs_and_writes_only_stdout(tmp_path):
     paths = {}
     payloads = {
