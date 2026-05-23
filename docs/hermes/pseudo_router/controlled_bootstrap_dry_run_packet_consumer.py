@@ -184,12 +184,16 @@ def build_controlled_bootstrap_dry_run_packet(
     elif not isinstance(approval_packet, dict):
         block_reasons.append("approval_packet_payload_not_object")
         approval_packet = {}
+    else:
+        approval_packet = dict(approval_packet)
 
     target_repo = _normalize_repo(approval_packet.get("target_repo"))
     allowlist = _normalized_allowlist(allowed_test_repos or [])
 
     if approval_packet.pop("__invalid_json__", False):
         block_reasons.append("approval_packet_json_invalid")
+    if approval_packet.pop("__input_error__", False):
+        block_reasons.append("approval_packet_input_unreadable")
     if not approval_packet:
         block_reasons.append("missing_approval_packet")
     elif approval_packet.get("schema_version") != APPROVAL_RUNNER_SCHEMA_VERSION:
@@ -206,11 +210,12 @@ def build_controlled_bootstrap_dry_run_packet(
     if approval_packet.get("side_effects") != []:
         block_reasons.append("approval_packet_has_side_effects")
     allowed_actions = approval_packet.get("allowed_actions", [])
+    if not isinstance(allowed_actions, list):
+        block_reasons.append("approval_packet_allows_non_dry_run_actions")
+        allowed_actions = []
     if _DRY_RUN_ACTION not in allowed_actions:
         block_reasons.append("approval_packet_missing_dry_run_action")
-    if not isinstance(allowed_actions, list) or any(
-        not str(action).startswith("dry_run_") for action in allowed_actions
-    ):
+    if any(not str(action).startswith("dry_run_") for action in allowed_actions):
         block_reasons.append("approval_packet_allows_non_dry_run_actions")
     if target_repo not in allowlist:
         block_reasons.append("target_repo_not_allowlisted_for_controlled_testrepo_bootstrap")
@@ -246,6 +251,8 @@ def _load_json(path: str | None) -> Any:
         return json.loads(Path(path).read_text(encoding="utf-8"))
     except json.JSONDecodeError:
         return {"__invalid_json__": True}
+    except OSError:
+        return {"__input_error__": True}
 
 
 def main(argv: list[str] | None = None) -> int:

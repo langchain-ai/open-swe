@@ -132,7 +132,8 @@ def test_blocks_near_miss_approval_phrase_and_does_not_echo_raw_text():
 
 
 def test_blocks_secret_like_target_repo_without_echoing_it():
-    secret_repo = "token=ghp_FAKESECRET1234567890"
+    secret_value = "ghp_FAKESECRET7890"
+    secret_repo = f"token={secret_value}"
     packet = build_controlled_bootstrap_approval_packet(
         readiness_decision=_readiness_decision(target_repo=secret_repo),
         approval_text=EXACT_APPROVAL_PHRASE,
@@ -144,14 +145,15 @@ def test_blocks_secret_like_target_repo_without_echoing_it():
     assert "unsafe_raw_approval_or_secret_material_detected" in packet["block_reasons"]
     assert packet["target_repo"] == "[REDACTED]"
     assert "ghp_" not in serialized
-    assert "FAKESECRET" not in serialized
+    assert secret_value not in serialized
     assert packet["side_effects"] == []
 
 
 def test_blocks_secret_like_input_without_echoing_secret_or_approval_phrase():
+    secret_value = "ghp_FAKESECRET7890"
     packet = build_controlled_bootstrap_approval_packet(
         readiness_decision=_readiness_decision(),
-        approval_text=f"{EXACT_APPROVAL_PHRASE}\ntoken=ghp_FAKESECRET1234567890",
+        approval_text=f"{EXACT_APPROVAL_PHRASE}\ntoken={secret_value}",
         allowed_test_repos=[TEST_REPO],
     )
     serialized = json.dumps(packet, sort_keys=True)
@@ -159,7 +161,7 @@ def test_blocks_secret_like_input_without_echoing_secret_or_approval_phrase():
     assert packet["status"] == "BLOCKED"
     assert "unsafe_raw_approval_or_secret_material_detected" in packet["block_reasons"]
     assert "ghp_" not in serialized
-    assert "FAKESECRET" not in serialized
+    assert secret_value not in serialized
     assert EXACT_APPROVAL_PHRASE not in serialized
     assert packet["side_effects"] == []
 

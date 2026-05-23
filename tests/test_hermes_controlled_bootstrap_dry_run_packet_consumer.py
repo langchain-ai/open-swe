@@ -161,13 +161,40 @@ def test_blocks_non_dry_run_allowed_actions_even_when_dry_run_action_is_present(
     assert packet["side_effects"] == []
 
 
+def test_blocks_malformed_allowed_actions_without_crashing():
+    packet = build_controlled_bootstrap_dry_run_packet(
+        approval_packet=_approval_packet(allowed_actions=None),
+        allowed_test_repos=[TEST_REPO],
+    )
+
+    assert packet["status"] == "BLOCKED"
+    assert packet["BOOTSTRAP_EXECUTION_ALLOWED"] is False
+    assert "approval_packet_missing_dry_run_action" in packet["block_reasons"]
+    assert "approval_packet_allows_non_dry_run_actions" in packet["block_reasons"]
+    assert packet["side_effects"] == []
+
+
+def test_does_not_mutate_loaded_approval_packet():
+    approval_packet = _approval_packet(__invalid_json__=True)
+
+    packet = build_controlled_bootstrap_dry_run_packet(
+        approval_packet=approval_packet,
+        allowed_test_repos=[TEST_REPO],
+    )
+
+    assert packet["status"] == "BLOCKED"
+    assert "approval_packet_json_invalid" in packet["block_reasons"]
+    assert approval_packet["__invalid_json__"] is True
+
+
 def test_blocks_secret_like_inputs_without_echoing_secret_or_approval_phrase():
+    secret_value = "ghp_FAKESECRET7890"
     packet = build_controlled_bootstrap_dry_run_packet(
         approval_packet=_approval_packet(
-            target_repo="token=ghp_FAKESECRET1234567890",
-            raw_approval_text="ALLOW_BOOTSTRAP_INSTALL=YES token=ghp_FAKESECRET1234567890",
+            target_repo=f"token={secret_value}",
+            raw_approval_text=f"ALLOW_BOOTSTRAP_INSTALL=YES token={secret_value}",
         ),
-        allowed_test_repos=["token=ghp_FAKESECRET1234567890"],
+        allowed_test_repos=[f"token={secret_value}"],
     )
     serialized = json.dumps(packet, sort_keys=True)
 
@@ -175,7 +202,7 @@ def test_blocks_secret_like_inputs_without_echoing_secret_or_approval_phrase():
     assert "unsafe_raw_approval_or_secret_material_detected" in packet["block_reasons"]
     assert packet["target_repo"] == "[REDACTED]"
     assert "ghp_" not in serialized
-    assert "FAKESECRET" not in serialized
+    assert secret_value not in serialized
     assert "ALLOW_BOOTSTRAP_INSTALL=YES" not in serialized
     assert packet["side_effects"] == []
 
@@ -249,6 +276,35 @@ def test_cli_blocks_invalid_json_approval_packet_without_traceback(tmp_path):
     assert output["status"] == "BLOCKED"
     assert output["BOOTSTRAP_EXECUTION_ALLOWED"] is False
     assert "approval_packet_json_invalid" in output["block_reasons"]
+    assert output["side_effects"] == []
+
+
+def test_cli_blocks_missing_approval_packet_without_traceback(tmp_path):
+    missing_path = tmp_path / "missing.json"
+
+    result = subprocess.run(
+        [
+            "uv",
+            "run",
+            "python",
+            str(ROOT / "docs/hermes/pseudo_router/controlled_bootstrap_dry_run_packet_consumer.py"),
+            "--approval-packet",
+            str(missing_path),
+            "--allowed-test-repo",
+            TEST_REPO,
+        ],
+        cwd=tmp_path,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    output = json.loads(result.stdout)
+
+    assert result.returncode == 1
+    assert result.stderr == ""
+    assert output["status"] == "BLOCKED"
+    assert output["BOOTSTRAP_EXECUTION_ALLOWED"] is False
+    assert "approval_packet_input_unreadable" in output["block_reasons"]
     assert output["side_effects"] == []
 
 
