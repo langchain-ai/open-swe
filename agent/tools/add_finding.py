@@ -55,14 +55,21 @@ def add_finding(
             ``style``, ``flag``, etc.). Free-form; used for grouping in the UI.
         file: Repo-relative path of the file the finding refers to.
         description: Markdown body the user sees.
-        start_line: 1-based line in the new (post-PR) file to anchor the
-            comment to. Pick the single most relevant line — the call site,
-            the signature, or the line the issue is actually about. Omit
-            (with ``end_line``) for file-level findings.
-        end_line: Accepted for API compatibility, but findings are always
-            anchored to a single line (``start_line``). GitHub renders
-            multi-line ranges as walls of context that bury the comment, so
-            we collapse to one line for a cleaner comment.
+        start_line: 1-based line in the new (post-PR) file where the
+            relevant range begins. For a single-line finding, this is the
+            line the issue is about. For a multi-line finding, this is the
+            first line of the relevant range. Omit (with ``end_line``) for
+            file-level findings.
+        end_line: 1-based line where the relevant range ends. GitHub
+            anchors the inline comment at ``end_line`` and renders the
+            ``start_line..end_line`` span as the highlighted snippet, so
+            choose ``end_line`` as the *last* line that matters — typically
+            the line the comment is most directly about. For a single-line
+            finding, set ``end_line == start_line`` (or omit it). Prefer
+            the natural range of the issue over a single line: GitHub
+            shows context above ``end_line``, so a one-line anchor often
+            buries the issue under unrelated context. Defaults to
+            ``start_line`` when omitted.
         suggestion: Replacement text for ``start_line..end_line``. When set,
             the published GitHub comment includes a ```suggestion``` block so
             the user can click "Commit suggestion". **Only set this for small,
@@ -90,9 +97,6 @@ def add_finding(
         return {"success": False, "error": f"Invalid side: {side}"}
     if start_line is not None and end_line is not None and end_line < start_line:
         return {"success": False, "error": "end_line must be >= start_line"}
-
-    if start_line is not None:
-        end_line = start_line
 
     config = get_config()
     configurable = config.get("configurable", {}) if isinstance(config, dict) else {}
