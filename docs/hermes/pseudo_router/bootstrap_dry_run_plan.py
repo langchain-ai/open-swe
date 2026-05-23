@@ -127,9 +127,7 @@ def _target_repo_values_match(
     nested_packet = approval_packet.get("approval_packet")
     if isinstance(nested_packet, dict):
         approval_targets.append(str(nested_packet.get("target_repo") or "").strip())
-    return bool(readiness_target) and all(
-        target == readiness_target for target in approval_targets
-    )
+    return bool(readiness_target) and all(target == readiness_target for target in approval_targets)
 
 
 def build_bootstrap_dry_run_plan(

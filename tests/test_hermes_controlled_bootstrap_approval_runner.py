@@ -63,7 +63,10 @@ def test_returns_controlled_dry_run_packet_for_ready_allowlisted_testrepo_with_e
     assert packet["approval_text_echoed"] is False
     assert packet["approval_phrase_received"] is True
     assert packet["allowed_actions"] == ["dry_run_controlled_local_testrepo_bootstrap_preview"]
-    assert packet["NEXT_REQUIRED_HUMAN_ACTION"] == "review controlled local testrepo bootstrap dry-run packet"
+    assert (
+        packet["NEXT_REQUIRED_HUMAN_ACTION"]
+        == "review controlled local testrepo bootstrap dry-run packet"
+    )
     assert packet["side_effects"] == []
 
 
@@ -100,7 +103,9 @@ def test_blocks_unallowlisted_target_repo_even_when_readiness_claims_allowlisted
 
     assert packet["status"] == "BLOCKED"
     assert packet["BOOTSTRAP_EXECUTION_ALLOWED"] is False
-    assert "target_repo_not_allowlisted_for_controlled_testrepo_bootstrap" in packet["block_reasons"]
+    assert (
+        "target_repo_not_allowlisted_for_controlled_testrepo_bootstrap" in packet["block_reasons"]
+    )
     assert packet["side_effects"] == []
 
 
