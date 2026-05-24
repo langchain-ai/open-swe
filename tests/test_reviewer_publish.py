@@ -9,6 +9,7 @@ import pytest
 
 from agent.reviewer_findings import Finding, new_finding
 from agent.reviewer_publish import (
+    fetch_pr_review_threads,
     post_pull_request_review,
     render_inline_comment_body,
     render_inline_comment_payload,
@@ -543,3 +544,89 @@ async def test_publish_review_skips_slack_reply_when_no_slack_ref() -> None:
         )
 
     slack_post.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_fetch_pr_review_threads_parses_threads_and_comments() -> None:
+    """GraphQL response is mapped into the simplified thread dicts."""
+    response = MagicMock()
+    response.json.return_value = {
+        "data": {
+            "repository": {
+                "pullRequest": {
+                    "reviewThreads": {
+                        "pageInfo": {"hasNextPage": False, "endCursor": None},
+                        "nodes": [
+                            {
+                                "isResolved": True,
+                                "isOutdated": False,
+                                "path": "a/b.py",
+                                "line": 37,
+                                "originalLine": 37,
+                                "comments": {
+                                    "nodes": [
+                                        {
+                                            "author": {"login": "open-swe[bot]"},
+                                            "body": "additionalTtlPrefixes removes lifecycle rules",
+                                            "createdAt": "2026-05-23T10:00:00Z",
+                                        },
+                                        {
+                                            "author": {"login": "human"},
+                                            "body": "We added defaults in the template",
+                                            "createdAt": "2026-05-24T11:00:00Z",
+                                        },
+                                    ]
+                                },
+                            },
+                            {
+                                "isResolved": False,
+                                "isOutdated": False,
+                                "path": "c.py",
+                                "line": 9,
+                                "originalLine": None,
+                                "comments": {
+                                    "nodes": [
+                                        {
+                                            "author": {"login": "rev"},
+                                            "body": "this looks fishy",
+                                            "createdAt": "2026-05-24T12:00:00Z",
+                                        }
+                                    ]
+                                },
+                            },
+                        ],
+                    }
+                }
+            }
+        }
+    }
+    response.raise_for_status.return_value = None
+
+    client_cm = AsyncMock()
+    client_cm.__aenter__.return_value = client_cm
+    client_cm.post = AsyncMock(return_value=response)
+
+    with patch("agent.reviewer_publish.httpx.AsyncClient", return_value=client_cm):
+        threads = await fetch_pr_review_threads(owner="o", repo="r", pr_number=1, token="t")
+
+    assert len(threads) == 2
+    assert threads[0]["path"] == "a/b.py"
+    assert threads[0]["is_resolved"] is True
+    assert threads[0]["line"] == 37
+    assert len(threads[0]["comments"]) == 2
+    assert threads[0]["comments"][1]["author"] == "human"
+    assert "added defaults" in threads[0]["comments"][1]["body"]
+    assert threads[1]["is_resolved"] is False
+
+
+@pytest.mark.asyncio
+async def test_fetch_pr_review_threads_returns_empty_on_http_error() -> None:
+    import httpx
+
+    client_cm = AsyncMock()
+    client_cm.__aenter__.return_value = client_cm
+    client_cm.post = AsyncMock(side_effect=httpx.HTTPError("boom"))
+
+    with patch("agent.reviewer_publish.httpx.AsyncClient", return_value=client_cm):
+        threads = await fetch_pr_review_threads(owner="o", repo="r", pr_number=1, token="t")
+    assert threads == []
