@@ -18,6 +18,12 @@ export class ApiError extends Error {
   }
 }
 
+export function isGithubReauthError(error: unknown): boolean {
+  if (!(error instanceof ApiError)) return false;
+  if (error.status === 401) return true;
+  return /github token|re-login required/i.test(error.message);
+}
+
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const res = await fetch(`${API_BASE}/dashboard/api${path}`, {
     ...init,
@@ -61,6 +67,11 @@ export interface Profile {
   default_model?: string;
   reasoning_effort?: string;
   default_repo?: string | null;
+  base_branch?: string | null;
+  branch_prefix?: string | null;
+  auto_fix_ci?: boolean;
+  create_prs?: boolean;
+  review_draft_prs?: boolean | null;
   updated_at?: string;
 }
 
@@ -68,6 +79,27 @@ export interface ProfileUpdate {
   default_model: string;
   reasoning_effort: string;
   default_repo?: string | null;
+  base_branch?: string | null;
+  branch_prefix?: string | null;
+  auto_fix_ci?: boolean;
+  create_prs?: boolean;
+  review_draft_prs?: boolean | null;
+}
+
+export type TriggerMode = "every_push" | "once_per_pr" | "manual";
+export type AutofixMode = "off" | "low" | "medium" | "high";
+
+export interface TeamSettings {
+  trigger_mode: TriggerMode;
+  review_draft_prs: boolean;
+  pr_summaries: boolean;
+  autofix_mode: AutofixMode;
+  autofix_severity_threshold: AutofixMode;
+  default_agent_model?: string | null;
+  default_agent_reasoning_effort?: string | null;
+  default_reviewer_model?: string | null;
+  default_reviewer_reasoning_effort?: string | null;
+  updated_at?: string | null;
 }
 
 export interface Repository {
@@ -86,6 +118,26 @@ export interface ReposPayload {
   repositories: Array<Repository>;
 }
 
+export type ReviewStyleStatus = "idle" | "running" | "completed" | "failed";
+
+export interface ReviewStyle {
+  full_name: string;
+  owner?: string;
+  name?: string;
+  status: ReviewStyleStatus;
+  custom_prompt: string | null;
+  analysis_summary: string | null;
+  top_reviewers: Array<string>;
+  prs_sampled: number;
+  reviews_sampled: number;
+  analysis_thread_id: string | null;
+  analysis_run_id: string | null;
+  error: string | null;
+  created_by?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
 export const api = {
   me: () => request<SessionUser>("/me"),
   options: () => request<{ models: Array<ModelOption> }>("/options"),
@@ -93,6 +145,41 @@ export const api = {
   saveProfile: (body: ProfileUpdate) =>
     request<Profile>("/profile", { method: "PUT", body: JSON.stringify(body) }),
   repos: () => request<ReposPayload>("/repos"),
+  listReviewStyles: () => request<Array<ReviewStyle>>("/review-styles"),
+  createReviewStyle: (full_name: string) =>
+    request<ReviewStyle>("/review-styles", {
+      method: "POST",
+      body: JSON.stringify({ full_name }),
+    }),
+  getReviewStyle: (full_name: string) =>
+    request<ReviewStyle>(`/review-styles/${encodeURIComponent(full_name)}`),
+  saveReviewStylePrompt: (full_name: string, custom_prompt: string) =>
+    request<ReviewStyle>(`/review-styles/${encodeURIComponent(full_name)}`, {
+      method: "PUT",
+      body: JSON.stringify({ custom_prompt }),
+    }),
+  analyzeReviewStyle: (full_name: string) =>
+    request<ReviewStyle>(`/review-styles/${encodeURIComponent(full_name)}/analyze`, {
+      method: "POST",
+    }),
+  cancelReviewStyle: (full_name: string) =>
+    request<ReviewStyle>(`/review-styles/${encodeURIComponent(full_name)}/cancel`, {
+      method: "POST",
+    }),
+  deleteReviewStyle: (full_name: string) =>
+    request<void>(`/review-styles/${encodeURIComponent(full_name)}`, {
+      method: "DELETE",
+    }),
+  getTeamSettings: () => request<TeamSettings>("/team-settings"),
+  saveTeamSettings: (body: TeamSettings) =>
+    request<TeamSettings>("/team-settings", { method: "PUT", body: JSON.stringify(body) }),
+  listEnabledReviewRepos: () =>
+    request<{ repos: Array<string> }>("/enabled-review-repos"),
+  setEnabledReviewRepo: (full_name: string, enabled: boolean) =>
+    request<{ repos: Array<string> }>("/enabled-review-repos", {
+      method: "PUT",
+      body: JSON.stringify({ full_name, enabled }),
+    }),
   adminListProfiles: () => request<Array<Profile>>("/admin/profiles"),
   adminSaveProfile: (login: string, body: ProfileUpdate & { email?: string }) =>
     request<Profile>(`/admin/profiles/${encodeURIComponent(login)}`, {

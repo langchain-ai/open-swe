@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 dependencies = [
-    "deepagents>=0.5.7",
+    "deepagents>=0.6.3",
     "fastapi>=0.136.1",
     "uvicorn>=0.46.0",
     "httpx>=0.28.1",
@@ -24,6 +24,7 @@ dependencies = [
     "langchain-modal>=0.0.3",
     "langchain-runloop>=0.0.4",
     "exa-py>=2.12.1",
+    "langchain-google-genai>=4.2.2",
 ]
 
 [project.optional-dependencies]

@@ -19,6 +19,7 @@ def update_finding(
     finding_id: str,
     status: str | None = None,
     severity: str | None = None,
+    confidence: str | None = None,
     description: str | None = None,
     suggestion: str | None = None,
     note: str | None = None,
@@ -35,6 +36,8 @@ def update_finding(
         status: New status (``open``, ``resolved``, ``dismissed``).
             Use ``resolved`` when the new commits address the issue.
         severity: New severity, if reassessing.
+        confidence: New confidence rating (``low``, ``medium``, ``high``), if
+            new commits change how sure you are the finding is a real issue.
         description: New description body, if revising.
         suggestion: New replacement text. Pass an empty string to clear it.
             Capped at 4 lines — longer values are dropped (the finding keeps
@@ -47,14 +50,10 @@ def update_finding(
     """
     if status is not None and status not in {"open", "resolved", "dismissed"}:
         return {"success": False, "error": f"Invalid status: {status}"}
-    if severity is not None and severity not in {
-        "informational",
-        "low",
-        "medium",
-        "high",
-        "critical",
-    }:
+    if severity is not None and severity not in {"low", "medium", "high", "critical"}:
         return {"success": False, "error": f"Invalid severity: {severity}"}
+    if confidence is not None and confidence not in {"low", "medium", "high"}:
+        return {"success": False, "error": f"Invalid confidence: {confidence}"}
 
     updates: dict[str, Any] = {}
     suggestion_dropped = False
@@ -62,6 +61,8 @@ def update_finding(
         updates["status"] = status
     if severity is not None:
         updates["severity"] = severity
+    if confidence is not None:
+        updates["confidence"] = confidence
     if description is not None:
         updates["description"] = description
     if suggestion is not None:

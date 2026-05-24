@@ -22,6 +22,10 @@ import asyncio
 warnings.filterwarnings("ignore", message=".*Pydantic V1.*", category=UserWarning)
 
 # Now safe to import agent (which imports LangChain modules)
+from ._patch_messages_reducer import _apply as _apply_messages_reducer_patch
+
+_apply_messages_reducer_patch()
+
 from deepagents import create_deep_agent
 from deepagents.backends import LangSmithSandbox
 from deepagents.backends.protocol import SandboxBackendProtocol
@@ -31,8 +35,11 @@ from langsmith.sandbox import SandboxClientError
 from .dashboard.agent_overrides import (
     load_profile,
     normalize_profile_overrides,
+    profile_create_prs,
     resolve_github_login,
 )
+from .dashboard.options import DEFAULT_MODEL_ID, SUPPORTED_MODEL_IDS, model_supports_effort
+from .dashboard.team_settings import get_team_default_model
 from .integrations.langsmith import _configure_github_proxy
 from .middleware import (
     ModelFallbackMiddleware,
@@ -64,11 +71,11 @@ from .utils.auth import resolve_github_token
 from .utils.authorship import resolve_triggering_user_identity
 from .utils.github_app import get_github_app_installation_token
 from .utils.model import (
-    AnthropicThinking,
+    DEFAULT_LLM_REASONING,
     ModelKwargs,
-    OpenAIReasoning,
     fallback_model_id_for,
     make_model,
+    provider_model_kwargs,
 )
 from .utils.sandbox import create_sandbox
 from .utils.sandbox_paths import aresolve_sandbox_work_dir
@@ -331,58 +338,10 @@ async def ensure_sandbox_for_thread(thread_id: str) -> SandboxBackendProtocol:
     return sandbox_backend
 
 
-DEFAULT_LLM_MODEL_ID = "openai:gpt-5.5"
-DEFAULT_LLM_REASONING: OpenAIReasoning = {"effort": "medium"}
+DEFAULT_LLM_MODEL_ID = DEFAULT_MODEL_ID
 DEFAULT_LLM_MAX_TOKENS = 64_000
 DEFAULT_RECURSION_LIMIT = 9_999
 MODEL_CALL_RECURSION_LIMIT = 5_000  # ~half the recursion limit to account for tool calls
-
-
-def _openai_reasoning_for(profile_effort: str | None) -> OpenAIReasoning | None:
-    """Return an OpenAI reasoning kwarg from a (validated) profile effort.
-
-    Anthropic-only efforts like ``"max"`` are dropped — OpenAI's effort
-    Literal doesn't accept them. Falls back to the default effort when the
-    profile didn't override.
-    """
-    effort = profile_effort or DEFAULT_LLM_REASONING.get("effort")
-    if effort == "none":
-        return {"effort": "none"}
-    if effort == "low":
-        return {"effort": "low"}
-    if effort == "medium":
-        return {"effort": "medium"}
-    if effort == "high":
-        return {"effort": "high"}
-    if effort == "xhigh":
-        return {"effort": "xhigh"}
-    return None
-
-
-# Mapping mirrors Claude Code's effort levels for Opus 4.7. Numbers are tuned
-# so each level meaningfully separates from the next while leaving headroom
-# under DEFAULT_LLM_MAX_TOKENS (64k) for the model's actual output.
-_ANTHROPIC_THINKING_BUDGETS: dict[str, int] = {
-    "low": 1_024,
-    "medium": 4_000,
-    "high": 12_000,
-    "xhigh": 32_000,
-    "max": 60_000,
-}
-
-
-def _anthropic_thinking_for(profile_effort: str | None) -> AnthropicThinking | None:
-    """Map a profile effort string to an Anthropic thinking kwarg.
-
-    Returns ``None`` when the effort doesn't have a known budget so we leave
-    the model's default thinking behaviour alone.
-    """
-    if not profile_effort:
-        return None
-    budget = _ANTHROPIC_THINKING_BUDGETS.get(profile_effort)
-    if budget is None:
-        return None
-    return {"type": "enabled", "budget_tokens": budget}
 
 
 def _get_cached_sandbox_backend(thread_id: str) -> SandboxBackendProtocol:
@@ -424,8 +383,10 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     def backend_factory(_runtime: object, _thread_id: str = thread_id) -> SandboxBackendProtocol:
         return _get_cached_sandbox_backend(_thread_id)
 
-    model_id = os.environ.get("LLM_MODEL_ID", DEFAULT_LLM_MODEL_ID)
-    profile_effort: str | None = None
+    model_id, profile_effort = await get_team_default_model("agent")
+    logger.info("Using team default agent model: model=%s effort=%s", model_id, profile_effort)
+
+    profile: dict[str, Any] | None = None
     profile_login = resolve_github_login(config)
     if profile_login:
         profile = await load_profile(profile_login)
@@ -441,15 +402,32 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 model_id = overridden_model
                 profile_effort = overridden_effort
 
-    model_kwargs: ModelKwargs = {"max_tokens": DEFAULT_LLM_MAX_TOKENS}
-    if model_id.startswith("openai:"):
-        reasoning = _openai_reasoning_for(profile_effort)
-        if reasoning is not None:
-            model_kwargs["reasoning"] = reasoning
-    elif model_id.startswith("anthropic:"):
-        thinking = _anthropic_thinking_for(profile_effort)
-        if thinking is not None:
-            model_kwargs["thinking"] = thinking
+    configurable = (config or {}).get("configurable") or {}
+    per_thread_model = configurable.get("agent_model_id")
+    per_thread_effort = configurable.get("agent_effort")
+    if (
+        isinstance(per_thread_model, str)
+        and per_thread_model in SUPPORTED_MODEL_IDS
+        and isinstance(per_thread_effort, str)
+        and model_supports_effort(per_thread_model, per_thread_effort)
+    ):
+        logger.info(
+            "Applying per-thread model override: model=%s effort=%s",
+            per_thread_model,
+            per_thread_effort,
+        )
+        model_id = per_thread_model
+        profile_effort = per_thread_effort
+
+    create_prs = profile_create_prs(profile)
+    if not create_prs:
+        logger.info("PR creation disabled by profile for %s", profile_login)
+
+    model_kwargs = provider_model_kwargs(
+        model_id,
+        profile_effort,
+        max_tokens=DEFAULT_LLM_MAX_TOKENS,
+    )
 
     fallback_model_id = os.environ.get("LLM_FALLBACK_MODEL_ID") or fallback_model_id_for(model_id)
     fallback_middleware: list[Any] = []
@@ -470,6 +448,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             linear_project_id=linear_project_id,
             linear_issue_number=linear_issue_number,
             triggering_user_identity=triggering_user_identity,
+            create_prs=create_prs,
         ),
         tools=[
             http_request,

@@ -28,6 +28,7 @@ def test_add_finding_rejects_invalid_severity() -> None:
     with patch("agent.tools.add_finding.get_config", return_value=_config()):
         result = add_finding(
             severity="trivial",
+            confidence="high",
             category="x",
             file="foo.py",
             description="d",
@@ -42,6 +43,7 @@ def test_add_finding_rejects_out_of_diff_lines() -> None:
     with patch("agent.tools.add_finding.get_config", return_value=_config()):
         result = add_finding(
             severity="high",
+            confidence="high",
             category="correctness",
             file="foo.py",
             description="d",
@@ -50,6 +52,21 @@ def test_add_finding_rejects_out_of_diff_lines() -> None:
         )
     assert result["success"] is False
     assert "not part of the PR diff" in result["error"]
+
+
+def test_add_finding_rejects_invalid_confidence() -> None:
+    with patch("agent.tools.add_finding.get_config", return_value=_config()):
+        result = add_finding(
+            severity="high",
+            confidence="certain",
+            category="correctness",
+            file="foo.py",
+            description="d",
+            start_line=11,
+            end_line=11,
+        )
+    assert result["success"] is False
+    assert "confidence" in result["error"].lower()
 
 
 def test_add_finding_persists_to_thread_metadata() -> None:
@@ -66,6 +83,7 @@ def test_add_finding_persists_to_thread_metadata() -> None:
     ):
         result = add_finding(
             severity="medium",
+            confidence="high",
             category="style",
             file="foo.py",
             description="rename",
@@ -80,10 +98,11 @@ def test_add_finding_persists_to_thread_metadata() -> None:
     assert persisted_thread == "tid-1"
     assert persisted["file"] == "foo.py"
     assert persisted["start_line"] == 11
-    assert persisted["end_line"] == 11
+    assert persisted["end_line"] == 12
     assert persisted["suggestion"] == "renamed = 1"
     assert persisted["status"] == "open"
     assert persisted["first_seen_sha"] == "sha-head"
+    assert persisted["confidence"] == "high"
 
 
 def test_add_finding_allows_file_level_with_no_lines() -> None:
@@ -98,6 +117,7 @@ def test_add_finding_allows_file_level_with_no_lines() -> None:
     ):
         result = add_finding(
             severity="low",
+            confidence="medium",
             category="style",
             file="missing.py",
             description="file-level note",
@@ -133,6 +153,7 @@ def test_add_finding_drops_long_suggestion() -> None:
     ):
         result = add_finding(
             severity="medium",
+            confidence="high",
             category="style",
             file="foo.py",
             description="rewrite",
@@ -162,6 +183,7 @@ def test_add_finding_keeps_short_suggestion() -> None:
     ):
         result = add_finding(
             severity="medium",
+            confidence="medium",
             category="style",
             file="foo.py",
             description="rename",
@@ -175,8 +197,8 @@ def test_add_finding_keeps_short_suggestion() -> None:
     assert captured[0]["suggestion"] == short_suggestion
 
 
-def test_add_finding_always_collapses_to_single_line() -> None:
-    """Multi-line ranges are always collapsed to ``start_line``."""
+def test_add_finding_preserves_multi_line_range() -> None:
+    """Multi-line ranges are preserved end-to-end (no collapse to start_line)."""
     captured: list[Any] = []
 
     async def fake_append(thread_id: str, finding: Any) -> Any:
@@ -190,16 +212,17 @@ def test_add_finding_always_collapses_to_single_line() -> None:
     ):
         result = add_finding(
             severity="low",
+            confidence="low",
             category="style",
             file="foo.py",
-            description="anchor on start_line",
+            description="span the relevant range",
             start_line=15,
             end_line=19,
         )
 
     assert result["success"] is True
     assert captured[0]["start_line"] == 15
-    assert captured[0]["end_line"] == 15
+    assert captured[0]["end_line"] == 19
 
 
 def test_update_finding_rejects_long_suggestion_without_clobbering() -> None:

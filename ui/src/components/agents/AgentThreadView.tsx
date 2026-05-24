@@ -1,0 +1,202 @@
+import { useEffect, useMemo, useRef, useState } from "react";
+import { ChevronDown } from "lucide-react";
+
+import { AgentPromptBar } from "@/components/agents/AgentPromptBar";
+import { AgentsShell } from "@/components/agents/AgentsSidebar";
+import {
+  MessageView,
+  summarizeChangedFiles,
+  type MessageViewScrollControl,
+} from "@/components/agents/ported";
+import type { SessionUser } from "@/lib/api";
+import type { AgentThread, Message } from "@/lib/agents/types";
+import { useSendAgentMessage } from "@/lib/agents/queries";
+import {
+  dropPendingPrompts,
+  getPendingPrompts,
+  type PendingPrompt,
+} from "@/lib/agents/pendingPrompts";
+import { useAgentThreadStream } from "@/lib/agents/useThreadStream";
+import { useModelOptions, type ModelSelection } from "@/lib/agents/useModelOptions";
+
+interface AgentThreadViewProps {
+  user: SessionUser;
+  thread: AgentThread;
+}
+
+const PROMPT_OVERLAY_INSET = 128;
+
+export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
+  const sendMessage = useSendAgentMessage(thread.id);
+  useAgentThreadStream(thread.id, thread.status === "running");
+  const scrollControlRef = useRef<MessageViewScrollControl | null>(null);
+  const [showScrollToBottom, setShowScrollToBottom] = useState(false);
+  const [pendingPrompts, setPendingPrompts] = useState<PendingPrompt[]>(() =>
+    getPendingPrompts(thread.id),
+  );
+
+  const { models, defaultSelection } = useModelOptions();
+  const threadSelection = useMemo<ModelSelection | null>(() => {
+    if (!thread.model || !thread.effort) return null;
+    const supported = models.some(
+      (m) => m.id === thread.model && m.efforts.includes(thread.effort ?? ""),
+    );
+    if (!supported) return null;
+    return { modelId: thread.model, effort: thread.effort };
+  }, [models, thread.model, thread.effort]);
+  const [selection, setSelection] = useState<ModelSelection | null>(null);
+
+  useEffect(() => {
+    if (selection !== null) return;
+    if (threadSelection) setSelection(threadSelection);
+    else if (defaultSelection) setSelection(defaultSelection);
+  }, [defaultSelection, selection, threadSelection]);
+
+  const userMessageTexts = useMemo(() => {
+    return new Set(
+      thread.messages
+        .filter((m) => m.author === "user")
+        .map((m) =>
+          m.chunks
+            .filter((c) => c.kind === "text")
+            .map((c) => (c as { kind: "text"; text: string }).text)
+            .join(""),
+        ),
+    );
+  }, [thread.messages]);
+
+  useEffect(() => {
+    setPendingPrompts((prev) => {
+      if (prev.length === 0) return prev;
+      const next = dropPendingPrompts(thread.id, (entry) =>
+        userMessageTexts.has(entry.prompt),
+      );
+      return next.length === prev.length ? prev : next;
+    });
+  }, [thread.id, userMessageTexts]);
+
+  const displayMessages = useMemo<Message[]>(() => {
+    if (pendingPrompts.length === 0) return thread.messages;
+    const baseTimestamp = new Date().toISOString();
+    const result = thread.messages.slice();
+    pendingPrompts.forEach((entry, i) => {
+      const synth: Message = {
+        id: `pending-user-${i}`,
+        author: "user",
+        timestamp: baseTimestamp,
+        chunks: [{ kind: "text", text: entry.prompt }],
+      };
+      const at = Math.min(Math.max(entry.insertAt, 0), result.length);
+      result.splice(at, 0, synth);
+    });
+    return result;
+  }, [thread.messages, pendingPrompts]);
+
+  const changedFiles = useMemo(() => {
+    const agentMessages = thread.messages.filter((m) => m.author === "agent");
+    const allChunks = agentMessages.flatMap((m) => m.chunks);
+    return summarizeChangedFiles(allChunks);
+  }, [thread.messages]);
+
+  const hasMessages = displayMessages.length > 0;
+  const isStreaming = thread.status === "running" || pendingPrompts.length > 0;
+
+  return (
+    <AgentsShell user={user} activeThreadId={thread.id}>
+      <div className="flex min-w-0 flex-1 flex-col">
+        <div className="flex min-h-0 flex-1 flex-col">
+          {hasMessages ? (
+            <div className="relative flex min-h-0 flex-1 flex-col">
+              <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+                <MessageView
+                  messages={displayMessages}
+                  isStreaming={isStreaming}
+                  contentWidthClass="max-w-3xl"
+                  bottomInset={PROMPT_OVERLAY_INSET}
+                  scrollButtonSlot="external"
+                  scrollControlRef={scrollControlRef}
+                  onShowScrollToBottomChange={setShowScrollToBottom}
+                />
+
+                {changedFiles.length > 0 && (
+                  <div className="mx-auto mt-4 w-full max-w-3xl shrink-0 px-6">
+                    <div className="rounded-lg border border-[var(--ui-border)] bg-[var(--ui-panel)] p-3">
+                      <div className="mb-2 text-xs font-medium text-[var(--ui-text-muted)]">
+                        {changedFiles.length} Files Changed
+                      </div>
+                      <div className="space-y-1">
+                        {changedFiles.map((file) => (
+                          <div
+                            key={file.filePath}
+                            className="flex items-center justify-between rounded px-2 py-1 text-xs hover:bg-[var(--ui-panel-2)]"
+                          >
+                            <span className="font-mono text-[var(--ui-text)]">{file.filePath}</span>
+                            <span className="text-[var(--ui-success)]">+{file.additions}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 px-6 pb-4">
+                <div className="pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-[var(--ui-bg)] via-[var(--ui-bg)]/80 to-transparent" />
+                <div className="pointer-events-auto relative mx-auto max-w-3xl">
+                  {showScrollToBottom && (
+                    <button
+                      type="button"
+                      onClick={() => scrollControlRef.current?.scrollToBottom()}
+                      aria-label="Scroll to bottom"
+                      className="absolute bottom-full left-1/2 z-30 mb-2 inline-flex h-8 w-8 -translate-x-1/2 items-center justify-center rounded-full bg-[var(--ui-panel-2)] text-[color:var(--ui-text-muted)] shadow-md transition-colors hover:bg-[var(--ui-panel)] hover:text-[color:var(--ui-text)]"
+                    >
+                      <ChevronDown className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                  <AgentPromptBar
+                    placeholder="Add a follow up"
+                    compact
+                    busy={isStreaming}
+                    disabled={sendMessage.isPending}
+                    onSubmit={(content) =>
+                      sendMessage.mutate({
+                        content,
+                        model_id: selection?.modelId ?? null,
+                        effort: selection?.effort ?? null,
+                      })
+                    }
+                    models={models}
+                    selection={selection ?? threadSelection ?? defaultSelection}
+                    onSelectionChange={setSelection}
+                  />
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="flex flex-1 flex-col items-center justify-center gap-4 px-6">
+              <p className="text-sm text-[var(--ui-text-dim)]">This thread has no messages yet.</p>
+              <div className="w-full max-w-3xl">
+                <AgentPromptBar
+                  placeholder="Send the first message"
+                  compact
+                  busy={isStreaming}
+                  disabled={sendMessage.isPending}
+                  onSubmit={(content) =>
+                    sendMessage.mutate({
+                      content,
+                      model_id: selection?.modelId ?? null,
+                      effort: selection?.effort ?? null,
+                    })
+                  }
+                  models={models}
+                  selection={selection ?? threadSelection ?? defaultSelection}
+                  onSelectionChange={setSelection}
+                />
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </AgentsShell>
+  );
+}

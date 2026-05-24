@@ -1,4 +1,4 @@
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
@@ -187,3 +187,21 @@ class TestEnsureNoEmptyMsgNotify:
         result = ensure_no_empty_msg.after_model(state, self._make_runtime())
 
         assert result is None
+
+    def test_skips_confirming_completion_for_dashboard_source(self) -> None:
+        ai = AIMessage(content="Hi! How can I help?")
+        state = {
+            "messages": [
+                HumanMessage(content="hello"),
+                ai,
+            ]
+        }
+
+        with patch(
+            "agent.middleware.ensure_no_empty_msg.get_config",
+            return_value={"configurable": {"source": "dashboard"}},
+        ):
+            result = ensure_no_empty_msg.after_model(state, self._make_runtime())
+
+        assert result is None
+        assert not ai.tool_calls

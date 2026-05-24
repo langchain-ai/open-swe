@@ -363,7 +363,9 @@ LANGSMITH_TRACING_PROJECT_ID_PROD=""
 LANGSMITH_URL_PROD="https://smith.langchain.com"                 
 
 # === LLM ===
-ANTHROPIC_API_KEY=""                   # Anthropic API key (default provider)
+ANTHROPIC_API_KEY=""                   # Anthropic API key
+OPENAI_API_KEY=""                      # OpenAI API key (when using openai: models)
+GOOGLE_API_KEY=""                      # Google AI API key (when using google_genai: models)
 
 # === GitHub App (required) ===
 GITHUB_APP_ID=""                       # From step 3c
