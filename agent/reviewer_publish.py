@@ -197,6 +197,136 @@ async def fetch_review_comments(
     return out
 
 
+async def fetch_pr_review_threads(
+    *,
+    owner: str,
+    repo: str,
+    pr_number: int,
+    token: str,
+    max_threads: int = 100,
+    max_comments_per_thread: int = 20,
+) -> list[dict[str, Any]]:
+    """Fetch all inline review threads on a PR (across reviewers, with replies).
+
+    Returned shape per thread:
+        {
+            "path": str,
+            "line": int | None,
+            "original_line": int | None,
+            "is_resolved": bool,
+            "is_outdated": bool,
+            "comments": [{"author": str, "body": str, "created_at": str}, ...],
+        }
+
+    Used to give the reviewer agent comment-awareness: it should not re-file a
+    finding that already appears as an open thread (its own or another
+    reviewer's), and should treat a thread as addressed when a human reply
+    explains the code or the thread is resolved.
+    """
+    query = """
+    query Threads($owner: String!, $repo: String!, $pr: Int!, $cursor: String, $perThread: Int!) {
+      repository(owner: $owner, name: $repo) {
+        pullRequest(number: $pr) {
+          reviewThreads(first: 50, after: $cursor) {
+            pageInfo { hasNextPage endCursor }
+            nodes {
+              isResolved
+              isOutdated
+              path
+              line
+              originalLine
+              comments(first: $perThread) {
+                nodes {
+                  author { login }
+                  body
+                  createdAt
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+    """
+    out: list[dict[str, Any]] = []
+    cursor: str | None = None
+    async with httpx.AsyncClient() as client:
+        while len(out) < max_threads:
+            try:
+                response = await client.post(
+                    _GITHUB_GRAPHQL,
+                    headers={"Authorization": f"Bearer {token}"},
+                    json={
+                        "query": query,
+                        "variables": {
+                            "owner": owner,
+                            "repo": repo,
+                            "pr": pr_number,
+                            "cursor": cursor,
+                            "perThread": max_comments_per_thread,
+                        },
+                    },
+                    timeout=30,
+                )
+                response.raise_for_status()
+            except httpx.HTTPError:
+                logger.exception(
+                    "Failed to fetch PR review threads for %s/%s#%s",
+                    owner,
+                    repo,
+                    pr_number,
+                )
+                return out
+            data = response.json()
+            threads = (
+                data.get("data", {})
+                .get("repository", {})
+                .get("pullRequest", {})
+                .get("reviewThreads", {})
+            )
+            for thread in threads.get("nodes", []) or []:
+                if not isinstance(thread, dict):
+                    continue
+                comments_block = thread.get("comments") or {}
+                comments_nodes = comments_block.get("nodes") or []
+                comments: list[dict[str, Any]] = []
+                for c in comments_nodes:
+                    if not isinstance(c, dict):
+                        continue
+                    author_block = c.get("author") or {}
+                    login = author_block.get("login") if isinstance(author_block, dict) else None
+                    comments.append(
+                        {
+                            "author": login if isinstance(login, str) else "unknown",
+                            "body": c.get("body", "") if isinstance(c.get("body"), str) else "",
+                            "created_at": c.get("createdAt", "")
+                            if isinstance(c.get("createdAt"), str)
+                            else "",
+                        }
+                    )
+                out.append(
+                    {
+                        "path": thread.get("path", "")
+                        if isinstance(thread.get("path"), str)
+                        else "",
+                        "line": thread.get("line") if isinstance(thread.get("line"), int) else None,
+                        "original_line": thread.get("originalLine")
+                        if isinstance(thread.get("originalLine"), int)
+                        else None,
+                        "is_resolved": bool(thread.get("isResolved")),
+                        "is_outdated": bool(thread.get("isOutdated")),
+                        "comments": comments,
+                    }
+                )
+                if len(out) >= max_threads:
+                    break
+            page_info = threads.get("pageInfo") or {}
+            if not page_info.get("hasNextPage"):
+                break
+            cursor = page_info.get("endCursor")
+    return out
+
+
 async def fetch_review_thread_id_for_comment(
     *,
     owner: str,

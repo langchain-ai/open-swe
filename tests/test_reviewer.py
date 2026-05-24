@@ -241,3 +241,386 @@ async def test_reviewer_inlines_agents_md_into_system_prompt() -> None:
     mock_fetch_agents_md.assert_awaited_once_with("acme", "repo", "base-sha-xyz", token="gh-token")
     assert "Repository conventions (AGENTS.md)" in captured["system_prompt"]
     assert "Always use the design system IconButton." in captured["system_prompt"]
+
+
+def test_format_pr_review_threads_renders_resolved_and_open_threads() -> None:
+    block = reviewer._format_pr_review_threads(
+        [
+            {
+                "path": "a/b.py",
+                "line": 37,
+                "original_line": 37,
+                "is_resolved": True,
+                "is_outdated": False,
+                "comments": [
+                    {
+                        "author": "open-swe[bot]",
+                        "body": "additionalTtlPrefixes removes lifecycle rules",
+                        "created_at": "2026-05-23T10:00:00Z",
+                    },
+                    {
+                        "author": "human",
+                        "body": "We added defaults in the template",
+                        "created_at": "2026-05-24T11:00:00Z",
+                    },
+                ],
+            },
+            {
+                "path": "c.py",
+                "line": 9,
+                "original_line": None,
+                "is_resolved": False,
+                "is_outdated": False,
+                "comments": [{"author": "rev", "body": "this looks fishy", "created_at": ""}],
+            },
+        ]
+    )
+    # Open thread sorts before resolved.
+    assert block.index("c.py:9") < block.index("a/b.py:37")
+    assert "resolved" in block
+    assert "open" in block
+    assert "open-swe[bot]" in block
+    assert "We added defaults in the template" in block
+
+
+def test_format_pr_review_threads_returns_empty_string_for_no_threads() -> None:
+    assert reviewer._format_pr_review_threads([]) == ""
+    # Threads with no comments are skipped.
+    assert (
+        reviewer._format_pr_review_threads(
+            [{"path": "a.py", "line": 1, "is_resolved": False, "comments": []}]
+        )
+        == ""
+    )
+
+
+def test_reviewer_system_prompt_warns_against_overlap_with_existing_threads() -> None:
+    prompt = reviewer._reviewer_system_prompt(
+        "/workspace/repo",
+        repo_owner="acme",
+        repo_name="repo",
+        pr_number=42,
+    )
+    assert "Pre-existing PR review threads" in prompt
+    assert "overlaps" in prompt or "overlap" in prompt
+
+
+def test_build_first_review_context_includes_existing_threads_block_when_present() -> None:
+    ctx = reviewer._build_first_review_context(
+        pr_url="https://example/pr",
+        repo_owner="acme",
+        repo_name="repo",
+        pr_number=1,
+        base_sha="b",
+        head_sha="h",
+        existing_threads_block="### a.py:1 — open\n- **human**: hello",
+    )
+    assert "Pre-existing PR review threads" in ctx
+    assert "### a.py:1 — open" in ctx
+
+
+def test_build_first_review_context_omits_threads_section_when_empty() -> None:
+    ctx = reviewer._build_first_review_context(
+        pr_url="https://example/pr",
+        repo_owner="acme",
+        repo_name="repo",
+        pr_number=1,
+        base_sha="b",
+        head_sha="h",
+    )
+    # The rendered H2 heading must be absent when no threads exist (the
+    # phrase still appears in the inline instructions).
+    assert "## Pre-existing PR review threads" not in ctx
+
+
+def test_build_re_review_context_includes_existing_threads_block() -> None:
+    ctx = reviewer._build_re_review_context(
+        pr_url="https://example/pr",
+        repo_owner="acme",
+        repo_name="repo",
+        pr_number=1,
+        last_reviewed_sha="prev",
+        head_sha="head",
+        existing_findings_block="_(none)_",
+        existing_threads_block="### a.py:1 — open\n- **bot**: dup",
+    )
+    assert "Pre-existing PR review threads" in ctx
+    assert "### a.py:1 — open" in ctx
+    # The re-review instructions must reference the existing-threads guidance.
+    assert "skip anything already covered" in ctx
+
+
+@pytest.mark.asyncio
+async def test_reviewer_injects_pr_review_threads_into_first_review_context() -> None:
+    config: RunnableConfig = {
+        "configurable": {
+            "__is_for_execution__": True,
+            "thread_id": "reviewer-thread-id",
+            "source": "github",
+            "repo": {"owner": "acme", "name": "repo"},
+            "pr_number": 42,
+            "pr_url": "https://github.com/acme/repo/pull/42",
+            "base_sha": "base",
+            "head_sha": "head",
+        },
+        "metadata": {},
+    }
+    captured: dict[str, str] = {}
+
+    def fake_create_deep_agent(*, system_prompt: str, **kwargs: object) -> _DummyAgent:
+        captured["system_prompt"] = system_prompt
+        return _DummyAgent()
+
+    fake_threads = [
+        {
+            "path": "a/b.py",
+            "line": 37,
+            "original_line": 37,
+            "is_resolved": False,
+            "is_outdated": False,
+            "comments": [
+                {
+                    "author": "open-swe[bot]",
+                    "body": "additionalTtlPrefixes removes lifecycle rules",
+                    "created_at": "2026-05-23T10:00:00Z",
+                },
+                {
+                    "author": "romain-priour-lc",
+                    "body": "We added defaults in the template",
+                    "created_at": "2026-05-24T11:00:00Z",
+                },
+            ],
+        }
+    ]
+
+    with (
+        patch(
+            "agent.reviewer.get_github_token_from_thread",
+            new_callable=AsyncMock,
+            return_value=("gh-token", "encrypted-token", None),
+        ),
+        patch("agent.reviewer.resolve_github_token", new_callable=AsyncMock),
+        patch(
+            "agent.reviewer.ensure_sandbox_for_thread",
+            new_callable=AsyncMock,
+            return_value=MagicMock(),
+        ),
+        patch(
+            "agent.reviewer.aresolve_sandbox_work_dir",
+            new_callable=AsyncMock,
+            return_value="/workspace",
+        ),
+        patch(
+            "agent.reviewer.fetch_agents_md",
+            new_callable=AsyncMock,
+            return_value=None,
+        ),
+        patch(
+            "agent.reviewer.fetch_pr_review_threads",
+            new_callable=AsyncMock,
+            return_value=fake_threads,
+        ) as mock_fetch_threads,
+        patch("agent.reviewer.make_model", return_value=MagicMock()),
+        patch("agent.reviewer.create_deep_agent", side_effect=fake_create_deep_agent),
+    ):
+        await reviewer.get_reviewer_agent(config)
+
+    mock_fetch_threads.assert_awaited_once()
+    assert "Pre-existing PR review threads" in captured["system_prompt"]
+    assert "a/b.py:37" in captured["system_prompt"]
+    assert "We added defaults in the template" in captured["system_prompt"]
+
+
+@pytest.mark.asyncio
+async def test_reviewer_injects_pr_review_threads_into_re_review_context() -> None:
+    config: RunnableConfig = {
+        "configurable": {
+            "__is_for_execution__": True,
+            "thread_id": "reviewer-thread-id",
+            "source": "github",
+            "repo": {"owner": "acme", "name": "repo"},
+            "pr_number": 42,
+            "pr_url": "https://github.com/acme/repo/pull/42",
+            "base_sha": "base",
+            "head_sha": "head",
+            "re_review": True,
+            "last_reviewed_sha": "prev",
+        },
+        "metadata": {},
+    }
+    captured: dict[str, str] = {}
+
+    def fake_create_deep_agent(*, system_prompt: str, **kwargs: object) -> _DummyAgent:
+        captured["system_prompt"] = system_prompt
+        return _DummyAgent()
+
+    fake_threads = [
+        {
+            "path": "x.py",
+            "line": 5,
+            "original_line": 5,
+            "is_resolved": False,
+            "is_outdated": False,
+            "comments": [{"author": "open-swe[bot]", "body": "same bug again", "created_at": ""}],
+        }
+    ]
+
+    with (
+        patch(
+            "agent.reviewer.get_github_token_from_thread",
+            new_callable=AsyncMock,
+            return_value=("gh-token", "encrypted-token", None),
+        ),
+        patch("agent.reviewer.resolve_github_token", new_callable=AsyncMock),
+        patch(
+            "agent.reviewer.ensure_sandbox_for_thread",
+            new_callable=AsyncMock,
+            return_value=MagicMock(),
+        ),
+        patch(
+            "agent.reviewer.aresolve_sandbox_work_dir",
+            new_callable=AsyncMock,
+            return_value="/workspace",
+        ),
+        patch(
+            "agent.reviewer.fetch_agents_md",
+            new_callable=AsyncMock,
+            return_value=None,
+        ),
+        patch(
+            "agent.reviewer.fetch_pr_review_threads",
+            new_callable=AsyncMock,
+            return_value=fake_threads,
+        ),
+        patch(
+            "agent.reviewer.list_findings_async",
+            new_callable=AsyncMock,
+            return_value=[],
+        ),
+        patch("agent.reviewer.make_model", return_value=MagicMock()),
+        patch("agent.reviewer.create_deep_agent", side_effect=fake_create_deep_agent),
+    ):
+        await reviewer.get_reviewer_agent(config)
+
+    assert "A new commit has been pushed" in captured["system_prompt"]
+    assert "Pre-existing PR review threads" in captured["system_prompt"]
+    assert "x.py:5" in captured["system_prompt"]
+    assert "same bug again" in captured["system_prompt"]
+
+
+@pytest.mark.asyncio
+async def test_reviewer_omits_threads_block_when_fetch_returns_empty() -> None:
+    config: RunnableConfig = {
+        "configurable": {
+            "__is_for_execution__": True,
+            "thread_id": "reviewer-thread-id",
+            "source": "github",
+            "repo": {"owner": "acme", "name": "repo"},
+            "pr_number": 42,
+            "pr_url": "https://github.com/acme/repo/pull/42",
+            "base_sha": "base",
+            "head_sha": "head",
+        },
+        "metadata": {},
+    }
+    captured: dict[str, str] = {}
+
+    def fake_create_deep_agent(*, system_prompt: str, **kwargs: object) -> _DummyAgent:
+        captured["system_prompt"] = system_prompt
+        return _DummyAgent()
+
+    with (
+        patch(
+            "agent.reviewer.get_github_token_from_thread",
+            new_callable=AsyncMock,
+            return_value=("gh-token", "encrypted-token", None),
+        ),
+        patch("agent.reviewer.resolve_github_token", new_callable=AsyncMock),
+        patch(
+            "agent.reviewer.ensure_sandbox_for_thread",
+            new_callable=AsyncMock,
+            return_value=MagicMock(),
+        ),
+        patch(
+            "agent.reviewer.aresolve_sandbox_work_dir",
+            new_callable=AsyncMock,
+            return_value="/workspace",
+        ),
+        patch(
+            "agent.reviewer.fetch_agents_md",
+            new_callable=AsyncMock,
+            return_value=None,
+        ),
+        patch(
+            "agent.reviewer.fetch_pr_review_threads",
+            new_callable=AsyncMock,
+            return_value=[],
+        ),
+        patch("agent.reviewer.make_model", return_value=MagicMock()),
+        patch("agent.reviewer.create_deep_agent", side_effect=fake_create_deep_agent),
+    ):
+        await reviewer.get_reviewer_agent(config)
+
+    # The section header is unconditional in the system prompt (it's a rule),
+    # but the actual rendered thread block under the user message must NOT
+    # appear when there are no prior threads — only the rule text should.
+    # We assert there is no "### " marker (used by _format_pr_review_threads).
+    assert "### " not in captured["system_prompt"]
+
+
+@pytest.mark.asyncio
+async def test_reviewer_continues_when_thread_fetch_raises() -> None:
+    config: RunnableConfig = {
+        "configurable": {
+            "__is_for_execution__": True,
+            "thread_id": "reviewer-thread-id",
+            "source": "github",
+            "repo": {"owner": "acme", "name": "repo"},
+            "pr_number": 42,
+            "pr_url": "https://github.com/acme/repo/pull/42",
+            "base_sha": "base",
+            "head_sha": "head",
+        },
+        "metadata": {},
+    }
+    captured: dict[str, str] = {}
+
+    def fake_create_deep_agent(*, system_prompt: str, **kwargs: object) -> _DummyAgent:
+        captured["system_prompt"] = system_prompt
+        return _DummyAgent()
+
+    with (
+        patch(
+            "agent.reviewer.get_github_token_from_thread",
+            new_callable=AsyncMock,
+            return_value=("gh-token", "encrypted-token", None),
+        ),
+        patch("agent.reviewer.resolve_github_token", new_callable=AsyncMock),
+        patch(
+            "agent.reviewer.ensure_sandbox_for_thread",
+            new_callable=AsyncMock,
+            return_value=MagicMock(),
+        ),
+        patch(
+            "agent.reviewer.aresolve_sandbox_work_dir",
+            new_callable=AsyncMock,
+            return_value="/workspace",
+        ),
+        patch(
+            "agent.reviewer.fetch_agents_md",
+            new_callable=AsyncMock,
+            return_value=None,
+        ),
+        patch(
+            "agent.reviewer.fetch_pr_review_threads",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("network down"),
+        ),
+        patch("agent.reviewer.make_model", return_value=MagicMock()),
+        patch("agent.reviewer.create_deep_agent", side_effect=fake_create_deep_agent),
+    ):
+        await reviewer.get_reviewer_agent(config)
+
+    # The reviewer must still produce a usable prompt even if the thread
+    # fetch fails; the first-review user-message context should still appear.
+    assert "## Pull request to review" in captured["system_prompt"]

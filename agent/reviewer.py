@@ -41,6 +41,7 @@ from .middleware import (
 from .reviewer_findings import (
     list_findings as list_findings_async,
 )
+from .reviewer_publish import fetch_pr_review_threads
 from .server import (
     DEFAULT_LLM_MAX_TOKENS,
     DEFAULT_RECURSION_LIMIT,
@@ -105,6 +106,16 @@ nothing. Add net-new findings with `add_finding`.
 
 # Do NOT file
 
+- **Anything that overlaps an existing PR review thread.** A
+  "Pre-existing PR review threads" block below (when present) lists every
+  inline thread already on this PR, with replies and resolution status.
+  Before calling `add_finding`, check whether your candidate overlaps any
+  thread there — same file and line range, or same underlying defect. If
+  it does, do NOT file. The author has already been told. This holds even
+  when the thread is open and the code has not changed: re-filing means
+  the agent looks broken and the comment gets ignored. Treat a thread as
+  addressed when (a) it is resolved, (b) it is outdated, or (c) a non-bot
+  reply explains the code or says it's been fixed.
 - **Style / naming / convention nits.** No "rename this", "extract a
   constant", "use a different helper", "this could be cleaner". The one
   exception: typos that break behavior (a template binding, an exported name
@@ -262,21 +273,30 @@ def _build_first_review_context(
     pr_number: int,
     base_sha: str,
     head_sha: str,
+    existing_threads_block: str = "",
 ) -> str:
+    prior_section = (
+        f"\n## Pre-existing PR review threads\n\n{existing_threads_block}\n"
+        if existing_threads_block
+        else ""
+    )
     return (
         f"## Pull request to review\n\n"
         f"- repo: {repo_owner}/{repo_name}\n"
         f"- pr_number: {pr_number}\n"
         f"- url: {pr_url}\n"
         f"- base_sha: {base_sha}\n"
-        f"- head_sha: {head_sha}\n\n"
+        f"- head_sha: {head_sha}\n"
+        f"{prior_section}\n"
         f"Fetch the diff yourself with "
         f"`GH_TOKEN=dummy gh pr diff {pr_number} --repo {repo_owner}/{repo_name}`, "
         f"then review using the ordered passes (mechanical grep → diff-line audit "
         f"→ security/auth if applicable → pipeline sweep → deep flow).\n\n"
-        f"This is a first review — there are no existing findings. Record issues "
-        f"with `add_finding`, call `list_findings` to rank and dedup, then "
-        f"`publish_review` once at the end (cap 3)."
+        f"This is a first review — there are no existing findings recorded by "
+        f"you. If a Pre-existing PR review threads section is present, do not "
+        f"re-file anything that overlaps one of those threads. Record net-new "
+        f"issues with `add_finding`, call `list_findings` to rank and dedup, "
+        f"then `publish_review` once at the end (cap 3)."
     )
 
 
@@ -289,7 +309,13 @@ def _build_re_review_context(
     last_reviewed_sha: str,
     head_sha: str,
     existing_findings_block: str,
+    existing_threads_block: str = "",
 ) -> str:
+    prior_threads_section = (
+        f"## Pre-existing PR review threads\n\n{existing_threads_block}\n\n"
+        if existing_threads_block
+        else ""
+    )
     return (
         f"## A new commit has been pushed\n\n"
         f"- repo: {repo_owner}/{repo_name}\n"
@@ -298,6 +324,7 @@ def _build_re_review_context(
         f"- previous reviewed SHA: {last_reviewed_sha}\n"
         f"- new HEAD SHA: {head_sha}\n\n"
         f"## Existing findings\n\n{existing_findings_block}\n\n"
+        f"{prior_threads_section}"
         f"Fetch the diff since the previous reviewed SHA yourself with "
         f"`GH_TOKEN=dummy gh api repos/{repo_owner}/{repo_name}/compare/"
         f'{last_reviewed_sha}...{head_sha} -H "Accept: application/vnd.github.v3.diff"`, '
@@ -306,8 +333,61 @@ def _build_re_review_context(
         f'it (`update_finding(id, status="resolved")`), left it unchanged '
         f"(no action), or changed it materially (`update_finding` with new "
         f"fields + a `note`). Then add any net-new findings introduced by the "
-        f"new diff, and call `publish_review` once at the end."
+        f"new diff — but skip anything already covered by an existing PR "
+        f"review thread above (your own prior threads, another reviewer's, or "
+        f"one a human has already replied to). Call `publish_review` once at "
+        f"the end."
     )
+
+
+def _format_pr_review_threads(threads: list[dict]) -> str:
+    """Render existing PR review threads as a compact, human-scannable block."""
+    if not threads:
+        return ""
+    visible: list[dict] = []
+    for t in threads:
+        comments = t.get("comments") or []
+        if not comments:
+            continue
+        visible.append(t)
+    if not visible:
+        return ""
+
+    def _sort_key(t: dict) -> tuple[int, int, str, int]:
+        # Open + non-outdated first; then by path/line for stability.
+        priority = 0 if not t.get("is_resolved") and not t.get("is_outdated") else 1
+        return (
+            priority,
+            0 if not t.get("is_resolved") else 1,
+            t.get("path") or "",
+            t.get("line") or t.get("original_line") or 0,
+        )
+
+    visible.sort(key=_sort_key)
+
+    lines: list[str] = []
+    for t in visible:
+        path = t.get("path") or "<unknown>"
+        line = t.get("line") if isinstance(t.get("line"), int) else t.get("original_line")
+        location = f"{path}:{line}" if isinstance(line, int) else path
+        flags: list[str] = []
+        if t.get("is_resolved"):
+            flags.append("resolved")
+        if t.get("is_outdated"):
+            flags.append("outdated")
+        if not flags:
+            flags.append("open")
+        lines.append(f"### {location} — {', '.join(flags)}")
+        for c in t.get("comments") or []:
+            author = c.get("author") or "unknown"
+            body = (c.get("body") or "").strip()
+            # Single-line preview; collapse newlines so the block stays compact.
+            preview = " ".join(body.split())
+            if len(preview) > 400:  # noqa: PLR2004
+                preview = preview[:397] + "..."
+            lines.append(f"- **{author}**: {preview}")
+        lines.append("")
+    return "\n".join(lines).rstrip()
 
 
 def _format_existing_findings(findings: list[dict]) -> str:
@@ -376,6 +456,39 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
     config["configurable"]["diff_text"] = ""
     config["configurable"]["diff_line_set"] = None
 
+    existing_threads_block = ""
+    if (
+        pr_number is not None
+        and isinstance(pr_number, int)
+        and repo_owner
+        and repo_name
+        and github_token
+    ):
+        try:
+            threads = await fetch_pr_review_threads(
+                owner=repo_owner,
+                repo=repo_name,
+                pr_number=pr_number,
+                token=github_token,
+            )
+            existing_threads_block = _format_pr_review_threads(threads)
+            if existing_threads_block:
+                logger.info(
+                    "Loaded %d existing PR review thread(s) into reviewer context for %s/%s#%s",
+                    len(threads),
+                    repo_owner,
+                    repo_name,
+                    pr_number,
+                )
+        except Exception:  # noqa: BLE001
+            logger.exception(
+                "Failed to load existing PR review threads for %s/%s#%s; "
+                "continuing without comment-awareness context",
+                repo_owner,
+                repo_name,
+                pr_number,
+            )
+
     review_context = ""
     if pr_number is not None and isinstance(pr_number, int):
         if is_re_review and last_reviewed_sha:
@@ -388,6 +501,7 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
                 last_reviewed_sha=last_reviewed_sha,
                 head_sha=head_sha,
                 existing_findings_block=_format_existing_findings(existing_findings),
+                existing_threads_block=existing_threads_block,
             )
         else:
             review_context = _build_first_review_context(
@@ -397,6 +511,7 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
                 pr_number=pr_number,
                 base_sha=base_sha,
                 head_sha=head_sha,
+                existing_threads_block=existing_threads_block,
             )
 
     from .dashboard.team_settings import get_team_default_model
