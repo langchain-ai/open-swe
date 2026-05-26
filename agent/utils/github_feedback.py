@@ -116,6 +116,9 @@ async def _update_reaction_state(
         active_reactions.add(reaction)
     else:
         active_reactions.discard(reaction)
+    if not active_reactions:
+        await langgraph_client.store.delete_item(namespace, key)
+        return active_reactions
     await langgraph_client.store.put_item(
         namespace,
         key,

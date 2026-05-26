@@ -64,11 +64,10 @@ def render_inline_comment_body(finding: Finding) -> str:
         f"{json.dumps(marker_payload, separators=(',', ':'))} -->"
     )
     suggestion = finding.get("suggestion")
-    feedback_footer = "---\n*Was this helpful? React with +1 or -1 to provide feedback.*"
     body = f"{marker}\n\n{description}"
     if suggestion:
         body = f"{body}\n\n```suggestion\n{suggestion}\n```"
-    return f"{body}\n\n{feedback_footer}"
+    return body
 
 
 def render_inline_comment_payload(finding: Finding) -> dict[str, Any] | None:

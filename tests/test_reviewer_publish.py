@@ -39,7 +39,7 @@ def test_render_inline_comment_body_without_suggestion() -> None:
     assert "<!-- open-swe-review-comment" in body
     assert '"id":"f_' in body
     assert "just text" in body
-    assert "React with +1 or -1" in body
+    assert "React with +1 or -1" not in body
 
 
 def test_render_inline_comment_body_with_suggestion_appends_block() -> None:

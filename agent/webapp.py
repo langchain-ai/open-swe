@@ -56,11 +56,6 @@ from .utils.github_comments import (
     sanitize_github_comment_body,
     verify_github_signature,
 )
-from .utils.github_feedback import (
-    GITHUB_FEEDBACK_REACTIONS,
-    process_github_reaction_added,
-    process_github_reaction_removed,
-)
 from .utils.github_org_membership import INTERNAL_BOT_LOGINS, is_user_active_org_member
 from .utils.github_token import get_github_token_from_thread, invalidate_cached_github_token
 from .utils.github_user_email_map import GITHUB_USER_EMAIL_MAP
@@ -1339,7 +1334,6 @@ _SUPPORTED_GH_EVENTS = frozenset(
         "pull_request_review_comment",
         "pull_request_review",
         "push",
-        "reaction",
     ]
 )
 _SUPPORTED_GH_ISSUE_ACTIONS = frozenset(["edited", "opened", "reopened"])
@@ -2424,23 +2418,6 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks) ->
         "owner": webhook_repo.get("owner", {}).get("login", ""),
         "name": webhook_repo.get("name", ""),
     }
-
-    if event_type == "reaction":
-        action = payload.get("action", "")
-        reaction = payload.get("reaction", {})
-        content = reaction.get("content") if isinstance(reaction, dict) else None
-        if action not in {"created", "deleted"}:
-            return {"status": "ignored", "reason": f"Unsupported GitHub reaction action: {action}"}
-        if content not in GITHUB_FEEDBACK_REACTIONS:
-            return {"status": "ignored", "reason": "Reaction not tracked for feedback"}
-        if not await _is_repo_enabled_for_review(webhook_repo_config):
-            return {"status": "ignored", "reason": "Repository not enabled for review"}
-        delivery_id = request.headers.get("X-GitHub-Delivery", "")
-        if action == "created":
-            background_tasks.add_task(process_github_reaction_added, payload, delivery_id)
-            return {"status": "accepted", "message": "GitHub reaction feedback queued"}
-        background_tasks.add_task(process_github_reaction_removed, payload, delivery_id)
-        return {"status": "accepted", "message": "GitHub reaction removal queued"}
 
     issue = payload.get("issue", {})
     is_pull_request_comment = bool(event_type == "issue_comment" and issue.get("pull_request"))

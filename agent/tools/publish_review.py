@@ -44,25 +44,13 @@ def publish_review(
 
     Call this once at the end of a review run, after you have finished adding
     findings (and, on a re-review, after marking resolved findings via
-    ``update_finding``). It will:
+    ``update_finding``). The tool posts one GitHub PR Review for eligible
+    inline findings, records the GitHub comment/thread IDs for future
+    re-reviews, resolves GitHub threads for findings now marked resolved, and
+    advances the reviewer thread's ``last_reviewed_sha``.
 
-    1. Read findings from the reviewer thread.
-    2. Filter to status=open and severity ≥ ``severity_threshold``, capped
-       at ``cap`` to avoid review spam.
-    3. POST a single GitHub PR Review with the eligible findings as inline
-       comments. ``finding.suggestion`` becomes a ```suggestion``` block
-       (the "Commit suggestion" UX). The review body is a fixed,
-       host-formatted summary line — you do not write it. On a re-review
-       run with no new findings to surface, the GitHub Review post is
-       skipped entirely (resolved threads and ``last_reviewed_sha`` are
-       still updated). The "no issues found" summary only posts on the
-       first review of a PR.
-    4. Store the returned per-comment IDs back on each finding so a future
-       re-review can resolve those threads on GitHub when the issues are fixed.
-    5. For findings whose status moved ``open`` → ``resolved`` since the last
-       publish, resolve their existing GitHub review threads via the GraphQL
-       ``resolveReviewThread`` mutation.
-    6. Update ``last_reviewed_sha`` on the thread to the current head SHA.
+    On a re-review with no new findings to surface, it skips posting a new
+    GitHub Review but still resolves fixed threads and updates reviewer state.
 
     Args:
         severity_threshold: Lowest severity to surface to GitHub (default
@@ -119,7 +107,7 @@ def publish_review(
                 severity_threshold=_cast_severity(severity_threshold),
                 cap=cap,
                 is_re_review=is_re_review,
-                run_id=_current_run_id(config),
+                langgraph_run_id=_current_run_id(config),
             )
         )
     except GitHubAuthError as exc:
@@ -190,7 +178,7 @@ async def _publish_review_async(
     severity_threshold: Severity,
     cap: int,
     is_re_review: bool,
-    run_id: str | None = None,
+    langgraph_run_id: str | None = None,
 ) -> dict[str, Any]:
     thread_id = get_thread_id_from_runtime()
     findings = await list_findings_async(thread_id)
@@ -275,17 +263,17 @@ async def _publish_review_async(
             review_id=review_id,
             token=token,
         )
-        if run_id is None:
+        if langgraph_run_id is None:
             metadata = await get_thread_metadata(thread_id)
             current_run_id = metadata.get("current_reviewer_run_id")
             if isinstance(current_run_id, str) and current_run_id:
-                run_id = current_run_id
+                langgraph_run_id = current_run_id
         await _store_comment_ids_on_findings(
             thread_id=thread_id,
             findings=findings,
             eligible_with_payload=eligible_with_payload,
             comment_records=comment_records,
-            run_id=run_id,
+            langgraph_run_id=langgraph_run_id,
         )
         await _store_thread_ids_on_findings(
             thread_id=thread_id,
@@ -364,7 +352,7 @@ async def _store_comment_ids_on_findings(
     findings: list[dict[str, Any]],
     eligible_with_payload: list[tuple[dict[str, Any], dict[str, Any]]],
     comment_records: list[dict[str, Any]],
-    run_id: str | None,
+    langgraph_run_id: str | None,
 ) -> None:
     """Match returned GitHub comment ids back to the findings that produced them.
 
@@ -403,8 +391,8 @@ async def _store_comment_ids_on_findings(
         if finding is None:
             continue
         finding["github_review_comment_id"] = comment_id
-        if run_id:
-            finding["github_review_run_id"] = run_id
+        if langgraph_run_id:
+            finding["github_review_run_id"] = langgraph_run_id
         updated = True
 
     if updated:
@@ -420,12 +408,16 @@ async def _store_thread_ids_on_findings(
     token: str,
 ) -> None:
     findings = await list_findings_async(thread_id)
-    comment_ids_by_finding_id = {
-        finding.get("id"): finding.get("github_review_comment_id")
-        for finding in findings
-        if isinstance(finding.get("github_review_comment_id"), int)
-        and not isinstance(finding.get("github_review_thread_id"), str)
-    }
+    comment_ids_by_finding_id: dict[str, int] = {}
+    for finding in findings:
+        finding_id = finding.get("id")
+        comment_id = finding.get("github_review_comment_id")
+        if (
+            isinstance(finding_id, str)
+            and isinstance(comment_id, int)
+            and not isinstance(finding.get("github_review_thread_id"), str)
+        ):
+            comment_ids_by_finding_id[finding_id] = comment_id
     if not comment_ids_by_finding_id:
         return
 
@@ -515,19 +507,10 @@ async def _resolve_threads_for_resolved_findings(
 
 
 def _current_run_id(config: dict[str, Any]) -> str | None:
-    candidates = [
-        config.get("run_id"),
-        config.get("metadata", {}).get("run_id") if isinstance(config.get("metadata"), dict) else None,
-    ]
+    candidates = [config.get("run_id")]
     configurable = config.get("configurable")
     if isinstance(configurable, dict):
-        candidates.extend(
-            [
-                configurable.get("run_id"),
-                configurable.get("__run_id"),
-                configurable.get("langgraph_run_id"),
-            ]
-        )
+        candidates.append(configurable.get("run_id"))
     for candidate in candidates:
         if isinstance(candidate, str) and candidate:
             return candidate

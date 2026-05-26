@@ -23,6 +23,9 @@ class _FakeStore:
     async def put_item(self, namespace: tuple[str, ...], key: str, value: dict[str, Any]) -> None:
         self.items[(namespace, key)] = {"value": value}
 
+    async def delete_item(self, namespace: tuple[str, ...], key: str) -> None:
+        self.items.pop((namespace, key), None)
+
 
 class _FakeClient:
     def __init__(self) -> None:
@@ -162,23 +165,20 @@ async def test_github_reaction_removed_deletes_langsmith_feedback(
         "run_id": "run-1",
         "key": "github_reaction:langchain-ai/open-swe:reviewer:123",
     }
+    assert (
+        ("github_reaction_state", "langchain-ai/open-swe"),
+        "run-1:reviewer:123",
+    ) not in client.store.items
 
 
 @pytest.mark.asyncio
-async def test_github_webhook_queues_reaction_feedback(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_github_webhook_ignores_reaction_event(monkeypatch: pytest.MonkeyPatch) -> None:
     payload = _reaction_payload()
     background_tasks = _FakeBackgroundTasks()
 
     monkeypatch.setattr(webapp, "verify_github_signature", lambda *args, **kwargs: True)
 
-    async def fake_is_repo_enabled(repo: dict[str, str]) -> bool:
-        return True
-
-    monkeypatch.setattr(webapp, "_is_repo_enabled_for_review", fake_is_repo_enabled)
-
     response = await webapp.github_webhook(_FakeRequest(payload), background_tasks)
 
-    assert response == {"status": "accepted", "message": "GitHub reaction feedback queued"}
-    assert background_tasks.tasks == [
-        (webapp.process_github_reaction_added, (payload, "delivery-1"))
-    ]
+    assert response == {"status": "ignored", "reason": "Unsupported event type: reaction"}
+    assert background_tasks.tasks == []
