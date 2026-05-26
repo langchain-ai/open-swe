@@ -77,6 +77,13 @@ class Finding(TypedDict, total=False):
     first_seen_sha: str
     last_confirmed_sha: str
     github_review_comment_id: int | None
+    github_review_thread_id: str | None
+    github_review_run_id: str | None
+    github_thread_resolved: bool
+    last_human_reply_at: str | None
+    last_human_reply_author: str | None
+    last_human_reply_body: str | None
+    last_reconciliation_note: str | None
     diff_hunk: str | None
 
 
@@ -135,6 +142,13 @@ def new_finding(
         "first_seen_sha": sha,
         "last_confirmed_sha": sha,
         "github_review_comment_id": None,
+        "github_review_thread_id": None,
+        "github_review_run_id": None,
+        "github_thread_resolved": False,
+        "last_human_reply_at": None,
+        "last_human_reply_author": None,
+        "last_human_reply_body": None,
+        "last_reconciliation_note": None,
         "diff_hunk": diff_hunk,
     }
 

@@ -43,6 +43,7 @@ from .reviewer_findings import (
     list_findings as list_findings_async,
 )
 from .reviewer_publish import fetch_pr_review_threads
+from .reviewer_reconcile import reconcile_findings_with_review_threads
 from .server import (
     DEFAULT_LLM_MAX_TOKENS,
     DEFAULT_RECURSION_LIMIT,
@@ -56,6 +57,8 @@ from .tools import (
     http_request,
     list_findings,
     publish_review,
+    reply_to_finding_thread,
+    resolve_finding_thread,
     update_finding,
     web_search,
 )
@@ -87,12 +90,21 @@ Clone the repo so you can grep for full file context:
 GH_TOKEN=dummy gh repo clone {repo_owner}/{repo_name} && cd {repo_name} && git checkout <head_sha>
 ```
 
-Tools: `add_finding`, `update_finding`, `list_findings`, `publish_review`.
+Tools: `add_finding`, `update_finding`, `list_findings`, `publish_review`,
+`resolve_finding_thread`, `reply_to_finding_thread`.
 Call `publish_review` once at the end.
 
 Re-review: for each open finding, `update_finding(id, status="resolved")` if
 fixed, `update_finding` with new fields + `note` if changed, otherwise do
 nothing. Add net-new findings with `add_finding`.
+
+If a human reply shows one of your published findings is invalid, call
+`resolve_finding_thread(finding_id, status="dismissed")` after verifying the
+claim. If the finding is fixed by code, use `update_finding(...,
+status="resolved")`; `publish_review` will close the GitHub thread. Reply with
+`reply_to_finding_thread` only when the user directly asks a question or a short
+clarification is needed after pushback. Bias strongly toward resolving/dismissing
+without replying.
 
 # The bar: file a finding only if it passes these criteria
 
@@ -341,7 +353,11 @@ def _build_re_review_context(
         f"For each open finding above, decide whether the new commits resolved "
         f'it (`update_finding(id, status="resolved")`), left it unchanged '
         f"(no action), or changed it materially (`update_finding` with new "
-        f"fields + a `note`). Then add any net-new findings introduced by the "
+        f"fields + a `note`). If a human reply on a finding explains why your "
+        f"comment was invalid, verify that analysis, then call "
+        f"`resolve_finding_thread(id, status=\"dismissed\")` to close it. "
+        f"Reply only when directly asked or when a concise clarification is "
+        f"necessary. Then add any net-new findings introduced by the "
         f"new diff — but skip anything already covered by an existing PR "
         f"review thread above (your own prior threads, another reviewer's, or "
         f"one a human has already replied to). Call `publish_review` once at "
@@ -468,6 +484,10 @@ def _format_existing_findings(findings: list[dict]) -> str:
             f"- [{f.get('id')}] ({f.get('severity')}, {f.get('category')}) "
             f"{location} — {f.get('description', '').strip()}"
         )
+        human_reply = f.get("last_human_reply_body")
+        if isinstance(human_reply, str) and human_reply:
+            author = f.get("last_human_reply_author") or "human"
+            lines.append(f"  Human reply from {author}: {human_reply}")
     return "\n".join(lines) if lines else "_(no open findings)_"
 
 
@@ -533,6 +553,7 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
                 pr_number=pr_number,
                 token=github_token,
             )
+            await reconcile_findings_with_review_threads(thread_id, threads)
             existing_threads_block = _format_pr_review_threads(threads)
             if existing_threads_block:
                 logger.info(
@@ -650,6 +671,8 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
             update_finding,
             list_findings,
             publish_review,
+            resolve_finding_thread,
+            reply_to_finding_thread,
             web_search,
             fetch_url,
             http_request,

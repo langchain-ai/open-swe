@@ -20,6 +20,7 @@ from ..reviewer_findings import (
     list_findings as list_findings_async,
 )
 from ..reviewer_publish import (
+    fetch_pr_review_threads,
     fetch_review_comments,
     fetch_review_thread_id_for_comment,
     post_pull_request_review,
@@ -118,6 +119,7 @@ def publish_review(
                 severity_threshold=_cast_severity(severity_threshold),
                 cap=cap,
                 is_re_review=is_re_review,
+                run_id=_current_run_id(config),
             )
         )
     except GitHubAuthError as exc:
@@ -188,6 +190,7 @@ async def _publish_review_async(
     severity_threshold: Severity,
     cap: int,
     is_re_review: bool,
+    run_id: str | None = None,
 ) -> dict[str, Any]:
     thread_id = get_thread_id_from_runtime()
     findings = await list_findings_async(thread_id)
@@ -272,11 +275,24 @@ async def _publish_review_async(
             review_id=review_id,
             token=token,
         )
+        if run_id is None:
+            metadata = await get_thread_metadata(thread_id)
+            current_run_id = metadata.get("current_reviewer_run_id")
+            if isinstance(current_run_id, str) and current_run_id:
+                run_id = current_run_id
         await _store_comment_ids_on_findings(
             thread_id=thread_id,
             findings=findings,
             eligible_with_payload=eligible_with_payload,
             comment_records=comment_records,
+            run_id=run_id,
+        )
+        await _store_thread_ids_on_findings(
+            thread_id=thread_id,
+            owner=owner,
+            repo=repo,
+            pr_number=pr_number,
+            token=token,
         )
 
     resolved_thread_count = await _resolve_threads_for_resolved_findings(
@@ -348,6 +364,7 @@ async def _store_comment_ids_on_findings(
     findings: list[dict[str, Any]],
     eligible_with_payload: list[tuple[dict[str, Any], dict[str, Any]]],
     comment_records: list[dict[str, Any]],
+    run_id: str | None,
 ) -> None:
     """Match returned GitHub comment ids back to the findings that produced them.
 
@@ -386,10 +403,65 @@ async def _store_comment_ids_on_findings(
         if finding is None:
             continue
         finding["github_review_comment_id"] = comment_id
+        if run_id:
+            finding["github_review_run_id"] = run_id
         updated = True
 
     if updated:
         await replace_findings(thread_id, list(findings_by_id.values()))
+
+
+async def _store_thread_ids_on_findings(
+    *,
+    thread_id: str,
+    owner: str,
+    repo: str,
+    pr_number: int,
+    token: str,
+) -> None:
+    findings = await list_findings_async(thread_id)
+    comment_ids_by_finding_id = {
+        finding.get("id"): finding.get("github_review_comment_id")
+        for finding in findings
+        if isinstance(finding.get("github_review_comment_id"), int)
+        and not isinstance(finding.get("github_review_thread_id"), str)
+    }
+    if not comment_ids_by_finding_id:
+        return
+
+    threads = await fetch_pr_review_threads(
+        owner=owner,
+        repo=repo,
+        pr_number=pr_number,
+        token=token,
+    )
+    thread_id_by_comment_id: dict[int, str] = {}
+    for thread in threads:
+        github_thread_id = thread.get("id")
+        if not isinstance(github_thread_id, str) or not github_thread_id:
+            continue
+        for comment in thread.get("comments") or []:
+            if not isinstance(comment, dict):
+                continue
+            comment_id = comment.get("id")
+            if isinstance(comment_id, int):
+                thread_id_by_comment_id[comment_id] = github_thread_id
+
+    updated = False
+    for finding in findings:
+        finding_id = finding.get("id")
+        if not isinstance(finding_id, str):
+            continue
+        comment_id = comment_ids_by_finding_id.get(finding_id)
+        if not isinstance(comment_id, int):
+            continue
+        github_thread_id = thread_id_by_comment_id.get(comment_id)
+        if github_thread_id:
+            finding["github_review_thread_id"] = github_thread_id
+            updated = True
+
+    if updated:
+        await replace_findings(thread_id, findings)
 
 
 async def _resolve_threads_for_resolved_findings(
@@ -418,13 +490,15 @@ async def _resolve_threads_for_resolved_findings(
             continue
         if finding.get("github_thread_resolved"):
             continue
-        thread_node_id = await fetch_review_thread_id_for_comment(
-            owner=owner,
-            repo=repo,
-            pr_number=pr_number,
-            review_comment_id=comment_id,
-            token=token,
-        )
+        thread_node_id = finding.get("github_review_thread_id")
+        if not isinstance(thread_node_id, str) or not thread_node_id:
+            thread_node_id = await fetch_review_thread_id_for_comment(
+                owner=owner,
+                repo=repo,
+                pr_number=pr_number,
+                review_comment_id=comment_id,
+                token=token,
+            )
         if not thread_node_id:
             continue
         ok = await resolve_review_thread(thread_node_id=thread_node_id, token=token)
@@ -438,3 +512,23 @@ async def _resolve_threads_for_resolved_findings(
         await replace_findings(thread_id, findings)
 
     return resolved_count
+
+
+def _current_run_id(config: dict[str, Any]) -> str | None:
+    candidates = [
+        config.get("run_id"),
+        config.get("metadata", {}).get("run_id") if isinstance(config.get("metadata"), dict) else None,
+    ]
+    configurable = config.get("configurable")
+    if isinstance(configurable, dict):
+        candidates.extend(
+            [
+                configurable.get("run_id"),
+                configurable.get("__run_id"),
+                configurable.get("langgraph_run_id"),
+            ]
+        )
+    for candidate in candidates:
+        if isinstance(candidate, str) and candidate:
+            return candidate
+    return None

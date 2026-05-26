@@ -14,6 +14,7 @@ from agent.reviewer_publish import (
     render_inline_comment_body,
     render_inline_comment_payload,
     render_review_body,
+    reply_to_review_comment,
     resolve_review_thread,
 )
 
@@ -35,7 +36,10 @@ def _f(**overrides: Any) -> Finding:
 
 def test_render_inline_comment_body_without_suggestion() -> None:
     body = render_inline_comment_body(_f(description="just text"))
-    assert body == "just text"
+    assert "<!-- open-swe-review-comment" in body
+    assert '"id":"f_' in body
+    assert "just text" in body
+    assert "React with +1 or -1" in body
 
 
 def test_render_inline_comment_body_with_suggestion_appends_block() -> None:
@@ -49,12 +53,12 @@ def test_render_inline_comment_body_with_suggestion_appends_block() -> None:
 
 def test_render_inline_comment_payload_single_line() -> None:
     payload = render_inline_comment_payload(_f(start_line=10, end_line=10))
-    assert payload == {
-        "path": "src/foo.py",
-        "line": 10,
-        "side": "RIGHT",
-        "body": "boom",
-    }
+    assert payload is not None
+    assert payload["path"] == "src/foo.py"
+    assert payload["line"] == 10
+    assert payload["side"] == "RIGHT"
+    assert "boom" in payload["body"]
+    assert "<!-- open-swe-review-comment" in payload["body"]
 
 
 def test_render_inline_comment_payload_multi_line_uses_start_fields() -> None:
@@ -558,6 +562,7 @@ async def test_fetch_pr_review_threads_parses_threads_and_comments() -> None:
                         "pageInfo": {"hasNextPage": False, "endCursor": None},
                         "nodes": [
                             {
+                                "id": "THREAD_1",
                                 "isResolved": True,
                                 "isOutdated": False,
                                 "path": "a/b.py",
@@ -566,12 +571,16 @@ async def test_fetch_pr_review_threads_parses_threads_and_comments() -> None:
                                 "comments": {
                                     "nodes": [
                                         {
+                                            "databaseId": 101,
                                             "author": {"login": "open-swe[bot]"},
+                                            "authorAssociation": "MEMBER",
                                             "body": "additionalTtlPrefixes removes lifecycle rules",
                                             "createdAt": "2026-05-23T10:00:00Z",
                                         },
                                         {
+                                            "databaseId": 102,
                                             "author": {"login": "human"},
+                                            "authorAssociation": "MEMBER",
                                             "body": "We added defaults in the template",
                                             "createdAt": "2026-05-24T11:00:00Z",
                                         },
@@ -579,6 +588,7 @@ async def test_fetch_pr_review_threads_parses_threads_and_comments() -> None:
                                 },
                             },
                             {
+                                "id": "THREAD_2",
                                 "isResolved": False,
                                 "isOutdated": False,
                                 "path": "c.py",
@@ -587,7 +597,9 @@ async def test_fetch_pr_review_threads_parses_threads_and_comments() -> None:
                                 "comments": {
                                     "nodes": [
                                         {
+                                            "databaseId": 201,
                                             "author": {"login": "rev"},
+                                            "authorAssociation": "CONTRIBUTOR",
                                             "body": "this looks fishy",
                                             "createdAt": "2026-05-24T12:00:00Z",
                                         }
@@ -610,10 +622,12 @@ async def test_fetch_pr_review_threads_parses_threads_and_comments() -> None:
         threads = await fetch_pr_review_threads(owner="o", repo="r", pr_number=1, token="t")
 
     assert len(threads) == 2
+    assert threads[0]["id"] == "THREAD_1"
     assert threads[0]["path"] == "a/b.py"
     assert threads[0]["is_resolved"] is True
     assert threads[0]["line"] == 37
     assert len(threads[0]["comments"]) == 2
+    assert threads[0]["comments"][0]["id"] == 101
     assert threads[0]["comments"][1]["author"] == "human"
     assert "added defaults" in threads[0]["comments"][1]["body"]
     assert threads[1]["is_resolved"] is False
@@ -630,3 +644,30 @@ async def test_fetch_pr_review_threads_returns_empty_on_http_error() -> None:
     with patch("agent.reviewer_publish.httpx.AsyncClient", return_value=client_cm):
         threads = await fetch_pr_review_threads(owner="o", repo="r", pr_number=1, token="t")
     assert threads == []
+
+
+@pytest.mark.asyncio
+async def test_reply_to_review_comment_posts_reply_payload() -> None:
+    response = MagicMock()
+    response.status_code = 201
+    response.json.return_value = {"id": 456, "body": "Thanks for the context."}
+    response.raise_for_status.return_value = None
+
+    client_cm = AsyncMock()
+    client_cm.__aenter__.return_value = client_cm
+    client_cm.post = AsyncMock(return_value=response)
+
+    with patch("agent.reviewer_publish.httpx.AsyncClient", return_value=client_cm):
+        result = await reply_to_review_comment(
+            owner="o",
+            repo="r",
+            pr_number=7,
+            review_comment_id=123,
+            body="Thanks for the context.",
+            token="t",
+        )
+
+    assert result == {"id": 456, "body": "Thanks for the context."}
+    args = client_cm.post.await_args
+    assert args.args[0] == "https://api.github.com/repos/o/r/pulls/7/comments/123/replies"
+    assert args.kwargs["json"] == {"body": "Thanks for the context."}
