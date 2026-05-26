@@ -685,7 +685,7 @@ TRACE_REPLY_TIPS: tuple[str, ...] = (
     "Kick off another task in parallel — each one runs in its own isolated sandbox, no queuing.",
     "Add `repo:owner/name` to your message to point me at a different repo for this task.",
     "Drop an `AGENTS.md` at your repo root and I'll read it on every run — it's the easiest way to teach me your conventions.",
-    "I'll open a draft PR automatically when I'm done and link it back here.",
+    "For code-change tasks, I'll open a draft PR when it's necessary or requested and link it back here.",
     "Tag me on a PR comment of an open-swe PR to have me address review feedback on the same branch.",
     "I can spawn subagents for independent subtasks — useful for parallel research or fan-out work.",
     "Click `View trace` above to watch every tool call and model response live in LangSmith.",

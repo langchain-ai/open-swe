@@ -1,9 +1,9 @@
-import { Navigate, createFileRoute } from "@tanstack/react-router";
-import { useEffect, useRef, useState } from "react";
+import { Navigate, createFileRoute } from "@tanstack/react-router"
+import { useEffect, useRef, useState } from "react"
 
-import type { ModelOption } from "@/lib/api";
-import { AppShell, SettingsRow, SettingsSection } from "@/components/AppShell";
-import { Button } from "@/components/ui/button";
+import type { ModelOption } from "@/lib/api"
+import { AppShell, SettingsRow, SettingsSection } from "@/components/AppShell"
+import { Button } from "@/components/ui/button"
 import {
   Combobox,
   ComboboxContent,
@@ -11,81 +11,89 @@ import {
   ComboboxInput,
   ComboboxItem,
   ComboboxList,
-} from "@/components/ui/combobox";
-import { Input } from "@/components/ui/input";
+} from "@/components/ui/combobox"
+import { Input } from "@/components/ui/input"
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Switch } from "@/components/ui/switch";
-import { buildProfileUpdate, useOptions, useProfile, useRepos, useSaveProfile } from "@/lib/profile";
-import { useSession } from "@/lib/session";
+} from "@/components/ui/select"
+import { Skeleton } from "@/components/ui/skeleton"
+import { Switch } from "@/components/ui/switch"
+import {
+  buildProfileUpdate,
+  useOptions,
+  useProfile,
+  useRepos,
+  useSaveProfile,
+} from "@/lib/profile"
+import { useSession } from "@/lib/session"
 
-export const Route = createFileRoute("/cloud-agents")({ component: CloudAgentsPage });
+export const Route = createFileRoute("/cloud-agents")({
+  component: CloudAgentsPage,
+})
 
 function CloudAgentsPage() {
-  const session = useSession();
-  const profile = useProfile();
-  const options = useOptions();
-  const repos = useRepos();
-  const save = useSaveProfile();
+  const session = useSession()
+  const profile = useProfile()
+  const options = useOptions()
+  const repos = useRepos()
+  const save = useSaveProfile()
 
-  const [modelId, setModelId] = useState("");
-  const [effort, setEffort] = useState("");
-  const [defaultRepo, setDefaultRepo] = useState("");
-  const [baseBranch, setBaseBranch] = useState("");
-  const [branchPrefix, setBranchPrefix] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const initialized = useRef(false);
+  const [modelId, setModelId] = useState("")
+  const [effort, setEffort] = useState("")
+  const [defaultRepo, setDefaultRepo] = useState("")
+  const [baseBranch, setBaseBranch] = useState("")
+  const [branchPrefix, setBranchPrefix] = useState("")
+  const [error, setError] = useState<string | null>(null)
+  const initialized = useRef(false)
 
-  const firstModel: ModelOption | undefined = options.data?.models[0];
+  const firstModel: ModelOption | undefined = options.data?.models[0]
   const currentModel: ModelOption | undefined =
-    options.data?.models.find((m) => m.id === modelId) ?? firstModel;
+    options.data?.models.find((m) => m.id === modelId) ?? firstModel
 
   useEffect(() => {
-    if (!profile.data || initialized.current) return;
+    if (!profile.data || initialized.current) return
     // For users with no saved profile, wait until the options API has loaded
     // so the model/effort selects can initialise to the first available option.
-    const hasModel = !!profile.data.default_model || !!firstModel;
-    if (!hasModel) return;
-    initialized.current = true;
-    setModelId(profile.data.default_model ?? firstModel?.id ?? "");
-    setEffort(profile.data.reasoning_effort ?? firstModel?.default_effort ?? "");
-    setDefaultRepo(profile.data.default_repo ?? "");
-    setBaseBranch(profile.data.base_branch ?? "");
-    setBranchPrefix(profile.data.branch_prefix ?? "");
-  }, [profile.data, firstModel?.id, firstModel?.default_effort, firstModel]);
+    const hasModel = !!profile.data.default_model || !!firstModel
+    if (!hasModel) return
+    initialized.current = true
+    setModelId(profile.data.default_model ?? firstModel?.id ?? "")
+    setEffort(profile.data.reasoning_effort ?? firstModel?.default_effort ?? "")
+    setDefaultRepo(profile.data.default_repo ?? "")
+    setBaseBranch(profile.data.base_branch ?? "")
+    setBranchPrefix(profile.data.branch_prefix ?? "")
+  }, [profile.data, firstModel?.id, firstModel?.default_effort, firstModel])
 
   useEffect(() => {
     if (currentModel && !currentModel.efforts.includes(effort)) {
-      setEffort(currentModel.default_effort);
+      setEffort(currentModel.default_effort)
     }
-  }, [currentModel, effort]);
+  }, [currentModel, effort])
 
   if (session.isLoading) {
     return (
       <main className="p-6">
         <Skeleton className="h-64 w-full" />
       </main>
-    );
+    )
   }
-  if (!session.data) return <Navigate to="/login" />;
+  if (!session.data) return <Navigate to="/login" />
 
-  const fallbackModel = firstModel?.id ?? "";
-  const fallbackEffort = firstModel?.default_effort ?? "";
+  const fallbackModel = firstModel?.id ?? ""
+  const fallbackEffort = firstModel?.default_effort ?? ""
 
   const persist = (patch: Parameters<typeof buildProfileUpdate>[1]) => {
-    setError(null);
+    setError(null)
     save
       .mutateAsync(
-        buildProfileUpdate(profile.data, patch, fallbackModel, fallbackEffort),
+        buildProfileUpdate(profile.data, patch, fallbackModel, fallbackEffort)
       )
-      .catch((e: Error) => setError(e.message));
-  };
+      .catch((e: Error) => setError(e.message))
+  }
 
   const persistDefaults = () => {
     persist({
@@ -94,8 +102,8 @@ function CloudAgentsPage() {
       default_repo: defaultRepo || null,
       base_branch: baseBranch || null,
       branch_prefix: branchPrefix || null,
-    });
-  };
+    })
+  }
 
   return (
     <AppShell
@@ -154,7 +162,11 @@ function CloudAgentsPage() {
                       setDefaultRepo(typeof v === "string" ? v : "")
                     }
                   >
-                    <ComboboxInput placeholder="Pick a repository…" showClear className="w-full" />
+                    <ComboboxInput
+                      placeholder="Pick a repository…"
+                      showClear
+                      className="w-full"
+                    />
                     <ComboboxContent className="min-w-[var(--anchor-width)]">
                       <ComboboxList className="max-h-64">
                         <ComboboxEmpty>No matches</ComboboxEmpty>
@@ -205,7 +217,11 @@ function CloudAgentsPage() {
             }
           />
           <div className="flex justify-end px-4 py-3">
-            <Button size="sm" onClick={persistDefaults} disabled={save.isPending}>
+            <Button
+              size="sm"
+              onClick={persistDefaults}
+              disabled={save.isPending}
+            >
               {save.isPending ? "Saving…" : "Save defaults"}
             </Button>
           </div>
@@ -227,11 +243,11 @@ function CloudAgentsPage() {
             }
           />
           <SettingsRow
-            label="Create PRs"
-            description="Automatically create a pull request when a Cloud Agent completes. When disabled, the branch is still pushed."
+            label="Always Create PRs"
+            description="Always create a pull request for code changes. When disabled, agents create PRs only when necessary or requested."
             control={
               <Switch
-                checked={profile.data?.create_prs ?? true}
+                checked={profile.data?.create_prs ?? false}
                 onCheckedChange={(v) => persist({ create_prs: v })}
               />
             }
@@ -241,5 +257,5 @@ function CloudAgentsPage() {
 
       {error && <p className="text-xs text-destructive">{error}</p>}
     </AppShell>
-  );
+  )
 }
