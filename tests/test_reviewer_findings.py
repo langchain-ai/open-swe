@@ -49,6 +49,10 @@ def test_new_finding_defaults() -> None:
     assert finding["first_seen_sha"] == "abc123"
     assert finding["last_confirmed_sha"] == "abc123"
     assert finding["github_review_comment_id"] is None
+    assert finding["github_review_thread_id"] is None
+    assert finding["github_review_run_id"] is None
+    assert finding["github_thread_resolved"] is False
+    assert finding["last_human_reply_at"] is None
     assert finding["suggestion"] is None
 
 

@@ -20,6 +20,7 @@ the GraphQL ``resolveReviewThread`` mutation (REST doesn't expose this).
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any
 
@@ -51,10 +52,19 @@ def render_inline_comment_body(finding: Finding) -> str:
     Multi-line suggestions just become multi-line ```suggestion``` blocks.
     """
     description = finding.get("description", "") or ""
+    marker_payload = {
+        "id": finding.get("id", ""),
+        "file_path": finding.get("file", ""),
+        "start_line": finding.get("start_line"),
+        "end_line": finding.get("end_line"),
+        "side": finding.get("side", "RIGHT"),
+    }
+    marker = f"<!-- open-swe-review-comment {json.dumps(marker_payload, separators=(',', ':'))} -->"
     suggestion = finding.get("suggestion")
-    if not suggestion:
-        return description
-    return f"{description}\n\n```suggestion\n{suggestion}\n```"
+    body = f"{marker}\n\n{description}"
+    if suggestion:
+        body = f"{body}\n\n```suggestion\n{suggestion}\n```"
+    return body
 
 
 def render_inline_comment_payload(finding: Finding) -> dict[str, Any] | None:
@@ -230,6 +240,7 @@ async def fetch_pr_review_threads(
           reviewThreads(first: 50, after: $cursor) {
             pageInfo { hasNextPage endCursor }
             nodes {
+              id
               isResolved
               isOutdated
               path
@@ -237,7 +248,9 @@ async def fetch_pr_review_threads(
               originalLine
               comments(first: $perThread) {
                 nodes {
+                  databaseId
                   author { login }
+                  authorAssociation
                   body
                   createdAt
                 }
@@ -297,7 +310,13 @@ async def fetch_pr_review_threads(
                     login = author_block.get("login") if isinstance(author_block, dict) else None
                     comments.append(
                         {
+                            "id": c.get("databaseId")
+                            if isinstance(c.get("databaseId"), int)
+                            else None,
                             "author": login if isinstance(login, str) else "unknown",
+                            "author_association": c.get("authorAssociation", "")
+                            if isinstance(c.get("authorAssociation"), str)
+                            else "",
                             "body": c.get("body", "") if isinstance(c.get("body"), str) else "",
                             "created_at": c.get("createdAt", "")
                             if isinstance(c.get("createdAt"), str)
@@ -306,6 +325,7 @@ async def fetch_pr_review_threads(
                     )
                 out.append(
                     {
+                        "id": thread.get("id") if isinstance(thread.get("id"), str) else "",
                         "path": thread.get("path", "")
                         if isinstance(thread.get("path"), str)
                         else "",
@@ -430,6 +450,48 @@ async def resolve_review_thread(*, thread_node_id: str, token: str) -> bool:
         return False
     thread = data.get("data", {}).get("resolveReviewThread", {}).get("thread", {})
     return bool(thread.get("isResolved"))
+
+
+async def reply_to_review_comment(
+    *,
+    owner: str,
+    repo: str,
+    pr_number: int,
+    review_comment_id: int,
+    body: str,
+    token: str,
+) -> dict[str, Any] | None:
+    """Reply to an existing pull request review comment thread."""
+    url = (
+        f"{_GITHUB_API_BASE}/repos/{owner}/{repo}/pulls/"
+        f"{pr_number}/comments/{review_comment_id}/replies"
+    )
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.post(
+                url,
+                headers=_github_headers(token),
+                json={"body": body},
+                timeout=30,
+            )
+            if response.status_code == 401:
+                raise GitHubAuthError(
+                    f"GitHub returned 401 replying to review comment {review_comment_id}"
+                )
+            response.raise_for_status()
+        except GitHubAuthError:
+            raise
+        except httpx.HTTPError:
+            logger.exception(
+                "Failed to reply to review comment %s on %s/%s#%s",
+                review_comment_id,
+                owner,
+                repo,
+                pr_number,
+            )
+            return None
+    data = response.json()
+    return data if isinstance(data, dict) else None
 
 
 def _github_headers(token: str) -> dict[str, str]:
