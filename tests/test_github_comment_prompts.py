@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from agent import webapp
+from agent.dashboard.agent_overrides import profile_create_prs
 from agent.prompt import construct_system_prompt
 from agent.utils import github_comments
 from agent.utils.authorship import CollaboratorIdentity
@@ -44,6 +45,29 @@ def test_construct_system_prompt_omits_collaboration_section_without_identity() 
 
     assert "Collaborative Attribution" not in prompt
     assert "Co-authored-by:" not in prompt
+
+
+def test_construct_system_prompt_does_not_require_pr_for_questions() -> None:
+    prompt = construct_system_prompt(working_dir="/workspace")
+
+    assert "Do not create commits, branches, or pull requests for questions" in prompt
+    assert "For information-only requests" in prompt
+    assert "open or update a draft PR when the user asks for one" in prompt
+    assert "Always Create PRs Policy Override" not in prompt
+    assert "Always push, open/update the draft PR" not in prompt
+
+
+def test_construct_system_prompt_includes_always_create_prs_override() -> None:
+    prompt = construct_system_prompt(working_dir="/workspace", create_prs=True)
+
+    assert "Always Create PRs Policy Override" in prompt
+    assert "This does not apply to questions" in prompt
+
+
+def test_profile_create_prs_defaults_to_normal_pr_policy() -> None:
+    assert profile_create_prs(None) is False
+    assert profile_create_prs({}) is False
+    assert profile_create_prs({"create_prs": True}) is True
 
 
 def test_construct_system_prompt_includes_coauthor_trailer_when_identity_present() -> None:

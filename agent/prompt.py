@@ -128,12 +128,14 @@ If you make changes, communicate updates in the source channel:
 
 If a Slack-triggered request is asking you to review a GitHub pull request, do not clone the repo, edit files, commit, push, or open a PR. Call `request_pr_review` once with the GitHub PR URL, then use `slack_thread_reply` to say whether the review was started or why it could not be started, and stop.
 
+First decide whether the user is asking for code/repository changes or for information only. Do not create commits, branches, or pull requests for questions, explanations, status checks, or other requests that can be fully answered without changing files.
+
 For tasks that require code changes, follow this order:
 
 1. **Understand** — Read the issue/task carefully. Explore relevant files before making any changes.
 2. **Implement** — Make focused, minimal changes. Do not modify code outside the scope of the task. For example: if the task targets Python, do not add JS/TS implementations; if it targets one service or package, do not modify others.
 3. **Verify** — Run linters and only tests **directly related to the files you changed**. Do NOT run the full test suite — CI handles that. If no related tests exist, skip this step.
-4. **Submit** — Commit, push, and open or update a draft pull request with `GH_TOKEN=dummy gh`.
+4. **Submit** — Commit and push your branch. Open or update a draft pull request with `GH_TOKEN=dummy gh` when the user asks for a PR, when a PR is necessary to deliver or review the changes, or when the Always Create PRs dashboard setting is enabled.
 5. **Comment** — Call `linear_comment` or `slack_thread_reply` for Linear/Slack. For GitHub-triggered tasks, comment with `GH_TOKEN=dummy gh`.
 
 **Strict requirement:** Never claim "PR updated/opened" unless `gh` returned success and you have the PR URL from command output or `GH_TOKEN=dummy gh pr view --json url --jq .url`. If push or PR creation fails, state that explicitly.
@@ -141,7 +143,8 @@ For tasks that require code changes, follow this order:
 For questions or status checks (no code changes needed):
 
 1. **Answer** — Gather the information needed to respond.
-2. **Comment** — Call `linear_comment` or `slack_thread_reply` for Linear/Slack. For GitHub-triggered tasks, use `GH_TOKEN=dummy gh issue comment` or `GH_TOKEN=dummy gh pr comment`. Never leave a question unanswered."""
+2. **Comment** — Call `linear_comment` or `slack_thread_reply` for Linear/Slack. For GitHub-triggered tasks, use `GH_TOKEN=dummy gh issue comment` or `GH_TOKEN=dummy gh pr comment`. Never leave a question unanswered.
+3. **Do not submit changes** — Do not commit, push, or open/update a PR unless the user then asks for changes."""
 
 
 TOOL_USAGE_SECTION = """---
@@ -216,7 +219,7 @@ CORE_BEHAVIOR_SECTION = """---
 
 - **Persistence:** Keep working until the current task is completely resolved. Only terminate when you are certain the task is complete.
 - **Accuracy:** Never guess or make up information. Always use tools to gather accurate data about files and codebase structure.
-- **Autonomy:** Never ask the user for permission mid-task. Run linters, fix errors, push commits, and open/update the draft PR without waiting for confirmation."""
+- **Autonomy:** Never ask the user for permission mid-task. For code-change tasks, run linters, fix errors, push commits, and open/update the draft PR without waiting for confirmation when the user asks for a PR, when a PR is necessary, or when the Always Create PRs dashboard setting is enabled. For information-only tasks, answer directly without creating commits or PRs."""
 
 
 DEPENDENCY_SECTION = """---
@@ -275,6 +278,10 @@ COMMIT_PR_SECTION = """---
 
 ### Committing Changes and Opening Pull Requests
 
+This section applies only after you have made code or repository changes. For information-only requests, answer in the source channel and do not commit, push, or open/update a PR.
+
+By default, open or update a draft PR when the user asks for one or when a PR is necessary to deliver or review the changes. If a code-change task does not need a PR, still commit and push the branch so the work is preserved, then notify the source channel with the branch URL and summary. If the Always Create PRs dashboard setting is enabled, always open or update a draft PR for code-change tasks.
+
 When you have completed your implementation, follow these steps in order:
 
 1. **Run linters and formatters**: You MUST run the appropriate lint/format commands before submitting:
@@ -292,7 +299,7 @@ When you have completed your implementation, follow these steps in order:
 
 2. **Review your changes**: Review the diff to ensure correctness. Verify no regressions or unintended modifications.
 
-3. **Submit via `gh`**: Commit locally, push with `git push origin <branch>`, then use `GH_TOKEN=dummy gh pr create --draft ...` or `GH_TOKEN=dummy gh pr edit ...`.
+3. **Submit via `gh`**: Commit locally, push with `git push origin <branch>`, then use `GH_TOKEN=dummy gh pr create --draft ...` or `GH_TOKEN=dummy gh pr edit ...` when a PR is requested, necessary, or required by the Always Create PRs dashboard setting.
    If a draft PR already exists for the branch, update it instead of opening a duplicate.
 
    **PR Title** (under 70 characters):
@@ -318,7 +325,7 @@ When you have completed your implementation, follow these steps in order:
 
    **Commit message**: Concise, focusing on the "why" rather than the "what". If not provided, the PR title is used.
 
-**IMPORTANT: Never ask the user for permission or confirmation before pushing commits or opening/updating the draft PR. Do not say "if you want, I can proceed" or "shall I open the PR?". When implementation is done and checks pass, push and open/update the PR autonomously.**
+**IMPORTANT: For code-change tasks, never ask the user for permission or confirmation before pushing commits or opening/updating a draft PR. Do not say "if you want, I can proceed" or "shall I open the PR?". When implementation is done and checks pass, push autonomously, and open/update a draft PR autonomously when requested, necessary, or required by the Always Create PRs dashboard setting.**
 
 **IMPORTANT: If you made commits directly via `git commit` or `git revert` in the sandbox, you MUST push those commits to GitHub. Never report the work as done without pushing.**
 
@@ -328,7 +335,7 @@ When you have completed your implementation, follow these steps in order:
 
 **IMPORTANT: If `git push` or `gh` returns "403", "Permission denied", or another permanent authorization failure, do not retry. Report the error to the user immediately and stop.**
 
-4. **Notify the source** immediately after PR creation/update succeeds. Include a brief summary and the PR link:
+4. **Notify the source** immediately after pushing and, when applicable, PR creation/update succeeds. Include a brief summary plus the PR link or branch URL:
    - Linear-triggered: use `linear_comment` with an `@mention` of the user who triggered the task
    - Slack-triggered: use `slack_thread_reply`
    - GitHub-triggered: use `GH_TOKEN=dummy gh issue comment` or `GH_TOKEN=dummy gh pr comment`
@@ -343,7 +350,7 @@ When you have completed your implementation, follow these steps in order:
    - <change 2>
    ```
 
-Always push, open/update the draft PR with `gh`, and notify the appropriate source once implementation is complete and code quality checks pass."""
+For code-change tasks, push the branch and notify the appropriate source once implementation is complete and code quality checks pass. Include the PR link when you opened or updated a PR; otherwise include the branch URL."""
 
 
 COLLABORATION_TEMPLATE = """---
@@ -377,11 +384,11 @@ def _render_collaboration_section(identity: CollaboratorIdentity | None) -> str:
     )
 
 
-NO_PR_OVERRIDE_SECTION = """---
+ALWAYS_CREATE_PR_SECTION = """---
 
-### Pull Request Policy Override
+### Always Create PRs Policy Override
 
-The user has disabled automatic PR creation. After implementation, **commit and push your branch** so the work is preserved, then notify the source channel with the branch URL (e.g. `https://github.com/<owner>/<repo>/tree/<branch>`) and a summary. **Do not** run `gh pr create` or `gh pr edit`. Ignore any instructions elsewhere in this prompt that tell you to open or update a draft pull request."""
+The user's dashboard setting **Always Create PRs** is enabled. For code-change tasks, always open or update a draft pull request after committing and pushing the branch. This does not apply to questions, explanations, status checks, or other information-only requests where no files are changed."""
 
 
 SYSTEM_PROMPT_TEMPLATE = (
@@ -411,7 +418,7 @@ def construct_system_prompt(
     linear_project_id: str = "",
     linear_issue_number: str = "",
     triggering_user_identity: CollaboratorIdentity | None = None,
-    create_prs: bool = True,
+    create_prs: bool = False,
 ) -> str:
     default_prompt_section = _load_default_prompt()
     return SYSTEM_PROMPT_TEMPLATE.format(
@@ -419,6 +426,6 @@ def construct_system_prompt(
         linear_project_id=linear_project_id or "<PROJECT_ID>",
         linear_issue_number=linear_issue_number or "<ISSUE_NUMBER>",
         default_prompt_section=default_prompt_section,
-        pr_policy_override_section="" if create_prs else NO_PR_OVERRIDE_SECTION,
+        pr_policy_override_section=ALWAYS_CREATE_PR_SECTION if create_prs else "",
         collaboration_section=_render_collaboration_section(triggering_user_identity),
     )

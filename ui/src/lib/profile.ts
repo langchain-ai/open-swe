@@ -1,52 +1,52 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
-import { ApiError,   api } from "./api";
-import { useSession } from "./session";
-import type {Profile, ProfileUpdate} from "./api";
+import { ApiError, api } from "./api"
+import { useSession } from "./session"
+import type { Profile, ProfileUpdate } from "./api"
 
 export function useProfile() {
-  const session = useSession();
+  const session = useSession()
   return useQuery({
     queryKey: ["profile"],
     queryFn: api.profile,
     enabled: !!session.data,
-  });
+  })
 }
 
 export function useOptions() {
-  const session = useSession();
+  const session = useSession()
   return useQuery({
     queryKey: ["options"],
     queryFn: api.options,
     enabled: !!session.data,
-  });
+  })
 }
 
 export function useRepos() {
-  const session = useSession();
+  const session = useSession()
   return useQuery({
     queryKey: ["repos"],
     queryFn: async () => {
       try {
-        return await api.repos();
+        return await api.repos()
       } catch (e) {
         if (e instanceof ApiError && e.status === 401)
-          return { installations: [], repositories: [] };
-        throw e;
+          return { installations: [], repositories: [] }
+        throw e
       }
     },
     enabled: !!session.data,
-  });
+  })
 }
 
 export function useSaveProfile() {
-  const qc = useQueryClient();
+  const qc = useQueryClient()
   return useMutation({
     mutationFn: (body: ProfileUpdate) => api.saveProfile(body),
     onSuccess: (saved) => {
-      qc.setQueryData(["profile"], saved);
+      qc.setQueryData(["profile"], saved)
     },
-  });
+  })
 }
 
 /**
@@ -58,7 +58,7 @@ export function buildProfileUpdate(
   current: Profile | undefined,
   patch: Partial<ProfileUpdate>,
   fallbackModel: string,
-  fallbackEffort: string,
+  fallbackEffort: string
 ): ProfileUpdate {
   return {
     default_model: current?.default_model ?? fallbackModel,
@@ -67,8 +67,8 @@ export function buildProfileUpdate(
     base_branch: current?.base_branch ?? null,
     branch_prefix: current?.branch_prefix ?? null,
     auto_fix_ci: current?.auto_fix_ci ?? true,
-    create_prs: current?.create_prs ?? true,
+    create_prs: current?.create_prs ?? false,
     review_draft_prs: current?.review_draft_prs ?? null,
     ...patch,
-  };
+  }
 }

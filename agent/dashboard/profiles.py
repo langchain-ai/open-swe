@@ -39,7 +39,7 @@ class ProfileUpdate(BaseModel):
     base_branch: str | None = None
     branch_prefix: str | None = None
     auto_fix_ci: bool = True
-    create_prs: bool = True
+    create_prs: bool = False
     review_draft_prs: bool | None = None
 
     @field_validator("default_model")

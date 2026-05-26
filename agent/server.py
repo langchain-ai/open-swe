@@ -419,9 +419,9 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         model_id = per_thread_model
         profile_effort = per_thread_effort
 
-    create_prs = profile_create_prs(profile)
-    if not create_prs:
-        logger.info("PR creation disabled by profile for %s", profile_login)
+    always_create_prs = profile_create_prs(profile)
+    if always_create_prs:
+        logger.info("Always Create PRs enabled by profile for %s", profile_login)
 
     model_kwargs = provider_model_kwargs(
         model_id,
@@ -448,7 +448,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             linear_project_id=linear_project_id,
             linear_issue_number=linear_issue_number,
             triggering_user_identity=triggering_user_identity,
-            create_prs=create_prs,
+            create_prs=always_create_prs,
         ),
         tools=[
             http_request,
