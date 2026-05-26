@@ -75,6 +75,56 @@ async def test_push_event_skips_when_thread_not_watching() -> None:
 
 
 @pytest.mark.asyncio
+async def test_push_event_skips_when_pr_diff_unchanged_since_last_review() -> None:
+    payload = _push_payload(ref="refs/heads/feat-x", after="newsha")
+    pr = {
+        "number": 7,
+        "html_url": "https://github.com/lc/repo/pull/7",
+        "title": "T",
+        "head": {"sha": "newsha", "ref": "feat-x"},
+        "base": {"sha": "basesha", "ref": "main"},
+    }
+    fake_client = MagicMock()
+    fake_client.runs.create = AsyncMock()
+    set_metadata = AsyncMock()
+
+    with (
+        patch("agent.webapp._is_repo_allowed_for_reviewer", return_value=True),
+        patch(
+            "agent.webapp.get_github_app_installation_token_with_expiry",
+            new_callable=AsyncMock,
+            return_value=("t", None),
+        ),
+        patch(
+            "agent.webapp._fetch_open_pr_for_branch",
+            new_callable=AsyncMock,
+            return_value=pr,
+        ),
+        patch(
+            "agent.webapp._get_thread_metadata_safe",
+            new_callable=AsyncMock,
+            return_value={
+                "kind": "reviewer",
+                "watch": True,
+                "last_reviewed_sha": "oldsha",
+            },
+        ),
+        patch(
+            "agent.webapp._fetch_compare_diff",
+            new_callable=AsyncMock,
+            side_effect=["same diff", "same diff"],
+        ),
+        patch("agent.webapp.set_reviewer_thread_metadata", new=set_metadata),
+        patch("agent.webapp.get_client", return_value=fake_client),
+    ):
+        await webapp.process_github_push_event(payload)
+
+    fake_client.runs.create.assert_not_called()
+    set_metadata.assert_awaited_once()
+    assert set_metadata.await_args.kwargs["last_reviewed_sha"] == "newsha"
+
+
+@pytest.mark.asyncio
 async def test_push_event_triggers_re_review_run_when_watching() -> None:
     payload = _push_payload(ref="refs/heads/feat-x", after="newsha")
     pr = {
@@ -112,6 +162,11 @@ async def test_push_event_triggers_re_review_run_when_watching() -> None:
                 "watch": True,
                 "last_reviewed_sha": "oldsha",
             },
+        ),
+        patch(
+            "agent.webapp._fetch_compare_diff",
+            new_callable=AsyncMock,
+            side_effect=["old diff", "new diff"],
         ),
         patch(
             "agent.webapp._ensure_thread_exists_for_metadata",
