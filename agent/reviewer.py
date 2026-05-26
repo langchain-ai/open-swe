@@ -355,7 +355,7 @@ def _build_re_review_context(
         f"(no action), or changed it materially (`update_finding` with new "
         f"fields + a `note`). If a human reply on a finding explains why your "
         f"comment was invalid, verify that analysis, then call "
-        f"`resolve_finding_thread(id, status=\"dismissed\")` to close it. "
+        f'`resolve_finding_thread(id, status="dismissed")` to close it. '
         f"Reply only when directly asked or when a concise clarification is "
         f"necessary. Then add any net-new findings introduced by the "
         f"new diff — but skip anything already covered by an existing PR "

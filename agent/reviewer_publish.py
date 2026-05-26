@@ -59,10 +59,7 @@ def render_inline_comment_body(finding: Finding) -> str:
         "end_line": finding.get("end_line"),
         "side": finding.get("side", "RIGHT"),
     }
-    marker = (
-        "<!-- open-swe-review-comment "
-        f"{json.dumps(marker_payload, separators=(',', ':'))} -->"
-    )
+    marker = f"<!-- open-swe-review-comment {json.dumps(marker_payload, separators=(',', ':'))} -->"
     suggestion = finding.get("suggestion")
     body = f"{marker}\n\n{description}"
     if suggestion:
