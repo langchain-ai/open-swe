@@ -22,11 +22,12 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any
+import re
+from typing import Any, TypedDict
 
 import httpx
 
-from .reviewer_findings import Finding
+from .reviewer_findings import DiffSide, Finding
 from .utils.github_token import GitHubAuthError
 
 logger = logging.getLogger(__name__)
@@ -35,6 +36,52 @@ logger = logging.getLogger(__name__)
 _GITHUB_API_BASE = "https://api.github.com"
 _GITHUB_GRAPHQL = "https://api.github.com/graphql"
 _GITHUB_HEADERS_VERSION = "2022-11-28"
+_OPEN_SWE_REVIEW_COMMENT_MARKER_RE = re.compile(
+    r"<!--\s*open-swe-review-comment\s+(\{.*?\})\s*-->",
+    re.DOTALL,
+)
+
+
+class ReviewCommentMarker(TypedDict):
+    id: str
+    file_path: str
+    start_line: int | None
+    end_line: int | None
+    side: DiffSide
+
+
+def _optional_int(value: Any) -> int | None:
+    return value if isinstance(value, int) else None
+
+
+def parse_review_comment_marker(body: str) -> ReviewCommentMarker | None:
+    match = _OPEN_SWE_REVIEW_COMMENT_MARKER_RE.search(body)
+    if match is None:
+        return None
+    try:
+        payload = json.loads(match.group(1))
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(payload, dict):
+        return None
+
+    finding_id = payload.get("id")
+    file_path = payload.get("file_path")
+    side_raw = payload.get("side", "RIGHT")
+    if not isinstance(finding_id, str) or not finding_id:
+        return None
+    if not isinstance(file_path, str) or not file_path:
+        return None
+    if side_raw not in {"LEFT", "RIGHT"}:
+        return None
+    side: DiffSide = "LEFT" if side_raw == "LEFT" else "RIGHT"
+    return {
+        "id": finding_id,
+        "file_path": file_path,
+        "start_line": _optional_int(payload.get("start_line")),
+        "end_line": _optional_int(payload.get("end_line")),
+        "side": side,
+    }
 
 
 def render_inline_comment_body(finding: Finding) -> str:

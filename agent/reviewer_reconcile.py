@@ -3,8 +3,26 @@ from __future__ import annotations
 from typing import Any
 
 from .reviewer_findings import Finding, list_findings, replace_findings
+from .reviewer_publish import parse_review_comment_marker
 
 ReviewThread = dict[str, Any]
+ReviewThreadMatch = tuple[ReviewThread, int | None]
+
+
+def _is_open_swe_bot_comment(comment: ReviewThread) -> bool:
+    return comment.get("author") == "open-swe[bot]"
+
+
+def _int_list(value: Any) -> list[int]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, int)]
+
+
+def _str_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, str) and item]
 
 
 def _human_replies_after_bot_comment(
@@ -36,13 +54,14 @@ def _human_replies_after_bot_comment(
 
 def _index_review_threads(
     review_threads: list[ReviewThread],
-) -> tuple[dict[str, ReviewThread], dict[int, ReviewThread]]:
+) -> tuple[dict[str, ReviewThread], dict[int, ReviewThread], dict[str, list[ReviewThreadMatch]]]:
     by_thread_id = {
         thread_id: review_thread
         for review_thread in review_threads
         if isinstance(thread_id := review_thread.get("id"), str) and thread_id
     }
     by_comment_id: dict[int, ReviewThread] = {}
+    by_marker_id: dict[str, list[ReviewThreadMatch]] = {}
     for review_thread in review_threads:
         comments = review_thread.get("comments")
         if not isinstance(comments, list):
@@ -53,25 +72,70 @@ def _index_review_threads(
             comment_id = comment.get("id")
             if isinstance(comment_id, int):
                 by_comment_id[comment_id] = review_thread
-    return by_thread_id, by_comment_id
+            body = comment.get("body")
+            if not isinstance(body, str) or not _is_open_swe_bot_comment(comment):
+                continue
+            marker = parse_review_comment_marker(body)
+            if marker is not None and isinstance(comment_id, int):
+                by_marker_id.setdefault(marker["id"], []).append((review_thread, comment_id))
+    return by_thread_id, by_comment_id, by_marker_id
 
 
-def _find_review_thread_for_finding(
+def _find_review_threads_for_finding(
     finding: Finding,
     *,
     by_thread_id: dict[str, ReviewThread],
     by_comment_id: dict[int, ReviewThread],
-) -> ReviewThread | None:
+    by_marker_id: dict[str, list[ReviewThreadMatch]],
+) -> list[ReviewThreadMatch]:
+    finding_id = finding.get("id")
+    if isinstance(finding_id, str):
+        marker_match = by_marker_id.get(finding_id)
+        if marker_match:
+            return marker_match
+
     github_thread_id = finding.get("github_review_thread_id")
     if isinstance(github_thread_id, str) and github_thread_id:
         review_thread = by_thread_id.get(github_thread_id)
         if review_thread is not None:
-            return review_thread
+            comment_id = finding.get("github_review_comment_id")
+            return [(review_thread, comment_id if isinstance(comment_id, int) else None)]
 
     github_comment_id = finding.get("github_review_comment_id")
     if isinstance(github_comment_id, int):
-        return by_comment_id.get(github_comment_id)
-    return None
+        review_thread = by_comment_id.get(github_comment_id)
+        if review_thread is not None:
+            return [(review_thread, github_comment_id)]
+    return []
+
+
+def _sync_publication_identity(
+    finding: Finding,
+    review_thread: ReviewThread,
+    comment_id: int | None,
+) -> bool:
+    updated = False
+    if isinstance(comment_id, int) and not isinstance(finding.get("github_review_comment_id"), int):
+        finding["github_review_comment_id"] = comment_id
+        updated = True
+    comment_ids = _int_list(finding.get("github_review_comment_ids"))
+    if isinstance(comment_id, int) and comment_id not in comment_ids:
+        comment_ids.append(comment_id)
+        finding["github_review_comment_ids"] = comment_ids
+        updated = True
+
+    github_thread_id = finding.get("github_review_thread_id")
+    new_thread_id = review_thread.get("id")
+    if not isinstance(github_thread_id, str) or not github_thread_id:
+        if isinstance(new_thread_id, str) and new_thread_id:
+            finding["github_review_thread_id"] = new_thread_id
+            updated = True
+    thread_ids = _str_list(finding.get("github_review_thread_ids"))
+    if isinstance(new_thread_id, str) and new_thread_id and new_thread_id not in thread_ids:
+        thread_ids.append(new_thread_id)
+        finding["github_review_thread_ids"] = thread_ids
+        updated = True
+    return updated
 
 
 def _sync_thread_status(finding: Finding, review_thread: ReviewThread) -> bool:
@@ -94,8 +158,15 @@ def _sync_thread_status(finding: Finding, review_thread: ReviewThread) -> bool:
     return updated
 
 
-def _sync_latest_human_reply(finding: Finding, review_thread: ReviewThread) -> bool:
-    github_comment_id = finding.get("github_review_comment_id")
+def _sync_latest_human_reply(
+    finding: Finding,
+    review_thread: ReviewThread,
+    *,
+    comment_id: int | None,
+) -> bool:
+    github_comment_id = (
+        comment_id if isinstance(comment_id, int) else finding.get("github_review_comment_id")
+    )
     if not isinstance(github_comment_id, int):
         return False
 
@@ -130,20 +201,22 @@ async def reconcile_findings_with_review_threads(
     if not findings:
         return findings
 
-    by_thread_id, by_comment_id = _index_review_threads(review_threads)
+    by_thread_id, by_comment_id, by_marker_id = _index_review_threads(review_threads)
 
     updated = False
     for finding in findings:
-        review_thread = _find_review_thread_for_finding(
+        matches = _find_review_threads_for_finding(
             finding,
             by_thread_id=by_thread_id,
             by_comment_id=by_comment_id,
+            by_marker_id=by_marker_id,
         )
-        if review_thread is None:
-            continue
-
-        updated = _sync_thread_status(finding, review_thread) or updated
-        updated = _sync_latest_human_reply(finding, review_thread) or updated
+        for review_thread, comment_id in matches:
+            updated = _sync_publication_identity(finding, review_thread, comment_id) or updated
+            updated = _sync_thread_status(finding, review_thread) or updated
+            updated = (
+                _sync_latest_human_reply(finding, review_thread, comment_id=comment_id) or updated
+            )
 
     if updated:
         await replace_findings(reviewer_thread_id, findings)
