@@ -29,17 +29,20 @@ _apply_messages_reducer_patch()
 from deepagents import create_deep_agent
 from deepagents.backends import LangSmithSandbox
 from deepagents.backends.protocol import SandboxBackendProtocol
+from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT, SubAgent
 from langchain.agents.middleware import ModelCallLimitMiddleware
+from langchain_core.language_models import BaseChatModel
 from langsmith.sandbox import SandboxClientError
 
 from .dashboard.agent_overrides import (
     load_profile,
     normalize_profile_overrides,
+    normalize_profile_subagent_overrides,
     profile_create_prs,
     resolve_github_login,
 )
 from .dashboard.options import DEFAULT_MODEL_ID, SUPPORTED_MODEL_IDS, model_supports_effort
-from .dashboard.team_settings import get_team_default_model
+from .dashboard.team_settings import get_team_default_model, get_team_default_subagent_model
 from .integrations.langsmith import _configure_github_proxy
 from .middleware import (
     ModelFallbackMiddleware,
@@ -344,6 +347,15 @@ DEFAULT_RECURSION_LIMIT = 9_999
 MODEL_CALL_RECURSION_LIMIT = 5_000  # ~half the recursion limit to account for tool calls
 
 
+def _general_purpose_subagent(model: BaseChatModel) -> SubAgent:
+    return {
+        "name": GENERAL_PURPOSE_SUBAGENT["name"],
+        "description": GENERAL_PURPOSE_SUBAGENT["description"],
+        "system_prompt": GENERAL_PURPOSE_SUBAGENT["system_prompt"],
+        "model": model,
+    }
+
+
 def _get_cached_sandbox_backend(thread_id: str) -> SandboxBackendProtocol:
     sandbox_backend = SANDBOX_BACKENDS.get(thread_id)
     if sandbox_backend is None:
@@ -385,6 +397,12 @@ async def get_agent(config: RunnableConfig) -> Pregel:
 
     model_id, profile_effort = await get_team_default_model("agent")
     logger.info("Using team default agent model: model=%s effort=%s", model_id, profile_effort)
+    subagent_model_id, subagent_effort = await get_team_default_subagent_model("agent")
+    logger.info(
+        "Using team default agent subagent model: model=%s effort=%s",
+        subagent_model_id,
+        subagent_effort,
+    )
 
     profile: dict[str, Any] | None = None
     profile_login = resolve_github_login(config)
@@ -401,6 +419,18 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 )
                 model_id = overridden_model
                 profile_effort = overridden_effort
+            overridden_subagent_model, overridden_subagent_effort = (
+                normalize_profile_subagent_overrides(profile)
+            )
+            if overridden_subagent_model:
+                logger.info(
+                    "Applying dashboard profile subagent override for %s: model=%s effort=%s",
+                    profile_login,
+                    overridden_subagent_model,
+                    overridden_subagent_effort,
+                )
+                subagent_model_id = overridden_subagent_model
+                subagent_effort = overridden_subagent_effort
 
     configurable = (config or {}).get("configurable") or {}
     per_thread_model = configurable.get("agent_model_id")
@@ -428,6 +458,11 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         profile_effort,
         max_tokens=DEFAULT_LLM_MAX_TOKENS,
     )
+    subagent_model_kwargs = provider_model_kwargs(
+        subagent_model_id,
+        subagent_effort,
+        max_tokens=DEFAULT_LLM_MAX_TOKENS,
+    )
 
     fallback_model_id = os.environ.get("LLM_FALLBACK_MODEL_ID") or fallback_model_id_for(model_id)
     fallback_middleware: list[Any] = []
@@ -441,8 +476,10 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         logger.info("Configured model fallback %s -> %s", model_id, fallback_model_id)
 
     logger.info("Returning agent with sandbox for thread %s", thread_id)
+    main_model = make_model(model_id, **model_kwargs)
+    subagent_model = make_model(subagent_model_id, **subagent_model_kwargs)
     return create_deep_agent(
-        model=make_model(model_id, **model_kwargs),
+        model=main_model,
         system_prompt=construct_system_prompt(
             working_dir=work_dir,
             linear_project_id=linear_project_id,
@@ -465,6 +502,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             slack_read_thread_messages,
             slack_thread_reply,
         ],
+        subagents=[_general_purpose_subagent(subagent_model)],
         backend=backend_factory,
         middleware=[
             SanitizeToolInputsMiddleware(),

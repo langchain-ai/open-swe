@@ -33,8 +33,12 @@ class TeamSettingsUpdate(BaseModel):
     autofix_severity_threshold: AutofixMode = "medium"
     default_agent_model: str | None = None
     default_agent_reasoning_effort: str | None = None
+    default_agent_subagent_model: str | None = None
+    default_agent_subagent_reasoning_effort: str | None = None
     default_reviewer_model: str | None = None
     default_reviewer_reasoning_effort: str | None = None
+    default_reviewer_subagent_model: str | None = None
+    default_reviewer_subagent_reasoning_effort: str | None = None
 
     @model_validator(mode="after")
     def _validate_model_pairs(self) -> TeamSettingsUpdate:
@@ -42,7 +46,17 @@ class TeamSettingsUpdate(BaseModel):
             self.default_agent_model, self.default_agent_reasoning_effort, "agent"
         )
         _validate_model_effort_pair(
+            self.default_agent_subagent_model,
+            self.default_agent_subagent_reasoning_effort,
+            "agent subagent",
+        )
+        _validate_model_effort_pair(
             self.default_reviewer_model, self.default_reviewer_reasoning_effort, "reviewer"
+        )
+        _validate_model_effort_pair(
+            self.default_reviewer_subagent_model,
+            self.default_reviewer_subagent_reasoning_effort,
+            "reviewer subagent",
         )
         return self
 
@@ -72,8 +86,12 @@ def _default_settings() -> dict[str, Any]:
         "autofix_severity_threshold": "medium",
         "default_agent_model": fallback_model,
         "default_agent_reasoning_effort": fallback_effort,
+        "default_agent_subagent_model": fallback_model,
+        "default_agent_subagent_reasoning_effort": fallback_effort,
         "default_reviewer_model": fallback_model,
         "default_reviewer_reasoning_effort": fallback_effort,
+        "default_reviewer_subagent_model": fallback_model,
+        "default_reviewer_subagent_reasoning_effort": fallback_effort,
         "updated_at": None,
     }
 
@@ -110,8 +128,12 @@ async def upsert_team_settings(update: TeamSettingsUpdate) -> dict[str, Any]:
         "autofix_severity_threshold": update.autofix_severity_threshold,
         "default_agent_model": update.default_agent_model,
         "default_agent_reasoning_effort": update.default_agent_reasoning_effort,
+        "default_agent_subagent_model": update.default_agent_subagent_model,
+        "default_agent_subagent_reasoning_effort": update.default_agent_subagent_reasoning_effort,
         "default_reviewer_model": update.default_reviewer_model,
         "default_reviewer_reasoning_effort": update.default_reviewer_reasoning_effort,
+        "default_reviewer_subagent_model": update.default_reviewer_subagent_model,
+        "default_reviewer_subagent_reasoning_effort": update.default_reviewer_subagent_reasoning_effort,
         "updated_at": datetime.now(UTC).isoformat(),
     }
     await _client().store.put_item(TEAM_SETTINGS_NAMESPACE, TEAM_SETTINGS_KEY, value)
@@ -135,6 +157,27 @@ async def get_team_default_model(
     else:
         model = settings.get("default_reviewer_model")
         effort = settings.get("default_reviewer_reasoning_effort")
+    if (
+        isinstance(model, str)
+        and model in SUPPORTED_MODEL_IDS
+        and isinstance(effort, str)
+        and model_supports_effort(model, effort)
+    ):
+        return model, effort
+    return default_model_pair()
+
+
+async def get_team_default_subagent_model(
+    role: Literal["agent", "reviewer"],
+) -> tuple[str, str]:
+    """Return the team-wide default subagent ``(model_id, reasoning_effort)`` for ``role``."""
+    settings = await get_team_settings()
+    if role == "agent":
+        model = settings.get("default_agent_subagent_model")
+        effort = settings.get("default_agent_subagent_reasoning_effort")
+    else:
+        model = settings.get("default_reviewer_subagent_model")
+        effort = settings.get("default_reviewer_subagent_reasoning_effort")
     if (
         isinstance(model, str)
         and model in SUPPORTED_MODEL_IDS

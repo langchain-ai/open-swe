@@ -49,6 +49,7 @@ from .server import (
     DEFAULT_LLM_MAX_TOKENS,
     DEFAULT_RECURSION_LIMIT,
     MODEL_CALL_RECURSION_LIMIT,
+    _general_purpose_subagent,
     ensure_sandbox_for_thread,
     graph_loaded_for_execution,
 )
@@ -622,7 +623,7 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
                 existing_threads_block=existing_threads_block,
             )
 
-    from .dashboard.team_settings import get_team_default_model
+    from .dashboard.team_settings import get_team_default_model, get_team_default_subagent_model
 
     configured_model_id = config["configurable"].get("reviewer_model_id")
     configured_effort = config["configurable"].get("reviewer_reasoning_effort")
@@ -636,9 +637,29 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
             model_id,
             reasoning_effort,
         )
+    configured_subagent_model_id = config["configurable"].get("reviewer_subagent_model_id")
+    configured_subagent_effort = config["configurable"].get("reviewer_subagent_reasoning_effort")
+    if isinstance(configured_subagent_model_id, str) and configured_subagent_model_id:
+        subagent_model_id = configured_subagent_model_id
+        subagent_effort = (
+            configured_subagent_effort if isinstance(configured_subagent_effort, str) else None
+        )
+    else:
+        subagent_model_id, subagent_effort = await get_team_default_subagent_model("reviewer")
+        logger.info(
+            "Using team default reviewer subagent model: model=%s effort=%s",
+            subagent_model_id,
+            subagent_effort,
+        )
     model_kwargs = provider_model_kwargs(
         model_id,
         reasoning_effort,
+        max_tokens=DEFAULT_LLM_MAX_TOKENS,
+        openai_reasoning_default=DEFAULT_LLM_REASONING,
+    )
+    subagent_model_kwargs = provider_model_kwargs(
+        subagent_model_id,
+        subagent_effort,
         max_tokens=DEFAULT_LLM_MAX_TOKENS,
         openai_reasoning_default=DEFAULT_LLM_REASONING,
     )
@@ -688,8 +709,10 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
     if review_context:
         system_prompt = f"{system_prompt}\n\n{review_context}"
 
+    reviewer_model = make_model(model_id, **model_kwargs)
+    reviewer_subagent_model = make_model(subagent_model_id, **subagent_model_kwargs)
     return create_deep_agent(
-        model=make_model(model_id, **model_kwargs),
+        model=reviewer_model,
         system_prompt=system_prompt,
         tools=[
             add_finding,
@@ -702,6 +725,7 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
             fetch_url,
             http_request,
         ],
+        subagents=[_general_purpose_subagent(reviewer_subagent_model)],
         backend=sandbox_backend,
         middleware=[
             SanitizeToolInputsMiddleware(),

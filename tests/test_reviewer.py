@@ -95,6 +95,8 @@ async def test_reviewer_applies_eval_model_and_effort_overrides() -> None:
             "head_sha": "head",
             "reviewer_model_id": "anthropic:claude-opus-4-7",
             "reviewer_reasoning_effort": "high",
+            "reviewer_subagent_model_id": "openai:gpt-5.5",
+            "reviewer_subagent_reasoning_effort": "low",
         },
         "metadata": {},
     }
@@ -121,9 +123,13 @@ async def test_reviewer_applies_eval_model_and_effort_overrides() -> None:
     ):
         await reviewer.get_reviewer_agent(config)
 
-    assert make_model.call_args.args == ("anthropic:claude-opus-4-7",)
-    assert make_model.call_args.kwargs["thinking"] == {"type": "adaptive"}
-    assert make_model.call_args.kwargs["effort"] == "high"
+    main_model_call = make_model.call_args_list[0]
+    assert main_model_call.args == ("anthropic:claude-opus-4-7",)
+    assert main_model_call.kwargs["thinking"] == {"type": "adaptive"}
+    assert main_model_call.kwargs["effort"] == "high"
+    subagent_model_call = make_model.call_args_list[1]
+    assert subagent_model_call.args == ("openai:gpt-5.5",)
+    assert subagent_model_call.kwargs["reasoning"] == {"effort": "low"}
 
 
 @pytest.mark.asyncio

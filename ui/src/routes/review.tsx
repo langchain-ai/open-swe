@@ -52,8 +52,12 @@ const DEFAULT_SETTINGS: TeamSettings = {
   autofix_severity_threshold: "medium",
   default_agent_model: null,
   default_agent_reasoning_effort: null,
+  default_agent_subagent_model: null,
+  default_agent_subagent_reasoning_effort: null,
   default_reviewer_model: null,
   default_reviewer_reasoning_effort: null,
+  default_reviewer_subagent_model: null,
+  default_reviewer_subagent_reasoning_effort: null,
 };
 
 function ReviewPage() {

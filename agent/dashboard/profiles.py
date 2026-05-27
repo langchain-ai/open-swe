@@ -35,6 +35,8 @@ OAUTH_TOKENS_NAMESPACE: list[str] = ["oauth_tokens"]
 class ProfileUpdate(BaseModel):
     default_model: str
     reasoning_effort: str
+    default_subagent_model: str | None = None
+    subagent_reasoning_effort: str | None = None
     default_repo: str | None = None
     base_branch: str | None = None
     branch_prefix: str | None = None
@@ -53,6 +55,20 @@ class ProfileUpdate(BaseModel):
         if not model_supports_effort(self.default_model, self.reasoning_effort):
             raise ValueError(
                 f"effort {self.reasoning_effort!r} not supported by {self.default_model!r}"
+            )
+        if self.default_subagent_model is None and self.subagent_reasoning_effort is None:
+            return
+        if self.default_subagent_model is None:
+            raise ValueError("subagent reasoning effort set without a model")
+        if self.default_subagent_model not in SUPPORTED_MODEL_IDS:
+            raise ValueError(f"unsupported subagent model: {self.default_subagent_model}")
+        if self.subagent_reasoning_effort is None or not model_supports_effort(
+            self.default_subagent_model,
+            self.subagent_reasoning_effort,
+        ):
+            raise ValueError(
+                f"effort {self.subagent_reasoning_effort!r} not supported by "
+                f"{self.default_subagent_model!r}"
             )
 
 
@@ -91,6 +107,8 @@ async def upsert_profile(login: str, email: str, update: ProfileUpdate) -> dict[
         "email": email or existing.get("email", ""),
         "default_model": update.default_model,
         "reasoning_effort": update.reasoning_effort,
+        "default_subagent_model": update.default_subagent_model,
+        "subagent_reasoning_effort": update.subagent_reasoning_effort,
         "default_repo": update.default_repo,
         "base_branch": update.base_branch,
         "branch_prefix": update.branch_prefix,
