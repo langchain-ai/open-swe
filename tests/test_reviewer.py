@@ -35,6 +35,8 @@ def test_reviewer_system_prompt_includes_repo_style_section() -> None:
 
 
 class _DummyAgent:
+    config: dict[str, object]
+
     def with_config(self, config: dict[str, object]) -> _DummyAgent:
         self.config = config
         return self
@@ -80,6 +82,7 @@ async def test_reviewer_uses_cached_thread_token_for_slack_review_request() -> N
     assert metadata["github_token_encrypted"] == "encrypted-token"
     mock_get_thread_token.assert_awaited_once_with("reviewer-thread-id")
     mock_resolve_token.assert_not_called()
+    assert dummy_agent.config is config
 
 
 @pytest.mark.asyncio
