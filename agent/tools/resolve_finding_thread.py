@@ -5,8 +5,18 @@ from typing import Any
 
 from langgraph.config import get_config
 
-from ..reviewer_findings import get_finding, get_thread_id_from_runtime, update_finding_fields
-from ..reviewer_publish import fetch_review_thread_id_for_comment, resolve_review_thread
+from ..reviewer_findings import (
+    Finding,
+    get_finding,
+    get_thread_id_from_runtime,
+    update_finding_fields,
+)
+from ..reviewer_publish import (
+    fetch_pr_review_threads,
+    fetch_review_thread_id_for_comment,
+    resolve_review_thread,
+)
+from ..reviewer_reconcile import reconcile_findings_with_review_threads
 from ..utils.github_token import get_github_token
 
 
@@ -64,35 +74,110 @@ async def _resolve_finding_thread_async(
     token: str,
 ) -> dict[str, Any]:
     thread_id = get_thread_id_from_runtime()
-    finding = await get_finding(thread_id, finding_id)
+    finding = await _get_finding_with_pr_backfill(
+        thread_id=thread_id,
+        finding_id=finding_id,
+        owner=owner,
+        repo=repo,
+        pr_number=pr_number,
+        token=token,
+    )
     if finding is None:
         return {"success": False, "error": f"No finding found with id {finding_id}"}
 
-    github_thread_id = finding.get("github_review_thread_id")
-    if not isinstance(github_thread_id, str) or not github_thread_id:
-        comment_id = finding.get("github_review_comment_id")
-        if not isinstance(comment_id, int):
-            return {"success": False, "error": "Finding has no GitHub review thread mapping"}
-        github_thread_id = await fetch_review_thread_id_for_comment(
+    github_thread_ids = _thread_ids_for_finding(finding)
+    for comment_id in _comment_ids_for_finding(finding):
+        thread_node_id = await fetch_review_thread_id_for_comment(
             owner=owner,
             repo=repo,
             pr_number=pr_number,
             review_comment_id=comment_id,
             token=token,
         )
-    if not github_thread_id:
+        if thread_node_id and thread_node_id not in github_thread_ids:
+            github_thread_ids.append(thread_node_id)
+    if not github_thread_ids:
         return {"success": False, "error": "Could not resolve GitHub review thread id"}
 
-    ok = await resolve_review_thread(thread_node_id=github_thread_id, token=token)
-    if not ok:
+    resolved_thread_ids = _str_list(finding.get("github_resolved_thread_ids"))
+    resolved_count = 0
+    for github_thread_id in github_thread_ids:
+        if github_thread_id in resolved_thread_ids:
+            continue
+        ok = await resolve_review_thread(thread_node_id=github_thread_id, token=token)
+        if ok:
+            resolved_thread_ids.append(github_thread_id)
+            resolved_count += 1
+    if resolved_count == 0 and not all(
+        github_thread_id in resolved_thread_ids for github_thread_id in github_thread_ids
+    ):
         return {"success": False, "error": "GitHub did not resolve the review thread"}
 
     updates: dict[str, Any] = {
         "status": status,
-        "github_review_thread_id": github_thread_id,
-        "github_thread_resolved": True,
+        "github_review_thread_id": github_thread_ids[0],
+        "github_review_thread_ids": github_thread_ids,
+        "github_resolved_thread_ids": resolved_thread_ids,
+        "github_thread_resolved": all(
+            github_thread_id in resolved_thread_ids for github_thread_id in github_thread_ids
+        ),
     }
     if note:
         updates["last_reconciliation_note"] = note
     updated = await update_finding_fields(thread_id, finding_id, updates)
-    return {"success": True, "finding": updated}
+    return {"success": True, "finding": updated, "resolved_thread_count": resolved_count}
+
+
+async def _get_finding_with_pr_backfill(
+    *,
+    thread_id: str,
+    finding_id: str,
+    owner: str,
+    repo: str,
+    pr_number: int,
+    token: str,
+) -> Finding | None:
+    finding = await get_finding(thread_id, finding_id)
+    if finding is None:
+        return None
+    if _thread_ids_for_finding(finding) or _comment_ids_for_finding(finding):
+        return finding
+
+    review_threads = await fetch_pr_review_threads(
+        owner=owner,
+        repo=repo,
+        pr_number=pr_number,
+        token=token,
+    )
+    if review_threads:
+        await reconcile_findings_with_review_threads(thread_id, review_threads)
+        finding = await get_finding(thread_id, finding_id)
+    return finding
+
+
+def _int_list(value: Any) -> list[int]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, int)]
+
+
+def _str_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, str) and item]
+
+
+def _comment_ids_for_finding(finding: dict[str, Any]) -> list[int]:
+    comment_ids = _int_list(finding.get("github_review_comment_ids"))
+    comment_id = finding.get("github_review_comment_id")
+    if isinstance(comment_id, int) and comment_id not in comment_ids:
+        comment_ids.insert(0, comment_id)
+    return comment_ids
+
+
+def _thread_ids_for_finding(finding: dict[str, Any]) -> list[str]:
+    thread_ids = _str_list(finding.get("github_review_thread_ids"))
+    thread_id = finding.get("github_review_thread_id")
+    if isinstance(thread_id, str) and thread_id and thread_id not in thread_ids:
+        thread_ids.insert(0, thread_id)
+    return thread_ids
