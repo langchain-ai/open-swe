@@ -29,8 +29,8 @@ SUPPORTED_MODELS: list[ModelOption] = [
 
 SUPPORTED_MODEL_IDS: frozenset[str] = frozenset(m["id"] for m in SUPPORTED_MODELS)
 
-DEFAULT_MODEL_ID: str = "openai:gpt-5.5"
-DEFAULT_MODEL_EFFORT: str = "medium"
+DEFAULT_MODEL_ID: str = "anthropic:claude-opus-4-7"
+DEFAULT_MODEL_EFFORT: str = "xhigh"
 
 
 def model_supports_effort(model_id: str, effort: str) -> bool:
