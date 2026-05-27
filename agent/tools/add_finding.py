@@ -105,7 +105,7 @@ def add_finding(
     diff_text = configurable.get("diff_text", "") if isinstance(configurable, dict) else ""
 
     if isinstance(diff_line_set, dict) and not is_range_in_diff(
-        diff_line_set, file, start_line, end_line
+        diff_line_set, file, start_line, end_line, side=_cast_side(side)
     ):
         return {
             "success": False,

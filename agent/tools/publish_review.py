@@ -444,7 +444,10 @@ async def _filter_against_pr_diff(
                 end_line = payload_line
                 if start_line is None:
                     start_line = payload_line
-        if isinstance(path, str) and is_range_in_diff(diff_line_set, path, start_line, end_line):
+        side = finding.get("side") if finding.get("side") in {"LEFT", "RIGHT"} else "RIGHT"
+        if isinstance(path, str) and is_range_in_diff(
+            diff_line_set, path, start_line, end_line, side=side
+        ):
             valid.append((finding, payload))
         else:
             finding_id = finding.get("id")

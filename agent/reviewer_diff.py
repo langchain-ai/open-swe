@@ -18,10 +18,12 @@ import asyncio
 import logging
 import re
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
     from deepagents.backends.protocol import SandboxBackendProtocol
+
+DiffSide = Literal["LEFT", "RIGHT"]
 
 logger = logging.getLogger(__name__)
 
@@ -122,19 +124,24 @@ def parse_unified_diff(diff_text: str) -> list[FileDiff]:
     return files
 
 
-def compute_diff_line_set(diff_text: str) -> dict[str, set[int]]:
-    """Return ``{file: {line, ...}}`` for the new-side lines covered by the diff.
+def compute_diff_line_set(diff_text: str) -> dict[str, dict[str, set[int]]]:
+    """Return ``{file: {"RIGHT": {new_lines}, "LEFT": {old_lines}}}`` for the
+    lines covered by the diff.
 
-    A ``Finding`` whose ``(file, start_line..end_line)`` range falls outside
-    this set cannot be rendered as an inline GitHub review comment, so
-    ``add_finding`` rejects it.
+    Inline GitHub review comments anchor either to a new-side line (``side =
+    RIGHT``, the default — additions and context) or to an old-side line
+    (``side = LEFT`` — deletions). ``add_finding`` and ``publish_review``
+    validate a finding's ``(file, start_line..end_line, side)`` against the
+    matching set so deleted-line bugs aren't wrongly rejected.
     """
-    out: dict[str, set[int]] = {}
+    out: dict[str, dict[str, set[int]]] = {}
     for file_diff in parse_unified_diff(diff_text):
-        lines = out.setdefault(file_diff.file, set())
+        sides = out.setdefault(file_diff.file, {"RIGHT": set(), "LEFT": set()})
         for hunk in file_diff.hunks:
             for line in range(hunk.new_start, hunk.new_end + 1):
-                lines.add(line)
+                sides["RIGHT"].add(line)
+            for line in range(hunk.old_start, hunk.old_end + 1):
+                sides["LEFT"].add(line)
     return out
 
 
@@ -164,23 +171,30 @@ def extract_diff_hunk(
 
 
 def is_range_in_diff(
-    line_set: dict[str, set[int]],
+    line_set: dict[str, dict[str, set[int]]],
     file: str,
     start_line: int | None,
     end_line: int | None,
+    side: DiffSide = "RIGHT",
 ) -> bool:
-    """Return True if every line in ``start_line..end_line`` is in the diff.
+    """Return True if every line in ``start_line..end_line`` is on the given
+    side of the diff for ``file``.
 
-    File-level findings (both None) are always allowed.
+    File-level findings (both None) are always allowed. ``side`` selects
+    new-side lines (``RIGHT``, the default — additions/context) or old-side
+    lines (``LEFT`` — deletions). Pass the finding's recorded ``side``.
     """
     if start_line is None and end_line is None:
         return True
     if start_line is None or end_line is None:
         return False
-    file_lines = line_set.get(file)
-    if not file_lines:
+    file_sides = line_set.get(file)
+    if not file_sides:
         return False
-    return all(line in file_lines for line in range(start_line, end_line + 1))
+    side_lines = file_sides.get(side)
+    if not side_lines:
+        return False
+    return all(line in side_lines for line in range(start_line, end_line + 1))
 
 
 async def fetch_pr_diff(

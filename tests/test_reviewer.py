@@ -759,7 +759,7 @@ async def test_reviewer_populates_diff_line_set_from_github_api() -> None:
         owner="acme", repo="repo", pr_number=42, token="gh-token"
     )
     assert config["configurable"]["diff_text"] == pr_diff
-    assert config["configurable"]["diff_line_set"] == {"in_diff.py": {10}}
+    assert config["configurable"]["diff_line_set"] == {"in_diff.py": {"RIGHT": {10}, "LEFT": {1}}}
 
 
 @pytest.mark.asyncio

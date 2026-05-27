@@ -44,8 +44,16 @@ def test_parse_unified_diff_extracts_hunks_per_file() -> None:
 
 def test_compute_diff_line_set_covers_each_hunks_new_lines() -> None:
     line_set = compute_diff_line_set(_TWO_FILE_DIFF)
-    assert line_set["foo.py"] == {10, 11, 12, 13}
-    assert line_set["bar.py"] == {1, 2, 3, 51, 52, 53, 54}
+    assert line_set["foo.py"]["RIGHT"] == {10, 11, 12, 13}
+    assert line_set["bar.py"]["RIGHT"] == {1, 2, 3, 51, 52, 53, 54}
+
+
+def test_compute_diff_line_set_also_covers_old_side_lines() -> None:
+    """LEFT-side findings anchor to deleted/old-side lines; the line set
+    must expose those so add_finding doesn't wrongly reject them."""
+    line_set = compute_diff_line_set(_TWO_FILE_DIFF)
+    assert line_set["foo.py"]["LEFT"] == {10, 11, 12}
+    assert line_set["bar.py"]["LEFT"] == {1, 2, 50, 51, 52}
 
 
 def test_is_range_in_diff_for_inline_and_file_level() -> None:
@@ -54,6 +62,19 @@ def test_is_range_in_diff_for_inline_and_file_level() -> None:
     assert is_range_in_diff(line_set, "foo.py", 11, 99) is False
     assert is_range_in_diff(line_set, "missing.py", 1, 1) is False
     assert is_range_in_diff(line_set, "foo.py", None, None) is True
+
+
+def test_is_range_in_diff_left_side_accepts_old_line_numbers() -> None:
+    """A finding with side=LEFT must validate against the OLD-side line set,
+    not the new-side. The new-side hunk for foo.py is +10..+13; the old-side
+    is -10..-12. Asserting against the wrong side would falsely reject a
+    valid deleted-line finding."""
+    line_set = compute_diff_line_set(_TWO_FILE_DIFF)
+    assert is_range_in_diff(line_set, "foo.py", 12, 12, side="LEFT") is True
+    # And the same line on RIGHT side is also in-diff (it's context).
+    assert is_range_in_diff(line_set, "foo.py", 12, 12, side="RIGHT") is True
+    # A LEFT anchor on a line that doesn't exist on the old side must be rejected.
+    assert is_range_in_diff(line_set, "foo.py", 13, 13, side="LEFT") is False
 
 
 def test_extract_diff_hunk_returns_overlapping_hunk_body() -> None:
