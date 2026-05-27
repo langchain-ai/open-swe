@@ -52,7 +52,6 @@ from .utils.github_comments import (
     fetch_pr_comments_since_last_tag,
     format_github_comment_body_for_prompt,
     get_thread_id_from_branch,
-    parse_github_review_command,
     react_to_github_comment,
     sanitize_github_comment_body,
     verify_github_signature,
@@ -71,9 +70,7 @@ from .utils.slack import (
     format_slack_messages_for_prompt,
     get_slack_user_info,
     get_slack_user_names,
-    looks_like_slack_pr_review_command,
     parse_github_pr_url,
-    parse_slack_review_command,
     post_slack_thread_reply,
     post_slack_trace_reply,
     resolve_slack_links_in_context,
@@ -1282,23 +1279,6 @@ async def slack_webhook(request: Request, background_tasks: BackgroundTasks) -> 
 
     if bot_user_id and user_id == bot_user_id:
         return {"status": "ignored", "reason": "Event from this bot user"}
-
-    clean_text = strip_bot_mention(text, bot_user_id, bot_username=SLACK_BOT_USERNAME)
-    pr_ref = parse_slack_review_command(clean_text)
-    if pr_ref:
-        if not await _is_repo_enabled_for_review({"owner": pr_ref.owner, "name": pr_ref.repo}):
-            return {"status": "ignored", "reason": "Repository not enabled for review"}
-        background_tasks.add_task(process_slack_pr_review_request, pr_ref, channel_id, thread_ts)
-        return {"status": "accepted", "message": "Slack PR review request queued"}
-
-    if looks_like_slack_pr_review_command(clean_text):
-        background_tasks.add_task(
-            post_slack_thread_reply,
-            channel_id,
-            thread_ts,
-            "To request a PR review, use `@open-swe review https://github.com/OWNER/REPO/pull/NUMBER`.",
-        )
-        return {"status": "ignored", "reason": "Malformed Slack PR review command"}
 
     event_data = {
         "channel_id": channel_id,
@@ -2634,14 +2614,6 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks) ->
         "pull_request_review_comment",
         "pull_request_review",
     }:
-        is_review_command, pr_url_override = parse_github_review_command(comment_body)
-        if is_review_command:
-            if not await _is_repo_enabled_for_review(webhook_repo_config):
-                return {"status": "ignored", "reason": "Repository not enabled for review"}
-            background_tasks.add_task(
-                process_github_pr_review_command, payload, event_type, pr_url_override
-            )
-            return {"status": "accepted", "message": "Processing GitHub PR review command"}
         background_tasks.add_task(process_github_pr_comment, payload, event_type)
         return {"status": "accepted", "message": f"Processing {event_type} event"}
 

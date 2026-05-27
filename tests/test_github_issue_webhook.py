@@ -397,25 +397,31 @@ def test_github_webhook_ignores_review_requested_for_other_reviewer(monkeypatch)
     assert called is False
 
 
-def test_slack_webhook_routes_review_command_to_reviewer(monkeypatch) -> None:
+def test_slack_webhook_routes_review_command_to_agent(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
-    async def fake_process_slack_pr_review_request(
-        pr_ref: GitHubPrRef, channel_id: str, thread_ts: str
+    async def fake_get_slack_repo_config(
+        channel_id: str, thread_ts: str, slack_user_id: str | None = None
+    ) -> dict[str, str]:
+        captured["repo_config_request"] = {
+            "channel_id": channel_id,
+            "thread_ts": thread_ts,
+            "slack_user_id": slack_user_id,
+        }
+        return {"owner": "langchain-ai", "name": "open-swe"}
+
+    async def fake_process_slack_mention(
+        event_data: dict[str, object], repo_config: dict[str, str]
     ) -> None:
-        captured["pr_ref"] = pr_ref
-        captured["channel_id"] = channel_id
-        captured["thread_ts"] = thread_ts
+        captured["event_data"] = event_data
+        captured["repo_config"] = repo_config
 
     monkeypatch.setattr(webapp, "SLACK_SIGNING_SECRET", _TEST_SLACK_SECRET)
     monkeypatch.setattr(webapp, "SLACK_BOT_USER_ID", "UBOT")
     monkeypatch.setattr(webapp, "SLACK_BOT_USERNAME", "open-swe")
     monkeypatch.setattr(slack_utils.time, "time", lambda: 1700000000)
-    monkeypatch.setattr(webapp, "ALLOWED_REVIEWER_GITHUB_REPOS", frozenset())
-    monkeypatch.setattr(webapp, "ALLOWED_REVIEWER_GITHUB_ORGS", frozenset())
-    monkeypatch.setattr(
-        webapp, "process_slack_pr_review_request", fake_process_slack_pr_review_request
-    )
+    monkeypatch.setattr(webapp, "get_slack_repo_config", fake_get_slack_repo_config)
+    monkeypatch.setattr(webapp, "process_slack_mention", fake_process_slack_mention)
 
     client = TestClient(webapp.app)
     response = _post_slack_webhook(
@@ -433,32 +439,33 @@ def test_slack_webhook_routes_review_command_to_reviewer(monkeypatch) -> None:
     )
 
     assert response.status_code == 200
-    assert response.json()["message"] == "Slack PR review request queued"
-    pr_ref = captured["pr_ref"]
-    assert isinstance(pr_ref, GitHubPrRef)
-    assert pr_ref.owner == "langchain-ai"
-    assert pr_ref.repo == "open-swe"
-    assert pr_ref.number == 1244
-    assert captured["channel_id"] == "C123"
-    assert captured["thread_ts"] == "1700000000.000100"
+    assert response.json()["message"] == "Slack mention queued"
+    assert captured["repo_config"] == {"owner": "langchain-ai", "name": "open-swe"}
+    event_data = captured["event_data"]
+    assert isinstance(event_data, dict)
+    assert event_data["text"] == "<@UBOT> review https://github.com/langchain-ai/open-swe/pull/1244"
 
 
-def test_slack_webhook_malformed_review_command_does_not_start_agent(monkeypatch) -> None:
+def test_slack_webhook_malformed_review_command_starts_agent(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
-    async def fake_process_slack_mention(*args, **kwargs) -> None:
-        captured["agent_started"] = True
+    async def fake_get_slack_repo_config(
+        channel_id: str, thread_ts: str, slack_user_id: str | None = None
+    ) -> dict[str, str]:
+        return {"owner": "langchain-ai", "name": "open-swe"}
 
-    async def fake_post_slack_thread_reply(channel_id: str, thread_ts: str, text: str) -> bool:
-        captured["reply"] = text
-        return True
+    async def fake_process_slack_mention(
+        event_data: dict[str, object], repo_config: dict[str, str]
+    ) -> None:
+        captured["event_data"] = event_data
+        captured["repo_config"] = repo_config
 
     monkeypatch.setattr(webapp, "SLACK_SIGNING_SECRET", _TEST_SLACK_SECRET)
     monkeypatch.setattr(webapp, "SLACK_BOT_USER_ID", "UBOT")
     monkeypatch.setattr(webapp, "SLACK_BOT_USERNAME", "open-swe")
     monkeypatch.setattr(slack_utils.time, "time", lambda: 1700000000)
+    monkeypatch.setattr(webapp, "get_slack_repo_config", fake_get_slack_repo_config)
     monkeypatch.setattr(webapp, "process_slack_mention", fake_process_slack_mention)
-    monkeypatch.setattr(webapp, "post_slack_thread_reply", fake_post_slack_thread_reply)
 
     client = TestClient(webapp.app)
     response = _post_slack_webhook(
@@ -476,9 +483,13 @@ def test_slack_webhook_malformed_review_command_does_not_start_agent(monkeypatch
     )
 
     assert response.status_code == 200
-    assert response.json()["reason"] == "Malformed Slack PR review command"
-    assert "agent_started" not in captured
-    assert "OWNER/REPO/pull/NUMBER" in captured["reply"]
+    assert response.json()["message"] == "Slack mention queued"
+    assert captured["repo_config"] == {"owner": "langchain-ai", "name": "open-swe"}
+    event_data = captured["event_data"]
+    assert isinstance(event_data, dict)
+    assert (
+        event_data["text"] == "<@UBOT> review https://github.com/langchain-ai/open-swe/issues/1244"
+    )
 
 
 def test_slack_webhook_non_pr_review_request_starts_agent(monkeypatch) -> None:
@@ -886,13 +897,31 @@ def test_request_pr_review_tool_uses_shared_trigger(monkeypatch) -> None:
         source: str,
         github_login: str = "",
         github_user_id: int | None = None,
+        slack_channel_id: str = "",
+        slack_thread_ts: str = "",
     ) -> dict[str, object]:
         captured["pr_ref"] = pr_ref
         captured["source"] = source
+        captured["github_login"] = github_login
+        captured["github_user_id"] = github_user_id
+        captured["slack_channel_id"] = slack_channel_id
+        captured["slack_thread_ts"] = slack_thread_ts
         return {"success": True, "thread_id": "thread-id"}
 
     monkeypatch.setattr(
         request_pr_review_module, "trigger_pr_review_from_ref", fake_trigger_pr_review_from_ref
+    )
+    monkeypatch.setattr(
+        request_pr_review_module,
+        "get_config",
+        lambda: {
+            "configurable": {
+                "source": "github",
+                "github_login": "octocat",
+                "github_user_id": 123,
+                "slack_thread": {"channel_id": "C123", "thread_ts": "1700000000.000100"},
+            }
+        },
     )
 
     result = request_pr_review_tool("https://github.com/langchain-ai/open-swe/pull/1244")
@@ -900,7 +929,11 @@ def test_request_pr_review_tool_uses_shared_trigger(monkeypatch) -> None:
     pr_ref = captured["pr_ref"]
     assert isinstance(pr_ref, GitHubPrRef)
     assert pr_ref.number == 1244
-    assert captured["source"] == "slack"
+    assert captured["source"] == "github"
+    assert captured["github_login"] == "octocat"
+    assert captured["github_user_id"] == 123
+    assert captured["slack_channel_id"] == "C123"
+    assert captured["slack_thread_ts"] == "1700000000.000100"
     assert result["success"] is True
 
 
@@ -1105,25 +1138,21 @@ def test_parse_github_review_command_does_not_swallow_trailing_text() -> None:
     )
 
 
-def test_github_webhook_routes_pr_comment_review_to_reviewer(monkeypatch) -> None:
+def test_github_webhook_routes_pr_comment_review_to_agent(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
     async def fake_process_pr_comment(payload: dict[str, object], event_type: str) -> None:
-        raise AssertionError("process_github_pr_comment should not be called for review command")
+        captured["payload"] = payload
+        captured["event_type"] = event_type
 
     async def fake_process_review_command(
         payload: dict[str, object], event_type: str, pr_url_override: str | None
     ) -> None:
-        captured["payload"] = payload
-        captured["event_type"] = event_type
-        captured["pr_url_override"] = pr_url_override
+        raise AssertionError("review commands should route through the main agent")
 
     monkeypatch.setattr(webapp, "process_github_pr_comment", fake_process_pr_comment)
     monkeypatch.setattr(webapp, "process_github_pr_review_command", fake_process_review_command)
     monkeypatch.setattr(webapp, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
-    monkeypatch.setattr(
-        webapp, "ALLOWED_REVIEWER_GITHUB_REPOS", frozenset({"langchain-ai/open-swe"})
-    )
     monkeypatch.setattr(webapp, "ALLOWED_GITHUB_ORGS", frozenset({"langchain-ai"}))
 
     client = TestClient(webapp.app)
@@ -1144,26 +1173,31 @@ def test_github_webhook_routes_pr_comment_review_to_reviewer(monkeypatch) -> Non
     )
 
     assert response.status_code == 200
-    assert response.json() == {
-        "status": "accepted",
-        "message": "Processing GitHub PR review command",
-    }
+    assert response.json() == {"status": "accepted", "message": "Processing issue_comment event"}
     assert captured["event_type"] == "issue_comment"
-    assert captured["pr_url_override"] is None
 
 
-def test_github_webhook_blocks_pr_review_command_outside_reviewer_allowlist(monkeypatch) -> None:
+def test_github_webhook_routes_pr_review_request_outside_reviewer_allowlist_to_agent(
+    monkeypatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    async def fake_process_pr_comment(payload: dict[str, object], event_type: str) -> None:
+        captured["payload"] = payload
+        captured["event_type"] = event_type
+
     async def fake_process_review_command(
         payload: dict[str, object], event_type: str, pr_url_override: str | None
     ) -> None:
-        raise AssertionError("process_github_pr_review_command should not run")
+        raise AssertionError("review allowlist is enforced by request_pr_review")
 
+    monkeypatch.setattr(webapp, "process_github_pr_comment", fake_process_pr_comment)
     monkeypatch.setattr(webapp, "process_github_pr_review_command", fake_process_review_command)
     monkeypatch.setattr(webapp, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
+    monkeypatch.setattr(webapp, "ALLOWED_GITHUB_ORGS", frozenset({"langchain-ai"}))
     monkeypatch.setattr(
         webapp, "ALLOWED_REVIEWER_GITHUB_REPOS", frozenset({"langchain-ai/open-swe"})
     )
-    monkeypatch.setattr(webapp, "ALLOWED_GITHUB_ORGS", frozenset({"langchain-ai"}))
 
     client = TestClient(webapp.app)
     response = _post_github_webhook(
@@ -1183,10 +1217,8 @@ def test_github_webhook_blocks_pr_review_command_outside_reviewer_allowlist(monk
     )
 
     assert response.status_code == 200
-    assert response.json() == {
-        "status": "ignored",
-        "reason": "Repository not enabled for review",
-    }
+    assert response.json() == {"status": "accepted", "message": "Processing issue_comment event"}
+    assert captured["event_type"] == "issue_comment"
 
 
 def test_process_github_pr_review_command_uses_payload_pr(monkeypatch) -> None:
