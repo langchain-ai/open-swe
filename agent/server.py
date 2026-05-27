@@ -419,6 +419,8 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 )
                 model_id = overridden_model
                 profile_effort = overridden_effort
+                subagent_model_id = overridden_model
+                subagent_effort = overridden_effort
             overridden_subagent_model, overridden_subagent_effort = (
                 normalize_profile_subagent_overrides(profile)
             )
@@ -448,6 +450,8 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         )
         model_id = per_thread_model
         profile_effort = per_thread_effort
+        subagent_model_id = per_thread_model
+        subagent_effort = per_thread_effort
 
     always_create_prs = profile_create_prs(profile)
     if always_create_prs:

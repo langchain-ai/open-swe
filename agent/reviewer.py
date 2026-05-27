@@ -630,6 +630,8 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
     if isinstance(configured_model_id, str) and configured_model_id:
         model_id = configured_model_id
         reasoning_effort = configured_effort if isinstance(configured_effort, str) else None
+        subagent_model_id = model_id
+        subagent_effort = reasoning_effort
     else:
         model_id, reasoning_effort = await get_team_default_model("reviewer")
         logger.info(
@@ -637,19 +639,18 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
             model_id,
             reasoning_effort,
         )
+        subagent_model_id, subagent_effort = await get_team_default_subagent_model("reviewer")
+        logger.info(
+            "Using team default reviewer subagent model: model=%s effort=%s",
+            subagent_model_id,
+            subagent_effort,
+        )
     configured_subagent_model_id = config["configurable"].get("reviewer_subagent_model_id")
     configured_subagent_effort = config["configurable"].get("reviewer_subagent_reasoning_effort")
     if isinstance(configured_subagent_model_id, str) and configured_subagent_model_id:
         subagent_model_id = configured_subagent_model_id
         subagent_effort = (
             configured_subagent_effort if isinstance(configured_subagent_effort, str) else None
-        )
-    else:
-        subagent_model_id, subagent_effort = await get_team_default_subagent_model("reviewer")
-        logger.info(
-            "Using team default reviewer subagent model: model=%s effort=%s",
-            subagent_model_id,
-            subagent_effort,
         )
     model_kwargs = provider_model_kwargs(
         model_id,
