@@ -198,8 +198,7 @@ def looks_like_slack_pr_review_command(text: str) -> bool:
         return False
     for match in URL_RE.finditer(stripped):
         parsed = urlparse(match.group(0).strip("<>"))
-        host = (parsed.hostname or "").lower()
-        if parsed.scheme in {"http", "https"} and host in {"github.com", "www.github.com"}:
+        if parsed.scheme in {"http", "https"} and "github.com" in match.group(0):
             return True
     return False
 
