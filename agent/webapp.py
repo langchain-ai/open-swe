@@ -9,6 +9,7 @@ import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
@@ -1877,6 +1878,58 @@ async def _fetch_open_pr_for_branch(
     return pr if isinstance(pr, dict) else None
 
 
+def _normalized_diff_hash(diff_text: str) -> str:
+    normalized = "\n".join(
+        line.rstrip() for line in diff_text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    ).strip()
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
+async def _fetch_compare_diff(
+    repo_config: dict[str, str], base_ref: str, head_ref: str, *, token: str
+) -> str | None:
+    owner = repo_config.get("owner", "")
+    repo = repo_config.get("name", "")
+    if not owner or not repo or not base_ref or not head_ref:
+        return None
+
+    base = quote(base_ref, safe="")
+    head = quote(head_ref, safe="")
+    headers = {
+        "Accept": "application/vnd.github.diff",
+        "Authorization": f"Bearer {token}",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    async with httpx.AsyncClient() as http_client:
+        try:
+            response = await http_client.get(
+                f"https://api.github.com/repos/{owner}/{repo}/compare/{base}...{head}",
+                headers=headers,
+            )
+            response.raise_for_status()
+        except httpx.HTTPError:
+            logger.exception(
+                "Failed to fetch compare diff for %s/%s %s...%s", owner, repo, base_ref, head_ref
+            )
+            return None
+    return response.text
+
+
+async def _is_pr_diff_unchanged_since_last_review(
+    repo_config: dict[str, str],
+    *,
+    base_ref: str,
+    last_reviewed_sha: str,
+    head_sha: str,
+    token: str,
+) -> bool:
+    previous_diff = await _fetch_compare_diff(repo_config, base_ref, last_reviewed_sha, token=token)
+    current_diff = await _fetch_compare_diff(repo_config, base_ref, head_sha, token=token)
+    if previous_diff is None or current_diff is None:
+        return False
+    return _normalized_diff_hash(previous_diff) == _normalized_diff_hash(current_diff)
+
+
 async def _get_thread_metadata_safe(thread_id: str) -> dict[str, Any] | None:
     """Fetch a thread's metadata; return ``None`` if the thread doesn't exist."""
     langgraph_client = get_client(url=LANGGRAPH_URL)
@@ -2025,6 +2078,26 @@ async def process_github_push_event(payload: dict[str, Any]) -> None:
     if isinstance(last_reviewed_sha, str) and last_reviewed_sha == head_sha:
         logger.info("Push to %s ignored: head_sha unchanged from last_reviewed_sha", head_ref)
         return
+    thread_active = await is_thread_active(thread_id)
+    if (
+        not thread_active
+        and isinstance(last_reviewed_sha, str)
+        and last_reviewed_sha
+        and await _is_pr_diff_unchanged_since_last_review(
+            repo_config,
+            base_ref=base_ref,
+            last_reviewed_sha=last_reviewed_sha,
+            head_sha=head_sha,
+            token=app_token,
+        )
+    ):
+        await set_reviewer_thread_metadata(thread_id, last_reviewed_sha=head_sha)
+        logger.info(
+            "Push to %s ignored: PR diff unchanged since last reviewed SHA %s",
+            head_ref,
+            last_reviewed_sha,
+        )
+        return
 
     langgraph_client = get_client(url=LANGGRAPH_URL)
     if not await _ensure_thread_exists_for_metadata(thread_id, langgraph_client):
@@ -2065,7 +2138,6 @@ async def process_github_push_event(payload: dict[str, Any]) -> None:
         last_reviewed_sha=last_reviewed_sha if isinstance(last_reviewed_sha, str) else "",
     )
 
-    thread_active = await is_thread_active(thread_id)
     if thread_active:
         logger.info("Reviewer thread %s busy, queuing push re-review", thread_id)
         await queue_message_for_thread(thread_id, re_review_prompt)
