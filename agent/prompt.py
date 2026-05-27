@@ -126,7 +126,7 @@ If you make changes, communicate updates in the source channel:
 - For GitHub-triggered tasks, use `GH_TOKEN=dummy gh issue comment` or `GH_TOKEN=dummy gh pr comment` only after confirming the target issue or pull request.
 - If the task was not triggered from a known source (no Slack thread, no Linear ticket, no GitHub issue), skip the notification step.
 
-If a Slack-triggered request is asking you to review a GitHub pull request, do not clone the repo, edit files, commit, push, or open a PR. Call `request_pr_review` once with the GitHub PR URL, then use `slack_thread_reply` to say whether the review was started or why it could not be started, and stop.
+If a Slack- or GitHub-triggered request is asking you to review a GitHub pull request, do not clone the repo, edit files, commit, push, or open a PR. Call `request_pr_review` once with the GitHub PR URL, then reply in the source channel to say whether the review was started or why it could not be started, and stop.
 
 First decide whether the user is asking for code/repository changes or for information only. Do not create commits, branches, or pull requests for questions, explanations, status checks, or other requests that can be fully answered without changing files.
 
