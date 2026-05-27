@@ -938,7 +938,8 @@ async def test_publish_review_does_not_retry_when_no_findings_can_be_dropped() -
     findings = [
         _f(id="f_only", severity="high", file="in_diff.py", start_line=10, end_line=10),
     ]
-    # diff_line_set is missing entirely — no way to tell which finding is bad.
+    # No cached diff_line_set, and the on-demand fetch fails — no way to tell
+    # which finding is bad.
     first_response = {
         "_error": "HTTP 422: ...",
         "_error_kind": "unresolved_anchor",
@@ -958,6 +959,11 @@ async def test_publish_review_does_not_retry_when_no_findings_can_be_dropped() -
             AsyncMock(return_value=findings),
         ),
         patch("agent.tools.publish_review.post_pull_request_review", post_review),
+        patch(
+            "agent.tools.publish_review._resolve_diff_line_set",
+            new_callable=AsyncMock,
+            return_value=None,
+        ),
         patch(
             "agent.tools.publish_review._resolve_threads_for_resolved_findings",
             new_callable=AsyncMock,
@@ -981,3 +987,96 @@ async def test_publish_review_does_not_retry_when_no_findings_can_be_dropped() -
     assert result["success"] is False
     assert result["unresolvable_findings"] == []
     assert "update_finding" in result["hint"]
+
+
+@pytest.mark.asyncio
+async def test_publish_review_fetches_pr_diff_when_diff_line_set_missing() -> None:
+    """Reviewer runs clear ``diff_line_set`` from config before the agent
+    starts, so the publish-time retry path must fall back to fetching the
+    PR's unified diff on demand and recomputing the line set — otherwise no
+    finding is ever droppable and the retry surfaces empty
+    ``unresolvable_findings`` for the reachable production case."""
+    from agent.tools.publish_review import _publish_review_async
+
+    findings = [
+        _f(id="f_good", severity="high", file="in_diff.py", start_line=10, end_line=10),
+        _f(id="f_bad", severity="high", file="not_in_diff.py", start_line=99, end_line=99),
+    ]
+    first_response = {
+        "_error": "HTTP 422: ...",
+        "_error_kind": "unresolved_anchor",
+        "_raw_errors": ["Path could not be resolved"],
+        "_status": 422,
+    }
+    retry_response = {"id": 9999}
+    post_review = AsyncMock(side_effect=[first_response, retry_response])
+
+    pr_diff = (
+        "diff --git a/in_diff.py b/in_diff.py\n"
+        "--- a/in_diff.py\n"
+        "+++ b/in_diff.py\n"
+        "@@ -1,1 +10,1 @@\n"
+        "+touched\n"
+    )
+
+    http_response = MagicMock()
+    http_response.text = pr_diff
+    http_response.raise_for_status = MagicMock()
+
+    class _FakeClient:
+        def __init__(self, *_: Any, **__: Any) -> None:
+            return None
+
+        async def __aenter__(self) -> _FakeClient:
+            return self
+
+        async def __aexit__(self, *_: Any) -> None:
+            return None
+
+        async def get(self, *_: Any, **__: Any) -> Any:
+            return http_response
+
+    with (
+        patch(
+            "agent.tools.publish_review.get_config",
+            return_value={"configurable": {"thread_id": "tid"}},
+        ),
+        patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
+        patch(
+            "agent.tools.publish_review.list_findings_async",
+            AsyncMock(return_value=findings),
+        ),
+        patch("agent.tools.publish_review.post_pull_request_review", post_review),
+        patch("agent.tools.publish_review.httpx.AsyncClient", _FakeClient),
+        patch("agent.tools.publish_review.fetch_review_comments", AsyncMock(return_value=[])),
+        patch(
+            "agent.tools.publish_review._resolve_threads_for_resolved_findings",
+            new_callable=AsyncMock,
+            return_value=0,
+        ),
+        patch(
+            "agent.tools.publish_review._store_thread_ids_on_findings",
+            new_callable=AsyncMock,
+        ),
+        patch("agent.tools.publish_review.set_reviewer_thread_metadata", new_callable=AsyncMock),
+        patch(
+            "agent.tools.publish_review._maybe_post_slack_completion_reply",
+            new_callable=AsyncMock,
+        ),
+    ):
+        result = await _publish_review_async(
+            owner="o",
+            repo="r",
+            pr_number=7,
+            head_sha="sha",
+            token="t",
+            severity_threshold="medium",
+            cap=15,
+            is_re_review=False,
+        )
+
+    assert post_review.await_count == 2
+    retry_inline = post_review.await_args_list[1].kwargs["inline_comments"]
+    assert {c["path"] for c in retry_inline} == {"in_diff.py"}
+    assert result["success"] is True
+    assert result["unresolvable_findings"] == ["f_bad"]

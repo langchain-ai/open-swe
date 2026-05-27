@@ -167,10 +167,7 @@ async def post_pull_request_review(
                     raw_errors = []
                 if any(
                     isinstance(err, str)
-                    and (
-                        "Path could not be resolved" in err
-                        or "Line could not be resolved" in err
-                    )
+                    and ("Path could not be resolved" in err or "Line could not be resolved" in err)
                     for err in raw_errors
                 ):
                     error_kind = "unresolved_anchor"

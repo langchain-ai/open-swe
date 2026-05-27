@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import Any
 
+import httpx
 from langgraph.config import get_config
 
-from ..reviewer_diff import is_range_in_diff
+from ..reviewer_diff import compute_diff_line_set, is_range_in_diff
 from ..reviewer_findings import (
     Severity,
     filter_findings_for_publish,
@@ -35,6 +37,8 @@ from ..utils.github_token import (
     invalidate_cached_github_token,
 )
 from ..utils.slack import post_slack_thread_reply
+
+logger = logging.getLogger(__name__)
 
 
 def publish_review(
@@ -251,12 +255,16 @@ async def _publish_review_async(
         isinstance(review_response, dict)
         and review_response.get("_error_kind") == "unresolved_anchor"
     ):
-        valid_with_payload, dropped_ids = _filter_against_pr_diff(eligible_with_payload)
+        valid_with_payload, dropped_ids = await _filter_against_pr_diff(
+            eligible_with_payload,
+            owner=owner,
+            repo=repo,
+            pr_number=pr_number,
+            token=token,
+        )
         if dropped_ids and valid_with_payload:
             retry_inline = [p for _, p in valid_with_payload]
-            retry_body = render_review_body(
-                pr_number=pr_number, surfaced_count=len(retry_inline)
-            )
+            retry_body = render_review_body(pr_number=pr_number, surfaced_count=len(retry_inline))
             retry_response = await post_pull_request_review(
                 owner=owner,
                 repo=repo,
@@ -378,21 +386,68 @@ async def _publish_review_async(
     return result
 
 
-def _filter_against_pr_diff(
-    eligible_with_payload: list[tuple[dict[str, Any], dict[str, Any]]],
-) -> tuple[list[tuple[dict[str, Any], dict[str, Any]]], list[str]]:
-    """Drop findings whose path/line range is not in the current PR diff.
+async def _resolve_diff_line_set(
+    *,
+    owner: str,
+    repo: str,
+    pr_number: int,
+    token: str,
+) -> dict[str, set[int]] | None:
+    """Return the new-side line set for the PR diff, fetching it if needed.
 
-    Returns ``(valid_with_payload, dropped_finding_ids)``. When the run config
-    does not expose ``diff_line_set`` (older configs, eval modes), we can't
-    tell which findings are unresolvable, so we return everything unchanged
-    and an empty drop list — the caller will then surface the original error
-    rather than retry blindly.
+    Reviewer runs clear ``configurable['diff_line_set']`` before the agent
+    starts (so ``add_finding`` trusts the agent's anchors), which means the
+    publish-time retry path can't rely on it being populated. Fetch the PR's
+    unified diff from the GitHub REST API and recompute the line set on the
+    fly. Returns ``None`` if the fetch fails — caller treats that as "we
+    can't tell which finding is bad, don't retry blindly".
     """
     config = get_config()
     configurable = config.get("configurable", {}) if isinstance(config, dict) else {}
-    diff_line_set = configurable.get("diff_line_set") if isinstance(configurable, dict) else None
-    if not isinstance(diff_line_set, dict):
+    cached = configurable.get("diff_line_set") if isinstance(configurable, dict) else None
+    if isinstance(cached, dict):
+        return cached
+
+    headers = {
+        "Accept": "application/vnd.github.diff",
+        "Authorization": f"Bearer {token}",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    url = f"https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}"
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url, headers=headers, timeout=30.0)
+            response.raise_for_status()
+    except httpx.HTTPError:
+        logger.exception(
+            "Failed to fetch PR diff for %s/%s#%s during publish_review retry",
+            owner,
+            repo,
+            pr_number,
+        )
+        return None
+    return compute_diff_line_set(response.text)
+
+
+async def _filter_against_pr_diff(
+    eligible_with_payload: list[tuple[dict[str, Any], dict[str, Any]]],
+    *,
+    owner: str,
+    repo: str,
+    pr_number: int,
+    token: str,
+) -> tuple[list[tuple[dict[str, Any], dict[str, Any]]], list[str]]:
+    """Drop findings whose path/line range is not in the current PR diff.
+
+    Returns ``(valid_with_payload, dropped_finding_ids)``. When the diff
+    cannot be resolved (fetch failed and no cached set), we return everything
+    unchanged and an empty drop list — the caller will then surface the
+    original error rather than retry blindly.
+    """
+    diff_line_set = await _resolve_diff_line_set(
+        owner=owner, repo=repo, pr_number=pr_number, token=token
+    )
+    if diff_line_set is None:
         return list(eligible_with_payload), []
 
     valid: list[tuple[dict[str, Any], dict[str, Any]]] = []
@@ -408,9 +463,7 @@ def _filter_against_pr_diff(
                 end_line = payload_line
                 if start_line is None:
                     start_line = payload_line
-        if isinstance(path, str) and is_range_in_diff(
-            diff_line_set, path, start_line, end_line
-        ):
+        if isinstance(path, str) and is_range_in_diff(diff_line_set, path, start_line, end_line):
             valid.append((finding, payload))
         else:
             finding_id = finding.get("id")
