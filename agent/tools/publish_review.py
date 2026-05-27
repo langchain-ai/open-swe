@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import Any
 
+import httpx
 from langgraph.config import get_config
 
+from ..reviewer_diff import compute_diff_line_set, is_range_in_diff
 from ..reviewer_findings import (
     Severity,
     filter_findings_for_publish,
@@ -34,6 +37,8 @@ from ..utils.github_token import (
     invalidate_cached_github_token,
 )
 from ..utils.slack import post_slack_thread_reply
+
+logger = logging.getLogger(__name__)
 
 
 def publish_review(
@@ -241,6 +246,68 @@ async def _publish_review_async(
         inline_comments=inline_comments,
         token=token,
     )
+    # If GitHub rejected the batch because one or more inline comments anchor
+    # to a file/line that's not in the PR diff, drop just those findings and
+    # retry once. Returning the bare 422 to the agent only invites it to
+    # retry publish_review with byte-identical args until findings drain.
+    unresolvable_findings: list[str] = []
+    if (
+        isinstance(review_response, dict)
+        and review_response.get("_error_kind") == "unresolved_anchor"
+    ):
+        valid_with_payload, dropped_ids = await _filter_against_pr_diff(
+            eligible_with_payload,
+            owner=owner,
+            repo=repo,
+            pr_number=pr_number,
+            token=token,
+        )
+        if dropped_ids and valid_with_payload:
+            retry_inline = [p for _, p in valid_with_payload]
+            retry_body = render_review_body(pr_number=pr_number, surfaced_count=len(retry_inline))
+            retry_response = await post_pull_request_review(
+                owner=owner,
+                repo=repo,
+                pr_number=pr_number,
+                head_sha=head_sha,
+                body=retry_body,
+                inline_comments=retry_inline,
+                token=token,
+            )
+            if isinstance(retry_response, dict) and "_error" not in retry_response:
+                review_response = retry_response
+                inline_comments = retry_inline
+                eligible_with_payload = valid_with_payload
+                unresolvable_findings = dropped_ids
+            else:
+                retry_error = (
+                    retry_response.get("_error", "unknown error")
+                    if isinstance(retry_response, dict)
+                    else "no response"
+                )
+                return {
+                    "success": False,
+                    "error": f"Failed to POST PR review: {retry_error}",
+                    "unresolvable_findings": dropped_ids,
+                    "hint": (
+                        "Call update_finding(status='resolved') on these ids "
+                        "or fix their file/line before retrying."
+                    ),
+                }
+        else:
+            # Either nothing to drop (no diff_line_set available, so we can't
+            # tell which findings are bad) or everything would be dropped.
+            # Either way, do not retry — surface the structural signal so the
+            # agent stops retrying with the same args.
+            return {
+                "success": False,
+                "error": f"Failed to POST PR review: {review_response['_error']}",
+                "unresolvable_findings": dropped_ids,
+                "hint": (
+                    "Call update_finding(status='resolved') on these ids "
+                    "or fix their file/line before retrying."
+                ),
+            }
     if isinstance(review_response, dict) and "_error" in review_response:
         return {
             "success": False,
@@ -303,13 +370,106 @@ async def _publish_review_async(
 
     await set_reviewer_thread_metadata(thread_id, last_reviewed_sha=head_sha)
 
-    return {
+    result: dict[str, Any] = {
         "success": True,
         "review_id": review_id,
         "surfaced_count": len(inline_comments),
         "hidden_count": max(len(open_unpublished) - len(inline_comments), 0),
         "resolved_thread_count": resolved_thread_count,
     }
+    if unresolvable_findings:
+        result["unresolvable_findings"] = unresolvable_findings
+        result["hint"] = (
+            "Some findings had anchors not in the PR diff; "
+            "call update_finding to fix or resolve them."
+        )
+    return result
+
+
+async def _resolve_diff_line_set(
+    *,
+    owner: str,
+    repo: str,
+    pr_number: int,
+    token: str,
+) -> dict[str, set[int]] | None:
+    """Return the new-side line set for the PR diff, fetching it if needed.
+
+    Reviewer runs clear ``configurable['diff_line_set']`` before the agent
+    starts (so ``add_finding`` trusts the agent's anchors), which means the
+    publish-time retry path can't rely on it being populated. Fetch the PR's
+    unified diff from the GitHub REST API and recompute the line set on the
+    fly. Returns ``None`` if the fetch fails — caller treats that as "we
+    can't tell which finding is bad, don't retry blindly".
+    """
+    config = get_config()
+    configurable = config.get("configurable", {}) if isinstance(config, dict) else {}
+    cached = configurable.get("diff_line_set") if isinstance(configurable, dict) else None
+    if isinstance(cached, dict):
+        return cached
+
+    headers = {
+        "Accept": "application/vnd.github.diff",
+        "Authorization": f"Bearer {token}",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    url = f"https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}"
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url, headers=headers, timeout=30.0)
+            response.raise_for_status()
+    except httpx.HTTPError:
+        logger.exception(
+            "Failed to fetch PR diff for %s/%s#%s during publish_review retry",
+            owner,
+            repo,
+            pr_number,
+        )
+        return None
+    return compute_diff_line_set(response.text)
+
+
+async def _filter_against_pr_diff(
+    eligible_with_payload: list[tuple[dict[str, Any], dict[str, Any]]],
+    *,
+    owner: str,
+    repo: str,
+    pr_number: int,
+    token: str,
+) -> tuple[list[tuple[dict[str, Any], dict[str, Any]]], list[str]]:
+    """Drop findings whose path/line range is not in the current PR diff.
+
+    Returns ``(valid_with_payload, dropped_finding_ids)``. When the diff
+    cannot be resolved (fetch failed and no cached set), we return everything
+    unchanged and an empty drop list — the caller will then surface the
+    original error rather than retry blindly.
+    """
+    diff_line_set = await _resolve_diff_line_set(
+        owner=owner, repo=repo, pr_number=pr_number, token=token
+    )
+    if diff_line_set is None:
+        return list(eligible_with_payload), []
+
+    valid: list[tuple[dict[str, Any], dict[str, Any]]] = []
+    dropped: list[str] = []
+    for finding, payload in eligible_with_payload:
+        path = payload.get("path")
+        # Prefer the finding's recorded range; fall back to the payload line.
+        start_line = finding.get("start_line")
+        end_line = finding.get("end_line")
+        if end_line is None:
+            payload_line = payload.get("line")
+            if isinstance(payload_line, int):
+                end_line = payload_line
+                if start_line is None:
+                    start_line = payload_line
+        if isinstance(path, str) and is_range_in_diff(diff_line_set, path, start_line, end_line):
+            valid.append((finding, payload))
+        else:
+            finding_id = finding.get("id")
+            if isinstance(finding_id, str):
+                dropped.append(finding_id)
+    return valid, dropped
 
 
 async def _maybe_post_slack_completion_reply(
