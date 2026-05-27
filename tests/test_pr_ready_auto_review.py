@@ -61,12 +61,78 @@ async def test_pr_ready_for_review_triggers_run(monkeypatch: pytest.MonkeyPatch)
     fake_client = MagicMock()
     fake_client.runs.create = AsyncMock()
     _patch_dispatch_deps(monkeypatch, fake_client)
+    monkeypatch.setattr(webapp, "_get_thread_metadata_safe", AsyncMock(return_value=None))
     monkeypatch.setattr(webapp, "get_profile", AsyncMock(return_value=None))
     monkeypatch.setattr(webapp, "get_team_settings", AsyncMock(return_value={}))
 
     await webapp.process_github_pr_ready(_pr_payload(action="ready_for_review", draft=False))
 
     fake_client.runs.create.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_pr_ready_for_review_skips_when_head_already_reviewed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_client = MagicMock()
+    fake_client.runs.create = AsyncMock()
+    set_metadata = AsyncMock()
+    get_token = AsyncMock(return_value=("token", None))
+    monkeypatch.setattr(webapp, "get_github_app_installation_token_with_expiry", get_token)
+    monkeypatch.setattr(webapp, "set_reviewer_thread_metadata", set_metadata)
+    monkeypatch.setattr(
+        webapp,
+        "_get_thread_metadata_safe",
+        AsyncMock(
+            return_value={
+                "kind": "reviewer",
+                "watch": False,
+                "last_reviewed_sha": "headsha",
+            }
+        ),
+    )
+    monkeypatch.setattr(webapp, "get_client", lambda url: fake_client)
+    monkeypatch.setattr(webapp, "get_profile", AsyncMock(return_value=None))
+    monkeypatch.setattr(webapp, "get_team_settings", AsyncMock(return_value={}))
+
+    await webapp.process_github_pr_ready(_pr_payload(action="ready_for_review", draft=False))
+
+    fake_client.runs.create.assert_not_called()
+    get_token.assert_not_awaited()
+    set_metadata.assert_awaited_once()
+    assert set_metadata.await_args.kwargs["watch"] is True
+
+
+@pytest.mark.asyncio
+async def test_pr_ready_for_review_uses_re_review_after_previous_review(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_client = MagicMock()
+    fake_client.runs.create = AsyncMock()
+    _patch_dispatch_deps(monkeypatch, fake_client)
+    monkeypatch.setattr(
+        webapp,
+        "_get_thread_metadata_safe",
+        AsyncMock(
+            return_value={
+                "kind": "reviewer",
+                "watch": False,
+                "last_reviewed_sha": "oldsha",
+            }
+        ),
+    )
+    monkeypatch.setattr(webapp, "get_profile", AsyncMock(return_value=None))
+    monkeypatch.setattr(webapp, "get_team_settings", AsyncMock(return_value={}))
+
+    await webapp.process_github_pr_ready(_pr_payload(action="ready_for_review", draft=False))
+
+    fake_client.runs.create.assert_awaited_once()
+    _, kwargs = fake_client.runs.create.await_args
+    configurable = kwargs["config"]["configurable"]
+    assert configurable["re_review"] is True
+    assert configurable["last_reviewed_sha"] == "oldsha"
+    assert configurable["head_sha"] == "headsha"
+    assert "marked ready for review" in kwargs["input"]["messages"][0]["content"]
 
 
 @pytest.mark.asyncio
