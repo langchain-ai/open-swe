@@ -1694,6 +1694,33 @@ async def _dispatch_first_review_from_pr_payload(payload: dict[str, Any], *, sou
         repo_config.get("owner", ""), repo_config.get("name", ""), pr_number
     )
 
+    pr_meta: ReviewerPRMeta = {
+        "owner": repo_config.get("owner", ""),
+        "name": repo_config.get("name", ""),
+        "number": pr_number,
+        "url": pr_url,
+        "title": pr_title,
+        "head_ref": branch_name,
+        "base_ref": base_ref,
+    }
+    last_reviewed_sha = ""
+    if payload.get("action") == "ready_for_review":
+        metadata = await _get_thread_metadata_safe(thread_id)
+        if metadata is not None and metadata.get("kind") == REVIEWER_THREAD_KIND:
+            existing_last_reviewed_sha = metadata.get("last_reviewed_sha")
+            if isinstance(existing_last_reviewed_sha, str) and existing_last_reviewed_sha:
+                if existing_last_reviewed_sha == head_sha:
+                    await set_reviewer_thread_metadata(thread_id, pr=pr_meta, watch=True)
+                    logger.info(
+                        "Skipping ready_for_review auto-review for %s/%s#%s: "
+                        "head_sha unchanged from last_reviewed_sha",
+                        repo_config.get("owner"),
+                        repo_config.get("name"),
+                        pr_number,
+                    )
+                    return
+                last_reviewed_sha = existing_last_reviewed_sha
+
     app_token, app_token_expires_at = await get_github_app_installation_token_with_expiry()
     if not app_token:
         logger.warning("No GitHub App token available for reviewer dispatch")
@@ -1709,18 +1736,17 @@ async def _dispatch_first_review_from_pr_payload(payload: dict[str, Any], *, sou
         logger.warning("Could not persist bot token for reviewer thread %s", thread_id)
         return
 
-    pr_meta: ReviewerPRMeta = {
-        "owner": repo_config.get("owner", ""),
-        "name": repo_config.get("name", ""),
-        "number": pr_number,
-        "url": pr_url,
-        "title": pr_title,
-        "head_ref": branch_name,
-        "base_ref": base_ref,
-    }
     await set_reviewer_thread_metadata(thread_id, pr=pr_meta, watch=True)
 
-    prompt = build_github_pr_review_prompt(repo_config, pr_number, pr_url, base_sha, head_sha)
+    is_re_review = bool(last_reviewed_sha)
+    if is_re_review:
+        prompt = (
+            f"PR #{pr_number} has been marked ready for review. The new HEAD is "
+            f"{head_sha}. Reconcile existing findings against the new diff, add any "
+            f"net-new findings, and call `publish_review` once you're done."
+        )
+    else:
+        prompt = build_github_pr_review_prompt(repo_config, pr_number, pr_url, base_sha, head_sha)
     configurable = _build_reviewer_configurable(
         source=source,
         github_login=github_login,
@@ -1731,6 +1757,8 @@ async def _dispatch_first_review_from_pr_payload(payload: dict[str, Any], *, sou
         base_sha=base_sha,
         head_sha=head_sha,
         branch_name=branch_name,
+        re_review=is_re_review,
+        last_reviewed_sha=last_reviewed_sha,
     )
 
     thread_active = await is_thread_active(thread_id)
