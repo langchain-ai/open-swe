@@ -138,23 +138,36 @@ def _sync_publication_identity(
     return updated
 
 
-def _sync_thread_status(finding: Finding, review_thread: ReviewThread) -> bool:
-    updated = False
-    github_thread_id = finding.get("github_review_thread_id")
-    if not isinstance(github_thread_id, str) or not github_thread_id:
-        new_thread_id = review_thread.get("id")
-        if isinstance(new_thread_id, str) and new_thread_id:
-            finding["github_review_thread_id"] = new_thread_id
-            updated = True
+def _is_terminal_thread(review_thread: ReviewThread) -> bool:
+    return bool(review_thread.get("is_resolved") or review_thread.get("is_outdated"))
 
-    if review_thread.get("is_resolved") or review_thread.get("is_outdated"):
-        if finding.get("status") == "open":
-            finding["status"] = "resolved"
-            finding["last_reconciliation_note"] = "GitHub thread is resolved or outdated."
-            updated = True
-        if review_thread.get("is_resolved") and not finding.get("github_thread_resolved"):
-            finding["github_thread_resolved"] = True
-            updated = True
+
+def _sync_thread_status(finding: Finding, matches: list[ReviewThreadMatch]) -> bool:
+    if not matches or not all(_is_terminal_thread(review_thread) for review_thread, _ in matches):
+        return False
+
+    updated = False
+    if finding.get("status") == "open":
+        finding["status"] = "resolved"
+        finding["last_reconciliation_note"] = "All GitHub threads are resolved or outdated."
+        updated = True
+
+    resolved_thread_ids = _str_list(finding.get("github_resolved_thread_ids"))
+    all_resolved = True
+    for review_thread, _comment_id in matches:
+        thread_id = review_thread.get("id")
+        if review_thread.get("is_resolved") and isinstance(thread_id, str) and thread_id:
+            if thread_id not in resolved_thread_ids:
+                resolved_thread_ids.append(thread_id)
+                updated = True
+        else:
+            all_resolved = False
+
+    if resolved_thread_ids != _str_list(finding.get("github_resolved_thread_ids")):
+        finding["github_resolved_thread_ids"] = resolved_thread_ids
+    if all_resolved and not finding.get("github_thread_resolved"):
+        finding["github_thread_resolved"] = True
+        updated = True
     return updated
 
 
@@ -213,10 +226,10 @@ async def reconcile_findings_with_review_threads(
         )
         for review_thread, comment_id in matches:
             updated = _sync_publication_identity(finding, review_thread, comment_id) or updated
-            updated = _sync_thread_status(finding, review_thread) or updated
             updated = (
                 _sync_latest_human_reply(finding, review_thread, comment_id=comment_id) or updated
             )
+        updated = _sync_thread_status(finding, matches) or updated
 
     if updated:
         await replace_findings(reviewer_thread_id, findings)
