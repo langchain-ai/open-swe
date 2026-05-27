@@ -297,6 +297,94 @@ def test_github_webhook_routes_review_comment_reply_without_tag(monkeypatch) -> 
     assert payload["comment"]["in_reply_to_id"] == 111
 
 
+def test_process_github_review_finding_reply_uses_rereview_config(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    async def fake_get_thread_metadata_safe(_thread_id: str) -> dict[str, object]:
+        return {"kind": webapp.REVIEWER_THREAD_KIND}
+
+    async def fake_get_token_with_expiry() -> tuple[str, str]:
+        return "app-token", "2026-01-01T00:00:00Z"
+
+    async def fake_persist_token(
+        thread_id: str, token: str, *, expires_at: str | None = None
+    ) -> str:
+        captured["persist"] = (thread_id, token, expires_at)
+        return "encrypted"
+
+    async def fake_fetch_threads(**_kwargs: object) -> list[dict[str, object]]:
+        return []
+
+    async def fake_reconcile(_thread_id: str, _threads: list[dict[str, object]]) -> None:
+        return None
+
+    async def fake_list_findings(_thread_id: str) -> list[dict[str, object]]:
+        return [{"id": "f_1", "github_review_comment_id": 111}]
+
+    async def fake_append_interaction(
+        _thread_id: str, finding_id: str, interaction: dict[str, object]
+    ) -> dict[str, object]:
+        captured["interaction"] = (finding_id, interaction)
+        return {}
+
+    async def fake_is_thread_active(_thread_id: str) -> bool:
+        return False
+
+    async def fake_store_current_run_id(_thread_id: str, _run: object) -> None:
+        return None
+
+    class _FakeRunsClient:
+        async def create(self, thread_id: str, graph: str, **kwargs) -> dict[str, str]:
+            captured["thread_id"] = thread_id
+            captured["graph"] = graph
+            captured["kwargs"] = kwargs
+            return {"run_id": "run-1"}
+
+    class _FakeLangGraphClient:
+        runs = _FakeRunsClient()
+
+    monkeypatch.setattr(webapp, "_get_thread_metadata_safe", fake_get_thread_metadata_safe)
+    monkeypatch.setattr(
+        webapp, "get_github_app_installation_token_with_expiry", fake_get_token_with_expiry
+    )
+    monkeypatch.setattr(webapp, "persist_encrypted_github_token", fake_persist_token)
+    monkeypatch.setattr(webapp, "fetch_pr_review_threads", fake_fetch_threads)
+    monkeypatch.setattr(webapp, "reconcile_findings_with_review_threads", fake_reconcile)
+    monkeypatch.setattr(webapp, "list_reviewer_findings", fake_list_findings)
+    monkeypatch.setattr(webapp, "append_finding_interaction", fake_append_interaction)
+    monkeypatch.setattr(webapp, "is_thread_active", fake_is_thread_active)
+    monkeypatch.setattr(webapp, "_store_current_reviewer_run_id", fake_store_current_run_id)
+    monkeypatch.setattr(webapp, "get_client", lambda url: _FakeLangGraphClient())
+
+    asyncio.run(
+        webapp.process_github_review_finding_reply(
+            {
+                "comment": {
+                    "id": 222,
+                    "in_reply_to_id": 111,
+                    "body": "Why is this still a problem?",
+                    "created_at": "2026-05-27T00:00:00Z",
+                },
+                "pull_request": {
+                    "number": 1244,
+                    "html_url": "https://github.com/langchain-ai/open-swe/pull/1244",
+                    "base": {"sha": "base-sha"},
+                    "head": {"sha": "head-sha", "ref": "feature-branch"},
+                },
+                "repository": {"owner": {"login": "langchain-ai"}, "name": "open-swe"},
+                "sender": {"login": "octocat", "id": 123},
+            }
+        )
+    )
+
+    kwargs = captured["kwargs"]
+    assert isinstance(kwargs, dict)
+    config = kwargs["config"]["configurable"]
+    assert config["reviewer_event"] == "finding_reply"
+    assert config["re_review"] is True
+    assert config["finding_reply_id"] == "f_1"
+
+
 def test_github_webhook_ignores_unsupported_comment_action(monkeypatch) -> None:
     async def fake_process_github_pr_comment(payload: dict[str, object], event_type: str) -> None:
         raise AssertionError("process_github_pr_comment should not be called")

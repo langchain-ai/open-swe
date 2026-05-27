@@ -2465,7 +2465,7 @@ async def process_github_review_finding_reply(payload: dict[str, Any]) -> None:
         base_sha=base_sha,
         head_sha=head_sha,
         branch_name=branch_name,
-        re_review=False,
+        re_review=True,
     )
     configurable.update(
         {
