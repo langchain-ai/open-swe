@@ -52,6 +52,7 @@ from .utils.github_comments import (
     fetch_pr_comments_since_last_tag,
     format_github_comment_body_for_prompt,
     get_thread_id_from_branch,
+    parse_github_review_command,
     react_to_github_comment,
     sanitize_github_comment_body,
     verify_github_signature,
@@ -2263,12 +2264,24 @@ async def process_github_pr_comment(payload: dict[str, Any], event_type: str) ->
             else:
                 logger.warning("Failed to persist branch_name metadata for thread %s", thread_id)
 
+    comment = payload.get("comment") or payload.get("review", {})
+    is_review_request, _pr_url_override = parse_github_review_command(comment.get("body") or "")
     email = GITHUB_USER_EMAIL_MAP.get(github_login, "")
-    if not email:
+    if email:
+        github_token = await _get_or_resolve_thread_github_token(thread_id, email)
+    elif is_review_request:
+        github_token, expires_at = await get_github_app_installation_token_with_expiry()
+        if github_token:
+            try:
+                await persist_encrypted_github_token(thread_id, github_token, expires_at=expires_at)
+            except Exception:
+                logger.warning(
+                    "Could not persist bot token for PR review request thread %s", thread_id
+                )
+    else:
         logger.warning("No email mapping for GitHub user '%s', skipping", github_login)
         return
 
-    github_token = await _get_or_resolve_thread_github_token(thread_id, email)
     if not github_token:
         logger.warning("No GitHub token for thread %s, skipping", thread_id)
         return

@@ -937,6 +937,72 @@ def test_request_pr_review_tool_uses_shared_trigger(monkeypatch) -> None:
     assert result["success"] is True
 
 
+def test_process_github_pr_comment_review_request_without_email_uses_app_token(
+    monkeypatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    async def fake_extract_pr_context(payload: dict[str, object], event_type: str):
+        return (
+            {"owner": "langchain-ai", "name": "open-swe"},
+            1244,
+            "open-swe/00000000-0000-0000-0000-000000000001",
+            "external-user",
+            "https://github.com/langchain-ai/open-swe/pull/1244",
+            9,
+            None,
+        )
+
+    async def fake_get_app_token_with_expiry() -> tuple[str, str]:
+        return "app-token", "2026-01-01T00:00:00Z"
+
+    async def fake_persist_token(
+        thread_id: str, token: str, *, expires_at: str | None = None
+    ) -> str:
+        captured["persisted"] = {"thread_id": thread_id, "token": token, "expires_at": expires_at}
+        return "encrypted"
+
+    async def fake_react(*args, **kwargs) -> bool:
+        captured["reaction_token"] = kwargs["token"]
+        return True
+
+    async def fake_fetch_comments(repo_config: dict[str, str], pr_number: int, *, token: str):
+        captured["fetch_token"] = token
+        return [{"body": "@open-swe review", "author": "external-user", "created_at": "now"}]
+
+    async def fake_trigger_or_queue_run(*args, **kwargs) -> None:
+        captured["triggered"] = {"args": args, "kwargs": kwargs}
+
+    monkeypatch.setattr(webapp, "extract_pr_context", fake_extract_pr_context)
+    monkeypatch.setattr(webapp, "GITHUB_USER_EMAIL_MAP", {})
+    monkeypatch.setattr(
+        webapp, "get_github_app_installation_token_with_expiry", fake_get_app_token_with_expiry
+    )
+    monkeypatch.setattr(webapp, "persist_encrypted_github_token", fake_persist_token)
+    monkeypatch.setattr(webapp, "react_to_github_comment", fake_react)
+    monkeypatch.setattr(webapp, "fetch_pr_comments_since_last_tag", fake_fetch_comments)
+    monkeypatch.setattr(webapp, "_trigger_or_queue_run", fake_trigger_or_queue_run)
+
+    asyncio.run(
+        webapp.process_github_pr_comment(
+            {
+                "comment": {"id": 9, "body": "@open-swe review"},
+                "sender": {"login": "external-user", "id": 123},
+            },
+            "issue_comment",
+        )
+    )
+
+    assert captured["reaction_token"] == "app-token"
+    assert captured["fetch_token"] == "app-token"
+    assert captured["persisted"] == {
+        "thread_id": "00000000-0000-0000-0000-000000000001",
+        "token": "app-token",
+        "expires_at": "2026-01-01T00:00:00Z",
+    }
+    assert captured["triggered"]
+
+
 def test_process_github_issue_uses_resolved_user_token_for_reaction(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
