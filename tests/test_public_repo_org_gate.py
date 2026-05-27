@@ -104,12 +104,10 @@ def test_gate_allows_org_member_on_public_pr_comment(monkeypatch) -> None:
 
     called: dict[str, object] = {}
 
-    async def fake_process_github_pr_review_command(payload, event_type, pr_url_override) -> None:
+    async def fake_process_github_pr_comment(payload, event_type) -> None:
         called["event"] = event_type
 
-    monkeypatch.setattr(
-        webapp, "process_github_pr_review_command", fake_process_github_pr_review_command
-    )
+    monkeypatch.setattr(webapp, "process_github_pr_comment", fake_process_github_pr_comment)
 
     client = TestClient(webapp.app)
     response = _post_github_webhook(
