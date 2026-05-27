@@ -11,6 +11,7 @@ from ..reviewer_diff import compute_diff_line_set, fetch_pr_diff, is_range_in_di
 from ..reviewer_findings import (
     Finding,
     Severity,
+    _coerce_surface,
     filter_findings_for_publish,
     get_thread_id_from_runtime,
     get_thread_metadata,
@@ -497,6 +498,11 @@ async def _store_review_id_on_findings(
     for finding in findings:
         if finding.get("id") in finding_ids and finding.get("github_review_id") != review_id:
             finding["github_review_id"] = review_id
+            if isinstance(finding.get("id"), str):
+                surface = _coerce_surface(finding, str(finding["id"]))
+                surface["github_review_id"] = review_id
+                finding["surface"] = surface
+            updated = True
     if updated:
         await replace_findings(thread_id, findings)
 
@@ -663,6 +669,15 @@ async def _store_comment_ids_on_findings(
         if comment_id not in comment_ids:
             comment_ids.append(comment_id)
             finding["github_review_comment_ids"] = comment_ids
+        if isinstance(finding_id, str):
+            surface = _coerce_surface(finding, finding_id)
+            surface["state"] = "surfaced"
+            surface["github_review_comment_id"] = comment_id
+            surface["severity_threshold_at_publish"] = finding.get("severity")
+            surface["surfaced_at_sha"] = finding.get("last_confirmed_sha") or finding.get(
+                "first_seen_sha"
+            )
+            finding["surface"] = surface
         if langgraph_run_id:
             finding["github_review_run_id"] = langgraph_run_id
         updated = True
@@ -724,6 +739,10 @@ async def _store_thread_ids_on_findings(
                 thread_ids.append(github_thread_id)
                 finding["github_review_thread_ids"] = thread_ids
                 updated = True
+            surface = _coerce_surface(finding, finding_id)
+            surface["state"] = "surfaced"
+            surface["github_review_thread_id"] = github_thread_id
+            finding["surface"] = surface
             updated = True
 
     if updated:
@@ -747,7 +766,7 @@ async def _resolve_threads_for_resolved_findings(
     resolved_count = 0
     mutated = False
     for finding in findings:
-        if finding.get("status") != "resolved":
+        if finding.get("status") not in {"resolved", "dismissed"}:
             continue
         thread_node_ids = _thread_ids_for_finding(finding)
         for comment_id in _comment_ids_for_finding(finding):
@@ -784,6 +803,12 @@ async def _resolve_threads_for_resolved_findings(
             thread_id in resolved_thread_ids for thread_id in thread_node_ids
         ):
             finding["github_thread_resolved"] = True
+            if isinstance(finding.get("id"), str):
+                surface = _coerce_surface(finding, str(finding["id"]))
+                surface["state"] = "resolved"
+                if thread_node_ids:
+                    surface["github_review_thread_id"] = thread_node_ids[0]
+                finding["surface"] = surface
 
     if mutated:
         thread_id = get_thread_id_from_runtime()

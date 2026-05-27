@@ -254,6 +254,49 @@ def test_github_webhook_ignores_unmentioned_comment_without_info_log(monkeypatch
     assert "does not mention @openswe or @open-swe" not in caplog.text
 
 
+def test_github_webhook_routes_review_comment_reply_without_tag(monkeypatch) -> None:
+    called: dict[str, object] = {}
+
+    async def fake_process_github_review_finding_reply(payload: dict[str, object]) -> None:
+        called["payload"] = payload
+
+    async def fake_repo_enabled(_repo_config: dict[str, str]) -> bool:
+        return True
+
+    monkeypatch.setattr(
+        webapp, "process_github_review_finding_reply", fake_process_github_review_finding_reply
+    )
+    monkeypatch.setattr(webapp, "_is_repo_enabled_for_review", fake_repo_enabled)
+    monkeypatch.setattr(webapp, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
+
+    client = TestClient(webapp.app)
+    response = _post_github_webhook(
+        client,
+        "pull_request_review_comment",
+        {
+            "action": "created",
+            "comment": {
+                "id": 222,
+                "in_reply_to_id": 111,
+                "body": "This is handled elsewhere, so the finding is invalid.",
+            },
+            "pull_request": {
+                "number": 1244,
+                "base": {"sha": "base-sha"},
+                "head": {"sha": "head-sha", "ref": "feature-branch"},
+            },
+            "repository": {"owner": {"login": "langchain-ai"}, "name": "open-swe"},
+            "sender": {"login": "octocat"},
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "accepted"
+    payload = called["payload"]
+    assert isinstance(payload, dict)
+    assert payload["comment"]["in_reply_to_id"] == 111
+
+
 def test_github_webhook_ignores_unsupported_comment_action(monkeypatch) -> None:
     async def fake_process_github_pr_comment(payload: dict[str, object], event_type: str) -> None:
         raise AssertionError("process_github_pr_comment should not be called")

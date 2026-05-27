@@ -43,6 +43,8 @@ Severity = Literal["low", "medium", "high", "critical"]
 Confidence = Literal["low", "medium", "high"]
 FindingStatus = Literal["open", "resolved", "dismissed"]
 DiffSide = Literal["LEFT", "RIGHT"]
+SurfaceState = Literal["not_surfaced", "surfaced", "resolve_pending", "resolved", "error"]
+InteractionKind = Literal["human_reply", "bot_reply"]
 
 SEVERITY_ORDER: dict[Severity, int] = {
     "low": 0,
@@ -89,6 +91,39 @@ class Finding(TypedDict, total=False):
     last_human_reply_body: str | None
     last_reconciliation_note: str | None
     diff_hunk: str | None
+    fingerprint: str
+    anchor: FindingAnchor
+    surface: FindingSurface
+    interactions: list[FindingInteraction]
+
+
+class FindingAnchor(TypedDict):
+    file: str
+    start_line: int | None
+    end_line: int | None
+    side: DiffSide
+
+
+class FindingSurface(TypedDict, total=False):
+    finding_id: str
+    state: SurfaceState
+    github_review_id: int | None
+    github_review_comment_id: int | None
+    github_review_thread_id: str | None
+    severity_threshold_at_publish: Severity | None
+    surfaced_at_sha: str | None
+    last_github_sync_at: str | None
+    last_error: str | None
+
+
+class FindingInteraction(TypedDict, total=False):
+    kind: InteractionKind
+    github_comment_id: int | None
+    github_parent_comment_id: int | None
+    author: str
+    body: str
+    created_at: str
+    needs_reassessment: bool
 
 
 class ReviewerPRMeta(TypedDict, total=False):
@@ -131,8 +166,26 @@ def new_finding(
     finding_id: str | None = None,
 ) -> Finding:
     """Construct a fully-populated ``Finding`` ready to persist."""
+    resolved_id = finding_id or new_finding_id()
+    anchor: FindingAnchor = {
+        "file": file,
+        "start_line": start_line,
+        "end_line": end_line,
+        "side": side,
+    }
+    surface: FindingSurface = {
+        "finding_id": resolved_id,
+        "state": "not_surfaced",
+        "github_review_id": None,
+        "github_review_comment_id": None,
+        "github_review_thread_id": None,
+        "severity_threshold_at_publish": None,
+        "surfaced_at_sha": None,
+        "last_github_sync_at": None,
+        "last_error": None,
+    }
     return {
-        "id": finding_id or new_finding_id(),
+        "id": resolved_id,
         "severity": severity,
         "confidence": confidence,
         "category": category,
@@ -158,7 +211,21 @@ def new_finding(
         "last_human_reply_body": None,
         "last_reconciliation_note": None,
         "diff_hunk": diff_hunk,
+        "fingerprint": _finding_fingerprint(file, start_line, end_line, description),
+        "anchor": anchor,
+        "surface": surface,
+        "interactions": [],
     }
+
+
+def _finding_fingerprint(
+    file: str,
+    start_line: int | None,
+    end_line: int | None,
+    description: str,
+) -> str:
+    normalized_description = " ".join(description.strip().lower().split())
+    return f"{file}:{start_line or ''}:{end_line or ''}:{normalized_description[:160]}"
 
 
 def _coerce_finding(value: Any) -> Finding | None:
@@ -249,6 +316,97 @@ async def update_finding_fields(
         return None
     await replace_findings(thread_id, findings)
     return updated
+
+
+async def update_finding_surface(
+    thread_id: str,
+    finding_id: str,
+    updates: dict[str, Any],
+) -> Finding | None:
+    """Apply updates to the nested surface record and legacy GitHub fields."""
+    findings = await list_findings(thread_id)
+    updated: Finding | None = None
+    for finding in findings:
+        if finding.get("id") != finding_id:
+            continue
+        surface = _coerce_surface(finding, finding_id)
+        surface.update(updates)
+        finding["surface"] = surface
+        _sync_legacy_surface_fields(finding, surface)
+        updated = finding
+        break
+    if updated is None:
+        return None
+    await replace_findings(thread_id, findings)
+    return updated
+
+
+async def append_finding_interaction(
+    thread_id: str,
+    finding_id: str,
+    interaction: FindingInteraction,
+) -> Finding | None:
+    """Persist a GitHub review-thread interaction on one finding."""
+    findings = await list_findings(thread_id)
+    updated: Finding | None = None
+    for finding in findings:
+        if finding.get("id") != finding_id:
+            continue
+        interactions = finding.get("interactions")
+        if not isinstance(interactions, list):
+            interactions = []
+        github_comment_id = interaction.get("github_comment_id")
+        if isinstance(github_comment_id, int) and any(
+            isinstance(item, dict) and item.get("github_comment_id") == github_comment_id
+            for item in interactions
+        ):
+            updated = finding
+            break
+        interactions.append(interaction)
+        finding["interactions"] = interactions
+        updated = finding
+        break
+    if updated is None:
+        return None
+    await replace_findings(thread_id, findings)
+    return updated
+
+
+def _coerce_surface(finding: Finding, finding_id: str) -> FindingSurface:
+    surface = finding.get("surface")
+    if isinstance(surface, dict):
+        coerced = cast(FindingSurface, dict(surface))
+    else:
+        coerced = {"finding_id": finding_id}
+    if not coerced.get("state"):
+        if finding.get("github_thread_resolved"):
+            coerced["state"] = "resolved"
+        elif isinstance(finding.get("github_review_comment_id"), int):
+            coerced["state"] = "surfaced"
+        else:
+            coerced["state"] = "not_surfaced"
+    coerced.setdefault("github_review_id", finding.get("github_review_id"))
+    coerced.setdefault("github_review_comment_id", finding.get("github_review_comment_id"))
+    coerced.setdefault("github_review_thread_id", finding.get("github_review_thread_id"))
+    coerced.setdefault("severity_threshold_at_publish", None)
+    coerced.setdefault("surfaced_at_sha", None)
+    coerced.setdefault("last_github_sync_at", None)
+    coerced.setdefault("last_error", None)
+    return coerced
+
+
+def _sync_legacy_surface_fields(finding: Finding, surface: FindingSurface) -> None:
+    review_id = surface.get("github_review_id")
+    if isinstance(review_id, int) or review_id is None:
+        finding["github_review_id"] = review_id
+    comment_id = surface.get("github_review_comment_id")
+    if isinstance(comment_id, int) or comment_id is None:
+        finding["github_review_comment_id"] = comment_id
+    thread_id = surface.get("github_review_thread_id")
+    if isinstance(thread_id, str) or thread_id is None:
+        finding["github_review_thread_id"] = thread_id
+    if surface.get("state") == "resolved":
+        finding["github_thread_resolved"] = True
 
 
 async def set_reviewer_thread_metadata(

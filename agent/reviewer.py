@@ -371,6 +371,42 @@ def _build_re_review_context(
     )
 
 
+def _build_finding_reply_context(
+    *,
+    pr_url: str,
+    repo_owner: str,
+    repo_name: str,
+    pr_number: int,
+    finding_id: str,
+    reply_author: str,
+    reply_body: str,
+    existing_findings_block: str,
+    existing_threads_block: str = "",
+) -> str:
+    prior_threads_section = (
+        f"## Pre-existing PR review threads\n\n{existing_threads_block}\n\n"
+        if existing_threads_block
+        else ""
+    )
+    return (
+        f"## User replied to an Open SWE review finding\n\n"
+        f"- repo: {repo_owner}/{repo_name}\n"
+        f"- pr_number: {pr_number}\n"
+        f"- url: {pr_url}\n"
+        f"- finding_id: {finding_id}\n"
+        f"- reply_author: {reply_author}\n\n"
+        f"## Reply body\n\n{reply_body}\n\n"
+        f"## Existing findings\n\n{existing_findings_block}\n\n"
+        f"{prior_threads_section}"
+        f"Reassess only this finding. If the reply proves the finding is invalid, "
+        f'call `resolve_finding_thread(id, status="dismissed")`. If code now '
+        f'fixes the finding, call `update_finding(id, status="resolved")`. '
+        f"Use `reply_to_finding_thread` only when the user asked a direct "
+        f"question or a concise clarification is necessary. Call `publish_review` "
+        f"once at the end so pending GitHub thread state is reconciled."
+    )
+
+
 # GitHub login regex: alphanumerics or single hyphens, max 39 chars, optional
 # trailing "[bot]" suffix. Logins that don't match are surfaced as "unknown"
 # so we never let unexpected text leak through this field as a header.
@@ -535,6 +571,7 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
     pr_url = str(config["configurable"].get("pr_url", "") or "")
     last_reviewed_sha = str(config["configurable"].get("last_reviewed_sha", "") or "")
     is_re_review = bool(config["configurable"].get("re_review"))
+    reviewer_event = str(config["configurable"].get("reviewer_event", "") or "")
 
     # Fetch the PR's unified diff from the GitHub API and populate
     # diff_text + diff_line_set so add_finding can reject bad anchors at
@@ -600,7 +637,20 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
 
     review_context = ""
     if pr_number is not None and isinstance(pr_number, int):
-        if is_re_review and last_reviewed_sha:
+        if reviewer_event == "finding_reply":
+            existing_findings = await list_findings_async(thread_id)
+            review_context = _build_finding_reply_context(
+                pr_url=pr_url,
+                repo_owner=repo_owner,
+                repo_name=repo_name,
+                pr_number=pr_number,
+                finding_id=str(config["configurable"].get("finding_reply_id", "") or ""),
+                reply_author=str(config["configurable"].get("finding_reply_author", "") or ""),
+                reply_body=str(config["configurable"].get("finding_reply_body", "") or ""),
+                existing_findings_block=_format_existing_findings(existing_findings),
+                existing_threads_block=existing_threads_block,
+            )
+        elif is_re_review and last_reviewed_sha:
             existing_findings = await list_findings_async(thread_id)
             review_context = _build_re_review_context(
                 pr_url=pr_url,

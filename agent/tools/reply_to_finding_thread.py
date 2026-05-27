@@ -5,7 +5,13 @@ from typing import Any
 
 from langgraph.config import get_config
 
-from ..reviewer_findings import get_finding, get_thread_id_from_runtime, update_finding_fields
+from ..reviewer_findings import (
+    FindingInteraction,
+    append_finding_interaction,
+    get_finding,
+    get_thread_id_from_runtime,
+    update_finding_fields,
+)
 from ..reviewer_publish import reply_to_review_comment
 from ..utils.github_token import get_github_token
 
@@ -77,4 +83,14 @@ async def _reply_to_finding_thread_async(
     if isinstance(reply_id, int):
         updates["last_review_reply_comment_id"] = reply_id
     updated = await update_finding_fields(thread_id, finding_id, updates)
+    interaction: FindingInteraction = {
+        "kind": "bot_reply",
+        "github_comment_id": reply_id if isinstance(reply_id, int) else None,
+        "github_parent_comment_id": comment_id,
+        "author": "open-swe[bot]",
+        "body": body.strip(),
+        "created_at": "",
+        "needs_reassessment": False,
+    }
+    updated = await append_finding_interaction(thread_id, finding_id, interaction)
     return {"success": True, "finding": updated, "reply_id": reply_id}

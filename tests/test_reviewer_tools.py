@@ -408,6 +408,35 @@ def test_update_finding_passes_through_fields() -> None:
     assert updates["last_update_note"] == "addressed by new commit"
 
 
+def test_update_finding_resolves_github_thread_when_pr_context_available() -> None:
+    async def fake_update(thread_id: str, finding_id: str, updates: Any) -> Any:
+        return {"id": finding_id, **updates}
+
+    cfg = _config(repo={"owner": "o", "name": "r"}, pr_number=7)
+    with (
+        patch("agent.tools.update_finding.get_config", return_value=cfg),
+        patch("agent.tools.update_finding.get_thread_id_from_runtime", return_value="tid-1"),
+        patch("agent.tools.update_finding.update_finding_fields", side_effect=fake_update),
+        patch("agent.tools.resolve_finding_thread.get_config", return_value=cfg),
+        patch("agent.tools.resolve_finding_thread.get_github_token", return_value="token"),
+        patch(
+            "agent.tools.resolve_finding_thread._resolve_finding_thread_async",
+            new_callable=AsyncMock,
+            return_value={
+                "success": True,
+                "finding": {"id": "f_a", "status": "resolved", "github_thread_resolved": True},
+                "resolved_thread_count": 1,
+            },
+        ) as resolve_async,
+    ):
+        result = update_finding(finding_id="f_a", status="resolved")
+
+    assert result["success"] is True
+    assert result["github_resolution"]["success"] is True
+    assert result["finding"]["github_thread_resolved"] is True
+    resolve_async.assert_awaited_once()
+
+
 def test_list_findings_filters_by_status() -> None:
     findings = [
         {"id": "f_a", "status": "open"},
