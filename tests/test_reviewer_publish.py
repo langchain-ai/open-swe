@@ -671,3 +671,313 @@ async def test_reply_to_review_comment_posts_reply_payload() -> None:
     args = client_cm.post.await_args
     assert args.args[0] == "https://api.github.com/repos/o/r/pulls/7/comments/123/replies"
     assert args.kwargs["json"] == {"body": "Thanks for the context."}
+
+
+@pytest.mark.asyncio
+async def test_post_pull_request_review_tags_unresolved_anchor_on_422() -> None:
+    """A GitHub 422 with 'Path could not be resolved' must be tagged as
+    ``unresolved_anchor`` and carry the raw errors so the tool layer can act
+    on it (drop offending findings + retry) instead of bubbling an opaque
+    error string that the agent will only retry with identical args."""
+    import httpx
+
+    response = MagicMock()
+    response.status_code = 422
+    response.text = '{"errors":["Path could not be resolved"]}'
+    response.json.return_value = {"errors": ["Path could not be resolved"]}
+    response.raise_for_status.side_effect = httpx.HTTPStatusError(
+        "Unprocessable Entity",
+        request=MagicMock(),
+        response=response,
+    )
+
+    client_cm = AsyncMock()
+    client_cm.__aenter__.return_value = client_cm
+    client_cm.post = AsyncMock(return_value=response)
+
+    with patch("agent.reviewer_publish.httpx.AsyncClient", return_value=client_cm):
+        result = await post_pull_request_review(
+            owner="o",
+            repo="r",
+            pr_number=1,
+            head_sha="sha",
+            body="b",
+            inline_comments=[{"path": "missing.py", "line": 1, "side": "RIGHT", "body": "x"}],
+            token="t",
+        )
+
+    assert isinstance(result, dict)
+    assert result.get("_error_kind") == "unresolved_anchor"
+    assert result.get("_status") == 422
+    assert result.get("_raw_errors") == ["Path could not be resolved"]
+    assert "HTTP 422" in result.get("_error", "")
+
+
+@pytest.mark.asyncio
+async def test_post_pull_request_review_tags_unresolved_anchor_on_line_error() -> None:
+    """A 'Line could not be resolved' 422 must also be tagged as
+    ``unresolved_anchor`` so a line that's not in the diff is treated the same
+    way as a path that's not in the diff."""
+    import httpx
+
+    response = MagicMock()
+    response.status_code = 422
+    response.text = '{"errors":["Line could not be resolved"]}'
+    response.json.return_value = {"errors": ["Line could not be resolved"]}
+    response.raise_for_status.side_effect = httpx.HTTPStatusError(
+        "Unprocessable Entity",
+        request=MagicMock(),
+        response=response,
+    )
+
+    client_cm = AsyncMock()
+    client_cm.__aenter__.return_value = client_cm
+    client_cm.post = AsyncMock(return_value=response)
+
+    with patch("agent.reviewer_publish.httpx.AsyncClient", return_value=client_cm):
+        result = await post_pull_request_review(
+            owner="o",
+            repo="r",
+            pr_number=1,
+            head_sha="sha",
+            body="b",
+            inline_comments=[],
+            token="t",
+        )
+
+    assert isinstance(result, dict)
+    assert result.get("_error_kind") == "unresolved_anchor"
+
+
+@pytest.mark.asyncio
+async def test_post_pull_request_review_does_not_tag_unrelated_422() -> None:
+    """A 422 whose errors don't match the anchor patterns must NOT be tagged
+    as ``unresolved_anchor`` — the retry path is only safe for known
+    per-comment anchor failures."""
+    import httpx
+
+    response = MagicMock()
+    response.status_code = 422
+    response.text = '{"errors":["something else"]}'
+    response.json.return_value = {"errors": ["something else"]}
+    response.raise_for_status.side_effect = httpx.HTTPStatusError(
+        "Unprocessable Entity",
+        request=MagicMock(),
+        response=response,
+    )
+
+    client_cm = AsyncMock()
+    client_cm.__aenter__.return_value = client_cm
+    client_cm.post = AsyncMock(return_value=response)
+
+    with patch("agent.reviewer_publish.httpx.AsyncClient", return_value=client_cm):
+        result = await post_pull_request_review(
+            owner="o",
+            repo="r",
+            pr_number=1,
+            head_sha="sha",
+            body="b",
+            inline_comments=[],
+            token="t",
+        )
+
+    assert isinstance(result, dict)
+    assert result.get("_error_kind") is None
+    assert result.get("_raw_errors") == ["something else"]
+
+
+@pytest.mark.asyncio
+async def test_publish_review_drops_unresolvable_findings_and_retries_once() -> None:
+    """When GitHub rejects the batch with an ``unresolved_anchor`` 422, the
+    tool must filter the bad findings against the PR diff_line_set, re-POST
+    with only the valid ones, return ``success=True``, and report the dropped
+    finding ids via ``unresolvable_findings`` plus a corrective hint."""
+    from agent.tools.publish_review import _publish_review_async
+
+    findings = [
+        _f(id="f_good", severity="high", file="in_diff.py", start_line=10, end_line=10),
+        _f(id="f_bad", severity="high", file="not_in_diff.py", start_line=99, end_line=99),
+    ]
+    # The PR diff only covers in_diff.py:10. f_bad anchors to a file/line not
+    # in the diff, so it must be dropped on retry.
+    diff_line_set = {"in_diff.py": {10}}
+
+    first_response = {
+        "_error": "HTTP 422: ...",
+        "_error_kind": "unresolved_anchor",
+        "_raw_errors": ["Path could not be resolved"],
+        "_status": 422,
+    }
+    retry_response = {"id": 7777}
+    post_review = AsyncMock(side_effect=[first_response, retry_response])
+    fetch_comments = AsyncMock(return_value=[])
+    set_metadata = AsyncMock()
+
+    with (
+        patch(
+            "agent.tools.publish_review.get_config",
+            return_value={
+                "configurable": {
+                    "thread_id": "tid",
+                    "diff_line_set": diff_line_set,
+                },
+            },
+        ),
+        patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
+        patch(
+            "agent.tools.publish_review.list_findings_async",
+            AsyncMock(return_value=findings),
+        ),
+        patch("agent.tools.publish_review.post_pull_request_review", post_review),
+        patch("agent.tools.publish_review.fetch_review_comments", fetch_comments),
+        patch(
+            "agent.tools.publish_review._resolve_threads_for_resolved_findings",
+            new_callable=AsyncMock,
+            return_value=0,
+        ),
+        patch(
+            "agent.tools.publish_review._store_thread_ids_on_findings",
+            new_callable=AsyncMock,
+        ),
+        patch("agent.tools.publish_review.set_reviewer_thread_metadata", set_metadata),
+        patch(
+            "agent.tools.publish_review._maybe_post_slack_completion_reply",
+            new_callable=AsyncMock,
+        ),
+    ):
+        result = await _publish_review_async(
+            owner="o",
+            repo="r",
+            pr_number=7,
+            head_sha="sha",
+            token="t",
+            severity_threshold="medium",
+            cap=15,
+            is_re_review=False,
+        )
+
+    assert post_review.await_count == 2
+    # Retry must contain only the in-diff finding.
+    retry_inline = post_review.await_args_list[1].kwargs["inline_comments"]
+    assert {c["path"] for c in retry_inline} == {"in_diff.py"}
+    assert result["success"] is True
+    assert result["review_id"] == 7777
+    assert result["surfaced_count"] == 1
+    assert result["unresolvable_findings"] == ["f_bad"]
+    assert "update_finding" in result["hint"]
+
+
+@pytest.mark.asyncio
+async def test_publish_review_reports_unresolvable_when_retry_still_fails() -> None:
+    """If even the filtered retry fails, the tool surfaces
+    ``success=False`` plus the offending finding ids and a hint — it must
+    NOT collapse into the opaque retry-with-same-args loop."""
+    from agent.tools.publish_review import _publish_review_async
+
+    findings = [
+        _f(id="f_good", severity="high", file="in_diff.py", start_line=10, end_line=10),
+        _f(id="f_bad", severity="high", file="not_in_diff.py", start_line=99, end_line=99),
+    ]
+    diff_line_set = {"in_diff.py": {10}}
+
+    first_response = {
+        "_error": "HTTP 422: ...",
+        "_error_kind": "unresolved_anchor",
+        "_raw_errors": ["Path could not be resolved"],
+        "_status": 422,
+    }
+    retry_response = {"_error": "HTTP 500: boom"}
+    post_review = AsyncMock(side_effect=[first_response, retry_response])
+
+    with (
+        patch(
+            "agent.tools.publish_review.get_config",
+            return_value={
+                "configurable": {
+                    "thread_id": "tid",
+                    "diff_line_set": diff_line_set,
+                },
+            },
+        ),
+        patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
+        patch(
+            "agent.tools.publish_review.list_findings_async",
+            AsyncMock(return_value=findings),
+        ),
+        patch("agent.tools.publish_review.post_pull_request_review", post_review),
+        patch(
+            "agent.tools.publish_review._resolve_threads_for_resolved_findings",
+            new_callable=AsyncMock,
+            return_value=0,
+        ),
+        patch("agent.tools.publish_review.set_reviewer_thread_metadata", new_callable=AsyncMock),
+    ):
+        result = await _publish_review_async(
+            owner="o",
+            repo="r",
+            pr_number=7,
+            head_sha="sha",
+            token="t",
+            severity_threshold="medium",
+            cap=15,
+            is_re_review=False,
+        )
+
+    assert result["success"] is False
+    assert result["unresolvable_findings"] == ["f_bad"]
+    assert "update_finding" in result["hint"]
+
+
+@pytest.mark.asyncio
+async def test_publish_review_does_not_retry_when_no_findings_can_be_dropped() -> None:
+    """When the unresolved_anchor 422 fires but the diff_line_set rules out
+    no findings (e.g., diff data unavailable), the tool must NOT retry — it
+    must surface the structured error so the agent stops looping."""
+    from agent.tools.publish_review import _publish_review_async
+
+    findings = [
+        _f(id="f_only", severity="high", file="in_diff.py", start_line=10, end_line=10),
+    ]
+    # diff_line_set is missing entirely — no way to tell which finding is bad.
+    first_response = {
+        "_error": "HTTP 422: ...",
+        "_error_kind": "unresolved_anchor",
+        "_raw_errors": ["Path could not be resolved"],
+        "_status": 422,
+    }
+    post_review = AsyncMock(return_value=first_response)
+
+    with (
+        patch(
+            "agent.tools.publish_review.get_config",
+            return_value={"configurable": {"thread_id": "tid"}},
+        ),
+        patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
+        patch(
+            "agent.tools.publish_review.list_findings_async",
+            AsyncMock(return_value=findings),
+        ),
+        patch("agent.tools.publish_review.post_pull_request_review", post_review),
+        patch(
+            "agent.tools.publish_review._resolve_threads_for_resolved_findings",
+            new_callable=AsyncMock,
+            return_value=0,
+        ),
+        patch("agent.tools.publish_review.set_reviewer_thread_metadata", new_callable=AsyncMock),
+    ):
+        result = await _publish_review_async(
+            owner="o",
+            repo="r",
+            pr_number=7,
+            head_sha="sha",
+            token="t",
+            severity_threshold="medium",
+            cap=15,
+            is_re_review=False,
+        )
+
+    # Only one attempt — never retry blindly.
+    assert post_review.await_count == 1
+    assert result["success"] is False
+    assert result["unresolvable_findings"] == []
+    assert "update_finding" in result["hint"]

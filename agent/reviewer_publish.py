@@ -149,7 +149,37 @@ async def post_pull_request_review(
                 e.response.status_code,
                 body,
             )
-            return {"_error": f"HTTP {e.response.status_code}: {body}"}
+            # GitHub returns 422 with errors like "Path could not be resolved"
+            # or "Line could not be resolved" when an inline comment's anchor
+            # is not part of the PR diff. Surface that as a structured signal
+            # so the tool layer can prune the offending findings and retry
+            # once, instead of the agent retrying with byte-identical args.
+            error_kind: str | None = None
+            raw_errors: list[Any] = []
+            if e.response.status_code == 422:
+                try:
+                    parsed = e.response.json()
+                    if isinstance(parsed, dict):
+                        candidate = parsed.get("errors", [])
+                        if isinstance(candidate, list):
+                            raw_errors = candidate
+                except Exception:  # noqa: BLE001 — body may not be JSON
+                    raw_errors = []
+                if any(
+                    isinstance(err, str)
+                    and (
+                        "Path could not be resolved" in err
+                        or "Line could not be resolved" in err
+                    )
+                    for err in raw_errors
+                ):
+                    error_kind = "unresolved_anchor"
+            return {
+                "_error": f"HTTP {e.response.status_code}: {body}",
+                "_error_kind": error_kind,
+                "_raw_errors": raw_errors,
+                "_status": e.response.status_code,
+            }
         except httpx.HTTPError as e:
             logger.exception("Failed to POST PR review for %s/%s#%s", owner, repo, pr_number)
             return {"_error": f"{type(e).__name__}: {e}"}

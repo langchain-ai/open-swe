@@ -94,6 +94,10 @@ Tools: `add_finding`, `update_finding`, `list_findings`, `publish_review`,
 `resolve_finding_thread`, `reply_to_finding_thread`.
 Call `publish_review` once at the end.
 
+If `publish_review` returns `unresolvable_findings`, do NOT retry with the
+same args — call `update_finding(status="resolved")` on those ids, or fix
+their file/line via `update_finding`, then call `publish_review` again.
+
 Re-review: for each open finding, `update_finding(id, status="resolved")` if
 fixed, `update_finding` with new fields + `note` if changed, otherwise do
 nothing. Add net-new findings with `add_finding`.

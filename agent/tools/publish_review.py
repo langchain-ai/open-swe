@@ -7,6 +7,7 @@ from typing import Any
 
 from langgraph.config import get_config
 
+from ..reviewer_diff import is_range_in_diff
 from ..reviewer_findings import (
     Severity,
     filter_findings_for_publish,
@@ -241,6 +242,64 @@ async def _publish_review_async(
         inline_comments=inline_comments,
         token=token,
     )
+    # If GitHub rejected the batch because one or more inline comments anchor
+    # to a file/line that's not in the PR diff, drop just those findings and
+    # retry once. Returning the bare 422 to the agent only invites it to
+    # retry publish_review with byte-identical args until findings drain.
+    unresolvable_findings: list[str] = []
+    if (
+        isinstance(review_response, dict)
+        and review_response.get("_error_kind") == "unresolved_anchor"
+    ):
+        valid_with_payload, dropped_ids = _filter_against_pr_diff(eligible_with_payload)
+        if dropped_ids and valid_with_payload:
+            retry_inline = [p for _, p in valid_with_payload]
+            retry_body = render_review_body(
+                pr_number=pr_number, surfaced_count=len(retry_inline)
+            )
+            retry_response = await post_pull_request_review(
+                owner=owner,
+                repo=repo,
+                pr_number=pr_number,
+                head_sha=head_sha,
+                body=retry_body,
+                inline_comments=retry_inline,
+                token=token,
+            )
+            if isinstance(retry_response, dict) and "_error" not in retry_response:
+                review_response = retry_response
+                inline_comments = retry_inline
+                eligible_with_payload = valid_with_payload
+                unresolvable_findings = dropped_ids
+            else:
+                retry_error = (
+                    retry_response.get("_error", "unknown error")
+                    if isinstance(retry_response, dict)
+                    else "no response"
+                )
+                return {
+                    "success": False,
+                    "error": f"Failed to POST PR review: {retry_error}",
+                    "unresolvable_findings": dropped_ids,
+                    "hint": (
+                        "Call update_finding(status='resolved') on these ids "
+                        "or fix their file/line before retrying."
+                    ),
+                }
+        else:
+            # Either nothing to drop (no diff_line_set available, so we can't
+            # tell which findings are bad) or everything would be dropped.
+            # Either way, do not retry — surface the structural signal so the
+            # agent stops retrying with the same args.
+            return {
+                "success": False,
+                "error": f"Failed to POST PR review: {review_response['_error']}",
+                "unresolvable_findings": dropped_ids,
+                "hint": (
+                    "Call update_finding(status='resolved') on these ids "
+                    "or fix their file/line before retrying."
+                ),
+            }
     if isinstance(review_response, dict) and "_error" in review_response:
         return {
             "success": False,
@@ -303,13 +362,61 @@ async def _publish_review_async(
 
     await set_reviewer_thread_metadata(thread_id, last_reviewed_sha=head_sha)
 
-    return {
+    result: dict[str, Any] = {
         "success": True,
         "review_id": review_id,
         "surfaced_count": len(inline_comments),
         "hidden_count": max(len(open_unpublished) - len(inline_comments), 0),
         "resolved_thread_count": resolved_thread_count,
     }
+    if unresolvable_findings:
+        result["unresolvable_findings"] = unresolvable_findings
+        result["hint"] = (
+            "Some findings had anchors not in the PR diff; "
+            "call update_finding to fix or resolve them."
+        )
+    return result
+
+
+def _filter_against_pr_diff(
+    eligible_with_payload: list[tuple[dict[str, Any], dict[str, Any]]],
+) -> tuple[list[tuple[dict[str, Any], dict[str, Any]]], list[str]]:
+    """Drop findings whose path/line range is not in the current PR diff.
+
+    Returns ``(valid_with_payload, dropped_finding_ids)``. When the run config
+    does not expose ``diff_line_set`` (older configs, eval modes), we can't
+    tell which findings are unresolvable, so we return everything unchanged
+    and an empty drop list — the caller will then surface the original error
+    rather than retry blindly.
+    """
+    config = get_config()
+    configurable = config.get("configurable", {}) if isinstance(config, dict) else {}
+    diff_line_set = configurable.get("diff_line_set") if isinstance(configurable, dict) else None
+    if not isinstance(diff_line_set, dict):
+        return list(eligible_with_payload), []
+
+    valid: list[tuple[dict[str, Any], dict[str, Any]]] = []
+    dropped: list[str] = []
+    for finding, payload in eligible_with_payload:
+        path = payload.get("path")
+        # Prefer the finding's recorded range; fall back to the payload line.
+        start_line = finding.get("start_line")
+        end_line = finding.get("end_line")
+        if end_line is None:
+            payload_line = payload.get("line")
+            if isinstance(payload_line, int):
+                end_line = payload_line
+                if start_line is None:
+                    start_line = payload_line
+        if isinstance(path, str) and is_range_in_diff(
+            diff_line_set, path, start_line, end_line
+        ):
+            valid.append((finding, payload))
+        else:
+            finding_id = finding.get("id")
+            if isinstance(finding_id, str):
+                dropped.append(finding_id)
+    return valid, dropped
 
 
 async def _maybe_post_slack_completion_reply(
