@@ -115,6 +115,7 @@ async def test_push_event_skips_when_pr_diff_unchanged_since_last_review() -> No
             side_effect=["same diff", "same diff"],
         ),
         patch("agent.webapp.set_reviewer_thread_metadata", new=set_metadata),
+        patch("agent.webapp.is_thread_active", new_callable=AsyncMock, return_value=False),
         patch("agent.webapp.get_client", return_value=fake_client),
     ):
         await webapp.process_github_push_event(payload)
@@ -122,6 +123,66 @@ async def test_push_event_skips_when_pr_diff_unchanged_since_last_review() -> No
     fake_client.runs.create.assert_not_called()
     set_metadata.assert_awaited_once()
     assert set_metadata.await_args.kwargs["last_reviewed_sha"] == "newsha"
+
+
+@pytest.mark.asyncio
+async def test_push_event_queues_when_thread_active_even_if_pr_diff_unchanged() -> None:
+    payload = _push_payload(ref="refs/heads/feat-x", after="newsha")
+    pr = {
+        "number": 7,
+        "html_url": "https://github.com/lc/repo/pull/7",
+        "title": "T",
+        "head": {"sha": "newsha", "ref": "feat-x"},
+        "base": {"sha": "basesha", "ref": "main"},
+    }
+    fake_client = MagicMock()
+    fake_client.runs.create = AsyncMock()
+    fetch_compare_diff = AsyncMock()
+    queue_message = AsyncMock()
+
+    with (
+        patch("agent.webapp._is_repo_allowed_for_reviewer", return_value=True),
+        patch(
+            "agent.webapp.get_github_app_installation_token_with_expiry",
+            new_callable=AsyncMock,
+            return_value=("t", None),
+        ),
+        patch(
+            "agent.webapp._fetch_open_pr_for_branch",
+            new_callable=AsyncMock,
+            return_value=pr,
+        ),
+        patch(
+            "agent.webapp._get_thread_metadata_safe",
+            new_callable=AsyncMock,
+            return_value={
+                "kind": "reviewer",
+                "watch": True,
+                "last_reviewed_sha": "oldsha",
+            },
+        ),
+        patch("agent.webapp._fetch_compare_diff", new=fetch_compare_diff),
+        patch(
+            "agent.webapp._ensure_thread_exists_for_metadata",
+            new_callable=AsyncMock,
+            return_value=True,
+        ),
+        patch(
+            "agent.webapp.persist_encrypted_github_token",
+            new_callable=AsyncMock,
+            return_value="enc",
+        ),
+        patch("agent.webapp.set_reviewer_thread_metadata", new_callable=AsyncMock),
+        patch("agent.webapp.is_thread_active", new_callable=AsyncMock, return_value=True),
+        patch("agent.webapp.queue_message_for_thread", new=queue_message),
+        patch("agent.webapp.get_client", return_value=fake_client),
+    ):
+        await webapp.process_github_push_event(payload)
+
+    fetch_compare_diff.assert_not_called()
+    fake_client.runs.create.assert_not_called()
+    queue_message.assert_awaited_once()
+    assert "newsha" in queue_message.await_args.args[1]
 
 
 @pytest.mark.asyncio

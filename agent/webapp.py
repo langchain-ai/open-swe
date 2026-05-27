@@ -2078,8 +2078,10 @@ async def process_github_push_event(payload: dict[str, Any]) -> None:
     if isinstance(last_reviewed_sha, str) and last_reviewed_sha == head_sha:
         logger.info("Push to %s ignored: head_sha unchanged from last_reviewed_sha", head_ref)
         return
+    thread_active = await is_thread_active(thread_id)
     if (
-        isinstance(last_reviewed_sha, str)
+        not thread_active
+        and isinstance(last_reviewed_sha, str)
         and last_reviewed_sha
         and await _is_pr_diff_unchanged_since_last_review(
             repo_config,
@@ -2136,7 +2138,6 @@ async def process_github_push_event(payload: dict[str, Any]) -> None:
         last_reviewed_sha=last_reviewed_sha if isinstance(last_reviewed_sha, str) else "",
     )
 
-    thread_active = await is_thread_active(thread_id)
     if thread_active:
         logger.info("Reviewer thread %s busy, queuing push re-review", thread_id)
         await queue_message_for_thread(thread_id, re_review_prompt)
