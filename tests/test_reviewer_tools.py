@@ -7,7 +7,6 @@ from unittest.mock import AsyncMock, patch
 
 from agent.tools.add_finding import add_finding
 from agent.tools.list_findings import list_findings
-from agent.tools.resolve_finding_thread import resolve_finding_thread
 from agent.tools.update_finding import update_finding
 
 
@@ -197,28 +196,29 @@ def test_update_finding_rejects_invalid_status() -> None:
     assert result["success"] is False
 
 
-def test_resolve_finding_thread_resolves_all_known_threads() -> None:
+def test_update_finding_resolves_github_threads_on_resolve_status() -> None:
+    """update_finding(status='resolved') on a published finding (one carrying
+    github_review_thread_ids from the run-start PR-thread rebuild) also
+    resolves the corresponding GitHub review thread(s). This is what makes
+    'PR is source of truth' work — there's no separate resolve tool."""
     finding = {
         "id": "f1",
         "status": "open",
         "github_review_thread_ids": ["THREAD_1", "THREAD_2"],
-        "github_review_comment_ids": [11, 12],
+        "github_review_comment_id": 11,
     }
     update = AsyncMock(return_value={**finding, "status": "resolved"})
     resolve = AsyncMock(return_value=True)
 
     with (
-        patch(
-            "agent.tools.resolve_finding_thread.get_config",
-            return_value=_config(repo={"owner": "o", "name": "r"}, pr_number=7),
-        ),
-        patch("agent.tools.resolve_finding_thread.get_github_token", return_value="token"),
-        patch("agent.tools.resolve_finding_thread.get_thread_id_from_runtime", return_value="tid"),
-        patch("agent.tools.resolve_finding_thread.get_finding", AsyncMock(return_value=finding)),
-        patch("agent.tools.resolve_finding_thread.resolve_review_thread", resolve),
-        patch("agent.tools.resolve_finding_thread.update_finding_fields", update),
+        patch("agent.tools.update_finding.get_config", return_value=_config()),
+        patch("agent.tools.update_finding.get_github_token", return_value="token"),
+        patch("agent.tools.update_finding.get_thread_id_from_runtime", return_value="tid"),
+        patch("agent.tools.update_finding.get_finding", AsyncMock(return_value=finding)),
+        patch("agent.tools.update_finding.resolve_review_thread", resolve),
+        patch("agent.tools.update_finding.update_finding_fields", update),
     ):
-        result = resolve_finding_thread("f1", status="resolved")
+        result = update_finding("f1", status="resolved")
 
     assert result["success"] is True
     assert result["resolved_thread_count"] == 2
@@ -226,9 +226,59 @@ def test_resolve_finding_thread_resolves_all_known_threads() -> None:
         "THREAD_1",
         "THREAD_2",
     ]
-    updates = update.await_args.args[2]
-    assert updates["github_thread_resolved"] is True
-    assert updates["github_resolved_thread_ids"] == ["THREAD_1", "THREAD_2"]
+
+
+def test_update_finding_skips_thread_resolution_for_unpublished_finding() -> None:
+    """A finding added during the current run (no thread ids) does not trigger
+    any GitHub call — it's purely an in-memory state change."""
+    finding = {
+        "id": "f_new",
+        "status": "open",
+        "github_review_thread_ids": [],
+        "github_review_comment_id": None,
+    }
+    update = AsyncMock(return_value={**finding, "status": "resolved"})
+    resolve = AsyncMock(return_value=True)
+
+    with (
+        patch("agent.tools.update_finding.get_config", return_value=_config()),
+        patch("agent.tools.update_finding.get_github_token", return_value="token"),
+        patch("agent.tools.update_finding.get_thread_id_from_runtime", return_value="tid"),
+        patch("agent.tools.update_finding.get_finding", AsyncMock(return_value=finding)),
+        patch("agent.tools.update_finding.resolve_review_thread", resolve),
+        patch("agent.tools.update_finding.update_finding_fields", update),
+    ):
+        result = update_finding("f_new", status="resolved")
+
+    assert result["success"] is True
+    assert "resolved_thread_count" not in result
+    resolve.assert_not_awaited()
+
+
+def test_update_finding_does_not_re_resolve_when_already_terminal() -> None:
+    """An already-resolved finding does not re-trigger GitHub thread resolution
+    on a no-op update (e.g., just refining the description)."""
+    finding = {
+        "id": "f1",
+        "status": "resolved",
+        "github_review_thread_ids": ["THREAD_1"],
+        "github_review_comment_id": 11,
+    }
+    update = AsyncMock(return_value={**finding, "description": "refined"})
+    resolve = AsyncMock(return_value=True)
+
+    with (
+        patch("agent.tools.update_finding.get_config", return_value=_config()),
+        patch("agent.tools.update_finding.get_github_token", return_value="token"),
+        patch("agent.tools.update_finding.get_thread_id_from_runtime", return_value="tid"),
+        patch("agent.tools.update_finding.get_finding", AsyncMock(return_value=finding)),
+        patch("agent.tools.update_finding.resolve_review_thread", resolve),
+        patch("agent.tools.update_finding.update_finding_fields", update),
+    ):
+        result = update_finding("f1", status="resolved", description="refined")
+
+    assert result["success"] is True
+    resolve.assert_not_awaited()
 
 
 def test_update_finding_rejects_empty_update() -> None:
@@ -337,6 +387,10 @@ def test_update_finding_rejects_long_suggestion_without_clobbering() -> None:
     with (
         patch("agent.tools.update_finding.get_config", return_value=_config()),
         patch("agent.tools.update_finding.get_thread_id_from_runtime", return_value="tid-1"),
+        patch(
+            "agent.tools.update_finding.get_finding",
+            AsyncMock(return_value={"id": "f_a", "status": "open"}),
+        ),
         patch("agent.tools.update_finding.update_finding_fields", side_effect=fake_update),
     ):
         result = update_finding(
@@ -375,6 +429,10 @@ def test_update_finding_empty_string_clears_suggestion() -> None:
     with (
         patch("agent.tools.update_finding.get_config", return_value=_config()),
         patch("agent.tools.update_finding.get_thread_id_from_runtime", return_value="tid-1"),
+        patch(
+            "agent.tools.update_finding.get_finding",
+            AsyncMock(return_value={"id": "f_a", "status": "open"}),
+        ),
         patch("agent.tools.update_finding.update_finding_fields", side_effect=fake_update),
     ):
         result = update_finding(finding_id="f_a", suggestion="")
@@ -393,6 +451,10 @@ def test_update_finding_passes_through_fields() -> None:
     with (
         patch("agent.tools.update_finding.get_config", return_value=_config()),
         patch("agent.tools.update_finding.get_thread_id_from_runtime", return_value="tid-1"),
+        patch(
+            "agent.tools.update_finding.get_finding",
+            AsyncMock(return_value={"id": "f_a", "status": "open"}),
+        ),
         patch("agent.tools.update_finding.update_finding_fields", side_effect=fake_update),
     ):
         result = update_finding(
@@ -402,10 +464,10 @@ def test_update_finding_passes_through_fields() -> None:
         )
 
     assert result["success"] is True
+    assert result.get("note") == "addressed by new commit"
     _t, fid, updates = captured[0]
     assert fid == "f_a"
     assert updates["status"] == "resolved"
-    assert updates["last_update_note"] == "addressed by new commit"
 
 
 def test_list_findings_filters_by_status() -> None:

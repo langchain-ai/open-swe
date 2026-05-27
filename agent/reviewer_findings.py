@@ -1,13 +1,20 @@
 """Findings storage for the reviewer agent.
 
-Findings live in LangGraph thread metadata under the canonical reviewer thread
-for a PR. This file owns the Finding schema and the read/write helpers that
-the reviewer's tools and webhook handlers go through.
+The GitHub PR is the source of truth for review state. Findings live in
+LangGraph thread metadata as a per-run scratchpad: at the start of each
+reviewer run we rebuild the findings list from the PR's review threads (by
+parsing the ``<!-- open-swe-review-comment ... -->`` marker in each bot
+comment) and overwrite the metadata field. During a run the agent mutates
+this list via ``add_finding`` / ``update_finding``. At ``publish_review``
+time, new findings get posted as inline comments and findings now marked
+``resolved``/``dismissed`` have their GitHub threads resolved.
 
-Why thread metadata: it survives sandbox eviction, is queryable cross-thread
-via the langgraph SDK (a future UI lists all reviewer threads by filtering on
-``metadata.kind == "reviewer"``), and matches existing patterns the codebase
-already uses for ``sandbox_id``, ``github_token_encrypted``, etc.
+The only durable cross-run state on the reviewer thread (besides the
+PR-identity / watch / slack-thread fields) is ``published_comments`` — an
+append-only ``{comment_id: {run_id, finding_id}}`` map populated by
+``publish_review`` so the GitHub-reaction → LangSmith-feedback flow can map a
+👍/👎 reaction back to the LangGraph run that produced the comment, without
+scanning findings.
 """
 
 from __future__ import annotations
@@ -22,6 +29,7 @@ from langgraph_sdk import get_client
 logger = logging.getLogger(__name__)
 
 REVIEWER_THREAD_KIND = "reviewer"
+OPEN_SWE_BOT_AUTHORS = frozenset({"open-swe", "open-swe[bot]"})
 
 # Suggestions are only useful when the reader can scan them at a glance and
 # accept with one click. Anything longer reads as the reviewer rewriting the
@@ -61,6 +69,12 @@ class Finding(TypedDict, total=False):
 
     All fields are optional at the TypedDict level so partial updates are
     representable, but ``new_finding`` always returns a fully populated dict.
+
+    Findings reconstructed from existing PR review threads carry
+    ``github_review_comment_id`` and ``github_review_thread_ids`` so that
+    ``update_finding(status="resolved")`` can resolve the GitHub thread and
+    ``reply_to_finding_thread`` can post a reply. New findings (created via
+    ``add_finding`` during the current run) leave both empty.
     """
 
     id: str
@@ -76,18 +90,8 @@ class Finding(TypedDict, total=False):
     status: FindingStatus
     first_seen_sha: str
     last_confirmed_sha: str
-    github_review_id: int | None
     github_review_comment_id: int | None
-    github_review_comment_ids: list[int]
-    github_review_thread_id: str | None
     github_review_thread_ids: list[str]
-    github_review_run_id: str | None
-    github_thread_resolved: bool
-    github_resolved_thread_ids: list[str]
-    last_human_reply_at: str | None
-    last_human_reply_author: str | None
-    last_human_reply_body: str | None
-    last_reconciliation_note: str | None
     diff_hunk: str | None
 
 
@@ -129,6 +133,9 @@ def new_finding(
     suggestion: str | None = None,
     diff_hunk: str | None = None,
     finding_id: str | None = None,
+    status: FindingStatus = "open",
+    github_review_comment_id: int | None = None,
+    github_review_thread_ids: list[str] | None = None,
 ) -> Finding:
     """Construct a fully-populated ``Finding`` ready to persist."""
     return {
@@ -142,21 +149,11 @@ def new_finding(
         "side": side,
         "description": description,
         "suggestion": suggestion,
-        "status": "open",
+        "status": status,
         "first_seen_sha": sha,
         "last_confirmed_sha": sha,
-        "github_review_id": None,
-        "github_review_comment_id": None,
-        "github_review_comment_ids": [],
-        "github_review_thread_id": None,
-        "github_review_thread_ids": [],
-        "github_review_run_id": None,
-        "github_thread_resolved": False,
-        "github_resolved_thread_ids": [],
-        "last_human_reply_at": None,
-        "last_human_reply_author": None,
-        "last_human_reply_body": None,
-        "last_reconciliation_note": None,
+        "github_review_comment_id": github_review_comment_id,
+        "github_review_thread_ids": list(github_review_thread_ids or []),
         "diff_hunk": diff_hunk,
     }
 
@@ -341,3 +338,148 @@ def filter_findings_for_publish(
         )
     )
     return eligible[:cap]
+
+
+def is_open_swe_bot_comment(comment: dict[str, Any]) -> bool:
+    return comment.get("author") in OPEN_SWE_BOT_AUTHORS
+
+
+def findings_from_pr_threads(
+    review_threads: list[dict[str, Any]],
+    *,
+    head_sha: str,
+) -> list[Finding]:
+    """Rebuild the findings list from the PR's review threads.
+
+    Walks each thread, finds the first bot-authored comment carrying an
+    ``open-swe-review-comment`` marker, and materializes a ``Finding`` from
+    that marker. Threads with no bot/marker comment are ignored — those are
+    other reviewers' comments and the agent reads them from the
+    ``<pr_review_threads>`` block in the prompt.
+
+    Multiple threads can share a marker id (legacy from when reconciliation
+    was buggy and duplicated comments). In that case they're collapsed into a
+    single finding with all thread ids attached, so resolving the finding
+    closes every duplicate.
+    """
+    from .reviewer_publish import parse_review_comment_marker
+
+    findings_by_id: dict[str, Finding] = {}
+    for thread in review_threads:
+        if not isinstance(thread, dict):
+            continue
+        thread_node_id = thread.get("id")
+        comments = thread.get("comments") or []
+        if not isinstance(comments, list) or not isinstance(thread_node_id, str):
+            continue
+        marker = None
+        bot_comment: dict[str, Any] | None = None
+        for comment in comments:
+            if not isinstance(comment, dict) or not is_open_swe_bot_comment(comment):
+                continue
+            body = comment.get("body")
+            if not isinstance(body, str):
+                continue
+            candidate = parse_review_comment_marker(body)
+            if candidate is not None:
+                marker = candidate
+                bot_comment = comment
+                break
+        if marker is None or bot_comment is None:
+            continue
+
+        finding_id = marker["id"]
+        is_terminal = bool(thread.get("is_resolved") or thread.get("is_outdated"))
+        status: FindingStatus = "resolved" if is_terminal else "open"
+        comment_id = bot_comment.get("id") if isinstance(bot_comment.get("id"), int) else None
+
+        existing = findings_by_id.get(finding_id)
+        if existing is not None:
+            thread_ids = list(existing.get("github_review_thread_ids") or [])
+            if thread_node_id not in thread_ids:
+                thread_ids.append(thread_node_id)
+            existing["github_review_thread_ids"] = thread_ids
+            # If any duplicate is still open the finding is open; only mark
+            # resolved when every known thread for this id is terminal.
+            if status == "open":
+                existing["status"] = "open"
+            continue
+
+        body = bot_comment.get("body") if isinstance(bot_comment.get("body"), str) else ""
+        description = _description_from_comment_body(body)
+
+        findings_by_id[finding_id] = new_finding(
+            severity="medium",
+            confidence="medium",
+            category="correctness",
+            file=marker["file_path"],
+            start_line=marker["start_line"],
+            end_line=marker["end_line"],
+            description=description,
+            sha=head_sha,
+            side=marker["side"],
+            finding_id=finding_id,
+            status=status,
+            github_review_comment_id=comment_id,
+            github_review_thread_ids=[thread_node_id],
+        )
+    return list(findings_by_id.values())
+
+
+def _description_from_comment_body(body: str) -> str:
+    """Strip the marker prefix from a posted comment body so it reads as a
+    finding description again. Drops the ``<!-- open-swe-review-comment ... -->``
+    header and any leading blank lines."""
+    import re
+
+    stripped = re.sub(
+        r"^\s*<!--\s*open-swe-review-comment\s+.*?-->\s*\n*",
+        "",
+        body,
+        count=1,
+        flags=re.DOTALL,
+    )
+    return stripped.strip()
+
+
+def get_published_comments_map(metadata: dict[str, Any]) -> dict[str, dict[str, str]]:
+    """Return the ``published_comments`` map keyed by comment id (as str).
+
+    The map persists across runs and records which LangGraph run produced
+    each published inline comment. It is the source consulted by the
+    GitHub-reaction → LangSmith-feedback flow.
+    """
+    value = metadata.get("published_comments")
+    if not isinstance(value, dict):
+        return {}
+    out: dict[str, dict[str, str]] = {}
+    for key, entry in value.items():
+        if not isinstance(key, str) or not isinstance(entry, dict):
+            continue
+        run_id = entry.get("run_id")
+        finding_id = entry.get("finding_id")
+        if not isinstance(run_id, str) or not isinstance(finding_id, str):
+            continue
+        out[key] = {"run_id": run_id, "finding_id": finding_id}
+    return out
+
+
+async def record_published_comments(
+    thread_id: str,
+    entries: dict[int, dict[str, str]],
+) -> None:
+    """Append ``{comment_id: {run_id, finding_id}}`` entries to thread metadata.
+
+    Idempotent: re-recording an existing comment id overwrites the entry.
+    Uses ``threads.update`` so existing metadata fields are preserved.
+    """
+    if not entries:
+        return
+    metadata = await get_thread_metadata(thread_id)
+    current = get_published_comments_map(metadata)
+    for comment_id, payload in entries.items():
+        if not isinstance(comment_id, int):
+            continue
+        current[str(comment_id)] = payload
+    client = get_client()
+    await client.threads.update(thread_id=thread_id, metadata={"published_comments": current})

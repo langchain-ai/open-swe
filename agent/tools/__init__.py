@@ -12,7 +12,6 @@ from .list_findings import list_findings
 from .publish_review import publish_review
 from .reply_to_finding_thread import reply_to_finding_thread
 from .request_pr_review import request_pr_review
-from .resolve_finding_thread import resolve_finding_thread
 from .slack_read_thread_messages import slack_read_thread_messages
 from .slack_thread_reply import slack_thread_reply
 from .update_finding import update_finding
@@ -33,7 +32,6 @@ __all__ = [
     "publish_review",
     "request_pr_review",
     "reply_to_finding_thread",
-    "resolve_finding_thread",
     "slack_read_thread_messages",
     "slack_thread_reply",
     "update_finding",

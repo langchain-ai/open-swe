@@ -12,9 +12,12 @@ from agent.reviewer_findings import (
     Finding,
     append_finding,
     filter_findings_for_publish,
+    findings_from_pr_threads,
+    get_published_comments_map,
     list_findings,
     new_finding,
     new_finding_id,
+    record_published_comments,
     replace_findings,
     set_reviewer_thread_metadata,
     update_finding_fields,
@@ -48,15 +51,8 @@ def test_new_finding_defaults() -> None:
     assert finding["side"] == "RIGHT"
     assert finding["first_seen_sha"] == "abc123"
     assert finding["last_confirmed_sha"] == "abc123"
-    assert finding["github_review_id"] is None
     assert finding["github_review_comment_id"] is None
-    assert finding["github_review_comment_ids"] == []
-    assert finding["github_review_thread_id"] is None
     assert finding["github_review_thread_ids"] == []
-    assert finding["github_review_run_id"] is None
-    assert finding["github_thread_resolved"] is False
-    assert finding["github_resolved_thread_ids"] == []
-    assert finding["last_human_reply_at"] is None
     assert finding["suggestion"] is None
 
 
@@ -180,3 +176,150 @@ async def test_set_reviewer_thread_metadata_includes_kind() -> None:
     assert metadata["last_reviewed_sha"] == "sha"
     assert "pr" not in metadata
     assert "findings" not in metadata
+
+
+def _marker_body(finding_id: str, file_path: str = "a.py", line: int = 1) -> str:
+    return (
+        f'<!-- open-swe-review-comment {{"id":"{finding_id}",'
+        f'"file_path":"{file_path}","start_line":{line},'
+        f'"end_line":{line},"side":"RIGHT"}} -->\n\nbug body here'
+    )
+
+
+def test_findings_from_pr_threads_rebuilds_open_finding_from_bot_marker() -> None:
+    threads = [
+        {
+            "id": "THREAD_1",
+            "is_resolved": False,
+            "is_outdated": False,
+            "comments": [
+                {"id": 11, "author": "open-swe[bot]", "body": _marker_body("f1")},
+            ],
+        }
+    ]
+    findings = findings_from_pr_threads(threads, head_sha="sha-head")
+    assert len(findings) == 1
+    f = findings[0]
+    assert f["id"] == "f1"
+    assert f["status"] == "open"
+    assert f["github_review_comment_id"] == 11
+    assert f["github_review_thread_ids"] == ["THREAD_1"]
+    assert f["file"] == "a.py"
+    assert f["start_line"] == 1
+    assert f["end_line"] == 1
+    assert "bug body here" in f["description"]
+    assert "<!--" not in f["description"]
+
+
+def test_findings_from_pr_threads_marks_resolved_when_thread_terminal() -> None:
+    threads = [
+        {
+            "id": "THREAD_1",
+            "is_resolved": True,
+            "is_outdated": False,
+            "comments": [
+                {"id": 11, "author": "open-swe[bot]", "body": _marker_body("f1")},
+            ],
+        },
+        {
+            "id": "THREAD_2",
+            "is_resolved": False,
+            "is_outdated": True,
+            "comments": [
+                {"id": 22, "author": "open-swe", "body": _marker_body("f2")},
+            ],
+        },
+    ]
+    findings = {f["id"]: f for f in findings_from_pr_threads(threads, head_sha="sha")}
+    assert findings["f1"]["status"] == "resolved"
+    assert findings["f2"]["status"] == "resolved"
+
+
+def test_findings_from_pr_threads_ignores_spoofed_non_bot_marker() -> None:
+    threads = [
+        {
+            "id": "THREAD_1",
+            "is_resolved": False,
+            "is_outdated": False,
+            "comments": [
+                {"id": 11, "author": "attacker", "body": _marker_body("f1")},
+            ],
+        }
+    ]
+    assert findings_from_pr_threads(threads, head_sha="sha") == []
+
+
+def test_findings_from_pr_threads_collapses_duplicate_markers() -> None:
+    body = _marker_body("f1")
+    threads = [
+        {
+            "id": "THREAD_OLD",
+            "is_resolved": False,
+            "is_outdated": True,
+            "comments": [{"id": 11, "author": "open-swe[bot]", "body": body}],
+        },
+        {
+            "id": "THREAD_OPEN",
+            "is_resolved": False,
+            "is_outdated": False,
+            "comments": [{"id": 12, "author": "open-swe[bot]", "body": body}],
+        },
+    ]
+    findings = findings_from_pr_threads(threads, head_sha="sha")
+    assert len(findings) == 1
+    assert findings[0]["github_review_thread_ids"] == ["THREAD_OLD", "THREAD_OPEN"]
+    # Status is open because at least one duplicate thread is still open.
+    assert findings[0]["status"] == "open"
+
+
+def test_findings_from_pr_threads_skips_threads_without_marker() -> None:
+    threads = [
+        {
+            "id": "THREAD_HUMAN",
+            "is_resolved": False,
+            "is_outdated": False,
+            "comments": [{"id": 99, "author": "human", "body": "looks fishy"}],
+        }
+    ]
+    assert findings_from_pr_threads(threads, head_sha="sha") == []
+
+
+def test_get_published_comments_map_skips_malformed_entries() -> None:
+    metadata = {
+        "published_comments": {
+            "11": {"run_id": "r1", "finding_id": "f1"},
+            "12": {"run_id": "r2"},
+            "13": "not-a-dict",
+        }
+    }
+    assert get_published_comments_map(metadata) == {"11": {"run_id": "r1", "finding_id": "f1"}}
+
+
+@pytest.mark.asyncio
+async def test_record_published_comments_merges_with_existing_map() -> None:
+    fake_client = AsyncMock()
+    fake_client.threads.get.return_value = {
+        "metadata": {
+            "published_comments": {
+                "10": {"run_id": "r-old", "finding_id": "f-old"},
+            }
+        }
+    }
+    with patch("agent.reviewer_findings.get_client", return_value=fake_client):
+        await record_published_comments(
+            "tid",
+            {11: {"run_id": "r-new", "finding_id": "f-new"}},
+        )
+    persisted = fake_client.threads.update.await_args.kwargs["metadata"]["published_comments"]
+    assert persisted == {
+        "10": {"run_id": "r-old", "finding_id": "f-old"},
+        "11": {"run_id": "r-new", "finding_id": "f-new"},
+    }
+
+
+@pytest.mark.asyncio
+async def test_record_published_comments_no_op_on_empty_entries() -> None:
+    fake_client = AsyncMock()
+    with patch("agent.reviewer_findings.get_client", return_value=fake_client):
+        await record_published_comments("tid", {})
+    fake_client.threads.update.assert_not_called()

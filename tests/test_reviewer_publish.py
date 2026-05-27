@@ -39,8 +39,8 @@ def _f(**overrides: Any) -> Finding:
 @pytest.fixture(autouse=True)
 def _isolate_publish_review_pr_state() -> Iterator[None]:
     with (
-        patch("agent.tools.publish_review.fetch_pr_review_threads", AsyncMock(return_value=[])),
-        patch("agent.tools.publish_review.replace_findings", AsyncMock()),
+        patch("agent.tools.publish_review.record_published_comments", AsyncMock()),
+        patch("agent.reviewer_findings.replace_findings", AsyncMock()),
     ):
         yield
 
@@ -191,9 +191,6 @@ async def test_resolve_review_thread_returns_true_on_success() -> None:
 
 @pytest.mark.asyncio
 async def test_post_pull_request_review_non_dict_body_surfaces_status_and_excerpt() -> None:
-    """A non-dict GitHub response body must surface status code + body excerpt
-    via ``_error`` rather than collapsing to a bare ``None`` (which the
-    user-facing tool would render as the unhelpful ``Failed to POST PR review``)."""
     response = MagicMock()
     response.status_code = 200
     response.json.return_value = ["unexpected", "list", "body"]
@@ -221,7 +218,6 @@ async def test_post_pull_request_review_non_dict_body_surfaces_status_and_excerp
     assert "HTTP 200" in err
     assert "non-dict" in err
     assert "unexpected" in err
-    # The bare legacy string must not be the only signal anymore.
     assert err != "Failed to POST PR review"
 
 
@@ -291,28 +287,19 @@ async def test_publish_review_skips_findings_already_published() -> None:
 
 @pytest.mark.asyncio
 async def test_publish_review_skips_post_on_re_review_with_no_new_findings() -> None:
-    """Re-review with nothing new to surface must not spam another comment."""
+    """Re-review with nothing new to surface must not spam another comment, but
+    it must still resolve threads for findings now marked resolved."""
     from agent.tools.publish_review import _publish_review_async
 
-    # All findings already have github_review_comment_id from the prior publish
-    # (so none are "unpublished"), plus one previously-resolved finding whose
-    # thread still needs to be resolved on GitHub.
     findings = [
-        {
-            "id": "f_old",
-            "severity": "high",
-            "category": "correctness",
-            "file": "a.py",
-            "start_line": 1,
-            "end_line": 1,
-            "side": "RIGHT",
-            "description": "x",
-            "suggestion": None,
-            "status": "resolved",
-            "first_seen_sha": "s",
-            "last_confirmed_sha": "s",
-            "github_review_comment_id": 100,
-        },
+        _f(
+            id="f_old",
+            severity="high",
+            file="a.py",
+            github_review_comment_id=100,
+            github_review_thread_ids=["THREAD_OLD"],
+            status="resolved",
+        ),
     ]
     list_async = AsyncMock(return_value=findings)
     post_review = AsyncMock()
@@ -355,175 +342,30 @@ async def test_publish_review_skips_post_on_re_review_with_no_new_findings() -> 
 
 
 @pytest.mark.asyncio
-async def test_re_review_backfills_existing_marker_and_skips_duplicate_post() -> None:
+async def test_publish_review_resolves_thread_directly_from_finding_thread_ids() -> None:
+    """When a finding carries github_review_thread_ids (populated from
+    findings_from_pr_threads at run start), publish_review resolves those
+    threads directly without re-fetching them — no reconciliation step."""
     from agent.tools.publish_review import _publish_review_async
 
-    finding = _f(id="f_old", first_seen_sha="oldsha", github_review_comment_id=None)
-    findings = [finding]
-    thread = {
-        "id": "THREAD_1",
-        "is_resolved": False,
-        "is_outdated": False,
-        "comments": [
-            {
-                "id": 101,
-                "author": "open-swe[bot]",
-                "body": render_inline_comment_body(finding),
-                "created_at": "2026-05-27T10:00:00Z",
-            }
-        ],
-    }
-    post_review = AsyncMock()
-
-    with (
-        patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
-        patch(
-            "agent.tools.publish_review.fetch_pr_review_threads", AsyncMock(return_value=[thread])
+    findings = [
+        _f(
+            id="f_resolved",
+            severity="high",
+            file="a.py",
+            github_review_comment_id=101,
+            github_review_thread_ids=["THREAD_A", "THREAD_B"],
+            status="resolved",
         ),
-        patch("agent.tools.publish_review.list_findings_async", AsyncMock(return_value=findings)),
-        patch("agent.reviewer_reconcile.list_findings", AsyncMock(return_value=findings)),
-        patch("agent.reviewer_reconcile.replace_findings", AsyncMock()),
-        patch("agent.tools.publish_review.post_pull_request_review", post_review),
-        patch(
-            "agent.tools.publish_review._resolve_threads_for_resolved_findings",
-            new_callable=AsyncMock,
-            return_value=0,
-        ),
-        patch("agent.tools.publish_review.set_reviewer_thread_metadata", new_callable=AsyncMock),
-    ):
-        result = await _publish_review_async(
-            owner="o",
-            repo="r",
-            pr_number=7,
-            head_sha="newsha",
-            token="t",
-            severity_threshold="medium",
-            cap=15,
-            is_re_review=True,
-        )
-
-    post_review.assert_not_called()
-    assert result["skipped_empty_re_review"] is True
-    assert findings[0]["github_review_comment_id"] == 101
-    assert findings[0]["github_review_thread_id"] == "THREAD_1"
-
-
-@pytest.mark.asyncio
-async def test_re_review_backfills_and_resolves_duplicate_existing_threads() -> None:
-    from agent.tools.publish_review import _publish_review_async
-
-    finding = _f(
-        id="f_old",
-        first_seen_sha="oldsha",
-        github_review_comment_id=None,
-        status="resolved",
-    )
-    findings = [finding]
-    threads = [
-        {
-            "id": "THREAD_1",
-            "is_resolved": False,
-            "is_outdated": False,
-            "comments": [
-                {
-                    "id": 101,
-                    "author": "open-swe[bot]",
-                    "body": render_inline_comment_body(finding),
-                    "created_at": "2026-05-27T10:00:00Z",
-                }
-            ],
-        },
-        {
-            "id": "THREAD_2",
-            "is_resolved": False,
-            "is_outdated": False,
-            "comments": [
-                {
-                    "id": 102,
-                    "author": "open-swe[bot]",
-                    "body": render_inline_comment_body(finding),
-                    "created_at": "2026-05-27T10:01:00Z",
-                }
-            ],
-        },
     ]
     resolve_thread = AsyncMock(return_value=True)
 
     with (
         patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
-        patch(
-            "agent.tools.publish_review.fetch_pr_review_threads", AsyncMock(return_value=threads)
-        ),
         patch("agent.tools.publish_review.list_findings_async", AsyncMock(return_value=findings)),
-        patch("agent.reviewer_reconcile.list_findings", AsyncMock(return_value=findings)),
-        patch("agent.reviewer_reconcile.replace_findings", AsyncMock()),
         patch("agent.tools.publish_review.post_pull_request_review", AsyncMock()),
         patch("agent.tools.publish_review.resolve_review_thread", resolve_thread),
         patch("agent.tools.publish_review.set_reviewer_thread_metadata", new_callable=AsyncMock),
-    ):
-        result = await _publish_review_async(
-            owner="o",
-            repo="r",
-            pr_number=7,
-            head_sha="newsha",
-            token="t",
-            severity_threshold="medium",
-            cap=15,
-            is_re_review=True,
-        )
-
-    assert result["success"] is True
-    assert result["review_id"] is None
-    assert result["resolved_thread_count"] == 2
-    assert resolve_thread.await_count == 2
-    assert findings[0]["github_review_comment_ids"] == [101, 102]
-    assert findings[0]["github_review_thread_ids"] == ["THREAD_1", "THREAD_2"]
-    assert findings[0]["github_resolved_thread_ids"] == ["THREAD_1", "THREAD_2"]
-    assert findings[0]["github_thread_resolved"] is True
-
-
-@pytest.mark.asyncio
-async def test_publish_review_backfills_from_threads_when_review_comments_are_empty() -> None:
-    from agent.tools.publish_review import _publish_review_async
-
-    finding = _f(id="f_new", first_seen_sha="sha")
-    findings = [finding]
-    thread = {
-        "id": "THREAD_1",
-        "is_resolved": False,
-        "is_outdated": False,
-        "comments": [
-            {
-                "id": 202,
-                "author": "open-swe[bot]",
-                "body": render_inline_comment_body(finding),
-                "created_at": "2026-05-27T10:00:00Z",
-            }
-        ],
-    }
-    fetch_threads = AsyncMock(side_effect=[[], [thread]])
-
-    with (
-        patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
-        patch("agent.tools.publish_review.fetch_pr_review_threads", fetch_threads),
-        patch("agent.tools.publish_review.list_findings_async", AsyncMock(return_value=findings)),
-        patch("agent.reviewer_reconcile.list_findings", AsyncMock(return_value=findings)),
-        patch("agent.reviewer_reconcile.replace_findings", AsyncMock()),
-        patch(
-            "agent.tools.publish_review.post_pull_request_review",
-            AsyncMock(return_value={"id": 999}),
-        ),
-        patch("agent.tools.publish_review.fetch_review_comments", AsyncMock(return_value=[])),
-        patch(
-            "agent.tools.publish_review._resolve_threads_for_resolved_findings",
-            new_callable=AsyncMock,
-            return_value=0,
-        ),
-        patch("agent.tools.publish_review.set_reviewer_thread_metadata", new_callable=AsyncMock),
-        patch(
-            "agent.tools.publish_review._maybe_post_slack_completion_reply",
-            new_callable=AsyncMock,
-        ),
     ):
         result = await _publish_review_async(
             owner="o",
@@ -533,40 +375,45 @@ async def test_publish_review_backfills_from_threads_when_review_comments_are_em
             token="t",
             severity_threshold="medium",
             cap=15,
-            is_re_review=False,
+            is_re_review=True,
         )
 
     assert result["success"] is True
-    assert result["review_id"] == 999
-    assert fetch_threads.await_count == 2
-    assert findings[0]["github_review_id"] == 999
-    assert findings[0]["github_review_comment_id"] == 202
-    assert findings[0]["github_review_thread_id"] == "THREAD_1"
+    assert result["resolved_thread_count"] == 2
+    assert [call.kwargs["thread_node_id"] for call in resolve_thread.await_args_list] == [
+        "THREAD_A",
+        "THREAD_B",
+    ]
 
 
 @pytest.mark.asyncio
-async def test_re_review_only_posts_current_head_unpublished_findings() -> None:
+async def test_publish_review_records_published_comments_map() -> None:
+    """A successful post writes (comment_id, run_id, finding_id) entries to
+    the cross-run published_comments map so the github-reaction feedback
+    flow can find the originating LangGraph run."""
     from agent.tools.publish_review import _publish_review_async
 
-    old = _f(id="f_old", first_seen_sha="oldsha", file="old.py")
-    new = _f(id="f_new", first_seen_sha="newsha", file="new.py")
-    findings = [old, new]
-    post_review = AsyncMock(return_value={"id": 888})
+    new = _f(id="f_new", severity="high", file="b.py", github_review_comment_id=None)
+    findings = [new]
     fetch_comments = AsyncMock(
         return_value=[
             {
                 "id": 303,
-                "path": "new.py",
+                "path": "src/foo.py",
                 "line": 10,
                 "body": render_inline_comment_body(new),
             }
         ]
     )
+    record = AsyncMock()
 
     with (
         patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
         patch("agent.tools.publish_review.list_findings_async", AsyncMock(return_value=findings)),
-        patch("agent.tools.publish_review.post_pull_request_review", post_review),
+        patch(
+            "agent.tools.publish_review.post_pull_request_review",
+            AsyncMock(return_value={"id": 888}),
+        ),
         patch("agent.tools.publish_review.fetch_review_comments", fetch_comments),
         patch(
             "agent.tools.publish_review._resolve_threads_for_resolved_findings",
@@ -574,8 +421,13 @@ async def test_re_review_only_posts_current_head_unpublished_findings() -> None:
             return_value=0,
         ),
         patch("agent.tools.publish_review.set_reviewer_thread_metadata", new_callable=AsyncMock),
+        patch("agent.tools.publish_review.record_published_comments", record),
+        patch(
+            "agent.tools.publish_review._maybe_post_slack_completion_reply",
+            new_callable=AsyncMock,
+        ),
     ):
-        result = await _publish_review_async(
+        await _publish_review_async(
             owner="o",
             repo="r",
             pr_number=7,
@@ -583,16 +435,15 @@ async def test_re_review_only_posts_current_head_unpublished_findings() -> None:
             token="t",
             severity_threshold="medium",
             cap=15,
-            is_re_review=True,
+            is_re_review=False,
+            langgraph_run_id="run-123",
         )
 
-    assert result["success"] is True
-    assert result["surfaced_count"] == 1
-    inline_comments = post_review.await_args.kwargs["inline_comments"]
-    assert [comment["path"] for comment in inline_comments] == ["new.py"]
-    assert old["github_review_id"] is None
-    assert new["github_review_id"] == 888
-    assert new["github_review_comment_id"] == 303
+    record.assert_awaited_once()
+    args = record.await_args
+    assert args.args[0] == "tid"
+    entries = args.args[1]
+    assert entries == {303: {"run_id": "run-123", "finding_id": "f_new"}}
 
 
 @pytest.mark.asyncio
@@ -786,7 +637,6 @@ async def test_publish_review_skips_slack_reply_on_re_review() -> None:
         )
 
     slack_post.assert_not_awaited()
-    # Re-review path should also avoid even fetching the slack metadata.
     get_metadata.assert_not_awaited()
 
 
@@ -834,7 +684,6 @@ async def test_publish_review_skips_slack_reply_when_no_slack_ref() -> None:
 
 @pytest.mark.asyncio
 async def test_fetch_pr_review_threads_parses_threads_and_comments() -> None:
-    """GraphQL response is mapped into the simplified thread dicts."""
     response = MagicMock()
     response.json.return_value = {
         "data": {
@@ -957,10 +806,6 @@ async def test_reply_to_review_comment_posts_reply_payload() -> None:
 
 @pytest.mark.asyncio
 async def test_post_pull_request_review_tags_unresolved_anchor_on_422() -> None:
-    """A GitHub 422 with 'Path could not be resolved' must be tagged as
-    ``unresolved_anchor`` and carry the raw errors so the tool layer can act
-    on it (drop offending findings + retry) instead of bubbling an opaque
-    error string that the agent will only retry with identical args."""
     import httpx
 
     response = MagicMock()
@@ -997,9 +842,6 @@ async def test_post_pull_request_review_tags_unresolved_anchor_on_422() -> None:
 
 @pytest.mark.asyncio
 async def test_post_pull_request_review_tags_unresolved_anchor_on_line_error() -> None:
-    """A 'Line could not be resolved' 422 must also be tagged as
-    ``unresolved_anchor`` so a line that's not in the diff is treated the same
-    way as a path that's not in the diff."""
     import httpx
 
     response = MagicMock()
@@ -1033,9 +875,6 @@ async def test_post_pull_request_review_tags_unresolved_anchor_on_line_error() -
 
 @pytest.mark.asyncio
 async def test_post_pull_request_review_does_not_tag_unrelated_422() -> None:
-    """A 422 whose errors don't match the anchor patterns must NOT be tagged
-    as ``unresolved_anchor`` — the retry path is only safe for known
-    per-comment anchor failures."""
     import httpx
 
     response = MagicMock()
@@ -1070,18 +909,12 @@ async def test_post_pull_request_review_does_not_tag_unrelated_422() -> None:
 
 @pytest.mark.asyncio
 async def test_publish_review_drops_unresolvable_findings_and_retries_once() -> None:
-    """When GitHub rejects the batch with an ``unresolved_anchor`` 422, the
-    tool must filter the bad findings against the PR diff_line_set, re-POST
-    with only the valid ones, return ``success=True``, and report the dropped
-    finding ids via ``unresolvable_findings`` plus a corrective hint."""
     from agent.tools.publish_review import _publish_review_async
 
     findings = [
         _f(id="f_good", severity="high", file="in_diff.py", start_line=10, end_line=10),
         _f(id="f_bad", severity="high", file="not_in_diff.py", start_line=99, end_line=99),
     ]
-    # The PR diff only covers in_diff.py:10. f_bad anchors to a file/line not
-    # in the diff, so it must be dropped on retry.
     diff_line_set = {"in_diff.py": {"RIGHT": {10}, "LEFT": set()}}
 
     first_response = {
@@ -1117,10 +950,6 @@ async def test_publish_review_drops_unresolvable_findings_and_retries_once() -> 
             new_callable=AsyncMock,
             return_value=0,
         ),
-        patch(
-            "agent.tools.publish_review._store_thread_ids_on_findings",
-            new_callable=AsyncMock,
-        ),
         patch("agent.tools.publish_review.set_reviewer_thread_metadata", set_metadata),
         patch(
             "agent.tools.publish_review._maybe_post_slack_completion_reply",
@@ -1139,7 +968,6 @@ async def test_publish_review_drops_unresolvable_findings_and_retries_once() -> 
         )
 
     assert post_review.await_count == 2
-    # Retry must contain only the in-diff finding.
     retry_inline = post_review.await_args_list[1].kwargs["inline_comments"]
     assert {c["path"] for c in retry_inline} == {"in_diff.py"}
     assert result["success"] is True
@@ -1151,9 +979,6 @@ async def test_publish_review_drops_unresolvable_findings_and_retries_once() -> 
 
 @pytest.mark.asyncio
 async def test_publish_review_reports_unresolvable_when_retry_still_fails() -> None:
-    """If even the filtered retry fails, the tool surfaces
-    ``success=False`` plus the offending finding ids and a hint — it must
-    NOT collapse into the opaque retry-with-same-args loop."""
     from agent.tools.publish_review import _publish_review_async
 
     findings = [
@@ -1212,16 +1037,11 @@ async def test_publish_review_reports_unresolvable_when_retry_still_fails() -> N
 
 @pytest.mark.asyncio
 async def test_publish_review_does_not_retry_when_no_findings_can_be_dropped() -> None:
-    """When the unresolved_anchor 422 fires but the diff_line_set rules out
-    no findings (e.g., diff data unavailable), the tool must NOT retry — it
-    must surface the structured error so the agent stops looping."""
     from agent.tools.publish_review import _publish_review_async
 
     findings = [
         _f(id="f_only", severity="high", file="in_diff.py", start_line=10, end_line=10),
     ]
-    # No cached diff_line_set, and the on-demand fetch fails — no way to tell
-    # which finding is bad.
     first_response = {
         "_error": "HTTP 422: ...",
         "_error_kind": "unresolved_anchor",
@@ -1264,7 +1084,6 @@ async def test_publish_review_does_not_retry_when_no_findings_can_be_dropped() -
             is_re_review=False,
         )
 
-    # Only one attempt — never retry blindly.
     assert post_review.await_count == 1
     assert result["success"] is False
     assert result["unresolvable_findings"] == []
@@ -1273,11 +1092,6 @@ async def test_publish_review_does_not_retry_when_no_findings_can_be_dropped() -
 
 @pytest.mark.asyncio
 async def test_publish_review_fetches_pr_diff_when_diff_line_set_missing() -> None:
-    """Reviewer runs clear ``diff_line_set`` from config before the agent
-    starts, so the publish-time retry path must fall back to fetching the
-    PR's unified diff on demand and recomputing the line set — otherwise no
-    finding is ever droppable and the retry surfaces empty
-    ``unresolvable_findings`` for the reachable production case."""
     from agent.tools.publish_review import _publish_review_async
 
     findings = [
@@ -1321,10 +1135,6 @@ async def test_publish_review_fetches_pr_diff_when_diff_line_set_missing() -> No
             "agent.tools.publish_review._resolve_threads_for_resolved_findings",
             new_callable=AsyncMock,
             return_value=0,
-        ),
-        patch(
-            "agent.tools.publish_review._store_thread_ids_on_findings",
-            new_callable=AsyncMock,
         ),
         patch("agent.tools.publish_review.set_reviewer_thread_metadata", new_callable=AsyncMock),
         patch(

@@ -41,10 +41,10 @@ from .middleware import (
 )
 from .reviewer_diff import compute_diff_line_set, fetch_pr_diff
 from .reviewer_findings import (
-    list_findings as list_findings_async,
+    findings_from_pr_threads,
+    replace_findings,
 )
 from .reviewer_publish import fetch_pr_review_threads
-from .reviewer_reconcile import reconcile_findings_with_review_threads
 from .server import (
     DEFAULT_LLM_MAX_TOKENS,
     DEFAULT_RECURSION_LIMIT,
@@ -60,7 +60,6 @@ from .tools import (
     list_findings,
     publish_review,
     reply_to_finding_thread,
-    resolve_finding_thread,
     update_finding,
     web_search,
 )
@@ -93,24 +92,24 @@ GH_TOKEN=dummy gh repo clone {repo_owner}/{repo_name} && cd {repo_name} && git c
 ```
 
 Tools: `add_finding`, `update_finding`, `list_findings`, `publish_review`,
-`resolve_finding_thread`, `reply_to_finding_thread`.
-Call `publish_review` once at the end.
+`reply_to_finding_thread`. Call `publish_review` once at the end.
 
 If `publish_review` returns `unresolvable_findings`, do NOT retry with the
 same args — call `update_finding(status="resolved")` on those ids, or fix
 their file/line via `update_finding`, then call `publish_review` again.
 
-Re-review: for each open finding, `update_finding(id, status="resolved")` if
-fixed, `update_finding` with new fields + `note` if changed, otherwise do
-nothing. Add net-new findings with `add_finding`.
+Re-review: the existing findings list is rebuilt from the PR's review
+threads at run start — the GitHub PR is the source of truth. For each open
+finding, call `update_finding(id, status="resolved")` if the new commits
+fix it, `update_finding(id, status="dismissed")` if a human reply convinces
+you the finding was invalid, `update_finding` with new fields if the
+situation changed, or do nothing if it still stands. `update_finding` also
+resolves the matching GitHub thread for findings already published. Add
+net-new findings with `add_finding`.
 
-If a human reply shows one of your published findings is invalid, call
-`resolve_finding_thread(finding_id, status="dismissed")` after verifying the
-claim. If the finding is fixed by code, use `update_finding(...,
-status="resolved")`; `publish_review` will close the GitHub thread. Reply with
-`reply_to_finding_thread` only when the user directly asks a question or a short
-clarification is needed after pushback. Bias strongly toward resolving/dismissing
-without replying.
+Reply with `reply_to_finding_thread` only when the user directly asks a
+question or a short clarification is needed after pushback. Bias strongly
+toward resolving/dismissing without replying.
 
 # The bar: file a finding only if it passes these criteria
 
@@ -356,18 +355,18 @@ def _build_re_review_context(
         f"`GH_TOKEN=dummy gh api repos/{repo_owner}/{repo_name}/compare/"
         f'{last_reviewed_sha}...{head_sha} -H "Accept: application/vnd.github.v3.diff"`, '
         f"then review only what's in that diff.\n\n"
-        f"For each open finding above, decide whether the new commits resolved "
-        f'it (`update_finding(id, status="resolved")`), left it unchanged '
-        f"(no action), or changed it materially (`update_finding` with new "
-        f"fields + a `note`). If a human reply on a finding explains why your "
-        f"comment was invalid, verify that analysis, then call "
-        f'`resolve_finding_thread(id, status="dismissed")` to close it. '
-        f"Reply only when directly asked or when a concise clarification is "
-        f"necessary. Then add any net-new findings introduced by the "
-        f"new diff — but skip anything already covered by an existing PR "
-        f"review thread above (your own prior threads, another reviewer's, or "
-        f"one a human has already replied to). Call `publish_review` once at "
-        f"the end."
+        f"The existing findings list above was rebuilt from the PR's review "
+        f"threads — the GitHub PR is the source of truth. For each open "
+        f"finding, decide whether the new commits resolved it "
+        f'(`update_finding(id, status="resolved")`), a human reply convinces '
+        f'you it was invalid (`update_finding(id, status="dismissed")`), '
+        f"changed materially (`update_finding` with new fields), or still "
+        f"stands (no action). `update_finding` resolves the corresponding "
+        f"GitHub thread when the finding was already published. Reply only "
+        f"when directly asked or when a concise clarification is necessary. "
+        f"Then add any net-new findings introduced by the new diff — but "
+        f"skip anything already covered by an existing PR review thread "
+        f"above. Call `publish_review` once at the end."
     )
 
 
@@ -486,14 +485,12 @@ def _format_existing_findings(findings: list[dict]) -> str:
         end = f.get("end_line")
         if start is not None and end is not None:
             location += f":{start}" if start == end else f":{start}-{end}"
+        published = isinstance(f.get("github_review_comment_id"), int)
+        flag = " (published)" if published else ""
         lines.append(
-            f"- [{f.get('id')}] ({f.get('severity')}, {f.get('category')}) "
+            f"- [{f.get('id')}]{flag} ({f.get('severity')}, {f.get('category')}) "
             f"{location} — {f.get('description', '').strip()}"
         )
-        human_reply = f.get("last_human_reply_body")
-        if isinstance(human_reply, str) and human_reply:
-            author = f.get("last_human_reply_author") or "human"
-            lines.append(f"  Human reply from {author}: {human_reply}")
     return "\n".join(lines) if lines else "_(no open findings)_"
 
 
@@ -565,6 +562,7 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
     config["configurable"]["diff_line_set"] = pr_diff_line_set
 
     existing_threads_block = ""
+    rebuilt_findings: list[dict] = []
     if (
         pr_number is not None
         and isinstance(pr_number, int)
@@ -572,6 +570,7 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
         and repo_name
         and github_token
     ):
+        threads: list[dict] = []
         try:
             threads = await fetch_pr_review_threads(
                 owner=repo_owner,
@@ -579,16 +578,6 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
                 pr_number=pr_number,
                 token=github_token,
             )
-            await reconcile_findings_with_review_threads(thread_id, threads)
-            existing_threads_block = _format_pr_review_threads(threads)
-            if existing_threads_block:
-                logger.info(
-                    "Loaded %d existing PR review thread(s) into reviewer context for %s/%s#%s",
-                    len(threads),
-                    repo_owner,
-                    repo_name,
-                    pr_number,
-                )
         except Exception:  # noqa: BLE001
             logger.exception(
                 "Failed to load existing PR review threads for %s/%s#%s; "
@@ -598,10 +587,33 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
                 pr_number,
             )
 
+        existing_threads_block = _format_pr_review_threads(threads)
+        rebuilt_findings = list(findings_from_pr_threads(threads, head_sha=head_sha))
+        if existing_threads_block or rebuilt_findings:
+            logger.info(
+                "Loaded %d existing PR review thread(s) (rebuilt %d finding(s)) "
+                "into reviewer context for %s/%s#%s",
+                len(threads),
+                len(rebuilt_findings),
+                repo_owner,
+                repo_name,
+                pr_number,
+            )
+
+        try:
+            await replace_findings(thread_id, rebuilt_findings)
+        except Exception:  # noqa: BLE001
+            logger.exception(
+                "Failed to persist rebuilt findings from PR threads for %s/%s#%s; "
+                "the agent's tool view may diverge from the prompt for this run",
+                repo_owner,
+                repo_name,
+                pr_number,
+            )
+
     review_context = ""
     if pr_number is not None and isinstance(pr_number, int):
         if is_re_review and last_reviewed_sha:
-            existing_findings = await list_findings_async(thread_id)
             review_context = _build_re_review_context(
                 pr_url=pr_url,
                 repo_owner=repo_owner,
@@ -609,7 +621,7 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
                 pr_number=pr_number,
                 last_reviewed_sha=last_reviewed_sha,
                 head_sha=head_sha,
-                existing_findings_block=_format_existing_findings(existing_findings),
+                existing_findings_block=_format_existing_findings(rebuilt_findings),
                 existing_threads_block=existing_threads_block,
             )
         else:
@@ -720,7 +732,6 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
             update_finding,
             list_findings,
             publish_review,
-            resolve_finding_thread,
             reply_to_finding_thread,
             web_search,
             fetch_url,

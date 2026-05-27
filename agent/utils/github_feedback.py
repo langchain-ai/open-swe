@@ -10,7 +10,7 @@ from typing import Any
 from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
 
-from ..reviewer_findings import list_findings
+from ..reviewer_findings import get_published_comments_map, get_thread_metadata
 from .langsmith import create_langsmith_feedback, delete_langsmith_feedback
 
 logger = logging.getLogger(__name__)
@@ -171,22 +171,15 @@ async def process_github_reaction(
         return
 
     thread_id = _reviewer_thread_id(owner, repo_name, pr_number)
-    findings = await list_findings(thread_id)
-    finding = next(
-        (
-            candidate
-            for candidate in findings
-            if candidate.get("github_review_comment_id") == comment_id
-        ),
-        None,
-    )
-    if finding is None:
-        logger.debug("No tracked finding for GitHub review comment id %s", comment_id)
+    metadata = await get_thread_metadata(thread_id)
+    published_entry = get_published_comments_map(metadata).get(str(comment_id))
+    if published_entry is None:
+        logger.debug("No published_comments entry for GitHub review comment id %s", comment_id)
         return
-
-    run_id = finding.get("github_review_run_id")
+    run_id = published_entry.get("run_id")
+    finding_id = published_entry.get("finding_id")
     if not isinstance(run_id, str) or not run_id:
-        logger.debug("Finding %s has no LangSmith run id for feedback", finding.get("id"))
+        logger.debug("Comment %s has no LangSmith run id for feedback", comment_id)
         return
 
     active_reactions = await _update_reaction_state(
@@ -206,7 +199,7 @@ async def process_github_reaction(
         "repo": repo_name,
         "pr_number": pr_number,
         "comment_id": comment_id,
-        "finding_id": finding.get("id"),
+        "finding_id": finding_id,
         "user_login": user_login,
     }
     score = _score_reactions(active_reactions)

@@ -5,13 +5,13 @@ from typing import Any
 
 from langgraph.config import get_config
 
-from ..reviewer_findings import get_finding, get_thread_id_from_runtime, update_finding_fields
+from ..reviewer_findings import get_finding, get_thread_id_from_runtime
 from ..reviewer_publish import reply_to_review_comment
 from ..utils.github_token import get_github_token
 
 
 def reply_to_finding_thread(finding_id: str, body: str) -> dict[str, Any]:
-    """Reply to the GitHub review thread for a tracked finding."""
+    """Reply to the GitHub review thread for a published finding."""
     if not body.strip():
         return {"success": False, "error": "Reply body is required"}
 
@@ -73,8 +73,4 @@ async def _reply_to_finding_thread_async(
         return {"success": False, "error": "GitHub did not accept the reply"}
 
     reply_id = response.get("id")
-    updates: dict[str, Any] = {"last_reconciliation_note": "Replied to GitHub review thread."}
-    if isinstance(reply_id, int):
-        updates["last_review_reply_comment_id"] = reply_id
-    updated = await update_finding_fields(thread_id, finding_id, updates)
-    return {"success": True, "finding": updated, "reply_id": reply_id}
+    return {"success": True, "reply_id": reply_id}

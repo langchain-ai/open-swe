@@ -536,6 +536,10 @@ async def test_reviewer_injects_pr_review_threads_into_first_review_context() ->
             new_callable=AsyncMock,
             return_value=fake_threads,
         ) as mock_fetch_threads,
+        patch(
+            "agent.reviewer.replace_findings",
+            new_callable=AsyncMock,
+        ),
         patch("agent.reviewer.make_model", return_value=MagicMock()),
         patch("agent.reviewer.create_deep_agent", side_effect=fake_create_deep_agent),
     ):
@@ -609,9 +613,8 @@ async def test_reviewer_injects_pr_review_threads_into_re_review_context() -> No
             return_value=fake_threads,
         ),
         patch(
-            "agent.reviewer.list_findings_async",
+            "agent.reviewer.replace_findings",
             new_callable=AsyncMock,
-            return_value=[],
         ),
         patch("agent.reviewer.make_model", return_value=MagicMock()),
         patch("agent.reviewer.create_deep_agent", side_effect=fake_create_deep_agent),

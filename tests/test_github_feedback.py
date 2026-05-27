@@ -64,6 +64,17 @@ def _reaction_payload(content: str = "+1", action: str = "created") -> dict[str,
     }
 
 
+def _metadata_with_published_comment(
+    comment_id: int, run_id: str, finding_id: str
+) -> dict[str, Any]:
+    return {
+        "kind": "reviewer",
+        "published_comments": {
+            str(comment_id): {"run_id": run_id, "finding_id": finding_id},
+        },
+    }
+
+
 @pytest.mark.asyncio
 async def test_github_reaction_added_creates_langsmith_feedback(
     monkeypatch: pytest.MonkeyPatch,
@@ -92,20 +103,10 @@ async def test_github_reaction_added_creates_langsmith_feedback(
 
     monkeypatch.setattr(github_feedback, "get_client", lambda url: client)
 
-    async def fake_list_findings(thread_id: str) -> list[dict[str, Any]]:
-        return [
-            {
-                "id": "f1",
-                "github_review_comment_id": 123,
-                "github_review_run_id": "run-1",
-            }
-        ]
+    async def fake_get_metadata(_thread_id: str) -> dict[str, Any]:
+        return _metadata_with_published_comment(123, "run-1", "f1")
 
-    monkeypatch.setattr(
-        github_feedback,
-        "list_findings",
-        fake_list_findings,
-    )
+    monkeypatch.setattr(github_feedback, "get_thread_metadata", fake_get_metadata)
     monkeypatch.setattr(github_feedback, "create_langsmith_feedback", fake_create_feedback)
 
     await process_github_reaction_added(_reaction_payload(), delivery_id="delivery-1")
@@ -141,20 +142,10 @@ async def test_github_reaction_removed_deletes_langsmith_feedback(
 
     monkeypatch.setattr(github_feedback, "get_client", lambda url: client)
 
-    async def fake_list_findings(thread_id: str) -> list[dict[str, Any]]:
-        return [
-            {
-                "id": "f1",
-                "github_review_comment_id": 123,
-                "github_review_run_id": "run-1",
-            }
-        ]
+    async def fake_get_metadata(_thread_id: str) -> dict[str, Any]:
+        return _metadata_with_published_comment(123, "run-1", "f1")
 
-    monkeypatch.setattr(
-        github_feedback,
-        "list_findings",
-        fake_list_findings,
-    )
+    monkeypatch.setattr(github_feedback, "get_thread_metadata", fake_get_metadata)
     monkeypatch.setattr(github_feedback, "delete_langsmith_feedback", fake_delete_feedback)
 
     await process_github_reaction_removed(
@@ -169,6 +160,32 @@ async def test_github_reaction_removed_deletes_langsmith_feedback(
         ("github_reaction_state", "langchain-ai/open-swe"),
         "run-1:reviewer:123",
     ) not in client.store.items
+
+
+@pytest.mark.asyncio
+async def test_github_reaction_no_op_when_comment_not_in_published_map(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """If the comment id is not in published_comments (e.g. a reaction on a
+    human-authored review thread), nothing is sent to LangSmith."""
+    client = _FakeClient()
+    created: dict[str, Any] = {}
+
+    def fake_create_feedback(*_a: Any, **_kw: Any) -> bool:
+        created["called"] = True
+        return True
+
+    monkeypatch.setattr(github_feedback, "get_client", lambda url: client)
+
+    async def fake_get_metadata(_thread_id: str) -> dict[str, Any]:
+        return {"kind": "reviewer", "published_comments": {}}
+
+    monkeypatch.setattr(github_feedback, "get_thread_metadata", fake_get_metadata)
+    monkeypatch.setattr(github_feedback, "create_langsmith_feedback", fake_create_feedback)
+
+    await process_github_reaction_added(_reaction_payload(), delivery_id="delivery-skip")
+
+    assert created == {}
 
 
 @pytest.mark.asyncio
