@@ -685,3 +685,141 @@ async def test_reviewer_continues_when_thread_fetch_raises() -> None:
     # The reviewer must still produce a usable prompt even if the thread
     # fetch fails; the first-review user-message context should still appear.
     assert "## Pull request to review" in captured["system_prompt"]
+
+
+@pytest.mark.asyncio
+async def test_reviewer_populates_diff_line_set_from_github_api() -> None:
+    """The reviewer must fetch the PR's unified diff via the GitHub API and
+    populate ``configurable['diff_line_set']`` + ``diff_text`` so
+    ``add_finding`` can reject anchors not in the PR diff at creation time.
+    Without this, bad anchors only fail at publish_review with a 422."""
+    config: RunnableConfig = {
+        "configurable": {
+            "__is_for_execution__": True,
+            "thread_id": "reviewer-thread-id",
+            "source": "github",
+            "repo": {"owner": "acme", "name": "repo"},
+            "pr_number": 42,
+            "pr_url": "https://github.com/acme/repo/pull/42",
+            "base_sha": "base",
+            "head_sha": "head",
+        },
+        "metadata": {},
+    }
+
+    pr_diff = (
+        "diff --git a/in_diff.py b/in_diff.py\n"
+        "--- a/in_diff.py\n"
+        "+++ b/in_diff.py\n"
+        "@@ -1,1 +10,1 @@\n"
+        "+touched\n"
+    )
+
+    def fake_create_deep_agent(*, system_prompt: str, **kwargs: object) -> _DummyAgent:
+        return _DummyAgent()
+
+    with (
+        patch(
+            "agent.reviewer.get_github_token_from_thread",
+            new_callable=AsyncMock,
+            return_value=("gh-token", "encrypted-token", None),
+        ),
+        patch("agent.reviewer.resolve_github_token", new_callable=AsyncMock),
+        patch(
+            "agent.reviewer.ensure_sandbox_for_thread",
+            new_callable=AsyncMock,
+            return_value=MagicMock(),
+        ),
+        patch(
+            "agent.reviewer.aresolve_sandbox_work_dir",
+            new_callable=AsyncMock,
+            return_value="/workspace",
+        ),
+        patch(
+            "agent.reviewer.fetch_agents_md",
+            new_callable=AsyncMock,
+            return_value=None,
+        ),
+        patch(
+            "agent.reviewer.fetch_pr_review_threads",
+            new_callable=AsyncMock,
+            return_value=[],
+        ),
+        patch(
+            "agent.reviewer.fetch_pr_diff",
+            new_callable=AsyncMock,
+            return_value=pr_diff,
+        ) as mock_fetch_diff,
+        patch("agent.reviewer.make_model", return_value=MagicMock()),
+        patch("agent.reviewer.create_deep_agent", side_effect=fake_create_deep_agent),
+    ):
+        await reviewer.get_reviewer_agent(config)
+
+    mock_fetch_diff.assert_awaited_once_with(
+        owner="acme", repo="repo", pr_number=42, token="gh-token"
+    )
+    assert config["configurable"]["diff_text"] == pr_diff
+    assert config["configurable"]["diff_line_set"] == {"in_diff.py": {10}}
+
+
+@pytest.mark.asyncio
+async def test_reviewer_leaves_validation_disabled_when_diff_fetch_fails() -> None:
+    """If the GitHub diff fetch fails, the reviewer must not block the run —
+    fall back to ``diff_line_set=None`` so ``add_finding`` skips validation
+    and the publish-time retry safety net handles anything bad."""
+    config: RunnableConfig = {
+        "configurable": {
+            "__is_for_execution__": True,
+            "thread_id": "reviewer-thread-id",
+            "source": "github",
+            "repo": {"owner": "acme", "name": "repo"},
+            "pr_number": 42,
+            "pr_url": "https://github.com/acme/repo/pull/42",
+            "base_sha": "base",
+            "head_sha": "head",
+        },
+        "metadata": {},
+    }
+
+    def fake_create_deep_agent(*, system_prompt: str, **kwargs: object) -> _DummyAgent:
+        return _DummyAgent()
+
+    with (
+        patch(
+            "agent.reviewer.get_github_token_from_thread",
+            new_callable=AsyncMock,
+            return_value=("gh-token", "encrypted-token", None),
+        ),
+        patch("agent.reviewer.resolve_github_token", new_callable=AsyncMock),
+        patch(
+            "agent.reviewer.ensure_sandbox_for_thread",
+            new_callable=AsyncMock,
+            return_value=MagicMock(),
+        ),
+        patch(
+            "agent.reviewer.aresolve_sandbox_work_dir",
+            new_callable=AsyncMock,
+            return_value="/workspace",
+        ),
+        patch(
+            "agent.reviewer.fetch_agents_md",
+            new_callable=AsyncMock,
+            return_value=None,
+        ),
+        patch(
+            "agent.reviewer.fetch_pr_review_threads",
+            new_callable=AsyncMock,
+            return_value=[],
+        ),
+        patch(
+            "agent.reviewer.fetch_pr_diff",
+            new_callable=AsyncMock,
+            return_value=None,
+        ),
+        patch("agent.reviewer.make_model", return_value=MagicMock()),
+        patch("agent.reviewer.create_deep_agent", side_effect=fake_create_deep_agent),
+    ):
+        await reviewer.get_reviewer_agent(config)
+
+    assert config["configurable"]["diff_text"] == ""
+    assert config["configurable"]["diff_line_set"] is None

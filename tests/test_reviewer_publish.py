@@ -1019,23 +1019,6 @@ async def test_publish_review_fetches_pr_diff_when_diff_line_set_missing() -> No
         "+touched\n"
     )
 
-    http_response = MagicMock()
-    http_response.text = pr_diff
-    http_response.raise_for_status = MagicMock()
-
-    class _FakeClient:
-        def __init__(self, *_: Any, **__: Any) -> None:
-            return None
-
-        async def __aenter__(self) -> _FakeClient:
-            return self
-
-        async def __aexit__(self, *_: Any) -> None:
-            return None
-
-        async def get(self, *_: Any, **__: Any) -> Any:
-            return http_response
-
     with (
         patch(
             "agent.tools.publish_review.get_config",
@@ -1047,7 +1030,10 @@ async def test_publish_review_fetches_pr_diff_when_diff_line_set_missing() -> No
             AsyncMock(return_value=findings),
         ),
         patch("agent.tools.publish_review.post_pull_request_review", post_review),
-        patch("agent.tools.publish_review.httpx.AsyncClient", _FakeClient),
+        patch(
+            "agent.tools.publish_review.fetch_pr_diff",
+            AsyncMock(return_value=pr_diff),
+        ),
         patch("agent.tools.publish_review.fetch_review_comments", AsyncMock(return_value=[])),
         patch(
             "agent.tools.publish_review._resolve_threads_for_resolved_findings",

@@ -183,6 +183,39 @@ def is_range_in_diff(
     return all(line in file_lines for line in range(start_line, end_line + 1))
 
 
+async def fetch_pr_diff(
+    *,
+    owner: str,
+    repo: str,
+    pr_number: int,
+    token: str,
+    timeout: float = 30.0,
+) -> str | None:
+    """Fetch the PR's unified diff (base..head) from the GitHub REST API.
+
+    Returns ``None`` if the request fails. This is the same diff GitHub
+    validates against when posting inline review comments, so it's the right
+    source for ``add_finding``'s in-diff anchor validation and for
+    ``publish_review``'s 422 retry filter.
+    """
+    import httpx
+
+    headers = {
+        "Accept": "application/vnd.github.diff",
+        "Authorization": f"Bearer {token}",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    url = f"https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}"
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url, headers=headers, timeout=timeout)
+            response.raise_for_status()
+    except httpx.HTTPError:
+        logger.exception("Failed to fetch PR diff for %s/%s#%s", owner, repo, pr_number)
+        return None
+    return response.text
+
+
 async def compute_diff_in_sandbox(
     sandbox_backend: SandboxBackendProtocol,
     work_dir: str,

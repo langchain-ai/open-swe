@@ -3,13 +3,11 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 from typing import Any
 
-import httpx
 from langgraph.config import get_config
 
-from ..reviewer_diff import compute_diff_line_set, is_range_in_diff
+from ..reviewer_diff import compute_diff_line_set, fetch_pr_diff, is_range_in_diff
 from ..reviewer_findings import (
     Severity,
     filter_findings_for_publish,
@@ -37,8 +35,6 @@ from ..utils.github_token import (
     invalidate_cached_github_token,
 )
 from ..utils.slack import post_slack_thread_reply
-
-logger = logging.getLogger(__name__)
 
 
 def publish_review(
@@ -408,25 +404,10 @@ async def _resolve_diff_line_set(
     if isinstance(cached, dict):
         return cached
 
-    headers = {
-        "Accept": "application/vnd.github.diff",
-        "Authorization": f"Bearer {token}",
-        "X-GitHub-Api-Version": "2022-11-28",
-    }
-    url = f"https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}"
-    try:
-        async with httpx.AsyncClient() as client:
-            response = await client.get(url, headers=headers, timeout=30.0)
-            response.raise_for_status()
-    except httpx.HTTPError:
-        logger.exception(
-            "Failed to fetch PR diff for %s/%s#%s during publish_review retry",
-            owner,
-            repo,
-            pr_number,
-        )
+    diff_text = await fetch_pr_diff(owner=owner, repo=repo, pr_number=pr_number, token=token)
+    if diff_text is None:
         return None
-    return compute_diff_line_set(response.text)
+    return compute_diff_line_set(diff_text)
 
 
 async def _filter_against_pr_diff(
