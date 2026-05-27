@@ -112,6 +112,12 @@ status="resolved")`; `publish_review` will close the GitHub thread. Reply with
 clarification is needed after pushback. Bias strongly toward resolving/dismissing
 without replying.
 
+If you marked a published finding resolved/dismissed and `publish_review`
+returns `resolved_thread_count=0`, resolve the matching GitHub review thread
+directly with `GH_TOKEN=dummy gh api graphql`: fetch PR `reviewThreads`, find
+the thread whose Open SWE comment marker contains that finding id, then run the
+`resolveReviewThread` mutation for that thread id.
+
 # The bar: file a finding only if it passes these criteria
 
 1. You can anchor it to a specific changed line and quote that line.
