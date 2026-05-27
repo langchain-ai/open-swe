@@ -39,6 +39,7 @@ from .middleware import (
     SlackAssistantStatusMiddleware,
     ToolErrorMiddleware,
 )
+from .reviewer_diff import compute_diff_line_set, fetch_pr_diff
 from .reviewer_findings import (
     list_findings as list_findings_async,
 )
@@ -534,13 +535,33 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
     last_reviewed_sha = str(config["configurable"].get("last_reviewed_sha", "") or "")
     is_re_review = bool(config["configurable"].get("re_review"))
 
-    # Hotfix: prep was producing empty diffs for some PRs and the agent
-    # silently published "no issues found". The agent now fetches the diff
-    # itself via `gh pr diff` (or `gh api ...compare...` on re-review).
-    # `add_finding`'s in-diff line-range validation is skipped when no
-    # diff_line_set is set in config — we trust the agent's anchors.
-    config["configurable"]["diff_text"] = ""
-    config["configurable"]["diff_line_set"] = None
+    # Fetch the PR's unified diff from the GitHub API and populate
+    # diff_text + diff_line_set so add_finding can reject bad anchors at
+    # creation time (instead of letting them fail at publish_review with a
+    # 422 the agent then has to clean up). The API path is reliable — the
+    # previous sandbox-based prep was sometimes producing empty diffs,
+    # which is what forced the earlier hotfix. If the fetch fails, leave
+    # the validation disabled so the run isn't blocked entirely.
+    pr_diff_text = ""
+    pr_diff_line_set: dict[str, set[int]] | None = None
+    if (
+        pr_number is not None
+        and isinstance(pr_number, int)
+        and repo_owner
+        and repo_name
+        and github_token
+    ):
+        fetched_diff = await fetch_pr_diff(
+            owner=repo_owner,
+            repo=repo_name,
+            pr_number=pr_number,
+            token=github_token,
+        )
+        if fetched_diff is not None:
+            pr_diff_text = fetched_diff
+            pr_diff_line_set = compute_diff_line_set(fetched_diff)
+    config["configurable"]["diff_text"] = pr_diff_text
+    config["configurable"]["diff_line_set"] = pr_diff_line_set
 
     existing_threads_block = ""
     if (
