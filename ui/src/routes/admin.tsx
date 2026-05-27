@@ -132,7 +132,7 @@ function GlobalDefaultsSection({ models }: { models: Array<ModelOption> }) {
   return (
     <SettingsSection
       title="Global defaults"
-      description="Workspace-wide model defaults. Per-user Cloud Agent selections override these for the agent."
+      description="Workspace-wide model defaults. Per-user Cloud Agent selections override the agent defaults."
     >
       <div className="divide-y divide-border">
         <RolePicker
@@ -152,6 +152,22 @@ function GlobalDefaultsSection({ models }: { models: Array<ModelOption> }) {
           disabled={!settings.data || save.isPending}
         />
         <RolePicker
+          label="Open SWE Agent subagents"
+          description="Model used by delegated main-agent tasks."
+          models={models}
+          model={settings.data?.default_agent_subagent_model ?? null}
+          effort={settings.data?.default_agent_subagent_reasoning_effort ?? null}
+          onChange={(model, effort) =>
+            settings.data &&
+            save.mutate({
+              ...settings.data,
+              default_agent_subagent_model: model,
+              default_agent_subagent_reasoning_effort: effort,
+            })
+          }
+          disabled={!settings.data || save.isPending}
+        />
+        <RolePicker
           label="Open SWE Reviewer"
           description="Model used for PR review runs."
           models={models}
@@ -163,6 +179,22 @@ function GlobalDefaultsSection({ models }: { models: Array<ModelOption> }) {
               ...settings.data,
               default_reviewer_model: model,
               default_reviewer_reasoning_effort: effort,
+            })
+          }
+          disabled={!settings.data || save.isPending}
+        />
+        <RolePicker
+          label="Open SWE Reviewer subagents"
+          description="Model used by delegated reviewer tasks."
+          models={models}
+          model={settings.data?.default_reviewer_subagent_model ?? null}
+          effort={settings.data?.default_reviewer_subagent_reasoning_effort ?? null}
+          onChange={(model, effort) =>
+            settings.data &&
+            save.mutate({
+              ...settings.data,
+              default_reviewer_subagent_model: model,
+              default_reviewer_subagent_reasoning_effort: effort,
             })
           }
           disabled={!settings.data || save.isPending}

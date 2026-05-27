@@ -82,10 +82,14 @@ def profile_create_prs(profile: dict[str, Any] | None) -> bool:
     return False
 
 
-def normalize_profile_overrides(profile: dict[str, Any]) -> tuple[str | None, str | None]:
-    """Return ``(model_id, reasoning_effort)`` if both are valid, else ``(None, None)``."""
-    model_id = profile.get("default_model")
-    effort = profile.get("reasoning_effort")
+def _normalize_profile_model_pair(
+    profile: dict[str, Any],
+    *,
+    model_key: str,
+    effort_key: str,
+) -> tuple[str | None, str | None]:
+    model_id = profile.get(model_key)
+    effort = profile.get(effort_key)
     if (
         isinstance(model_id, str)
         and model_id in SUPPORTED_MODEL_IDS
@@ -94,3 +98,23 @@ def normalize_profile_overrides(profile: dict[str, Any]) -> tuple[str | None, st
     ):
         return model_id, effort
     return None, None
+
+
+def normalize_profile_overrides(profile: dict[str, Any]) -> tuple[str | None, str | None]:
+    """Return ``(model_id, reasoning_effort)`` if both are valid, else ``(None, None)``."""
+    return _normalize_profile_model_pair(
+        profile,
+        model_key="default_model",
+        effort_key="reasoning_effort",
+    )
+
+
+def normalize_profile_subagent_overrides(
+    profile: dict[str, Any],
+) -> tuple[str | None, str | None]:
+    """Return the profile's subagent model pair if valid, else ``(None, None)``."""
+    return _normalize_profile_model_pair(
+        profile,
+        model_key="default_subagent_model",
+        effort_key="subagent_reasoning_effort",
+    )

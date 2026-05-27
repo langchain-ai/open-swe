@@ -36,6 +36,17 @@ export function ProfileForm({ models, repos, initial, onSubmit, saving, error }:
   const [effort, setEffort] = useState<string>(
     initial.reasoning_effort ?? currentModel?.default_effort ?? "",
   );
+  const [subagentModelId, setSubagentModelId] = useState<string>(
+    initial.default_subagent_model ?? initial.default_model ?? first?.id ?? "",
+  );
+  const currentSubagentModel: ModelOption | undefined =
+    models.find((m) => m.id === subagentModelId) ?? first;
+  const [subagentEffort, setSubagentEffort] = useState<string>(
+    initial.subagent_reasoning_effort ??
+      initial.reasoning_effort ??
+      currentSubagentModel?.default_effort ??
+      "",
+  );
   const [defaultRepo, setDefaultRepo] = useState<string>(initial.default_repo ?? "");
 
   useEffect(() => {
@@ -44,11 +55,22 @@ export function ProfileForm({ models, repos, initial, onSubmit, saving, error }:
     }
   }, [modelId, currentModel, effort]);
 
+  useEffect(() => {
+    if (
+      currentSubagentModel !== undefined &&
+      !currentSubagentModel.efforts.includes(subagentEffort)
+    ) {
+      setSubagentEffort(currentSubagentModel.default_effort);
+    }
+  }, [subagentModelId, currentSubagentModel, subagentEffort]);
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     void onSubmit({
       default_model: modelId,
       reasoning_effort: effort,
+      default_subagent_model: subagentModelId,
+      subagent_reasoning_effort: subagentEffort,
       default_repo: defaultRepo || null,
     });
   };
@@ -79,6 +101,44 @@ export function ProfileForm({ models, repos, initial, onSubmit, saving, error }:
           </SelectTrigger>
           <SelectContent>
             {currentModel?.efforts.map((e) => (
+              <SelectItem key={e} value={e}>
+                {e}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      <div className="flex flex-col gap-2">
+        <Label htmlFor="subagent-model">Default subagent model</Label>
+        <Select
+          value={subagentModelId}
+          onValueChange={(v) => v && setSubagentModelId(v)}
+        >
+          <SelectTrigger id="subagent-model">
+            <SelectValue placeholder="Pick a model" />
+          </SelectTrigger>
+          <SelectContent>
+            {models.map((m) => (
+              <SelectItem key={m.id} value={m.id}>
+                {m.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      <div className="flex flex-col gap-2">
+        <Label htmlFor="subagent-effort">Subagent reasoning effort</Label>
+        <Select
+          value={subagentEffort}
+          onValueChange={(v) => v && setSubagentEffort(v)}
+        >
+          <SelectTrigger id="subagent-effort">
+            <SelectValue placeholder="Pick an effort level" />
+          </SelectTrigger>
+          <SelectContent>
+            {currentSubagentModel?.efforts.map((e) => (
               <SelectItem key={e} value={e}>
                 {e}
               </SelectItem>
@@ -123,7 +183,12 @@ export function ProfileForm({ models, repos, initial, onSubmit, saving, error }:
       {error && <p className="text-destructive text-sm">{error}</p>}
 
       <div className="flex justify-end">
-        <Button type="submit" disabled={saving || !modelId || !effort}>
+        <Button
+          type="submit"
+          disabled={
+            saving || !modelId || !effort || !subagentModelId || !subagentEffort
+          }
+        >
           {saving ? "Saving…" : "Save"}
         </Button>
       </div>

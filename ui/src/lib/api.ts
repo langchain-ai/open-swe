@@ -66,6 +66,8 @@ export interface Profile {
   email?: string;
   default_model?: string;
   reasoning_effort?: string;
+  default_subagent_model?: string | null;
+  subagent_reasoning_effort?: string | null;
   default_repo?: string | null;
   base_branch?: string | null;
   branch_prefix?: string | null;
@@ -78,6 +80,8 @@ export interface Profile {
 export interface ProfileUpdate {
   default_model: string;
   reasoning_effort: string;
+  default_subagent_model?: string | null;
+  subagent_reasoning_effort?: string | null;
   default_repo?: string | null;
   base_branch?: string | null;
   branch_prefix?: string | null;
@@ -97,8 +101,12 @@ export interface TeamSettings {
   autofix_severity_threshold: AutofixMode;
   default_agent_model?: string | null;
   default_agent_reasoning_effort?: string | null;
+  default_agent_subagent_model?: string | null;
+  default_agent_subagent_reasoning_effort?: string | null;
   default_reviewer_model?: string | null;
   default_reviewer_reasoning_effort?: string | null;
+  default_reviewer_subagent_model?: string | null;
+  default_reviewer_subagent_reasoning_effort?: string | null;
   updated_at?: string | null;
 }
 

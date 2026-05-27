@@ -44,6 +44,8 @@ function CloudAgentsPage() {
 
   const [modelId, setModelId] = useState("")
   const [effort, setEffort] = useState("")
+  const [subagentModelId, setSubagentModelId] = useState("")
+  const [subagentEffort, setSubagentEffort] = useState("")
   const [defaultRepo, setDefaultRepo] = useState("")
   const [baseBranch, setBaseBranch] = useState("")
   const [branchPrefix, setBranchPrefix] = useState("")
@@ -53,6 +55,8 @@ function CloudAgentsPage() {
   const firstModel: ModelOption | undefined = options.data?.models[0]
   const currentModel: ModelOption | undefined =
     options.data?.models.find((m) => m.id === modelId) ?? firstModel
+  const currentSubagentModel: ModelOption | undefined =
+    options.data?.models.find((m) => m.id === subagentModelId) ?? firstModel
 
   useEffect(() => {
     if (!profile.data || initialized.current) return
@@ -63,6 +67,18 @@ function CloudAgentsPage() {
     initialized.current = true
     setModelId(profile.data.default_model ?? firstModel?.id ?? "")
     setEffort(profile.data.reasoning_effort ?? firstModel?.default_effort ?? "")
+    setSubagentModelId(
+      profile.data.default_subagent_model ??
+        profile.data.default_model ??
+        firstModel?.id ??
+        ""
+    )
+    setSubagentEffort(
+      profile.data.subagent_reasoning_effort ??
+        profile.data.reasoning_effort ??
+        firstModel?.default_effort ??
+        ""
+    )
     setDefaultRepo(profile.data.default_repo ?? "")
     setBaseBranch(profile.data.base_branch ?? "")
     setBranchPrefix(profile.data.branch_prefix ?? "")
@@ -73,6 +89,15 @@ function CloudAgentsPage() {
       setEffort(currentModel.default_effort)
     }
   }, [currentModel, effort])
+
+  useEffect(() => {
+    if (
+      currentSubagentModel &&
+      !currentSubagentModel.efforts.includes(subagentEffort)
+    ) {
+      setSubagentEffort(currentSubagentModel.default_effort)
+    }
+  }, [currentSubagentModel, subagentEffort])
 
   if (session.isLoading) {
     return (
@@ -99,6 +124,8 @@ function CloudAgentsPage() {
     persist({
       default_model: modelId,
       reasoning_effort: effort,
+      default_subagent_model: subagentModelId,
+      subagent_reasoning_effort: subagentEffort,
       default_repo: defaultRepo || null,
       base_branch: baseBranch || null,
       branch_prefix: branchPrefix || null,
@@ -141,6 +168,48 @@ function CloudAgentsPage() {
                 </SelectTrigger>
                 <SelectContent>
                   {currentModel?.efforts.map((e) => (
+                    <SelectItem key={e} value={e}>
+                      {e}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            }
+          />
+          <SettingsRow
+            label="Default Subagent Model"
+            description="Used for delegated tasks launched by your agent"
+            control={
+              <Select
+                value={subagentModelId}
+                onValueChange={(v) => v && setSubagentModelId(v)}
+              >
+                <SelectTrigger className="w-40">
+                  <SelectValue placeholder="Pick a model" />
+                </SelectTrigger>
+                <SelectContent>
+                  {options.data?.models.map((m) => (
+                    <SelectItem key={m.id} value={m.id}>
+                      {m.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            }
+          />
+          <SettingsRow
+            label="Subagent Reasoning Effort"
+            description="How hard delegated subagents think before answering"
+            control={
+              <Select
+                value={subagentEffort}
+                onValueChange={(v) => v && setSubagentEffort(v)}
+              >
+                <SelectTrigger className="w-32">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {currentSubagentModel?.efforts.map((e) => (
                     <SelectItem key={e} value={e}>
                       {e}
                     </SelectItem>
