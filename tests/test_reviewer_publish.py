@@ -21,6 +21,16 @@ from agent.reviewer_publish import (
 )
 
 
+class _FakeProcess:
+    def __init__(self, *, returncode: int, stdout: bytes, stderr: bytes = b"") -> None:
+        self.returncode = returncode
+        self._stdout = stdout
+        self._stderr = stderr
+
+    async def communicate(self) -> tuple[bytes, bytes]:
+        return self._stdout, self._stderr
+
+
 def _f(**overrides: Any) -> Finding:
     base = new_finding(
         severity="high",
@@ -174,19 +184,24 @@ def test_publish_review_eval_mode_does_not_call_github() -> None:
 
 @pytest.mark.asyncio
 async def test_resolve_review_thread_returns_true_on_success() -> None:
-    response = MagicMock()
-    response.json.return_value = {
-        "data": {"resolveReviewThread": {"thread": {"id": "T_1", "isResolved": True}}}
-    }
-    response.raise_for_status.return_value = None
+    captured: dict[str, Any] = {}
 
-    client_cm = AsyncMock()
-    client_cm.__aenter__.return_value = client_cm
-    client_cm.post = AsyncMock(return_value=response)
+    async def fake_exec(*args: str, **kwargs: Any) -> _FakeProcess:
+        captured["args"] = args
+        captured["env"] = kwargs["env"]
+        return _FakeProcess(
+            returncode=0,
+            stdout=(
+                b'{"data":{"resolveReviewThread":{"thread":{"id":"T_1",'
+                b'"isResolved":true}}}}'
+            ),
+        )
 
-    with patch("agent.reviewer_publish.httpx.AsyncClient", return_value=client_cm):
+    with patch("agent.reviewer_publish.asyncio.create_subprocess_exec", side_effect=fake_exec):
         ok = await resolve_review_thread(thread_node_id="T_1", token="t")
     assert ok is True
+    assert captured["args"][:3] == ("gh", "api", "graphql")
+    assert captured["env"]["GH_TOKEN"] == "t"
 
 
 @pytest.mark.asyncio
@@ -227,15 +242,10 @@ async def test_post_pull_request_review_non_dict_body_surfaces_status_and_excerp
 
 @pytest.mark.asyncio
 async def test_resolve_review_thread_returns_false_on_graphql_errors() -> None:
-    response = MagicMock()
-    response.json.return_value = {"errors": [{"message": "no perms"}]}
-    response.raise_for_status.return_value = None
+    async def fake_exec(*_args: str, **_kwargs: Any) -> _FakeProcess:
+        return _FakeProcess(returncode=0, stdout=b'{"errors":[{"message":"no perms"}]}')
 
-    client_cm = AsyncMock()
-    client_cm.__aenter__.return_value = client_cm
-    client_cm.post = AsyncMock(return_value=response)
-
-    with patch("agent.reviewer_publish.httpx.AsyncClient", return_value=client_cm):
+    with patch("agent.reviewer_publish.asyncio.create_subprocess_exec", side_effect=fake_exec):
         ok = await resolve_review_thread(thread_node_id="T_1", token="t")
     assert ok is False
 

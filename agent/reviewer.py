@@ -100,23 +100,20 @@ If `publish_review` returns `unresolvable_findings`, do NOT retry with the
 same args — call `update_finding(status="resolved")` on those ids, or fix
 their file/line via `update_finding`, then call `publish_review` again.
 
-Re-review: for each open finding, `update_finding(id, status="resolved")` if
-fixed, `update_finding` with new fields + `note` if changed, otherwise do
-nothing. Add net-new findings with `add_finding`.
+Re-review: for each open finding, call `resolve_finding_thread` if a published
+finding is fixed, `update_finding(id, status="resolved")` if an unpublished
+finding is fixed, `update_finding` with new fields + `note` if changed,
+otherwise do nothing. Add net-new findings with `add_finding`.
 
 If a human reply shows one of your published findings is invalid, call
 `resolve_finding_thread(finding_id, status="dismissed")` after verifying the
-claim. If the finding is fixed by code, use `update_finding(...,
-status="resolved")`; `publish_review` will close the GitHub thread. Reply with
-`reply_to_finding_thread` only when the user directly asks a question or a short
-clarification is needed after pushback. Bias strongly toward resolving/dismissing
-without replying.
-
-If you marked a published finding resolved/dismissed and `publish_review`
-returns `resolved_thread_count=0`, resolve the matching GitHub review thread
-directly with `GH_TOKEN=dummy gh api graphql`: fetch PR `reviewThreads`, find
-the thread whose Open SWE comment marker contains that finding id, then run the
-`resolveReviewThread` mutation for that thread id.
+claim. If a published finding is fixed by code, call
+`resolve_finding_thread(finding_id, status="resolved")`; it treats GitHub PR
+review threads as the source of truth and resolves the matching thread with
+`gh api graphql`. Use `update_finding(..., status="resolved")` only for
+unpublished findings. Reply with `reply_to_finding_thread` only when the user
+directly asks a question or a short clarification is needed after pushback.
+Bias strongly toward resolving/dismissing without replying.
 
 # The bar: file a finding only if it passes these criteria
 

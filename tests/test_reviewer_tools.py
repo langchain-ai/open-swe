@@ -206,6 +206,7 @@ def test_resolve_finding_thread_resolves_all_known_threads() -> None:
     }
     update = AsyncMock(return_value={**finding, "status": "resolved"})
     resolve = AsyncMock(return_value=True)
+    fetch_threads = AsyncMock(return_value=[])
 
     with (
         patch(
@@ -215,6 +216,7 @@ def test_resolve_finding_thread_resolves_all_known_threads() -> None:
         patch("agent.tools.resolve_finding_thread.get_github_token", return_value="token"),
         patch("agent.tools.resolve_finding_thread.get_thread_id_from_runtime", return_value="tid"),
         patch("agent.tools.resolve_finding_thread.get_finding", AsyncMock(return_value=finding)),
+        patch("agent.tools.resolve_finding_thread.fetch_pr_review_threads", fetch_threads),
         patch("agent.tools.resolve_finding_thread.resolve_review_thread", resolve),
         patch("agent.tools.resolve_finding_thread.update_finding_fields", update),
     ):
@@ -226,6 +228,7 @@ def test_resolve_finding_thread_resolves_all_known_threads() -> None:
         "THREAD_1",
         "THREAD_2",
     ]
+    fetch_threads.assert_awaited_once()
     updates = update.await_args.args[2]
     assert updates["github_thread_resolved"] is True
     assert updates["github_resolved_thread_ids"] == ["THREAD_1", "THREAD_2"]

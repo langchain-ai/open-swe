@@ -20,8 +20,10 @@ the GraphQL ``resolveReviewThread`` mutation (REST doesn't expose this).
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+import os
 import re
 from typing import Any, TypedDict
 
@@ -498,7 +500,7 @@ async def fetch_review_thread_id_for_comment(
 
 
 async def resolve_review_thread(*, thread_node_id: str, token: str) -> bool:
-    """Mark a review thread as resolved via the GraphQL ``resolveReviewThread`` mutation."""
+    """Mark a review thread as resolved via ``gh api graphql``."""
     mutation = """
     mutation Resolve($threadId: ID!) {
       resolveReviewThread(input: {threadId: $threadId}) {
@@ -506,19 +508,34 @@ async def resolve_review_thread(*, thread_node_id: str, token: str) -> bool:
       }
     }
     """
-    async with httpx.AsyncClient() as client:
-        try:
-            response = await client.post(
-                _GITHUB_GRAPHQL,
-                headers={"Authorization": f"Bearer {token}"},
-                json={"query": mutation, "variables": {"threadId": thread_node_id}},
-                timeout=30,
-            )
-            response.raise_for_status()
-        except httpx.HTTPError:
-            logger.exception("Failed to resolve review thread %s", thread_node_id)
-            return False
-    data = response.json()
+    env = os.environ.copy()
+    env["GH_TOKEN"] = token
+    try:
+        process = await asyncio.create_subprocess_exec(
+            "gh",
+            "api",
+            "graphql",
+            "-f",
+            f"query={mutation}",
+            "-f",
+            f"threadId={thread_node_id}",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=env,
+        )
+        stdout, stderr = await process.communicate()
+    except OSError:
+        logger.exception("Failed to run gh to resolve review thread %s", thread_node_id)
+        return False
+    if process.returncode != 0:
+        stderr_text = stderr.decode("utf-8", errors="replace")[:500]
+        logger.warning("gh failed to resolve review thread %s: %s", thread_node_id, stderr_text)
+        return False
+    try:
+        data = json.loads(stdout.decode("utf-8"))
+    except json.JSONDecodeError:
+        logger.warning("gh returned non-JSON resolving review thread %s", thread_node_id)
+        return False
     if data.get("errors"):
         logger.warning("resolveReviewThread errors: %s", data["errors"])
         return False

@@ -140,8 +140,6 @@ async def _get_finding_with_pr_backfill(
     finding = await get_finding(thread_id, finding_id)
     if finding is None:
         return None
-    if _thread_ids_for_finding(finding) or _comment_ids_for_finding(finding):
-        return finding
 
     review_threads = await fetch_pr_review_threads(
         owner=owner,
