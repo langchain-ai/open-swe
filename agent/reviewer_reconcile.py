@@ -165,7 +165,6 @@ def _sync_thread_status(finding: Finding, matches: list[ReviewThreadMatch]) -> b
     updated = False
     if finding.get("status") == "open":
         finding["status"] = "resolved"
-        finding["last_reconciliation_note"] = "All GitHub threads are resolved or outdated."
         updated = True
 
     resolved_thread_ids = _str_list(finding.get("github_resolved_thread_ids"))

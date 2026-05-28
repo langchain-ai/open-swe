@@ -98,7 +98,7 @@ Tools: `add_finding`, `update_finding`, `list_findings`, `publish_review`,
 Call `publish_review` once at the end.
 
 If `publish_review` returns `unresolvable_findings`, do NOT retry with the
-same args — call `update_finding(status="resolved")` on those ids, or fix
+same args — call `update_finding(status="resolved", note="...")` on those ids, or fix
 their file/line via `update_finding`, then call `publish_review` again.
 
 Re-review: for each open finding, `update_finding(id, status="resolved", note="...")`
@@ -367,11 +367,11 @@ def _build_re_review_context(
         f'{last_reviewed_sha}...{head_sha} -H "Accept: application/vnd.github.v3.diff"`, '
         f"then review only what's in that diff.\n\n"
         f"For each open finding above, decide whether the new commits resolved "
-        f'it (`update_finding(id, status="resolved")`), left it unchanged '
+        f'it (`update_finding(id, status="resolved", note="...")`), left it unchanged '
         f"(no action), or changed it materially (`update_finding` with new "
         f"fields + a `note`). If a human reply on a finding explains why your "
         f"comment was invalid, verify that analysis, then call "
-        f'`resolve_finding_thread(id, status="dismissed")` to close it. '
+        f'`resolve_finding_thread(id, status="dismissed", note="...")` to close it. '
         f"Reply only when directly asked or when a concise clarification is "
         f"necessary. Then add any net-new findings introduced by the "
         f"new diff — but skip anything already covered by an existing PR "
@@ -418,8 +418,8 @@ def _build_finding_reply_context(
         f"## Existing findings\n\n{existing_findings_block}\n\n"
         f"{prior_threads_section}"
         f"Reassess only this finding. If the reply proves the finding is invalid, "
-        f'call `resolve_finding_thread(id, status="dismissed")`. If code now '
-        f'fixes the finding, call `update_finding(id, status="resolved")`. '
+        f'call `resolve_finding_thread(id, status="dismissed", note="...")`. If code now '
+        f'fixes the finding, call `update_finding(id, status="resolved", note="...")`. '
         f"Use `reply_to_finding_thread` only when the user asked a direct "
         f"question or a concise clarification is necessary. Call `publish_review` "
         f"once at the end so pending GitHub thread state is reconciled."

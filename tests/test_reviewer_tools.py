@@ -267,6 +267,17 @@ def test_resolve_finding_thread_resolves_all_known_threads() -> None:
     assert updates["github_thread_resolved"] is True
     assert updates["github_resolved_thread_ids"] == ["THREAD_1", "THREAD_2"]
     assert updates["github_posted_resolution_comment_ids"] == [11, 12]
+    assert updates["resolution_note"] == "Fixed in the latest commit"
+
+
+def test_resolve_finding_thread_requires_note() -> None:
+    with patch(
+        "agent.tools.resolve_finding_thread.get_config",
+        return_value=_config(repo={"owner": "o", "name": "r"}, pr_number=7),
+    ):
+        result = resolve_finding_thread("f1", note=" ", status="resolved")
+    assert result["success"] is False
+    assert "requires a note" in result["error"]
 
 
 def test_update_finding_rejects_empty_update() -> None:
@@ -274,6 +285,13 @@ def test_update_finding_rejects_empty_update() -> None:
         result = update_finding(finding_id="f_x")
     assert result["success"] is False
     assert "No fields" in result["error"]
+
+
+def test_update_finding_requires_note_for_resolution() -> None:
+    with patch("agent.tools.update_finding.get_config", return_value=_config()):
+        result = update_finding(finding_id="f_x", status="resolved")
+    assert result["success"] is False
+    assert "requires a note" in result["error"]
 
 
 def test_update_finding_updates_title() -> None:
@@ -481,6 +499,7 @@ def test_update_finding_passes_through_fields() -> None:
     assert fid == "f_a"
     assert updates["status"] == "resolved"
     assert updates["last_update_note"] == "addressed by new commit"
+    assert updates["resolution_note"] == "addressed by new commit"
 
 
 def test_update_finding_resolves_github_thread_when_pr_context_available() -> None:
@@ -505,7 +524,11 @@ def test_update_finding_resolves_github_thread_when_pr_context_available() -> No
             },
         ) as resolve_async,
     ):
-        result = update_finding(finding_id="f_a", status="resolved")
+        result = update_finding(
+            finding_id="f_a",
+            status="resolved",
+            note="The latest commit adds the missing guard.",
+        )
 
     assert result["success"] is True
     assert result["github_resolution"]["success"] is True
@@ -535,7 +558,11 @@ def test_update_finding_leaves_open_when_github_resolution_fails() -> None:
             },
         ) as resolve_async,
     ):
-        result = update_finding(finding_id="f_a", status="resolved")
+        result = update_finding(
+            finding_id="f_a",
+            status="resolved",
+            note="The latest commit adds the missing guard.",
+        )
 
     assert result["success"] is False
     assert "left open" in result["error"]
@@ -565,11 +592,16 @@ def test_update_finding_resolves_hidden_finding_locally() -> None:
             new_callable=AsyncMock,
         ) as resolve_async,
     ):
-        result = update_finding(finding_id="f_a", status="resolved")
+        result = update_finding(
+            finding_id="f_a",
+            status="resolved",
+            note="The latest commit adds the missing guard.",
+        )
 
     assert result["success"] is True
     _thread_id, _finding_id, updates = captured[0]
     assert updates["status"] == "resolved"
+    assert updates["resolution_note"] == "The latest commit adds the missing guard."
     resolve_async.assert_not_awaited()
 
 
