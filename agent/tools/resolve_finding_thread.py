@@ -10,6 +10,7 @@ from ..reviewer_findings import (
     get_finding,
     get_thread_id_from_runtime,
     update_finding_fields,
+    update_finding_surface,
 )
 from ..reviewer_publish import (
     fetch_pr_review_threads,
@@ -125,6 +126,15 @@ async def _resolve_finding_thread_async(
     if note:
         updates["last_reconciliation_note"] = note
     updated = await update_finding_fields(thread_id, finding_id, updates)
+    surface_updates: dict[str, Any] = {
+        "state": "resolved" if updates["github_thread_resolved"] else "resolve_pending",
+        "github_review_thread_id": github_thread_ids[0],
+        "last_error": None
+        if updates["github_thread_resolved"]
+        else "Not all GitHub threads resolved",
+    }
+    await update_finding_surface(thread_id, finding_id, surface_updates)
+    updated = await get_finding(thread_id, finding_id)
     return {"success": True, "finding": updated, "resolved_thread_count": resolved_count}
 
 

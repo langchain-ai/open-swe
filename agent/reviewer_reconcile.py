@@ -2,7 +2,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from .reviewer_findings import Finding, list_findings, replace_findings
+from .reviewer_findings import (
+    Finding,
+    FindingInteraction,
+    _coerce_surface,
+    list_findings,
+    replace_findings,
+)
 from .reviewer_publish import parse_review_comment_marker
 
 ReviewThread = dict[str, Any]
@@ -135,6 +141,16 @@ def _sync_publication_identity(
         thread_ids.append(new_thread_id)
         finding["github_review_thread_ids"] = thread_ids
         updated = True
+    if isinstance(finding.get("id"), str):
+        surface = _coerce_surface(finding, str(finding["id"]))
+        if isinstance(comment_id, int):
+            surface["github_review_comment_id"] = comment_id
+        if isinstance(new_thread_id, str) and new_thread_id:
+            surface["github_review_thread_id"] = new_thread_id
+        if surface.get("state") in {None, "not_surfaced"}:
+            surface["state"] = "surfaced"
+        finding["surface"] = surface
+        updated = True
     return updated
 
 
@@ -167,6 +183,11 @@ def _sync_thread_status(finding: Finding, matches: list[ReviewThreadMatch]) -> b
         finding["github_resolved_thread_ids"] = resolved_thread_ids
     if all_resolved and not finding.get("github_thread_resolved"):
         finding["github_thread_resolved"] = True
+        updated = True
+    if isinstance(finding.get("id"), str):
+        surface = _coerce_surface(finding, str(finding["id"]))
+        surface["state"] = "resolved" if all_resolved else "resolve_pending"
+        finding["surface"] = surface
         updated = True
     return updated
 
@@ -202,6 +223,28 @@ def _sync_latest_human_reply(
     finding["last_reconciliation_note"] = (
         "Human replied to this review thread; reassess before taking action."
     )
+    interactions = finding.get("interactions")
+    if not isinstance(interactions, list):
+        interactions = []
+    reply_id = latest.get("id")
+    interaction: FindingInteraction = {
+        "kind": "human_reply",
+        "github_comment_id": reply_id if isinstance(reply_id, int) else None,
+        "github_parent_comment_id": github_comment_id,
+        "author": author,
+        "body": body,
+        "created_at": created_at,
+        "needs_reassessment": True,
+    }
+    if not (
+        isinstance(reply_id, int)
+        and any(
+            isinstance(item, dict) and item.get("github_comment_id") == reply_id
+            for item in interactions
+        )
+    ):
+        interactions.append(interaction)
+        finding["interactions"] = interactions
     return True
 
 

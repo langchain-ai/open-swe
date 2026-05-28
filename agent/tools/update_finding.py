@@ -100,6 +100,21 @@ def update_finding(
     if updated is None:
         return {"success": False, "error": f"No finding found with id {finding_id}"}
     result: dict[str, Any] = {"success": True, "finding": updated}
+    repo_config = configurable.get("repo") if isinstance(configurable, dict) else None
+    pr_number = configurable.get("pr_number") if isinstance(configurable, dict) else None
+    can_resolve_github_thread = (
+        isinstance(repo_config, dict)
+        and bool(repo_config.get("owner"))
+        and bool(repo_config.get("name"))
+        and isinstance(pr_number, int)
+    )
+    if status in {"resolved", "dismissed"} and can_resolve_github_thread:
+        from .resolve_finding_thread import resolve_finding_thread
+
+        resolve_result = resolve_finding_thread(finding_id, status=status)
+        result["github_resolution"] = resolve_result
+        if resolve_result.get("success"):
+            result["finding"] = resolve_result.get("finding", updated)
     if suggestion_dropped:
         result["suggestion_dropped"] = True
         result["warning"] = (
