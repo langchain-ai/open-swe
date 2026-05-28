@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import asyncio
-import os
 from typing import Any
 
 from langgraph.config import get_config
 
+from ..dashboard.team_settings import get_team_review_trace_links_enabled
 from ..reviewer_diff import compute_diff_line_set, fetch_pr_diff, is_range_in_diff
 from ..reviewer_findings import (
     Finding,
@@ -43,9 +43,6 @@ from ..utils.github_token import (
 )
 from ..utils.langsmith import get_langsmith_trace_url
 from ..utils.slack import post_slack_thread_reply
-
-_REVIEW_TRACE_LINK_ENV = "OPEN_SWE_REVIEW_TRACE_LINK_ENABLED"
-_DISABLED_BOOL_STRINGS = {"0", "false", "no", "off"}
 
 
 def publish_review(
@@ -105,7 +102,6 @@ def publish_review(
             )
         )
 
-    review_trace_url = _review_trace_url_from_config(configurable)
     token = get_github_token()
     if not token:
         return {"success": False, "error": "No GitHub token available"}
@@ -122,7 +118,7 @@ def publish_review(
                 cap=cap,
                 is_re_review=is_re_review,
                 langgraph_run_id=_current_run_id(config),
-                review_trace_url=review_trace_url,
+                trace_link_config_override=configurable.get("review_trace_link_enabled"),
             )
         )
     except GitHubAuthError as exc:
@@ -143,14 +139,12 @@ def _cast_severity(value: str) -> Severity:
     return value  # type: ignore[return-value]
 
 
-def _review_trace_url_from_config(configurable: dict[str, Any]) -> str | None:
-    if configurable.get("review_trace_link_enabled") is False:
+async def _resolve_review_trace_url(thread_id: str, config_override: object) -> str | None:
+    if config_override is False:
         return None
-    env_value = os.environ.get(_REVIEW_TRACE_LINK_ENV)
-    if isinstance(env_value, str) and env_value.strip().lower() in _DISABLED_BOOL_STRINGS:
+    if not await get_team_review_trace_links_enabled():
         return None
-    thread_id = configurable.get("thread_id")
-    if not isinstance(thread_id, str) or not thread_id:
+    if not thread_id:
         return None
     return get_langsmith_trace_url(thread_id)
 
@@ -204,9 +198,10 @@ async def _publish_review_async(
     cap: int,
     is_re_review: bool,
     langgraph_run_id: str | None = None,
-    review_trace_url: str | None = None,
+    trace_link_config_override: object = None,
 ) -> dict[str, Any]:
     thread_id = get_thread_id_from_runtime()
+    review_trace_url = await _resolve_review_trace_url(thread_id, trace_link_config_override)
     findings = await _backfill_findings_from_pr_threads(
         thread_id=thread_id,
         owner=owner,
