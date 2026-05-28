@@ -144,6 +144,63 @@ async def set_custom_prompt(full_name: str, custom_prompt: str) -> dict[str, Any
     return await update_review_style(full_name, patch)
 
 
+_REPO_LEARNINGS_HEADER = "## Learned from PR comment replies"
+
+
+def _normalize_learning_text(learning: str) -> str:
+    return " ".join(
+        line.strip().lstrip("-*").strip() for line in learning.splitlines() if line.strip()
+    )
+
+
+async def append_repo_prompt_learning(
+    full_name: str,
+    learning: str,
+    *,
+    source: str = "",
+) -> dict[str, Any]:
+    full_name = normalize_repo_full_name(full_name)
+    normalized_learning = _normalize_learning_text(learning)
+    if not normalized_learning:
+        raise ValueError("learning cannot be empty")
+
+    existing = await get_review_style(full_name)
+    current_prompt = ""
+    if existing and isinstance(existing.get("custom_prompt"), str):
+        current_prompt = existing["custom_prompt"].strip()
+
+    entry = f"- {normalized_learning}"
+    normalized_source = source.strip()
+    if normalized_source:
+        entry = f"{entry} (source: {normalized_source})"
+
+    if normalized_learning.casefold() in current_prompt.casefold():
+        return await update_review_style(
+            full_name,
+            {
+                "status": "completed",
+                "error": None,
+            },
+        )
+
+    if current_prompt:
+        if _REPO_LEARNINGS_HEADER in current_prompt:
+            custom_prompt = f"{current_prompt}\n{entry}"
+        else:
+            custom_prompt = f"{current_prompt}\n\n{_REPO_LEARNINGS_HEADER}\n\n{entry}"
+    else:
+        custom_prompt = f"{_REPO_LEARNINGS_HEADER}\n\n{entry}"
+
+    return await update_review_style(
+        full_name,
+        {
+            "status": "completed",
+            "custom_prompt": custom_prompt,
+            "error": None,
+        },
+    )
+
+
 async def reconcile_running_status(
     full_name: str,
     record: dict[str, Any],

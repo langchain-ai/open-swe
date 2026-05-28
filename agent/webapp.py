@@ -2379,8 +2379,9 @@ def _build_queued_finding_reply_prompt(
         f"{safe_body}\n"
         "</body>\n"
         "</finding_reply>\n\n"
-        "Reassess only this finding, reply only if useful, resolve/dismiss it if "
-        "appropriate, and call `publish_review` once."
+        "Reassess only this finding, call `update_repo_prompt` if the reply teaches "
+        "a durable repo convention or review preference, reply only if useful, "
+        "resolve/dismiss it if appropriate, and call `publish_review` once."
     )
 
 
@@ -2483,8 +2484,9 @@ async def process_github_review_finding_reply(payload: dict[str, Any]) -> None:
     )
     prompt = (
         f"{reply_author} replied to Open SWE finding {finding_id} on PR #{pr_number}. "
-        "Reassess that finding, reply only if useful, resolve/dismiss it if appropriate, "
-        "and call `publish_review` once."
+        "Reassess that finding, call `update_repo_prompt` if the reply teaches a durable "
+        "repo convention or review preference, reply only if useful, resolve/dismiss it if "
+        "appropriate, and call `publish_review` once."
     )
 
     thread_active = await is_thread_active(thread_id)

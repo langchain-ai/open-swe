@@ -16,6 +16,7 @@ from .resolve_finding_thread import resolve_finding_thread
 from .slack_read_thread_messages import slack_read_thread_messages
 from .slack_thread_reply import slack_thread_reply
 from .update_finding import update_finding
+from .update_repo_prompt import update_repo_prompt
 from .web_search import web_search
 
 __all__ = [
@@ -37,5 +38,6 @@ __all__ = [
     "slack_read_thread_messages",
     "slack_thread_reply",
     "update_finding",
+    "update_repo_prompt",
     "web_search",
 ]

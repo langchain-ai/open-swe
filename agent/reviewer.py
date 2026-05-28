@@ -63,6 +63,7 @@ from .tools import (
     reply_to_finding_thread,
     resolve_finding_thread,
     update_finding,
+    update_repo_prompt,
     web_search,
 )
 from .utils.agents_md import fetch_agents_md
@@ -94,7 +95,7 @@ GH_TOKEN=dummy gh repo clone {repo_owner}/{repo_name} && cd {repo_name} && git c
 ```
 
 Tools: `add_finding`, `update_finding`, `list_findings`, `publish_review`,
-`resolve_finding_thread`, `reply_to_finding_thread`.
+`resolve_finding_thread`, `reply_to_finding_thread`, `update_repo_prompt`.
 Call `publish_review` once at the end.
 
 If `publish_review` returns `unresolvable_findings`, do NOT retry with the
@@ -114,10 +115,13 @@ be specific: "The current code at line X now does Y" beats "This is fixed".
 If a human reply shows one of your published findings is invalid, call
 `resolve_finding_thread(finding_id, status="dismissed", note="...")` after verifying
 the claim (the note should explain why). If the finding is fixed by code, use
-`update_finding(..., status="resolved", note="...")`. Do NOT use
-`reply_to_finding_thread` for resolutions or dismissals — the system posts those
-automatically. Use `reply_to_finding_thread` only when the user directly asks a
-question or a short clarification is needed after pushback.
+`update_finding(..., status="resolved", note="...")`. If the reply teaches a durable
+repository convention, review preference, or recurring false-positive pattern, call
+`update_repo_prompt` with a concise synthesized learning. Do not store the raw reply
+body, secrets, or one-off PR facts. Do NOT use `reply_to_finding_thread` for resolutions
+or dismissals — the system posts those automatically. Use `reply_to_finding_thread`
+only when the user directly asks a question or a short clarification is needed after
+pushback.
 
 # The bar: file a finding only if it passes these criteria
 
@@ -417,9 +421,13 @@ def _build_finding_reply_context(
         f"Reassess only this finding. If the reply proves the finding is invalid, "
         f'call `resolve_finding_thread(id, status="dismissed")`. If code now '
         f'fixes the finding, call `update_finding(id, status="resolved")`. '
-        f"Use `reply_to_finding_thread` only when the user asked a direct "
-        f"question or a concise clarification is necessary. Call `publish_review` "
-        f"once at the end so pending GitHub thread state is reconciled."
+        f"If the reply teaches a durable repository convention, review preference, "
+        f"or recurring false-positive pattern, call `update_repo_prompt` with a "
+        f"concise synthesized learning; do not store raw reply text, secrets, or "
+        f"one-off PR facts. Use `reply_to_finding_thread` only when the user asked "
+        f"a direct question or a concise clarification is necessary. Call "
+        f"`publish_review` once at the end so pending GitHub thread state is "
+        f"reconciled."
     )
 
 
@@ -788,6 +796,7 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
             publish_review,
             resolve_finding_thread,
             reply_to_finding_thread,
+            update_repo_prompt,
             web_search,
             fetch_url,
             http_request,

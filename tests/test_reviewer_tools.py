@@ -9,6 +9,7 @@ from agent.tools.add_finding import add_finding
 from agent.tools.list_findings import list_findings
 from agent.tools.resolve_finding_thread import resolve_finding_thread
 from agent.tools.update_finding import update_finding
+from agent.tools.update_repo_prompt import update_repo_prompt
 
 
 def _config(**configurable_overrides: Any) -> dict[str, Any]:
@@ -201,6 +202,39 @@ def test_update_finding_rejects_invalid_status() -> None:
     with patch("agent.tools.update_finding.get_config", return_value=_config()):
         result = update_finding(finding_id="f_x", status="archived")
     assert result["success"] is False
+
+
+def test_update_repo_prompt_uses_repo_from_config() -> None:
+    with (
+        patch(
+            "agent.tools.update_repo_prompt.get_config",
+            return_value=_config(repo={"owner": "acme", "name": "repo"}),
+        ),
+        patch(
+            "agent.tools.update_repo_prompt.append_repo_prompt_learning",
+            new_callable=AsyncMock,
+            return_value={"status": "completed", "custom_prompt": "prompt"},
+        ) as mock_append,
+    ):
+        result = update_repo_prompt(
+            "Avoid flagging missing tests for copy-only changes.",
+            source="PR #12",
+        )
+
+    assert result["ok"] is True
+    assert result["full_name"] == "acme/repo"
+    mock_append.assert_awaited_once_with(
+        "acme/repo",
+        "Avoid flagging missing tests for copy-only changes.",
+        source="PR #12",
+    )
+
+
+def test_update_repo_prompt_requires_repo_config() -> None:
+    with patch("agent.tools.update_repo_prompt.get_config", return_value=_config()):
+        result = update_repo_prompt("Prefer migrations over ad-hoc SQL.")
+    assert result["ok"] is False
+    assert "repo" in result["error"].lower()
 
 
 def test_resolve_finding_thread_resolves_all_known_threads() -> None:
