@@ -146,16 +146,6 @@ ALLOWED_GITHUB_ORGS: frozenset[str] = frozenset(
     for org in os.environ.get("ALLOWED_GITHUB_ORGS", "").split(",")
     if org.strip()
 )
-ALLOWED_REVIEWER_GITHUB_ORGS: frozenset[str] = frozenset(
-    org.strip().lower()
-    for org in os.environ.get("ALLOWED_REVIEWER_GITHUB_ORGS", "").split(",")
-    if org.strip()
-)
-ALLOWED_REVIEWER_GITHUB_REPOS: frozenset[str] = frozenset(
-    repo.strip().lower()
-    for repo in os.environ.get("ALLOWED_REVIEWER_GITHUB_REPOS", "").split(",")
-    if repo.strip()
-)
 # Org whose members are allowed to tag @open-swe on public repos. When empty,
 # the public-repo gate is disabled (back-compat).
 PUBLIC_REPO_ORG_GATE: str = os.environ.get("PUBLIC_REPO_ORG_GATE", "").strip()
@@ -405,29 +395,12 @@ def _is_repo_allowed(repo_config: dict[str, str]) -> bool:
     return False
 
 
-def _is_repo_allowed_for_reviewer(repo_config: dict[str, str]) -> bool:
-    """Check if a repo is allowed for reviewer-agent webhook entrypoints."""
-    owner = repo_config.get("owner", "").lower()
-    name = repo_config.get("name", "").lower()
-    full_name = f"{owner}/{name}" if owner and name else ""
-
-    if ALLOWED_REVIEWER_GITHUB_REPOS:
-        return full_name in ALLOWED_REVIEWER_GITHUB_REPOS
-
-    if not ALLOWED_REVIEWER_GITHUB_ORGS:
-        return True
-    return owner in ALLOWED_REVIEWER_GITHUB_ORGS
-
-
 async def _is_repo_enabled_for_review(repo_config: dict[str, str]) -> bool:
-    """Combined gate: operator allowlist + team opt-in list from the dashboard.
+    """Check the dashboard opt-in list for reviewer-agent entrypoints.
 
-    Both checks must pass. The opt-in list is empty by default, so repos
-    are off until an admin enables them in the dashboard's Open SWE Review
-    tab.
+    The opt-in list is empty by default, so repos are off until an admin
+    enables them in the dashboard's Open SWE Review tab.
     """
-    if not _is_repo_allowed_for_reviewer(repo_config):
-        return False
     return await is_review_repo_enabled(repo_config.get("owner", ""), repo_config.get("name", ""))
 
 

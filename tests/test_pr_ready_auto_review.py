@@ -260,7 +260,6 @@ async def test_converted_to_draft_disables_watch_when_drafts_off(
         captured.append((thread_id, kwargs))
 
     with (
-        patch("agent.webapp._is_repo_allowed_for_reviewer", return_value=True),
         patch(
             "agent.webapp._get_thread_metadata_safe",
             new_callable=AsyncMock,
@@ -288,7 +287,6 @@ async def test_converted_to_draft_keeps_watch_when_author_drafts_on(
 ) -> None:
     fake_set = AsyncMock()
     with (
-        patch("agent.webapp._is_repo_allowed_for_reviewer", return_value=True),
         patch(
             "agent.webapp._get_thread_metadata_safe",
             new_callable=AsyncMock,
@@ -316,7 +314,6 @@ async def test_converted_to_draft_keeps_watch_when_team_default_drafts_on(
 ) -> None:
     fake_set = AsyncMock()
     with (
-        patch("agent.webapp._is_repo_allowed_for_reviewer", return_value=True),
         patch(
             "agent.webapp._get_thread_metadata_safe",
             new_callable=AsyncMock,
