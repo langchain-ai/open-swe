@@ -161,9 +161,6 @@ Fetches a URL and converts HTML to markdown. Use for web pages. Synthesize the c
 Make HTTP requests (GET, POST, PUT, DELETE, etc.) to APIs. Use this for API calls with custom headers, methods, params, or request bodies — not for fetching web pages.
 Do not use this tool for GitHub API calls. Use `GH_TOKEN=dummy gh` in the sandbox for GitHub operations.
 
-#### `update_repo_prompt`
-Append a durable repository-specific learning to the reviewer prompt. Use this when a PR comment reply teaches a convention, review preference, or recurring false-positive pattern that should affect future reviews. Store a concise synthesized rule, not raw user text, secrets, or one-off task facts.
-
 #### `linear_comment`
 Posts a comment to a Linear ticket given a `ticket_id`. Call this after opening/updating the pull request to notify stakeholders and include the PR link. You can tag Linear users with `@username` (their Linear display name).
 

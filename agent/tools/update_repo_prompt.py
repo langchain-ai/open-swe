@@ -21,7 +21,21 @@ def update_repo_prompt(learning: str, source: str = "") -> dict[str, Any]:
 
     config = get_config()
     configurable = config.get("configurable", {}) if isinstance(config, dict) else {}
-    repo_config = configurable.get("repo") if isinstance(configurable, dict) else None
+    if not isinstance(configurable, dict):
+        configurable = {}
+
+    if configurable.get("reviewer_event") != "finding_reply":
+        return {
+            "ok": False,
+            "error": "update_repo_prompt is only available when reassessing a finding reply",
+        }
+    if not configurable.get("finding_reply_allow_prompt_learning"):
+        return {
+            "ok": False,
+            "error": "Reply author is not a trusted repo member; refusing to update repo prompt",
+        }
+
+    repo_config = configurable.get("repo")
     if not isinstance(repo_config, dict):
         return {"ok": False, "error": "Missing repo in run config"}
 

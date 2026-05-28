@@ -68,7 +68,6 @@ from .tools import (
     request_pr_review,
     slack_read_thread_messages,
     slack_thread_reply,
-    update_repo_prompt,
     web_search,
 )
 from .utils.auth import resolve_github_token
@@ -506,7 +505,6 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             request_pr_review,
             slack_read_thread_messages,
             slack_thread_reply,
-            update_repo_prompt,
         ],
         subagents=[_general_purpose_subagent(subagent_model)],
         backend=backend_factory,

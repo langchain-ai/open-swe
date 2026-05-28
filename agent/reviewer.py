@@ -393,6 +393,7 @@ def _build_finding_reply_context(
     reply_body: str,
     existing_findings_block: str,
     existing_threads_block: str = "",
+    allow_prompt_learning: bool = False,
 ) -> str:
     prior_threads_section = (
         f"## Pre-existing PR review threads\n\n{existing_threads_block}\n\n"
@@ -401,6 +402,15 @@ def _build_finding_reply_context(
     )
     safe_author = _safe_login(reply_author)
     safe_reply_body = _escape_for_data_block(reply_body)
+    learning_instruction = (
+        "If the reply teaches a durable repository convention, review preference, "
+        "or recurring false-positive pattern, call `update_repo_prompt` with a "
+        "concise synthesized learning; do not store raw reply text, secrets, or "
+        "one-off PR facts. "
+        if allow_prompt_learning
+        else "Do not call `update_repo_prompt` for this reply; the author is not a "
+        "trusted repo member. "
+    )
     return (
         f"## User replied to an Open SWE review finding\n\n"
         f"- repo: {repo_owner}/{repo_name}\n"
@@ -421,10 +431,7 @@ def _build_finding_reply_context(
         f"Reassess only this finding. If the reply proves the finding is invalid, "
         f'call `resolve_finding_thread(id, status="dismissed")`. If code now '
         f'fixes the finding, call `update_finding(id, status="resolved")`. '
-        f"If the reply teaches a durable repository convention, review preference, "
-        f"or recurring false-positive pattern, call `update_repo_prompt` with a "
-        f"concise synthesized learning; do not store raw reply text, secrets, or "
-        f"one-off PR facts. Use `reply_to_finding_thread` only when the user asked "
+        f"{learning_instruction}Use `reply_to_finding_thread` only when the user asked "
         f"a direct question or a concise clarification is necessary. Call "
         f"`publish_review` once at the end so pending GitHub thread state is "
         f"reconciled."
@@ -673,6 +680,9 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
                 reply_body=str(config["configurable"].get("finding_reply_body", "") or ""),
                 existing_findings_block=_format_existing_findings(existing_findings),
                 existing_threads_block=existing_threads_block,
+                allow_prompt_learning=bool(
+                    config["configurable"].get("finding_reply_allow_prompt_learning", False)
+                ),
             )
         elif is_re_review and last_reviewed_sha:
             existing_findings = await list_findings_async(thread_id)
