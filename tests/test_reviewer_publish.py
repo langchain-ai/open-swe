@@ -15,6 +15,7 @@ from agent.reviewer_publish import (
     post_pull_request_review,
     render_inline_comment_body,
     render_inline_comment_payload,
+    render_resolution_comment,
     render_review_body,
     reply_to_review_comment,
     resolve_review_thread,
@@ -50,7 +51,8 @@ def test_render_inline_comment_body_without_suggestion() -> None:
     assert "<!-- open-swe-review-comment" in body
     assert '"id":"f_' in body
     assert "just text" in body
-    assert "React with +1 or -1" not in body
+    assert "Was this helpful?" in body
+    assert "👍 or 👎" in body
 
 
 def test_render_inline_comment_body_with_suggestion_appends_block() -> None:
@@ -60,6 +62,55 @@ def test_render_inline_comment_body_with_suggestion_appends_block() -> None:
     assert "needs fix" in body
     assert "```suggestion" in body
     assert "x = 1\nx += 1" in body
+
+
+def test_render_inline_comment_body_uses_severity_emoji_and_bold_title() -> None:
+    body = render_inline_comment_body(_f(severity="critical", description="Null deref"))
+    assert "🔴 **Null deref**" in body
+
+
+def test_render_inline_comment_body_does_not_duplicate_first_line() -> None:
+    body = render_inline_comment_body(
+        _f(description="Short summary line\n\nLonger detail paragraph."),
+    )
+    assert "**Short summary line**" in body
+    assert "Longer detail paragraph." in body
+    # The first line is the bold title and must not also appear in the detail body.
+    assert body.count("Short summary line") == 1
+
+
+def test_render_inline_comment_body_single_line_has_no_detail() -> None:
+    body = render_inline_comment_body(_f(description="just text"))
+    assert body.count("just text") == 1
+
+
+def test_render_inline_comment_body_line_reference_range() -> None:
+    assert "*(Refers to lines 10-12)*" in render_inline_comment_body(_f(start_line=10, end_line=12))
+    assert "*(Refers to line 10)*" in render_inline_comment_body(_f(start_line=10, end_line=10))
+
+
+def test_render_resolution_comment_resolved_uses_note() -> None:
+    body = render_resolution_comment(_f(status="resolved"), "resolved", note="Fixed at line 5")
+    assert body == "✅ **Resolved**: Fixed at line 5"
+
+
+def test_render_resolution_comment_resolved_falls_back_without_note() -> None:
+    body = render_resolution_comment(_f(status="resolved"), "resolved")
+    assert body.startswith("✅ **Resolved**:")
+    assert "no longer present" in body
+
+
+def test_render_resolution_comment_dismissed_uses_note() -> None:
+    body = render_resolution_comment(_f(status="dismissed"), "dismissed", note="Intended behavior")
+    assert body == "❌ **Dismissed**: Intended behavior"
+
+
+def test_render_resolution_comment_handles_none_reconciliation_note() -> None:
+    # Regression: last_reconciliation_note defaults to None on a fresh finding.
+    finding = _f(status="resolved")
+    assert finding.get("last_reconciliation_note") is None
+    body = render_resolution_comment(finding, "resolved")
+    assert body.startswith("✅ **Resolved**:")
 
 
 def test_parse_review_comment_marker_accepts_valid_marker() -> None:
@@ -448,6 +499,7 @@ async def test_re_review_backfills_and_resolves_duplicate_existing_threads() -> 
         },
     ]
     resolve_thread = AsyncMock(return_value=True)
+    reply_comment = AsyncMock(return_value={"id": 555})
 
     with (
         patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
@@ -459,6 +511,11 @@ async def test_re_review_backfills_and_resolves_duplicate_existing_threads() -> 
         patch("agent.reviewer_reconcile.replace_findings", AsyncMock()),
         patch("agent.tools.publish_review.post_pull_request_review", AsyncMock()),
         patch("agent.tools.publish_review.resolve_review_thread", resolve_thread),
+        patch(
+            "agent.tools.publish_review.fetch_review_thread_id_for_comment",
+            AsyncMock(return_value=None),
+        ),
+        patch("agent.tools.publish_review.reply_to_review_comment", reply_comment),
         patch("agent.tools.publish_review.set_reviewer_thread_metadata", new_callable=AsyncMock),
     ):
         result = await _publish_review_async(
@@ -476,9 +533,12 @@ async def test_re_review_backfills_and_resolves_duplicate_existing_threads() -> 
     assert result["review_id"] is None
     assert result["resolved_thread_count"] == 2
     assert resolve_thread.await_count == 2
+    assert reply_comment.await_count == 2
+    assert "✅ **Resolved**" in reply_comment.await_args_list[0].kwargs["body"]
     assert findings[0]["github_review_comment_ids"] == [101, 102]
     assert findings[0]["github_review_thread_ids"] == ["THREAD_1", "THREAD_2"]
     assert findings[0]["github_resolved_thread_ids"] == ["THREAD_1", "THREAD_2"]
+    assert findings[0]["github_posted_resolution_comment_ids"] == [101, 102]
     assert findings[0]["github_thread_resolved"] is True
 
 

@@ -29,7 +29,9 @@ from ..reviewer_publish import (
     parse_review_comment_marker,
     post_pull_request_review,
     render_inline_comment_payload,
+    render_resolution_comment,
     render_review_body,
+    reply_to_review_comment,
     resolve_review_thread,
 )
 from ..reviewer_reconcile import reconcile_findings_with_review_threads
@@ -759,17 +761,21 @@ async def _resolve_threads_for_resolved_findings(
 ) -> int:
     """Resolve GitHub review threads for findings that just transitioned to resolved.
 
-    Resolves every known GitHub thread for a finding. Multiple threads can
-    exist when an earlier run duplicated a comment before publication identity
+    Posts a resolution comment to the thread, then resolves it. Multiple threads
+    can exist when an earlier run duplicated a comment before publication identity
     was backfilled.
     """
     resolved_count = 0
     mutated = False
     for finding in findings:
-        if finding.get("status") not in {"resolved", "dismissed"}:
+        status = finding.get("status")
+        if status not in {"resolved", "dismissed"}:
             continue
+
         thread_node_ids = _thread_ids_for_finding(finding)
-        for comment_id in _comment_ids_for_finding(finding):
+        comment_ids = _comment_ids_for_finding(finding)
+
+        for comment_id in comment_ids:
             thread_node_id = await fetch_review_thread_id_for_comment(
                 owner=owner,
                 repo=repo,
@@ -784,9 +790,28 @@ async def _resolve_threads_for_resolved_findings(
             continue
 
         resolved_thread_ids = _str_list(finding.get("github_resolved_thread_ids"))
-        for thread_node_id in thread_node_ids:
+        posted_resolution_comment_ids = _int_list(
+            finding.get("github_posted_resolution_comment_ids")
+        )
+
+        for idx, thread_node_id in enumerate(thread_node_ids):
             if thread_node_id in resolved_thread_ids:
                 continue
+
+            primary_comment_id = comment_ids[idx] if idx < len(comment_ids) else None
+            if primary_comment_id and primary_comment_id not in posted_resolution_comment_ids:
+                reply_response = await reply_to_review_comment(
+                    owner=owner,
+                    repo=repo,
+                    pr_number=pr_number,
+                    review_comment_id=primary_comment_id,
+                    body=render_resolution_comment(finding, status),
+                    token=token,
+                )
+                if reply_response and isinstance(reply_response.get("id"), int):
+                    posted_resolution_comment_ids.append(primary_comment_id)
+                    mutated = True
+
             ok = await resolve_review_thread(thread_node_id=thread_node_id, token=token)
             if ok:
                 resolved_thread_ids.append(thread_node_id)
@@ -795,6 +820,8 @@ async def _resolve_threads_for_resolved_findings(
 
         if resolved_thread_ids:
             finding["github_resolved_thread_ids"] = resolved_thread_ids
+        if posted_resolution_comment_ids:
+            finding["github_posted_resolution_comment_ids"] = posted_resolution_comment_ids
         if thread_node_ids:
             finding["github_review_thread_ids"] = thread_node_ids
             if not isinstance(finding.get("github_review_thread_id"), str):

@@ -212,6 +212,7 @@ def test_resolve_finding_thread_resolves_all_known_threads() -> None:
     }
     update = AsyncMock(return_value={**finding, "status": "resolved"})
     resolve = AsyncMock(return_value=True)
+    reply = AsyncMock(return_value={"id": 999})
 
     with (
         patch(
@@ -222,9 +223,10 @@ def test_resolve_finding_thread_resolves_all_known_threads() -> None:
         patch("agent.tools.resolve_finding_thread.get_thread_id_from_runtime", return_value="tid"),
         patch("agent.tools.resolve_finding_thread.get_finding", AsyncMock(return_value=finding)),
         patch("agent.tools.resolve_finding_thread.resolve_review_thread", resolve),
+        patch("agent.tools.resolve_finding_thread.reply_to_review_comment", reply),
         patch("agent.tools.resolve_finding_thread.update_finding_fields", update),
     ):
-        result = resolve_finding_thread("f1", status="resolved")
+        result = resolve_finding_thread("f1", status="resolved", note="Fixed in the latest commit")
 
     assert result["success"] is True
     assert result["resolved_thread_count"] == 2
@@ -232,9 +234,13 @@ def test_resolve_finding_thread_resolves_all_known_threads() -> None:
         "THREAD_1",
         "THREAD_2",
     ]
+    reply.assert_awaited_once()
+    assert reply.await_args.kwargs["review_comment_id"] == 11
+    assert "✅ **Resolved**: Fixed in the latest commit" in reply.await_args.kwargs["body"]
     updates = update.await_args.args[2]
     assert updates["github_thread_resolved"] is True
     assert updates["github_resolved_thread_ids"] == ["THREAD_1", "THREAD_2"]
+    assert updates["github_posted_resolution_comment_ids"] == [11]
 
 
 def test_update_finding_rejects_empty_update() -> None:

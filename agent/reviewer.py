@@ -101,17 +101,23 @@ If `publish_review` returns `unresolvable_findings`, do NOT retry with the
 same args — call `update_finding(status="resolved")` on those ids, or fix
 their file/line via `update_finding`, then call `publish_review` again.
 
-Re-review: for each open finding, `update_finding(id, status="resolved")` if
-fixed, `update_finding` with new fields + `note` if changed, otherwise do
-nothing. Add net-new findings with `add_finding`.
+Re-review: for each open finding, `update_finding(id, status="resolved", note="...")`
+if fixed (include a brief explanation of the fix in `note`), `update_finding` with
+new fields + `note` if changed, otherwise do nothing. Add net-new findings with
+`add_finding`.
+
+When you mark a finding as resolved, `publish_review` will automatically post a
+resolution comment to the GitHub thread explaining what was fixed, then close it.
+The `note` field you provide in `update_finding` becomes part of that comment, so
+be specific: "The current code at line X now does Y" beats "This is fixed".
 
 If a human reply shows one of your published findings is invalid, call
-`resolve_finding_thread(finding_id, status="dismissed")` after verifying the
-claim. If the finding is fixed by code, use `update_finding(...,
-status="resolved")`; `publish_review` will close the GitHub thread. Reply with
-`reply_to_finding_thread` only when the user directly asks a question or a short
-clarification is needed after pushback. Bias strongly toward resolving/dismissing
-without replying.
+`resolve_finding_thread(finding_id, status="dismissed", note="...")` after verifying
+the claim (the note should explain why). If the finding is fixed by code, use
+`update_finding(..., status="resolved", note="...")`. Do NOT use
+`reply_to_finding_thread` for resolutions or dismissals — the system posts those
+automatically. Use `reply_to_finding_thread` only when the user directly asks a
+question or a short clarification is needed after pushback.
 
 # The bar: file a finding only if it passes these criteria
 

@@ -86,6 +86,7 @@ class Finding(TypedDict, total=False):
     github_review_run_id: str | None
     github_thread_resolved: bool
     github_resolved_thread_ids: list[str]
+    github_posted_resolution_comment_ids: list[int]
     last_human_reply_at: str | None
     last_human_reply_author: str | None
     last_human_reply_body: str | None
@@ -206,6 +207,7 @@ def new_finding(
         "github_review_run_id": None,
         "github_thread_resolved": False,
         "github_resolved_thread_ids": [],
+        "github_posted_resolution_comment_ids": [],
         "last_human_reply_at": None,
         "last_human_reply_author": None,
         "last_human_reply_body": None,

@@ -15,6 +15,8 @@ from ..reviewer_findings import (
 from ..reviewer_publish import (
     fetch_pr_review_threads,
     fetch_review_thread_id_for_comment,
+    render_resolution_comment,
+    reply_to_review_comment,
     resolve_review_thread,
 )
 from ..reviewer_reconcile import reconcile_findings_with_review_threads
@@ -101,6 +103,26 @@ async def _resolve_finding_thread_async(
         return {"success": False, "error": "Could not resolve GitHub review thread id"}
 
     resolved_thread_ids = _str_list(finding.get("github_resolved_thread_ids"))
+    posted_resolution_comment_ids = _int_list(finding.get("github_posted_resolution_comment_ids"))
+    comment_ids = _comment_ids_for_finding(finding)
+    primary_comment_id = comment_ids[0] if comment_ids else None
+    unresolved_threads = [t for t in github_thread_ids if t not in resolved_thread_ids]
+    if (
+        unresolved_threads
+        and primary_comment_id
+        and primary_comment_id not in posted_resolution_comment_ids
+    ):
+        reply = await reply_to_review_comment(
+            owner=owner,
+            repo=repo,
+            pr_number=pr_number,
+            review_comment_id=primary_comment_id,
+            body=render_resolution_comment(finding, status, note=note),
+            token=token,
+        )
+        if reply and isinstance(reply.get("id"), int):
+            posted_resolution_comment_ids.append(primary_comment_id)
+
     resolved_count = 0
     for github_thread_id in github_thread_ids:
         if github_thread_id in resolved_thread_ids:
@@ -125,6 +147,8 @@ async def _resolve_finding_thread_async(
     }
     if note:
         updates["last_reconciliation_note"] = note
+    if posted_resolution_comment_ids:
+        updates["github_posted_resolution_comment_ids"] = posted_resolution_comment_ids
     updated = await update_finding_fields(thread_id, finding_id, updates)
     surface_updates: dict[str, Any] = {
         "state": "resolved" if updates["github_thread_resolved"] else "resolve_pending",
