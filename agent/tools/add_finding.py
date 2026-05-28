@@ -18,6 +18,7 @@ from ..reviewer_findings import (
     clip_suggestion,
     get_thread_id_from_runtime,
     new_finding,
+    normalize_finding_title,
 )
 
 
@@ -27,6 +28,7 @@ def add_finding(
     category: str,
     file: str,
     description: str,
+    title: str | None = None,
     start_line: int | None = None,
     end_line: int | None = None,
     suggestion: str | None = None,
@@ -39,9 +41,9 @@ def add_finding(
     flow and the future UI.
 
     **When to use:** Once per distinct issue you find while reviewing the
-    diff. Prefer one finding per issue, with a clear ``description`` and, when
-    you can offer a concrete fix, a ``suggestion`` that exactly replaces lines
-    ``start_line..end_line``.
+    diff. Prefer one finding per issue, with a clear ``title`` and
+    ``description`` and, when you can offer a concrete fix, a ``suggestion``
+    that exactly replaces lines ``start_line..end_line``.
 
     **In-diff only:** ``start_line..end_line`` must be inside the PR diff.
     File-level findings (both ``start_line`` and ``end_line`` None) are
@@ -55,6 +57,7 @@ def add_finding(
             ``style``, ``flag``, etc.). Free-form; used for grouping in the UI.
         file: Repo-relative path of the file the finding refers to.
         description: Markdown body the user sees.
+        title: Short headline displayed at the top of the published comment.
         start_line: 1-based line in the new (post-PR) file where the
             relevant range begins. For a single-line finding, this is the
             line the issue is about. For a multi-line finding, this is the
@@ -122,6 +125,7 @@ def add_finding(
         diff_hunk = extract_diff_hunk(diff_text, file, start_line, end_line)
 
     clipped_suggestion, suggestion_dropped = clip_suggestion(suggestion)
+    normalized_title = normalize_finding_title(title)
 
     finding: Finding = new_finding(
         severity=_cast_severity(severity),
@@ -133,6 +137,7 @@ def add_finding(
         description=description,
         sha=str(head_sha) if isinstance(head_sha, str) else "",
         side=_cast_side(side),
+        title=normalized_title,
         suggestion=clipped_suggestion,
         diff_hunk=diff_hunk,
     )

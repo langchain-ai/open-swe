@@ -73,6 +73,7 @@ class Finding(TypedDict, total=False):
     start_line: int | None
     end_line: int | None
     side: DiffSide
+    title: str | None
     description: str
     suggestion: str | None
     status: FindingStatus
@@ -91,6 +92,7 @@ class Finding(TypedDict, total=False):
     last_human_reply_author: str | None
     last_human_reply_body: str | None
     last_reconciliation_note: str | None
+    resolution_note: str | None
     diff_hunk: str | None
     fingerprint: str
     anchor: FindingAnchor
@@ -162,6 +164,7 @@ def new_finding(
     sha: str,
     confidence: Confidence = "medium",
     side: DiffSide = "RIGHT",
+    title: str | None = None,
     suggestion: str | None = None,
     diff_hunk: str | None = None,
     finding_id: str | None = None,
@@ -194,6 +197,7 @@ def new_finding(
         "start_line": start_line,
         "end_line": end_line,
         "side": side,
+        "title": normalize_finding_title(title),
         "description": description,
         "suggestion": suggestion,
         "status": "open",
@@ -212,12 +216,21 @@ def new_finding(
         "last_human_reply_author": None,
         "last_human_reply_body": None,
         "last_reconciliation_note": None,
+        "resolution_note": None,
         "diff_hunk": diff_hunk,
         "fingerprint": _finding_fingerprint(file, start_line, end_line, description),
         "anchor": anchor,
         "surface": surface,
         "interactions": [],
     }
+
+
+def normalize_finding_title(title: str | None) -> str | None:
+    """Return a one-line finding title, or None when absent."""
+    if title is None:
+        return None
+    normalized = " ".join(title.split()).strip()
+    return normalized or None
 
 
 def _finding_fingerprint(

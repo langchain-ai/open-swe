@@ -820,13 +820,18 @@ async def _resolve_threads_for_resolved_findings(
                 continue
 
             primary_comment_id = comment_ids[idx] if idx < len(comment_ids) else None
-            if primary_comment_id and primary_comment_id not in posted_resolution_comment_ids:
+            resolution_body = render_resolution_comment(finding, status)
+            if (
+                primary_comment_id
+                and primary_comment_id not in posted_resolution_comment_ids
+                and resolution_body is not None
+            ):
                 reply_response = await reply_to_review_comment(
                     owner=owner,
                     repo=repo,
                     pr_number=pr_number,
                     review_comment_id=primary_comment_id,
-                    body=render_resolution_comment(finding, status),
+                    body=resolution_body,
                     token=token,
                 )
                 if reply_response and isinstance(reply_response.get("id"), int):

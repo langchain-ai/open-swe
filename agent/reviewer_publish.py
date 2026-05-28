@@ -91,9 +91,9 @@ def render_inline_comment_body(finding: Finding) -> str:
 
         <!-- metadata marker -->
 
-        🟡 **Title (first line of the description)**
+        🟡 **Title (finding title, or first line of the description)**
 
-        <remaining description detail>
+        <description detail>
 
         *(Refers to lines X-Y)*
 
@@ -118,7 +118,7 @@ def render_inline_comment_body(finding: Finding) -> str:
     }
     marker = f"<!-- open-swe-review-comment {json.dumps(marker_payload, separators=(',', ':'))} -->"
 
-    title, detail = _split_title_and_detail(description)
+    title, detail = _finding_title_and_detail(finding, description)
     line_ref = _format_line_reference(finding.get("start_line"), finding.get("end_line"))
 
     body_parts = [marker, "", f"{_severity_emoji(severity)} **{title}**"]
@@ -144,12 +144,20 @@ def _severity_emoji(severity: str) -> str:
     }.get(severity, "🟡")
 
 
-def _split_title_and_detail(description: str) -> tuple[str, str]:
-    """Split a description into a short bold title and the remaining detail.
+def _finding_title_and_detail(finding: Finding, description: str) -> tuple[str, str]:
+    """Return the rendered finding title and body detail."""
+    explicit_title = finding.get("title")
+    if isinstance(explicit_title, str) and explicit_title.strip():
+        title = " ".join(explicit_title.split()).strip()
+        lines = description.split("\n")
+        first_line = " ".join(lines[0].split()).strip() if lines else ""
+        if first_line == title:
+            return title, "\n".join(lines[1:]).strip()
+        return title, description
+    return _split_description_title_and_detail(description)
 
-    The first line becomes the title; everything after it is the detail, so the
-    title text is never duplicated in the body.
-    """
+
+def _split_description_title_and_detail(description: str) -> tuple[str, str]:
     if not description:
         return "Code review finding", ""
     lines = description.split("\n")
@@ -169,24 +177,26 @@ def _format_line_reference(start_line: int | None, end_line: int | None) -> str:
     return f"*(Refers to lines {start_line}-{end_line})*"
 
 
-def render_resolution_comment(finding: Finding, status: str, note: str | None = None) -> str:
-    """Render the comment posted to a review thread when a finding is resolved.
-
-    ``note`` (an explanation from the agent's ``update_finding``/resolve call)
-    becomes the body. Falls back to the finding's stored reconciliation note, then
-    to a generic line.
-    """
-    if note is None:
-        note = finding.get("last_reconciliation_note")
-    note = (note or "").strip()
+def render_resolution_comment(
+    finding: Finding,
+    status: str,
+    note: str | None = None,
+) -> str | None:
+    """Render the agent-provided resolution reply for a review thread."""
+    body = _resolution_body(finding, note)
+    if body is None:
+        return None
     if status == "resolved":
-        body = note or (
-            "The reported issue is no longer present in the current code; "
-            "this finding has been fixed."
-        )
         return f"✅ **Resolved**: {body}"
-    body = note or "This finding has been dismissed after further review."
     return f"❌ **Dismissed**: {body}"
+
+
+def _resolution_body(finding: Finding, note: str | None) -> str | None:
+    candidates = [note, finding.get("resolution_note"), finding.get("last_update_note")]
+    for candidate in candidates:
+        if isinstance(candidate, str) and candidate.strip():
+            return candidate.strip()
+    return None
 
 
 def render_inline_comment_payload(finding: Finding) -> dict[str, Any] | None:

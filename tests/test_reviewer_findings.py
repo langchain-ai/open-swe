@@ -57,7 +57,24 @@ def test_new_finding_defaults() -> None:
     assert finding["github_thread_resolved"] is False
     assert finding["github_resolved_thread_ids"] == []
     assert finding["last_human_reply_at"] is None
+    assert finding["resolution_note"] is None
+    assert finding["title"] is None
     assert finding["suggestion"] is None
+
+
+def test_new_finding_normalizes_title() -> None:
+    finding = new_finding(
+        severity="high",
+        confidence="high",
+        category="correctness",
+        file="foo.py",
+        start_line=10,
+        end_line=10,
+        description="boom",
+        sha="abc123",
+        title="  Avoid lost updates\nwhen retrying  ",
+    )
+    assert finding["title"] == "Avoid lost updates when retrying"
 
 
 def test_severity_order_monotonic() -> None:

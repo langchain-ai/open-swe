@@ -13,12 +13,20 @@ from ..reviewer_findings import (
     clip_suggestion,
     get_thread_id_from_runtime,
     list_findings,
+    normalize_finding_title,
     update_finding_fields,
 )
 
 
 def _is_non_empty_str(value: Any) -> bool:
     return isinstance(value, str) and bool(value)
+
+
+def _normalize_note(note: str | None) -> str | None:
+    if note is None:
+        return None
+    normalized = note.strip()
+    return normalized or None
 
 
 def _has_published_github_surface(finding: Finding) -> bool:
@@ -44,6 +52,7 @@ def update_finding(
     severity: str | None = None,
     confidence: str | None = None,
     description: str | None = None,
+    title: str | None = None,
     suggestion: str | None = None,
     note: str | None = None,
 ) -> dict[str, Any]:
@@ -57,16 +66,18 @@ def update_finding(
         finding_id: The id returned by ``add_finding`` (or shown in the
             ``Existing findings`` block of the re-review user message).
         status: New status (``open``, ``resolved``, ``dismissed``).
-            Use ``resolved`` when the new commits address the issue.
+            Use ``resolved`` when the new commits address the issue. Resolving
+            or dismissing requires a ``note`` with the message to post.
         severity: New severity, if reassessing.
         confidence: New confidence rating (``low``, ``medium``, ``high``), if
             new commits change how sure you are the finding is a real issue.
         description: New description body, if revising.
+        title: New short headline. Pass an empty string to clear it.
         suggestion: New replacement text. Pass an empty string to clear it.
             Capped at 4 lines — longer values are dropped (the finding keeps
             its description). Only set this for small, obvious fixes.
-        note: Optional free-form note explaining the change. Persisted on the
-            finding under ``last_update_note``.
+        note: Optional free-form note explaining the change. Required when
+            resolving or dismissing because it becomes the GitHub reply body.
 
     Returns:
         Dictionary with ``success`` and (on success) the updated ``finding``.
@@ -77,6 +88,12 @@ def update_finding(
         return {"success": False, "error": f"Invalid severity: {severity}"}
     if confidence is not None and confidence not in {"low", "medium", "high"}:
         return {"success": False, "error": f"Invalid confidence: {confidence}"}
+    normalized_note = _normalize_note(note)
+    if status in {"resolved", "dismissed"} and normalized_note is None:
+        return {
+            "success": False,
+            "error": "Resolving or dismissing a finding requires a note with the message to post.",
+        }
 
     updates: dict[str, Any] = {}
     suggestion_dropped = False
@@ -88,6 +105,8 @@ def update_finding(
         updates["confidence"] = confidence
     if description is not None:
         updates["description"] = description
+    if title is not None:
+        updates["title"] = normalize_finding_title(title)
     if suggestion is not None:
         if suggestion == "":
             updates["suggestion"] = None
@@ -95,8 +114,10 @@ def update_finding(
             clipped, suggestion_dropped = clip_suggestion(suggestion)
             if not suggestion_dropped:
                 updates["suggestion"] = clipped
-    if note is not None:
-        updates["last_update_note"] = note
+    if normalized_note is not None:
+        updates["last_update_note"] = normalized_note
+        if status in {"resolved", "dismissed"}:
+            updates["resolution_note"] = normalized_note
 
     config = get_config()
     configurable = config.get("configurable", {}) if isinstance(config, dict) else {}
@@ -139,7 +160,7 @@ def update_finding(
     ):
         from .resolve_finding_thread import resolve_finding_thread
 
-        resolve_result = resolve_finding_thread(finding_id, status=status, note=note)
+        resolve_result = resolve_finding_thread(finding_id, status=status, note=normalized_note)
         if not resolve_result.get("success"):
             return {
                 "success": False,
@@ -148,6 +169,7 @@ def update_finding(
             }
         updates.pop("status", None)
         updates.pop("last_update_note", None)
+        updates.pop("resolution_note", None)
         if not updates:
             result: dict[str, Any] = {
                 "success": True,
