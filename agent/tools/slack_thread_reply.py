@@ -49,13 +49,40 @@ def slack_thread_reply(message: str) -> dict[str, Any]:
         return {"success": False, "error": "Message cannot be empty"}
 
     message = convert_mentions_to_slack_format(message)
-    message_ts = asyncio.run(_post_and_store_mapping(channel_id, thread_ts, message))
-    return {"success": message_ts is not None}
+    message_ts, slack_error = asyncio.run(_post_and_store_mapping(channel_id, thread_ts, message))
+    if message_ts is None:
+        return {
+            "success": False,
+            "error": slack_error or "post failed",
+            "slack_error": slack_error,
+            "message_chars": len(message),
+            "hint": _slack_reply_failure_hint(slack_error),
+        }
+    return {"success": True}
 
 
-async def _post_and_store_mapping(channel_id: str, thread_ts: str, message: str) -> str | None:
-    message_ts = await post_slack_thread_reply_with_ts(channel_id, thread_ts, message)
+def _slack_reply_failure_hint(slack_error: str | None) -> str:
+    if slack_error == "msg_too_long":
+        return "Slack rejected the message as too long; retry with a shorter message."
+    if slack_error in {"channel_not_found", "not_in_channel"}:
+        return "Slack rejected the channel; do not retry. Surface the failure to the user via the trace output instead."
+    if slack_error and slack_error.startswith("rate_limited"):
+        retry_after = slack_error.partition(":")[2].strip()
+        if retry_after:
+            return f"Slack rate limited the request; wait at least {retry_after}s before retrying, or surface the failure to the user via the trace output."
+        return "Slack rate limited the request; wait before retrying, or surface the failure to the user via the trace output."
+    if slack_error == "missing_slack_bot_token":
+        return "Slack bot token is missing; do not retry. Surface the failure to the user via the trace output instead."
+    if slack_error and slack_error.startswith("http_error:"):
+        return "Slack posting hit an HTTP error; retry once, then surface the failure to the user via the trace output."
+    return "Slack post failed; retry once with a concise message or surface the failure to the user via the trace output."
+
+
+async def _post_and_store_mapping(
+    channel_id: str, thread_ts: str, message: str
+) -> tuple[str | None, str | None]:
+    message_ts, slack_error = await post_slack_thread_reply_with_ts(channel_id, thread_ts, message)
     if message_ts:
         langgraph_client = get_client(url=LANGGRAPH_URL)
         await store_slack_message_run_mapping(langgraph_client, channel_id, thread_ts, message_ts)
-    return message_ts
+    return message_ts, slack_error
