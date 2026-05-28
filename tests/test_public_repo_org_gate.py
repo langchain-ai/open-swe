@@ -48,8 +48,6 @@ def _common_setup(monkeypatch, *, gate: str = "langchain-ai") -> None:
     monkeypatch.setattr(webapp, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
     monkeypatch.setattr(webapp, "PUBLIC_REPO_ORG_GATE", gate)
     monkeypatch.setattr(webapp, "ALLOWED_GITHUB_ORGS", frozenset())
-    monkeypatch.setattr(webapp, "ALLOWED_REVIEWER_GITHUB_ORGS", frozenset())
-    monkeypatch.setattr(webapp, "ALLOWED_REVIEWER_GITHUB_REPOS", frozenset())
 
 
 def test_gate_blocks_non_member_on_public_pr_comment(monkeypatch) -> None:
