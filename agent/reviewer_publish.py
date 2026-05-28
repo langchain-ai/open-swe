@@ -213,14 +213,8 @@ def render_inline_comment_payload(finding: Finding) -> dict[str, Any] | None:
     return payload
 
 
-def render_review_body(*, pr_number: int, surfaced_count: int) -> str:
-    """Compose the top-level review body.
-
-    Two fixed shapes — no agent prose:
-
-    - 0 surfaced findings: a single "no issues" line.
-    - N surfaced findings: a single "found N potential issue(s)" line.
-    """
+def render_review_body(*, pr_number: int, surfaced_count: int, trace_url: str | None = None) -> str:
+    """Compose the top-level review body."""
     if surfaced_count == 0:
         headline = (
             "## ✅ Open SWE Review: No issues found\n\n"
@@ -229,7 +223,12 @@ def render_review_body(*, pr_number: int, surfaced_count: int) -> str:
     else:
         issue_word = "issue" if surfaced_count == 1 else "issues"
         headline = f"**Open SWE Review** found {surfaced_count} potential {issue_word}."
-    return f"{headline}\n\n<!-- open-swe-reviewer pr={pr_number} -->"
+
+    parts = [headline]
+    if trace_url:
+        parts.append(f"[View Open SWE trace]({trace_url})")
+    parts.append(f"<!-- open-swe-reviewer pr={pr_number} -->")
+    return "\n\n".join(parts)
 
 
 async def post_pull_request_review(
@@ -553,12 +552,20 @@ async def fetch_review_thread_id_for_comment(
                 )
                 return None
             data = response.json()
-            threads = (
-                data.get("data", {})
-                .get("repository", {})
-                .get("pullRequest", {})
-                .get("reviewThreads", {})
-            )
+            if not isinstance(data, dict):
+                return None
+            data_root = data.get("data")
+            if not isinstance(data_root, dict):
+                return None
+            repository = data_root.get("repository")
+            if not isinstance(repository, dict):
+                return None
+            pull_request = repository.get("pullRequest")
+            if not isinstance(pull_request, dict):
+                return None
+            threads = pull_request.get("reviewThreads")
+            if not isinstance(threads, dict):
+                return None
             for thread in threads.get("nodes", []) or []:
                 comment_ids = {
                     c.get("databaseId") for c in (thread.get("comments", {}).get("nodes") or [])

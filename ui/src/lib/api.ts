@@ -97,6 +97,7 @@ export interface TeamSettings {
   trigger_mode: TriggerMode;
   review_draft_prs: boolean;
   pr_summaries: boolean;
+  review_trace_links: boolean;
   autofix_mode: AutofixMode;
   autofix_severity_threshold: AutofixMode;
   default_agent_model?: string | null;

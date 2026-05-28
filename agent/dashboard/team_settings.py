@@ -34,6 +34,7 @@ class TeamSettingsUpdate(BaseModel):
     trigger_mode: TriggerMode = "every_push"
     review_draft_prs: bool = False
     pr_summaries: bool = True
+    review_trace_links: bool = True
     autofix_mode: AutofixMode = "off"
     autofix_severity_threshold: AutofixMode = "medium"
     default_agent_model: str | None = None
@@ -87,6 +88,7 @@ def _default_settings() -> dict[str, Any]:
         "trigger_mode": "every_push",
         "review_draft_prs": False,
         "pr_summaries": True,
+        "review_trace_links": True,
         "autofix_mode": "off",
         "autofix_severity_threshold": "medium",
         "default_agent_model": fallback_model,
@@ -129,6 +131,7 @@ async def upsert_team_settings(update: TeamSettingsUpdate) -> dict[str, Any]:
         "trigger_mode": update.trigger_mode,
         "review_draft_prs": update.review_draft_prs,
         "pr_summaries": update.pr_summaries,
+        "review_trace_links": update.review_trace_links,
         "autofix_mode": update.autofix_mode,
         "autofix_severity_threshold": update.autofix_severity_threshold,
         "default_agent_model": update.default_agent_model,
@@ -164,6 +167,12 @@ async def get_team_default_model(
         model = settings.get("default_reviewer_model")
         effort = settings.get("default_reviewer_reasoning_effort")
     return _resolve_default_pair(model, effort)
+
+
+async def get_team_review_trace_links_enabled() -> bool:
+    """Return whether GitHub review bodies should include a LangSmith trace link."""
+    settings = await get_team_settings()
+    return bool(settings.get("review_trace_links", True))
 
 
 async def get_team_default_subagent_model(

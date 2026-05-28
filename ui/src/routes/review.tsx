@@ -48,6 +48,7 @@ const DEFAULT_SETTINGS: TeamSettings = {
   trigger_mode: "every_push",
   review_draft_prs: false,
   pr_summaries: true,
+  review_trace_links: true,
   autofix_mode: "off",
   autofix_severity_threshold: "medium",
   default_agent_model: null,
@@ -172,6 +173,17 @@ function ReviewPage() {
               <Switch
                 checked={current.pr_summaries}
                 onCheckedChange={(v) => persist({ pr_summaries: v })}
+                disabled={!canEdit}
+              />
+            }
+          />
+          <SettingsRow
+            label="Trace Links"
+            description="Include a LangSmith trace link in each review comment. Only members of your LangSmith workspace can open it."
+            control={
+              <Switch
+                checked={current.review_trace_links}
+                onCheckedChange={(v) => persist({ review_trace_links: v })}
                 disabled={!canEdit}
               />
             }
