@@ -64,6 +64,44 @@ def test_slack_thread_reply_hints_not_to_retry_channel_errors(
     assert "trace output" in result["hint"]
 
 
+def test_slack_thread_reply_rate_limited_hint_includes_retry_after(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_post_and_store_mapping(
+        channel_id: str, thread_ts: str, message: str
+    ) -> tuple[str | None, str | None]:
+        return None, "rate_limited: 30"
+
+    monkeypatch.setattr(slack_reply_tool, "get_config", _config)
+    monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", fake_post_and_store_mapping)
+
+    result = slack_reply_tool.slack_thread_reply("hello")
+
+    assert result["success"] is False
+    assert result["error"] == "rate_limited: 30"
+    assert result["slack_error"] == "rate_limited: 30"
+    assert "30s" in result["hint"]
+    assert "wait" in result["hint"]
+
+
+def test_slack_thread_reply_rate_limited_hint_without_retry_after(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_post_and_store_mapping(
+        channel_id: str, thread_ts: str, message: str
+    ) -> tuple[str | None, str | None]:
+        return None, "rate_limited"
+
+    monkeypatch.setattr(slack_reply_tool, "get_config", _config)
+    monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", fake_post_and_store_mapping)
+
+    result = slack_reply_tool.slack_thread_reply("hello")
+
+    assert result["success"] is False
+    assert result["slack_error"] == "rate_limited"
+    assert "wait" in result["hint"]
+
+
 def test_slack_thread_reply_uses_post_failed_without_slack_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -350,11 +350,20 @@ async def post_slack_thread_reply_with_ts(
                 headers=_slack_headers(),
                 json=payload,
             )
+            if response.status_code == 429:
+                retry_after = response.headers.get("Retry-After")
+                logger.warning("Slack chat.postMessage rate limited (retry-after=%s)", retry_after)
+                if retry_after:
+                    return None, f"rate_limited: {retry_after}"
+                return None, "rate_limited"
             response.raise_for_status()
             data = response.json()
             if not data.get("ok"):
-                logger.warning("Slack chat.postMessage failed: %s", data.get("error"))
-                return None, data.get("error")
+                error = data.get("error")
+                logger.warning("Slack chat.postMessage failed: %s", error)
+                if error == "ratelimited":
+                    return None, "rate_limited"
+                return None, error
             message_ts = data.get("ts")
             if isinstance(message_ts, str) and message_ts:
                 return message_ts, None
