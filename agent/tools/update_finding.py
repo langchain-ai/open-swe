@@ -8,6 +8,7 @@ from typing import Any
 from langgraph.config import get_config
 
 from ..reviewer_findings import (
+    DEFAULT_FINDING_TITLE,
     MAX_SUGGESTION_LINES,
     Finding,
     clip_suggestion,
@@ -51,8 +52,8 @@ def update_finding(
     status: str | None = None,
     severity: str | None = None,
     confidence: str | None = None,
-    description: str | None = None,
     title: str | None = None,
+    description: str | None = None,
     suggestion: str | None = None,
     note: str | None = None,
 ) -> dict[str, Any]:
@@ -71,8 +72,9 @@ def update_finding(
         severity: New severity, if reassessing.
         confidence: New confidence rating (``low``, ``medium``, ``high``), if
             new commits change how sure you are the finding is a real issue.
-        description: New description body, if revising.
-        title: New short headline. Pass an empty string to clear it.
+        title: New concise generated headline, if revising.
+        description: New description body, if revising. Do not repeat ``title``
+            as the first line.
         suggestion: New replacement text. Pass an empty string to clear it.
             Capped at 4 lines — longer values are dropped (the finding keeps
             its description). Only set this for small, obvious fixes.
@@ -103,10 +105,13 @@ def update_finding(
         updates["severity"] = severity
     if confidence is not None:
         updates["confidence"] = confidence
+    if title is not None:
+        normalized_title = normalize_finding_title(title)
+        if normalized_title == DEFAULT_FINDING_TITLE:
+            return {"success": False, "error": "title must be a non-empty generated headline"}
+        updates["title"] = normalized_title
     if description is not None:
         updates["description"] = description
-    if title is not None:
-        updates["title"] = normalize_finding_title(title)
     if suggestion is not None:
         if suggestion == "":
             updates["suggestion"] = None

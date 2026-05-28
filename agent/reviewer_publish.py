@@ -27,7 +27,7 @@ from typing import Any, TypedDict
 
 import httpx
 
-from .reviewer_findings import DiffSide, Finding
+from .reviewer_findings import DiffSide, Finding, normalize_finding_title
 from .utils.github_token import GitHubAuthError
 
 logger = logging.getLogger(__name__)
@@ -91,9 +91,9 @@ def render_inline_comment_body(finding: Finding) -> str:
 
         <!-- metadata marker -->
 
-        🟡 **Title (finding title, or first line of the description)**
+        🟡 **Generated finding title**
 
-        <description detail>
+        <finding description detail>
 
         *(Refers to lines X-Y)*
 
@@ -118,7 +118,7 @@ def render_inline_comment_body(finding: Finding) -> str:
     }
     marker = f"<!-- open-swe-review-comment {json.dumps(marker_payload, separators=(',', ':'))} -->"
 
-    title, detail = _finding_title_and_detail(finding, description)
+    title, detail = _split_title_and_detail(description, finding.get("title"))
     line_ref = _format_line_reference(finding.get("start_line"), finding.get("end_line"))
 
     body_parts = [marker, "", f"{_severity_emoji(severity)} **{title}**"]
@@ -144,28 +144,26 @@ def _severity_emoji(severity: str) -> str:
     }.get(severity, "🟡")
 
 
-def _finding_title_and_detail(finding: Finding, description: str) -> tuple[str, str]:
-    """Return the rendered finding title and body detail."""
-    explicit_title = finding.get("title")
-    if isinstance(explicit_title, str) and explicit_title.strip():
-        title = " ".join(explicit_title.split()).strip()
-        lines = description.split("\n")
-        first_line = " ".join(lines[0].split()).strip() if lines else ""
-        if first_line == title:
-            return title, "\n".join(lines[1:]).strip()
-        return title, description
-    return _split_description_title_and_detail(description)
+def _split_title_and_detail(description: str, title: object = None) -> tuple[str, str]:
+    """Split a generated finding title from the review comment detail."""
+    if isinstance(title, str) and title.strip():
+        normalized_title = normalize_finding_title(title)
+        detail = description.strip()
+        if detail:
+            lines = description.split("\n")
+            if normalize_finding_title(lines[0]) == normalized_title:
+                detail = "\n".join(lines[1:]).strip()
+        return normalized_title, detail
 
-
-def _split_description_title_and_detail(description: str) -> tuple[str, str]:
     if not description:
-        return "Code review finding", ""
+        return normalize_finding_title(None), ""
     lines = description.split("\n")
     first_line = lines[0].strip()
     detail = "\n".join(lines[1:]).strip()
-    if len(first_line) > 120:
-        return first_line[:117] + "...", description
-    return first_line, detail
+    normalized_title = normalize_finding_title(first_line)
+    if not detail and normalized_title != " ".join(first_line.split()):
+        return normalized_title, description
+    return normalized_title, detail
 
 
 def _format_line_reference(start_line: int | None, end_line: int | None) -> str:

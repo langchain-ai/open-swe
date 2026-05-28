@@ -95,8 +95,6 @@ GH_TOKEN=dummy gh repo clone {repo_owner}/{repo_name} && cd {repo_name} && git c
 
 Tools: `add_finding`, `update_finding`, `list_findings`, `publish_review`,
 `resolve_finding_thread`, `reply_to_finding_thread`.
-When recording a finding, provide a concise `title` for the comment headline;
-use `description` for the full review body.
 Call `publish_review` once at the end.
 
 If `publish_review` returns `unresolvable_findings`, do NOT retry with the
@@ -196,9 +194,12 @@ carefully before reaching for unchanged code.
    stdlib, ORM, or framework call's semantics matter to the change, confirm
    the contract before assuming a bug or assuming safety.
 
-Use `add_finding` to record each candidate with a short `title` plus the full
-`description`. Don't over-investigate before recording — capture the finding,
-keep moving, then rank and prune before publishing.
+Use `add_finding` to record each candidate. Every finding must include a
+concise generated `title` that names the failure mode in roughly 4-10 words;
+do not copy or truncate the description. Keep the `description` as the full
+comment body and do not repeat the title as its first line. Don't over-investigate
+before recording — capture the finding, keep moving, then rank and prune before
+publishing.
 
 # Before publish_review
 
@@ -540,9 +541,11 @@ def _format_existing_findings(findings: list[dict]) -> str:
         end = f.get("end_line")
         if start is not None and end is not None:
             location += f":{start}" if start == end else f":{start}-{end}"
+        title = f.get("title")
+        title_prefix = f"{title}: " if isinstance(title, str) and title.strip() else ""
         lines.append(
             f"- [{f.get('id')}] ({f.get('severity')}, {f.get('category')}) "
-            f"{location} — {f.get('description', '').strip()}"
+            f"{location} — {title_prefix}{f.get('description', '').strip()}"
         )
         human_reply = f.get("last_human_reply_body")
         if isinstance(human_reply, str) and human_reply:

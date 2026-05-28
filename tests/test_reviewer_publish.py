@@ -69,6 +69,15 @@ def test_render_inline_comment_body_uses_severity_emoji_and_bold_title() -> None
     assert "🔴 **Null deref**" in body
 
 
+def test_render_inline_comment_body_uses_generated_title() -> None:
+    description = "This request can fail because the new path skips auth token refresh."
+    body = render_inline_comment_body(_f(title="Refresh token skipped", description=description))
+
+    assert "🟠 **Refresh token skipped**" in body
+    assert description in body
+    assert "This request can fail because the new path skips auth token refresh" in body
+
+
 def test_render_inline_comment_body_does_not_duplicate_first_line() -> None:
     body = render_inline_comment_body(
         _f(description="Short summary line\n\nLonger detail paragraph."),
@@ -78,13 +87,15 @@ def test_render_inline_comment_body_does_not_duplicate_first_line() -> None:
     assert body.count("Short summary line") == 1
 
 
-def test_render_inline_comment_body_uses_explicit_title() -> None:
+def test_render_inline_comment_body_does_not_duplicate_generated_title() -> None:
     body = render_inline_comment_body(
-        _f(title="Call cleanup before returning", description="The early return skips cleanup."),
+        _f(
+            title="Short summary line", description="Short summary line\n\nLonger detail paragraph."
+        ),
     )
-    assert "🟠 **Call cleanup before returning**" in body
-    assert "The early return skips cleanup." in body
-    assert body.count("Call cleanup before returning") == 1
+    assert "**Short summary line**" in body
+    assert "Longer detail paragraph." in body
+    assert body.count("Short summary line") == 1
 
 
 def test_render_inline_comment_body_single_line_has_no_detail() -> None:
