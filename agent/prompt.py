@@ -166,6 +166,7 @@ Posts a comment to a Linear ticket given a `ticket_id`. Call this after opening/
 
 #### `slack_thread_reply`
 Posts a message to the active Slack thread. Use this for clarifying questions, mid-run progress updates, and final summaries when the task was triggered from Slack. You can call it multiple times during a run — if you're about to do something long-running (cloning a large repo, big refactors, running heavy test suites), post a short status update first so the user knows what's happening. Always end the run with a final reply that summarizes what you did or answers the question. Do not post a status reply before quick, single-tool answers — only when the user would otherwise be left waiting.
+If `slack_thread_reply` returns `success: False`, treat it like any other tool failure. Read the `slack_error` and `hint` fields. Never emit a final response message as if the user received it when the Slack post failed.
 Format messages using Slack's mrkdwn format, NOT standard Markdown.
     Key differences: *bold*, _italic_, ~strikethrough~, <url|link text>,
     bullet lists with "• ", ```code blocks```, > blockquotes.
