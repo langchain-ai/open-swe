@@ -16,7 +16,7 @@ ReviewThreadMatch = tuple[ReviewThread, int | None]
 
 
 def _is_open_swe_bot_comment(comment: ReviewThread) -> bool:
-    return comment.get("author") == "open-swe[bot]"
+    return comment.get("author") in {"open-swe", "open-swe[bot]"}
 
 
 def _int_list(value: Any) -> list[int]:
@@ -52,7 +52,7 @@ def _human_replies_after_bot_comment(
         if not seen_bot_comment:
             continue
         author = comment.get("author")
-        if author == "open-swe[bot]":
+        if author in {"open-swe", "open-swe[bot]"}:
             continue
         replies.append(comment)
     return replies
