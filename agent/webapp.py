@@ -2384,10 +2384,7 @@ def _escape_review_reply_data(text: str) -> str:
 
 def _escape_review_reply_attr(text: str) -> str:
     return (
-        text.replace("&", "&amp;")
-        .replace('"', "&quot;")
-        .replace("<", "&lt;")
-        .replace(">", "&gt;")
+        text.replace("&", "&amp;").replace('"', "&quot;").replace("<", "&lt;").replace(">", "&gt;")
     )
 
 
