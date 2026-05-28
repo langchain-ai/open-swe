@@ -61,7 +61,7 @@ async def test_agent_uses_profile_subagent_model_override() -> None:
             "agent.server.load_profile",
             new_callable=AsyncMock,
             return_value={
-                "default_model": "anthropic:claude-opus-4-7",
+                "default_model": "anthropic:claude-opus-4-8",
                 "reasoning_effort": "high",
                 "default_subagent_model": "openai:gpt-5.5",
                 "subagent_reasoning_effort": "xhigh",
@@ -81,7 +81,7 @@ async def test_agent_uses_profile_subagent_model_override() -> None:
     assert subagents[0]["model"] is subagent_model
 
     main_call = make_model.call_args_list[0]
-    assert main_call.args == ("anthropic:claude-opus-4-7",)
+    assert main_call.args == ("anthropic:claude-opus-4-8",)
     assert main_call.kwargs["thinking"] == {"type": "adaptive"}
     assert main_call.kwargs["effort"] == "high"
 
@@ -139,7 +139,7 @@ async def test_agent_subagent_inherits_profile_model_override_without_explicit_p
             "agent.server.load_profile",
             new_callable=AsyncMock,
             return_value={
-                "default_model": "anthropic:claude-opus-4-7",
+                "default_model": "anthropic:claude-opus-4-8",
                 "reasoning_effort": "high",
             },
         ),
@@ -153,7 +153,7 @@ async def test_agent_subagent_inherits_profile_model_override_without_explicit_p
     subagents = captured["subagents"]
     assert isinstance(subagents, list)
     assert subagents[0]["model"] is subagent_model
-    assert make_model.call_args_list[0].args == ("anthropic:claude-opus-4-7",)
-    assert make_model.call_args_list[1].args == ("anthropic:claude-opus-4-7",)
+    assert make_model.call_args_list[0].args == ("anthropic:claude-opus-4-8",)
+    assert make_model.call_args_list[1].args == ("anthropic:claude-opus-4-8",)
     assert make_model.call_args_list[1].kwargs["thinking"] == {"type": "adaptive"}
     assert make_model.call_args_list[1].kwargs["effort"] == "high"

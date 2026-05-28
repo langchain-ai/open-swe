@@ -5,7 +5,7 @@ max_concurrency = 5
 # Leave blank to use LANGGRAPH_URL or local dev.
 langgraph_url = ""
 assistant_id = "reviewer"
-# models: openai:gpt-5.5, anthropic:claude-opus-4-7, google_genai:gemini-3.5-flash
+# models: openai:gpt-5.5, anthropic:claude-opus-4-8, google_genai:gemini-3.5-flash
 model_id = "google_genai:gemini-3.5-flash"
 reasoning_effort = "medium"
 

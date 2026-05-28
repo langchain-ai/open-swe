@@ -9,7 +9,7 @@ import httpx
 from langgraph_sdk import get_client
 
 from ..utils.github_user_email_map import GITHUB_USER_EMAIL_MAP
-from .options import SUPPORTED_MODEL_IDS, model_supports_effort
+from .options import SUPPORTED_MODEL_IDS, model_supports_effort, provider_fallback_pair
 from .profiles import PROFILES_NAMESPACE
 
 logger = logging.getLogger(__name__)
@@ -97,6 +97,14 @@ def _normalize_profile_model_pair(
         and model_supports_effort(model_id, effort)
     ):
         return model_id, effort
+    # A stored selection whose exact id dropped out of the supported set (e.g. an
+    # Opus minor-version bump) stays on its provider rather than being discarded
+    # and silently deferring to the team default. An absent/unknown-provider
+    # selection still returns (None, None) so the team default applies.
+    if isinstance(model_id, str):
+        provider_pair = provider_fallback_pair(model_id, effort)
+        if provider_pair is not None:
+            return provider_pair
     return None, None
 
 

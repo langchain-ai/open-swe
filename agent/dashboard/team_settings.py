@@ -14,7 +14,12 @@ from typing import Any, Literal
 from langgraph_sdk import get_client
 from pydantic import BaseModel, model_validator
 
-from .options import SUPPORTED_MODEL_IDS, default_model_pair, model_supports_effort
+from .options import (
+    SUPPORTED_MODEL_IDS,
+    default_model_pair,
+    model_supports_effort,
+    provider_fallback_pair,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -145,10 +150,11 @@ async def get_team_default_model(
 ) -> tuple[str, str]:
     """Return the team-wide default ``(model_id, reasoning_effort)`` for ``role``.
 
-    Always returns a valid pair: the admin-configured pair if set, otherwise the
-    hardcoded fallback from :func:`agent.dashboard.options.default_model_pair`.
-    Invalid stored pairs (unsupported model or mismatched effort) fall back to
-    the hardcoded default rather than propagating bad data.
+    Always returns a valid pair, resolved in order: the admin-configured pair if
+    still supported; otherwise the newest supported model for the same provider
+    (so a stale Anthropic/OpenAI selection stays on its provider rather than
+    jumping cross-provider); otherwise the hardcoded global default from
+    :func:`agent.dashboard.options.default_model_pair`.
     """
     settings = await get_team_settings()
     if role == "agent":
@@ -157,14 +163,7 @@ async def get_team_default_model(
     else:
         model = settings.get("default_reviewer_model")
         effort = settings.get("default_reviewer_reasoning_effort")
-    if (
-        isinstance(model, str)
-        and model in SUPPORTED_MODEL_IDS
-        and isinstance(effort, str)
-        and model_supports_effort(model, effort)
-    ):
-        return model, effort
-    return default_model_pair()
+    return _resolve_default_pair(model, effort)
 
 
 async def get_team_default_subagent_model(
@@ -178,11 +177,19 @@ async def get_team_default_subagent_model(
     else:
         model = settings.get("default_reviewer_subagent_model")
         effort = settings.get("default_reviewer_subagent_reasoning_effort")
+    return _resolve_default_pair(model, effort)
+
+
+def _resolve_default_pair(model: object, effort: object) -> tuple[str, str]:
+    """Supported pair if valid, else same-provider fallback, else global default."""
     if (
         isinstance(model, str)
-        and model in SUPPORTED_MODEL_IDS
         and isinstance(effort, str)
+        and model in SUPPORTED_MODEL_IDS
         and model_supports_effort(model, effort)
     ):
         return model, effort
+    provider_pair = provider_fallback_pair(model, effort)
+    if provider_pair is not None:
+        return provider_pair
     return default_model_pair()
