@@ -233,9 +233,9 @@ def test_post_slack_trace_reply_emits_tip_only_when_no_trace_url(
         *,
         unfurl_links: bool = True,
         unfurl_media: bool = True,
-    ) -> str | None:
+    ) -> tuple[str | None, str | None]:
         posted.append({"text": text, "unfurl_links": unfurl_links, "unfurl_media": unfurl_media})
-        return "1.1"
+        return "1.1", None
 
     monkeypatch.setattr(
         slack_utils, "post_slack_thread_reply_with_ts", fake_post_slack_thread_reply_with_ts
@@ -264,9 +264,9 @@ def test_post_slack_trace_reply_includes_trace_link_and_tip(
         *,
         unfurl_links: bool = True,
         unfurl_media: bool = True,
-    ) -> str | None:
+    ) -> tuple[str | None, str | None]:
         posted.append({"text": text, "unfurl_links": unfurl_links, "unfurl_media": unfurl_media})
-        return "1.1"
+        return "1.1", None
 
     monkeypatch.setattr(
         slack_utils, "post_slack_thread_reply_with_ts", fake_post_slack_thread_reply_with_ts

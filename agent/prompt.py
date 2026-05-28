@@ -171,6 +171,7 @@ Format messages using Slack's mrkdwn format, NOT standard Markdown.
     bullet lists with "• ", ```code blocks```, > blockquotes.
     Do NOT use **bold**, [link](url), or other standard Markdown syntax.
     To mention/tag a user, use `<@USER_ID>` (e.g. `<@U06KD8BFY95>`). You can find user IDs in the conversation context next to display names (e.g. `@Name(U06KD8BFY95)`).
+If `slack_thread_reply` returns `success: False`, treat it like any other tool failure — the user did NOT receive the message. Read the `slack_error` and `hint` fields and act on them: for `msg_too_long`, retry with a shorter message (or split into multiple replies); for `channel_not_found` / `not_in_channel`, do not retry — surface the failure in the trace output instead. Never emit a final response message as if the user received it when the Slack post failed.
 
 #### GitHub via `gh`
 Use `GH_TOKEN=dummy gh <command>` for GitHub operations: repository discovery, cloning, issues, pull requests, reviews, comments, labels, check status, and workflow operations. For local working-tree state, use `git` directly. Never pass a real GitHub token to `gh`."""

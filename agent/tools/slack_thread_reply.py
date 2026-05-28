@@ -49,13 +49,37 @@ def slack_thread_reply(message: str) -> dict[str, Any]:
         return {"success": False, "error": "Message cannot be empty"}
 
     message = convert_mentions_to_slack_format(message)
-    message_ts = asyncio.run(_post_and_store_mapping(channel_id, thread_ts, message))
-    return {"success": message_ts is not None}
+    message_ts, slack_error = asyncio.run(
+        _post_and_store_mapping(channel_id, thread_ts, message)
+    )
+    if message_ts:
+        return {"success": True}
+    return {
+        "success": False,
+        "error": slack_error or "post failed",
+        "slack_error": slack_error,
+        "message_chars": len(message),
+        "hint": (
+            "If slack_error is 'msg_too_long', retry with a shorter message "
+            "(Slack's hard limit is ~40K chars but practical limits are much "
+            "lower in some workspaces — try splitting into multiple replies). "
+            "If slack_error is 'channel_not_found' or 'not_in_channel', do not "
+            "retry — the bot cannot post here; surface the failure in the "
+            "trace output so the user knows the response was not delivered. "
+            "If slack_error starts with 'http_error:' or is 'rate_limited', "
+            "a single retry may succeed. Never emit a final response as if "
+            "the user received it when this tool returns success: False."
+        ),
+    }
 
 
-async def _post_and_store_mapping(channel_id: str, thread_ts: str, message: str) -> str | None:
-    message_ts = await post_slack_thread_reply_with_ts(channel_id, thread_ts, message)
+async def _post_and_store_mapping(
+    channel_id: str, thread_ts: str, message: str
+) -> tuple[str | None, str | None]:
+    message_ts, slack_error = await post_slack_thread_reply_with_ts(
+        channel_id, thread_ts, message
+    )
     if message_ts:
         langgraph_client = get_client(url=LANGGRAPH_URL)
         await store_slack_message_run_mapping(langgraph_client, channel_id, thread_ts, message_ts)
-    return message_ts
+    return message_ts, slack_error

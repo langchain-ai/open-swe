@@ -330,10 +330,19 @@ async def post_slack_thread_reply_with_ts(
     *,
     unfurl_links: bool = True,
     unfurl_media: bool = True,
-) -> str | None:
-    """Post a reply in a Slack thread and return its Slack timestamp."""
+) -> tuple[str | None, str | None]:
+    """Post a reply in a Slack thread.
+
+    Returns ``(message_ts, error)``. On success ``message_ts`` is the Slack
+    timestamp string and ``error`` is None. On failure ``message_ts`` is None
+    and ``error`` carries a short machine-readable reason (Slack API error
+    code like ``msg_too_long``/``channel_not_found``/``not_in_channel``/
+    ``rate_limited``, ``http_error: <ExcType>``, or ``missing_slack_bot_token``)
+    so callers can recover or surface the failure instead of silently dropping
+    the message.
+    """
     if not SLACK_BOT_TOKEN:
-        return None
+        return None, "missing_slack_bot_token"
 
     payload: dict[str, Any] = {
         "channel": channel_id,
@@ -353,18 +362,22 @@ async def post_slack_thread_reply_with_ts(
             response.raise_for_status()
             data = response.json()
             if not data.get("ok"):
-                logger.warning("Slack chat.postMessage failed: %s", data.get("error"))
-                return None
+                slack_error = data.get("error") or "unknown_slack_error"
+                logger.warning("Slack chat.postMessage failed: %s", slack_error)
+                return None, slack_error
             message_ts = data.get("ts")
-            return message_ts if isinstance(message_ts, str) and message_ts else None
-        except httpx.HTTPError:
+            if isinstance(message_ts, str) and message_ts:
+                return message_ts, None
+            return None, "missing_ts_in_response"
+        except httpx.HTTPError as exc:
             logger.exception("Slack chat.postMessage request failed")
-            return None
+            return None, f"http_error: {type(exc).__name__}"
 
 
 async def post_slack_thread_reply(channel_id: str, thread_ts: str, text: str) -> bool:
     """Post a reply in a Slack thread."""
-    return await post_slack_thread_reply_with_ts(channel_id, thread_ts, text) is not None
+    message_ts, _ = await post_slack_thread_reply_with_ts(channel_id, thread_ts, text)
+    return message_ts is not None
 
 
 async def post_slack_ephemeral_message(
@@ -713,13 +726,14 @@ def _format_trace_reply(trace_url: str | None) -> str:
 async def post_slack_trace_reply(channel_id: str, thread_ts: str, thread_id: str) -> str | None:
     """Post a trace URL reply in a Slack thread and return its Slack timestamp."""
     trace_url = get_langsmith_trace_url(thread_id)
-    return await post_slack_thread_reply_with_ts(
+    message_ts, _ = await post_slack_thread_reply_with_ts(
         channel_id,
         thread_ts,
         _format_trace_reply(trace_url),
         unfurl_links=False,
         unfurl_media=False,
     )
+    return message_ts
 
 
 _SLACK_RUN_MAP_NAMESPACE = "slack_run_map"
