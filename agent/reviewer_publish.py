@@ -175,24 +175,26 @@ def _format_line_reference(start_line: int | None, end_line: int | None) -> str:
     return f"*(Refers to lines {start_line}-{end_line})*"
 
 
-def render_resolution_comment(finding: Finding, status: str, note: str | None = None) -> str:
-    """Render the comment posted to a review thread when a finding is resolved.
-
-    ``note`` (an explanation from the agent's ``update_finding``/resolve call)
-    becomes the body. Falls back to the finding's stored reconciliation note, then
-    to a generic line.
-    """
-    if note is None:
-        note = finding.get("last_reconciliation_note")
-    note = (note or "").strip()
+def render_resolution_comment(
+    finding: Finding,
+    status: str,
+    note: str | None = None,
+) -> str | None:
+    """Render the agent-provided resolution reply for a review thread."""
+    body = _resolution_body(finding, note)
+    if body is None:
+        return None
     if status == "resolved":
-        body = note or (
-            "The reported issue is no longer present in the current code; "
-            "this finding has been fixed."
-        )
         return f"✅ **Resolved**: {body}"
-    body = note or "This finding has been dismissed after further review."
     return f"❌ **Dismissed**: {body}"
+
+
+def _resolution_body(finding: Finding, note: str | None) -> str | None:
+    candidates = [note, finding.get("resolution_note"), finding.get("last_update_note")]
+    for candidate in candidates:
+        if isinstance(candidate, str) and candidate.strip():
+            return candidate.strip()
+    return None
 
 
 def render_inline_comment_payload(finding: Finding) -> dict[str, Any] | None:

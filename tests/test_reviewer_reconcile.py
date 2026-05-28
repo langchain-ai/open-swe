@@ -213,7 +213,7 @@ async def test_reconcile_duplicate_markers_resolve_when_all_threads_terminal() -
         )
 
     assert result[0]["status"] == "resolved"
-    assert result[0]["last_reconciliation_note"] == "All GitHub threads are resolved or outdated."
+    assert "last_reconciliation_note" not in result[0]
     assert result[0]["github_resolved_thread_ids"] == ["THREAD_RESOLVED"]
     assert result[0].get("github_thread_resolved") is not True
     replace.assert_awaited_once()

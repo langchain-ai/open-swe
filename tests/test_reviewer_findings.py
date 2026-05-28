@@ -57,6 +57,7 @@ def test_new_finding_defaults() -> None:
     assert finding["github_thread_resolved"] is False
     assert finding["github_resolved_thread_ids"] == []
     assert finding["last_human_reply_at"] is None
+    assert finding["resolution_note"] is None
     assert finding["suggestion"] is None
 
 

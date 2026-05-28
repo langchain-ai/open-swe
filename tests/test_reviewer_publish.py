@@ -113,10 +113,9 @@ def test_render_resolution_comment_resolved_uses_note() -> None:
     assert body == "✅ **Resolved**: Fixed at line 5"
 
 
-def test_render_resolution_comment_resolved_falls_back_without_note() -> None:
+def test_render_resolution_comment_returns_none_without_agent_note() -> None:
     body = render_resolution_comment(_f(status="resolved"), "resolved")
-    assert body.startswith("✅ **Resolved**:")
-    assert "no longer present" in body
+    assert body is None
 
 
 def test_render_resolution_comment_dismissed_uses_note() -> None:
@@ -124,12 +123,10 @@ def test_render_resolution_comment_dismissed_uses_note() -> None:
     assert body == "❌ **Dismissed**: Intended behavior"
 
 
-def test_render_resolution_comment_handles_none_reconciliation_note() -> None:
-    # Regression: last_reconciliation_note defaults to None on a fresh finding.
-    finding = _f(status="resolved")
-    assert finding.get("last_reconciliation_note") is None
+def test_render_resolution_comment_uses_stored_resolution_note() -> None:
+    finding = _f(status="resolved", resolution_note="The guard now returns before indexing.")
     body = render_resolution_comment(finding, "resolved")
-    assert body.startswith("✅ **Resolved**:")
+    assert body == "✅ **Resolved**: The guard now returns before indexing."
 
 
 def test_parse_review_comment_marker_accepts_valid_marker() -> None:
@@ -578,6 +575,7 @@ async def test_re_review_backfills_and_resolves_duplicate_existing_threads() -> 
         first_seen_sha="oldsha",
         github_review_comment_id=None,
         status="resolved",
+        resolution_note="The duplicate threads are fixed by the latest commit.",
     )
     findings = [finding]
     threads = [
@@ -644,7 +642,10 @@ async def test_re_review_backfills_and_resolves_duplicate_existing_threads() -> 
     assert result["resolved_thread_count"] == 2
     assert resolve_thread.await_count == 2
     assert reply_comment.await_count == 2
-    assert "✅ **Resolved**" in reply_comment.await_args_list[0].kwargs["body"]
+    assert (
+        reply_comment.await_args_list[0].kwargs["body"]
+        == "✅ **Resolved**: The duplicate threads are fixed by the latest commit."
+    )
     assert findings[0]["github_review_comment_ids"] == [101, 102]
     assert findings[0]["github_review_thread_ids"] == ["THREAD_1", "THREAD_2"]
     assert findings[0]["github_resolved_thread_ids"] == ["THREAD_1", "THREAD_2"]

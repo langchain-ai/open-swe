@@ -107,6 +107,7 @@ class Finding(TypedDict, total=False):
     last_human_reply_author: str | None
     last_human_reply_body: str | None
     last_reconciliation_note: str | None
+    resolution_note: str | None
     diff_hunk: str | None
     fingerprint: str
     anchor: FindingAnchor
@@ -229,6 +230,7 @@ def new_finding(
         "last_human_reply_author": None,
         "last_human_reply_body": None,
         "last_reconciliation_note": None,
+        "resolution_note": None,
         "diff_hunk": diff_hunk,
         "fingerprint": _finding_fingerprint(file, start_line, end_line, description),
         "anchor": anchor,
