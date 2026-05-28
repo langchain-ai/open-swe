@@ -89,7 +89,16 @@ def render_inline_comment_body(finding: Finding) -> str:
 
     Format:
 
-        <description>
+        <!-- metadata marker -->
+
+        🟡 **Title (first line of the description)**
+
+        <remaining description detail>
+
+        *(Refers to lines X-Y)*
+
+        ---
+        *Was this helpful? React with 👍 or 👎 to provide feedback.*
 
         ```suggestion
         <replacement>
@@ -98,7 +107,8 @@ def render_inline_comment_body(finding: Finding) -> str:
     The suggestion block is only included when ``finding.suggestion`` is set.
     Multi-line suggestions just become multi-line ```suggestion``` blocks.
     """
-    description = finding.get("description", "") or ""
+    description = (finding.get("description") or "").strip()
+    severity = finding.get("severity") or "medium"
     marker_payload = {
         "id": finding.get("id", ""),
         "file_path": finding.get("file", ""),
@@ -107,11 +117,76 @@ def render_inline_comment_body(finding: Finding) -> str:
         "side": finding.get("side", "RIGHT"),
     }
     marker = f"<!-- open-swe-review-comment {json.dumps(marker_payload, separators=(',', ':'))} -->"
+
+    title, detail = _split_title_and_detail(description)
+    line_ref = _format_line_reference(finding.get("start_line"), finding.get("end_line"))
+
+    body_parts = [marker, "", f"{_severity_emoji(severity)} **{title}**"]
+    if detail:
+        body_parts.extend(["", detail])
+    if line_ref:
+        body_parts.extend(["", line_ref])
+    body_parts.extend(["", "---", "*Was this helpful? React with 👍 or 👎 to provide feedback.*"])
+    body = "\n".join(body_parts)
+
     suggestion = finding.get("suggestion")
-    body = f"{marker}\n\n{description}"
     if suggestion:
         body = f"{body}\n\n```suggestion\n{suggestion}\n```"
     return body
+
+
+def _severity_emoji(severity: str) -> str:
+    return {
+        "critical": "🔴",
+        "high": "🟠",
+        "medium": "🟡",
+        "low": "🔵",
+    }.get(severity, "🟡")
+
+
+def _split_title_and_detail(description: str) -> tuple[str, str]:
+    """Split a description into a short bold title and the remaining detail.
+
+    The first line becomes the title; everything after it is the detail, so the
+    title text is never duplicated in the body.
+    """
+    if not description:
+        return "Code review finding", ""
+    lines = description.split("\n")
+    first_line = lines[0].strip()
+    detail = "\n".join(lines[1:]).strip()
+    if len(first_line) > 120:
+        return first_line[:117] + "...", description
+    return first_line, detail
+
+
+def _format_line_reference(start_line: int | None, end_line: int | None) -> str:
+    """Format the line reference footer."""
+    if end_line is None:
+        return ""
+    if start_line is None or start_line == end_line:
+        return f"*(Refers to line {end_line})*"
+    return f"*(Refers to lines {start_line}-{end_line})*"
+
+
+def render_resolution_comment(finding: Finding, status: str, note: str | None = None) -> str:
+    """Render the comment posted to a review thread when a finding is resolved.
+
+    ``note`` (an explanation from the agent's ``update_finding``/resolve call)
+    becomes the body. Falls back to the finding's stored reconciliation note, then
+    to a generic line.
+    """
+    if note is None:
+        note = finding.get("last_reconciliation_note")
+    note = (note or "").strip()
+    if status == "resolved":
+        body = note or (
+            "The reported issue is no longer present in the current code; "
+            "this finding has been fixed."
+        )
+        return f"✅ **Resolved**: {body}"
+    body = note or "This finding has been dismissed after further review."
+    return f"❌ **Dismissed**: {body}"
 
 
 def render_inline_comment_payload(finding: Finding) -> dict[str, Any] | None:
