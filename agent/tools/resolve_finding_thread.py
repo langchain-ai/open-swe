@@ -32,7 +32,7 @@ def resolve_finding_thread(
     ``status="dismissed"`` when analysis shows the original review comment was
     not valid.
     """
-    if status not in {"resolved", "dismissed"}:
+    if status in {"resolved", "dismissed"}:
         return {"success": False, "error": f"Invalid status: {status}"}
 
     config = get_config()
