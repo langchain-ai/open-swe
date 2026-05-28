@@ -9,6 +9,7 @@ from langgraph.config import get_config
 
 from ..reviewer_diff import is_range_in_diff
 from ..reviewer_findings import (
+    DEFAULT_FINDING_TITLE,
     MAX_SUGGESTION_LINES,
     Confidence,
     DiffSide,
@@ -18,6 +19,7 @@ from ..reviewer_findings import (
     clip_suggestion,
     get_thread_id_from_runtime,
     new_finding,
+    normalize_finding_title,
 )
 
 
@@ -26,6 +28,7 @@ def add_finding(
     confidence: str,
     category: str,
     file: str,
+    title: str,
     description: str,
     start_line: int | None = None,
     end_line: int | None = None,
@@ -39,8 +42,9 @@ def add_finding(
     flow and the future UI.
 
     **When to use:** Once per distinct issue you find while reviewing the
-    diff. Prefer one finding per issue, with a clear ``description`` and, when
-    you can offer a concrete fix, a ``suggestion`` that exactly replaces lines
+    diff. Prefer one finding per issue, with a concise generated ``title`` that
+    names the failure mode, a clear ``description`` body, and, when you can
+    offer a concrete fix, a ``suggestion`` that exactly replaces lines
     ``start_line..end_line``.
 
     **In-diff only:** ``start_line..end_line`` must be inside the PR diff.
@@ -54,7 +58,10 @@ def add_finding(
         category: Short category label (``correctness``, ``security``, ``perf``,
             ``style``, ``flag``, etc.). Free-form; used for grouping in the UI.
         file: Repo-relative path of the file the finding refers to.
-        description: Markdown body the user sees.
+        title: Concise generated headline for the finding. Name the failure mode
+            in roughly 4-10 words; do not copy or truncate the description.
+        description: Markdown body the user sees. Do not repeat ``title`` as the
+            first line.
         start_line: 1-based line in the new (post-PR) file where the
             relevant range begins. For a single-line finding, this is the
             line the issue is about. For a multi-line finding, this is the
@@ -88,6 +95,10 @@ def add_finding(
         end_line = start_line
     if start_line is None and end_line is not None:
         start_line = end_line
+
+    normalized_title = normalize_finding_title(title)
+    if normalized_title == DEFAULT_FINDING_TITLE:
+        return {"success": False, "error": "title must be a non-empty generated headline"}
 
     if severity not in {"low", "medium", "high", "critical"}:
         return {"success": False, "error": f"Invalid severity: {severity}"}
@@ -132,6 +143,7 @@ def add_finding(
         end_line=end_line,
         description=description,
         sha=str(head_sha) if isinstance(head_sha, str) else "",
+        title=normalized_title,
         side=_cast_side(side),
         suggestion=clipped_suggestion,
         diff_hunk=diff_hunk,

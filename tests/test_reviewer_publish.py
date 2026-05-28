@@ -69,13 +69,32 @@ def test_render_inline_comment_body_uses_severity_emoji_and_bold_title() -> None
     assert "🔴 **Null deref**" in body
 
 
+def test_render_inline_comment_body_uses_generated_title() -> None:
+    description = "This request can fail because the new path skips auth token refresh."
+    body = render_inline_comment_body(_f(title="Refresh token skipped", description=description))
+
+    assert "🟠 **Refresh token skipped**" in body
+    assert description in body
+    assert "This request can fail because the new path skips auth token refresh" in body
+
+
 def test_render_inline_comment_body_does_not_duplicate_first_line() -> None:
     body = render_inline_comment_body(
         _f(description="Short summary line\n\nLonger detail paragraph."),
     )
     assert "**Short summary line**" in body
     assert "Longer detail paragraph." in body
-    # The first line is the bold title and must not also appear in the detail body.
+    assert body.count("Short summary line") == 1
+
+
+def test_render_inline_comment_body_does_not_duplicate_generated_title() -> None:
+    body = render_inline_comment_body(
+        _f(
+            title="Short summary line", description="Short summary line\n\nLonger detail paragraph."
+        ),
+    )
+    assert "**Short summary line**" in body
+    assert "Longer detail paragraph." in body
     assert body.count("Short summary line") == 1
 
 

@@ -40,12 +40,29 @@ def test_add_finding_rejects_invalid_severity() -> None:
             confidence="high",
             category="x",
             file="foo.py",
+            title="Generated title",
             description="d",
             start_line=11,
             end_line=11,
         )
     assert result["success"] is False
     assert "severity" in result["error"].lower()
+
+
+def test_add_finding_rejects_empty_title() -> None:
+    with patch("agent.tools.add_finding.get_config", return_value=_config()):
+        result = add_finding(
+            severity="high",
+            confidence="high",
+            category="correctness",
+            file="foo.py",
+            title=" ",
+            description="d",
+            start_line=11,
+            end_line=11,
+        )
+    assert result["success"] is False
+    assert "title" in result["error"].lower()
 
 
 def test_add_finding_rejects_out_of_diff_lines() -> None:
@@ -55,6 +72,7 @@ def test_add_finding_rejects_out_of_diff_lines() -> None:
             confidence="high",
             category="correctness",
             file="foo.py",
+            title="Generated title",
             description="d",
             start_line=99,
             end_line=99,
@@ -89,6 +107,7 @@ def test_add_finding_accepts_left_side_anchor_on_old_line() -> None:
             confidence="high",
             category="correctness",
             file="foo.py",
+            title="Release resources removed",
             description="deleted call to releaseResources()",
             start_line=51,
             end_line=51,
@@ -117,6 +136,7 @@ def test_add_finding_rejects_left_anchor_outside_old_side_set() -> None:
             confidence="high",
             category="correctness",
             file="foo.py",
+            title="Generated title",
             description="d",
             start_line=99,
             end_line=99,
@@ -133,6 +153,7 @@ def test_add_finding_rejects_invalid_confidence() -> None:
             confidence="certain",
             category="correctness",
             file="foo.py",
+            title="Generated title",
             description="d",
             start_line=11,
             end_line=11,
@@ -158,6 +179,7 @@ def test_add_finding_persists_to_thread_metadata() -> None:
             confidence="high",
             category="style",
             file="foo.py",
+            title="Rename breaks reference",
             description="rename",
             start_line=11,
             end_line=12,
@@ -168,6 +190,7 @@ def test_add_finding_persists_to_thread_metadata() -> None:
     assert "finding_id" in result
     persisted_thread, persisted = captured[0]
     assert persisted_thread == "tid-1"
+    assert persisted["title"] == "Rename breaks reference"
     assert persisted["file"] == "foo.py"
     assert persisted["start_line"] == 11
     assert persisted["end_line"] == 12
@@ -192,6 +215,7 @@ def test_add_finding_allows_file_level_with_no_lines() -> None:
             confidence="medium",
             category="style",
             file="missing.py",
+            title="File-level issue",
             description="file-level note",
         )
     assert result["success"] is True
@@ -252,6 +276,28 @@ def test_update_finding_rejects_empty_update() -> None:
     assert "No fields" in result["error"]
 
 
+def test_update_finding_updates_title() -> None:
+    captured: list[Any] = []
+
+    async def fake_update(thread_id: str, finding_id: str, updates: Any) -> Any:
+        captured.append(updates)
+        return {"id": finding_id, **updates}
+
+    with (
+        patch("agent.tools.update_finding.get_config", return_value=_config()),
+        patch("agent.tools.update_finding.get_thread_id_from_runtime", return_value="tid-1"),
+        patch(
+            "agent.tools.update_finding.list_findings",
+            AsyncMock(return_value=[_existing_finding()]),
+        ),
+        patch("agent.tools.update_finding.update_finding_fields", side_effect=fake_update),
+    ):
+        result = update_finding(finding_id="f_a", title="new generated title")
+
+    assert result["success"] is True
+    assert captured[0]["title"] == "new generated title"
+
+
 def test_add_finding_drops_long_suggestion() -> None:
     captured: list[Any] = []
 
@@ -270,6 +316,7 @@ def test_add_finding_drops_long_suggestion() -> None:
             confidence="high",
             category="style",
             file="foo.py",
+            title="Rewrite changes behavior",
             description="rewrite",
             start_line=11,
             end_line=12,
@@ -300,6 +347,7 @@ def test_add_finding_keeps_short_suggestion() -> None:
             confidence="medium",
             category="style",
             file="foo.py",
+            title="Rename breaks reference",
             description="rename",
             start_line=11,
             end_line=12,
@@ -329,6 +377,7 @@ def test_add_finding_preserves_multi_line_range() -> None:
             confidence="low",
             category="style",
             file="foo.py",
+            title="Range spans issue",
             description="span the relevant range",
             start_line=15,
             end_line=19,
