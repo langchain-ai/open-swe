@@ -113,7 +113,7 @@ async def test_reviewer_applies_eval_model_and_effort_overrides() -> None:
             "pr_url": "https://github.com/acme/repo/pull/1",
             "base_sha": "base",
             "head_sha": "head",
-            "reviewer_model_id": "anthropic:claude-opus-4-7",
+            "reviewer_model_id": "anthropic:claude-opus-4-8",
             "reviewer_reasoning_effort": "high",
             "reviewer_subagent_model_id": "openai:gpt-5.5",
             "reviewer_subagent_reasoning_effort": "low",
@@ -144,7 +144,7 @@ async def test_reviewer_applies_eval_model_and_effort_overrides() -> None:
         await reviewer.get_reviewer_agent(config)
 
     main_model_call = make_model.call_args_list[0]
-    assert main_model_call.args == ("anthropic:claude-opus-4-7",)
+    assert main_model_call.args == ("anthropic:claude-opus-4-8",)
     assert main_model_call.kwargs["thinking"] == {"type": "adaptive"}
     assert main_model_call.kwargs["effort"] == "high"
     subagent_model_call = make_model.call_args_list[1]
@@ -163,7 +163,7 @@ async def test_reviewer_subagent_inherits_eval_model_without_explicit_override()
             "pr_url": "https://github.com/acme/repo/pull/1",
             "base_sha": "base",
             "head_sha": "head",
-            "reviewer_model_id": "anthropic:claude-opus-4-7",
+            "reviewer_model_id": "anthropic:claude-opus-4-8",
             "reviewer_reasoning_effort": "high",
         },
         "metadata": {},
@@ -192,11 +192,11 @@ async def test_reviewer_subagent_inherits_eval_model_without_explicit_override()
         await reviewer.get_reviewer_agent(config)
 
     main_model_call = make_model.call_args_list[0]
-    assert main_model_call.args == ("anthropic:claude-opus-4-7",)
+    assert main_model_call.args == ("anthropic:claude-opus-4-8",)
     assert main_model_call.kwargs["thinking"] == {"type": "adaptive"}
     assert main_model_call.kwargs["effort"] == "high"
     subagent_model_call = make_model.call_args_list[1]
-    assert subagent_model_call.args == ("anthropic:claude-opus-4-7",)
+    assert subagent_model_call.args == ("anthropic:claude-opus-4-8",)
     assert subagent_model_call.kwargs["thinking"] == {"type": "adaptive"}
     assert subagent_model_call.kwargs["effort"] == "high"
 

@@ -14,8 +14,8 @@ class ModelOption(TypedDict):
 
 SUPPORTED_MODELS: list[ModelOption] = [
     {
-        "id": "anthropic:claude-opus-4-7",
-        "label": "Opus 4.7",
+        "id": "anthropic:claude-opus-4-8",
+        "label": "Opus 4.8",
         "efforts": ["low", "medium", "high", "xhigh", "max"],
         "default_effort": "high",
     },
