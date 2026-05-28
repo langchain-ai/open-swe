@@ -35,6 +35,7 @@ from deepagents import create_deep_agent
 from langchain.agents.middleware import ModelCallLimitMiddleware
 
 from .middleware import (
+    SanitizeThinkingBlocksMiddleware,
     SanitizeToolInputsMiddleware,
     SlackAssistantStatusMiddleware,
     ToolErrorMiddleware,
@@ -794,5 +795,6 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
             ToolErrorMiddleware(),
             check_message_queue_before_model,
             SlackAssistantStatusMiddleware(),
+            SanitizeThinkingBlocksMiddleware(),
         ],
     ).with_config(config)
