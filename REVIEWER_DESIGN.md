@@ -63,11 +63,12 @@ Reviewer-thread metadata schema:
 
 Tools the reviewer agent uses to mutate findings:
 
-- `add_finding(severity, category, file, start_line, end_line, description, suggestion=None, side="RIGHT") -> id`
+- `add_finding(severity, category, file, title, description, start_line, end_line, suggestion=None, side="RIGHT") -> id`
+  - `title` is a concise generated headline for the GitHub comment, not a copied/truncated description.
   - Single-line finding: `start_line == end_line`.
   - File-level finding: both `None` (publishes as a top-level review body line, not inline).
   - `suggestion`, when set, must be the exact replacement text for lines `start_line..end_line` inclusive — that's how GitHub's ```suggestion block works.
-- `update_finding(id, *, status?, severity?, description?, suggestion?, note?)` — single tool for any post-creation mutation, including marking resolved/dismissed and revising a suggestion after the agent looks more carefully.
+- `update_finding(id, *, status?, severity?, title?, description?, suggestion?, note?)` — single tool for any post-creation mutation, including marking resolved/dismissed and revising a suggestion after the agent looks more carefully.
 - `list_findings(status_filter?) -> list[Finding]`
 
 Resolved findings are kept in the list (status=`resolved`), hidden from the default top-K GitHub surfacing, surfaced in the eventual UI as "what's already addressed". This prevents the agent from re-finding the same issue across runs.

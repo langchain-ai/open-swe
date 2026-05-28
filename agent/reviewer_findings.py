@@ -28,6 +28,8 @@ REVIEWER_THREAD_KIND = "reviewer"
 # code for the author and clutters the comment. We cap at 4 lines and drop
 # longer suggestions; the description still gets posted on its own.
 MAX_SUGGESTION_LINES = 4
+MAX_FINDING_TITLE_LENGTH = 120
+DEFAULT_FINDING_TITLE = "Code review finding"
 
 
 def clip_suggestion(suggestion: str | None) -> tuple[str | None, bool]:
@@ -37,6 +39,19 @@ def clip_suggestion(suggestion: str | None) -> tuple[str | None, bool]:
     if suggestion.count("\n") + 1 > MAX_SUGGESTION_LINES:
         return None, True
     return suggestion, False
+
+
+def normalize_finding_title(title: str | None, description: str = "") -> str:
+    """Return a compact finding title suitable for a review comment headline."""
+    raw = title.strip() if isinstance(title, str) else ""
+    if not raw and description:
+        raw = description.strip().split("\n", 1)[0].strip()
+    compact = " ".join(raw.split())
+    if not compact:
+        return DEFAULT_FINDING_TITLE
+    if len(compact) > MAX_FINDING_TITLE_LENGTH:
+        return f"{compact[: MAX_FINDING_TITLE_LENGTH - 3].rstrip()}..."
+    return compact
 
 
 Severity = Literal["low", "medium", "high", "critical"]
@@ -61,14 +76,15 @@ SEVERITY_ORDER: dict[Severity, int] = {
 class Finding(TypedDict, total=False):
     """A single review finding.
 
-    All fields are optional at the TypedDict level so partial updates are
-    representable, but ``new_finding`` always returns a fully populated dict.
+    All fields are optional at the TypedDict level so partial updates and
+    legacy findings without generated titles are representable.
     """
 
     id: str
     severity: Severity
     confidence: Confidence
     category: str
+    title: str
     file: str
     start_line: int | None
     end_line: int | None
@@ -160,6 +176,7 @@ def new_finding(
     end_line: int | None,
     description: str,
     sha: str,
+    title: str | None = None,
     confidence: Confidence = "medium",
     side: DiffSide = "RIGHT",
     suggestion: str | None = None,
@@ -185,7 +202,7 @@ def new_finding(
         "last_github_sync_at": None,
         "last_error": None,
     }
-    return {
+    finding: Finding = {
         "id": resolved_id,
         "severity": severity,
         "confidence": confidence,
@@ -218,6 +235,9 @@ def new_finding(
         "surface": surface,
         "interactions": [],
     }
+    if title is not None:
+        finding["title"] = normalize_finding_title(title)
+    return finding
 
 
 def _finding_fingerprint(
