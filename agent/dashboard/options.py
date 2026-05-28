@@ -40,6 +40,32 @@ def model_supports_effort(model_id: str, effort: str) -> bool:
     return False
 
 
+def _provider_of(model_id: str) -> str | None:
+    provider, _, rest = model_id.partition(":")
+    return provider if rest else None
+
+
+def provider_fallback_pair(model_id: object, effort: object = None) -> tuple[str, str] | None:
+    """Newest supported ``(model_id, effort)`` for the same provider as ``model_id``.
+
+    Keeps a stored selection on its original provider when its exact id has
+    dropped out of the supported set (e.g. an Opus minor-version bump), instead
+    of falling through to the cross-provider global default. Preserves ``effort``
+    when the fallback model supports it, otherwise uses that model's default
+    effort. Returns ``None`` when no supported model shares the provider.
+    """
+    if not isinstance(model_id, str):
+        return None
+    provider = _provider_of(model_id)
+    if provider is None:
+        return None
+    for m in SUPPORTED_MODELS:
+        if _provider_of(m["id"]) == provider:
+            new_effort = effort if (isinstance(effort, str) and effort in m["efforts"]) else None
+            return m["id"], new_effort or m["default_effort"]
+    return None
+
+
 def default_model_pair() -> tuple[str, str]:
     """Hardcoded fallback (model_id, reasoning_effort) used when no team default is set."""
     if DEFAULT_MODEL_ID in SUPPORTED_MODEL_IDS and model_supports_effort(
