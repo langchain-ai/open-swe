@@ -9,10 +9,33 @@ from langgraph.config import get_config
 
 from ..reviewer_findings import (
     MAX_SUGGESTION_LINES,
+    Finding,
     clip_suggestion,
     get_thread_id_from_runtime,
+    list_findings,
     update_finding_fields,
 )
+
+
+def _is_non_empty_str(value: Any) -> bool:
+    return isinstance(value, str) and bool(value)
+
+
+def _has_published_github_surface(finding: Finding) -> bool:
+    surface = finding.get("surface")
+    if isinstance(surface, dict) and (
+        isinstance(surface.get("github_review_comment_id"), int)
+        or _is_non_empty_str(surface.get("github_review_thread_id"))
+    ):
+        return True
+    comment_ids = finding.get("github_review_comment_ids")
+    thread_ids = finding.get("github_review_thread_ids")
+    return (
+        isinstance(finding.get("github_review_comment_id"), int)
+        or _is_non_empty_str(finding.get("github_review_thread_id"))
+        or (isinstance(comment_ids, list) and any(isinstance(item, int) for item in comment_ids))
+        or (isinstance(thread_ids, list) and any(_is_non_empty_str(item) for item in thread_ids))
+    )
 
 
 def update_finding(
@@ -96,10 +119,11 @@ def update_finding(
         return {"success": False, "error": "No fields provided to update"}
 
     thread_id = get_thread_id_from_runtime()
-    updated = asyncio.run(update_finding_fields(thread_id, finding_id, updates))
-    if updated is None:
+    findings = asyncio.run(list_findings(thread_id))
+    finding = next((item for item in findings if item.get("id") == finding_id), None)
+    if finding is None:
         return {"success": False, "error": f"No finding found with id {finding_id}"}
-    result: dict[str, Any] = {"success": True, "finding": updated}
+
     repo_config = configurable.get("repo") if isinstance(configurable, dict) else None
     pr_number = configurable.get("pr_number") if isinstance(configurable, dict) else None
     can_resolve_github_thread = (
@@ -108,13 +132,41 @@ def update_finding(
         and bool(repo_config.get("name"))
         and isinstance(pr_number, int)
     )
-    if status in {"resolved", "dismissed"} and can_resolve_github_thread:
+    if (
+        status in {"resolved", "dismissed"}
+        and can_resolve_github_thread
+        and _has_published_github_surface(finding)
+    ):
         from .resolve_finding_thread import resolve_finding_thread
 
-        resolve_result = resolve_finding_thread(finding_id, status=status)
-        result["github_resolution"] = resolve_result
-        if resolve_result.get("success"):
-            result["finding"] = resolve_result.get("finding", updated)
+        resolve_result = resolve_finding_thread(finding_id, status=status, note=note)
+        if not resolve_result.get("success"):
+            return {
+                "success": False,
+                "error": "GitHub review thread resolution failed; finding was left open.",
+                "github_resolution": resolve_result,
+            }
+        updates.pop("status", None)
+        updates.pop("last_update_note", None)
+        if not updates:
+            result: dict[str, Any] = {
+                "success": True,
+                "finding": resolve_result.get("finding"),
+                "github_resolution": resolve_result,
+            }
+            if suggestion_dropped:
+                result["suggestion_dropped"] = True
+                result["warning"] = (
+                    f"Suggestion exceeded the {MAX_SUGGESTION_LINES}-line cap and was "
+                    "rejected — the finding's prior `suggestion` was left unchanged. "
+                    "Only include `suggestion` for small, obvious fixes."
+                )
+            return result
+
+    updated = asyncio.run(update_finding_fields(thread_id, finding_id, updates))
+    if updated is None:
+        return {"success": False, "error": f"No finding found with id {finding_id}"}
+    result = {"success": True, "finding": updated}
     if suggestion_dropped:
         result["suggestion_dropped"] = True
         result["warning"] = (

@@ -86,6 +86,49 @@ async def test_reconcile_backfills_comment_and_thread_ids_from_bot_marker() -> N
 
 
 @pytest.mark.asyncio
+async def test_reconcile_backfills_marker_from_graphql_app_login() -> None:
+    findings = [
+        {
+            "id": "f1",
+            "status": "open",
+            "github_review_comment_id": None,
+            "github_review_thread_id": None,
+        }
+    ]
+    replace = AsyncMock()
+
+    with (
+        patch("agent.reviewer_reconcile.list_findings", AsyncMock(return_value=findings)),
+        patch("agent.reviewer_reconcile.replace_findings", replace),
+    ):
+        result = await reconcile_findings_with_review_threads(
+            "tid",
+            [
+                {
+                    "id": "THREAD_1",
+                    "is_resolved": False,
+                    "is_outdated": False,
+                    "comments": [
+                        {
+                            "id": 11,
+                            "author": "open-swe",
+                            "body": (
+                                '<!-- open-swe-review-comment {"id":"f1",'
+                                '"file_path":"a.py","start_line":1,'
+                                '"end_line":1,"side":"RIGHT"} -->\n\nbug'
+                            ),
+                        }
+                    ],
+                }
+            ],
+        )
+
+    assert result[0]["github_review_comment_id"] == 11
+    assert result[0]["github_review_thread_id"] == "THREAD_1"
+    replace.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_reconcile_duplicate_markers_require_all_threads_terminal() -> None:
     findings = [
         {
