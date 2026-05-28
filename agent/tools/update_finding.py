@@ -95,11 +95,6 @@ def update_finding(
             }
         return {"success": False, "error": "No fields provided to update"}
 
-    thread_id = get_thread_id_from_runtime()
-    updated = asyncio.run(update_finding_fields(thread_id, finding_id, updates))
-    if updated is None:
-        return {"success": False, "error": f"No finding found with id {finding_id}"}
-    result: dict[str, Any] = {"success": True, "finding": updated}
     repo_config = configurable.get("repo") if isinstance(configurable, dict) else None
     pr_number = configurable.get("pr_number") if isinstance(configurable, dict) else None
     can_resolve_github_thread = (
@@ -111,10 +106,35 @@ def update_finding(
     if status in {"resolved", "dismissed"} and can_resolve_github_thread:
         from .resolve_finding_thread import resolve_finding_thread
 
-        resolve_result = resolve_finding_thread(finding_id, status=status)
-        result["github_resolution"] = resolve_result
-        if resolve_result.get("success"):
-            result["finding"] = resolve_result.get("finding", updated)
+        resolve_result = resolve_finding_thread(finding_id, status=status, note=note)
+        if not resolve_result.get("success"):
+            return {
+                "success": False,
+                "error": "GitHub review thread resolution failed; finding was left open.",
+                "github_resolution": resolve_result,
+            }
+        updates.pop("status", None)
+        updates.pop("last_update_note", None)
+        if not updates:
+            result: dict[str, Any] = {
+                "success": True,
+                "finding": resolve_result.get("finding"),
+                "github_resolution": resolve_result,
+            }
+            if suggestion_dropped:
+                result["suggestion_dropped"] = True
+                result["warning"] = (
+                    f"Suggestion exceeded the {MAX_SUGGESTION_LINES}-line cap and was "
+                    "rejected — the finding's prior `suggestion` was left unchanged. "
+                    "Only include `suggestion` for small, obvious fixes."
+                )
+            return result
+
+    thread_id = get_thread_id_from_runtime()
+    updated = asyncio.run(update_finding_fields(thread_id, finding_id, updates))
+    if updated is None:
+        return {"success": False, "error": f"No finding found with id {finding_id}"}
+    result = {"success": True, "finding": updated}
     if suggestion_dropped:
         result["suggestion_dropped"] = True
         result["warning"] = (
