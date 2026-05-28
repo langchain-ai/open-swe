@@ -47,6 +47,7 @@ from .integrations.langsmith import _configure_github_proxy
 from .middleware import (
     ModelFallbackMiddleware,
     SandboxCircuitBreakerMiddleware,
+    SanitizeThinkingBlocksMiddleware,
     SanitizeToolInputsMiddleware,
     SlackAssistantStatusMiddleware,
     ToolErrorMiddleware,
@@ -518,5 +519,6 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             notify_step_limit_reached,
             SandboxCircuitBreakerMiddleware(),
             *fallback_middleware,
+            SanitizeThinkingBlocksMiddleware(),
         ],
     ).with_config(config)
