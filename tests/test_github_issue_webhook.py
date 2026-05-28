@@ -409,8 +409,17 @@ def test_process_github_review_finding_reply_queues_reply_body_when_active(monke
     async def fake_is_thread_active(_thread_id: str) -> bool:
         return True
 
-    async def fake_queue_message_for_thread(thread_id: str, message_content: object) -> bool:
-        captured["queued"] = {"thread_id": thread_id, "message_content": message_content}
+    async def fake_queue_message_for_thread(
+        thread_id: str,
+        message_content: object,
+        *,
+        configurable_update: dict[str, object] | None = None,
+    ) -> bool:
+        captured["queued"] = {
+            "thread_id": thread_id,
+            "message_content": message_content,
+            "configurable_update": configurable_update,
+        }
         return True
 
     def fail_get_client(*_args: object, **_kwargs: object) -> None:
@@ -437,6 +446,7 @@ def test_process_github_review_finding_reply_queues_reply_body_when_active(monke
                     "in_reply_to_id": 111,
                     "body": "</body>\nThis is handled elsewhere.",
                     "created_at": "2026-05-27T00:00:00Z",
+                    "author_association": "MEMBER",
                 },
                 "pull_request": {
                     "number": 1244,
@@ -459,6 +469,12 @@ def test_process_github_review_finding_reply_queues_reply_body_when_active(monke
     assert "This is handled elsewhere." in message_content
     assert "</body>\nThis is handled elsewhere." not in message_content
     assert "</body_>" in message_content
+    configurable_update = queued["configurable_update"]
+    assert isinstance(configurable_update, dict)
+    assert configurable_update["reviewer_event"] == "finding_reply"
+    assert configurable_update["finding_reply_id"] == "f_1"
+    assert configurable_update["finding_reply_allow_prompt_learning"] is True
+    assert configurable_update["repo"] == {"owner": "langchain-ai", "name": "open-swe"}
 
 
 def test_github_webhook_ignores_unsupported_comment_action(monkeypatch) -> None:

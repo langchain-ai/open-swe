@@ -19,6 +19,59 @@ from ..utils.multimodal import fetch_image_block
 
 logger = logging.getLogger(__name__)
 
+_QUEUED_CONFIGURABLE_KEYS = frozenset(
+    {
+        "reviewer_event",
+        "finding_reply_id",
+        "finding_reply_author",
+        "finding_reply_body",
+        "finding_reply_allow_prompt_learning",
+        "repo",
+    }
+)
+
+
+def _queued_configurable_update(message: dict[str, Any]) -> dict[str, Any]:
+    raw_update = message.get("configurable")
+    if not isinstance(raw_update, dict):
+        return {}
+
+    update: dict[str, Any] = {}
+    for key in _QUEUED_CONFIGURABLE_KEYS:
+        if key not in raw_update:
+            continue
+        value = raw_update[key]
+        if key == "finding_reply_allow_prompt_learning":
+            update[key] = bool(value)
+            continue
+        if key == "repo":
+            if not isinstance(value, dict):
+                continue
+            owner = value.get("owner")
+            name = value.get("name")
+            if isinstance(owner, str) and isinstance(name, str):
+                update[key] = {"owner": owner, "name": name}
+            continue
+        if isinstance(value, str):
+            update[key] = value
+    return update
+
+
+def _select_queued_messages(
+    queued_messages: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
+    if not queued_messages:
+        return [], [], {}
+
+    first_update = _queued_configurable_update(queued_messages[0])
+    if first_update:
+        return [queued_messages[0]], queued_messages[1:], first_update
+
+    for index, message in enumerate(queued_messages):
+        if _queued_configurable_update(message):
+            return queued_messages[:index], queued_messages[index:], {}
+    return queued_messages, [], {}
+
 
 class LinearNotifyState(AgentState):
     """Extended agent state for tracking Linear notifications."""
@@ -88,13 +141,28 @@ async def check_message_queue_before_model(  # noqa: PLR0911
             return None
 
         queued_value = queued_item.value
-        queued_messages = queued_value.get("messages", [])
+        raw_queued_messages = (
+            queued_value.get("messages") if isinstance(queued_value, dict) else None
+        )
+        queued_messages = (
+            [msg for msg in raw_queued_messages if isinstance(msg, dict)]
+            if isinstance(raw_queued_messages, list)
+            else []
+        )
 
-        # Delete early to prevent duplicate processing if middleware runs again
-        await store.adelete(namespace, "pending_messages")
+        queued_messages, remaining_messages, configurable_update = _select_queued_messages(
+            queued_messages
+        )
+        if remaining_messages:
+            await store.aput(namespace, "pending_messages", {"messages": remaining_messages})
+        else:
+            await store.adelete(namespace, "pending_messages")
 
         if not queued_messages:
             return None
+
+        if configurable_update:
+            configurable.update(configurable_update)
 
         logger.info(
             "Found %d queued message(s) for thread %s, injecting into state",

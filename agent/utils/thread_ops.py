@@ -38,14 +38,19 @@ async def is_thread_active(thread_id: str) -> bool:
 
 
 async def queue_message_for_thread(
-    thread_id: str, message_content: str | list[dict[str, Any]] | dict[str, Any]
+    thread_id: str,
+    message_content: str | list[dict[str, Any]] | dict[str, Any],
+    *,
+    configurable_update: dict[str, Any] | None = None,
 ) -> bool:
     """Queue a follow-up message for a busy thread (FIFO store namespace)."""
     client = langgraph_client()
     try:
         namespace = ("queue", thread_id)
         key = "pending_messages"
-        new_message = {"content": message_content}
+        new_message: dict[str, Any] = {"content": message_content}
+        if configurable_update:
+            new_message["configurable"] = configurable_update
 
         existing_messages: list[dict[str, Any]] = []
         try:

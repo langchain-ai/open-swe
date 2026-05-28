@@ -2533,7 +2533,18 @@ async def process_github_review_finding_reply(payload: dict[str, Any]) -> None:
             pr_number=pr_number,
             allow_prompt_learning=allow_prompt_learning,
         )
-        await queue_message_for_thread(thread_id, queued_prompt)
+        await queue_message_for_thread(
+            thread_id,
+            queued_prompt,
+            configurable_update={
+                "reviewer_event": "finding_reply",
+                "finding_reply_id": finding_id,
+                "finding_reply_author": reply_author,
+                "finding_reply_body": reply_body,
+                "finding_reply_allow_prompt_learning": allow_prompt_learning,
+                "repo": repo_config,
+            },
+        )
         return
 
     langgraph_client = get_client(url=LANGGRAPH_URL)
