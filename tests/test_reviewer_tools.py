@@ -234,13 +234,15 @@ def test_resolve_finding_thread_resolves_all_known_threads() -> None:
         "THREAD_1",
         "THREAD_2",
     ]
-    reply.assert_awaited_once()
-    assert reply.await_args.kwargs["review_comment_id"] == 11
-    assert "✅ **Resolved**: Fixed in the latest commit" in reply.await_args.kwargs["body"]
+    assert [call.kwargs["review_comment_id"] for call in reply.await_args_list] == [11, 12]
+    assert all(
+        "✅ **Resolved**: Fixed in the latest commit" in call.kwargs["body"]
+        for call in reply.await_args_list
+    )
     updates = update.await_args.args[2]
     assert updates["github_thread_resolved"] is True
     assert updates["github_resolved_thread_ids"] == ["THREAD_1", "THREAD_2"]
-    assert updates["github_posted_resolution_comment_ids"] == [11]
+    assert updates["github_posted_resolution_comment_ids"] == [11, 12]
 
 
 def test_update_finding_rejects_empty_update() -> None:
