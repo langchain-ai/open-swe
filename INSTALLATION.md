@@ -361,6 +361,7 @@ LANGCHAIN_PROJECT=""                   # LangSmith project name for traces
 LANGSMITH_TENANT_ID_PROD=""           
 LANGSMITH_TRACING_PROJECT_ID_PROD=""  
 LANGSMITH_URL_PROD="https://smith.langchain.com"                 
+OPEN_SWE_REVIEW_TRACE_LINK_ENABLED="true" # Set false to omit trace links from GitHub reviews
 
 # === LLM ===
 ANTHROPIC_API_KEY=""                   # Anthropic API key

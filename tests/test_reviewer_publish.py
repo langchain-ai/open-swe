@@ -133,6 +133,16 @@ def test_render_review_body_no_findings_message() -> None:
     assert "<!-- open-swe-reviewer pr=99 -->" in body
 
 
+def test_render_review_body_includes_trace_link_when_provided() -> None:
+    body = render_review_body(
+        pr_number=123,
+        surfaced_count=0,
+        trace_url="https://smith.langchain.com/o/t/project/p/t/thread-id",
+    )
+    assert "[View Open SWE trace](https://smith.langchain.com/o/t/project/p/t/thread-id)" in body
+    assert body.endswith("<!-- open-swe-reviewer pr=123 -->")
+
+
 def test_publish_review_eval_mode_does_not_call_github() -> None:
     from agent.tools.publish_review import publish_review
 
@@ -170,6 +180,93 @@ def test_publish_review_eval_mode_does_not_call_github() -> None:
     get_token.assert_not_called()
     post_review.assert_not_called()
     set_meta.assert_awaited_once_with("tid", last_reviewed_sha="sha")
+
+
+def test_publish_review_passes_trace_url_to_review_body() -> None:
+    from agent.tools.publish_review import publish_review
+
+    publish_async = AsyncMock(return_value={"success": True})
+    with (
+        patch(
+            "agent.tools.publish_review.get_config",
+            return_value={
+                "configurable": {
+                    "thread_id": "reviewer-thread-id",
+                    "repo": {"owner": "o", "name": "r"},
+                    "pr_number": 7,
+                    "head_sha": "sha",
+                },
+                "metadata": {},
+            },
+        ),
+        patch("agent.tools.publish_review.get_github_token", return_value="token"),
+        patch("agent.tools.publish_review.get_langsmith_trace_url", return_value="https://smith/t"),
+        patch("agent.tools.publish_review._publish_review_async", publish_async),
+    ):
+        result = publish_review()
+
+    assert result == {"success": True}
+    assert publish_async.call_args.kwargs["review_trace_url"] == "https://smith/t"
+
+
+def test_publish_review_trace_link_can_be_disabled_by_config() -> None:
+    from agent.tools.publish_review import publish_review
+
+    publish_async = AsyncMock(return_value={"success": True})
+    trace_url = MagicMock(return_value="https://smith/t")
+    with (
+        patch(
+            "agent.tools.publish_review.get_config",
+            return_value={
+                "configurable": {
+                    "thread_id": "reviewer-thread-id",
+                    "repo": {"owner": "o", "name": "r"},
+                    "pr_number": 7,
+                    "head_sha": "sha",
+                    "review_trace_link_enabled": False,
+                },
+                "metadata": {},
+            },
+        ),
+        patch("agent.tools.publish_review.get_github_token", return_value="token"),
+        patch("agent.tools.publish_review.get_langsmith_trace_url", trace_url),
+        patch("agent.tools.publish_review._publish_review_async", publish_async),
+    ):
+        result = publish_review()
+
+    assert result == {"success": True}
+    assert publish_async.call_args.kwargs["review_trace_url"] is None
+    trace_url.assert_not_called()
+
+
+def test_publish_review_trace_link_can_be_disabled_by_env() -> None:
+    from agent.tools.publish_review import publish_review
+
+    publish_async = AsyncMock(return_value={"success": True})
+    trace_url = MagicMock(return_value="https://smith/t")
+    with (
+        patch.dict("os.environ", {"OPEN_SWE_REVIEW_TRACE_LINK_ENABLED": "false"}),
+        patch(
+            "agent.tools.publish_review.get_config",
+            return_value={
+                "configurable": {
+                    "thread_id": "reviewer-thread-id",
+                    "repo": {"owner": "o", "name": "r"},
+                    "pr_number": 7,
+                    "head_sha": "sha",
+                },
+                "metadata": {},
+            },
+        ),
+        patch("agent.tools.publish_review.get_github_token", return_value="token"),
+        patch("agent.tools.publish_review.get_langsmith_trace_url", trace_url),
+        patch("agent.tools.publish_review._publish_review_async", publish_async),
+    ):
+        result = publish_review()
+
+    assert result == {"success": True}
+    assert publish_async.call_args.kwargs["review_trace_url"] is None
+    trace_url.assert_not_called()
 
 
 @pytest.mark.asyncio
