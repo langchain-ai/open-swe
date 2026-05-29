@@ -21,11 +21,6 @@ import asyncio
 # Suppress Pydantic v1 compatibility warnings from langchain on Python 3.14+
 warnings.filterwarnings("ignore", message=".*Pydantic V1.*", category=UserWarning)
 
-# Now safe to import agent (which imports LangChain modules)
-from ._patch_messages_reducer import _apply as _apply_messages_reducer_patch
-
-_apply_messages_reducer_patch()
-
 from deepagents import create_deep_agent
 from deepagents.backends import LangSmithSandbox
 from deepagents.backends.protocol import SandboxBackendProtocol
