@@ -177,16 +177,14 @@ def _format_line_reference(start_line: int | None, end_line: int | None) -> str:
 
 def render_resolution_comment(
     finding: Finding,
-    status: str,
+    _status: str,
     note: str | None = None,
 ) -> str | None:
     """Render the agent-provided resolution reply for a review thread."""
     body = _resolution_body(finding, note)
     if body is None:
         return None
-    if status == "resolved":
-        return f"✅ **Resolved**: {body}"
-    return f"❌ **Dismissed**: {body}"
+    return f"✅ **Resolved**: {body}"
 
 
 def _resolution_body(finding: Finding, note: str | None) -> str | None:

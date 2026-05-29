@@ -118,9 +118,9 @@ def test_render_resolution_comment_returns_none_without_agent_note() -> None:
     assert body is None
 
 
-def test_render_resolution_comment_dismissed_uses_note() -> None:
+def test_render_resolution_comment_dismissed_uses_resolved_label() -> None:
     body = render_resolution_comment(_f(status="dismissed"), "dismissed", note="Intended behavior")
-    assert body == "❌ **Dismissed**: Intended behavior"
+    assert body == "✅ **Resolved**: Intended behavior"
 
 
 def test_render_resolution_comment_uses_stored_resolution_note() -> None:
