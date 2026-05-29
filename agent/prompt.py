@@ -300,8 +300,8 @@ When you have completed your implementation, follow these steps in order:
 
 2. **Review your changes**: Review the diff to ensure correctness. Verify no regressions or unintended modifications.
 
-3. **Submit via `gh`**: Commit locally, fetch the remote branch if it exists, rebase your local branch onto `origin/<branch>` when the remote has new commits, then push with `git push origin <branch>`. Use `GH_TOKEN=dummy gh pr create --draft ...` or `GH_TOKEN=dummy gh pr edit ...` when a PR is requested, necessary, or required by the Always Create PRs dashboard setting.
-   If a draft PR already exists for the branch, update it instead of opening a duplicate. Preserve already-pushed commits so reviewers can inspect inter-commit diffs: do not force-push, do not use `--force-with-lease`, and do not amend/rebase commits that are already on the remote branch. For follow-up changes, add a new commit on top of the existing branch history.
+3. **Submit via `gh`**: Commit locally, push with `git push origin <branch>`, then use `GH_TOKEN=dummy gh pr create --draft ...` or `GH_TOKEN=dummy gh pr edit ...` when a PR is requested, necessary, or required by the Always Create PRs dashboard setting.
+   If a draft PR already exists for the branch, update it instead of opening a duplicate. For follow-up changes, add a new commit on top of the existing branch history.
 
    **PR Title** (under 70 characters):
    ```
@@ -332,7 +332,7 @@ When you have completed your implementation, follow these steps in order:
 
 **IMPORTANT: Never claim a PR was created or updated unless `gh` returned success and you have the PR URL from command output or `GH_TOKEN=dummy gh pr view --json url --jq .url`. If there are no changes or any command fails, report that explicitly.**
 
-**IMPORTANT: Never run `git push --force`, `git push --force-with-lease`, or any other history-rewriting push. If a normal push is rejected because the remote branch has new commits, fetch and rebase onto the remote branch, then push normally. If that cannot be completed cleanly, report the conflict or failure.**
+**IMPORTANT: Never force-push.** Never run `git push --force` or `git push --force-with-lease`, and never amend or rebase commits that are already on the remote branch — reviewers rely on inter-commit diffs. Add follow-up work as new commits. If a normal push is rejected because the remote branch has new commits, run `git pull --rebase origin <branch>` and push again; if that conflicts, report it and stop.
 
 **IMPORTANT: If `git push` or `gh pr create` fails with an infrastructure or permission error, do not retry blindly. Report the failure and end the task.**
 
@@ -374,7 +374,7 @@ This run was triggered by **{display_name}**. Credit them on every commit and PR
   _Opened collaboratively by {display_name} and open-swe._
   ```
 
-If you forget the trailer on a local commit that has not been pushed, fix it with `git commit --amend` (or rebase) before pushing — do not push without it. If the commit has already been pushed, add the trailer in a new follow-up commit instead of rewriting remote history."""
+If you forget the trailer on a local commit that has not been pushed, fix it with `git commit --amend` before pushing — do not push without it. If the commit has already been pushed, leave it as-is and add the trailer to your next commit; never rewrite remote history to fix it."""
 
 
 def _render_collaboration_section(identity: CollaboratorIdentity | None) -> str:
