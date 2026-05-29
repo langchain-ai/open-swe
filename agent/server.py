@@ -82,8 +82,6 @@ from .utils.sandbox_paths import aresolve_sandbox_work_dir
 client = get_client()
 
 SANDBOX_CREATING = "__creating__"
-SANDBOX_CREATION_TIMEOUT = 180
-SANDBOX_POLL_INTERVAL = 1.0
 
 from .utils.sandbox_state import (
     SANDBOX_BACKENDS,
@@ -226,27 +224,6 @@ async def check_or_recreate_sandbox(
     return sandbox_backend
 
 
-async def _wait_for_sandbox_id(thread_id: str) -> str:
-    """Wait for sandbox_id to be set in thread metadata.
-
-    Polls thread metadata until sandbox_id is set to a real value
-    (not the creating sentinel).
-
-    Raises:
-        TimeoutError: If sandbox creation takes too long
-    """
-    elapsed = 0.0
-    while elapsed < SANDBOX_CREATION_TIMEOUT:
-        sandbox_id = await get_sandbox_id_from_metadata(thread_id)
-        if sandbox_id is not None and sandbox_id != SANDBOX_CREATING:
-            return sandbox_id
-        await asyncio.sleep(SANDBOX_POLL_INTERVAL)
-        elapsed += SANDBOX_POLL_INTERVAL
-
-    msg = f"Timeout waiting for sandbox creation for thread {thread_id}"
-    raise TimeoutError(msg)
-
-
 def graph_loaded_for_execution(config: RunnableConfig) -> bool:
     """Check if the graph is loaded for actual execution vs introspection."""
     return (
@@ -262,7 +239,7 @@ async def ensure_sandbox_for_thread(thread_id: str) -> SandboxBackendProtocol:
     Implements the four-state lifecycle described in AGENTS.md:
 
     1. Cached in memory → ping; recreate on ``SandboxClientError``.
-    2. Metadata says ``__creating__`` and no cache → poll until ready.
+    2. Metadata says ``__creating__`` and no cache → reset stale metadata.
     3. No sandbox at all → create one and persist the id.
     4. Metadata has an id but no cache → reconnect; recreate on failure.
 
@@ -274,8 +251,12 @@ async def ensure_sandbox_for_thread(thread_id: str) -> SandboxBackendProtocol:
     sandbox_id = await get_sandbox_id_from_metadata(thread_id)
 
     if sandbox_id == SANDBOX_CREATING and not sandbox_backend:
-        logger.info("Sandbox creation in progress for thread %s, waiting...", thread_id)
-        sandbox_id = await _wait_for_sandbox_id(thread_id)
+        logger.warning(
+            "Found stale SANDBOX_CREATING for thread %s with no cached backend, resetting",
+            thread_id,
+        )
+        await client.threads.update(thread_id=thread_id, metadata={"sandbox_id": None})
+        sandbox_id = None
 
     if sandbox_backend:
         logger.info("Using cached sandbox backend for thread %s", thread_id)

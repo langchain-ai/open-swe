@@ -48,7 +48,7 @@ The FastAPI app is `agent.webapp:app`.
 `SANDBOX_BACKENDS` (in `agent/utils/sandbox_state.py`) is an in-process dict keyed by `thread_id`. Thread metadata persists `sandbox_id` across processes. `ensure_sandbox_for_thread` handles four cases:
 
 1. Sandbox cached in memory → ping it (`echo ok`); recreate on `SandboxClientError`. Healthy reused sandboxes also get a GitHub-proxy refresh (recreate on failure).
-2. Metadata says `__creating__` and no cache → poll until ready (`_wait_for_sandbox_id`).
+2. Metadata says `__creating__` and no cache → reset stale metadata so a fresh sandbox can be created.
 3. No sandbox at all → set `__creating__` sentinel, create one, persist the real id.
 4. Metadata has an id but no cache → reconnect; fall back to recreate on failure.
 
