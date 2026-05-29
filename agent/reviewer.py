@@ -40,6 +40,7 @@ from .middleware import (
     SlackAssistantStatusMiddleware,
     ToolErrorMiddleware,
     check_message_queue_before_model,
+    notify_provider_error_reached,
 )
 from .reviewer_diff import compute_diff_line_set, fetch_pr_diff
 from .reviewer_findings import (
@@ -806,6 +807,7 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
             ToolErrorMiddleware(),
             check_message_queue_before_model,
             SlackAssistantStatusMiddleware(),
+            notify_provider_error_reached,
             SanitizeThinkingBlocksMiddleware(),
         ],
     ).with_config(config)

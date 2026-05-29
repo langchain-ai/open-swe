@@ -21,10 +21,19 @@ import openai
 from langchain.agents.middleware import AgentMiddleware
 from langchain.agents.middleware.types import ModelCallResult, ModelRequest, ModelResponse
 from langchain_core.language_models import BaseChatModel
+from langchain_core.messages import AIMessage
 
 logger = logging.getLogger(__name__)
 
-_RETRYABLE_STATUS_CODES = {408, 409, 425, 429, 500, 502, 503, 504, 529}
+# Marker text embedded in the synthetic final AIMessage when every provider
+# attempt fails. The companion ``notify_provider_error_reached`` after_agent
+# middleware looks for this prefix to post a user-facing notification.
+PROVIDER_ERROR_MARKER = "Provider error: agent terminated without completing the task"
+
+# 401/403 from the primary provider are intentionally retryable: they indicate
+# a primary-provider auth/permission problem that the fallback provider
+# (configured with a different API key) can actually recover from.
+_RETRYABLE_STATUS_CODES = {401, 403, 408, 409, 425, 429, 500, 502, 503, 504, 529}
 
 _TRANSIENT_EXCEPTIONS: tuple[type[BaseException], ...] = (
     anthropic.APIConnectionError,
@@ -72,7 +81,14 @@ class ModelFallbackMiddleware(AgentMiddleware):
                 getattr(self._fallback_model, "model_name", None)
                 or getattr(self._fallback_model, "model", "fallback"),
             )
-            return handler(request.override(model=self._fallback_model))
+            try:
+                return handler(request.override(model=self._fallback_model))
+            except Exception as fallback_exc:
+                logger.exception(
+                    "Fallback model also failed (%s); terminating agent with marker message",
+                    type(fallback_exc).__name__,
+                )
+                return _provider_error_response(exc, fallback_exc)
 
     async def awrap_model_call(
         self,
@@ -90,4 +106,23 @@ class ModelFallbackMiddleware(AgentMiddleware):
                 getattr(self._fallback_model, "model_name", None)
                 or getattr(self._fallback_model, "model", "fallback"),
             )
-            return await handler(request.override(model=self._fallback_model))
+            try:
+                return await handler(request.override(model=self._fallback_model))
+            except Exception as fallback_exc:
+                logger.exception(
+                    "Fallback model also failed (%s); terminating agent with marker message",
+                    type(fallback_exc).__name__,
+                )
+                return _provider_error_response(exc, fallback_exc)
+
+
+def _provider_error_response(
+    primary_exc: BaseException,
+    fallback_exc: BaseException,
+) -> ModelResponse:
+    """Build a terminal AIMessage describing the unrecoverable provider failure."""
+    content = (
+        f"{PROVIDER_ERROR_MARKER} "
+        f"(primary={type(primary_exc).__name__}, fallback={type(fallback_exc).__name__})"
+    )
+    return ModelResponse(result=[AIMessage(content=content)])

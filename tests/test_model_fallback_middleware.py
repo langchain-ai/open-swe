@@ -11,6 +11,7 @@ import pytest
 from langchain_core.messages import AIMessage
 
 from agent.middleware.model_fallback import (
+    PROVIDER_ERROR_MARKER,
     ModelFallbackMiddleware,
     _should_fallback,
 )
@@ -58,6 +59,24 @@ class TestShouldFallback:
         exc = anthropic.BadRequestError("bad", response=response, body={})
         assert _should_fallback(exc) is False
 
+    def test_openai_401_auth_error_falls_back(self) -> None:
+        request = httpx.Request("POST", "https://api.openai.com/v1/chat/completions")
+        response = httpx.Response(
+            401,
+            request=request,
+            json={
+                "error": {"message": "You do not have access to the project tied to the API key"}
+            },
+        )
+        exc = openai.AuthenticationError("auth", response=response, body=response.json())
+        assert _should_fallback(exc) is True
+
+    def test_openai_403_permission_error_falls_back(self) -> None:
+        request = httpx.Request("POST", "https://api.openai.com/v1/chat/completions")
+        response = httpx.Response(403, request=request, json={"error": {"message": "forbidden"}})
+        exc = openai.PermissionDeniedError("forbidden", response=response, body=response.json())
+        assert _should_fallback(exc) is True
+
     def test_value_error_does_not_fall_back(self) -> None:
         assert _should_fallback(ValueError("nope")) is False
 
@@ -86,6 +105,36 @@ class TestModelFallbackMiddleware:
         assert calls[1] is request.override.return_value
 
     @pytest.mark.asyncio
+    async def test_async_falls_over_on_openai_401(self) -> None:
+        fallback_model = MagicMock(name="fallback_model")
+        middleware = ModelFallbackMiddleware(fallback_model)
+
+        calls: list[object] = []
+        good_response = MagicMock(result=[AIMessage(content="ok from fallback")])
+
+        request_401 = httpx.Request("POST", "https://api.openai.com/v1/chat/completions")
+        response_401 = httpx.Response(
+            401,
+            request=request_401,
+            json={"error": {"message": "no project access"}},
+        )
+
+        async def handler(req: object) -> object:
+            calls.append(req)
+            if len(calls) == 1:
+                raise openai.AuthenticationError(
+                    "auth", response=response_401, body=response_401.json()
+                )
+            return good_response
+
+        request = _make_request()
+        result = await middleware.awrap_model_call(request, handler)
+
+        assert result is good_response
+        assert len(calls) == 2
+        request.override.assert_called_once_with(model=fallback_model)
+
+    @pytest.mark.asyncio
     async def test_async_propagates_non_transient_error(self) -> None:
         middleware = ModelFallbackMiddleware(MagicMock())
         calls: list[object] = []
@@ -100,8 +149,33 @@ class TestModelFallbackMiddleware:
         assert len(calls) == 1
 
     @pytest.mark.asyncio
+    async def test_async_returns_marker_when_both_providers_401(self) -> None:
+        middleware = ModelFallbackMiddleware(MagicMock(name="fallback_model"))
+
+        request_401 = httpx.Request("POST", "https://api.openai.com/v1/chat/completions")
+        response_401 = httpx.Response(
+            401, request=request_401, json={"error": {"message": "no project access"}}
+        )
+
+        calls: list[object] = []
+
+        async def handler(req: object) -> object:
+            calls.append(req)
+            raise openai.AuthenticationError(
+                "auth", response=response_401, body=response_401.json()
+            )
+
+        result = await middleware.awrap_model_call(_make_request(), handler)
+
+        assert len(calls) == 2
+        messages = result.result
+        assert len(messages) == 1
+        assert PROVIDER_ERROR_MARKER in messages[0].content
+        assert "AuthenticationError" in messages[0].content
+
+    @pytest.mark.asyncio
     async def test_async_does_not_double_fall_back(self) -> None:
-        """If the fallback also fails transiently, the error propagates."""
+        """If the fallback also fails transiently, return a terminal marker AIMessage."""
         middleware = ModelFallbackMiddleware(MagicMock())
         calls: list[object] = []
 
@@ -109,10 +183,12 @@ class TestModelFallbackMiddleware:
             calls.append(req)
             raise _openai_5xx()
 
-        with pytest.raises(openai.APIStatusError):
-            await middleware.awrap_model_call(_make_request(), handler)
+        result = await middleware.awrap_model_call(_make_request(), handler)
 
         assert len(calls) == 2
+        messages = result.result
+        assert len(messages) == 1
+        assert PROVIDER_ERROR_MARKER in messages[0].content
 
     def test_sync_falls_over_on_overloaded(self) -> None:
         fallback_model = MagicMock(name="fallback_model")
