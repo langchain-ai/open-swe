@@ -309,10 +309,21 @@ async def get_finding(thread_id: str, finding_id: str) -> Finding | None:
     return None
 
 
+async def _update_thread_metadata(client: Any, thread_id: str, metadata: dict[str, Any]) -> None:
+    """Update thread metadata, creating the row first if it doesn't exist yet."""
+    try:
+        await client.threads.update(thread_id=thread_id, metadata=metadata)
+    except Exception as exc:  # noqa: BLE001
+        if getattr(exc, "status_code", None) != 404 and "not found" not in str(exc).lower():
+            raise
+        await client.threads.create(thread_id=thread_id, if_exists="do_nothing")
+        await client.threads.update(thread_id=thread_id, metadata=metadata)
+
+
 async def replace_findings(thread_id: str, findings: list[Finding]) -> None:
     """Overwrite the findings list on a thread's metadata."""
     client = get_client()
-    await client.threads.update(thread_id=thread_id, metadata={"findings": findings})
+    await _update_thread_metadata(client, thread_id, {"findings": findings})
 
 
 async def append_finding(thread_id: str, finding: Finding) -> Finding:
@@ -463,7 +474,7 @@ async def set_reviewer_thread_metadata(
         metadata["slack_thread"] = slack_thread
     if extra:
         metadata.update(extra)
-    await client.threads.update(thread_id=thread_id, metadata=metadata)
+    await _update_thread_metadata(client, thread_id, metadata)
 
 
 def get_thread_watch_flag(metadata: dict[str, Any]) -> bool:

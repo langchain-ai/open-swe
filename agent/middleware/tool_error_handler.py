@@ -20,6 +20,7 @@ from langchain_core.messages import ToolMessage
 from langgraph.config import get_config
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
+from langgraph_sdk.errors import NotFoundError as LangGraphNotFoundError
 from langsmith.sandbox import SandboxClientError
 
 logger = logging.getLogger(__name__)
@@ -156,6 +157,20 @@ def _generic_error_tool_message(e: Exception, request: ToolCallRequest) -> ToolM
     )
 
 
+def _not_found_tool_message(e: Exception, request: ToolCallRequest) -> ToolMessage:
+    data = _to_error_payload(e, request)
+    data["error"] = (
+        f"LangGraph resource not found: {e}. This is a persistent backend "
+        "state error — retrying the same tool call will fail identically. "
+        "Stop calling this tool and report the failure to the caller."
+    )
+    return ToolMessage(
+        content=json.dumps(data),
+        tool_call_id=_get_tool_call_id(request),
+        status="error",
+    )
+
+
 class ToolErrorMiddleware(AgentMiddleware):
     """Normalize tool execution errors into predictable payloads.
 
@@ -183,6 +198,9 @@ class ToolErrorMiddleware(AgentMiddleware):
                 except Exception:
                     logger.exception("Failed to recreate sandbox for thread %s", thread_id)
             return _generic_error_tool_message(e, request)
+        except LangGraphNotFoundError as e:
+            logger.exception("LangGraph NotFound during tool call handling; request=%r", request)
+            return _not_found_tool_message(e, request)
         except Exception as e:
             logger.exception("Error during tool call handling; request=%r", request)
             return _generic_error_tool_message(e, request)
@@ -204,6 +222,9 @@ class ToolErrorMiddleware(AgentMiddleware):
                 except Exception:
                     logger.exception("Failed to recreate sandbox for thread %s", thread_id)
             return _generic_error_tool_message(e, request)
+        except LangGraphNotFoundError as e:
+            logger.exception("LangGraph NotFound during tool call handling; request=%r", request)
+            return _not_found_tool_message(e, request)
         except Exception as e:
             logger.exception("Error during tool call handling; request=%r", request)
             return _generic_error_tool_message(e, request)

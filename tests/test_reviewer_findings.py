@@ -181,3 +181,36 @@ async def test_set_reviewer_thread_metadata_includes_kind() -> None:
     assert metadata["last_reviewed_sha"] == "sha"
     assert "pr" not in metadata
     assert "findings" not in metadata
+
+
+class _FakeNotFoundError(Exception):
+    status_code = 404
+
+    def __init__(self) -> None:
+        super().__init__("thread tid not found")
+
+
+@pytest.mark.asyncio
+async def test_append_finding_recovers_from_missing_thread_row() -> None:
+    fake_client = AsyncMock()
+    fake_client.threads.get.return_value = {"metadata": {}}
+    fake_client.threads.update.side_effect = [_FakeNotFoundError(), None]
+
+    with patch("agent.reviewer_findings.get_client", return_value=fake_client):
+        result = await append_finding("tid", _f(id="f_new"))
+
+    assert result["id"] == "f_new"
+    fake_client.threads.create.assert_awaited_once_with(thread_id="tid", if_exists="do_nothing")
+    assert fake_client.threads.update.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_replace_findings_propagates_non_not_found_errors() -> None:
+    fake_client = AsyncMock()
+    fake_client.threads.update.side_effect = RuntimeError("boom")
+    with (
+        patch("agent.reviewer_findings.get_client", return_value=fake_client),
+        pytest.raises(RuntimeError, match="boom"),
+    ):
+        await replace_findings("tid", [_f(id="f_x")])
+    fake_client.threads.create.assert_not_called()
