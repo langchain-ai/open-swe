@@ -8,8 +8,6 @@ from typing import Any
 
 import httpx
 
-from .github_user_email_map import GITHUB_USER_EMAIL_MAP
-
 logger = logging.getLogger(__name__)
 
 OPEN_SWE_BOT_NAME = "open-swe[bot]"
@@ -84,8 +82,10 @@ def _identity_from_config(config: dict[str, Any]) -> CollaboratorIdentity | None
     github_login = _normalize_text(configurable.get("github_login"))
     if github_login:
         github_user_id = configurable.get("github_user_id")
+        from ..dashboard.user_mappings import cached_email_for_login
+
         commit_email = _github_noreply_email(github_login, github_user_id) or _normalize_text(
-            GITHUB_USER_EMAIL_MAP.get(github_login)
+            cached_email_for_login(github_login)
         )
         if commit_email:
             return CollaboratorIdentity(

@@ -8,22 +8,21 @@ from typing import Any
 import httpx
 from langgraph_sdk import get_client
 
-from ..utils.github_user_email_map import GITHUB_USER_EMAIL_MAP
 from .options import SUPPORTED_MODEL_IDS, model_supports_effort, provider_fallback_pair
 from .profiles import PROFILES_NAMESPACE
+from .user_mappings import cached_login_for_email
 
 logger = logging.getLogger(__name__)
 
 
 def resolve_login_from_email(email: str | None) -> str | None:
-    """Reverse-lookup ``GITHUB_USER_EMAIL_MAP`` for the GitHub login of an email."""
-    if not isinstance(email, str) or not email.strip():
-        return None
-    normalized = email.strip().lower()
-    for gh_login, mapped in GITHUB_USER_EMAIL_MAP.items():
-        if mapped.lower() == normalized:
-            return gh_login
-    return None
+    """Reverse-lookup the user-mapping store for the GitHub login of an email.
+
+    Reads the in-process mapping cache (sync). When the cache is cold the
+    lookup misses; the webhook path that triggers a run primes the cache via
+    :func:`agent.dashboard.user_mappings.refresh_cache` beforehand.
+    """
+    return cached_login_for_email(email)
 
 
 def resolve_github_login(config: dict[str, Any]) -> str | None:

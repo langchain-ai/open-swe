@@ -111,6 +111,22 @@ export interface TeamSettings {
   updated_at?: string | null;
 }
 
+export interface UserMapping {
+  github_login: string;
+  work_email: string;
+  slack_user_id?: string | null;
+  source?: string;
+  status?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface UserMappingUpsert {
+  github_login: string;
+  work_email: string;
+  slack_user_id?: string | null;
+}
+
 export interface Repository {
   full_name: string;
   private: boolean;
@@ -195,6 +211,19 @@ export const api = {
       method: "PUT",
       body: JSON.stringify(body),
     }),
+  adminListUserMappings: () => request<Array<UserMapping>>("/admin/user-mappings"),
+  adminSaveUserMapping: (body: UserMappingUpsert) =>
+    request<UserMapping>("/admin/user-mappings", {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  adminDeleteUserMapping: (github_login: string) =>
+    request<{ deleted: boolean }>(
+      `/admin/user-mappings/${encodeURIComponent(github_login)}`,
+      { method: "DELETE" },
+    ),
+  adminImportUserMappings: () =>
+    request<{ created: number }>("/admin/user-mappings/import", { method: "POST" }),
   logout: () => request<void>("/auth/logout", { method: "POST" }),
 };
 

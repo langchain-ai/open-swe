@@ -207,13 +207,11 @@ GitHub triggering works automatically once your GitHub App is set up (step 3). U
 - Tag `@openswe` in issue comments for follow-up instructions
 - Tag `@openswe` in PR review comments to have it address review feedback
 
-To control which GitHub users can trigger the agent, add them to the `GITHUB_USER_EMAIL_MAP` in `agent/utils/github_user_email_map.py`:
+Which GitHub users can trigger the agent is controlled by the **user mapping** (GitHub login ⇄ work email ⇄ optional Slack ID), stored in the LangGraph Store rather than in code. Manage it in the dashboard under **Admin → User mappings**:
 
-```python
-GITHUB_USER_EMAIL_MAP = {
-    "their-github-username": "their-email@example.com",
-}
-```
+- **Add / update** a single mapping (GitHub login + work email, plus an optional Slack user ID).
+- **Import legacy mapping** — a one-time button that seeds the Store from the historical `agent/utils/github_user_email_map.py` dict (records already present are left untouched). Run this once after deploying so existing users keep working; the dict is no longer read at runtime.
+- Users can also **self-onboard**: when an unmapped person tags Open SWE in Slack, the agent runs with limited (GitHub App installation) permissions and posts a "link your GitHub account" prompt. Completing the org-gated GitHub OAuth login records a `self` mapping (carrying the originating Slack ID and work email). Self-signup is therefore bounded by the same `ALLOWED_GITHUB_ORGS` gate as dashboard login.
 
 You should also configure which GitHub organizations and/or repositories the agent is allowed to operate on. You can specify allowed orgs, specific `owner/repo` pairs, or both:
 
@@ -547,7 +545,7 @@ The `langgraph.json` at the project root already defines the graph entry point a
 
 ### Agent not responding to comments
 
-- For GitHub: ensure the comment or issue contains `@openswe` (case-insensitive), and the commenter's GitHub username is in `GITHUB_USER_EMAIL_MAP`
+- For GitHub: ensure the comment or issue contains `@openswe` (case-insensitive), and the commenter has a user mapping (Admin → User mappings; see "Configure triggering surfaces"). If you just migrated, run the one-time **Import legacy mapping** button.
 - For Linear: ensure the comment contains `@openswe` (case-insensitive)
 - For Slack: ensure the bot is invited to the channel and the message is an `@mention`
 - Check server logs for webhook processing errors

@@ -23,6 +23,7 @@ from .oauth import (
     SESSION_TTL_SECONDS,
     STATE_COOKIE_NAME,
     STATE_TTL_SECONDS,
+    decode_account_link,
     decode_state,
     enforce_org_login_gate,
     exchange_code,
@@ -73,6 +74,12 @@ from .thread_api import (
     list_dashboard_threads,
     send_dashboard_message,
     stream_dashboard_thread,
+)
+from .user_mappings import (
+    bulk_import,
+    delete_mapping,
+    list_mappings,
+    upsert_mapping,
 )
 
 logger = logging.getLogger(__name__)
@@ -144,14 +151,25 @@ def _clear_state_cookie(response: Response) -> None:
 
 
 @router.get("/auth/login")
-async def auth_login(request: Request, redirect_to: str | None = None) -> RedirectResponse:
+async def auth_login(
+    request: Request,
+    redirect_to: str | None = None,
+    link: str | None = None,
+) -> RedirectResponse:
     client_id = os.environ.get("GITHUB_APP_CLIENT_ID", "")
     if not client_id:
         raise HTTPException(500, "GITHUB_APP_CLIENT_ID not configured")
     safe_redirect = sanitize_redirect_to(redirect_to) or _frontend_base_url()
 
+    # Only carry a structurally valid account-link token onward.
+    link_token = link if (link and decode_account_link(link)) else None
+
     nonce = new_state_nonce()
-    state = issue_state(redirect_to=safe_redirect, nonce_hash=hash_state_nonce(nonce))
+    state = issue_state(
+        redirect_to=safe_redirect,
+        nonce_hash=hash_state_nonce(nonce),
+        link=link_token,
+    )
     redirect_uri = f"{_api_base_url()}/dashboard/api/auth/callback"
     url = (
         "https://github.com/login/oauth/authorize"
@@ -192,12 +210,40 @@ async def auth_callback(request: Request, code: str, state: str) -> RedirectResp
     await enforce_org_login_gate(login)
 
     await upsert_access_token_from_github_response(login, email or "", token_data)
+    await _complete_account_mapping(login, email, state_payload.get("link"))
 
     session_jwt = issue_session(login=login, email=email, avatar_url=user.get("avatar_url"))
     response = RedirectResponse(redirect_to, status_code=302)
     _set_session_cookie(response, session_jwt)
     _clear_state_cookie(response)
     return response
+
+
+async def _complete_account_mapping(login: str, github_email: str | None, link_token: Any) -> None:
+    """Create/refresh the user mapping after a successful org-gated login.
+
+    Self-service signup: the user is already org-gated (only members reach
+    here), so we record a ``source="self"`` mapping. The Slack identity (user
+    id + work email) is carried in the signed account-link token when the flow
+    started from an unmapped Slack mention; otherwise we fall back to the
+    user's verified GitHub email.
+    """
+    link = decode_account_link(link_token) if isinstance(link_token, str) else None
+    slack_user_id = link.get("slack_user_id") if link else None
+    work_email = (link.get("work_email") if link else None) or github_email
+    if not work_email:
+        logger.warning("No work email available to map GitHub login %r", login)
+        return
+    try:
+        await upsert_mapping(
+            github_login=login,
+            work_email=work_email,
+            slack_user_id=slack_user_id if isinstance(slack_user_id, str) else None,
+            source="self",
+            status="active",
+        )
+    except Exception:  # noqa: BLE001
+        logger.warning("Failed to persist self-service mapping for %r", login, exc_info=True)
 
 
 @router.post("/auth/logout")
@@ -304,6 +350,56 @@ async def api_set_enabled_review_repo(
 ) -> dict[str, list[str]]:
     repos = await set_review_repo_enabled(update.full_name, update.enabled)
     return {"repos": repos}
+
+
+class UserMappingUpsert(BaseModel):
+    github_login: str
+    work_email: str
+    slack_user_id: str | None = None
+
+
+@router.get("/admin/user-mappings")
+async def admin_list_user_mappings(
+    _admin: dict[str, Any] = _ADMIN_DEP,
+) -> list[dict[str, Any]]:
+    return await list_mappings()
+
+
+@router.put("/admin/user-mappings")
+async def admin_upsert_user_mapping(
+    body: UserMappingUpsert,
+    _admin: dict[str, Any] = _ADMIN_DEP,
+) -> dict[str, Any]:
+    try:
+        return await upsert_mapping(
+            github_login=body.github_login,
+            work_email=body.work_email,
+            slack_user_id=body.slack_user_id,
+            source="admin",
+            status="active",
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+
+
+@router.delete("/admin/user-mappings/{github_login}")
+async def admin_delete_user_mapping(
+    github_login: str,
+    _admin: dict[str, Any] = _ADMIN_DEP,
+) -> dict[str, bool]:
+    deleted = await delete_mapping(github_login)
+    return {"deleted": deleted}
+
+
+@router.post("/admin/user-mappings/import")
+async def admin_import_user_mappings(
+    _admin: dict[str, Any] = _ADMIN_DEP,
+) -> dict[str, int]:
+    """One-time seed of the legacy hardcoded GitHub→email map into the Store."""
+    from ..utils.github_user_email_map import GITHUB_USER_EMAIL_MAP
+
+    created = await bulk_import(GITHUB_USER_EMAIL_MAP, source="hardcoded")
+    return {"created": created}
 
 
 def _next_link_url(link_header: str | None) -> str | None:

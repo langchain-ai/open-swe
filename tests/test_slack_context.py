@@ -673,3 +673,100 @@ def test_process_slack_mention_queues_active_thread_message(
     queued_payload = captured["queued"]["message_content"]
     assert queued_payload["image_urls"] == ["https://example.com/image.png"]
     assert "## Latest Mention Request\ninclude this screenshot" in queued_payload["text"]
+
+
+def test_process_slack_mention_unmapped_user_uses_fallback_and_prompts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An unmapped Slack user runs on the installation token and is prompted to link."""
+    from agent.dashboard import user_mappings
+
+    captured: dict[str, object] = {}
+    _setup_slack_mention_fakes(monkeypatch, captured)
+    user_mappings.clear_cache()
+
+    async def fake_thread_exists(thread_id: str) -> bool:
+        return False
+
+    async def fake_refresh_cache() -> list:
+        return []
+
+    async def fake_login_for_slack_id(slack_user_id):
+        return None
+
+    async def fake_login_for_email(email):
+        return None
+
+    async def fake_post_prompt(channel_id, thread_ts, user_id, user_email) -> None:
+        captured["prompt"] = {"user_id": user_id, "user_email": user_email}
+
+    monkeypatch.setattr(webapp, "_thread_exists", fake_thread_exists)
+    monkeypatch.setattr(webapp, "refresh_user_mapping_cache", fake_refresh_cache)
+    monkeypatch.setattr(webapp, "login_for_slack_id", fake_login_for_slack_id)
+    monkeypatch.setattr(webapp, "login_for_email", fake_login_for_email)
+    monkeypatch.setattr(webapp, "_post_account_link_prompt", fake_post_prompt)
+
+    asyncio.run(
+        webapp.process_slack_mention(
+            {
+                "channel_id": "C123",
+                "thread_ts": "1700000000.000100",
+                "event_ts": "1700000000.000200",
+                "user_id": "U123",
+                "text": "<@UBOT> do the thing",
+                "bot_user_id": "UBOT",
+            },
+            {"owner": "langchain-ai", "name": "open-swe"},
+        )
+    )
+
+    run_create = captured["run_create"]
+    configurable = run_create["kwargs"]["config"]["configurable"]
+    assert configurable["use_installation_token_fallback"] is True
+    assert "github_login" not in configurable
+    assert captured["prompt"] == {"user_id": "U123", "user_email": "mason@example.com"}
+
+
+def test_process_slack_mention_mapped_user_no_prompt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A mapped Slack user runs as themselves with no link prompt and no fallback."""
+    captured: dict[str, object] = {}
+    _setup_slack_mention_fakes(monkeypatch, captured)
+
+    async def fake_thread_exists(thread_id: str) -> bool:
+        return False
+
+    async def fake_refresh_cache() -> list:
+        return []
+
+    async def fake_login_for_slack_id(slack_user_id):
+        return "mason-gh" if slack_user_id == "U123" else None
+
+    async def fake_post_prompt(*args, **kwargs) -> None:
+        captured["prompt"] = True
+
+    monkeypatch.setattr(webapp, "_thread_exists", fake_thread_exists)
+    monkeypatch.setattr(webapp, "refresh_user_mapping_cache", fake_refresh_cache)
+    monkeypatch.setattr(webapp, "login_for_slack_id", fake_login_for_slack_id)
+    monkeypatch.setattr(webapp, "_post_account_link_prompt", fake_post_prompt)
+
+    asyncio.run(
+        webapp.process_slack_mention(
+            {
+                "channel_id": "C123",
+                "thread_ts": "1700000000.000100",
+                "event_ts": "1700000000.000200",
+                "user_id": "U123",
+                "text": "<@UBOT> do the thing",
+                "bot_user_id": "UBOT",
+            },
+            {"owner": "langchain-ai", "name": "open-swe"},
+        )
+    )
+
+    run_create = captured["run_create"]
+    configurable = run_create["kwargs"]["config"]["configurable"]
+    assert configurable["github_login"] == "mason-gh"
+    assert "use_installation_token_fallback" not in configurable
+    assert "prompt" not in captured

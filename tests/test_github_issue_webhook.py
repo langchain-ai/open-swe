@@ -87,7 +87,15 @@ def test_build_github_issue_prompt_includes_issue_context() -> None:
 
 
 def test_build_github_issue_followup_prompt_only_includes_comment() -> None:
-    prompt = webapp.build_github_issue_followup_prompt("bracesproul", "Please handle this")
+    from agent.dashboard import user_mappings
+
+    user_mappings.prime_cache(
+        [{"github_login": "bracesproul", "work_email": "brace@x.com", "status": "active"}]
+    )
+    try:
+        prompt = webapp.build_github_issue_followup_prompt("bracesproul", "Please handle this")
+    finally:
+        user_mappings.clear_cache()
 
     assert prompt == "**bracesproul:**\nPlease handle this"
     assert "## Repository" not in prompt
@@ -1178,7 +1186,7 @@ def test_process_github_pr_comment_review_request_without_email_uses_app_token(
         captured["triggered"] = {"args": args, "kwargs": kwargs}
 
     monkeypatch.setattr(webapp, "extract_pr_context", fake_extract_pr_context)
-    monkeypatch.setattr(webapp, "GITHUB_USER_EMAIL_MAP", {})
+    monkeypatch.setattr(webapp, "email_for_login", lambda login: asyncio.sleep(0, result=None))
     monkeypatch.setattr(
         webapp, "get_github_app_installation_token_with_expiry", fake_get_app_token_with_expiry
     )
@@ -1258,7 +1266,13 @@ def test_process_github_issue_uses_resolved_user_token_for_reaction(monkeypatch)
     monkeypatch.setattr(webapp, "fetch_issue_comments", fake_fetch_issue_comments)
     monkeypatch.setattr(webapp, "is_thread_active", fake_is_thread_active)
     monkeypatch.setattr(webapp, "get_client", lambda url: _FakeLangGraphClient())
-    monkeypatch.setattr(webapp, "GITHUB_USER_EMAIL_MAP", {"octocat": "octocat@example.com"})
+    monkeypatch.setattr(
+        webapp,
+        "email_for_login",
+        lambda login: asyncio.sleep(
+            0, result="octocat@example.com" if login == "octocat" else None
+        ),
+    )
 
     asyncio.run(
         webapp.process_github_issue(
@@ -1333,9 +1347,16 @@ def test_process_github_issue_existing_thread_uses_followup_prompt(monkeypatch) 
     monkeypatch.setattr(webapp, "fetch_issue_comments", fake_fetch_issue_comments)
     monkeypatch.setattr(webapp, "is_thread_active", fake_is_thread_active)
     monkeypatch.setattr(webapp, "get_client", lambda url: _FakeLangGraphClient())
-    monkeypatch.setattr(webapp, "GITHUB_USER_EMAIL_MAP", {"octocat": "octocat@example.com"})
     monkeypatch.setattr(
-        github_comments, "GITHUB_USER_EMAIL_MAP", {"octocat": "octocat@example.com"}
+        webapp,
+        "email_for_login",
+        lambda login: asyncio.sleep(
+            0, result="octocat@example.com" if login == "octocat" else None
+        ),
+    )
+    monkeypatch.setattr(
+        "agent.dashboard.user_mappings.is_login_mapped",
+        lambda login: login == "octocat",
     )
 
     asyncio.run(

@@ -12,7 +12,6 @@ from typing import Any
 import httpx
 
 from .github_token import GitHubAuthError
-from .github_user_email_map import GITHUB_USER_EMAIL_MAP
 
 logger = logging.getLogger(__name__)
 
@@ -111,7 +110,9 @@ def sanitize_github_comment_body(body: str) -> str:
 def format_github_comment_body_for_prompt(author: str, body: str) -> str:
     """Format a GitHub comment body for prompt inclusion."""
     sanitized_body = sanitize_github_comment_body(body)
-    if author in GITHUB_USER_EMAIL_MAP:
+    from ..dashboard.user_mappings import is_login_mapped
+
+    if is_login_mapped(author):
         return sanitized_body
 
     return (

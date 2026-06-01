@@ -2,10 +2,17 @@ import { Navigate, createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
-import type { ModelOption, Profile, ProfileUpdate, TeamSettings } from "@/lib/api";
+import type {
+  ModelOption,
+  Profile,
+  ProfileUpdate,
+  TeamSettings,
+  UserMapping,
+} from "@/lib/api";
 import { AppShell, SettingsRow, SettingsSection } from "@/components/AppShell";
 import { ProfileForm } from "@/components/ProfileForm";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -68,6 +75,8 @@ function AdminPage() {
     >
       <GlobalDefaultsSection models={options.data?.models ?? []} />
 
+      <UserMappingsSection enabled={!!session.data.is_admin} />
+
       <SettingsSection title="Per-user profiles">
         <div className="grid grid-cols-1 gap-0 md:grid-cols-[260px_1fr]">
           <div className="flex flex-col gap-0.5 border-b border-border p-2 md:border-b-0 md:border-r">
@@ -109,6 +118,135 @@ function AdminPage() {
         </div>
       </SettingsSection>
     </AppShell>
+  );
+}
+
+function UserMappingsSection({ enabled }: { enabled: boolean }) {
+  const qc = useQueryClient();
+  const [login, setLogin] = useState("");
+  const [email, setEmail] = useState("");
+  const [slackId, setSlackId] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  const mappings = useQuery({
+    queryKey: ["adminUserMappings"],
+    queryFn: api.adminListUserMappings,
+    enabled,
+  });
+
+  const invalidate = () =>
+    void qc.invalidateQueries({ queryKey: ["adminUserMappings"] });
+
+  const save = useMutation({
+    mutationFn: () =>
+      api.adminSaveUserMapping({
+        github_login: login.trim(),
+        work_email: email.trim(),
+        slack_user_id: slackId.trim() || null,
+      }),
+    onSuccess: () => {
+      setLogin("");
+      setEmail("");
+      setSlackId("");
+      setError(null);
+      setNotice(null);
+      invalidate();
+    },
+    onError: (e: Error) => setError(e.message),
+  });
+
+  const remove = useMutation({
+    mutationFn: (gh: string) => api.adminDeleteUserMapping(gh),
+    onSuccess: invalidate,
+    onError: (e: Error) => setError(e.message),
+  });
+
+  const importLegacy = useMutation({
+    mutationFn: api.adminImportUserMappings,
+    onSuccess: (res) => {
+      setNotice(`Imported ${res.created} legacy mapping(s).`);
+      setError(null);
+      invalidate();
+    },
+    onError: (e: Error) => setError(e.message),
+  });
+
+  return (
+    <SettingsSection
+      title="User mappings"
+      description="Link GitHub logins to work emails (and Slack IDs) so tagged users run as themselves."
+    >
+      <div className="flex flex-col gap-3 p-4">
+        <div className="grid grid-cols-1 gap-2 md:grid-cols-[1fr_1fr_1fr_auto]">
+          <Input
+            placeholder="github-login"
+            value={login}
+            onChange={(e) => setLogin(e.target.value)}
+          />
+          <Input
+            placeholder="work@example.com"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+          />
+          <Input
+            placeholder="Slack ID (optional)"
+            value={slackId}
+            onChange={(e) => setSlackId(e.target.value)}
+          />
+          <Button
+            onClick={() => save.mutate()}
+            disabled={!login.trim() || !email.trim() || save.isPending}
+          >
+            {save.isPending ? "Saving…" : "Add / Update"}
+          </Button>
+        </div>
+
+        <div className="flex items-center gap-3">
+          <Button
+            variant="outline"
+            onClick={() => importLegacy.mutate()}
+            disabled={importLegacy.isPending}
+          >
+            {importLegacy.isPending ? "Importing…" : "Import legacy mapping"}
+          </Button>
+          {notice && <span className="text-xs text-muted-foreground">{notice}</span>}
+          {error && <span className="text-xs text-destructive">{error}</span>}
+        </div>
+
+        <div className="flex flex-col gap-0.5">
+          {mappings.isLoading ? (
+            <Skeleton className="h-32" />
+          ) : !mappings.data?.length ? (
+            <p className="text-xs text-muted-foreground">No mappings yet.</p>
+          ) : (
+            mappings.data.map((m: UserMapping) => (
+              <div
+                key={m.github_login}
+                className="flex items-center justify-between gap-2 border-b border-border py-1.5 text-sm last:border-b-0"
+              >
+                <div className="flex min-w-0 flex-col">
+                  <span className="truncate font-medium">{m.github_login}</span>
+                  <span className="truncate text-xs text-muted-foreground">
+                    {m.work_email}
+                    {m.slack_user_id ? ` · ${m.slack_user_id}` : ""}
+                    {m.source ? ` · ${m.source}` : ""}
+                  </span>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => remove.mutate(m.github_login)}
+                  disabled={remove.isPending}
+                >
+                  Remove
+                </Button>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+    </SettingsSection>
   );
 }
 

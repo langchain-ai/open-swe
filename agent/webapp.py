@@ -25,8 +25,17 @@ from .dashboard.agent_overrides import (
     resolve_login_from_email,
 )
 from .dashboard.enabled_repos import is_review_repo_enabled
+from .dashboard.oauth import build_account_link_url
 from .dashboard.profiles import get_profile
 from .dashboard.team_settings import get_team_settings
+from .dashboard.user_mappings import (
+    email_for_login,
+    login_for_email,
+    login_for_slack_id,
+)
+from .dashboard.user_mappings import (
+    refresh_cache as refresh_user_mapping_cache,
+)
 from .reviewer_findings import (
     REVIEWER_THREAD_KIND,
     Finding,
@@ -68,7 +77,6 @@ from .utils.github_comments import (
 )
 from .utils.github_org_membership import INTERNAL_BOT_LOGINS, is_user_active_org_member
 from .utils.github_token import get_github_token_from_thread, invalidate_cached_github_token
-from .utils.github_user_email_map import GITHUB_USER_EMAIL_MAP
 from .utils.linear import post_linear_trace_comment
 from .utils.linear_team_repo_map import LINEAR_TEAM_TO_REPO
 from .utils.multimodal import dedupe_urls, extract_image_urls, fetch_image_block
@@ -81,6 +89,7 @@ from .utils.slack import (
     get_slack_user_info,
     get_slack_user_names,
     parse_github_pr_url,
+    post_slack_ephemeral_message,
     post_slack_thread_reply,
     post_slack_trace_reply,
     resolve_slack_links_in_context,
@@ -857,6 +866,25 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
         await post_linear_trace_comment(issue_id, thread_id, triggering_comment_id)
 
 
+async def _post_account_link_prompt(
+    channel_id: str, thread_ts: str, user_id: str, user_email: str | None
+) -> None:
+    """Prompt an unmapped Slack user to link their GitHub account (ephemeral)."""
+    link_url = build_account_link_url(slack_user_id=user_id, work_email=user_email)
+    if not link_url:
+        logger.debug("Account-link URL unavailable (DASHBOARD_API_BASE_URL unset); skipping prompt")
+        return
+    text = (
+        "👋 I don't have your GitHub account linked yet, so I'm running with limited "
+        "(bot) permissions. Link your account so I can act on your behalf:\n"
+        f"<{link_url}|Link your GitHub account>"
+    )
+    try:
+        await post_slack_ephemeral_message(channel_id, user_id, text, thread_ts=thread_ts)
+    except Exception:  # noqa: BLE001
+        logger.debug("Failed to post account-link prompt to Slack", exc_info=True)
+
+
 async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[str, str]) -> None:
     """Process a Slack app mention by creating a run or queuing a mid-run message."""
     channel_id = event_data.get("channel_id", "")
@@ -878,6 +906,12 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
     await set_slack_assistant_status(channel_id, thread_ts)
 
     thread_id = generate_thread_id_from_slack_thread(channel_id, thread_ts)
+
+    # Prime the user-mapping cache so login/email/slack-id lookups below are warm.
+    try:
+        await refresh_user_mapping_cache()
+    except Exception:  # noqa: BLE001
+        logger.debug("Could not refresh user mapping cache for Slack mention", exc_info=True)
 
     user_email = None
     user_name = ""
@@ -969,6 +1003,11 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
                 if image_block:
                     content_blocks.append(image_block)
 
+    mapped_login = await login_for_slack_id(user_id)
+    if not mapped_login and user_email:
+        mapped_login = await login_for_email(user_email)
+    is_user_mapped = bool(mapped_login)
+
     configurable: dict[str, Any] = {
         "repo": repo_config,
         "slack_thread": {
@@ -982,6 +1021,11 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
         "user_email": user_email,
         "source": "slack",
     }
+    if mapped_login:
+        configurable["github_login"] = mapped_login
+    else:
+        # Unmapped: run on the installation token and prompt the user to link.
+        configurable["use_installation_token_fallback"] = True
 
     langgraph_client = get_client(url=LANGGRAPH_URL)
     is_first_mention = not await _thread_exists(thread_id)
@@ -1026,6 +1070,8 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
         thread_id,
     )
     run_id = run.get("run_id")
+    if is_first_mention and not is_user_mapped and user_id:
+        await _post_account_link_prompt(channel_id, thread_ts, user_id, user_email)
     if is_first_mention:
         trace_message_ts = await post_slack_trace_reply(channel_id, thread_ts, thread_id)
         await set_slack_assistant_status(channel_id, thread_ts)
@@ -2345,7 +2391,7 @@ async def process_github_pr_comment(payload: dict[str, Any], event_type: str) ->
 
     comment = payload.get("comment") or payload.get("review", {})
     is_review_request, _pr_url_override = parse_github_review_command(comment.get("body") or "")
-    email = GITHUB_USER_EMAIL_MAP.get(github_login, "")
+    email = await email_for_login(github_login) or ""
     if email:
         github_token = await _get_or_resolve_thread_github_token(thread_id, email)
     elif is_review_request:
@@ -2627,7 +2673,7 @@ async def process_github_issue(payload: dict[str, Any], event_type: str) -> None
         logger.warning("Missing GitHub issue id/number, skipping")
         return
 
-    email = GITHUB_USER_EMAIL_MAP.get(github_login, "")
+    email = await email_for_login(github_login) or ""
     if not email:
         logger.warning("No email mapping for GitHub user '%s', skipping", github_login)
         return
