@@ -209,8 +209,7 @@ GitHub triggering works automatically once your GitHub App is set up (step 3). U
 
 Which GitHub users can trigger the agent is controlled by the **user mapping** (GitHub login ⇄ work email ⇄ optional Slack ID), stored in the LangGraph Store rather than in code. Manage it in the dashboard under **Admin → User mappings**:
 
-- **Add / update** a single mapping (GitHub login + work email, plus an optional Slack user ID).
-- **Import legacy mapping** — a one-time button that seeds the Store from the historical `agent/utils/github_user_email_map.py` dict (records already present are left untouched). Run this once after deploying so existing users keep working; the dict is no longer read at runtime.
+- **Add / update** a single mapping (GitHub login + work email, plus an optional Slack user ID). The list is paged (20 per page).
 - Users can also **self-onboard**: when an unmapped person tags Open SWE in Slack, the agent runs with limited (GitHub App installation) permissions and posts a "link your GitHub account" prompt. Completing the org-gated GitHub OAuth login records a `self` mapping (carrying the originating Slack ID and work email). Self-signup is therefore bounded by the same `ALLOWED_GITHUB_ORGS` gate as dashboard login.
 
 You should also configure which GitHub organizations and/or repositories the agent is allowed to operate on. You can specify allowed orgs, specific `owner/repo` pairs, or both:

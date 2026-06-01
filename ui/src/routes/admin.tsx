@@ -2,15 +2,8 @@ import { Navigate, createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
-import type {
-  ModelOption,
-  Profile,
-  ProfileUpdate,
-  TeamSettings,
-  UserMapping,
-} from "@/lib/api";
+import type { ModelOption, TeamSettings, UserMapping } from "@/lib/api";
 import { AppShell, SettingsRow, SettingsSection } from "@/components/AppShell";
-import { ProfileForm } from "@/components/ProfileForm";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -28,30 +21,11 @@ export const Route = createFileRoute("/admin")({ component: AdminPage });
 
 function AdminPage() {
   const session = useSession();
-  const qc = useQueryClient();
-  const [selected, setSelected] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
 
   const options = useQuery({
     queryKey: ["options"],
     queryFn: api.options,
     enabled: !!session.data?.is_admin,
-  });
-
-  const profiles = useQuery({
-    queryKey: ["adminProfiles"],
-    queryFn: api.adminListProfiles,
-    enabled: !!session.data?.is_admin,
-  });
-
-  const save = useMutation({
-    mutationFn: ({ login, body }: { login: string; body: ProfileUpdate }) =>
-      api.adminSaveProfile(login, body),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ["adminProfiles"] });
-      setError(null);
-    },
-    onError: (e: Error) => setError(e.message),
   });
 
   if (session.isLoading) {
@@ -64,62 +38,20 @@ function AdminPage() {
   if (!session.data) return <Navigate to="/login" />;
   if (!session.data.is_admin) return <Navigate to="/my-settings" />;
 
-  const activeProfile: Profile | null =
-    (selected && profiles.data?.find((p) => p.login === selected)) || null;
-
   return (
     <AppShell
       user={session.data}
       title="Admin"
-      description="Workspace-wide defaults and per-user profile edits."
+      description="Workspace-wide defaults and user mappings."
     >
       <GlobalDefaultsSection models={options.data?.models ?? []} />
 
       <UserMappingsSection enabled={!!session.data.is_admin} />
-
-      <SettingsSection title="Per-user profiles">
-        <div className="grid grid-cols-1 gap-0 md:grid-cols-[260px_1fr]">
-          <div className="flex flex-col gap-0.5 border-b border-border p-2 md:border-b-0 md:border-r">
-            {profiles.isLoading ? (
-              <Skeleton className="h-32" />
-            ) : (
-              profiles.data?.map((p) => (
-                <Button
-                  key={p.login}
-                  variant={selected === p.login ? "secondary" : "ghost"}
-                  className="justify-start"
-                  onClick={() => setSelected(p.login ?? null)}
-                >
-                  <span className="truncate">{p.login}</span>
-                </Button>
-              ))
-            )}
-          </div>
-          <div className="p-4">
-            {!activeProfile ? (
-              <p className="text-xs text-muted-foreground">
-                Pick a user on the left to edit their profile.
-              </p>
-            ) : options.isLoading ? (
-              <Skeleton className="h-48" />
-            ) : (
-              <ProfileForm
-                models={options.data?.models ?? []}
-                repos={[]}
-                initial={activeProfile}
-                onSubmit={(body) =>
-                  save.mutateAsync({ login: activeProfile.login!, body })
-                }
-                saving={save.isPending}
-                error={error}
-              />
-            )}
-          </div>
-        </div>
-      </SettingsSection>
     </AppShell>
   );
 }
+
+const PAGE_SIZE = 20;
 
 function UserMappingsSection({ enabled }: { enabled: boolean }) {
   const qc = useQueryClient();
@@ -127,13 +59,16 @@ function UserMappingsSection({ enabled }: { enabled: boolean }) {
   const [email, setEmail] = useState("");
   const [slackId, setSlackId] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
 
   const mappings = useQuery({
-    queryKey: ["adminUserMappings"],
-    queryFn: api.adminListUserMappings,
+    queryKey: ["adminUserMappings", page],
+    queryFn: () => api.adminListUserMappings(page, PAGE_SIZE),
     enabled,
   });
+
+  const total = mappings.data?.total ?? 0;
+  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   const invalidate = () =>
     void qc.invalidateQueries({ queryKey: ["adminUserMappings"] });
@@ -150,7 +85,6 @@ function UserMappingsSection({ enabled }: { enabled: boolean }) {
       setEmail("");
       setSlackId("");
       setError(null);
-      setNotice(null);
       invalidate();
     },
     onError: (e: Error) => setError(e.message),
@@ -162,15 +96,7 @@ function UserMappingsSection({ enabled }: { enabled: boolean }) {
     onError: (e: Error) => setError(e.message),
   });
 
-  const importLegacy = useMutation({
-    mutationFn: api.adminImportUserMappings,
-    onSuccess: (res) => {
-      setNotice(`Imported ${res.created} legacy mapping(s).`);
-      setError(null);
-      invalidate();
-    },
-    onError: (e: Error) => setError(e.message),
-  });
+  const items = mappings.data?.items ?? [];
 
   return (
     <SettingsSection
@@ -202,25 +128,15 @@ function UserMappingsSection({ enabled }: { enabled: boolean }) {
           </Button>
         </div>
 
-        <div className="flex items-center gap-3">
-          <Button
-            variant="outline"
-            onClick={() => importLegacy.mutate()}
-            disabled={importLegacy.isPending}
-          >
-            {importLegacy.isPending ? "Importing…" : "Import legacy mapping"}
-          </Button>
-          {notice && <span className="text-xs text-muted-foreground">{notice}</span>}
-          {error && <span className="text-xs text-destructive">{error}</span>}
-        </div>
+        {error && <span className="text-xs text-destructive">{error}</span>}
 
         <div className="flex flex-col gap-0.5">
           {mappings.isLoading ? (
             <Skeleton className="h-32" />
-          ) : !mappings.data?.length ? (
+          ) : !items.length ? (
             <p className="text-xs text-muted-foreground">No mappings yet.</p>
           ) : (
-            mappings.data.map((m: UserMapping) => (
+            items.map((m: UserMapping) => (
               <div
                 key={m.github_login}
                 className="flex items-center justify-between gap-2 border-b border-border py-1.5 text-sm last:border-b-0"
@@ -245,6 +161,32 @@ function UserMappingsSection({ enabled }: { enabled: boolean }) {
             ))
           )}
         </div>
+
+        {total > PAGE_SIZE && (
+          <div className="flex items-center justify-between pt-1 text-xs text-muted-foreground">
+            <span>
+              {total} mapping{total === 1 ? "" : "s"} · page {page} of {pageCount}
+            </span>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={page <= 1 || mappings.isFetching}
+              >
+                Previous
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setPage((p) => Math.min(pageCount, p + 1))}
+                disabled={page >= pageCount || mappings.isFetching}
+              >
+                Next
+              </Button>
+            </div>
+          </div>
+        )}
       </div>
     </SettingsSection>
   );
