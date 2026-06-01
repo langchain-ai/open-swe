@@ -8,6 +8,7 @@ import os
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import quote
 
@@ -481,6 +482,68 @@ async def _upsert_slack_thread_repo_metadata(
         )
 
 
+async def upsert_agent_thread_owner_metadata(
+    thread_id: str,
+    *,
+    source: str,
+    repo_config: dict[str, str] | None = None,
+    github_login: str = "",
+    user_email: str = "",
+    title: str = "",
+    source_context: dict[str, Any] | None = None,
+) -> None:
+    """Persist owner/source metadata so the dashboard can surface non-dashboard threads.
+
+    Webhook-triggered runs only pass ``source``/``github_login`` through the run
+    config; the Agents UI lists and authorizes threads by thread *metadata*, so we
+    mirror the owner-identifying fields onto the thread here.
+    """
+    now_ms = int(datetime.now(UTC).timestamp() * 1000)
+    resolved_login = github_login or resolve_login_from_email(user_email) or ""
+    metadata: dict[str, Any] = {"source": source, "updated_at_ms": now_ms}
+    if isinstance(repo_config, dict) and repo_config.get("owner") and repo_config.get("name"):
+        metadata["repo"] = repo_config
+        metadata["repo_owner"] = repo_config["owner"]
+        metadata["repo_name"] = repo_config["name"]
+    if resolved_login:
+        metadata["github_login"] = resolved_login
+    if user_email:
+        metadata["triggering_user_email"] = user_email.strip().lower()
+    if title:
+        metadata["title"] = title[:80]
+    if source_context:
+        metadata["source_context"] = source_context
+
+    langgraph_client = get_client(url=LANGGRAPH_URL)
+    try:
+        existing = await langgraph_client.threads.get(thread_id)
+    except Exception as exc:  # noqa: BLE001
+        if not _is_not_found_error(exc):
+            logger.exception("Failed to read thread %s for owner metadata", thread_id)
+        existing = None
+
+    existing_meta = (
+        existing.get("metadata")
+        if isinstance(existing, dict) and isinstance(existing.get("metadata"), dict)
+        else {}
+    )
+    if existing_meta.get("created_at_ms") is None:
+        metadata["created_at_ms"] = now_ms
+    if existing_meta.get("title") and "title" in metadata:
+        # Preserve a title that was already chosen (first message wins).
+        metadata.pop("title")
+
+    try:
+        if existing is None:
+            await langgraph_client.threads.create(
+                thread_id=thread_id, if_exists="do_nothing", metadata=metadata
+            )
+        else:
+            await langgraph_client.threads.update(thread_id=thread_id, metadata=metadata)
+    except Exception:  # noqa: BLE001
+        logger.exception("Failed to persist owner metadata for thread %s", thread_id)
+
+
 async def get_slack_repo_config(
     channel_id: str,
     thread_ts: str,
@@ -747,6 +810,15 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
         "source": "linear",
     }
 
+    await upsert_agent_thread_owner_metadata(
+        thread_id,
+        source="linear",
+        repo_config=repo_config,
+        user_email=user_email or "",
+        title=title or identifier or "Linear issue",
+        source_context={"linear_issue": configurable["linear_issue"]},
+    )
+
     logger.info("Checking if thread %s is active before creating run", thread_id)
     thread_active = await is_thread_active(thread_id)
     logger.info("Thread %s active status: %s", thread_id, thread_active)
@@ -914,6 +986,14 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
     langgraph_client = get_client(url=LANGGRAPH_URL)
     is_first_mention = not await _thread_exists(thread_id)
     await _upsert_slack_thread_repo_metadata(thread_id, repo_config, langgraph_client)
+    await upsert_agent_thread_owner_metadata(
+        thread_id,
+        source="slack",
+        repo_config=repo_config,
+        user_email=user_email or "",
+        title=clean_text if is_first_mention else "",
+        source_context={"slack_thread": configurable["slack_thread"]},
+    )
 
     thread_active = await is_thread_active(thread_id)
     if thread_active:
@@ -1392,6 +1472,14 @@ async def _trigger_or_queue_run(
     pr_number: int,
 ) -> None:
     """Create a new agent run or queue the message if the thread is busy."""
+    await upsert_agent_thread_owner_metadata(
+        thread_id,
+        source="github",
+        repo_config=repo_config,
+        github_login=github_login,
+        title=f"PR #{pr_number}" if pr_number else "",
+        source_context={"pr_number": pr_number} if pr_number else None,
+    )
     thread_active = await is_thread_active(thread_id)
     if thread_active:
         logger.info("Thread %s is busy, queuing GitHub PR comment message", thread_id)
@@ -2634,6 +2722,15 @@ async def process_github_issue(payload: dict[str, Any], event_type: str) -> None
             "url": issue_url,
         },
     }
+
+    await upsert_agent_thread_owner_metadata(
+        thread_id,
+        source="github",
+        repo_config=repo_config,
+        github_login=github_login,
+        title=title or (f"Issue #{issue_number}" if issue_number else ""),
+        source_context={"github_issue": configurable["github_issue"]},
+    )
 
     thread_active = await is_thread_active(thread_id)
     if thread_active:
