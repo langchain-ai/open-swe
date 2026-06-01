@@ -230,6 +230,45 @@ async def fetch_pr_diff(
     return response.text
 
 
+async def fetch_pr_metadata(
+    *,
+    owner: str,
+    repo: str,
+    pr_number: int,
+    token: str,
+    timeout: float = 30.0,
+) -> tuple[str, str] | None:
+    """Fetch the PR's title and body from the GitHub REST API.
+
+    Returns ``(title, body)`` or ``None`` if the request fails. Always
+    fetched fresh per run (never cached) so an edited title/description is
+    reflected on every re-review. ``body`` is normalized to ``""`` when the
+    PR has no description.
+    """
+    import httpx
+
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "Authorization": f"Bearer {token}",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    url = f"https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}"
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url, headers=headers, timeout=timeout)
+            response.raise_for_status()
+            payload = response.json()
+    except httpx.HTTPError:
+        logger.exception("Failed to fetch PR metadata for %s/%s#%s", owner, repo, pr_number)
+        return None
+    except ValueError:
+        logger.exception("Failed to parse PR metadata for %s/%s#%s", owner, repo, pr_number)
+        return None
+    title = payload.get("title")
+    body = payload.get("body")
+    return (title if isinstance(title, str) else "", body if isinstance(body, str) else "")
+
+
 async def compute_diff_in_sandbox(
     sandbox_backend: SandboxBackendProtocol,
     work_dir: str,
