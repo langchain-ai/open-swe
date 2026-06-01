@@ -17,6 +17,7 @@ from ..reviewer_findings import (
     normalize_finding_title,
     update_finding_fields,
 )
+from ..utils.reviewer_outcomes import emit_finding_status_outcome
 
 
 def _is_non_empty_str(value: Any) -> bool:
@@ -196,8 +197,6 @@ def update_finding(
     if updated is None:
         return {"success": False, "error": f"No finding found with id {finding_id}"}
     if status in {"resolved", "dismissed"} and not delegated_resolution:
-        from ..utils.reviewer_outcomes import emit_finding_status_outcome
-
         emit_finding_status_outcome(updated, status, configurable=configurable, thread_id=thread_id)
     result = {"success": True, "finding": updated}
     if suggestion_dropped:

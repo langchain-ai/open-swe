@@ -21,6 +21,7 @@ from ..reviewer_publish import (
 )
 from ..reviewer_reconcile import reconcile_findings_with_review_threads
 from ..utils.github_token import get_github_token
+from ..utils.reviewer_outcomes import emit_finding_status_outcome
 
 
 def _normalize_note(note: str | None) -> str | None:
@@ -78,8 +79,6 @@ def resolve_finding_thread(
         )
     )
     if result.get("success") and isinstance(result.get("finding"), dict):
-        from ..utils.reviewer_outcomes import emit_finding_status_outcome
-
         thread_id = configurable.get("thread_id") if isinstance(configurable, dict) else None
         emit_finding_status_outcome(
             result["finding"],
