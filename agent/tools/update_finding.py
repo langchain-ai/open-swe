@@ -150,6 +150,7 @@ def update_finding(
     if finding is None:
         return {"success": False, "error": f"No finding found with id {finding_id}"}
 
+    delegated_resolution = False
     repo_config = configurable.get("repo") if isinstance(configurable, dict) else None
     pr_number = configurable.get("pr_number") if isinstance(configurable, dict) else None
     can_resolve_github_thread = (
@@ -172,6 +173,7 @@ def update_finding(
                 "error": "GitHub review thread resolution failed; finding was left open.",
                 "github_resolution": resolve_result,
             }
+        delegated_resolution = True
         updates.pop("status", None)
         updates.pop("last_update_note", None)
         updates.pop("resolution_note", None)
@@ -193,6 +195,10 @@ def update_finding(
     updated = asyncio.run(update_finding_fields(thread_id, finding_id, updates))
     if updated is None:
         return {"success": False, "error": f"No finding found with id {finding_id}"}
+    if status in {"resolved", "dismissed"} and not delegated_resolution:
+        from ..utils.reviewer_outcomes import emit_finding_status_outcome
+
+        emit_finding_status_outcome(updated, status, configurable=configurable, thread_id=thread_id)
     result = {"success": True, "finding": updated}
     if suggestion_dropped:
         result["suggestion_dropped"] = True

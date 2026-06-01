@@ -43,7 +43,7 @@ from .profiles import (
 )
 from .review_style_jobs import (
     cancel_review_style_analysis,
-    start_review_style_analysis,
+    start_bootstrap_analysis,
     sync_review_style_run_status,
 )
 from .review_styles import (
@@ -539,7 +539,7 @@ async def api_analyze_review_style(
         record = await sync_review_style_run_status(full_name)
         if record.get("status") == "running":
             raise HTTPException(409, "analysis already running")
-    return await start_review_style_analysis(
+    return await start_bootstrap_analysis(
         full_name,
         github_token=token,
         created_by=session["sub"],

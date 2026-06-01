@@ -66,7 +66,7 @@ def resolve_finding_thread(
     if not token:
         return {"success": False, "error": "No GitHub token available"}
 
-    return asyncio.run(
+    result = asyncio.run(
         _resolve_finding_thread_async(
             finding_id=finding_id,
             status=status,
@@ -77,6 +77,17 @@ def resolve_finding_thread(
             token=token,
         )
     )
+    if result.get("success") and isinstance(result.get("finding"), dict):
+        from ..utils.reviewer_outcomes import emit_finding_status_outcome
+
+        thread_id = configurable.get("thread_id") if isinstance(configurable, dict) else None
+        emit_finding_status_outcome(
+            result["finding"],
+            status,
+            configurable=configurable,
+            thread_id=thread_id if isinstance(thread_id, str) else None,
+        )
+    return result
 
 
 async def _resolve_finding_thread_async(
