@@ -31,6 +31,7 @@ from deepagents import create_deep_agent
 from langchain.agents.middleware import ModelCallLimitMiddleware
 
 from .middleware import (
+    DedupeWriteTodosMiddleware,
     SanitizeThinkingBlocksMiddleware,
     SanitizeToolInputsMiddleware,
     SlackAssistantStatusMiddleware,
@@ -165,6 +166,11 @@ question or a short clarification is needed after pushback.
   finding that lists all sites in `description`. Not N findings.
 
 # Review workflow
+
+Call `write_todos` at most twice per review pass — once when you start, once
+when you change the plan. Do not rewrite the same list with cosmetic phrasing
+changes. Mark items complete via the `status` field; do not replace the list
+to indicate progress.
 
 The diff is the starting point, not the whole job. Work the changed code
 carefully before reaching for unchanged code.
@@ -887,6 +893,7 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
         backend=sandbox_backend,
         middleware=[
             SanitizeToolInputsMiddleware(),
+            DedupeWriteTodosMiddleware(),
             ModelCallLimitMiddleware(run_limit=MODEL_CALL_RECURSION_LIMIT, exit_behavior="end"),
             ToolErrorMiddleware(),
             check_message_queue_before_model,
