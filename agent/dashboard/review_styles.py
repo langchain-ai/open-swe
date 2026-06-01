@@ -89,6 +89,7 @@ def _default_record(full_name: str, created_by: str) -> dict[str, Any]:
         "reviews_sampled": 0,
         "analysis_thread_id": None,
         "analysis_run_id": None,
+        "continual_cron_id": None,
         "error": None,
         "created_by": created_by,
         "created_at": _now_iso(),

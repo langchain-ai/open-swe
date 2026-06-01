@@ -5,6 +5,7 @@
 # ruff: noqa: E402
 import logging
 import os
+import time
 import warnings
 from typing import Any
 
@@ -191,15 +192,12 @@ async def _recreate_sandbox(thread_id: str) -> SandboxBackendProtocol:
     (with proxy auth configured), swapping the per-thread proxy target.
     The agent is responsible for cloning repos via tools.
     """
-    await client.threads.update(
-        thread_id=thread_id,
-        metadata={"sandbox_id": SANDBOX_CREATING},
-    )
+    await client.threads.update(thread_id=thread_id, metadata=_creating_metadata())
     try:
         sandbox_backend = set_sandbox_backend(thread_id, await _create_sandbox_with_proxy())
     except Exception:
         logger.exception("Failed to recreate sandbox after connection failure")
-        await client.threads.update(thread_id=thread_id, metadata={"sandbox_id": None})
+        await client.threads.update(thread_id=thread_id, metadata=_RESET_METADATA)
         raise
     return sandbox_backend
 
@@ -226,25 +224,42 @@ async def check_or_recreate_sandbox(
     return sandbox_backend
 
 
-async def _wait_for_sandbox_id(thread_id: str) -> str:
-    """Wait for sandbox_id to be set in thread metadata.
+def _creating_metadata() -> dict[str, Any]:
+    """Metadata that claims the cross-process creation lock with a timestamp."""
+    return {"sandbox_id": SANDBOX_CREATING, "sandbox_creating_at": time.time()}
 
-    Polls thread metadata until sandbox_id is set to a real value
-    (not the creating sentinel).
 
-    Raises:
-        TimeoutError: If sandbox creation takes too long
+_RESET_METADATA: dict[str, Any] = {"sandbox_id": None, "sandbox_creating_at": None}
+
+
+async def _resolve_creating_sentinel(thread_id: str) -> str | None:
+    """Resolve a ``__creating__`` sentinel seen with no cached backend.
+
+    The sentinel is a cross-process lock: another worker may still be creating
+    the sandbox. Poll live thread metadata until it resolves to a real id. Only
+    when the sentinel is older than ``SANDBOX_CREATION_TIMEOUT`` (e.g. the
+    creating worker was restarted) is it treated as stale: metadata is reset and
+    ``None`` is returned so the caller creates a fresh sandbox. A sentinel with
+    no timestamp (written before this field existed) is also treated as stale.
     """
-    elapsed = 0.0
-    while elapsed < SANDBOX_CREATION_TIMEOUT:
-        sandbox_id = await get_sandbox_id_from_metadata(thread_id)
-        if sandbox_id is not None and sandbox_id != SANDBOX_CREATING:
-            return sandbox_id
-        await asyncio.sleep(SANDBOX_POLL_INTERVAL)
-        elapsed += SANDBOX_POLL_INTERVAL
+    while True:
+        thread = await client.threads.get(thread_id)
+        metadata = thread.get("metadata", {}) if isinstance(thread, dict) else {}
+        sandbox_id = metadata.get("sandbox_id") if isinstance(metadata, dict) else None
 
-    msg = f"Timeout waiting for sandbox creation for thread {thread_id}"
-    raise TimeoutError(msg)
+        if sandbox_id != SANDBOX_CREATING:
+            return sandbox_id if isinstance(sandbox_id, str) else None
+
+        creating_at = metadata.get("sandbox_creating_at") if isinstance(metadata, dict) else None
+        age = time.time() - creating_at if isinstance(creating_at, (int, float)) else None
+        if age is None or age > SANDBOX_CREATION_TIMEOUT:
+            logger.warning(
+                "Resetting stale SANDBOX_CREATING for thread %s (age=%s)", thread_id, age
+            )
+            await client.threads.update(thread_id=thread_id, metadata=_RESET_METADATA)
+            return None
+
+        await asyncio.sleep(SANDBOX_POLL_INTERVAL)
 
 
 def graph_loaded_for_execution(config: RunnableConfig) -> bool:
@@ -262,7 +277,8 @@ async def ensure_sandbox_for_thread(thread_id: str) -> SandboxBackendProtocol:
     Implements the four-state lifecycle described in AGENTS.md:
 
     1. Cached in memory → ping; recreate on ``SandboxClientError``.
-    2. Metadata says ``__creating__`` and no cache → poll until ready.
+    2. Metadata says ``__creating__`` and no cache → wait for the creating
+       worker; only reset if the sentinel is proven stale (timestamp/timeout).
     3. No sandbox at all → create one and persist the id.
     4. Metadata has an id but no cache → reconnect; recreate on failure.
 
@@ -275,7 +291,7 @@ async def ensure_sandbox_for_thread(thread_id: str) -> SandboxBackendProtocol:
 
     if sandbox_id == SANDBOX_CREATING and not sandbox_backend:
         logger.info("Sandbox creation in progress for thread %s, waiting...", thread_id)
-        sandbox_id = await _wait_for_sandbox_id(thread_id)
+        sandbox_id = await _resolve_creating_sentinel(thread_id)
 
     if sandbox_backend:
         logger.info("Using cached sandbox backend for thread %s", thread_id)
@@ -285,14 +301,14 @@ async def ensure_sandbox_for_thread(thread_id: str) -> SandboxBackendProtocol:
             sandbox_backend = await _refresh_github_proxy_or_recreate(sandbox_backend, thread_id)
     elif sandbox_id is None:
         logger.info("Creating new sandbox for thread %s", thread_id)
-        await client.threads.update(thread_id=thread_id, metadata={"sandbox_id": SANDBOX_CREATING})
+        await client.threads.update(thread_id=thread_id, metadata=_creating_metadata())
         try:
             sandbox_backend = await _create_sandbox_with_proxy()
             logger.info("Sandbox created: %s", sandbox_backend.id)
         except Exception:
             logger.exception("Failed to create sandbox")
             try:
-                await client.threads.update(thread_id=thread_id, metadata={"sandbox_id": None})
+                await client.threads.update(thread_id=thread_id, metadata=_RESET_METADATA)
             except Exception:
                 logger.exception("Failed to reset sandbox_id metadata")
             raise
@@ -303,15 +319,13 @@ async def ensure_sandbox_for_thread(thread_id: str) -> SandboxBackendProtocol:
             sandbox_backend = await asyncio.to_thread(create_sandbox, sandbox_id)
         except Exception:
             logger.warning("Failed to connect to existing sandbox %s, creating new one", sandbox_id)
-            await client.threads.update(
-                thread_id=thread_id, metadata={"sandbox_id": SANDBOX_CREATING}
-            )
+            await client.threads.update(thread_id=thread_id, metadata=_creating_metadata())
             try:
                 sandbox_backend = await _create_sandbox_with_proxy()
                 created_replacement_sandbox = True
             except Exception:
                 logger.exception("Failed to create replacement sandbox")
-                await client.threads.update(thread_id=thread_id, metadata={"sandbox_id": None})
+                await client.threads.update(thread_id=thread_id, metadata=_RESET_METADATA)
                 raise
         if not created_replacement_sandbox:
             original_sandbox_id = sandbox_backend.id

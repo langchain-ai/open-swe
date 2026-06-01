@@ -3,11 +3,29 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import Any
 
 from langgraph.config import get_config
 
+from ..dashboard.analyzer_cron import ensure_continual_cron
 from ..dashboard.review_styles import mark_analysis_completed, mark_analysis_failed
+
+logger = logging.getLogger(__name__)
+
+
+async def _complete_and_register(full_name: str, **completed_kwargs: Any) -> dict[str, Any]:
+    """Persist the prompt, then ensure the repo's nightly continual cron exists.
+
+    Cron registration is idempotent, so continual runs completing later don't
+    re-register it; it just guarantees a cron once a prompt first exists.
+    """
+    record = await mark_analysis_completed(full_name, **completed_kwargs)
+    try:
+        await ensure_continual_cron(full_name)
+    except Exception:
+        logger.exception("Failed to ensure continual cron for %s", full_name)
+    return record
 
 
 def save_review_style_prompt(
@@ -41,7 +59,7 @@ def save_review_style_prompt(
         return {"ok": False, "error": "custom_prompt cannot be empty"}
 
     record = asyncio.run(
-        mark_analysis_completed(
+        _complete_and_register(
             full_name,
             custom_prompt=custom_prompt.strip(),
             analysis_summary=analysis_summary.strip(),
