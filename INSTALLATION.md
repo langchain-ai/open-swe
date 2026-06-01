@@ -225,6 +225,8 @@ ALLOWED_GITHUB_REPOS="some-user/their-repo,another-org/specific-repo"
 
 A GitHub or Linear webhook is accepted if the resolved repo's org is in `ALLOWED_GITHUB_ORGS` **or** the `owner/repo` is in `ALLOWED_GITHUB_REPOS`. If both are empty, all repos are allowed. Slack mentions are not rejected from regex-inferred repository text; repository access is bounded by the GitHub App installation permissions.
 
+`ALLOWED_GITHUB_ORGS` also gates **dashboard login**: when set, only GitHub accounts that are active members of one of the listed organizations can complete the OAuth login and receive a session. Membership is verified server-side with the GitHub App installation token (so private memberships are visible and no extra OAuth scope is required), and the check fails closed on any API error. When `ALLOWED_GITHUB_ORGS` is empty, dashboard login is open to any GitHub account (the prior behavior).
+
 ### Linear (optional)
 
 Open SWE listens for Linear comments that mention `@openswe`.
