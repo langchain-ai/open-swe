@@ -49,6 +49,7 @@ from .middleware import (
     ToolErrorMiddleware,
     check_message_queue_before_model,
     ensure_no_empty_msg,
+    finalize_response,
     notify_step_limit_reached,
 )
 from .prompt import construct_system_prompt
@@ -525,6 +526,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             check_message_queue_before_model,
             SlackAssistantStatusMiddleware(),
             ensure_no_empty_msg,
+            finalize_response,
             notify_step_limit_reached,
             SandboxCircuitBreakerMiddleware(),
             *fallback_middleware,

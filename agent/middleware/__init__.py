@@ -4,6 +4,7 @@ from .exclude_tools import ExcludeToolsMiddleware
 from .model_fallback import ModelFallbackMiddleware
 from .notify_step_limit import notify_step_limit_reached
 from .refresh_slack_status import SlackAssistantStatusMiddleware
+from .response_finalizer import finalize_response
 from .sandbox_circuit_breaker import SandboxCircuitBreakerMiddleware
 from .sanitize_thinking_blocks import SanitizeThinkingBlocksMiddleware
 from .sanitize_tool_inputs import SanitizeToolInputsMiddleware
@@ -19,5 +20,6 @@ __all__ = [
     "SlackAssistantStatusMiddleware",
     "check_message_queue_before_model",
     "ensure_no_empty_msg",
+    "finalize_response",
     "notify_step_limit_reached",
 ]
