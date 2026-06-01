@@ -480,18 +480,32 @@ def _safe_login(value: object) -> str:
     return "unknown"
 
 
+# Closing tags of the wrappers used in this module. XML tolerates whitespace
+# around the tag name (e.g. `</body >`, `</ body\n>`), so a literal `.replace()`
+# of the canonical spelling alone is insufficient — we match each end tag
+# whitespace-tolerantly and rewrite it to an inert, human-readable form.
+_DATA_BLOCK_WRAPPER_TAGS = (
+    "pr_review_threads",
+    "thread",
+    "comment",
+    "body",
+    "pr_overview",
+    "title",
+)
+_CLOSING_TAG_RE = re.compile(
+    r"</\s*(" + "|".join(_DATA_BLOCK_WRAPPER_TAGS) + r")\s*>",
+    re.IGNORECASE,
+)
+
+
 def _escape_for_data_block(text: str) -> str:
-    """Neutralize closing tags so an attacker-controlled body can't break out."""
-    # Replace any literal closing tag of the wrappers we use below. The
-    # replacement keeps the text human-readable but unparsable as a closer.
-    return (
-        text.replace("</pr_review_threads>", "</pr_review_threads_>")
-        .replace("</thread>", "</thread_>")
-        .replace("</comment>", "</comment_>")
-        .replace("</body>", "</body_>")
-        .replace("</pr_overview>", "</pr_overview_>")
-        .replace("</title>", "</title_>")
-    )
+    """Neutralize closing tags so an attacker-controlled body can't break out.
+
+    Matches each wrapper's end tag whitespace-tolerantly (XML allows whitespace
+    before/after the tag name) and rewrites it to an inert ``</name_>`` form
+    that stays human-readable but is no longer a valid closer.
+    """
+    return _CLOSING_TAG_RE.sub(lambda m: f"</{m.group(1).lower()}_>", text)
 
 
 def _format_pr_review_threads(threads: list[dict]) -> str:
