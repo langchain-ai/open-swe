@@ -27,6 +27,8 @@ logger = logging.getLogger(__name__)
 _ASSISTANT_ID = "agent"
 _DASHBOARD_SOURCE = "dashboard"
 _DASHBOARD_STREAM_MODES: tuple[str, ...] = ("values", "updates", "messages-tuple")
+# Sources whose threads should surface in the Agents UI (besides "dashboard").
+_SURFACED_SOURCES: tuple[str, ...] = ("dashboard", "github", "slack", "linear")
 
 
 def _agent_version_metadata() -> dict[str, str]:
@@ -91,11 +93,28 @@ def _thread_owner_login(metadata: dict[str, Any]) -> str | None:
     return login.strip() if isinstance(login, str) and login.strip() else None
 
 
-def _assert_thread_owner(metadata: dict[str, Any], login: str) -> None:
-    owner = _thread_owner_login(metadata)
-    if owner != login:
-        raise HTTPException(404, "thread not found")
-    if metadata.get("source") != _DASHBOARD_SOURCE:
+def _thread_owner_email(metadata: dict[str, Any]) -> str | None:
+    email = metadata.get("triggering_user_email")
+    return email.strip().lower() if isinstance(email, str) and email.strip() else None
+
+
+def _thread_source(metadata: dict[str, Any]) -> str:
+    source = metadata.get("source")
+    return source if isinstance(source, str) and source else _DASHBOARD_SOURCE
+
+
+def _user_owns_thread(metadata: dict[str, Any], login: str, email: str | None) -> bool:
+    if _thread_source(metadata) not in _SURFACED_SOURCES:
+        return False
+    if _thread_owner_login(metadata) == login:
+        return True
+    if email and _thread_owner_email(metadata) == email.strip().lower():
+        return True
+    return False
+
+
+def _assert_thread_owner(metadata: dict[str, Any], login: str, email: str | None = None) -> None:
+    if not _user_owns_thread(metadata, login, email):
         raise HTTPException(404, "thread not found")
 
 
@@ -153,6 +172,7 @@ def _thread_summary(
         "branch": metadata.get("branch_name") or metadata.get("base_branch") or "main",
         "model": model,
         "effort": effort,
+        "source": _thread_source(metadata),
         "status": status,
         "createdAt": int(created_at) if isinstance(created_at, (int, float)) else _now_ms(),
         "updatedAt": int(updated_at) if isinstance(updated_at, (int, float)) else _now_ms(),
@@ -182,21 +202,40 @@ async def _latest_run_status(thread_id: str) -> str | None:
     return raw.lower() if isinstance(raw, str) else None
 
 
-async def list_dashboard_threads(login: str, *, limit: int = 50) -> list[dict[str, Any]]:
-    threads = await langgraph_client().threads.search(
-        metadata={"source": _DASHBOARD_SOURCE, "github_login": login},
-        limit=limit,
-        sort_by="updated_at",
-        sort_order="desc",
-    )
-    out: list[dict[str, Any]] = []
-    for thread in threads or []:
-        if isinstance(thread, dict):
-            out.append(_thread_summary(thread))
-    return out
+async def list_dashboard_threads(
+    login: str, *, email: str | None = None, limit: int = 50
+) -> list[dict[str, Any]]:
+    client = langgraph_client()
+    searches: list[dict[str, Any]] = [{"github_login": login}]
+    if email and email.strip():
+        searches.append({"triggering_user_email": email.strip().lower()})
+
+    seen: dict[str, dict[str, Any]] = {}
+    for metadata_filter in searches:
+        threads = await client.threads.search(
+            metadata=metadata_filter,
+            limit=limit,
+            sort_by="updated_at",
+            sort_order="desc",
+        )
+        for thread in threads or []:
+            if not isinstance(thread, dict):
+                continue
+            meta = thread.get("metadata") if isinstance(thread.get("metadata"), dict) else {}
+            if not _user_owns_thread(meta, login, email):
+                continue
+            thread_id = thread.get("thread_id") or thread.get("id")
+            if isinstance(thread_id, str) and thread_id not in seen:
+                seen[thread_id] = thread
+
+    summaries = [_thread_summary(thread) for thread in seen.values()]
+    summaries.sort(key=lambda item: item.get("updatedAt", 0), reverse=True)
+    return summaries[:limit]
 
 
-async def get_dashboard_thread(thread_id: str, login: str) -> dict[str, Any]:
+async def get_dashboard_thread(
+    thread_id: str, login: str, *, email: str | None = None
+) -> dict[str, Any]:
     client = langgraph_client()
     try:
         thread = await client.threads.get(thread_id)
@@ -205,7 +244,7 @@ async def get_dashboard_thread(thread_id: str, login: str) -> dict[str, Any]:
         raise HTTPException(404, "thread not found") from exc
 
     metadata = thread.get("metadata") if isinstance(thread.get("metadata"), dict) else {}
-    _assert_thread_owner(metadata, login)
+    _assert_thread_owner(metadata, login, email)
 
     messages: list[dict[str, Any]] = []
     try:
@@ -321,7 +360,7 @@ async def create_dashboard_thread(login: str, body: ThreadCreateBody) -> dict[st
 
 
 async def send_dashboard_message(
-    thread_id: str, login: str, body: ThreadMessageBody
+    thread_id: str, login: str, body: ThreadMessageBody, *, email: str | None = None
 ) -> dict[str, Any]:
     client = langgraph_client()
     try:
@@ -330,7 +369,7 @@ async def send_dashboard_message(
         raise HTTPException(404, "thread not found") from exc
 
     metadata = thread.get("metadata") if isinstance(thread.get("metadata"), dict) else {}
-    _assert_thread_owner(metadata, login)
+    _assert_thread_owner(metadata, login, email)
     owner, name, _ = _metadata_repo(metadata)
     if not owner or not name:
         raise HTTPException(400, "thread is missing repository metadata")
@@ -355,13 +394,18 @@ async def send_dashboard_message(
 
     await _persist_dashboard_github_token(thread_id, login)
     profile = await get_profile(login) or {}
+    thread_source = _thread_source(metadata)
     configurable: dict[str, Any] = {
         "thread_id": thread_id,
-        "source": _DASHBOARD_SOURCE,
+        "source": thread_source,
         "github_login": login,
         "repo": {"owner": owner, "name": name},
         "user_email": profile.get("email"),
     }
+    source_context = metadata.get("source_context")
+    if isinstance(source_context, dict):
+        for key, value in source_context.items():
+            configurable.setdefault(key, value)
     if chosen_model and chosen_effort:
         configurable["agent_model_id"] = chosen_model
         configurable["agent_effort"] = chosen_effort
@@ -384,7 +428,9 @@ async def send_dashboard_message(
     )
 
 
-async def cancel_dashboard_thread(thread_id: str, login: str) -> dict[str, Any]:
+async def cancel_dashboard_thread(
+    thread_id: str, login: str, *, email: str | None = None
+) -> dict[str, Any]:
     client = langgraph_client()
     try:
         thread = await client.threads.get(thread_id)
@@ -392,7 +438,7 @@ async def cancel_dashboard_thread(thread_id: str, login: str) -> dict[str, Any]:
         raise HTTPException(404, "thread not found") from exc
 
     metadata = thread.get("metadata") if isinstance(thread.get("metadata"), dict) else {}
-    _assert_thread_owner(metadata, login)
+    _assert_thread_owner(metadata, login, email)
 
     run_id = metadata.get("latest_run_id")
     if isinstance(run_id, str) and run_id:
@@ -411,7 +457,7 @@ async def cancel_dashboard_thread(thread_id: str, login: str) -> dict[str, Any]:
     )
 
 
-async def delete_dashboard_thread(thread_id: str, login: str) -> None:
+async def delete_dashboard_thread(thread_id: str, login: str, *, email: str | None = None) -> None:
     client = langgraph_client()
     try:
         thread = await client.threads.get(thread_id)
@@ -419,7 +465,7 @@ async def delete_dashboard_thread(thread_id: str, login: str) -> None:
         raise HTTPException(404, "thread not found") from exc
 
     metadata = thread.get("metadata") if isinstance(thread.get("metadata"), dict) else {}
-    _assert_thread_owner(metadata, login)
+    _assert_thread_owner(metadata, login, email)
 
     run_id = metadata.get("latest_run_id")
     if isinstance(run_id, str) and run_id:
@@ -432,7 +478,7 @@ async def delete_dashboard_thread(thread_id: str, login: str) -> None:
 
 
 async def stream_dashboard_thread(
-    thread_id: str, login: str, *, last_event_id: str | None = None
+    thread_id: str, login: str, *, email: str | None = None, last_event_id: str | None = None
 ) -> AsyncIterator[str]:
     try:
         thread = await langgraph_client().threads.get(thread_id)
@@ -440,7 +486,7 @@ async def stream_dashboard_thread(
         raise HTTPException(404, "thread not found") from exc
 
     metadata = thread.get("metadata") if isinstance(thread.get("metadata"), dict) else {}
-    _assert_thread_owner(metadata, login)
+    _assert_thread_owner(metadata, login, email)
 
     stream = await langgraph_client().threads.join_stream(
         thread_id,

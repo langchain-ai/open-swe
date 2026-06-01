@@ -1,9 +1,25 @@
 import { Link } from "@tanstack/react-router";
-import { CheckCircleIcon, GitBranchIcon, GitPullRequestIcon } from "@phosphor-icons/react";
+import {
+  ChatCircleIcon,
+  CheckCircleIcon,
+  GitBranchIcon,
+  GitPullRequestIcon,
+  GithubLogoIcon,
+  KanbanIcon,
+  SlackLogoIcon,
+} from "@phosphor-icons/react";
+import type { Icon } from "@phosphor-icons/react";
 
+import type { AgentSource, AgentThread } from "@/lib/agents/types";
 import { formatRelativeTime } from "@/lib/agents/api";
-import type { AgentThread } from "@/lib/agents/types";
 import { cn } from "@/lib/utils";
+
+const SOURCE_META: Record<AgentSource, { icon: Icon; label: string }> = {
+  dashboard: { icon: ChatCircleIcon, label: "Dashboard" },
+  github: { icon: GithubLogoIcon, label: "GitHub" },
+  slack: { icon: SlackLogoIcon, label: "Slack" },
+  linear: { icon: KanbanIcon, label: "Linear" },
+};
 
 interface AgentRunCardProps {
   thread: AgentThread;
@@ -12,6 +28,8 @@ interface AgentRunCardProps {
 export function AgentRunCard({ thread }: AgentRunCardProps) {
   const stats = thread.diffStats;
   const hasPr = Boolean(thread.pr);
+  const source = thread.source ? SOURCE_META[thread.source] : null;
+  const SourceIcon = source?.icon;
 
   return (
     <Link
@@ -51,6 +69,15 @@ export function AgentRunCard({ thread }: AgentRunCardProps) {
       <div className="min-w-0 flex-1">
         <div className="truncate text-sm font-medium text-[var(--ui-text)]">{thread.title}</div>
         <div className="mt-1 flex items-center gap-2 text-xs text-[var(--ui-text-dim)]">
+          {source && SourceIcon && (
+            <>
+              <span className="flex items-center gap-1" title={source.label}>
+                <SourceIcon className="size-3.5" weight="fill" aria-label={source.label} />
+                {source.label}
+              </span>
+              <span>·</span>
+            </>
+          )}
           <span>{thread.model}</span>
           <span>·</span>
           <span>{thread.repo}</span>

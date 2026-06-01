@@ -579,7 +579,7 @@ async def api_delete_review_style(
 async def api_list_threads(
     session: dict[str, Any] = _SESSION_DEP,
 ) -> list[dict[str, Any]]:
-    return await list_dashboard_threads(session["sub"])
+    return await list_dashboard_threads(session["sub"], email=session.get("email"))
 
 
 @router.post("/threads")
@@ -595,7 +595,7 @@ async def api_get_thread(
     thread_id: str,
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
-    return await get_dashboard_thread(thread_id, session["sub"])
+    return await get_dashboard_thread(thread_id, session["sub"], email=session.get("email"))
 
 
 @router.post("/threads/{thread_id}/messages")
@@ -604,7 +604,7 @@ async def api_send_thread_message(
     body: ThreadMessageBody,
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
-    return await send_dashboard_message(thread_id, session["sub"], body)
+    return await send_dashboard_message(thread_id, session["sub"], body, email=session.get("email"))
 
 
 @router.post("/threads/{thread_id}/cancel")
@@ -612,7 +612,7 @@ async def api_cancel_thread(
     thread_id: str,
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
-    return await cancel_dashboard_thread(thread_id, session["sub"])
+    return await cancel_dashboard_thread(thread_id, session["sub"], email=session.get("email"))
 
 
 @router.delete("/threads/{thread_id}")
@@ -620,7 +620,7 @@ async def api_delete_thread(
     thread_id: str,
     session: dict[str, Any] = _SESSION_DEP,
 ) -> Response:
-    await delete_dashboard_thread(thread_id, session["sub"])
+    await delete_dashboard_thread(thread_id, session["sub"], email=session.get("email"))
     return Response(status_code=204)
 
 
@@ -634,7 +634,7 @@ async def api_stream_thread(
 
     async def event_generator():
         async for chunk in stream_dashboard_thread(
-            thread_id, session["sub"], last_event_id=last_event_id
+            thread_id, session["sub"], email=session.get("email"), last_event_id=last_event_id
         ):
             yield chunk
 

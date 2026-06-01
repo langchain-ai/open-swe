@@ -1,7 +1,17 @@
 import { Link } from "@tanstack/react-router";
-import { ChartLineUpIcon, PlusIcon, XIcon } from "@phosphor-icons/react";
+import {
+  ChartLineUpIcon,
+  ChatCircleIcon,
+  GithubLogoIcon,
+  KanbanIcon,
+  PlusIcon,
+  SlackLogoIcon,
+  XIcon,
+} from "@phosphor-icons/react";
+import type { Icon } from "@phosphor-icons/react";
 
 import type { SessionUser } from "@/lib/api";
+import type { AgentSource, AgentThread } from "@/lib/agents/types";
 import { SidebarUserMenu } from "@/components/SidebarUserMenu";
 import {
   SidebarCollapseButton,
@@ -10,8 +20,14 @@ import {
 } from "@/components/sidebar-layout";
 import { groupThreads } from "@/lib/agents/api";
 import { useAgentThreads, useDeleteAgentThread } from "@/lib/agents/queries";
-import type { AgentThread } from "@/lib/agents/types";
 import { cn } from "@/lib/utils";
+
+const SOURCE_META: Record<AgentSource, { icon: Icon; label: string }> = {
+  dashboard: { icon: ChatCircleIcon, label: "Started from the dashboard" },
+  github: { icon: GithubLogoIcon, label: "Triggered from GitHub" },
+  slack: { icon: SlackLogoIcon, label: "Triggered from Slack" },
+  linear: { icon: KanbanIcon, label: "Triggered from Linear" },
+};
 
 interface AgentsSidebarProps {
   user: SessionUser;
@@ -117,6 +133,9 @@ function ThreadRow({ thread, isActive }: { thread: AgentThread; isActive: boolea
     deleteThread.mutate(thread.id);
   };
 
+  const source = thread.source && thread.source !== "dashboard" ? SOURCE_META[thread.source] : null;
+  const SourceIcon = source?.icon;
+
   return (
     <Link
       to="/agents/$threadId"
@@ -139,6 +158,15 @@ function ThreadRow({ thread, isActive }: { thread: AgentThread; isActive: boolea
               : "bg-[var(--ui-border)]",
         )}
       />
+      {source && SourceIcon && (
+        <SourceIcon
+          className="size-3.5 shrink-0 text-[var(--ui-text-dim)]"
+          weight="fill"
+          aria-label={source.label}
+        >
+          <title>{source.label}</title>
+        </SourceIcon>
+      )}
       <span className="min-w-0 flex-1 truncate text-xs">{thread.title}</span>
       {badge && (
         <span className="shrink-0 rounded bg-[var(--ui-panel-2)] px-1.5 py-0.5 text-[10px] text-[var(--ui-text-dim)] group-hover:hidden">

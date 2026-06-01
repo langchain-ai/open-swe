@@ -13,6 +13,8 @@ export type TodoStatus = "pending" | "in_progress" | "completed";
 
 export type AgentStatus = "idle" | "running" | "finished" | "interrupted" | "error";
 
+export type AgentSource = "dashboard" | "github" | "slack" | "linear";
+
 export interface TodoItem {
   content: string;
   status: TodoStatus;
@@ -128,6 +130,7 @@ export interface AgentThread {
   branch: string;
   model: string;
   effort?: string | null;
+  source?: AgentSource;
   status: AgentStatus;
   createdAt: number;
   updatedAt: number;
