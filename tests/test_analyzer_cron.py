@@ -57,6 +57,9 @@ async def test_ensure_continual_cron_creates_and_stores(monkeypatch, fake_client
     created = fake_client.crons.created[0]
     assert created["assistant_id"] == "analyzer"
     assert created["config"]["configurable"]["analyzer_mode"] == "continual"
+    # Must carry an explicit thread_id, else get_analyzer early-returns an empty
+    # agent and the nightly run no-ops.
+    assert created["config"]["configurable"].get("thread_id")
     assert "/continual-learning/SKILL.md" in created["input"]["files"]
     assert updates["continual_cron_id"] == "cron_123"
 

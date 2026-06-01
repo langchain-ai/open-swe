@@ -54,8 +54,18 @@ def build_continual_run_input(full_name: str) -> dict[str, Any]:
 
 
 def build_continual_run_configurable(full_name: str) -> dict[str, Any]:
-    """Configurable for a continual-learning analyzer run (shared with the cron)."""
+    """Configurable for a continual-learning analyzer run (shared with the cron).
+
+    Includes an explicit ``thread_id`` so the run is anchored to the repo's
+    deterministic analyzer thread. The nightly cron is threadless, so without
+    this ``get_analyzer`` would early-return an empty agent (no thread_id) and
+    the run would no-op. Reusing the deterministic id keys the sandbox + thread
+    metadata to the repo; the threadless run carries no message history, so it
+    does not accumulate across nights.
+    """
+    owner, repo = full_name.split("/", 1)
     return {
+        "thread_id": generate_review_style_thread_id(owner, repo),
         "review_style_full_name": full_name,
         "analyzer_mode": "continual",
     }
@@ -155,9 +165,8 @@ async def start_continual_run(
     created_by: str = "manual",
 ) -> dict[str, Any]:
     """Start an immediate continual-learning run (outcome-driven refinement)."""
-    owner, repo = full_name.split("/", 1)
-    thread_id = generate_review_style_thread_id(owner, repo)
-    configurable = {"thread_id": thread_id, **build_continual_run_configurable(full_name)}
+    configurable = build_continual_run_configurable(full_name)
+    thread_id = configurable["thread_id"]
     try:
         run = await _client().runs.create(
             thread_id,

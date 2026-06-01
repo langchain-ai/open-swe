@@ -53,6 +53,7 @@ def test_continual_run_payload_carries_mode_and_skill_files() -> None:
     configurable = build_continual_run_configurable("o/r")
     assert configurable["analyzer_mode"] == "continual"
     assert configurable["review_style_full_name"] == "o/r"
+    assert configurable.get("thread_id")
 
     run_input = build_continual_run_input("o/r")
     assert "/continual-learning/SKILL.md" in run_input["files"]
