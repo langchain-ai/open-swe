@@ -40,7 +40,6 @@ from .profiles import (
     ProfileUpdate,
     get_profile,
     get_valid_access_token,
-    list_profiles,
     upsert_access_token_from_github_response,
     upsert_profile,
 )
@@ -76,7 +75,6 @@ from .thread_api import (
     stream_dashboard_thread,
 )
 from .user_mappings import (
-    bulk_import,
     delete_mapping,
     list_mappings,
     upsert_mapping,
@@ -285,37 +283,6 @@ async def put_my_profile(
     return await upsert_profile(session["sub"], session.get("email") or "", update)
 
 
-@router.get("/admin/profiles")
-async def admin_list_profiles(
-    _admin: dict[str, Any] = _ADMIN_DEP,
-) -> list[dict[str, Any]]:
-    return await list_profiles()
-
-
-class AdminProfileUpdate(ProfileUpdate):
-    email: str | None = None
-
-
-@router.put("/admin/profiles/{login}")
-async def admin_put_profile(
-    login: str,
-    update: AdminProfileUpdate,
-    _admin: dict[str, Any] = _ADMIN_DEP,
-) -> dict[str, Any]:
-    update.validate_pairing()
-    existing = await get_profile(login) or {}
-    email = update.email or existing.get("email") or ""
-    # Overlay only fields that were explicitly sent so the admin form (which
-    # only sends model/effort/repo) can't reset other fields the target user
-    # configured via My Settings / Cloud Agents to ProfileUpdate's defaults.
-    incoming = update.model_dump(exclude={"email"}, exclude_unset=True)
-    merged = {**existing, **incoming}
-    base = ProfileUpdate(
-        **{k: v for k, v in merged.items() if k in ProfileUpdate.model_fields},
-    )
-    return await upsert_profile(login, email, base)
-
-
 @router.get("/team-settings")
 async def api_get_team_settings(
     session: dict[str, Any] = _SESSION_DEP,
@@ -360,9 +327,22 @@ class UserMappingUpsert(BaseModel):
 
 @router.get("/admin/user-mappings")
 async def admin_list_user_mappings(
+    page: int = 1,
+    page_size: int = 20,
     _admin: dict[str, Any] = _ADMIN_DEP,
-) -> list[dict[str, Any]]:
-    return await list_mappings()
+) -> dict[str, Any]:
+    page = max(page, 1)
+    page_size = max(1, min(page_size, 100))
+    records = await list_mappings()
+    total = len(records)
+    start = (page - 1) * page_size
+    items = records[start : start + page_size]
+    return {
+        "items": items,
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+    }
 
 
 @router.put("/admin/user-mappings")
@@ -389,17 +369,6 @@ async def admin_delete_user_mapping(
 ) -> dict[str, bool]:
     deleted = await delete_mapping(github_login)
     return {"deleted": deleted}
-
-
-@router.post("/admin/user-mappings/import")
-async def admin_import_user_mappings(
-    _admin: dict[str, Any] = _ADMIN_DEP,
-) -> dict[str, int]:
-    """One-time seed of the legacy hardcoded GitHub→email map into the Store."""
-    from ..utils.github_user_email_map import GITHUB_USER_EMAIL_MAP
-
-    created = await bulk_import(GITHUB_USER_EMAIL_MAP, source="hardcoded")
-    return {"created": created}
 
 
 def _next_link_url(link_header: str | None) -> str | None:
