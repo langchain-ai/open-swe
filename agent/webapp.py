@@ -508,7 +508,7 @@ async def upsert_agent_thread_owner_metadata(
     if resolved_login:
         metadata["github_login"] = resolved_login
     if user_email:
-        metadata["triggering_user_email"] = user_email
+        metadata["triggering_user_email"] = user_email.strip().lower()
     if title:
         metadata["title"] = title[:80]
     if source_context:
