@@ -276,7 +276,11 @@ def test_process_github_pr_comment_invalidates_and_reauths_on_401(
     monkeypatch.setattr(webapp, "react_to_github_comment", fake_react)
     monkeypatch.setattr(webapp, "fetch_pr_comments_since_last_tag", fake_fetch_pr_comments)
     monkeypatch.setattr(webapp, "_trigger_or_queue_run", fake_trigger_or_queue_run)
-    monkeypatch.setattr(webapp, "GITHUB_USER_EMAIL_MAP", {"octo": "octo@example.com"})
+    monkeypatch.setattr(
+        webapp,
+        "email_for_login",
+        lambda login: asyncio.sleep(0, result="octo@example.com" if login == "octo" else None),
+    )
 
     asyncio.run(
         webapp.process_github_pr_comment(

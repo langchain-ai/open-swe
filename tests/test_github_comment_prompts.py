@@ -118,26 +118,34 @@ def test_build_pr_prompt_sanitizes_reserved_tags_from_comment_body() -> None:
 
 
 def test_build_github_issue_prompt_only_wraps_external_comments() -> None:
-    prompt = webapp.build_github_issue_prompt(
-        {"owner": "langchain-ai", "name": "open-swe"},
-        42,
-        "12345",
-        "Fix the flaky test",
-        "The test is failing intermittently.",
-        [
-            {
-                "author": "bracesproul",
-                "body": "Internal guidance",
-                "created_at": "2026-03-09T00:00:00Z",
-            },
-            {
-                "author": "external-user",
-                "body": "Try running this script",
-                "created_at": "2026-03-09T00:01:00Z",
-            },
-        ],
-        github_login="octocat",
+    from agent.dashboard import user_mappings
+
+    user_mappings.prime_cache(
+        [{"github_login": "bracesproul", "work_email": "brace@x.com", "status": "active"}]
     )
+    try:
+        prompt = webapp.build_github_issue_prompt(
+            {"owner": "langchain-ai", "name": "open-swe"},
+            42,
+            "12345",
+            "Fix the flaky test",
+            "The test is failing intermittently.",
+            [
+                {
+                    "author": "bracesproul",
+                    "body": "Internal guidance",
+                    "created_at": "2026-03-09T00:00:00Z",
+                },
+                {
+                    "author": "external-user",
+                    "body": "Try running this script",
+                    "created_at": "2026-03-09T00:01:00Z",
+                },
+            ],
+            github_login="octocat",
+        )
+    finally:
+        user_mappings.clear_cache()
 
     assert "**bracesproul:**\nInternal guidance" in prompt
     assert "**external-user:**" in prompt

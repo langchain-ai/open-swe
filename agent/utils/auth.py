@@ -16,7 +16,6 @@ from langgraph_sdk import get_client
 from ..encryption import encrypt_token
 from .github_app import get_github_app_installation_token_with_expiry
 from .github_token import get_github_token_from_thread
-from .github_user_email_map import GITHUB_USER_EMAIL_MAP
 from .linear import comment_on_linear_issue
 from .slack import post_slack_ephemeral_message, post_slack_thread_reply
 
@@ -406,6 +405,17 @@ async def resolve_github_token(
         logger.error("Missing source for thread %s; cannot route auth failure responses", thread_id)
         raise RuntimeError(f"GitHub auth failed for thread {thread_id}: missing source")
 
+    # Unmapped Slack/Linear users still get a run on the GitHub App installation
+    # token (the webhook posts a "link your account" prompt separately). This
+    # keeps the agent responsive while self-service onboarding completes.
+    if configurable.get("use_installation_token_fallback"):
+        cached_token, cached_encrypted, cached_expires_at = await get_github_token_from_thread(
+            thread_id
+        )
+        if cached_token and cached_encrypted:
+            return cached_token, cached_encrypted, cached_expires_at
+        return await _resolve_bot_installation_token(thread_id)
+
     try:
         if source == "github":
             cached_token, cached_encrypted, cached_expires_at = await get_github_token_from_thread(
@@ -414,7 +424,9 @@ async def resolve_github_token(
             if cached_token and cached_encrypted:
                 return cached_token, cached_encrypted, cached_expires_at
             github_login = configurable.get("github_login")
-            email = GITHUB_USER_EMAIL_MAP.get(github_login or "")
+            from ..dashboard.user_mappings import email_for_login
+
+            email = await email_for_login(github_login)
             if not email:
                 raise ValueError(f"No email mapping found for GitHub user '{github_login}'")
             return await save_encrypted_token_from_email(email, source)

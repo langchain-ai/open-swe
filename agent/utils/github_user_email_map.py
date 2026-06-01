@@ -1,7 +1,13 @@
-"""Mapping of GitHub usernames to LangSmith email addresses.
+"""Legacy GitHub-username → LangSmith-email mapping.
 
-Add entries here as:
-    "github-username": "user@example.com",
+This dict is **no longer read at runtime**. The live mapping is the
+Store-backed bidirectional record managed in
+``agent/dashboard/user_mappings.py`` (Admin → User mappings in the
+dashboard). This file is retained only as the payload for the one-time
+``POST /dashboard/api/admin/user-mappings/import`` bulk import (the
+"Import legacy mapping" admin button), which seeds the Store with
+``source="hardcoded"`` entries. It can be deleted once every deployment has
+run that import.
 """
 
 GITHUB_USER_EMAIL_MAP: dict[str, str] = {
