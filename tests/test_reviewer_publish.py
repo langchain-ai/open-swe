@@ -453,8 +453,8 @@ async def test_publish_review_skips_post_on_re_review_with_no_new_findings() -> 
     from agent.tools.publish_review import _publish_review_async
 
     # All findings already have github_review_comment_id from the prior publish
-    # (so none are "unpublished"), plus one previously-resolved finding whose
-    # thread still needs to be resolved on GitHub.
+    # (so none are "unpublished"). With no open unpublished findings, the
+    # fast-path returns immediately without round-tripping GitHub.
     findings = [
         {
             "id": "f_old",
@@ -476,11 +476,13 @@ async def test_publish_review_skips_post_on_re_review_with_no_new_findings() -> 
     post_review = AsyncMock()
     set_metadata = AsyncMock()
     resolve_threads = AsyncMock(return_value=1)
+    fetch_threads = AsyncMock(return_value=[])
 
     with (
         patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
         patch("agent.tools.publish_review.list_findings_async", list_async),
         patch("agent.tools.publish_review.post_pull_request_review", post_review),
+        patch("agent.tools.publish_review.fetch_pr_review_threads", fetch_threads),
         patch(
             "agent.tools.publish_review._resolve_threads_for_resolved_findings",
             resolve_threads,
@@ -503,13 +505,62 @@ async def test_publish_review_skips_post_on_re_review_with_no_new_findings() -> 
         )
 
     post_review.assert_not_called()
-    resolve_threads.assert_awaited_once()
-    set_metadata.assert_awaited_once()
+    resolve_threads.assert_not_called()
+    fetch_threads.assert_not_called()
+    set_metadata.assert_not_called()
     assert result["success"] is True
     assert result["review_id"] is None
     assert result["surfaced_count"] == 0
-    assert result["resolved_thread_count"] == 1
+    assert result["hidden_count"] == 0
+    assert result["resolved_thread_count"] == 0
     assert result["skipped_empty_re_review"] is True
+    assert "no new findings" in result["note"]
+
+
+@pytest.mark.asyncio
+async def test_publish_review_back_to_back_re_reviews_round_trip_github_once() -> None:
+    """Repeated re-review publishes with no new findings must not re-hit GitHub."""
+    from agent.tools.publish_review import _publish_review_async
+
+    findings: list[dict[str, Any]] = []
+    list_async = AsyncMock(return_value=findings)
+    post_review = AsyncMock()
+    fetch_threads = AsyncMock(return_value=[])
+    resolve_threads = AsyncMock(return_value=0)
+    set_metadata = AsyncMock()
+
+    with (
+        patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
+        patch("agent.tools.publish_review.list_findings_async", list_async),
+        patch("agent.tools.publish_review.post_pull_request_review", post_review),
+        patch("agent.tools.publish_review.fetch_pr_review_threads", fetch_threads),
+        patch(
+            "agent.tools.publish_review._resolve_threads_for_resolved_findings",
+            resolve_threads,
+        ),
+        patch("agent.tools.publish_review.set_reviewer_thread_metadata", set_metadata),
+        patch(
+            "agent.tools.publish_review._maybe_post_slack_completion_reply",
+            new_callable=AsyncMock,
+        ),
+    ):
+        for _ in range(5):
+            result = await _publish_review_async(
+                owner="o",
+                repo="r",
+                pr_number=7,
+                head_sha="newsha",
+                token="t",
+                severity_threshold="medium",
+                cap=15,
+                is_re_review=True,
+            )
+            assert result["skipped_empty_re_review"] is True
+
+    post_review.assert_not_called()
+    fetch_threads.assert_not_called()
+    resolve_threads.assert_not_called()
+    set_metadata.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -568,16 +619,24 @@ async def test_re_review_backfills_existing_marker_and_skips_duplicate_post() ->
 
 @pytest.mark.asyncio
 async def test_re_review_backfills_and_resolves_duplicate_existing_threads() -> None:
+    # A net-new open finding co-exists with the resolved one so this re-review
+    # is not eligible for the empty-re-review fast-path; backfill + duplicate-
+    # thread resolution still happens for the resolved finding.
     from agent.tools.publish_review import _publish_review_async
 
-    finding = _f(
+    open_finding = _f(
+        id="f_open_anchor",
+        first_seen_sha="newsha",
+        github_review_comment_id=None,
+    )
+    resolved_finding = _f(
         id="f_old",
         first_seen_sha="oldsha",
         github_review_comment_id=None,
         status="resolved",
         resolution_note="The duplicate threads are fixed by the latest commit.",
     )
-    findings = [finding]
+    findings = [open_finding, resolved_finding]
     threads = [
         {
             "id": "THREAD_1",
@@ -587,7 +646,7 @@ async def test_re_review_backfills_and_resolves_duplicate_existing_threads() -> 
                 {
                     "id": 101,
                     "author": "open-swe[bot]",
-                    "body": render_inline_comment_body(finding),
+                    "body": render_inline_comment_body(resolved_finding),
                     "created_at": "2026-05-27T10:00:00Z",
                 }
             ],
@@ -600,7 +659,7 @@ async def test_re_review_backfills_and_resolves_duplicate_existing_threads() -> 
                 {
                     "id": 102,
                     "author": "open-swe[bot]",
-                    "body": render_inline_comment_body(finding),
+                    "body": render_inline_comment_body(resolved_finding),
                     "created_at": "2026-05-27T10:01:00Z",
                 }
             ],
@@ -646,11 +705,11 @@ async def test_re_review_backfills_and_resolves_duplicate_existing_threads() -> 
         reply_comment.await_args_list[0].kwargs["body"]
         == "✅ **Resolved**: The duplicate threads are fixed by the latest commit."
     )
-    assert findings[0]["github_review_comment_ids"] == [101, 102]
-    assert findings[0]["github_review_thread_ids"] == ["THREAD_1", "THREAD_2"]
-    assert findings[0]["github_resolved_thread_ids"] == ["THREAD_1", "THREAD_2"]
-    assert findings[0]["github_posted_resolution_comment_ids"] == [101, 102]
-    assert findings[0]["github_thread_resolved"] is True
+    assert resolved_finding["github_review_comment_ids"] == [101, 102]
+    assert resolved_finding["github_review_thread_ids"] == ["THREAD_1", "THREAD_2"]
+    assert resolved_finding["github_resolved_thread_ids"] == ["THREAD_1", "THREAD_2"]
+    assert resolved_finding["github_posted_resolution_comment_ids"] == [101, 102]
+    assert resolved_finding["github_thread_resolved"] is True
 
 
 @pytest.mark.asyncio

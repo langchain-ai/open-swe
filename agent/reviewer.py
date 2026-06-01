@@ -92,7 +92,12 @@ GH_TOKEN=dummy gh repo clone {repo_owner}/{repo_name} && cd {repo_name} && git c
 
 Tools: `add_finding`, `update_finding`, `list_findings`, `publish_review`,
 `resolve_finding_thread`, `reply_to_finding_thread`.
-Call `publish_review` once at the end.
+Call `publish_review` exactly once per top-level user message (initial review
+OR a new-commit push OR a finding reply). Never call `publish_review` again
+within the same response unless the prior call returned an error you have
+addressed via `update_finding`. The thread persists across commit pushes —
+each push is a new top-level message and warrants exactly one `publish_review`
+at the end of that response.
 
 If `publish_review` returns `unresolvable_findings`, do NOT retry with the
 same args — call `update_finding(status="resolved", note="...")` on those ids, or fix
@@ -365,7 +370,8 @@ def _build_first_review_context(
         f"you. If a Pre-existing PR review threads section is present, do not "
         f"re-file anything that overlaps one of those threads. Record net-new "
         f"issues with `add_finding`, call `list_findings` to rank and dedup, "
-        f"then `publish_review` once at the end (cap 3)."
+        f"then call `publish_review` exactly once at the end of this response "
+        f"(cap 3). Do not call `publish_review` more than once."
     )
 
 
@@ -413,8 +419,9 @@ def _build_re_review_context(
         f"necessary. Then add any net-new findings introduced by the "
         f"new diff — but skip anything already covered by an existing PR "
         f"review thread above (your own prior threads, another reviewer's, or "
-        f"one a human has already replied to). Call `publish_review` once at "
-        f"the end."
+        f"one a human has already replied to). Call `publish_review` exactly "
+        f"once at the end of this response. Do not call it again within the "
+        f"same response."
     )
 
 
@@ -464,7 +471,8 @@ def _build_finding_reply_context(
         f'fixes the finding, call `update_finding(id, status="resolved", note="...")`. '
         f"Use `reply_to_finding_thread` only when the user asked a direct "
         f"question or a concise clarification is necessary. Call `publish_review` "
-        f"once at the end so pending GitHub thread state is reconciled."
+        f"exactly once at the end of this response so pending GitHub thread state "
+        f"is reconciled. Do not call it again within the same response."
     )
 
 

@@ -201,6 +201,33 @@ async def _publish_review_async(
     trace_link_config_override: object = None,
 ) -> dict[str, Any]:
     thread_id = get_thread_id_from_runtime()
+
+    # The agent sometimes calls publish_review on every internal planning beat,
+    # which otherwise round-trips GitHub for the full thread list each time.
+    # Short-circuit before any I/O when there's nothing actionable to publish.
+    if is_re_review:
+        existing_findings = await list_findings_async(thread_id)
+        unpublished_open_findings = [
+            f
+            for f in existing_findings
+            if f.get("status", "open") == "open"
+            and not isinstance(f.get("github_review_comment_id"), int)
+        ]
+        if not unpublished_open_findings:
+            return {
+                "success": True,
+                "review_id": None,
+                "surfaced_count": 0,
+                "hidden_count": 0,
+                "resolved_thread_count": 0,
+                "skipped_empty_re_review": True,
+                "note": (
+                    "no new findings since last publish — do not call "
+                    "publish_review again until you have added a new finding "
+                    "or reconciled an existing one."
+                ),
+            }
+
     review_trace_url = await _resolve_review_trace_url(thread_id, trace_link_config_override)
     findings = await _backfill_findings_from_pr_threads(
         thread_id=thread_id,
