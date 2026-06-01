@@ -70,6 +70,15 @@ def test_profile_create_prs_defaults_to_normal_pr_policy() -> None:
     assert profile_create_prs({"create_prs": True}) is True
 
 
+def test_construct_system_prompt_forbids_force_push() -> None:
+    prompt = construct_system_prompt(working_dir="/workspace")
+
+    assert "Never force-push." in prompt
+    assert "Never run `git push --force`" in prompt
+    assert "start from `origin/<branch>`" in prompt
+    assert "git pull --rebase origin <branch>" in prompt
+
+
 def test_construct_system_prompt_includes_coauthor_trailer_when_identity_present() -> None:
     identity = CollaboratorIdentity(
         display_name="octocat",
