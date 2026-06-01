@@ -69,6 +69,8 @@ Write this down. You'll use it in the callback URL below and again in step 4 whe
      - Pull requests: Read & write
      - Issues: Read & write
      - Metadata: Read-only
+   - **Organization permissions** (required only if you plan to set `ALLOWED_GITHUB_ORGS` — see step 5 / Security):
+     - Members: Read-only — used to verify org membership for the dashboard-login gate via `GET /orgs/{org}/memberships/{username}`. Without this permission that call returns 403, the check fails closed, and **every** dashboard login is rejected.
 4. Under **Subscribe to events**, enable:
    - `Issue comment`
    - `Pull request review`
@@ -226,6 +228,8 @@ ALLOWED_GITHUB_REPOS="some-user/their-repo,another-org/specific-repo"
 A GitHub or Linear webhook is accepted if the resolved repo's org is in `ALLOWED_GITHUB_ORGS` **or** the `owner/repo` is in `ALLOWED_GITHUB_REPOS`. If both are empty, all repos are allowed. Slack mentions are not rejected from regex-inferred repository text; repository access is bounded by the GitHub App installation permissions.
 
 `ALLOWED_GITHUB_ORGS` also gates **dashboard login**: when set, only GitHub accounts that are active members of one of the listed organizations can complete the OAuth login and receive a session. Membership is verified server-side with the GitHub App installation token (so private memberships are visible and no extra OAuth scope is required), and the check fails closed on any API error. When `ALLOWED_GITHUB_ORGS` is empty, dashboard login is open to any GitHub account (the prior behavior).
+
+> **Required GitHub App permission**: the membership check calls `GET /orgs/{org}/memberships/{username}`, which requires the GitHub App's **Organization → Members: Read-only** permission (see step 3b). If you set `ALLOWED_GITHUB_ORGS` without granting that permission, the call returns 403, the check fails closed, and **every** dashboard login is rejected. After changing an installed app's permissions, GitHub requires you to **approve the new permission** on each installation before it takes effect.
 
 ### Linear (optional)
 
@@ -387,6 +391,8 @@ GITHUB_OAUTH_PROVIDER_ID=""            # The provider ID from steps 3a / 4b
 
 # === Repo Allowlist (optional) ===
 # Comma-separated list of GitHub orgs the agent is allowed to operate on.
+# Also gates dashboard login to members of these orgs (requires the GitHub App's
+# Organization -> Members: Read-only permission; without it, all dashboard logins are rejected).
 # Leave empty to allow all orgs.
 ALLOWED_GITHUB_ORGS=""                 # e.g. "my-org,my-other-org"
 # Comma-separated list of specific owner/repo pairs the agent is allowed to operate on.
