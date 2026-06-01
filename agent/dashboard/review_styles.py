@@ -184,12 +184,6 @@ async def reconcile_running_status(
 
 
 async def delete_review_style(full_name: str) -> None:
-    try:
-        from .analyzer_cron import remove_continual_cron
-
-        await remove_continual_cron(full_name)
-    except Exception:
-        logger.exception("Failed to remove continual cron for %s", full_name)
     await _client().store.delete_item(REVIEW_STYLES_NAMESPACE, full_name)
 
 
@@ -225,7 +219,7 @@ async def mark_analysis_completed(
     prs_sampled: int,
     reviews_sampled: int,
 ) -> dict[str, Any]:
-    record = await update_review_style(
+    return await update_review_style(
         full_name,
         {
             "status": "completed",
@@ -237,15 +231,6 @@ async def mark_analysis_completed(
             "error": None,
         },
     )
-    # Now that a prompt exists, ensure the repo has a nightly continual-learning
-    # cron. Idempotent, so continual runs completing later don't re-register it.
-    try:
-        from .analyzer_cron import ensure_continual_cron
-
-        await ensure_continual_cron(full_name)
-    except Exception:
-        logger.exception("Failed to ensure continual cron for %s", full_name)
-    return record
 
 
 async def mark_analysis_failed(full_name: str, error: str) -> dict[str, Any]:

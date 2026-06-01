@@ -13,6 +13,7 @@ from fastapi.responses import RedirectResponse, Response, StreamingResponse
 from pydantic import BaseModel
 
 from .admin import is_admin
+from .analyzer_cron import remove_continual_cron
 from .enabled_repos import (
     list_enabled_review_repos,
     set_review_repo_enabled,
@@ -571,6 +572,7 @@ async def api_delete_review_style(
         raise HTTPException(404, "review style not found")
     if record.get("status") == "running":
         await cancel_review_style_analysis(full_name)
+    await remove_continual_cron(full_name)
     await delete_review_style(full_name)
     return Response(status_code=204)
 
