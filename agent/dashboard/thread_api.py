@@ -21,6 +21,7 @@ from .message_adapter import state_messages_to_ui
 from .options import SUPPORTED_MODEL_IDS, model_supports_effort
 from .profiles import OAUTH_TOKENS_NAMESPACE, get_profile, get_valid_access_token
 from .profiles import _get_value as get_oauth_record
+from .user_mappings import email_for_login
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +35,17 @@ _SURFACED_SOURCES: tuple[str, ...] = ("dashboard", "github", "slack", "linear")
 def _agent_version_metadata() -> dict[str, str]:
     revision = os.environ.get("LANGCHAIN_REVISION_ID")
     return {"LANGSMITH_AGENT_VERSION": revision} if revision else {}
+
+
+async def _resolve_run_email(login: str, profile: dict[str, Any]) -> str | None:
+    """Email used for GitHub/LangSmith auth on a run.
+
+    Prefers the admin/self GitHub→email mapping (the work email known to
+    the org) over the OAuth profile email, which may be a personal account
+    that isn't an org member.
+    """
+    mapped = await email_for_login(login)
+    return mapped or profile.get("email")
 
 
 class ThreadCreateBody(BaseModel):
@@ -320,7 +332,7 @@ async def _start_agent_run(
         "source": _DASHBOARD_SOURCE,
         "github_login": login,
         "repo": repo_config,
-        "user_email": profile.get("email"),
+        "user_email": await _resolve_run_email(login, profile),
     }
     if chosen_model and chosen_effort:
         configurable["agent_model_id"] = chosen_model
@@ -400,7 +412,7 @@ async def send_dashboard_message(
         "source": thread_source,
         "github_login": login,
         "repo": {"owner": owner, "name": name},
-        "user_email": profile.get("email"),
+        "user_email": await _resolve_run_email(login, profile),
     }
     source_context = metadata.get("source_context")
     if isinstance(source_context, dict):
