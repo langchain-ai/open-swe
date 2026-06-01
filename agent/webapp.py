@@ -22,7 +22,7 @@ from langgraph_sdk.client import LangGraphClient
 from .dashboard import router as dashboard_router
 from .dashboard.agent_overrides import (
     get_profile_default_repo,
-    resolve_login_from_email,
+    resolve_login_from_email_async,
 )
 from .dashboard.enabled_repos import is_review_repo_enabled
 from .dashboard.oauth import build_account_link_url
@@ -508,7 +508,7 @@ async def upsert_agent_thread_owner_metadata(
     mirror the owner-identifying fields onto the thread here.
     """
     now_ms = int(datetime.now(UTC).timestamp() * 1000)
-    resolved_login = github_login or resolve_login_from_email(user_email) or ""
+    resolved_login = github_login or await resolve_login_from_email_async(user_email) or ""
     metadata: dict[str, Any] = {"source": source, "updated_at_ms": now_ms}
     if isinstance(repo_config, dict) and repo_config.get("owner") and repo_config.get("name"):
         metadata["repo"] = repo_config
@@ -593,7 +593,9 @@ async def get_slack_repo_config(
                 if isinstance(slack_user, dict)
                 else None
             )
-            profile_repo = await get_profile_default_repo(resolve_login_from_email(slack_email))
+            profile_repo = await get_profile_default_repo(
+                await resolve_login_from_email_async(slack_email)
+            )
             if profile_repo:
                 logger.info(
                     "Applying dashboard default_repo for Slack user %s: %s/%s",
@@ -1226,7 +1228,7 @@ async def linear_webhook(  # noqa: PLR0911, PLR0912, PLR0915
         comment_user_email = (data.get("user") or {}).get("email")
         try:
             profile_repo = await get_profile_default_repo(
-                resolve_login_from_email(comment_user_email)
+                await resolve_login_from_email_async(comment_user_email)
             )
         except Exception:  # noqa: BLE001
             logger.exception("Failed to apply dashboard default_repo for Linear user")

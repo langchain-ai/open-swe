@@ -281,6 +281,7 @@ async def upsert_mapping(
         "updated_at": _now(),
     }
     await _client().store.put_item(USER_MAPPINGS_NAMESPACE, login.lower(), record)
+    _deindex_login(login)
     _index_record(record)
     return record
 

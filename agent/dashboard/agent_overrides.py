@@ -10,7 +10,7 @@ from langgraph_sdk import get_client
 
 from .options import SUPPORTED_MODEL_IDS, model_supports_effort, provider_fallback_pair
 from .profiles import PROFILES_NAMESPACE
-from .user_mappings import cached_login_for_email
+from .user_mappings import cached_login_for_email, login_for_email
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +23,16 @@ def resolve_login_from_email(email: str | None) -> str | None:
     :func:`agent.dashboard.user_mappings.refresh_cache` beforehand.
     """
     return cached_login_for_email(email)
+
+
+async def resolve_login_from_email_async(email: str | None) -> str | None:
+    """Async reverse-lookup that falls through to the Store on a cold cache.
+
+    Use this from webhook/repo-resolution paths that may run on a freshly
+    started worker before the user-mapping cache has been primed, so a mapped
+    user still resolves to their GitHub login (and dashboard ``default_repo``).
+    """
+    return await login_for_email(email if isinstance(email, str) else None)
 
 
 def resolve_github_login(config: dict[str, Any]) -> str | None:

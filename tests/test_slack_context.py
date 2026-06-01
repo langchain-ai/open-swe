@@ -382,7 +382,7 @@ def test_get_slack_repo_config_applies_profile_default_repo(
     async def fake_get_slack_user_info(user_id: str) -> dict:
         return {"profile": {"email": "mason@example.com"}}
 
-    def fake_resolve_login_from_email(email: str | None) -> str | None:
+    async def fake_resolve_login_from_email_async(email: str | None) -> str | None:
         return "mason"
 
     async def fake_get_profile_default_repo(login: str | None) -> dict[str, str] | None:
@@ -391,7 +391,9 @@ def test_get_slack_repo_config_applies_profile_default_repo(
 
     monkeypatch.setattr(webapp, "get_client", lambda url: _FakeClient(threads_client))
     monkeypatch.setattr(webapp, "get_slack_user_info", fake_get_slack_user_info)
-    monkeypatch.setattr(webapp, "resolve_login_from_email", fake_resolve_login_from_email)
+    monkeypatch.setattr(
+        webapp, "resolve_login_from_email_async", fake_resolve_login_from_email_async
+    )
     monkeypatch.setattr(webapp, "get_profile_default_repo", fake_get_profile_default_repo)
 
     repo = asyncio.run(webapp.get_slack_repo_config("C123", "1.234", slack_user_id="U123"))
