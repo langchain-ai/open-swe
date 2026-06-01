@@ -20,6 +20,10 @@ async def is_user_active_org_member(username: str, org: str) -> bool:
     memberships are visible (the same approach as the reference
     ``tag-external-contributions.yml`` workflow). On any API error, returns
     ``False`` — fail-closed for security.
+
+    Requires the GitHub App to have the ``Organization -> Members: Read-only``
+    permission; the ``GET /orgs/{org}/memberships/{username}`` endpoint returns
+    403 (-> ``False``) without it. See INSTALLATION.md.
     """
     if not username or not org:
         return False

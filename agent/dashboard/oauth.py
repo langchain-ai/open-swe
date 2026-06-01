@@ -16,6 +16,8 @@ import httpx
 import jwt
 from fastapi import HTTPException, Request
 
+from agent.utils.github_org_membership import is_user_active_org_member
+
 logger = logging.getLogger(__name__)
 
 COOKIE_NAME = "osw_session"
@@ -78,6 +80,37 @@ def sanitize_redirect_to(redirect_to: str | None) -> str:
         return redirect_to
     logger.warning("Rejected redirect_to=%r — origin not in allowlist", redirect_to)
     return fallback
+
+
+def _allowed_login_orgs() -> frozenset[str]:
+    """Orgs whose members may log in to the dashboard.
+
+    Reuses the webhook-side ``ALLOWED_GITHUB_ORGS`` allowlist so deployments
+    configure a single org gate. When empty the dashboard login gate is
+    disabled (fail-open) to preserve existing deployments.
+    """
+    return frozenset(
+        org.strip().lower()
+        for org in os.environ.get("ALLOWED_GITHUB_ORGS", "").split(",")
+        if org.strip()
+    )
+
+
+async def enforce_org_login_gate(login: str) -> None:
+    """Reject dashboard login for users outside the allowed GitHub org(s).
+
+    No-op when ``ALLOWED_GITHUB_ORGS`` is unset. Otherwise the user must be an
+    active member of at least one configured org; membership is checked with
+    the GitHub App installation token (fail-closed on any API error).
+    """
+    orgs = _allowed_login_orgs()
+    if not orgs:
+        return
+    for org in orgs:
+        if await is_user_active_org_member(login, org):
+            return
+    logger.warning("Rejected dashboard login for %r — not in allowed org(s)", login)
+    raise HTTPException(403, "your GitHub account is not a member of an authorized organization")
 
 
 def issue_session(*, login: str, email: str | None, avatar_url: str | None) -> str:

@@ -24,6 +24,7 @@ from .oauth import (
     STATE_COOKIE_NAME,
     STATE_TTL_SECONDS,
     decode_state,
+    enforce_org_login_gate,
     exchange_code,
     fetch_github_user,
     hash_state_nonce,
@@ -187,6 +188,8 @@ async def auth_callback(request: Request, code: str, state: str) -> RedirectResp
     login = user.get("login")
     if not login:
         raise HTTPException(400, "could not resolve GitHub login")
+
+    await enforce_org_login_gate(login)
 
     await upsert_access_token_from_github_response(login, email or "", token_data)
 
