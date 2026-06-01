@@ -1,4 +1,5 @@
 from .check_message_queue import check_message_queue_before_model
+from .dedupe_read_file import DedupeReadFileMiddleware
 from .ensure_no_empty_msg import ensure_no_empty_msg
 from .exclude_tools import ExcludeToolsMiddleware
 from .model_fallback import ModelFallbackMiddleware
@@ -10,6 +11,7 @@ from .sanitize_tool_inputs import SanitizeToolInputsMiddleware
 from .tool_error_handler import ToolErrorMiddleware
 
 __all__ = [
+    "DedupeReadFileMiddleware",
     "ExcludeToolsMiddleware",
     "ModelFallbackMiddleware",
     "SanitizeThinkingBlocksMiddleware",

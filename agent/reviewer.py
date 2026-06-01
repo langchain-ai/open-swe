@@ -31,6 +31,7 @@ from deepagents import create_deep_agent
 from langchain.agents.middleware import ModelCallLimitMiddleware
 
 from .middleware import (
+    DedupeReadFileMiddleware,
     SanitizeThinkingBlocksMiddleware,
     SanitizeToolInputsMiddleware,
     SlackAssistantStatusMiddleware,
@@ -168,6 +169,12 @@ question or a short clarification is needed after pushback.
 
 The diff is the starting point, not the whole job. Work the changed code
 carefully before reaching for unchanged code.
+
+Each file may be read only once per `(file_path, offset, limit)` triple per
+invocation. If you already have the content in a prior tool result this
+session, reference that result instead of calling `read_file` again — repeat
+reads of the same span waste tokens and inflate the trajectory without
+adding information.
 
 1. **Read the diff end-to-end.** For each changed hunk, ask: *what did this
    exact line change, and what's the failure mode if the change is wrong?*
@@ -887,6 +894,7 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
         backend=sandbox_backend,
         middleware=[
             SanitizeToolInputsMiddleware(),
+            DedupeReadFileMiddleware(),
             ModelCallLimitMiddleware(run_limit=MODEL_CALL_RECURSION_LIMIT, exit_behavior="end"),
             ToolErrorMiddleware(),
             check_message_queue_before_model,
