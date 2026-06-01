@@ -544,7 +544,7 @@ The `langgraph.json` at the project root already defines the graph entry point a
 
 ### Agent not responding to comments
 
-- For GitHub: ensure the comment or issue contains `@openswe` (case-insensitive), and the commenter has a user mapping (Admin → User mappings; see "Configure triggering surfaces"). If you just migrated, run the one-time **Import legacy mapping** button.
+- For GitHub: ensure the comment or issue contains `@openswe` (case-insensitive), and the commenter has a user mapping (Admin → User mappings; see "Configure triggering surfaces"). Add any missing user with **Add / update** in that section.
 - For Linear: ensure the comment contains `@openswe` (case-insensitive)
 - For Slack: ensure the bot is invited to the channel and the message is an `@mention`
 - Check server logs for webhook processing errors

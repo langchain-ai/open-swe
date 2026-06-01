@@ -70,6 +70,12 @@ function UserMappingsSection({ enabled }: { enabled: boolean }) {
   const total = mappings.data?.total ?? 0;
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
+  useEffect(() => {
+    if (!mappings.isFetching && page > pageCount) {
+      setPage(pageCount);
+    }
+  }, [mappings.isFetching, page, pageCount]);
+
   const invalidate = () =>
     void qc.invalidateQueries({ queryKey: ["adminUserMappings"] });
 
