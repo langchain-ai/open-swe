@@ -122,8 +122,8 @@ class TestCreateSandboxWithProxy:
     """Tests for _create_sandbox_with_proxy token source selection."""
 
     @pytest.mark.asyncio
-    async def test_uses_installation_token_for_langsmith(self) -> None:
-        """Installation token should be used for proxy auth on langsmith sandboxes."""
+    async def test_uses_installation_token_for_langsmith_without_user_token(self) -> None:
+        """Installation token should be used when no user token is provided."""
         with (
             patch(
                 "agent.server.get_github_app_installation_token",
@@ -142,6 +142,27 @@ class TestCreateSandboxWithProxy:
 
             mock_create.assert_called_once_with()
             mock_proxy.assert_called_once_with("sandbox-123", "ghs_install")
+
+    @pytest.mark.asyncio
+    async def test_uses_user_token_for_langsmith_when_provided(self) -> None:
+        """User token should be used for proxy auth on langsmith sandboxes."""
+        with (
+            patch("agent.server.create_sandbox") as mock_create,
+            patch("agent.server._configure_github_proxy") as mock_proxy,
+            patch(
+                "agent.server.get_github_app_installation_token", new_callable=AsyncMock
+            ) as mock_installation_token,
+            patch.dict("os.environ", {"SANDBOX_TYPE": "langsmith", "LANGSMITH_API_KEY": "ls-key"}),
+        ):
+            mock_create.return_value = MagicMock(id="sandbox-user")
+
+            from agent.server import _create_sandbox_with_proxy
+
+            await _create_sandbox_with_proxy("ghp_user")
+
+            mock_create.assert_called_once_with()
+            mock_installation_token.assert_not_awaited()
+            mock_proxy.assert_called_once_with("sandbox-user", "ghp_user")
 
     @pytest.mark.asyncio
     async def test_skips_proxy_for_non_langsmith(self) -> None:
@@ -176,7 +197,7 @@ class TestCreateSandboxWithProxy:
 
             from agent.server import _create_sandbox_with_proxy
 
-            with pytest.raises(ValueError, match="installation token is unavailable"):
+            with pytest.raises(ValueError, match="GitHub token is unavailable"):
                 await _create_sandbox_with_proxy()
 
 
@@ -246,7 +267,7 @@ class TestRefreshProxyOnSandboxReuse:
 
             await get_agent(config)
 
-            mock_proxy.assert_called_once_with("sandbox-cached", "ghs_fresh")
+            mock_proxy.assert_called_once_with("sandbox-cached", "ghp")
 
     @pytest.mark.asyncio
     async def test_refreshes_proxy_when_reconnecting_to_existing_langsmith_sandbox(self) -> None:
@@ -288,7 +309,7 @@ class TestRefreshProxyOnSandboxReuse:
             await get_agent(config)
 
             mock_create.assert_called_once_with("sandbox-existing")
-            mock_proxy.assert_called_once_with("sandbox-existing", "ghs_fresh")
+            mock_proxy.assert_called_once_with("sandbox-existing", "ghp")
 
     @pytest.mark.asyncio
     async def test_proxy_refresh_failure_recreates_sandbox(self) -> None:
@@ -327,7 +348,7 @@ class TestRefreshProxyOnSandboxReuse:
 
             assert sandbox is replacement_sandbox
             mock_proxy.assert_called_once_with("sandbox-stale", "ghs_fresh")
-            mock_recreate.assert_awaited_once_with("thread-123")
+            mock_recreate.assert_awaited_once_with("thread-123", None)
 
     @pytest.mark.asyncio
     async def test_starts_stopped_langsmith_sandbox_before_proxy_refresh(self) -> None:
