@@ -1,5 +1,6 @@
 import logging
 import os
+import shlex
 from pathlib import Path
 
 from .utils.authorship import (
@@ -94,7 +95,7 @@ Before starting any task that requires code changes, set up the repository in yo
 3. **Set the commit identity** — IMMEDIATELY after cloning, `cd` into the repo and run:
 
    ```bash
-   git config user.name '{commit_identity_name}' && git config user.email '{commit_identity_email}'
+   git config user.name {commit_identity_name} && git config user.email {commit_identity_email}
    ```
 
    This sets the author of every commit you make. This is required for CI: third-party integrations (e.g. Vercel preview deploys) reject commits whose author email cannot be resolved to a GitHub account, and this email resolves. Do NOT set any other identity, do NOT pass `--author` to `git commit`, and do NOT export `GIT_AUTHOR_*` / `GIT_COMMITTER_*` env vars.
@@ -427,12 +428,14 @@ def construct_system_prompt(
     create_prs: bool = False,
 ) -> str:
     default_prompt_section = _load_default_prompt()
+    # Shell-escape: display names/emails are user-controlled (e.g. O'Connor) and
+    # are embedded in a `git config` command the agent copies verbatim.
     if triggering_user_identity is not None:
-        commit_identity_name = triggering_user_identity.commit_name
-        commit_identity_email = triggering_user_identity.commit_email
+        commit_identity_name = shlex.quote(triggering_user_identity.commit_name)
+        commit_identity_email = shlex.quote(triggering_user_identity.commit_email)
     else:
-        commit_identity_name = OPEN_SWE_BOT_NAME
-        commit_identity_email = OPEN_SWE_BOT_EMAIL
+        commit_identity_name = shlex.quote(OPEN_SWE_BOT_NAME)
+        commit_identity_email = shlex.quote(OPEN_SWE_BOT_EMAIL)
     return SYSTEM_PROMPT_TEMPLATE.format(
         working_dir=working_dir,
         linear_project_id=linear_project_id or "<PROJECT_ID>",

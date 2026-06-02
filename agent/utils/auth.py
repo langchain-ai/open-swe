@@ -383,18 +383,15 @@ async def _resolve_dashboard_user_token(
 
     Returns the ``(token, encrypted, expires_at)`` tuple, or ``None`` when the
     user has no valid token (never linked, or expired/revoked beyond refresh).
-    The thread cache is checked first; ``get_github_token_from_thread`` already
-    treats an expired ciphertext as a miss.
+
+    The thread-metadata token cache is intentionally NOT consulted here: Slack
+    thread ids are shared across everyone in a conversation, so a cached token
+    from a prior triggering user would impersonate the current ``github_login``.
+    We always resolve by login from the dashboard store instead.
     """
     login = github_login.strip()
     if not login:
         raise ValueError("missing github_login")
-
-    cached_token, cached_encrypted, cached_expires_at = await get_github_token_from_thread(
-        thread_id
-    )
-    if cached_token and cached_encrypted:
-        return cached_token, cached_encrypted, cached_expires_at
 
     from ..dashboard.profiles import OAUTH_TOKENS_NAMESPACE, get_valid_access_token
     from ..dashboard.profiles import _get_value as get_oauth_record

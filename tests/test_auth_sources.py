@@ -138,27 +138,21 @@ def test_resolve_github_token_slack_uses_dashboard_store(
     assert expires_at == "2099-01-01T00:00:00Z"
 
 
-def test_resolve_github_token_slack_returns_cached_token(
+def test_resolve_github_token_slack_ignores_stale_thread_cache(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    async def fail_get_valid(login: str):
-        raise AssertionError("dashboard store should not be hit when cache is warm")
-
-    from agent.dashboard import profiles
-
+    # Slack thread ids are shared, so a prior user's cached token must NOT be
+    # returned. Resolution always goes by github_login via the dashboard store.
     _stub_dashboard_store(
-        monkeypatch, token=None, cached=("cached-tok", "cached-enc", "2099-01-01T00:00:00Z")
+        monkeypatch,
+        token="bob-token",
+        cached=("alice-token", "alice-enc", "2099-01-01T00:00:00Z"),
     )
-    monkeypatch.setattr(profiles, "get_valid_access_token", fail_get_valid)
     monkeypatch.setattr(auth, "is_bot_token_only_mode", lambda: False)
 
-    token, encrypted, expires_at = asyncio.run(auth.resolve_github_token(_slack_config(), "t1"))
+    token, _, _ = asyncio.run(auth.resolve_github_token(_slack_config(), "t1"))
 
-    assert (token, encrypted, expires_at) == (
-        "cached-tok",
-        "cached-enc",
-        "2099-01-01T00:00:00Z",
-    )
+    assert token == "bob-token"
 
 
 def test_resolve_github_token_slack_no_token_raises(
