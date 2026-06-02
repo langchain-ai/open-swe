@@ -115,6 +115,10 @@ def test_construct_system_prompt_includes_github_login_in_pr_footer() -> None:
 
     assert "Co-authored-by: Mona Lisa <1234+octocat@users.noreply.github.com>" in prompt
     assert "_Opened collaboratively by Mona Lisa (@octocat) and open-swe._" in prompt
+    assert (
+        "replace that legacy footer with this line instead of appending a second footer" in prompt
+    )
+    assert "`_Opened collaboratively by Mona Lisa and open-swe._`" in prompt
 
 
 def test_add_pr_collaboration_note_replaces_legacy_footer() -> None:

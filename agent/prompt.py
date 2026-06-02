@@ -368,7 +368,7 @@ This run was triggered by **{display_name}**. Credit them on every commit and PR
   Co-authored-by: {commit_name} <{commit_email}>
   ```
 
-- **PR body**: append this line to the bottom of the PR description (separated from the body by a blank line) when you open or update the draft PR. Do not duplicate it if it is already present:
+- **PR body**: append this line to the bottom of the PR description (separated from the body by a blank line) when you open or update the draft PR. Do not duplicate it if it is already present. If the PR body already contains the legacy footer `_Opened collaboratively by {display_name} and open-swe._`, replace that legacy footer with this line instead of appending a second footer:
 
   ```
   _Opened collaboratively by {pr_attribution_name} and open-swe._
