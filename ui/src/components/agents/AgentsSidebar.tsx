@@ -2,13 +2,12 @@ import { Link } from "@tanstack/react-router";
 import {
   ChartLineUpIcon,
   ChatCircleIcon,
-  GithubLogoIcon,
-  KanbanIcon,
   PlusIcon,
-  SlackLogoIcon,
   XIcon,
 } from "@phosphor-icons/react";
-import type { Icon } from "@phosphor-icons/react";
+import { IoLogoGithub, IoLogoSlack } from "react-icons/io5";
+import { SiLinear } from "react-icons/si";
+import type { ComponentType, SVGProps } from "react";
 
 import type { SessionUser } from "@/lib/api";
 import type { AgentSource, AgentThread } from "@/lib/agents/types";
@@ -22,11 +21,13 @@ import { groupThreads } from "@/lib/agents/api";
 import { useAgentThreads, useDeleteAgentThread } from "@/lib/agents/queries";
 import { cn } from "@/lib/utils";
 
-const SOURCE_META: Record<AgentSource, { icon: Icon; label: string }> = {
+type SourceIcon = ComponentType<SVGProps<SVGSVGElement>>;
+
+const SOURCE_META: Record<AgentSource, { icon: SourceIcon; label: string }> = {
   dashboard: { icon: ChatCircleIcon, label: "Started from the dashboard" },
-  github: { icon: GithubLogoIcon, label: "Triggered from GitHub" },
-  slack: { icon: SlackLogoIcon, label: "Triggered from Slack" },
-  linear: { icon: KanbanIcon, label: "Triggered from Linear" },
+  github: { icon: IoLogoGithub, label: "Triggered from GitHub" },
+  slack: { icon: IoLogoSlack, label: "Triggered from Slack" },
+  linear: { icon: SiLinear, label: "Triggered from Linear" },
 };
 
 interface AgentsSidebarProps {
@@ -100,7 +101,7 @@ function ThreadGroup({
   activeThreadId,
 }: {
   label: string;
-  threads: AgentThread[];
+  threads: Array<AgentThread>;
   activeThreadId?: string;
 }) {
   if (threads.length === 0) return null;
@@ -161,7 +162,6 @@ function ThreadRow({ thread, isActive }: { thread: AgentThread; isActive: boolea
       {source && SourceIcon && (
         <SourceIcon
           className="size-3.5 shrink-0 text-[var(--ui-text-dim)]"
-          weight="fill"
           aria-label={source.label}
         >
           <title>{source.label}</title>

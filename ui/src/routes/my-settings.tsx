@@ -1,7 +1,7 @@
 import { Navigate, createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { SlackLogoIcon } from "@phosphor-icons/react";
 import { useState } from "react";
+import { IoLogoSlack } from "react-icons/io5";
 
 import type { SessionUser } from "@/lib/api";
 import { AppShell, SettingsRow, SettingsSection } from "@/components/AppShell";
@@ -85,7 +85,7 @@ function UserMappingSection({ session }: { session: SessionUser }) {
                   onClick={connect}
                   disabled={connecting || mapping.isLoading}
                 >
-                  <SlackLogoIcon className="size-4" />
+                  <IoLogoSlack className="size-4" />
                   {connecting ? "Redirecting…" : connected ? "Reconnect" : "Connect Slack"}
                 </Button>
               ) : (
