@@ -1,9 +1,11 @@
 import { Navigate, createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useRef, useState } from "react";
 
+import type { SessionUser } from "@/lib/api";
 import { AppShell, SettingsRow, SettingsSection } from "@/components/AppShell";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -15,6 +17,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { api } from "@/lib/api";
 import { buildProfileUpdate, useOptions, useProfile, useSaveProfile } from "@/lib/profile";
 import { useSession } from "@/lib/session";
+import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/my-settings")({ component: MySettingsPage });
 
@@ -30,6 +33,102 @@ function fromChoice(choice: DraftReviewChoice): boolean | null {
   if (choice === "always_on") return true;
   if (choice === "always_off") return false;
   return null;
+}
+
+function UserMappingSection({ session }: { session: SessionUser }) {
+  const qc = useQueryClient();
+  const mapping = useQuery({ queryKey: ["myMapping"], queryFn: api.myMapping });
+  const [workEmail, setWorkEmail] = useState("");
+  const [slackId, setSlackId] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const initialized = useRef(false);
+
+  useEffect(() => {
+    if (mapping.isLoading || initialized.current) return;
+    initialized.current = true;
+    setWorkEmail(mapping.data?.work_email ?? session.email ?? "");
+    setSlackId(mapping.data?.slack_user_id ?? "");
+  }, [mapping.isLoading, mapping.data, session.email]);
+
+  const save = useMutation({
+    mutationFn: () =>
+      api.saveMyMapping({
+        work_email: workEmail.trim(),
+        slack_user_id: slackId.trim() || null,
+      }),
+    onSuccess: () => {
+      setError(null);
+      void qc.invalidateQueries({ queryKey: ["myMapping"] });
+    },
+    onError: (e: Error) => setError(e.message),
+  });
+
+  const linked = !!mapping.data?.work_email;
+
+  return (
+    <SettingsSection
+      title="User mapping"
+      description="Link your GitHub account to your work email so Open SWE can act as you when you tag it from Slack or Linear. Your GitHub email may differ from your work email — set the one your Slack/Linear account uses."
+    >
+      <div className="divide-y divide-border">
+        <SettingsRow
+          label="GitHub account"
+          control={
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-muted-foreground">{session.login}</span>
+              <span
+                className={cn(
+                  "rounded-full px-2 py-0.5 text-[10px] font-medium",
+                  linked ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground",
+                )}
+              >
+                {linked ? "Linked" : "Not linked"}
+              </span>
+            </div>
+          }
+        />
+        <SettingsRow
+          label="Work email"
+          description="The email address tied to your Slack and Linear accounts."
+          htmlFor="work-email"
+          control={
+            <Input
+              id="work-email"
+              className="w-64"
+              placeholder="you@company.com"
+              type="email"
+              value={workEmail}
+              onChange={(e) => setWorkEmail(e.target.value)}
+            />
+          }
+        />
+        <SettingsRow
+          label="Slack member ID"
+          description="Optional. Found in Slack under your profile → ⋯ → Copy member ID (starts with U)."
+          htmlFor="slack-id"
+          control={
+            <Input
+              id="slack-id"
+              className="w-64"
+              placeholder="U01234567 (optional)"
+              value={slackId}
+              onChange={(e) => setSlackId(e.target.value)}
+            />
+          }
+        />
+        <div className="flex justify-end px-4 py-3">
+          <Button
+            size="sm"
+            onClick={() => save.mutate()}
+            disabled={!workEmail.trim() || save.isPending || mapping.isLoading}
+          >
+            {save.isPending ? "Saving…" : "Save mapping"}
+          </Button>
+        </div>
+      </div>
+      {error && <p className="px-4 pb-3 text-xs text-destructive">{error}</p>}
+    </SettingsSection>
+  );
 }
 
 function MySettingsPage() {
@@ -84,17 +183,17 @@ function MySettingsPage() {
   };
 
   return (
-    <AppShell user={session.data} title="My Settings">
+    <AppShell user={session.data} title="Profile Settings">
       <SettingsSection title="Profile">
         <SettingsRow
           label="Email"
           control={
-            <span className="text-xs text-muted-foreground">
-              {session.data.email ?? "—"}
-            </span>
+            <span className="text-xs text-muted-foreground">{session.data.email ?? "—"}</span>
           }
         />
       </SettingsSection>
+
+      <UserMappingSection session={session.data} />
 
       <SettingsSection title="Open SWE Review">
         <SettingsRow

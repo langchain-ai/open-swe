@@ -135,8 +135,8 @@ function CloudAgentsPage() {
   return (
     <AppShell
       user={session.data}
-      title="Cloud Agents"
-      description="Configure how Cloud Agents pick a model, repository, and PR defaults."
+      title="Open SWE Agent"
+      description="Configure how the Open SWE Agent picks a model, repository, and PR defaults."
     >
       <SettingsSection title="Defaults">
         <div className="divide-y divide-border">

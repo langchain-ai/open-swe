@@ -34,15 +34,29 @@ def test_decode_account_link_rejects_wrong_kind() -> None:
 
 def test_build_account_link_url(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("DASHBOARD_API_BASE_URL", "https://api.example.com/")
+    monkeypatch.delenv("DASHBOARD_BASE_URL", raising=False)
     url = oauth.build_account_link_url(slack_user_id="U1", work_email="d@x.com")
     assert url is not None
     assert url.startswith("https://api.example.com/dashboard/api/auth/login?link=")
     # The embedded token must decode back to the same identity.
-    token = url.split("link=", 1)[1]
+    token = url.split("link=", 1)[1].split("&", 1)[0]
     from urllib.parse import unquote
 
     payload = oauth.decode_account_link(unquote(token))
     assert payload["slack_user_id"] == "U1"
+
+
+def test_build_account_link_url_redirects_to_profile_settings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DASHBOARD_API_BASE_URL", "https://api.example.com")
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://app.example.com")
+    url = oauth.build_account_link_url(slack_user_id="U1", work_email="d@x.com")
+    assert url is not None
+    from urllib.parse import parse_qs, urlparse
+
+    query = parse_qs(urlparse(url).query)
+    assert query["redirect_to"] == ["https://app.example.com/my-settings"]
 
 
 def test_build_account_link_url_none_without_base(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -170,6 +170,9 @@ def decode_state(state: str) -> dict[str, Any]:
 
 LINK_TTL_SECONDS = 7 * 24 * 60 * 60
 
+# Dashboard route where users manage their GitHub↔Slack link.
+PROFILE_SETTINGS_PATH = "/my-settings"
+
 
 def issue_account_link(*, slack_user_id: str | None, work_email: str | None) -> str:
     """Sign a short-lived token carrying the Slack identity to map after login.
@@ -212,7 +215,14 @@ def build_account_link_url(*, slack_user_id: str | None, work_email: str | None)
     if not api_base:
         return None
     token = issue_account_link(slack_user_id=slack_user_id, work_email=work_email)
-    return f"{api_base}/dashboard/api/auth/login?link={quote(token, safe='')}"
+    url = f"{api_base}/dashboard/api/auth/login?link={quote(token, safe='')}"
+    # Land the user on the Profile Settings page so they can review/complete
+    # their GitHub↔Slack link after re-authenticating.
+    frontend_base = os.environ.get("DASHBOARD_BASE_URL", "").rstrip("/")
+    if frontend_base:
+        redirect_to = f"{frontend_base}{PROFILE_SETTINGS_PATH}"
+        url += f"&redirect_to={quote(redirect_to, safe='')}"
+    return url
 
 
 def require_session(request: Request) -> dict[str, Any]:

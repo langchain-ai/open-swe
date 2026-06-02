@@ -76,6 +76,7 @@ from .thread_api import (
 )
 from .user_mappings import (
     delete_mapping,
+    get_mapping,
     list_mappings,
     upsert_mapping,
 )
@@ -115,14 +116,29 @@ def _frontend_base_url() -> str:
     return v
 
 
+def _cookie_security() -> tuple[bool, str]:
+    """Cookie ``secure``/``samesite`` flags derived from the API scheme.
+
+    Production serves the API over HTTPS and the dashboard is a separate
+    (cross-site) origin, so the session cookie must be ``Secure; SameSite=None``.
+    Local dev runs over ``http://localhost`` where ``Secure`` cookies are
+    rejected and the frontend/API are same-site, so fall back to
+    ``SameSite=Lax`` without ``Secure``.
+    """
+    if os.environ.get("DASHBOARD_API_BASE_URL", "").startswith("https://"):
+        return True, "none"
+    return False, "lax"
+
+
 def _set_session_cookie(response: Response, jwt_token: str) -> None:
+    secure, samesite = _cookie_security()
     response.set_cookie(
         key=COOKIE_NAME,
         value=jwt_token,
         max_age=SESSION_TTL_SECONDS,
         httponly=True,
-        secure=True,
-        samesite="none",
+        secure=secure,
+        samesite=samesite,
         path="/",
     )
 
@@ -131,20 +147,22 @@ def _set_state_cookie(response: Response, nonce: str) -> None:
     # SameSite=Lax so GitHub's top-level redirect back to /auth/callback
     # still presents this cookie; the cookie is single-purpose and lives
     # only for the duration of one OAuth round-trip.
+    secure, _ = _cookie_security()
     response.set_cookie(
         key=STATE_COOKIE_NAME,
         value=nonce,
         max_age=STATE_TTL_SECONDS,
         httponly=True,
-        secure=True,
+        secure=secure,
         samesite="lax",
         path="/dashboard/api/auth",
     )
 
 
 def _clear_state_cookie(response: Response) -> None:
+    secure, _ = _cookie_security()
     response.delete_cookie(
-        STATE_COOKIE_NAME, path="/dashboard/api/auth", samesite="lax", secure=True
+        STATE_COOKIE_NAME, path="/dashboard/api/auth", samesite="lax", secure=secure
     )
 
 
@@ -247,7 +265,8 @@ async def _complete_account_mapping(login: str, github_email: str | None, link_t
 @router.post("/auth/logout")
 async def auth_logout() -> Response:
     response = Response(status_code=204)
-    response.delete_cookie(COOKIE_NAME, path="/", samesite="none", secure=True)
+    secure, samesite = _cookie_security()
+    response.delete_cookie(COOKIE_NAME, path="/", samesite=samesite, secure=secure)
     return response
 
 
@@ -281,6 +300,42 @@ async def put_my_profile(
 ) -> dict[str, Any]:
     update.validate_pairing()
     return await upsert_profile(session["sub"], session.get("email") or "", update)
+
+
+class MyMappingUpdate(BaseModel):
+    work_email: str
+    slack_user_id: str | None = None
+
+
+@router.get("/my-mapping")
+async def get_my_mapping(
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    """Return the logged-in user's own GitHub↔Slack mapping (or empty)."""
+    mapping = await get_mapping(session["sub"])
+    return mapping or {}
+
+
+@router.put("/my-mapping")
+async def put_my_mapping(
+    body: MyMappingUpdate,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    """Let a logged-in user set their own work email / Slack ID.
+
+    Keyed by the session's GitHub login, so users can only edit their own
+    mapping. A blank ``slack_user_id`` preserves any existing value.
+    """
+    try:
+        return await upsert_mapping(
+            github_login=session["sub"],
+            work_email=body.work_email,
+            slack_user_id=body.slack_user_id,
+            source="self",
+            status="active",
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
 
 
 @router.get("/team-settings")

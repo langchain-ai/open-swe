@@ -223,7 +223,7 @@ function GlobalDefaultsSection({ models }: { models: Array<ModelOption> }) {
       <div className="divide-y divide-border">
         <RolePicker
           label="Open SWE Agent"
-          description="Model used for code-writing runs triggered from Slack, Linear, GitHub, and Cloud Agents."
+          description="Model used for code-writing runs triggered from Slack, Linear, GitHub, and the Open SWE Agent."
           models={models}
           model={settings.data?.default_agent_model ?? null}
           effort={settings.data?.default_agent_reasoning_effort ?? null}

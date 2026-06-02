@@ -212,6 +212,9 @@ export const api = {
       method: "PUT",
       body: JSON.stringify({ full_name, enabled }),
     }),
+  myMapping: () => request<Partial<UserMapping>>("/my-mapping"),
+  saveMyMapping: (body: { work_email: string; slack_user_id?: string | null }) =>
+    request<UserMapping>("/my-mapping", { method: "PUT", body: JSON.stringify(body) }),
   adminListUserMappings: (page = 1, pageSize = 20) =>
     request<UserMappingsPage>(
       `/admin/user-mappings?page=${page}&page_size=${pageSize}`,
