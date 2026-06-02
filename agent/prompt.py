@@ -368,10 +368,10 @@ This run was triggered by **{display_name}**. Credit them on every commit and PR
   Co-authored-by: {commit_name} <{commit_email}>
   ```
 
-- **PR body**: append this line to the bottom of the PR description (separated from the body by a blank line) when you open or update the draft PR. Do not duplicate it if it is already present:
+- **PR body**: append this line to the bottom of the PR description (separated from the body by a blank line) when you open or update the draft PR. Do not duplicate it if it is already present. If the PR body already contains the legacy footer `_Opened collaboratively by {display_name} and open-swe._`, replace that legacy footer with this line instead of appending a second footer:
 
   ```
-  _Opened collaboratively by {display_name} and open-swe._
+  _Opened collaboratively by {pr_attribution_name} and open-swe._
   ```
 
 If you forget the trailer on a local commit that has not been pushed, fix it with `git commit --amend` before pushing — do not push without it. If the commit has already been pushed, leave it as-is and add the trailer to your next commit; never rewrite remote history to fix it."""
@@ -384,6 +384,7 @@ def _render_collaboration_section(identity: CollaboratorIdentity | None) -> str:
         display_name=identity.display_name,
         commit_name=identity.commit_name,
         commit_email=identity.commit_email,
+        pr_attribution_name=identity.pr_attribution_name,
     )
 
 
