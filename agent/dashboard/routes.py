@@ -58,6 +58,14 @@ from .review_styles import (
     normalize_repo_full_name,
     set_custom_prompt,
 )
+from .slack_oauth import (
+    SLACK_STATE_COOKIE_NAME,
+    build_authorize_url,
+    exchange_slack_code,
+    fetch_slack_identity,
+    slack_oauth_configured,
+    verify_team,
+)
 from .team_settings import (
     TeamSettingsUpdate,
     get_team_settings,
@@ -163,6 +171,26 @@ def _clear_state_cookie(response: Response) -> None:
     secure, _ = _cookie_security()
     response.delete_cookie(
         STATE_COOKIE_NAME, path="/dashboard/api/auth", samesite="lax", secure=secure
+    )
+
+
+def _set_slack_state_cookie(response: Response, nonce: str) -> None:
+    secure, _ = _cookie_security()
+    response.set_cookie(
+        key=SLACK_STATE_COOKIE_NAME,
+        value=nonce,
+        max_age=STATE_TTL_SECONDS,
+        httponly=True,
+        secure=secure,
+        samesite="lax",
+        path="/dashboard/api/slack",
+    )
+
+
+def _clear_slack_state_cookie(response: Response) -> None:
+    secure, _ = _cookie_security()
+    response.delete_cookie(
+        SLACK_STATE_COOKIE_NAME, path="/dashboard/api/slack", samesite="lax", secure=secure
     )
 
 
@@ -277,6 +305,7 @@ async def me(session: dict[str, Any] = _SESSION_DEP) -> dict[str, Any]:
         "email": session.get("email"),
         "avatar_url": session.get("avatar_url"),
         "is_admin": is_admin(session.get("email")),
+        "slack_oauth_enabled": slack_oauth_configured(),
     }
 
 
@@ -302,11 +331,6 @@ async def put_my_profile(
     return await upsert_profile(session["sub"], session.get("email") or "", update)
 
 
-class MyMappingUpdate(BaseModel):
-    work_email: str
-    slack_user_id: str | None = None
-
-
 @router.get("/my-mapping")
 async def get_my_mapping(
     session: dict[str, Any] = _SESSION_DEP,
@@ -316,26 +340,68 @@ async def get_my_mapping(
     return mapping or {}
 
 
-@router.put("/my-mapping")
-async def put_my_mapping(
-    body: MyMappingUpdate,
-    session: dict[str, Any] = _SESSION_DEP,
-) -> dict[str, Any]:
-    """Let a logged-in user set their own work email / Slack ID.
+@router.get("/slack/login")
+async def slack_login(
+    _session: dict[str, Any] = _SESSION_DEP,
+) -> RedirectResponse:
+    """Start the Sign in with Slack flow to link the current GitHub account."""
+    if not slack_oauth_configured():
+        raise HTTPException(500, "Slack OAuth is not configured")
+    redirect_uri = f"{_api_base_url()}/dashboard/api/slack/callback"
+    nonce = new_state_nonce()
+    state = issue_state(
+        redirect_to=f"{_frontend_base_url()}/my-settings",
+        nonce_hash=hash_state_nonce(nonce),
+    )
+    response = RedirectResponse(
+        build_authorize_url(redirect_uri=redirect_uri, state=state), status_code=302
+    )
+    _set_slack_state_cookie(response, nonce)
+    return response
 
-    Keyed by the session's GitHub login, so users can only edit their own
-    mapping. A blank ``slack_user_id`` preserves any existing value.
+
+@router.get("/slack/callback")
+async def slack_callback(
+    request: Request,
+    code: str,
+    state: str,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> RedirectResponse:
+    """Link the verified Slack identity to the logged-in GitHub user.
+
+    The Slack member id and email come from Slack's verified OIDC claims, so a
+    user can only ever link their own Slack account — no self-asserted values.
     """
-    try:
-        return await upsert_mapping(
-            github_login=session["sub"],
-            work_email=body.work_email,
-            slack_user_id=body.slack_user_id,
-            source="self",
-            status="active",
-        )
-    except ValueError as e:
-        raise HTTPException(400, str(e)) from e
+    state_payload = decode_state(state)
+    nonce_hash = state_payload.get("nonce_hash")
+    cookie_nonce = request.cookies.get(SLACK_STATE_COOKIE_NAME)
+    if (
+        not isinstance(nonce_hash, str)
+        or not cookie_nonce
+        or not hmac.compare_digest(hash_state_nonce(cookie_nonce), nonce_hash)
+    ):
+        raise HTTPException(400, "oauth state mismatch — please retry")
+
+    redirect_to = sanitize_redirect_to(state_payload.get("redirect_to")) or _frontend_base_url()
+    redirect_uri = f"{_api_base_url()}/dashboard/api/slack/callback"
+
+    access_token = await exchange_slack_code(code, redirect_uri)
+    identity = await fetch_slack_identity(access_token)
+    verify_team(identity)
+    if not identity.email or not identity.email_verified:
+        raise HTTPException(400, "your Slack account has no verified email to link")
+
+    await upsert_mapping(
+        github_login=session["sub"],
+        work_email=identity.email,
+        slack_user_id=identity.user_id,
+        source="slack_oauth",
+        status="active",
+    )
+
+    response = RedirectResponse(redirect_to, status_code=302)
+    _clear_slack_state_cookie(response)
+    return response
 
 
 @router.get("/team-settings")

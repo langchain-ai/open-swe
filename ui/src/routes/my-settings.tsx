@@ -1,11 +1,11 @@
 import { Navigate, createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { SlackLogoIcon } from "@phosphor-icons/react";
+import { useState } from "react";
 
 import type { SessionUser } from "@/lib/api";
 import { AppShell, SettingsRow, SettingsSection } from "@/components/AppShell";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -14,7 +14,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import { api } from "@/lib/api";
+import { api, slackConnectUrl } from "@/lib/api";
 import { buildProfileUpdate, useOptions, useProfile, useSaveProfile } from "@/lib/profile";
 import { useSession } from "@/lib/session";
 import { cn } from "@/lib/utils";
@@ -38,95 +38,63 @@ function fromChoice(choice: DraftReviewChoice): boolean | null {
 function UserMappingSection({ session }: { session: SessionUser }) {
   const qc = useQueryClient();
   const mapping = useQuery({ queryKey: ["myMapping"], queryFn: api.myMapping });
-  const [workEmail, setWorkEmail] = useState("");
-  const [slackId, setSlackId] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const initialized = useRef(false);
+  const [connecting, setConnecting] = useState(false);
 
-  useEffect(() => {
-    if (mapping.isLoading || initialized.current) return;
-    initialized.current = true;
-    setWorkEmail(mapping.data?.work_email ?? session.email ?? "");
-    setSlackId(mapping.data?.slack_user_id ?? "");
-  }, [mapping.isLoading, mapping.data, session.email]);
+  const slackUserId = mapping.data?.slack_user_id ?? null;
+  const workEmail = mapping.data?.work_email ?? null;
+  const connected = !!slackUserId;
 
-  const save = useMutation({
-    mutationFn: () =>
-      api.saveMyMapping({
-        work_email: workEmail.trim(),
-        slack_user_id: slackId.trim() || null,
-      }),
-    onSuccess: () => {
-      setError(null);
-      void qc.invalidateQueries({ queryKey: ["myMapping"] });
-    },
-    onError: (e: Error) => setError(e.message),
-  });
-
-  const linked = !!mapping.data?.work_email;
+  const connect = () => {
+    setConnecting(true);
+    // Refresh the cached mapping when the user returns from the OAuth redirect.
+    void qc.invalidateQueries({ queryKey: ["myMapping"] });
+    window.location.assign(slackConnectUrl());
+  };
 
   return (
     <SettingsSection
       title="User mapping"
-      description="Link your GitHub account to your work email so Open SWE can act as you when you tag it from Slack or Linear. Your GitHub email may differ from your work email — set the one your Slack/Linear account uses."
+      description="Connect your Slack account so Open SWE can act as you when you tag it from Slack. We use the email Slack verifies, which also lets Linear mentions resolve to you."
     >
       <div className="divide-y divide-border">
         <SettingsRow
           label="GitHub account"
+          control={<span className="text-xs text-muted-foreground">{session.login}</span>}
+        />
+        <SettingsRow
+          label="Slack account"
+          description={
+            connected
+              ? `Linked to Slack member ${slackUserId}${workEmail ? ` · ${workEmail}` : ""}.`
+              : "Not connected. Sign in with Slack to verify your identity — no manual IDs to copy."
+          }
           control={
             <div className="flex items-center gap-2">
-              <span className="text-xs text-muted-foreground">{session.login}</span>
               <span
                 className={cn(
                   "rounded-full px-2 py-0.5 text-[10px] font-medium",
-                  linked ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground",
+                  connected ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground",
                 )}
               >
-                {linked ? "Linked" : "Not linked"}
+                {connected ? "Connected" : "Not connected"}
               </span>
+              {session.slack_oauth_enabled ? (
+                <Button
+                  size="sm"
+                  variant={connected ? "outline" : "default"}
+                  onClick={connect}
+                  disabled={connecting || mapping.isLoading}
+                >
+                  <SlackLogoIcon className="size-4" />
+                  {connecting ? "Redirecting…" : connected ? "Reconnect" : "Connect Slack"}
+                </Button>
+              ) : (
+                <span className="text-[10px] text-muted-foreground">Sign in with Slack unavailable</span>
+              )}
             </div>
           }
         />
-        <SettingsRow
-          label="Work email"
-          description="The email address tied to your Slack and Linear accounts."
-          htmlFor="work-email"
-          control={
-            <Input
-              id="work-email"
-              className="w-64"
-              placeholder="you@company.com"
-              type="email"
-              value={workEmail}
-              onChange={(e) => setWorkEmail(e.target.value)}
-            />
-          }
-        />
-        <SettingsRow
-          label="Slack member ID"
-          description="Optional. Found in Slack under your profile → ⋯ → Copy member ID (starts with U)."
-          htmlFor="slack-id"
-          control={
-            <Input
-              id="slack-id"
-              className="w-64"
-              placeholder="U01234567 (optional)"
-              value={slackId}
-              onChange={(e) => setSlackId(e.target.value)}
-            />
-          }
-        />
-        <div className="flex justify-end px-4 py-3">
-          <Button
-            size="sm"
-            onClick={() => save.mutate()}
-            disabled={!workEmail.trim() || save.isPending || mapping.isLoading}
-          >
-            {save.isPending ? "Saving…" : "Save mapping"}
-          </Button>
-        </div>
       </div>
-      {error && <p className="px-4 pb-3 text-xs text-destructive">{error}</p>}
     </SettingsSection>
   );
 }
