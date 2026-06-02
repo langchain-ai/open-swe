@@ -1,8 +1,13 @@
 import logging
 import os
+import shlex
 from pathlib import Path
 
-from .utils.authorship import CollaboratorIdentity
+from .utils.authorship import (
+    OPEN_SWE_BOT_EMAIL,
+    OPEN_SWE_BOT_NAME,
+    CollaboratorIdentity,
+)
 from .utils.github_comments import UNTRUSTED_GITHUB_COMMENT_OPEN_TAG
 
 logger = logging.getLogger(__name__)
@@ -90,10 +95,10 @@ Before starting any task that requires code changes, set up the repository in yo
 3. **Set the commit identity** — IMMEDIATELY after cloning, `cd` into the repo and run:
 
    ```bash
-   git config user.name 'open-swe[bot]' && git config user.email 'open-swe@users.noreply.github.com'
+   git config user.name {commit_identity_name} && git config user.email {commit_identity_email}
    ```
 
-   This is required: third-party CI integrations (e.g. Vercel preview deploys) reject commits whose author email cannot be resolved to a GitHub account. Do NOT set any other identity, do NOT pass `--author` to `git commit`, and do NOT export `GIT_AUTHOR_*` / `GIT_COMMITTER_*` env vars.
+   This sets the author of every commit you make. This is required for CI: third-party integrations (e.g. Vercel preview deploys) reject commits whose author email cannot be resolved to a GitHub account, and this email resolves. Do NOT set any other identity, do NOT pass `--author` to `git commit`, and do NOT export `GIT_AUTHOR_*` / `GIT_COMMITTER_*` env vars.
 
 4. **Choose your branch** — Use a thread-stable branch name such as `open-swe/<short-task-slug>`. If a branch already exists for this thread/task, fetch and check it out instead of creating a new one.
 
@@ -360,12 +365,12 @@ COLLABORATION_TEMPLATE = """---
 
 ### Collaborative Attribution
 
-This run was triggered by **{display_name}**. Credit them on every commit and PR you create:
+This run was triggered by **{display_name}**. You author the work **as them** — their git identity is already configured in the Repository Setup step, so every commit and the PR are attributed to them. Credit open-swe as the collaborator:
 
 - **Commits**: append this trailer (verbatim, on its own line, separated from the message body by a blank line) to every commit message you author. Add it to both the first commit and any follow-up commits in this run:
 
   ```
-  Co-authored-by: {commit_name} <{commit_email}>
+  Co-authored-by: open-swe[bot] <open-swe@users.noreply.github.com>
   ```
 
 - **PR body**: append this line to the bottom of the PR description (separated from the body by a blank line) when you open or update the draft PR. Do not duplicate it if it is already present. If the PR body already contains the legacy footer `_Opened collaboratively by {display_name} and open-swe._`, replace that legacy footer with this line instead of appending a second footer:
@@ -382,8 +387,6 @@ def _render_collaboration_section(identity: CollaboratorIdentity | None) -> str:
         return ""
     return COLLABORATION_TEMPLATE.format(
         display_name=identity.display_name,
-        commit_name=identity.commit_name,
-        commit_email=identity.commit_email,
         pr_attribution_name=identity.pr_attribution_name,
     )
 
@@ -425,6 +428,14 @@ def construct_system_prompt(
     create_prs: bool = False,
 ) -> str:
     default_prompt_section = _load_default_prompt()
+    # Shell-escape: display names/emails are user-controlled (e.g. O'Connor) and
+    # are embedded in a `git config` command the agent copies verbatim.
+    if triggering_user_identity is not None:
+        commit_identity_name = shlex.quote(triggering_user_identity.commit_name)
+        commit_identity_email = shlex.quote(triggering_user_identity.commit_email)
+    else:
+        commit_identity_name = shlex.quote(OPEN_SWE_BOT_NAME)
+        commit_identity_email = shlex.quote(OPEN_SWE_BOT_EMAIL)
     return SYSTEM_PROMPT_TEMPLATE.format(
         working_dir=working_dir,
         linear_project_id=linear_project_id or "<PROJECT_ID>",
@@ -432,4 +443,6 @@ def construct_system_prompt(
         default_prompt_section=default_prompt_section,
         pr_policy_override_section=ALWAYS_CREATE_PR_SECTION if create_prs else "",
         collaboration_section=_render_collaboration_section(triggering_user_identity),
+        commit_identity_name=commit_identity_name,
+        commit_identity_email=commit_identity_email,
     )

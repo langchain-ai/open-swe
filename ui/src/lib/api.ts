@@ -52,6 +52,7 @@ export interface SessionUser {
   email: string | null;
   avatar_url: string | null;
   is_admin: boolean;
+  slack_oauth_enabled?: boolean;
 }
 
 export interface ModelOption {
@@ -212,6 +213,7 @@ export const api = {
       method: "PUT",
       body: JSON.stringify({ full_name, enabled }),
     }),
+  myMapping: () => request<Partial<UserMapping>>("/my-mapping"),
   adminListUserMappings: (page = 1, pageSize = 20) =>
     request<UserMappingsPage>(
       `/admin/user-mappings?page=${page}&page_size=${pageSize}`,
@@ -233,4 +235,8 @@ export function loginUrl(redirectTo?: string): string {
   const target = redirectTo ?? (typeof window !== "undefined" ? window.location.origin : "");
   const qs = target ? `?redirect_to=${encodeURIComponent(target)}` : "";
   return `${API_BASE}/dashboard/api/auth/login${qs}`;
+}
+
+export function slackConnectUrl(): string {
+  return `${API_BASE}/dashboard/api/slack/login`;
 }

@@ -23,6 +23,21 @@ logger = logging.getLogger(__name__)
 
 client = get_client()
 
+
+class GitHubUserAuthRequired(RuntimeError):
+    """Raised when a mapped user has no valid GitHub OAuth token.
+
+    Signals that the run cannot proceed on the user's behalf and that the user
+    must (re-)authenticate. The Slack webhook blocks before creating a run, so
+    this is a defense-in-depth signal at execution time.
+    """
+
+    def __init__(self, source: str, github_login: str | None) -> None:
+        self.source = source
+        self.github_login = github_login
+        super().__init__(f"GitHub authentication required for {source} user '{github_login}'")
+
+
 LANGSMITH_API_KEY = os.environ.get("LANGSMITH_API_KEY_PROD", "")
 LANGSMITH_API_URL = os.environ.get("LANGSMITH_ENDPOINT", "https://api.smith.langchain.com")
 LANGSMITH_HOST_API_URL = os.environ.get("LANGSMITH_HOST_API_URL", "https://api.host.langchain.com")
@@ -361,6 +376,36 @@ async def save_encrypted_token_from_email(
     return token, encrypted, expires_at
 
 
+async def _resolve_dashboard_user_token(
+    thread_id: str, github_login: str
+) -> tuple[str, str, str | None] | None:
+    """Resolve a per-user GitHub token from the dashboard OAuth store.
+
+    Returns the ``(token, encrypted, expires_at)`` tuple, or ``None`` when the
+    user has no valid token (never linked, or expired/revoked beyond refresh).
+
+    The thread-metadata token cache is intentionally NOT consulted here: Slack
+    thread ids are shared across everyone in a conversation, so a cached token
+    from a prior triggering user would impersonate the current ``github_login``.
+    We always resolve by login from the dashboard store instead.
+    """
+    login = github_login.strip()
+    if not login:
+        raise ValueError("missing github_login")
+
+    from ..dashboard.profiles import OAUTH_TOKENS_NAMESPACE, get_valid_access_token
+    from ..dashboard.profiles import _get_value as get_oauth_record
+
+    token = await get_valid_access_token(login)
+    if not token:
+        return None
+    record = await get_oauth_record(OAUTH_TOKENS_NAMESPACE, login)
+    expires_at = record.get("token_expires_at") if isinstance(record, dict) else None
+    expires_at = expires_at if isinstance(expires_at, str) else None
+    encrypted = await persist_encrypted_github_token(thread_id, token, expires_at=expires_at)
+    return token, encrypted, expires_at
+
+
 async def _resolve_bot_installation_token(thread_id: str) -> tuple[str, str, str | None]:
     """Get a GitHub App installation token and persist it for the thread."""
     bot_token, expires_at = await get_github_app_installation_token_with_expiry()
@@ -396,24 +441,32 @@ async def resolve_github_token(
     Raises:
         RuntimeError: If source is missing or token resolution fails.
     """
-    if is_bot_token_only_mode():
-        return await _resolve_bot_installation_token(thread_id)
-
     configurable = config["configurable"]
     source = configurable.get("source")
     if not source:
         logger.error("Missing source for thread %s; cannot route auth failure responses", thread_id)
         raise RuntimeError(f"GitHub auth failed for thread {thread_id}: missing source")
 
-    # Unmapped Slack/Linear users still get a run on the GitHub App installation
-    # token (the webhook posts a "link your account" prompt separately). This
-    # keeps the agent responsive while self-service onboarding completes.
-    if configurable.get("use_installation_token_fallback"):
-        cached_token, cached_encrypted, cached_expires_at = await get_github_token_from_thread(
-            thread_id
-        )
-        if cached_token and cached_encrypted:
-            return cached_token, cached_encrypted, cached_expires_at
+    github_login = configurable.get("github_login")
+
+    # Per-user OAuth from the dashboard store wins even in bot-token-only mode,
+    # for sources that carry a mapped GitHub login (Slack, dashboard). This is
+    # what lets the agent open PRs as the triggering user.
+    if source in ("slack", "dashboard") and isinstance(github_login, str) and github_login.strip():
+        try:
+            user_token = await _resolve_dashboard_user_token(thread_id, github_login)
+        except ValueError as exc:
+            logger.error("GitHub auth failed for thread %s: %s", thread_id, str(exc))
+            raise RuntimeError(str(exc)) from exc
+        if user_token is not None:
+            return user_token
+        # No valid user token. In bot-token-only mode fall back to the bot so the
+        # deployment stays functional; otherwise block and require auth.
+        if is_bot_token_only_mode():
+            return await _resolve_bot_installation_token(thread_id)
+        raise GitHubUserAuthRequired(source, github_login)
+
+    if is_bot_token_only_mode():
         return await _resolve_bot_installation_token(thread_id)
 
     try:
@@ -423,36 +476,12 @@ async def resolve_github_token(
             )
             if cached_token and cached_encrypted:
                 return cached_token, cached_encrypted, cached_expires_at
-            github_login = configurable.get("github_login")
             from ..dashboard.user_mappings import email_for_login
 
             email = await email_for_login(github_login)
             if not email:
                 raise ValueError(f"No email mapping found for GitHub user '{github_login}'")
             return await save_encrypted_token_from_email(email, source)
-        if source == "dashboard":
-            cached_token, cached_encrypted, cached_expires_at = await get_github_token_from_thread(
-                thread_id
-            )
-            if cached_token and cached_encrypted:
-                return cached_token, cached_encrypted, cached_expires_at
-            github_login = configurable.get("github_login")
-            if not isinstance(github_login, str) or not github_login.strip():
-                raise ValueError("missing github_login for dashboard run")
-            from ..dashboard.profiles import OAUTH_TOKENS_NAMESPACE, get_valid_access_token
-            from ..dashboard.profiles import _get_value as get_oauth_record
-
-            token = await get_valid_access_token(github_login.strip())
-            if not token:
-                raise ValueError("github token unavailable, re-login required")
-            record = await get_oauth_record(OAUTH_TOKENS_NAMESPACE, github_login.strip())
-            expires_at = record.get("token_expires_at") if isinstance(record, dict) else None
-            encrypted = await persist_encrypted_github_token(
-                thread_id,
-                token,
-                expires_at=expires_at if isinstance(expires_at, str) else None,
-            )
-            return token, encrypted, expires_at if isinstance(expires_at, str) else None
         return await save_encrypted_token_from_email(configurable.get("user_email"), source)
     except ValueError as exc:
         logger.error("GitHub auth failed for thread %s: %s", thread_id, str(exc))
