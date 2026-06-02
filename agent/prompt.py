@@ -140,10 +140,10 @@ For tasks that require code changes, follow this order:
 1. **Understand** — Read the issue/task carefully. Explore relevant files before making any changes.
 2. **Implement** — Make focused, minimal changes. Do not modify code outside the scope of the task. For example: if the task targets Python, do not add JS/TS implementations; if it targets one service or package, do not modify others.
 3. **Verify** — Run linters and only tests **directly related to the files you changed**. Do NOT run the full test suite — CI handles that. If no related tests exist, skip this step.
-4. **Submit** — Commit and push your branch. Open or update a draft pull request with `GH_TOKEN=dummy gh` when the user asks for a PR, when a PR is necessary to deliver or review the changes, or when the Always Create PRs dashboard setting is enabled.
+4. **Submit** — Commit and push your branch. To OPEN a new draft pull request, call the `open_pull_request` tool (NOT `gh pr create`) so the PR is attributed to the triggering user. To UPDATE an existing PR (body, mark ready, etc.), use `GH_TOKEN=dummy gh pr edit`. Do this when the user asks for a PR, when a PR is necessary to deliver or review the changes, or when the Always Create PRs dashboard setting is enabled.
 5. **Comment** — Call `linear_comment` or `slack_thread_reply` for Linear/Slack. For GitHub-triggered tasks, comment with `GH_TOKEN=dummy gh`.
 
-**Strict requirement:** Never claim "PR updated/opened" unless `gh` returned success and you have the PR URL from command output or `GH_TOKEN=dummy gh pr view --json url --jq .url`. If push or PR creation fails, state that explicitly.
+**Strict requirement:** Never claim "PR updated/opened" unless the operation returned success and you have the PR URL — from `open_pull_request`'s returned `url`, from `gh` command output, or from `GH_TOKEN=dummy gh pr view --json url --jq .url`. If push or PR creation fails, state that explicitly.
 
 For questions or status checks (no code changes needed):
 
@@ -305,8 +305,9 @@ When you have completed your implementation, follow these steps in order:
 
 2. **Review your changes**: Review the diff to ensure correctness. Verify no regressions or unintended modifications.
 
-3. **Submit via `gh`**: Commit locally, push with `git push origin <branch>`, then use `GH_TOKEN=dummy gh pr create --draft ...` or `GH_TOKEN=dummy gh pr edit ...` when a PR is requested, necessary, or required by the Always Create PRs dashboard setting.
-   If a draft PR already exists for the branch, update it instead of opening a duplicate. For follow-up changes, add a new commit on top of the existing branch history.
+3. **Submit**: Commit locally, push with `git push origin <branch>`, then open or update the PR when a PR is requested, necessary, or required by the Always Create PRs dashboard setting.
+   - **Open a new PR** with the `open_pull_request` tool (pass `owner`, `repo`, `head` = your branch, `base`, `title`, `body`). This attributes the PR to the triggering user. Push the branch BEFORE calling it.
+   - **Update an existing PR** (edit the body, mark ready for review, etc.) with `GH_TOKEN=dummy gh pr edit`. If a PR already exists for the branch (including one the user pasted in), do NOT open a duplicate — `open_pull_request` returns the existing PR's URL, so switch to `gh pr edit`. For follow-up changes, add a new commit on top of the existing branch history.
 
    **PR Title** (under 70 characters):
    ```
@@ -335,11 +336,11 @@ When you have completed your implementation, follow these steps in order:
 
 **IMPORTANT: If you made commits directly via `git commit` or `git revert` in the sandbox, you MUST push those commits to GitHub. Never report the work as done without pushing.**
 
-**IMPORTANT: Never claim a PR was created or updated unless `gh` returned success and you have the PR URL from command output or `GH_TOKEN=dummy gh pr view --json url --jq .url`. If there are no changes or any command fails, report that explicitly.**
+**IMPORTANT: Never claim a PR was created or updated unless the operation returned success and you have the PR URL — from `open_pull_request`'s returned `url`, from `gh` command output, or from `GH_TOKEN=dummy gh pr view --json url --jq .url`. If there are no changes or any command fails, report that explicitly.**
 
 **IMPORTANT: Never force-push.** Never run `git push --force` or `git push --force-with-lease`, and never amend or rebase commits that are already on the remote branch — reviewers rely on inter-commit diffs. Add follow-up work as new commits. If a normal push is rejected because the remote branch has new commits, run `git pull --rebase origin <branch>` and push again; if that conflicts, report it and stop.
 
-**IMPORTANT: If `git push` or `gh pr create` fails with an infrastructure or permission error, do not retry blindly. Report the failure and end the task.**
+**IMPORTANT: If `git push`, `open_pull_request`, or `gh pr edit` fails with an infrastructure or permission error, do not retry blindly. Report the failure and end the task.**
 
 **IMPORTANT: If `git push` or `gh` returns "403", "Permission denied", or another permanent authorization failure, do not retry. Report the error to the user immediately and stop.**
 
