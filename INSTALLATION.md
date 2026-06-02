@@ -435,9 +435,11 @@ DEFAULT_REPO_OWNER=""                  # Default GitHub org (e.g. "my-org")
 DEFAULT_REPO_NAME=""                   # Default GitHub repo (e.g. "my-repo")
 
 # === Dashboard (required to run the web dashboard) ===
-# Public base URL of the FastAPI backend (where /dashboard/api/* lives).
+# Public URL that browsers use for /dashboard/api/* and OAuth callbacks.
+# Use the FastAPI backend URL for local/cross-origin direct API calls.
+# Use the dashboard frontend URL when a same-origin frontend rewrite proxies /dashboard/api/*.
 # Its scheme drives cookie security: http:// => SameSite=Lax (local);
-# https:// => Secure + SameSite=None (cross-site prod).
+# https:// => Secure + SameSite=None (production).
 DASHBOARD_API_BASE_URL="http://localhost:2024"
 # Public base URL of the dashboard frontend (the ui/ app). Default post-login redirect.
 DASHBOARD_BASE_URL="http://localhost:3000"
@@ -552,15 +554,13 @@ The dashboard is the web app in `ui/`. It's a static TanStack Start client that 
 ```bash
 cd ui
 bun install
+cat > .env <<'EOF'
+VITE_DASHBOARD_API_BASE_URL="http://localhost:2024"
+EOF
 bun run dev          # vite dev --port 3000 -> http://localhost:3000
 ```
 
-It needs one env var, `VITE_DASHBOARD_API_BASE_URL`, pointing at the backend. `ui/.env` already defaults to the local backend:
-
-```bash
-# ui/.env
-VITE_DASHBOARD_API_BASE_URL="http://localhost:2024"
-```
+The dashboard needs `VITE_DASHBOARD_API_BASE_URL` in `ui/.env` pointing at the backend for local dev. The file is intentionally untracked because `.env*` files are gitignored.
 
 The client calls `${VITE_DASHBOARD_API_BASE_URL}/dashboard/api/*` with `credentials: "include"`, so the backend's `osw_session` cookie rides along. Because the UI (`:3000`) and API (`:2024`) are different origins, the backend needs **CORS** enabled for the UI origin — set `DASHBOARD_ALLOWED_ORIGINS="http://localhost:3000"` (CORS is off unless this is set). Keep `DASHBOARD_API_BASE_URL` on an `http://` URL locally so the cookie uses `SameSite=Lax` rather than `Secure`.
 
@@ -608,8 +608,8 @@ Production runs the backend and dashboard separately.
 
 1. Push your code to a GitHub repository
 2. Connect the repo to LangGraph Cloud
-3. Set all environment variables from step 6 in the deployment config. Set `DASHBOARD_API_BASE_URL`, `DASHBOARD_BASE_URL`, and `LANGGRAPH_URL` to your production URLs (all `https://`), and add the frontend origin to `DASHBOARD_ALLOWED_ORIGINS` so CORS and the session cookie work cross-site.
-4. Update your webhook URLs (Linear, Slack, GitHub App) and the GitHub App / Slack OAuth callback URLs to your production URLs (replace the ngrok / localhost values)
+3. Set all environment variables from step 6 in the deployment config. Set `DASHBOARD_BASE_URL` and `LANGGRAPH_URL` to your production URLs (all `https://`). Set `DASHBOARD_API_BASE_URL` to the URL browsers use for dashboard API requests and OAuth callbacks: either the backend URL for direct cross-origin calls, or the dashboard/Vercel URL when a same-origin rewrite proxies `/dashboard/api/*`.
+4. Update your webhook URLs (Linear, Slack, GitHub App) and the GitHub App / Slack OAuth callback URLs to your production URLs (replace the ngrok / localhost values). The dashboard GitHub App callback must be `<DASHBOARD_API_BASE_URL>/dashboard/api/auth/callback`.
 
 The `langgraph.json` at the project root defines the three graphs and the HTTP app:
 
@@ -626,7 +626,9 @@ The `langgraph.json` at the project root defines the three graphs and the HTTP a
 }
 ```
 
-**Dashboard** — the `ui/` app deploys to [Vercel](https://vercel.com/). In production it issues **same-origin** requests to `/dashboard/api/*` (leave `VITE_DASHBOARD_API_BASE_URL` empty), and `ui/vercel.json` rewrites those to the hosted LangGraph deployment — keeping the session cookie first-party and avoiding CORS. Update the rewrite `destination` in `ui/vercel.json` to your own LangGraph deployment URL.
+**Dashboard** — the `ui/` app deploys to [Vercel](https://vercel.com/). The recommended production setup uses **same-origin** requests to `/dashboard/api/*` (leave `VITE_DASHBOARD_API_BASE_URL` empty), and `ui/vercel.json` rewrites those to the hosted LangGraph deployment. In this mode, set both `DASHBOARD_API_BASE_URL` and the GitHub App dashboard callback URL to the Vercel/dashboard origin (for example, `https://your-dashboard.vercel.app/dashboard/api/auth/callback`). The OAuth callback response then sets the `osw_session` cookie on the dashboard host, and later same-origin `/dashboard/api/*` requests include it. Update the rewrite `destination` in `ui/vercel.json` to your own LangGraph deployment URL.
+
+Alternatively, you can run the dashboard as a direct cross-origin client: set `VITE_DASHBOARD_API_BASE_URL` to the hosted backend origin, set `DASHBOARD_API_BASE_URL` to that same backend origin, and include the dashboard origin in `DASHBOARD_ALLOWED_ORIGINS`.
 
 ## Troubleshooting
 
