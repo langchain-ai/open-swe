@@ -4,7 +4,11 @@ from agent import webapp
 from agent.dashboard.agent_overrides import profile_create_prs
 from agent.prompt import construct_system_prompt
 from agent.utils import github_comments
-from agent.utils.authorship import CollaboratorIdentity
+from agent.utils.authorship import (
+    CollaboratorIdentity,
+    add_pr_collaboration_note,
+    resolve_triggering_user_identity,
+)
 
 
 def test_build_pr_prompt_wraps_external_comments_without_trust_section() -> None:
@@ -94,6 +98,57 @@ def test_construct_system_prompt_includes_coauthor_trailer_when_identity_present
     assert "Collaborative Attribution" in prompt
     assert "Co-authored-by: octocat <1234+octocat@users.noreply.github.com>" in prompt
     assert "_Opened collaboratively by octocat and open-swe._" in prompt
+
+
+def test_construct_system_prompt_includes_github_login_in_pr_footer() -> None:
+    identity = CollaboratorIdentity(
+        display_name="Mona Lisa",
+        commit_name="Mona Lisa",
+        commit_email="1234+octocat@users.noreply.github.com",
+        github_login="octocat",
+    )
+
+    prompt = construct_system_prompt(
+        working_dir="/workspace",
+        triggering_user_identity=identity,
+    )
+
+    assert "Co-authored-by: Mona Lisa <1234+octocat@users.noreply.github.com>" in prompt
+    assert "_Opened collaboratively by Mona Lisa (@octocat) and open-swe._" in prompt
+
+
+def test_add_pr_collaboration_note_replaces_legacy_footer() -> None:
+    identity = CollaboratorIdentity(
+        display_name="Mona Lisa",
+        commit_name="Mona Lisa",
+        commit_email="1234+octocat@users.noreply.github.com",
+        github_login="octocat",
+    )
+
+    body = "## Description\nDone.\n\n_Opened collaboratively by Mona Lisa and open-swe._"
+
+    assert add_pr_collaboration_note(body, identity) == (
+        "## Description\nDone.\n\n_Opened collaboratively by Mona Lisa (@octocat) and open-swe._"
+    )
+
+
+def test_resolve_triggering_user_identity_combines_slack_name_with_github_login() -> None:
+    identity = resolve_triggering_user_identity(
+        {
+            "configurable": {
+                "github_login": "mdrxy",
+                "github_user_id": 1234,
+                "slack_thread": {"triggering_user_name": "Mason Daugherty"},
+            }
+        }
+    )
+
+    assert identity is not None
+    assert identity.display_name == "Mason Daugherty"
+    assert identity.commit_name == "Mason Daugherty"
+    assert identity.commit_email == "1234+mdrxy@users.noreply.github.com"
+    assert identity.github_login == "mdrxy"
+    assert identity.pr_attribution_name == "Mason Daugherty (@mdrxy)"
 
 
 def test_build_pr_prompt_sanitizes_reserved_tags_from_comment_body() -> None:

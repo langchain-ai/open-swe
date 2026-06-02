@@ -21,6 +21,14 @@ class CollaboratorIdentity:
     display_name: str
     commit_name: str
     commit_email: str
+    github_login: str = ""
+
+    @property
+    def pr_attribution_name(self) -> str:
+        """Display name with GitHub login when available."""
+        if self.github_login and self.github_login != self.display_name:
+            return f"{self.display_name} (@{self.github_login})"
+        return self.display_name
 
 
 def _normalize_text(value: Any) -> str:
@@ -70,6 +78,7 @@ def _identity_from_github_token(github_token: str | None) -> CollaboratorIdentit
             display_name=display_name,
             commit_name=display_name,
             commit_email=commit_email,
+            github_login=login,
         )
     except httpx.HTTPError:
         logger.debug("Failed to resolve GitHub user identity from token", exc_info=True)
@@ -78,6 +87,14 @@ def _identity_from_github_token(github_token: str | None) -> CollaboratorIdentit
 
 def _identity_from_config(config: dict[str, Any]) -> CollaboratorIdentity | None:
     configurable = config.get("configurable", {})
+    slack_thread = configurable.get("slack_thread", {})
+    linear_issue = configurable.get("linear_issue", {})
+
+    display_name = (
+        _normalize_text(slack_thread.get("triggering_user_name"))
+        or _normalize_text(linear_issue.get("triggering_user_name"))
+        or _normalize_text(configurable.get("user_email")).split("@", 1)[0]
+    )
 
     github_login = _normalize_text(configurable.get("github_login"))
     if github_login:
@@ -88,20 +105,13 @@ def _identity_from_config(config: dict[str, Any]) -> CollaboratorIdentity | None
             cached_email_for_login(github_login)
         )
         if commit_email:
+            commit_name = display_name or github_login
             return CollaboratorIdentity(
-                display_name=github_login,
-                commit_name=github_login,
+                display_name=commit_name,
+                commit_name=commit_name,
                 commit_email=commit_email,
+                github_login=github_login,
             )
-
-    slack_thread = configurable.get("slack_thread", {})
-    linear_issue = configurable.get("linear_issue", {})
-
-    display_name = (
-        _normalize_text(slack_thread.get("triggering_user_name"))
-        or _normalize_text(linear_issue.get("triggering_user_name"))
-        or _normalize_text(configurable.get("user_email")).split("@", 1)[0]
-    )
     commit_email = _normalize_text(configurable.get("user_email")) or _normalize_text(
         slack_thread.get("triggering_user_email")
     )
@@ -157,9 +167,12 @@ def add_pr_collaboration_note(
     if not identity:
         return normalized_body
 
-    note = f"_Opened collaboratively by {identity.display_name} and open-swe._"
+    old_note = f"_Opened collaboratively by {identity.display_name} and open-swe._"
+    note = f"_Opened collaboratively by {identity.pr_attribution_name} and open-swe._"
     if note in normalized_body:
         return normalized_body
+    if old_note in normalized_body:
+        return normalized_body.replace(old_note, note)
     if not normalized_body:
         return note
     return f"{normalized_body}\n\n{note}"
