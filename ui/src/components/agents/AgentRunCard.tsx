@@ -4,21 +4,22 @@ import {
   CheckCircleIcon,
   GitBranchIcon,
   GitPullRequestIcon,
-  GithubLogoIcon,
-  KanbanIcon,
-  SlackLogoIcon,
 } from "@phosphor-icons/react";
-import type { Icon } from "@phosphor-icons/react";
+import { IoLogoGithub, IoLogoSlack } from "react-icons/io5";
+import { SiLinear } from "react-icons/si";
+import type { ComponentType, SVGProps } from "react";
 
 import type { AgentSource, AgentThread } from "@/lib/agents/types";
 import { formatRelativeTime } from "@/lib/agents/api";
 import { cn } from "@/lib/utils";
 
-const SOURCE_META: Record<AgentSource, { icon: Icon; label: string }> = {
+type SourceIcon = ComponentType<SVGProps<SVGSVGElement>>;
+
+const SOURCE_META: Record<AgentSource, { icon: SourceIcon; label: string }> = {
   dashboard: { icon: ChatCircleIcon, label: "Dashboard" },
-  github: { icon: GithubLogoIcon, label: "GitHub" },
-  slack: { icon: SlackLogoIcon, label: "Slack" },
-  linear: { icon: KanbanIcon, label: "Linear" },
+  github: { icon: IoLogoGithub, label: "GitHub" },
+  slack: { icon: IoLogoSlack, label: "Slack" },
+  linear: { icon: SiLinear, label: "Linear" },
 };
 
 interface AgentRunCardProps {
@@ -72,7 +73,7 @@ export function AgentRunCard({ thread }: AgentRunCardProps) {
           {source && SourceIcon && (
             <>
               <span className="flex items-center gap-1" title={source.label}>
-                <SourceIcon className="size-3.5" weight="fill" aria-label={source.label} />
+                <SourceIcon className="size-3.5" aria-label={source.label} />
                 {source.label}
               </span>
               <span>·</span>

@@ -1,7 +1,8 @@
 import { Link, Navigate, createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CaretRightIcon, GithubLogoIcon } from "@phosphor-icons/react";
+import { CaretRightIcon } from "@phosphor-icons/react";
 import { useEffect, useMemo, useState } from "react";
+import { IoLogoGithub } from "react-icons/io5";
 
 import type { AutofixMode, ReposPayload, TeamSettings, TriggerMode } from "@/lib/api";
 import { AppShell, SettingsRow, SettingsSection } from "@/components/AppShell";
@@ -315,7 +316,7 @@ function RepositoriesSection({ canEdit: _canEdit }: { canEdit: boolean }) {
               className="flex items-center justify-between gap-4 px-4 py-3 hover:bg-muted/40"
             >
               <div className="flex items-center gap-3">
-                <GithubLogoIcon className="size-5 shrink-0 text-muted-foreground" />
+                <IoLogoGithub className="size-5 shrink-0 text-muted-foreground" />
                 <div className="flex flex-col gap-0.5">
                   <div className="flex items-center gap-2 text-xs">
                     <span className="font-medium text-foreground">{owner}</span>
