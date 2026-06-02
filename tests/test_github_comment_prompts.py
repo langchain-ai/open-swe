@@ -96,7 +96,10 @@ def test_construct_system_prompt_includes_coauthor_trailer_when_identity_present
     )
 
     assert "Collaborative Attribution" in prompt
-    assert "Co-authored-by: octocat <1234+octocat@users.noreply.github.com>" in prompt
+    # The user authors the commits; open-swe[bot] is the co-author/collaborator.
+    assert "git config user.name 'octocat'" in prompt
+    assert "git config user.email '1234+octocat@users.noreply.github.com'" in prompt
+    assert "Co-authored-by: open-swe[bot] <open-swe@users.noreply.github.com>" in prompt
     assert "_Opened collaboratively by octocat and open-swe._" in prompt
 
 
@@ -113,7 +116,9 @@ def test_construct_system_prompt_includes_github_login_in_pr_footer() -> None:
         triggering_user_identity=identity,
     )
 
-    assert "Co-authored-by: Mona Lisa <1234+octocat@users.noreply.github.com>" in prompt
+    assert "git config user.name 'Mona Lisa'" in prompt
+    assert "git config user.email '1234+octocat@users.noreply.github.com'" in prompt
+    assert "Co-authored-by: open-swe[bot] <open-swe@users.noreply.github.com>" in prompt
     assert "_Opened collaboratively by Mona Lisa (@octocat) and open-swe._" in prompt
     assert (
         "replace that legacy footer with this line instead of appending a second footer" in prompt

@@ -26,7 +26,7 @@ from .dashboard.agent_overrides import (
 )
 from .dashboard.enabled_repos import is_review_repo_enabled
 from .dashboard.oauth import build_account_link_url
-from .dashboard.profiles import get_profile
+from .dashboard.profiles import get_profile, get_valid_access_token
 from .dashboard.team_settings import get_team_settings
 from .dashboard.user_mappings import (
     email_for_login,
@@ -869,18 +869,34 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
 
 
 async def _post_account_link_prompt(
-    channel_id: str, thread_ts: str, user_id: str, user_email: str | None
+    channel_id: str,
+    thread_ts: str,
+    user_id: str,
+    user_email: str | None,
+    reason: str = "unlinked",
 ) -> None:
-    """Prompt an unmapped Slack user to link their GitHub account (ephemeral)."""
+    """Prompt a Slack user to (re-)link their GitHub account (ephemeral).
+
+    ``reason`` is ``"unlinked"`` (no mapping yet) or ``"expired"`` (mapped but
+    the stored GitHub authorization is missing/expired/revoked). Open SWE opens
+    PRs as the triggering user, so it cannot start until the account is linked.
+    """
     link_url = build_account_link_url(slack_user_id=user_id, work_email=user_email)
     if not link_url:
         logger.debug("Account-link URL unavailable (DASHBOARD_API_BASE_URL unset); skipping prompt")
         return
-    text = (
-        "👋 I don't have your GitHub account linked yet, so I'm running with limited "
-        "(bot) permissions. Link your account so I can act on your behalf:\n"
-        f"<{link_url}|Link your GitHub account>"
-    )
+    if reason == "expired":
+        text = (
+            "🔐 Your GitHub authorization has expired or was revoked, so I can't act on "
+            "your behalf. Re-link your account to continue:\n"
+            f"<{link_url}|Re-link your GitHub account>"
+        )
+    else:
+        text = (
+            "👋 I don't have your GitHub account linked yet, so I can't open PRs on your "
+            "behalf. I won't start until you link your account:\n"
+            f"<{link_url}|Link your GitHub account>"
+        )
     try:
         await post_slack_ephemeral_message(channel_id, user_id, text, thread_ts=thread_ts)
     except Exception:  # noqa: BLE001
@@ -1010,6 +1026,37 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
         mapped_login = await login_for_email(user_email)
     is_user_mapped = bool(mapped_login)
 
+    # Open SWE opens PRs as the triggering user, so a run only proceeds when we
+    # have a valid user GitHub token. Unmapped users, and mapped users whose
+    # token is missing/expired/revoked, are blocked and prompted to (re-)link.
+    # Bot-token-only deployments are exempt — they run on the installation token.
+    user_token: str | None = None
+    if mapped_login:
+        try:
+            user_token = await get_valid_access_token(mapped_login)
+        except Exception:  # noqa: BLE001
+            logger.debug(
+                "Failed to resolve GitHub token for %s; treating as unauthenticated",
+                mapped_login,
+                exc_info=True,
+            )
+            user_token = None
+    has_valid_user_token = bool(user_token)
+
+    if not has_valid_user_token and not is_bot_token_only_mode():
+        reason = "expired" if is_user_mapped else "unlinked"
+        logger.info(
+            "Blocking Slack run for thread %s: no valid user GitHub token (%s)",
+            thread_id,
+            reason,
+        )
+        if user_id:
+            await _post_account_link_prompt(
+                channel_id, thread_ts, user_id, user_email, reason=reason
+            )
+        await set_slack_assistant_status(channel_id, thread_ts, status="")
+        return
+
     configurable: dict[str, Any] = {
         "repo": repo_config,
         "slack_thread": {
@@ -1025,9 +1072,6 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
     }
     if mapped_login:
         configurable["github_login"] = mapped_login
-    else:
-        # Unmapped: run on the installation token and prompt the user to link.
-        configurable["use_installation_token_fallback"] = True
 
     langgraph_client = get_client(url=LANGGRAPH_URL)
     is_first_mention = not await _thread_exists(thread_id)
@@ -1072,8 +1116,6 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
         thread_id,
     )
     run_id = run.get("run_id")
-    if is_first_mention and not is_user_mapped and user_id:
-        await _post_account_link_prompt(channel_id, thread_ts, user_id, user_email)
     if is_first_mention:
         trace_message_ts = await post_slack_trace_reply(channel_id, thread_ts, thread_id)
         await set_slack_assistant_status(channel_id, thread_ts)

@@ -138,16 +138,14 @@ def resolve_triggering_user_identity(
     return _identity_from_github_token(github_token) or _identity_from_config(config)
 
 
-def add_user_coauthor_trailer(
-    commit_message: str,
-    identity: CollaboratorIdentity | None,
-) -> str:
-    """Append a Co-authored-by trailer when a user identity is available."""
-    normalized_message = commit_message.rstrip()
-    if not identity:
-        return normalized_message
+def add_bot_coauthor_trailer(commit_message: str) -> str:
+    """Append the open-swe[bot] Co-authored-by trailer.
 
-    trailer = f"Co-authored-by: {identity.commit_name} <{identity.commit_email}>"
+    Commits are authored by the triggering user (via the repo-local git
+    identity); open-swe[bot] is credited as the collaborator.
+    """
+    normalized_message = commit_message.rstrip()
+    trailer = f"Co-authored-by: {OPEN_SWE_BOT_NAME} <{OPEN_SWE_BOT_EMAIL}>"
     if trailer in normalized_message:
         return normalized_message
     return f"{normalized_message}\n\n{trailer}"
