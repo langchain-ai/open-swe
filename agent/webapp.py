@@ -1,5 +1,8 @@
 """Custom FastAPI routes for LangGraph server."""
 
+from dotenv import load_dotenv
+load_dotenv()
+
 import hashlib
 import hmac
 import json
@@ -130,6 +133,362 @@ if DASHBOARD_ALLOWED_ORIGINS:
     )
 
 app.include_router(dashboard_router)
+
+# ==============================================================================
+# ENTERPRISE SECURITY GATEWAY & AUDIT TRAIL ENDPOINTS
+# ==============================================================================
+import sqlite3
+from fastapi.responses import HTMLResponse
+from pydantic import BaseModel
+
+class ApprovalRequest(BaseModel):
+    approval_id: int
+    status: str  # 'APPROVED' or 'REJECTED'
+
+@app.get("/safety/approvals")
+async def list_approvals():
+    """Retrieve all safety approvals (pending and resolved)."""
+    from .utils.sandbox_safety import DB_PATH
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, timestamp, command, risk_level, reason, status FROM approvals ORDER BY id DESC")
+        rows = cursor.fetchall()
+        conn.close()
+        
+        approvals = []
+        for r in rows:
+            approvals.append({
+                "id": r[0],
+                "timestamp": r[1],
+                "command": r[2],
+                "risk_level": r[3],
+                "reason": r[4],
+                "status": r[5]
+            })
+        return {"approvals": approvals}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/safety/audit")
+async def list_audit_trail():
+    """Retrieve the complete sandbox safety command execution history (audit trail)."""
+    from .utils.sandbox_safety import DB_PATH
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, timestamp, command, risk_level, reason, duration, exit_code FROM audit_trail ORDER BY id DESC")
+        rows = cursor.fetchall()
+        conn.close()
+        
+        audit = []
+        for r in rows:
+            audit.append({
+                "id": r[0],
+                "timestamp": r[1],
+                "command": r[2],
+                "reason": r[4],
+                "risk_level": r[3],
+                "duration": r[5],
+                "exit_code": r[6]
+            })
+        return {"audit": audit}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/safety/approve")
+async def approve_command(req: ApprovalRequest):
+    """Approve or reject a pending command."""
+    from .utils.sandbox_safety import DB_PATH
+    if req.status not in ("APPROVED", "REJECTED"):
+        raise HTTPException(status_code=400, detail="Invalid status. Must be APPROVED or REJECTED.")
+        
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        
+        # Verify it exists
+        cursor.execute("SELECT status FROM approvals WHERE id = ?", (req.approval_id,))
+        row = cursor.fetchone()
+        if not row:
+            conn.close()
+            raise HTTPException(status_code=404, detail=f"Approval ID {req.approval_id} not found.")
+            
+        if row[0] != "PENDING":
+            conn.close()
+            raise HTTPException(status_code=400, detail=f"Approval ID {req.approval_id} is already resolved to {row[0]}.")
+            
+        cursor.execute("UPDATE approvals SET status = ? WHERE id = ?", (req.status, req.approval_id))
+        conn.commit()
+        conn.close()
+        
+        return {"status": "success", "message": f"Command {req.approval_id} has been {req.status}."}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/safety/approvals/ui", response_class=HTMLResponse)
+async def approvals_dashboard():
+    """Render a premium dark-mode developer console for safety audit and approvals."""
+    html_content = """
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Open-SWE Enterprise - Safety Shield Dashboard</title>
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['"Plus Jakarta Sans"', 'sans-serif'],
+                        mono: ['"JetBrains Mono"', 'monospace'],
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body {
+            background-color: #09090b;
+            color: #fafafa;
+        }
+        .glass {
+            background: rgba(18, 18, 24, 0.7);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+        .glow-pending {
+            box-shadow: 0 0 15px rgba(245, 158, 11, 0.15);
+        }
+    </style>
+</head>
+<body class="font-sans antialiased min-h-screen pb-12">
+    <!-- Header -->
+    <header class="border-b border-zinc-800 bg-zinc-950/60 sticky top-0 z-50 backdrop-blur-md">
+        <div class="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
+            <div class="flex items-center space-x-3">
+                <span class="p-2 bg-amber-500/10 text-amber-500 rounded-lg border border-amber-500/20">🛡️</span>
+                <div>
+                    <h1 class="text-md font-bold tracking-tight text-white flex items-center gap-2">
+                        Open-SWE <span class="text-xs px-2 py-0.5 bg-amber-500/20 text-amber-400 font-semibold rounded-full border border-amber-500/30">Enterprise Shield</span>
+                    </h1>
+                    <p class="text-xs text-zinc-400">Sandbox Command Security Gateway & Audit Trail</p>
+                </div>
+            </div>
+            <div class="flex items-center space-x-4">
+                <div class="flex items-center gap-2 text-xs text-zinc-400 bg-zinc-900 border border-zinc-800 px-3 py-1.5 rounded-lg">
+                    <span class="h-2 w-2 rounded-full bg-emerald-500 animate-ping"></span>
+                    <span>Monitoring active sandboxes</span>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <main class="max-w-7xl mx-auto px-6 mt-8 grid grid-cols-1 lg:grid-cols-3 gap-8">
+        <!-- Main Column: Approvals Queue -->
+        <div class="lg:col-span-2 space-y-6">
+            <h2 class="text-lg font-semibold text-white flex items-center gap-2">
+                📥 Safety Approvals Queue
+                <span id="pending-badge" class="hidden text-xs px-2 py-0.5 bg-amber-500/20 text-amber-400 font-semibold rounded-full border border-amber-500/30"></span>
+            </h2>
+            
+            <div id="approvals-container" class="space-y-4">
+                <!-- Dynamically populated approvals -->
+                <div class="text-center py-12 border border-zinc-800 rounded-xl bg-zinc-950/30 text-zinc-400 text-sm">
+                    Loading safety queue...
+                </div>
+            </div>
+        </div>
+
+        <!-- Sidebar: Audit Trails & Stats -->
+        <div class="space-y-6">
+            <h2 class="text-lg font-semibold text-white flex items-center gap-2">
+                📊 Audit Analytics
+            </h2>
+            
+            <!-- Quick Stats -->
+            <div class="grid grid-cols-2 gap-4">
+                <div class="glass p-4 rounded-xl">
+                    <p class="text-xs text-zinc-400">Total Intercepted</p>
+                    <p id="stat-total" class="text-2xl font-bold text-white mt-1">0</p>
+                </div>
+                <div class="glass p-4 rounded-xl">
+                    <p class="text-xs text-zinc-400">Blocked (High)</p>
+                    <p id="stat-high" class="text-2xl font-bold text-rose-500 mt-1">0</p>
+                </div>
+            </div>
+
+            <h2 class="text-lg font-semibold text-white flex items-center gap-2 mt-8">
+                📜 Command Audit Trail
+            </h2>
+            <div class="glass rounded-xl overflow-hidden border border-zinc-800">
+                <div class="max-h-[500px] overflow-y-auto divide-y divide-zinc-800" id="audit-container">
+                    <div class="text-center py-8 text-zinc-500 text-xs">
+                        Loading audit trails...
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- JS Logic -->
+    <script>
+        async function fetchDashboardData() {
+            try {
+                // Fetch approvals
+                const appRes = await fetch('/safety/approvals');
+                const appData = await appRes.json();
+                
+                // Fetch audit trail
+                const auditRes = await fetch('/safety/audit');
+                const auditData = await auditRes.json();
+                
+                renderApprovals(appData.approvals);
+                renderAuditTrail(auditData.audit);
+                renderStats(auditData.audit);
+            } catch (err) {
+                console.error("Failed to load dashboard data", err);
+            }
+        }
+
+        function renderApprovals(approvals) {
+            const container = document.getElementById('approvals-container');
+            const pendingBadge = document.getElementById('pending-badge');
+            
+            const pending = approvals.filter(a => a.status === 'PENDING');
+            if (pending.length > 0) {
+                pendingBadge.classList.remove('hidden');
+                pendingBadge.innerText = `${pending.length} Pending`;
+            } else {
+                pendingBadge.classList.add('hidden');
+            }
+
+            if (approvals.length === 0) {
+                container.innerHTML = `
+                    <div class="text-center py-12 border border-zinc-800 rounded-xl bg-zinc-950/30 text-zinc-500 text-sm">
+                        No commands in safety queue. Safe coding environment active!
+                    </div>
+                `;
+                return;
+            }
+
+            container.innerHTML = approvals.map(appr => {
+                const isPending = appr.status === 'PENDING';
+                let statusColor = "bg-zinc-800 text-zinc-400 border-zinc-700";
+                if (appr.status === 'APPROVED') statusColor = "bg-emerald-500/10 text-emerald-400 border-emerald-500/20";
+                if (appr.status === 'REJECTED') statusColor = "bg-rose-500/10 text-rose-400 border-rose-500/20";
+                if (appr.status === 'TIMEOUT') statusColor = "bg-zinc-800 text-zinc-400 border-zinc-700";
+
+                const riskColor = appr.risk_level === 'HIGH' ? 'text-rose-500 bg-rose-500/10 border-rose-500/20' : 'text-amber-500 bg-amber-500/10 border-amber-500/20';
+
+                return `
+                    <div class="glass p-5 rounded-xl transition-all duration-300 ${isPending ? 'border-amber-500/30 glow-pending animate-pulse' : ''}">
+                        <div class="flex items-center justify-between gap-4 flex-wrap">
+                            <div class="flex items-center gap-2">
+                                <span class="text-xs px-2.5 py-1 rounded-full font-semibold border ${statusColor}">
+                                    ${appr.status}
+                                </span>
+                                <span class="text-xs px-2.5 py-1 rounded-full font-semibold border ${riskColor}">
+                                    ${appr.risk_level} Risk
+                                </span>
+                                <span class="text-xs text-zinc-500">${appr.timestamp}</span>
+                            </div>
+                            ${isPending ? `
+                                <div class="flex items-center space-x-2">
+                                    <button onclick="resolveApproval(${appr.id}, 'APPROVED')" class="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-xs rounded-lg transition-colors shadow-md shadow-emerald-950/20">
+                                        Approve
+                                    </button>
+                                    <button onclick="resolveApproval(${appr.id}, 'REJECTED')" class="px-3.5 py-1.5 bg-rose-600 hover:bg-rose-500 text-white font-medium text-xs rounded-lg transition-colors shadow-md shadow-rose-950/20">
+                                        Reject
+                                    </button>
+                                </div>
+                            ` : ''}
+                        </div>
+                        <div class="mt-4">
+                            <p class="text-xs text-zinc-400 font-semibold mb-1">Command String</p>
+                            <pre class="bg-zinc-950 border border-zinc-800 p-3 rounded-lg font-mono text-sm text-zinc-200 overflow-x-auto">${appr.command}</pre>
+                        </div>
+                        <div class="mt-3 text-xs text-zinc-400">
+                            <span class="font-semibold text-zinc-300">Reasoning:</span> ${appr.reason || "N/A"}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function renderAuditTrail(audit) {
+            const container = document.getElementById('audit-container');
+            if (audit.length === 0) {
+                container.innerHTML = `
+                    <div class="text-center py-8 text-zinc-500 text-xs">
+                        No audit trails recorded yet.
+                    </div>
+                `;
+                return;
+            }
+
+            container.innerHTML = audit.map(aud => {
+                const exitColor = aud.exit_code === 0 ? 'text-emerald-500' : 'text-rose-500';
+                const riskColor = aud.risk_level === 'HIGH' ? 'text-rose-500 bg-rose-500/10' : (aud.risk_level === 'MEDIUM' ? 'text-amber-500 bg-amber-500/10' : 'text-zinc-500 bg-zinc-800');
+                const durationText = aud.duration ? `${aud.duration.toFixed(2)}s` : 'N/A';
+                
+                return `
+                    <div class="p-3 text-xs space-y-1 hover:bg-zinc-900/50 transition-colors">
+                        <div class="flex items-center justify-between">
+                            <span class="px-1.5 py-0.5 rounded font-mono text-[10px] ${riskColor}">${aud.risk_level}</span>
+                            <span class="text-[10px] text-zinc-500">${aud.timestamp}</span>
+                        </div>
+                        <div class="font-mono text-zinc-300 break-all select-all">${aud.command}</div>
+                        <div class="flex items-center justify-between text-[10px] text-zinc-500">
+                            <span>Duration: ${durationText}</span>
+                            <span class="${exitColor}">Exit: ${aud.exit_code}</span>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function renderStats(audit) {
+            document.getElementById('stat-total').innerText = audit.length;
+            document.getElementById('stat-high').innerText = audit.filter(a => a.risk_level === 'HIGH').length;
+        }
+
+        async function resolveApproval(id, status) {
+            try {
+                const res = await fetch('/safety/approve', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ approval_id: id, status: status })
+                });
+                const data = await res.json();
+                if (data.status === 'success') {
+                    fetchDashboardData();
+                } else {
+                    alert(data.detail || "Error resolving approval.");
+                }
+            } catch (err) {
+                console.error(err);
+                alert("Failed to connect to safety server.");
+            }
+        }
+
+        // Poll every 2 seconds
+        fetchDashboardData();
+        setInterval(fetchDashboardData, 2000);
+    </script>
+</body>
+</html>
+    """
+    return HTMLResponse(content=html_content)
+
 
 LINEAR_WEBHOOK_SECRET = os.environ.get("LINEAR_WEBHOOK_SECRET", "")
 GITHUB_WEBHOOK_SECRET = os.environ.get("GITHUB_WEBHOOK_SECRET", "")

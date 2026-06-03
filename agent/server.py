@@ -192,12 +192,18 @@ async def _recreate_sandbox(thread_id: str) -> SandboxBackendProtocol:
     (with proxy auth configured), swapping the per-thread proxy target.
     The agent is responsible for cloning repos via tools.
     """
-    await client.threads.update(thread_id=thread_id, metadata=_creating_metadata())
+    try:
+        await client.threads.update(thread_id=thread_id, metadata=_creating_metadata())
+    except Exception as e:
+        logger.warning("Failed to update thread metadata (likely running offline): %s", e)
     try:
         sandbox_backend = set_sandbox_backend(thread_id, await _create_sandbox_with_proxy())
     except Exception:
         logger.exception("Failed to recreate sandbox after connection failure")
-        await client.threads.update(thread_id=thread_id, metadata=_RESET_METADATA)
+        try:
+            await client.threads.update(thread_id=thread_id, metadata=_RESET_METADATA)
+        except Exception as e:
+            logger.warning("Failed to reset thread metadata (likely running offline): %s", e)
         raise
     return sandbox_backend
 
@@ -242,24 +248,31 @@ async def _resolve_creating_sentinel(thread_id: str) -> str | None:
     ``None`` is returned so the caller creates a fresh sandbox. A sentinel with
     no timestamp (written before this field existed) is also treated as stale.
     """
-    while True:
-        thread = await client.threads.get(thread_id)
-        metadata = thread.get("metadata", {}) if isinstance(thread, dict) else {}
-        sandbox_id = metadata.get("sandbox_id") if isinstance(metadata, dict) else None
+    try:
+        while True:
+            thread = await client.threads.get(thread_id)
+            metadata = thread.get("metadata", {}) if isinstance(thread, dict) else {}
+            sandbox_id = metadata.get("sandbox_id") if isinstance(metadata, dict) else None
 
-        if sandbox_id != SANDBOX_CREATING:
-            return sandbox_id if isinstance(sandbox_id, str) else None
+            if sandbox_id != SANDBOX_CREATING:
+                return sandbox_id if isinstance(sandbox_id, str) else None
 
-        creating_at = metadata.get("sandbox_creating_at") if isinstance(metadata, dict) else None
-        age = time.time() - creating_at if isinstance(creating_at, (int, float)) else None
-        if age is None or age > SANDBOX_CREATION_TIMEOUT:
-            logger.warning(
-                "Resetting stale SANDBOX_CREATING for thread %s (age=%s)", thread_id, age
-            )
-            await client.threads.update(thread_id=thread_id, metadata=_RESET_METADATA)
-            return None
+            creating_at = metadata.get("sandbox_creating_at") if isinstance(metadata, dict) else None
+            age = time.time() - creating_at if isinstance(creating_at, (int, float)) else None
+            if age is None or age > SANDBOX_CREATION_TIMEOUT:
+                logger.warning(
+                    "Resetting stale SANDBOX_CREATING for thread %s (age=%s)", thread_id, age
+                )
+                try:
+                    await client.threads.update(thread_id=thread_id, metadata=_RESET_METADATA)
+                except Exception as e:
+                    logger.warning("Failed to reset thread metadata (likely running offline): %s", e)
+                return None
 
-        await asyncio.sleep(SANDBOX_POLL_INTERVAL)
+            await asyncio.sleep(SANDBOX_POLL_INTERVAL)
+    except Exception as e:
+        logger.warning("Failed to fetch thread metadata in _resolve_creating_sentinel: %s", e)
+        return None
 
 
 def graph_loaded_for_execution(config: RunnableConfig) -> bool:
@@ -301,7 +314,10 @@ async def ensure_sandbox_for_thread(thread_id: str) -> SandboxBackendProtocol:
             sandbox_backend = await _refresh_github_proxy_or_recreate(sandbox_backend, thread_id)
     elif sandbox_id is None:
         logger.info("Creating new sandbox for thread %s", thread_id)
-        await client.threads.update(thread_id=thread_id, metadata=_creating_metadata())
+        try:
+            await client.threads.update(thread_id=thread_id, metadata=_creating_metadata())
+        except Exception as e:
+            logger.warning("Failed to update thread metadata (likely running offline): %s", e)
         try:
             sandbox_backend = await _create_sandbox_with_proxy()
             logger.info("Sandbox created: %s", sandbox_backend.id)
@@ -309,8 +325,8 @@ async def ensure_sandbox_for_thread(thread_id: str) -> SandboxBackendProtocol:
             logger.exception("Failed to create sandbox")
             try:
                 await client.threads.update(thread_id=thread_id, metadata=_RESET_METADATA)
-            except Exception:
-                logger.exception("Failed to reset sandbox_id metadata")
+            except Exception as e:
+                logger.warning("Failed to reset thread metadata (likely running offline): %s", e)
             raise
     else:
         logger.info("Connecting to existing sandbox %s", sandbox_id)
@@ -319,13 +335,19 @@ async def ensure_sandbox_for_thread(thread_id: str) -> SandboxBackendProtocol:
             sandbox_backend = await asyncio.to_thread(create_sandbox, sandbox_id)
         except Exception:
             logger.warning("Failed to connect to existing sandbox %s, creating new one", sandbox_id)
-            await client.threads.update(thread_id=thread_id, metadata=_creating_metadata())
+            try:
+                await client.threads.update(thread_id=thread_id, metadata=_creating_metadata())
+            except Exception as e:
+                logger.warning("Failed to update thread metadata (likely running offline): %s", e)
             try:
                 sandbox_backend = await _create_sandbox_with_proxy()
                 created_replacement_sandbox = True
             except Exception:
                 logger.exception("Failed to create replacement sandbox")
-                await client.threads.update(thread_id=thread_id, metadata=_RESET_METADATA)
+                try:
+                    await client.threads.update(thread_id=thread_id, metadata=_RESET_METADATA)
+                except Exception as e:
+                    logger.warning("Failed to reset thread metadata (likely running offline): %s", e)
                 raise
         if not created_replacement_sandbox:
             original_sandbox_id = sandbox_backend.id
@@ -338,9 +360,12 @@ async def ensure_sandbox_for_thread(thread_id: str) -> SandboxBackendProtocol:
     sandbox_backend = set_sandbox_backend(thread_id, sandbox_backend)
 
     if sandbox_id != sandbox_backend.id:
-        await client.threads.update(
-            thread_id=thread_id, metadata={"sandbox_id": sandbox_backend.id}
-        )
+        try:
+            await client.threads.update(
+                thread_id=thread_id, metadata={"sandbox_id": sandbox_backend.id}
+            )
+        except Exception as e:
+            logger.warning("Failed to update thread metadata with sandbox_id (likely running offline): %s", e)
 
     # Re-apply git identity every run: cached/reconnected sandboxes may have
     # lost their `--global` config (or had it overwritten), and Vercel preview
@@ -385,6 +410,16 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             system_prompt="",
             tools=[],
         ).with_config(config)
+
+    # Dynamic Multi-Agent routing option with recursion guard
+    if (
+        config["configurable"].get("use_multi_agent", False)
+        and not config["configurable"].get("in_coder_node", False)
+    ):
+        logger.info("Routing thread %s to Multi-Agent collaboration graph", thread_id)
+        await ensure_sandbox_for_thread(thread_id)
+        from .multi_agent.graph import get_multi_agent_graph
+        return get_multi_agent_graph(config)
 
     github_token, new_encrypted, new_expires_at = await resolve_github_token(config, thread_id)
     config["metadata"]["github_token_encrypted"] = new_encrypted
@@ -447,12 +482,15 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     configurable = (config or {}).get("configurable") or {}
     per_thread_model = configurable.get("agent_model_id")
     per_thread_effort = configurable.get("agent_effort")
-    if (
-        isinstance(per_thread_model, str)
-        and per_thread_model in SUPPORTED_MODEL_IDS
-        and isinstance(per_thread_effort, str)
-        and model_supports_effort(per_thread_model, per_thread_effort)
-    ):
+    if isinstance(per_thread_model, str) and per_thread_model in SUPPORTED_MODEL_IDS:
+        if not isinstance(per_thread_effort, str) or not model_supports_effort(per_thread_model, per_thread_effort):
+            from .dashboard.options import SUPPORTED_MODELS
+            for m in SUPPORTED_MODELS:
+                if m["id"] == per_thread_model:
+                    per_thread_effort = m["default_effort"]
+                    break
+            else:
+                per_thread_effort = "medium"
         logger.info(
             "Applying per-thread model override: model=%s effort=%s",
             per_thread_model,

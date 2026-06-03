@@ -21,7 +21,7 @@ def _load_default_prompt() -> str:
     try:
         path = Path(DEFAULT_PROMPT_PATH)
         if path.is_file():
-            content = path.read_text().strip()
+            content = path.read_text(encoding="utf-8").strip()
             if content:
                 # Escape curly braces so .format() doesn't choke on them
                 escaped = content.replace("{", "{{").replace("}", "}}")

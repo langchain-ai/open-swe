@@ -68,4 +68,18 @@ __pycache__/
 *.egg-info/
 .eggs/
 
-# 
+# SQLite databases and system generated task files
+*.db
+.system_generated/
+
+# Evaluation scratch workspace
+evals/swe/scratch/
+evals/swe/eval_report.json
+
+# Nested directories and local scratch files
+Project/
+*clean_log.py
+*clean_task-915.log
+clean_logs.py
+read_all_clean_log.py
+scratch_test.py

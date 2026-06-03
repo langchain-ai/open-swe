@@ -60,6 +60,30 @@ def _iter_work_dir_candidates(
 ) -> Iterable[str]:
     seen: set[str] = set()
 
+    # Retrieve root_dir directly from local sandbox instance to support correct concurrent workspace resolution
+    current = sandbox_backend
+    while True:
+        if hasattr(current, "current"):
+            current = getattr(current, "current")
+        elif hasattr(current, "_raw_sandbox"):
+            current = getattr(current, "_raw_sandbox")
+        else:
+            break
+    local_dir = None
+    if hasattr(current, "root_dir"):
+        local_dir = getattr(current, "root_dir")
+    elif hasattr(current, "cwd"):
+        local_dir = getattr(current, "cwd")
+
+    if local_dir:
+        import os
+        local_dir = os.path.abspath(str(local_dir))
+        if local_dir not in seen:
+            seen.add(local_dir)
+            yield local_dir
+
+
+
     for candidate in _iter_provider_paths(sandbox_backend, "get_work_dir"):
         if candidate not in seen:
             seen.add(candidate)
@@ -85,13 +109,26 @@ def _iter_work_dir_candidates(
         yield shell_home_dir
 
 
+def _is_local_backend(sandbox_backend: SandboxBackendProtocol) -> bool:
+    current = sandbox_backend
+    while True:
+        if hasattr(current, "current"):
+            current = getattr(current, "current")
+        elif hasattr(current, "_raw_sandbox"):
+            current = getattr(current, "_raw_sandbox")
+        else:
+            break
+    return type(current).__name__ == "LocalShellBackend"
+
+
 def _iter_provider_paths(
     sandbox_backend: SandboxBackendProtocol,
     *method_names: str,
 ) -> Iterable[str]:
+    is_local = _is_local_backend(sandbox_backend)
     for provider in _iter_path_providers(sandbox_backend):
         for method_name in method_names:
-            path = _call_path_method(provider, method_name)
+            path = _call_path_method(provider, method_name, is_local)
             if path:
                 yield path
 
@@ -104,13 +141,13 @@ def _iter_path_providers(sandbox_backend: SandboxBackendProtocol) -> Iterable[An
             yield provider
 
 
-def _call_path_method(provider: Any, method_name: str) -> str | None:
+def _call_path_method(provider: Any, method_name: str, is_local: bool) -> str | None:
     method = getattr(provider, method_name, None)
     if not callable(method):
         return None
 
     try:
-        return _normalize_path(method())
+        return _normalize_path(method(), is_local)
     except Exception:
         logger.debug("Failed to call %s on %s", method_name, type(provider).__name__, exc_info=True)
         return None
@@ -123,24 +160,36 @@ def _resolve_shell_path(
     result = sandbox_backend.execute(command)
     if result.exit_code != 0:
         return None
-    return _normalize_path(result.output)
+    is_local = _is_local_backend(sandbox_backend)
+    return _normalize_path(result.output, is_local)
 
 
-def _normalize_path(raw_path: str | None) -> str | None:
+def _normalize_path(raw_path: str | None, is_local: bool = False) -> str | None:
     if raw_path is None:
         return None
 
     path = raw_path.strip()
-    if not path or not path.startswith("/"):
+    if not path:
         return None
 
-    return posixpath.normpath(path)
+    import os
+    if os.name == "nt" and is_local:
+        return os.path.normpath(path)
+    else:
+        if not path.startswith("/"):
+            return None
+        return posixpath.normpath(path)
 
 
 def _is_writable_directory(
     sandbox_backend: SandboxBackendProtocol,
     directory: str,
 ) -> bool:
+    import os
+    is_local = _is_local_backend(sandbox_backend)
+    if os.name == "nt" and is_local:
+        return os.path.isdir(directory) and os.access(directory, os.W_OK)
+
     safe_directory = shlex.quote(directory)
     result = sandbox_backend.execute(f"test -d {safe_directory} && test -w {safe_directory}")
     return result.exit_code == 0

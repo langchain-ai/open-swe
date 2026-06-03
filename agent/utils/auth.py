@@ -48,6 +48,8 @@ def is_bot_token_only_mode() -> bool:
     can't resolve per-user GitHub OAuth tokens. In this mode the GitHub App
     installation token is used for all git operations instead.
     """
+    if os.environ.get("SANDBOX_TYPE") == "local":
+        return False
     return bool(LANGSMITH_API_KEY and not X_SERVICE_AUTH_JWT_SECRET and not USER_ID_API_KEY_MAP)
 
 
@@ -396,10 +398,19 @@ async def resolve_github_token(
     Raises:
         RuntimeError: If source is missing or token resolution fails.
     """
+    if os.environ.get("SANDBOX_TYPE") == "local":
+        return "dummy-token", "dummy-encrypted", None
+
     if is_bot_token_only_mode():
         return await _resolve_bot_installation_token(thread_id)
 
     configurable = config["configurable"]
+    if (
+        configurable.get("__is_for_execution__")
+        and os.environ.get("SANDBOX_TYPE") == "local"
+    ):
+        return "dummy-token", "dummy-encrypted", None
+
     source = configurable.get("source")
     if not source:
         logger.error("Missing source for thread %s; cannot route auth failure responses", thread_id)

@@ -118,6 +118,8 @@ class SandboxBackendProxy(SandboxBackendProtocol):
         return await self._backend.aexecute(command, timeout=timeout)
 
 
+from .sandbox_safety import AuditingSandboxWrapper
+
 # Thread ID -> stable SandboxBackendProxy, shared between server.py and middleware.
 SANDBOX_BACKENDS: dict[str, SandboxBackendProxy] = {}
 
@@ -132,12 +134,22 @@ def set_sandbox_backend(
     thread_id: str,
     sandbox_backend: SandboxBackendProtocol,
 ) -> SandboxBackendProxy:
+    # Centrally wrap sandbox backend with safety gateway wrapper if not already wrapped
+    if (
+        not isinstance(sandbox_backend, SandboxBackendProxy)
+        and not isinstance(sandbox_backend, AuditingSandboxWrapper)
+    ):
+        sandbox_backend = AuditingSandboxWrapper(sandbox_backend)
+
     if isinstance(sandbox_backend, SandboxBackendProxy):
         SANDBOX_BACKENDS[thread_id] = sandbox_backend
         return sandbox_backend
 
     existing = SANDBOX_BACKENDS.get(thread_id)
     if isinstance(existing, SandboxBackendProxy):
+        # Also ensure replacement is wrapped
+        if not isinstance(sandbox_backend, AuditingSandboxWrapper):
+            sandbox_backend = AuditingSandboxWrapper(sandbox_backend)
         existing.replace_backend(sandbox_backend)
         return existing
 
@@ -170,6 +182,11 @@ async def get_sandbox_backend(thread_id: str) -> SandboxBackendProxy:
     if sandbox_backend:
         return sandbox_backend
 
+    logger.warning(
+        "get_sandbox_backend not found in cache for thread_id %s. Available keys in SANDBOX_BACKENDS: %s",
+        thread_id,
+        list(SANDBOX_BACKENDS.keys()),
+    )
     sandbox_id = await get_sandbox_id_from_metadata(thread_id)
     if not sandbox_id:
         raise ValueError(f"Missing sandbox_id in thread metadata for {thread_id}")

@@ -31,6 +31,7 @@ async def test_agent_uses_profile_subagent_model_override() -> None:
         return _DummyAgent()
 
     with (
+        patch.dict("os.environ", {"LLM_FALLBACK_MODEL_ID": ""}),
         patch(
             "agent.server.resolve_github_token",
             new_callable=AsyncMock,
@@ -109,6 +110,7 @@ async def test_agent_subagent_inherits_profile_model_override_without_explicit_p
         return _DummyAgent()
 
     with (
+        patch.dict("os.environ", {"LLM_FALLBACK_MODEL_ID": ""}),
         patch(
             "agent.server.resolve_github_token",
             new_callable=AsyncMock,

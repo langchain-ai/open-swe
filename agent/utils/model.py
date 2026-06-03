@@ -38,12 +38,37 @@ _ANTHROPIC_EFFORTS: set[AnthropicEffort] = {"low", "medium", "high", "xhigh", "m
 
 
 def make_model(model_id: str, **kwargs: Unpack[ModelKwargs]):
+    import os
+
+    # Dynamic mapping of DeepSeek credentials/endpoints
+    if os.environ.get("DEEPSEEK_API_KEY") and not os.environ.get("OPENAI_API_KEY"):
+        os.environ["OPENAI_API_KEY"] = os.environ["DEEPSEEK_API_KEY"]
+    if os.environ.get("DEEPSEEK_BASE_URL") and not os.environ.get("OPENAI_API_BASE"):
+        os.environ["OPENAI_API_BASE"] = os.environ["DEEPSEEK_BASE_URL"]
+
+    # Rewrite model ID to DeepSeek model name if we are routing to DeepSeek
+    openai_base = os.environ.get("OPENAI_API_BASE", "")
+    is_deepseek = "deepseek" in openai_base.lower() or bool(os.environ.get("DEEPSEEK_MODEL"))
+    
+    if is_deepseek and model_id.startswith("openai:"):
+        custom_model = os.environ.get("DEEPSEEK_MODEL", "deepseek-v4-flash")
+        model_id = f"openai:{custom_model}"
+
     model_kwargs: dict[str, object] = kwargs.copy()
     model_kwargs.setdefault("max_retries", DEFAULT_MAX_RETRIES)
 
+    # DeepSeek doesn't support o1-style reasoning effort, pop it to avoid TypeError in openai client
+    if is_deepseek:
+        model_kwargs.pop("reasoning", None)
+        model_kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
+
     if model_id.startswith("openai:"):
-        model_kwargs["base_url"] = OPENAI_RESPONSES_WS_BASE_URL
-        model_kwargs["use_responses_api"] = True
+        # Only override with OpenAI responses websocket base if a custom base is not explicitly set
+        if not os.environ.get("OPENAI_API_BASE"):
+            model_kwargs["base_url"] = OPENAI_RESPONSES_WS_BASE_URL
+            model_kwargs["use_responses_api"] = True
+        else:
+            model_kwargs["use_responses_api"] = False
 
     return init_chat_model(model=model_id, **model_kwargs)
 

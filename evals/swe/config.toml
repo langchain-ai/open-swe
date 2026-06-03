@@ -1,0 +1,19 @@
+# Private SWE-bench Evaluation Configuration
+
+[benchmark]
+dataset_path = "evals/swe/swe_benchmark.jsonl"
+scratch_dir = "evals/swe/scratch"
+concurrency_limit = 3
+timeout_seconds = 180
+
+[model]
+# Default model for PM/Architect/QA evaluation
+model_id = "openai:deepseek-v4-flash"
+reasoning_effort = "medium"
+
+[metrics]
+# Approximate pricing per 1M tokens ($)
+input_token_price = 0.15
+output_token_price = 0.60
+# Target AST similarity passing threshold
+ast_similarity_threshold = 0.85
