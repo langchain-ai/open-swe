@@ -1,8 +1,15 @@
 {
+  "framework": null,
+  "buildCommand": "bun run build",
+  "outputDirectory": ".output/public",
   "rewrites": [
     {
       "source": "/dashboard/api/:path*",
       "destination": "https://open-swe-v3-f2834ffc0df05a46a10262a9690e8490.us.langgraph.app/dashboard/api/:path*"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/_shell.html"
     }
   ]
 }
