@@ -1049,7 +1049,18 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
     if not has_valid_user_token and not is_bot_token_only_mode():
         # A stored-but-unusable token means "sign in again"; no record at all
         # means the user has never connected GitHub + Slack via the dashboard.
-        has_token_record = bool(mapped_login) and await has_access_token_record(mapped_login)
+        # Guard the store read like token resolution above so a transient
+        # failure still yields an actionable prompt and clears the status.
+        has_token_record = False
+        if mapped_login:
+            try:
+                has_token_record = await has_access_token_record(mapped_login)
+            except Exception:  # noqa: BLE001
+                logger.debug(
+                    "Failed to check GitHub token record for %s; prompting sign-in",
+                    mapped_login,
+                    exc_info=True,
+                )
         reason = "revoked" if has_token_record else "unlinked"
         logger.info(
             "Blocking Slack run for thread %s: no valid user GitHub token (%s)",
