@@ -39,6 +39,39 @@ def test_state_messages_to_ui_maps_user_and_tool_calls() -> None:
     assert tool_chunk["output"] == "print('hi')"
 
 
+def test_state_messages_to_ui_tags_slack_and_linear_replies() -> None:
+    messages = [
+        {"type": "human", "id": "u1", "content": "ping"},
+        {
+            "type": "ai",
+            "id": "a1",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call-slack",
+                    "name": "slack_thread_reply",
+                    "args": {"message": "Done! Opened a PR."},
+                },
+                {
+                    "id": "call-linear",
+                    "name": "linear_comment",
+                    "args": {"comment_body": "Done! Opened a PR.", "ticket_id": "abc"},
+                },
+            ],
+        },
+    ]
+
+    ui = state_messages_to_ui(messages)
+
+    chunks = ui[-1]["chunks"]
+    slack_chunk = next(c for c in chunks if c["toolCallId"] == "call-slack")
+    linear_chunk = next(c for c in chunks if c["toolCallId"] == "call-linear")
+    assert slack_chunk["toolKind"] == "slack"
+    assert slack_chunk["input"]["message"] == "Done! Opened a PR."
+    assert linear_chunk["toolKind"] == "linear"
+    assert linear_chunk["input"]["comment_body"] == "Done! Opened a PR."
+
+
 def test_state_messages_to_ui_merges_agent_turn_and_hides_internal_tools() -> None:
     messages = [
         {"type": "human", "id": "u1", "content": "hello"},

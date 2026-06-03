@@ -8,6 +8,7 @@ import { CodeBlock } from "./CodeBlock";
 import { Markdown } from "./Markdown";
 import { ToolExecution } from "./ToolExecution";
 import { ShellCommand } from "./ShellCommand";
+import { ReplyCard } from "./ReplyCard";
 import type {
   Chunk,
   Message,
@@ -21,6 +22,7 @@ type RenderItem =
   | { type: "explored-group"; key: string; id: string; chunks: ToolExecutionChunk[] }
   | { type: "edit-item"; key: string; chunk: ToolExecutionChunk }
   | { type: "shell-item"; key: string; chunk: ToolExecutionChunk }
+  | { type: "reply-item"; key: string; chunk: ToolExecutionChunk }
   | { type: "tool-item"; key: string; chunk: ToolExecutionChunk };
 
 function getChunkRenderKey(chunk: Chunk, sourceIndex: number): string {
@@ -61,6 +63,10 @@ function isShellTool(chunk: ToolExecutionChunk): boolean {
   return chunk.toolKind === "execute";
 }
 
+function isReplyTool(chunk: ToolExecutionChunk): boolean {
+  return chunk.toolKind === "slack" || chunk.toolKind === "linear";
+}
+
 function buildRenderItems(chunks: Chunk[]): RenderItem[] {
   const items: RenderItem[] = [];
   let exploredBuffer: ToolExecutionChunk[] = [];
@@ -96,6 +102,8 @@ function buildRenderItems(chunks: Chunk[]): RenderItem[] {
         items.push({ type: "edit-item", key: `tool-${chunk.toolCallId}`, chunk });
       } else if (isShellTool(chunk)) {
         items.push({ type: "shell-item", key: `tool-${chunk.toolCallId}`, chunk });
+      } else if (isReplyTool(chunk)) {
+        items.push({ type: "reply-item", key: `tool-${chunk.toolCallId}`, chunk });
       } else {
         items.push({ type: "tool-item", key: `tool-${chunk.toolCallId}`, chunk });
       }
@@ -575,6 +583,13 @@ function AgentMessage({
                   chunk={item.chunk}
                   projectPath={projectPath}
                 />
+              </div>
+            );
+
+          case "reply-item":
+            return (
+              <div key={item.key}>
+                <ReplyCard chunk={item.chunk} />
               </div>
             );
 

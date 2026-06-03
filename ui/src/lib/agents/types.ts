@@ -29,6 +29,8 @@ export type AcpToolKind =
   | "execute"
   | "think"
   | "fetch"
+  | "slack"
+  | "linear"
   | "other";
 
 export type AcpToolStatus = "pending" | "in_progress" | "completed" | "error";
