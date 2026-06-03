@@ -764,10 +764,10 @@ def test_process_slack_mention_unmapped_user_blocked_and_prompted(
     }
 
 
-def test_process_slack_mention_mapped_user_no_token_blocked_and_prompted(
+def test_process_slack_mention_mapped_user_no_token_record_prompts_setup(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A mapped Slack user with no valid token is blocked and prompted to re-link."""
+    """A mapped user who never signed in (no token record) is prompted to set up."""
     captured: dict[str, object] = {}
     _setup_slack_mention_fakes(monkeypatch, captured)
 
@@ -780,12 +780,16 @@ def test_process_slack_mention_mapped_user_no_token_blocked_and_prompted(
     async def fake_get_valid_access_token(login):
         return None
 
+    async def fake_has_token_record(login):
+        return False
+
     async def fake_post_prompt(channel_id, thread_ts, user_id, user_email, reason="unlinked"):
         captured["prompt"] = {"reason": reason}
 
     monkeypatch.setattr(webapp, "_thread_exists", fake_thread_exists)
     monkeypatch.setattr(webapp, "login_for_slack_id", fake_login_for_slack_id)
     monkeypatch.setattr(webapp, "get_valid_access_token", fake_get_valid_access_token)
+    monkeypatch.setattr(webapp, "has_access_token_record", fake_has_token_record)
     monkeypatch.setattr(webapp, "_post_account_link_prompt", fake_post_prompt)
 
     asyncio.run(
@@ -803,7 +807,53 @@ def test_process_slack_mention_mapped_user_no_token_blocked_and_prompted(
     )
 
     assert "run_create" not in captured
-    assert captured["prompt"] == {"reason": "expired"}
+    assert captured["prompt"] == {"reason": "unlinked"}
+
+
+def test_process_slack_mention_mapped_user_unusable_token_prompts_revoked(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A user who signed in before but whose token is now unusable is told to re-auth."""
+    captured: dict[str, object] = {}
+    _setup_slack_mention_fakes(monkeypatch, captured)
+
+    async def fake_thread_exists(thread_id: str) -> bool:
+        return False
+
+    async def fake_login_for_slack_id(slack_user_id):
+        return "mason-gh" if slack_user_id == "U123" else None
+
+    async def fake_get_valid_access_token(login):
+        return None
+
+    async def fake_has_token_record(login):
+        return True
+
+    async def fake_post_prompt(channel_id, thread_ts, user_id, user_email, reason="unlinked"):
+        captured["prompt"] = {"reason": reason}
+
+    monkeypatch.setattr(webapp, "_thread_exists", fake_thread_exists)
+    monkeypatch.setattr(webapp, "login_for_slack_id", fake_login_for_slack_id)
+    monkeypatch.setattr(webapp, "get_valid_access_token", fake_get_valid_access_token)
+    monkeypatch.setattr(webapp, "has_access_token_record", fake_has_token_record)
+    monkeypatch.setattr(webapp, "_post_account_link_prompt", fake_post_prompt)
+
+    asyncio.run(
+        webapp.process_slack_mention(
+            {
+                "channel_id": "C123",
+                "thread_ts": "1700000000.000100",
+                "event_ts": "1700000000.000200",
+                "user_id": "U123",
+                "text": "<@UBOT> do the thing",
+                "bot_user_id": "UBOT",
+            },
+            {"owner": "langchain-ai", "name": "open-swe"},
+        )
+    )
+
+    assert "run_create" not in captured
+    assert captured["prompt"] == {"reason": "revoked"}
 
 
 def test_process_slack_mention_mapped_user_with_token_runs_as_user(
