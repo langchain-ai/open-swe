@@ -17,7 +17,7 @@ from ..encryption import encrypt_token
 from .github_app import get_github_app_installation_token_with_expiry
 from .github_token import get_github_token_from_thread
 from .linear import comment_on_linear_issue
-from .slack import post_slack_ephemeral_message, post_slack_thread_reply
+from .slack import post_slack_thread_reply
 
 logger = logging.getLogger(__name__)
 
@@ -254,33 +254,11 @@ async def leave_failure_comment(
         slack_thread = configurable.get("slack_thread", {})
         channel_id = slack_thread.get("channel_id") if isinstance(slack_thread, dict) else None
         thread_ts = slack_thread.get("thread_ts") if isinstance(slack_thread, dict) else None
-        triggering_user_id = (
-            slack_thread.get("triggering_user_id") if isinstance(slack_thread, dict) else None
-        )
         if channel_id and thread_ts:
-            if isinstance(triggering_user_id, str) and triggering_user_id:
-                logger.info(
-                    "Posting auth failure ephemeral reply to Slack user %s in channel %s thread %s",
-                    triggering_user_id,
-                    channel_id,
-                    thread_ts,
-                )
-                sent = await post_slack_ephemeral_message(
-                    channel_id=channel_id,
-                    user_id=triggering_user_id,
-                    text=message,
-                    thread_ts=thread_ts,
-                )
-                if sent:
-                    return
-                logger.warning(
-                    "Failed to post ephemeral auth failure reply for Slack user %s; falling back to thread reply",
-                    triggering_user_id,
-                )
-            else:
-                logger.warning(
-                    "Missing Slack triggering_user_id for auth failure reply; falling back to thread reply",
-                )
+            # Use a visible threaded reply, not an ephemeral message: ephemeral
+            # messages are silently dropped in Slack's assistant threads (where
+            # Open SWE runs) even when the API returns ok, so the user would see
+            # no auth-failure prompt.
             logger.info(
                 "Posting auth failure reply to Slack channel %s thread %s",
                 channel_id,
