@@ -13,6 +13,8 @@ logger = logging.getLogger(__name__)
 OPEN_SWE_BOT_NAME = "open-swe[bot]"
 OPEN_SWE_BOT_EMAIL = "open-swe@users.noreply.github.com"
 
+PR_ATTRIBUTION_FOOTER = "Made by [Open SWE](https://openswe.vercel.app)"
+
 
 @dataclass(frozen=True)
 class CollaboratorIdentity:
@@ -153,24 +155,29 @@ def add_bot_coauthor_trailer(commit_message: str) -> str:
 
 def add_pr_collaboration_note(
     pr_body: str,
-    identity: CollaboratorIdentity | None,
+    identity: CollaboratorIdentity | None = None,
 ) -> str:
-    """Append a best-effort PR attribution note.
+    """Append the Open SWE attribution footer to a PR body.
 
-    GitHub supports commit co-authors, but not PR co-authors. This note makes
-    the collaboration explicit in the automatically-opened PR body.
+    The PR is opened as the triggering user, so the body only credits Open SWE
+    as the collaborator. Any legacy double-attribution footer is replaced.
     """
 
     normalized_body = pr_body.rstrip()
-    if not identity:
-        return normalized_body
-
-    old_note = f"_Opened collaboratively by {identity.display_name} and open-swe._"
-    note = f"_Opened collaboratively by {identity.pr_attribution_name} and open-swe._"
+    note = PR_ATTRIBUTION_FOOTER
     if note in normalized_body:
         return normalized_body
-    if old_note in normalized_body:
-        return normalized_body.replace(old_note, note)
+
+    legacy_footers: list[str] = []
+    if identity is not None:
+        legacy_footers.append(
+            f"_Opened collaboratively by {identity.pr_attribution_name} and open-swe._"
+        )
+        legacy_footers.append(f"_Opened collaboratively by {identity.display_name} and open-swe._")
+    for legacy in legacy_footers:
+        if legacy in normalized_body:
+            return normalized_body.replace(legacy, note)
+
     if not normalized_body:
         return note
     return f"{normalized_body}\n\n{note}"
