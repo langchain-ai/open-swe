@@ -15,6 +15,7 @@ from ..reviewer_findings import (
     get_thread_id_from_runtime,
     list_findings,
     normalize_finding_title,
+    resolve_review_head_sha,
     update_finding_fields,
 )
 from ..utils.reviewer_outcomes import emit_finding_status_outcome
@@ -127,9 +128,10 @@ def update_finding(
 
     config = get_config()
     configurable = config.get("configurable", {}) if isinstance(config, dict) else {}
-    head_sha = configurable.get("head_sha", "") if isinstance(configurable, dict) else ""
-    if status == "open" and isinstance(head_sha, str) and head_sha:
-        updates["last_confirmed_sha"] = head_sha
+    if status == "open":
+        head_sha = asyncio.run(resolve_review_head_sha(get_thread_id_from_runtime(), configurable))
+        if head_sha:
+            updates["last_confirmed_sha"] = head_sha
 
     if not updates:
         if suggestion_dropped:
