@@ -80,8 +80,12 @@ export function AgentRunCard({ thread }: AgentRunCardProps) {
             </>
           )}
           <span>{thread.model}</span>
-          <span>·</span>
-          <span>{thread.repo}</span>
+          {thread.repo && (
+            <>
+              <span>·</span>
+              <span>{thread.repo}</span>
+            </>
+          )}
           <span>·</span>
           <span>{formatRelativeTime(thread.updatedAt)}</span>
         </div>

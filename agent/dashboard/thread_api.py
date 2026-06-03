@@ -16,7 +16,6 @@ from pydantic import BaseModel, Field
 
 from ..utils.auth import persist_encrypted_github_token
 from ..utils.thread_ops import is_thread_active, langgraph_client, queue_message_for_thread
-from .agent_overrides import get_profile_default_repo
 from .message_adapter import state_messages_to_ui
 from .options import SUPPORTED_MODEL_IDS, model_supports_effort
 from .profiles import OAUTH_TOKENS_NAMESPACE, get_profile, get_valid_access_token
@@ -179,8 +178,8 @@ def _thread_summary(
     summary: dict[str, Any] = {
         "id": thread.get("thread_id") or thread.get("id"),
         "title": title,
-        "repo": name or "unknown",
-        "repoFullName": full_name or "unknown/unknown",
+        "repo": name,
+        "repoFullName": full_name,
         "branch": metadata.get("branch_name") or metadata.get("base_branch") or "main",
         "model": model,
         "effort": effort,
@@ -279,18 +278,15 @@ async def get_dashboard_thread(
     return _thread_summary(thread, messages=messages)
 
 
-async def _resolve_repo_config(login: str, repo: str | None) -> dict[str, str]:
-    parsed = _parse_repo(repo)
-    if parsed:
-        return parsed
-    profile_repo = await get_profile_default_repo(login)
-    if profile_repo:
-        return profile_repo
-    profile = await get_profile(login)
-    parsed = _parse_repo(profile.get("default_repo") if isinstance(profile, dict) else None)
-    if parsed:
-        return parsed
-    raise HTTPException(400, "no default repository configured — set one in Cloud Agents settings")
+def _resolve_repo_config(repo: str | None) -> dict[str, str]:
+    """Resolve the run's repo from the request, or ``{}`` when none is given.
+
+    A repo is optional: the agent identifies and clones the target repo from the
+    task itself. The dashboard pre-fills the user's default repo on the client,
+    so the request value is authoritative here — an empty value means an
+    intentionally repo-less run, not "fall back to the saved default".
+    """
+    return _parse_repo(repo) or {}
 
 
 async def _start_agent_run(
@@ -308,12 +304,11 @@ async def _start_agent_run(
     chosen_model, chosen_effort = _normalize_model_choice(model_id, effort)
     metadata_model = chosen_model or profile.get("default_model") or "Default"
     metadata_effort = chosen_effort or profile.get("reasoning_effort")
-    metadata = {
+    has_repo = bool(repo_config.get("owner") and repo_config.get("name"))
+    metadata: dict[str, Any] = {
         "source": _DASHBOARD_SOURCE,
         "github_login": login,
         "title": title or prompt[:80] or "New agent",
-        "repo_owner": repo_config["owner"],
-        "repo_name": repo_config["name"],
         "base_branch": profile.get("base_branch") or "main",
         "branch_prefix": profile.get("branch_prefix"),
         "model": metadata_model,
@@ -321,6 +316,9 @@ async def _start_agent_run(
         "created_at_ms": now_ms,
         "updated_at_ms": now_ms,
     }
+    if has_repo:
+        metadata["repo_owner"] = repo_config["owner"]
+        metadata["repo_name"] = repo_config["name"]
 
     client = langgraph_client()
     await client.threads.create(thread_id=thread_id, metadata=metadata, if_exists="do_nothing")
@@ -331,9 +329,10 @@ async def _start_agent_run(
         "thread_id": thread_id,
         "source": _DASHBOARD_SOURCE,
         "github_login": login,
-        "repo": repo_config,
         "user_email": await _resolve_run_email(login, profile),
     }
+    if has_repo:
+        configurable["repo"] = repo_config
     if chosen_model and chosen_effort:
         configurable["agent_model_id"] = chosen_model
         configurable["agent_effort"] = chosen_effort
@@ -359,7 +358,7 @@ async def _start_agent_run(
 
 
 async def create_dashboard_thread(login: str, body: ThreadCreateBody) -> dict[str, Any]:
-    repo_config = await _resolve_repo_config(login, body.repo)
+    repo_config = _resolve_repo_config(body.repo)
     thread_id = str(uuid.uuid4())
     return await _start_agent_run(
         thread_id,
@@ -383,8 +382,6 @@ async def send_dashboard_message(
     metadata = thread.get("metadata") if isinstance(thread.get("metadata"), dict) else {}
     _assert_thread_owner(metadata, login, email)
     owner, name, _ = _metadata_repo(metadata)
-    if not owner or not name:
-        raise HTTPException(400, "thread is missing repository metadata")
 
     prompt = body.content.strip()
     now_ms = _now_ms()
@@ -411,9 +408,10 @@ async def send_dashboard_message(
         "thread_id": thread_id,
         "source": thread_source,
         "github_login": login,
-        "repo": {"owner": owner, "name": name},
         "user_email": await _resolve_run_email(login, profile),
     }
+    if owner and name:
+        configurable["repo"] = {"owner": owner, "name": name}
     source_context = metadata.get("source_context")
     if isinstance(source_context, dict):
         for key, value in source_context.items():

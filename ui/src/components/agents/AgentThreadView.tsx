@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { FolderIcon } from "@phosphor-icons/react";
 
 import { AgentPromptBar } from "@/components/agents/AgentPromptBar";
 import { AgentsShell } from "@/components/agents/AgentsSidebar";
@@ -89,6 +90,17 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
   return (
     <AgentsShell user={user} activeThreadId={thread.id}>
       <div className="flex min-w-0 flex-1 flex-col">
+        <div className="flex shrink-0 items-center gap-2 border-b border-[var(--ui-border)] px-4 py-3">
+          <span className="truncate text-sm font-medium text-[color:var(--ui-text)]">
+            {thread.title}
+          </span>
+          {thread.repo && (
+            <span className="flex min-w-0 items-center gap-1 text-xs text-[color:var(--ui-text-dim)]">
+              <FolderIcon className="size-3.5 shrink-0" />
+              <span className="truncate">{thread.repoFullName}</span>
+            </span>
+          )}
+        </div>
         <div className="flex min-h-0 flex-1 flex-col">
           {hasMessages ? (
             <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
