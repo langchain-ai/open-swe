@@ -89,7 +89,6 @@ from .utils.slack import (
     get_slack_user_info,
     get_slack_user_names,
     parse_github_pr_url,
-    post_slack_ephemeral_message,
     post_slack_thread_reply,
     post_slack_trace_reply,
     resolve_slack_links_in_context,
@@ -875,7 +874,7 @@ async def _post_account_link_prompt(
     user_email: str | None,
     reason: str = "unlinked",
 ) -> None:
-    """Prompt a Slack user to connect their account via the dashboard (ephemeral).
+    """Prompt a Slack user to connect their account via the dashboard.
 
     ``reason`` is ``"unlinked"`` (never signed in with GitHub) or ``"revoked"``
     (signed in before, but the stored GitHub authorization is no longer usable).
@@ -900,8 +899,12 @@ async def _post_account_link_prompt(
             "Slack account. Set that up in your dashboard:\n"
             f"<{link_url}|Sign in with GitHub & connect Slack>"
         )
+    # Use a visible threaded reply, not an ephemeral message: ephemeral messages
+    # are silently dropped in Slack's assistant threads (where Open SWE runs) —
+    # the API returns ok but the user sees nothing — so a blocked user would get
+    # no actionable prompt. This is the same channel the agent uses to reply.
     try:
-        await post_slack_ephemeral_message(channel_id, user_id, text, thread_ts=thread_ts)
+        await post_slack_thread_reply(channel_id, thread_ts, text)
     except Exception:  # noqa: BLE001
         logger.debug("Failed to post account-link prompt to Slack", exc_info=True)
 

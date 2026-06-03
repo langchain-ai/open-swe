@@ -62,3 +62,44 @@ def test_build_account_link_url_redirects_to_profile_settings(
 def test_build_account_link_url_none_without_base(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("DASHBOARD_API_BASE_URL", raising=False)
     assert oauth.build_account_link_url(slack_user_id="U1", work_email="d@x.com") is None
+
+
+def test_account_link_prompt_posts_visible_threaded_reply(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The prompt uses a visible threaded reply (ephemeral is dropped in assistant threads)."""
+    import asyncio
+
+    from agent import webapp
+
+    monkeypatch.setenv("DASHBOARD_API_BASE_URL", "https://api.example.com")
+    calls: dict[str, object] = {}
+
+    async def fake_reply(channel_id, thread_ts, text):
+        calls["reply"] = {"channel_id": channel_id, "thread_ts": thread_ts, "text": text}
+        return True
+
+    monkeypatch.setattr(webapp, "post_slack_thread_reply", fake_reply)
+
+    asyncio.run(webapp._post_account_link_prompt("C1", "1.1", "U1", "d@x.com", reason="unlinked"))
+    assert calls["reply"]["channel_id"] == "C1"
+    assert calls["reply"]["thread_ts"] == "1.1"
+    assert "Sign in with GitHub" in calls["reply"]["text"]
+
+
+def test_account_link_prompt_revoked_wording(monkeypatch: pytest.MonkeyPatch) -> None:
+    import asyncio
+
+    from agent import webapp
+
+    monkeypatch.setenv("DASHBOARD_API_BASE_URL", "https://api.example.com")
+    calls: dict[str, object] = {}
+
+    async def fake_reply(channel_id, thread_ts, text):
+        calls["text"] = text
+        return True
+
+    monkeypatch.setattr(webapp, "post_slack_thread_reply", fake_reply)
+
+    asyncio.run(webapp._post_account_link_prompt("C1", "1.1", "U1", "d@x.com", reason="revoked"))
+    assert "no longer valid" in calls["text"]
