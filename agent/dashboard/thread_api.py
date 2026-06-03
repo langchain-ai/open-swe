@@ -16,7 +16,6 @@ from pydantic import BaseModel, Field
 
 from ..utils.auth import persist_encrypted_github_token
 from ..utils.thread_ops import is_thread_active, langgraph_client, queue_message_for_thread
-from .agent_overrides import get_profile_default_repo
 from .message_adapter import state_messages_to_ui
 from .options import SUPPORTED_MODEL_IDS, model_supports_effort
 from .profiles import OAUTH_TOKENS_NAMESPACE, get_profile, get_valid_access_token
@@ -279,24 +278,15 @@ async def get_dashboard_thread(
     return _thread_summary(thread, messages=messages)
 
 
-async def _resolve_repo_config(login: str, repo: str | None) -> dict[str, str]:
-    """Resolve a repo for the run, or ``{}`` when none is specified.
+def _resolve_repo_config(repo: str | None) -> dict[str, str]:
+    """Resolve the run's repo from the request, or ``{}`` when none is given.
 
     A repo is optional: the agent identifies and clones the target repo from the
-    task itself. When the request and the user's profile default are both empty
-    we return an empty config rather than blocking the run.
+    task itself. The dashboard pre-fills the user's default repo on the client,
+    so the request value is authoritative here — an empty value means an
+    intentionally repo-less run, not "fall back to the saved default".
     """
-    parsed = _parse_repo(repo)
-    if parsed:
-        return parsed
-    profile_repo = await get_profile_default_repo(login)
-    if profile_repo:
-        return profile_repo
-    profile = await get_profile(login)
-    parsed = _parse_repo(profile.get("default_repo") if isinstance(profile, dict) else None)
-    if parsed:
-        return parsed
-    return {}
+    return _parse_repo(repo) or {}
 
 
 async def _start_agent_run(
@@ -368,7 +358,7 @@ async def _start_agent_run(
 
 
 async def create_dashboard_thread(login: str, body: ThreadCreateBody) -> dict[str, Any]:
-    repo_config = await _resolve_repo_config(login, body.repo)
+    repo_config = _resolve_repo_config(body.repo)
     thread_id = str(uuid.uuid4())
     return await _start_agent_run(
         thread_id,

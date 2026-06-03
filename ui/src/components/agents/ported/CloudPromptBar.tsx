@@ -18,6 +18,10 @@ export interface CloudPromptBarProps {
   models?: ModelOption[];
   selection?: ModelSelection | null;
   onSelectionChange?: (next: ModelSelection) => void;
+  /** Repos the user can target. When provided with onRepoChange, a repo picker is shown. */
+  repos?: Array<{ full_name: string }>;
+  selectedRepo?: string | null;
+  onRepoChange?: (repo: string | null) => void;
 }
 
 /** Web-adapted PromptBar from open-swe-app — local state, no Electron/Zustand deps. */
@@ -30,11 +34,25 @@ export const CloudPromptBar = memo(function CloudPromptBar({
   models = [],
   selection = null,
   onSelectionChange,
+  repos,
+  selectedRepo = null,
+  onRepoChange,
 }: CloudPromptBarProps) {
   const [value, setValue] = useState("");
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
+  const [repoDropdownOpen, setRepoDropdownOpen] = useState(false);
+  const [repoQuery, setRepoQuery] = useState("");
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const modelDropdownRef = useRef<HTMLDivElement>(null);
+  const repoDropdownRef = useRef<HTMLDivElement>(null);
+
+  const repoPickerEnabled = !!onRepoChange;
+  const filteredRepos = useMemo(() => {
+    const all = repos ?? [];
+    const q = repoQuery.trim().toLowerCase();
+    if (!q) return all;
+    return all.filter((r) => r.full_name.toLowerCase().includes(q));
+  }, [repos, repoQuery]);
 
   const combos = useMemo<ModelSelection[]>(() => {
     const list: ModelSelection[] = [];
@@ -67,8 +85,12 @@ export const CloudPromptBar = memo(function CloudPromptBar({
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
-      if (modelDropdownRef.current && !modelDropdownRef.current.contains(e.target as Node)) {
+      const target = e.target as Node;
+      if (modelDropdownRef.current && !modelDropdownRef.current.contains(target)) {
         setModelDropdownOpen(false);
+      }
+      if (repoDropdownRef.current && !repoDropdownRef.current.contains(target)) {
+        setRepoDropdownOpen(false);
       }
     }
     document.addEventListener("mousedown", handleClickOutside);
@@ -108,6 +130,83 @@ export const CloudPromptBar = memo(function CloudPromptBar({
         />
 
         <div className="mt-auto flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 pt-2 text-xs text-[color:var(--ui-text-dim)]">
+          {repoPickerEnabled && (
+            <>
+              <div ref={repoDropdownRef} className="relative min-w-0 shrink">
+                <button
+                  type="button"
+                  onClick={() => setRepoDropdownOpen((open) => !open)}
+                  className="max-w-[220px] cursor-pointer truncate text-[color:var(--ui-text-muted)] transition-opacity hover:opacity-80"
+                >
+                  {selectedRepo || "Select repository"}
+                </button>
+                {repoDropdownOpen && (
+                  <div className="absolute bottom-full left-0 z-50 mb-1 flex max-h-72 w-72 flex-col overflow-hidden rounded border border-[var(--ui-border)] bg-[var(--ui-surface)] shadow-lg">
+                    <input
+                      autoFocus
+                      value={repoQuery}
+                      onChange={(e) => setRepoQuery(e.target.value)}
+                      placeholder="Search repositories…"
+                      className="w-full border-b border-[var(--ui-border)] bg-transparent px-3 py-2 text-[color:var(--ui-text)] outline-none placeholder:text-[color:var(--ui-text-dim)]"
+                    />
+                    <div className="overflow-y-auto">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onRepoChange(null);
+                          setRepoDropdownOpen(false);
+                          setRepoQuery("");
+                        }}
+                        className={cn(
+                          "flex w-full items-center px-3 py-1.5 text-left transition-colors hover:bg-[var(--ui-panel-2)]",
+                          selectedRepo
+                            ? "text-[color:var(--ui-text-muted)]"
+                            : "text-[color:var(--ui-text)]",
+                        )}
+                      >
+                        No repository
+                        {!selectedRepo && (
+                          <span className="ml-auto pl-3 text-[color:var(--ui-text-dim)]">✓</span>
+                        )}
+                      </button>
+                      {filteredRepos.length === 0 ? (
+                        <div className="px-3 py-1.5 text-[color:var(--ui-text-dim)]">No matches</div>
+                      ) : (
+                        filteredRepos.map((repo) => {
+                          const selected = repo.full_name === selectedRepo;
+                          return (
+                            <button
+                              key={repo.full_name}
+                              type="button"
+                              onClick={() => {
+                                onRepoChange(repo.full_name);
+                                setRepoDropdownOpen(false);
+                                setRepoQuery("");
+                              }}
+                              className={cn(
+                                "flex w-full items-center px-3 py-1.5 text-left transition-colors hover:bg-[var(--ui-panel-2)]",
+                                selected
+                                  ? "text-[color:var(--ui-text)]"
+                                  : "text-[color:var(--ui-text-muted)]",
+                              )}
+                            >
+                              <span className="truncate">{repo.full_name}</span>
+                              {selected && (
+                                <span className="ml-auto pl-3 text-[color:var(--ui-text-dim)]">
+                                  ✓
+                                </span>
+                              )}
+                            </button>
+                          );
+                        })
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+              <span className="text-[color:var(--ui-text-dim)]">·</span>
+            </>
+          )}
           <div ref={modelDropdownRef} className="relative min-w-0 shrink">
             <button
               type="button"

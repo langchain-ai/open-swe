@@ -8,6 +8,7 @@ import { SlackConnectDialog } from "@/components/agents/SlackConnectDialog"
 import { Logo } from "@/components/agents/ported/Logo"
 import { useAgentThreads, useCreateAgentThread } from "@/lib/agents/queries"
 import { useModelOptions } from "@/lib/agents/useModelOptions"
+import { useProfile, useRepos } from "@/lib/profile"
 
 export function AgentsHome() {
   const threadsQuery = useAgentThreads()
@@ -15,6 +16,13 @@ export function AgentsHome() {
   const recentRuns = (threadsQuery.data ?? []).slice(0, 5)
   const { models, defaultSelection } = useModelOptions()
   const [selection, setSelection] = useState<ModelSelection | null>(null)
+
+  const reposQuery = useRepos()
+  const profileQuery = useProfile()
+  // undefined = untouched (fall back to the profile default); null = explicitly "no repo".
+  const [repoOverride, setRepoOverride] = useState<string | null | undefined>(undefined)
+  const repo =
+    repoOverride === undefined ? (profileQuery.data?.default_repo ?? null) : repoOverride
 
   useEffect(() => {
     if (selection === null && defaultSelection) setSelection(defaultSelection)
@@ -30,6 +38,7 @@ export function AgentsHome() {
             onSubmit={(prompt) =>
               createThread.mutate({
                 prompt,
+                repo,
                 model_id: selection?.modelId ?? null,
                 effort: selection?.effort ?? null,
               })
@@ -38,6 +47,9 @@ export function AgentsHome() {
             models={models}
             selection={selection ?? defaultSelection}
             onSelectionChange={setSelection}
+            repos={reposQuery.data?.repositories}
+            selectedRepo={repo}
+            onRepoChange={setRepoOverride}
           />
         </div>
 

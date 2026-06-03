@@ -1,54 +1,17 @@
 from __future__ import annotations
 
-from typing import Any
-
-import pytest
-
 from agent.dashboard import thread_api
 
 
-@pytest.mark.asyncio
-async def test_resolve_repo_config_parses_request_repo(monkeypatch: pytest.MonkeyPatch) -> None:
-    async def _fail(*_args: Any, **_kwargs: Any) -> Any:  # pragma: no cover - must not run
-        raise AssertionError("profile lookup should be skipped when request carries a repo")
-
-    monkeypatch.setattr(thread_api, "get_profile_default_repo", _fail)
-    monkeypatch.setattr(thread_api, "get_profile", _fail)
-
-    assert await thread_api._resolve_repo_config("octocat", "octo/repo") == {
-        "owner": "octo",
-        "name": "repo",
-    }
+def test_resolve_repo_config_parses_request_repo() -> None:
+    assert thread_api._resolve_repo_config("octo/repo") == {"owner": "octo", "name": "repo"}
 
 
-@pytest.mark.asyncio
-async def test_resolve_repo_config_uses_profile_default(monkeypatch: pytest.MonkeyPatch) -> None:
-    async def _default(_login: str | None) -> dict[str, str] | None:
-        return {"owner": "octo", "name": "default-repo"}
-
-    monkeypatch.setattr(thread_api, "get_profile_default_repo", _default)
-
-    assert await thread_api._resolve_repo_config("octocat", None) == {
-        "owner": "octo",
-        "name": "default-repo",
-    }
-
-
-@pytest.mark.asyncio
-async def test_resolve_repo_config_returns_empty_when_unconfigured(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    async def _no_default(_login: str | None) -> dict[str, str] | None:
-        return None
-
-    async def _empty_profile(_login: str) -> dict[str, Any]:
-        return {}
-
-    monkeypatch.setattr(thread_api, "get_profile_default_repo", _no_default)
-    monkeypatch.setattr(thread_api, "get_profile", _empty_profile)
-
-    # No request repo and no profile default: optional, so no error is raised.
-    assert await thread_api._resolve_repo_config("octocat", None) == {}
+def test_resolve_repo_config_returns_empty_when_no_repo_given() -> None:
+    # None / blank / malformed all mean an intentionally repo-less run — never an error.
+    assert thread_api._resolve_repo_config(None) == {}
+    assert thread_api._resolve_repo_config("") == {}
+    assert thread_api._resolve_repo_config("not-a-repo") == {}
 
 
 def test_thread_summary_blanks_repo_when_absent() -> None:
