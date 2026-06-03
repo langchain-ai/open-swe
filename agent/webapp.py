@@ -1721,6 +1721,8 @@ async def trigger_pr_review_from_ref(
     if not await _is_repo_enabled_for_review(repo_config):
         return {"success": False, "error": "Repository not enabled for review"}
 
+    # Full token to read PR metadata (privacy/id aren't in the trigger ref);
+    # re-scoped below once we know whether the repo is public.
     app_token, app_token_expires_at = await get_github_app_installation_token_with_expiry()
     if not app_token:
         logger.warning("No GitHub App token available for PR reviewer request")
@@ -2299,8 +2301,21 @@ async def process_github_push_event(payload: dict[str, Any]) -> None:
         )
         return
 
-    repo_private = repo_private if repo_private is not None else _repo_private_from_pr_metadata(pr)
-    repo_id = repo_id or _repo_id_from_pr_metadata(pr)
+    # Push payloads normally carry repo privacy/id; fall back to PR metadata.
+    # If the repo turns out public, re-scope the token so reviewer.py doesn't
+    # proxy a full-installation token for a public PR.
+    if repo_private is None:
+        repo_private = _repo_private_from_pr_metadata(pr)
+        repo_id = repo_id or _repo_id_from_pr_metadata(pr)
+        if repo_private is False:
+            app_token, app_token_expires_at = await _reviewer_token_for_repo(
+                repo_config,
+                repo_private=repo_private,
+                repo_id=repo_id,
+            )
+            if not app_token:
+                logger.warning("No GitHub App token for push re-review on %s", head_ref)
+                return
     pr_number = pr.get("number")
     pr_url = pr.get("html_url") or pr.get("url") or ""
     base_sha = pr.get("base", {}).get("sha", "")

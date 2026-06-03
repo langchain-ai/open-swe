@@ -234,26 +234,6 @@ async def check_or_recreate_sandbox(
     return sandbox_backend
 
 
-async def _check_or_recreate_sandbox_for_proxy(
-    sandbox_backend: SandboxBackendProtocol,
-    thread_id: str,
-    github_proxy_token: str | None,
-) -> SandboxBackendProtocol:
-    if github_proxy_token is None:
-        return await check_or_recreate_sandbox(sandbox_backend, thread_id)
-    return await check_or_recreate_sandbox(sandbox_backend, thread_id, github_proxy_token)
-
-
-async def _refresh_github_proxy_or_recreate_for_proxy(
-    sandbox_backend: SandboxBackendProtocol,
-    thread_id: str,
-    github_proxy_token: str | None,
-) -> SandboxBackendProtocol:
-    if github_proxy_token is None:
-        return await _refresh_github_proxy_or_recreate(sandbox_backend, thread_id)
-    return await _refresh_github_proxy_or_recreate(sandbox_backend, thread_id, github_proxy_token)
-
-
 def _creating_metadata() -> dict[str, Any]:
     """Metadata that claims the cross-process creation lock with a timestamp."""
     return {"sandbox_id": SANDBOX_CREATING, "sandbox_creating_at": time.time()}
@@ -330,16 +310,12 @@ async def ensure_sandbox_for_thread(
     if sandbox_backend:
         logger.info("Using cached sandbox backend for thread %s", thread_id)
         original_sandbox_id = sandbox_backend.id
-        sandbox_backend = await _check_or_recreate_sandbox_for_proxy(
-            sandbox_backend,
-            thread_id,
-            github_proxy_token,
+        sandbox_backend = await check_or_recreate_sandbox(
+            sandbox_backend, thread_id, github_proxy_token
         )
         if sandbox_backend.id == original_sandbox_id:
-            sandbox_backend = await _refresh_github_proxy_or_recreate_for_proxy(
-                sandbox_backend,
-                thread_id,
-                github_proxy_token,
+            sandbox_backend = await _refresh_github_proxy_or_recreate(
+                sandbox_backend, thread_id, github_proxy_token
             )
     elif sandbox_id is None:
         logger.info("Creating new sandbox for thread %s", thread_id)
@@ -371,16 +347,12 @@ async def ensure_sandbox_for_thread(
                 raise
         if not created_replacement_sandbox:
             original_sandbox_id = sandbox_backend.id
-            sandbox_backend = await _check_or_recreate_sandbox_for_proxy(
-                sandbox_backend,
-                thread_id,
-                github_proxy_token,
+            sandbox_backend = await check_or_recreate_sandbox(
+                sandbox_backend, thread_id, github_proxy_token
             )
             if sandbox_backend.id == original_sandbox_id:
-                sandbox_backend = await _refresh_github_proxy_or_recreate_for_proxy(
-                    sandbox_backend,
-                    thread_id,
-                    github_proxy_token,
+                sandbox_backend = await _refresh_github_proxy_or_recreate(
+                    sandbox_backend, thread_id, github_proxy_token
                 )
 
     sandbox_backend = set_sandbox_backend(thread_id, sandbox_backend)

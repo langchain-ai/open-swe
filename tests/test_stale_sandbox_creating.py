@@ -67,7 +67,7 @@ async def test_fresh_sandbox_creating_waits_for_other_worker() -> None:
         {"metadata": {"sandbox_id": "sandbox-existing", "sandbox_creating_at": fresh_at}},
     ]
 
-    async def passthrough(sb, _thread_id):
+    async def passthrough(sb, _thread_id, _github_proxy_token=None):
         return sb
 
     with (
