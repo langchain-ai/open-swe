@@ -7,7 +7,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
-from deepagents.backends import LangSmithSandbox
 
 from agent.integrations.langsmith import _configure_github_proxy
 
@@ -328,7 +327,7 @@ class TestRefreshProxyOnSandboxReuse:
 
             assert sandbox is replacement_sandbox
             mock_proxy.assert_called_once_with("sandbox-stale", "ghs_fresh")
-            mock_recreate.assert_awaited_once_with("thread-123")
+            mock_recreate.assert_awaited_once_with("thread-123", github_proxy_token=None)
 
     @pytest.mark.asyncio
     async def test_starts_stopped_langsmith_sandbox_before_proxy_refresh(self) -> None:
@@ -336,8 +335,6 @@ class TestRefreshProxyOnSandboxReuse:
         inner_sandbox = MagicMock(name="sandbox-stopped")
         inner_sandbox.name = "sandbox-stopped"
         inner_sandbox._client.get_sandbox_status.return_value = MagicMock(status="stopped")
-        sandbox_backend = object.__new__(LangSmithSandbox)
-        sandbox_backend._sandbox = inner_sandbox
 
         with (
             patch(
@@ -348,7 +345,10 @@ class TestRefreshProxyOnSandboxReuse:
             patch("agent.server._configure_github_proxy") as mock_proxy,
             patch.dict("os.environ", {"SANDBOX_TYPE": "langsmith"}),
         ):
-            from agent.server import _refresh_github_proxy
+            from agent.server import LangSmithSandbox, _refresh_github_proxy
+
+            sandbox_backend = object.__new__(LangSmithSandbox)
+            sandbox_backend._sandbox = inner_sandbox
 
             await _refresh_github_proxy(sandbox_backend)
 
@@ -362,8 +362,6 @@ class TestRefreshProxyOnSandboxReuse:
         inner_sandbox = MagicMock(name="sandbox-ready")
         inner_sandbox.name = "sandbox-ready"
         inner_sandbox._client.get_sandbox_status.return_value = MagicMock(status="ready")
-        sandbox_backend = object.__new__(LangSmithSandbox)
-        sandbox_backend._sandbox = inner_sandbox
 
         with (
             patch(
@@ -374,7 +372,10 @@ class TestRefreshProxyOnSandboxReuse:
             patch("agent.server._configure_github_proxy") as mock_proxy,
             patch.dict("os.environ", {"SANDBOX_TYPE": "langsmith"}),
         ):
-            from agent.server import _refresh_github_proxy
+            from agent.server import LangSmithSandbox, _refresh_github_proxy
+
+            sandbox_backend = object.__new__(LangSmithSandbox)
+            sandbox_backend._sandbox = inner_sandbox
 
             await _refresh_github_proxy(sandbox_backend)
 

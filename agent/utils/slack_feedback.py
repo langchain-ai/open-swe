@@ -11,6 +11,8 @@ from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
 
 from .langsmith import create_langsmith_feedback, delete_langsmith_feedback
+from .reviewer_outcomes import outcome_from_score as _outcome_from_score
+from .reviewer_outcomes import upsert_run_outcome
 from .slack import lookup_slack_run_mapping
 
 logger = logging.getLogger(__name__)
@@ -199,6 +201,17 @@ async def process_slack_reaction(
             score=score,
             comment=f"Slack reaction feedback from user {user_id}",
             source_info={**source_info, "reactions": sorted(active_reactions)},
+        )
+
+    outcome = _outcome_from_score(score, source="slack")
+    if outcome is not None:
+        label, label_source = outcome
+        await asyncio.to_thread(
+            upsert_run_outcome,
+            label=label,
+            label_source=label_source,
+            run_id=run_id,
+            extra={"channel_id": channel_id},
         )
 
     if success:

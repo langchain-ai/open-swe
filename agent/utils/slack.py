@@ -12,7 +12,7 @@ import re
 import time
 from dataclasses import dataclass
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 import httpx
 from langgraph_sdk.client import LangGraphClient
@@ -23,10 +23,6 @@ logger = logging.getLogger(__name__)
 
 SLACK_API_BASE_URL = "https://slack.com/api"
 SLACK_BOT_TOKEN = os.environ.get("SLACK_BOT_TOKEN", "")
-GITHUB_PR_URL_RE = re.compile(r"https?://(?:www\.)?github\.com/[^\s<>|]+/[^\s<>|]+/pull/\d+")
-URL_RE = re.compile(r"https?://[^\s<>|]+")
-
-
 DEFAULT_ASSISTANT_STATUS = "is thinking…"
 
 # Curated rotating loading strings shown by Slack while the indicator is active.
@@ -174,36 +170,6 @@ def parse_github_pr_url(url: str) -> GitHubPrRef | None:
     )
 
 
-def parse_slack_review_command(text: str) -> GitHubPrRef | None:
-    stripped = text.strip()
-    command_match = re.fullmatch(r"(?is)review\s+(.+)", stripped)
-    if not command_match:
-        return None
-
-    rest = command_match.group(1).strip()
-    url_match = GITHUB_PR_URL_RE.search(rest)
-    if not url_match:
-        return None
-
-    trailing_text = rest[url_match.end() :].strip()
-    if trailing_text and trailing_text != ">" and not trailing_text.startswith("|"):
-        return None
-
-    return parse_github_pr_url(url_match.group(0))
-
-
-def looks_like_slack_pr_review_command(text: str) -> bool:
-    stripped = text.strip()
-    if not re.match(r"(?is)^review\b", stripped):
-        return False
-    for match in URL_RE.finditer(stripped):
-        parsed = urlparse(match.group(0).strip("<>"))
-        host = (parsed.hostname or "").lower()
-        if parsed.scheme in {"http", "https"} and host in {"github.com", "www.github.com"}:
-            return True
-    return False
-
-
 def select_slack_context_messages(
     messages: list[dict[str, Any]],
     current_message_ts: str,
@@ -330,10 +296,10 @@ async def post_slack_thread_reply_with_ts(
     *,
     unfurl_links: bool = True,
     unfurl_media: bool = True,
-) -> str | None:
-    """Post a reply in a Slack thread and return its Slack timestamp."""
+) -> tuple[str | None, str | None]:
+    """Post a reply in a Slack thread and return its Slack timestamp and error."""
     if not SLACK_BOT_TOKEN:
-        return None
+        return None, "missing_slack_bot_token"
 
     payload: dict[str, Any] = {
         "channel": channel_id,
@@ -350,21 +316,33 @@ async def post_slack_thread_reply_with_ts(
                 headers=_slack_headers(),
                 json=payload,
             )
+            if response.status_code == 429:
+                retry_after = response.headers.get("Retry-After")
+                logger.warning("Slack chat.postMessage rate limited (retry-after=%s)", retry_after)
+                if retry_after:
+                    return None, f"rate_limited: {retry_after}"
+                return None, "rate_limited"
             response.raise_for_status()
             data = response.json()
             if not data.get("ok"):
-                logger.warning("Slack chat.postMessage failed: %s", data.get("error"))
-                return None
+                error = data.get("error")
+                logger.warning("Slack chat.postMessage failed: %s", error)
+                if error == "ratelimited":
+                    return None, "rate_limited"
+                return None, error
             message_ts = data.get("ts")
-            return message_ts if isinstance(message_ts, str) and message_ts else None
-        except httpx.HTTPError:
+            if isinstance(message_ts, str) and message_ts:
+                return message_ts, None
+            return None, None
+        except httpx.HTTPError as exc:
             logger.exception("Slack chat.postMessage request failed")
-            return None
+            return None, f"http_error: {type(exc).__name__}"
 
 
 async def post_slack_thread_reply(channel_id: str, thread_ts: str, text: str) -> bool:
     """Post a reply in a Slack thread."""
-    return await post_slack_thread_reply_with_ts(channel_id, thread_ts, text) is not None
+    message_ts, _ = await post_slack_thread_reply_with_ts(channel_id, thread_ts, text)
+    return message_ts is not None
 
 
 async def post_slack_ephemeral_message(
@@ -685,17 +663,17 @@ TRACE_REPLY_TIPS: tuple[str, ...] = (
     "Kick off another task in parallel — each one runs in its own isolated sandbox, no queuing.",
     "Add `repo:owner/name` to your message to point me at a different repo for this task.",
     "Drop an `AGENTS.md` at your repo root and I'll read it on every run — it's the easiest way to teach me your conventions.",
-    "I'll open a draft PR automatically when I'm done and link it back here.",
+    "For code-change tasks, I'll open a draft PR when it's necessary or requested and link it back here.",
     "Tag me on a PR comment of an open-swe PR to have me address review feedback on the same branch.",
     "I can spawn subagents for independent subtasks — useful for parallel research or fan-out work.",
     "Click `View trace` above to watch every tool call and model response live in LangSmith.",
     "React to my final reply with :+1: or :-1: to share feedback — it helps me get better.",
-    "Send me `review <github-pr-url>` in Slack and I'll spin up the reviewer agent to leave inline comments on that PR.",
+    "Ask me to review a GitHub PR in Slack and I'll spin up the reviewer agent to leave inline comments.",
     "Pasting a GitHub URL into your message also works to point me at a repo — no `repo:` prefix needed.",
     "Attach screenshots or images directly in Slack or Linear — I'll read them as part of the task context.",
     "Tag `@openswe` on a Linear issue and I'll pull in the full title, description, and comment thread before starting.",
     "I also pick up `@openswe` mentions in GitHub issue bodies and comments — not just on PRs.",
-    "On a GitHub PR, comment `@open-swe review` to trigger the reviewer agent and get inline review comments.",
+    "On a GitHub PR, ask me to review it and I'll hand it off to the reviewer agent for inline comments.",
     "Each thread keeps a persistent sandbox — follow-up runs reuse the same workspace, so my context sticks around.",
     "Paste a Slack message link from another thread and I'll fetch its content (and any images) as extra context.",
     "Ask me to search the web — I have a `web_search` tool for finding docs, examples, and GitHub repos mid-task.",
@@ -703,23 +681,42 @@ TRACE_REPLY_TIPS: tuple[str, ...] = (
 )
 
 
-def _format_trace_reply(trace_url: str | None) -> str:
+def _get_dashboard_thread_url(thread_id: str) -> str | None:
+    """Build the dashboard thread URL for a given thread ID."""
+    base_url = (
+        os.environ.get("DASHBOARD_BASE_URL", "https://openswe.vercel.app").strip().rstrip("/")
+    )
+    if not base_url:
+        return None
+    return f"{base_url}/agents/{quote(thread_id, safe='')}"
+
+
+def _format_trace_reply(trace_url: str | None, dashboard_url: str | None) -> str:
     """Format the initial trace reply with a randomly selected tip."""
     tip = random.choice(TRACE_REPLY_TIPS)
-    head = f"<{trace_url}|View trace>\n" if trace_url else ""
+    links = []
+    if trace_url:
+        links.append(f"<{trace_url}|View trace>")
+    if dashboard_url:
+        links.append(f"<{dashboard_url}|Open in Web>")
+    head = f"{' • '.join(links)}\n" if links else ""
     return f"{head}_Tip: {tip}_"
 
 
-async def post_slack_trace_reply(channel_id: str, thread_ts: str, thread_id: str) -> str | None:
+async def post_slack_trace_reply(
+    channel_id: str, thread_ts: str, thread_id: str, *, include_dashboard_link: bool = True
+) -> str | None:
     """Post a trace URL reply in a Slack thread and return its Slack timestamp."""
     trace_url = get_langsmith_trace_url(thread_id)
-    return await post_slack_thread_reply_with_ts(
+    dashboard_url = _get_dashboard_thread_url(thread_id) if include_dashboard_link else None
+    message_ts, _ = await post_slack_thread_reply_with_ts(
         channel_id,
         thread_ts,
-        _format_trace_reply(trace_url),
+        _format_trace_reply(trace_url, dashboard_url),
         unfurl_links=False,
         unfurl_media=False,
     )
+    return message_ts
 
 
 _SLACK_RUN_MAP_NAMESPACE = "slack_run_map"

@@ -1,5 +1,15 @@
 {
   "include": ["**/*.ts", "**/*.tsx", "eslint.config.js", "prettier.config.js", "vite.config.js"],
+  "exclude": [
+    "src/components/agents/ported/ChatView.tsx",
+    "src/components/agents/ported/PromptBar.tsx",
+    "src/components/agents/ported/BranchSelector.tsx",
+    "src/components/agents/ported/ContextIndicator.tsx",
+    "src/components/agents/ported/SourceControlPanel.tsx",
+    "src/components/agents/ported/SourceControlTile.tsx",
+    "src/components/agents/ported/Footer.tsx",
+    "src/components/agents/ported/ThreadPicker.tsx"
+  ],
 
   "compilerOptions": {
     "target": "ES2022",

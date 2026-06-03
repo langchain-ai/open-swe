@@ -3,7 +3,8 @@
   "python_version": "3.12",
   "graphs": {
     "agent": "agent.server:get_agent",
-    "reviewer": "agent.reviewer:get_reviewer_agent"
+    "reviewer": "agent.reviewer:get_reviewer_agent",
+    "analyzer": "agent.analyzer:get_analyzer"
   },
   "dependencies": ["."],
   "http": {

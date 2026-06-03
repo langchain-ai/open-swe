@@ -28,6 +28,8 @@ REVIEWER_THREAD_KIND = "reviewer"
 # code for the author and clutters the comment. We cap at 4 lines and drop
 # longer suggestions; the description still gets posted on its own.
 MAX_SUGGESTION_LINES = 4
+MAX_FINDING_TITLE_LENGTH = 120
+DEFAULT_FINDING_TITLE = "Code review finding"
 
 
 def clip_suggestion(suggestion: str | None) -> tuple[str | None, bool]:
@@ -39,29 +41,50 @@ def clip_suggestion(suggestion: str | None) -> tuple[str | None, bool]:
     return suggestion, False
 
 
-Severity = Literal["informational", "low", "medium", "high", "critical"]
+def normalize_finding_title(title: str | None, description: str = "") -> str:
+    """Return a compact finding title suitable for a review comment headline."""
+    raw = title.strip() if isinstance(title, str) else ""
+    if not raw and description:
+        raw = description.strip().split("\n", 1)[0].strip()
+    compact = " ".join(raw.split())
+    if not compact:
+        return DEFAULT_FINDING_TITLE
+    if len(compact) > MAX_FINDING_TITLE_LENGTH:
+        return f"{compact[: MAX_FINDING_TITLE_LENGTH - 3].rstrip()}..."
+    return compact
+
+
+Severity = Literal["low", "medium", "high", "critical"]
+Confidence = Literal["low", "medium", "high"]
 FindingStatus = Literal["open", "resolved", "dismissed"]
 DiffSide = Literal["LEFT", "RIGHT"]
+SurfaceState = Literal["not_surfaced", "surfaced", "resolve_pending", "resolved", "error"]
+InteractionKind = Literal["human_reply", "bot_reply"]
 
 SEVERITY_ORDER: dict[Severity, int] = {
-    "informational": 0,
-    "low": 1,
-    "medium": 2,
-    "high": 3,
-    "critical": 4,
+    "low": 0,
+    "medium": 1,
+    "high": 2,
+    "critical": 3,
 }
+
+# Confidence is recorded on every finding for post-hoc calibration analysis
+# but does not gate publication — the system prompt's defensibility bar is
+# the discipline.
 
 
 class Finding(TypedDict, total=False):
     """A single review finding.
 
-    All fields are optional at the TypedDict level so partial updates are
-    representable, but ``new_finding`` always returns a fully populated dict.
+    All fields are optional at the TypedDict level so partial updates and
+    legacy findings without generated titles are representable.
     """
 
     id: str
     severity: Severity
+    confidence: Confidence
     category: str
+    title: str
     file: str
     start_line: int | None
     end_line: int | None
@@ -71,8 +94,54 @@ class Finding(TypedDict, total=False):
     status: FindingStatus
     first_seen_sha: str
     last_confirmed_sha: str
+    github_review_id: int | None
     github_review_comment_id: int | None
+    github_review_comment_ids: list[int]
+    github_review_thread_id: str | None
+    github_review_thread_ids: list[str]
+    github_review_run_id: str | None
+    github_thread_resolved: bool
+    github_resolved_thread_ids: list[str]
+    github_posted_resolution_comment_ids: list[int]
+    last_human_reply_at: str | None
+    last_human_reply_author: str | None
+    last_human_reply_body: str | None
+    last_reconciliation_note: str | None
+    resolution_note: str | None
     diff_hunk: str | None
+    fingerprint: str
+    anchor: FindingAnchor
+    surface: FindingSurface
+    interactions: list[FindingInteraction]
+
+
+class FindingAnchor(TypedDict):
+    file: str
+    start_line: int | None
+    end_line: int | None
+    side: DiffSide
+
+
+class FindingSurface(TypedDict, total=False):
+    finding_id: str
+    state: SurfaceState
+    github_review_id: int | None
+    github_review_comment_id: int | None
+    github_review_thread_id: str | None
+    severity_threshold_at_publish: Severity | None
+    surfaced_at_sha: str | None
+    last_github_sync_at: str | None
+    last_error: str | None
+
+
+class FindingInteraction(TypedDict, total=False):
+    kind: InteractionKind
+    github_comment_id: int | None
+    github_parent_comment_id: int | None
+    author: str
+    body: str
+    created_at: str
+    needs_reassessment: bool
 
 
 class ReviewerPRMeta(TypedDict, total=False):
@@ -108,15 +177,36 @@ def new_finding(
     end_line: int | None,
     description: str,
     sha: str,
+    title: str | None = None,
+    confidence: Confidence = "medium",
     side: DiffSide = "RIGHT",
     suggestion: str | None = None,
     diff_hunk: str | None = None,
     finding_id: str | None = None,
 ) -> Finding:
     """Construct a fully-populated ``Finding`` ready to persist."""
-    return {
-        "id": finding_id or new_finding_id(),
+    resolved_id = finding_id or new_finding_id()
+    anchor: FindingAnchor = {
+        "file": file,
+        "start_line": start_line,
+        "end_line": end_line,
+        "side": side,
+    }
+    surface: FindingSurface = {
+        "finding_id": resolved_id,
+        "state": "not_surfaced",
+        "github_review_id": None,
+        "github_review_comment_id": None,
+        "github_review_thread_id": None,
+        "severity_threshold_at_publish": None,
+        "surfaced_at_sha": None,
+        "last_github_sync_at": None,
+        "last_error": None,
+    }
+    finding: Finding = {
+        "id": resolved_id,
         "severity": severity,
+        "confidence": confidence,
         "category": category,
         "file": file,
         "start_line": start_line,
@@ -127,9 +217,39 @@ def new_finding(
         "status": "open",
         "first_seen_sha": sha,
         "last_confirmed_sha": sha,
+        "github_review_id": None,
         "github_review_comment_id": None,
+        "github_review_comment_ids": [],
+        "github_review_thread_id": None,
+        "github_review_thread_ids": [],
+        "github_review_run_id": None,
+        "github_thread_resolved": False,
+        "github_resolved_thread_ids": [],
+        "github_posted_resolution_comment_ids": [],
+        "last_human_reply_at": None,
+        "last_human_reply_author": None,
+        "last_human_reply_body": None,
+        "last_reconciliation_note": None,
+        "resolution_note": None,
         "diff_hunk": diff_hunk,
+        "fingerprint": _finding_fingerprint(file, start_line, end_line, description),
+        "anchor": anchor,
+        "surface": surface,
+        "interactions": [],
     }
+    if title is not None:
+        finding["title"] = normalize_finding_title(title)
+    return finding
+
+
+def _finding_fingerprint(
+    file: str,
+    start_line: int | None,
+    end_line: int | None,
+    description: str,
+) -> str:
+    normalized_description = " ".join(description.strip().lower().split())
+    return f"{file}:{start_line or ''}:{end_line or ''}:{normalized_description[:160]}"
 
 
 def _coerce_finding(value: Any) -> Finding | None:
@@ -172,6 +292,24 @@ async def get_thread_metadata(thread_id: str) -> dict[str, Any]:
         return {}
     metadata = thread.get("metadata") if isinstance(thread, dict) else None
     return metadata if isinstance(metadata, dict) else {}
+
+
+async def resolve_review_head_sha(thread_id: str, configurable: dict[str, Any]) -> str:
+    """Return the current PR head SHA for a reviewer run.
+
+    A push that lands while a reviewer run is in flight is delivered as a queued
+    message into that run, whose frozen ``configurable`` still names the head the
+    run was created for. The dispatching webhook records the current head in
+    thread metadata, so prefer that; fall back to the run's config when metadata
+    carries no head (first review, eval, tests).
+    """
+    config_head = configurable.get("head_sha") if isinstance(configurable, dict) else None
+    config_head = config_head if isinstance(config_head, str) else ""
+    if not thread_id:
+        return config_head
+    metadata = await get_thread_metadata(thread_id)
+    meta_head = metadata.get("head_sha")
+    return meta_head if isinstance(meta_head, str) and meta_head else config_head
 
 
 async def list_findings(thread_id: str) -> list[Finding]:
@@ -222,11 +360,103 @@ async def update_finding_fields(
     return updated
 
 
+async def update_finding_surface(
+    thread_id: str,
+    finding_id: str,
+    updates: dict[str, Any],
+) -> Finding | None:
+    """Apply updates to the nested surface record and legacy GitHub fields."""
+    findings = await list_findings(thread_id)
+    updated: Finding | None = None
+    for finding in findings:
+        if finding.get("id") != finding_id:
+            continue
+        surface = _coerce_surface(finding, finding_id)
+        surface.update(updates)
+        finding["surface"] = surface
+        _sync_legacy_surface_fields(finding, surface)
+        updated = finding
+        break
+    if updated is None:
+        return None
+    await replace_findings(thread_id, findings)
+    return updated
+
+
+async def append_finding_interaction(
+    thread_id: str,
+    finding_id: str,
+    interaction: FindingInteraction,
+) -> Finding | None:
+    """Persist a GitHub review-thread interaction on one finding."""
+    findings = await list_findings(thread_id)
+    updated: Finding | None = None
+    for finding in findings:
+        if finding.get("id") != finding_id:
+            continue
+        interactions = finding.get("interactions")
+        if not isinstance(interactions, list):
+            interactions = []
+        github_comment_id = interaction.get("github_comment_id")
+        if isinstance(github_comment_id, int) and any(
+            isinstance(item, dict) and item.get("github_comment_id") == github_comment_id
+            for item in interactions
+        ):
+            updated = finding
+            break
+        interactions.append(interaction)
+        finding["interactions"] = interactions
+        updated = finding
+        break
+    if updated is None:
+        return None
+    await replace_findings(thread_id, findings)
+    return updated
+
+
+def _coerce_surface(finding: Finding, finding_id: str) -> FindingSurface:
+    surface = finding.get("surface")
+    if isinstance(surface, dict):
+        coerced = cast(FindingSurface, dict(surface))
+    else:
+        coerced = {"finding_id": finding_id}
+    if not coerced.get("state"):
+        if finding.get("github_thread_resolved"):
+            coerced["state"] = "resolved"
+        elif isinstance(finding.get("github_review_comment_id"), int):
+            coerced["state"] = "surfaced"
+        else:
+            coerced["state"] = "not_surfaced"
+    coerced.setdefault("github_review_id", finding.get("github_review_id"))
+    coerced.setdefault("github_review_comment_id", finding.get("github_review_comment_id"))
+    coerced.setdefault("github_review_thread_id", finding.get("github_review_thread_id"))
+    coerced.setdefault("severity_threshold_at_publish", None)
+    coerced.setdefault("surfaced_at_sha", None)
+    coerced.setdefault("last_github_sync_at", None)
+    coerced.setdefault("last_error", None)
+    return coerced
+
+
+def _sync_legacy_surface_fields(finding: Finding, surface: FindingSurface) -> None:
+    review_id = surface.get("github_review_id")
+    if isinstance(review_id, int) or review_id is None:
+        finding["github_review_id"] = review_id
+    comment_id = surface.get("github_review_comment_id")
+    if isinstance(comment_id, int) or comment_id is None:
+        finding["github_review_comment_id"] = comment_id
+    thread_id = surface.get("github_review_thread_id")
+    if isinstance(thread_id, str) or thread_id is None:
+        finding["github_review_thread_id"] = thread_id
+    if surface.get("state") == "resolved":
+        finding["github_thread_resolved"] = True
+
+
 async def set_reviewer_thread_metadata(
     thread_id: str,
     *,
     pr: ReviewerPRMeta | None = None,
     last_reviewed_sha: str | None = None,
+    head_sha: str | None = None,
     watch: bool | None = None,
     findings: list[Finding] | None = None,
     slack_thread: ReviewerSlackThread | None = None,
@@ -237,6 +467,11 @@ async def set_reviewer_thread_metadata(
     Always sets ``kind=reviewer`` so the future UI can list reviewer threads by
     filtering on metadata. Only includes the fields the caller passed in
     (langgraph metadata updates merge rather than overwrite).
+
+    ``head_sha`` records the current PR head the dispatching webhook is acting
+    on. A push that lands mid-run is queued into the still-running run, whose
+    frozen config can't be updated; persisting the head here lets the reviewer
+    tools resolve the live head via ``resolve_review_head_sha``.
     """
     client = get_client()
     metadata: dict[str, Any] = {"kind": REVIEWER_THREAD_KIND}
@@ -244,6 +479,8 @@ async def set_reviewer_thread_metadata(
         metadata["pr"] = pr
     if last_reviewed_sha is not None:
         metadata["last_reviewed_sha"] = last_reviewed_sha
+    if head_sha is not None:
+        metadata["head_sha"] = head_sha
     if watch is not None:
         metadata["watch"] = watch
     if findings is not None:
@@ -297,16 +534,16 @@ def filter_findings_for_publish(
     - sorted by severity descending, then file/start_line for stable ordering
     - capped at ``cap`` to avoid review spam
     """
-    threshold_rank = SEVERITY_ORDER[severity_threshold]
+    severity_rank = SEVERITY_ORDER[severity_threshold]
     eligible = [
         finding
         for finding in findings
         if finding.get("status", "open") == "open"
-        and SEVERITY_ORDER.get(finding.get("severity", "informational"), 0) >= threshold_rank
+        and SEVERITY_ORDER.get(finding.get("severity", "low"), 0) >= severity_rank
     ]
     eligible.sort(
         key=lambda f: (
-            -SEVERITY_ORDER.get(f.get("severity", "informational"), 0),
+            -SEVERITY_ORDER.get(f.get("severity", "low"), 0),
             f.get("file", ""),
             f.get("start_line") or 0,
         )

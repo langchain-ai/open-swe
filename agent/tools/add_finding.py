@@ -9,7 +9,9 @@ from langgraph.config import get_config
 
 from ..reviewer_diff import is_range_in_diff
 from ..reviewer_findings import (
+    DEFAULT_FINDING_TITLE,
     MAX_SUGGESTION_LINES,
+    Confidence,
     DiffSide,
     Finding,
     Severity,
@@ -17,13 +19,17 @@ from ..reviewer_findings import (
     clip_suggestion,
     get_thread_id_from_runtime,
     new_finding,
+    normalize_finding_title,
+    resolve_review_head_sha,
 )
 
 
 def add_finding(
     severity: str,
+    confidence: str,
     category: str,
     file: str,
+    title: str,
     description: str,
     start_line: int | None = None,
     end_line: int | None = None,
@@ -37,8 +43,9 @@ def add_finding(
     flow and the future UI.
 
     **When to use:** Once per distinct issue you find while reviewing the
-    diff. Prefer one finding per issue, with a clear ``description`` and, when
-    you can offer a concrete fix, a ``suggestion`` that exactly replaces lines
+    diff. Prefer one finding per issue, with a concise generated ``title`` that
+    names the failure mode, a clear ``description`` body, and, when you can
+    offer a concrete fix, a ``suggestion`` that exactly replaces lines
     ``start_line..end_line``.
 
     **In-diff only:** ``start_line..end_line`` must be inside the PR diff.
@@ -47,19 +54,30 @@ def add_finding(
     issue truly isn't anchored to a line.
 
     Args:
-        severity: One of ``informational``, ``low``, ``medium``, ``high``, ``critical``.
+        severity: One of ``low``, ``medium``, ``high``, ``critical``.
+        confidence: One of ``low``, ``medium``, ``high``.
         category: Short category label (``correctness``, ``security``, ``perf``,
             ``style``, ``flag``, etc.). Free-form; used for grouping in the UI.
         file: Repo-relative path of the file the finding refers to.
-        description: Markdown body the user sees.
-        start_line: 1-based line in the new (post-PR) file to anchor the
-            comment to. Pick the single most relevant line — the call site,
-            the signature, or the line the issue is actually about. Omit
-            (with ``end_line``) for file-level findings.
-        end_line: Accepted for API compatibility, but findings are always
-            anchored to a single line (``start_line``). GitHub renders
-            multi-line ranges as walls of context that bury the comment, so
-            we collapse to one line for a cleaner comment.
+        title: Concise generated headline for the finding. Name the failure mode
+            in roughly 4-10 words; do not copy or truncate the description.
+        description: Markdown body the user sees. Do not repeat ``title`` as the
+            first line.
+        start_line: 1-based line in the new (post-PR) file where the
+            relevant range begins. For a single-line finding, this is the
+            line the issue is about. For a multi-line finding, this is the
+            first line of the relevant range. Omit (with ``end_line``) for
+            file-level findings.
+        end_line: 1-based line where the relevant range ends. GitHub
+            anchors the inline comment at ``end_line`` and renders the
+            ``start_line..end_line`` span as the highlighted snippet, so
+            choose ``end_line`` as the *last* line that matters — typically
+            the line the comment is most directly about. For a single-line
+            finding, set ``end_line == start_line`` (or omit it). Prefer
+            the natural range of the issue over a single line: GitHub
+            shows context above ``end_line``, so a one-line anchor often
+            buries the issue under unrelated context. Defaults to
+            ``start_line`` when omitted.
         suggestion: Replacement text for ``start_line..end_line``. When set,
             the published GitHub comment includes a ```suggestion``` block so
             the user can click "Commit suggestion". **Only set this for small,
@@ -79,24 +97,26 @@ def add_finding(
     if start_line is None and end_line is not None:
         start_line = end_line
 
-    if severity not in {"informational", "low", "medium", "high", "critical"}:
+    normalized_title = normalize_finding_title(title)
+    if normalized_title == DEFAULT_FINDING_TITLE:
+        return {"success": False, "error": "title must be a non-empty generated headline"}
+
+    if severity not in {"low", "medium", "high", "critical"}:
         return {"success": False, "error": f"Invalid severity: {severity}"}
+    if confidence not in {"low", "medium", "high"}:
+        return {"success": False, "error": f"Invalid confidence: {confidence}"}
     if side not in {"LEFT", "RIGHT"}:
         return {"success": False, "error": f"Invalid side: {side}"}
     if start_line is not None and end_line is not None and end_line < start_line:
         return {"success": False, "error": "end_line must be >= start_line"}
 
-    if start_line is not None:
-        end_line = start_line
-
     config = get_config()
     configurable = config.get("configurable", {}) if isinstance(config, dict) else {}
     diff_line_set = configurable.get("diff_line_set") if isinstance(configurable, dict) else None
-    head_sha = configurable.get("head_sha", "") if isinstance(configurable, dict) else ""
     diff_text = configurable.get("diff_text", "") if isinstance(configurable, dict) else ""
 
     if isinstance(diff_line_set, dict) and not is_range_in_diff(
-        diff_line_set, file, start_line, end_line
+        diff_line_set, file, start_line, end_line, side=_cast_side(side)
     ):
         return {
             "success": False,
@@ -114,20 +134,24 @@ def add_finding(
 
     clipped_suggestion, suggestion_dropped = clip_suggestion(suggestion)
 
+    thread_id = get_thread_id_from_runtime()
+    head_sha = asyncio.run(resolve_review_head_sha(thread_id, configurable))
+
     finding: Finding = new_finding(
         severity=_cast_severity(severity),
+        confidence=_cast_confidence(confidence),
         category=category,
         file=file,
         start_line=start_line,
         end_line=end_line,
         description=description,
-        sha=str(head_sha) if isinstance(head_sha, str) else "",
+        sha=head_sha,
+        title=normalized_title,
         side=_cast_side(side),
         suggestion=clipped_suggestion,
         diff_hunk=diff_hunk,
     )
 
-    thread_id = get_thread_id_from_runtime()
     asyncio.run(append_finding(thread_id, finding))
     result: dict[str, Any] = {"success": True, "finding_id": finding["id"]}
     if suggestion_dropped:
@@ -141,6 +165,10 @@ def add_finding(
 
 
 def _cast_severity(value: str) -> Severity:
+    return value  # type: ignore[return-value]
+
+
+def _cast_confidence(value: str) -> Confidence:
     return value  # type: ignore[return-value]
 
 

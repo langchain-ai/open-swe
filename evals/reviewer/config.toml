@@ -1,0 +1,18 @@
+dataset_name = "openswe-reviewer-v1"
+experiment_prefix = "openswe-review-confidence"
+max_concurrency = 5
+
+# Leave blank to use LANGGRAPH_URL or local dev.
+langgraph_url = ""
+assistant_id = "reviewer"
+# models: openai:gpt-5.5, anthropic:claude-opus-4-8, google_genai:gemini-3.5-flash
+model_id = "google_genai:gemini-3.5-flash"
+reasoning_effort = "medium"
+
+# score_mode:
+# - "all_findings" — score every add_finding the agent emits (no gating).
+# - "surfaced_findings" — only findings that pass the production severity
+#   threshold and cap.
+score_mode = "all_findings"
+severity_threshold = "medium"
+cap = 4

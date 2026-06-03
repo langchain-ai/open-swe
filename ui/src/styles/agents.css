@@ -1,0 +1,47 @@
+.agents-ui {
+  --ui-bg: oklch(0.99 0.002 197.1);
+  --ui-surface: oklch(1 0 0);
+  --ui-panel: oklch(0.985 0.002 197.1);
+  --ui-panel-2: oklch(0.967 0.001 286.375);
+  --ui-border: oklch(0.925 0.005 214.3);
+  --ui-border-subtle: oklch(0.945 0.004 214.3);
+  --ui-text: oklch(0.148 0.004 228.8);
+  --ui-text-muted: oklch(0.45 0.017 213.2);
+  --ui-text-dim: oklch(0.56 0.021 213.5);
+  --ui-accent: oklch(0.52 0.105 223.128);
+  --ui-accent-bubble: oklch(0.955 0.015 223);
+  --ui-sidebar: oklch(0.987 0.002 197.1);
+  --ui-sidebar-hover: oklch(0.963 0.002 197.1);
+  --ui-success: oklch(0.62 0.17 145);
+  --ui-danger: oklch(0.577 0.245 27.325);
+}
+
+.agents-ui {
+  color: var(--ui-text);
+  background: var(--ui-bg);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.agents-ui * {
+  scrollbar-width: thin;
+  scrollbar-color: oklch(0.85 0.01 214) transparent;
+}
+
+.agents-ui .shimmer-text {
+  background: linear-gradient(90deg, var(--ui-text-dim) 40%, var(--ui-accent) 50%, var(--ui-text-dim) 60%);
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  animation: agents-shimmer 4s linear infinite;
+}
+
+@keyframes agents-shimmer {
+  0% {
+    background-position: 200% center;
+  }
+  100% {
+    background-position: -200% center;
+  }
+}

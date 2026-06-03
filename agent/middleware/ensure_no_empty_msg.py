@@ -3,7 +3,10 @@ from uuid import uuid4
 
 from langchain.agents.middleware import AgentState, after_model
 from langchain_core.messages import AnyMessage, ToolMessage
+from langgraph.config import get_config
 from langgraph.runtime import Runtime
+
+_DASHBOARD_SOURCE = "dashboard"
 
 
 def get_every_message_since_last_human(state: AgentState) -> list[AnyMessage]:
@@ -40,6 +43,17 @@ def check_if_no_op(messages: list[AnyMessage]) -> bool:
     return False
 
 
+def _is_dashboard_source() -> bool:
+    try:
+        config = get_config()
+    except RuntimeError:
+        return False
+    configurable = config.get("configurable", {})
+    if not isinstance(configurable, dict):
+        return False
+    return configurable.get("source") == _DASHBOARD_SOURCE
+
+
 @after_model
 def ensure_no_empty_msg(state: AgentState, runtime: Runtime) -> dict[str, Any] | None:
     last_msg = state["messages"][-1]
@@ -67,9 +81,11 @@ def ensure_no_empty_msg(state: AgentState, runtime: Runtime) -> dict[str, Any] |
     if has_contents and not has_tool_calls:
         messages_since_last_human = get_every_message_since_last_human(state)
 
-        if check_if_model_messaged_user(
-            messages_since_last_human
-        ) or check_if_confirming_completion(messages_since_last_human):
+        if (
+            check_if_model_messaged_user(messages_since_last_human)
+            or check_if_confirming_completion(messages_since_last_human)
+            or _is_dashboard_source()
+        ):
             return None
 
         tc_id = str(uuid4())

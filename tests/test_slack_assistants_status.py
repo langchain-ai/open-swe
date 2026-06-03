@@ -23,6 +23,13 @@ def _err_response(error: str = "channel_not_found") -> MagicMock:
     return response
 
 
+def _rate_limited_response(retry_after: str | None = None) -> MagicMock:
+    response = MagicMock()
+    response.status_code = 429
+    response.headers = {"Retry-After": retry_after} if retry_after else {}
+    return response
+
+
 def _async_client_cm(post_response: MagicMock) -> AsyncMock:
     client_cm = AsyncMock()
     client_cm.__aenter__.return_value = client_cm
@@ -140,3 +147,96 @@ async def test_post_slack_thread_reply_does_not_call_set_status(
     assert ok is True
     assert client_cm.post.await_count == 1
     assert client_cm.post.call_args.args[0].endswith("/chat.postMessage")
+
+
+@pytest.mark.asyncio
+async def test_post_slack_thread_reply_with_ts_returns_missing_token_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "")
+
+    client_cm = _async_client_cm(_ok_response())
+    with patch.object(slack_utils.httpx, "AsyncClient", return_value=client_cm):
+        result = await slack_utils.post_slack_thread_reply_with_ts("C1", "1.0", "hello")
+
+    assert result == (None, "missing_slack_bot_token")
+    client_cm.post.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_post_slack_thread_reply_with_ts_returns_slack_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
+
+    client_cm = _async_client_cm(_err_response("msg_too_long"))
+    with patch.object(slack_utils.httpx, "AsyncClient", return_value=client_cm):
+        result = await slack_utils.post_slack_thread_reply_with_ts("C1", "1.0", "hello")
+
+    assert result == (None, "msg_too_long")
+
+
+@pytest.mark.asyncio
+async def test_post_slack_thread_reply_with_ts_returns_rate_limited_with_retry_after(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
+
+    client_cm = _async_client_cm(_rate_limited_response(retry_after="30"))
+    with patch.object(slack_utils.httpx, "AsyncClient", return_value=client_cm):
+        result = await slack_utils.post_slack_thread_reply_with_ts("C1", "1.0", "hello")
+
+    assert result == (None, "rate_limited: 30")
+
+
+@pytest.mark.asyncio
+async def test_post_slack_thread_reply_with_ts_returns_rate_limited_without_retry_after(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
+
+    client_cm = _async_client_cm(_rate_limited_response())
+    with patch.object(slack_utils.httpx, "AsyncClient", return_value=client_cm):
+        result = await slack_utils.post_slack_thread_reply_with_ts("C1", "1.0", "hello")
+
+    assert result == (None, "rate_limited")
+
+
+@pytest.mark.asyncio
+async def test_post_slack_thread_reply_with_ts_normalizes_ratelimited_body_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
+
+    client_cm = _async_client_cm(_err_response("ratelimited"))
+    with patch.object(slack_utils.httpx, "AsyncClient", return_value=client_cm):
+        result = await slack_utils.post_slack_thread_reply_with_ts("C1", "1.0", "hello")
+
+    assert result == (None, "rate_limited")
+
+
+@pytest.mark.asyncio
+async def test_post_slack_thread_reply_with_ts_returns_http_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
+
+    client_cm = _async_client_cm(_ok_response())
+    client_cm.post = AsyncMock(side_effect=slack_utils.httpx.ConnectError("boom"))
+    with patch.object(slack_utils.httpx, "AsyncClient", return_value=client_cm):
+        result = await slack_utils.post_slack_thread_reply_with_ts("C1", "1.0", "hello")
+
+    assert result == (None, "http_error: ConnectError")
+
+
+@pytest.mark.asyncio
+async def test_post_slack_thread_reply_preserves_bool_return_on_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
+
+    client_cm = _async_client_cm(_err_response("channel_not_found"))
+    with patch.object(slack_utils.httpx, "AsyncClient", return_value=client_cm):
+        ok = await slack_utils.post_slack_thread_reply("C1", "1.0", "hello")
+
+    assert ok is False

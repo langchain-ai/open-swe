@@ -134,12 +134,13 @@ This is an area where you can extend Open SWE for your org: add deterministic CI
 - **GitHub OAuth built-in** — authenticates with your GitHub account automatically
 - **Opens PRs automatically** — commits changes and opens a draft PR when done, linked back to your ticket
 - **Subagent support** — the agent can spawn child agents for parallel subtasks
+- **Web dashboard** — a companion app (in `ui/`) for GitHub login, per-user model/profile settings, team defaults, enabled-repo and review-style management, user mappings, and an Agents chat UI
 
 ---
 
 ## Getting Started
 
-- **[Installation Guide](INSTALLATION.md)** — GitHub App creation, LangSmith, Linear/Slack/GitHub triggers, and production deployment
+- **[Installation Guide](INSTALLATION.md)** — local dev (backend + dashboard), GitHub App creation, LangSmith, Linear/Slack/GitHub triggers, and production deployment
 - **[Customization Guide](CUSTOMIZATION.md)** — swap the sandbox, model, tools, triggers, system prompt, and middleware for your org
 
 ## License

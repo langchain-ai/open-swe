@@ -16,13 +16,27 @@ from langgraph_sdk import get_client
 from ..encryption import encrypt_token
 from .github_app import get_github_app_installation_token_with_expiry
 from .github_token import get_github_token_from_thread
-from .github_user_email_map import GITHUB_USER_EMAIL_MAP
 from .linear import comment_on_linear_issue
-from .slack import post_slack_ephemeral_message, post_slack_thread_reply
+from .slack import post_slack_thread_reply
 
 logger = logging.getLogger(__name__)
 
 client = get_client()
+
+
+class GitHubUserAuthRequired(RuntimeError):
+    """Raised when a mapped user has no valid GitHub OAuth token.
+
+    Signals that the run cannot proceed on the user's behalf and that the user
+    must (re-)authenticate. The Slack webhook blocks before creating a run, so
+    this is a defense-in-depth signal at execution time.
+    """
+
+    def __init__(self, source: str, github_login: str | None) -> None:
+        self.source = source
+        self.github_login = github_login
+        super().__init__(f"GitHub authentication required for {source} user '{github_login}'")
+
 
 LANGSMITH_API_KEY = os.environ.get("LANGSMITH_API_KEY_PROD", "")
 LANGSMITH_API_URL = os.environ.get("LANGSMITH_ENDPOINT", "https://api.smith.langchain.com")
@@ -240,39 +254,30 @@ async def leave_failure_comment(
         slack_thread = configurable.get("slack_thread", {})
         channel_id = slack_thread.get("channel_id") if isinstance(slack_thread, dict) else None
         thread_ts = slack_thread.get("thread_ts") if isinstance(slack_thread, dict) else None
-        triggering_user_id = (
-            slack_thread.get("triggering_user_id") if isinstance(slack_thread, dict) else None
-        )
         if channel_id and thread_ts:
-            if isinstance(triggering_user_id, str) and triggering_user_id:
-                logger.info(
-                    "Posting auth failure ephemeral reply to Slack user %s in channel %s thread %s",
-                    triggering_user_id,
-                    channel_id,
-                    thread_ts,
-                )
-                sent = await post_slack_ephemeral_message(
-                    channel_id=channel_id,
-                    user_id=triggering_user_id,
-                    text=message,
-                    thread_ts=thread_ts,
-                )
-                if sent:
-                    return
-                logger.warning(
-                    "Failed to post ephemeral auth failure reply for Slack user %s; falling back to thread reply",
-                    triggering_user_id,
-                )
-            else:
-                logger.warning(
-                    "Missing Slack triggering_user_id for auth failure reply; falling back to thread reply",
-                )
+            # The auth-failure ``message`` can carry a per-user GitHub auth URL,
+            # which must not be posted in a shared thread (anyone could complete
+            # it and bind the wrong account). Post a generic, token-free notice and
+            # let the user finish sign-in from their own authenticated dashboard.
+            from ..dashboard.oauth import build_settings_url
+
+            settings_url = build_settings_url()
+            link = (
+                f"<{settings_url}|your Open SWE settings>"
+                if settings_url
+                else "your Open SWE settings"
+            )
             logger.info(
-                "Posting auth failure reply to Slack channel %s thread %s",
+                "Posting generic auth-failure notice to Slack channel %s thread %s",
                 channel_id,
                 thread_ts,
             )
-            await post_slack_thread_reply(channel_id, thread_ts, message)
+            await post_slack_thread_reply(
+                channel_id,
+                thread_ts,
+                "⚠️ I couldn't resolve your GitHub account for this run. Sign in with GitHub and "
+                f"connect your Slack account in {link}, then tag me again.",
+            )
         return
     if source == "github":
         logger.warning(
@@ -362,6 +367,36 @@ async def save_encrypted_token_from_email(
     return token, encrypted, expires_at
 
 
+async def _resolve_dashboard_user_token(
+    thread_id: str, github_login: str
+) -> tuple[str, str, str | None] | None:
+    """Resolve a per-user GitHub token from the dashboard OAuth store.
+
+    Returns the ``(token, encrypted, expires_at)`` tuple, or ``None`` when the
+    user has no valid token (never linked, or expired/revoked beyond refresh).
+
+    The thread-metadata token cache is intentionally NOT consulted here: Slack
+    thread ids are shared across everyone in a conversation, so a cached token
+    from a prior triggering user would impersonate the current ``github_login``.
+    We always resolve by login from the dashboard store instead.
+    """
+    login = github_login.strip()
+    if not login:
+        raise ValueError("missing github_login")
+
+    from ..dashboard.profiles import OAUTH_TOKENS_NAMESPACE, get_valid_access_token
+    from ..dashboard.profiles import _get_value as get_oauth_record
+
+    token = await get_valid_access_token(login)
+    if not token:
+        return None
+    record = await get_oauth_record(OAUTH_TOKENS_NAMESPACE, login)
+    expires_at = record.get("token_expires_at") if isinstance(record, dict) else None
+    expires_at = expires_at if isinstance(expires_at, str) else None
+    encrypted = await persist_encrypted_github_token(thread_id, token, expires_at=expires_at)
+    return token, encrypted, expires_at
+
+
 async def _resolve_bot_installation_token(thread_id: str) -> tuple[str, str, str | None]:
     """Get a GitHub App installation token and persist it for the thread."""
     bot_token, expires_at = await get_github_app_installation_token_with_expiry()
@@ -397,14 +432,33 @@ async def resolve_github_token(
     Raises:
         RuntimeError: If source is missing or token resolution fails.
     """
-    if is_bot_token_only_mode():
-        return await _resolve_bot_installation_token(thread_id)
-
     configurable = config["configurable"]
     source = configurable.get("source")
     if not source:
         logger.error("Missing source for thread %s; cannot route auth failure responses", thread_id)
         raise RuntimeError(f"GitHub auth failed for thread {thread_id}: missing source")
+
+    github_login = configurable.get("github_login")
+
+    # Per-user OAuth from the dashboard store wins even in bot-token-only mode,
+    # for sources that carry a mapped GitHub login (Slack, dashboard). This is
+    # what lets the agent open PRs as the triggering user.
+    if source in ("slack", "dashboard") and isinstance(github_login, str) and github_login.strip():
+        try:
+            user_token = await _resolve_dashboard_user_token(thread_id, github_login)
+        except ValueError as exc:
+            logger.error("GitHub auth failed for thread %s: %s", thread_id, str(exc))
+            raise RuntimeError(str(exc)) from exc
+        if user_token is not None:
+            return user_token
+        # No valid user token. In bot-token-only mode fall back to the bot so the
+        # deployment stays functional; otherwise block and require auth.
+        if is_bot_token_only_mode():
+            return await _resolve_bot_installation_token(thread_id)
+        raise GitHubUserAuthRequired(source, github_login)
+
+    if is_bot_token_only_mode():
+        return await _resolve_bot_installation_token(thread_id)
 
     try:
         if source == "github":
@@ -413,8 +467,9 @@ async def resolve_github_token(
             )
             if cached_token and cached_encrypted:
                 return cached_token, cached_encrypted, cached_expires_at
-            github_login = configurable.get("github_login")
-            email = GITHUB_USER_EMAIL_MAP.get(github_login or "")
+            from ..dashboard.user_mappings import email_for_login
+
+            email = await email_for_login(github_login)
             if not email:
                 raise ValueError(f"No email mapping found for GitHub user '{github_login}'")
             return await save_encrypted_token_from_email(email, source)

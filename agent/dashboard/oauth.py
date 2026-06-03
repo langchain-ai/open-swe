@@ -8,12 +8,15 @@ import logging
 import os
 import secrets
 import time
+from datetime import UTC, datetime, timedelta
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 import httpx
 import jwt
 from fastapi import HTTPException, Request
+
+from agent.utils.github_org_membership import is_user_active_org_member
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +82,37 @@ def sanitize_redirect_to(redirect_to: str | None) -> str:
     return fallback
 
 
+def _allowed_login_orgs() -> frozenset[str]:
+    """Orgs whose members may log in to the dashboard.
+
+    Reuses the webhook-side ``ALLOWED_GITHUB_ORGS`` allowlist so deployments
+    configure a single org gate. When empty the dashboard login gate is
+    disabled (fail-open) to preserve existing deployments.
+    """
+    return frozenset(
+        org.strip().lower()
+        for org in os.environ.get("ALLOWED_GITHUB_ORGS", "").split(",")
+        if org.strip()
+    )
+
+
+async def enforce_org_login_gate(login: str) -> None:
+    """Reject dashboard login for users outside the allowed GitHub org(s).
+
+    No-op when ``ALLOWED_GITHUB_ORGS`` is unset. Otherwise the user must be an
+    active member of at least one configured org; membership is checked with
+    the GitHub App installation token (fail-closed on any API error).
+    """
+    orgs = _allowed_login_orgs()
+    if not orgs:
+        return
+    for org in orgs:
+        if await is_user_active_org_member(login, org):
+            return
+    logger.warning("Rejected dashboard login for %r — not in allowed org(s)", login)
+    raise HTTPException(403, "your GitHub account is not a member of an authorized organization")
+
+
 def issue_session(*, login: str, email: str | None, avatar_url: str | None) -> str:
     now = int(time.time())
     payload = {
@@ -114,14 +148,16 @@ def hash_state_nonce(nonce: str) -> str:
     return hmac.new(_secret().encode(), nonce.encode(), hashlib.sha256).hexdigest()
 
 
-def issue_state(*, redirect_to: str, nonce_hash: str) -> str:
+def issue_state(*, redirect_to: str, nonce_hash: str, link: str | None = None) -> str:
     now = int(time.time())
-    payload = {
+    payload: dict[str, Any] = {
         "nonce_hash": nonce_hash,
         "redirect_to": redirect_to,
         "iat": now,
         "exp": now + STATE_TTL_SECONDS,
     }
+    if link:
+        payload["link"] = link
     return jwt.encode(payload, _secret(), algorithm=JWT_ALG)
 
 
@@ -132,6 +168,76 @@ def decode_state(state: str) -> dict[str, Any]:
         raise HTTPException(400, f"invalid state: {e}") from e
 
 
+LINK_TTL_SECONDS = 7 * 24 * 60 * 60
+
+# Dashboard route where users manage their GitHub↔Slack link.
+PROFILE_SETTINGS_PATH = "/my-settings"
+
+
+def issue_account_link(*, slack_user_id: str | None, work_email: str | None) -> str:
+    """Sign a short-lived token carrying the Slack identity to map after login.
+
+    Threaded through the OAuth ``state`` so the callback can attach the
+    resolved ``github_login`` to the originating Slack user/email in one step.
+    """
+    now = int(time.time())
+    payload = {
+        "kind": "account_link",
+        "slack_user_id": slack_user_id or None,
+        "work_email": work_email or None,
+        "iat": now,
+        "exp": now + LINK_TTL_SECONDS,
+    }
+    return jwt.encode(payload, _secret(), algorithm=JWT_ALG)
+
+
+def decode_account_link(token: str) -> dict[str, Any] | None:
+    """Decode an account-link token; return ``None`` if absent/invalid/expired."""
+    if not token:
+        return None
+    try:
+        payload = jwt.decode(token, _secret(), algorithms=[JWT_ALG])
+    except jwt.PyJWTError as e:
+        logger.warning("invalid account-link token: %s", e)
+        return None
+    if payload.get("kind") != "account_link":
+        return None
+    return payload
+
+
+def build_settings_url() -> str | None:
+    """Return the dashboard Profile Settings URL, or ``None`` if not configured.
+
+    This is a plain, token-free link: it carries no per-user identity, so it is
+    safe to share in a public Slack thread. The user signs in with GitHub from
+    their own session and connects Slack via verified OIDC on the settings page.
+    """
+    frontend_base = os.environ.get("DASHBOARD_BASE_URL", "").rstrip("/")
+    if not frontend_base:
+        return None
+    return f"{frontend_base}{PROFILE_SETTINGS_PATH}"
+
+
+def build_account_link_url(*, slack_user_id: str | None, work_email: str | None) -> str | None:
+    """Return the dashboard login URL that links a Slack identity on completion.
+
+    Returns ``None`` when ``DASHBOARD_API_BASE_URL`` isn't configured (login
+    can't be initiated), so callers can skip the prompt cleanly.
+    """
+    api_base = os.environ.get("DASHBOARD_API_BASE_URL", "").rstrip("/")
+    if not api_base:
+        return None
+    token = issue_account_link(slack_user_id=slack_user_id, work_email=work_email)
+    url = f"{api_base}/dashboard/api/auth/login?link={quote(token, safe='')}"
+    # Land the user on the Profile Settings page so they can review/complete
+    # their GitHub↔Slack link after re-authenticating.
+    frontend_base = os.environ.get("DASHBOARD_BASE_URL", "").rstrip("/")
+    if frontend_base:
+        redirect_to = f"{frontend_base}{PROFILE_SETTINGS_PATH}"
+        url += f"&redirect_to={quote(redirect_to, safe='')}"
+    return url
+
+
 def require_session(request: Request) -> dict[str, Any]:
     token = request.cookies.get(COOKIE_NAME)
     if not token:
@@ -139,26 +245,61 @@ def require_session(request: Request) -> dict[str, Any]:
     return decode_session(token)
 
 
-async def exchange_code(code: str) -> str:
-    """Exchange an OAuth authorization code for a user-to-server access token."""
+def expires_at_from_github_response(data: dict[str, Any], *, field: str) -> str | None:
+    """Convert GitHub ``expires_in`` / ``refresh_token_expires_in`` to an ISO timestamp."""
+    raw = data.get(field)
+    if not isinstance(raw, int | float) or raw <= 0:
+        return None
+    return (datetime.now(UTC) + timedelta(seconds=int(raw))).isoformat()
+
+
+async def _request_github_tokens(body: dict[str, str]) -> dict[str, Any]:
     if not GITHUB_APP_CLIENT_ID or not GITHUB_APP_CLIENT_SECRET:
         raise HTTPException(500, "GitHub App OAuth not configured")
     async with httpx.AsyncClient() as client:
         resp = await client.post(
             "https://github.com/login/oauth/access_token",
             headers={"Accept": "application/json"},
-            data={
-                "client_id": GITHUB_APP_CLIENT_ID,
-                "client_secret": GITHUB_APP_CLIENT_SECRET,
-                "code": code,
-            },
+            data=body,
         )
     resp.raise_for_status()
     data = resp.json()
-    token = data.get("access_token")
-    if not token:
+    if not isinstance(data, dict):
+        raise HTTPException(502, "unexpected GitHub OAuth response")
+    if data.get("error"):
+        raise HTTPException(
+            400, f"github oauth error: {data.get('error_description') or data['error']}"
+        )
+    return data
+
+
+async def exchange_code(code: str) -> dict[str, Any]:
+    """Exchange an OAuth authorization code for user-to-server tokens."""
+    data = await _request_github_tokens(
+        {
+            "client_id": GITHUB_APP_CLIENT_ID,
+            "client_secret": GITHUB_APP_CLIENT_SECRET,
+            "code": code,
+        }
+    )
+    if not data.get("access_token"):
         raise HTTPException(400, f"oauth exchange failed: {data}")
-    return token
+    return data
+
+
+async def refresh_user_access_token(refresh_token: str) -> dict[str, Any]:
+    """Rotate an expiring user access token using its refresh token."""
+    data = await _request_github_tokens(
+        {
+            "client_id": GITHUB_APP_CLIENT_ID,
+            "client_secret": GITHUB_APP_CLIENT_SECRET,
+            "grant_type": "refresh_token",
+            "refresh_token": refresh_token,
+        }
+    )
+    if not data.get("access_token"):
+        raise HTTPException(400, f"oauth refresh failed: {data}")
+    return data
 
 
 async def fetch_github_user(access_token: str) -> tuple[dict[str, Any], str | None]:

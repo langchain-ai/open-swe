@@ -8,12 +8,14 @@ from typing import Any
 
 import httpx
 
-from .github_user_email_map import GITHUB_USER_EMAIL_MAP
-
 logger = logging.getLogger(__name__)
 
 OPEN_SWE_BOT_NAME = "open-swe[bot]"
-OPEN_SWE_BOT_EMAIL = "open-swe@users.noreply.github.com"
+# GitHub App bot noreply address (<app-user-id>+<slug>[bot]@users.noreply.github.com).
+# Resolves to the open-swe[bot] account, not the separate "open-swe" user account.
+OPEN_SWE_BOT_EMAIL = "215916821+open-swe[bot]@users.noreply.github.com"
+
+PR_ATTRIBUTION_FOOTER = "Made by [Open SWE](https://openswe.vercel.app)"
 
 
 @dataclass(frozen=True)
@@ -23,6 +25,14 @@ class CollaboratorIdentity:
     display_name: str
     commit_name: str
     commit_email: str
+    github_login: str = ""
+
+    @property
+    def pr_attribution_name(self) -> str:
+        """Display name with GitHub login when available."""
+        if self.github_login and self.github_login != self.display_name:
+            return f"{self.display_name} (@{self.github_login})"
+        return self.display_name
 
 
 def _normalize_text(value: Any) -> str:
@@ -72,6 +82,7 @@ def _identity_from_github_token(github_token: str | None) -> CollaboratorIdentit
             display_name=display_name,
             commit_name=display_name,
             commit_email=commit_email,
+            github_login=login,
         )
     except httpx.HTTPError:
         logger.debug("Failed to resolve GitHub user identity from token", exc_info=True)
@@ -80,20 +91,6 @@ def _identity_from_github_token(github_token: str | None) -> CollaboratorIdentit
 
 def _identity_from_config(config: dict[str, Any]) -> CollaboratorIdentity | None:
     configurable = config.get("configurable", {})
-
-    github_login = _normalize_text(configurable.get("github_login"))
-    if github_login:
-        github_user_id = configurable.get("github_user_id")
-        commit_email = _github_noreply_email(github_login, github_user_id) or _normalize_text(
-            GITHUB_USER_EMAIL_MAP.get(github_login)
-        )
-        if commit_email:
-            return CollaboratorIdentity(
-                display_name=github_login,
-                commit_name=github_login,
-                commit_email=commit_email,
-            )
-
     slack_thread = configurable.get("slack_thread", {})
     linear_issue = configurable.get("linear_issue", {})
 
@@ -102,6 +99,23 @@ def _identity_from_config(config: dict[str, Any]) -> CollaboratorIdentity | None
         or _normalize_text(linear_issue.get("triggering_user_name"))
         or _normalize_text(configurable.get("user_email")).split("@", 1)[0]
     )
+
+    github_login = _normalize_text(configurable.get("github_login"))
+    if github_login:
+        github_user_id = configurable.get("github_user_id")
+        from ..dashboard.user_mappings import cached_email_for_login
+
+        commit_email = _github_noreply_email(github_login, github_user_id) or _normalize_text(
+            cached_email_for_login(github_login)
+        )
+        if commit_email:
+            commit_name = display_name or github_login
+            return CollaboratorIdentity(
+                display_name=commit_name,
+                commit_name=commit_name,
+                commit_email=commit_email,
+                github_login=github_login,
+            )
     commit_email = _normalize_text(configurable.get("user_email")) or _normalize_text(
         slack_thread.get("triggering_user_email")
     )
@@ -128,16 +142,14 @@ def resolve_triggering_user_identity(
     return _identity_from_github_token(github_token) or _identity_from_config(config)
 
 
-def add_user_coauthor_trailer(
-    commit_message: str,
-    identity: CollaboratorIdentity | None,
-) -> str:
-    """Append a Co-authored-by trailer when a user identity is available."""
-    normalized_message = commit_message.rstrip()
-    if not identity:
-        return normalized_message
+def add_bot_coauthor_trailer(commit_message: str) -> str:
+    """Append the open-swe[bot] Co-authored-by trailer.
 
-    trailer = f"Co-authored-by: {identity.commit_name} <{identity.commit_email}>"
+    Commits are authored by the triggering user (via the repo-local git
+    identity); open-swe[bot] is credited as the collaborator.
+    """
+    normalized_message = commit_message.rstrip()
+    trailer = f"Co-authored-by: {OPEN_SWE_BOT_NAME} <{OPEN_SWE_BOT_EMAIL}>"
     if trailer in normalized_message:
         return normalized_message
     return f"{normalized_message}\n\n{trailer}"
@@ -145,21 +157,29 @@ def add_user_coauthor_trailer(
 
 def add_pr_collaboration_note(
     pr_body: str,
-    identity: CollaboratorIdentity | None,
+    identity: CollaboratorIdentity | None = None,
 ) -> str:
-    """Append a best-effort PR attribution note.
+    """Append the Open SWE attribution footer to a PR body.
 
-    GitHub supports commit co-authors, but not PR co-authors. This note makes
-    the collaboration explicit in the automatically-opened PR body.
+    The PR is opened as the triggering user, so the body only credits Open SWE
+    as the collaborator. Any legacy double-attribution footer is replaced.
     """
 
     normalized_body = pr_body.rstrip()
-    if not identity:
-        return normalized_body
-
-    note = f"_Opened collaboratively by {identity.display_name} and open-swe._"
+    note = PR_ATTRIBUTION_FOOTER
     if note in normalized_body:
         return normalized_body
+
+    legacy_footers: list[str] = []
+    if identity is not None:
+        legacy_footers.append(
+            f"_Opened collaboratively by {identity.pr_attribution_name} and open-swe._"
+        )
+        legacy_footers.append(f"_Opened collaboratively by {identity.display_name} and open-swe._")
+    for legacy in legacy_footers:
+        if legacy in normalized_body:
+            return normalized_body.replace(legacy, note)
+
     if not normalized_body:
         return note
     return f"{normalized_body}\n\n{note}"

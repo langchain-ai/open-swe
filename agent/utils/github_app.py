@@ -5,6 +5,8 @@ from __future__ import annotations
 import logging
 import os
 import time
+from collections.abc import Sequence
+from typing import Any
 
 import httpx
 import jwt
@@ -28,25 +30,34 @@ def _generate_app_jwt() -> str:
     return jwt.encode(payload, private_key, algorithm="RS256")
 
 
-async def get_github_app_installation_token() -> str | None:
-    """Exchange the GitHub App JWT for an installation access token.
-
-    Returns:
-        Installation access token string, or None if unavailable.
-    """
-    token, _ = await get_github_app_installation_token_with_expiry()
+async def get_github_app_installation_token(
+    *,
+    repository_ids: Sequence[int] | None = None,
+    repositories: Sequence[str] | None = None,
+) -> str | None:
+    """Exchange the GitHub App JWT for an installation access token."""
+    token, _ = await get_github_app_installation_token_with_expiry(
+        repository_ids=repository_ids,
+        repositories=repositories,
+    )
     return token
 
 
-async def get_github_app_installation_token_with_expiry() -> tuple[str | None, str | None]:
-    """Exchange the GitHub App JWT for an installation access token and its expiry.
-
-    Returns ``(token, expires_at)`` where ``expires_at`` is the ISO-8601 string
-    returned by GitHub (typically 1 hour out). Either value may be ``None``.
-    """
+async def get_github_app_installation_token_with_expiry(
+    *,
+    repository_ids: Sequence[int] | None = None,
+    repositories: Sequence[str] | None = None,
+) -> tuple[str | None, str | None]:
+    """Exchange the GitHub App JWT for an installation access token and its expiry."""
     if not GITHUB_APP_ID or not GITHUB_APP_PRIVATE_KEY or not GITHUB_APP_INSTALLATION_ID:
         logger.debug("GitHub App env vars not fully configured, skipping app token")
         return None, None
+
+    body: dict[str, Any] = {}
+    if repository_ids:
+        body["repository_ids"] = list(repository_ids)
+    elif repositories:
+        body["repositories"] = list(repositories)
 
     try:
         app_jwt = _generate_app_jwt()
@@ -58,6 +69,7 @@ async def get_github_app_installation_token_with_expiry() -> tuple[str | None, s
                     "Accept": "application/vnd.github+json",
                     "X-GitHub-Api-Version": "2022-11-28",
                 },
+                json=body or None,
             )
             response.raise_for_status()
             data = response.json()

@@ -9,19 +9,47 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as ProfileRouteImport } from './routes/profile'
+import { Route as ReviewRouteImport } from './routes/review'
+import { Route as MySettingsRouteImport } from './routes/my-settings'
 import { Route as LoginRouteImport } from './routes/login'
+import { Route as IntegrationsRouteImport } from './routes/integrations'
+import { Route as CloudAgentsRouteImport } from './routes/cloud-agents'
+import { Route as AgentsRouteImport } from './routes/agents'
 import { Route as AdminRouteImport } from './routes/admin'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AgentsIndexRouteImport } from './routes/agents/index'
+import { Route as ReviewStylesRouteImport } from './routes/review_.styles'
+import { Route as AgentsThreadIdRouteImport } from './routes/agents/$threadId'
+import { Route as ReviewRepositoriesOwnerRouteImport } from './routes/review_.repositories.$owner'
 
-const ProfileRoute = ProfileRouteImport.update({
-  id: '/profile',
-  path: '/profile',
+const ReviewRoute = ReviewRouteImport.update({
+  id: '/review',
+  path: '/review',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const MySettingsRoute = MySettingsRouteImport.update({
+  id: '/my-settings',
+  path: '/my-settings',
   getParentRoute: () => rootRouteImport,
 } as any)
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
   path: '/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const IntegrationsRoute = IntegrationsRouteImport.update({
+  id: '/integrations',
+  path: '/integrations',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CloudAgentsRoute = CloudAgentsRouteImport.update({
+  id: '/cloud-agents',
+  path: '/cloud-agents',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AgentsRoute = AgentsRouteImport.update({
+  id: '/agents',
+  path: '/agents',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AdminRoute = AdminRouteImport.update({
@@ -34,48 +62,140 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AgentsIndexRoute = AgentsIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AgentsRoute,
+} as any)
+const ReviewStylesRoute = ReviewStylesRouteImport.update({
+  id: '/review_/styles',
+  path: '/review/styles',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AgentsThreadIdRoute = AgentsThreadIdRouteImport.update({
+  id: '/$threadId',
+  path: '/$threadId',
+  getParentRoute: () => AgentsRoute,
+} as any)
+const ReviewRepositoriesOwnerRoute = ReviewRepositoriesOwnerRouteImport.update({
+  id: '/review_/repositories/$owner',
+  path: '/review/repositories/$owner',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
+  '/agents': typeof AgentsRouteWithChildren
+  '/cloud-agents': typeof CloudAgentsRoute
+  '/integrations': typeof IntegrationsRoute
   '/login': typeof LoginRoute
-  '/profile': typeof ProfileRoute
+  '/my-settings': typeof MySettingsRoute
+  '/review': typeof ReviewRoute
+  '/agents/$threadId': typeof AgentsThreadIdRoute
+  '/review/styles': typeof ReviewStylesRoute
+  '/agents/': typeof AgentsIndexRoute
+  '/review/repositories/$owner': typeof ReviewRepositoriesOwnerRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
+  '/cloud-agents': typeof CloudAgentsRoute
+  '/integrations': typeof IntegrationsRoute
   '/login': typeof LoginRoute
-  '/profile': typeof ProfileRoute
+  '/my-settings': typeof MySettingsRoute
+  '/review': typeof ReviewRoute
+  '/agents/$threadId': typeof AgentsThreadIdRoute
+  '/review/styles': typeof ReviewStylesRoute
+  '/agents': typeof AgentsIndexRoute
+  '/review/repositories/$owner': typeof ReviewRepositoriesOwnerRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
+  '/agents': typeof AgentsRouteWithChildren
+  '/cloud-agents': typeof CloudAgentsRoute
+  '/integrations': typeof IntegrationsRoute
   '/login': typeof LoginRoute
-  '/profile': typeof ProfileRoute
+  '/my-settings': typeof MySettingsRoute
+  '/review': typeof ReviewRoute
+  '/agents/$threadId': typeof AgentsThreadIdRoute
+  '/review_/styles': typeof ReviewStylesRoute
+  '/agents/': typeof AgentsIndexRoute
+  '/review_/repositories/$owner': typeof ReviewRepositoriesOwnerRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/admin' | '/login' | '/profile'
+  fullPaths:
+    | '/'
+    | '/admin'
+    | '/agents'
+    | '/cloud-agents'
+    | '/integrations'
+    | '/login'
+    | '/my-settings'
+    | '/review'
+    | '/agents/$threadId'
+    | '/review/styles'
+    | '/agents/'
+    | '/review/repositories/$owner'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/admin' | '/login' | '/profile'
-  id: '__root__' | '/' | '/admin' | '/login' | '/profile'
+  to:
+    | '/'
+    | '/admin'
+    | '/cloud-agents'
+    | '/integrations'
+    | '/login'
+    | '/my-settings'
+    | '/review'
+    | '/agents/$threadId'
+    | '/review/styles'
+    | '/agents'
+    | '/review/repositories/$owner'
+  id:
+    | '__root__'
+    | '/'
+    | '/admin'
+    | '/agents'
+    | '/cloud-agents'
+    | '/integrations'
+    | '/login'
+    | '/my-settings'
+    | '/review'
+    | '/agents/$threadId'
+    | '/review_/styles'
+    | '/agents/'
+    | '/review_/repositories/$owner'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AdminRoute: typeof AdminRoute
+  AgentsRoute: typeof AgentsRouteWithChildren
+  CloudAgentsRoute: typeof CloudAgentsRoute
+  IntegrationsRoute: typeof IntegrationsRoute
   LoginRoute: typeof LoginRoute
-  ProfileRoute: typeof ProfileRoute
+  MySettingsRoute: typeof MySettingsRoute
+  ReviewRoute: typeof ReviewRoute
+  ReviewStylesRoute: typeof ReviewStylesRoute
+  ReviewRepositoriesOwnerRoute: typeof ReviewRepositoriesOwnerRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/profile': {
-      id: '/profile'
-      path: '/profile'
-      fullPath: '/profile'
-      preLoaderRoute: typeof ProfileRouteImport
+    '/review': {
+      id: '/review'
+      path: '/review'
+      fullPath: '/review'
+      preLoaderRoute: typeof ReviewRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/my-settings': {
+      id: '/my-settings'
+      path: '/my-settings'
+      fullPath: '/my-settings'
+      preLoaderRoute: typeof MySettingsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/login': {
@@ -83,6 +203,27 @@ declare module '@tanstack/react-router' {
       path: '/login'
       fullPath: '/login'
       preLoaderRoute: typeof LoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/integrations': {
+      id: '/integrations'
+      path: '/integrations'
+      fullPath: '/integrations'
+      preLoaderRoute: typeof IntegrationsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/cloud-agents': {
+      id: '/cloud-agents'
+      path: '/cloud-agents'
+      fullPath: '/cloud-agents'
+      preLoaderRoute: typeof CloudAgentsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/agents': {
+      id: '/agents'
+      path: '/agents'
+      fullPath: '/agents'
+      preLoaderRoute: typeof AgentsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/admin': {
@@ -99,14 +240,61 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/agents/': {
+      id: '/agents/'
+      path: '/'
+      fullPath: '/agents/'
+      preLoaderRoute: typeof AgentsIndexRouteImport
+      parentRoute: typeof AgentsRoute
+    }
+    '/review_/styles': {
+      id: '/review_/styles'
+      path: '/review/styles'
+      fullPath: '/review/styles'
+      preLoaderRoute: typeof ReviewStylesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/agents/$threadId': {
+      id: '/agents/$threadId'
+      path: '/$threadId'
+      fullPath: '/agents/$threadId'
+      preLoaderRoute: typeof AgentsThreadIdRouteImport
+      parentRoute: typeof AgentsRoute
+    }
+    '/review_/repositories/$owner': {
+      id: '/review_/repositories/$owner'
+      path: '/review/repositories/$owner'
+      fullPath: '/review/repositories/$owner'
+      preLoaderRoute: typeof ReviewRepositoriesOwnerRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
+
+interface AgentsRouteChildren {
+  AgentsThreadIdRoute: typeof AgentsThreadIdRoute
+  AgentsIndexRoute: typeof AgentsIndexRoute
+}
+
+const AgentsRouteChildren: AgentsRouteChildren = {
+  AgentsThreadIdRoute: AgentsThreadIdRoute,
+  AgentsIndexRoute: AgentsIndexRoute,
+}
+
+const AgentsRouteWithChildren =
+  AgentsRoute._addFileChildren(AgentsRouteChildren)
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AdminRoute: AdminRoute,
+  AgentsRoute: AgentsRouteWithChildren,
+  CloudAgentsRoute: CloudAgentsRoute,
+  IntegrationsRoute: IntegrationsRoute,
   LoginRoute: LoginRoute,
-  ProfileRoute: ProfileRoute,
+  MySettingsRoute: MySettingsRoute,
+  ReviewRoute: ReviewRoute,
+  ReviewStylesRoute: ReviewStylesRoute,
+  ReviewRepositoriesOwnerRoute: ReviewRepositoriesOwnerRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

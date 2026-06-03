@@ -16,6 +16,7 @@ from agent.reviewer_findings import (
     new_finding,
     new_finding_id,
     replace_findings,
+    resolve_review_head_sha,
     set_reviewer_thread_metadata,
     update_finding_fields,
 )
@@ -24,6 +25,7 @@ from agent.reviewer_findings import (
 def _f(**overrides: Any) -> Finding:
     base = new_finding(
         severity="high",
+        confidence="high",
         category="correctness",
         file="foo.py",
         start_line=10,
@@ -47,14 +49,22 @@ def test_new_finding_defaults() -> None:
     assert finding["side"] == "RIGHT"
     assert finding["first_seen_sha"] == "abc123"
     assert finding["last_confirmed_sha"] == "abc123"
+    assert finding["github_review_id"] is None
     assert finding["github_review_comment_id"] is None
+    assert finding["github_review_comment_ids"] == []
+    assert finding["github_review_thread_id"] is None
+    assert finding["github_review_thread_ids"] == []
+    assert finding["github_review_run_id"] is None
+    assert finding["github_thread_resolved"] is False
+    assert finding["github_resolved_thread_ids"] == []
+    assert finding["last_human_reply_at"] is None
+    assert finding["resolution_note"] is None
     assert finding["suggestion"] is None
 
 
 def test_severity_order_monotonic() -> None:
     assert (
-        SEVERITY_ORDER["informational"]
-        < SEVERITY_ORDER["low"]
+        SEVERITY_ORDER["low"]
         < SEVERITY_ORDER["medium"]
         < SEVERITY_ORDER["high"]
         < SEVERITY_ORDER["critical"]
@@ -67,7 +77,6 @@ def test_filter_findings_for_publish_drops_below_threshold_and_resolved() -> Non
         _f(id="f_b", severity="low", file="b.py"),
         _f(id="f_c", severity="critical", file="c.py", start_line=2, end_line=2),
         _f(id="f_d", severity="high", file="d.py", status="resolved"),
-        _f(id="f_e", severity="informational", file="e.py"),
     ]
     surfaced = filter_findings_for_publish(findings, severity_threshold="medium", cap=10)
     assert [f["id"] for f in surfaced] == ["f_c", "f_a"]
@@ -173,3 +182,41 @@ async def test_set_reviewer_thread_metadata_includes_kind() -> None:
     assert metadata["last_reviewed_sha"] == "sha"
     assert "pr" not in metadata
     assert "findings" not in metadata
+
+
+@pytest.mark.asyncio
+async def test_set_reviewer_thread_metadata_persists_head_sha() -> None:
+    fake_client = AsyncMock()
+    with patch("agent.reviewer_findings.get_client", return_value=fake_client):
+        await set_reviewer_thread_metadata("tid", head_sha="newhead")
+    metadata = fake_client.threads.update.await_args.kwargs["metadata"]
+    assert metadata["head_sha"] == "newhead"
+
+
+@pytest.mark.asyncio
+async def test_resolve_review_head_sha_prefers_metadata_over_config() -> None:
+    """A mid-run push records the live head in thread metadata; it must win over
+    the stale head frozen in the run's config."""
+    fake_client = AsyncMock()
+    fake_client.threads.get.return_value = {"metadata": {"head_sha": "metahead"}}
+    with patch("agent.reviewer_findings.get_client", return_value=fake_client):
+        head = await resolve_review_head_sha("tid", {"head_sha": "confighead"})
+    assert head == "metahead"
+
+
+@pytest.mark.asyncio
+async def test_resolve_review_head_sha_falls_back_to_config_when_metadata_empty() -> None:
+    fake_client = AsyncMock()
+    fake_client.threads.get.return_value = {"metadata": {}}
+    with patch("agent.reviewer_findings.get_client", return_value=fake_client):
+        head = await resolve_review_head_sha("tid", {"head_sha": "confighead"})
+    assert head == "confighead"
+
+
+@pytest.mark.asyncio
+async def test_resolve_review_head_sha_falls_back_without_thread_id() -> None:
+    fake_client = AsyncMock()
+    with patch("agent.reviewer_findings.get_client", return_value=fake_client):
+        head = await resolve_review_head_sha("", {"head_sha": "confighead"})
+    assert head == "confighead"
+    fake_client.threads.get.assert_not_called()
