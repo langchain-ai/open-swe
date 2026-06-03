@@ -2414,7 +2414,7 @@ async def process_github_pr_comment(payload: dict[str, Any], event_type: str) ->
             return
         owner = repo_config.get("owner", "")
         name = repo_config.get("name", "")
-        stable_key = f"{owner}/{name}/pr/{pr_number}"
+        stable_key = f"{owner}/{name}/pr"
         thread_id = str(uuid.uuid5(uuid.NAMESPACE_URL, stable_key))
         logger.info("Generated thread_id %s for non-open-swe branch '%s'", thread_id, branch_name)
         langgraph_client = get_client(url=LANGGRAPH_URL)
