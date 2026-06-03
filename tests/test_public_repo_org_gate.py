@@ -54,15 +54,9 @@ def test_gate_blocks_non_member_on_public_pr_comment(monkeypatch) -> None:
     _common_setup(monkeypatch)
     seen = _install_membership_stub(monkeypatch, members={"insider"})
 
-    async def fake_process_github_pr_review_command(*_args, **_kwargs) -> None:
-        raise AssertionError("should not be called")
-
     async def fake_process_github_pr_comment(*_args, **_kwargs) -> None:
         raise AssertionError("should not be called")
 
-    monkeypatch.setattr(
-        webapp, "process_github_pr_review_command", fake_process_github_pr_review_command
-    )
     monkeypatch.setattr(webapp, "process_github_pr_comment", fake_process_github_pr_comment)
 
     client = TestClient(webapp.app)
@@ -254,16 +248,9 @@ def test_gate_blocks_non_member_on_public_issue(monkeypatch) -> None:
     assert "not a member" in body["reason"]
 
 
-def test_gate_blocks_non_member_on_public_review_requested(monkeypatch) -> None:
+def test_review_requested_is_unsupported_before_public_repo_gate(monkeypatch) -> None:
     _common_setup(monkeypatch)
-    _install_membership_stub(monkeypatch, members={"insider"})
-
-    async def fake_process_github_pr_review_request(*_args, **_kwargs) -> None:
-        raise AssertionError("should not be called")
-
-    monkeypatch.setattr(
-        webapp, "process_github_pr_review_request", fake_process_github_pr_review_request
-    )
+    seen = _install_membership_stub(monkeypatch, members={"insider"})
 
     client = TestClient(webapp.app)
     response = _post_github_webhook(
@@ -288,9 +275,11 @@ def test_gate_blocks_non_member_on_public_review_requested(monkeypatch) -> None:
     )
 
     assert response.status_code == 200
-    body = response.json()
-    assert body["status"] == "ignored"
-    assert "not a member" in body["reason"]
+    assert response.json() == {
+        "status": "ignored",
+        "reason": "Unsupported GitHub pull_request action: review_requested",
+    }
+    assert seen["calls"] == []
 
 
 def test_gate_allows_internal_bot_sender(monkeypatch) -> None:

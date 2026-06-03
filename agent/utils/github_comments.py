@@ -25,7 +25,6 @@ __all__ = [
     "fetch_pr_comments_since_last_tag",
     "format_github_comment_body_for_prompt",
     "get_thread_id_from_branch",
-    "parse_github_review_command",
     "post_github_comment",
     "react_to_github_comment",
     "sanitize_github_comment_body",
@@ -33,8 +32,6 @@ __all__ = [
 ]
 
 OPEN_SWE_TAGS = ("@openswe", "@open-swe", "@openswe-dev")
-_OPEN_SWE_MENTION_RE = re.compile(r"(?i)@(?:openswe-dev|open-swe|openswe)\b")
-_REVIEW_COMMAND_RE = re.compile(r"(?i)\Areview(?:\s+(https?://\S+))?\s*\Z")
 UNTRUSTED_GITHUB_COMMENT_OPEN_TAG = "<dangerous-external-untrusted-users-comment>"
 UNTRUSTED_GITHUB_COMMENT_CLOSE_TAG = "</dangerous-external-untrusted-users-comment>"
 _SANITIZED_UNTRUSTED_GITHUB_COMMENT_OPEN_TAG = "[blocked-untrusted-comment-tag-open]"
@@ -74,23 +71,6 @@ def get_thread_id_from_branch(branch_name: str) -> str | None:
         re.IGNORECASE,
     )
     return match.group(0) if match else None
-
-
-def parse_github_review_command(body: str) -> tuple[bool, str | None]:
-    """Detect ``@open-swe review [URL]`` in a GitHub comment body.
-
-    Returns ``(is_review_command, optional_pr_url)``. When ``is_review_command``
-    is True and the URL is None, the command applies to the PR being commented
-    on. The URL — if present — is returned as-is so the caller can validate it
-    with ``parse_github_pr_url``.
-    """
-    if not body:
-        return False, None
-    stripped = _OPEN_SWE_MENTION_RE.sub("", body).strip()
-    match = _REVIEW_COMMAND_RE.match(stripped)
-    if not match:
-        return False, None
-    return True, match.group(1) or None
 
 
 def sanitize_github_comment_body(body: str) -> str:
