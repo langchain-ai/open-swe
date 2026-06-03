@@ -737,10 +737,12 @@ def _format_trace_reply(trace_url: str | None, dashboard_url: str | None) -> str
     return f"{head}_Tip: {tip}_"
 
 
-async def post_slack_trace_reply(channel_id: str, thread_ts: str, thread_id: str) -> str | None:
+async def post_slack_trace_reply(
+    channel_id: str, thread_ts: str, thread_id: str, *, include_dashboard_link: bool = True
+) -> str | None:
     """Post a trace URL reply in a Slack thread and return its Slack timestamp."""
     trace_url = get_langsmith_trace_url(thread_id)
-    dashboard_url = _get_dashboard_thread_url(thread_id)
+    dashboard_url = _get_dashboard_thread_url(thread_id) if include_dashboard_link else None
     message_ts, _ = await post_slack_thread_reply_with_ts(
         channel_id,
         thread_ts,

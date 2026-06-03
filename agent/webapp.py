@@ -1176,7 +1176,9 @@ async def process_slack_pr_review_request(
     if result.get("success"):
         thread_id = result.get("thread_id")
         if isinstance(thread_id, str) and thread_id:
-            await post_slack_trace_reply(channel_id, thread_ts, thread_id)
+            await post_slack_trace_reply(
+                channel_id, thread_ts, thread_id, include_dashboard_link=False
+            )
             await set_slack_assistant_status(channel_id, thread_ts)
         return
 
