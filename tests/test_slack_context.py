@@ -221,7 +221,7 @@ def test_format_slack_messages_for_prompt_replaces_bot_id_mention_in_text() -> N
     assert formatted == "@alice(U123): @open-swe status update?"
 
 
-def test_post_slack_trace_reply_emits_tip_only_when_no_trace_url(
+def test_post_slack_trace_reply_includes_web_link_without_trace_url(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     posted: list[dict] = []
@@ -237,6 +237,7 @@ def test_post_slack_trace_reply_emits_tip_only_when_no_trace_url(
         posted.append({"text": text, "unfurl_links": unfurl_links, "unfurl_media": unfurl_media})
         return "1.1", None
 
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://app.example.com/")
     monkeypatch.setattr(
         slack_utils, "post_slack_thread_reply_with_ts", fake_post_slack_thread_reply_with_ts
     )
@@ -246,8 +247,10 @@ def test_post_slack_trace_reply_emits_tip_only_when_no_trace_url(
 
     assert len(posted) == 1
     text = posted[0]["text"]
-    assert text.startswith("_Tip: ") and text.endswith("_")
-    assert any(tip in text for tip in TRACE_REPLY_TIPS)
+    head, _, tip_line = text.partition("\n")
+    assert head == "<https://app.example.com/agents/thread-id|Open in Web>"
+    assert tip_line.startswith("_Tip: ") and tip_line.endswith("_")
+    assert any(tip in tip_line for tip in TRACE_REPLY_TIPS)
     assert posted[0]["unfurl_links"] is False
     assert posted[0]["unfurl_media"] is False
 
@@ -268,6 +271,7 @@ def test_post_slack_trace_reply_includes_trace_link_and_tip(
         posted.append({"text": text, "unfurl_links": unfurl_links, "unfurl_media": unfurl_media})
         return "1.1", None
 
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://app.example.com")
     monkeypatch.setattr(
         slack_utils, "post_slack_thread_reply_with_ts", fake_post_slack_thread_reply_with_ts
     )
@@ -278,9 +282,47 @@ def test_post_slack_trace_reply_includes_trace_link_and_tip(
     assert len(posted) == 1
     text = posted[0]["text"]
     head, _, tip_line = text.partition("\n")
-    assert head == "<https://smith/x|View trace>"
+    assert (
+        head
+        == "<https://smith/x|View trace> • <https://app.example.com/agents/thread-id|Open in Web>"
+    )
     assert tip_line.startswith("_Tip: ") and tip_line.endswith("_")
     assert any(tip in tip_line for tip in TRACE_REPLY_TIPS)
+    assert posted[0]["unfurl_links"] is False
+    assert posted[0]["unfurl_media"] is False
+
+
+def test_post_slack_trace_reply_can_skip_web_link(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    posted: list[dict] = []
+
+    async def fake_post_slack_thread_reply_with_ts(
+        channel_id: str,
+        thread_ts: str,
+        text: str,
+        *,
+        unfurl_links: bool = True,
+        unfurl_media: bool = True,
+    ) -> tuple[str | None, str | None]:
+        posted.append({"text": text, "unfurl_links": unfurl_links, "unfurl_media": unfurl_media})
+        return "1.1", None
+
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://app.example.com")
+    monkeypatch.setattr(
+        slack_utils, "post_slack_thread_reply_with_ts", fake_post_slack_thread_reply_with_ts
+    )
+    monkeypatch.setattr(slack_utils, "get_langsmith_trace_url", lambda thread_id: "https://smith/x")
+
+    asyncio.run(
+        post_slack_trace_reply("C123", "1.0", "reviewer-thread-id", include_dashboard_link=False)
+    )
+
+    assert len(posted) == 1
+    head, _, tip_line = posted[0]["text"].partition("\n")
+    assert head == "<https://smith/x|View trace>"
+    assert "Open in Web" not in posted[0]["text"]
+    assert tip_line.startswith("_Tip: ") and tip_line.endswith("_")
     assert posted[0]["unfurl_links"] is False
     assert posted[0]["unfurl_media"] is False
 
