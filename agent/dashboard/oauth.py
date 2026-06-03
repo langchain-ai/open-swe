@@ -205,6 +205,19 @@ def decode_account_link(token: str) -> dict[str, Any] | None:
     return payload
 
 
+def build_settings_url() -> str | None:
+    """Return the dashboard Profile Settings URL, or ``None`` if not configured.
+
+    This is a plain, token-free link: it carries no per-user identity, so it is
+    safe to share in a public Slack thread. The user signs in with GitHub from
+    their own session and connects Slack via verified OIDC on the settings page.
+    """
+    frontend_base = os.environ.get("DASHBOARD_BASE_URL", "").rstrip("/")
+    if not frontend_base:
+        return None
+    return f"{frontend_base}{PROFILE_SETTINGS_PATH}"
+
+
 def build_account_link_url(*, slack_user_id: str | None, work_email: str | None) -> str | None:
     """Return the dashboard login URL that links a Slack identity on completion.
 

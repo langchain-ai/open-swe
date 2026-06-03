@@ -1,25 +1,28 @@
-import { Link } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { Link } from "@tanstack/react-router"
+import { useEffect, useState } from "react"
 
-import { AgentPromptBar } from "@/components/agents/AgentPromptBar";
-import { AgentRunCard } from "@/components/agents/AgentRunCard";
-import { Logo } from "@/components/agents/ported/Logo";
-import { useAgentThreads, useCreateAgentThread } from "@/lib/agents/queries";
-import { useModelOptions, type ModelSelection } from "@/lib/agents/useModelOptions";
+import type { ModelSelection } from "@/lib/agents/useModelOptions"
+import { AgentPromptBar } from "@/components/agents/AgentPromptBar"
+import { AgentRunCard } from "@/components/agents/AgentRunCard"
+import { SlackConnectDialog } from "@/components/agents/SlackConnectDialog"
+import { Logo } from "@/components/agents/ported/Logo"
+import { useAgentThreads, useCreateAgentThread } from "@/lib/agents/queries"
+import { useModelOptions } from "@/lib/agents/useModelOptions"
 
 export function AgentsHome() {
-  const threadsQuery = useAgentThreads();
-  const createThread = useCreateAgentThread();
-  const recentRuns = (threadsQuery.data ?? []).slice(0, 5);
-  const { models, defaultSelection } = useModelOptions();
-  const [selection, setSelection] = useState<ModelSelection | null>(null);
+  const threadsQuery = useAgentThreads()
+  const createThread = useCreateAgentThread()
+  const recentRuns = (threadsQuery.data ?? []).slice(0, 5)
+  const { models, defaultSelection } = useModelOptions()
+  const [selection, setSelection] = useState<ModelSelection | null>(null)
 
   useEffect(() => {
-    if (selection === null && defaultSelection) setSelection(defaultSelection);
-  }, [defaultSelection, selection]);
+    if (selection === null && defaultSelection) setSelection(defaultSelection)
+  }, [defaultSelection, selection])
 
   return (
     <div className="flex min-w-0 flex-1 flex-col overflow-y-auto px-6 py-8">
+      <SlackConnectDialog />
       <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col items-center justify-center">
         <div className="flex w-full flex-col items-center gap-6">
           <Logo />
@@ -40,16 +43,20 @@ export function AgentsHome() {
 
         <div className="mx-auto mt-6 w-full max-w-[640px] space-y-2">
           {threadsQuery.isLoading ? (
-            <p className="text-center text-sm text-[var(--ui-text-dim)]">Loading agents…</p>
+            <p className="text-center text-sm text-[var(--ui-text-dim)]">
+              Loading agents…
+            </p>
           ) : recentRuns.length === 0 ? (
             <AgentsHomeEmptyState />
           ) : (
-            recentRuns.map((thread) => <AgentRunCard key={thread.id} thread={thread} />)
+            recentRuns.map((thread) => (
+              <AgentRunCard key={thread.id} thread={thread} />
+            ))
           )}
         </div>
       </div>
     </div>
-  );
+  )
 }
 
 export function AgentsHomeEmptyState() {
@@ -63,5 +70,5 @@ export function AgentsHomeEmptyState() {
         Start your first agent
       </Link>
     </div>
-  );
+  )
 }
