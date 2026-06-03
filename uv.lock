@@ -1511,7 +1511,7 @@ wheels = [
 
 [[package]]
 name = "langgraph-cli"
-version = "0.4.24"
+version = "0.4.27"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "click" },
@@ -1520,9 +1520,9 @@ dependencies = [
     { name = "pathspec" },
     { name = "python-dotenv" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/1c/77/34ebed84736dacbf164617794c15cd9271c18773cf32eeb7086c8b7b6dfd/langgraph_cli-0.4.24.tar.gz", hash = "sha256:8f05f0aec38a5da3cb0e7250123530e83c0179d74be0021050bc5cd36ac0dafb", size = 1027613, upload-time = "2026-04-22T18:49:30.921Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/02/21/046b2345d83427a59ebdac797fbe343bb8d1e575560667846f7346733774/langgraph_cli-0.4.27.tar.gz", hash = "sha256:67a64b67dddc8c670d77cc4c9663a7f8e924eaeb8857a926e87f239b699ef8f6", size = 1045499, upload-time = "2026-05-28T14:25:35.13Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/12/89/c5b09ad2dffb411987529f32e81fe318ccef3c2fdff2442e7c25b05b108c/langgraph_cli-0.4.24-py3-none-any.whl", hash = "sha256:aaf4dbecd752391c1489864da3a8e0af08e6bb0684d6516007617ce0abe9404d", size = 75486, upload-time = "2026-04-22T18:49:29.888Z" },
+    { url = "https://files.pythonhosted.org/packages/d5/89/4bda72ff33172ad15ddb2c57c5b998bf9309e7c4890d3d84a8c8ed6333d4/langgraph_cli-0.4.27-py3-none-any.whl", hash = "sha256:d53bddfc4e7b6e47871bedb34ccc476fd5e4e97f8678dd453ecac597c5f11ff1", size = 78002, upload-time = "2026-05-28T14:25:34.127Z" },
 ]
 
 [package.optional-dependencies]
@@ -1893,7 +1893,7 @@ requires-dist = [
     { name = "langchain-openai", specifier = ">=1.2.2" },
     { name = "langchain-runloop", specifier = ">=0.0.4" },
     { name = "langgraph", specifier = ">=1.1.10" },
-    { name = "langgraph-cli", extras = ["inmem"], specifier = ">=0.4.24" },
+    { name = "langgraph-cli", extras = ["inmem"], specifier = ">=0.4.27" },
     { name = "langgraph-sdk", specifier = ">=0.4.2" },
     { name = "langsmith", specifier = ">=0.8.8" },
     { name = "markdownify", specifier = ">=1.2.2" },
