@@ -221,6 +221,15 @@ def render_inline_comment_payload(finding: Finding) -> dict[str, Any] | None:
     return payload
 
 
+def review_summary_marker(pr_number: int) -> str:
+    """The hidden marker embedded in every Open SWE review summary body.
+
+    Used both to stamp the summary (``render_review_body``) and to detect
+    (``open_swe_review_exists``) whether Open SWE has already reviewed a PR.
+    """
+    return f"<!-- open-swe-reviewer pr={pr_number} -->"
+
+
 def render_review_body(*, pr_number: int, surfaced_count: int, trace_url: str | None = None) -> str:
     """Compose the top-level review body."""
     if surfaced_count == 0:
@@ -235,8 +244,55 @@ def render_review_body(*, pr_number: int, surfaced_count: int, trace_url: str | 
     parts = [headline]
     if trace_url:
         parts.append(f"[View Open SWE trace]({trace_url})")
-    parts.append(f"<!-- open-swe-reviewer pr={pr_number} -->")
+    parts.append(review_summary_marker(pr_number))
     return "\n\n".join(parts)
+
+
+async def open_swe_review_exists(
+    *,
+    owner: str,
+    repo: str,
+    pr_number: int,
+    token: str,
+) -> bool:
+    """Return True if Open SWE has already posted a review summary on this PR.
+
+    Detected via the ``review_summary_marker`` that ``render_review_body``
+    embeds in every Open SWE review body. The reviewer uses this to avoid
+    posting a duplicate "No issues found" summary when the ``re_review`` config
+    flag is stale — a push that lands mid-run is delivered as a queued message
+    into the still-running first-review run, whose configurable still says
+    ``re_review=False``, so the empty-review guard can't trust that flag alone.
+
+    On any API failure this returns False (fail open): the only consequence is
+    a possible duplicate summary, never a suppressed first review.
+    """
+    marker = review_summary_marker(pr_number)
+    url = f"{_GITHUB_API_BASE}/repos/{owner}/{repo}/pulls/{pr_number}/reviews"
+    headers = _github_headers(token)
+    params: dict[str, Any] = {"per_page": 100, "page": 1}
+    async with httpx.AsyncClient() as client:
+        while True:
+            try:
+                response = await client.get(url, headers=headers, params=params, timeout=30)
+                response.raise_for_status()
+            except httpx.HTTPError:
+                logger.exception(
+                    "Failed to list PR reviews for %s/%s#%s",
+                    owner,
+                    repo,
+                    pr_number,
+                )
+                return False
+            data = response.json()
+            if not isinstance(data, list) or not data:
+                return False
+            for review in data:
+                if isinstance(review, dict) and marker in (review.get("body") or ""):
+                    return True
+            if len(data) < 100:  # noqa: PLR2004
+                return False
+            params["page"] += 1
 
 
 async def post_pull_request_review(

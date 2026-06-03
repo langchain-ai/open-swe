@@ -11,6 +11,7 @@ import pytest
 from agent.reviewer_findings import Finding, new_finding
 from agent.reviewer_publish import (
     fetch_pr_review_threads,
+    open_swe_review_exists,
     parse_review_comment_marker,
     post_pull_request_review,
     render_inline_comment_body,
@@ -19,6 +20,7 @@ from agent.reviewer_publish import (
     render_review_body,
     reply_to_review_comment,
     resolve_review_thread,
+    review_summary_marker,
 )
 
 
@@ -42,6 +44,7 @@ def _isolate_publish_review_pr_state() -> Iterator[None]:
     with (
         patch("agent.tools.publish_review.fetch_pr_review_threads", AsyncMock(return_value=[])),
         patch("agent.tools.publish_review.replace_findings", AsyncMock()),
+        patch("agent.tools.publish_review.open_swe_review_exists", AsyncMock(return_value=False)),
     ):
         yield
 
@@ -510,6 +513,135 @@ async def test_publish_review_skips_post_on_re_review_with_no_new_findings() -> 
     assert result["surfaced_count"] == 0
     assert result["resolved_thread_count"] == 1
     assert result["skipped_empty_re_review"] is True
+
+
+@pytest.mark.asyncio
+async def test_publish_review_skips_duplicate_empty_summary_when_open_swe_already_reviewed() -> (
+    None
+):
+    """A push landing mid-run is queued into the still-running first-review run,
+    whose configurable still says re_review=False. With nothing to surface, the
+    empty-review guard must key off the existing Open SWE review summary on the
+    PR (not the stale flag) so it does not post a duplicate "No issues found"."""
+    from agent.tools.publish_review import _publish_review_async
+
+    post_review = AsyncMock()
+    set_metadata = AsyncMock()
+    resolve_threads = AsyncMock(return_value=0)
+    review_exists = AsyncMock(return_value=True)
+    slack_reply = AsyncMock()
+
+    with (
+        patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
+        patch("agent.tools.publish_review.list_findings_async", AsyncMock(return_value=[])),
+        patch("agent.tools.publish_review.open_swe_review_exists", review_exists),
+        patch("agent.tools.publish_review.post_pull_request_review", post_review),
+        patch("agent.tools.publish_review._resolve_threads_for_resolved_findings", resolve_threads),
+        patch("agent.tools.publish_review.set_reviewer_thread_metadata", set_metadata),
+        patch("agent.tools.publish_review._maybe_post_slack_completion_reply", slack_reply),
+    ):
+        result = await _publish_review_async(
+            owner="o",
+            repo="r",
+            pr_number=7,
+            head_sha="newsha",
+            token="t",
+            severity_threshold="medium",
+            cap=15,
+            is_re_review=False,
+        )
+
+    post_review.assert_not_called()
+    review_exists.assert_awaited_once()
+    resolve_threads.assert_awaited_once()
+    slack_reply.assert_not_called()
+    assert result["success"] is True
+    assert result["review_id"] is None
+    assert result["surfaced_count"] == 0
+    assert result["skipped_empty_re_review"] is True
+    set_metadata.assert_awaited_once_with("tid", last_reviewed_sha="newsha")
+
+
+@pytest.mark.asyncio
+async def test_publish_review_skips_review_existence_check_on_re_review() -> None:
+    """When re_review is already True we know a prior review exists, so the
+    empty-review guard must short-circuit without an extra reviews API call."""
+    from agent.tools.publish_review import _publish_review_async
+
+    review_exists = AsyncMock(return_value=True)
+
+    with (
+        patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
+        patch("agent.tools.publish_review.list_findings_async", AsyncMock(return_value=[])),
+        patch("agent.tools.publish_review.open_swe_review_exists", review_exists),
+        patch("agent.tools.publish_review.post_pull_request_review", AsyncMock()) as post_review,
+        patch(
+            "agent.tools.publish_review._resolve_threads_for_resolved_findings",
+            new_callable=AsyncMock,
+            return_value=0,
+        ),
+        patch("agent.tools.publish_review.set_reviewer_thread_metadata", new_callable=AsyncMock),
+    ):
+        result = await _publish_review_async(
+            owner="o",
+            repo="r",
+            pr_number=7,
+            head_sha="newsha",
+            token="t",
+            severity_threshold="medium",
+            cap=15,
+            is_re_review=True,
+        )
+
+    review_exists.assert_not_called()
+    post_review.assert_not_called()
+    assert result["skipped_empty_re_review"] is True
+
+
+@pytest.mark.asyncio
+async def test_open_swe_review_exists_detects_summary_marker() -> None:
+    response = MagicMock()
+    response.json.return_value = [
+        {"id": 1, "body": "some human review"},
+        {"id": 2, "body": f"## ✅ Open SWE Review\n\n{review_summary_marker(7)}"},
+    ]
+    response.raise_for_status.return_value = None
+
+    client_cm = AsyncMock()
+    client_cm.__aenter__.return_value = client_cm
+    client_cm.get = AsyncMock(return_value=response)
+
+    with patch("agent.reviewer_publish.httpx.AsyncClient", return_value=client_cm):
+        exists = await open_swe_review_exists(owner="o", repo="r", pr_number=7, token="t")
+    assert exists is True
+
+
+@pytest.mark.asyncio
+async def test_open_swe_review_exists_false_without_marker() -> None:
+    response = MagicMock()
+    response.json.return_value = [{"id": 1, "body": "looks good to me"}]
+    response.raise_for_status.return_value = None
+
+    client_cm = AsyncMock()
+    client_cm.__aenter__.return_value = client_cm
+    client_cm.get = AsyncMock(return_value=response)
+
+    with patch("agent.reviewer_publish.httpx.AsyncClient", return_value=client_cm):
+        exists = await open_swe_review_exists(owner="o", repo="r", pr_number=7, token="t")
+    assert exists is False
+
+
+@pytest.mark.asyncio
+async def test_open_swe_review_exists_fails_open_on_http_error() -> None:
+    import httpx
+
+    client_cm = AsyncMock()
+    client_cm.__aenter__.return_value = client_cm
+    client_cm.get = AsyncMock(side_effect=httpx.HTTPError("boom"))
+
+    with patch("agent.reviewer_publish.httpx.AsyncClient", return_value=client_cm):
+        exists = await open_swe_review_exists(owner="o", repo="r", pr_number=7, token="t")
+    assert exists is False
 
 
 @pytest.mark.asyncio
