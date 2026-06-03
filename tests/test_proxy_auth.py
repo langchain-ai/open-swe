@@ -327,7 +327,7 @@ class TestRefreshProxyOnSandboxReuse:
 
             assert sandbox is replacement_sandbox
             mock_proxy.assert_called_once_with("sandbox-stale", "ghs_fresh")
-            mock_recreate.assert_awaited_once_with("thread-123")
+            mock_recreate.assert_awaited_once_with("thread-123", github_proxy_token=None)
 
     @pytest.mark.asyncio
     async def test_starts_stopped_langsmith_sandbox_before_proxy_refresh(self) -> None:

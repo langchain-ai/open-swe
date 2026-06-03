@@ -1668,6 +1668,46 @@ async def fetch_github_pr_metadata(pr_ref: GitHubPrRef, *, token: str) -> dict[s
     return data if isinstance(data, dict) else None
 
 
+def _repo_private_from_pr_metadata(pr_metadata: dict[str, Any]) -> bool | None:
+    repo = pr_metadata.get("base", {}).get("repo")
+    if isinstance(repo, dict) and isinstance(repo.get("private"), bool):
+        return repo["private"]
+    return None
+
+
+def _repo_id_from_pr_metadata(pr_metadata: dict[str, Any]) -> int | None:
+    repo = pr_metadata.get("base", {}).get("repo")
+    repo_id = repo.get("id") if isinstance(repo, dict) else None
+    return repo_id if isinstance(repo_id, int) else None
+
+
+def _repo_private_from_payload(payload: dict[str, Any]) -> bool | None:
+    repo = payload.get("repository")
+    private = repo.get("private") if isinstance(repo, dict) else None
+    return private if isinstance(private, bool) else None
+
+
+def _repo_id_from_payload(payload: dict[str, Any]) -> int | None:
+    repo = payload.get("repository")
+    repo_id = repo.get("id") if isinstance(repo, dict) else None
+    return repo_id if isinstance(repo_id, int) else None
+
+
+async def _reviewer_token_for_repo(
+    repo_config: dict[str, str],
+    *,
+    repo_private: bool | None,
+    repo_id: int | None = None,
+) -> tuple[str | None, str | None]:
+    if repo_private is False:
+        if repo_id is not None:
+            return await get_github_app_installation_token_with_expiry(repository_ids=[repo_id])
+        repo_name = repo_config.get("name")
+        if repo_name:
+            return await get_github_app_installation_token_with_expiry(repositories=[repo_name])
+    return await get_github_app_installation_token_with_expiry()
+
+
 async def trigger_pr_review_from_ref(
     pr_ref: GitHubPrRef,
     *,
@@ -1681,6 +1721,8 @@ async def trigger_pr_review_from_ref(
     if not await _is_repo_enabled_for_review(repo_config):
         return {"success": False, "error": "Repository not enabled for review"}
 
+    # Full token to read PR metadata (privacy/id aren't in the trigger ref);
+    # re-scoped below once we know whether the repo is public.
     app_token, app_token_expires_at = await get_github_app_installation_token_with_expiry()
     if not app_token:
         logger.warning("No GitHub App token available for PR reviewer request")
@@ -1689,6 +1731,17 @@ async def trigger_pr_review_from_ref(
     pr_metadata = await fetch_github_pr_metadata(pr_ref, token=app_token)
     if not pr_metadata:
         return {"success": False, "error": "Could not fetch pull request metadata"}
+
+    repo_private = _repo_private_from_pr_metadata(pr_metadata)
+    repo_id = _repo_id_from_pr_metadata(pr_metadata)
+    app_token, app_token_expires_at = await _reviewer_token_for_repo(
+        repo_config,
+        repo_private=repo_private,
+        repo_id=repo_id,
+    )
+    if not app_token:
+        logger.warning("No GitHub App token available for PR reviewer request")
+        return {"success": False, "error": "No GitHub App token available"}
 
     base_sha = pr_metadata.get("base", {}).get("sha", "")
     head = pr_metadata.get("head", {})
@@ -1742,6 +1795,7 @@ async def trigger_pr_review_from_ref(
         base_sha=base_sha,
         head_sha=head_sha,
         branch_name=branch_name,
+        repo_private=repo_private,
         slack_channel_id=slack_channel_id,
         slack_thread_ts=slack_thread_ts,
     )
@@ -1781,6 +1835,7 @@ def _build_reviewer_configurable(
     base_sha: str,
     head_sha: str,
     branch_name: str,
+    repo_private: bool | None = None,
     re_review: bool = False,
     last_reviewed_sha: str = "",
     slack_channel_id: str = "",
@@ -1801,6 +1856,8 @@ def _build_reviewer_configurable(
     }
     if branch_name:
         configurable["branch_name"] = branch_name
+    if repo_private is not None:
+        configurable["repo_private"] = repo_private
     if last_reviewed_sha:
         configurable["last_reviewed_sha"] = last_reviewed_sha
     if slack_channel_id and slack_thread_ts:
@@ -1836,6 +1893,8 @@ async def _dispatch_first_review_from_pr_payload(payload: dict[str, Any], *, sou
         "owner": repo.get("owner", {}).get("login", ""),
         "name": repo.get("name", ""),
     }
+    repo_private = _repo_private_from_payload(payload)
+    repo_id = _repo_id_from_payload(payload)
     pr_number = pull_request.get("number")
     pr_url = pull_request.get("html_url", "") or pull_request.get("url", "")
     branch_name = pull_request.get("head", {}).get("ref", "")
@@ -1881,7 +1940,11 @@ async def _dispatch_first_review_from_pr_payload(payload: dict[str, Any], *, sou
                     return
                 last_reviewed_sha = existing_last_reviewed_sha
 
-    app_token, app_token_expires_at = await get_github_app_installation_token_with_expiry()
+    app_token, app_token_expires_at = await _reviewer_token_for_repo(
+        repo_config,
+        repo_private=repo_private,
+        repo_id=repo_id,
+    )
     if not app_token:
         logger.warning("No GitHub App token available for reviewer dispatch")
         return
@@ -1917,6 +1980,7 @@ async def _dispatch_first_review_from_pr_payload(payload: dict[str, Any], *, sou
         base_sha=base_sha,
         head_sha=head_sha,
         branch_name=branch_name,
+        repo_private=repo_private,
         re_review=is_re_review,
         last_reviewed_sha=last_reviewed_sha,
     )
@@ -2204,6 +2268,8 @@ async def process_github_push_event(payload: dict[str, Any]) -> None:
         "owner": repo.get("owner", {}).get("login", "") or repo.get("owner", {}).get("name", ""),
         "name": repo.get("name", ""),
     }
+    repo_private = _repo_private_from_payload(payload)
+    repo_id = _repo_id_from_payload(payload)
     if not repo_config["owner"] or not repo_config["name"]:
         logger.warning("Push to %s ignored: repository owner/name missing from payload", head_ref)
         return
@@ -2216,7 +2282,11 @@ async def process_github_push_event(payload: dict[str, Any]) -> None:
         )
         return
 
-    app_token, app_token_expires_at = await get_github_app_installation_token_with_expiry()
+    app_token, app_token_expires_at = await _reviewer_token_for_repo(
+        repo_config,
+        repo_private=repo_private,
+        repo_id=repo_id,
+    )
     if not app_token:
         logger.warning("No GitHub App token for push re-review on %s", head_ref)
         return
@@ -2231,6 +2301,21 @@ async def process_github_push_event(payload: dict[str, Any]) -> None:
         )
         return
 
+    # Push payloads normally carry repo privacy/id; fall back to PR metadata.
+    # If the repo turns out public, re-scope the token so reviewer.py doesn't
+    # proxy a full-installation token for a public PR.
+    if repo_private is None:
+        repo_private = _repo_private_from_pr_metadata(pr)
+        repo_id = repo_id or _repo_id_from_pr_metadata(pr)
+        if repo_private is False:
+            app_token, app_token_expires_at = await _reviewer_token_for_repo(
+                repo_config,
+                repo_private=repo_private,
+                repo_id=repo_id,
+            )
+            if not app_token:
+                logger.warning("No GitHub App token for push re-review on %s", head_ref)
+                return
     pr_number = pr.get("number")
     pr_url = pr.get("html_url") or pr.get("url") or ""
     base_sha = pr.get("base", {}).get("sha", "")
@@ -2332,6 +2417,7 @@ async def process_github_push_event(payload: dict[str, Any]) -> None:
         base_sha=base_sha,
         head_sha=head_sha,
         branch_name=head_ref,
+        repo_private=repo_private,
         re_review=True,
         last_reviewed_sha=last_reviewed_sha if isinstance(last_reviewed_sha, str) else "",
     )
@@ -2599,6 +2685,8 @@ async def process_github_review_finding_reply(payload: dict[str, Any]) -> None:
         "owner": repo.get("owner", {}).get("login", ""),
         "name": repo.get("name", ""),
     }
+    repo_private = _repo_private_from_payload(payload)
+    repo_id = _repo_id_from_payload(payload)
     pr_number = pull_request.get("number")
     if not isinstance(pr_number, int):
         return
@@ -2610,7 +2698,11 @@ async def process_github_review_finding_reply(payload: dict[str, Any]) -> None:
     if metadata is None or metadata.get("kind") != REVIEWER_THREAD_KIND:
         return
 
-    app_token, app_token_expires_at = await get_github_app_installation_token_with_expiry()
+    app_token, app_token_expires_at = await _reviewer_token_for_repo(
+        repo_config,
+        repo_private=repo_private,
+        repo_id=repo_id,
+    )
     if not app_token:
         return
     try:
@@ -2669,6 +2761,7 @@ async def process_github_review_finding_reply(payload: dict[str, Any]) -> None:
         base_sha=base_sha,
         head_sha=head_sha,
         branch_name=branch_name,
+        repo_private=repo_private,
         re_review=True,
     )
     configurable.update(
