@@ -25,7 +25,7 @@ from .dashboard.agent_overrides import (
     resolve_login_from_email_async,
 )
 from .dashboard.enabled_repos import is_review_repo_enabled
-from .dashboard.oauth import build_account_link_url
+from .dashboard.oauth import build_settings_url
 from .dashboard.profiles import get_profile, get_valid_access_token, has_access_token_record
 from .dashboard.team_settings import get_team_settings
 from .dashboard.user_mappings import (
@@ -880,29 +880,28 @@ async def _post_account_link_prompt(
     (signed in before, but the stored GitHub authorization is no longer usable).
     Open SWE opens PRs as the triggering user, so it cannot start until the user
     has signed in with GitHub and connected their Slack account in the dashboard.
-    The link runs the GitHub sign-in and lands them on Profile Settings, where
-    they can connect Slack.
+
+    Posts a plain, token-free dashboard link as a visible threaded reply. The
+    link carries no per-user identity, so it's safe to show in a shared channel:
+    the user signs in with GitHub from their own session and connects Slack via
+    verified OIDC on the settings page.
     """
-    link_url = build_account_link_url(slack_user_id=user_id, work_email=user_email)
-    if not link_url:
-        logger.debug("Account-link URL unavailable (DASHBOARD_API_BASE_URL unset); skipping prompt")
+    settings_url = build_settings_url()
+    if not settings_url:
+        logger.debug(
+            "Dashboard settings URL unavailable (DASHBOARD_BASE_URL unset); skipping prompt"
+        )
         return
     if reason == "revoked":
         text = (
             "🔐 Your GitHub sign-in is no longer valid, so I can't act on your behalf. "
-            "Sign in with GitHub again to reconnect:\n"
-            f"<{link_url}|Sign in with GitHub>"
+            f"Sign in again in <{settings_url}|your Open SWE settings>."
         )
     else:
         text = (
             "👋 To act on your behalf I need you to sign in with GitHub and connect your "
-            "Slack account. Set that up in your dashboard:\n"
-            f"<{link_url}|Sign in with GitHub & connect Slack>"
+            f"Slack account in <{settings_url}|your Open SWE settings>."
         )
-    # Use a visible threaded reply, not an ephemeral message: ephemeral messages
-    # are silently dropped in Slack's assistant threads (where Open SWE runs) —
-    # the API returns ok but the user sees nothing — so a blocked user would get
-    # no actionable prompt. This is the same channel the agent uses to reply.
     try:
         await post_slack_thread_reply(channel_id, thread_ts, text)
     except Exception:  # noqa: BLE001

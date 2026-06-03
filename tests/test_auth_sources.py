@@ -7,10 +7,11 @@ import pytest
 from agent.utils import auth
 
 
-def test_leave_failure_comment_posts_visible_slack_thread_reply(
+def test_leave_failure_comment_posts_generic_token_free_slack_notice(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Auth failures post a visible threaded reply (ephemeral is dropped in assistant threads)."""
+    """Slack auth failures post a generic notice, never the (possibly sensitive) message."""
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://app.example.com")
     thread_called: dict[str, str] = {}
 
     async def fake_post_slack_thread_reply(channel_id: str, thread_ts: str, message: str) -> bool:
@@ -34,9 +35,13 @@ def test_leave_failure_comment_posts_visible_slack_thread_reply(
         },
     )
 
-    asyncio.run(auth.leave_failure_comment("slack", "auth failed"))
+    # Pass a message that embeds a per-user auth URL; it must NOT be echoed publicly.
+    asyncio.run(auth.leave_failure_comment("slack", "Click https://auth.example/secret-token"))
 
-    assert thread_called == {"channel_id": "C123", "thread_ts": "1.2", "message": "auth failed"}
+    assert thread_called["channel_id"] == "C123"
+    assert thread_called["thread_ts"] == "1.2"
+    assert "secret-token" not in thread_called["message"]
+    assert "https://app.example.com/my-settings" in thread_called["message"]
 
 
 def _slack_config(github_login: str | None = "mason-gh") -> dict:
