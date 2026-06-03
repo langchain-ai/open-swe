@@ -26,7 +26,7 @@ from .dashboard.agent_overrides import (
 )
 from .dashboard.enabled_repos import is_review_repo_enabled
 from .dashboard.oauth import build_account_link_url
-from .dashboard.profiles import get_profile, get_valid_access_token
+from .dashboard.profiles import get_profile, get_valid_access_token, has_access_token_record
 from .dashboard.team_settings import get_team_settings
 from .dashboard.user_mappings import (
     email_for_login,
@@ -875,27 +875,30 @@ async def _post_account_link_prompt(
     user_email: str | None,
     reason: str = "unlinked",
 ) -> None:
-    """Prompt a Slack user to (re-)link their GitHub account (ephemeral).
+    """Prompt a Slack user to connect their account via the dashboard (ephemeral).
 
-    ``reason`` is ``"unlinked"`` (no mapping yet) or ``"expired"`` (mapped but
-    the stored GitHub authorization is missing/expired/revoked). Open SWE opens
-    PRs as the triggering user, so it cannot start until the account is linked.
+    ``reason`` is ``"unlinked"`` (never signed in with GitHub) or ``"revoked"``
+    (signed in before, but the stored GitHub authorization is no longer usable).
+    Open SWE opens PRs as the triggering user, so it cannot start until the user
+    has signed in with GitHub and connected their Slack account in the dashboard.
+    The link runs the GitHub sign-in and lands them on Profile Settings, where
+    they can connect Slack.
     """
     link_url = build_account_link_url(slack_user_id=user_id, work_email=user_email)
     if not link_url:
         logger.debug("Account-link URL unavailable (DASHBOARD_API_BASE_URL unset); skipping prompt")
         return
-    if reason == "expired":
+    if reason == "revoked":
         text = (
-            "🔐 Your GitHub authorization has expired or was revoked, so I can't act on "
-            "your behalf. Re-link your account to continue:\n"
-            f"<{link_url}|Re-link your GitHub account>"
+            "🔐 Your GitHub sign-in is no longer valid, so I can't act on your behalf. "
+            "Sign in with GitHub again to reconnect:\n"
+            f"<{link_url}|Sign in with GitHub>"
         )
     else:
         text = (
-            "👋 I don't have your GitHub account linked yet, so I can't open PRs on your "
-            "behalf. I won't start until you link your account:\n"
-            f"<{link_url}|Link your GitHub account>"
+            "👋 To act on your behalf I need you to sign in with GitHub and connect your "
+            "Slack account. Set that up in your dashboard:\n"
+            f"<{link_url}|Sign in with GitHub & connect Slack>"
         )
     try:
         await post_slack_ephemeral_message(channel_id, user_id, text, thread_ts=thread_ts)
@@ -1024,12 +1027,12 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
     mapped_login = await login_for_slack_id(user_id)
     if not mapped_login and user_email:
         mapped_login = await login_for_email(user_email)
-    is_user_mapped = bool(mapped_login)
 
     # Open SWE opens PRs as the triggering user, so a run only proceeds when we
-    # have a valid user GitHub token. Unmapped users, and mapped users whose
-    # token is missing/expired/revoked, are blocked and prompted to (re-)link.
-    # Bot-token-only deployments are exempt — they run on the installation token.
+    # have a valid user GitHub token. Users who have never signed in with
+    # GitHub, and users whose stored authorization is no longer usable, are
+    # blocked and prompted to set up via the dashboard. Bot-token-only
+    # deployments are exempt — they run on the installation token.
     user_token: str | None = None
     if mapped_login:
         try:
@@ -1044,7 +1047,21 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
     has_valid_user_token = bool(user_token)
 
     if not has_valid_user_token and not is_bot_token_only_mode():
-        reason = "expired" if is_user_mapped else "unlinked"
+        # A stored-but-unusable token means "sign in again"; no record at all
+        # means the user has never connected GitHub + Slack via the dashboard.
+        # Guard the store read like token resolution above so a transient
+        # failure still yields an actionable prompt and clears the status.
+        has_token_record = False
+        if mapped_login:
+            try:
+                has_token_record = await has_access_token_record(mapped_login)
+            except Exception:  # noqa: BLE001
+                logger.debug(
+                    "Failed to check GitHub token record for %s; prompting sign-in",
+                    mapped_login,
+                    exc_info=True,
+                )
+        reason = "revoked" if has_token_record else "unlinked"
         logger.info(
             "Blocking Slack run for thread %s: no valid user GitHub token (%s)",
             thread_id,

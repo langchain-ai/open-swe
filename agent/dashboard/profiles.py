@@ -270,6 +270,16 @@ async def get_access_token(login: str) -> str | None:
     return await get_valid_access_token(login)
 
 
+async def has_access_token_record(login: str) -> bool:
+    """Whether an OAuth token record exists for ``login``.
+
+    Distinguishes "user has never completed a GitHub login" (no record) from
+    "the stored authorization is present but no longer usable" (record exists
+    but won't decrypt / was revoked), so callers can prompt accurately.
+    """
+    return bool(await _get_value(OAUTH_TOKENS_NAMESPACE, login))
+
+
 async def list_profiles() -> list[dict[str, Any]]:
     result = await _client().store.search_items(PROFILES_NAMESPACE, limit=1000)
     items = result.get("items") if isinstance(result, dict) else getattr(result, "items", [])
