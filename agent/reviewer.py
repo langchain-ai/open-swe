@@ -637,11 +637,16 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
             config["metadata"]["github_token_expires_at"] = new_expires_at
             github_token = _token
 
-    sandbox_backend = await ensure_sandbox_for_thread(thread_id)
+    repo_config = config["configurable"].get("repo") or {}
+    repo_private = config["configurable"].get("repo_private")
+    github_proxy_token = github_token if repo_private is False else None
+    sandbox_backend = await ensure_sandbox_for_thread(
+        thread_id,
+        github_proxy_token=github_proxy_token,
+    )
 
     work_dir = await aresolve_sandbox_work_dir(sandbox_backend)
 
-    repo_config = config["configurable"].get("repo") or {}
     repo_owner = str(repo_config.get("owner", ""))
     repo_name = str(repo_config.get("name", ""))
     base_sha = str(config["configurable"].get("base_sha", "") or "")
