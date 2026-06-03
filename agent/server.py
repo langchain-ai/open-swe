@@ -69,7 +69,11 @@ from .tools import (
     web_search,
 )
 from .utils.auth import resolve_github_token
-from .utils.authorship import resolve_triggering_user_identity
+from .utils.authorship import (
+    OPEN_SWE_BOT_EMAIL,
+    OPEN_SWE_BOT_NAME,
+    resolve_triggering_user_identity,
+)
 from .utils.github_app import get_github_app_installation_token
 from .utils.model import (
     DEFAULT_LLM_REASONING,
@@ -181,8 +185,8 @@ async def _refresh_github_proxy_or_recreate(
 async def _configure_git_identity(sandbox_backend: SandboxBackendProtocol) -> None:
     await asyncio.to_thread(
         sandbox_backend.execute,
-        "git config --global user.name 'open-swe[bot]' && "
-        "git config --global user.email 'open-swe@users.noreply.github.com'",
+        f"git config --global user.name '{OPEN_SWE_BOT_NAME}' && "
+        f"git config --global user.email '{OPEN_SWE_BOT_EMAIL}'",
     )
 
 

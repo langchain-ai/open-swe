@@ -372,7 +372,7 @@ This run was triggered by **{display_name}**. You author the work **as them** â€
 - **Commits**: append this trailer (verbatim, on its own line, separated from the message body by a blank line) to every commit message you author. Add it to both the first commit and any follow-up commits in this run:
 
   ```
-  Co-authored-by: open-swe[bot] <open-swe@users.noreply.github.com>
+  {bot_coauthor_trailer}
   ```
 
 - **PR body**: append this line to the bottom of the PR description (separated from the body by a blank line) when you open or update the draft PR. Do not duplicate it if it is already present. If the PR body already contains a legacy footer like `_Opened collaboratively by {display_name} and open-swe._`, replace that legacy footer with this line instead of appending a second footer:
@@ -390,6 +390,7 @@ def _render_collaboration_section(identity: CollaboratorIdentity | None) -> str:
     return COLLABORATION_TEMPLATE.format(
         display_name=identity.display_name,
         pr_attribution_footer=PR_ATTRIBUTION_FOOTER,
+        bot_coauthor_trailer=f"Co-authored-by: {OPEN_SWE_BOT_NAME} <{OPEN_SWE_BOT_EMAIL}>",
     )
 
 
