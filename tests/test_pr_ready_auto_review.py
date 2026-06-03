@@ -191,6 +191,12 @@ async def test_pr_ready_for_review_uses_re_review_after_previous_review(
     assert configurable["last_reviewed_sha"] == "oldsha"
     assert configurable["head_sha"] == "headsha"
     assert "marked ready for review" in kwargs["input"]["messages"][0]["content"]
+    head_sha_writes = [
+        c.kwargs.get("head_sha")
+        for c in webapp.set_reviewer_thread_metadata.await_args_list
+        if c.kwargs.get("head_sha") is not None
+    ]
+    assert "headsha" in head_sha_writes
 
 
 @pytest.mark.asyncio

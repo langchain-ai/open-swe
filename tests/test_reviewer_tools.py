@@ -2,13 +2,36 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from typing import Any
 from unittest.mock import AsyncMock, patch
+
+import pytest
 
 from agent.tools.add_finding import add_finding
 from agent.tools.list_findings import list_findings
 from agent.tools.resolve_finding_thread import resolve_finding_thread
 from agent.tools.update_finding import update_finding
+
+
+@pytest.fixture(autouse=True)
+def _stub_resolve_review_head_sha() -> Iterator[None]:
+    """Resolve the review head from the run config (no thread-metadata fetch).
+
+    Mirrors the production fallback when metadata carries no head, keeping these
+    unit tests offline. Tests that exercise the metadata-override path patch
+    ``resolve_review_head_sha`` themselves.
+    """
+
+    def _head(thread_id: str, configurable: dict[str, Any]) -> str:
+        head = configurable.get("head_sha")
+        return head if isinstance(head, str) else ""
+
+    with (
+        patch("agent.tools.add_finding.resolve_review_head_sha", AsyncMock(side_effect=_head)),
+        patch("agent.tools.update_finding.resolve_review_head_sha", AsyncMock(side_effect=_head)),
+    ):
+        yield
 
 
 def _config(**configurable_overrides: Any) -> dict[str, Any]:
@@ -198,6 +221,40 @@ def test_add_finding_persists_to_thread_metadata() -> None:
     assert persisted["status"] == "open"
     assert persisted["first_seen_sha"] == "sha-head"
     assert persisted["confidence"] == "high"
+
+
+def test_add_finding_uses_resolved_head_sha_for_provenance() -> None:
+    """A net-new finding filed during a mid-run re-review must record the live
+    head (from thread metadata), not the stale head frozen in the run config."""
+    captured: list[Any] = []
+
+    async def fake_append(thread_id: str, finding: Any) -> Any:
+        captured.append(finding)
+        return finding
+
+    with (
+        patch("agent.tools.add_finding.get_config", return_value=_config()),
+        patch("agent.tools.add_finding.get_thread_id_from_runtime", return_value="tid-1"),
+        patch(
+            "agent.tools.add_finding.resolve_review_head_sha",
+            AsyncMock(return_value="freshhead"),
+        ),
+        patch("agent.tools.add_finding.append_finding", side_effect=fake_append),
+    ):
+        result = add_finding(
+            severity="medium",
+            confidence="high",
+            category="style",
+            file="foo.py",
+            title="Rename breaks reference",
+            description="rename",
+            start_line=11,
+            end_line=12,
+        )
+
+    assert result["success"] is True
+    assert captured[0]["first_seen_sha"] == "freshhead"
+    assert captured[0]["last_confirmed_sha"] == "freshhead"
 
 
 def test_add_finding_allows_file_level_with_no_lines() -> None:

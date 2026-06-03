@@ -265,7 +265,7 @@ async def test_push_event_triggers_re_review_run_when_watching() -> None:
         patch(
             "agent.webapp.set_reviewer_thread_metadata",
             new_callable=AsyncMock,
-        ),
+        ) as set_meta,
         patch("agent.webapp.is_thread_active", new_callable=AsyncMock, return_value=False),
         patch("agent.webapp.get_client", return_value=fake_client),
     ):
@@ -278,6 +278,14 @@ async def test_push_event_triggers_re_review_run_when_watching() -> None:
     assert configurable["re_review"] is True
     assert configurable["last_reviewed_sha"] == "oldsha"
     assert configurable["head_sha"] == "newsha"
+    # The live head is persisted to thread metadata so a re-review queued into
+    # an in-flight run can resolve it despite the run's frozen config.
+    head_sha_writes = [
+        c.kwargs.get("head_sha")
+        for c in set_meta.await_args_list
+        if c.kwargs.get("head_sha") is not None
+    ]
+    assert "newsha" in head_sha_writes
 
 
 @pytest.mark.asyncio

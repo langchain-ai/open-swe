@@ -18,6 +18,7 @@ from ..reviewer_findings import (
     get_thread_metadata,
     get_thread_slack_ref,
     replace_findings,
+    resolve_review_head_sha,
     set_reviewer_thread_metadata,
 )
 from ..reviewer_findings import (
@@ -202,6 +203,11 @@ async def _publish_review_async(
     trace_link_config_override: object = None,
 ) -> dict[str, Any]:
     thread_id = get_thread_id_from_runtime()
+    # The run config's head_sha is frozen at run creation; a push that arrived
+    # mid-run updated the live head in thread metadata. Prefer that so the
+    # review anchors to (and last_reviewed_sha advances to) the commit actually
+    # reviewed, not the stale one this run was created for.
+    head_sha = await resolve_review_head_sha(thread_id, {"head_sha": head_sha})
     review_trace_url = await _resolve_review_trace_url(thread_id, trace_link_config_override)
     findings = await _backfill_findings_from_pr_threads(
         thread_id=thread_id,

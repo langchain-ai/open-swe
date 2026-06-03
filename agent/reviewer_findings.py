@@ -294,6 +294,24 @@ async def get_thread_metadata(thread_id: str) -> dict[str, Any]:
     return metadata if isinstance(metadata, dict) else {}
 
 
+async def resolve_review_head_sha(thread_id: str, configurable: dict[str, Any]) -> str:
+    """Return the current PR head SHA for a reviewer run.
+
+    A push that lands while a reviewer run is in flight is delivered as a queued
+    message into that run, whose frozen ``configurable`` still names the head the
+    run was created for. The dispatching webhook records the current head in
+    thread metadata, so prefer that; fall back to the run's config when metadata
+    carries no head (first review, eval, tests).
+    """
+    config_head = configurable.get("head_sha") if isinstance(configurable, dict) else None
+    config_head = config_head if isinstance(config_head, str) else ""
+    if not thread_id:
+        return config_head
+    metadata = await get_thread_metadata(thread_id)
+    meta_head = metadata.get("head_sha")
+    return meta_head if isinstance(meta_head, str) and meta_head else config_head
+
+
 async def list_findings(thread_id: str) -> list[Finding]:
     """Return all findings persisted on the reviewer thread."""
     metadata = await get_thread_metadata(thread_id)
@@ -438,6 +456,7 @@ async def set_reviewer_thread_metadata(
     *,
     pr: ReviewerPRMeta | None = None,
     last_reviewed_sha: str | None = None,
+    head_sha: str | None = None,
     watch: bool | None = None,
     findings: list[Finding] | None = None,
     slack_thread: ReviewerSlackThread | None = None,
@@ -448,6 +467,11 @@ async def set_reviewer_thread_metadata(
     Always sets ``kind=reviewer`` so the future UI can list reviewer threads by
     filtering on metadata. Only includes the fields the caller passed in
     (langgraph metadata updates merge rather than overwrite).
+
+    ``head_sha`` records the current PR head the dispatching webhook is acting
+    on. A push that lands mid-run is queued into the still-running run, whose
+    frozen config can't be updated; persisting the head here lets the reviewer
+    tools resolve the live head via ``resolve_review_head_sha``.
     """
     client = get_client()
     metadata: dict[str, Any] = {"kind": REVIEWER_THREAD_KIND}
@@ -455,6 +479,8 @@ async def set_reviewer_thread_metadata(
         metadata["pr"] = pr
     if last_reviewed_sha is not None:
         metadata["last_reviewed_sha"] = last_reviewed_sha
+    if head_sha is not None:
+        metadata["head_sha"] = head_sha
     if watch is not None:
         metadata["watch"] = watch
     if findings is not None:

@@ -911,8 +911,9 @@ def test_process_github_pr_review_request_creates_reviewer_run(monkeypatch) -> N
         runs = _FakeRunsClient()
         threads = _FakeThreadsClient()
 
-    async def fake_set_reviewer_thread_metadata(thread_id: str, **_kwargs: object) -> None:
+    async def fake_set_reviewer_thread_metadata(thread_id: str, **kwargs: object) -> None:
         captured["set_metadata_thread_id"] = thread_id
+        captured["set_metadata_kwargs"] = kwargs
 
     monkeypatch.setattr(
         webapp, "get_github_app_installation_token", fake_get_github_app_installation_token
@@ -1011,8 +1012,9 @@ def test_trigger_pr_review_from_ref_creates_reviewer_run(monkeypatch) -> None:
         runs = _FakeRunsClient()
         threads = _FakeThreadsClient()
 
-    async def fake_set_reviewer_thread_metadata(thread_id: str, **_kwargs: object) -> None:
+    async def fake_set_reviewer_thread_metadata(thread_id: str, **kwargs: object) -> None:
         captured["set_metadata_thread_id"] = thread_id
+        captured["set_metadata_kwargs"] = kwargs
 
     monkeypatch.setattr(
         webapp, "get_github_app_installation_token", fake_get_github_app_installation_token
@@ -1065,6 +1067,9 @@ def test_trigger_pr_review_from_ref_creates_reviewer_run(monkeypatch) -> None:
         "channel_id": "C123",
         "thread_ts": "1700000000.000100",
     }
+    # The live head must be persisted to metadata so resolve_review_head_sha
+    # doesn't return a stale head left by a prior push/ready dispatch.
+    assert captured["set_metadata_kwargs"]["head_sha"] == "head-sha"
 
 
 def test_trigger_pr_review_from_ref_respects_dashboard_opt_in(monkeypatch) -> None:
