@@ -10,7 +10,8 @@ def create_local_sandbox(sandbox_id: str | None = None):
     Only use for local development with human-in-the-loop enabled.
 
     The root directory defaults to the current working directory and can be
-    overridden via the LOCAL_SANDBOX_ROOT_DIR environment variable.
+    overridden via the LOCAL_SANDBOX_ROOT_DIR environment variable. It is
+    created if it does not already exist.
 
     Args:
         sandbox_id: Ignored for local sandboxes; accepted for interface compatibility.
@@ -19,6 +20,7 @@ def create_local_sandbox(sandbox_id: str | None = None):
         LocalShellBackend instance implementing SandboxBackendProtocol.
     """
     root_dir = os.getenv("LOCAL_SANDBOX_ROOT_DIR", os.getcwd())
+    os.makedirs(root_dir, exist_ok=True)
 
     return LocalShellBackend(
         root_dir=root_dir,
