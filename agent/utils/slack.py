@@ -12,7 +12,7 @@ import re
 import time
 from dataclasses import dataclass
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 import httpx
 from langgraph_sdk.client import LangGraphClient
@@ -715,20 +715,36 @@ TRACE_REPLY_TIPS: tuple[str, ...] = (
 )
 
 
-def _format_trace_reply(trace_url: str | None) -> str:
+def _get_dashboard_thread_url(thread_id: str) -> str | None:
+    """Build the dashboard thread URL for a given thread ID."""
+    base_url = (
+        os.environ.get("DASHBOARD_BASE_URL", "https://openswe.vercel.app").strip().rstrip("/")
+    )
+    if not base_url:
+        return None
+    return f"{base_url}/agents/{quote(thread_id, safe='')}"
+
+
+def _format_trace_reply(trace_url: str | None, dashboard_url: str | None) -> str:
     """Format the initial trace reply with a randomly selected tip."""
     tip = random.choice(TRACE_REPLY_TIPS)
-    head = f"<{trace_url}|View trace>\n" if trace_url else ""
+    links = []
+    if trace_url:
+        links.append(f"<{trace_url}|View trace>")
+    if dashboard_url:
+        links.append(f"<{dashboard_url}|Open in Web>")
+    head = f"{' • '.join(links)}\n" if links else ""
     return f"{head}_Tip: {tip}_"
 
 
 async def post_slack_trace_reply(channel_id: str, thread_ts: str, thread_id: str) -> str | None:
     """Post a trace URL reply in a Slack thread and return its Slack timestamp."""
     trace_url = get_langsmith_trace_url(thread_id)
+    dashboard_url = _get_dashboard_thread_url(thread_id)
     message_ts, _ = await post_slack_thread_reply_with_ts(
         channel_id,
         thread_ts,
-        _format_trace_reply(trace_url),
+        _format_trace_reply(trace_url, dashboard_url),
         unfurl_links=False,
         unfurl_media=False,
     )
