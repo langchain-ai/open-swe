@@ -5,10 +5,14 @@ from agent.dashboard.agent_overrides import profile_create_prs
 from agent.prompt import construct_system_prompt
 from agent.utils import github_comments
 from agent.utils.authorship import (
+    OPEN_SWE_BOT_EMAIL,
+    OPEN_SWE_BOT_NAME,
     CollaboratorIdentity,
     add_pr_collaboration_note,
     resolve_triggering_user_identity,
 )
+
+_BOT_TRAILER = f"Co-authored-by: {OPEN_SWE_BOT_NAME} <{OPEN_SWE_BOT_EMAIL}>"
 
 
 def test_build_pr_prompt_wraps_external_comments_without_trust_section() -> None:
@@ -100,7 +104,7 @@ def test_construct_system_prompt_includes_coauthor_trailer_when_identity_present
     # Values are shell-escaped via shlex.quote; safe tokens need no quoting.
     assert "git config user.name octocat" in prompt
     assert "git config user.email 1234+octocat@users.noreply.github.com" in prompt
-    assert "Co-authored-by: open-swe[bot] <open-swe@users.noreply.github.com>" in prompt
+    assert _BOT_TRAILER in prompt
     assert "Made by [Open SWE](https://openswe.vercel.app)" in prompt
 
 
@@ -120,7 +124,7 @@ def test_construct_system_prompt_includes_github_login_in_pr_footer() -> None:
     # A name with a space is shlex-quoted; the safe email is left bare.
     assert "git config user.name 'Mona Lisa'" in prompt
     assert "git config user.email 1234+octocat@users.noreply.github.com" in prompt
-    assert "Co-authored-by: open-swe[bot] <open-swe@users.noreply.github.com>" in prompt
+    assert _BOT_TRAILER in prompt
     assert "Made by [Open SWE](https://openswe.vercel.app)" in prompt
     assert (
         "replace that legacy footer with this line instead of appending a second footer" in prompt

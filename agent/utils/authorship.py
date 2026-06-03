@@ -11,7 +11,9 @@ import httpx
 logger = logging.getLogger(__name__)
 
 OPEN_SWE_BOT_NAME = "open-swe[bot]"
-OPEN_SWE_BOT_EMAIL = "open-swe@users.noreply.github.com"
+# GitHub App bot noreply address (<app-user-id>+<slug>[bot]@users.noreply.github.com).
+# Resolves to the open-swe[bot] account, not the separate "open-swe" user account.
+OPEN_SWE_BOT_EMAIL = "215916821+open-swe[bot]@users.noreply.github.com"
 
 PR_ATTRIBUTION_FOOTER = "Made by [Open SWE](https://openswe.vercel.app)"
 
