@@ -24,9 +24,7 @@ warnings.filterwarnings("ignore", module="langchain_core._api.deprecation")
 warnings.filterwarnings("ignore", message=".*Pydantic V1.*", category=UserWarning)
 
 from deepagents import create_deep_agent
-from deepagents.backends.composite import CompositeBackend
 from deepagents.backends.protocol import SandboxBackendProtocol
-from deepagents.backends.state import StateBackend
 from langchain.agents.middleware import ModelCallLimitMiddleware
 
 from .integrations.langsmith import _configure_github_proxy
@@ -41,11 +39,12 @@ from .server import (
 )
 from .tools.read_finding_outcomes import read_finding_outcomes
 from .tools.save_review_style import save_review_style_prompt
-from .utils.analyzer_skills import SKILLS_ROUTE, skill_path_for_mode
+from .utils.analyzer_skills import skill_path_for_mode
 from .utils.github_app import get_github_app_installation_token
 from .utils.model import DEFAULT_LLM_REASONING, make_model, provider_model_kwargs
 from .utils.sandbox_paths import aresolve_sandbox_work_dir
 from .utils.sandbox_state import unwrap_sandbox_backend
+from .utils.skills_hub import build_analyzer_skills_backend
 
 logger = logging.getLogger(__name__)
 
@@ -110,9 +109,10 @@ async def get_analyzer(config: RunnableConfig) -> Pregel:
     if isinstance(github_token, str) and github_token:
         await _configure_sandbox_github_proxy(sandbox_backend, github_token)
 
-    # Skills are served from a virtual StateBackend route; gh/clone/execute stay on
-    # the sandbox. SKILL.md files are seeded into the `files` channel at invoke time.
-    backend = CompositeBackend(default=sandbox_backend, routes={SKILLS_ROUTE: StateBackend()})
+    # Skills served on a /skills/ route; gh/clone/execute stay on the sandbox.
+    # Prefer the shared Context Hub repo when it has commits, else fall back to
+    # the bundled SKILL.md floor seeded into the `files` channel at invoke time.
+    backend, skill_sources = await build_analyzer_skills_backend(sandbox_backend)
 
     model_id = DEFAULT_LLM_MODEL_ID
     model_kwargs = provider_model_kwargs(
@@ -138,7 +138,7 @@ async def get_analyzer(config: RunnableConfig) -> Pregel:
         system_prompt=system_prompt,
         tools=[save_review_style_prompt, read_finding_outcomes],
         backend=backend,
-        skills=[SKILLS_ROUTE],
+        skills=skill_sources,
         middleware=[
             SanitizeToolInputsMiddleware(),
             ModelCallLimitMiddleware(

@@ -24,7 +24,8 @@ warnings.filterwarnings("ignore", message=".*Pydantic V1.*", category=UserWarnin
 
 from deepagents import create_deep_agent
 from deepagents.backends import LangSmithSandbox
-from deepagents.backends.protocol import SandboxBackendProtocol
+from deepagents.backends.composite import CompositeBackend
+from deepagents.backends.protocol import BackendProtocol, SandboxBackendProtocol
 from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT, SubAgent
 from langchain.agents.middleware import ModelCallLimitMiddleware
 from langchain_core.language_models import BaseChatModel
@@ -84,6 +85,7 @@ from .utils.model import (
 )
 from .utils.sandbox import create_sandbox
 from .utils.sandbox_paths import aresolve_sandbox_work_dir
+from .utils.skills_hub import build_agent_skill_routes
 
 client = get_client()
 
@@ -426,9 +428,6 @@ async def get_agent(config: RunnableConfig) -> Pregel:
 
     work_dir = await aresolve_sandbox_work_dir(sandbox_backend)
 
-    def backend_factory(_runtime: object, _thread_id: str = thread_id) -> SandboxBackendProtocol:
-        return _get_cached_sandbox_backend(_thread_id)
-
     model_id, profile_effort = await get_team_default_model("agent")
     logger.info("Using team default agent model: model=%s effort=%s", model_id, profile_effort)
     subagent_model_id, subagent_effort = await get_team_default_subagent_model("agent")
@@ -491,6 +490,21 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     if always_create_prs:
         logger.info("Always Create PRs enabled by profile for %s", profile_login)
 
+    # Layered Context Hub skills: shared global defaults plus the user's own
+    # skills, keyed by resolved login. The route backends are built once per run
+    # so their per-run cache persists; the factory rewraps the live sandbox.
+    skill_routes, skill_sources = build_agent_skill_routes(profile_login)
+
+    def backend_factory(
+        _runtime: object,
+        _thread_id: str = thread_id,
+        _routes: dict[str, BackendProtocol] = skill_routes,
+    ) -> BackendProtocol:
+        sandbox = _get_cached_sandbox_backend(_thread_id)
+        if not _routes:
+            return sandbox
+        return CompositeBackend(default=sandbox, routes=_routes)
+
     model_kwargs = provider_model_kwargs(
         model_id,
         profile_effort,
@@ -543,6 +557,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         ],
         subagents=[_general_purpose_subagent(subagent_model)],
         backend=backend_factory,
+        skills=skill_sources or None,
         middleware=[
             SanitizeToolInputsMiddleware(),
             ModelCallLimitMiddleware(run_limit=MODEL_CALL_RECURSION_LIMIT, exit_behavior="end"),
