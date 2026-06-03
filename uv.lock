@@ -1895,7 +1895,7 @@ requires-dist = [
     { name = "langchain-openai", specifier = ">=1.2.2" },
     { name = "langchain-runloop", specifier = ">=0.0.4" },
     { name = "langgraph", specifier = ">=1.1.10" },
-    { name = "langgraph-cli", extras = ["inmem"], specifier = ">=0.4.24" },
+    { name = "langgraph-cli", extras = ["inmem"], specifier = ">=0.4.27" },
     { name = "langgraph-sdk", specifier = ">=0.4.2" },
     { name = "langsmith", specifier = ">=0.8.8" },
     { name = "markdownify", specifier = ">=1.2.2" },
