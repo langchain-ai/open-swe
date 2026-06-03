@@ -55,7 +55,6 @@ from .utils.auth import (
     persist_encrypted_github_token,
     resolve_github_token_from_email,
 )
-from .utils.authorship import OPEN_SWE_BOT_NAME
 from .utils.comments import get_recent_comments
 from .utils.github_app import (
     get_github_app_installation_token,
@@ -70,7 +69,6 @@ from .utils.github_comments import (
     fetch_pr_comments_since_last_tag,
     format_github_comment_body_for_prompt,
     get_thread_id_from_branch,
-    parse_github_review_command,
     react_to_github_comment,
     sanitize_github_comment_body,
     verify_github_signature,
@@ -88,7 +86,6 @@ from .utils.slack import (
     format_slack_messages_for_prompt,
     get_slack_user_info,
     get_slack_user_names,
-    parse_github_pr_url,
     post_slack_thread_reply,
     post_slack_trace_reply,
     resolve_slack_links_in_context,
@@ -1163,33 +1160,6 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
             )
 
 
-async def process_slack_pr_review_request(
-    pr_ref: GitHubPrRef, channel_id: str, thread_ts: str
-) -> None:
-    await set_slack_assistant_status(channel_id, thread_ts)
-    result = await trigger_pr_review_from_ref(
-        pr_ref,
-        source="slack",
-        slack_channel_id=channel_id,
-        slack_thread_ts=thread_ts,
-    )
-    if result.get("success"):
-        thread_id = result.get("thread_id")
-        if isinstance(thread_id, str) and thread_id:
-            await post_slack_trace_reply(
-                channel_id, thread_ts, thread_id, include_dashboard_link=False
-            )
-            await set_slack_assistant_status(channel_id, thread_ts)
-        return
-
-    await post_slack_thread_reply(
-        channel_id,
-        thread_ts,
-        f"Could not start review for <{pr_ref.url}|{pr_ref.owner}/{pr_ref.repo}#{pr_ref.number}>: "
-        f"{result.get('error', 'unknown error')}.",
-    )
-
-
 def verify_linear_signature(body: bytes, signature: str, secret: str) -> bool:
     """Verify the Linear webhook signature.
 
@@ -1494,7 +1464,6 @@ _SUPPORTED_GH_EVENTS = frozenset(
 _SUPPORTED_GH_ISSUE_ACTIONS = frozenset(["edited", "opened", "reopened"])
 _SUPPORTED_GH_PULL_REQUEST_ACTIONS = frozenset(
     [
-        "review_requested",
         "opened",
         "ready_for_review",
         "converted_to_draft",
@@ -1617,12 +1586,6 @@ async def _trigger_or_queue_run(
         if_not_exists="create",
     )
     logger.info("LangGraph run created for thread %s from GitHub PR comment", thread_id)
-
-
-def _is_open_swe_reviewer_request(payload: dict[str, Any]) -> bool:
-    reviewer = payload.get("requested_reviewer") or {}
-    login = reviewer.get("login", "") if isinstance(reviewer, dict) else ""
-    return login.lower() == OPEN_SWE_BOT_NAME.lower()
 
 
 def build_github_pr_review_prompt(
@@ -2005,11 +1968,6 @@ async def _dispatch_first_review_from_pr_payload(payload: dict[str, Any], *, sou
     logger.info("Reviewer run created for thread %s (source=%s)", thread_id, source)
 
 
-async def process_github_pr_review_request(payload: dict[str, Any]) -> None:
-    """Trigger the reviewer agent when the Open SWE bot is requested on a PR."""
-    await _dispatch_first_review_from_pr_payload(payload, source="github")
-
-
 async def process_github_pr_ready(payload: dict[str, Any]) -> None:
     """Auto-review a PR that has just been opened or marked ready-for-review.
 
@@ -2031,75 +1989,6 @@ async def process_github_pr_ready(payload: dict[str, Any]) -> None:
     # the thread; "github_auto" would fall through to the email-based path,
     # which has no user_email to route on for webhook-triggered runs.
     await _dispatch_first_review_from_pr_payload(payload, source="github")
-
-
-async def process_github_pr_review_command(
-    payload: dict[str, Any],
-    event_type: str,
-    pr_url_override: str | None,
-) -> None:
-    """Trigger the reviewer when a PR comment contains ``@open-swe review``.
-
-    ``pr_url_override`` is the optional URL token that followed ``review``. If
-    set, the review targets that PR; otherwise the comment's own PR is used.
-    """
-    repo = payload.get("repository", {})
-    repo_config = {
-        "owner": repo.get("owner", {}).get("login", ""),
-        "name": repo.get("name", ""),
-    }
-    pr_data = payload.get("pull_request") or payload.get("issue", {})
-    sender = payload.get("sender", {})
-    github_login = sender.get("login", "")
-    github_user_id = sender.get("id")
-
-    pr_ref: GitHubPrRef | None = None
-    if pr_url_override:
-        pr_ref = parse_github_pr_url(pr_url_override)
-        if pr_ref is None:
-            logger.info("Ignoring @open-swe review with unparseable URL %s", pr_url_override)
-            return
-    else:
-        pr_number = pr_data.get("number")
-        if not pr_number:
-            logger.warning("@open-swe review command missing pr_number, skipping")
-            return
-        pr_ref = GitHubPrRef(
-            owner=repo_config["owner"],
-            repo=repo_config["name"],
-            number=pr_number,
-            url=pr_data.get("html_url", "") or pr_data.get("url", ""),
-        )
-
-    comment = payload.get("comment") or payload.get("review", {})
-    comment_id = comment.get("id")
-    node_id = comment.get("node_id") if event_type == "pull_request_review" else None
-    if comment_id:
-        app_token = await get_github_app_installation_token()
-        if app_token:
-            await react_to_github_comment(
-                repo_config,
-                comment_id,
-                event_type=event_type,
-                token=app_token,
-                pull_number=pr_data.get("number"),
-                node_id=node_id,
-            )
-
-    result = await trigger_pr_review_from_ref(
-        pr_ref,
-        source="github",
-        github_login=github_login,
-        github_user_id=github_user_id,
-    )
-    if not result.get("success"):
-        logger.warning(
-            "Failed to trigger reviewer from @open-swe review on %s/%s#%s: %s",
-            pr_ref.owner,
-            pr_ref.repo,
-            pr_ref.number,
-            result.get("error"),
-        )
 
 
 async def _fetch_open_pr_for_branch(
@@ -2541,20 +2430,9 @@ async def process_github_pr_comment(payload: dict[str, Any], event_type: str) ->
             else:
                 logger.warning("Failed to persist branch_name metadata for thread %s", thread_id)
 
-    comment = payload.get("comment") or payload.get("review", {})
-    is_review_request, _pr_url_override = parse_github_review_command(comment.get("body") or "")
     email = await email_for_login(github_login) or ""
     if email:
         github_token = await _get_or_resolve_thread_github_token(thread_id, email)
-    elif is_review_request:
-        github_token, expires_at = await get_github_app_installation_token_with_expiry()
-        if github_token:
-            try:
-                await persist_encrypted_github_token(thread_id, github_token, expires_at=expires_at)
-            except Exception:
-                logger.warning(
-                    "Could not persist bot token for PR review request thread %s", thread_id
-                )
     else:
         logger.warning("No email mapping for GitHub user '%s', skipping", github_login)
         return
@@ -3011,24 +2889,11 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks) ->
             logger.info("Accepted GitHub PR %s webhook, scheduling auto-review task", action)
             background_tasks.add_task(process_github_pr_ready, payload)
             return {"status": "accepted", "message": f"Processing PR {action} for auto-review"}
-        if not _is_open_swe_reviewer_request(payload):
-            logger.info("Ignoring PR review request for a different reviewer")
-            return {"status": "ignored", "reason": "Review request is not for open-swe bot"}
-        if not await _is_repo_enabled_for_review(webhook_repo_config):
-            logger.warning(
-                "Rejecting GitHub reviewer webhook: repo '%s/%s' not enabled for review",
-                webhook_repo_config.get("owner"),
-                webhook_repo_config.get("name"),
-            )
-            return {"status": "ignored", "reason": "Repository not enabled for review"}
-
-        gate_rejection = await _enforce_public_repo_org_gate(payload, "pull_request")
-        if gate_rejection is not None:
-            return gate_rejection
-
-        logger.info("Accepted GitHub PR review request webhook, scheduling reviewer task")
-        background_tasks.add_task(process_github_pr_review_request, payload)
-        return {"status": "accepted", "message": "Processing GitHub PR review request"}
+        logger.info("Ignoring unsupported GitHub pull_request action: %s", action)
+        return {
+            "status": "ignored",
+            "reason": f"Unsupported GitHub pull_request action: {action}",
+        }
 
     if event_type == "push":
         if not await _is_repo_enabled_for_review(webhook_repo_config):

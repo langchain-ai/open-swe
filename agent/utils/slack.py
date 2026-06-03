@@ -23,10 +23,6 @@ logger = logging.getLogger(__name__)
 
 SLACK_API_BASE_URL = "https://slack.com/api"
 SLACK_BOT_TOKEN = os.environ.get("SLACK_BOT_TOKEN", "")
-GITHUB_PR_URL_RE = re.compile(r"https?://(?:www\.)?github\.com/[^\s<>|]+/[^\s<>|]+/pull/\d+")
-URL_RE = re.compile(r"https?://[^\s<>|]+")
-
-
 DEFAULT_ASSISTANT_STATUS = "is thinking…"
 
 # Curated rotating loading strings shown by Slack while the indicator is active.
@@ -172,36 +168,6 @@ def parse_github_pr_url(url: str) -> GitHubPrRef | None:
         number=number,
         url=f"https://github.com/{owner}/{repo}/pull/{number}",
     )
-
-
-def parse_slack_review_command(text: str) -> GitHubPrRef | None:
-    stripped = text.strip()
-    command_match = re.fullmatch(r"(?is)review\s+(.+)", stripped)
-    if not command_match:
-        return None
-
-    rest = command_match.group(1).strip()
-    url_match = GITHUB_PR_URL_RE.search(rest)
-    if not url_match:
-        return None
-
-    trailing_text = rest[url_match.end() :].strip()
-    if trailing_text and trailing_text != ">" and not trailing_text.startswith("|"):
-        return None
-
-    return parse_github_pr_url(url_match.group(0))
-
-
-def looks_like_slack_pr_review_command(text: str) -> bool:
-    stripped = text.strip()
-    if not re.match(r"(?is)^review\b", stripped):
-        return False
-    for match in URL_RE.finditer(stripped):
-        parsed = urlparse(match.group(0).strip("<>"))
-        host = (parsed.hostname or "").lower()
-        if parsed.scheme in {"http", "https"} and host in {"github.com", "www.github.com"}:
-            return True
-    return False
 
 
 def select_slack_context_messages(
