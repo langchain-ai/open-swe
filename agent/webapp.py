@@ -894,13 +894,14 @@ async def _post_account_link_prompt(
         return
     if reason == "revoked":
         text = (
-            "🔐 Your GitHub sign-in is no longer valid, so I can't act on your behalf. "
-            f"Sign in again in <{settings_url}|your Open SWE settings>."
+            "🔐 Your GitHub sign-in is no longer valid, so I can't resolve your GitHub "
+            f"account. Re-connect it in <{settings_url}|your Open SWE settings>, then tag me again."
         )
     else:
         text = (
-            "👋 To act on your behalf I need you to sign in with GitHub and connect your "
-            f"Slack account in <{settings_url}|your Open SWE settings>."
+            "👋 I couldn't resolve your GitHub account from Slack. Sign in with GitHub and "
+            f"connect your Slack account in <{settings_url}|your Open SWE settings>, then tag me "
+            "again."
         )
     try:
         await post_slack_thread_reply(channel_id, thread_ts, text)

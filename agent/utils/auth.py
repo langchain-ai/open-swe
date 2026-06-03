@@ -275,8 +275,8 @@ async def leave_failure_comment(
             await post_slack_thread_reply(
                 channel_id,
                 thread_ts,
-                "⚠️ I couldn't authenticate with GitHub for this run. Sign in and connect your "
-                f"Slack account in {link}.",
+                "⚠️ I couldn't resolve your GitHub account for this run. Sign in with GitHub and "
+                f"connect your Slack account in {link}, then tag me again.",
             )
         return
     if source == "github":

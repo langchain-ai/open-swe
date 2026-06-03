@@ -9,7 +9,8 @@ import { useSession } from "@/lib/session"
 
 /**
  * Modal shown on first login (and until connected) prompting the user to link
- * Slack. ``open`` is derived from the mapping query, so it appears once the data
+ * Slack so Open SWE can resolve their GitHub account when tagged in Slack.
+ * ``open`` is derived from the mapping query, so it appears once the data
  * resolves to "not connected" and closes itself once Slack is linked; dismissing
  * it hides it for the session.
  */
@@ -42,9 +43,9 @@ export function SlackConnectDialog() {
               </Dialog.Title>
             </div>
             <Dialog.Description className="text-sm text-muted-foreground">
-              Link Slack so Open SWE can act as you when you tag it — it opens
-              pull requests and replies on your behalf. We use the email Slack
-              verifies, which also lets Linear mentions resolve to you.
+              Connect Slack so that when you tag Open SWE, it can resolve your
+              GitHub account. We use the email Slack verifies, which also lets
+              Linear mentions resolve to you.
             </Dialog.Description>
             <div className="mt-2 flex justify-end gap-2">
               <Button
