@@ -27,6 +27,7 @@ from ..reviewer_publish import (
     fetch_pr_review_threads,
     fetch_review_comments,
     fetch_review_thread_id_for_comment,
+    open_swe_review_exists,
     parse_review_comment_marker,
     post_pull_request_review,
     render_inline_comment_payload,
@@ -235,12 +236,20 @@ async def _publish_review_async(
         inline_comments.append(payload)
         eligible_with_payload.append((dict(finding), payload))
 
-    # On re-review with nothing new to surface, skip the "no issues found"
-    # comment — the user already saw the previous findings, and posting
-    # another summary on every push is noise. Still resolve threads for
-    # findings that just moved to resolved, and advance last_reviewed_sha so
-    # subsequent pushes don't redo the same diff.
-    if is_re_review and not inline_comments:
+    # With nothing new to surface, skip the "no issues found" summary if Open
+    # SWE has already reviewed this PR — the user already saw the previous
+    # result, and posting another summary on every push is noise. We can't rely
+    # on the static re_review flag alone: a push that lands mid-run is delivered
+    # as a queued message into the still-running first-review run, whose
+    # configurable still says re_review=False, so that path would post a
+    # duplicate "No issues found". Key off the actual PR state (an existing Open
+    # SWE review summary) instead. Still resolve threads for findings that just
+    # moved to resolved, and advance last_reviewed_sha so subsequent pushes
+    # don't redo the same diff.
+    if not inline_comments and (
+        is_re_review
+        or await open_swe_review_exists(owner=owner, repo=repo, pr_number=pr_number, token=token)
+    ):
         resolved_thread_count = await _resolve_threads_for_resolved_findings(
             owner=owner,
             repo=repo,
