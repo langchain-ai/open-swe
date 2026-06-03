@@ -6,6 +6,7 @@ from pathlib import Path
 from .utils.authorship import (
     OPEN_SWE_BOT_EMAIL,
     OPEN_SWE_BOT_NAME,
+    PR_ATTRIBUTION_FOOTER,
     CollaboratorIdentity,
 )
 from .utils.github_comments import UNTRUSTED_GITHUB_COMMENT_OPEN_TAG
@@ -374,10 +375,10 @@ This run was triggered by **{display_name}**. You author the work **as them** â€
   Co-authored-by: open-swe[bot] <open-swe@users.noreply.github.com>
   ```
 
-- **PR body**: append this line to the bottom of the PR description (separated from the body by a blank line) when you open or update the draft PR. Do not duplicate it if it is already present. If the PR body already contains the legacy footer `_Opened collaboratively by {display_name} and open-swe._`, replace that legacy footer with this line instead of appending a second footer:
+- **PR body**: append this line to the bottom of the PR description (separated from the body by a blank line) when you open or update the draft PR. Do not duplicate it if it is already present. If the PR body already contains a legacy footer like `_Opened collaboratively by {display_name} and open-swe._`, replace that legacy footer with this line instead of appending a second footer:
 
   ```
-  _Opened collaboratively by {pr_attribution_name} and open-swe._
+  {pr_attribution_footer}
   ```
 
 If you forget the trailer on a local commit that has not been pushed, fix it with `git commit --amend` before pushing â€” do not push without it. If the commit has already been pushed, leave it as-is and add the trailer to your next commit; never rewrite remote history to fix it."""
@@ -388,7 +389,7 @@ def _render_collaboration_section(identity: CollaboratorIdentity | None) -> str:
         return ""
     return COLLABORATION_TEMPLATE.format(
         display_name=identity.display_name,
-        pr_attribution_name=identity.pr_attribution_name,
+        pr_attribution_footer=PR_ATTRIBUTION_FOOTER,
     )
 
 
