@@ -1,8 +1,7 @@
 # Reviewer Eval
 
 Offline LangSmith eval for the Open SWE Reviewer graph against the 50 PRs from
-`withmartian/code-review-benchmark`. See `REVIEWER_EVAL_PLAN.md` at the repo
-root for the full design.
+`withmartian/code-review-benchmark`.
 
 ## Layout
 
@@ -86,14 +85,6 @@ would pass the production threshold/cap.
 `model_id` and `reasoning_effort` in the config are passed to the reviewer run,
 so isolated benchmark deployments can test a specific model/effort without
 changing deployment-wide defaults.
-
-## Comparing against Devin Review
-
-Both tools are scored on the same 50 PRs with the same judge model
-(`claude-opus-4-5`) and the same judge prompt (verbatim from martian
-`step3_judge_comments.py`). Pull martian's published Devin numbers from their
-dashboard and compare against the LangSmith experiment's `micro_*` /
-`macro_*` summary metrics.
 
 ## Notes
 
