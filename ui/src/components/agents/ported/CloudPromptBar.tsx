@@ -1,4 +1,4 @@
-import { ArrowUp, LoaderCircle } from "lucide-react"
+import { ArrowUp, ChevronDown, LoaderCircle } from "lucide-react"
 import {
   memo,
   useCallback,
@@ -135,8 +135,7 @@ export const CloudPromptBar = memo(function CloudPromptBarComponent({
           placeholder={busy ? "Send a message to queue next..." : placeholder}
           disabled={disabled}
           className={cn(
-            // 16px on mobile prevents iOS from zooming the viewport on focus; 13px on desktop.
-            "w-full min-w-0 resize-none overflow-hidden bg-transparent text-[16px] leading-[1.45] text-[color:var(--ui-text)] outline-none placeholder:text-[color:var(--ui-text-dim)] md:text-[13px]",
+            "w-full min-w-0 resize-none overflow-hidden bg-transparent text-[13px] leading-[1.45] text-[color:var(--ui-text)] outline-none placeholder:text-[color:var(--ui-text-dim)]",
             compact ? "min-h-[36px]" : "min-h-[52px]"
           )}
           style={{ maxHeight: PROMPT_TEXTAREA_MAX_HEIGHT }}
@@ -148,9 +147,12 @@ export const CloudPromptBar = memo(function CloudPromptBarComponent({
               type="button"
               disabled={pickerDisabled}
               onClick={() => setModelDropdownOpen((open) => !open)}
-              className="max-w-[220px] cursor-pointer truncate text-[color:var(--ui-text-muted)] transition-opacity hover:opacity-80 disabled:cursor-default disabled:opacity-60"
+              className="flex max-w-[220px] cursor-pointer items-center gap-1 truncate rounded-full border border-[var(--ui-border)] px-2.5 py-1 text-[color:var(--ui-text-muted)] transition-colors hover:bg-[var(--ui-panel-2)] disabled:cursor-default disabled:opacity-60"
             >
-              {selectionLabel}
+              <span className="truncate">{selectionLabel}</span>
+              {!pickerDisabled && (
+                <ChevronDown className="size-3 shrink-0 opacity-70" />
+              )}
             </button>
             {modelDropdownOpen && combos.length > 0 && (
               <div className="absolute bottom-full left-0 z-50 mb-1 max-h-72 overflow-hidden overflow-y-auto rounded border border-[var(--ui-border)] bg-[var(--ui-surface)] shadow-lg">

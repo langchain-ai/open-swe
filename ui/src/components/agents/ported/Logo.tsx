@@ -14,7 +14,7 @@ export function Logo() {
   return (
     <div className="w-full" style={{ containerType: "inline-size" }}>
       <pre
-        className="m-0 w-full overflow-hidden font-mono leading-none text-[#87CEEB]"
+        className="m-0 w-full overflow-hidden text-center font-mono leading-none text-[#87CEEB]"
         style={{ fontSize: "min(7px, 1.9cqw)" }}
       >
         {ascii}
