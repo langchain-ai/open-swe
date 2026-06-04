@@ -8,7 +8,9 @@ from typing import Any
 
 import httpx
 from langgraph.config import get_config
+from langgraph_sdk import get_client
 
+from ..dashboard.agent_usage import record_agent_pr_usage
 from ..utils.github_app import get_github_app_installation_token
 
 logger = logging.getLogger(__name__)
@@ -67,6 +69,100 @@ async def _find_existing_pr(
     return items[0] if isinstance(items, list) and items else None
 
 
+async def _fetch_pr_details(
+    client: httpx.AsyncClient, token: str, owner: str, repo: str, pr_number: int
+) -> dict[str, Any]:
+    resp = await client.get(
+        f"{GITHUB_API}/repos/{owner}/{repo}/pulls/{pr_number}",
+        headers=_auth_headers(token),
+    )
+    if resp.status_code != 200:
+        logger.debug(
+            "GitHub returned %s fetching PR stats for %s/%s#%s: %s",
+            resp.status_code,
+            owner,
+            repo,
+            pr_number,
+            resp.text,
+        )
+        return {}
+    data = resp.json()
+    return data if isinstance(data, dict) else {}
+
+
+async def _record_pr_telemetry(
+    *,
+    client: httpx.AsyncClient,
+    token: str,
+    owner: str,
+    repo: str,
+    head: str,
+    base: str,
+    pr: dict[str, Any],
+) -> None:
+    pr_number = pr.get("number")
+    if not isinstance(pr_number, int):
+        return
+    try:
+        details = await _fetch_pr_details(client, token, owner, repo, pr_number)
+        config = get_config()
+        configurable = config.get("configurable", {}) if isinstance(config, dict) else {}
+        thread_id = configurable.get("thread_id")
+        github_login = configurable.get("github_login")
+        user_email = configurable.get("user_email")
+        if not isinstance(github_login, str) or not github_login.strip():
+            from ..dashboard.user_mappings import login_for_email
+
+            github_login = (
+                await login_for_email(user_email if isinstance(user_email, str) else None) or ""
+            )
+        pr_url = details.get("html_url") or pr.get("html_url")
+        merged = bool(details.get("merged"))
+        state = details.get("state") if isinstance(details.get("state"), str) else "open"
+        additions = details.get("additions") if isinstance(details.get("additions"), int) else 0
+        deletions = details.get("deletions") if isinstance(details.get("deletions"), int) else 0
+        changed_files = (
+            details.get("changed_files") if isinstance(details.get("changed_files"), int) else 0
+        )
+        await record_agent_pr_usage(
+            thread_id=thread_id if isinstance(thread_id, str) else None,
+            github_login=github_login,
+            user_email=user_email if isinstance(user_email, str) else None,
+            owner=owner,
+            repo=repo,
+            pr_number=pr_number,
+            pr_url=pr_url if isinstance(pr_url, str) else None,
+            head=head,
+            base=base,
+            additions=additions,
+            deletions=deletions,
+            changed_files=changed_files,
+            state=state,
+            merged=merged,
+        )
+        if isinstance(thread_id, str) and thread_id:
+            await get_client().threads.update(
+                thread_id=thread_id,
+                metadata={
+                    "agent_kind": "agent",
+                    "pr_url": pr_url if isinstance(pr_url, str) else "",
+                    "pr_number": pr_number,
+                    "pr_state": "merged" if merged else state,
+                    "branch_name": head,
+                    "base_branch": base,
+                    "diff_stats": {
+                        "files": changed_files,
+                        "additions": additions,
+                        "deletions": deletions,
+                    },
+                },
+            )
+    except Exception:
+        logger.debug(
+            "Failed to record PR usage for %s/%s#%s", owner, repo, pr_number, exc_info=True
+        )
+
+
 async def _open_pull_request(
     *,
     owner: str,
@@ -93,6 +189,16 @@ async def _open_pull_request(
         )
         if resp.status_code == 201:
             pr = resp.json()
+            if isinstance(pr, dict):
+                await _record_pr_telemetry(
+                    client=client,
+                    token=token,
+                    owner=owner,
+                    repo=repo,
+                    head=head,
+                    base=base,
+                    pr=pr,
+                )
             return {
                 "success": True,
                 "created": True,
@@ -107,6 +213,15 @@ async def _open_pull_request(
         if resp.status_code == 422:  # noqa: PLR2004
             existing = await _find_existing_pr(client, token, owner, repo, head)
             if existing is not None:
+                await _record_pr_telemetry(
+                    client=client,
+                    token=token,
+                    owner=owner,
+                    repo=repo,
+                    head=head,
+                    base=base,
+                    pr=existing,
+                )
                 return {
                     "success": True,
                     "created": False,

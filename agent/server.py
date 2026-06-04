@@ -37,6 +37,7 @@ from .dashboard.agent_overrides import (
     profile_create_prs,
     resolve_github_login,
 )
+from .dashboard.agent_usage import record_agent_thread_usage
 from .dashboard.options import DEFAULT_MODEL_ID, SUPPORTED_MODEL_IDS, model_supports_effort
 from .dashboard.team_settings import get_team_default_model_pair
 from .integrations.langsmith import _configure_github_proxy
@@ -513,6 +514,32 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             ModelFallbackMiddleware(make_model(fallback_model_id, **fallback_kwargs))
         )
         logger.info("Configured model fallback %s -> %s", model_id, fallback_model_id)
+
+    source = (
+        configurable.get("source") if isinstance(configurable.get("source"), str) else "dashboard"
+    )
+    user_email = configurable.get("user_email")
+    user_email = user_email if isinstance(user_email, str) else ""
+    try:
+        await client.threads.update(
+            thread_id=thread_id,
+            metadata={
+                "agent_kind": "agent",
+                "model": model_id,
+                "effort": profile_effort,
+                "source": source,
+            },
+        )
+        await record_agent_thread_usage(
+            thread_id=thread_id,
+            github_login=profile_login,
+            user_email=user_email,
+            model_id=model_id,
+            effort=profile_effort,
+            source=source,
+        )
+    except Exception:
+        logger.debug("Failed to record agent usage for thread %s", thread_id, exc_info=True)
 
     logger.info("Returning agent with sandbox for thread %s", thread_id)
     main_model = make_model(model_id, **model_kwargs)

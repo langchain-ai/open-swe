@@ -137,6 +137,31 @@ export interface UserMappingsPage {
   page_size: number;
 }
 
+export type UsageLeaderboardPeriod = "7d" | "30d" | "all";
+
+export interface UsageLeaderboardRow {
+  rank: number;
+  user: {
+    name: string;
+    github_login: string | null;
+    email: string | null;
+  };
+  favorite_model: string;
+  agent_runs: number;
+  prs_opened: number;
+  merged_prs: number;
+  agent_loc: number;
+  additions: number;
+  deletions: number;
+}
+
+export interface UsageLeaderboardPayload {
+  period: UsageLeaderboardPeriod;
+  rows: Array<UsageLeaderboardRow>;
+  total_members: number;
+  current_user_rank: number | null;
+}
+
 export interface Repository {
   full_name: string;
   private: boolean;
@@ -215,6 +240,10 @@ export const api = {
       method: "PUT",
       body: JSON.stringify({ full_name, enabled }),
     }),
+  usageLeaderboard: (period: UsageLeaderboardPeriod = "30d", limit = 10) =>
+    request<UsageLeaderboardPayload>(
+      `/agent-usage-leaderboard?period=${encodeURIComponent(period)}&limit=${limit}`,
+    ),
   myMapping: () => request<Partial<UserMapping>>("/my-mapping"),
   adminListUserMappings: (page = 1, pageSize = 20) =>
     request<UserMappingsPage>(
