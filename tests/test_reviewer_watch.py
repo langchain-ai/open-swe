@@ -404,7 +404,6 @@ async def test_push_event_public_repo_uses_scoped_token() -> None:
         await webapp.process_github_push_event(payload)
 
     get_token.assert_awaited_once_with(repository_ids=[123])
-    assert cache_token.call_args.args[1] == "scoped-token"
     _, kwargs = fake_client.runs.create.await_args
     assert kwargs["config"]["configurable"]["repo_private"] is False
 
@@ -450,7 +449,6 @@ async def test_push_event_rescopes_token_when_pr_metadata_reveals_public() -> No
         await webapp.process_github_push_event(payload)
 
     assert get_token.await_args_list == [call(), call(repository_ids=[456])]
-    assert cache_token.call_args.args[1] == "scoped-token"
     _, kwargs = fake_client.runs.create.await_args
     assert kwargs["config"]["configurable"]["repo_private"] is False
 

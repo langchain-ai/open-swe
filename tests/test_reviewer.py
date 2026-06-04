@@ -59,11 +59,12 @@ class _DummyAgent:
 
 
 @pytest.mark.asyncio
-async def test_reviewer_uses_cached_thread_token_for_slack_review_request() -> None:
+async def test_reviewer_resolves_app_installation_token_at_run_start() -> None:
     config: RunnableConfig = {
         "configurable": {
             "__is_for_execution__": True,
             "thread_id": "reviewer-thread-id",
+            "repo": {"owner": "acme", "name": "repo"},
             "source": "slack",
             "review_requested": True,
         },
@@ -73,11 +74,11 @@ async def test_reviewer_uses_cached_thread_token_for_slack_review_request() -> N
 
     with (
         patch(
-            "agent.reviewer.get_github_token_from_thread",
+            "agent.reviewer.get_github_app_installation_token_with_expiry",
             new_callable=AsyncMock,
             return_value=("app-token", None),
-        ) as mock_get_thread_token,
-        patch("agent.reviewer.resolve_github_token", new_callable=AsyncMock) as mock_resolve_token,
+        ) as mock_app_token,
+        patch("agent.reviewer.cache_github_token_for_thread") as mock_cache_token,
         patch(
             "agent.reviewer.ensure_sandbox_for_thread",
             new_callable=AsyncMock,
@@ -96,10 +97,43 @@ async def test_reviewer_uses_cached_thread_token_for_slack_review_request() -> N
     metadata = config["metadata"]
     assert isinstance(metadata, dict)
     assert "github_token_encrypted" not in metadata
-    mock_get_thread_token.assert_awaited_once_with("reviewer-thread-id")
-    mock_resolve_token.assert_not_called()
+    # Token is resolved in this process at run start (scoped to the repo), not read
+    # from a cache the webhook handler populated in a different process.
+    mock_app_token.assert_awaited_once_with(repositories=["repo"])
+    mock_cache_token.assert_called_once_with("reviewer-thread-id", "app-token", expires_at=None)
     middleware = create_agent.call_args.kwargs["middleware"]
     assert reviewer.check_message_queue_before_model in middleware
+
+
+@pytest.mark.asyncio
+async def test_reviewer_raises_when_app_installation_token_unavailable() -> None:
+    config: RunnableConfig = {
+        "configurable": {
+            "__is_for_execution__": True,
+            "thread_id": "reviewer-thread-id",
+            "repo": {"owner": "acme", "name": "repo"},
+            "source": "github_push",
+        },
+        "metadata": {},
+    }
+
+    with (
+        patch(
+            "agent.reviewer.get_github_app_installation_token_with_expiry",
+            new_callable=AsyncMock,
+            return_value=(None, None),
+        ),
+        patch(
+            "agent.reviewer.ensure_sandbox_for_thread",
+            new_callable=AsyncMock,
+            return_value=MagicMock(),
+        ) as mock_sandbox,
+        patch("agent.reviewer.create_deep_agent", return_value=_DummyAgent()),
+    ):
+        with pytest.raises(RuntimeError, match="installation token unavailable"):
+            await reviewer.get_reviewer_agent(config)
+
+    mock_sandbox.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -288,11 +322,10 @@ async def test_reviewer_inlines_agents_md_into_system_prompt() -> None:
 
     with (
         patch(
-            "agent.reviewer.get_github_token_from_thread",
+            "agent.reviewer.get_github_app_installation_token_with_expiry",
             new_callable=AsyncMock,
             return_value=("gh-token", None),
         ),
-        patch("agent.reviewer.resolve_github_token", new_callable=AsyncMock),
         patch(
             "agent.reviewer.ensure_sandbox_for_thread",
             new_callable=AsyncMock,
@@ -648,11 +681,10 @@ async def test_reviewer_injects_pr_review_threads_into_first_review_context() ->
 
     with (
         patch(
-            "agent.reviewer.get_github_token_from_thread",
+            "agent.reviewer.get_github_app_installation_token_with_expiry",
             new_callable=AsyncMock,
             return_value=("gh-token", None),
         ),
-        patch("agent.reviewer.resolve_github_token", new_callable=AsyncMock),
         patch(
             "agent.reviewer.ensure_sandbox_for_thread",
             new_callable=AsyncMock,
@@ -720,11 +752,10 @@ async def test_reviewer_injects_pr_review_threads_into_re_review_context() -> No
 
     with (
         patch(
-            "agent.reviewer.get_github_token_from_thread",
+            "agent.reviewer.get_github_app_installation_token_with_expiry",
             new_callable=AsyncMock,
             return_value=("gh-token", None),
         ),
-        patch("agent.reviewer.resolve_github_token", new_callable=AsyncMock),
         patch(
             "agent.reviewer.ensure_sandbox_for_thread",
             new_callable=AsyncMock,
@@ -784,11 +815,10 @@ async def test_reviewer_omits_threads_block_when_fetch_returns_empty() -> None:
 
     with (
         patch(
-            "agent.reviewer.get_github_token_from_thread",
+            "agent.reviewer.get_github_app_installation_token_with_expiry",
             new_callable=AsyncMock,
             return_value=("gh-token", None),
         ),
-        patch("agent.reviewer.resolve_github_token", new_callable=AsyncMock),
         patch(
             "agent.reviewer.ensure_sandbox_for_thread",
             new_callable=AsyncMock,
@@ -844,11 +874,10 @@ async def test_reviewer_continues_when_thread_fetch_raises() -> None:
 
     with (
         patch(
-            "agent.reviewer.get_github_token_from_thread",
+            "agent.reviewer.get_github_app_installation_token_with_expiry",
             new_callable=AsyncMock,
             return_value=("gh-token", None),
         ),
-        patch("agent.reviewer.resolve_github_token", new_callable=AsyncMock),
         patch(
             "agent.reviewer.ensure_sandbox_for_thread",
             new_callable=AsyncMock,
@@ -912,11 +941,10 @@ async def test_reviewer_populates_diff_line_set_from_github_api() -> None:
 
     with (
         patch(
-            "agent.reviewer.get_github_token_from_thread",
+            "agent.reviewer.get_github_app_installation_token_with_expiry",
             new_callable=AsyncMock,
             return_value=("gh-token", None),
         ),
-        patch("agent.reviewer.resolve_github_token", new_callable=AsyncMock),
         patch(
             "agent.reviewer.ensure_sandbox_for_thread",
             new_callable=AsyncMock,
@@ -978,11 +1006,10 @@ async def test_reviewer_leaves_validation_disabled_when_diff_fetch_fails() -> No
 
     with (
         patch(
-            "agent.reviewer.get_github_token_from_thread",
+            "agent.reviewer.get_github_app_installation_token_with_expiry",
             new_callable=AsyncMock,
             return_value=("gh-token", None),
         ),
-        patch("agent.reviewer.resolve_github_token", new_callable=AsyncMock),
         patch(
             "agent.reviewer.ensure_sandbox_for_thread",
             new_callable=AsyncMock,
@@ -1040,11 +1067,10 @@ async def test_reviewer_injects_pr_title_and_body_into_context() -> None:
 
     with (
         patch(
-            "agent.reviewer.get_github_token_from_thread",
+            "agent.reviewer.get_github_app_installation_token_with_expiry",
             new_callable=AsyncMock,
             return_value=("gh-token", None),
         ),
-        patch("agent.reviewer.resolve_github_token", new_callable=AsyncMock),
         patch(
             "agent.reviewer.ensure_sandbox_for_thread",
             new_callable=AsyncMock,
