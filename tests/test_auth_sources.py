@@ -60,7 +60,7 @@ def _stub_dashboard_store(
     *,
     token: str | None,
     expires_at: str | None = "2099-01-01T00:00:00Z",
-    cached: tuple[str | None, str | None, str | None] = (None, None, None),
+    cached: tuple[str | None, str | None] = (None, None),
 ) -> None:
     from agent.dashboard import profiles
 
@@ -73,11 +73,7 @@ def _stub_dashboard_store(
     async def fake_get_value(namespace, key):
         return {"token_expires_at": expires_at}
 
-    async def fake_persist(thread_id: str, tok: str, expires_at: str | None = None):
-        return "enc"
-
     monkeypatch.setattr(auth, "get_github_token_from_thread", fake_get_from_thread)
-    monkeypatch.setattr(auth, "persist_encrypted_github_token", fake_persist)
     monkeypatch.setattr(profiles, "get_valid_access_token", fake_get_valid)
     monkeypatch.setattr(profiles, "_get_value", fake_get_value)
 
@@ -88,10 +84,9 @@ def test_resolve_github_token_slack_uses_dashboard_store(
     _stub_dashboard_store(monkeypatch, token="user-tok")
     monkeypatch.setattr(auth, "is_bot_token_only_mode", lambda: False)
 
-    token, encrypted, expires_at = asyncio.run(auth.resolve_github_token(_slack_config(), "t1"))
+    token, expires_at = asyncio.run(auth.resolve_github_token(_slack_config(), "t1"))
 
     assert token == "user-tok"
-    assert encrypted == "enc"
     assert expires_at == "2099-01-01T00:00:00Z"
 
 
@@ -103,11 +98,11 @@ def test_resolve_github_token_slack_ignores_stale_thread_cache(
     _stub_dashboard_store(
         monkeypatch,
         token="bob-token",
-        cached=("alice-token", "alice-enc", "2099-01-01T00:00:00Z"),
+        cached=("alice-token", "2099-01-01T00:00:00Z"),
     )
     monkeypatch.setattr(auth, "is_bot_token_only_mode", lambda: False)
 
-    token, _, _ = asyncio.run(auth.resolve_github_token(_slack_config(), "t1"))
+    token, _ = asyncio.run(auth.resolve_github_token(_slack_config(), "t1"))
 
     assert token == "bob-token"
 
@@ -133,7 +128,7 @@ def test_resolve_github_token_per_user_wins_over_bot_only_mode(
 
     monkeypatch.setattr(auth, "_resolve_bot_installation_token", fail_bot)
 
-    token, _, _ = asyncio.run(auth.resolve_github_token(_slack_config(), "t1"))
+    token, _ = asyncio.run(auth.resolve_github_token(_slack_config(), "t1"))
     assert token == "user-tok"
 
 
@@ -144,12 +139,12 @@ def test_resolve_github_token_slack_no_token_falls_back_to_bot_in_bot_only_mode(
     monkeypatch.setattr(auth, "is_bot_token_only_mode", lambda: True)
 
     async def fake_bot(thread_id: str):
-        return ("bot-tok", "bot-enc", None)
+        return ("bot-tok", None)
 
     monkeypatch.setattr(auth, "_resolve_bot_installation_token", fake_bot)
 
-    token, encrypted, expires_at = asyncio.run(auth.resolve_github_token(_slack_config(), "t1"))
-    assert (token, encrypted, expires_at) == ("bot-tok", "bot-enc", None)
+    token, expires_at = asyncio.run(auth.resolve_github_token(_slack_config(), "t1"))
+    assert (token, expires_at) == ("bot-tok", None)
 
 
 @pytest.mark.parametrize("source", ["github", "linear"])
@@ -159,10 +154,10 @@ def test_resolve_github_token_bot_only_mode_non_slack_uses_bot(
     monkeypatch.setattr(auth, "is_bot_token_only_mode", lambda: True)
 
     async def fake_bot(thread_id: str):
-        return ("bot-tok", "bot-enc", None)
+        return ("bot-tok", None)
 
     monkeypatch.setattr(auth, "_resolve_bot_installation_token", fake_bot)
 
     config = {"configurable": {"source": source, "github_login": "octo", "thread_id": "t1"}}
-    token, _, _ = asyncio.run(auth.resolve_github_token(config, "t1"))
+    token, _ = asyncio.run(auth.resolve_github_token(config, "t1"))
     assert token == "bot-tok"

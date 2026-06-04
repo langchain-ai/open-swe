@@ -188,11 +188,7 @@ async def test_push_event_queues_when_thread_active_even_if_pr_diff_unchanged() 
             new_callable=AsyncMock,
             return_value=True,
         ),
-        patch(
-            "agent.webapp.persist_encrypted_github_token",
-            new_callable=AsyncMock,
-            return_value="enc",
-        ),
+        patch("agent.webapp.cache_github_token_for_thread"),
         patch("agent.webapp.set_reviewer_thread_metadata", new_callable=AsyncMock),
         patch("agent.webapp.is_thread_active", new_callable=AsyncMock, return_value=True),
         patch("agent.webapp.queue_message_for_thread", new=queue_message),
@@ -257,11 +253,7 @@ async def test_push_event_triggers_re_review_run_when_watching() -> None:
             new_callable=AsyncMock,
             return_value=True,
         ),
-        patch(
-            "agent.webapp.persist_encrypted_github_token",
-            new_callable=AsyncMock,
-            return_value="enc",
-        ),
+        patch("agent.webapp.cache_github_token_for_thread"),
         patch(
             "agent.webapp.set_reviewer_thread_metadata",
             new_callable=AsyncMock,
@@ -384,7 +376,7 @@ async def test_push_event_public_repo_uses_scoped_token() -> None:
     fake_client = MagicMock()
     fake_client.runs.create = AsyncMock()
     get_token = AsyncMock(return_value=("scoped-token", "exp"))
-    persist = AsyncMock(return_value="enc")
+    cache_token = MagicMock()
 
     with (
         patch(
@@ -402,7 +394,7 @@ async def test_push_event_public_repo_uses_scoped_token() -> None:
             new_callable=AsyncMock,
             return_value=True,
         ),
-        patch("agent.webapp.persist_encrypted_github_token", persist),
+        patch("agent.webapp.cache_github_token_for_thread", cache_token),
         patch("agent.webapp.fetch_pr_review_threads", new_callable=AsyncMock, return_value=[]),
         patch("agent.webapp.reconcile_findings_with_review_threads", new_callable=AsyncMock),
         patch("agent.webapp.set_reviewer_thread_metadata", new_callable=AsyncMock),
@@ -412,7 +404,7 @@ async def test_push_event_public_repo_uses_scoped_token() -> None:
         await webapp.process_github_push_event(payload)
 
     get_token.assert_awaited_once_with(repository_ids=[123])
-    assert persist.await_args.args[1] == "scoped-token"
+    assert cache_token.call_args.args[1] == "scoped-token"
     _, kwargs = fake_client.runs.create.await_args
     assert kwargs["config"]["configurable"]["repo_private"] is False
 
@@ -430,7 +422,7 @@ async def test_push_event_rescopes_token_when_pr_metadata_reveals_public() -> No
     fake_client = MagicMock()
     fake_client.runs.create = AsyncMock()
     get_token = AsyncMock(side_effect=[("full-token", "e1"), ("scoped-token", "e2")])
-    persist = AsyncMock(return_value="enc")
+    cache_token = MagicMock()
 
     with (
         patch(
@@ -448,7 +440,7 @@ async def test_push_event_rescopes_token_when_pr_metadata_reveals_public() -> No
             new_callable=AsyncMock,
             return_value=True,
         ),
-        patch("agent.webapp.persist_encrypted_github_token", persist),
+        patch("agent.webapp.cache_github_token_for_thread", cache_token),
         patch("agent.webapp.fetch_pr_review_threads", new_callable=AsyncMock, return_value=[]),
         patch("agent.webapp.reconcile_findings_with_review_threads", new_callable=AsyncMock),
         patch("agent.webapp.set_reviewer_thread_metadata", new_callable=AsyncMock),
@@ -458,7 +450,7 @@ async def test_push_event_rescopes_token_when_pr_metadata_reveals_public() -> No
         await webapp.process_github_push_event(payload)
 
     assert get_token.await_args_list == [call(), call(repository_ids=[456])]
-    assert persist.await_args.args[1] == "scoped-token"
+    assert cache_token.call_args.args[1] == "scoped-token"
     _, kwargs = fake_client.runs.create.await_args
     assert kwargs["config"]["configurable"]["repo_private"] is False
 
