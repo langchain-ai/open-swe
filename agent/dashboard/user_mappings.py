@@ -7,7 +7,7 @@ keyed by GitHub login in the ``["user_mappings"]`` LangGraph Store namespace::
         "github_login": "octocat",
         "work_email": "octo@example.com",
         "slack_user_id": "U123" | None,
-        "source": "hardcoded" | "self" | "admin",
+        "source": "slack_oauth",
         "status": "active" | "pending",
         "created_at": "...", "updated_at": "...",
     }
@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 
 USER_MAPPINGS_NAMESPACE: list[str] = ["user_mappings"]
 
-MappingSource = Literal["hardcoded", "self", "admin", "slack_oauth"]
+MappingSource = Literal["slack_oauth"]
 MappingStatus = Literal["active", "pending"]
 
 
@@ -259,7 +259,7 @@ async def upsert_mapping(
     github_login: str,
     work_email: str,
     slack_user_id: str | None = None,
-    source: MappingSource = "admin",
+    source: MappingSource = "slack_oauth",
     status: MappingStatus = "active",
 ) -> dict[str, Any]:
     """Create or update a mapping keyed by GitHub login."""
@@ -301,26 +301,3 @@ async def delete_mapping(github_login: str) -> bool:
     return True
 
 
-async def bulk_import(mapping: dict[str, str], *, source: MappingSource = "hardcoded") -> int:
-    """Seed the Store from a ``{github_login: work_email}`` dict.
-
-    Existing records are left untouched so re-running the import never
-    downgrades a richer (self/admin) record back to ``hardcoded``. Returns the
-    number of records newly created.
-    """
-    created = 0
-    for raw_login, raw_email in mapping.items():
-        login = _norm_login(raw_login)
-        email = _norm_email(raw_email)
-        if not login or not email:
-            continue
-        if await get_mapping(login):
-            continue
-        await upsert_mapping(
-            github_login=login,
-            work_email=email,
-            source=source,
-            status="active",
-        )
-        created += 1
-    return created
