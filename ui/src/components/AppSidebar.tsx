@@ -51,6 +51,7 @@ export function AppSidebar({ user }: { user: SessionUser }) {
       <nav className="flex flex-1 flex-col gap-0.5 px-2">
         <Link
           to="/agents"
+          onClick={layout.closeOnMobile}
           className={cn(
             "flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-xs/relaxed text-muted-foreground transition-colors",
             "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
@@ -65,6 +66,7 @@ export function AppSidebar({ user }: { user: SessionUser }) {
             <Link
               key={item.to}
               to={item.to}
+              onClick={layout.closeOnMobile}
               className={cn(
                 "flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-xs/relaxed text-muted-foreground transition-colors",
                 "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
