@@ -18,7 +18,7 @@ const config = defineConfig({
     tanstackStart({ spa: { enabled: true } }),
     VitePWA({
       injectRegister: false,
-      registerType: "autoUpdate",
+      registerType: "prompt",
       outDir: ".output/public",
       integration: {
         closeBundleOrder: "pre",
@@ -50,7 +50,7 @@ const config = defineConfig({
       workbox: {
         navigateFallback: "/_shell.html",
         navigateFallbackDenylist: [/^\/dashboard\/api\//, /^\/_serverFn\//],
-        globPatterns: ["**/*.{js,css,png,svg,ico,webmanifest,json}"],
+        globPatterns: ["**/*.{js,css,png,svg,ico,webmanifest}"],
         additionalManifestEntries: [
           { url: "/_shell.html", revision: new Date().toISOString() },
         ],
