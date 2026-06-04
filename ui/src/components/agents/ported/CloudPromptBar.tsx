@@ -147,11 +147,11 @@ export const CloudPromptBar = memo(function CloudPromptBarComponent({
               type="button"
               disabled={pickerDisabled}
               onClick={() => setModelDropdownOpen((open) => !open)}
-              className="flex max-w-[220px] cursor-pointer items-center gap-1 truncate rounded-full border border-[var(--ui-border)] px-2.5 py-1 text-[color:var(--ui-text-muted)] transition-colors hover:bg-[var(--ui-panel-2)] disabled:cursor-default disabled:opacity-60"
+              className="flex max-w-[220px] cursor-pointer items-center gap-0.5 text-[13px] text-[color:var(--ui-text-muted)] transition-opacity hover:opacity-80 disabled:cursor-default disabled:opacity-60"
             >
               <span className="truncate">{selectionLabel}</span>
               {!pickerDisabled && (
-                <ChevronDown className="size-3 shrink-0 opacity-70" />
+                <ChevronDown className="size-3.5 shrink-0 opacity-60" />
               )}
             </button>
             {modelDropdownOpen && combos.length > 0 && (
