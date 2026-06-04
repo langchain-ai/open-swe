@@ -85,8 +85,6 @@ async def test_pr_ready_public_repo_uses_scoped_reviewer_token(
     await webapp.process_github_pr_ready(_pr_payload(action="opened", draft=False, private=False))
 
     get_token.assert_awaited_once_with(repository_ids=[123])
-    cache_token.assert_called_once()
-    assert cache_token.call_args.args[1] == "scoped-token"
     _, kwargs = fake_client.runs.create.await_args
     assert kwargs["config"]["configurable"]["repo_private"] is False
 

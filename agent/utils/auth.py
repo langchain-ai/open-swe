@@ -278,7 +278,7 @@ async def leave_failure_comment(
                 f"connect your Slack account in {link}, then tag me again.",
             )
         return
-    if source == "github":
+    if source in ("github", "github_push"):
         logger.warning(
             "Auth failure for GitHub-triggered run (no token to post comment): %s", message
         )

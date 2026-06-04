@@ -797,8 +797,6 @@ def test_process_github_pr_ready_creates_reviewer_run(monkeypatch) -> None:
         "thread_id": captured["thread_id"],
         "if_exists": "do_nothing",
     }
-    assert captured["cache_token"] == "app-token"
-    assert captured["cache_thread_id"] == captured["thread_id"]
     assert "https://github.com/langchain-ai/open-swe/pull/1244" in prompt
     assert "Base SHA: base-sha" in prompt
     assert "Head SHA: head-sha" in prompt
@@ -894,7 +892,6 @@ def test_trigger_pr_review_from_ref_creates_reviewer_run(monkeypatch) -> None:
         "if_exists": "do_nothing",
     }
     assert captured["metadata_token"] == "app-token"
-    assert captured["cache_token"] == "app-token"
     assert "Base SHA: base-sha" in prompt
     assert "Head SHA: head-sha" in prompt
     assert config["source"] == "slack"

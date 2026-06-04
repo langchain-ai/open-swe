@@ -1808,8 +1808,6 @@ async def trigger_pr_review_from_ref(
     if not await _ensure_thread_exists_for_metadata(thread_id, langgraph_client):
         return {"success": False, "error": "Could not create reviewer thread"}
 
-    cache_github_token_for_thread(thread_id, app_token, expires_at=app_token_expires_at)
-
     pr_meta: ReviewerPRMeta = {
         "owner": pr_ref.owner,
         "name": pr_ref.repo,
@@ -1997,8 +1995,6 @@ async def _dispatch_first_review_from_pr_payload(payload: dict[str, Any], *, sou
     langgraph_client = get_client(url=LANGGRAPH_URL)
     if not await _ensure_thread_exists_for_metadata(thread_id, langgraph_client):
         return
-
-    cache_github_token_for_thread(thread_id, app_token, expires_at=app_token_expires_at)
 
     await set_reviewer_thread_metadata(thread_id, pr=pr_meta, watch=True, head_sha=head_sha)
 
@@ -2342,7 +2338,6 @@ async def process_github_push_event(payload: dict[str, Any]) -> None:
     langgraph_client = get_client(url=LANGGRAPH_URL)
     if not await _ensure_thread_exists_for_metadata(thread_id, langgraph_client):
         return
-    cache_github_token_for_thread(thread_id, app_token, expires_at=app_token_expires_at)
     try:
         threads = await fetch_pr_review_threads(
             owner=repo_config["owner"],
@@ -2651,7 +2646,6 @@ async def process_github_review_finding_reply(payload: dict[str, Any]) -> None:
     )
     if not app_token:
         return
-    cache_github_token_for_thread(thread_id, app_token, expires_at=app_token_expires_at)
 
     threads = await fetch_pr_review_threads(
         owner=repo_config["owner"],

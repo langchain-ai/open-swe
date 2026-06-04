@@ -63,9 +63,8 @@ from .tools import (
     web_search,
 )
 from .utils.agents_md import fetch_agents_md
-from .utils.auth import resolve_github_token
 from .utils.github_app import get_github_app_installation_token_with_expiry
-from .utils.github_token import cache_github_token_for_thread, get_github_token_from_thread
+from .utils.github_token import cache_github_token_for_thread
 from .utils.model import DEFAULT_LLM_REASONING, make_model, provider_model_kwargs
 from .utils.sandbox_paths import aresolve_sandbox_work_dir
 
@@ -626,20 +625,20 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
     repo_config = config["configurable"].get("repo") or {}
     github_token: str | None = None
     if config["configurable"].get("source"):
-        cached_token, _cached_expires_at = await get_github_token_from_thread(thread_id)
-        if cached_token:
-            github_token = cached_token
-        else:
-            try:
-                github_token, _expires_at = await resolve_github_token(config, thread_id)
-            except RuntimeError:
-                github_token, expires_at = await get_github_app_installation_token_with_expiry(
-                    repositories=[str(repo_config.get("name"))] if repo_config.get("name") else None
-                )
-                if github_token:
-                    cache_github_token_for_thread(thread_id, github_token, expires_at=expires_at)
-                else:
-                    raise
+        # Reviewer runs always act as the GitHub App (open-swe[bot]). Resolve the
+        # installation token in this process at run start rather than relying on a
+        # token cached by the webhook handler, which runs in a separate process. The
+        # App token also bypasses org SAML enforcement that blocks user OAuth tokens.
+        repo_name = str(repo_config.get("name") or "")
+        github_token, expires_at = await get_github_app_installation_token_with_expiry(
+            repositories=[repo_name] if repo_name else None
+        )
+        if not github_token:
+            raise RuntimeError(
+                f"GitHub App installation token unavailable for reviewer thread {thread_id}"
+            )
+        # Cache in-process so reviewer tools and the sandbox proxy can read it this run.
+        cache_github_token_for_thread(thread_id, github_token, expires_at=expires_at)
 
     repo_private = config["configurable"].get("repo_private")
     github_proxy_token = github_token if repo_private is False else None
