@@ -269,20 +269,29 @@ async def _complete_account_mapping(login: str, github_email: str | None, link_t
     Self-service signup: the user is already org-gated (only members reach
     here), so we record a ``source="self"`` mapping. The Slack identity (user
     id + work email) is carried in the signed account-link token when the flow
-    started from an unmapped Slack mention; otherwise we fall back to the
-    user's verified GitHub email.
+    started from an unmapped Slack mention. Existing Slack-linked work emails
+    stay canonical before falling back to the user's verified GitHub email.
     """
     link = decode_account_link(link_token) if isinstance(link_token, str) else None
-    slack_user_id = link.get("slack_user_id") if link else None
-    work_email = (link.get("work_email") if link else None) or github_email
-    if not work_email:
+    link_slack_user_id = link.get("slack_user_id") if link else None
+    slack_user_id = link_slack_user_id if isinstance(link_slack_user_id, str) else None
+    link_work_email = link.get("work_email") if link else None
+    link_email = link_work_email if isinstance(link_work_email, str) and link_work_email.strip() else None
+    existing = await get_mapping(login)
+    existing_slack_email: str | None = None
+    if isinstance(existing, dict) and isinstance(existing.get("slack_user_id"), str):
+        existing_work_email = existing.get("work_email")
+        if isinstance(existing_work_email, str) and existing_work_email.strip():
+            existing_slack_email = existing_work_email
+    work_email = link_email or existing_slack_email or github_email
+    if not isinstance(work_email, str) or not work_email.strip():
         logger.warning("No work email available to map GitHub login %r", login)
         return
     try:
         await upsert_mapping(
             github_login=login,
             work_email=work_email,
-            slack_user_id=slack_user_id if isinstance(slack_user_id, str) else None,
+            slack_user_id=slack_user_id,
             source="self",
             status="active",
         )
