@@ -1,3 +1,4 @@
+import { ArrowUp, LoaderCircle } from "lucide-react"
 import {
   memo,
   useCallback,
@@ -134,7 +135,8 @@ export const CloudPromptBar = memo(function CloudPromptBarComponent({
           placeholder={busy ? "Send a message to queue next..." : placeholder}
           disabled={disabled}
           className={cn(
-            "w-full min-w-0 resize-none overflow-hidden bg-transparent leading-[1.45] text-[color:var(--ui-text)] outline-none placeholder:text-[color:var(--ui-text-dim)]",
+            // 16px on mobile prevents iOS from zooming the viewport on focus; 13px on desktop.
+            "w-full min-w-0 resize-none overflow-hidden bg-transparent text-[16px] leading-[1.45] text-[color:var(--ui-text)] outline-none placeholder:text-[color:var(--ui-text-dim)] md:text-[13px]",
             compact ? "min-h-[36px]" : "min-h-[52px]"
           )}
           style={{ maxHeight: PROMPT_TEXTAREA_MAX_HEIGHT }}
@@ -184,6 +186,20 @@ export const CloudPromptBar = memo(function CloudPromptBarComponent({
               </div>
             )}
           </div>
+
+          <button
+            type="button"
+            onClick={handleSubmit}
+            disabled={!value.trim() || disabled}
+            aria-label="Send message"
+            className="ml-auto flex size-8 shrink-0 items-center justify-center rounded-full bg-[var(--ui-accent)] text-white transition-opacity hover:opacity-90 disabled:cursor-default disabled:opacity-40"
+          >
+            {disabled ? (
+              <LoaderCircle className="size-4 animate-spin" />
+            ) : (
+              <ArrowUp className="size-4" strokeWidth={2.5} />
+            )}
+          </button>
         </div>
       </div>
     </div>
