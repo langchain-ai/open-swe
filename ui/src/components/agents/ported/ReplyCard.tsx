@@ -21,6 +21,28 @@ const SLACK_TOKEN = /<([^>]+)>/g
 const LINK_CLASS =
   "text-[color:var(--ui-accent)] underline decoration-[color:var(--ui-accent)]/50 break-words [overflow-wrap:anywhere]"
 
+type SlackTextObject = { type?: string; text?: string }
+type SlackBlock = {
+  type?: string
+  text?: SlackTextObject
+  elements?: Array<{ type?: string; text?: SlackTextObject }>
+}
+
+function isSlackTextObject(value: unknown): value is SlackTextObject {
+  return (
+    !!value &&
+    typeof value === "object" &&
+    typeof (value as SlackTextObject).text === "string"
+  )
+}
+
+function isSlackBlockArray(value: unknown): value is SlackBlock[] {
+  return (
+    Array.isArray(value) &&
+    value.every((block) => !!block && typeof block === "object")
+  )
+}
+
 // Slack mrkdwn isn't standard Markdown — rewrite its link/mention syntax for display
 // rather than feeding it to the Markdown renderer (which mis-renders *bold* etc.).
 function renderSlackBody(text: string): Array<ReactNode> {
@@ -71,11 +93,88 @@ function renderSlackBody(text: string): Array<ReactNode> {
   return nodes
 }
 
+function blocksFromOptions(
+  message: string,
+  options: unknown
+): SlackBlock[] | null {
+  if (!Array.isArray(options)) return null
+  const cleanOptions = options.filter(
+    (option): option is string =>
+      typeof option === "string" && option.trim().length > 0
+  )
+  if (cleanOptions.length === 0) return null
+  return [
+    { type: "section", text: { type: "mrkdwn", text: message } },
+    {
+      type: "actions",
+      elements: cleanOptions.slice(0, 5).map((option) => ({
+        type: "button",
+        text: { type: "plain_text", text: option },
+      })),
+    },
+  ]
+}
+
+function renderSlackBlocks(blocks: SlackBlock[]): ReactNode {
+  return (
+    <div className="flex flex-col gap-2">
+      {blocks.map((block, index) => {
+        if (
+          (block.type === "section" || block.type === "context") &&
+          isSlackTextObject(block.text)
+        ) {
+          return (
+            <div
+              key={index}
+              className="[overflow-wrap:anywhere] break-words whitespace-pre-wrap"
+            >
+              {renderSlackBody(block.text.text ?? "")}
+            </div>
+          )
+        }
+        if (block.type === "actions" && Array.isArray(block.elements)) {
+          return (
+            <div key={index} className="flex flex-wrap gap-2">
+              {block.elements.map((element, elementIndex) => {
+                const label = isSlackTextObject(element.text)
+                  ? element.text.text
+                  : element.type || "Action"
+                return (
+                  <span
+                    key={elementIndex}
+                    className="rounded-md border border-[var(--ui-border)] bg-[var(--ui-panel)] px-2 py-1 text-[12px] text-[color:var(--ui-text)]"
+                  >
+                    {label}
+                  </span>
+                )
+              })}
+            </div>
+          )
+        }
+        if (block.type === "divider") {
+          return (
+            <div
+              key={index}
+              className="border-t border-[var(--ui-border-subtle)]"
+            />
+          )
+        }
+        return null
+      })}
+    </div>
+  )
+}
+
 export const ReplyCard = memo(function ReplyCard({ chunk }: ReplyCardProps) {
   const isLinear = chunk.toolKind === "linear"
   const body =
     ((isLinear ? chunk.input?.comment_body : chunk.input?.message) as string) ||
     ""
+  const blocks = !isLinear
+    ? isSlackBlockArray(chunk.input?.blocks)
+      ? chunk.input.blocks
+      : blocksFromOptions(body, chunk.input?.options)
+    : null
 
   return (
     <div className="my-1">
@@ -88,6 +187,8 @@ export const ReplyCard = memo(function ReplyCard({ chunk }: ReplyCardProps) {
           <div className="max-h-[250px] overflow-auto px-3 py-2 text-[13px] text-[color:var(--ui-text)]">
             {isLinear ? (
               <Markdown content={body} />
+            ) : blocks ? (
+              renderSlackBlocks(blocks)
             ) : (
               <div className="[overflow-wrap:anywhere] break-words whitespace-pre-wrap">
                 {renderSlackBody(body)}

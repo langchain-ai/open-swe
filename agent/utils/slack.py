@@ -296,6 +296,7 @@ async def post_slack_thread_reply_with_ts(
     *,
     unfurl_links: bool = True,
     unfurl_media: bool = True,
+    blocks: list[dict[str, Any]] | None = None,
 ) -> tuple[str | None, str | None]:
     """Post a reply in a Slack thread and return its Slack timestamp and error."""
     if not SLACK_BOT_TOKEN:
@@ -308,6 +309,8 @@ async def post_slack_thread_reply_with_ts(
         "unfurl_links": unfurl_links,
         "unfurl_media": unfurl_media,
     }
+    if blocks:
+        payload["blocks"] = blocks
 
     async with httpx.AsyncClient() as http_client:
         try:
