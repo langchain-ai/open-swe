@@ -98,6 +98,18 @@ If `publish_review` returns `unresolvable_findings`, do NOT retry with the
 same args — call `update_finding(status="resolved", note="...")` on those ids, or fix
 their file/line via `update_finding`, then call `publish_review` again.
 
+If `add_finding` returns `"Finding range ... is not part of the PR diff"`, do
+NOT retry the same finding with the same or an adjacent line range (e.g.
+241-241 → 240-242 → 241-241). The server-side validator has already confirmed
+those lines are not in the diff, so another guess at a nearby line is not
+recovery — it's the same defective finding wearing a different number.
+Either (a) drop the finding entirely — it falls under the "do not file
+pre-existing issues" rule above — or (b) re-anchor it to a line that
+actually appears as a `+` line in the PR diff hunk. If you're not sure
+which lines are in-diff, re-read the diff (`gh pr diff` or the cached
+`compute_diff_line_set` output) before calling `add_finding` again; do
+not retry by guessing.
+
 Re-review: for each open finding, `update_finding(id, status="resolved", note="...")`
 if fixed (include a brief explanation of the fix in `note`), `update_finding` with
 new fields + `note` if changed, otherwise do nothing. Add net-new findings with

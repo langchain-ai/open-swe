@@ -118,13 +118,16 @@ def add_finding(
     if isinstance(diff_line_set, dict) and not is_range_in_diff(
         diff_line_set, file, start_line, end_line, side=_cast_side(side)
     ):
-        return {
-            "success": False,
-            "error": (
-                f"Finding range {file}:{start_line}-{end_line} is not part of the PR diff. "
-                "Only review changes the PR introduces; do not flag pre-existing code."
-            ),
-        }
+        hint = _format_in_diff_hint(diff_line_set, file, side)
+        error = (
+            f"Finding range {file}:{start_line}-{end_line} is not part of the PR diff. "
+            "Only review changes the PR introduces; do not flag pre-existing code. "
+            "Do NOT retry with the same or an adjacent line range — re-anchor to a line "
+            "that actually appears in the diff, or drop the finding."
+        )
+        if hint:
+            error = f"{error} {hint}"
+        return {"success": False, "error": error}
 
     diff_hunk: str | None = None
     if isinstance(diff_text, str) and diff_text:
@@ -162,6 +165,35 @@ def add_finding(
             "include `suggestion` for small, obvious fixes."
         )
     return result
+
+
+def _format_in_diff_hint(diff_line_set: dict[str, Any], file: str, side: str) -> str:
+    """Format a short hint listing in-diff line ranges for ``file`` on ``side``."""
+    file_sides = diff_line_set.get(file)
+    if not isinstance(file_sides, dict):
+        return ""
+    side_lines = file_sides.get(side)
+    if not side_lines:
+        return ""
+    ranges = _collapse_to_ranges(sorted(int(line) for line in side_lines))
+    if not ranges:
+        return ""
+    formatted = ", ".join(
+        f"{start}-{end}" if start != end else f"{start}" for start, end in ranges[:8]
+    )
+    suffix = " (truncated)" if len(ranges) > 8 else ""
+    return f"In-diff {side}-side lines on {file}: {formatted}{suffix}."
+
+
+def _collapse_to_ranges(lines: list[int]) -> list[tuple[int, int]]:
+    """Collapse a sorted list of line numbers into contiguous (start, end) ranges."""
+    ranges: list[tuple[int, int]] = []
+    for line in lines:
+        if ranges and line == ranges[-1][1] + 1:
+            ranges[-1] = (ranges[-1][0], line)
+        else:
+            ranges.append((line, line))
+    return ranges
 
 
 def _cast_severity(value: str) -> Severity:
