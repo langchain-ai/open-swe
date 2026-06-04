@@ -2963,7 +2963,7 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks) ->
         return {"status": "accepted", "message": "Processing GitHub push for reviewer watch"}
 
     if not _is_repo_allowed(webhook_repo_config):
-        logger.warning(
+        logger.debug(
             "Rejecting GitHub webhook: repo '%s/%s' not in allowlist",
             webhook_repo_config.get("owner"),
             webhook_repo_config.get("name"),
