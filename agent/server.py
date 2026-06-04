@@ -410,9 +410,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             tools=[],
         ).with_config(config)
 
-    github_token, new_encrypted, new_expires_at = await resolve_github_token(config, thread_id)
-    config["metadata"]["github_token_encrypted"] = new_encrypted
-    config["metadata"]["github_token_expires_at"] = new_expires_at
+    github_token, _expires_at = await resolve_github_token(config, thread_id)
     triggering_user_identity = await asyncio.to_thread(
         resolve_triggering_user_identity, config, github_token
     )

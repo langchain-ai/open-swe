@@ -43,7 +43,7 @@ def _patch_dispatch_deps(monkeypatch: pytest.MonkeyPatch, fake_client: Any) -> N
         AsyncMock(return_value=("token", None)),
     )
     monkeypatch.setattr(webapp, "_ensure_thread_exists_for_metadata", AsyncMock(return_value=True))
-    monkeypatch.setattr(webapp, "persist_encrypted_github_token", AsyncMock(return_value="enc"))
+    monkeypatch.setattr(webapp, "cache_github_token_for_thread", MagicMock())
     monkeypatch.setattr(webapp, "set_reviewer_thread_metadata", AsyncMock())
     monkeypatch.setattr(webapp, "is_thread_active", AsyncMock(return_value=False))
     monkeypatch.setattr(webapp, "get_client", lambda url: fake_client)
@@ -74,8 +74,8 @@ async def test_pr_ready_public_repo_uses_scoped_reviewer_token(
     get_token = AsyncMock(return_value=("scoped-token", "expires"))
     monkeypatch.setattr(webapp, "get_github_app_installation_token_with_expiry", get_token)
     monkeypatch.setattr(webapp, "_ensure_thread_exists_for_metadata", AsyncMock(return_value=True))
-    persist_token = AsyncMock(return_value="enc")
-    monkeypatch.setattr(webapp, "persist_encrypted_github_token", persist_token)
+    cache_token = MagicMock()
+    monkeypatch.setattr(webapp, "cache_github_token_for_thread", cache_token)
     monkeypatch.setattr(webapp, "set_reviewer_thread_metadata", AsyncMock())
     monkeypatch.setattr(webapp, "is_thread_active", AsyncMock(return_value=False))
     monkeypatch.setattr(webapp, "get_client", lambda url: fake_client)
@@ -85,8 +85,8 @@ async def test_pr_ready_public_repo_uses_scoped_reviewer_token(
     await webapp.process_github_pr_ready(_pr_payload(action="opened", draft=False, private=False))
 
     get_token.assert_awaited_once_with(repository_ids=[123])
-    persist_token.assert_awaited_once()
-    assert persist_token.await_args.args[1] == "scoped-token"
+    cache_token.assert_called_once()
+    assert cache_token.call_args.args[1] == "scoped-token"
     _, kwargs = fake_client.runs.create.await_args
     assert kwargs["config"]["configurable"]["repo_private"] is False
 
@@ -100,7 +100,7 @@ async def test_pr_ready_private_repo_uses_full_reviewer_token(
     get_token = AsyncMock(return_value=("full-token", "expires"))
     monkeypatch.setattr(webapp, "get_github_app_installation_token_with_expiry", get_token)
     monkeypatch.setattr(webapp, "_ensure_thread_exists_for_metadata", AsyncMock(return_value=True))
-    monkeypatch.setattr(webapp, "persist_encrypted_github_token", AsyncMock(return_value="enc"))
+    monkeypatch.setattr(webapp, "cache_github_token_for_thread", MagicMock())
     monkeypatch.setattr(webapp, "set_reviewer_thread_metadata", AsyncMock())
     monkeypatch.setattr(webapp, "is_thread_active", AsyncMock(return_value=False))
     monkeypatch.setattr(webapp, "get_client", lambda url: fake_client)

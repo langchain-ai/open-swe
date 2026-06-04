@@ -19,6 +19,14 @@ from ..utils.multimodal import fetch_image_block
 
 logger = logging.getLogger(__name__)
 
+DASHBOARD_HANDOFF_MARKER = "[Open SWE Web handoff]"
+DASHBOARD_HANDOFF_INSTRUCTION = (
+    f"{DASHBOARD_HANDOFF_MARKER} This follow-up was sent from Web. "
+    "The conversation has moved to Web, so answer in the dashboard stream with a normal "
+    "assistant message. Do not call slack_thread_reply unless a later Slack message explicitly "
+    "moves the conversation back to Slack."
+)
+
 
 class LinearNotifyState(AgentState):
     """Extended agent state for tracking Linear notifications."""
@@ -43,6 +51,10 @@ async def _build_blocks_from_payload(
             if image_block:
                 blocks.append(image_block)
     return blocks
+
+
+def _is_dashboard_queued_message(content: object) -> bool:
+    return isinstance(content, dict) and content.get("source") == "dashboard"
 
 
 @before_model(state_schema=LinearNotifyState)
@@ -105,6 +117,8 @@ async def check_message_queue_before_model(  # noqa: PLR0911
         content_blocks: list[dict[str, Any]] = []
         for msg in queued_messages:
             content = msg.get("content")
+            if _is_dashboard_queued_message(content):
+                content_blocks.append({"type": "text", "text": DASHBOARD_HANDOFF_INSTRUCTION})
             if isinstance(content, dict) and ("text" in content or "image_urls" in content):
                 logger.debug("Queued message contains text + image URLs")
                 blocks = await _build_blocks_from_payload(content)

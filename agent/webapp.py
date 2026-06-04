@@ -52,7 +52,6 @@ from .reviewer_publish import fetch_pr_review_threads
 from .reviewer_reconcile import reconcile_findings_with_review_threads
 from .utils.auth import (
     is_bot_token_only_mode,
-    persist_encrypted_github_token,
     resolve_github_token_from_email,
 )
 from .utils.comments import get_recent_comments
@@ -74,7 +73,11 @@ from .utils.github_comments import (
     verify_github_signature,
 )
 from .utils.github_org_membership import INTERNAL_BOT_LOGINS, is_user_active_org_member
-from .utils.github_token import get_github_token_from_thread, invalidate_cached_github_token
+from .utils.github_token import (
+    cache_github_token_for_thread,
+    get_github_token_from_thread,
+    invalidate_cached_github_token,
+)
 from .utils.linear import post_linear_trace_comment
 from .utils.linear_team_repo_map import LINEAR_TEAM_TO_REPO
 from .utils.multimodal import dedupe_urls, extract_image_urls, fetch_image_block
@@ -1725,11 +1728,7 @@ async def trigger_pr_review_from_ref(
     if not await _ensure_thread_exists_for_metadata(thread_id, langgraph_client):
         return {"success": False, "error": "Could not create reviewer thread"}
 
-    try:
-        await persist_encrypted_github_token(thread_id, app_token, expires_at=app_token_expires_at)
-    except Exception:
-        logger.warning("Could not persist bot token for reviewer thread %s", thread_id)
-        return {"success": False, "error": "Could not persist reviewer token"}
+    cache_github_token_for_thread(thread_id, app_token, expires_at=app_token_expires_at)
 
     pr_meta: ReviewerPRMeta = {
         "owner": pr_ref.owner,
@@ -1919,11 +1918,7 @@ async def _dispatch_first_review_from_pr_payload(payload: dict[str, Any], *, sou
     if not await _ensure_thread_exists_for_metadata(thread_id, langgraph_client):
         return
 
-    try:
-        await persist_encrypted_github_token(thread_id, app_token, expires_at=app_token_expires_at)
-    except Exception:
-        logger.warning("Could not persist bot token for reviewer thread %s", thread_id)
-        return
+    cache_github_token_for_thread(thread_id, app_token, expires_at=app_token_expires_at)
 
     await set_reviewer_thread_metadata(thread_id, pr=pr_meta, watch=True, head_sha=head_sha)
 
@@ -1986,9 +1981,9 @@ async def process_github_pr_ready(payload: dict[str, Any]) -> None:
                 author_login or "<unknown>",
             )
             return
-    # Use source="github" so the auth resolver finds the bot token persisted on
-    # the thread; "github_auto" would fall through to the email-based path,
-    # which has no user_email to route on for webhook-triggered runs.
+    # Use source="github" so the reviewer resolver can use the GitHub App token;
+    # "github_auto" would fall through to the email-based path, which has no
+    # user_email to route on for webhook-triggered runs.
     await _dispatch_first_review_from_pr_payload(payload, source="github")
 
 
@@ -2267,11 +2262,7 @@ async def process_github_push_event(payload: dict[str, Any]) -> None:
     langgraph_client = get_client(url=LANGGRAPH_URL)
     if not await _ensure_thread_exists_for_metadata(thread_id, langgraph_client):
         return
-    try:
-        await persist_encrypted_github_token(thread_id, app_token, expires_at=app_token_expires_at)
-    except Exception:
-        logger.warning("Could not persist bot token for reviewer thread %s", thread_id)
-        return
+    cache_github_token_for_thread(thread_id, app_token, expires_at=app_token_expires_at)
     try:
         threads = await fetch_pr_review_threads(
             owner=repo_config["owner"],
@@ -2341,24 +2332,20 @@ async def _refresh_thread_github_token_after_401(thread_id: str, email: str) -> 
 
 
 async def _get_or_resolve_thread_github_token(thread_id: str, email: str) -> str | None:
-    """Resolve and persist a GitHub token for a thread when available.
+    """Resolve and cache a GitHub token for a thread when available.
 
-    Skips the cached ciphertext when its ``github_token_expires_at`` is past.
     In bot-token-only mode, returns a fresh GitHub App installation token
     instead of resolving per-user OAuth tokens.
     """
     if is_bot_token_only_mode():
         bot_token, expires_at = await get_github_app_installation_token_with_expiry()
         if bot_token:
-            try:
-                await persist_encrypted_github_token(thread_id, bot_token, expires_at=expires_at)
-            except Exception:
-                logger.warning("Could not persist bot token for thread %s", thread_id)
+            cache_github_token_for_thread(thread_id, bot_token, expires_at=expires_at)
             return bot_token
         logger.warning("Bot-token-only mode but GitHub App token unavailable")
         return None
 
-    github_token, _encrypted_token, _expires_at = await get_github_token_from_thread(thread_id)
+    github_token, _expires_at = await get_github_token_from_thread(thread_id)
     if github_token:
         return github_token
 
@@ -2367,12 +2354,10 @@ async def _get_or_resolve_thread_github_token(thread_id: str, email: str) -> str
     if not github_token:
         return None
 
-    try:
-        await persist_encrypted_github_token(
-            thread_id, github_token, expires_at=auth_result.get("expires_at")
-        )
-    except Exception:
-        logger.warning("Could not persist GitHub token for thread %s", thread_id)
+    expires_at = auth_result.get("expires_at")
+    cache_github_token_for_thread(
+        thread_id, github_token, expires_at=expires_at if isinstance(expires_at, str) else None
+    )
     return github_token
 
 
@@ -2586,11 +2571,7 @@ async def process_github_review_finding_reply(payload: dict[str, Any]) -> None:
     )
     if not app_token:
         return
-    try:
-        await persist_encrypted_github_token(thread_id, app_token, expires_at=app_token_expires_at)
-    except Exception:
-        logger.warning("Could not persist bot token for reviewer thread %s", thread_id)
-        return
+    cache_github_token_for_thread(thread_id, app_token, expires_at=app_token_expires_at)
 
     threads = await fetch_pr_review_threads(
         owner=repo_config["owner"],

@@ -7,7 +7,7 @@ the reviewer's tools and webhook handlers go through.
 Why thread metadata: it survives sandbox eviction, is queryable cross-thread
 via the langgraph SDK (a future UI lists all reviewer threads by filtering on
 ``metadata.kind == "reviewer"``), and matches existing patterns the codebase
-already uses for ``sandbox_id``, ``github_token_encrypted``, etc.
+already uses for durable non-secret run state like ``sandbox_id``.
 """
 
 from __future__ import annotations
