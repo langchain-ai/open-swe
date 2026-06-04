@@ -34,7 +34,7 @@ async def test_agent_uses_profile_subagent_model_override() -> None:
         patch(
             "agent.server.resolve_github_token",
             new_callable=AsyncMock,
-            return_value=("ghp", "enc", None),
+            return_value=("ghp", None),
         ),
         patch("agent.server.resolve_triggering_user_identity", return_value=None),
         patch(
@@ -112,7 +112,7 @@ async def test_agent_subagent_inherits_profile_model_override_without_explicit_p
         patch(
             "agent.server.resolve_github_token",
             new_callable=AsyncMock,
-            return_value=("ghp", "enc", None),
+            return_value=("ghp", None),
         ),
         patch("agent.server.resolve_triggering_user_identity", return_value=None),
         patch(

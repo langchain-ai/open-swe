@@ -14,12 +14,10 @@ from fastapi import HTTPException
 from langgraph_sdk.errors import InternalServerError
 from pydantic import BaseModel, Field
 
-from ..utils.auth import persist_encrypted_github_token
 from ..utils.thread_ops import is_thread_active, langgraph_client, queue_message_for_thread
 from .message_adapter import state_messages_to_ui
 from .options import SUPPORTED_MODEL_IDS, model_supports_effort
-from .profiles import OAUTH_TOKENS_NAMESPACE, get_profile, get_valid_access_token
-from .profiles import _get_value as get_oauth_record
+from .profiles import get_profile, get_valid_access_token
 from .user_mappings import email_for_login
 
 logger = logging.getLogger(__name__)
@@ -86,17 +84,10 @@ def _parse_repo(full_name: str | None) -> dict[str, str] | None:
     return {"owner": owner, "name": name}
 
 
-async def _persist_dashboard_github_token(thread_id: str, login: str) -> None:
+async def _ensure_dashboard_github_token(login: str) -> None:
     token = await get_valid_access_token(login)
     if not token:
         raise HTTPException(401, "github token unavailable, re-login required")
-    record = await get_oauth_record(OAUTH_TOKENS_NAMESPACE, login)
-    expires_at = record.get("token_expires_at") if isinstance(record, dict) else None
-    await persist_encrypted_github_token(
-        thread_id,
-        token,
-        expires_at=expires_at if isinstance(expires_at, str) else None,
-    )
 
 
 def _thread_owner_login(metadata: dict[str, Any]) -> str | None:
@@ -323,7 +314,7 @@ async def _start_agent_run(
     client = langgraph_client()
     await client.threads.create(thread_id=thread_id, metadata=metadata, if_exists="do_nothing")
     await client.threads.update(thread_id=thread_id, metadata=metadata)
-    await _persist_dashboard_github_token(thread_id, login)
+    await _ensure_dashboard_github_token(login)
 
     configurable: dict[str, Any] = {
         "thread_id": thread_id,
@@ -401,7 +392,7 @@ async def send_dashboard_message(
             thread if isinstance(thread, dict) else {"thread_id": thread_id, "metadata": metadata}
         )
 
-    await _persist_dashboard_github_token(thread_id, login)
+    await _ensure_dashboard_github_token(login)
     profile = await get_profile(login) or {}
     thread_source = _thread_source(metadata)
     configurable: dict[str, Any] = {

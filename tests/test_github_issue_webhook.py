@@ -305,11 +305,8 @@ def test_process_github_review_finding_reply_uses_rereview_config(monkeypatch) -
     async def fake_get_token_with_expiry() -> tuple[str, str]:
         return "app-token", "2026-01-01T00:00:00Z"
 
-    async def fake_persist_token(
-        thread_id: str, token: str, *, expires_at: str | None = None
-    ) -> str:
-        captured["persist"] = (thread_id, token, expires_at)
-        return "encrypted"
+    def fake_cache_token(thread_id: str, token: str, *, expires_at: str | None = None) -> None:
+        captured["cache"] = (thread_id, token, expires_at)
 
     async def fake_fetch_threads(**_kwargs: object) -> list[dict[str, object]]:
         return []
@@ -346,7 +343,7 @@ def test_process_github_review_finding_reply_uses_rereview_config(monkeypatch) -
     monkeypatch.setattr(
         webapp, "get_github_app_installation_token_with_expiry", fake_get_token_with_expiry
     )
-    monkeypatch.setattr(webapp, "persist_encrypted_github_token", fake_persist_token)
+    monkeypatch.setattr(webapp, "cache_github_token_for_thread", fake_cache_token)
     monkeypatch.setattr(webapp, "fetch_pr_review_threads", fake_fetch_threads)
     monkeypatch.setattr(webapp, "reconcile_findings_with_review_threads", fake_reconcile)
     monkeypatch.setattr(webapp, "list_reviewer_findings", fake_list_findings)
@@ -393,11 +390,8 @@ def test_process_github_review_finding_reply_queues_reply_body_when_active(monke
     async def fake_get_token_with_expiry() -> tuple[str, str]:
         return "app-token", "2026-01-01T00:00:00Z"
 
-    async def fake_persist_token(
-        _thread_id: str, _token: str, *, expires_at: str | None = None
-    ) -> str:
+    def fake_cache_token(_thread_id: str, _token: str, *, expires_at: str | None = None) -> None:
         captured["expires_at"] = expires_at
-        return "encrypted"
 
     async def fake_fetch_threads(**_kwargs: object) -> list[dict[str, object]]:
         return []
@@ -427,7 +421,7 @@ def test_process_github_review_finding_reply_queues_reply_body_when_active(monke
     monkeypatch.setattr(
         webapp, "get_github_app_installation_token_with_expiry", fake_get_token_with_expiry
     )
-    monkeypatch.setattr(webapp, "persist_encrypted_github_token", fake_persist_token)
+    monkeypatch.setattr(webapp, "cache_github_token_for_thread", fake_cache_token)
     monkeypatch.setattr(webapp, "fetch_pr_review_threads", fake_fetch_threads)
     monkeypatch.setattr(webapp, "reconcile_findings_with_review_threads", fake_reconcile)
     monkeypatch.setattr(webapp, "list_reviewer_findings", fake_list_findings)
@@ -739,13 +733,12 @@ def test_process_github_pr_ready_creates_reviewer_run(monkeypatch) -> None:
     async def fake_get_github_app_installation_token_with_expiry() -> tuple[str | None, str | None]:
         return "app-token", None
 
-    async def fake_persist_encrypted_github_token(
+    def fake_cache_github_token(
         thread_id: str, token: str, *, expires_at: str | None = None
-    ) -> str:
-        captured["persist_thread_id"] = thread_id
-        captured["persist_token"] = token
-        captured["persist_expires_at"] = expires_at
-        return "encrypted-token"
+    ) -> None:
+        captured["cache_thread_id"] = thread_id
+        captured["cache_token"] = token
+        captured["cache_expires_at"] = expires_at
 
     async def fake_is_thread_active(thread_id: str) -> bool:
         captured["active_thread_id"] = thread_id
@@ -774,9 +767,7 @@ def test_process_github_pr_ready_creates_reviewer_run(monkeypatch) -> None:
         "get_github_app_installation_token_with_expiry",
         fake_get_github_app_installation_token_with_expiry,
     )
-    monkeypatch.setattr(
-        webapp, "persist_encrypted_github_token", fake_persist_encrypted_github_token
-    )
+    monkeypatch.setattr(webapp, "cache_github_token_for_thread", fake_cache_github_token)
     monkeypatch.setattr(webapp, "is_thread_active", fake_is_thread_active)
     monkeypatch.setattr(webapp, "set_reviewer_thread_metadata", fake_set_reviewer_thread_metadata)
     monkeypatch.setattr(webapp, "get_client", lambda url: _FakeLangGraphClient())
@@ -806,8 +797,8 @@ def test_process_github_pr_ready_creates_reviewer_run(monkeypatch) -> None:
         "thread_id": captured["thread_id"],
         "if_exists": "do_nothing",
     }
-    assert captured["persist_token"] == "app-token"
-    assert captured["persist_thread_id"] == captured["thread_id"]
+    assert captured["cache_token"] == "app-token"
+    assert captured["cache_thread_id"] == captured["thread_id"]
     assert "https://github.com/langchain-ai/open-swe/pull/1244" in prompt
     assert "Base SHA: base-sha" in prompt
     assert "Head SHA: head-sha" in prompt
@@ -836,13 +827,12 @@ def test_trigger_pr_review_from_ref_creates_reviewer_run(monkeypatch) -> None:
             "head": {"sha": "head-sha", "ref": "feature-branch"},
         }
 
-    async def fake_persist_encrypted_github_token(
+    def fake_cache_github_token(
         thread_id: str, token: str, *, expires_at: str | None = None
-    ) -> str:
-        captured["persist_thread_id"] = thread_id
-        captured["persist_token"] = token
-        captured["persist_expires_at"] = expires_at
-        return "encrypted-token"
+    ) -> None:
+        captured["cache_thread_id"] = thread_id
+        captured["cache_token"] = token
+        captured["cache_expires_at"] = expires_at
 
     async def fake_is_thread_active(thread_id: str) -> bool:
         captured["active_thread_id"] = thread_id
@@ -875,9 +865,7 @@ def test_trigger_pr_review_from_ref_creates_reviewer_run(monkeypatch) -> None:
         fake_get_github_app_installation_token_with_expiry,
     )
     monkeypatch.setattr(webapp, "fetch_github_pr_metadata", fake_fetch_github_pr_metadata)
-    monkeypatch.setattr(
-        webapp, "persist_encrypted_github_token", fake_persist_encrypted_github_token
-    )
+    monkeypatch.setattr(webapp, "cache_github_token_for_thread", fake_cache_github_token)
     monkeypatch.setattr(webapp, "is_thread_active", fake_is_thread_active)
     monkeypatch.setattr(webapp, "set_reviewer_thread_metadata", fake_set_reviewer_thread_metadata)
     monkeypatch.setattr(webapp, "get_client", lambda url: _FakeLangGraphClient())
@@ -906,7 +894,7 @@ def test_trigger_pr_review_from_ref_creates_reviewer_run(monkeypatch) -> None:
         "if_exists": "do_nothing",
     }
     assert captured["metadata_token"] == "app-token"
-    assert captured["persist_token"] == "app-token"
+    assert captured["cache_token"] == "app-token"
     assert "Base SHA: base-sha" in prompt
     assert "Head SHA: head-sha" in prompt
     assert config["source"] == "slack"

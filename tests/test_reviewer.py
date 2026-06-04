@@ -75,7 +75,7 @@ async def test_reviewer_uses_cached_thread_token_for_slack_review_request() -> N
         patch(
             "agent.reviewer.get_github_token_from_thread",
             new_callable=AsyncMock,
-            return_value=("app-token", "encrypted-token", None),
+            return_value=("app-token", None),
         ) as mock_get_thread_token,
         patch("agent.reviewer.resolve_github_token", new_callable=AsyncMock) as mock_resolve_token,
         patch(
@@ -95,7 +95,7 @@ async def test_reviewer_uses_cached_thread_token_for_slack_review_request() -> N
 
     metadata = config["metadata"]
     assert isinstance(metadata, dict)
-    assert metadata["github_token_encrypted"] == "encrypted-token"
+    assert "github_token_encrypted" not in metadata
     mock_get_thread_token.assert_awaited_once_with("reviewer-thread-id")
     mock_resolve_token.assert_not_called()
     middleware = create_agent.call_args.kwargs["middleware"]
@@ -290,7 +290,7 @@ async def test_reviewer_inlines_agents_md_into_system_prompt() -> None:
         patch(
             "agent.reviewer.get_github_token_from_thread",
             new_callable=AsyncMock,
-            return_value=("gh-token", "encrypted-token", None),
+            return_value=("gh-token", None),
         ),
         patch("agent.reviewer.resolve_github_token", new_callable=AsyncMock),
         patch(
@@ -650,7 +650,7 @@ async def test_reviewer_injects_pr_review_threads_into_first_review_context() ->
         patch(
             "agent.reviewer.get_github_token_from_thread",
             new_callable=AsyncMock,
-            return_value=("gh-token", "encrypted-token", None),
+            return_value=("gh-token", None),
         ),
         patch("agent.reviewer.resolve_github_token", new_callable=AsyncMock),
         patch(
@@ -722,7 +722,7 @@ async def test_reviewer_injects_pr_review_threads_into_re_review_context() -> No
         patch(
             "agent.reviewer.get_github_token_from_thread",
             new_callable=AsyncMock,
-            return_value=("gh-token", "encrypted-token", None),
+            return_value=("gh-token", None),
         ),
         patch("agent.reviewer.resolve_github_token", new_callable=AsyncMock),
         patch(
@@ -786,7 +786,7 @@ async def test_reviewer_omits_threads_block_when_fetch_returns_empty() -> None:
         patch(
             "agent.reviewer.get_github_token_from_thread",
             new_callable=AsyncMock,
-            return_value=("gh-token", "encrypted-token", None),
+            return_value=("gh-token", None),
         ),
         patch("agent.reviewer.resolve_github_token", new_callable=AsyncMock),
         patch(
@@ -846,7 +846,7 @@ async def test_reviewer_continues_when_thread_fetch_raises() -> None:
         patch(
             "agent.reviewer.get_github_token_from_thread",
             new_callable=AsyncMock,
-            return_value=("gh-token", "encrypted-token", None),
+            return_value=("gh-token", None),
         ),
         patch("agent.reviewer.resolve_github_token", new_callable=AsyncMock),
         patch(
@@ -914,7 +914,7 @@ async def test_reviewer_populates_diff_line_set_from_github_api() -> None:
         patch(
             "agent.reviewer.get_github_token_from_thread",
             new_callable=AsyncMock,
-            return_value=("gh-token", "encrypted-token", None),
+            return_value=("gh-token", None),
         ),
         patch("agent.reviewer.resolve_github_token", new_callable=AsyncMock),
         patch(
@@ -980,7 +980,7 @@ async def test_reviewer_leaves_validation_disabled_when_diff_fetch_fails() -> No
         patch(
             "agent.reviewer.get_github_token_from_thread",
             new_callable=AsyncMock,
-            return_value=("gh-token", "encrypted-token", None),
+            return_value=("gh-token", None),
         ),
         patch("agent.reviewer.resolve_github_token", new_callable=AsyncMock),
         patch(
@@ -1042,7 +1042,7 @@ async def test_reviewer_injects_pr_title_and_body_into_context() -> None:
         patch(
             "agent.reviewer.get_github_token_from_thread",
             new_callable=AsyncMock,
-            return_value=("gh-token", "encrypted-token", None),
+            return_value=("gh-token", None),
         ),
         patch("agent.reviewer.resolve_github_token", new_callable=AsyncMock),
         patch(

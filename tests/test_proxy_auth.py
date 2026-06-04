@@ -209,7 +209,7 @@ class TestRefreshProxyOnSandboxReuse:
             patch(
                 "agent.server.resolve_github_token",
                 new_callable=AsyncMock,
-                return_value=("ghp", "enc", None),
+                return_value=("ghp", None),
             ),
             patch(
                 "agent.server.get_sandbox_id_from_metadata",
@@ -258,7 +258,7 @@ class TestRefreshProxyOnSandboxReuse:
             patch(
                 "agent.server.resolve_github_token",
                 new_callable=AsyncMock,
-                return_value=("ghp", "enc", None),
+                return_value=("ghp", None),
             ),
             patch(
                 "agent.server.get_sandbox_id_from_metadata",
