@@ -45,8 +45,9 @@ export function useSidebarLayout() {
 
   const closeOnMobile = useCallback(() => {
     if (typeof window === "undefined") return;
-    if (window.matchMedia("(max-width: 767px)").matches) setCollapsed(true);
-  }, [setCollapsed]);
+    // State-only: don't persist, so the desktop collapsed preference is preserved.
+    if (window.matchMedia("(max-width: 767px)").matches) setCollapsedState(true);
+  }, []);
 
   return { width, collapsed, setWidth, setCollapsed, toggle, closeOnMobile };
 }
