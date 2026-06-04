@@ -101,21 +101,60 @@ class TestConfigureGithubProxy:
             headers = mock_client.patch.call_args.kwargs["headers"]
             assert headers == {"X-API-Key": "my-api-key"}
 
-    def test_raises_on_http_error(self) -> None:
-        """Verify HTTP errors propagate."""
+    def test_retries_transient_http_error(self) -> None:
+        """Transient proxy API errors should be retried on the same sandbox."""
+        request = httpx.Request(
+            "PATCH", "https://api.smith.langchain.com/v2/sandboxes/boxes/sandbox-abc"
+        )
+        response = httpx.Response(503, request=request)
+        transient_error = httpx.HTTPStatusError(
+            "Server error",
+            request=request,
+            response=response,
+        )
         with (
             patch("agent.integrations.langsmith.httpx.Client") as mock_client_cls,
+            patch("agent.integrations.langsmith.time.sleep") as mock_sleep,
             patch.dict("os.environ", {"LANGSMITH_API_KEY": "api-key"}),
         ):
             mock_client = MagicMock()
-            mock_client.patch.side_effect = httpx.HTTPStatusError(
-                "Server error", request=MagicMock(), response=MagicMock(status_code=500)
-            )
+            failed_response = MagicMock()
+            failed_response.raise_for_status.side_effect = transient_error
+            successful_response = MagicMock()
+            successful_response.raise_for_status = MagicMock()
+            mock_client.patch.side_effect = [failed_response, successful_response]
+            mock_client_cls.return_value.__enter__ = MagicMock(return_value=mock_client)
+            mock_client_cls.return_value.__exit__ = MagicMock(return_value=False)
+
+            _configure_github_proxy("sandbox-abc", "token")
+
+            assert mock_client.patch.call_count == 2
+            mock_sleep.assert_called_once()
+
+    def test_raises_on_non_retryable_http_error(self) -> None:
+        """Non-retryable HTTP errors should propagate without retrying."""
+        request = httpx.Request(
+            "PATCH", "https://api.smith.langchain.com/v2/sandboxes/boxes/sandbox-abc"
+        )
+        response = httpx.Response(400, request=request)
+        error = httpx.HTTPStatusError("Bad request", request=request, response=response)
+        with (
+            patch("agent.integrations.langsmith.httpx.Client") as mock_client_cls,
+            patch("agent.integrations.langsmith.time.sleep") as mock_sleep,
+            patch.dict("os.environ", {"LANGSMITH_API_KEY": "api-key"}),
+        ):
+            mock_client = MagicMock()
+            failed_response = MagicMock()
+            failed_response.raise_for_status.side_effect = error
+            mock_client.patch.return_value = failed_response
             mock_client_cls.return_value.__enter__ = MagicMock(return_value=mock_client)
             mock_client_cls.return_value.__exit__ = MagicMock(return_value=False)
 
             with pytest.raises(httpx.HTTPStatusError):
                 _configure_github_proxy("sandbox-abc", "token")
+
+            mock_client.patch.assert_called_once()
+            mock_sleep.assert_not_called()
 
 
 class TestCreateSandboxWithProxy:

@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import logging
 import os
+import time
 from abc import ABC, abstractmethod
 from typing import Any
 
@@ -20,6 +21,10 @@ DEFAULT_SANDBOX_VCPUS = 2
 DEFAULT_SANDBOX_MEM_BYTES = 7936 * 1024**2  # 7936 MiB ("large" tier cap)
 DEFAULT_SANDBOX_IDLE_TTL_SECONDS = 10 * 60  # 10 minutes
 DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS = 24 * 60 * 60  # 24 hours
+PROXY_CONFIG_MAX_ATTEMPTS = 3
+PROXY_CONFIG_TIMEOUT_SECONDS = 10.0
+PROXY_CONFIG_RETRY_DELAYS_SECONDS = (0.5, 1.0)
+PROXY_CONFIG_RETRYABLE_STATUS_CODES = frozenset({408, 409, 425, 429, 500, 502, 503, 504, 529})
 
 
 def _get_langsmith_api_key() -> str | None:
@@ -95,6 +100,25 @@ def _github_proxy_rules(github_token: str) -> list[dict[str, Any]]:
     ]
 
 
+def _retry_after_seconds(response: httpx.Response | None) -> float | None:
+    if response is None:
+        return None
+    raw = response.headers.get("Retry-After")
+    if not raw:
+        return None
+    try:
+        delay = float(raw)
+    except ValueError:
+        return None
+    return max(delay, 0.0)
+
+
+def _is_retryable_proxy_config_error(exc: BaseException) -> bool:
+    if isinstance(exc, httpx.HTTPStatusError):
+        return exc.response.status_code in PROXY_CONFIG_RETRYABLE_STATUS_CODES
+    return isinstance(exc, httpx.TransportError)
+
+
 def _configure_github_proxy(sandbox_name: str, github_token: str) -> None:
     """Configure sandbox proxy to inject GitHub auth for GitHub traffic.
 
@@ -113,13 +137,39 @@ def _configure_github_proxy(sandbox_name: str, github_token: str) -> None:
     langsmith_endpoint = os.environ.get("LANGSMITH_ENDPOINT", "https://api.smith.langchain.com")
     url = f"{langsmith_endpoint}/v2/sandboxes/boxes/{sandbox_name}"
     payload = {"proxy_config": {"rules": _github_proxy_rules(github_token)}}
-    with httpx.Client() as client:
-        response = client.patch(
-            url,
-            json=payload,
-            headers={"X-API-Key": api_key},
-        )
-        response.raise_for_status()
+    with httpx.Client(timeout=PROXY_CONFIG_TIMEOUT_SECONDS) as client:
+        for attempt in range(PROXY_CONFIG_MAX_ATTEMPTS):
+            try:
+                response = client.patch(
+                    url,
+                    json=payload,
+                    headers={"X-API-Key": api_key},
+                )
+                response.raise_for_status()
+                break
+            except Exception as exc:
+                if attempt == PROXY_CONFIG_MAX_ATTEMPTS - 1 or not _is_retryable_proxy_config_error(
+                    exc
+                ):
+                    raise
+                retry_after = (
+                    _retry_after_seconds(exc.response)
+                    if isinstance(exc, httpx.HTTPStatusError)
+                    else None
+                )
+                delay = (
+                    retry_after
+                    or PROXY_CONFIG_RETRY_DELAYS_SECONDS[
+                        min(attempt, len(PROXY_CONFIG_RETRY_DELAYS_SECONDS) - 1)
+                    ]
+                )
+                logger.warning(
+                    "Failed to configure GitHub proxy for sandbox %s (%s); retrying in %.1fs",
+                    sandbox_name,
+                    type(exc).__name__,
+                    delay,
+                )
+                time.sleep(delay)
     logger.info("Configured GitHub proxy for sandbox %s", sandbox_name)
 
 
