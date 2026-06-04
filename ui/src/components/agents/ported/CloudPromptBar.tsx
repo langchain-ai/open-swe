@@ -122,7 +122,7 @@ export const CloudPromptBar = memo(function CloudPromptBarComponent({
       )}
       <div
         className={cn(
-          "relative flex min-h-[106px] flex-col rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface)] px-4 py-3.5 shadow-sm",
+          "relative flex min-h-[106px] flex-col rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface)] px-3 py-2.5 shadow-sm",
           compact && "min-h-[88px]"
         )}
       >
@@ -194,12 +194,12 @@ export const CloudPromptBar = memo(function CloudPromptBarComponent({
             onClick={handleSubmit}
             disabled={!value.trim() || disabled}
             aria-label="Send message"
-            className="ml-auto flex size-8 shrink-0 items-center justify-center rounded-full bg-[var(--ui-accent)] text-white transition-opacity hover:opacity-90 disabled:cursor-default disabled:opacity-40"
+            className="ml-auto flex size-7 shrink-0 items-center justify-center rounded-full bg-[var(--ui-accent)] text-white transition-opacity hover:opacity-90 disabled:cursor-default disabled:opacity-40"
           >
             {disabled ? (
-              <LoaderCircle className="size-4 animate-spin" />
+              <LoaderCircle className="size-3.5 animate-spin" />
             ) : (
-              <ArrowUp className="size-4" strokeWidth={2.5} />
+              <ArrowUp className="size-3.5" strokeWidth={2.5} />
             )}
           </button>
         </div>
