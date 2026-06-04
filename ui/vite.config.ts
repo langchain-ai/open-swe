@@ -20,6 +20,9 @@ const config = defineConfig({
       injectRegister: false,
       registerType: "prompt",
       outDir: ".output/public",
+      devOptions: {
+        enabled: true,
+      },
       integration: {
         closeBundleOrder: "pre",
       },

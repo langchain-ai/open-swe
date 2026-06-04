@@ -1,3 +1,4 @@
+import { ArrowUp, ChevronDown, LoaderCircle } from "lucide-react"
 import {
   memo,
   useCallback,
@@ -121,7 +122,7 @@ export const CloudPromptBar = memo(function CloudPromptBarComponent({
       )}
       <div
         className={cn(
-          "relative flex min-h-[106px] flex-col rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface)] px-4 py-3.5 shadow-sm",
+          "relative flex min-h-[106px] flex-col rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface)] px-3 py-2.5 shadow-sm",
           compact && "min-h-[88px]"
         )}
       >
@@ -134,7 +135,7 @@ export const CloudPromptBar = memo(function CloudPromptBarComponent({
           placeholder={busy ? "Send a message to queue next..." : placeholder}
           disabled={disabled}
           className={cn(
-            "w-full min-w-0 resize-none overflow-hidden bg-transparent leading-[1.45] text-[color:var(--ui-text)] outline-none placeholder:text-[color:var(--ui-text-dim)]",
+            "w-full min-w-0 resize-none overflow-hidden bg-transparent text-[13px] leading-[1.45] text-[color:var(--ui-text)] outline-none placeholder:text-[color:var(--ui-text-dim)]",
             compact ? "min-h-[36px]" : "min-h-[52px]"
           )}
           style={{ maxHeight: PROMPT_TEXTAREA_MAX_HEIGHT }}
@@ -146,9 +147,12 @@ export const CloudPromptBar = memo(function CloudPromptBarComponent({
               type="button"
               disabled={pickerDisabled}
               onClick={() => setModelDropdownOpen((open) => !open)}
-              className="max-w-[220px] cursor-pointer truncate text-[color:var(--ui-text-muted)] transition-opacity hover:opacity-80 disabled:cursor-default disabled:opacity-60"
+              className="flex max-w-[220px] cursor-pointer items-center gap-0.5 text-[13px] text-[color:var(--ui-text-muted)] transition-opacity hover:opacity-80 disabled:cursor-default disabled:opacity-60"
             >
-              {selectionLabel}
+              <span className="truncate">{selectionLabel}</span>
+              {!pickerDisabled && (
+                <ChevronDown className="size-3.5 shrink-0 opacity-60" />
+              )}
             </button>
             {modelDropdownOpen && combos.length > 0 && (
               <div className="absolute bottom-full left-0 z-50 mb-1 max-h-72 overflow-hidden overflow-y-auto rounded border border-[var(--ui-border)] bg-[var(--ui-surface)] shadow-lg">
@@ -184,6 +188,20 @@ export const CloudPromptBar = memo(function CloudPromptBarComponent({
               </div>
             )}
           </div>
+
+          <button
+            type="button"
+            onClick={handleSubmit}
+            disabled={!value.trim() || disabled}
+            aria-label="Send message"
+            className="ml-auto flex size-7 shrink-0 items-center justify-center rounded-full bg-[var(--ui-accent)] text-white transition-opacity hover:opacity-90 disabled:cursor-default disabled:opacity-40"
+          >
+            {disabled ? (
+              <LoaderCircle className="size-3.5 animate-spin" />
+            ) : (
+              <ArrowUp className="size-3.5" strokeWidth={2.5} />
+            )}
+          </button>
         </div>
       </div>
     </div>
