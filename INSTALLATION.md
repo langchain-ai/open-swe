@@ -286,7 +286,7 @@ Users can also override the team/project mapping per-comment by including `repo:
 1. Go to [api.slack.com/apps](https://api.slack.com/apps) → **Create New App** → **From a manifest**
 2. Copy the manifest below, replacing the two placeholder URLs:
    - Replace `<your-provider-id>` with the OAuth provider ID from step 3a
-   - Replace `<your-ngrok-url>` with the ngrok URL from step 2
+   - Replace `<your-ngrok-url>` with the backend URL from step 2 (or your deployed LangGraph/FastAPI URL in production)
 
 <details>
 <summary>Slack App Manifest</summary>
@@ -343,6 +343,10 @@ Users can also override the team/project mapping per-comment by including `repo:
                 "message.mpim"
             ]
         },
+        "interactivity": {
+            "is_enabled": true,
+            "request_url": "https://<your-ngrok-url>/webhooks/slack/interactivity"
+        },
         "org_deploy_enabled": false,
         "socket_mode_enabled": false,
         "token_rotation_enabled": false
@@ -353,6 +357,15 @@ Users can also override the team/project mapping per-comment by including `repo:
 </details>
 
 3. Install the app to your workspace and copy the **Bot User OAuth Token** (`xoxb-...`)
+
+**Slack URL checklist:**
+
+Both Slack URLs must point at the Open SWE backend that serves `agent.webapp:app` (locally, your ngrok URL forwarding to `langgraph dev`; in production, your LangGraph/FastAPI deployment URL), not the dashboard frontend URL.
+
+- **Event Subscriptions → Request URL:** `https://<your-backend-url>/webhooks/slack`
+- **Interactivity & Shortcuts → Interactivity Request URL:** `https://<your-backend-url>/webhooks/slack/interactivity`
+
+Slack Block Kit option buttons only work when Interactivity is enabled and pointed at `/webhooks/slack/interactivity`.
 
 **Credentials you'll need:**
 
@@ -539,6 +552,7 @@ make dev          # uv run langgraph dev
 | `POST /webhooks/linear` | Linear comment webhooks |
 | `GET /webhooks/linear` | Linear webhook verification |
 | `POST /webhooks/slack` | Slack event webhooks |
+| `POST /webhooks/slack/interactivity` | Slack Block Kit button interactions |
 | `GET /webhooks/slack` | Slack webhook verification |
 | `GET /dashboard/api/auth/login` | Dashboard GitHub OAuth login |
 | `GET /dashboard/api/auth/callback` | Dashboard GitHub OAuth callback (registered on the App in step 3b) |

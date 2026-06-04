@@ -230,6 +230,23 @@ async def test_post_slack_thread_reply_with_ts_returns_http_error(
 
 
 @pytest.mark.asyncio
+@pytest.mark.asyncio
+async def test_post_slack_thread_reply_with_ts_sends_blocks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
+
+    blocks = [{"type": "section", "text": {"type": "mrkdwn", "text": "Pick"}}]
+    client_cm = _async_client_cm(_ok_response())
+    with patch.object(slack_utils.httpx, "AsyncClient", return_value=client_cm):
+        result = await slack_utils.post_slack_thread_reply_with_ts(
+            "C1", "1.0", "Pick", blocks=blocks
+        )
+
+    assert result == ("1.0", None)
+    assert client_cm.post.call_args.kwargs["json"]["blocks"] == blocks
+
+
 async def test_post_slack_thread_reply_preserves_bool_return_on_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

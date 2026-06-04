@@ -10,7 +10,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import parse_qs, quote
 
 import httpx
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
@@ -1441,6 +1441,86 @@ async def slack_webhook(request: Request, background_tasks: BackgroundTasks) -> 
     background_tasks.add_task(process_slack_mention, event_data, repo_config)
 
     return {"status": "accepted", "message": "Slack mention queued"}
+
+
+@app.post("/webhooks/slack/interactivity")
+async def slack_interactivity(
+    request: Request, background_tasks: BackgroundTasks
+) -> dict[str, str]:
+    """Handle Slack Block Kit interactions."""
+    body = await request.body()
+    signature = request.headers.get("X-Slack-Signature", "")
+    timestamp = request.headers.get("X-Slack-Request-Timestamp", "")
+    if not verify_slack_signature(
+        body=body,
+        timestamp=timestamp,
+        signature=signature,
+        secret=SLACK_SIGNING_SECRET,
+    ):
+        logger.warning("Invalid Slack interactivity signature")
+        raise HTTPException(status_code=401, detail="Invalid signature")
+
+    form = parse_qs(body.decode("utf-8"))
+    payload_raw = (form.get("payload") or [""])[0]
+    try:
+        payload = json.loads(payload_raw)
+    except json.JSONDecodeError:
+        logger.exception("Failed to parse Slack interactivity payload")
+        return {"status": "error", "message": "Invalid payload"}
+
+    action = _first_open_swe_option_action(payload.get("actions"))
+    if action is None:
+        return {"status": "ignored", "reason": "No Open SWE action"}
+
+    try:
+        action_value = json.loads(str(action.get("value") or "{}"))
+    except json.JSONDecodeError:
+        return {"status": "ignored", "reason": "Invalid action value"}
+    if action_value.get("type") != "open_swe_option":
+        return {"status": "ignored", "reason": "Unknown action type"}
+
+    response = str(action_value.get("response") or "").strip()
+    if not response:
+        return {"status": "ignored", "reason": "Empty response"}
+
+    channel = payload.get("channel") if isinstance(payload.get("channel"), dict) else {}
+    message = payload.get("message") if isinstance(payload.get("message"), dict) else {}
+    container = payload.get("container") if isinstance(payload.get("container"), dict) else {}
+    user = payload.get("user") if isinstance(payload.get("user"), dict) else {}
+    channel_id = str(channel.get("id") or container.get("channel_id") or "")
+    event_ts = str(
+        action.get("action_ts") or message.get("ts") or container.get("message_ts") or ""
+    )
+    thread_ts = str(
+        message.get("thread_ts") or message.get("ts") or container.get("thread_ts") or event_ts
+    )
+    user_id = str(user.get("id") or "")
+    if not channel_id or not thread_ts or not event_ts or not user_id:
+        return {"status": "ignored", "reason": "Missing Slack action context"}
+
+    repo_config = await get_slack_repo_config(channel_id, thread_ts, slack_user_id=user_id)
+    background_tasks.add_task(
+        process_slack_mention,
+        {
+            "channel_id": channel_id,
+            "thread_ts": thread_ts,
+            "event_ts": event_ts,
+            "user_id": user_id,
+            "text": response,
+            "bot_user_id": SLACK_BOT_USER_ID,
+        },
+        repo_config,
+    )
+    return {"status": "accepted", "message": "Slack option queued"}
+
+
+def _first_open_swe_option_action(actions: Any) -> dict[str, Any] | None:
+    if not isinstance(actions, list):
+        return None
+    for action in actions:
+        if isinstance(action, dict) and action.get("action_id") == "open_swe_option_select":
+            return action
+    return None
 
 
 @app.get("/webhooks/slack")

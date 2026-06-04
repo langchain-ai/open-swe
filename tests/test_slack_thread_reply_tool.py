@@ -23,7 +23,11 @@ def test_slack_thread_reply_returns_structured_error_for_msg_too_long(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async def fake_post_and_store_mapping(
-        channel_id: str, thread_ts: str, message: str
+        channel_id: str,
+        thread_ts: str,
+        message: str,
+        *,
+        blocks: list[dict[str, Any]] | None = None,
     ) -> tuple[str | None, str | None]:
         return None, "msg_too_long"
 
@@ -47,7 +51,11 @@ def test_slack_thread_reply_hints_not_to_retry_channel_errors(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async def fake_post_and_store_mapping(
-        channel_id: str, thread_ts: str, message: str
+        channel_id: str,
+        thread_ts: str,
+        message: str,
+        *,
+        blocks: list[dict[str, Any]] | None = None,
     ) -> tuple[str | None, str | None]:
         return None, slack_error
 
@@ -68,7 +76,11 @@ def test_slack_thread_reply_rate_limited_hint_includes_retry_after(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async def fake_post_and_store_mapping(
-        channel_id: str, thread_ts: str, message: str
+        channel_id: str,
+        thread_ts: str,
+        message: str,
+        *,
+        blocks: list[dict[str, Any]] | None = None,
     ) -> tuple[str | None, str | None]:
         return None, "rate_limited: 30"
 
@@ -88,7 +100,11 @@ def test_slack_thread_reply_rate_limited_hint_without_retry_after(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async def fake_post_and_store_mapping(
-        channel_id: str, thread_ts: str, message: str
+        channel_id: str,
+        thread_ts: str,
+        message: str,
+        *,
+        blocks: list[dict[str, Any]] | None = None,
     ) -> tuple[str | None, str | None]:
         return None, "rate_limited"
 
@@ -106,7 +122,11 @@ def test_slack_thread_reply_uses_post_failed_without_slack_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async def fake_post_and_store_mapping(
-        channel_id: str, thread_ts: str, message: str
+        channel_id: str,
+        thread_ts: str,
+        message: str,
+        *,
+        blocks: list[dict[str, Any]] | None = None,
     ) -> tuple[str | None, str | None]:
         return None, None
 
@@ -119,3 +139,33 @@ def test_slack_thread_reply_uses_post_failed_without_slack_error(
     assert result["error"] == "post failed"
     assert result["slack_error"] is None
     assert result["message_chars"] == 5
+
+
+def test_slack_thread_reply_builds_option_blocks(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, Any] = {}
+
+    async def fake_post_and_store_mapping(
+        channel_id: str,
+        thread_ts: str,
+        message: str,
+        *,
+        blocks: list[dict[str, Any]] | None = None,
+    ) -> tuple[str | None, str | None]:
+        captured.update(
+            {"channel_id": channel_id, "thread_ts": thread_ts, "message": message, "blocks": blocks}
+        )
+        return "2.0", None
+
+    monkeypatch.setattr(slack_reply_tool, "get_config", _config)
+    monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", fake_post_and_store_mapping)
+
+    result = slack_reply_tool.slack_thread_reply("Pick one", options=["A", "B"])
+
+    assert result == {"success": True}
+    assert captured["channel_id"] == "C1"
+    assert captured["thread_ts"] == "1.0"
+    assert captured["message"] == "Pick one"
+    actions = captured["blocks"][1]
+    assert actions["type"] == "actions"
+    assert [button["text"]["text"] for button in actions["elements"]] == ["A", "B"]
+    assert actions["elements"][0]["action_id"] == "open_swe_option_select"
