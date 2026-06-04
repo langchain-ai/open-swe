@@ -471,6 +471,9 @@ def _setup_slack_mention_fakes(
     async def fake_login_for_email(email):
         return None
 
+    async def fake_email_for_login(login):
+        return "mason@langchain.dev" if login else None
+
     async def fake_refresh_cache() -> list:
         return []
 
@@ -485,6 +488,7 @@ def _setup_slack_mention_fakes(
     monkeypatch.setattr(webapp, "get_client", lambda url: _FakeLangGraphClientForProcess())
     monkeypatch.setattr(webapp, "login_for_slack_id", fake_login_for_slack_id)
     monkeypatch.setattr(webapp, "login_for_email", fake_login_for_email)
+    monkeypatch.setattr(webapp, "email_for_login", fake_email_for_login)
     monkeypatch.setattr(webapp, "refresh_user_mapping_cache", fake_refresh_cache)
     monkeypatch.setattr(webapp, "get_valid_access_token", fake_get_valid_access_token)
     monkeypatch.setattr(webapp, "_post_account_link_prompt", fake_post_prompt)
@@ -673,6 +677,9 @@ def test_process_slack_mention_queues_active_thread_message(
     async def fake_login_for_email(email):
         return None
 
+    async def fake_email_for_login(login):
+        return "mason@langchain.dev" if login else None
+
     async def fake_refresh_cache() -> list:
         return []
 
@@ -681,6 +688,7 @@ def test_process_slack_mention_queues_active_thread_message(
 
     monkeypatch.setattr(webapp, "login_for_slack_id", fake_login_for_slack_id)
     monkeypatch.setattr(webapp, "login_for_email", fake_login_for_email)
+    monkeypatch.setattr(webapp, "email_for_login", fake_email_for_login)
     monkeypatch.setattr(webapp, "refresh_user_mapping_cache", fake_refresh_cache)
     monkeypatch.setattr(webapp, "get_valid_access_token", fake_get_valid_access_token)
 
@@ -883,6 +891,10 @@ def test_process_slack_mention_mapped_user_with_token_runs_as_user(
     run_create = captured["run_create"]
     configurable = run_create["kwargs"]["config"]["configurable"]
     assert configurable["github_login"] == "mason-gh"
+    # The Slack profile email is mason@example.com, but tagging must use the email
+    # stored in the user mapping so the thread surfaces in the web Agents UI.
+    assert configurable["user_email"] == "mason@langchain.dev"
+    assert configurable["slack_thread"]["triggering_user_email"] == "mason@langchain.dev"
     assert "use_installation_token_fallback" not in configurable
     assert "prompt" not in captured
 

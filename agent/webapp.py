@@ -1078,6 +1078,13 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
         await set_slack_assistant_status(channel_id, thread_ts, status="")
         return
 
+    # Tag the run with the identity stored in the user mapping (resolved above from
+    # the stable Slack user id), using the mapping's work email rather than the
+    # transient Slack profile email. This keeps thread ownership consistent with
+    # what the dashboard searches by, so Slack threads reliably surface in the web
+    # Agents UI. Falls back to the Slack profile email for unmapped users.
+    owner_email = (await email_for_login(mapped_login) if mapped_login else None) or user_email
+
     configurable: dict[str, Any] = {
         "repo": repo_config,
         "slack_thread": {
@@ -1085,10 +1092,10 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
             "thread_ts": thread_ts,
             "triggering_user_id": user_id,
             "triggering_user_name": user_name,
-            "triggering_user_email": user_email,
+            "triggering_user_email": owner_email,
             "triggering_event_ts": event_ts,
         },
-        "user_email": user_email,
+        "user_email": owner_email,
         "source": "slack",
     }
     if mapped_login:
@@ -1101,7 +1108,8 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
         thread_id,
         source="slack",
         repo_config=repo_config,
-        user_email=user_email or "",
+        github_login=mapped_login or "",
+        user_email=owner_email or "",
         title=clean_text if is_first_mention else "",
         source_context={"slack_thread": configurable["slack_thread"]},
     )
