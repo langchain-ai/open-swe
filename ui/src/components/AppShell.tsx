@@ -22,14 +22,14 @@ export function AppShell({ user, title, description, backTo, children }: AppShel
           {backTo && (
             <Link
               to={backTo.to}
-              className="mb-4 inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+              className="mb-4 inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground max-md:pl-9"
             >
               <ArrowLeftIcon className="size-3.5" />
               {backTo.label}
             </Link>
           )}
           <header className="mb-8">
-            <h1 className="font-heading text-lg font-medium">{title}</h1>
+            <h1 className="font-heading text-lg font-medium max-md:pl-9">{title}</h1>
             {description && (
               <p className="mt-1 text-xs text-muted-foreground">{description}</p>
             )}
