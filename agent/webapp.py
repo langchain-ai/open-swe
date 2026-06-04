@@ -2343,7 +2343,7 @@ async def _refresh_thread_github_token_after_401(thread_id: str, email: str) -> 
 async def _get_or_resolve_thread_github_token(thread_id: str, email: str) -> str | None:
     """Resolve and persist a GitHub token for a thread when available.
 
-    Skips the cached ciphertext when its ``github_token_expires_at`` is past.
+    Skips the cached Store token when its expiry is past.
     In bot-token-only mode, returns a fresh GitHub App installation token
     instead of resolving per-user OAuth tokens.
     """

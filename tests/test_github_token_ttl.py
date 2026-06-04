@@ -2,7 +2,7 @@
 
 Covers:
 - (a) expired-cache reads return None / fall through to re-auth
-- (b) 401 on a downstream GitHub call invalidates the cached ciphertext and
+- (b) 401 on a downstream GitHub call invalidates the cached Store token and
   triggers a fresh resolve in the webapp
 - (c) ``publish_review`` invalidates the cached token and returns a clean
   failure when GitHub responds 401
@@ -57,37 +57,80 @@ def test_is_expired_treats_unparseable_as_not_expired() -> None:
     assert github_token._is_expired("not-a-date") is False
 
 
-def test_get_github_token_returns_none_for_expired_run_metadata() -> None:
+def test_get_github_token_returns_none_for_expired_store_token() -> None:
     past = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
-    metadata = {
-        "github_token_encrypted": _encrypted("ghp_secret"),
-        "github_token_expires_at": past,
+    fake_client = AsyncMock()
+    fake_client.store.get_item.return_value = {
+        "value": {
+            "encrypted_token": _encrypted("ghp_secret"),
+            "expires_at": past,
+        }
     }
-    assert github_token.get_github_token({"metadata": metadata}) is None
+    with patch.object(github_token, "client", fake_client):
+        token = github_token.get_github_token({"configurable": {"thread_id": "tid"}})
+    assert token is None
 
 
-def test_get_github_token_returns_decrypted_for_fresh_metadata() -> None:
+def test_get_github_token_returns_decrypted_for_fresh_store_token() -> None:
     future = (datetime.now(UTC) + timedelta(hours=1)).isoformat()
-    metadata = {
-        "github_token_encrypted": _encrypted("ghp_secret"),
-        "github_token_expires_at": future,
+    fake_client = AsyncMock()
+    fake_client.store.get_item.return_value = {
+        "value": {
+            "encrypted_token": _encrypted("ghp_secret"),
+            "expires_at": future,
+        }
     }
-    assert github_token.get_github_token({"metadata": metadata}) == "ghp_secret"
+    with patch.object(github_token, "client", fake_client):
+        token = github_token.get_github_token({"configurable": {"thread_id": "tid"}})
+    assert token == "ghp_secret"
 
 
 def test_get_github_token_returns_decrypted_when_no_expires_at() -> None:
-    metadata = {"github_token_encrypted": _encrypted("ghp_secret")}
-    assert github_token.get_github_token({"metadata": metadata}) == "ghp_secret"
+    fake_client = AsyncMock()
+    fake_client.store.get_item.return_value = {
+        "value": {"encrypted_token": _encrypted("ghp_secret")}
+    }
+    with patch.object(github_token, "client", fake_client):
+        token = github_token.get_github_token({"configurable": {"thread_id": "tid"}})
+    assert token == "ghp_secret"
+
+
+@pytest.mark.asyncio
+async def test_aget_github_token_prefers_store_for_reviewer_configs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent.dashboard import profiles
+
+    async def fail_get_valid_access_token(login: str) -> str | None:
+        raise AssertionError("reviewer tokens should resolve from thread Store first")
+
+    fake_client = AsyncMock()
+    fake_client.store.get_item.return_value = {
+        "value": {"encrypted_token": _encrypted("app-token")}
+    }
+    monkeypatch.setattr(profiles, "get_valid_access_token", fail_get_valid_access_token)
+    with patch.object(github_token, "client", fake_client):
+        token = await github_token.aget_github_token(
+            {
+                "configurable": {
+                    "source": "slack",
+                    "github_login": "octo",
+                    "thread_id": "reviewer-thread",
+                    "review_requested": True,
+                }
+            }
+        )
+    assert token == "app-token"
 
 
 @pytest.mark.asyncio
 async def test_get_github_token_from_thread_skips_expired() -> None:
     past = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
     fake_client = AsyncMock()
-    fake_client.threads.get.return_value = {
-        "metadata": {
-            "github_token_encrypted": _encrypted("ghp_revoked"),
-            "github_token_expires_at": past,
+    fake_client.store.get_item.return_value = {
+        "value": {
+            "encrypted_token": _encrypted("ghp_revoked"),
+            "expires_at": past,
         }
     }
     with patch.object(github_token, "client", fake_client):
@@ -102,10 +145,10 @@ async def test_get_github_token_from_thread_returns_fresh() -> None:
     future = (datetime.now(UTC) + timedelta(hours=1)).isoformat()
     enc = _encrypted("ghp_live")
     fake_client = AsyncMock()
-    fake_client.threads.get.return_value = {
-        "metadata": {
-            "github_token_encrypted": enc,
-            "github_token_expires_at": future,
+    fake_client.store.get_item.return_value = {
+        "value": {
+            "encrypted_token": enc,
+            "expires_at": future,
         }
     }
     with patch.object(github_token, "client", fake_client):
@@ -116,13 +159,13 @@ async def test_get_github_token_from_thread_returns_fresh() -> None:
 
 
 @pytest.mark.asyncio
-async def test_invalidate_cached_github_token_clears_metadata() -> None:
+async def test_invalidate_cached_github_token_deletes_store_record() -> None:
     fake_client = AsyncMock()
     with patch.object(github_token, "client", fake_client):
         await github_token.invalidate_cached_github_token("tid-42")
-    fake_client.threads.update.assert_awaited_once_with(
-        thread_id="tid-42",
-        metadata={"github_token_encrypted": None, "github_token_expires_at": None},
+    fake_client.store.delete_item.assert_awaited_once_with(
+        github_token.THREAD_GITHUB_TOKENS_NAMESPACE,
+        "tid-42",
     )
 
 

@@ -59,7 +59,7 @@ class _DummyAgent:
 
 
 @pytest.mark.asyncio
-async def test_reviewer_uses_cached_thread_token_for_slack_review_request() -> None:
+async def test_reviewer_uses_cached_store_token_for_slack_review_request() -> None:
     config: RunnableConfig = {
         "configurable": {
             "__is_for_execution__": True,
@@ -95,7 +95,7 @@ async def test_reviewer_uses_cached_thread_token_for_slack_review_request() -> N
 
     metadata = config["metadata"]
     assert isinstance(metadata, dict)
-    assert metadata["github_token_encrypted"] == "encrypted-token"
+    assert "github_token_encrypted" not in metadata
     mock_get_thread_token.assert_awaited_once_with("reviewer-thread-id")
     mock_resolve_token.assert_not_called()
     middleware = create_agent.call_args.kwargs["middleware"]

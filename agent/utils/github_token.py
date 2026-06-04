@@ -2,21 +2,23 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any
 
+import httpx
 from langgraph.config import get_config
 from langgraph_sdk import get_client
-from langgraph_sdk.errors import NotFoundError
 
-from ..encryption import decrypt_token
+from ..encryption import decrypt_token, encrypt_token
 
 logger = logging.getLogger(__name__)
 
-_GITHUB_TOKEN_METADATA_KEY = "github_token_encrypted"
-_GITHUB_TOKEN_EXPIRES_AT_METADATA_KEY = "github_token_expires_at"
+THREAD_GITHUB_TOKENS_NAMESPACE: list[str] = ["thread_github_tokens"]
+_ENCRYPTED_TOKEN_KEY = "encrypted_token"
+_TOKEN_EXPIRES_AT_KEY = "expires_at"
 
 
 class GitHubAuthError(Exception):
@@ -28,11 +30,6 @@ class GitHubAuthError(Exception):
 _GITHUB_TOKEN_EXPIRY_SKEW_SECONDS = 60
 
 client = get_client()
-
-
-def _read_encrypted_github_token(metadata: dict[str, Any]) -> str | None:
-    encrypted_token = metadata.get(_GITHUB_TOKEN_METADATA_KEY)
-    return encrypted_token if isinstance(encrypted_token, str) and encrypted_token else None
 
 
 def _decrypt_github_token(encrypted_token: str | None) -> str | None:
@@ -78,76 +75,111 @@ def _is_expired(expires_at: Any, *, now: datetime | None = None) -> bool:
     return (parsed - current).total_seconds() <= _GITHUB_TOKEN_EXPIRY_SKEW_SECONDS
 
 
-def _read_token_if_fresh(metadata: dict[str, Any]) -> str | None:
-    """Decrypt the cached token only if it has not expired."""
-    encrypted = _read_encrypted_github_token(metadata)
-    if not encrypted:
-        return None
-    if _is_expired(metadata.get(_GITHUB_TOKEN_EXPIRES_AT_METADATA_KEY)):
-        return None
-    return _decrypt_github_token(encrypted)
+def _store_value(item: Any) -> dict[str, Any] | None:
+    value = item.get("value") if isinstance(item, dict) else getattr(item, "value", None)
+    return value if isinstance(value, dict) else None
 
 
-def get_github_token(run_config: Mapping[str, Any] | None = None) -> str | None:
-    """Resolve a GitHub token from run metadata.
+async def _get_thread_token_record(thread_id: str) -> dict[str, Any] | None:
+    try:
+        item = await client.store.get_item(THREAD_GITHUB_TOKENS_NAMESPACE, thread_id)
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == 404:
+            return None
+        raise
+    return _store_value(item) if item is not None else None
 
-    Pass ``run_config`` when LangGraph runnable config is already available (e.g. after
-    ``get_config()`` in callers). Omit to read from ``get_config()`` (required runnable
-    context). Returns ``None`` for tokens whose ``github_token_expires_at`` is past.
-    """
-    resolved = run_config if run_config is not None else get_config()
-    return _read_token_if_fresh(resolved.get("metadata", {}))
+
+async def persist_github_token_for_thread(
+    thread_id: str, token: str, expires_at: str | None = None
+) -> str:
+    """Encrypt a GitHub token into LangGraph Store for a thread."""
+    encrypted = encrypt_token(token)
+    await client.store.put_item(
+        THREAD_GITHUB_TOKENS_NAMESPACE,
+        thread_id,
+        {
+            _ENCRYPTED_TOKEN_KEY: encrypted,
+            _TOKEN_EXPIRES_AT_KEY: expires_at,
+            "updated_at": datetime.now(UTC).isoformat(),
+        },
+    )
+    return encrypted
 
 
 async def get_github_token_from_thread(
     thread_id: str,
 ) -> tuple[str | None, str | None, str | None]:
-    """Resolve a GitHub token from LangGraph thread metadata.
+    """Resolve a GitHub token from LangGraph Store by thread id.
 
     Returns ``(None, None, None)`` when no token is cached or when the cached
-    token's ``github_token_expires_at`` has elapsed — callers must treat the
-    cache as missing in that case and re-resolve. On a fresh hit, returns the
-    decrypted token, its ciphertext, and the persisted expiry (or ``None``).
+    token's expiry has elapsed. On a fresh hit, returns the decrypted token, its
+    ciphertext, and the persisted expiry (or ``None``).
     """
     try:
-        thread = await client.threads.get(thread_id)
-    except NotFoundError:
-        logger.debug("Thread %s not found while looking up GitHub token", thread_id)
-        return None, None, None
+        record = await _get_thread_token_record(thread_id)
     except Exception:  # noqa: BLE001
-        logger.exception("Failed to fetch thread metadata for %s", thread_id)
+        logger.exception("Failed to fetch GitHub token store record for %s", thread_id)
         return None, None, None
 
-    metadata = (thread or {}).get("metadata", {})
-    encrypted_token = _read_encrypted_github_token(metadata)
-    if not encrypted_token:
+    if not record:
         return None, None, None
-    expires_at_raw = metadata.get(_GITHUB_TOKEN_EXPIRES_AT_METADATA_KEY)
+    encrypted_token = record.get(_ENCRYPTED_TOKEN_KEY)
+    if not isinstance(encrypted_token, str) or not encrypted_token:
+        return None, None, None
+    expires_at_raw = record.get(_TOKEN_EXPIRES_AT_KEY)
     if _is_expired(expires_at_raw):
         logger.info("Cached GitHub token for thread %s has expired; re-resolving", thread_id)
         return None, None, None
 
     token = _decrypt_github_token(encrypted_token)
     if token:
-        logger.info("Found GitHub token in thread metadata for thread %s", thread_id)
+        logger.info("Found GitHub token in Store for thread %s", thread_id)
     expires_at = expires_at_raw if isinstance(expires_at_raw, str) else None
     return token, encrypted_token, expires_at
 
 
-async def invalidate_cached_github_token(thread_id: str) -> None:
-    """Clear a cached GitHub token from thread metadata.
+async def aget_github_token(run_config: Mapping[str, Any] | None = None) -> str | None:
+    """Resolve a GitHub token from Store or the OAuth profile store."""
+    resolved = run_config if run_config is not None else get_config()
+    configurable = resolved.get("configurable", {})
+    if not isinstance(configurable, Mapping):
+        return None
 
-    Called when a downstream GitHub API call returns 401, so the next run
-    re-resolves a fresh token instead of replaying the revoked ciphertext.
-    """
+    thread_id = configurable.get("thread_id")
+    if configurable.get("review_requested") is True and isinstance(thread_id, str) and thread_id:
+        token, _encrypted, _expires_at = await get_github_token_from_thread(thread_id)
+        if token:
+            return token
+
+    source = configurable.get("source")
+    github_login = configurable.get("github_login")
+    if source in ("slack", "dashboard") and isinstance(github_login, str) and github_login.strip():
+        from ..dashboard.profiles import get_valid_access_token
+
+        token = await get_valid_access_token(github_login.strip())
+        if token:
+            return token
+
+    if isinstance(thread_id, str) and thread_id:
+        token, _encrypted, _expires_at = await get_github_token_from_thread(thread_id)
+        return token
+    return None
+
+
+def get_github_token(run_config: Mapping[str, Any] | None = None) -> str | None:
+    """Resolve a GitHub token for synchronous tools."""
+    return asyncio.run(aget_github_token(run_config))
+
+
+async def invalidate_cached_github_token(thread_id: str) -> None:
+    """Clear a cached GitHub token from LangGraph Store."""
     try:
-        await client.threads.update(
-            thread_id=thread_id,
-            metadata={
-                _GITHUB_TOKEN_METADATA_KEY: None,
-                _GITHUB_TOKEN_EXPIRES_AT_METADATA_KEY: None,
-            },
-        )
+        await client.store.delete_item(THREAD_GITHUB_TOKENS_NAMESPACE, thread_id)
         logger.info("Invalidated cached GitHub token for thread %s", thread_id)
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == 404:
+            return
+        logger.exception("Failed to invalidate cached GitHub token for thread %s", thread_id)
     except Exception:
         logger.exception("Failed to invalidate cached GitHub token for thread %s", thread_id)

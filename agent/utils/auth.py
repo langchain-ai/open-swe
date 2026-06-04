@@ -11,17 +11,13 @@ import httpx
 import jwt
 from langgraph.config import get_config
 from langgraph.graph.state import RunnableConfig
-from langgraph_sdk import get_client
 
-from ..encryption import encrypt_token
 from .github_app import get_github_app_installation_token_with_expiry
-from .github_token import get_github_token_from_thread
+from .github_token import get_github_token_from_thread, persist_github_token_for_thread
 from .linear import comment_on_linear_issue
 from .slack import post_slack_thread_reply
 
 logger = logging.getLogger(__name__)
-
-client = get_client()
 
 
 class GitHubUserAuthRequired(RuntimeError):
@@ -290,14 +286,8 @@ async def leave_failure_comment(
 async def persist_encrypted_github_token(
     thread_id: str, token: str, expires_at: str | None = None
 ) -> str:
-    """Encrypt a GitHub token and store it (and its expiry) on the thread metadata."""
-    encrypted = encrypt_token(token)
-    metadata: dict[str, Any] = {
-        "github_token_encrypted": encrypted,
-        "github_token_expires_at": expires_at,
-    }
-    await client.threads.update(thread_id=thread_id, metadata=metadata)
-    return encrypted
+    """Encrypt a GitHub token and store it for a thread."""
+    return await persist_github_token_for_thread(thread_id, token, expires_at=expires_at)
 
 
 async def save_encrypted_token_from_email(

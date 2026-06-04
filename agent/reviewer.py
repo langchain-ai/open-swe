@@ -624,17 +624,13 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
 
     github_token: str | None = None
     if config["configurable"].get("source"):
-        cached_token, cached_encrypted, cached_expires_at = await get_github_token_from_thread(
+        cached_token, _cached_encrypted, _cached_expires_at = await get_github_token_from_thread(
             thread_id
         )
-        if cached_token and cached_encrypted:
-            config["metadata"]["github_token_encrypted"] = cached_encrypted
-            config["metadata"]["github_token_expires_at"] = cached_expires_at
+        if cached_token:
             github_token = cached_token
         else:
-            _token, new_encrypted, new_expires_at = await resolve_github_token(config, thread_id)
-            config["metadata"]["github_token_encrypted"] = new_encrypted
-            config["metadata"]["github_token_expires_at"] = new_expires_at
+            _token, _new_encrypted, _new_expires_at = await resolve_github_token(config, thread_id)
             github_token = _token
 
     repo_config = config["configurable"].get("repo") or {}

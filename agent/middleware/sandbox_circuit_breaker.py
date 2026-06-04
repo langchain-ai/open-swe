@@ -15,7 +15,7 @@ from langgraph.runtime import Runtime
 
 from ..utils.github_app import get_github_app_installation_token
 from ..utils.github_comments import post_github_comment
-from ..utils.github_token import get_github_token
+from ..utils.github_token import aget_github_token
 from ..utils.linear import comment_on_linear_issue
 from ..utils.slack import post_slack_thread_reply
 
@@ -186,7 +186,7 @@ async def _post_unrecoverable_notification(config: Mapping[str, Any]) -> None:
 
     github_target = _get_github_target(configurable)
     if github_target is not None:
-        token = get_github_token(config) or await get_github_app_installation_token()
+        token = await aget_github_token(config) or await get_github_app_installation_token()
         if not token:
             logger.info("No GitHub token available for sandbox circuit breaker notification")
             return
