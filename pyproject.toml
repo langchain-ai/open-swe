@@ -20,6 +20,9 @@ dependencies = [
     "langgraph-cli[inmem]>=0.4.27",
     "langsmith>=0.8.8",
     "langchain-openai>=1.2.2",
+    "langchain-fireworks>=1.4.2",
+    # langchain-fireworks 1.4.2 pins a pre-release fireworks-ai; opt in explicitly so uv resolves it.
+    "fireworks-ai>=1.2.0a71",
     "langchain-daytona>=0.0.5",
     "langchain-modal>=0.0.3",
     "langchain-runloop>=0.0.4",

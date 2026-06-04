@@ -22,8 +22,32 @@ SUPPORTED_MODELS: list[ModelOption] = [
     {
         "id": "openai:gpt-5.5",
         "label": "GPT-5.5",
-        "efforts": ["low", "medium", "high", "xhigh"],
+        "efforts": ["none", "low", "medium", "high", "xhigh"],
         "default_effort": "xhigh",
+    },
+    {
+        "id": "fireworks:accounts/fireworks/models/kimi-k2p6",
+        "label": "Kimi K2.6",
+        "efforts": ["none", "low", "medium", "high"],
+        "default_effort": "high",
+    },
+    {
+        "id": "fireworks:accounts/fireworks/models/deepseek-v4-pro",
+        "label": "DeepSeek V4 Pro",
+        "efforts": ["none", "low", "medium", "high", "xhigh", "max"],
+        "default_effort": "high",
+    },
+    {
+        "id": "fireworks:accounts/fireworks/models/nemotron-3-ultra-nvfp4",
+        "label": "Nemotron 3 Ultra",
+        "efforts": ["none", "low", "medium", "high"],
+        "default_effort": "high",
+    },
+    {
+        "id": "fireworks:accounts/fireworks/models/glm-5p1",
+        "label": "GLM 5.1",
+        "efforts": ["none", "low", "medium", "high"],
+        "default_effort": "high",
     },
 ]
 
