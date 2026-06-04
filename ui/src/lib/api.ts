@@ -62,6 +62,14 @@ export interface ModelOption {
   default_effort: string;
 }
 
+export interface OptionsPayload {
+  models: Array<ModelOption>;
+  default_agent_model: string;
+  default_agent_reasoning_effort: string;
+  default_agent_subagent_model: string;
+  default_agent_subagent_reasoning_effort: string;
+}
+
 export interface Profile {
   login?: string;
   email?: string;
@@ -167,7 +175,7 @@ export interface ReviewStyle {
 
 export const api = {
   me: () => request<SessionUser>("/me"),
-  options: () => request<{ models: Array<ModelOption> }>("/options"),
+  options: () => request<OptionsPayload>("/options"),
   profile: () => request<Profile>("/profile"),
   saveProfile: (body: ProfileUpdate) =>
     request<Profile>("/profile", { method: "PUT", body: JSON.stringify(body) }),

@@ -67,6 +67,8 @@ from .slack_oauth import (
 )
 from .team_settings import (
     TeamSettingsUpdate,
+    get_team_default_model,
+    get_team_default_subagent_model,
     get_team_settings,
     upsert_team_settings,
 )
@@ -279,7 +281,15 @@ async def me(session: dict[str, Any] = _SESSION_DEP) -> dict[str, Any]:
 
 @router.get("/options")
 async def options() -> dict[str, Any]:
-    return {"models": SUPPORTED_MODELS}
+    agent_model, agent_effort = await get_team_default_model("agent")
+    subagent_model, subagent_effort = await get_team_default_subagent_model("agent")
+    return {
+        "models": SUPPORTED_MODELS,
+        "default_agent_model": agent_model,
+        "default_agent_reasoning_effort": agent_effort,
+        "default_agent_subagent_model": subagent_model,
+        "default_agent_subagent_reasoning_effort": subagent_effort,
+    }
 
 
 @router.get("/profile")

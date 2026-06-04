@@ -148,8 +148,11 @@ function MySettingsPage() {
   }
 
   const firstModel = options.data?.models[0]
-  const fallbackModel = firstModel?.id ?? ""
-  const fallbackEffort = firstModel?.default_effort ?? ""
+  const fallbackModel = options.data?.default_agent_model ?? firstModel?.id ?? ""
+  const fallbackEffort =
+    options.data?.default_agent_reasoning_effort ??
+    firstModel?.default_effort ??
+    ""
 
   const draftChoice = toChoice(profile.data?.review_draft_prs)
   const teamDefaultOn = teamSettings.data?.review_draft_prs ?? false
