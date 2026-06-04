@@ -43,7 +43,6 @@ async def test_run_email_prefers_github_mapping(fake_store: _FakeStore) -> None:
     await um.upsert_mapping(
         github_login="johannes117",
         work_email="johannes@langchain.dev",
-        source="admin",
     )
     # OAuth profile carries a personal account that isn't an org member.
     profile = {"email": "johannesduplessis117@gmail.com"}

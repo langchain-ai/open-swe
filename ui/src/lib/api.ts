@@ -122,12 +122,6 @@ export interface UserMapping {
   updated_at?: string;
 }
 
-export interface UserMappingUpsert {
-  github_login: string;
-  work_email: string;
-  slack_user_id?: string | null;
-}
-
 export interface UserMappingsPage {
   items: Array<UserMapping>;
   total: number;
@@ -218,11 +212,6 @@ export const api = {
     request<UserMappingsPage>(
       `/admin/user-mappings?page=${page}&page_size=${pageSize}`,
     ),
-  adminSaveUserMapping: (body: UserMappingUpsert) =>
-    request<UserMapping>("/admin/user-mappings", {
-      method: "PUT",
-      body: JSON.stringify(body),
-    }),
   adminDeleteUserMapping: (github_login: string) =>
     request<{ deleted: boolean }>(
       `/admin/user-mappings/${encodeURIComponent(github_login)}`,

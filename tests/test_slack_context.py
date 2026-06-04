@@ -863,8 +863,14 @@ def test_process_slack_mention_mapped_user_with_token_runs_as_user(
     async def fake_login_for_slack_id(slack_user_id):
         return "mason-gh" if slack_user_id == "U123" else None
 
+    owner_meta: dict[str, object] = {}
+
+    async def fake_upsert_owner(thread_id: str, **kwargs: object) -> None:
+        owner_meta.update(kwargs)
+
     monkeypatch.setattr(webapp, "_thread_exists", fake_thread_exists)
     monkeypatch.setattr(webapp, "login_for_slack_id", fake_login_for_slack_id)
+    monkeypatch.setattr(webapp, "upsert_agent_thread_owner_metadata", fake_upsert_owner)
 
     asyncio.run(
         webapp.process_slack_mention(
@@ -883,6 +889,10 @@ def test_process_slack_mention_mapped_user_with_token_runs_as_user(
     run_create = captured["run_create"]
     configurable = run_create["kwargs"]["config"]["configurable"]
     assert configurable["github_login"] == "mason-gh"
+    # The thread is tagged with the login resolved from the Slack user id, so it
+    # surfaces in the web Agents UI even when the Slack profile email does not
+    # resolve to a mapping (login_for_email returns None in this harness).
+    assert owner_meta["github_login"] == "mason-gh"
     assert "use_installation_token_fallback" not in configurable
     assert "prompt" not in captured
 

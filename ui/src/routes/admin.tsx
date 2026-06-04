@@ -5,7 +5,6 @@ import { useEffect, useState } from "react";
 import type { ModelOption, TeamSettings, UserMapping } from "@/lib/api";
 import { AppShell, SettingsRow, SettingsSection } from "@/components/AppShell";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -54,10 +53,6 @@ function AdminPage() {
 const PAGE_SIZE = 20;
 
 function UserMappingsSection({ enabled }: { enabled: boolean }) {
-  const qc = useQueryClient();
-  const [login, setLogin] = useState("");
-  const [email, setEmail] = useState("");
-  const [slackId, setSlackId] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [page, setPage] = useState(1);
 
@@ -76,29 +71,9 @@ function UserMappingsSection({ enabled }: { enabled: boolean }) {
     }
   }, [mappings.isFetching, page, pageCount]);
 
-  const invalidate = () =>
-    void qc.invalidateQueries({ queryKey: ["adminUserMappings"] });
-
-  const save = useMutation({
-    mutationFn: () =>
-      api.adminSaveUserMapping({
-        github_login: login.trim(),
-        work_email: email.trim(),
-        slack_user_id: slackId.trim() || null,
-      }),
-    onSuccess: () => {
-      setLogin("");
-      setEmail("");
-      setSlackId("");
-      setError(null);
-      invalidate();
-    },
-    onError: (e: Error) => setError(e.message),
-  });
-
   const remove = useMutation({
     mutationFn: (gh: string) => api.adminDeleteUserMapping(gh),
-    onSuccess: invalidate,
+    onSuccess: () => void mappings.refetch(),
     onError: (e: Error) => setError(e.message),
   });
 
@@ -107,33 +82,9 @@ function UserMappingsSection({ enabled }: { enabled: boolean }) {
   return (
     <SettingsSection
       title="User mappings"
-      description="Link GitHub logins to work emails (and Slack IDs) so tagged users run as themselves."
+      description="Mappings are created when users connect Slack from settings. Admins can remove stale mappings here."
     >
       <div className="flex flex-col gap-3 p-4">
-        <div className="grid grid-cols-1 gap-2 md:grid-cols-[1fr_1fr_1fr_auto]">
-          <Input
-            placeholder="github-login"
-            value={login}
-            onChange={(e) => setLogin(e.target.value)}
-          />
-          <Input
-            placeholder="work@example.com"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-          />
-          <Input
-            placeholder="Slack ID (optional)"
-            value={slackId}
-            onChange={(e) => setSlackId(e.target.value)}
-          />
-          <Button
-            onClick={() => save.mutate()}
-            disabled={!login.trim() || !email.trim() || save.isPending}
-          >
-            {save.isPending ? "Saving…" : "Add / Update"}
-          </Button>
-        </div>
-
         {error && <span className="text-xs text-destructive">{error}</span>}
 
         <div className="flex flex-col gap-0.5">

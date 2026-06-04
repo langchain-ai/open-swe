@@ -10,7 +10,7 @@ import secrets
 import time
 from datetime import UTC, datetime, timedelta
 from typing import Any
-from urllib.parse import quote, urlparse
+from urllib.parse import urlparse
 
 import httpx
 import jwt
@@ -148,7 +148,7 @@ def hash_state_nonce(nonce: str) -> str:
     return hmac.new(_secret().encode(), nonce.encode(), hashlib.sha256).hexdigest()
 
 
-def issue_state(*, redirect_to: str, nonce_hash: str, link: str | None = None) -> str:
+def issue_state(*, redirect_to: str, nonce_hash: str) -> str:
     now = int(time.time())
     payload: dict[str, Any] = {
         "nonce_hash": nonce_hash,
@@ -156,8 +156,6 @@ def issue_state(*, redirect_to: str, nonce_hash: str, link: str | None = None) -
         "iat": now,
         "exp": now + STATE_TTL_SECONDS,
     }
-    if link:
-        payload["link"] = link
     return jwt.encode(payload, _secret(), algorithm=JWT_ALG)
 
 
@@ -168,41 +166,8 @@ def decode_state(state: str) -> dict[str, Any]:
         raise HTTPException(400, f"invalid state: {e}") from e
 
 
-LINK_TTL_SECONDS = 7 * 24 * 60 * 60
-
 # Dashboard route where users manage their GitHub↔Slack link.
 PROFILE_SETTINGS_PATH = "/my-settings"
-
-
-def issue_account_link(*, slack_user_id: str | None, work_email: str | None) -> str:
-    """Sign a short-lived token carrying the Slack identity to map after login.
-
-    Threaded through the OAuth ``state`` so the callback can attach the
-    resolved ``github_login`` to the originating Slack user/email in one step.
-    """
-    now = int(time.time())
-    payload = {
-        "kind": "account_link",
-        "slack_user_id": slack_user_id or None,
-        "work_email": work_email or None,
-        "iat": now,
-        "exp": now + LINK_TTL_SECONDS,
-    }
-    return jwt.encode(payload, _secret(), algorithm=JWT_ALG)
-
-
-def decode_account_link(token: str) -> dict[str, Any] | None:
-    """Decode an account-link token; return ``None`` if absent/invalid/expired."""
-    if not token:
-        return None
-    try:
-        payload = jwt.decode(token, _secret(), algorithms=[JWT_ALG])
-    except jwt.PyJWTError as e:
-        logger.warning("invalid account-link token: %s", e)
-        return None
-    if payload.get("kind") != "account_link":
-        return None
-    return payload
 
 
 def build_settings_url() -> str | None:
@@ -216,26 +181,6 @@ def build_settings_url() -> str | None:
     if not frontend_base:
         return None
     return f"{frontend_base}{PROFILE_SETTINGS_PATH}"
-
-
-def build_account_link_url(*, slack_user_id: str | None, work_email: str | None) -> str | None:
-    """Return the dashboard login URL that links a Slack identity on completion.
-
-    Returns ``None`` when ``DASHBOARD_API_BASE_URL`` isn't configured (login
-    can't be initiated), so callers can skip the prompt cleanly.
-    """
-    api_base = os.environ.get("DASHBOARD_API_BASE_URL", "").rstrip("/")
-    if not api_base:
-        return None
-    token = issue_account_link(slack_user_id=slack_user_id, work_email=work_email)
-    url = f"{api_base}/dashboard/api/auth/login?link={quote(token, safe='')}"
-    # Land the user on the Profile Settings page so they can review/complete
-    # their GitHub↔Slack link after re-authenticating.
-    frontend_base = os.environ.get("DASHBOARD_BASE_URL", "").rstrip("/")
-    if frontend_base:
-        redirect_to = f"{frontend_base}{PROFILE_SETTINGS_PATH}"
-        url += f"&redirect_to={quote(redirect_to, safe='')}"
-    return url
 
 
 def require_session(request: Request) -> dict[str, Any]:

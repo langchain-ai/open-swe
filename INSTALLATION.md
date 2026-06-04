@@ -456,7 +456,7 @@ DEFAULT_REPO_NAME=""                   # Default GitHub repo (e.g. "my-repo")
 DASHBOARD_API_BASE_URL="http://localhost:2024"
 # Public base URL of the dashboard frontend (the ui/ app). Default post-login redirect.
 DASHBOARD_BASE_URL="http://localhost:3000"
-# HMAC secret for all dashboard JWTs (session cookie, OAuth state, account-link tokens).
+# HMAC secret for dashboard JWTs (session cookie and OAuth state).
 DASHBOARD_JWT_SECRET=""                # Generate with: openssl rand -hex 32
 # Comma-separated origins allowed for credentialed CORS and post-login redirects.
 # Required whenever the frontend and API are on different origins — including local

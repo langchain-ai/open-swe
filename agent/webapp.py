@@ -1097,10 +1097,14 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
     langgraph_client = get_client(url=LANGGRAPH_URL)
     is_first_mention = not await _thread_exists(thread_id)
     await _upsert_slack_thread_repo_metadata(thread_id, repo_config, langgraph_client)
+    # Pass the login resolved above (from the stable Slack user id) so the thread is
+    # always tagged with github_login — the key the dashboard searches by. Without
+    # it, upsert re-resolves from the Slack profile email, which can miss.
     await upsert_agent_thread_owner_metadata(
         thread_id,
         source="slack",
         repo_config=repo_config,
+        github_login=mapped_login or "",
         user_email=user_email or "",
         title=clean_text if is_first_mention else "",
         source_context={"slack_thread": configurable["slack_thread"]},
