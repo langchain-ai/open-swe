@@ -503,12 +503,22 @@ async def fetch_pr_review_threads(
                 )
                 return out
             data = response.json()
-            threads = (
-                data.get("data", {})
-                .get("repository", {})
-                .get("pullRequest", {})
-                .get("reviewThreads", {})
-            )
+            payload = (data or {}).get("data") or {}
+            repository = payload.get("repository")
+            if repository is None:
+                # GraphQL returns repository: null when the token cannot read
+                # the repo (SAML enforcement, expired token, deleted/private).
+                logger.warning(
+                    "GitHub GraphQL repository node was null for %s/%s#%s "
+                    "(token lacks access?) — returning %d threads collected so far",
+                    owner,
+                    repo,
+                    pr_number,
+                    len(out),
+                )
+                return out
+            pull_request = repository.get("pullRequest") or {}
+            threads = pull_request.get("reviewThreads") or {}
             for thread in threads.get("nodes", []) or []:
                 if not isinstance(thread, dict):
                     continue

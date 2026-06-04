@@ -1288,6 +1288,22 @@ async def test_fetch_pr_review_threads_returns_empty_on_http_error() -> None:
 
 
 @pytest.mark.asyncio
+async def test_fetch_pr_review_threads_returns_empty_when_repository_is_null() -> None:
+    """GitHub returns repository: null when the token cannot read the repo."""
+    response = MagicMock()
+    response.json.return_value = {"data": {"repository": None}}
+    response.raise_for_status.return_value = None
+
+    client_cm = AsyncMock()
+    client_cm.__aenter__.return_value = client_cm
+    client_cm.post = AsyncMock(return_value=response)
+
+    with patch("agent.reviewer_publish.httpx.AsyncClient", return_value=client_cm):
+        threads = await fetch_pr_review_threads(owner="o", repo="r", pr_number=1, token="t")
+    assert threads == []
+
+
+@pytest.mark.asyncio
 async def test_reply_to_review_comment_posts_reply_payload() -> None:
     response = MagicMock()
     response.status_code = 201
