@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections import Counter
 from datetime import UTC, datetime, timedelta
@@ -18,6 +19,8 @@ USAGE_PR_NAMESPACE: list[str] = ["agent_usage", "prs"]
 Period = Literal["7d", "30d", "all"]
 _AGENT_SOURCES = frozenset({"dashboard", "github", "slack", "linear"})
 _PR_REFRESH_INTERVAL_MS = 10 * 60 * 1000
+_MAX_PR_REFRESH_PER_REQUEST = 25
+_PR_REFRESH_CONCURRENCY = 5
 _GITHUB_API = "https://api.github.com"
 
 logger = logging.getLogger(__name__)
@@ -274,22 +277,35 @@ async def _refresh_pr_record(
 
 
 async def _refresh_pr_records(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    now_ms = _now_ms()
+    stale_indexes = [
+        index
+        for index, record in enumerate(records)
+        if not (updated_at := _coerce_int(record.get("updated_at_ms")))
+        or now_ms - updated_at >= _PR_REFRESH_INTERVAL_MS
+    ][:_MAX_PR_REFRESH_PER_REQUEST]
+    if not stale_indexes:
+        return records
     token = await get_github_app_installation_token()
     if not token:
         return records
-    now_ms = _now_ms()
-    refreshed: list[dict[str, Any]] = []
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        for record in records:
-            updated_at = _coerce_int(record.get("updated_at_ms"))
-            if updated_at and now_ms - updated_at < _PR_REFRESH_INTERVAL_MS:
-                refreshed.append(record)
-                continue
+
+    refreshed = list(records)
+    semaphore = asyncio.Semaphore(_PR_REFRESH_CONCURRENCY)
+
+    async def refresh_one(index: int, client: httpx.AsyncClient) -> tuple[int, dict[str, Any]]:
+        async with semaphore:
             try:
-                refreshed.append(await _refresh_pr_record(client, token, record))
+                return index, await _refresh_pr_record(client, token, records[index])
             except Exception:
                 logger.debug("Failed to refresh usage PR record", exc_info=True)
-                refreshed.append(record)
+                return index, records[index]
+
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        for index, record in await asyncio.gather(
+            *(refresh_one(index, client) for index in stale_indexes)
+        ):
+            refreshed[index] = record
     return refreshed
 
 
@@ -360,12 +376,14 @@ async def list_agent_usage_leaderboard(
     for index, user in enumerate(sorted_users, start=1):
         model_counts: Counter[str] = user.pop("model_counts")
         favorite_model = model_counts.most_common(1)[0][0] if model_counts else "default"
+        github_login = user.get("github_login") or None
+        is_current_user = user["key"] in current_keys
         row = {
             "rank": index,
             "user": {
-                "name": user.get("name") or "Unknown user",
-                "github_login": user.get("github_login") or None,
-                "email": user.get("email") or None,
+                "name": user.get("name") if is_current_user or github_login else "Open SWE user",
+                "github_login": github_login,
+                "email": (user.get("email") or None) if is_current_user else None,
             },
             "favorite_model": favorite_model,
             "agent_runs": user["agent_runs"],
@@ -375,7 +393,7 @@ async def list_agent_usage_leaderboard(
             "additions": user["additions"],
             "deletions": user["deletions"],
         }
-        if user["key"] in current_keys:
+        if is_current_user:
             current_user_row = row
         if len(rows) < safe_limit:
             rows.append(row)
