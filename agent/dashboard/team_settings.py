@@ -169,6 +169,32 @@ async def get_team_default_model(
     return _resolve_default_pair(model, effort)
 
 
+async def get_team_default_model_pair(
+    role: Literal["agent", "reviewer"],
+) -> tuple[tuple[str, str], tuple[str, str]]:
+    """Return default ``(main, subagent)`` model pairs for ``role`` from one store read."""
+    settings = await get_team_settings()
+    if role == "agent":
+        main = _resolve_default_pair(
+            settings.get("default_agent_model"),
+            settings.get("default_agent_reasoning_effort"),
+        )
+        subagent = _resolve_default_pair(
+            settings.get("default_agent_subagent_model"),
+            settings.get("default_agent_subagent_reasoning_effort"),
+        )
+    else:
+        main = _resolve_default_pair(
+            settings.get("default_reviewer_model"),
+            settings.get("default_reviewer_reasoning_effort"),
+        )
+        subagent = _resolve_default_pair(
+            settings.get("default_reviewer_subagent_model"),
+            settings.get("default_reviewer_subagent_reasoning_effort"),
+        )
+    return main, subagent
+
+
 async def get_team_review_trace_links_enabled() -> bool:
     """Return whether GitHub review bodies should include a LangSmith trace link."""
     settings = await get_team_settings()

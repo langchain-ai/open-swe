@@ -11,6 +11,25 @@ import pytest
 from agent.integrations.langsmith import _configure_github_proxy
 
 
+class TestSandboxFactoryLoading:
+    def test_create_sandbox_loads_only_selected_provider(self) -> None:
+        with (
+            patch("agent.utils.sandbox.import_module") as mock_import_module,
+            patch.dict("os.environ", {"SANDBOX_TYPE": "local"}),
+        ):
+            module = MagicMock()
+            module.create_local_sandbox.return_value = MagicMock(id="local")
+            mock_import_module.return_value = module
+
+            from agent.utils.sandbox import create_sandbox
+
+            sandbox = create_sandbox("existing")
+
+        assert sandbox.id == "local"
+        mock_import_module.assert_called_once_with("agent.integrations.local")
+        module.create_local_sandbox.assert_called_once_with("existing")
+
+
 class TestConfigureGithubProxy:
     """Tests for _configure_github_proxy payload shape and error handling."""
 

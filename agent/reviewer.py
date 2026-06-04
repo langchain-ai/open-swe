@@ -15,6 +15,7 @@ agent for code review only:
 """
 # ruff: noqa: E402
 
+import asyncio
 import logging
 import re
 import warnings
@@ -30,6 +31,7 @@ warnings.filterwarnings("ignore", message=".*Pydantic V1.*", category=UserWarnin
 from deepagents import create_deep_agent
 from langchain.agents.middleware import ModelCallLimitMiddleware
 
+from .dashboard.team_settings import get_team_default_model_pair
 from .middleware import (
     SanitizeThinkingBlocksMiddleware,
     SanitizeToolInputsMiddleware,
@@ -640,8 +642,8 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
         # Cache in-process so reviewer tools and the sandbox proxy can read it this run.
         cache_github_token_for_thread(thread_id, github_token, expires_at=expires_at)
 
-    repo_private = config["configurable"].get("repo_private")
-    github_proxy_token = github_token if repo_private is False else None
+    github_proxy_token = github_token
+    github_api_token = github_token
     sandbox_backend = await ensure_sandbox_for_thread(
         thread_id,
         github_proxy_token=github_proxy_token,
@@ -659,74 +661,51 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
     is_re_review = bool(config["configurable"].get("re_review"))
     reviewer_event = str(config["configurable"].get("reviewer_event", "") or "")
 
-    # Fetch the PR's unified diff from the GitHub API and populate
-    # diff_text + diff_line_set so add_finding can reject bad anchors at
-    # creation time (instead of letting them fail at publish_review with a
-    # 422 the agent then has to clean up). The API path is reliable — the
-    # previous sandbox-based prep was sometimes producing empty diffs,
-    # which is what forced the earlier hotfix. If the fetch fails, leave
-    # the validation disabled so the run isn't blocked entirely.
-    pr_diff_text = ""
-    pr_diff_line_set: dict[str, set[int]] | None = None
-    if (
+    can_fetch_pr = (
         pr_number is not None
         and isinstance(pr_number, int)
-        and repo_owner
-        and repo_name
-        and github_token
-    ):
+        and bool(repo_owner)
+        and bool(repo_name)
+        and bool(github_api_token)
+    )
+
+    async def _fetch_diff_context() -> tuple[str, dict[str, dict[str, set[int]]] | None]:
+        if not can_fetch_pr or github_api_token is None or not isinstance(pr_number, int):
+            return "", None
         fetched_diff = await fetch_pr_diff(
             owner=repo_owner,
             repo=repo_name,
             pr_number=pr_number,
-            token=github_token,
+            token=github_api_token,
         )
-        if fetched_diff is not None:
-            pr_diff_text = fetched_diff
-            pr_diff_line_set = compute_diff_line_set(fetched_diff)
-    config["configurable"]["diff_text"] = pr_diff_text
-    config["configurable"]["diff_line_set"] = pr_diff_line_set
+        if fetched_diff is None:
+            return "", None
+        return fetched_diff, compute_diff_line_set(fetched_diff)
 
-    # Fetch the PR title and body fresh every run (never cached) so an edited
-    # title/description is reflected on re-reviews. Injected into the review
-    # context so the agent knows the original intent of the PR. On failure we
-    # leave both blank and the overview block is simply omitted.
-    pr_title = ""
-    pr_body = ""
-    if (
-        pr_number is not None
-        and isinstance(pr_number, int)
-        and repo_owner
-        and repo_name
-        and github_token
-    ):
+    async def _fetch_pr_overview() -> tuple[str, str]:
+        if not can_fetch_pr or github_api_token is None or not isinstance(pr_number, int):
+            return "", ""
         metadata = await fetch_pr_metadata(
             owner=repo_owner,
             repo=repo_name,
             pr_number=pr_number,
-            token=github_token,
+            token=github_api_token,
         )
-        if metadata is not None:
-            pr_title, pr_body = metadata
+        return metadata if metadata is not None else ("", "")
 
-    existing_threads_block = ""
-    if (
-        pr_number is not None
-        and isinstance(pr_number, int)
-        and repo_owner
-        and repo_name
-        and github_token
-    ):
+    async def _fetch_existing_threads_block() -> str:
+        if not can_fetch_pr or github_api_token is None or not isinstance(pr_number, int):
+            return ""
         try:
             threads = await fetch_pr_review_threads(
                 owner=repo_owner,
                 repo=repo_name,
                 pr_number=pr_number,
-                token=github_token,
+                token=github_api_token,
             )
             await reconcile_findings_with_review_threads(thread_id, threads)
-            existing_threads_block = _format_pr_review_threads(threads)
-            if existing_threads_block:
+            block = _format_pr_review_threads(threads)
+            if block:
                 logger.info(
                     "Loaded %d existing PR review thread(s) into reviewer context for %s/%s#%s",
                     len(threads),
@@ -734,6 +713,7 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
                     repo_name,
                     pr_number,
                 )
+            return block
         except Exception:  # noqa: BLE001
             logger.exception(
                 "Failed to load existing PR review threads for %s/%s#%s; "
@@ -742,6 +722,51 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
                 repo_name,
                 pr_number,
             )
+            return ""
+
+    async def _fetch_repo_style_prompt() -> str | None:
+        if not repo_owner or not repo_name:
+            return None
+        from .dashboard.review_styles import get_repo_custom_prompt
+
+        return await get_repo_custom_prompt(repo_owner, repo_name)
+
+    async def _fetch_agents_md_context() -> str | None:
+        if not repo_owner or not repo_name or not base_sha:
+            return None
+        content = await fetch_agents_md(
+            repo_owner,
+            repo_name,
+            base_sha,
+            token=github_api_token,
+        )
+        if content:
+            logger.info(
+                "Loaded AGENTS.md (%d chars) from %s/%s@%s into reviewer prompt",
+                len(content),
+                repo_owner,
+                repo_name,
+                base_sha,
+            )
+        return content
+
+    (
+        diff_context,
+        pr_overview,
+        existing_threads_block,
+        repo_style_prompt,
+        agents_md_content,
+    ) = await asyncio.gather(
+        _fetch_diff_context(),
+        _fetch_pr_overview(),
+        _fetch_existing_threads_block(),
+        _fetch_repo_style_prompt(),
+        _fetch_agents_md_context(),
+    )
+    pr_diff_text, pr_diff_line_set = diff_context
+    pr_title, pr_body = pr_overview
+    config["configurable"]["diff_text"] = pr_diff_text
+    config["configurable"]["diff_line_set"] = pr_diff_line_set
 
     review_context = ""
     if pr_number is not None and isinstance(pr_number, int):
@@ -787,8 +812,6 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
                 existing_threads_block=existing_threads_block,
             )
 
-    from .dashboard.team_settings import get_team_default_model, get_team_default_subagent_model
-
     configured_model_id = config["configurable"].get("reviewer_model_id")
     configured_effort = config["configurable"].get("reviewer_reasoning_effort")
     if isinstance(configured_model_id, str) and configured_model_id:
@@ -797,13 +820,15 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
         subagent_model_id = model_id
         subagent_effort = reasoning_effort
     else:
-        model_id, reasoning_effort = await get_team_default_model("reviewer")
+        (
+            (model_id, reasoning_effort),
+            (subagent_model_id, subagent_effort),
+        ) = await get_team_default_model_pair("reviewer")
         logger.info(
             "Using team default reviewer model: model=%s effort=%s",
             model_id,
             reasoning_effort,
         )
-        subagent_model_id, subagent_effort = await get_team_default_subagent_model("reviewer")
         logger.info(
             "Using team default reviewer subagent model: model=%s effort=%s",
             subagent_model_id,
@@ -833,34 +858,8 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
         config["configurable"].get("reviewer_eval") is True
         or config["configurable"].get("eval") is True
     )
-    repo_style_prompt: str | None = None
-    if repo_owner and repo_name:
-        from .dashboard.review_styles import get_repo_custom_prompt
-
-        repo_style_prompt = await get_repo_custom_prompt(repo_owner, repo_name)
-
-    # Fetch AGENTS.md from base_sha (the target branch's state before this
-    # PR's changes), not head_sha. The contents are inlined into the system
-    # prompt, so reading from head would let a PR author smuggle reviewer
-    # instructions ("ignore all bugs", "publish no findings") into the
-    # review. base_sha is the trusted ref.
-    agents_md_content: str | None = None
-    if repo_owner and repo_name and base_sha:
-        agents_md_content = await fetch_agents_md(
-            repo_owner,
-            repo_name,
-            base_sha,
-            token=github_token,
-        )
-        if agents_md_content:
-            logger.info(
-                "Loaded AGENTS.md (%d chars) from %s/%s@%s into reviewer prompt",
-                len(agents_md_content),
-                repo_owner,
-                repo_name,
-                base_sha,
-            )
-    del github_token
+    github_api_token = None
+    github_token = None
 
     system_prompt = _reviewer_system_prompt(
         f"{work_dir}/{repo_name}" if repo_name else work_dir,

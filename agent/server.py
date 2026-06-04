@@ -38,7 +38,7 @@ from .dashboard.agent_overrides import (
     resolve_github_login,
 )
 from .dashboard.options import DEFAULT_MODEL_ID, SUPPORTED_MODEL_IDS, model_supports_effort
-from .dashboard.team_settings import get_team_default_model, get_team_default_subagent_model
+from .dashboard.team_settings import get_team_default_model_pair
 from .integrations.langsmith import _configure_github_proxy
 from .middleware import (
     ModelFallbackMiddleware,
@@ -411,12 +411,20 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         ).with_config(config)
 
     github_token, _expires_at = await resolve_github_token(config, thread_id)
-    triggering_user_identity = await asyncio.to_thread(
-        resolve_triggering_user_identity, config, github_token
+    profile_login = resolve_github_login(config)
+    triggering_user_identity_task = asyncio.create_task(
+        asyncio.to_thread(resolve_triggering_user_identity, config, github_token)
     )
+    sandbox_task = asyncio.create_task(ensure_sandbox_for_thread(thread_id))
+    team_defaults_task = asyncio.create_task(get_team_default_model_pair("agent"))
+    profile_task = asyncio.create_task(load_profile(profile_login)) if profile_login else None
+    triggering_user_identity, sandbox_backend, team_defaults = await asyncio.gather(
+        triggering_user_identity_task,
+        sandbox_task,
+        team_defaults_task,
+    )
+    profile = await profile_task if profile_task is not None else None
     del github_token
-
-    sandbox_backend = await ensure_sandbox_for_thread(thread_id)
 
     linear_issue = config["configurable"].get("linear_issue", {})
     linear_project_id = linear_issue.get("linear_project_id", "")
@@ -427,44 +435,39 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     def backend_factory(_runtime: object, _thread_id: str = thread_id) -> SandboxBackendProtocol:
         return _get_cached_sandbox_backend(_thread_id)
 
-    model_id, profile_effort = await get_team_default_model("agent")
+    (model_id, profile_effort), (subagent_model_id, subagent_effort) = team_defaults
     logger.info("Using team default agent model: model=%s effort=%s", model_id, profile_effort)
-    subagent_model_id, subagent_effort = await get_team_default_subagent_model("agent")
     logger.info(
         "Using team default agent subagent model: model=%s effort=%s",
         subagent_model_id,
         subagent_effort,
     )
 
-    profile: dict[str, Any] | None = None
-    profile_login = resolve_github_login(config)
-    if profile_login:
-        profile = await load_profile(profile_login)
-        if profile:
-            overridden_model, overridden_effort = normalize_profile_overrides(profile)
-            if overridden_model:
-                logger.info(
-                    "Applying dashboard profile override for %s: model=%s effort=%s",
-                    profile_login,
-                    overridden_model,
-                    overridden_effort,
-                )
-                model_id = overridden_model
-                profile_effort = overridden_effort
-                subagent_model_id = overridden_model
-                subagent_effort = overridden_effort
-            overridden_subagent_model, overridden_subagent_effort = (
-                normalize_profile_subagent_overrides(profile)
+    if profile_login and profile:
+        overridden_model, overridden_effort = normalize_profile_overrides(profile)
+        if overridden_model:
+            logger.info(
+                "Applying dashboard profile override for %s: model=%s effort=%s",
+                profile_login,
+                overridden_model,
+                overridden_effort,
             )
-            if overridden_subagent_model:
-                logger.info(
-                    "Applying dashboard profile subagent override for %s: model=%s effort=%s",
-                    profile_login,
-                    overridden_subagent_model,
-                    overridden_subagent_effort,
-                )
-                subagent_model_id = overridden_subagent_model
-                subagent_effort = overridden_subagent_effort
+            model_id = overridden_model
+            profile_effort = overridden_effort
+            subagent_model_id = overridden_model
+            subagent_effort = overridden_effort
+        overridden_subagent_model, overridden_subagent_effort = (
+            normalize_profile_subagent_overrides(profile)
+        )
+        if overridden_subagent_model:
+            logger.info(
+                "Applying dashboard profile subagent override for %s: model=%s effort=%s",
+                profile_login,
+                overridden_subagent_model,
+                overridden_subagent_effort,
+            )
+            subagent_model_id = overridden_subagent_model
+            subagent_effort = overridden_subagent_effort
 
     configurable = (config or {}).get("configurable") or {}
     per_thread_model = configurable.get("agent_model_id")
