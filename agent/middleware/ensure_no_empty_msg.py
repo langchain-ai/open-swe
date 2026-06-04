@@ -6,6 +6,8 @@ from langchain_core.messages import AnyMessage, ToolMessage
 from langgraph.config import get_config
 from langgraph.runtime import Runtime
 
+from .check_message_queue import DASHBOARD_HANDOFF_MARKER
+
 _DASHBOARD_SOURCE = "dashboard"
 
 
@@ -40,6 +42,24 @@ def check_if_no_op(messages: list[AnyMessage]) -> bool:
     for msg in messages:
         if msg.type == "tool" and msg.name == "no_op":
             return True
+    return False
+
+
+def _content_contains_text(content: object, text: str) -> bool:
+    if isinstance(content, str):
+        return text in content
+    if not isinstance(content, list):
+        return False
+    for block in content:
+        if isinstance(block, dict) and text in str(block.get("text", "")):
+            return True
+    return False
+
+
+def _last_human_is_dashboard_handoff(state: AgentState) -> bool:
+    for msg in reversed(state["messages"]):
+        if msg.type == "human":
+            return _content_contains_text(msg.content, DASHBOARD_HANDOFF_MARKER)
     return False
 
 
@@ -85,6 +105,7 @@ def ensure_no_empty_msg(state: AgentState, runtime: Runtime) -> dict[str, Any] |
             check_if_model_messaged_user(messages_since_last_human)
             or check_if_confirming_completion(messages_since_last_human)
             or _is_dashboard_source()
+            or _last_human_is_dashboard_handoff(state)
         ):
             return None
 
