@@ -377,14 +377,17 @@ async def send_dashboard_message(
     prompt = body.content.strip()
     now_ms = _now_ms()
     chosen_model, chosen_effort = _normalize_model_choice(body.model_id, body.effort)
-    metadata_update: dict[str, Any] = {"updated_at_ms": now_ms}
+    metadata_update: dict[str, Any] = {"source": _DASHBOARD_SOURCE, "updated_at_ms": now_ms}
     if chosen_model and chosen_effort:
         metadata_update["model"] = chosen_model
         metadata_update["effort"] = chosen_effort
     await client.threads.update(thread_id=thread_id, metadata=metadata_update)
 
     if await is_thread_active(thread_id):
-        queued = await queue_message_for_thread(thread_id, prompt)
+        queued = await queue_message_for_thread(
+            thread_id,
+            {"text": prompt, "source": _DASHBOARD_SOURCE},
+        )
         if not queued:
             raise HTTPException(502, "failed to queue follow-up message")
         thread = await client.threads.get(thread_id)
@@ -394,19 +397,14 @@ async def send_dashboard_message(
 
     await _ensure_dashboard_github_token(login)
     profile = await get_profile(login) or {}
-    thread_source = _thread_source(metadata)
     configurable: dict[str, Any] = {
         "thread_id": thread_id,
-        "source": thread_source,
+        "source": _DASHBOARD_SOURCE,
         "github_login": login,
         "user_email": await _resolve_run_email(login, profile),
     }
     if owner and name:
         configurable["repo"] = {"owner": owner, "name": name}
-    source_context = metadata.get("source_context")
-    if isinstance(source_context, dict):
-        for key, value in source_context.items():
-            configurable.setdefault(key, value)
     if chosen_model and chosen_effort:
         configurable["agent_model_id"] = chosen_model
         configurable["agent_effort"] = chosen_effort
