@@ -9,6 +9,7 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as UsageRouteImport } from './routes/usage'
 import { Route as ReviewRouteImport } from './routes/review'
 import { Route as MySettingsRouteImport } from './routes/my-settings'
 import { Route as LoginRouteImport } from './routes/login'
@@ -22,6 +23,11 @@ import { Route as ReviewStylesRouteImport } from './routes/review_.styles'
 import { Route as AgentsThreadIdRouteImport } from './routes/agents/$threadId'
 import { Route as ReviewRepositoriesOwnerRouteImport } from './routes/review_.repositories.$owner'
 
+const UsageRoute = UsageRouteImport.update({
+  id: '/usage',
+  path: '/usage',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ReviewRoute = ReviewRouteImport.update({
   id: '/review',
   path: '/review',
@@ -92,6 +98,7 @@ export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute
   '/my-settings': typeof MySettingsRoute
   '/review': typeof ReviewRoute
+  '/usage': typeof UsageRoute
   '/agents/$threadId': typeof AgentsThreadIdRoute
   '/review/styles': typeof ReviewStylesRoute
   '/agents/': typeof AgentsIndexRoute
@@ -105,6 +112,7 @@ export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/my-settings': typeof MySettingsRoute
   '/review': typeof ReviewRoute
+  '/usage': typeof UsageRoute
   '/agents/$threadId': typeof AgentsThreadIdRoute
   '/review/styles': typeof ReviewStylesRoute
   '/agents': typeof AgentsIndexRoute
@@ -120,6 +128,7 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/my-settings': typeof MySettingsRoute
   '/review': typeof ReviewRoute
+  '/usage': typeof UsageRoute
   '/agents/$threadId': typeof AgentsThreadIdRoute
   '/review_/styles': typeof ReviewStylesRoute
   '/agents/': typeof AgentsIndexRoute
@@ -136,6 +145,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/my-settings'
     | '/review'
+    | '/usage'
     | '/agents/$threadId'
     | '/review/styles'
     | '/agents/'
@@ -149,6 +159,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/my-settings'
     | '/review'
+    | '/usage'
     | '/agents/$threadId'
     | '/review/styles'
     | '/agents'
@@ -163,6 +174,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/my-settings'
     | '/review'
+    | '/usage'
     | '/agents/$threadId'
     | '/review_/styles'
     | '/agents/'
@@ -178,6 +190,7 @@ export interface RootRouteChildren {
   LoginRoute: typeof LoginRoute
   MySettingsRoute: typeof MySettingsRoute
   ReviewRoute: typeof ReviewRoute
+  UsageRoute: typeof UsageRoute
   ReviewStylesRoute: typeof ReviewStylesRoute
   ReviewRepositoriesOwnerRoute: typeof ReviewRepositoriesOwnerRoute
 }
@@ -189,6 +202,13 @@ declare module '@tanstack/react-router' {
       path: '/review'
       fullPath: '/review'
       preLoaderRoute: typeof ReviewRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/usage': {
+      id: '/usage'
+      path: '/usage'
+      fullPath: '/usage'
+      preLoaderRoute: typeof UsageRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/my-settings': {
@@ -293,6 +313,7 @@ const rootRouteChildren: RootRouteChildren = {
   LoginRoute: LoginRoute,
   MySettingsRoute: MySettingsRoute,
   ReviewRoute: ReviewRoute,
+  UsageRoute: UsageRoute,
   ReviewStylesRoute: ReviewStylesRoute,
   ReviewRepositoriesOwnerRoute: ReviewRepositoriesOwnerRoute,
 }

@@ -13,6 +13,7 @@ from fastapi.responses import RedirectResponse, Response, StreamingResponse
 from pydantic import BaseModel
 
 from .admin import is_admin
+from .agent_usage import list_agent_usage_leaderboard
 from .analyzer_cron import remove_continual_cron
 from .enabled_repos import (
     list_enabled_review_repos,
@@ -745,6 +746,20 @@ async def api_delete_review_style(
     await remove_continual_cron(full_name)
     await delete_review_style(full_name)
     return Response(status_code=204)
+
+
+@router.get("/agent-usage-leaderboard")
+async def api_agent_usage_leaderboard(
+    period: str | None = "30d",
+    limit: int = 10,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    return await list_agent_usage_leaderboard(
+        period=period,
+        limit=limit,
+        current_login=session["sub"],
+        current_email=session.get("email"),
+    )
 
 
 @router.get("/threads")
