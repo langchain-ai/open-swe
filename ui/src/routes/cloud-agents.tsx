@@ -227,17 +227,26 @@ function CloudAgentsPage() {
             label="Default Repository"
             description="Used when no repository is specified"
             control={
-              <div className="w-64">
-                <RepoSelector
-                  repos={repos.data?.repositories}
-                  selectedRepo={defaultRepo || null}
-                  onRepoChange={(repo) => setDefaultRepo(repo ?? "")}
-                  placeholder="Pick a repository…"
-                  emptySelectionLabel="No default repository"
-                  triggerClassName="h-9 w-full max-w-none rounded-md border border-input bg-transparent px-3 text-sm text-foreground shadow-xs hover:opacity-100"
-                  dropdownClassName="w-64"
+              repos.data?.repositories?.length ? (
+                <div className="w-56">
+                  <RepoSelector
+                    repos={repos.data.repositories}
+                    selectedRepo={defaultRepo || null}
+                    onRepoChange={(repo) => setDefaultRepo(repo ?? "")}
+                    placeholder="Pick a repository…"
+                    emptySelectionLabel="No default repository"
+                    triggerClassName="h-7 w-full max-w-none rounded-md border border-input bg-input/20 px-2 py-1.5 text-xs/relaxed text-foreground transition-colors hover:opacity-100 dark:bg-input/30"
+                    dropdownClassName="w-56"
+                  />
+                </div>
+              ) : (
+                <Input
+                  className="w-56"
+                  placeholder="owner/repo"
+                  value={defaultRepo}
+                  onChange={(e) => setDefaultRepo(e.target.value)}
                 />
-              </div>
+              )
             }
           />
           <SettingsRow

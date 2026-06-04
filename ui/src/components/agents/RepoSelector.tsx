@@ -66,7 +66,9 @@ export function RepoSelector({
         )}
       >
         <FolderIcon className="size-3.5 shrink-0" />
-        <span className="truncate">{selectedRepo || placeholder}</span>
+        <span className="flex-1 truncate text-left">
+          {selectedRepo || placeholder}
+        </span>
         <CaretDownIcon className="size-3 shrink-0 opacity-70" />
       </button>
       {open && (
