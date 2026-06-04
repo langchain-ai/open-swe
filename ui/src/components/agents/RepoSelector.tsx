@@ -74,7 +74,7 @@ export function RepoSelector({
       {open && (
         <div
           className={cn(
-            "absolute top-full left-0 z-50 mt-1 flex max-h-72 w-72 flex-col overflow-hidden rounded border border-border bg-popover text-popover-foreground shadow-lg",
+            "absolute top-full left-0 z-50 mt-1 flex max-h-72 w-72 flex-col overflow-hidden rounded border border-border bg-popover text-xs text-popover-foreground shadow-lg",
             dropdownClassName
           )}
         >
@@ -83,7 +83,7 @@ export function RepoSelector({
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder={searchPlaceholder}
-            className="w-full border-b border-border bg-transparent px-3 py-2 text-foreground outline-none placeholder:text-muted-foreground"
+            className="w-full border-b border-border bg-transparent px-2 py-1.5 text-foreground outline-none placeholder:text-muted-foreground"
           />
           <div className="overflow-y-auto">
             <button
@@ -94,7 +94,7 @@ export function RepoSelector({
                 setQuery("")
               }}
               className={cn(
-                "flex w-full items-center px-3 py-1.5 text-left transition-colors hover:bg-muted",
+                "flex w-full items-center px-2 py-1.5 text-left transition-colors hover:bg-muted",
                 selectedRepo ? "text-muted-foreground" : "text-foreground"
               )}
             >
@@ -104,7 +104,7 @@ export function RepoSelector({
               )}
             </button>
             {filteredRepos.length === 0 ? (
-              <div className="px-3 py-1.5 text-muted-foreground">
+              <div className="px-2 py-1.5 text-muted-foreground">
                 {noMatchesLabel}
               </div>
             ) : (
@@ -120,7 +120,7 @@ export function RepoSelector({
                       setQuery("")
                     }}
                     className={cn(
-                      "flex w-full items-center px-3 py-1.5 text-left transition-colors hover:bg-muted",
+                      "flex w-full items-center px-2 py-1.5 text-left transition-colors hover:bg-muted",
                       selected ? "text-foreground" : "text-muted-foreground"
                     )}
                   >
