@@ -299,5 +299,3 @@ async def delete_mapping(github_login: str) -> bool:
         raise
     _deindex_login(login)
     return True
-
-

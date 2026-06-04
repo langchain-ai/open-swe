@@ -68,9 +68,7 @@ async def test_cache_readers_after_refresh(fake_store: _FakeStore) -> None:
 
 @pytest.mark.asyncio
 async def test_pending_status_not_trusted(fake_store: _FakeStore) -> None:
-    await um.upsert_mapping(
-        github_login="newbie", work_email="n@x.com", status="pending"
-    )
+    await um.upsert_mapping(github_login="newbie", work_email="n@x.com", status="pending")
     um.clear_cache()
     await um.refresh_cache()
     assert um.is_login_mapped("newbie") is False
