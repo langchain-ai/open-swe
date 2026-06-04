@@ -405,6 +405,7 @@ LANGSMITH_URL_PROD="https://smith.langchain.com"
 ANTHROPIC_API_KEY=""                   # Anthropic API key
 OPENAI_API_KEY=""                      # OpenAI API key (when using openai: models)
 GOOGLE_API_KEY=""                      # Google AI API key (when using google_genai: models)
+FIREWORKS_API_KEY=""                   # Fireworks API key (when using fireworks: models)
 
 # === GitHub App (required) ===
 GITHUB_APP_ID=""                       # From step 3c

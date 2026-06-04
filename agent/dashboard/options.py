@@ -38,12 +38,6 @@ SUPPORTED_MODELS: list[ModelOption] = [
         "default_effort": "high",
     },
     {
-        "id": "fireworks:accounts/fireworks/models/nemotron-3-ultra-nvfp4",
-        "label": "Nemotron 3 Ultra",
-        "efforts": ["none", "low", "medium", "high"],
-        "default_effort": "high",
-    },
-    {
         "id": "fireworks:accounts/fireworks/models/glm-5p1",
         "label": "GLM 5.1",
         "efforts": ["none", "low", "medium", "high"],
