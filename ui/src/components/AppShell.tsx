@@ -18,7 +18,7 @@ export function AppShell({ user, title, description, backTo, children }: AppShel
     <div className="flex h-svh overflow-hidden bg-background text-foreground">
       <AppSidebar user={user} />
       <main className="flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-3xl px-8 py-10">
+        <div className="mx-auto max-w-3xl px-4 pt-14 pb-6 sm:px-8 sm:py-10">
           {backTo && (
             <Link
               to={backTo.to}
@@ -83,7 +83,7 @@ export function SettingsRow({
   comingSoon,
 }: SettingsRowProps) {
   return (
-    <div className="flex items-center justify-between gap-6 border-b border-border px-4 py-3 last:border-b-0">
+    <div className="flex flex-col gap-2 border-b border-border px-4 py-3 last:border-b-0 sm:flex-row sm:items-center sm:justify-between sm:gap-6">
       <label className="flex flex-col gap-0.5" htmlFor={htmlFor}>
         <span className="flex items-center gap-2">
           <span
@@ -103,7 +103,7 @@ export function SettingsRow({
           <span className="text-xs text-muted-foreground">{description}</span>
         )}
       </label>
-      <div className={`shrink-0 ${comingSoon ? "opacity-50" : ""}`}>{control}</div>
+      <div className={`sm:shrink-0 ${comingSoon ? "opacity-50" : ""}`}>{control}</div>
     </div>
   );
 }

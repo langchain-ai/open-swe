@@ -20,6 +20,9 @@ function readStoredWidth(): number {
 
 function readStoredCollapsed(): boolean {
   if (typeof window === "undefined") return false;
+  // On mobile the sidebar is a full-screen overlay, so start collapsed to keep
+  // the chat visible regardless of the stored desktop preference.
+  if (window.matchMedia("(max-width: 767px)").matches) return true;
   return window.localStorage.getItem(STORAGE_COLLAPSED) === "1";
 }
 
@@ -40,7 +43,13 @@ export function useSidebarLayout() {
 
   const toggle = useCallback(() => setCollapsed(!collapsed), [collapsed, setCollapsed]);
 
-  return { width, collapsed, setWidth, setCollapsed, toggle };
+  const closeOnMobile = useCallback(() => {
+    if (typeof window === "undefined") return;
+    // State-only: don't persist, so the desktop collapsed preference is preserved.
+    if (window.matchMedia("(max-width: 767px)").matches) setCollapsedState(true);
+  }, []);
+
+  return { width, collapsed, setWidth, setCollapsed, toggle, closeOnMobile };
 }
 
 interface SidebarFrameProps {
@@ -76,10 +85,16 @@ export function SidebarFrame({
   return (
     <aside
       style={{ width }}
-      className={cn("relative flex h-svh shrink-0 flex-col", className)}
+      className={cn(
+        "relative flex h-svh shrink-0 flex-col",
+        "max-md:fixed max-md:inset-0 max-md:z-40 max-md:!w-full",
+        className,
+      )}
     >
       {children}
-      <ResizeHandle width={width} onResize={setWidth} />
+      <div className="max-md:hidden">
+        <ResizeHandle width={width} onResize={setWidth} />
+      </div>
     </aside>
   );
 }

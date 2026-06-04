@@ -69,25 +69,29 @@ export function AgentRunCard({ thread }: AgentRunCardProps) {
 
       <div className="min-w-0 flex-1">
         <div className="truncate text-sm font-medium text-[var(--ui-text)]">{thread.title}</div>
-        <div className="mt-1 flex items-center gap-2 text-xs text-[var(--ui-text-dim)]">
+        <div className="mt-1 flex min-w-0 items-center gap-2 text-xs text-[var(--ui-text-dim)]">
           {source && SourceIcon && (
             <>
-              <span className="flex items-center gap-1" title={source.label}>
+              <span className="flex shrink-0 items-center gap-1" title={source.label}>
                 <SourceIcon className="size-3.5" aria-label={source.label} />
                 {source.label}
               </span>
-              <span>·</span>
+              <span className="shrink-0">·</span>
             </>
           )}
-          <span>{thread.model}</span>
+          <span className="min-w-0 truncate" title={thread.model}>
+            {thread.model}
+          </span>
           {thread.repo && (
             <>
-              <span>·</span>
-              <span>{thread.repo}</span>
+              <span className="shrink-0">·</span>
+              <span className="min-w-0 truncate" title={thread.repo}>
+                {thread.repo}
+              </span>
             </>
           )}
-          <span>·</span>
-          <span>{formatRelativeTime(thread.updatedAt)}</span>
+          <span className="shrink-0">·</span>
+          <span className="shrink-0 whitespace-nowrap">{formatRelativeTime(thread.updatedAt)}</span>
         </div>
       </div>
 

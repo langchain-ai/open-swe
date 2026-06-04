@@ -59,6 +59,7 @@ export function AgentsSidebar({ user, activeThreadId }: AgentsSidebarProps) {
       <div className="px-2 pb-1">
         <Link
           to="/agents"
+          onClick={layout.closeOnMobile}
           className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-[var(--ui-text)] transition-colors hover:bg-[var(--ui-sidebar-hover)]"
         >
           <PlusIcon className="size-4" />
@@ -73,6 +74,7 @@ export function AgentsSidebar({ user, activeThreadId }: AgentsSidebarProps) {
             <Link
               key={item.to}
               to={item.to}
+              onClick={layout.closeOnMobile}
               className="flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-xs text-[var(--ui-text-muted)] transition-colors hover:bg-[var(--ui-sidebar-hover)] hover:text-[var(--ui-text)]"
             >
               <Icon className="size-4" />
@@ -83,9 +85,24 @@ export function AgentsSidebar({ user, activeThreadId }: AgentsSidebarProps) {
       </nav>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
-        <ThreadGroup label="Today" threads={groups.today} activeThreadId={activeThreadId} />
-        <ThreadGroup label="Last 30 days" threads={groups.last30} activeThreadId={activeThreadId} />
-        <ThreadGroup label="Older" threads={groups.older} activeThreadId={activeThreadId} />
+        <ThreadGroup
+          label="Today"
+          threads={groups.today}
+          activeThreadId={activeThreadId}
+          onNavigate={layout.closeOnMobile}
+        />
+        <ThreadGroup
+          label="Last 30 days"
+          threads={groups.last30}
+          activeThreadId={activeThreadId}
+          onNavigate={layout.closeOnMobile}
+        />
+        <ThreadGroup
+          label="Older"
+          threads={groups.older}
+          activeThreadId={activeThreadId}
+          onNavigate={layout.closeOnMobile}
+        />
       </div>
 
       <div className="p-2">
@@ -99,10 +116,12 @@ function ThreadGroup({
   label,
   threads,
   activeThreadId,
+  onNavigate,
 }: {
   label: string;
   threads: Array<AgentThread>;
   activeThreadId?: string;
+  onNavigate?: () => void;
 }) {
   if (threads.length === 0) return null;
 
@@ -112,13 +131,26 @@ function ThreadGroup({
         {label}
       </div>
       {threads.map((thread) => (
-        <ThreadRow key={thread.id} thread={thread} isActive={thread.id === activeThreadId} />
+        <ThreadRow
+          key={thread.id}
+          thread={thread}
+          isActive={thread.id === activeThreadId}
+          onNavigate={onNavigate}
+        />
       ))}
     </div>
   );
 }
 
-function ThreadRow({ thread, isActive }: { thread: AgentThread; isActive: boolean }) {
+function ThreadRow({
+  thread,
+  isActive,
+  onNavigate,
+}: {
+  thread: AgentThread;
+  isActive: boolean;
+  onNavigate?: () => void;
+}) {
   const deleteThread = useDeleteAgentThread();
   const badge =
     thread.diffStats && thread.diffStats.additions > 0
@@ -141,6 +173,7 @@ function ThreadRow({ thread, isActive }: { thread: AgentThread; isActive: boolea
     <Link
       to="/agents/$threadId"
       params={{ threadId: thread.id }}
+      onClick={onNavigate}
       className={cn(
         "group mb-0.5 flex items-center gap-2 rounded-lg px-2.5 py-1.5 transition-colors",
         isActive
