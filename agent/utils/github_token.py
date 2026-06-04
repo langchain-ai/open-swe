@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Mapping
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from langgraph.config import get_config
@@ -14,7 +14,11 @@ logger = logging.getLogger(__name__)
 # Treat tokens with <= this many seconds remaining as expired so we re-auth
 # before kicking off long agent runs.
 _GITHUB_TOKEN_EXPIRY_SKEW_SECONDS = 60
-_GITHUB_TOKEN_CACHE: dict[str, tuple[str, str | None]] = {}
+# Hard cap on how long an entry stays cached regardless of the token's own
+# expiry, so entries for threads that are never read again don't accumulate.
+_GITHUB_TOKEN_MAX_TTL = timedelta(hours=24)
+# thread_id -> (token, token_expires_at, cached_at)
+_GITHUB_TOKEN_CACHE: dict[str, tuple[str, str | None, datetime]] = {}
 
 
 class GitHubAuthError(Exception):
@@ -27,7 +31,9 @@ def cache_github_token_for_thread(
     """Cache a GitHub token in process for the current thread."""
     if not thread_id or not token:
         return
-    _GITHUB_TOKEN_CACHE[thread_id] = (token, expires_at)
+    now = datetime.now(UTC)
+    _GITHUB_TOKEN_CACHE[thread_id] = (token, expires_at, now)
+    _evict_expired(now=now)
 
 
 def _is_expired(expires_at: Any, *, now: datetime | None = None) -> bool:
@@ -61,14 +67,32 @@ def _is_expired(expires_at: Any, *, now: datetime | None = None) -> bool:
     return (parsed - current).total_seconds() <= _GITHUB_TOKEN_EXPIRY_SKEW_SECONDS
 
 
+def _entry_expired(expires_at: str | None, cached_at: datetime, *, now: datetime) -> bool:
+    """Expired when past the token's own expiry or the 24h cache cap."""
+    if now - cached_at >= _GITHUB_TOKEN_MAX_TTL:
+        return True
+    return _is_expired(expires_at, now=now)
+
+
+def _evict_expired(*, now: datetime | None = None) -> None:
+    current = now or datetime.now(UTC)
+    stale = [
+        tid
+        for tid, (_token, expires_at, cached_at) in _GITHUB_TOKEN_CACHE.items()
+        if _entry_expired(expires_at, cached_at, now=current)
+    ]
+    for tid in stale:
+        _GITHUB_TOKEN_CACHE.pop(tid, None)
+
+
 def _cached_token_if_fresh(thread_id: str | None) -> tuple[str | None, str | None]:
     if not thread_id:
         return None, None
     cached = _GITHUB_TOKEN_CACHE.get(thread_id)
     if not cached:
         return None, None
-    token, expires_at = cached
-    if _is_expired(expires_at):
+    token, expires_at, cached_at = cached
+    if _entry_expired(expires_at, cached_at, now=datetime.now(UTC)):
         _GITHUB_TOKEN_CACHE.pop(thread_id, None)
         logger.info("Cached GitHub token for thread %s has expired; re-resolving", thread_id)
         return None, None

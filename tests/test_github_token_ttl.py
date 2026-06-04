@@ -65,6 +65,23 @@ def test_get_github_token_returns_cached_token_when_no_expires_at() -> None:
     assert github_token.get_github_token({"configurable": {"thread_id": "tid"}}) == "ghp_secret"
 
 
+def test_cached_token_expires_after_max_ttl() -> None:
+    """A token with no/far expiry is still dropped once it's older than the 24h cap."""
+    far_future = (datetime.now(UTC) + timedelta(days=30)).isoformat()
+    old_cached_at = datetime.now(UTC) - timedelta(hours=25)
+    github_token._GITHUB_TOKEN_CACHE["tid"] = ("ghp_secret", far_future, old_cached_at)
+    assert github_token.get_github_token({"configurable": {"thread_id": "tid"}}) is None
+
+
+def test_cache_write_sweeps_other_expired_entries() -> None:
+    """Writing one entry evicts unrelated entries that have passed their expiry."""
+    past = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
+    github_token.cache_github_token_for_thread("stale", "ghp_stale", expires_at=past)
+    github_token.cache_github_token_for_thread("fresh", "ghp_fresh")
+    assert "stale" not in github_token._GITHUB_TOKEN_CACHE
+    assert "fresh" in github_token._GITHUB_TOKEN_CACHE
+
+
 @pytest.mark.asyncio
 async def test_get_github_token_from_thread_skips_expired() -> None:
     past = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
