@@ -1,19 +1,17 @@
 import { useEffect, useMemo, useState } from "react";
 import { FolderIcon } from "@phosphor-icons/react";
 
+import type { SessionUser } from "@/lib/api";
+import type { PendingPrompt } from "@/lib/agents/pendingPrompts";
+import type { AgentThread, Message } from "@/lib/agents/types";
+import type { ModelSelection } from "@/lib/agents/useModelOptions";
 import { AgentPromptBar } from "@/components/agents/AgentPromptBar";
 import { AgentsShell } from "@/components/agents/AgentsSidebar";
 import { MessageView } from "@/components/agents/ported";
-import type { SessionUser } from "@/lib/api";
-import type { AgentThread, Message } from "@/lib/agents/types";
 import { useSendAgentMessage } from "@/lib/agents/queries";
-import {
-  dropPendingPrompts,
-  getPendingPrompts,
-  type PendingPrompt,
-} from "@/lib/agents/pendingPrompts";
+import { dropPendingPrompts, getPendingPrompts } from "@/lib/agents/pendingPrompts";
 import { useAgentThreadStream } from "@/lib/agents/useThreadStream";
-import { useModelOptions, type ModelSelection } from "@/lib/agents/useModelOptions";
+import { useModelOptions } from "@/lib/agents/useModelOptions";
 
 interface AgentThreadViewProps {
   user: SessionUser;
@@ -23,7 +21,7 @@ interface AgentThreadViewProps {
 export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
   const sendMessage = useSendAgentMessage(thread.id);
   useAgentThreadStream(thread.id, thread.status === "running");
-  const [pendingPrompts, setPendingPrompts] = useState<PendingPrompt[]>(() =>
+  const [pendingPrompts, setPendingPrompts] = useState<Array<PendingPrompt>>(() =>
     getPendingPrompts(thread.id),
   );
 
@@ -37,12 +35,7 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
     return { modelId: thread.model, effort: thread.effort };
   }, [models, thread.model, thread.effort]);
   const [selection, setSelection] = useState<ModelSelection | null>(null);
-
-  useEffect(() => {
-    if (selection !== null) return;
-    if (threadSelection) setSelection(threadSelection);
-    else if (defaultSelection) setSelection(defaultSelection);
-  }, [defaultSelection, selection, threadSelection]);
+  const activeSelection = selection ?? threadSelection ?? defaultSelection;
 
   const userMessageTexts = useMemo(() => {
     return new Set(
@@ -51,7 +44,7 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
         .map((m) =>
           m.chunks
             .filter((c) => c.kind === "text")
-            .map((c) => (c as { kind: "text"; text: string }).text)
+            .map((c) => c.text)
             .join(""),
         ),
     );
@@ -67,7 +60,7 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
     });
   }, [thread.id, userMessageTexts]);
 
-  const displayMessages = useMemo<Message[]>(() => {
+  const displayMessages = useMemo<Array<Message>>(() => {
     if (pendingPrompts.length === 0) return thread.messages;
     const baseTimestamp = new Date().toISOString();
     const result = thread.messages.slice();
@@ -119,12 +112,12 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
                     onSubmit={(content) =>
                       sendMessage.mutate({
                         content,
-                        model_id: selection?.modelId ?? null,
-                        effort: selection?.effort ?? null,
+                        model_id: activeSelection?.modelId ?? null,
+                        effort: activeSelection?.effort ?? null,
                       })
                     }
                     models={models}
-                    selection={selection ?? threadSelection ?? defaultSelection}
+                    selection={activeSelection}
                     onSelectionChange={setSelection}
                   />
                 </div>
@@ -142,12 +135,12 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
                   onSubmit={(content) =>
                     sendMessage.mutate({
                       content,
-                      model_id: selection?.modelId ?? null,
-                      effort: selection?.effort ?? null,
+                      model_id: activeSelection?.modelId ?? null,
+                      effort: activeSelection?.effort ?? null,
                     })
                   }
                   models={models}
-                  selection={selection ?? threadSelection ?? defaultSelection}
+                  selection={activeSelection}
                   onSelectionChange={setSelection}
                 />
               </div>
