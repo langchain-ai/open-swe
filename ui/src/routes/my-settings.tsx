@@ -5,6 +5,7 @@ import { IoLogoSlack } from "react-icons/io5"
 
 import type { SessionUser } from "@/lib/api"
 import { AppShell, SettingsRow, SettingsSection } from "@/components/AppShell"
+import { SkillsSection } from "@/components/SkillsSection"
 import { Button } from "@/components/ui/button"
 import {
   Select,
@@ -212,6 +213,8 @@ function MySettingsPage() {
           }
         />
       </SettingsSection>
+
+      <SkillsSection />
 
       <SettingsSection title="Account">
         <SettingsRow

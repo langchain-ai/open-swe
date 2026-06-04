@@ -58,6 +58,14 @@ from .review_styles import (
     normalize_repo_full_name,
     set_custom_prompt,
 )
+from .skills import (
+    SkillPayload,
+    create_user_skill,
+    delete_user_skill,
+    get_user_skill,
+    list_user_skills,
+    update_user_skill,
+)
 from .slack_oauth import (
     SLACK_STATE_COOKIE_NAME,
     build_authorize_url,
@@ -763,6 +771,50 @@ async def api_delete_review_style(
         await cancel_review_style_analysis(full_name)
     await remove_continual_cron(full_name)
     await delete_review_style(full_name)
+    return Response(status_code=204)
+
+
+@router.get("/skills")
+async def api_list_skills(
+    session: dict[str, Any] = _SESSION_DEP,
+) -> list[dict[str, Any]]:
+    return await list_user_skills(session["sub"])
+
+
+@router.post("/skills")
+async def api_create_skill(
+    body: SkillPayload,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    return await create_user_skill(session["sub"], body)
+
+
+@router.get("/skills/{name}")
+async def api_get_skill(
+    name: str,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    skill = await get_user_skill(session["sub"], name)
+    if skill is None:
+        raise HTTPException(404, "skill not found")
+    return skill
+
+
+@router.put("/skills/{name}")
+async def api_update_skill(
+    name: str,
+    body: SkillPayload,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    return await update_user_skill(session["sub"], name, body)
+
+
+@router.delete("/skills/{name}")
+async def api_delete_skill(
+    name: str,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> Response:
+    await delete_user_skill(session["sub"], name)
     return Response(status_code=204)
 
 

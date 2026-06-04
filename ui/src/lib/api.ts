@@ -171,6 +171,12 @@ export interface ReviewStyle {
   updated_at?: string;
 }
 
+export interface Skill {
+  name: string;
+  description: string;
+  body: string;
+}
+
 export const api = {
   me: () => request<SessionUser>("/me"),
   options: () => request<{ models: Array<ModelOption> }>("/options"),
@@ -213,6 +219,16 @@ export const api = {
       method: "PUT",
       body: JSON.stringify({ full_name, enabled }),
     }),
+  listSkills: () => request<Array<Skill>>("/skills"),
+  createSkill: (body: Skill) =>
+    request<Skill>("/skills", { method: "POST", body: JSON.stringify(body) }),
+  updateSkill: (name: string, body: Skill) =>
+    request<Skill>(`/skills/${encodeURIComponent(name)}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  deleteSkill: (name: string) =>
+    request<void>(`/skills/${encodeURIComponent(name)}`, { method: "DELETE" }),
   myMapping: () => request<Partial<UserMapping>>("/my-mapping"),
   adminListUserMappings: (page = 1, pageSize = 20) =>
     request<UserMappingsPage>(
