@@ -91,6 +91,7 @@ from .user_mappings import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/dashboard/api", tags=["dashboard"])
+_GITHUB_API_TIMEOUT = httpx.Timeout(10.0, connect=3.0)
 
 
 def _require_admin(session: dict[str, Any]) -> dict[str, Any]:
@@ -466,10 +467,25 @@ async def _paginate(
     first = True
     while next_url and len(out) < cap:
         params = {"per_page": "100"} if first else None
-        r = await client.get(next_url, headers=headers, params=params)
+        try:
+            r = await client.get(next_url, headers=headers, params=params)
+        except httpx.TimeoutException as exc:
+            logger.warning("GitHub API timed out while paginating %s", next_url)
+            raise HTTPException(503, "github API request timed out") from exc
+        except httpx.RequestError as exc:
+            logger.warning("GitHub API request failed while paginating %s: %s", next_url, exc)
+            raise HTTPException(502, "github API request failed") from exc
         if r.status_code == 401:
             raise HTTPException(401, "github token expired, re-login required")
-        r.raise_for_status()
+        try:
+            r.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            logger.warning(
+                "GitHub API returned %s while paginating %s",
+                r.status_code,
+                next_url,
+            )
+            raise HTTPException(502, f"github API error ({r.status_code})") from exc
         body = r.json()
         page = body.get(items_key, []) if items_key else body
         if isinstance(page, list):
@@ -498,7 +514,7 @@ async def list_repos(
         "Accept": "application/vnd.github+json",
         "X-GitHub-Api-Version": "2022-11-28",
     }
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=_GITHUB_API_TIMEOUT) as client:
         try:
             installations = await _paginate(
                 client,
@@ -531,9 +547,10 @@ async def list_repos(
                     headers=headers,
                     items_key="repositories",
                 )
-            except HTTPException:
-                raise
-            except httpx.HTTPStatusError:
+            except HTTPException as exc:
+                if exc.status_code == 401:
+                    raise
+                logger.warning("Skipping installation %s repository list: %s", inst_id, exc.detail)
                 continue
             repositories.extend(repos)
     return {

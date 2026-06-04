@@ -48,14 +48,9 @@ async def test_agent_uses_profile_subagent_model_override() -> None:
             return_value="/workspace",
         ),
         patch(
-            "agent.server.get_team_default_model",
+            "agent.server.get_team_default_model_pair",
             new_callable=AsyncMock,
-            return_value=("openai:gpt-5.5", "medium"),
-        ),
-        patch(
-            "agent.server.get_team_default_subagent_model",
-            new_callable=AsyncMock,
-            return_value=("openai:gpt-5.5", "low"),
+            return_value=(("openai:gpt-5.5", "medium"), ("openai:gpt-5.5", "low")),
         ),
         patch(
             "agent.server.load_profile",
@@ -126,14 +121,9 @@ async def test_agent_subagent_inherits_profile_model_override_without_explicit_p
             return_value="/workspace",
         ),
         patch(
-            "agent.server.get_team_default_model",
+            "agent.server.get_team_default_model_pair",
             new_callable=AsyncMock,
-            return_value=("openai:gpt-5.5", "medium"),
-        ),
-        patch(
-            "agent.server.get_team_default_subagent_model",
-            new_callable=AsyncMock,
-            return_value=("openai:gpt-5.5", "low"),
+            return_value=(("openai:gpt-5.5", "medium"), ("openai:gpt-5.5", "low")),
         ),
         patch(
             "agent.server.load_profile",

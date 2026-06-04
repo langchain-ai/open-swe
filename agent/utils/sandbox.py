@@ -1,20 +1,30 @@
 import os
+from collections.abc import Callable
+from importlib import import_module
 
 from deepagents.backends.protocol import SandboxBackendProtocol
 
-from agent.integrations.daytona import create_daytona_sandbox
-from agent.integrations.langsmith import create_langsmith_sandbox
-from agent.integrations.local import create_local_sandbox
-from agent.integrations.modal import create_modal_sandbox
-from agent.integrations.runloop import create_runloop_sandbox
+SandboxFactory = Callable[[str | None], SandboxBackendProtocol]
 
-SANDBOX_FACTORIES = {
-    "langsmith": create_langsmith_sandbox,
-    "daytona": create_daytona_sandbox,
-    "modal": create_modal_sandbox,
-    "runloop": create_runloop_sandbox,
-    "local": create_local_sandbox,
+SANDBOX_FACTORIES: dict[str, tuple[str, str]] = {
+    "langsmith": ("agent.integrations.langsmith", "create_langsmith_sandbox"),
+    "daytona": ("agent.integrations.daytona", "create_daytona_sandbox"),
+    "modal": ("agent.integrations.modal", "create_modal_sandbox"),
+    "runloop": ("agent.integrations.runloop", "create_runloop_sandbox"),
+    "local": ("agent.integrations.local", "create_local_sandbox"),
 }
+
+
+def _load_sandbox_factory(sandbox_type: str) -> SandboxFactory:
+    factory_path = SANDBOX_FACTORIES.get(sandbox_type)
+    if factory_path is None:
+        supported = ", ".join(sorted(SANDBOX_FACTORIES))
+        raise ValueError(f"Invalid sandbox type: {sandbox_type}. Supported types: {supported}")
+    module_name, function_name = factory_path
+    factory = getattr(import_module(module_name), function_name)
+    if not callable(factory):
+        raise TypeError(f"Sandbox factory {module_name}.{function_name} is not callable")
+    return factory
 
 
 def create_sandbox(sandbox_id: str | None = None) -> SandboxBackendProtocol:
@@ -30,10 +40,7 @@ def create_sandbox(sandbox_id: str | None = None) -> SandboxBackendProtocol:
         A sandbox backend implementing SandboxBackendProtocol.
     """
     sandbox_type = os.getenv("SANDBOX_TYPE", "langsmith")
-    factory = SANDBOX_FACTORIES.get(sandbox_type)
-    if not factory:
-        supported = ", ".join(sorted(SANDBOX_FACTORIES))
-        raise ValueError(f"Invalid sandbox type: {sandbox_type}. Supported types: {supported}")
+    factory = _load_sandbox_factory(sandbox_type)
     return factory(sandbox_id)
 
 
