@@ -18,18 +18,18 @@ export function AppShell({ user, title, description, backTo, children }: AppShel
     <div className="flex h-svh overflow-hidden bg-background text-foreground">
       <AppSidebar user={user} />
       <main className="flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-3xl px-4 py-6 sm:px-8 sm:py-10">
+        <div className="mx-auto max-w-3xl px-4 pt-14 pb-6 sm:px-8 sm:py-10">
           {backTo && (
             <Link
               to={backTo.to}
-              className="mb-4 inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground max-md:pl-9"
+              className="mb-4 inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
             >
               <ArrowLeftIcon className="size-3.5" />
               {backTo.label}
             </Link>
           )}
           <header className="mb-8">
-            <h1 className="font-heading text-lg font-medium max-md:pl-9">{title}</h1>
+            <h1 className="font-heading text-lg font-medium">{title}</h1>
             {description && (
               <p className="mt-1 text-xs text-muted-foreground">{description}</p>
             )}
