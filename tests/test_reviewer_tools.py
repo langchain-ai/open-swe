@@ -104,6 +104,24 @@ def test_add_finding_rejects_out_of_diff_lines() -> None:
     assert "not part of the PR diff" in result["error"]
 
 
+def test_add_finding_out_of_diff_rejection_includes_nearby_in_diff_hint() -> None:
+    with patch("agent.tools.add_finding.get_config", return_value=_config()):
+        result = add_finding(
+            severity="high",
+            confidence="high",
+            category="correctness",
+            file="foo.py",
+            title="Generated title",
+            description="d",
+            start_line=99,
+            end_line=99,
+        )
+    assert result["success"] is False
+    assert "not part of the PR diff" in result["error"]
+    # foo.py has RIGHT lines 10-40 in diff; rejection should point there.
+    assert "In-diff RIGHT lines for this file: 10-40" in result["error"]
+
+
 def test_add_finding_accepts_left_side_anchor_on_old_line() -> None:
     """A finding on a deleted (LEFT-side) line must validate against the
     old-side line set, not the new-side. With only RIGHT lines in 10..40,

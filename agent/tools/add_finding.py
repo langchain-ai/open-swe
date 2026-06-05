@@ -118,13 +118,14 @@ def add_finding(
     if isinstance(diff_line_set, dict) and not is_range_in_diff(
         diff_line_set, file, start_line, end_line, side=_cast_side(side)
     ):
-        return {
-            "success": False,
-            "error": (
-                f"Finding range {file}:{start_line}-{end_line} is not part of the PR diff. "
-                "Only review changes the PR introduces; do not flag pre-existing code."
-            ),
-        }
+        error = (
+            f"Finding range {file}:{start_line}-{end_line} is not part of the PR diff. "
+            "Only review changes the PR introduces; do not flag pre-existing code."
+        )
+        hint = _in_diff_lines_hint(diff_line_set, file, _cast_side(side), start_line)
+        if hint:
+            error += f" In-diff {side} lines for this file: {hint}."
+        return {"success": False, "error": error}
 
     diff_hunk: str | None = None
     if isinstance(diff_text, str) and diff_text:
@@ -174,3 +175,28 @@ def _cast_confidence(value: str) -> Confidence:
 
 def _cast_side(value: str) -> DiffSide:
     return value  # type: ignore[return-value]
+
+
+def _in_diff_lines_hint(
+    diff_line_set: dict[str, Any],
+    file: str,
+    side: DiffSide,
+    near: int | None,
+    max_ranges: int = 3,
+) -> str:
+    """Render up to ``max_ranges`` in-diff line ranges for ``file`` on ``side``,
+    nearest to ``near`` first, so a rejected finding can be re-anchored without
+    guessing. Returns "" when the file has no in-diff lines on that side."""
+    file_sides = diff_line_set.get(file)
+    side_lines = file_sides.get(side) if isinstance(file_sides, dict) else None
+    if not side_lines:
+        return ""
+    ranges: list[tuple[int, int]] = []
+    for line in sorted(side_lines):
+        if ranges and line == ranges[-1][1] + 1:
+            ranges[-1] = (ranges[-1][0], line)
+        else:
+            ranges.append((line, line))
+    if near is not None:
+        ranges.sort(key=lambda r: min(abs(near - r[0]), abs(near - r[1])))
+    return ", ".join(f"{s}-{e}" if s != e else f"{s}" for s, e in ranges[:max_ranges])
