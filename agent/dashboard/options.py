@@ -69,6 +69,20 @@ def _provider_of(model_id: str) -> str | None:
     return provider if rest else None
 
 
+def _fallback_effort_for(model: ModelOption, effort: object) -> str | None:
+    if not isinstance(effort, str):
+        return None
+    if effort in model["efforts"]:
+        return effort
+    if (
+        model["id"].startswith("google_genai:")
+        and effort == "none"
+        and "minimal" in model["efforts"]
+    ):
+        return "minimal"
+    return None
+
+
 def provider_fallback_pair(model_id: object, effort: object = None) -> tuple[str, str] | None:
     """Newest supported ``(model_id, effort)`` for the same provider as ``model_id``.
 
@@ -85,8 +99,7 @@ def provider_fallback_pair(model_id: object, effort: object = None) -> tuple[str
         return None
     for m in SUPPORTED_MODELS:
         if _provider_of(m["id"]) == provider:
-            new_effort = effort if (isinstance(effort, str) and effort in m["efforts"]) else None
-            return m["id"], new_effort or m["default_effort"]
+            return m["id"], _fallback_effort_for(m, effort) or m["default_effort"]
     return None
 
 

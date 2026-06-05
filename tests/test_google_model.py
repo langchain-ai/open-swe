@@ -33,6 +33,13 @@ def test_google_provider_fallback_uses_gemini_35_flash() -> None:
     )
 
 
+def test_google_provider_fallback_maps_legacy_none_to_minimal() -> None:
+    assert provider_fallback_pair("google_genai:gemini-3-flash-preview", "none") == (
+        "google_genai:gemini-3.5-flash",
+        "minimal",
+    )
+
+
 def test_provider_model_kwargs_for_google() -> None:
     kwargs = provider_model_kwargs(
         "google_genai:gemini-3.5-flash",
