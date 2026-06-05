@@ -109,6 +109,7 @@ export interface TeamSettings {
   review_trace_links: boolean;
   autofix_mode: AutofixMode;
   autofix_severity_threshold: AutofixMode;
+  org_guidelines?: string | null;
   default_agent_model?: string | null;
   default_agent_reasoning_effort?: string | null;
   default_agent_subagent_model?: string | null;

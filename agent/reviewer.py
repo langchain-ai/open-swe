@@ -31,7 +31,7 @@ warnings.filterwarnings("ignore", message=".*Pydantic V1.*", category=UserWarnin
 from deepagents import create_deep_agent
 from langchain.agents.middleware import ModelCallLimitMiddleware
 
-from .dashboard.team_settings import get_team_default_model_pair
+from .dashboard.team_settings import get_org_review_guidelines, get_team_default_model_pair
 from .middleware import (
     SanitizeThinkingBlocksMiddleware,
     SanitizeToolInputsMiddleware,
@@ -275,6 +275,7 @@ def _reviewer_system_prompt(
     repo_name: str,
     pr_number: int | str,
     reviewer_eval: bool = False,
+    org_guidelines: str | None = None,
     repo_style_prompt: str | None = None,
     agents_md_content: str | None = None,
 ) -> str:
@@ -286,6 +287,17 @@ def _reviewer_system_prompt(
     )
     if reviewer_eval:
         prompt = f"{prompt}\n{REVIEWER_EVAL_PROMPT_SUFFIX}"
+    if org_guidelines:
+        prompt = (
+            f"{prompt}\n\n"
+            "# Organization-wide review guidelines\n\n"
+            "These guidelines were set by a workspace admin and apply to every "
+            "repository this reviewer covers. Apply them when they agree with the "
+            "global bar above; they refine tone, severity, and what this "
+            "organization typically flags. Repository-specific rules below take "
+            "precedence when they conflict.\n\n"
+            f"{org_guidelines}"
+        )
     if repo_style_prompt:
         prompt = (
             f"{prompt}\n\n"
@@ -743,6 +755,13 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
 
         return await get_repo_custom_prompt(repo_owner, repo_name)
 
+    async def _fetch_org_guidelines() -> str | None:
+        try:
+            return await get_org_review_guidelines()
+        except Exception:  # noqa: BLE001
+            logger.exception("Failed to load org-wide review guidelines; continuing without them")
+            return None
+
     async def _fetch_agents_md_context() -> str | None:
         if not repo_owner or not repo_name or not base_sha:
             return None
@@ -768,12 +787,14 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
         existing_threads_block,
         repo_style_prompt,
         agents_md_content,
+        org_guidelines,
     ) = await asyncio.gather(
         _fetch_diff_context(),
         _fetch_pr_overview(),
         _fetch_existing_threads_block(),
         _fetch_repo_style_prompt(),
         _fetch_agents_md_context(),
+        _fetch_org_guidelines(),
     )
     pr_diff_text, pr_diff_line_set = diff_context
     pr_title, pr_body = pr_overview
@@ -879,6 +900,7 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
         repo_name=repo_name,
         pr_number=pr_number if isinstance(pr_number, int) else "",
         reviewer_eval=reviewer_eval,
+        org_guidelines=org_guidelines,
         repo_style_prompt=repo_style_prompt,
         agents_md_content=agents_md_content,
     )

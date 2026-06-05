@@ -36,6 +36,32 @@ def test_reviewer_system_prompt_includes_repo_style_section() -> None:
     assert "missing tests for API" in prompt
 
 
+def test_reviewer_system_prompt_includes_org_guidelines_section() -> None:
+    prompt = reviewer._reviewer_system_prompt(
+        "/workspace/repo",
+        repo_owner="acme",
+        repo_name="repo",
+        pr_number=42,
+        org_guidelines="Flag any new endpoint that lacks input validation.",
+    )
+    assert "Organization-wide review guidelines" in prompt
+    assert "lacks input validation" in prompt
+
+
+def test_reviewer_system_prompt_org_guidelines_precede_repo_style() -> None:
+    prompt = reviewer._reviewer_system_prompt(
+        "/workspace/repo",
+        repo_owner="acme",
+        repo_name="repo",
+        pr_number=42,
+        org_guidelines="Org rule text.",
+        repo_style_prompt="Repo rule text.",
+    )
+    assert prompt.index("Organization-wide review guidelines") < prompt.index(
+        "Repository-specific review style"
+    )
+
+
 def test_finding_reply_context_wraps_reply_as_untrusted_data() -> None:
     prompt = reviewer._build_finding_reply_context(
         pr_url="https://github.com/acme/repo/pull/1",
@@ -336,6 +362,67 @@ async def test_reviewer_injects_repo_style_during_eval() -> None:
 
     assert "Repository-specific review style" in captured["system_prompt"]
     assert "Flag table rerender regressions" in captured["system_prompt"]
+
+
+@pytest.mark.asyncio
+async def test_reviewer_inlines_org_guidelines_into_system_prompt() -> None:
+    config: RunnableConfig = {
+        "configurable": {
+            "__is_for_execution__": True,
+            "thread_id": "reviewer-thread-id",
+            "source": "github",
+            "repo": {"owner": "acme", "name": "repo"},
+            "pr_number": 9,
+            "pr_url": "https://github.com/acme/repo/pull/9",
+            "base_sha": "base",
+            "head_sha": "head",
+        },
+        "metadata": {},
+    }
+    captured: dict[str, str] = {}
+
+    def fake_create_deep_agent(*, system_prompt: str, **kwargs: object) -> _DummyAgent:
+        captured["system_prompt"] = system_prompt
+        return _DummyAgent()
+
+    with (
+        patch(
+            "agent.reviewer.get_github_app_installation_token_with_expiry",
+            new_callable=AsyncMock,
+            return_value=("gh-token", None),
+        ),
+        patch(
+            "agent.reviewer.ensure_sandbox_for_thread",
+            new_callable=AsyncMock,
+            return_value=MagicMock(),
+        ),
+        patch(
+            "agent.reviewer.aresolve_sandbox_work_dir",
+            new_callable=AsyncMock,
+            return_value="/workspace",
+        ),
+        patch(
+            "agent.reviewer.get_org_review_guidelines",
+            new_callable=AsyncMock,
+            return_value="Never approve a PR that disables a CI gate.",
+        ),
+        patch(
+            "agent.dashboard.review_styles.get_repo_custom_prompt",
+            new_callable=AsyncMock,
+            return_value=None,
+        ),
+        patch(
+            "agent.reviewer.fetch_agents_md",
+            new_callable=AsyncMock,
+            return_value=None,
+        ),
+        patch("agent.reviewer.make_model", return_value=MagicMock()),
+        patch("agent.reviewer.create_deep_agent", side_effect=fake_create_deep_agent),
+    ):
+        await reviewer.get_reviewer_agent(config)
+
+    assert "Organization-wide review guidelines" in captured["system_prompt"]
+    assert "disables a CI gate" in captured["system_prompt"]
 
 
 def test_reviewer_system_prompt_includes_agents_md_section() -> None:
