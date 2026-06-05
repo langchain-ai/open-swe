@@ -26,6 +26,12 @@ SUPPORTED_MODELS: list[ModelOption] = [
         "default_effort": "xhigh",
     },
     {
+        "id": "google_genai:gemini-3.5-flash",
+        "label": "Gemini 3.5 Flash",
+        "efforts": ["minimal", "low", "medium", "high"],
+        "default_effort": "medium",
+    },
+    {
         "id": "fireworks:accounts/fireworks/models/kimi-k2p6",
         "label": "Kimi K2.6",
         "efforts": ["none", "low", "medium", "high"],

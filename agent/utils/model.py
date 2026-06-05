@@ -126,7 +126,7 @@ def fireworks_reasoning_effort_for(profile_effort: str | None) -> FireworksReaso
 
 def google_thinking_level_for(profile_effort: str | None) -> GoogleThinkingLevel | None:
     """Map profile effort to Gemini 3+ ``thinking_level``."""
-    if profile_effort == "none":
+    if profile_effort in ("minimal", "none"):
         return "minimal"
     if profile_effort == "low":
         return "low"
