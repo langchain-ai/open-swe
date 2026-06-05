@@ -3,6 +3,7 @@ import {
   CalendarBlankIcon,
   ChartLineUpIcon,
   ChatCircleIcon,
+  LightningIcon,
   PlusIcon,
   XIcon,
 } from "@phosphor-icons/react"
@@ -38,6 +39,7 @@ interface AgentsSidebarProps {
 }
 
 const NAV = [
+  { to: "/agents/automations", label: "Automations", icon: LightningIcon },
   { to: "/my-settings", label: "Dashboard", icon: ChartLineUpIcon },
 ] as const
 
@@ -83,6 +85,10 @@ export function AgentsSidebar({ user, activeThreadId }: AgentsSidebarProps) {
               to={item.to}
               onClick={layout.closeOnMobile}
               className="flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-xs text-[var(--ui-text-muted)] transition-colors hover:bg-[var(--ui-sidebar-hover)] hover:text-[var(--ui-text)]"
+              activeProps={{
+                className:
+                  "bg-[var(--ui-sidebar-hover)] !text-[var(--ui-text)] font-medium",
+              }}
             >
               <Icon className="size-4" />
               {item.label}

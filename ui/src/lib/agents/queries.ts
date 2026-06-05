@@ -3,6 +3,7 @@ import { useNavigate } from "@tanstack/react-router"
 
 import { agentsApi } from "./api"
 import { addPendingPrompt } from "./pendingPrompts"
+import type { ScheduleUpdateRequest } from "./api"
 
 export const agentThreadKeys = {
   all: ["agent-threads"] as const,
@@ -53,8 +54,8 @@ export function useUpdateAgentSchedule() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: (vars: { scheduleId: string; enabled?: boolean }) =>
-      agentsApi.updateSchedule(vars.scheduleId, { enabled: vars.enabled }),
+    mutationFn: (vars: { scheduleId: string; body: ScheduleUpdateRequest }) =>
+      agentsApi.updateSchedule(vars.scheduleId, vars.body),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: agentScheduleKeys.all })
     },
