@@ -118,7 +118,7 @@ export function AutomationEditor({ mode, schedule }: AutomationEditorProps) {
           name: name.trim(),
           prompt: prompt.trim(),
           schedule: cron.trim(),
-          repo,
+          repo: repo ?? "",
           model_id: modelId,
           effort,
           enabled,
