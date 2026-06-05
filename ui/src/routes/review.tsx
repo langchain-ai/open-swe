@@ -13,8 +13,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
 import { ApiError, api } from "@/lib/api";
 import { useSession } from "@/lib/session";
 
@@ -52,6 +54,7 @@ const DEFAULT_SETTINGS: TeamSettings = {
   review_trace_links: true,
   autofix_mode: "off",
   autofix_severity_threshold: "medium",
+  org_guidelines: null,
   default_agent_model: null,
   default_agent_reasoning_effort: null,
   default_agent_subagent_model: null,
@@ -71,10 +74,14 @@ function ReviewPage() {
     enabled: !!session.data,
   });
   const [local, setLocal] = useState<TeamSettings>(DEFAULT_SETTINGS);
+  const [guidelinesDraft, setGuidelinesDraft] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (settings.data) setLocal(settings.data);
+    if (settings.data) {
+      setLocal(settings.data);
+      setGuidelinesDraft(settings.data.org_guidelines ?? "");
+    }
   }, [settings.data]);
 
   const save = useMutation({
@@ -108,6 +115,15 @@ function ReviewPage() {
     TRIGGER_MODES.find((m) => m.value === current.trigger_mode)?.description ??
     "Open SWE Review will automatically review every push to a PR";
 
+  const trimmedGuidelines = guidelinesDraft.trim();
+  const savedGuidelines = current.org_guidelines ?? "";
+  const guidelinesDirty = trimmedGuidelines !== savedGuidelines.trim();
+
+  const saveGuidelines = () => {
+    if (!canEdit) return;
+    persist({ org_guidelines: trimmedGuidelines || null });
+  };
+
   return (
     <AppShell
       user={session.data}
@@ -129,6 +145,35 @@ function ReviewPage() {
           </div>
           <CaretRightIcon className="size-3.5 shrink-0 text-muted-foreground" />
         </Link>
+      </SettingsSection>
+
+      <SettingsSection
+        title="Organization Guidelines"
+        description="Org-wide instructions injected into every review, across all repositories. Repository-specific style prompts take precedence when they conflict."
+      >
+        <div className="flex flex-col gap-2 p-4">
+          <Textarea
+            className="min-h-[200px] w-full font-mono text-xs"
+            value={guidelinesDraft}
+            onChange={(e) => setGuidelinesDraft(e.target.value)}
+            placeholder="e.g. Always flag missing input validation on new API endpoints. Prefer structured logging over print statements."
+            disabled={!canEdit}
+          />
+          {canEdit && (
+            <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                disabled={!guidelinesDirty || save.isPending}
+                onClick={saveGuidelines}
+              >
+                Save guidelines
+              </Button>
+              {guidelinesDirty && (
+                <span className="text-xs text-muted-foreground">Unsaved changes</span>
+              )}
+            </div>
+          )}
+        </div>
       </SettingsSection>
 
       <SettingsSection title="Configuration">

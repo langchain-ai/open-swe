@@ -12,7 +12,7 @@ from datetime import UTC, datetime
 from typing import Any, Literal
 
 from langgraph_sdk import get_client
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, field_validator, model_validator
 
 from .options import (
     SUPPORTED_MODEL_IDS,
@@ -29,6 +29,10 @@ TEAM_SETTINGS_KEY = "default"
 TriggerMode = Literal["every_push", "once_per_pr", "manual"]
 AutofixMode = Literal["off", "low", "medium", "high"]
 
+# Cap the org-wide guidelines so a runaway value can't dominate the reviewer
+# prompt. Generous enough for a detailed policy, small enough to stay bounded.
+ORG_GUIDELINES_MAX_CHARS = 10_000
+
 
 class TeamSettingsUpdate(BaseModel):
     trigger_mode: TriggerMode = "every_push"
@@ -37,6 +41,7 @@ class TeamSettingsUpdate(BaseModel):
     review_trace_links: bool = True
     autofix_mode: AutofixMode = "off"
     autofix_severity_threshold: AutofixMode = "medium"
+    org_guidelines: str | None = None
     default_agent_model: str | None = None
     default_agent_reasoning_effort: str | None = None
     default_agent_subagent_model: str | None = None
@@ -45,6 +50,22 @@ class TeamSettingsUpdate(BaseModel):
     default_reviewer_reasoning_effort: str | None = None
     default_reviewer_subagent_model: str | None = None
     default_reviewer_subagent_reasoning_effort: str | None = None
+
+    @field_validator("org_guidelines", mode="before")
+    @classmethod
+    def _normalize_org_guidelines(cls, v: object) -> str | None:
+        if v is None:
+            return None
+        if not isinstance(v, str):
+            raise ValueError("org_guidelines must be a string")
+        text = v.strip()
+        if not text:
+            return None
+        if len(text) > ORG_GUIDELINES_MAX_CHARS:
+            raise ValueError(
+                f"org_guidelines must be at most {ORG_GUIDELINES_MAX_CHARS} characters"
+            )
+        return text
 
     @model_validator(mode="after")
     def _validate_model_pairs(self) -> TeamSettingsUpdate:
@@ -91,6 +112,7 @@ def _default_settings() -> dict[str, Any]:
         "review_trace_links": True,
         "autofix_mode": "off",
         "autofix_severity_threshold": "medium",
+        "org_guidelines": None,
         "default_agent_model": fallback_model,
         "default_agent_reasoning_effort": fallback_effort,
         "default_agent_subagent_model": fallback_model,
@@ -134,6 +156,7 @@ async def upsert_team_settings(update: TeamSettingsUpdate) -> dict[str, Any]:
         "review_trace_links": update.review_trace_links,
         "autofix_mode": update.autofix_mode,
         "autofix_severity_threshold": update.autofix_severity_threshold,
+        "org_guidelines": update.org_guidelines,
         "default_agent_model": update.default_agent_model,
         "default_agent_reasoning_effort": update.default_agent_reasoning_effort,
         "default_agent_subagent_model": update.default_agent_subagent_model,
@@ -199,6 +222,15 @@ async def get_team_review_trace_links_enabled() -> bool:
     """Return whether GitHub review bodies should include a LangSmith trace link."""
     settings = await get_team_settings()
     return bool(settings.get("review_trace_links", True))
+
+
+async def get_org_review_guidelines() -> str | None:
+    """Return the org-wide reviewer guidelines supplement, if configured."""
+    settings = await get_team_settings()
+    value = settings.get("org_guidelines")
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return None
 
 
 async def get_team_default_subagent_model(
