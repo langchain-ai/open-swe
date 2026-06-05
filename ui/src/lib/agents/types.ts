@@ -147,6 +147,8 @@ export interface AgentSchedule {
   lastThreadId?: string | null
   lastRunId?: string | null
   lastTriggeredAt?: string | null
+  lastError?: string | null
+  lastErrorAt?: string | null
   createdAt?: string | null
   updatedAt?: string | null
 }

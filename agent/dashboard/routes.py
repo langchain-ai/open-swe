@@ -43,6 +43,7 @@ from .profiles import (
     upsert_access_token_from_github_response,
     upsert_profile,
 )
+from .repo_access import require_repo_access_for_user
 from .review_style_jobs import (
     cancel_review_style_analysis,
     start_bootstrap_analysis,
@@ -600,59 +601,6 @@ async def list_repos(
     }
 
 
-def _raise_for_github_repo_status(status_code: int) -> None:
-    if status_code == 401:
-        raise HTTPException(401, "github token expired, re-login required")
-    if status_code == 404:
-        raise HTTPException(404, "repository not found")
-    if status_code == 403:
-        raise HTTPException(403, "no access to this private repository")
-    if status_code != 200:
-        raise HTTPException(502, f"github API error ({status_code})")
-
-
-async def _assert_repo_available_for_style_analysis(full_name: str, token: str) -> None:
-    """Ensure the repo exists and is readable for style learning.
-
-    Public repositories are allowed without the GitHub App installed on them.
-    Private repositories require the authenticated user to have read access.
-    """
-    full_name = normalize_repo_full_name(full_name)
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Accept": "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28",
-    }
-    owner, name = full_name.split("/", 1)
-    async with httpx.AsyncClient() as client:
-        r = await client.get(
-            f"https://api.github.com/repos/{owner}/{name}",
-            headers=headers,
-        )
-        _raise_for_github_repo_status(r.status_code)
-        body = r.json()
-        if body.get("private") is not True:
-            return
-        # Private repo: 200 from GitHub implies the user's token can read it.
-
-
-async def _require_repo_access_for_user(login: str, full_name: str) -> str:
-    """Verify the user can read ``full_name`` on GitHub; return a valid access token."""
-    token = await get_valid_access_token(login)
-    if not token:
-        raise HTTPException(401, "github token unavailable, re-login required")
-    try:
-        await _assert_repo_available_for_style_analysis(full_name, token)
-    except HTTPException as exc:
-        if exc.status_code != 401:
-            raise
-        token = await get_valid_access_token(login, force_refresh=True)
-        if not token:
-            raise HTTPException(401, "github token expired, re-login required") from exc
-        await _assert_repo_available_for_style_analysis(full_name, token)
-    return token
-
-
 @router.get("/review-styles")
 async def api_list_review_styles(
     session: dict[str, Any] = _SESSION_DEP,
@@ -673,7 +621,7 @@ async def api_create_review_style(
     body: ReviewStyleCreate,
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
-    await _require_repo_access_for_user(session["sub"], body.full_name)
+    await require_repo_access_for_user(session["sub"], body.full_name)
     return await create_review_style(body.full_name, session["sub"])
 
 
@@ -701,7 +649,7 @@ async def api_update_review_style_prompt(
     record = await get_review_style(full_name)
     if not record:
         raise HTTPException(404, "review style not found")
-    await _require_repo_access_for_user(session["sub"], full_name)
+    await require_repo_access_for_user(session["sub"], full_name)
     return await set_custom_prompt(full_name, body.custom_prompt)
 
 
@@ -711,7 +659,7 @@ async def api_analyze_review_style(
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
     full_name = normalize_repo_full_name(full_name)
-    token = await _require_repo_access_for_user(session["sub"], full_name)
+    token = await require_repo_access_for_user(session["sub"], full_name)
     record = await get_review_style(full_name)
     if not record:
         record = await create_review_style(full_name, session["sub"])

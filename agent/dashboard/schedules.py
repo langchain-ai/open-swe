@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field, field_validator
 from ..utils.thread_ops import langgraph_client
 from .options import SUPPORTED_MODEL_IDS, model_supports_effort
 from .profiles import get_profile, get_valid_access_token
+from .repo_access import repo_config_for_user, require_repo_access_for_user
 from .thread_api import _agent_version_metadata, _now_ms, _resolve_run_email
 
 logger = logging.getLogger(__name__)
@@ -58,15 +59,6 @@ def _client():
 
 def _now_iso() -> str:
     return datetime.now(UTC).isoformat()
-
-
-def _parse_repo(full_name: str | None) -> dict[str, str] | None:
-    if not isinstance(full_name, str):
-        return None
-    owner, sep, name = full_name.strip().partition("/")
-    if not sep or not owner.strip() or not name.strip():
-        return None
-    return {"owner": owner.strip(), "name": name.strip()}
 
 
 def _normalize_model_choice(
@@ -144,6 +136,8 @@ def _schedule_summary(record: dict[str, Any]) -> dict[str, Any]:
         "lastThreadId": record.get("last_thread_id"),
         "lastRunId": record.get("last_run_id"),
         "lastTriggeredAt": record.get("last_triggered_at"),
+        "lastError": record.get("last_error"),
+        "lastErrorAt": record.get("last_error_at"),
         "createdAt": record.get("created_at"),
         "updatedAt": record.get("updated_at"),
     }
@@ -181,14 +175,42 @@ def _assert_schedule_owner(
         raise HTTPException(404, "schedule not found")
 
 
-async def list_agent_schedules(login: str, *, email: str | None = None) -> list[dict[str, Any]]:
-    result = await _client().store.search_items(SCHEDULES_NAMESPACE, limit=1000)
-    items = result.get("items") if isinstance(result, dict) else getattr(result, "items", [])
+async def _search_schedule_values(filter: dict[str, Any]) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
-    for item in items or []:
-        value = item.get("value") if isinstance(item, dict) else getattr(item, "value", None)
-        if isinstance(value, dict) and _user_owns_schedule(value, login, email):
-            records.append(value)
+    limit = 100
+    offset = 0
+    while True:
+        result = await _client().store.search_items(
+            SCHEDULES_NAMESPACE,
+            filter=filter,
+            limit=limit,
+            offset=offset,
+        )
+        items = result.get("items") if isinstance(result, dict) else getattr(result, "items", [])
+        if not items:
+            break
+        for item in items:
+            value = item.get("value") if isinstance(item, dict) else getattr(item, "value", None)
+            if isinstance(value, dict):
+                records.append(value)
+        if len(items) < limit:
+            break
+        offset += len(items)
+    return records
+
+
+async def list_agent_schedules(login: str, *, email: str | None = None) -> list[dict[str, Any]]:
+    searches: list[dict[str, Any]] = [{"created_by": login}]
+    if email and email.strip():
+        searches.append({"user_email": email.strip().lower()})
+
+    seen: dict[str, dict[str, Any]] = {}
+    for filter in searches:
+        for record in await _search_schedule_values(filter):
+            schedule_id = record.get("id")
+            if isinstance(schedule_id, str) and _user_owns_schedule(record, login, email):
+                seen[schedule_id] = record
+    records = list(seen.values())
     records.sort(key=lambda item: item.get("updated_at", ""), reverse=True)
     return [_schedule_summary(record) for record in records]
 
@@ -241,7 +263,7 @@ async def create_agent_schedule(
     await _ensure_dashboard_github_token(login)
     profile = await get_profile(login) or {}
     chosen_model, chosen_effort = _normalize_model_choice(body.model_id, body.effort)
-    repo = _parse_repo(body.repo)
+    repo = await repo_config_for_user(login, body.repo)
     schedule_id = str(uuid.uuid4())
     now = _now_iso()
     record: dict[str, Any] = {
@@ -259,6 +281,8 @@ async def create_agent_schedule(
         "last_thread_id": None,
         "last_run_id": None,
         "last_triggered_at": None,
+        "last_error": None,
+        "last_error_at": None,
         "created_by": login,
         "user_email": (await _resolve_run_email(login, profile) or email or "").strip().lower(),
         "created_at": now,
@@ -290,7 +314,7 @@ async def update_agent_schedule(
     if body.name is not None:
         patch["name"] = body.name.strip() or _derive_name(patch.get("prompt", existing["prompt"]))
     if body.repo is not None:
-        patch["repo"] = _parse_repo(body.repo)
+        patch["repo"] = await repo_config_for_user(login, body.repo)
     if body.model_id is not None or body.effort is not None:
         model, effort = _normalize_model_choice(body.model_id, body.effort)
         if model and effort:
@@ -376,6 +400,35 @@ async def launch_scheduled_agent_run(schedule_id: str) -> dict[str, Any]:
     if not record.get("enabled"):
         return {"status": "disabled", "schedule_id": schedule_id}
 
+    repo = record.get("repo") if isinstance(record.get("repo"), dict) else None
+    full_name = _repo_full_name(repo)
+    login = record.get("created_by")
+    if full_name:
+        if not (isinstance(login, str) and login):
+            await _put_value(
+                {
+                    **record,
+                    "last_error": "schedule owner unavailable",
+                    "last_error_at": _now_iso(),
+                }
+            )
+            return {
+                "status": "unauthorized",
+                "schedule_id": schedule_id,
+                "error": "schedule owner unavailable",
+            }
+        try:
+            await require_repo_access_for_user(login, full_name)
+        except HTTPException as exc:
+            await _put_value(
+                {
+                    **record,
+                    "last_error": str(exc.detail),
+                    "last_error_at": _now_iso(),
+                }
+            )
+            return {"status": "unauthorized", "schedule_id": schedule_id, "error": exc.detail}
+
     thread_id = str(uuid.uuid4())
     metadata = _agent_run_metadata(record, thread_id)
     client = _client()
@@ -402,6 +455,8 @@ async def launch_scheduled_agent_run(schedule_id: str) -> dict[str, Any]:
             "last_thread_id": thread_id,
             "last_run_id": run_id,
             "last_triggered_at": _now_iso(),
+            "last_error": None,
+            "last_error_at": None,
         }
     )
     return {

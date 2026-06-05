@@ -1,5 +1,5 @@
 import { CalendarClock, Pause, Play, Trash2 } from "lucide-react"
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { Link } from "@tanstack/react-router"
 
 import type { ModelSelection } from "@/lib/agents/useModelOptions"
@@ -48,6 +48,11 @@ export function ScheduledAgentsPanel({
   const [prompt, setPrompt] = useState("")
   const [schedule, setSchedule] = useState("0 9 * * 1-5")
   const [repo, setRepo] = useState<string | null>(defaultRepo ?? null)
+  const [repoTouched, setRepoTouched] = useState(false)
+
+  useEffect(() => {
+    if (!repoTouched) setRepo(defaultRepo ?? null)
+  }, [defaultRepo, repoTouched])
 
   const schedules = schedulesQuery.data ?? []
   const isPending = createSchedule.isPending
@@ -78,6 +83,11 @@ export function ScheduledAgentsPanel({
         },
       }
     )
+  }
+
+  const onRepoChange = (nextRepo: string | null) => {
+    setRepoTouched(true)
+    setRepo(nextRepo)
   }
 
   return (
@@ -143,7 +153,7 @@ export function ScheduledAgentsPanel({
         <RepoSelector
           repos={repos}
           selectedRepo={repo}
-          onRepoChange={setRepo}
+          onRepoChange={onRepoChange}
         />
         {errorMessage && <p className="text-xs text-red-400">{errorMessage}</p>}
       </form>
