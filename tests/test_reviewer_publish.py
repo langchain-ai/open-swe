@@ -206,7 +206,33 @@ def test_render_review_body_no_findings_message() -> None:
     body = render_review_body(pr_number=99, surfaced_count=0)
     assert "## ✅ Open SWE Review: No issues found" in body
     assert "Open SWE reviewed this PR and found no potential bugs to report." in body
-    assert "<!-- open-swe-reviewer pr=99 -->" in body
+
+
+def test_render_review_body_with_only_out_of_diff_findings() -> None:
+    body = render_review_body(
+        pr_number=7,
+        surfaced_count=0,
+        out_of_diff_findings=[
+            _f(title="Caller passes stale arg", description="boom", file="x/caller.py")
+        ],
+    )
+    assert "No issues found" not in body
+    assert "found no issues in the changed lines" in body
+    assert "<details>" in body
+    assert "1 out-of-diff finding</summary>" in body
+    assert "**Caller passes stale arg**" in body
+    assert "`x/caller.py" in body
+
+
+def test_render_review_body_combines_inline_and_out_of_diff() -> None:
+    body = render_review_body(
+        pr_number=7,
+        surfaced_count=2,
+        out_of_diff_findings=[_f(title="A"), _f(title="B")],
+    )
+    assert "found 2 potential issues." in body
+    assert "2 out-of-diff findings</summary>" in body
+    assert "<!-- open-swe-reviewer pr=7 -->" in body
 
 
 def test_render_review_body_includes_trace_link_when_provided() -> None:
@@ -519,6 +545,57 @@ async def test_publish_review_skips_post_on_re_review_with_no_new_findings() -> 
     assert result["surfaced_count"] == 0
     assert result["resolved_thread_count"] == 1
     assert result["skipped_empty_re_review"] is True
+
+
+@pytest.mark.asyncio
+async def test_publish_review_surfaces_out_of_diff_finding_on_re_review() -> None:
+    """A new out-of-diff finding has no inline comment, but the re-review
+    empty-summary suppression must not swallow it — it should post a summary
+    review carrying the collapsed out-of-diff dropdown."""
+    from agent.tools.publish_review import _publish_review_async
+
+    findings = [
+        _f(
+            id="f_ood",
+            file="caller.py",
+            in_diff=False,
+            first_seen_sha="newsha",
+            github_review_comment_id=None,
+            github_review_id=None,
+        )
+    ]
+    post_review = AsyncMock(return_value={"id": 555})
+
+    with (
+        patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
+        patch("agent.tools.publish_review.list_findings_async", AsyncMock(return_value=findings)),
+        patch("agent.tools.publish_review.post_pull_request_review", post_review),
+        patch(
+            "agent.tools.publish_review._resolve_threads_for_resolved_findings",
+            AsyncMock(return_value=0),
+        ),
+        patch("agent.tools.publish_review.set_reviewer_thread_metadata", AsyncMock()),
+        patch("agent.tools.publish_review._maybe_post_slack_completion_reply", AsyncMock()),
+        patch("agent.tools.publish_review._resolve_review_trace_url", AsyncMock(return_value=None)),
+    ):
+        result = await _publish_review_async(
+            owner="o",
+            repo="r",
+            pr_number=7,
+            head_sha="newsha",
+            token="t",
+            severity_threshold="medium",
+            cap=15,
+            is_re_review=True,
+        )
+
+    post_review.assert_awaited_once()
+    assert "out-of-diff" in post_review.await_args.kwargs["body"]
+    assert post_review.await_args.kwargs["inline_comments"] == []
+    assert result["success"] is True
+    assert result["surfaced_count"] == 0
+    assert result["out_of_diff_count"] == 1
+    assert "skipped_empty_re_review" not in result
 
 
 @pytest.mark.asyncio

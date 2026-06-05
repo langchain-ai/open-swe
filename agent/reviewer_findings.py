@@ -89,6 +89,7 @@ class Finding(TypedDict, total=False):
     start_line: int | None
     end_line: int | None
     side: DiffSide
+    in_diff: bool
     description: str
     suggestion: str | None
     status: FindingStatus
@@ -183,6 +184,7 @@ def new_finding(
     suggestion: str | None = None,
     diff_hunk: str | None = None,
     finding_id: str | None = None,
+    in_diff: bool = True,
 ) -> Finding:
     """Construct a fully-populated ``Finding`` ready to persist."""
     resolved_id = finding_id or new_finding_id()
@@ -212,6 +214,7 @@ def new_finding(
         "start_line": start_line,
         "end_line": end_line,
         "side": side,
+        "in_diff": in_diff,
         "description": description,
         "suggestion": suggestion,
         "status": "open",

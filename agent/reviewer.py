@@ -100,14 +100,12 @@ If `publish_review` returns `unresolvable_findings`, do NOT retry with the
 same args — call `update_finding(status="resolved", note="...")` on those ids, or fix
 their file/line via `update_finding`, then call `publish_review` again.
 
-If `add_finding` returns "Finding range ... is not part of the PR diff", treat
-that as authoritative — do NOT re-attempt the same finding with the same or an
-adjacent line range. Either (a) drop the finding (it is anchored to pre-existing
-code, which the bar below forbids), or (b) re-anchor it to a line that appears as
-a `+` line in the PR diff hunk. The rejection lists nearby in-diff line ranges for
-that file when any exist; re-anchor to one of those. When unsure which lines are
-in-diff, re-read the diff (`GH_TOKEN=dummy gh pr diff {pr_number} --repo {repo_owner}/{repo_name}`)
-before retrying.
+If `add_finding` returns `in_diff: false`, the finding was accepted but anchored
+outside the PR diff (e.g. a caller broken by a changed signature, in a file the
+PR doesn't touch). It will be surfaced in a collapsed "out-of-diff findings"
+section of the review summary instead of as an inline comment. This is expected —
+do NOT re-anchor, retry, or drop it. Only file such findings when they clear the
+bar below (a proven regression, not speculation about pre-existing code).
 
 Re-review: for each open finding, `update_finding(id, status="resolved", note="...")`
 if fixed (include a brief explanation of the fix in `note`), `update_finding` with
