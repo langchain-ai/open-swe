@@ -205,11 +205,11 @@ async def _latest_run_status(thread_id: str) -> str | None:
 
 
 async def list_dashboard_threads(
-    login: str, *, email: str | None = None, limit: int = 50
+    login: str, *, email: str | None = None, limit: int = 50, include_all: bool = False
 ) -> list[dict[str, Any]]:
     client = langgraph_client()
-    searches: list[dict[str, Any]] = [{"github_login": login}]
-    if email and email.strip():
+    searches: list[dict[str, Any]] = [{}] if include_all else [{"github_login": login}]
+    if not include_all and email and email.strip():
         searches.append({"triggering_user_email": email.strip().lower()})
 
     seen: dict[str, dict[str, Any]] = {}
@@ -224,7 +224,7 @@ async def list_dashboard_threads(
             if not isinstance(thread, dict):
                 continue
             meta = thread.get("metadata") if isinstance(thread.get("metadata"), dict) else {}
-            if not _user_owns_thread(meta, login, email):
+            if not include_all and not _user_owns_thread(meta, login, email):
                 continue
             thread_id = thread.get("thread_id") or thread.get("id")
             if isinstance(thread_id, str) and thread_id not in seen:
@@ -246,7 +246,6 @@ async def get_dashboard_thread(
         raise HTTPException(404, "thread not found") from exc
 
     metadata = thread.get("metadata") if isinstance(thread.get("metadata"), dict) else {}
-    _assert_thread_owner(metadata, login, email)
 
     messages: list[dict[str, Any]] = []
     try:
@@ -480,12 +479,9 @@ async def stream_dashboard_thread(
     thread_id: str, login: str, *, email: str | None = None, last_event_id: str | None = None
 ) -> AsyncIterator[str]:
     try:
-        thread = await langgraph_client().threads.get(thread_id)
+        await langgraph_client().threads.get(thread_id)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(404, "thread not found") from exc
-
-    metadata = thread.get("metadata") if isinstance(thread.get("metadata"), dict) else {}
-    _assert_thread_owner(metadata, login, email)
 
     stream = await langgraph_client().threads.join_stream(
         thread_id,
