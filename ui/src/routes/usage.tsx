@@ -60,11 +60,7 @@ function UsagePage() {
   if (!session.data) return <Navigate to="/login" />
 
   return (
-    <AppShell
-      user={session.data}
-      title="Usage"
-      description="Cached Open SWE Agent and reviewer activity from this release onward."
-    >
+    <AppShell user={session.data} title="Usage">
       <SettingsSection
         title="Agent leaderboard"
         description="Ranked by agent lines of code, then PRs opened and agent runs."

@@ -30,8 +30,8 @@ interface NavItem {
 const NAV: Array<NavItem> = [
   { to: "/my-settings", label: "Profile Settings", icon: IoOptionsOutline },
   { to: "/cloud-agents", label: "Open SWE Agent", icon: IoCloudOutline },
-  { to: "/usage", label: "Usage", icon: IoStatsChartOutline },
   { to: "/review", label: "Open SWE Review", icon: IoGitPullRequestOutline },
+  { to: "/usage", label: "Usage", icon: IoStatsChartOutline },
   { to: "/admin", label: "Admin", icon: IoSettingsOutline, adminOnly: true },
 ];
 
