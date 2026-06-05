@@ -13,7 +13,6 @@ def test_resolve_repo_config_parses_request_repo() -> None:
 
 
 def test_resolve_repo_config_returns_empty_when_no_repo_given() -> None:
-    # None / blank / malformed all mean an intentionally repo-less run — never an error.
     assert thread_api._resolve_repo_config(None) == {}
     assert thread_api._resolve_repo_config("") == {}
     assert thread_api._resolve_repo_config("not-a-repo") == {}
@@ -101,7 +100,7 @@ def dashboard_run_client(monkeypatch: pytest.MonkeyPatch) -> _FakeLangGraphClien
     return client
 
 
-def test_start_agent_run_marks_repo_less_config(
+def test_start_agent_run_omits_repo_less_marker_when_repo_unset(
     dashboard_run_client: _FakeLangGraphClient,
 ) -> None:
     asyncio.run(
@@ -109,6 +108,25 @@ def test_start_agent_run_marks_repo_less_config(
             "thread-id",
             login="octo",
             repo_config={},
+            prompt="do work",
+        )
+    )
+
+    configurable = dashboard_run_client.runs.configurable
+    assert configurable is not None
+    assert "repo_explicitly_none" not in configurable
+    assert "repo" not in configurable
+
+
+def test_start_agent_run_marks_repo_less_config_when_explicit(
+    dashboard_run_client: _FakeLangGraphClient,
+) -> None:
+    asyncio.run(
+        thread_api._start_agent_run(
+            "thread-id",
+            login="octo",
+            repo_config={},
+            repo_explicitly_none=True,
             prompt="do work",
         )
     )

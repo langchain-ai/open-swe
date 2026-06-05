@@ -36,6 +36,7 @@ export function AgentsHome() {
               createThread.mutate({
                 prompt,
                 repo,
+                repo_explicitly_none: repoOverride === null,
                 model_id: activeSelection?.modelId ?? null,
                 effort: activeSelection?.effort ?? null,
               })

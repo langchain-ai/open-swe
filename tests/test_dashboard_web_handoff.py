@@ -120,3 +120,58 @@ async def test_dashboard_followup_on_busy_thread_queues_dashboard_handoff(
 
     assert client.threads.updates[0]["source"] == "dashboard"
     assert queued_messages == [{"text": "continue in web", "source": "dashboard"}]
+
+
+@pytest.mark.asyncio
+async def test_dashboard_followup_preserves_explicit_repo_less_thread(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    metadata = {
+        "source": "dashboard",
+        "github_login": "octocat",
+        "repo_explicitly_none": True,
+    }
+    client = _FakeClient(metadata)
+
+    monkeypatch.setattr(thread_api, "langgraph_client", lambda: client)
+    monkeypatch.setattr(thread_api, "is_thread_active", _inactive_thread)
+    monkeypatch.setattr(thread_api, "_ensure_dashboard_github_token", _noop_token_check)
+    monkeypatch.setattr(thread_api, "get_profile", _empty_profile)
+    monkeypatch.setattr(thread_api, "_resolve_run_email", _run_email)
+
+    await thread_api.send_dashboard_message(
+        "thread-1",
+        "octocat",
+        thread_api.ThreadMessageBody(content="continue in web"),
+    )
+
+    run_config = client.runs.created[0]["kwargs"]["config"]["configurable"]
+    assert run_config["repo_explicitly_none"] is True
+    assert "repo" not in run_config
+
+
+@pytest.mark.asyncio
+async def test_dashboard_followup_without_repo_metadata_allows_team_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    metadata = {
+        "source": "dashboard",
+        "github_login": "octocat",
+    }
+    client = _FakeClient(metadata)
+
+    monkeypatch.setattr(thread_api, "langgraph_client", lambda: client)
+    monkeypatch.setattr(thread_api, "is_thread_active", _inactive_thread)
+    monkeypatch.setattr(thread_api, "_ensure_dashboard_github_token", _noop_token_check)
+    monkeypatch.setattr(thread_api, "get_profile", _empty_profile)
+    monkeypatch.setattr(thread_api, "_resolve_run_email", _run_email)
+
+    await thread_api.send_dashboard_message(
+        "thread-1",
+        "octocat",
+        thread_api.ThreadMessageBody(content="continue in web"),
+    )
+
+    run_config = client.runs.created[0]["kwargs"]["config"]["configurable"]
+    assert "repo_explicitly_none" not in run_config
+    assert "repo" not in run_config
