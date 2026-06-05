@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import type { ModelOption, TeamSettings, UserMapping } from "@/lib/api";
 import { AppShell, SettingsRow, SettingsSection } from "@/components/AppShell";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -156,6 +157,11 @@ function GlobalDefaultsSection({ models }: { models: Array<ModelOption> }) {
     queryFn: api.getTeamSettings,
   });
   const [error, setError] = useState<string | null>(null);
+  const [defaultRepoDraft, setDefaultRepoDraft] = useState("");
+
+  useEffect(() => {
+    setDefaultRepoDraft(settings.data?.default_repo ?? "");
+  }, [settings.data?.default_repo]);
 
   const save = useMutation({
     mutationFn: (body: TeamSettings) => api.saveTeamSettings(body),
@@ -203,6 +209,26 @@ function GlobalDefaultsSection({ models }: { models: Array<ModelOption> }) {
             })
           }
           disabled={!settings.data || save.isPending}
+        />
+        <SettingsRow
+          label="Default Repository"
+          description="Global fallback used when a run has no explicit repo and the user has no profile default. Use owner/repo."
+          control={
+            <Input
+              className="w-56"
+              placeholder="owner/repo"
+              value={defaultRepoDraft}
+              onChange={(e) => setDefaultRepoDraft(e.target.value)}
+              onBlur={() =>
+                settings.data &&
+                save.mutate({
+                  ...settings.data,
+                  default_repo: defaultRepoDraft.trim() || null,
+                })
+              }
+              disabled={!settings.data || save.isPending}
+            />
+          }
         />
         <RolePicker
           label="Open SWE Reviewer"

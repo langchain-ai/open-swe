@@ -429,8 +429,15 @@ def construct_system_prompt(
     linear_issue_number: str = "",
     triggering_user_identity: CollaboratorIdentity | None = None,
     create_prs: bool = False,
+    default_repo: dict[str, str] | None = None,
 ) -> str:
     default_prompt_section = _load_default_prompt()
+    if default_repo and default_repo.get("owner") and default_repo.get("name"):
+        repo_line = (
+            "When a repository is not explicitly mentioned, use "
+            f"`{default_repo['owner']}/{default_repo['name']}`."
+        )
+        default_prompt_section += f"\n\n{repo_line}"
     # Shell-escape: display names/emails are user-controlled (e.g. O'Connor) and
     # are embedded in a `git config` command the agent copies verbatim.
     if triggering_user_identity is not None:

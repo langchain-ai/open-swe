@@ -48,6 +48,7 @@ async def _resolve_run_email(login: str, profile: dict[str, Any]) -> str | None:
 class ThreadCreateBody(BaseModel):
     prompt: str = Field(min_length=1, max_length=20_000)
     repo: str | None = None
+    repo_explicitly_none: bool = False
     model_id: str | None = None
     effort: str | None = None
 
@@ -269,13 +270,7 @@ async def get_dashboard_thread(
 
 
 def _resolve_repo_config(repo: str | None) -> dict[str, str]:
-    """Resolve the run's repo from the request, or ``{}`` when none is given.
-
-    A repo is optional: the agent identifies and clones the target repo from the
-    task itself. The dashboard pre-fills the user's default repo on the client,
-    so the request value is authoritative here — an empty value means an
-    intentionally repo-less run, not "fall back to the saved default".
-    """
+    """Resolve the run's repo from the request, or ``{}`` when none is given."""
     return _parse_repo(repo) or {}
 
 
@@ -284,6 +279,7 @@ async def _start_agent_run(
     *,
     login: str,
     repo_config: dict[str, str],
+    repo_explicitly_none: bool = False,
     prompt: str,
     title: str | None = None,
     model_id: str | None = None,
@@ -309,6 +305,8 @@ async def _start_agent_run(
     if has_repo:
         metadata["repo_owner"] = repo_config["owner"]
         metadata["repo_name"] = repo_config["name"]
+    elif repo_explicitly_none:
+        metadata["repo_explicitly_none"] = True
 
     client = langgraph_client()
     await client.threads.create(thread_id=thread_id, metadata=metadata, if_exists="do_nothing")
@@ -323,6 +321,8 @@ async def _start_agent_run(
     }
     if has_repo:
         configurable["repo"] = repo_config
+    elif repo_explicitly_none:
+        configurable["repo_explicitly_none"] = True
     if chosen_model and chosen_effort:
         configurable["agent_model_id"] = chosen_model
         configurable["agent_effort"] = chosen_effort
@@ -354,6 +354,7 @@ async def create_dashboard_thread(login: str, body: ThreadCreateBody) -> dict[st
         thread_id,
         login=login,
         repo_config=repo_config,
+        repo_explicitly_none=body.repo_explicitly_none,
         prompt=body.prompt.strip(),
         model_id=body.model_id,
         effort=body.effort,
@@ -404,6 +405,8 @@ async def send_dashboard_message(
     }
     if owner and name:
         configurable["repo"] = {"owner": owner, "name": name}
+    elif metadata.get("repo_explicitly_none") is True:
+        configurable["repo_explicitly_none"] = True
     if chosen_model and chosen_effort:
         configurable["agent_model_id"] = chosen_model
         configurable["agent_effort"] = chosen_effort

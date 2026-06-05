@@ -39,7 +39,7 @@ from .dashboard.agent_overrides import (
 )
 from .dashboard.agent_usage import record_agent_thread_usage
 from .dashboard.options import DEFAULT_MODEL_ID, SUPPORTED_MODEL_IDS, model_supports_effort
-from .dashboard.team_settings import get_team_default_model_pair
+from .dashboard.team_settings import get_team_default_model_pair, get_team_default_repo
 from .integrations.langsmith import _configure_github_proxy
 from .middleware import (
     ModelFallbackMiddleware,
@@ -98,6 +98,24 @@ from .utils.sandbox_state import (
     set_sandbox_backend,
     unwrap_sandbox_backend,
 )
+
+
+async def _resolve_prompt_default_repo(configurable: dict[str, Any]) -> dict[str, str] | None:
+    repo_config = configurable.get("repo")
+    if isinstance(repo_config, dict):
+        owner = repo_config.get("owner")
+        name = repo_config.get("name")
+        if isinstance(owner, str) and isinstance(name, str):
+            return {"owner": owner, "name": name}
+
+    if configurable.get("repo_explicitly_none") is True:
+        return None
+
+    try:
+        return await get_team_default_repo()
+    except Exception:
+        logger.debug("Failed to load team default repo for prompt", exc_info=True)
+        return None
 
 
 async def _start_langsmith_sandbox_if_needed(sandbox_backend: SandboxBackendProtocol) -> None:
@@ -541,6 +559,8 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     except Exception:
         logger.debug("Failed to record agent usage for thread %s", thread_id, exc_info=True)
 
+    prompt_default_repo = await _resolve_prompt_default_repo(configurable)
+
     logger.info("Returning agent with sandbox for thread %s", thread_id)
     main_model = make_model(model_id, **model_kwargs)
     subagent_model = make_model(subagent_model_id, **subagent_model_kwargs)
@@ -552,6 +572,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             linear_issue_number=linear_issue_number,
             triggering_user_identity=triggering_user_identity,
             create_prs=always_create_prs,
+            default_repo=prompt_default_repo,
         ),
         tools=[
             http_request,

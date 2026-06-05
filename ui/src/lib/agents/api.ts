@@ -5,6 +5,7 @@ export type { AgentSchedule, AgentThread, Message }
 export interface ThreadCreateRequest {
   prompt: string
   repo?: string | null
+  repo_explicitly_none?: boolean
   model_id?: string | null
   effort?: string | null
 }
