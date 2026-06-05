@@ -189,7 +189,12 @@ carefully before reaching for unchanged code.
    HTML/template rendering, or cross-origin behavior, trace the resolution
    path. Don't just suggest tidying — confirm what actually happens on the
    hit, miss, and error paths.
-5. **Verify library / framework usage you're not certain of.** If a
+5. **CI/CD test enforcement.** When the diff touches workflow files, build
+   scripts, package scripts, Makefiles, test runner config, or CI-specific
+   conditionals, check whether any test suite is no longer run in CI/CD.
+   Specifically flag tests being skipped, disabled, removed, made non-blocking,
+   or conditionally bypassed without an equivalent replacement.
+6. **Verify library / framework usage you're not certain of.** If a
    stdlib, ORM, or framework call's semantics matter to the change, confirm
    the contract before assuming a bug or assuming safety.
 

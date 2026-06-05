@@ -17,6 +17,8 @@ def test_reviewer_system_prompt_formats_without_keyerror() -> None:
     )
     assert "acme/repo" in prompt
     assert "The bar" in prompt
+    assert "CI/CD test enforcement" in prompt
+    assert "Specifically flag tests being skipped" in prompt
     assert "benchmark" not in prompt.lower()
     assert "golden" not in prompt.lower()
     assert "at least 1 finding" not in prompt.lower()
