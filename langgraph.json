@@ -4,7 +4,8 @@
   "graphs": {
     "agent": "agent.server:get_agent",
     "reviewer": "agent.reviewer:get_reviewer_agent",
-    "analyzer": "agent.analyzer:get_analyzer"
+    "analyzer": "agent.analyzer:get_analyzer",
+    "scheduler": "agent.scheduler:get_scheduler"
   },
   "dependencies": ["."],
   "http": {
