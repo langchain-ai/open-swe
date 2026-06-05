@@ -503,12 +503,21 @@ async def fetch_pr_review_threads(
                 )
                 return out
             data = response.json()
-            threads = (
-                data.get("data", {})
-                .get("repository", {})
-                .get("pullRequest", {})
-                .get("reviewThreads", {})
-            )
+            data_root = data.get("data") if isinstance(data, dict) else None
+            repository = data_root.get("repository") if isinstance(data_root, dict) else None
+            if not isinstance(repository, dict):
+                logger.warning(
+                    "Null repository in review-threads response for %s/%s#%s "
+                    "(token likely lacks access: SAML, expired token, or private/deleted repo)",
+                    owner,
+                    repo,
+                    pr_number,
+                )
+                return out
+            pull_request = repository.get("pullRequest")
+            threads = pull_request.get("reviewThreads") if isinstance(pull_request, dict) else None
+            if not isinstance(threads, dict):
+                return out
             for thread in threads.get("nodes", []) or []:
                 if not isinstance(thread, dict):
                     continue
@@ -668,8 +677,10 @@ async def resolve_review_thread(*, thread_node_id: str, token: str) -> bool:
     if data.get("errors"):
         logger.warning("resolveReviewThread errors: %s", data["errors"])
         return False
-    thread = data.get("data", {}).get("resolveReviewThread", {}).get("thread", {})
-    return bool(thread.get("isResolved"))
+    data_root = data.get("data") if isinstance(data, dict) else None
+    resolved = data_root.get("resolveReviewThread") if isinstance(data_root, dict) else None
+    thread = resolved.get("thread") if isinstance(resolved, dict) else None
+    return bool(thread.get("isResolved")) if isinstance(thread, dict) else False
 
 
 async def reply_to_review_comment(
