@@ -11,5 +11,12 @@
   "http": {
     "app": "agent.webapp:app"
   },
-  "env": ".env" 
+  "checkpointer": {
+    "ttl": {
+      "strategy": "delete",
+      "sweep_interval_minutes": 60,
+      "default_ttl": 43200
+    }
+  },
+  "env": ".env"
 }
