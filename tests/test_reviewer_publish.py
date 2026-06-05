@@ -357,6 +357,24 @@ async def test_resolve_review_thread_returns_true_on_success() -> None:
 
 
 @pytest.mark.asyncio
+async def test_fetch_pr_review_threads_handles_null_repository() -> None:
+    """GitHub returns ``repository: null`` when the token can't read the repo
+    (SAML, expired token, private/deleted). ``dict.get(k, {})`` does not coalesce
+    explicit null, so the fetch must guard against it and return collected threads."""
+    response = MagicMock()
+    response.json.return_value = {"data": {"repository": None}}
+    response.raise_for_status.return_value = None
+
+    client_cm = AsyncMock()
+    client_cm.__aenter__.return_value = client_cm
+    client_cm.post = AsyncMock(return_value=response)
+
+    with patch("agent.reviewer_publish.httpx.AsyncClient", return_value=client_cm):
+        threads = await fetch_pr_review_threads(owner="o", repo="r", pr_number=1, token="t")
+    assert threads == []
+
+
+@pytest.mark.asyncio
 async def test_post_pull_request_review_non_dict_body_surfaces_status_and_excerpt() -> None:
     """A non-dict GitHub response body must surface status code + body excerpt
     via ``_error`` rather than collapsing to a bare ``None`` (which the
