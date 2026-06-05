@@ -395,6 +395,24 @@ def test_get_slack_repo_config_applies_profile_default_repo(
     assert repo == {"owner": "profile-owner", "name": "profile-repo"}
 
 
+def test_get_slack_repo_config_applies_team_default_repo(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    threads_client = _FakeThreadsClient(thread={"metadata": {}})
+
+    async def fake_get_team_default_repo() -> dict[str, str] | None:
+        return {"owner": "team-owner", "name": "team-repo"}
+
+    monkeypatch.setattr(webapp, "get_client", lambda url: _FakeClient(threads_client))
+    monkeypatch.setattr(webapp, "get_team_default_repo", fake_get_team_default_repo)
+    monkeypatch.setattr(webapp, "SLACK_REPO_NAME", "")
+    monkeypatch.setattr(webapp, "DEFAULT_REPO_NAME", "")
+
+    repo = asyncio.run(webapp.get_slack_repo_config("C123", "1.234"))
+
+    assert repo == {"owner": "team-owner", "name": "team-repo"}
+
+
 def _setup_slack_mention_fakes(
     monkeypatch: pytest.MonkeyPatch, captured: dict[str, object]
 ) -> None:

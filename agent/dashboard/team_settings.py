@@ -8,6 +8,7 @@ configuration in one place. Per-repo style prompts live in
 from __future__ import annotations
 
 import logging
+import os
 from datetime import UTC, datetime
 from typing import Any, Literal
 
@@ -41,6 +42,7 @@ class TeamSettingsUpdate(BaseModel):
     default_agent_reasoning_effort: str | None = None
     default_agent_subagent_model: str | None = None
     default_agent_subagent_reasoning_effort: str | None = None
+    default_repo: str | None = None
     default_reviewer_model: str | None = None
     default_reviewer_reasoning_effort: str | None = None
     default_reviewer_subagent_model: str | None = None
@@ -82,6 +84,21 @@ def _client():
     return get_client()
 
 
+def _env_default_repo() -> str | None:
+    owner = os.environ.get("DEFAULT_REPO_OWNER", "").strip()
+    name = os.environ.get("DEFAULT_REPO_NAME", "").strip()
+    return f"{owner}/{name}" if owner and name else None
+
+
+def _parse_repo(value: object) -> dict[str, str] | None:
+    if not isinstance(value, str):
+        return None
+    owner, sep, name = value.strip().partition("/")
+    if not sep or not owner.strip() or not name.strip():
+        return None
+    return {"owner": owner.strip(), "name": name.strip()}
+
+
 def _default_settings() -> dict[str, Any]:
     fallback_model, fallback_effort = default_model_pair()
     return {
@@ -95,6 +112,7 @@ def _default_settings() -> dict[str, Any]:
         "default_agent_reasoning_effort": fallback_effort,
         "default_agent_subagent_model": fallback_model,
         "default_agent_subagent_reasoning_effort": fallback_effort,
+        "default_repo": _env_default_repo(),
         "default_reviewer_model": fallback_model,
         "default_reviewer_reasoning_effort": fallback_effort,
         "default_reviewer_subagent_model": fallback_model,
@@ -138,6 +156,7 @@ async def upsert_team_settings(update: TeamSettingsUpdate) -> dict[str, Any]:
         "default_agent_reasoning_effort": update.default_agent_reasoning_effort,
         "default_agent_subagent_model": update.default_agent_subagent_model,
         "default_agent_subagent_reasoning_effort": update.default_agent_subagent_reasoning_effort,
+        "default_repo": update.default_repo,
         "default_reviewer_model": update.default_reviewer_model,
         "default_reviewer_reasoning_effort": update.default_reviewer_reasoning_effort,
         "default_reviewer_subagent_model": update.default_reviewer_subagent_model,
@@ -146,6 +165,11 @@ async def upsert_team_settings(update: TeamSettingsUpdate) -> dict[str, Any]:
     }
     await _client().store.put_item(TEAM_SETTINGS_NAMESPACE, TEAM_SETTINGS_KEY, value)
     return value
+
+
+async def get_team_default_repo() -> dict[str, str] | None:
+    settings = await get_team_settings()
+    return _parse_repo(settings.get("default_repo"))
 
 
 async def get_team_default_model(

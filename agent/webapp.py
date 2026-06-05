@@ -27,7 +27,7 @@ from .dashboard.agent_overrides import (
 from .dashboard.enabled_repos import is_review_repo_enabled
 from .dashboard.oauth import build_settings_url
 from .dashboard.profiles import get_profile, get_valid_access_token, has_access_token_record
-from .dashboard.team_settings import get_team_settings
+from .dashboard.team_settings import get_team_default_repo, get_team_settings
 from .dashboard.user_mappings import (
     email_for_login,
     login_for_email,
@@ -137,7 +137,7 @@ SLACK_SIGNING_SECRET = os.environ.get("SLACK_SIGNING_SECRET", "")
 SLACK_BOT_USER_ID = os.environ.get("SLACK_BOT_USER_ID", "")
 SLACK_BOT_USERNAME = os.environ.get("SLACK_BOT_USERNAME", "")
 DEFAULT_REPO_OWNER = os.environ.get("DEFAULT_REPO_OWNER", "langchain-ai")
-DEFAULT_REPO_NAME = os.environ.get("DEFAULT_REPO_NAME", "langchainplus")
+DEFAULT_REPO_NAME = os.environ.get("DEFAULT_REPO_NAME", "")
 SLACK_REPO_OWNER = os.environ.get("SLACK_REPO_OWNER", "") or DEFAULT_REPO_OWNER
 SLACK_REPO_NAME = os.environ.get("SLACK_REPO_NAME", "") or DEFAULT_REPO_NAME
 
@@ -183,7 +183,7 @@ def get_repo_config_from_team_mapping(
     team_identifier: str, project_name: str = ""
 ) -> dict[str, str]:
     """Look up repository configuration from LINEAR_TEAM_TO_REPO mapping."""
-    fallback = {"owner": DEFAULT_REPO_OWNER, "name": DEFAULT_REPO_NAME}
+    fallback = {"owner": DEFAULT_REPO_OWNER, "name": DEFAULT_REPO_NAME} if DEFAULT_REPO_NAME else {}
 
     if not team_identifier or team_identifier not in LINEAR_TEAM_TO_REPO:
         return fallback
@@ -608,7 +608,13 @@ async def get_slack_repo_config(
             logger.exception("Failed to apply dashboard default_repo for Slack user")
 
     if not repo_config:
+        repo_config = await get_team_default_repo()
+
+    if not repo_config and default_owner and default_name:
         repo_config = {"owner": default_owner, "name": default_name}
+
+    if not repo_config:
+        raise HTTPException(400, "no default repository configured")
 
     return repo_config
 
@@ -1304,6 +1310,12 @@ async def linear_webhook(  # noqa: PLR0911, PLR0912, PLR0915
                 "repo_config": repo_config,
             },
         )
+
+    if not repo_config:
+        repo_config = await get_team_default_repo()
+
+    if not repo_config:
+        return {"status": "ignored", "reason": "No default repository configured"}
 
     if not _is_repo_allowed(repo_config):
         logger.warning(

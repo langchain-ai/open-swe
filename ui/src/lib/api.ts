@@ -113,6 +113,7 @@ export interface TeamSettings {
   default_agent_reasoning_effort?: string | null;
   default_agent_subagent_model?: string | null;
   default_agent_subagent_reasoning_effort?: string | null;
+  default_repo?: string | null;
   default_reviewer_model?: string | null;
   default_reviewer_reasoning_effort?: string | null;
   default_reviewer_subagent_model?: string | null;

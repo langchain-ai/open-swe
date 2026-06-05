@@ -39,7 +39,7 @@ from .dashboard.agent_overrides import (
 )
 from .dashboard.agent_usage import record_agent_thread_usage
 from .dashboard.options import DEFAULT_MODEL_ID, SUPPORTED_MODEL_IDS, model_supports_effort
-from .dashboard.team_settings import get_team_default_model_pair
+from .dashboard.team_settings import get_team_default_model_pair, get_team_default_repo
 from .integrations.langsmith import _configure_github_proxy
 from .middleware import (
     ModelFallbackMiddleware,
@@ -541,6 +541,15 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     except Exception:
         logger.debug("Failed to record agent usage for thread %s", thread_id, exc_info=True)
 
+    prompt_default_repo = (
+        configurable.get("repo") if isinstance(configurable.get("repo"), dict) else None
+    )
+    if not prompt_default_repo:
+        try:
+            prompt_default_repo = await get_team_default_repo()
+        except Exception:
+            logger.debug("Failed to load team default repo for prompt", exc_info=True)
+
     logger.info("Returning agent with sandbox for thread %s", thread_id)
     main_model = make_model(model_id, **model_kwargs)
     subagent_model = make_model(subagent_model_id, **subagent_model_kwargs)
@@ -552,6 +561,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             linear_issue_number=linear_issue_number,
             triggering_user_identity=triggering_user_identity,
             create_prs=always_create_prs,
+            default_repo=prompt_default_repo,
         ),
         tools=[
             http_request,
