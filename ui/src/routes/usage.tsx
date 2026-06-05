@@ -1,7 +1,11 @@
 import { Navigate, createFileRoute } from "@tanstack/react-router"
 import { useQuery } from "@tanstack/react-query"
 
-import type { UsageLeaderboardPeriod, UsageLeaderboardRow } from "@/lib/api"
+import type {
+  ReviewerStatsPayload,
+  UsageLeaderboardPeriod,
+  UsageLeaderboardRow,
+} from "@/lib/api"
 import { AppShell, SettingsSection } from "@/components/AppShell"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import {
@@ -43,6 +47,7 @@ function UsagePage() {
     queryKey: ["usageLeaderboard", activePeriod],
     queryFn: () => api.usageLeaderboard(activePeriod, 10),
     enabled: !!session.data,
+    staleTime: 5 * 60 * 1000,
   })
 
   if (session.isLoading) {
@@ -57,11 +62,11 @@ function UsagePage() {
   return (
     <AppShell
       user={session.data}
-      title="Usage Leaderboard"
-      description="Open SWE Agent usage recorded from this release onward. Reviewer-agent runs are excluded."
+      title="Usage"
+      description="Cached Open SWE Agent and reviewer activity from this release onward."
     >
       <SettingsSection
-        title="Leaderboard"
+        title="Agent leaderboard"
         description="Ranked by agent lines of code, then PRs opened and agent runs."
         action={
           <Select
@@ -94,7 +99,7 @@ function UsagePage() {
           </div>
         ) : leaderboard.isError ? (
           <p className="p-4 text-xs text-destructive">
-            Failed to load usage leaderboard: {leaderboard.error.message}
+            Failed to load usage data: {leaderboard.error.message}
           </p>
         ) : !leaderboard.data?.rows.length ? (
           <div className="p-6 text-center text-sm text-muted-foreground">
@@ -106,6 +111,31 @@ function UsagePage() {
             rows={leaderboard.data.rows}
             totalMembers={leaderboard.data.total_members}
           />
+        )}
+      </SettingsSection>
+
+      <SettingsSection
+        title="Reviewer stats"
+        description="Issues surfaced by Open SWE Review and how often users addressed them."
+      >
+        {leaderboard.isLoading ? (
+          <div className="grid gap-3 p-4 sm:grid-cols-2">
+            <Skeleton className="h-24 w-full" />
+            <Skeleton className="h-24 w-full" />
+            <Skeleton className="h-24 w-full" />
+            <Skeleton className="h-24 w-full" />
+          </div>
+        ) : leaderboard.isError ? (
+          <p className="p-4 text-xs text-destructive">
+            Failed to load reviewer stats: {leaderboard.error.message}
+          </p>
+        ) : leaderboard.data?.reviewer_stats ? (
+          <ReviewerStats stats={leaderboard.data.reviewer_stats} />
+        ) : (
+          <div className="p-6 text-center text-sm text-muted-foreground">
+            No reviewer stats have been recorded for{" "}
+            {PERIOD_LABELS[activePeriod].toLowerCase()} yet.
+          </div>
         )}
       </SettingsSection>
     </AppShell>
@@ -172,6 +202,105 @@ function UsageTable({
   )
 }
 
+function ReviewerStats({ stats }: { stats: ReviewerStatsPayload }) {
+  const cards = [
+    {
+      label: "Reviewed PRs",
+      value: stats.reviewed_prs,
+      helper: `${formatNumber(stats.prs_with_findings)} with findings`,
+    },
+    {
+      label: "Issues surfaced",
+      value: stats.surfaced_findings,
+      helper: `${formatNumber(stats.findings_recorded)} recorded`,
+    },
+    {
+      label: "Addressed & resolved",
+      value: stats.addressed_findings,
+      helper: `${formatPercent(stats.resolution_rate)} of surfaced`,
+    },
+    {
+      label: "Resolved after update",
+      value: stats.resolved_after_update,
+      helper: "Resolved on a later PR head",
+    },
+    {
+      label: "Awaiting follow-up",
+      value: stats.unresolved_surfaced_findings,
+      helper: "Surfaced but not resolved/dismissed",
+    },
+    {
+      label: "Dismissed",
+      value: stats.dismissed_findings,
+      helper: `${formatNumber(stats.human_replies)} human replies tracked`,
+    },
+  ]
+
+  return (
+    <div className="space-y-4 p-4">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {cards.map((card) => (
+          <div key={card.label} className="rounded-md border border-border p-3">
+            <div className="text-xs text-muted-foreground">{card.label}</div>
+            <div className="mt-1 text-xl font-medium tabular-nums">
+              {formatNumber(card.value)}
+            </div>
+            <div className="mt-1 text-xs text-muted-foreground">
+              {card.helper}
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="grid gap-4 border-t border-border pt-4 sm:grid-cols-2">
+        <CounterList title="Top categories" rows={stats.top_categories} />
+        <CounterList title="Severity mix" rows={severityRows(stats)} />
+      </div>
+    </div>
+  )
+}
+
+function severityRows(
+  stats: ReviewerStatsPayload
+): Array<{ name: string; count: number }> {
+  return ["critical", "high", "medium", "low"]
+    .map((severity) => ({
+      name: severity,
+      count: stats.severity_counts[severity] ?? 0,
+    }))
+    .filter((row) => row.count > 0)
+}
+
+function CounterList({
+  title,
+  rows,
+}: {
+  title: string
+  rows: Array<{ name: string; count: number }>
+}) {
+  return (
+    <div>
+      <h3 className="text-xs font-medium text-muted-foreground">{title}</h3>
+      {rows.length ? (
+        <ul className="mt-2 space-y-2 text-sm">
+          {rows.map((row) => (
+            <li
+              key={row.name}
+              className="flex items-center justify-between gap-3"
+            >
+              <span className="truncate text-foreground">{row.name}</span>
+              <span className="text-muted-foreground tabular-nums">
+                {formatNumber(row.count)}
+              </span>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="mt-2 text-xs text-muted-foreground">No data yet.</p>
+      )}
+    </div>
+  )
+}
+
 function UserCell({ row }: { row: UsageLeaderboardRow }) {
   const initials = initialsFor(row.user.name)
   return (
@@ -202,4 +331,11 @@ function initialsFor(name: string): string {
 
 function formatNumber(value: number): string {
   return new Intl.NumberFormat().format(value)
+}
+
+function formatPercent(value: number): string {
+  return new Intl.NumberFormat(undefined, {
+    maximumFractionDigits: 0,
+    style: "percent",
+  }).format(value)
 }

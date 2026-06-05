@@ -155,11 +155,35 @@ export interface UsageLeaderboardRow {
   deletions: number;
 }
 
+export interface ReviewerStatsCounterRow {
+  name: string;
+  count: number;
+}
+
+export interface ReviewerStatsPayload {
+  period: UsageLeaderboardPeriod;
+  reviewed_prs: number;
+  prs_with_findings: number;
+  findings_recorded: number;
+  surfaced_findings: number;
+  addressed_findings: number;
+  resolved_after_update: number;
+  dismissed_findings: number;
+  unresolved_surfaced_findings: number;
+  resolution_rate: number;
+  human_replies: number;
+  severity_counts: Record<string, number>;
+  top_categories: Array<ReviewerStatsCounterRow>;
+  generated_at_ms: number | null;
+}
+
 export interface UsageLeaderboardPayload {
   period: UsageLeaderboardPeriod;
   rows: Array<UsageLeaderboardRow>;
   total_members: number;
   current_user_rank: number | null;
+  generated_at_ms: number | null;
+  reviewer_stats: ReviewerStatsPayload;
 }
 
 export interface Repository {
