@@ -7,7 +7,7 @@ import type { ModelSelection } from "@/lib/agents/useModelOptions";
 import { AgentPromptBar } from "@/components/agents/AgentPromptBar";
 import { AgentsShell } from "@/components/agents/AgentsSidebar";
 import { MessageView } from "@/components/agents/ported";
-import { useSendAgentMessage } from "@/lib/agents/queries";
+import { useCancelAgentThread, useSendAgentMessage } from "@/lib/agents/queries";
 import { dropPendingPrompts, getPendingPrompts } from "@/lib/agents/pendingPrompts";
 import { useAgentThreadStream } from "@/lib/agents/useThreadStream";
 import { useModelOptions } from "@/lib/agents/useModelOptions";
@@ -19,6 +19,7 @@ interface AgentThreadViewProps {
 
 export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
   const sendMessage = useSendAgentMessage(thread.id);
+  const cancelThread = useCancelAgentThread(thread.id);
   useAgentThreadStream(thread.id, thread.status === "running");
   const [pendingPrompts, setPendingPrompts] = useState<Array<PendingPrompt>>(() =>
     getPendingPrompts(thread.id),
@@ -104,6 +105,8 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
                         effort: activeSelection?.effort ?? null,
                       })
                     }
+                    onStop={() => cancelThread.mutate()}
+                    stopping={cancelThread.isPending}
                     models={models}
                     selection={activeSelection}
                     onSelectionChange={setSelection}
@@ -127,6 +130,8 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
                       effort: activeSelection?.effort ?? null,
                     })
                   }
+                  onStop={() => cancelThread.mutate()}
+                  stopping={cancelThread.isPending}
                   models={models}
                   selection={activeSelection}
                   onSelectionChange={setSelection}

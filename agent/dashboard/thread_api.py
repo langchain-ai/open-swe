@@ -444,7 +444,7 @@ async def cancel_dashboard_thread(
     run_id = metadata.get("latest_run_id")
     if isinstance(run_id, str) and run_id:
         try:
-            await client.runs.cancel(thread_id, run_id, wait=False)
+            await client.runs.cancel(thread_id, run_id, wait=False, action="interrupt")
         except Exception:
             logger.debug("Could not cancel run %s for thread %s", run_id, thread_id, exc_info=True)
 
