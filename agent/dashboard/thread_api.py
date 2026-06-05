@@ -120,6 +120,11 @@ def _assert_thread_owner(metadata: dict[str, Any], login: str, email: str | None
         raise HTTPException(404, "thread not found")
 
 
+def _assert_thread_viewable(metadata: dict[str, Any]) -> None:
+    if _thread_source(metadata) not in _SURFACED_SOURCES:
+        raise HTTPException(404, "thread not found")
+
+
 def _metadata_repo(metadata: dict[str, Any]) -> tuple[str, str, str]:
     owner = metadata.get("repo_owner")
     name = metadata.get("repo_name")
@@ -205,12 +210,15 @@ async def _latest_run_status(thread_id: str) -> str | None:
 
 
 async def list_dashboard_threads(
-    login: str, *, email: str | None = None, limit: int = 50
+    login: str, *, email: str | None = None, limit: int = 50, include_all: bool = False
 ) -> list[dict[str, Any]]:
     client = langgraph_client()
-    searches: list[dict[str, Any]] = [{"github_login": login}]
-    if email and email.strip():
-        searches.append({"triggering_user_email": email.strip().lower()})
+    if include_all:
+        searches: list[dict[str, Any]] = [{"source": source} for source in _SURFACED_SOURCES]
+    else:
+        searches = [{"github_login": login}]
+        if email and email.strip():
+            searches.append({"triggering_user_email": email.strip().lower()})
 
     seen: dict[str, dict[str, Any]] = {}
     for metadata_filter in searches:
@@ -224,7 +232,10 @@ async def list_dashboard_threads(
             if not isinstance(thread, dict):
                 continue
             meta = thread.get("metadata") if isinstance(thread.get("metadata"), dict) else {}
-            if not _user_owns_thread(meta, login, email):
+            if include_all:
+                if _thread_source(meta) not in _SURFACED_SOURCES:
+                    continue
+            elif not _user_owns_thread(meta, login, email):
                 continue
             thread_id = thread.get("thread_id") or thread.get("id")
             if isinstance(thread_id, str) and thread_id not in seen:
@@ -246,7 +257,7 @@ async def get_dashboard_thread(
         raise HTTPException(404, "thread not found") from exc
 
     metadata = thread.get("metadata") if isinstance(thread.get("metadata"), dict) else {}
-    _assert_thread_owner(metadata, login, email)
+    _assert_thread_viewable(metadata)
 
     messages: list[dict[str, Any]] = []
     try:
@@ -485,7 +496,7 @@ async def stream_dashboard_thread(
         raise HTTPException(404, "thread not found") from exc
 
     metadata = thread.get("metadata") if isinstance(thread.get("metadata"), dict) else {}
-    _assert_thread_owner(metadata, login, email)
+    _assert_thread_viewable(metadata)
 
     stream = await langgraph_client().threads.join_stream(
         thread_id,

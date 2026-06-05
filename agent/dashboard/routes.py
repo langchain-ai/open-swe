@@ -755,9 +755,10 @@ async def api_delete_schedule(
 
 @router.get("/threads")
 async def api_list_threads(
+    all: bool = False,
     session: dict[str, Any] = _SESSION_DEP,
 ) -> list[dict[str, Any]]:
-    return await list_dashboard_threads(session["sub"], email=session.get("email"))
+    return await list_dashboard_threads(session["sub"], email=session.get("email"), include_all=all)
 
 
 @router.post("/threads")
