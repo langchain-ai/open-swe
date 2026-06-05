@@ -323,6 +323,8 @@ async def _start_agent_run(
     }
     if has_repo:
         configurable["repo"] = repo_config
+    else:
+        configurable["repo_explicitly_none"] = True
     if chosen_model and chosen_effort:
         configurable["agent_model_id"] = chosen_model
         configurable["agent_effort"] = chosen_effort
@@ -404,6 +406,8 @@ async def send_dashboard_message(
     }
     if owner and name:
         configurable["repo"] = {"owner": owner, "name": name}
+    else:
+        configurable["repo_explicitly_none"] = True
     if chosen_model and chosen_effort:
         configurable["agent_model_id"] = chosen_model
         configurable["agent_effort"] = chosen_effort

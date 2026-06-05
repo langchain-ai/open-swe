@@ -100,6 +100,24 @@ from .utils.sandbox_state import (
 )
 
 
+async def _resolve_prompt_default_repo(configurable: dict[str, Any]) -> dict[str, str] | None:
+    repo_config = configurable.get("repo")
+    if isinstance(repo_config, dict):
+        owner = repo_config.get("owner")
+        name = repo_config.get("name")
+        if isinstance(owner, str) and isinstance(name, str):
+            return {"owner": owner, "name": name}
+
+    if configurable.get("repo_explicitly_none") is True:
+        return None
+
+    try:
+        return await get_team_default_repo()
+    except Exception:
+        logger.debug("Failed to load team default repo for prompt", exc_info=True)
+        return None
+
+
 async def _start_langsmith_sandbox_if_needed(sandbox_backend: SandboxBackendProtocol) -> None:
     """Start a LangSmith sandbox before operations that require it to be running."""
     if os.getenv("SANDBOX_TYPE", "langsmith") != "langsmith":
@@ -541,14 +559,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     except Exception:
         logger.debug("Failed to record agent usage for thread %s", thread_id, exc_info=True)
 
-    prompt_default_repo = (
-        configurable.get("repo") if isinstance(configurable.get("repo"), dict) else None
-    )
-    if not prompt_default_repo:
-        try:
-            prompt_default_repo = await get_team_default_repo()
-        except Exception:
-            logger.debug("Failed to load team default repo for prompt", exc_info=True)
+    prompt_default_repo = await _resolve_prompt_default_repo(configurable)
 
     logger.info("Returning agent with sandbox for thread %s", thread_id)
     main_model = make_model(model_id, **model_kwargs)
