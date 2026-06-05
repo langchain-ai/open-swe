@@ -22,10 +22,13 @@ class FakeStore:
 class FakeThreads:
     def __init__(self, threads: list[dict]):
         self.threads = threads
+        self.calls: list[dict] = []
 
     async def search(self, **kwargs) -> list[dict]:
-        self.kwargs = kwargs
-        return self.threads
+        self.calls.append(kwargs)
+        offset = kwargs.get("offset") or 0
+        limit = kwargs.get("limit") or len(self.threads)
+        return self.threads[offset : offset + limit]
 
 
 class FakeClient:
@@ -177,3 +180,39 @@ async def test_reviewer_stats_snapshot_counts_surfaced_and_resolved_findings(mon
         {"name": "performance", "count": 1},
         {"name": "style", "count": 1},
     ]
+
+
+@pytest.mark.asyncio
+async def test_reviewer_stats_paginates_reviewer_threads(monkeypatch):
+    threads = [
+        {"created_at": "2025-01-03T00:00:00Z", "metadata": {"kind": "reviewer", "findings": []}},
+        {"created_at": "2025-01-02T00:00:00Z", "metadata": {"kind": "reviewer", "findings": []}},
+        {"created_at": "2025-01-01T00:00:00Z", "metadata": {"kind": "reviewer", "findings": []}},
+    ]
+    fake_threads = FakeThreads(threads)
+    monkeypatch.setattr(agent_usage, "_CACHE_SEARCH_LIMIT", 2)
+    monkeypatch.setattr(agent_usage, "_client", lambda: FakeClient(threads=fake_threads))
+
+    snapshot = await agent_usage._build_reviewer_stats_snapshot("all")
+
+    assert snapshot["reviewed_prs"] == 3
+    assert [call["offset"] for call in fake_threads.calls] == [0, 2]
+    assert all(call["sort_by"] == "created_at" for call in fake_threads.calls)
+
+
+@pytest.mark.asyncio
+async def test_reviewer_stats_stops_after_page_older_than_cutoff(monkeypatch):
+    threads = [
+        {"created_at": "2025-01-03T00:00:00Z", "metadata": {"kind": "reviewer", "findings": []}},
+        {"created_at": "2025-01-01T00:00:00Z", "metadata": {"kind": "reviewer", "findings": []}},
+        {"created_at": "2024-12-31T00:00:00Z", "metadata": {"kind": "reviewer", "findings": []}},
+    ]
+    fake_threads = FakeThreads(threads)
+    monkeypatch.setattr(agent_usage, "_CACHE_SEARCH_LIMIT", 2)
+    monkeypatch.setattr(agent_usage, "_client", lambda: FakeClient(threads=fake_threads))
+    cutoff_ms = agent_usage._timestamp_ms("2025-01-02T00:00:00Z")
+
+    pages = [page async for page in agent_usage._iter_reviewer_thread_pages(cutoff_ms)]
+
+    assert len(pages) == 1
+    assert [call["offset"] for call in fake_threads.calls] == [0]

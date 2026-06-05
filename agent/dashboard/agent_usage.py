@@ -449,11 +449,10 @@ def _is_finding_resolved_by_us(finding: dict[str, Any]) -> bool:
 
 
 def _thread_created_at_ms(thread: dict[str, Any], metadata: dict[str, Any]) -> int:
+    timestamp = _thread_explicit_created_at_ms(thread, metadata)
+    if timestamp:
+        return timestamp
     for source in (
-        metadata.get("created_at_ms"),
-        metadata.get("created_at"),
-        thread.get("created_at"),
-        thread.get("createdAt"),
         metadata.get("updated_at_ms"),
         metadata.get("updated_at"),
         thread.get("updated_at"),
@@ -465,18 +464,53 @@ def _thread_created_at_ms(thread: dict[str, Any], metadata: dict[str, Any]) -> i
     return _now_ms()
 
 
+def _thread_explicit_created_at_ms(thread: dict[str, Any], metadata: dict[str, Any]) -> int:
+    for source in (
+        metadata.get("created_at_ms"),
+        metadata.get("created_at"),
+        thread.get("created_at"),
+        thread.get("createdAt"),
+    ):
+        timestamp = _timestamp_ms(source)
+        if timestamp:
+            return timestamp
+    return 0
+
+
 def _counter_rows(counter: Counter[str], *, limit: int = 5) -> list[dict[str, Any]]:
     return [{"name": name, "count": count} for name, count in counter.most_common(limit)]
 
 
+async def _iter_reviewer_thread_pages(cutoff_ms: int | None):
+    client = _client()
+    offset = 0
+    while True:
+        page = await client.threads.search(
+            metadata={"kind": REVIEWER_THREAD_KIND},
+            limit=_CACHE_SEARCH_LIMIT,
+            offset=offset,
+            sort_by="created_at",
+            sort_order="desc",
+        )
+        if not page:
+            return
+        yield page
+        if len(page) < _CACHE_SEARCH_LIMIT:
+            return
+        if cutoff_ms is not None:
+            last_thread = next(
+                (thread for thread in reversed(page) if isinstance(thread, dict)), None
+            )
+            metadata = last_thread.get("metadata") if isinstance(last_thread, dict) else None
+            if isinstance(metadata, dict):
+                last_created_at_ms = _thread_explicit_created_at_ms(last_thread, metadata)
+                if last_created_at_ms and last_created_at_ms < cutoff_ms:
+                    return
+        offset += len(page)
+
+
 async def _build_reviewer_stats_snapshot(period: Period) -> dict[str, Any]:
     cutoff_ms = _period_cutoff_ms(period)
-    threads = await _client().threads.search(
-        metadata={"kind": REVIEWER_THREAD_KIND},
-        limit=_CACHE_SEARCH_LIMIT,
-        sort_by="updated_at",
-        sort_order="desc",
-    )
 
     reviewed_prs = 0
     prs_with_findings = 0
@@ -489,53 +523,55 @@ async def _build_reviewer_stats_snapshot(period: Period) -> dict[str, Any]:
     severity_counts: Counter[str] = Counter()
     category_counts: Counter[str] = Counter()
 
-    for thread in threads or []:
-        if not isinstance(thread, dict):
-            continue
-        metadata = thread.get("metadata") if isinstance(thread.get("metadata"), dict) else {}
-        if cutoff_ms is not None and _thread_created_at_ms(thread, metadata) < cutoff_ms:
-            continue
+    async for page in _iter_reviewer_thread_pages(cutoff_ms):
+        for thread in page:
+            if not isinstance(thread, dict):
+                continue
+            metadata = thread.get("metadata") if isinstance(thread.get("metadata"), dict) else {}
+            if cutoff_ms is not None and _thread_created_at_ms(thread, metadata) < cutoff_ms:
+                continue
 
-        reviewed_prs += 1
-        findings = metadata.get("findings")
-        if not isinstance(findings, list):
-            continue
-        valid_findings = [finding for finding in findings if isinstance(finding, dict)]
-        if valid_findings:
-            prs_with_findings += 1
-        for finding in valid_findings:
-            findings_recorded += 1
-            severity = finding.get("severity")
-            if isinstance(severity, str) and severity:
-                severity_counts[severity] += 1
-            category = finding.get("category")
-            if isinstance(category, str) and category:
-                category_counts[category] += 1
-            interactions = finding.get("interactions")
-            if isinstance(interactions, list):
-                human_replies += sum(
-                    1
-                    for interaction in interactions
-                    if isinstance(interaction, dict) and interaction.get("kind") == "human_reply"
-                )
-            elif finding.get("last_human_reply_at"):
-                human_replies += 1
+            reviewed_prs += 1
+            findings = metadata.get("findings")
+            if not isinstance(findings, list):
+                continue
+            valid_findings = [finding for finding in findings if isinstance(finding, dict)]
+            if valid_findings:
+                prs_with_findings += 1
+            for finding in valid_findings:
+                findings_recorded += 1
+                severity = finding.get("severity")
+                if isinstance(severity, str) and severity:
+                    severity_counts[severity] += 1
+                category = finding.get("category")
+                if isinstance(category, str) and category:
+                    category_counts[category] += 1
+                interactions = finding.get("interactions")
+                if isinstance(interactions, list):
+                    human_replies += sum(
+                        1
+                        for interaction in interactions
+                        if isinstance(interaction, dict)
+                        and interaction.get("kind") == "human_reply"
+                    )
+                elif finding.get("last_human_reply_at"):
+                    human_replies += 1
 
-            surfaced = _is_finding_surfaced(finding)
-            if surfaced:
-                surfaced_findings += 1
-            if _is_finding_resolved_by_us(finding):
-                addressed_findings += 1
-                first_seen_sha = finding.get("first_seen_sha")
-                head_sha = metadata.get("head_sha") or finding.get("last_confirmed_sha")
-                if (
-                    isinstance(first_seen_sha, str)
-                    and isinstance(head_sha, str)
-                    and first_seen_sha != head_sha
-                ):
-                    resolved_after_update += 1
-            if finding.get("status") == "dismissed":
-                dismissed_findings += 1
+                surfaced = _is_finding_surfaced(finding)
+                if surfaced:
+                    surfaced_findings += 1
+                if _is_finding_resolved_by_us(finding):
+                    addressed_findings += 1
+                    first_seen_sha = finding.get("first_seen_sha")
+                    head_sha = metadata.get("head_sha") or finding.get("last_confirmed_sha")
+                    if (
+                        isinstance(first_seen_sha, str)
+                        and isinstance(head_sha, str)
+                        and first_seen_sha != head_sha
+                    ):
+                        resolved_after_update += 1
+                if finding.get("status") == "dismissed":
+                    dismissed_findings += 1
 
     unresolved_surfaced_findings = max(
         0, surfaced_findings - addressed_findings - dismissed_findings
