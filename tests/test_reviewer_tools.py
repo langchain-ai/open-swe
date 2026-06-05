@@ -88,8 +88,17 @@ def test_add_finding_rejects_empty_title() -> None:
     assert "title" in result["error"].lower()
 
 
-def test_add_finding_rejects_out_of_diff_lines() -> None:
-    with patch("agent.tools.add_finding.get_config", return_value=_config()):
+def test_add_finding_accepts_out_of_diff_lines_marked_not_in_diff() -> None:
+    captured: list[Any] = []
+
+    async def fake_append(_thread_id: str, finding: Any) -> None:
+        captured.append(finding)
+
+    with (
+        patch("agent.tools.add_finding.get_config", return_value=_config()),
+        patch("agent.tools.add_finding.get_thread_id_from_runtime", return_value="tid-1"),
+        patch("agent.tools.add_finding.append_finding", side_effect=fake_append),
+    ):
         result = add_finding(
             severity="high",
             confidence="high",
@@ -100,8 +109,10 @@ def test_add_finding_rejects_out_of_diff_lines() -> None:
             start_line=99,
             end_line=99,
         )
-    assert result["success"] is False
-    assert "not part of the PR diff" in result["error"]
+    assert result["success"] is True
+    assert result["in_diff"] is False
+    assert "out-of-diff section" in result["note"]
+    assert captured[0]["in_diff"] is False
 
 
 def test_add_finding_accepts_left_side_anchor_on_old_line() -> None:
@@ -139,9 +150,9 @@ def test_add_finding_accepts_left_side_anchor_on_old_line() -> None:
     assert result["success"] is True
 
 
-def test_add_finding_rejects_left_anchor_outside_old_side_set() -> None:
-    """A LEFT anchor on a line that's not in the old-side hunk must be
-    rejected — same guard, just on the correct side."""
+def test_add_finding_left_anchor_outside_old_side_set_marked_not_in_diff() -> None:
+    """A LEFT anchor on a line that's not in the old-side hunk is accepted but
+    marked out-of-diff — same guard, just on the correct side."""
     config = {
         "configurable": {
             "thread_id": "tid-1",
@@ -153,7 +164,11 @@ def test_add_finding_rejects_left_anchor_outside_old_side_set() -> None:
         },
         "metadata": {},
     }
-    with patch("agent.tools.add_finding.get_config", return_value=config):
+    with (
+        patch("agent.tools.add_finding.get_config", return_value=config),
+        patch("agent.tools.add_finding.get_thread_id_from_runtime", return_value="tid-1"),
+        patch("agent.tools.add_finding.append_finding", new_callable=AsyncMock),
+    ):
         result = add_finding(
             severity="high",
             confidence="high",
@@ -165,8 +180,8 @@ def test_add_finding_rejects_left_anchor_outside_old_side_set() -> None:
             end_line=99,
             side="LEFT",
         )
-    assert result["success"] is False
-    assert "not part of the PR diff" in result["error"]
+    assert result["success"] is True
+    assert result["in_diff"] is False
 
 
 def test_add_finding_rejects_invalid_confidence() -> None:

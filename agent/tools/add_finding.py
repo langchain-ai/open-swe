@@ -115,16 +115,9 @@ def add_finding(
     diff_line_set = configurable.get("diff_line_set") if isinstance(configurable, dict) else None
     diff_text = configurable.get("diff_text", "") if isinstance(configurable, dict) else ""
 
-    if isinstance(diff_line_set, dict) and not is_range_in_diff(
+    in_diff = not isinstance(diff_line_set, dict) or is_range_in_diff(
         diff_line_set, file, start_line, end_line, side=_cast_side(side)
-    ):
-        return {
-            "success": False,
-            "error": (
-                f"Finding range {file}:{start_line}-{end_line} is not part of the PR diff. "
-                "Only review changes the PR introduces; do not flag pre-existing code."
-            ),
-        }
+    )
 
     diff_hunk: str | None = None
     if isinstance(diff_text, str) and diff_text:
@@ -150,10 +143,18 @@ def add_finding(
         side=_cast_side(side),
         suggestion=clipped_suggestion,
         diff_hunk=diff_hunk,
+        in_diff=in_diff,
     )
 
     asyncio.run(append_finding(thread_id, finding))
     result: dict[str, Any] = {"success": True, "finding_id": finding["id"]}
+    if not in_diff:
+        result["in_diff"] = False
+        result["note"] = (
+            "Anchored outside the PR diff. This will be surfaced in the collapsed "
+            "out-of-diff section of the review summary, not as an inline comment. "
+            "Do not re-anchor or retry."
+        )
     if suggestion_dropped:
         result["suggestion_dropped"] = True
         result["warning"] = (

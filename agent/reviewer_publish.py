@@ -230,18 +230,59 @@ def review_summary_marker(pr_number: int) -> str:
     return f"<!-- open-swe-reviewer pr={pr_number} -->"
 
 
-def render_review_body(*, pr_number: int, surfaced_count: int, trace_url: str | None = None) -> str:
+def render_out_of_diff_section(findings: list[Finding]) -> str:
+    """Render findings anchored outside the PR diff as a collapsed dropdown.
+
+    These can't be posted as inline comments (GitHub rejects off-diff lines), so
+    they live in the review summary body inside a ``<details>`` block — visible
+    on demand without adding noise to the changed-line review.
+    """
+    count = len(findings)
+    noun = "finding" if count == 1 else "findings"
+    items: list[str] = []
+    for f in findings:
+        title, detail = _split_title_and_detail(
+            (f.get("description") or "").strip(), f.get("title")
+        )
+        location = f.get("file") or "?"
+        line_ref = _format_line_reference(f.get("start_line"), f.get("end_line"))
+        if line_ref:
+            location += f" {line_ref.strip('*()')}".replace("Refers to ", "")
+        item = f"- {_severity_emoji(f.get('severity') or 'medium')} **{title}** — `{location}`"
+        if detail:
+            item += f"\n  {detail}"
+        items.append(item)
+    return (
+        f"<details>\n<summary>🔍 {count} out-of-diff {noun}</summary>\n\n"
+        "These relate to code outside this PR's changed lines.\n\n"
+        + "\n".join(items)
+        + "\n</details>"
+    )
+
+
+def render_review_body(
+    *,
+    pr_number: int,
+    surfaced_count: int,
+    trace_url: str | None = None,
+    out_of_diff_findings: list[Finding] | None = None,
+) -> str:
     """Compose the top-level review body."""
-    if surfaced_count == 0:
+    out_of_diff_findings = out_of_diff_findings or []
+    if surfaced_count == 0 and not out_of_diff_findings:
         headline = (
             "## ✅ Open SWE Review: No issues found\n\n"
             "Open SWE reviewed this PR and found no potential bugs to report."
         )
+    elif surfaced_count == 0:
+        headline = "**Open SWE Review** found no issues in the changed lines."
     else:
         issue_word = "issue" if surfaced_count == 1 else "issues"
         headline = f"**Open SWE Review** found {surfaced_count} potential {issue_word}."
 
     parts = [headline]
+    if out_of_diff_findings:
+        parts.append(render_out_of_diff_section(out_of_diff_findings))
     if trace_url:
         parts.append(f"[View Open SWE trace]({trace_url})")
     parts.append(review_summary_marker(pr_number))

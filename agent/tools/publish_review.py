@@ -166,8 +166,15 @@ async def _publish_review_eval_dry_run_async(
     findings = await list_findings_async(thread_id)
     unpublished_findings = [f for f in findings if not _has_publication_identity(f)]
     open_unpublished = [f for f in unpublished_findings if f.get("status", "open") == "open"]
+    in_diff_unpublished = [f for f in unpublished_findings if f.get("in_diff", True)]
+    out_of_diff_unpublished = [f for f in unpublished_findings if not f.get("in_diff", True)]
     eligible = filter_findings_for_publish(
-        unpublished_findings,
+        in_diff_unpublished,
+        severity_threshold=severity_threshold,
+        cap=cap,
+    )
+    eligible_out_of_diff = filter_findings_for_publish(
+        out_of_diff_unpublished,
         severity_threshold=severity_threshold,
         cap=cap,
     )
@@ -184,7 +191,10 @@ async def _publish_review_eval_dry_run_async(
         "dry_run": True,
         "review_id": None,
         "surfaced_count": len(inline_comments),
-        "hidden_count": max(len(open_unpublished) - len(inline_comments), 0),
+        "out_of_diff_count": len(eligible_out_of_diff),
+        "hidden_count": max(
+            len(open_unpublished) - len(inline_comments) - len(eligible_out_of_diff), 0
+        ),
         "resolved_thread_count": 0,
     }
 
@@ -229,8 +239,21 @@ async def _publish_review_async(
             f for f in unpublished_findings if f.get("first_seen_sha") == head_sha
         ]
     open_unpublished = [f for f in unpublished_findings if f.get("status", "open") == "open"]
+    # In-diff findings become inline comments. Out-of-diff findings can't anchor
+    # to an inline comment (GitHub rejects off-diff lines), so they're surfaced
+    # in a collapsed dropdown in the review body. Already-surfaced out-of-diff
+    # findings carry a github_review_id, so they're not re-posted on re-review.
+    in_diff_unpublished = [f for f in unpublished_findings if f.get("in_diff", True)]
+    out_of_diff_unpublished = [
+        f
+        for f in unpublished_findings
+        if not f.get("in_diff", True) and not isinstance(f.get("github_review_id"), int)
+    ]
     eligible = filter_findings_for_publish(
-        unpublished_findings, severity_threshold=severity_threshold, cap=cap
+        in_diff_unpublished, severity_threshold=severity_threshold, cap=cap
+    )
+    eligible_out_of_diff = filter_findings_for_publish(
+        out_of_diff_unpublished, severity_threshold=severity_threshold, cap=cap
     )
 
     inline_comments: list[dict[str, Any]] = []
@@ -252,9 +275,15 @@ async def _publish_review_async(
     # SWE review summary) instead. Still resolve threads for findings that just
     # moved to resolved, and advance last_reviewed_sha so subsequent pushes
     # don't redo the same diff.
-    if not inline_comments and (
-        is_re_review
-        or await open_swe_review_exists(owner=owner, repo=repo, pr_number=pr_number, token=token)
+    if (
+        not inline_comments
+        and not eligible_out_of_diff
+        and (
+            is_re_review
+            or await open_swe_review_exists(
+                owner=owner, repo=repo, pr_number=pr_number, token=token
+            )
+        )
     ):
         resolved_thread_count = await _resolve_threads_for_resolved_findings(
             owner=owner,
@@ -277,6 +306,7 @@ async def _publish_review_async(
         pr_number=pr_number,
         surfaced_count=len(inline_comments),
         trace_url=review_trace_url,
+        out_of_diff_findings=eligible_out_of_diff,
     )
 
     review_response = await post_pull_request_review(
@@ -310,6 +340,7 @@ async def _publish_review_async(
                 pr_number=pr_number,
                 surfaced_count=len(retry_inline),
                 trace_url=review_trace_url,
+                out_of_diff_findings=eligible_out_of_diff,
             )
             retry_response = await post_pull_request_review(
                 owner=owner,
@@ -367,6 +398,15 @@ async def _publish_review_async(
             "error": "Failed to POST PR review: no response from GitHub",
         }
     review_id = review_response.get("id") if isinstance(review_response, dict) else None
+
+    if review_id is not None and eligible_out_of_diff:
+        # Mark surfaced out-of-diff findings so re-review doesn't repost them.
+        await _store_review_id_on_findings(
+            thread_id=thread_id,
+            findings=findings,
+            eligible_with_payload=[(dict(f), {}) for f in eligible_out_of_diff],
+            review_id=review_id,
+        )
 
     if review_id is not None and inline_comments:
         await _store_review_id_on_findings(
@@ -435,7 +475,10 @@ async def _publish_review_async(
         "success": True,
         "review_id": review_id,
         "surfaced_count": len(inline_comments),
-        "hidden_count": max(len(open_unpublished) - len(inline_comments), 0),
+        "out_of_diff_count": len(eligible_out_of_diff),
+        "hidden_count": max(
+            len(open_unpublished) - len(inline_comments) - len(eligible_out_of_diff), 0
+        ),
         "resolved_thread_count": resolved_thread_count,
     }
     if unresolvable_findings:
