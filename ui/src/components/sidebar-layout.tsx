@@ -88,6 +88,7 @@ export function SidebarFrame({
       className={cn(
         "relative flex h-svh shrink-0 flex-col",
         "max-md:fixed max-md:inset-0 max-md:z-40 max-md:!w-full",
+        "max-md:animate-in max-md:fade-in-0 max-md:slide-in-from-left-4 max-md:duration-200 max-md:ease-out",
         className,
       )}
     >
