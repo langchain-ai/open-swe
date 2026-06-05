@@ -8,12 +8,16 @@ import os
 from typing import Any
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from fastapi.responses import RedirectResponse, Response, StreamingResponse
 from pydantic import BaseModel
 
 from .admin import is_admin
-from .agent_usage import list_agent_usage_leaderboard
+from .agent_usage import (
+    list_agent_usage_leaderboard,
+    refresh_reviewer_stats_cache,
+    refresh_usage_leaderboard_cache,
+)
 from .analyzer_cron import remove_continual_cron
 from .enabled_repos import (
     list_enabled_review_repos,
@@ -706,6 +710,7 @@ async def api_delete_review_style(
 
 @router.get("/agent-usage-leaderboard")
 async def api_agent_usage_leaderboard(
+    background_tasks: BackgroundTasks,
     period: str | None = "30d",
     limit: int = 10,
     session: dict[str, Any] = _SESSION_DEP,
@@ -715,6 +720,12 @@ async def api_agent_usage_leaderboard(
         limit=limit,
         current_login=session["sub"],
         current_email=session.get("email"),
+        schedule_usage_refresh=lambda cache_period: background_tasks.add_task(
+            refresh_usage_leaderboard_cache, cache_period
+        ),
+        schedule_reviewer_refresh=lambda cache_period: background_tasks.add_task(
+            refresh_reviewer_stats_cache, cache_period
+        ),
     )
 
 
