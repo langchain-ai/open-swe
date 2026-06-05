@@ -16,6 +16,7 @@ from agent.reviewer_findings import (
     new_finding,
     new_finding_id,
     replace_findings,
+    resolve_review_head_sha,
     set_reviewer_thread_metadata,
     update_finding_fields,
 )
@@ -57,6 +58,7 @@ def test_new_finding_defaults() -> None:
     assert finding["github_thread_resolved"] is False
     assert finding["github_resolved_thread_ids"] == []
     assert finding["last_human_reply_at"] is None
+    assert finding["resolution_note"] is None
     assert finding["suggestion"] is None
 
 
@@ -180,3 +182,41 @@ async def test_set_reviewer_thread_metadata_includes_kind() -> None:
     assert metadata["last_reviewed_sha"] == "sha"
     assert "pr" not in metadata
     assert "findings" not in metadata
+
+
+@pytest.mark.asyncio
+async def test_set_reviewer_thread_metadata_persists_head_sha() -> None:
+    fake_client = AsyncMock()
+    with patch("agent.reviewer_findings.get_client", return_value=fake_client):
+        await set_reviewer_thread_metadata("tid", head_sha="newhead")
+    metadata = fake_client.threads.update.await_args.kwargs["metadata"]
+    assert metadata["head_sha"] == "newhead"
+
+
+@pytest.mark.asyncio
+async def test_resolve_review_head_sha_prefers_metadata_over_config() -> None:
+    """A mid-run push records the live head in thread metadata; it must win over
+    the stale head frozen in the run's config."""
+    fake_client = AsyncMock()
+    fake_client.threads.get.return_value = {"metadata": {"head_sha": "metahead"}}
+    with patch("agent.reviewer_findings.get_client", return_value=fake_client):
+        head = await resolve_review_head_sha("tid", {"head_sha": "confighead"})
+    assert head == "metahead"
+
+
+@pytest.mark.asyncio
+async def test_resolve_review_head_sha_falls_back_to_config_when_metadata_empty() -> None:
+    fake_client = AsyncMock()
+    fake_client.threads.get.return_value = {"metadata": {}}
+    with patch("agent.reviewer_findings.get_client", return_value=fake_client):
+        head = await resolve_review_head_sha("tid", {"head_sha": "confighead"})
+    assert head == "confighead"
+
+
+@pytest.mark.asyncio
+async def test_resolve_review_head_sha_falls_back_without_thread_id() -> None:
+    fake_client = AsyncMock()
+    with patch("agent.reviewer_findings.get_client", return_value=fake_client):
+        head = await resolve_review_head_sha("", {"head_sha": "confighead"})
+    assert head == "confighead"
+    fake_client.threads.get.assert_not_called()

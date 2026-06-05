@@ -52,6 +52,7 @@ export interface SessionUser {
   email: string | null;
   avatar_url: string | null;
   is_admin: boolean;
+  slack_oauth_enabled?: boolean;
 }
 
 export interface ModelOption {
@@ -59,6 +60,14 @@ export interface ModelOption {
   label: string;
   efforts: Array<string>;
   default_effort: string;
+}
+
+export interface OptionsPayload {
+  models: Array<ModelOption>;
+  default_agent_model: string;
+  default_agent_reasoning_effort: string;
+  default_agent_subagent_model: string;
+  default_agent_subagent_reasoning_effort: string;
 }
 
 export interface Profile {
@@ -100,15 +109,83 @@ export interface TeamSettings {
   review_trace_links: boolean;
   autofix_mode: AutofixMode;
   autofix_severity_threshold: AutofixMode;
+  org_guidelines?: string | null;
   default_agent_model?: string | null;
   default_agent_reasoning_effort?: string | null;
   default_agent_subagent_model?: string | null;
   default_agent_subagent_reasoning_effort?: string | null;
+  default_repo?: string | null;
   default_reviewer_model?: string | null;
   default_reviewer_reasoning_effort?: string | null;
   default_reviewer_subagent_model?: string | null;
   default_reviewer_subagent_reasoning_effort?: string | null;
   updated_at?: string | null;
+}
+
+export interface UserMapping {
+  github_login: string;
+  work_email: string;
+  slack_user_id?: string | null;
+  source?: string;
+  status?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface UserMappingsPage {
+  items: Array<UserMapping>;
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+export type UsageLeaderboardPeriod = "7d" | "30d" | "all";
+
+export interface UsageLeaderboardRow {
+  rank: number;
+  user: {
+    name: string;
+    github_login: string | null;
+    email: string | null;
+  };
+  favorite_model: string;
+  agent_runs: number;
+  prs_opened: number;
+  merged_prs: number;
+  agent_loc: number;
+  additions: number;
+  deletions: number;
+}
+
+export interface ReviewerStatsCounterRow {
+  name: string;
+  count: number;
+}
+
+export interface ReviewerStatsPayload {
+  period: UsageLeaderboardPeriod;
+  reviewed_prs: number;
+  prs_with_findings: number;
+  findings_recorded: number;
+  surfaced_findings: number;
+  addressed_findings: number;
+  resolved_after_update: number;
+  dismissed_findings: number;
+  unresolved_surfaced_findings: number;
+  resolution_rate: number;
+  human_replies: number;
+  severity_counts: Record<string, number>;
+  top_categories: Array<ReviewerStatsCounterRow>;
+  generated_at_ms: number | null;
+}
+
+export interface UsageLeaderboardPayload {
+  period: UsageLeaderboardPeriod;
+  rows: Array<UsageLeaderboardRow>;
+  total_members: number;
+  current_user_rank: number | null;
+  generated_at_ms: number | null;
+  reviewer_stats: ReviewerStatsPayload;
 }
 
 export interface Repository {
@@ -149,7 +226,7 @@ export interface ReviewStyle {
 
 export const api = {
   me: () => request<SessionUser>("/me"),
-  options: () => request<{ models: Array<ModelOption> }>("/options"),
+  options: () => request<OptionsPayload>("/options"),
   profile: () => request<Profile>("/profile"),
   saveProfile: (body: ProfileUpdate) =>
     request<Profile>("/profile", { method: "PUT", body: JSON.stringify(body) }),
@@ -189,12 +266,20 @@ export const api = {
       method: "PUT",
       body: JSON.stringify({ full_name, enabled }),
     }),
-  adminListProfiles: () => request<Array<Profile>>("/admin/profiles"),
-  adminSaveProfile: (login: string, body: ProfileUpdate & { email?: string }) =>
-    request<Profile>(`/admin/profiles/${encodeURIComponent(login)}`, {
-      method: "PUT",
-      body: JSON.stringify(body),
-    }),
+  usageLeaderboard: (period: UsageLeaderboardPeriod = "30d", limit = 10) =>
+    request<UsageLeaderboardPayload>(
+      `/agent-usage-leaderboard?period=${encodeURIComponent(period)}&limit=${limit}`,
+    ),
+  myMapping: () => request<Partial<UserMapping>>("/my-mapping"),
+  adminListUserMappings: (page = 1, pageSize = 20) =>
+    request<UserMappingsPage>(
+      `/admin/user-mappings?page=${page}&page_size=${pageSize}`,
+    ),
+  adminDeleteUserMapping: (github_login: string) =>
+    request<{ deleted: boolean }>(
+      `/admin/user-mappings/${encodeURIComponent(github_login)}`,
+      { method: "DELETE" },
+    ),
   logout: () => request<void>("/auth/logout", { method: "POST" }),
 };
 
@@ -202,4 +287,8 @@ export function loginUrl(redirectTo?: string): string {
   const target = redirectTo ?? (typeof window !== "undefined" ? window.location.origin : "");
   const qs = target ? `?redirect_to=${encodeURIComponent(target)}` : "";
   return `${API_BASE}/dashboard/api/auth/login${qs}`;
+}
+
+export function slackConnectUrl(): string {
+  return `${API_BASE}/dashboard/api/slack/login`;
 }

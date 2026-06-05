@@ -36,6 +36,10 @@ def _message_type(message: dict[str, Any]) -> str:
 
 def _tool_kind(name: str) -> str:
     lowered = name.lower()
+    if lowered == "slack_thread_reply":
+        return "slack"
+    if lowered == "linear_comment":
+        return "linear"
     if lowered in _EDIT_TOOLS or any(token in lowered for token in ("edit", "write", "replace")):
         return "edit"
     if lowered in _EXECUTE_TOOLS:

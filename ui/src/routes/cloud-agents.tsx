@@ -4,14 +4,7 @@ import { useEffect, useRef, useState } from "react"
 import type { ModelOption } from "@/lib/api"
 import { AppShell, SettingsRow, SettingsSection } from "@/components/AppShell"
 import { Button } from "@/components/ui/button"
-import {
-  Combobox,
-  ComboboxContent,
-  ComboboxEmpty,
-  ComboboxInput,
-  ComboboxItem,
-  ComboboxList,
-} from "@/components/ui/combobox"
+import { RepoSelector } from "@/components/agents/RepoSelector"
 import { Input } from "@/components/ui/input"
 import {
   Select,
@@ -53,6 +46,16 @@ function CloudAgentsPage() {
   const initialized = useRef(false)
 
   const firstModel: ModelOption | undefined = options.data?.models[0]
+  const defaultAgentModel =
+    options.data?.default_agent_model ?? firstModel?.id ?? ""
+  const defaultAgentEffort =
+    options.data?.default_agent_reasoning_effort ??
+    firstModel?.default_effort ??
+    ""
+  const defaultSubagentModel =
+    options.data?.default_agent_subagent_model ?? defaultAgentModel
+  const defaultSubagentEffort =
+    options.data?.default_agent_subagent_reasoning_effort ?? defaultAgentEffort
   const currentModel: ModelOption | undefined =
     options.data?.models.find((m) => m.id === modelId) ?? firstModel
   const currentSubagentModel: ModelOption | undefined =
@@ -60,29 +63,31 @@ function CloudAgentsPage() {
 
   useEffect(() => {
     if (!profile.data || initialized.current) return
-    // For users with no saved profile, wait until the options API has loaded
-    // so the model/effort selects can initialise to the first available option.
-    const hasModel = !!profile.data.default_model || !!firstModel
+    const hasModel = !!profile.data.default_model || !!defaultAgentModel
     if (!hasModel) return
     initialized.current = true
-    setModelId(profile.data.default_model ?? firstModel?.id ?? "")
-    setEffort(profile.data.reasoning_effort ?? firstModel?.default_effort ?? "")
+    setModelId(profile.data.default_model ?? defaultAgentModel)
+    setEffort(profile.data.reasoning_effort ?? defaultAgentEffort)
     setSubagentModelId(
       profile.data.default_subagent_model ??
         profile.data.default_model ??
-        firstModel?.id ??
-        ""
+        defaultSubagentModel
     )
     setSubagentEffort(
       profile.data.subagent_reasoning_effort ??
         profile.data.reasoning_effort ??
-        firstModel?.default_effort ??
-        ""
+        defaultSubagentEffort
     )
     setDefaultRepo(profile.data.default_repo ?? "")
     setBaseBranch(profile.data.base_branch ?? "")
     setBranchPrefix(profile.data.branch_prefix ?? "")
-  }, [profile.data, firstModel?.id, firstModel?.default_effort, firstModel])
+  }, [
+    profile.data,
+    defaultAgentModel,
+    defaultAgentEffort,
+    defaultSubagentModel,
+    defaultSubagentEffort,
+  ])
 
   useEffect(() => {
     if (currentModel && !currentModel.efforts.includes(effort)) {
@@ -108,8 +113,8 @@ function CloudAgentsPage() {
   }
   if (!session.data) return <Navigate to="/login" />
 
-  const fallbackModel = firstModel?.id ?? ""
-  const fallbackEffort = firstModel?.default_effort ?? ""
+  const fallbackModel = defaultAgentModel
+  const fallbackEffort = defaultAgentEffort
 
   const persist = (patch: Parameters<typeof buildProfileUpdate>[1]) => {
     setError(null)
@@ -135,8 +140,8 @@ function CloudAgentsPage() {
   return (
     <AppShell
       user={session.data}
-      title="Cloud Agents"
-      description="Configure how Cloud Agents pick a model, repository, and PR defaults."
+      title="Open SWE Agent"
+      description="Configure how the Open SWE Agent picks a model, repository, and PR defaults."
     >
       <SettingsSection title="Defaults">
         <div className="divide-y divide-border">
@@ -222,39 +227,26 @@ function CloudAgentsPage() {
             label="Default Repository"
             description="Used when no repository is specified"
             control={
-              <div className="w-64">
-                {repos.data && repos.data.repositories.length > 0 ? (
-                  <Combobox
-                    items={repos.data.repositories.map((r) => r.full_name)}
-                    value={defaultRepo}
-                    onValueChange={(v) =>
-                      setDefaultRepo(typeof v === "string" ? v : "")
-                    }
-                  >
-                    <ComboboxInput
-                      placeholder="Pick a repository…"
-                      showClear
-                      className="w-full"
-                    />
-                    <ComboboxContent className="min-w-[var(--anchor-width)]">
-                      <ComboboxList className="max-h-64">
-                        <ComboboxEmpty>No matches</ComboboxEmpty>
-                        {repos.data.repositories.map((r) => (
-                          <ComboboxItem key={r.full_name} value={r.full_name}>
-                            <span className="truncate">{r.full_name}</span>
-                          </ComboboxItem>
-                        ))}
-                      </ComboboxList>
-                    </ComboboxContent>
-                  </Combobox>
-                ) : (
-                  <Input
-                    placeholder="owner/repo"
-                    value={defaultRepo}
-                    onChange={(e) => setDefaultRepo(e.target.value)}
+              repos.data?.repositories?.length ? (
+                <div className="w-56">
+                  <RepoSelector
+                    repos={repos.data.repositories}
+                    selectedRepo={defaultRepo || null}
+                    onRepoChange={(repo) => setDefaultRepo(repo ?? "")}
+                    placeholder="Pick a repository…"
+                    emptySelectionLabel="No default repository"
+                    triggerClassName="h-7 w-full max-w-none rounded-md border border-input bg-input/20 px-2 py-1.5 text-xs/relaxed text-foreground transition-colors hover:opacity-100 dark:bg-input/30"
+                    dropdownClassName="w-56"
                   />
-                )}
-              </div>
+                </div>
+              ) : (
+                <Input
+                  className="w-56"
+                  placeholder="owner/repo"
+                  value={defaultRepo}
+                  onChange={(e) => setDefaultRepo(e.target.value)}
+                />
+              )
             }
           />
           <SettingsRow

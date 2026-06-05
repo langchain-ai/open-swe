@@ -16,6 +16,8 @@ import httpx
 import jwt
 from fastapi import HTTPException, Request
 
+from agent.utils.github_org_membership import is_user_active_org_member
+
 logger = logging.getLogger(__name__)
 
 COOKIE_NAME = "osw_session"
@@ -80,6 +82,37 @@ def sanitize_redirect_to(redirect_to: str | None) -> str:
     return fallback
 
 
+def _allowed_login_orgs() -> frozenset[str]:
+    """Orgs whose members may log in to the dashboard.
+
+    Reuses the webhook-side ``ALLOWED_GITHUB_ORGS`` allowlist so deployments
+    configure a single org gate. When empty the dashboard login gate is
+    disabled (fail-open) to preserve existing deployments.
+    """
+    return frozenset(
+        org.strip().lower()
+        for org in os.environ.get("ALLOWED_GITHUB_ORGS", "").split(",")
+        if org.strip()
+    )
+
+
+async def enforce_org_login_gate(login: str) -> None:
+    """Reject dashboard login for users outside the allowed GitHub org(s).
+
+    No-op when ``ALLOWED_GITHUB_ORGS`` is unset. Otherwise the user must be an
+    active member of at least one configured org; membership is checked with
+    the GitHub App installation token (fail-closed on any API error).
+    """
+    orgs = _allowed_login_orgs()
+    if not orgs:
+        return
+    for org in orgs:
+        if await is_user_active_org_member(login, org):
+            return
+    logger.warning("Rejected dashboard login for %r — not in allowed org(s)", login)
+    raise HTTPException(403, "your GitHub account is not a member of an authorized organization")
+
+
 def issue_session(*, login: str, email: str | None, avatar_url: str | None) -> str:
     now = int(time.time())
     payload = {
@@ -117,7 +150,7 @@ def hash_state_nonce(nonce: str) -> str:
 
 def issue_state(*, redirect_to: str, nonce_hash: str) -> str:
     now = int(time.time())
-    payload = {
+    payload: dict[str, Any] = {
         "nonce_hash": nonce_hash,
         "redirect_to": redirect_to,
         "iat": now,
@@ -131,6 +164,23 @@ def decode_state(state: str) -> dict[str, Any]:
         return jwt.decode(state, _secret(), algorithms=[JWT_ALG])
     except jwt.PyJWTError as e:
         raise HTTPException(400, f"invalid state: {e}") from e
+
+
+# Dashboard route where users manage their GitHub↔Slack link.
+PROFILE_SETTINGS_PATH = "/my-settings"
+
+
+def build_settings_url() -> str | None:
+    """Return the dashboard Profile Settings URL, or ``None`` if not configured.
+
+    This is a plain, token-free link: it carries no per-user identity, so it is
+    safe to share in a public Slack thread. The user signs in with GitHub from
+    their own session and connects Slack via verified OIDC on the settings page.
+    """
+    frontend_base = os.environ.get("DASHBOARD_BASE_URL", "").rstrip("/")
+    if not frontend_base:
+        return None
+    return f"{frontend_base}{PROFILE_SETTINGS_PATH}"
 
 
 def require_session(request: Request) -> dict[str, Any]:

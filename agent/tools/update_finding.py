@@ -8,17 +8,28 @@ from typing import Any
 from langgraph.config import get_config
 
 from ..reviewer_findings import (
+    DEFAULT_FINDING_TITLE,
     MAX_SUGGESTION_LINES,
     Finding,
     clip_suggestion,
     get_thread_id_from_runtime,
     list_findings,
+    normalize_finding_title,
+    resolve_review_head_sha,
     update_finding_fields,
 )
+from ..utils.reviewer_outcomes import emit_finding_status_outcome
 
 
 def _is_non_empty_str(value: Any) -> bool:
     return isinstance(value, str) and bool(value)
+
+
+def _normalize_note(note: str | None) -> str | None:
+    if note is None:
+        return None
+    normalized = note.strip()
+    return normalized or None
 
 
 def _has_published_github_surface(finding: Finding) -> bool:
@@ -43,6 +54,7 @@ def update_finding(
     status: str | None = None,
     severity: str | None = None,
     confidence: str | None = None,
+    title: str | None = None,
     description: str | None = None,
     suggestion: str | None = None,
     note: str | None = None,
@@ -57,16 +69,19 @@ def update_finding(
         finding_id: The id returned by ``add_finding`` (or shown in the
             ``Existing findings`` block of the re-review user message).
         status: New status (``open``, ``resolved``, ``dismissed``).
-            Use ``resolved`` when the new commits address the issue.
+            Use ``resolved`` when the new commits address the issue. Resolving
+            or dismissing requires a ``note`` with the message to post.
         severity: New severity, if reassessing.
         confidence: New confidence rating (``low``, ``medium``, ``high``), if
             new commits change how sure you are the finding is a real issue.
-        description: New description body, if revising.
+        title: New concise generated headline, if revising.
+        description: New description body, if revising. Do not repeat ``title``
+            as the first line.
         suggestion: New replacement text. Pass an empty string to clear it.
             Capped at 4 lines — longer values are dropped (the finding keeps
             its description). Only set this for small, obvious fixes.
-        note: Optional free-form note explaining the change. Persisted on the
-            finding under ``last_update_note``.
+        note: Optional free-form note explaining the change. Required when
+            resolving or dismissing because it becomes the GitHub reply body.
 
     Returns:
         Dictionary with ``success`` and (on success) the updated ``finding``.
@@ -77,6 +92,12 @@ def update_finding(
         return {"success": False, "error": f"Invalid severity: {severity}"}
     if confidence is not None and confidence not in {"low", "medium", "high"}:
         return {"success": False, "error": f"Invalid confidence: {confidence}"}
+    normalized_note = _normalize_note(note)
+    if status in {"resolved", "dismissed"} and normalized_note is None:
+        return {
+            "success": False,
+            "error": "Resolving or dismissing a finding requires a note with the message to post.",
+        }
 
     updates: dict[str, Any] = {}
     suggestion_dropped = False
@@ -86,6 +107,11 @@ def update_finding(
         updates["severity"] = severity
     if confidence is not None:
         updates["confidence"] = confidence
+    if title is not None:
+        normalized_title = normalize_finding_title(title)
+        if normalized_title == DEFAULT_FINDING_TITLE:
+            return {"success": False, "error": "title must be a non-empty generated headline"}
+        updates["title"] = normalized_title
     if description is not None:
         updates["description"] = description
     if suggestion is not None:
@@ -95,14 +121,17 @@ def update_finding(
             clipped, suggestion_dropped = clip_suggestion(suggestion)
             if not suggestion_dropped:
                 updates["suggestion"] = clipped
-    if note is not None:
-        updates["last_update_note"] = note
+    if normalized_note is not None:
+        updates["last_update_note"] = normalized_note
+        if status in {"resolved", "dismissed"}:
+            updates["resolution_note"] = normalized_note
 
     config = get_config()
     configurable = config.get("configurable", {}) if isinstance(config, dict) else {}
-    head_sha = configurable.get("head_sha", "") if isinstance(configurable, dict) else ""
-    if status == "open" and isinstance(head_sha, str) and head_sha:
-        updates["last_confirmed_sha"] = head_sha
+    if status == "open":
+        head_sha = asyncio.run(resolve_review_head_sha(get_thread_id_from_runtime(), configurable))
+        if head_sha:
+            updates["last_confirmed_sha"] = head_sha
 
     if not updates:
         if suggestion_dropped:
@@ -124,6 +153,7 @@ def update_finding(
     if finding is None:
         return {"success": False, "error": f"No finding found with id {finding_id}"}
 
+    delegated_resolution = False
     repo_config = configurable.get("repo") if isinstance(configurable, dict) else None
     pr_number = configurable.get("pr_number") if isinstance(configurable, dict) else None
     can_resolve_github_thread = (
@@ -139,15 +169,17 @@ def update_finding(
     ):
         from .resolve_finding_thread import resolve_finding_thread
 
-        resolve_result = resolve_finding_thread(finding_id, status=status, note=note)
+        resolve_result = resolve_finding_thread(finding_id, status=status, note=normalized_note)
         if not resolve_result.get("success"):
             return {
                 "success": False,
                 "error": "GitHub review thread resolution failed; finding was left open.",
                 "github_resolution": resolve_result,
             }
+        delegated_resolution = True
         updates.pop("status", None)
         updates.pop("last_update_note", None)
+        updates.pop("resolution_note", None)
         if not updates:
             result: dict[str, Any] = {
                 "success": True,
@@ -166,6 +198,8 @@ def update_finding(
     updated = asyncio.run(update_finding_fields(thread_id, finding_id, updates))
     if updated is None:
         return {"success": False, "error": f"No finding found with id {finding_id}"}
+    if status in {"resolved", "dismissed"} and not delegated_resolution:
+        emit_finding_status_outcome(updated, status, configurable=configurable, thread_id=thread_id)
     result = {"success": True, "finding": updated}
     if suggestion_dropped:
         result["suggestion_dropped"] = True

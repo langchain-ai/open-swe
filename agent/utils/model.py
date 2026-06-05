@@ -14,6 +14,7 @@ OpenAIReasoningEffort = Literal["none", "low", "medium", "high", "xhigh"]
 AnthropicThinkingType = Literal["adaptive"]
 AnthropicEffort = Literal["low", "medium", "high", "xhigh", "max"]
 GoogleThinkingLevel = Literal["minimal", "low", "medium", "high"]
+FireworksReasoningEffort = Literal["none", "low", "medium", "high", "xhigh", "max"]
 
 
 class OpenAIReasoning(TypedDict, total=False):
@@ -32,6 +33,7 @@ class ModelKwargs(TypedDict, total=False):
     thinking_level: GoogleThinkingLevel | None
     temperature: float | None
     max_retries: int | None
+    model_kwargs: dict[str, object] | None
 
 
 _ANTHROPIC_EFFORTS: set[AnthropicEffort] = {"low", "medium", "high", "xhigh", "max"}
@@ -99,9 +101,32 @@ def anthropic_effort_for(profile_effort: str | None) -> AnthropicEffort | None:
     return None
 
 
+def fireworks_reasoning_effort_for(profile_effort: str | None) -> FireworksReasoningEffort | None:
+    """Map profile effort to a Fireworks ``reasoning_effort`` value.
+
+    Fireworks' OpenAI-compatible API accepts ``reasoning_effort`` on its reasoning
+    models. ``none`` disables reasoning; ``xhigh``/``max`` are only honored by models
+    that advertise them (e.g. DeepSeek V4 Pro). The per-model ``efforts`` lists in
+    ``dashboard/options.py`` gate which values can actually reach this function.
+    """
+    if profile_effort == "none":
+        return "none"
+    if profile_effort == "low":
+        return "low"
+    if profile_effort == "medium":
+        return "medium"
+    if profile_effort == "high":
+        return "high"
+    if profile_effort == "xhigh":
+        return "xhigh"
+    if profile_effort == "max":
+        return "max"
+    return None
+
+
 def google_thinking_level_for(profile_effort: str | None) -> GoogleThinkingLevel | None:
     """Map profile effort to Gemini 3+ ``thinking_level``."""
-    if profile_effort == "none":
+    if profile_effort in ("minimal", "none"):
         return "minimal"
     if profile_effort == "low":
         return "low"
@@ -138,4 +163,8 @@ def provider_model_kwargs(
         thinking_level = google_thinking_level_for(profile_effort)
         if thinking_level is not None:
             kwargs["thinking_level"] = thinking_level
+    elif model_id.startswith("fireworks:"):
+        effort = fireworks_reasoning_effort_for(profile_effort)
+        if effort is not None:
+            kwargs["model_kwargs"] = {"reasoning_effort": effort}
     return kwargs

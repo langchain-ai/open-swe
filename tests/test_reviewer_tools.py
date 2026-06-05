@@ -2,14 +2,37 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from typing import Any
 from unittest.mock import AsyncMock, patch
+
+import pytest
 
 from agent.tools.add_finding import add_finding
 from agent.tools.list_findings import list_findings
 from agent.tools.resolve_finding_thread import resolve_finding_thread
 from agent.tools.update_finding import update_finding
 from agent.tools.update_repo_prompt import update_repo_prompt
+
+
+@pytest.fixture(autouse=True)
+def _stub_resolve_review_head_sha() -> Iterator[None]:
+    """Resolve the review head from the run config (no thread-metadata fetch).
+
+    Mirrors the production fallback when metadata carries no head, keeping these
+    unit tests offline. Tests that exercise the metadata-override path patch
+    ``resolve_review_head_sha`` themselves.
+    """
+
+    def _head(thread_id: str, configurable: dict[str, Any]) -> str:
+        head = configurable.get("head_sha")
+        return head if isinstance(head, str) else ""
+
+    with (
+        patch("agent.tools.add_finding.resolve_review_head_sha", AsyncMock(side_effect=_head)),
+        patch("agent.tools.update_finding.resolve_review_head_sha", AsyncMock(side_effect=_head)),
+    ):
+        yield
 
 
 def _config(**configurable_overrides: Any) -> dict[str, Any]:
@@ -41,6 +64,7 @@ def test_add_finding_rejects_invalid_severity() -> None:
             confidence="high",
             category="x",
             file="foo.py",
+            title="Generated title",
             description="d",
             start_line=11,
             end_line=11,
@@ -49,19 +73,47 @@ def test_add_finding_rejects_invalid_severity() -> None:
     assert "severity" in result["error"].lower()
 
 
-def test_add_finding_rejects_out_of_diff_lines() -> None:
+def test_add_finding_rejects_empty_title() -> None:
     with patch("agent.tools.add_finding.get_config", return_value=_config()):
         result = add_finding(
             severity="high",
             confidence="high",
             category="correctness",
             file="foo.py",
+            title=" ",
+            description="d",
+            start_line=11,
+            end_line=11,
+        )
+    assert result["success"] is False
+    assert "title" in result["error"].lower()
+
+
+def test_add_finding_accepts_out_of_diff_lines_marked_not_in_diff() -> None:
+    captured: list[Any] = []
+
+    async def fake_append(_thread_id: str, finding: Any) -> None:
+        captured.append(finding)
+
+    with (
+        patch("agent.tools.add_finding.get_config", return_value=_config()),
+        patch("agent.tools.add_finding.get_thread_id_from_runtime", return_value="tid-1"),
+        patch("agent.tools.add_finding.append_finding", side_effect=fake_append),
+    ):
+        result = add_finding(
+            severity="high",
+            confidence="high",
+            category="correctness",
+            file="foo.py",
+            title="Generated title",
             description="d",
             start_line=99,
             end_line=99,
         )
-    assert result["success"] is False
-    assert "not part of the PR diff" in result["error"]
+    assert result["success"] is True
+    assert result["in_diff"] is False
+    assert "out-of-diff section" in result["note"]
+    assert captured[0]["in_diff"] is False
 
 
 def test_add_finding_accepts_left_side_anchor_on_old_line() -> None:
@@ -90,6 +142,7 @@ def test_add_finding_accepts_left_side_anchor_on_old_line() -> None:
             confidence="high",
             category="correctness",
             file="foo.py",
+            title="Release resources removed",
             description="deleted call to releaseResources()",
             start_line=51,
             end_line=51,
@@ -98,9 +151,9 @@ def test_add_finding_accepts_left_side_anchor_on_old_line() -> None:
     assert result["success"] is True
 
 
-def test_add_finding_rejects_left_anchor_outside_old_side_set() -> None:
-    """A LEFT anchor on a line that's not in the old-side hunk must be
-    rejected — same guard, just on the correct side."""
+def test_add_finding_left_anchor_outside_old_side_set_marked_not_in_diff() -> None:
+    """A LEFT anchor on a line that's not in the old-side hunk is accepted but
+    marked out-of-diff — same guard, just on the correct side."""
     config = {
         "configurable": {
             "thread_id": "tid-1",
@@ -112,19 +165,24 @@ def test_add_finding_rejects_left_anchor_outside_old_side_set() -> None:
         },
         "metadata": {},
     }
-    with patch("agent.tools.add_finding.get_config", return_value=config):
+    with (
+        patch("agent.tools.add_finding.get_config", return_value=config),
+        patch("agent.tools.add_finding.get_thread_id_from_runtime", return_value="tid-1"),
+        patch("agent.tools.add_finding.append_finding", new_callable=AsyncMock),
+    ):
         result = add_finding(
             severity="high",
             confidence="high",
             category="correctness",
             file="foo.py",
+            title="Generated title",
             description="d",
             start_line=99,
             end_line=99,
             side="LEFT",
         )
-    assert result["success"] is False
-    assert "not part of the PR diff" in result["error"]
+    assert result["success"] is True
+    assert result["in_diff"] is False
 
 
 def test_add_finding_rejects_invalid_confidence() -> None:
@@ -134,6 +192,7 @@ def test_add_finding_rejects_invalid_confidence() -> None:
             confidence="certain",
             category="correctness",
             file="foo.py",
+            title="Generated title",
             description="d",
             start_line=11,
             end_line=11,
@@ -159,6 +218,7 @@ def test_add_finding_persists_to_thread_metadata() -> None:
             confidence="high",
             category="style",
             file="foo.py",
+            title="Rename breaks reference",
             description="rename",
             start_line=11,
             end_line=12,
@@ -169,6 +229,7 @@ def test_add_finding_persists_to_thread_metadata() -> None:
     assert "finding_id" in result
     persisted_thread, persisted = captured[0]
     assert persisted_thread == "tid-1"
+    assert persisted["title"] == "Rename breaks reference"
     assert persisted["file"] == "foo.py"
     assert persisted["start_line"] == 11
     assert persisted["end_line"] == 12
@@ -176,6 +237,40 @@ def test_add_finding_persists_to_thread_metadata() -> None:
     assert persisted["status"] == "open"
     assert persisted["first_seen_sha"] == "sha-head"
     assert persisted["confidence"] == "high"
+
+
+def test_add_finding_uses_resolved_head_sha_for_provenance() -> None:
+    """A net-new finding filed during a mid-run re-review must record the live
+    head (from thread metadata), not the stale head frozen in the run config."""
+    captured: list[Any] = []
+
+    async def fake_append(thread_id: str, finding: Any) -> Any:
+        captured.append(finding)
+        return finding
+
+    with (
+        patch("agent.tools.add_finding.get_config", return_value=_config()),
+        patch("agent.tools.add_finding.get_thread_id_from_runtime", return_value="tid-1"),
+        patch(
+            "agent.tools.add_finding.resolve_review_head_sha",
+            AsyncMock(return_value="freshhead"),
+        ),
+        patch("agent.tools.add_finding.append_finding", side_effect=fake_append),
+    ):
+        result = add_finding(
+            severity="medium",
+            confidence="high",
+            category="style",
+            file="foo.py",
+            title="Rename breaks reference",
+            description="rename",
+            start_line=11,
+            end_line=12,
+        )
+
+    assert result["success"] is True
+    assert captured[0]["first_seen_sha"] == "freshhead"
+    assert captured[0]["last_confirmed_sha"] == "freshhead"
 
 
 def test_add_finding_allows_file_level_with_no_lines() -> None:
@@ -193,6 +288,7 @@ def test_add_finding_allows_file_level_with_no_lines() -> None:
             confidence="medium",
             category="style",
             file="missing.py",
+            title="File-level issue",
             description="file-level note",
         )
     assert result["success"] is True
@@ -309,6 +405,17 @@ def test_resolve_finding_thread_resolves_all_known_threads() -> None:
     assert updates["github_thread_resolved"] is True
     assert updates["github_resolved_thread_ids"] == ["THREAD_1", "THREAD_2"]
     assert updates["github_posted_resolution_comment_ids"] == [11, 12]
+    assert updates["resolution_note"] == "Fixed in the latest commit"
+
+
+def test_resolve_finding_thread_requires_note() -> None:
+    with patch(
+        "agent.tools.resolve_finding_thread.get_config",
+        return_value=_config(repo={"owner": "o", "name": "r"}, pr_number=7),
+    ):
+        result = resolve_finding_thread("f1", note=" ", status="resolved")
+    assert result["success"] is False
+    assert "requires a note" in result["error"]
 
 
 def test_update_finding_rejects_empty_update() -> None:
@@ -316,6 +423,35 @@ def test_update_finding_rejects_empty_update() -> None:
         result = update_finding(finding_id="f_x")
     assert result["success"] is False
     assert "No fields" in result["error"]
+
+
+def test_update_finding_requires_note_for_resolution() -> None:
+    with patch("agent.tools.update_finding.get_config", return_value=_config()):
+        result = update_finding(finding_id="f_x", status="resolved")
+    assert result["success"] is False
+    assert "requires a note" in result["error"]
+
+
+def test_update_finding_updates_title() -> None:
+    captured: list[Any] = []
+
+    async def fake_update(thread_id: str, finding_id: str, updates: Any) -> Any:
+        captured.append(updates)
+        return {"id": finding_id, **updates}
+
+    with (
+        patch("agent.tools.update_finding.get_config", return_value=_config()),
+        patch("agent.tools.update_finding.get_thread_id_from_runtime", return_value="tid-1"),
+        patch(
+            "agent.tools.update_finding.list_findings",
+            AsyncMock(return_value=[_existing_finding()]),
+        ),
+        patch("agent.tools.update_finding.update_finding_fields", side_effect=fake_update),
+    ):
+        result = update_finding(finding_id="f_a", title="new generated title")
+
+    assert result["success"] is True
+    assert captured[0]["title"] == "new generated title"
 
 
 def test_add_finding_drops_long_suggestion() -> None:
@@ -336,6 +472,7 @@ def test_add_finding_drops_long_suggestion() -> None:
             confidence="high",
             category="style",
             file="foo.py",
+            title="Rewrite changes behavior",
             description="rewrite",
             start_line=11,
             end_line=12,
@@ -366,6 +503,7 @@ def test_add_finding_keeps_short_suggestion() -> None:
             confidence="medium",
             category="style",
             file="foo.py",
+            title="Rename breaks reference",
             description="rename",
             start_line=11,
             end_line=12,
@@ -395,6 +533,7 @@ def test_add_finding_preserves_multi_line_range() -> None:
             confidence="low",
             category="style",
             file="foo.py",
+            title="Range spans issue",
             description="span the relevant range",
             start_line=15,
             end_line=19,
@@ -498,6 +637,7 @@ def test_update_finding_passes_through_fields() -> None:
     assert fid == "f_a"
     assert updates["status"] == "resolved"
     assert updates["last_update_note"] == "addressed by new commit"
+    assert updates["resolution_note"] == "addressed by new commit"
 
 
 def test_update_finding_resolves_github_thread_when_pr_context_available() -> None:
@@ -522,7 +662,11 @@ def test_update_finding_resolves_github_thread_when_pr_context_available() -> No
             },
         ) as resolve_async,
     ):
-        result = update_finding(finding_id="f_a", status="resolved")
+        result = update_finding(
+            finding_id="f_a",
+            status="resolved",
+            note="The latest commit adds the missing guard.",
+        )
 
     assert result["success"] is True
     assert result["github_resolution"]["success"] is True
@@ -552,7 +696,11 @@ def test_update_finding_leaves_open_when_github_resolution_fails() -> None:
             },
         ) as resolve_async,
     ):
-        result = update_finding(finding_id="f_a", status="resolved")
+        result = update_finding(
+            finding_id="f_a",
+            status="resolved",
+            note="The latest commit adds the missing guard.",
+        )
 
     assert result["success"] is False
     assert "left open" in result["error"]
@@ -582,11 +730,16 @@ def test_update_finding_resolves_hidden_finding_locally() -> None:
             new_callable=AsyncMock,
         ) as resolve_async,
     ):
-        result = update_finding(finding_id="f_a", status="resolved")
+        result = update_finding(
+            finding_id="f_a",
+            status="resolved",
+            note="The latest commit adds the missing guard.",
+        )
 
     assert result["success"] is True
     _thread_id, _finding_id, updates = captured[0]
     assert updates["status"] == "resolved"
+    assert updates["resolution_note"] == "The latest commit adds the missing guard."
     resolve_async.assert_not_awaited()
 
 

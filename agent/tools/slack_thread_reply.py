@@ -1,4 +1,5 @@
 import asyncio
+import json
 import os
 from typing import Any
 
@@ -16,7 +17,11 @@ LANGGRAPH_URL = os.environ.get("LANGGRAPH_URL") or os.environ.get(
 )
 
 
-def slack_thread_reply(message: str) -> dict[str, Any]:
+def slack_thread_reply(
+    message: str,
+    options: list[str] | None = None,
+    blocks: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     """Post a message to the current Slack thread.
 
     Use this for clarifying questions, mid-run progress updates, and the final
@@ -29,6 +34,10 @@ def slack_thread_reply(message: str) -> dict[str, Any]:
     Key differences: *bold*, _italic_, ~strikethrough~, <url|link text>,
     bullet lists with "• ", ```code blocks```, > blockquotes.
     Do NOT use **bold**, [link](url), or other standard Markdown syntax.
+
+    To ask a user to choose from predefined options, pass `options`. Slack will
+    render interactive buttons and the web UI will render the same choices.
+    The user can still reply manually in the Slack thread.
 
     To mention/tag a user, use Slack's mention format: <@USER_ID>.
     You can find user IDs in the conversation context (e.g. @Name(U06KD8BFY95)).
@@ -49,13 +58,72 @@ def slack_thread_reply(message: str) -> dict[str, Any]:
         return {"success": False, "error": "Message cannot be empty"}
 
     message = convert_mentions_to_slack_format(message)
-    message_ts = asyncio.run(_post_and_store_mapping(channel_id, thread_ts, message))
-    return {"success": message_ts is not None}
+    slack_blocks = blocks or _build_option_blocks(message, options)
+    message_ts, slack_error = asyncio.run(
+        _post_and_store_mapping(channel_id, thread_ts, message, blocks=slack_blocks)
+    )
+    if message_ts is None:
+        return {
+            "success": False,
+            "error": slack_error or "post failed",
+            "slack_error": slack_error,
+            "message_chars": len(message),
+            "hint": _slack_reply_failure_hint(slack_error),
+        }
+    return {"success": True}
 
 
-async def _post_and_store_mapping(channel_id: str, thread_ts: str, message: str) -> str | None:
-    message_ts = await post_slack_thread_reply_with_ts(channel_id, thread_ts, message)
+def _build_option_blocks(message: str, options: list[str] | None) -> list[dict[str, Any]] | None:
+    if not options:
+        return None
+    clean_options = [option.strip() for option in options if option.strip()]
+    if not clean_options:
+        return None
+    return [
+        {"type": "section", "text": {"type": "mrkdwn", "text": message}},
+        {
+            "type": "actions",
+            "elements": [
+                {
+                    "type": "button",
+                    "text": {"type": "plain_text", "text": option[:75], "emoji": True},
+                    "value": json.dumps({"type": "open_swe_option", "response": option}),
+                    "action_id": "open_swe_option_select",
+                }
+                for option in clean_options[:5]
+            ],
+        },
+    ]
+
+
+def _slack_reply_failure_hint(slack_error: str | None) -> str:
+    if slack_error == "msg_too_long":
+        return "Slack rejected the message as too long; retry with a shorter message."
+    if slack_error in {"channel_not_found", "not_in_channel"}:
+        return "Slack rejected the channel; do not retry. Surface the failure to the user via the trace output instead."
+    if slack_error and slack_error.startswith("rate_limited"):
+        retry_after = slack_error.partition(":")[2].strip()
+        if retry_after:
+            return f"Slack rate limited the request; wait at least {retry_after}s before retrying, or surface the failure to the user via the trace output."
+        return "Slack rate limited the request; wait before retrying, or surface the failure to the user via the trace output."
+    if slack_error == "missing_slack_bot_token":
+        return "Slack bot token is missing; do not retry. Surface the failure to the user via the trace output instead."
+    if slack_error and slack_error.startswith("http_error:"):
+        return "Slack posting hit an HTTP error; retry once, then surface the failure to the user via the trace output."
+    return "Slack post failed; retry once with a concise message or surface the failure to the user via the trace output."
+
+
+async def _post_and_store_mapping(
+    channel_id: str,
+    thread_ts: str,
+    message: str,
+    *,
+    blocks: list[dict[str, Any]] | None = None,
+) -> tuple[str | None, str | None]:
+    message_ts, slack_error = await post_slack_thread_reply_with_ts(
+        channel_id, thread_ts, message, blocks=blocks
+    )
     if message_ts:
         langgraph_client = get_client(url=LANGGRAPH_URL)
         await store_slack_message_run_mapping(langgraph_client, channel_id, thread_ts, message_ts)
-    return message_ts
+    return message_ts, slack_error

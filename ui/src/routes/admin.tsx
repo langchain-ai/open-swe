@@ -2,10 +2,10 @@ import { Navigate, createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
-import type { ModelOption, Profile, ProfileUpdate, TeamSettings } from "@/lib/api";
+import type { ModelOption, TeamSettings, UserMapping } from "@/lib/api";
 import { AppShell, SettingsRow, SettingsSection } from "@/components/AppShell";
-import { ProfileForm } from "@/components/ProfileForm";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -21,30 +21,11 @@ export const Route = createFileRoute("/admin")({ component: AdminPage });
 
 function AdminPage() {
   const session = useSession();
-  const qc = useQueryClient();
-  const [selected, setSelected] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
 
   const options = useQuery({
     queryKey: ["options"],
     queryFn: api.options,
     enabled: !!session.data?.is_admin,
-  });
-
-  const profiles = useQuery({
-    queryKey: ["adminProfiles"],
-    queryFn: api.adminListProfiles,
-    enabled: !!session.data?.is_admin,
-  });
-
-  const save = useMutation({
-    mutationFn: ({ login, body }: { login: string; body: ProfileUpdate }) =>
-      api.adminSaveProfile(login, body),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ["adminProfiles"] });
-      setError(null);
-    },
-    onError: (e: Error) => setError(e.message),
   });
 
   if (session.isLoading) {
@@ -57,58 +38,115 @@ function AdminPage() {
   if (!session.data) return <Navigate to="/login" />;
   if (!session.data.is_admin) return <Navigate to="/my-settings" />;
 
-  const activeProfile: Profile | null =
-    (selected && profiles.data?.find((p) => p.login === selected)) || null;
-
   return (
     <AppShell
       user={session.data}
       title="Admin"
-      description="Workspace-wide defaults and per-user profile edits."
+      description="Workspace-wide defaults and user mappings."
     >
       <GlobalDefaultsSection models={options.data?.models ?? []} />
 
-      <SettingsSection title="Per-user profiles">
-        <div className="grid grid-cols-1 gap-0 md:grid-cols-[260px_1fr]">
-          <div className="flex flex-col gap-0.5 border-b border-border p-2 md:border-b-0 md:border-r">
-            {profiles.isLoading ? (
-              <Skeleton className="h-32" />
-            ) : (
-              profiles.data?.map((p) => (
-                <Button
-                  key={p.login}
-                  variant={selected === p.login ? "secondary" : "ghost"}
-                  className="justify-start"
-                  onClick={() => setSelected(p.login ?? null)}
-                >
-                  <span className="truncate">{p.login}</span>
-                </Button>
-              ))
-            )}
-          </div>
-          <div className="p-4">
-            {!activeProfile ? (
-              <p className="text-xs text-muted-foreground">
-                Pick a user on the left to edit their profile.
-              </p>
-            ) : options.isLoading ? (
-              <Skeleton className="h-48" />
-            ) : (
-              <ProfileForm
-                models={options.data?.models ?? []}
-                repos={[]}
-                initial={activeProfile}
-                onSubmit={(body) =>
-                  save.mutateAsync({ login: activeProfile.login!, body })
-                }
-                saving={save.isPending}
-                error={error}
-              />
-            )}
-          </div>
-        </div>
-      </SettingsSection>
+      <UserMappingsSection enabled={!!session.data.is_admin} />
     </AppShell>
+  );
+}
+
+const PAGE_SIZE = 20;
+
+function UserMappingsSection({ enabled }: { enabled: boolean }) {
+  const [error, setError] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
+
+  const mappings = useQuery({
+    queryKey: ["adminUserMappings", page],
+    queryFn: () => api.adminListUserMappings(page, PAGE_SIZE),
+    enabled,
+  });
+
+  const total = mappings.data?.total ?? 0;
+  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
+
+  useEffect(() => {
+    if (!mappings.isFetching && page > pageCount) {
+      setPage(pageCount);
+    }
+  }, [mappings.isFetching, page, pageCount]);
+
+  const remove = useMutation({
+    mutationFn: (gh: string) => api.adminDeleteUserMapping(gh),
+    onSuccess: () => void mappings.refetch(),
+    onError: (e: Error) => setError(e.message),
+  });
+
+  const items = mappings.data?.items ?? [];
+
+  return (
+    <SettingsSection
+      title="User mappings"
+      description="Mappings are created when users connect Slack from settings. Admins can remove stale mappings here."
+    >
+      <div className="flex flex-col gap-3 p-4">
+        {error && <span className="text-xs text-destructive">{error}</span>}
+
+        <div className="flex flex-col gap-0.5">
+          {mappings.isLoading ? (
+            <Skeleton className="h-32" />
+          ) : !items.length ? (
+            <p className="text-xs text-muted-foreground">No mappings yet.</p>
+          ) : (
+            items.map((m: UserMapping) => (
+              <div
+                key={m.github_login}
+                className="flex items-center justify-between gap-2 border-b border-border py-1.5 text-sm last:border-b-0"
+              >
+                <div className="flex min-w-0 flex-col">
+                  <span className="truncate font-medium">{m.github_login}</span>
+                  <span className="truncate text-xs text-muted-foreground">
+                    {m.work_email}
+                    {m.slack_user_id ? ` · ${m.slack_user_id}` : ""}
+                    {m.source ? ` · ${m.source}` : ""}
+                  </span>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => remove.mutate(m.github_login)}
+                  disabled={remove.isPending}
+                >
+                  Remove
+                </Button>
+              </div>
+            ))
+          )}
+        </div>
+
+        {total > PAGE_SIZE && (
+          <div className="flex items-center justify-between pt-1 text-xs text-muted-foreground">
+            <span>
+              {total} mapping{total === 1 ? "" : "s"} · page {page} of {pageCount}
+            </span>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={page <= 1 || mappings.isFetching}
+              >
+                Previous
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setPage((p) => Math.min(pageCount, p + 1))}
+                disabled={page >= pageCount || mappings.isFetching}
+              >
+                Next
+              </Button>
+            </div>
+          </div>
+        )}
+      </div>
+    </SettingsSection>
   );
 }
 
@@ -119,6 +157,11 @@ function GlobalDefaultsSection({ models }: { models: Array<ModelOption> }) {
     queryFn: api.getTeamSettings,
   });
   const [error, setError] = useState<string | null>(null);
+  const [defaultRepoDraft, setDefaultRepoDraft] = useState("");
+
+  useEffect(() => {
+    setDefaultRepoDraft(settings.data?.default_repo ?? "");
+  }, [settings.data?.default_repo]);
 
   const save = useMutation({
     mutationFn: (body: TeamSettings) => api.saveTeamSettings(body),
@@ -137,7 +180,7 @@ function GlobalDefaultsSection({ models }: { models: Array<ModelOption> }) {
       <div className="divide-y divide-border">
         <RolePicker
           label="Open SWE Agent"
-          description="Model used for code-writing runs triggered from Slack, Linear, GitHub, and Cloud Agents."
+          description="Model used for code-writing runs triggered from Slack, Linear, GitHub, and the Open SWE Agent."
           models={models}
           model={settings.data?.default_agent_model ?? null}
           effort={settings.data?.default_agent_reasoning_effort ?? null}
@@ -166,6 +209,26 @@ function GlobalDefaultsSection({ models }: { models: Array<ModelOption> }) {
             })
           }
           disabled={!settings.data || save.isPending}
+        />
+        <SettingsRow
+          label="Default Repository"
+          description="Global fallback used when a run has no explicit repo and the user has no profile default. Use owner/repo."
+          control={
+            <Input
+              className="w-56"
+              placeholder="owner/repo"
+              value={defaultRepoDraft}
+              onChange={(e) => setDefaultRepoDraft(e.target.value)}
+              onBlur={() =>
+                settings.data &&
+                save.mutate({
+                  ...settings.data,
+                  default_repo: defaultRepoDraft.trim() || null,
+                })
+              }
+              disabled={!settings.data || save.isPending}
+            />
+          }
         />
         <RolePicker
           label="Open SWE Reviewer"

@@ -1,7 +1,7 @@
 """LLM-judge evaluator for the reviewer eval.
 
 Pairwise matches each agent-emitted candidate against each golden comment using
-claude-opus-4-5 (the model martian used to score Devin Review). Returns
+claude-opus-4-5 (the judge model used by the martian benchmark). Returns
 precision/recall/f1 per example, plus aggregate micro/macro metrics across
 the experiment via a summary evaluator.
 

@@ -27,7 +27,7 @@ from typing import Any, TypedDict
 
 import httpx
 
-from .reviewer_findings import DiffSide, Finding
+from .reviewer_findings import DiffSide, Finding, normalize_finding_title
 from .utils.github_token import GitHubAuthError
 
 logger = logging.getLogger(__name__)
@@ -91,9 +91,9 @@ def render_inline_comment_body(finding: Finding) -> str:
 
         <!-- metadata marker -->
 
-        🟡 **Title (first line of the description)**
+        🟡 **Generated finding title**
 
-        <remaining description detail>
+        <finding description detail>
 
         *(Refers to lines X-Y)*
 
@@ -118,7 +118,7 @@ def render_inline_comment_body(finding: Finding) -> str:
     }
     marker = f"<!-- open-swe-review-comment {json.dumps(marker_payload, separators=(',', ':'))} -->"
 
-    title, detail = _split_title_and_detail(description)
+    title, detail = _split_title_and_detail(description, finding.get("title"))
     line_ref = _format_line_reference(finding.get("start_line"), finding.get("end_line"))
 
     body_parts = [marker, "", f"{_severity_emoji(severity)} **{title}**"]
@@ -144,20 +144,26 @@ def _severity_emoji(severity: str) -> str:
     }.get(severity, "🟡")
 
 
-def _split_title_and_detail(description: str) -> tuple[str, str]:
-    """Split a description into a short bold title and the remaining detail.
+def _split_title_and_detail(description: str, title: object = None) -> tuple[str, str]:
+    """Split a generated finding title from the review comment detail."""
+    if isinstance(title, str) and title.strip():
+        normalized_title = normalize_finding_title(title)
+        detail = description.strip()
+        if detail:
+            lines = description.split("\n")
+            if normalize_finding_title(lines[0]) == normalized_title:
+                detail = "\n".join(lines[1:]).strip()
+        return normalized_title, detail
 
-    The first line becomes the title; everything after it is the detail, so the
-    title text is never duplicated in the body.
-    """
     if not description:
-        return "Code review finding", ""
+        return normalize_finding_title(None), ""
     lines = description.split("\n")
     first_line = lines[0].strip()
     detail = "\n".join(lines[1:]).strip()
-    if len(first_line) > 120:
-        return first_line[:117] + "...", description
-    return first_line, detail
+    normalized_title = normalize_finding_title(first_line)
+    if not detail and normalized_title != " ".join(first_line.split()):
+        return normalized_title, description
+    return normalized_title, detail
 
 
 def _format_line_reference(start_line: int | None, end_line: int | None) -> str:
@@ -169,24 +175,26 @@ def _format_line_reference(start_line: int | None, end_line: int | None) -> str:
     return f"*(Refers to lines {start_line}-{end_line})*"
 
 
-def render_resolution_comment(finding: Finding, status: str, note: str | None = None) -> str:
-    """Render the comment posted to a review thread when a finding is resolved.
-
-    ``note`` (an explanation from the agent's ``update_finding``/resolve call)
-    becomes the body. Falls back to the finding's stored reconciliation note, then
-    to a generic line.
-    """
-    if note is None:
-        note = finding.get("last_reconciliation_note")
-    note = (note or "").strip()
+def render_resolution_comment(
+    finding: Finding,
+    status: str,
+    note: str | None = None,
+) -> str | None:
+    """Render the agent-provided resolution reply for a review thread."""
+    body = _resolution_body(finding, note)
+    if body is None:
+        return None
     if status == "resolved":
-        body = note or (
-            "The reported issue is no longer present in the current code; "
-            "this finding has been fixed."
-        )
         return f"✅ **Resolved**: {body}"
-    body = note or "This finding has been dismissed after further review."
     return f"❌ **Dismissed**: {body}"
+
+
+def _resolution_body(finding: Finding, note: str | None) -> str | None:
+    candidates = [note, finding.get("resolution_note"), finding.get("last_update_note")]
+    for candidate in candidates:
+        if isinstance(candidate, str) and candidate.strip():
+            return candidate.strip()
+    return None
 
 
 def render_inline_comment_payload(finding: Finding) -> dict[str, Any] | None:
@@ -213,22 +221,119 @@ def render_inline_comment_payload(finding: Finding) -> dict[str, Any] | None:
     return payload
 
 
-def render_review_body(*, pr_number: int, surfaced_count: int, trace_url: str | None = None) -> str:
+def review_summary_marker(pr_number: int) -> str:
+    """The hidden marker embedded in every Open SWE review summary body.
+
+    Used both to stamp the summary (``render_review_body``) and to detect
+    (``open_swe_review_exists``) whether Open SWE has already reviewed a PR.
+    """
+    return f"<!-- open-swe-reviewer pr={pr_number} -->"
+
+
+def render_out_of_diff_section(findings: list[Finding]) -> str:
+    """Render findings anchored outside the PR diff as a collapsed dropdown.
+
+    These can't be posted as inline comments (GitHub rejects off-diff lines), so
+    they live in the review summary body inside a ``<details>`` block — visible
+    on demand without adding noise to the changed-line review.
+    """
+    count = len(findings)
+    noun = "finding" if count == 1 else "findings"
+    items: list[str] = []
+    for f in findings:
+        title, detail = _split_title_and_detail(
+            (f.get("description") or "").strip(), f.get("title")
+        )
+        location = f.get("file") or "?"
+        line_ref = _format_line_reference(f.get("start_line"), f.get("end_line"))
+        if line_ref:
+            location += f" {line_ref.strip('*()')}".replace("Refers to ", "")
+        item = f"- {_severity_emoji(f.get('severity') or 'medium')} **{title}** — `{location}`"
+        if detail:
+            item += f"\n  {detail}"
+        items.append(item)
+    return (
+        f"<details>\n<summary>🔍 {count} out-of-diff {noun}</summary>\n\n"
+        "These relate to code outside this PR's changed lines.\n\n"
+        + "\n".join(items)
+        + "\n</details>"
+    )
+
+
+def render_review_body(
+    *,
+    pr_number: int,
+    surfaced_count: int,
+    trace_url: str | None = None,
+    out_of_diff_findings: list[Finding] | None = None,
+) -> str:
     """Compose the top-level review body."""
-    if surfaced_count == 0:
+    out_of_diff_findings = out_of_diff_findings or []
+    if surfaced_count == 0 and not out_of_diff_findings:
         headline = (
             "## ✅ Open SWE Review: No issues found\n\n"
             "Open SWE reviewed this PR and found no potential bugs to report."
         )
+    elif surfaced_count == 0:
+        headline = "**Open SWE Review** found no issues in the changed lines."
     else:
         issue_word = "issue" if surfaced_count == 1 else "issues"
         headline = f"**Open SWE Review** found {surfaced_count} potential {issue_word}."
 
     parts = [headline]
+    if out_of_diff_findings:
+        parts.append(render_out_of_diff_section(out_of_diff_findings))
     if trace_url:
         parts.append(f"[View Open SWE trace]({trace_url})")
-    parts.append(f"<!-- open-swe-reviewer pr={pr_number} -->")
+    parts.append(review_summary_marker(pr_number))
     return "\n\n".join(parts)
+
+
+async def open_swe_review_exists(
+    *,
+    owner: str,
+    repo: str,
+    pr_number: int,
+    token: str,
+) -> bool:
+    """Return True if Open SWE has already posted a review summary on this PR.
+
+    Detected via the ``review_summary_marker`` that ``render_review_body``
+    embeds in every Open SWE review body. The reviewer uses this to avoid
+    posting a duplicate "No issues found" summary when the ``re_review`` config
+    flag is stale — a push that lands mid-run is delivered as a queued message
+    into the still-running first-review run, whose configurable still says
+    ``re_review=False``, so the empty-review guard can't trust that flag alone.
+
+    On any API failure this returns False (fail open): the only consequence is
+    a possible duplicate summary, never a suppressed first review.
+    """
+    marker = review_summary_marker(pr_number)
+    url = f"{_GITHUB_API_BASE}/repos/{owner}/{repo}/pulls/{pr_number}/reviews"
+    headers = _github_headers(token)
+    params: dict[str, Any] = {"per_page": 100, "page": 1}
+    async with httpx.AsyncClient() as client:
+        while True:
+            try:
+                response = await client.get(url, headers=headers, params=params, timeout=30)
+                response.raise_for_status()
+            except httpx.HTTPError:
+                logger.exception(
+                    "Failed to list PR reviews for %s/%s#%s",
+                    owner,
+                    repo,
+                    pr_number,
+                )
+                return False
+            data = response.json()
+            if not isinstance(data, list) or not data:
+                return False
+            for review in data:
+                if isinstance(review, dict) and marker in (review.get("body") or ""):
+                    return True
+            if len(data) < 100:  # noqa: PLR2004
+                return False
+            params["page"] += 1
 
 
 async def post_pull_request_review(
@@ -439,12 +544,21 @@ async def fetch_pr_review_threads(
                 )
                 return out
             data = response.json()
-            threads = (
-                data.get("data", {})
-                .get("repository", {})
-                .get("pullRequest", {})
-                .get("reviewThreads", {})
-            )
+            data_root = data.get("data") if isinstance(data, dict) else None
+            repository = data_root.get("repository") if isinstance(data_root, dict) else None
+            if not isinstance(repository, dict):
+                logger.warning(
+                    "Null repository in review-threads response for %s/%s#%s "
+                    "(token likely lacks access: SAML, expired token, or private/deleted repo)",
+                    owner,
+                    repo,
+                    pr_number,
+                )
+                return out
+            pull_request = repository.get("pullRequest")
+            threads = pull_request.get("reviewThreads") if isinstance(pull_request, dict) else None
+            if not isinstance(threads, dict):
+                return out
             for thread in threads.get("nodes", []) or []:
                 if not isinstance(thread, dict):
                     continue
@@ -604,8 +718,10 @@ async def resolve_review_thread(*, thread_node_id: str, token: str) -> bool:
     if data.get("errors"):
         logger.warning("resolveReviewThread errors: %s", data["errors"])
         return False
-    thread = data.get("data", {}).get("resolveReviewThread", {}).get("thread", {})
-    return bool(thread.get("isResolved"))
+    data_root = data.get("data") if isinstance(data, dict) else None
+    resolved = data_root.get("resolveReviewThread") if isinstance(data_root, dict) else None
+    thread = resolved.get("thread") if isinstance(resolved, dict) else None
+    return bool(thread.get("isResolved")) if isinstance(thread, dict) else False
 
 
 async def reply_to_review_comment(

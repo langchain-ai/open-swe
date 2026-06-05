@@ -2,6 +2,7 @@ from unittest.mock import MagicMock, patch
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
+from agent.middleware.check_message_queue import DASHBOARD_HANDOFF_INSTRUCTION
 from agent.middleware.ensure_no_empty_msg import (
     check_if_confirming_completion,
     check_if_model_messaged_user,
@@ -200,6 +201,29 @@ class TestEnsureNoEmptyMsgNotify:
         with patch(
             "agent.middleware.ensure_no_empty_msg.get_config",
             return_value={"configurable": {"source": "dashboard"}},
+        ):
+            result = ensure_no_empty_msg.after_model(state, self._make_runtime())
+
+        assert result is None
+        assert not ai.tool_calls
+
+    def test_skips_confirming_completion_for_dashboard_handoff(self) -> None:
+        ai = AIMessage(content="Done in web.")
+        state = {
+            "messages": [
+                HumanMessage(
+                    content=[
+                        {"type": "text", "text": DASHBOARD_HANDOFF_INSTRUCTION},
+                        {"type": "text", "text": "continue in web"},
+                    ]
+                ),
+                ai,
+            ]
+        }
+
+        with patch(
+            "agent.middleware.ensure_no_empty_msg.get_config",
+            return_value={"configurable": {"source": "slack"}},
         ):
             result = ensure_no_empty_msg.after_model(state, self._make_runtime())
 

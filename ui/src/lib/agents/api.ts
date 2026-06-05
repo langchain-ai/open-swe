@@ -1,23 +1,49 @@
-import type { AgentThread, Message } from "./types";
+import type { AgentSchedule, AgentThread, Message } from "./types"
 
-export type { AgentThread, Message };
+export type { AgentSchedule, AgentThread, Message }
 
 export interface ThreadCreateRequest {
-  prompt: string;
-  repo?: string | null;
-  model_id?: string | null;
-  effort?: string | null;
+  prompt: string
+  repo?: string | null
+  repo_explicitly_none?: boolean
+  model_id?: string | null
+  effort?: string | null
 }
 
 export interface ThreadMessageRequest {
-  content: string;
-  model_id?: string | null;
-  effort?: string | null;
+  content: string
+  model_id?: string | null
+  effort?: string | null
 }
 
-const API_BASE = (import.meta.env.VITE_DASHBOARD_API_BASE_URL ?? "").replace(/\/$/, "");
+export interface ScheduleCreateRequest {
+  prompt: string
+  schedule: string
+  name?: string | null
+  repo?: string | null
+  model_id?: string | null
+  effort?: string | null
+}
 
-async function agentsRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
+export interface ScheduleUpdateRequest {
+  prompt?: string | null
+  schedule?: string | null
+  name?: string | null
+  repo?: string | null
+  model_id?: string | null
+  effort?: string | null
+  enabled?: boolean | null
+}
+
+const API_BASE = (import.meta.env.VITE_DASHBOARD_API_BASE_URL ?? "").replace(
+  /\/$/,
+  ""
+)
+
+async function agentsRequest<T>(
+  path: string,
+  init: RequestInit = {}
+): Promise<T> {
   const res = await fetch(`${API_BASE}/dashboard/api${path}`, {
     ...init,
     credentials: "include",
@@ -25,25 +51,46 @@ async function agentsRequest<T>(path: string, init: RequestInit = {}): Promise<T
       "Content-Type": "application/json",
       ...(init.headers ?? {}),
     },
-  });
+  })
   if (!res.ok) {
-    let message = res.statusText;
+    let message = res.statusText
     try {
-      const body = await res.json();
+      const body = await res.json()
       if (body?.detail) {
-        message = typeof body.detail === "string" ? body.detail : JSON.stringify(body.detail);
+        message =
+          typeof body.detail === "string"
+            ? body.detail
+            : JSON.stringify(body.detail)
       }
     } catch {
       /* ignore */
     }
-    throw new Error(message);
+    throw new Error(message)
   }
-  if (res.status === 204) return undefined as T;
-  return (await res.json()) as T;
+  if (res.status === 204) return undefined as T
+  return (await res.json()) as T
 }
 
 export const agentsApi = {
-  listThreads: () => agentsRequest<AgentThread[]>("/threads"),
+  listThreads: () => agentsRequest<Array<AgentThread>>("/threads"),
+  listSchedules: () => agentsRequest<Array<AgentSchedule>>("/schedules"),
+  createSchedule: (body: ScheduleCreateRequest) =>
+    agentsRequest<AgentSchedule>("/schedules", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  updateSchedule: (scheduleId: string, body: ScheduleUpdateRequest) =>
+    agentsRequest<AgentSchedule>(
+      `/schedules/${encodeURIComponent(scheduleId)}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify(body),
+      }
+    ),
+  deleteSchedule: (scheduleId: string) =>
+    agentsRequest<void>(`/schedules/${encodeURIComponent(scheduleId)}`, {
+      method: "DELETE",
+    }),
   getThread: (threadId: string) =>
     agentsRequest<AgentThread>(`/threads/${encodeURIComponent(threadId)}`),
   createThread: (body: ThreadCreateRequest) =>
@@ -52,56 +99,64 @@ export const agentsApi = {
       body: JSON.stringify(body),
     }),
   sendMessage: (threadId: string, body: ThreadMessageRequest) =>
-    agentsRequest<AgentThread>(`/threads/${encodeURIComponent(threadId)}/messages`, {
-      method: "POST",
-      body: JSON.stringify(body),
-    }),
+    agentsRequest<AgentThread>(
+      `/threads/${encodeURIComponent(threadId)}/messages`,
+      {
+        method: "POST",
+        body: JSON.stringify(body),
+      }
+    ),
   cancelThread: (threadId: string) =>
-    agentsRequest<AgentThread>(`/threads/${encodeURIComponent(threadId)}/cancel`, {
-      method: "POST",
-    }),
+    agentsRequest<AgentThread>(
+      `/threads/${encodeURIComponent(threadId)}/cancel`,
+      {
+        method: "POST",
+      }
+    ),
   deleteThread: (threadId: string) =>
     agentsRequest<void>(`/threads/${encodeURIComponent(threadId)}`, {
       method: "DELETE",
     }),
   streamUrl: (threadId: string) =>
     `${API_BASE}/dashboard/api/threads/${encodeURIComponent(threadId)}/stream`,
-};
-
-export function formatRelativeTime(ts: number): string {
-  const diff = Date.now() - ts;
-  const mins = Math.floor(diff / 60000);
-  if (mins < 60) return `${mins}m`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h`;
-  const days = Math.floor(hours / 24);
-  if (days < 7) return `${days}d`;
-  const weeks = Math.floor(days / 7);
-  return `${weeks}w`;
 }
 
-export type ThreadGroup = "today" | "last30" | "older";
+export function formatRelativeTime(ts: number): string {
+  const diff = Date.now() - ts
+  const mins = Math.floor(diff / 60000)
+  if (mins < 60) return `${mins}m`
+  const hours = Math.floor(mins / 60)
+  if (hours < 24) return `${hours}h`
+  const days = Math.floor(hours / 24)
+  if (days < 7) return `${days}d`
+  const weeks = Math.floor(days / 7)
+  return `${weeks}w`
+}
 
-export function groupThreads(threads: AgentThread[]): Record<ThreadGroup, AgentThread[]> {
-  const todayStart = new Date();
-  todayStart.setHours(0, 0, 0, 0);
-  const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
+export type ThreadGroup = "today" | "last30" | "older"
 
-  const groups: Record<ThreadGroup, AgentThread[]> = {
+export function groupThreads(
+  threads: Array<AgentThread>
+): Record<ThreadGroup, Array<AgentThread>> {
+  const todayStart = new Date()
+  todayStart.setHours(0, 0, 0, 0)
+  const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000
+
+  const groups: Record<ThreadGroup, Array<AgentThread>> = {
     today: [],
     last30: [],
     older: [],
-  };
+  }
 
   for (const thread of [...threads].sort((a, b) => b.updatedAt - a.updatedAt)) {
     if (thread.updatedAt >= todayStart.getTime()) {
-      groups.today.push(thread);
+      groups.today.push(thread)
     } else if (thread.updatedAt >= thirtyDaysAgo) {
-      groups.last30.push(thread);
+      groups.last30.push(thread)
     } else {
-      groups.older.push(thread);
+      groups.older.push(thread)
     }
   }
 
-  return groups;
+  return groups
 }

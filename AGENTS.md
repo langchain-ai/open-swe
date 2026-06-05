@@ -29,7 +29,7 @@ make format             # ruff format + ruff check --fix
 |---|---|---|
 | `agent` | `agent.server:get_agent` | Main coding agent (Slack/Linear/GitHub-triggered). |
 | `reviewer` | `agent.reviewer:get_reviewer_agent` | Read-only PR reviewer. Findings model + `publish_review`. |
-| `review_style_analyzer` | `agent.review_style_analyzer:get_review_style_analyzer` | Learns per-repo reviewer style from historical PRs. |
+| `analyzer` | `agent.analyzer:get_analyzer` | Learns per-repo reviewer style from historical PRs and this reviewer's own finding outcomes. |
 
 The FastAPI app is `agent.webapp:app`.
 
@@ -39,7 +39,7 @@ The FastAPI app is `agent.webapp:app`.
 
 - **`agent/server.py` → `get_agent(config)`** — main graph factory. Called per-thread. Resolves the GitHub token, gets-or-creates the sandbox for the thread, resolves the team/profile/per-thread model + effort, then constructs a fresh `create_deep_agent(...)` with the curated tool list and middleware stack. The agent itself is stateless — all per-thread state lives in the sandbox + thread metadata.
 - **`agent/reviewer.py` → `get_reviewer_agent(config)`** — reviewer graph factory. Shares `ensure_sandbox_for_thread` with the main agent but wires a reviewer-only toolset (`add_finding`, `update_finding`, `list_findings`, `publish_review`, `web_search`, `fetch_url`, `http_request`) and a different system prompt that pins the single-evolving-findings model and the diff-anchored bar for filing a finding. Read-only: no commit/push/PR-opening tools.
-- **`agent/review_style_analyzer.py` → `get_review_style_analyzer(config)`** — small graph that reads historical PR reviews from a repo and emits a per-repo style prompt via the `save_review_style_prompt` tool. Output is consumed by the reviewer as a "repository-specific review style" appendix.
+- **`agent/analyzer.py` → `get_analyzer(config)`** — small graph that emits a per-repo style prompt via the `save_review_style_prompt` tool, consumed by the reviewer as a "repository-specific review style" appendix. It runs in one of two modes (`analyzer_mode` in `configurable`): **bootstrap** (cold-start: crawl historical PR reviews) and **continual** (nightly: refine using this reviewer's own finding outcomes via `read_finding_outcomes`). Each mode's procedure lives in a deepagents **skill** (`agent/skills/bootstrap-repo-analysis/`, `agent/skills/continual-learning/`) served as virtual files via a `CompositeBackend` `/skills/` route + `StateBackend` (seeded into the run's `files` channel by the launcher — never written to the sandbox). Launchers and the per-repo nightly cron live in `agent/dashboard/review_style_jobs.py` and `agent/dashboard/analyzer_cron.py`; the cron is registered when bootstrap completes.
 - **`agent/webapp.py`** — custom FastAPI routes mounted alongside the LangGraph server. Webhooks land here (GitHub, Linear, Slack). Each webhook resolves a deterministic `thread_id` (so follow-up messages route to the same agent run) and triggers/streams a run via the `langgraph_sdk` client. Also auto-reviews PRs on `opened` / `ready_for_review` events when the repo+author opt in.
 - **`agent/dashboard/`** — `router` mounted under the FastAPI app at startup (`app.include_router(dashboard_router)`). Owns GitHub OAuth, per-user profiles, admin endpoints, team defaults, enabled-repo lists, review-style management, and the Agents chat thread API used by the UI in `ui/`.
 
@@ -48,7 +48,7 @@ The FastAPI app is `agent.webapp:app`.
 `SANDBOX_BACKENDS` (in `agent/utils/sandbox_state.py`) is an in-process dict keyed by `thread_id`. Thread metadata persists `sandbox_id` across processes. `ensure_sandbox_for_thread` handles four cases:
 
 1. Sandbox cached in memory → ping it (`echo ok`); recreate on `SandboxClientError`. Healthy reused sandboxes also get a GitHub-proxy refresh (recreate on failure).
-2. Metadata says `__creating__` and no cache → poll until ready (`_wait_for_sandbox_id`).
+2. Metadata says `__creating__` and no cache → reset stale metadata so a fresh sandbox can be created.
 3. No sandbox at all → set `__creating__` sentinel, create one, persist the real id.
 4. Metadata has an id but no cache → reconnect; fall back to recreate on failure.
 
@@ -68,9 +68,10 @@ Configured in `agent/server.py:get_agent`, runs around every model call (in this
 6. `ensure_no_empty_msg` — guards against empty assistant messages that some providers reject.
 7. `notify_step_limit_reached` — after-agent hook that posts a Slack reply when the agent hits the step limit, so the user gets a clear signal instead of silence.
 8. `SandboxCircuitBreakerMiddleware` — trips the agent out of repeated sandbox failures instead of looping.
-9. `ModelFallbackMiddleware` (optional, last) — added only when `LLM_FALLBACK_MODEL_ID` or the per-model default fallback differs from the primary model.
+9. `ModelFallbackMiddleware` (optional) — added only when `LLM_FALLBACK_MODEL_ID` or the per-model default fallback differs from the primary model.
+10. `SanitizeThinkingBlocksMiddleware` — strips malformed empty Anthropic thinking blocks immediately before provider calls.
 
-Other middleware exists in `agent/middleware/` (`ExcludeToolsMiddleware`) but isn't wired into the default agent. The reviewer uses a leaner stack: `SanitizeToolInputsMiddleware`, `ModelCallLimitMiddleware`, `ToolErrorMiddleware`, `SlackAssistantStatusMiddleware`.
+Other middleware exists in `agent/middleware/` (`ExcludeToolsMiddleware`) but isn't wired into the default agent. The reviewer uses a leaner stack: `SanitizeToolInputsMiddleware`, `ModelCallLimitMiddleware`, `ToolErrorMiddleware`, `SlackAssistantStatusMiddleware`, `SanitizeThinkingBlocksMiddleware`.
 
 There is intentionally no after-agent safety net that opens a PR for the agent. The agent itself is responsible for committing, pushing, opening/updating the draft PR, and replying in the source channel — all via `GH_TOKEN=dummy gh` and `slack_thread_reply` / `linear_comment`.
 
@@ -97,7 +98,7 @@ Supported model IDs and per-model effort/reasoning rules live in `agent/dashboar
 
 ### Auth
 
-- **GitHub**: dual-mode. User OAuth tokens are encrypted-at-rest in thread metadata (`agent/encryption.py`, `utils/auth.py:resolve_github_token`). When no user token is available, falls back to a GitHub App installation token (`utils/github_app.py`). The installation token is also what configures the LangSmith sandbox's GitHub proxy.
+- **GitHub**: dual-mode. User OAuth tokens are encrypted at rest in the dashboard OAuth store and cached only in process during a run (`utils/auth.py:resolve_github_token`, `utils/github_token.py`). When no user token is available, falls back to a GitHub App installation token (`utils/github_app.py`). The installation token is also what configures the LangSmith sandbox's GitHub proxy.
 - **Webhooks**: GitHub signatures verified in `utils/github_comments.py:verify_github_signature`; Slack/Linear handled in their respective utils.
 - **Dashboard / UI**: GitHub OAuth login lives in `agent/dashboard/oauth.py` and `routes.py` (`/auth/login`, `/auth/callback`, `/auth/logout`, `/me`).
 

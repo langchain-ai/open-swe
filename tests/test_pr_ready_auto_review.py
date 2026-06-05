@@ -10,10 +10,19 @@ import pytest
 from agent import webapp
 
 
-def _pr_payload(*, action: str, draft: bool, author: str = "alice") -> dict[str, Any]:
+def _pr_payload(
+    *,
+    action: str,
+    draft: bool,
+    author: str = "alice",
+    private: bool | None = None,
+) -> dict[str, Any]:
+    repository: dict[str, Any] = {"owner": {"login": "lc"}, "name": "repo", "id": 123}
+    if private is not None:
+        repository["private"] = private
     return {
         "action": action,
-        "repository": {"owner": {"login": "lc"}, "name": "repo"},
+        "repository": repository,
         "pull_request": {
             "number": 7,
             "html_url": "https://github.com/lc/repo/pull/7",
@@ -34,7 +43,7 @@ def _patch_dispatch_deps(monkeypatch: pytest.MonkeyPatch, fake_client: Any) -> N
         AsyncMock(return_value=("token", None)),
     )
     monkeypatch.setattr(webapp, "_ensure_thread_exists_for_metadata", AsyncMock(return_value=True))
-    monkeypatch.setattr(webapp, "persist_encrypted_github_token", AsyncMock(return_value="enc"))
+    monkeypatch.setattr(webapp, "cache_github_token_for_thread", MagicMock())
     monkeypatch.setattr(webapp, "set_reviewer_thread_metadata", AsyncMock())
     monkeypatch.setattr(webapp, "is_thread_active", AsyncMock(return_value=False))
     monkeypatch.setattr(webapp, "get_client", lambda url: fake_client)
@@ -54,6 +63,53 @@ async def test_pr_ready_non_draft_triggers_run(monkeypatch: pytest.MonkeyPatch) 
     _, kwargs = fake_client.runs.create.await_args
     assert kwargs["config"]["configurable"]["source"] == "github"
     assert kwargs["config"]["configurable"]["pr_number"] == 7
+
+
+@pytest.mark.asyncio
+async def test_pr_ready_public_repo_uses_scoped_reviewer_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_client = MagicMock()
+    fake_client.runs.create = AsyncMock()
+    get_token = AsyncMock(return_value=("scoped-token", "expires"))
+    monkeypatch.setattr(webapp, "get_github_app_installation_token_with_expiry", get_token)
+    monkeypatch.setattr(webapp, "_ensure_thread_exists_for_metadata", AsyncMock(return_value=True))
+    cache_token = MagicMock()
+    monkeypatch.setattr(webapp, "cache_github_token_for_thread", cache_token)
+    monkeypatch.setattr(webapp, "set_reviewer_thread_metadata", AsyncMock())
+    monkeypatch.setattr(webapp, "is_thread_active", AsyncMock(return_value=False))
+    monkeypatch.setattr(webapp, "get_client", lambda url: fake_client)
+    monkeypatch.setattr(webapp, "get_profile", AsyncMock(return_value=None))
+    monkeypatch.setattr(webapp, "get_team_settings", AsyncMock(return_value={}))
+
+    await webapp.process_github_pr_ready(_pr_payload(action="opened", draft=False, private=False))
+
+    get_token.assert_awaited_once_with(repository_ids=[123])
+    _, kwargs = fake_client.runs.create.await_args
+    assert kwargs["config"]["configurable"]["repo_private"] is False
+
+
+@pytest.mark.asyncio
+async def test_pr_ready_private_repo_uses_full_reviewer_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_client = MagicMock()
+    fake_client.runs.create = AsyncMock()
+    get_token = AsyncMock(return_value=("full-token", "expires"))
+    monkeypatch.setattr(webapp, "get_github_app_installation_token_with_expiry", get_token)
+    monkeypatch.setattr(webapp, "_ensure_thread_exists_for_metadata", AsyncMock(return_value=True))
+    monkeypatch.setattr(webapp, "cache_github_token_for_thread", MagicMock())
+    monkeypatch.setattr(webapp, "set_reviewer_thread_metadata", AsyncMock())
+    monkeypatch.setattr(webapp, "is_thread_active", AsyncMock(return_value=False))
+    monkeypatch.setattr(webapp, "get_client", lambda url: fake_client)
+    monkeypatch.setattr(webapp, "get_profile", AsyncMock(return_value=None))
+    monkeypatch.setattr(webapp, "get_team_settings", AsyncMock(return_value={}))
+
+    await webapp.process_github_pr_ready(_pr_payload(action="opened", draft=False, private=True))
+
+    get_token.assert_awaited_once_with()
+    _, kwargs = fake_client.runs.create.await_args
+    assert kwargs["config"]["configurable"]["repo_private"] is True
 
 
 @pytest.mark.asyncio
@@ -133,6 +189,12 @@ async def test_pr_ready_for_review_uses_re_review_after_previous_review(
     assert configurable["last_reviewed_sha"] == "oldsha"
     assert configurable["head_sha"] == "headsha"
     assert "marked ready for review" in kwargs["input"]["messages"][0]["content"]
+    head_sha_writes = [
+        c.kwargs.get("head_sha")
+        for c in webapp.set_reviewer_thread_metadata.await_args_list
+        if c.kwargs.get("head_sha") is not None
+    ]
+    assert "headsha" in head_sha_writes
 
 
 @pytest.mark.asyncio

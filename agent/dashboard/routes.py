@@ -8,11 +8,17 @@ import os
 from typing import Any
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from fastapi.responses import RedirectResponse, Response, StreamingResponse
 from pydantic import BaseModel
 
 from .admin import is_admin
+from .agent_usage import (
+    list_agent_usage_leaderboard,
+    refresh_reviewer_stats_cache,
+    refresh_usage_leaderboard_cache,
+)
+from .analyzer_cron import remove_continual_cron
 from .enabled_repos import (
     list_enabled_review_repos,
     set_review_repo_enabled,
@@ -23,6 +29,7 @@ from .oauth import (
     STATE_COOKIE_NAME,
     STATE_TTL_SECONDS,
     decode_state,
+    enforce_org_login_gate,
     exchange_code,
     fetch_github_user,
     hash_state_nonce,
@@ -37,13 +44,13 @@ from .profiles import (
     ProfileUpdate,
     get_profile,
     get_valid_access_token,
-    list_profiles,
     upsert_access_token_from_github_response,
     upsert_profile,
 )
+from .repo_access import require_repo_access_for_user
 from .review_style_jobs import (
     cancel_review_style_analysis,
-    start_review_style_analysis,
+    start_bootstrap_analysis,
     sync_review_style_run_status,
 )
 from .review_styles import (
@@ -56,8 +63,26 @@ from .review_styles import (
     normalize_repo_full_name,
     set_custom_prompt,
 )
+from .schedules import (
+    ScheduleCreateBody,
+    ScheduleUpdateBody,
+    create_agent_schedule,
+    delete_agent_schedule,
+    list_agent_schedules,
+    update_agent_schedule,
+)
+from .slack_oauth import (
+    SLACK_STATE_COOKIE_NAME,
+    build_authorize_url,
+    exchange_slack_code,
+    fetch_slack_identity,
+    slack_oauth_configured,
+    verify_team,
+)
 from .team_settings import (
     TeamSettingsUpdate,
+    get_team_default_model,
+    get_team_default_subagent_model,
     get_team_settings,
     upsert_team_settings,
 )
@@ -72,10 +97,18 @@ from .thread_api import (
     send_dashboard_message,
     stream_dashboard_thread,
 )
+from .user_mappings import (
+    delete_mapping,
+    get_mapping,
+    list_mappings,
+    upsert_mapping,
+)
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/dashboard/api", tags=["dashboard"])
+_GITHUB_API_TIMEOUT = httpx.Timeout(10.0, connect=3.0)
+_SKIPPABLE_INSTALLATION_REPO_STATUS_CODES = frozenset({403, 404})
 
 
 def _require_admin(session: dict[str, Any]) -> dict[str, Any]:
@@ -108,14 +141,29 @@ def _frontend_base_url() -> str:
     return v
 
 
+def _cookie_security() -> tuple[bool, str]:
+    """Cookie ``secure``/``samesite`` flags derived from the API scheme.
+
+    Production serves the API over HTTPS and the dashboard is a separate
+    (cross-site) origin, so the session cookie must be ``Secure; SameSite=None``.
+    Local dev runs over ``http://localhost`` where ``Secure`` cookies are
+    rejected and the frontend/API are same-site, so fall back to
+    ``SameSite=Lax`` without ``Secure``.
+    """
+    if os.environ.get("DASHBOARD_API_BASE_URL", "").startswith("https://"):
+        return True, "none"
+    return False, "lax"
+
+
 def _set_session_cookie(response: Response, jwt_token: str) -> None:
+    secure, samesite = _cookie_security()
     response.set_cookie(
         key=COOKIE_NAME,
         value=jwt_token,
         max_age=SESSION_TTL_SECONDS,
         httponly=True,
-        secure=True,
-        samesite="none",
+        secure=secure,
+        samesite=samesite,
         path="/",
     )
 
@@ -124,32 +172,60 @@ def _set_state_cookie(response: Response, nonce: str) -> None:
     # SameSite=Lax so GitHub's top-level redirect back to /auth/callback
     # still presents this cookie; the cookie is single-purpose and lives
     # only for the duration of one OAuth round-trip.
+    secure, _ = _cookie_security()
     response.set_cookie(
         key=STATE_COOKIE_NAME,
         value=nonce,
         max_age=STATE_TTL_SECONDS,
         httponly=True,
-        secure=True,
+        secure=secure,
         samesite="lax",
         path="/dashboard/api/auth",
     )
 
 
 def _clear_state_cookie(response: Response) -> None:
+    secure, _ = _cookie_security()
     response.delete_cookie(
-        STATE_COOKIE_NAME, path="/dashboard/api/auth", samesite="lax", secure=True
+        STATE_COOKIE_NAME, path="/dashboard/api/auth", samesite="lax", secure=secure
+    )
+
+
+def _set_slack_state_cookie(response: Response, nonce: str) -> None:
+    secure, _ = _cookie_security()
+    response.set_cookie(
+        key=SLACK_STATE_COOKIE_NAME,
+        value=nonce,
+        max_age=STATE_TTL_SECONDS,
+        httponly=True,
+        secure=secure,
+        samesite="lax",
+        path="/dashboard/api/slack",
+    )
+
+
+def _clear_slack_state_cookie(response: Response) -> None:
+    secure, _ = _cookie_security()
+    response.delete_cookie(
+        SLACK_STATE_COOKIE_NAME, path="/dashboard/api/slack", samesite="lax", secure=secure
     )
 
 
 @router.get("/auth/login")
-async def auth_login(request: Request, redirect_to: str | None = None) -> RedirectResponse:
+async def auth_login(
+    request: Request,
+    redirect_to: str | None = None,
+) -> RedirectResponse:
     client_id = os.environ.get("GITHUB_APP_CLIENT_ID", "")
     if not client_id:
         raise HTTPException(500, "GITHUB_APP_CLIENT_ID not configured")
     safe_redirect = sanitize_redirect_to(redirect_to) or _frontend_base_url()
 
     nonce = new_state_nonce()
-    state = issue_state(redirect_to=safe_redirect, nonce_hash=hash_state_nonce(nonce))
+    state = issue_state(
+        redirect_to=safe_redirect,
+        nonce_hash=hash_state_nonce(nonce),
+    )
     redirect_uri = f"{_api_base_url()}/dashboard/api/auth/callback"
     url = (
         "https://github.com/login/oauth/authorize"
@@ -187,6 +263,8 @@ async def auth_callback(request: Request, code: str, state: str) -> RedirectResp
     if not login:
         raise HTTPException(400, "could not resolve GitHub login")
 
+    await enforce_org_login_gate(login)
+
     await upsert_access_token_from_github_response(login, email or "", token_data)
 
     session_jwt = issue_session(login=login, email=email, avatar_url=user.get("avatar_url"))
@@ -199,7 +277,8 @@ async def auth_callback(request: Request, code: str, state: str) -> RedirectResp
 @router.post("/auth/logout")
 async def auth_logout() -> Response:
     response = Response(status_code=204)
-    response.delete_cookie(COOKIE_NAME, path="/", samesite="none", secure=True)
+    secure, samesite = _cookie_security()
+    response.delete_cookie(COOKIE_NAME, path="/", samesite=samesite, secure=secure)
     return response
 
 
@@ -210,12 +289,21 @@ async def me(session: dict[str, Any] = _SESSION_DEP) -> dict[str, Any]:
         "email": session.get("email"),
         "avatar_url": session.get("avatar_url"),
         "is_admin": is_admin(session.get("email")),
+        "slack_oauth_enabled": slack_oauth_configured(),
     }
 
 
 @router.get("/options")
 async def options() -> dict[str, Any]:
-    return {"models": SUPPORTED_MODELS}
+    agent_model, agent_effort = await get_team_default_model("agent")
+    subagent_model, subagent_effort = await get_team_default_subagent_model("agent")
+    return {
+        "models": SUPPORTED_MODELS,
+        "default_agent_model": agent_model,
+        "default_agent_reasoning_effort": agent_effort,
+        "default_agent_subagent_model": subagent_model,
+        "default_agent_subagent_reasoning_effort": subagent_effort,
+    }
 
 
 @router.get("/profile")
@@ -235,35 +323,77 @@ async def put_my_profile(
     return await upsert_profile(session["sub"], session.get("email") or "", update)
 
 
-@router.get("/admin/profiles")
-async def admin_list_profiles(
-    _admin: dict[str, Any] = _ADMIN_DEP,
-) -> list[dict[str, Any]]:
-    return await list_profiles()
-
-
-class AdminProfileUpdate(ProfileUpdate):
-    email: str | None = None
-
-
-@router.put("/admin/profiles/{login}")
-async def admin_put_profile(
-    login: str,
-    update: AdminProfileUpdate,
-    _admin: dict[str, Any] = _ADMIN_DEP,
+@router.get("/my-mapping")
+async def get_my_mapping(
+    session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
-    update.validate_pairing()
-    existing = await get_profile(login) or {}
-    email = update.email or existing.get("email") or ""
-    # Overlay only fields that were explicitly sent so the admin form (which
-    # only sends model/effort/repo) can't reset other fields the target user
-    # configured via My Settings / Cloud Agents to ProfileUpdate's defaults.
-    incoming = update.model_dump(exclude={"email"}, exclude_unset=True)
-    merged = {**existing, **incoming}
-    base = ProfileUpdate(
-        **{k: v for k, v in merged.items() if k in ProfileUpdate.model_fields},
+    """Return the logged-in user's own GitHub↔Slack mapping (or empty)."""
+    mapping = await get_mapping(session["sub"])
+    return mapping or {}
+
+
+@router.get("/slack/login")
+async def slack_login(
+    _session: dict[str, Any] = _SESSION_DEP,
+) -> RedirectResponse:
+    """Start the Sign in with Slack flow to link the current GitHub account."""
+    if not slack_oauth_configured():
+        raise HTTPException(500, "Slack OAuth is not configured")
+    redirect_uri = f"{_api_base_url()}/dashboard/api/slack/callback"
+    nonce = new_state_nonce()
+    state = issue_state(
+        redirect_to=f"{_frontend_base_url()}/my-settings",
+        nonce_hash=hash_state_nonce(nonce),
     )
-    return await upsert_profile(login, email, base)
+    response = RedirectResponse(
+        build_authorize_url(redirect_uri=redirect_uri, state=state), status_code=302
+    )
+    _set_slack_state_cookie(response, nonce)
+    return response
+
+
+@router.get("/slack/callback")
+async def slack_callback(
+    request: Request,
+    code: str,
+    state: str,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> RedirectResponse:
+    """Link the verified Slack identity to the logged-in GitHub user.
+
+    The Slack member id and email come from Slack's verified OIDC claims, so a
+    user can only ever link their own Slack account — no self-asserted values.
+    """
+    state_payload = decode_state(state)
+    nonce_hash = state_payload.get("nonce_hash")
+    cookie_nonce = request.cookies.get(SLACK_STATE_COOKIE_NAME)
+    if (
+        not isinstance(nonce_hash, str)
+        or not cookie_nonce
+        or not hmac.compare_digest(hash_state_nonce(cookie_nonce), nonce_hash)
+    ):
+        raise HTTPException(400, "oauth state mismatch — please retry")
+
+    redirect_to = sanitize_redirect_to(state_payload.get("redirect_to")) or _frontend_base_url()
+    redirect_uri = f"{_api_base_url()}/dashboard/api/slack/callback"
+
+    access_token = await exchange_slack_code(code, redirect_uri)
+    identity = await fetch_slack_identity(access_token)
+    verify_team(identity)
+    if not identity.email or not identity.email_verified:
+        raise HTTPException(400, "your Slack account has no verified email to link")
+
+    await upsert_mapping(
+        github_login=session["sub"],
+        work_email=identity.email,
+        slack_user_id=identity.user_id,
+        source="slack_oauth",
+        status="active",
+    )
+
+    response = RedirectResponse(redirect_to, status_code=302)
+    _clear_slack_state_cookie(response)
+    return response
 
 
 @router.get("/team-settings")
@@ -302,6 +432,35 @@ async def api_set_enabled_review_repo(
     return {"repos": repos}
 
 
+@router.get("/admin/user-mappings")
+async def admin_list_user_mappings(
+    page: int = 1,
+    page_size: int = 20,
+    _admin: dict[str, Any] = _ADMIN_DEP,
+) -> dict[str, Any]:
+    page = max(page, 1)
+    page_size = max(1, min(page_size, 100))
+    records = await list_mappings()
+    total = len(records)
+    start = (page - 1) * page_size
+    items = records[start : start + page_size]
+    return {
+        "items": items,
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+    }
+
+
+@router.delete("/admin/user-mappings/{github_login}")
+async def admin_delete_user_mapping(
+    github_login: str,
+    _admin: dict[str, Any] = _ADMIN_DEP,
+) -> dict[str, bool]:
+    deleted = await delete_mapping(github_login)
+    return {"deleted": deleted}
+
+
 def _next_link_url(link_header: str | None) -> str | None:
     if not link_header:
         return None
@@ -311,6 +470,16 @@ def _next_link_url(link_header: str | None) -> str | None:
         if len(segments) >= 2 and 'rel="next"' in segments[1] and segments[0].startswith("<"):
             return segments[0][1:-1]
     return None
+
+
+def _github_api_http_exception(status_code: int) -> HTTPException:
+    if status_code == 401:
+        return HTTPException(401, "github token expired, re-login required")
+    if status_code == 403:
+        return HTTPException(403, "github API forbidden")
+    if status_code == 404:
+        return HTTPException(404, "github API resource not found")
+    return HTTPException(502, f"github API error ({status_code})")
 
 
 async def _paginate(
@@ -333,10 +502,23 @@ async def _paginate(
     first = True
     while next_url and len(out) < cap:
         params = {"per_page": "100"} if first else None
-        r = await client.get(next_url, headers=headers, params=params)
-        if r.status_code == 401:
-            raise HTTPException(401, "github token expired, re-login required")
-        r.raise_for_status()
+        try:
+            r = await client.get(next_url, headers=headers, params=params)
+        except httpx.TimeoutException as exc:
+            logger.warning("GitHub API timed out while paginating %s", next_url)
+            raise HTTPException(503, "github API request timed out") from exc
+        except httpx.RequestError as exc:
+            logger.warning("GitHub API request failed while paginating %s: %s", next_url, exc)
+            raise HTTPException(502, "github API request failed") from exc
+        try:
+            r.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            logger.warning(
+                "GitHub API returned %s while paginating %s",
+                r.status_code,
+                next_url,
+            )
+            raise _github_api_http_exception(r.status_code) from exc
         body = r.json()
         page = body.get(items_key, []) if items_key else body
         if isinstance(page, list):
@@ -365,7 +547,7 @@ async def list_repos(
         "Accept": "application/vnd.github+json",
         "X-GitHub-Api-Version": "2022-11-28",
     }
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=_GITHUB_API_TIMEOUT) as client:
         try:
             installations = await _paginate(
                 client,
@@ -398,10 +580,13 @@ async def list_repos(
                     headers=headers,
                     items_key="repositories",
                 )
-            except HTTPException:
+            except HTTPException as exc:
+                if exc.status_code in _SKIPPABLE_INSTALLATION_REPO_STATUS_CODES:
+                    logger.warning(
+                        "Skipping installation %s repository list: %s", inst_id, exc.detail
+                    )
+                    continue
                 raise
-            except httpx.HTTPStatusError:
-                continue
             repositories.extend(repos)
     return {
         "installations": [
@@ -418,59 +603,6 @@ async def list_repos(
             if r.get("full_name")
         ],
     }
-
-
-def _raise_for_github_repo_status(status_code: int) -> None:
-    if status_code == 401:
-        raise HTTPException(401, "github token expired, re-login required")
-    if status_code == 404:
-        raise HTTPException(404, "repository not found")
-    if status_code == 403:
-        raise HTTPException(403, "no access to this private repository")
-    if status_code != 200:
-        raise HTTPException(502, f"github API error ({status_code})")
-
-
-async def _assert_repo_available_for_style_analysis(full_name: str, token: str) -> None:
-    """Ensure the repo exists and is readable for style learning.
-
-    Public repositories are allowed without the GitHub App installed on them.
-    Private repositories require the authenticated user to have read access.
-    """
-    full_name = normalize_repo_full_name(full_name)
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Accept": "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28",
-    }
-    owner, name = full_name.split("/", 1)
-    async with httpx.AsyncClient() as client:
-        r = await client.get(
-            f"https://api.github.com/repos/{owner}/{name}",
-            headers=headers,
-        )
-        _raise_for_github_repo_status(r.status_code)
-        body = r.json()
-        if body.get("private") is not True:
-            return
-        # Private repo: 200 from GitHub implies the user's token can read it.
-
-
-async def _require_repo_access_for_user(login: str, full_name: str) -> str:
-    """Verify the user can read ``full_name`` on GitHub; return a valid access token."""
-    token = await get_valid_access_token(login)
-    if not token:
-        raise HTTPException(401, "github token unavailable, re-login required")
-    try:
-        await _assert_repo_available_for_style_analysis(full_name, token)
-    except HTTPException as exc:
-        if exc.status_code != 401:
-            raise
-        token = await get_valid_access_token(login, force_refresh=True)
-        if not token:
-            raise HTTPException(401, "github token expired, re-login required") from exc
-        await _assert_repo_available_for_style_analysis(full_name, token)
-    return token
 
 
 @router.get("/review-styles")
@@ -493,7 +625,7 @@ async def api_create_review_style(
     body: ReviewStyleCreate,
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
-    await _require_repo_access_for_user(session["sub"], body.full_name)
+    await require_repo_access_for_user(session["sub"], body.full_name)
     return await create_review_style(body.full_name, session["sub"])
 
 
@@ -521,7 +653,7 @@ async def api_update_review_style_prompt(
     record = await get_review_style(full_name)
     if not record:
         raise HTTPException(404, "review style not found")
-    await _require_repo_access_for_user(session["sub"], full_name)
+    await require_repo_access_for_user(session["sub"], full_name)
     return await set_custom_prompt(full_name, body.custom_prompt)
 
 
@@ -531,7 +663,7 @@ async def api_analyze_review_style(
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
     full_name = normalize_repo_full_name(full_name)
-    token = await _require_repo_access_for_user(session["sub"], full_name)
+    token = await require_repo_access_for_user(session["sub"], full_name)
     record = await get_review_style(full_name)
     if not record:
         record = await create_review_style(full_name, session["sub"])
@@ -539,7 +671,7 @@ async def api_analyze_review_style(
         record = await sync_review_style_run_status(full_name)
         if record.get("status") == "running":
             raise HTTPException(409, "analysis already running")
-    return await start_review_style_analysis(
+    return await start_bootstrap_analysis(
         full_name,
         github_token=token,
         created_by=session["sub"],
@@ -571,15 +703,73 @@ async def api_delete_review_style(
         raise HTTPException(404, "review style not found")
     if record.get("status") == "running":
         await cancel_review_style_analysis(full_name)
+    await remove_continual_cron(full_name)
     await delete_review_style(full_name)
+    return Response(status_code=204)
+
+
+@router.get("/agent-usage-leaderboard")
+async def api_agent_usage_leaderboard(
+    background_tasks: BackgroundTasks,
+    period: str | None = "30d",
+    limit: int = 10,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    return await list_agent_usage_leaderboard(
+        period=period,
+        limit=limit,
+        current_login=session["sub"],
+        current_email=session.get("email"),
+        schedule_usage_refresh=lambda cache_period: background_tasks.add_task(
+            refresh_usage_leaderboard_cache, cache_period
+        ),
+        schedule_reviewer_refresh=lambda cache_period: background_tasks.add_task(
+            refresh_reviewer_stats_cache, cache_period
+        ),
+    )
+
+
+@router.get("/schedules")
+async def api_list_schedules(
+    session: dict[str, Any] = _SESSION_DEP,
+) -> list[dict[str, Any]]:
+    return await list_agent_schedules(session["sub"], email=session.get("email"))
+
+
+@router.post("/schedules")
+async def api_create_schedule(
+    body: ScheduleCreateBody,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    return await create_agent_schedule(session["sub"], body, email=session.get("email"))
+
+
+@router.patch("/schedules/{schedule_id}")
+async def api_update_schedule(
+    schedule_id: str,
+    body: ScheduleUpdateBody,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    return await update_agent_schedule(
+        schedule_id, session["sub"], body, email=session.get("email")
+    )
+
+
+@router.delete("/schedules/{schedule_id}")
+async def api_delete_schedule(
+    schedule_id: str,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> Response:
+    await delete_agent_schedule(schedule_id, session["sub"], email=session.get("email"))
     return Response(status_code=204)
 
 
 @router.get("/threads")
 async def api_list_threads(
+    all: bool = False,
     session: dict[str, Any] = _SESSION_DEP,
 ) -> list[dict[str, Any]]:
-    return await list_dashboard_threads(session["sub"])
+    return await list_dashboard_threads(session["sub"], email=session.get("email"), include_all=all)
 
 
 @router.post("/threads")
@@ -595,7 +785,7 @@ async def api_get_thread(
     thread_id: str,
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
-    return await get_dashboard_thread(thread_id, session["sub"])
+    return await get_dashboard_thread(thread_id, session["sub"], email=session.get("email"))
 
 
 @router.post("/threads/{thread_id}/messages")
@@ -604,7 +794,7 @@ async def api_send_thread_message(
     body: ThreadMessageBody,
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
-    return await send_dashboard_message(thread_id, session["sub"], body)
+    return await send_dashboard_message(thread_id, session["sub"], body, email=session.get("email"))
 
 
 @router.post("/threads/{thread_id}/cancel")
@@ -612,7 +802,7 @@ async def api_cancel_thread(
     thread_id: str,
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
-    return await cancel_dashboard_thread(thread_id, session["sub"])
+    return await cancel_dashboard_thread(thread_id, session["sub"], email=session.get("email"))
 
 
 @router.delete("/threads/{thread_id}")
@@ -620,7 +810,7 @@ async def api_delete_thread(
     thread_id: str,
     session: dict[str, Any] = _SESSION_DEP,
 ) -> Response:
-    await delete_dashboard_thread(thread_id, session["sub"])
+    await delete_dashboard_thread(thread_id, session["sub"], email=session.get("email"))
     return Response(status_code=204)
 
 
@@ -634,7 +824,7 @@ async def api_stream_thread(
 
     async def event_generator():
         async for chunk in stream_dashboard_thread(
-            thread_id, session["sub"], last_event_id=last_event_id
+            thread_id, session["sub"], email=session.get("email"), last_event_id=last_event_id
         ):
             yield chunk
 

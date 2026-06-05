@@ -21,21 +21,35 @@ from ..reviewer_publish import (
 )
 from ..reviewer_reconcile import reconcile_findings_with_review_threads
 from ..utils.github_token import get_github_token
+from ..utils.reviewer_outcomes import emit_finding_status_outcome
+
+
+def _normalize_note(note: str | None) -> str | None:
+    if note is None:
+        return None
+    normalized = note.strip()
+    return normalized or None
 
 
 def resolve_finding_thread(
     finding_id: str,
+    note: str,
     status: str = "dismissed",
-    note: str | None = None,
 ) -> dict[str, Any]:
     """Resolve the GitHub review thread for a tracked Open SWE finding.
 
     Use ``status="resolved"`` when the code now fixes the issue. Use
     ``status="dismissed"`` when analysis shows the original review comment was
-    not valid.
+    not valid. ``note`` is required and becomes the GitHub reply body.
     """
     if status not in {"resolved", "dismissed"}:
         return {"success": False, "error": f"Invalid status: {status}"}
+    normalized_note = _normalize_note(note)
+    if normalized_note is None:
+        return {
+            "success": False,
+            "error": "Resolving or dismissing a finding requires a note with the message to post.",
+        }
 
     config = get_config()
     configurable = config.get("configurable", {}) if isinstance(config, dict) else {}
@@ -53,24 +67,33 @@ def resolve_finding_thread(
     if not token:
         return {"success": False, "error": "No GitHub token available"}
 
-    return asyncio.run(
+    result = asyncio.run(
         _resolve_finding_thread_async(
             finding_id=finding_id,
             status=status,
-            note=note,
+            note=normalized_note,
             owner=str(repo_config["owner"]),
             repo=str(repo_config["name"]),
             pr_number=pr_number,
             token=token,
         )
     )
+    if result.get("success") and isinstance(result.get("finding"), dict):
+        thread_id = configurable.get("thread_id") if isinstance(configurable, dict) else None
+        emit_finding_status_outcome(
+            result["finding"],
+            status,
+            configurable=configurable,
+            thread_id=thread_id if isinstance(thread_id, str) else None,
+        )
+    return result
 
 
 async def _resolve_finding_thread_async(
     *,
     finding_id: str,
     status: str,
-    note: str | None,
+    note: str,
     owner: str,
     repo: str,
     pr_number: int,
@@ -106,6 +129,8 @@ async def _resolve_finding_thread_async(
     posted_resolution_comment_ids = _int_list(finding.get("github_posted_resolution_comment_ids"))
     comment_ids = _comment_ids_for_finding(finding)
     resolution_body = render_resolution_comment(finding, status, note=note)
+    if resolution_body is None:
+        return {"success": False, "error": "Missing resolution note"}
 
     resolved_count = 0
     for idx, github_thread_id in enumerate(github_thread_ids):
@@ -141,8 +166,8 @@ async def _resolve_finding_thread_async(
             github_thread_id in resolved_thread_ids for github_thread_id in github_thread_ids
         ),
     }
-    if note:
-        updates["last_reconciliation_note"] = note
+    updates["last_reconciliation_note"] = note
+    updates["resolution_note"] = note
     if posted_resolution_comment_ids:
         updates["github_posted_resolution_comment_ids"] = posted_resolution_comment_ids
     updated = await update_finding_fields(thread_id, finding_id, updates)

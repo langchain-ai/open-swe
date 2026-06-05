@@ -2,7 +2,7 @@
 
 Covers:
 - (a) expired-cache reads return None / fall through to re-auth
-- (b) 401 on a downstream GitHub call invalidates the cached ciphertext and
+- (b) 401 on a downstream GitHub call invalidates the cached token and
   triggers a fresh resolve in the webapp
 - (c) ``publish_review`` invalidates the cached token and returns a clean
   failure when GitHub responds 401
@@ -13,25 +13,16 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime, timedelta
 from typing import Any
-from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
 
 from agent.utils import github_comments, github_token
 
-_TEST_FERNET_KEY = "GMI8FNqVnhFzVfKDUTpGAUq8a2cm14kU0SyXzMTM4Yc="
-
 
 @pytest.fixture(autouse=True)
-def _set_encryption_key(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", _TEST_FERNET_KEY)
-
-
-def _encrypted(token: str) -> str:
-    from agent.encryption import encrypt_token
-
-    return encrypt_token(token)
+def _clear_token_cache() -> None:
+    github_token._GITHUB_TOKEN_CACHE.clear()
 
 
 # (a) expired-cache reads -----------------------------------------------------
@@ -57,73 +48,65 @@ def test_is_expired_treats_unparseable_as_not_expired() -> None:
     assert github_token._is_expired("not-a-date") is False
 
 
-def test_get_github_token_returns_none_for_expired_run_metadata() -> None:
+def test_get_github_token_returns_none_for_expired_cache() -> None:
     past = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
-    metadata = {
-        "github_token_encrypted": _encrypted("ghp_secret"),
-        "github_token_expires_at": past,
-    }
-    assert github_token.get_github_token({"metadata": metadata}) is None
+    github_token.cache_github_token_for_thread("tid", "ghp_secret", expires_at=past)
+    assert github_token.get_github_token({"configurable": {"thread_id": "tid"}}) is None
 
 
-def test_get_github_token_returns_decrypted_for_fresh_metadata() -> None:
+def test_get_github_token_returns_fresh_cached_token() -> None:
     future = (datetime.now(UTC) + timedelta(hours=1)).isoformat()
-    metadata = {
-        "github_token_encrypted": _encrypted("ghp_secret"),
-        "github_token_expires_at": future,
-    }
-    assert github_token.get_github_token({"metadata": metadata}) == "ghp_secret"
+    github_token.cache_github_token_for_thread("tid", "ghp_secret", expires_at=future)
+    assert github_token.get_github_token({"configurable": {"thread_id": "tid"}}) == "ghp_secret"
 
 
-def test_get_github_token_returns_decrypted_when_no_expires_at() -> None:
-    metadata = {"github_token_encrypted": _encrypted("ghp_secret")}
-    assert github_token.get_github_token({"metadata": metadata}) == "ghp_secret"
+def test_get_github_token_returns_cached_token_when_no_expires_at() -> None:
+    github_token.cache_github_token_for_thread("tid", "ghp_secret")
+    assert github_token.get_github_token({"configurable": {"thread_id": "tid"}}) == "ghp_secret"
+
+
+def test_cached_token_expires_after_max_ttl() -> None:
+    """A token with no/far expiry is still dropped once it's older than the 24h cap."""
+    far_future = (datetime.now(UTC) + timedelta(days=30)).isoformat()
+    old_cached_at = datetime.now(UTC) - timedelta(hours=25)
+    github_token._GITHUB_TOKEN_CACHE["tid"] = ("ghp_secret", far_future, old_cached_at)
+    assert github_token.get_github_token({"configurable": {"thread_id": "tid"}}) is None
+
+
+def test_cache_write_sweeps_other_expired_entries() -> None:
+    """Writing one entry evicts unrelated entries that have passed their expiry."""
+    past = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
+    github_token.cache_github_token_for_thread("stale", "ghp_stale", expires_at=past)
+    github_token.cache_github_token_for_thread("fresh", "ghp_fresh")
+    assert "stale" not in github_token._GITHUB_TOKEN_CACHE
+    assert "fresh" in github_token._GITHUB_TOKEN_CACHE
 
 
 @pytest.mark.asyncio
 async def test_get_github_token_from_thread_skips_expired() -> None:
     past = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
-    fake_client = AsyncMock()
-    fake_client.threads.get.return_value = {
-        "metadata": {
-            "github_token_encrypted": _encrypted("ghp_revoked"),
-            "github_token_expires_at": past,
-        }
-    }
-    with patch.object(github_token, "client", fake_client):
-        token, encrypted, expires_at = await github_token.get_github_token_from_thread("tid")
+    github_token.cache_github_token_for_thread("tid", "ghp_revoked", expires_at=past)
+    token, expires_at = await github_token.get_github_token_from_thread("tid")
     assert token is None
-    assert encrypted is None
     assert expires_at is None
 
 
 @pytest.mark.asyncio
 async def test_get_github_token_from_thread_returns_fresh() -> None:
     future = (datetime.now(UTC) + timedelta(hours=1)).isoformat()
-    enc = _encrypted("ghp_live")
-    fake_client = AsyncMock()
-    fake_client.threads.get.return_value = {
-        "metadata": {
-            "github_token_encrypted": enc,
-            "github_token_expires_at": future,
-        }
-    }
-    with patch.object(github_token, "client", fake_client):
-        token, encrypted, expires_at = await github_token.get_github_token_from_thread("tid")
+    github_token.cache_github_token_for_thread("tid", "ghp_live", expires_at=future)
+    token, expires_at = await github_token.get_github_token_from_thread("tid")
     assert token == "ghp_live"
-    assert encrypted == enc
     assert expires_at == future
 
 
 @pytest.mark.asyncio
-async def test_invalidate_cached_github_token_clears_metadata() -> None:
-    fake_client = AsyncMock()
-    with patch.object(github_token, "client", fake_client):
-        await github_token.invalidate_cached_github_token("tid-42")
-    fake_client.threads.update.assert_awaited_once_with(
-        thread_id="tid-42",
-        metadata={"github_token_encrypted": None, "github_token_expires_at": None},
-    )
+async def test_invalidate_cached_github_token_clears_cache() -> None:
+    github_token.cache_github_token_for_thread("tid-42", "ghp_live")
+    await github_token.invalidate_cached_github_token("tid-42")
+    token, expires_at = await github_token.get_github_token_from_thread("tid-42")
+    assert token is None
+    assert expires_at is None
 
 
 # (b) 401 on a downstream GitHub call -----------------------------------------
@@ -276,7 +259,11 @@ def test_process_github_pr_comment_invalidates_and_reauths_on_401(
     monkeypatch.setattr(webapp, "react_to_github_comment", fake_react)
     monkeypatch.setattr(webapp, "fetch_pr_comments_since_last_tag", fake_fetch_pr_comments)
     monkeypatch.setattr(webapp, "_trigger_or_queue_run", fake_trigger_or_queue_run)
-    monkeypatch.setattr(webapp, "GITHUB_USER_EMAIL_MAP", {"octo": "octo@example.com"})
+    monkeypatch.setattr(
+        webapp,
+        "email_for_login",
+        lambda login: asyncio.sleep(0, result="octo@example.com" if login == "octo" else None),
+    )
 
     asyncio.run(
         webapp.process_github_pr_comment(

@@ -9,6 +9,7 @@ from langgraph.config import get_config
 
 from ..reviewer_diff import is_range_in_diff
 from ..reviewer_findings import (
+    DEFAULT_FINDING_TITLE,
     MAX_SUGGESTION_LINES,
     Confidence,
     DiffSide,
@@ -18,6 +19,8 @@ from ..reviewer_findings import (
     clip_suggestion,
     get_thread_id_from_runtime,
     new_finding,
+    normalize_finding_title,
+    resolve_review_head_sha,
 )
 
 
@@ -26,6 +29,7 @@ def add_finding(
     confidence: str,
     category: str,
     file: str,
+    title: str,
     description: str,
     start_line: int | None = None,
     end_line: int | None = None,
@@ -39,8 +43,9 @@ def add_finding(
     flow and the future UI.
 
     **When to use:** Once per distinct issue you find while reviewing the
-    diff. Prefer one finding per issue, with a clear ``description`` and, when
-    you can offer a concrete fix, a ``suggestion`` that exactly replaces lines
+    diff. Prefer one finding per issue, with a concise generated ``title`` that
+    names the failure mode, a clear ``description`` body, and, when you can
+    offer a concrete fix, a ``suggestion`` that exactly replaces lines
     ``start_line..end_line``.
 
     **In-diff only:** ``start_line..end_line`` must be inside the PR diff.
@@ -54,7 +59,10 @@ def add_finding(
         category: Short category label (``correctness``, ``security``, ``perf``,
             ``style``, ``flag``, etc.). Free-form; used for grouping in the UI.
         file: Repo-relative path of the file the finding refers to.
-        description: Markdown body the user sees.
+        title: Concise generated headline for the finding. Name the failure mode
+            in roughly 4-10 words; do not copy or truncate the description.
+        description: Markdown body the user sees. Do not repeat ``title`` as the
+            first line.
         start_line: 1-based line in the new (post-PR) file where the
             relevant range begins. For a single-line finding, this is the
             line the issue is about. For a multi-line finding, this is the
@@ -89,6 +97,10 @@ def add_finding(
     if start_line is None and end_line is not None:
         start_line = end_line
 
+    normalized_title = normalize_finding_title(title)
+    if normalized_title == DEFAULT_FINDING_TITLE:
+        return {"success": False, "error": "title must be a non-empty generated headline"}
+
     if severity not in {"low", "medium", "high", "critical"}:
         return {"success": False, "error": f"Invalid severity: {severity}"}
     if confidence not in {"low", "medium", "high"}:
@@ -101,19 +113,11 @@ def add_finding(
     config = get_config()
     configurable = config.get("configurable", {}) if isinstance(config, dict) else {}
     diff_line_set = configurable.get("diff_line_set") if isinstance(configurable, dict) else None
-    head_sha = configurable.get("head_sha", "") if isinstance(configurable, dict) else ""
     diff_text = configurable.get("diff_text", "") if isinstance(configurable, dict) else ""
 
-    if isinstance(diff_line_set, dict) and not is_range_in_diff(
+    in_diff = not isinstance(diff_line_set, dict) or is_range_in_diff(
         diff_line_set, file, start_line, end_line, side=_cast_side(side)
-    ):
-        return {
-            "success": False,
-            "error": (
-                f"Finding range {file}:{start_line}-{end_line} is not part of the PR diff. "
-                "Only review changes the PR introduces; do not flag pre-existing code."
-            ),
-        }
+    )
 
     diff_hunk: str | None = None
     if isinstance(diff_text, str) and diff_text:
@@ -123,6 +127,9 @@ def add_finding(
 
     clipped_suggestion, suggestion_dropped = clip_suggestion(suggestion)
 
+    thread_id = get_thread_id_from_runtime()
+    head_sha = asyncio.run(resolve_review_head_sha(thread_id, configurable))
+
     finding: Finding = new_finding(
         severity=_cast_severity(severity),
         confidence=_cast_confidence(confidence),
@@ -131,15 +138,23 @@ def add_finding(
         start_line=start_line,
         end_line=end_line,
         description=description,
-        sha=str(head_sha) if isinstance(head_sha, str) else "",
+        sha=head_sha,
+        title=normalized_title,
         side=_cast_side(side),
         suggestion=clipped_suggestion,
         diff_hunk=diff_hunk,
+        in_diff=in_diff,
     )
 
-    thread_id = get_thread_id_from_runtime()
     asyncio.run(append_finding(thread_id, finding))
     result: dict[str, Any] = {"success": True, "finding_id": finding["id"]}
+    if not in_diff:
+        result["in_diff"] = False
+        result["note"] = (
+            "Anchored outside the PR diff. This will be surfaced in the collapsed "
+            "out-of-diff section of the review summary, not as an inline comment. "
+            "Do not re-anchor or retry."
+        )
     if suggestion_dropped:
         result["suggestion_dropped"] = True
         result["warning"] = (

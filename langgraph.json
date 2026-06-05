@@ -4,11 +4,19 @@
   "graphs": {
     "agent": "agent.server:get_agent",
     "reviewer": "agent.reviewer:get_reviewer_agent",
-    "review_style_analyzer": "agent.review_style_analyzer:get_review_style_analyzer"
+    "analyzer": "agent.analyzer:get_analyzer",
+    "scheduler": "agent.scheduler:get_scheduler"
   },
   "dependencies": ["."],
   "http": {
     "app": "agent.webapp:app"
   },
-  "env": ".env" 
+  "checkpointer": {
+    "ttl": {
+      "strategy": "delete",
+      "sweep_interval_minutes": 60,
+      "default_ttl": 43200
+    }
+  },
+  "env": ".env"
 }

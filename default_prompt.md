@@ -1,3 +1,3 @@
 # Default Prompt
 
-When a repository is not explicitly mentioned, use `langchain-ai/langchainplus`. Always assume the organization is `langchain-ai`.
+When a repository is not explicitly mentioned, use the repository provided in the run metadata or dashboard settings. Do not assume a hardcoded repository name.

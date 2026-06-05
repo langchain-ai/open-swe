@@ -7,7 +7,7 @@ the reviewer's tools and webhook handlers go through.
 Why thread metadata: it survives sandbox eviction, is queryable cross-thread
 via the langgraph SDK (a future UI lists all reviewer threads by filtering on
 ``metadata.kind == "reviewer"``), and matches existing patterns the codebase
-already uses for ``sandbox_id``, ``github_token_encrypted``, etc.
+already uses for durable non-secret run state like ``sandbox_id``.
 """
 
 from __future__ import annotations
@@ -28,6 +28,8 @@ REVIEWER_THREAD_KIND = "reviewer"
 # code for the author and clutters the comment. We cap at 4 lines and drop
 # longer suggestions; the description still gets posted on its own.
 MAX_SUGGESTION_LINES = 4
+MAX_FINDING_TITLE_LENGTH = 120
+DEFAULT_FINDING_TITLE = "Code review finding"
 
 
 def clip_suggestion(suggestion: str | None) -> tuple[str | None, bool]:
@@ -37,6 +39,19 @@ def clip_suggestion(suggestion: str | None) -> tuple[str | None, bool]:
     if suggestion.count("\n") + 1 > MAX_SUGGESTION_LINES:
         return None, True
     return suggestion, False
+
+
+def normalize_finding_title(title: str | None, description: str = "") -> str:
+    """Return a compact finding title suitable for a review comment headline."""
+    raw = title.strip() if isinstance(title, str) else ""
+    if not raw and description:
+        raw = description.strip().split("\n", 1)[0].strip()
+    compact = " ".join(raw.split())
+    if not compact:
+        return DEFAULT_FINDING_TITLE
+    if len(compact) > MAX_FINDING_TITLE_LENGTH:
+        return f"{compact[: MAX_FINDING_TITLE_LENGTH - 3].rstrip()}..."
+    return compact
 
 
 Severity = Literal["low", "medium", "high", "critical"]
@@ -61,18 +76,20 @@ SEVERITY_ORDER: dict[Severity, int] = {
 class Finding(TypedDict, total=False):
     """A single review finding.
 
-    All fields are optional at the TypedDict level so partial updates are
-    representable, but ``new_finding`` always returns a fully populated dict.
+    All fields are optional at the TypedDict level so partial updates and
+    legacy findings without generated titles are representable.
     """
 
     id: str
     severity: Severity
     confidence: Confidence
     category: str
+    title: str
     file: str
     start_line: int | None
     end_line: int | None
     side: DiffSide
+    in_diff: bool
     description: str
     suggestion: str | None
     status: FindingStatus
@@ -91,6 +108,7 @@ class Finding(TypedDict, total=False):
     last_human_reply_author: str | None
     last_human_reply_body: str | None
     last_reconciliation_note: str | None
+    resolution_note: str | None
     diff_hunk: str | None
     fingerprint: str
     anchor: FindingAnchor
@@ -160,11 +178,13 @@ def new_finding(
     end_line: int | None,
     description: str,
     sha: str,
+    title: str | None = None,
     confidence: Confidence = "medium",
     side: DiffSide = "RIGHT",
     suggestion: str | None = None,
     diff_hunk: str | None = None,
     finding_id: str | None = None,
+    in_diff: bool = True,
 ) -> Finding:
     """Construct a fully-populated ``Finding`` ready to persist."""
     resolved_id = finding_id or new_finding_id()
@@ -185,7 +205,7 @@ def new_finding(
         "last_github_sync_at": None,
         "last_error": None,
     }
-    return {
+    finding: Finding = {
         "id": resolved_id,
         "severity": severity,
         "confidence": confidence,
@@ -194,6 +214,7 @@ def new_finding(
         "start_line": start_line,
         "end_line": end_line,
         "side": side,
+        "in_diff": in_diff,
         "description": description,
         "suggestion": suggestion,
         "status": "open",
@@ -212,12 +233,16 @@ def new_finding(
         "last_human_reply_author": None,
         "last_human_reply_body": None,
         "last_reconciliation_note": None,
+        "resolution_note": None,
         "diff_hunk": diff_hunk,
         "fingerprint": _finding_fingerprint(file, start_line, end_line, description),
         "anchor": anchor,
         "surface": surface,
         "interactions": [],
     }
+    if title is not None:
+        finding["title"] = normalize_finding_title(title)
+    return finding
 
 
 def _finding_fingerprint(
@@ -270,6 +295,24 @@ async def get_thread_metadata(thread_id: str) -> dict[str, Any]:
         return {}
     metadata = thread.get("metadata") if isinstance(thread, dict) else None
     return metadata if isinstance(metadata, dict) else {}
+
+
+async def resolve_review_head_sha(thread_id: str, configurable: dict[str, Any]) -> str:
+    """Return the current PR head SHA for a reviewer run.
+
+    A push that lands while a reviewer run is in flight is delivered as a queued
+    message into that run, whose frozen ``configurable`` still names the head the
+    run was created for. The dispatching webhook records the current head in
+    thread metadata, so prefer that; fall back to the run's config when metadata
+    carries no head (first review, eval, tests).
+    """
+    config_head = configurable.get("head_sha") if isinstance(configurable, dict) else None
+    config_head = config_head if isinstance(config_head, str) else ""
+    if not thread_id:
+        return config_head
+    metadata = await get_thread_metadata(thread_id)
+    meta_head = metadata.get("head_sha")
+    return meta_head if isinstance(meta_head, str) and meta_head else config_head
 
 
 async def list_findings(thread_id: str) -> list[Finding]:
@@ -416,6 +459,7 @@ async def set_reviewer_thread_metadata(
     *,
     pr: ReviewerPRMeta | None = None,
     last_reviewed_sha: str | None = None,
+    head_sha: str | None = None,
     watch: bool | None = None,
     findings: list[Finding] | None = None,
     slack_thread: ReviewerSlackThread | None = None,
@@ -426,6 +470,11 @@ async def set_reviewer_thread_metadata(
     Always sets ``kind=reviewer`` so the future UI can list reviewer threads by
     filtering on metadata. Only includes the fields the caller passed in
     (langgraph metadata updates merge rather than overwrite).
+
+    ``head_sha`` records the current PR head the dispatching webhook is acting
+    on. A push that lands mid-run is queued into the still-running run, whose
+    frozen config can't be updated; persisting the head here lets the reviewer
+    tools resolve the live head via ``resolve_review_head_sha``.
     """
     client = get_client()
     metadata: dict[str, Any] = {"kind": REVIEWER_THREAD_KIND}
@@ -433,6 +482,8 @@ async def set_reviewer_thread_metadata(
         metadata["pr"] = pr
     if last_reviewed_sha is not None:
         metadata["last_reviewed_sha"] = last_reviewed_sha
+    if head_sha is not None:
+        metadata["head_sha"] = head_sha
     if watch is not None:
         metadata["watch"] = watch
     if findings is not None:

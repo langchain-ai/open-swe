@@ -11,7 +11,6 @@ from fastapi.testclient import TestClient
 
 from agent import webapp
 from agent.tools import request_pr_review as request_pr_review_tool
-from agent.utils import github_comments
 from agent.utils import slack as slack_utils
 from agent.utils.slack import GitHubPrRef
 
@@ -87,7 +86,15 @@ def test_build_github_issue_prompt_includes_issue_context() -> None:
 
 
 def test_build_github_issue_followup_prompt_only_includes_comment() -> None:
-    prompt = webapp.build_github_issue_followup_prompt("bracesproul", "Please handle this")
+    from agent.dashboard import user_mappings
+
+    user_mappings.prime_cache(
+        [{"github_login": "bracesproul", "work_email": "brace@x.com", "status": "active"}]
+    )
+    try:
+        prompt = webapp.build_github_issue_followup_prompt("bracesproul", "Please handle this")
+    finally:
+        user_mappings.clear_cache()
 
     assert prompt == "**bracesproul:**\nPlease handle this"
     assert "## Repository" not in prompt
@@ -298,11 +305,8 @@ def test_process_github_review_finding_reply_uses_rereview_config(monkeypatch) -
     async def fake_get_token_with_expiry() -> tuple[str, str]:
         return "app-token", "2026-01-01T00:00:00Z"
 
-    async def fake_persist_token(
-        thread_id: str, token: str, *, expires_at: str | None = None
-    ) -> str:
-        captured["persist"] = (thread_id, token, expires_at)
-        return "encrypted"
+    def fake_cache_token(thread_id: str, token: str, *, expires_at: str | None = None) -> None:
+        captured["cache"] = (thread_id, token, expires_at)
 
     async def fake_fetch_threads(**_kwargs: object) -> list[dict[str, object]]:
         return []
@@ -339,7 +343,7 @@ def test_process_github_review_finding_reply_uses_rereview_config(monkeypatch) -
     monkeypatch.setattr(
         webapp, "get_github_app_installation_token_with_expiry", fake_get_token_with_expiry
     )
-    monkeypatch.setattr(webapp, "persist_encrypted_github_token", fake_persist_token)
+    monkeypatch.setattr(webapp, "cache_github_token_for_thread", fake_cache_token)
     monkeypatch.setattr(webapp, "fetch_pr_review_threads", fake_fetch_threads)
     monkeypatch.setattr(webapp, "reconcile_findings_with_review_threads", fake_reconcile)
     monkeypatch.setattr(webapp, "list_reviewer_findings", fake_list_findings)
@@ -386,11 +390,8 @@ def test_process_github_review_finding_reply_queues_reply_body_when_active(monke
     async def fake_get_token_with_expiry() -> tuple[str, str]:
         return "app-token", "2026-01-01T00:00:00Z"
 
-    async def fake_persist_token(
-        _thread_id: str, _token: str, *, expires_at: str | None = None
-    ) -> str:
+    def fake_cache_token(_thread_id: str, _token: str, *, expires_at: str | None = None) -> None:
         captured["expires_at"] = expires_at
-        return "encrypted"
 
     async def fake_fetch_threads(**_kwargs: object) -> list[dict[str, object]]:
         return []
@@ -429,7 +430,7 @@ def test_process_github_review_finding_reply_queues_reply_body_when_active(monke
     monkeypatch.setattr(
         webapp, "get_github_app_installation_token_with_expiry", fake_get_token_with_expiry
     )
-    monkeypatch.setattr(webapp, "persist_encrypted_github_token", fake_persist_token)
+    monkeypatch.setattr(webapp, "cache_github_token_for_thread", fake_cache_token)
     monkeypatch.setattr(webapp, "fetch_pr_review_threads", fake_fetch_threads)
     monkeypatch.setattr(webapp, "reconcile_findings_with_review_threads", fake_reconcile)
     monkeypatch.setattr(webapp, "list_reviewer_findings", fake_list_findings)
@@ -509,23 +510,8 @@ def test_github_webhook_ignores_unsupported_comment_action(monkeypatch) -> None:
     }
 
 
-def test_github_webhook_blocks_reviewer_repo_not_enabled_in_dashboard(monkeypatch) -> None:
-    called = False
-
-    async def fake_process_github_pr_review_request(payload: dict[str, object]) -> None:
-        nonlocal called
-        called = True
-
-    monkeypatch.setattr(
-        webapp, "process_github_pr_review_request", fake_process_github_pr_review_request
-    )
+def test_github_webhook_ignores_review_requested(monkeypatch) -> None:
     monkeypatch.setattr(webapp, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
-
-    async def fake_is_review_repo_enabled(_owner: str, _name: str) -> bool:
-        return False
-
-    monkeypatch.setattr(webapp, "is_review_repo_enabled", fake_is_review_repo_enabled)
-
     client = TestClient(webapp.app)
     response = _post_github_webhook(
         client,
@@ -545,77 +531,10 @@ def test_github_webhook_blocks_reviewer_repo_not_enabled_in_dashboard(monkeypatc
     )
 
     assert response.status_code == 200
-    assert response.json() == {"status": "ignored", "reason": "Repository not enabled for review"}
-    assert called is False
-
-
-def test_github_webhook_accepts_open_swe_review_requested(monkeypatch) -> None:
-    called: dict[str, object] = {}
-
-    async def fake_process_github_pr_review_request(payload: dict[str, object]) -> None:
-        called["payload"] = payload
-
-    monkeypatch.setattr(
-        webapp, "process_github_pr_review_request", fake_process_github_pr_review_request
-    )
-    monkeypatch.setattr(webapp, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
-
-    client = TestClient(webapp.app)
-    response = _post_github_webhook(
-        client,
-        "pull_request",
-        {
-            "action": "review_requested",
-            "requested_reviewer": {"login": "open-swe[bot]"},
-            "pull_request": {
-                "number": 1244,
-                "html_url": "https://github.com/langchain-ai/open-swe/pull/1244",
-                "base": {"sha": "base-sha"},
-                "head": {"sha": "head-sha", "ref": "feature-branch"},
-            },
-            "repository": {"owner": {"login": "langchain-ai"}, "name": "open-swe"},
-            "sender": {"login": "octocat"},
-        },
-    )
-
-    assert response.status_code == 200
-    assert response.json()["status"] == "accepted"
-    assert called["payload"]["requested_reviewer"]["login"] == "open-swe[bot]"
-
-
-def test_github_webhook_ignores_review_requested_for_other_reviewer(monkeypatch) -> None:
-    called = False
-
-    async def fake_process_github_pr_review_request(payload: dict[str, object]) -> None:
-        nonlocal called
-        called = True
-
-    monkeypatch.setattr(
-        webapp, "process_github_pr_review_request", fake_process_github_pr_review_request
-    )
-    monkeypatch.setattr(webapp, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
-
-    client = TestClient(webapp.app)
-    response = _post_github_webhook(
-        client,
-        "pull_request",
-        {
-            "action": "review_requested",
-            "requested_reviewer": {"login": "someone-else"},
-            "pull_request": {
-                "number": 1244,
-                "html_url": "https://github.com/langchain-ai/open-swe/pull/1244",
-                "base": {"sha": "base-sha"},
-                "head": {"sha": "head-sha", "ref": "feature-branch"},
-            },
-            "repository": {"owner": {"login": "langchain-ai"}, "name": "open-swe"},
-            "sender": {"login": "octocat"},
-        },
-    )
-
-    assert response.status_code == 200
-    assert response.json()["status"] == "ignored"
-    assert called is False
+    assert response.json() == {
+        "status": "ignored",
+        "reason": "Unsupported GitHub pull_request action: review_requested",
+    }
 
 
 def test_slack_webhook_routes_review_command_to_agent(monkeypatch) -> None:
@@ -824,82 +743,18 @@ def test_slack_webhook_threaded_followup_uses_parent_thread_ts(monkeypatch) -> N
     assert event_data["event_ts"] == "1700000000.000200"
 
 
-def test_process_slack_pr_review_request_posts_trace_reply(monkeypatch) -> None:
+def test_process_github_pr_ready_creates_reviewer_run(monkeypatch) -> None:
     captured: dict[str, object] = {}
-
-    async def fake_trigger_pr_review_from_ref(
-        pr_ref: GitHubPrRef,
-        *,
-        source: str,
-        github_login: str = "",
-        github_user_id: int | None = None,
-        slack_channel_id: str = "",
-        slack_thread_ts: str = "",
-    ) -> dict[str, object]:
-        captured["pr_ref"] = pr_ref
-        captured["source"] = source
-        captured["slack_channel_id"] = slack_channel_id
-        captured["slack_thread_ts"] = slack_thread_ts
-        return {"success": True, "thread_id": "reviewer-thread-id", "pr_url": pr_ref.url}
-
-    async def fake_post_slack_trace_reply(channel_id: str, thread_ts: str, thread_id: str) -> None:
-        captured["trace_reply"] = {
-            "channel_id": channel_id,
-            "thread_ts": thread_ts,
-            "thread_id": thread_id,
-        }
-
-    async def fake_set_slack_assistant_status(channel_id: str, thread_ts: str) -> bool:
-        captured.setdefault("status_calls", []).append((channel_id, thread_ts))
-        return True
-
-    monkeypatch.setattr(webapp, "trigger_pr_review_from_ref", fake_trigger_pr_review_from_ref)
-    monkeypatch.setattr(webapp, "post_slack_trace_reply", fake_post_slack_trace_reply)
-    monkeypatch.setattr(webapp, "set_slack_assistant_status", fake_set_slack_assistant_status)
-
-    asyncio.run(
-        webapp.process_slack_pr_review_request(
-            GitHubPrRef(
-                owner="langchain-ai",
-                repo="open-swe",
-                number=1244,
-                url="https://github.com/langchain-ai/open-swe/pull/1244",
-            ),
-            "C123",
-            "1700000000.000100",
-        )
-    )
-
-    assert captured["source"] == "slack"
-    assert captured["slack_channel_id"] == "C123"
-    assert captured["slack_thread_ts"] == "1700000000.000100"
-    assert captured["trace_reply"] == {
-        "channel_id": "C123",
-        "thread_ts": "1700000000.000100",
-        "thread_id": "reviewer-thread-id",
-    }
-    assert captured["status_calls"] == [
-        ("C123", "1700000000.000100"),
-        ("C123", "1700000000.000100"),
-    ]
-
-
-def test_process_github_pr_review_request_creates_reviewer_run(monkeypatch) -> None:
-    captured: dict[str, object] = {}
-
-    async def fake_get_github_app_installation_token() -> str | None:
-        return "app-token"
 
     async def fake_get_github_app_installation_token_with_expiry() -> tuple[str | None, str | None]:
         return "app-token", None
 
-    async def fake_persist_encrypted_github_token(
+    def fake_cache_github_token(
         thread_id: str, token: str, *, expires_at: str | None = None
-    ) -> str:
-        captured["persist_thread_id"] = thread_id
-        captured["persist_token"] = token
-        captured["persist_expires_at"] = expires_at
-        return "encrypted-token"
+    ) -> None:
+        captured["cache_thread_id"] = thread_id
+        captured["cache_token"] = token
+        captured["cache_expires_at"] = expires_at
 
     async def fake_is_thread_active(thread_id: str) -> bool:
         captured["active_thread_id"] = thread_id
@@ -919,29 +774,24 @@ def test_process_github_pr_review_request_creates_reviewer_run(monkeypatch) -> N
         runs = _FakeRunsClient()
         threads = _FakeThreadsClient()
 
-    async def fake_set_reviewer_thread_metadata(thread_id: str, **_kwargs: object) -> None:
+    async def fake_set_reviewer_thread_metadata(thread_id: str, **kwargs: object) -> None:
         captured["set_metadata_thread_id"] = thread_id
+        captured["set_metadata_kwargs"] = kwargs
 
-    monkeypatch.setattr(
-        webapp, "get_github_app_installation_token", fake_get_github_app_installation_token
-    )
     monkeypatch.setattr(
         webapp,
         "get_github_app_installation_token_with_expiry",
         fake_get_github_app_installation_token_with_expiry,
     )
-    monkeypatch.setattr(
-        webapp, "persist_encrypted_github_token", fake_persist_encrypted_github_token
-    )
+    monkeypatch.setattr(webapp, "cache_github_token_for_thread", fake_cache_github_token)
     monkeypatch.setattr(webapp, "is_thread_active", fake_is_thread_active)
     monkeypatch.setattr(webapp, "set_reviewer_thread_metadata", fake_set_reviewer_thread_metadata)
     monkeypatch.setattr(webapp, "get_client", lambda url: _FakeLangGraphClient())
 
     asyncio.run(
-        webapp.process_github_pr_review_request(
+        webapp.process_github_pr_ready(
             {
-                "action": "review_requested",
-                "requested_reviewer": {"login": "open-swe[bot]"},
+                "action": "opened",
                 "pull_request": {
                     "number": 1244,
                     "html_url": "https://github.com/langchain-ai/open-swe/pull/1244",
@@ -963,8 +813,6 @@ def test_process_github_pr_review_request_creates_reviewer_run(monkeypatch) -> N
         "thread_id": captured["thread_id"],
         "if_exists": "do_nothing",
     }
-    assert captured["persist_token"] == "app-token"
-    assert captured["persist_thread_id"] == captured["thread_id"]
     assert "https://github.com/langchain-ai/open-swe/pull/1244" in prompt
     assert "Base SHA: base-sha" in prompt
     assert "Head SHA: head-sha" in prompt
@@ -993,13 +841,12 @@ def test_trigger_pr_review_from_ref_creates_reviewer_run(monkeypatch) -> None:
             "head": {"sha": "head-sha", "ref": "feature-branch"},
         }
 
-    async def fake_persist_encrypted_github_token(
+    def fake_cache_github_token(
         thread_id: str, token: str, *, expires_at: str | None = None
-    ) -> str:
-        captured["persist_thread_id"] = thread_id
-        captured["persist_token"] = token
-        captured["persist_expires_at"] = expires_at
-        return "encrypted-token"
+    ) -> None:
+        captured["cache_thread_id"] = thread_id
+        captured["cache_token"] = token
+        captured["cache_expires_at"] = expires_at
 
     async def fake_is_thread_active(thread_id: str) -> bool:
         captured["active_thread_id"] = thread_id
@@ -1019,8 +866,9 @@ def test_trigger_pr_review_from_ref_creates_reviewer_run(monkeypatch) -> None:
         runs = _FakeRunsClient()
         threads = _FakeThreadsClient()
 
-    async def fake_set_reviewer_thread_metadata(thread_id: str, **_kwargs: object) -> None:
+    async def fake_set_reviewer_thread_metadata(thread_id: str, **kwargs: object) -> None:
         captured["set_metadata_thread_id"] = thread_id
+        captured["set_metadata_kwargs"] = kwargs
 
     monkeypatch.setattr(
         webapp, "get_github_app_installation_token", fake_get_github_app_installation_token
@@ -1031,9 +879,7 @@ def test_trigger_pr_review_from_ref_creates_reviewer_run(monkeypatch) -> None:
         fake_get_github_app_installation_token_with_expiry,
     )
     monkeypatch.setattr(webapp, "fetch_github_pr_metadata", fake_fetch_github_pr_metadata)
-    monkeypatch.setattr(
-        webapp, "persist_encrypted_github_token", fake_persist_encrypted_github_token
-    )
+    monkeypatch.setattr(webapp, "cache_github_token_for_thread", fake_cache_github_token)
     monkeypatch.setattr(webapp, "is_thread_active", fake_is_thread_active)
     monkeypatch.setattr(webapp, "set_reviewer_thread_metadata", fake_set_reviewer_thread_metadata)
     monkeypatch.setattr(webapp, "get_client", lambda url: _FakeLangGraphClient())
@@ -1062,7 +908,6 @@ def test_trigger_pr_review_from_ref_creates_reviewer_run(monkeypatch) -> None:
         "if_exists": "do_nothing",
     }
     assert captured["metadata_token"] == "app-token"
-    assert captured["persist_token"] == "app-token"
     assert "Base SHA: base-sha" in prompt
     assert "Head SHA: head-sha" in prompt
     assert config["source"] == "slack"
@@ -1073,6 +918,9 @@ def test_trigger_pr_review_from_ref_creates_reviewer_run(monkeypatch) -> None:
         "channel_id": "C123",
         "thread_ts": "1700000000.000100",
     }
+    # The live head must be persisted to metadata so resolve_review_head_sha
+    # doesn't return a stale head left by a prior push/ready dispatch.
+    assert captured["set_metadata_kwargs"]["head_sha"] == "head-sha"
 
 
 def test_trigger_pr_review_from_ref_respects_dashboard_opt_in(monkeypatch) -> None:
@@ -1157,7 +1005,7 @@ def test_request_pr_review_tool_uses_shared_trigger(monkeypatch) -> None:
     assert result["success"] is True
 
 
-def test_process_github_pr_comment_review_request_without_email_uses_app_token(
+def test_process_github_pr_comment_without_email_skips(
     monkeypatch,
 ) -> None:
     captured: dict[str, object] = {}
@@ -1173,15 +1021,6 @@ def test_process_github_pr_comment_review_request_without_email_uses_app_token(
             None,
         )
 
-    async def fake_get_app_token_with_expiry() -> tuple[str, str]:
-        return "app-token", "2026-01-01T00:00:00Z"
-
-    async def fake_persist_token(
-        thread_id: str, token: str, *, expires_at: str | None = None
-    ) -> str:
-        captured["persisted"] = {"thread_id": thread_id, "token": token, "expires_at": expires_at}
-        return "encrypted"
-
     async def fake_react(*args, **kwargs) -> bool:
         captured["reaction_token"] = kwargs["token"]
         return True
@@ -1194,11 +1033,7 @@ def test_process_github_pr_comment_review_request_without_email_uses_app_token(
         captured["triggered"] = {"args": args, "kwargs": kwargs}
 
     monkeypatch.setattr(webapp, "extract_pr_context", fake_extract_pr_context)
-    monkeypatch.setattr(webapp, "GITHUB_USER_EMAIL_MAP", {})
-    monkeypatch.setattr(
-        webapp, "get_github_app_installation_token_with_expiry", fake_get_app_token_with_expiry
-    )
-    monkeypatch.setattr(webapp, "persist_encrypted_github_token", fake_persist_token)
+    monkeypatch.setattr(webapp, "email_for_login", lambda login: asyncio.sleep(0, result=None))
     monkeypatch.setattr(webapp, "react_to_github_comment", fake_react)
     monkeypatch.setattr(webapp, "fetch_pr_comments_since_last_tag", fake_fetch_comments)
     monkeypatch.setattr(webapp, "_trigger_or_queue_run", fake_trigger_or_queue_run)
@@ -1213,14 +1048,7 @@ def test_process_github_pr_comment_review_request_without_email_uses_app_token(
         )
     )
 
-    assert captured["reaction_token"] == "app-token"
-    assert captured["fetch_token"] == "app-token"
-    assert captured["persisted"] == {
-        "thread_id": "00000000-0000-0000-0000-000000000001",
-        "token": "app-token",
-        "expires_at": "2026-01-01T00:00:00Z",
-    }
-    assert captured["triggered"]
+    assert captured == {}
 
 
 def test_process_github_issue_uses_resolved_user_token_for_reaction(monkeypatch) -> None:
@@ -1274,7 +1102,13 @@ def test_process_github_issue_uses_resolved_user_token_for_reaction(monkeypatch)
     monkeypatch.setattr(webapp, "fetch_issue_comments", fake_fetch_issue_comments)
     monkeypatch.setattr(webapp, "is_thread_active", fake_is_thread_active)
     monkeypatch.setattr(webapp, "get_client", lambda url: _FakeLangGraphClient())
-    monkeypatch.setattr(webapp, "GITHUB_USER_EMAIL_MAP", {"octocat": "octocat@example.com"})
+    monkeypatch.setattr(
+        webapp,
+        "email_for_login",
+        lambda login: asyncio.sleep(
+            0, result="octocat@example.com" if login == "octocat" else None
+        ),
+    )
 
     asyncio.run(
         webapp.process_github_issue(
@@ -1349,9 +1183,16 @@ def test_process_github_issue_existing_thread_uses_followup_prompt(monkeypatch) 
     monkeypatch.setattr(webapp, "fetch_issue_comments", fake_fetch_issue_comments)
     monkeypatch.setattr(webapp, "is_thread_active", fake_is_thread_active)
     monkeypatch.setattr(webapp, "get_client", lambda url: _FakeLangGraphClient())
-    monkeypatch.setattr(webapp, "GITHUB_USER_EMAIL_MAP", {"octocat": "octocat@example.com"})
     monkeypatch.setattr(
-        github_comments, "GITHUB_USER_EMAIL_MAP", {"octocat": "octocat@example.com"}
+        webapp,
+        "email_for_login",
+        lambda login: asyncio.sleep(
+            0, result="octocat@example.com" if login == "octocat" else None
+        ),
+    )
+    monkeypatch.setattr(
+        "agent.dashboard.user_mappings.is_login_mapped",
+        lambda login: login == "octocat",
     )
 
     asyncio.run(
@@ -1380,50 +1221,6 @@ def test_process_github_issue_existing_thread_uses_followup_prompt(monkeypatch) 
     assert "## Repository" not in captured["prompt"]
 
 
-def test_parse_github_review_command_standalone() -> None:
-    is_review, url = github_comments.parse_github_review_command("@open-swe review")
-    assert is_review is True
-    assert url is None
-
-
-def test_parse_github_review_command_with_url() -> None:
-    is_review, url = github_comments.parse_github_review_command(
-        "@open-swe review https://github.com/langchain-ai/open-swe/pull/1244"
-    )
-    assert is_review is True
-    assert url == "https://github.com/langchain-ai/open-swe/pull/1244"
-
-
-def test_parse_github_review_command_case_insensitive_and_aliases() -> None:
-    assert github_comments.parse_github_review_command("@OpenSWE Review") == (True, None)
-    assert github_comments.parse_github_review_command("@openswe review") == (True, None)
-    assert github_comments.parse_github_review_command("@openswe-dev review") == (True, None)
-
-
-def test_parse_github_review_command_freeform_does_not_match() -> None:
-    assert github_comments.parse_github_review_command("@open-swe review my code") == (False, None)
-    assert github_comments.parse_github_review_command("@open-swe please review") == (False, None)
-    assert github_comments.parse_github_review_command("@open-swe fix this") == (False, None)
-    assert github_comments.parse_github_review_command("") == (False, None)
-
-
-def test_parse_github_review_command_does_not_swallow_trailing_text() -> None:
-    # Trailing text after `review` (on a new line, with punctuation, or extra
-    # words) must NOT be parsed as a URL — otherwise the comment would be
-    # silently dropped instead of falling through to the regular handler.
-    assert github_comments.parse_github_review_command("@open-swe review\nthanks!") == (
-        False,
-        None,
-    )
-    assert github_comments.parse_github_review_command("@open-swe review please") == (False, None)
-    assert github_comments.parse_github_review_command("@open-swe review now") == (False, None)
-    # Non-http schemes are not URLs we can route to a PR.
-    assert github_comments.parse_github_review_command("@open-swe review ftp://x/y/pull/1") == (
-        False,
-        None,
-    )
-
-
 def test_github_webhook_routes_pr_comment_review_to_agent(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
@@ -1431,13 +1228,7 @@ def test_github_webhook_routes_pr_comment_review_to_agent(monkeypatch) -> None:
         captured["payload"] = payload
         captured["event_type"] = event_type
 
-    async def fake_process_review_command(
-        payload: dict[str, object], event_type: str, pr_url_override: str | None
-    ) -> None:
-        raise AssertionError("review commands should route through the main agent")
-
     monkeypatch.setattr(webapp, "process_github_pr_comment", fake_process_pr_comment)
-    monkeypatch.setattr(webapp, "process_github_pr_review_command", fake_process_review_command)
     monkeypatch.setattr(webapp, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
     monkeypatch.setattr(webapp, "ALLOWED_GITHUB_ORGS", frozenset({"langchain-ai"}))
 
@@ -1494,105 +1285,3 @@ def test_github_webhook_routes_pr_review_request_comment_to_agent(monkeypatch) -
     assert response.status_code == 200
     assert response.json() == {"status": "accepted", "message": "Processing issue_comment event"}
     assert captured["event_type"] == "issue_comment"
-
-
-def test_process_github_pr_review_command_uses_payload_pr(monkeypatch) -> None:
-    captured: dict[str, object] = {}
-
-    async def fake_get_app_token() -> str:
-        return "app-token"
-
-    async def fake_react(*args, **kwargs) -> None:
-        captured["reacted"] = True
-
-    async def fake_trigger(
-        pr_ref: GitHubPrRef,
-        *,
-        source: str,
-        github_login: str = "",
-        github_user_id: int | None = None,
-        slack_channel_id: str = "",
-        slack_thread_ts: str = "",
-    ) -> dict[str, object]:
-        captured["pr_ref"] = pr_ref
-        captured["source"] = source
-        captured["github_login"] = github_login
-        captured["github_user_id"] = github_user_id
-        return {"success": True, "thread_id": "tid", "pr_url": pr_ref.url}
-
-    monkeypatch.setattr(webapp, "get_github_app_installation_token", fake_get_app_token)
-    monkeypatch.setattr(webapp, "react_to_github_comment", fake_react)
-    monkeypatch.setattr(webapp, "trigger_pr_review_from_ref", fake_trigger)
-
-    asyncio.run(
-        webapp.process_github_pr_review_command(
-            {
-                "issue": {
-                    "number": 1244,
-                    "html_url": "https://github.com/langchain-ai/open-swe/pull/1244",
-                    "pull_request": {"url": "..."},
-                },
-                "comment": {"id": 9, "body": "@open-swe review"},
-                "repository": {"owner": {"login": "langchain-ai"}, "name": "open-swe"},
-                "sender": {"login": "octocat", "id": 123},
-            },
-            "issue_comment",
-            None,
-        )
-    )
-
-    pr_ref = captured["pr_ref"]
-    assert isinstance(pr_ref, GitHubPrRef)
-    assert pr_ref.owner == "langchain-ai"
-    assert pr_ref.repo == "open-swe"
-    assert pr_ref.number == 1244
-    assert pr_ref.url == "https://github.com/langchain-ai/open-swe/pull/1244"
-    assert captured["source"] == "github"
-    assert captured["github_login"] == "octocat"
-    assert captured["github_user_id"] == 123
-    assert captured.get("reacted") is True
-
-
-def test_process_github_pr_review_command_uses_url_override(monkeypatch) -> None:
-    captured: dict[str, object] = {}
-
-    async def fake_get_app_token() -> str:
-        return "app-token"
-
-    async def fake_react(*args, **kwargs) -> None:
-        return None
-
-    async def fake_trigger(
-        pr_ref: GitHubPrRef,
-        *,
-        source: str,
-        github_login: str = "",
-        github_user_id: int | None = None,
-        slack_channel_id: str = "",
-        slack_thread_ts: str = "",
-    ) -> dict[str, object]:
-        captured["pr_ref"] = pr_ref
-        return {"success": True, "thread_id": "tid", "pr_url": pr_ref.url}
-
-    monkeypatch.setattr(webapp, "get_github_app_installation_token", fake_get_app_token)
-    monkeypatch.setattr(webapp, "react_to_github_comment", fake_react)
-    monkeypatch.setattr(webapp, "trigger_pr_review_from_ref", fake_trigger)
-
-    asyncio.run(
-        webapp.process_github_pr_review_command(
-            {
-                "issue": {"number": 99, "pull_request": {"url": "..."}},
-                "comment": {"id": 1, "body": "@open-swe review https://github.com/x/y/pull/7"},
-                "repository": {"owner": {"login": "x"}, "name": "y"},
-                "sender": {"login": "octocat", "id": 1},
-            },
-            "issue_comment",
-            "https://github.com/x/y/pull/7",
-        )
-    )
-
-    pr_ref = captured["pr_ref"]
-    assert isinstance(pr_ref, GitHubPrRef)
-    assert pr_ref.number == 7
-    assert pr_ref.owner == "x"
-    assert pr_ref.repo == "y"

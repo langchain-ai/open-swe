@@ -12,6 +12,7 @@ from langgraph_sdk.client import LangGraphClient
 
 from ..reviewer_findings import list_findings
 from .langsmith import create_langsmith_feedback, delete_langsmith_feedback
+from .reviewer_outcomes import outcome_from_score, upsert_finding_outcome
 
 logger = logging.getLogger(__name__)
 
@@ -221,6 +222,22 @@ async def process_github_reaction(
             comment=f"GitHub review reaction feedback from {user_login}",
             source_info={**source_info, "reactions": sorted(active_reactions)},
         )
+    outcome = outcome_from_score(score, source="github")
+    if outcome is not None:
+        label, label_source = outcome
+        await asyncio.to_thread(
+            upsert_finding_outcome,
+            finding,
+            label=label,
+            label_source=label_source,
+            repo=repo_key,
+            pr_number=pr_number,
+            pr_url=f"https://github.com/{repo_key}/pull/{pr_number}",
+            head_sha=str(finding.get("first_seen_sha") or ""),
+            run_id=run_id,
+            thread_id=thread_id,
+        )
+
     if success:
         await _mark_event_processed(langgraph_client, repo_key, delivery_id)
 

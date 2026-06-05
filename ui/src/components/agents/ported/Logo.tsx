@@ -12,8 +12,13 @@ export function Logo() {
   ].join("\n");
 
   return (
-    <pre className="m-0 max-w-full overflow-x-auto font-mono text-[7px] leading-none text-[#87CEEB]">
-      {ascii}
-    </pre>
+    <div className="w-full" style={{ containerType: "inline-size" }}>
+      <pre
+        className="m-0 w-full overflow-hidden text-center font-mono leading-none text-[#87CEEB]"
+        style={{ fontSize: "min(7px, 1.9cqw)" }}
+      >
+        {ascii}
+      </pre>
+    </div>
   );
 }

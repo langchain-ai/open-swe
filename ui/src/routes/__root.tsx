@@ -1,22 +1,32 @@
-import { HeadContent, Outlet, Scripts, createRootRoute } from "@tanstack/react-router";
-import { TanStackRouterDevtoolsPanel } from "@tanstack/react-router-devtools";
-import { TanStackDevtools } from "@tanstack/react-devtools";
-import { QueryClientProvider } from "@tanstack/react-query";
-import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
-import { useState } from "react";
+import {
+  HeadContent,
+  Outlet,
+  Scripts,
+  createRootRoute,
+} from "@tanstack/react-router"
+import { TanStackRouterDevtoolsPanel } from "@tanstack/react-router-devtools"
+import { TanStackDevtools } from "@tanstack/react-devtools"
+import { QueryClientProvider } from "@tanstack/react-query"
+import { ReactQueryDevtools } from "@tanstack/react-query-devtools"
+import { useState } from "react"
 
-import appCss from "../styles.css?url";
-import { makeQueryClient } from "@/lib/query";
+import appCss from "../styles.css?url"
+import { makeQueryClient } from "@/lib/query"
 
 export const Route = createRootRoute({
   head: () => ({
     meta: [
       { charSet: "utf-8" },
-      { name: "viewport", content: "width=device-width, initial-scale=1" },
+      {
+        name: "viewport",
+        content: "width=device-width, initial-scale=1, maximum-scale=1",
+      },
+      { name: "theme-color", content: "#000000" },
       { title: "open-swe" },
     ],
     links: [
       { rel: "stylesheet", href: appCss },
+      { rel: "manifest", href: "/manifest.webmanifest" },
       { rel: "icon", type: "image/png", href: "/favicon.png" },
       { rel: "apple-touch-icon", href: "/apple-touch-icon.png" },
     ],
@@ -24,14 +34,16 @@ export const Route = createRootRoute({
   notFoundComponent: () => (
     <main className="container mx-auto p-4 pt-16">
       <h1 className="text-2xl font-medium">404</h1>
-      <p className="text-muted-foreground">The requested page could not be found.</p>
+      <p className="text-muted-foreground">
+        The requested page could not be found.
+      </p>
     </main>
   ),
   shellComponent: RootDocument,
-});
+})
 
 function RootDocument({ children }: { children: React.ReactNode }) {
-  const [queryClient] = useState(() => makeQueryClient());
+  const [queryClient] = useState(() => makeQueryClient())
   return (
     <html lang="en">
       <head>
@@ -43,7 +55,10 @@ function RootDocument({ children }: { children: React.ReactNode }) {
           <TanStackDevtools
             config={{ position: "bottom-right" }}
             plugins={[
-              { name: "Tanstack Router", render: <TanStackRouterDevtoolsPanel /> },
+              {
+                name: "Tanstack Router",
+                render: <TanStackRouterDevtoolsPanel />,
+              },
             ]}
           />
           <ReactQueryDevtools initialIsOpen={false} />
@@ -51,5 +66,5 @@ function RootDocument({ children }: { children: React.ReactNode }) {
         <Scripts />
       </body>
     </html>
-  );
+  )
 }

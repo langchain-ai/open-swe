@@ -9,6 +9,7 @@ from .linear_get_issue_comments import linear_get_issue_comments
 from .linear_list_teams import linear_list_teams
 from .linear_update_issue import linear_update_issue
 from .list_findings import list_findings
+from .open_pull_request import open_pull_request
 from .publish_review import publish_review
 from .reply_to_finding_thread import reply_to_finding_thread
 from .request_pr_review import request_pr_review
@@ -31,6 +32,7 @@ __all__ = [
     "linear_list_teams",
     "linear_update_issue",
     "list_findings",
+    "open_pull_request",
     "publish_review",
     "request_pr_review",
     "reply_to_finding_thread",
