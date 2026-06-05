@@ -58,6 +58,14 @@ from .review_styles import (
     normalize_repo_full_name,
     set_custom_prompt,
 )
+from .schedules import (
+    ScheduleCreateBody,
+    ScheduleUpdateBody,
+    create_agent_schedule,
+    delete_agent_schedule,
+    list_agent_schedules,
+    update_agent_schedule,
+)
 from .slack_oauth import (
     SLACK_STATE_COOKIE_NAME,
     build_authorize_url,
@@ -760,6 +768,41 @@ async def api_agent_usage_leaderboard(
         current_login=session["sub"],
         current_email=session.get("email"),
     )
+
+
+@router.get("/schedules")
+async def api_list_schedules(
+    session: dict[str, Any] = _SESSION_DEP,
+) -> list[dict[str, Any]]:
+    return await list_agent_schedules(session["sub"], email=session.get("email"))
+
+
+@router.post("/schedules")
+async def api_create_schedule(
+    body: ScheduleCreateBody,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    return await create_agent_schedule(session["sub"], body, email=session.get("email"))
+
+
+@router.patch("/schedules/{schedule_id}")
+async def api_update_schedule(
+    schedule_id: str,
+    body: ScheduleUpdateBody,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    return await update_agent_schedule(
+        schedule_id, session["sub"], body, email=session.get("email")
+    )
+
+
+@router.delete("/schedules/{schedule_id}")
+async def api_delete_schedule(
+    schedule_id: str,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> Response:
+    await delete_agent_schedule(schedule_id, session["sub"], email=session.get("email"))
+    return Response(status_code=204)
 
 
 @router.get("/threads")

@@ -421,7 +421,11 @@ async def resolve_github_token(config: RunnableConfig, thread_id: str) -> tuple[
     # Per-user OAuth from the dashboard store wins even in bot-token-only mode,
     # for sources that carry a mapped GitHub login (Slack, dashboard). This is
     # what lets the agent open PRs as the triggering user.
-    if source in ("slack", "dashboard") and isinstance(github_login, str) and github_login.strip():
+    if (
+        source in ("slack", "dashboard", "schedule")
+        and isinstance(github_login, str)
+        and github_login.strip()
+    ):
         try:
             user_token = await _resolve_dashboard_user_token(thread_id, github_login)
         except ValueError as exc:

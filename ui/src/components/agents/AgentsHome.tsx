@@ -3,6 +3,7 @@ import { useState } from "react"
 import type { ModelSelection } from "@/lib/agents/useModelOptions"
 import { AgentPromptBar } from "@/components/agents/AgentPromptBar"
 import { SlackConnectDialog } from "@/components/agents/SlackConnectDialog"
+import { ScheduledAgentsPanel } from "@/components/agents/ScheduledAgentsPanel"
 import { Logo } from "@/components/agents/ported/Logo"
 import { useCreateAgentThread } from "@/lib/agents/queries"
 import { useModelOptions } from "@/lib/agents/useModelOptions"
@@ -47,6 +48,11 @@ export function AgentsHome() {
             repos={reposQuery.data?.repositories}
             selectedRepo={repo}
             onRepoChange={setRepoOverride}
+          />
+          <ScheduledAgentsPanel
+            repos={reposQuery.data?.repositories}
+            defaultRepo={repo}
+            selection={activeSelection}
           />
         </div>
       </div>

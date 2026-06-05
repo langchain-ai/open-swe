@@ -1,4 +1,4 @@
-export type Author = "user" | "agent" | "system" | "tool";
+export type Author = "user" | "agent" | "system" | "tool"
 
 export type ChunkKind =
   | "text"
@@ -7,17 +7,27 @@ export type ChunkKind =
   | "list"
   | "tool-execution"
   | "todo"
-  | "image";
+  | "image"
 
-export type TodoStatus = "pending" | "in_progress" | "completed";
+export type TodoStatus = "pending" | "in_progress" | "completed"
 
-export type AgentStatus = "idle" | "running" | "finished" | "interrupted" | "error";
+export type AgentStatus =
+  | "idle"
+  | "running"
+  | "finished"
+  | "interrupted"
+  | "error"
 
-export type AgentSource = "dashboard" | "github" | "slack" | "linear";
+export type AgentSource =
+  | "dashboard"
+  | "github"
+  | "slack"
+  | "linear"
+  | "schedule"
 
 export interface TodoItem {
-  content: string;
-  status: TodoStatus;
+  content: string
+  status: TodoStatus
 }
 
 export type AcpToolKind =
@@ -31,71 +41,71 @@ export type AcpToolKind =
   | "fetch"
   | "slack"
   | "linear"
-  | "other";
+  | "other"
 
-export type AcpToolStatus = "pending" | "in_progress" | "completed" | "error";
+export type AcpToolStatus = "pending" | "in_progress" | "completed" | "error"
 
 export interface AcpToolLocation {
-  path: string;
-  line?: number;
+  path: string
+  line?: number
 }
 
 export interface DiffData {
-  originalContent: string | null;
-  newContent: string;
-  filePath: string;
-  isNewFile: boolean;
-  isBinary: boolean;
-  isTruncated: boolean;
-  totalLines: number;
+  originalContent: string | null
+  newContent: string
+  filePath: string
+  isNewFile: boolean
+  isBinary: boolean
+  isTruncated: boolean
+  totalLines: number
 }
 
 export interface ToolExecutionChunk {
-  kind: "tool-execution";
-  toolCallId: string;
-  title: string;
-  toolKind: AcpToolKind;
-  input?: Record<string, unknown>;
-  status: AcpToolStatus;
-  output?: string;
-  elapsedMs?: number;
-  approvalRequestId?: string;
-  diffData?: DiffData;
-  diffs?: DiffData[];
-  locations?: AcpToolLocation[];
+  kind: "tool-execution"
+  toolCallId: string
+  title: string
+  toolKind: AcpToolKind
+  input?: Record<string, unknown>
+  status: AcpToolStatus
+  output?: string
+  elapsedMs?: number
+  approvalRequestId?: string
+  diffData?: DiffData
+  diffs?: Array<DiffData>
+  locations?: Array<AcpToolLocation>
 }
 
 export interface TextChunk {
-  kind: "text";
-  text: string;
+  kind: "text"
+  text: string
 }
 
 export interface CodeChunk {
-  kind: "code";
-  text: string;
-  language?: string;
+  kind: "code"
+  text: string
+  language?: string
 }
 
 export interface ErrorChunk {
-  kind: "error";
-  text: string;
+  kind: "error"
+  text: string
 }
 
 export interface ListChunk {
-  kind: "list";
-  lines: string[];
+  kind: "list"
+  lines: Array<string>
 }
 
 export interface TodoChunk {
-  kind: "todo";
-  todos: TodoItem[];
+  kind: "todo"
+  todos: Array<TodoItem>
 }
 
 export interface ImageChunk {
-  kind: "image";
-  base64: string;
-  mimeType: string;
-  fileName?: string;
+  kind: "image"
+  base64: string
+  mimeType: string
+  fileName?: string
 }
 
 export type Chunk =
@@ -105,57 +115,74 @@ export type Chunk =
   | ListChunk
   | ToolExecutionChunk
   | TodoChunk
-  | ImageChunk;
+  | ImageChunk
 
 export interface Message {
-  id: string;
-  author: Author;
-  timestamp: string;
-  chunks: Chunk[];
-  hidden?: boolean;
+  id: string
+  author: Author
+  timestamp: string
+  chunks: Array<Chunk>
+  hidden?: boolean
 }
 
 export interface Project {
-  id: string;
-  path: string;
-  name: string;
-  createdAt: number;
-  lastOpenedAt: number;
-  gitBranch?: string;
+  id: string
+  path: string
+  name: string
+  createdAt: number
+  lastOpenedAt: number
+  gitBranch?: string
+}
+
+export interface AgentSchedule {
+  id: string
+  name: string
+  prompt: string
+  schedule: string
+  repo: string | null
+  model: string
+  effort?: string | null
+  enabled: boolean
+  cronId?: string | null
+  lastThreadId?: string | null
+  lastRunId?: string | null
+  lastTriggeredAt?: string | null
+  createdAt?: string | null
+  updatedAt?: string | null
 }
 
 export interface AgentThread {
-  id: string;
-  title: string;
-  repo: string;
-  repoFullName: string;
-  branch: string;
-  model: string;
-  effort?: string | null;
-  source?: AgentSource;
-  status: AgentStatus;
-  createdAt: number;
-  updatedAt: number;
-  messages: Message[];
+  id: string
+  title: string
+  repo: string
+  repoFullName: string
+  branch: string
+  model: string
+  effort?: string | null
+  source?: AgentSource
+  status: AgentStatus
+  createdAt: number
+  updatedAt: number
+  messages: Array<Message>
   pr?: {
-    number: number;
-    title: string;
-    state: "draft" | "open" | "merged";
-    headRef: string;
-    baseRef: string;
-    url: string;
-  };
+    number: number
+    title: string
+    state: "draft" | "open" | "merged"
+    headRef: string
+    baseRef: string
+    url: string
+  }
   diffStats?: {
-    files: number;
-    additions: number;
-    deletions: number;
-  };
+    files: number
+    additions: number
+    deletions: number
+  }
   changedFiles?: Array<{
-    path: string;
-    additions: number;
-    deletions: number;
-    patch?: string;
-  }>;
+    path: string
+    additions: number
+    deletions: number
+    patch?: string
+  }>
 }
 
 export type GitFileStatus =
@@ -164,11 +191,11 @@ export type GitFileStatus =
   | "index-deleted"
   | "modified"
   | "deleted"
-  | "untracked";
+  | "untracked"
 
 export interface GitStatusEntry {
-  path: string;
-  status: GitFileStatus;
-  staged: boolean;
-  originalPath?: string;
+  path: string
+  status: GitFileStatus
+  staged: boolean
+  originalPath?: string
 }

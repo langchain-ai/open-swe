@@ -26,7 +26,7 @@ _ASSISTANT_ID = "agent"
 _DASHBOARD_SOURCE = "dashboard"
 _DASHBOARD_STREAM_MODES: tuple[str, ...] = ("values", "updates", "messages-tuple")
 # Sources whose threads should surface in the Agents UI (besides "dashboard").
-_SURFACED_SOURCES: tuple[str, ...] = ("dashboard", "github", "slack", "linear")
+_SURFACED_SOURCES: tuple[str, ...] = ("dashboard", "github", "slack", "linear", "schedule")
 
 
 def _agent_version_metadata() -> dict[str, str]:
