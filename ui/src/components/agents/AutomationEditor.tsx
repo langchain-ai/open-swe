@@ -138,7 +138,7 @@ export function AutomationEditor({ mode, schedule }: AutomationEditorProps) {
 
   return (
     <div className="flex min-w-0 flex-1 flex-col overflow-y-auto">
-      <header className="flex items-center justify-between gap-3 px-6 py-4">
+      <header className="flex items-center justify-between gap-3 px-6 py-4 max-md:pt-14">
         <div className="flex min-w-0 items-center gap-1.5 text-sm text-[var(--ui-text-dim)]">
           <Link
             to="/agents/automations"

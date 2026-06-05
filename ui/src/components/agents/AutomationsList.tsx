@@ -41,7 +41,7 @@ export function AutomationsList() {
 
   return (
     <div className="flex min-w-0 flex-1 flex-col overflow-y-auto">
-      <div className="mx-auto w-full max-w-4xl px-6 py-8">
+      <div className="mx-auto w-full max-w-4xl px-6 py-8 max-md:pt-16">
         <h1 className="text-2xl font-semibold text-[var(--ui-text)]">
           Automations
         </h1>
