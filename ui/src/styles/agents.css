@@ -16,6 +16,25 @@
   --ui-danger: oklch(0.577 0.245 27.325);
 }
 
+.dark .agents-ui,
+.dark.agents-ui {
+  --ui-bg: oklch(0.148 0.004 228.8);
+  --ui-surface: oklch(0.218 0.008 223.9);
+  --ui-panel: oklch(0.218 0.008 223.9);
+  --ui-panel-2: oklch(0.274 0.006 286.033);
+  --ui-border: oklch(1 0 0 / 10%);
+  --ui-border-subtle: oklch(1 0 0 / 6%);
+  --ui-text: oklch(0.987 0.002 197.1);
+  --ui-text-muted: oklch(0.723 0.014 214.4);
+  --ui-text-dim: oklch(0.56 0.021 213.5);
+  --ui-accent: oklch(0.715 0.143 215.221);
+  --ui-accent-bubble: oklch(0.274 0.04 223);
+  --ui-sidebar: oklch(0.218 0.008 223.9);
+  --ui-sidebar-hover: oklch(0.275 0.011 216.9);
+  --ui-success: oklch(0.62 0.17 145);
+  --ui-danger: oklch(0.704 0.191 22.216);
+}
+
 .agents-ui {
   color: var(--ui-text);
   background: var(--ui-bg);
@@ -26,6 +45,10 @@
 .agents-ui * {
   scrollbar-width: thin;
   scrollbar-color: oklch(0.85 0.01 214) transparent;
+}
+
+.dark .agents-ui * {
+  scrollbar-color: oklch(0.4 0.01 214) transparent;
 }
 
 .agents-ui .shimmer-text {

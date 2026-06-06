@@ -1,10 +1,24 @@
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
-import { IoLogOutOutline, IoSettingsOutline } from "react-icons/io5";
+import {
+  IoDesktopOutline,
+  IoLogOutOutline,
+  IoMoonOutline,
+  IoSettingsOutline,
+  IoSunnyOutline,
+} from "react-icons/io5";
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { api, type SessionUser } from "@/lib/api";
+import { useTheme, type Theme } from "@/lib/theme";
+import { cn } from "@/lib/utils";
+
+const THEME_OPTIONS: Array<{ value: Theme; label: string; icon: typeof IoSunnyOutline }> = [
+  { value: "light", label: "Light", icon: IoSunnyOutline },
+  { value: "dark", label: "Dark", icon: IoMoonOutline },
+  { value: "system", label: "System", icon: IoDesktopOutline },
+];
 
 interface SidebarUserMenuProps {
   user: SessionUser;
@@ -14,6 +28,7 @@ interface SidebarUserMenuProps {
 export function SidebarUserMenu({ user, showSettingsLink = false }: SidebarUserMenuProps) {
   const qc = useQueryClient();
   const navigate = useNavigate();
+  const { theme, setTheme } = useTheme();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement | null>(null);
 
@@ -67,6 +82,35 @@ export function SidebarUserMenu({ user, showSettingsLink = false }: SidebarUserM
           role="menu"
           className="absolute right-0 bottom-full left-0 mb-2 overflow-hidden rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md"
         >
+          <div className="px-2 py-1.5">
+            <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+              Theme
+            </span>
+            <div className="mt-1.5 grid grid-cols-3 gap-1">
+              {THEME_OPTIONS.map((option) => {
+                const Icon = option.icon;
+                const active = theme === option.value;
+                return (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() => setTheme(option.value)}
+                    aria-pressed={active}
+                    className={cn(
+                      "flex flex-col items-center gap-1 rounded-sm border px-1 py-1.5 text-[10px] transition-colors",
+                      active
+                        ? "border-primary/40 bg-primary/10 text-primary"
+                        : "border-transparent text-muted-foreground hover:bg-muted",
+                    )}
+                  >
+                    <Icon className="size-3.5" />
+                    {option.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+          <div className="my-1 h-px bg-border" />
           {showSettingsLink && (
             <Link
               to="/my-settings"
