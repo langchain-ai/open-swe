@@ -18,9 +18,11 @@ from langgraph_sdk.errors import InternalServerError
 from pydantic import BaseModel, ConfigDict, Field
 
 from ..utils.thread_ops import is_thread_active, langgraph_client, queue_message_for_thread
+from .agent_overrides import normalize_profile_overrides
 from .message_adapter import state_messages_to_ui
-from .options import SUPPORTED_MODEL_IDS, model_supports_effort
+from .options import SUPPORTED_MODEL_IDS, model_supports_effort, model_supports_images
 from .profiles import get_profile, get_valid_access_token
+from .team_settings import get_team_default_model
 from .user_mappings import email_for_login
 
 logger = logging.getLogger(__name__)
@@ -86,6 +88,21 @@ def _normalize_model_choice(
     return model_id, effort
 
 
+async def _resolve_agent_model_choice(
+    profile: dict[str, Any],
+    model_id: str | None,
+    effort: str | None,
+) -> tuple[str, str]:
+    resolved_model, resolved_effort = await get_team_default_model("agent")
+    profile_model, profile_effort = normalize_profile_overrides(profile)
+    if profile_model and profile_effort:
+        resolved_model, resolved_effort = profile_model, profile_effort
+    chosen_model, chosen_effort = _normalize_model_choice(model_id, effort)
+    if chosen_model and chosen_effort:
+        resolved_model, resolved_effort = chosen_model, chosen_effort
+    return resolved_model, resolved_effort
+
+
 def _now_ms() -> int:
     return int(datetime.now(UTC).timestamp() * 1000)
 
@@ -114,9 +131,11 @@ def _decode_dashboard_image(image: DashboardImageBody) -> bytes:
     return data
 
 
-def _image_blocks(images: list[DashboardImageBody]) -> list[dict[str, Any]]:
+def _image_blocks(images: list[DashboardImageBody], *, model_id: str) -> list[dict[str, Any]]:
     if len(images) > _MAX_DASHBOARD_IMAGES:
         raise HTTPException(422, f"at most {_MAX_DASHBOARD_IMAGES} images are supported")
+    if images and not model_supports_images(model_id):
+        raise HTTPException(422, f"model {model_id} does not support image input")
     return [
         create_image_block(
             base64=base64.b64encode(_decode_dashboard_image(image)).decode("ascii"),
@@ -127,14 +146,17 @@ def _image_blocks(images: list[DashboardImageBody]) -> list[dict[str, Any]]:
 
 
 def _user_message_content(
-    prompt: str, images: list[DashboardImageBody]
+    prompt: str, images: list[DashboardImageBody], *, model_id: str
 ) -> str | list[dict[str, Any]]:
     text = prompt.strip()
     if not text and not images:
         raise HTTPException(422, "prompt or image required")
     if not images:
         return text
-    return [*_image_blocks(images), *([{"type": "text", "text": text}] if text else [])]
+    return [
+        *_image_blocks(images, model_id=model_id),
+        *([{"type": "text", "text": text}] if text else []),
+    ]
 
 
 async def _ensure_dashboard_github_token(login: str) -> None:
@@ -343,7 +365,8 @@ async def _start_agent_run(
     profile = await get_profile(login) or {}
     now_ms = _now_ms()
     prompt = prompt.strip()
-    content = _user_message_content(prompt, images or [])
+    resolved_model, _resolved_effort = await _resolve_agent_model_choice(profile, model_id, effort)
+    content = _user_message_content(prompt, images or [], model_id=resolved_model)
     chosen_model, chosen_effort = _normalize_model_choice(model_id, effort)
     metadata_model = chosen_model or profile.get("default_model") or "Default"
     metadata_effort = chosen_effort or profile.get("reasoning_effort")
@@ -433,7 +456,11 @@ async def send_dashboard_message(
     owner, name, _ = _metadata_repo(metadata)
 
     prompt = body.content.strip()
-    content = _user_message_content(prompt, body.images)
+    profile = await get_profile(login) or {}
+    resolved_model, _resolved_effort = await _resolve_agent_model_choice(
+        profile, body.model_id, body.effort
+    )
+    content = _user_message_content(prompt, body.images, model_id=resolved_model)
     now_ms = _now_ms()
     chosen_model, chosen_effort = _normalize_model_choice(body.model_id, body.effort)
     metadata_update: dict[str, Any] = {"source": _DASHBOARD_SOURCE, "updated_at_ms": now_ms}
@@ -462,7 +489,6 @@ async def send_dashboard_message(
         )
 
     await _ensure_dashboard_github_token(login)
-    profile = await get_profile(login) or {}
     configurable: dict[str, Any] = {
         "thread_id": thread_id,
         "source": _DASHBOARD_SOURCE,

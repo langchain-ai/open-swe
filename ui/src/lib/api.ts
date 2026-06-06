@@ -60,6 +60,7 @@ export interface ModelOption {
   label: string;
   efforts: Array<string>;
   default_effort: string;
+  supports_images: boolean;
 }
 
 export interface OptionsPayload {
