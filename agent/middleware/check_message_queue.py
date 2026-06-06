@@ -39,9 +39,12 @@ async def _build_blocks_from_payload(
 ) -> list[dict[str, Any]]:
     text = payload.get("text", "")
     image_urls = payload.get("image_urls", []) or []
+    images = payload.get("images", []) or []
     blocks: list[dict[str, Any]] = []
     if text:
         blocks.append({"type": "text", "text": text})
+    if isinstance(images, list):
+        blocks.extend(image for image in images if isinstance(image, dict))
 
     if not image_urls:
         return blocks
@@ -119,7 +122,9 @@ async def check_message_queue_before_model(  # noqa: PLR0911
             content = msg.get("content")
             if _is_dashboard_queued_message(content):
                 content_blocks.append({"type": "text", "text": DASHBOARD_HANDOFF_INSTRUCTION})
-            if isinstance(content, dict) and ("text" in content or "image_urls" in content):
+            if isinstance(content, dict) and (
+                "text" in content or "image_urls" in content or "images" in content
+            ):
                 logger.debug("Queued message contains text + image URLs")
                 blocks = await _build_blocks_from_payload(content)
                 content_blocks.extend(blocks)

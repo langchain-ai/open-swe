@@ -92,6 +92,51 @@ async def test_dashboard_followup_on_slack_thread_uses_dashboard_source(
 
 
 @pytest.mark.asyncio
+async def test_dashboard_followup_sends_image_content_blocks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    metadata = {
+        "source": "dashboard",
+        "github_login": "octocat",
+        "repo_owner": "octo",
+        "repo_name": "repo",
+    }
+    client = _FakeClient(metadata)
+
+    monkeypatch.setattr(thread_api, "langgraph_client", lambda: client)
+    monkeypatch.setattr(thread_api, "is_thread_active", _inactive_thread)
+    monkeypatch.setattr(thread_api, "_ensure_dashboard_github_token", _noop_token_check)
+    monkeypatch.setattr(thread_api, "get_profile", _empty_profile)
+    monkeypatch.setattr(thread_api, "_resolve_run_email", _run_email)
+    monkeypatch.setattr(
+        thread_api,
+        "create_image_block",
+        lambda *, base64, mime_type: {"type": "image", "data": base64, "mime_type": mime_type},
+    )
+
+    await thread_api.send_dashboard_message(
+        "thread-1",
+        "octocat",
+        thread_api.ThreadMessageBody(
+            content="describe this",
+            images=[
+                thread_api.DashboardImageBody(
+                    base64="aW1hZ2U=",
+                    mimeType="image/png",
+                    fileName="screenshot.png",
+                )
+            ],
+        ),
+    )
+
+    content = client.runs.created[0]["kwargs"]["input"]["messages"][0]["content"]
+    assert content == [
+        {"type": "image", "data": "aW1hZ2U=", "mime_type": "image/png"},
+        {"type": "text", "text": "describe this"},
+    ]
+
+
+@pytest.mark.asyncio
 async def test_dashboard_followup_on_busy_thread_queues_dashboard_handoff(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -120,6 +165,48 @@ async def test_dashboard_followup_on_busy_thread_queues_dashboard_handoff(
 
     assert client.threads.updates[0]["source"] == "dashboard"
     assert queued_messages == [{"text": "continue in web", "source": "dashboard"}]
+
+
+@pytest.mark.asyncio
+async def test_dashboard_followup_on_busy_thread_queues_images(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    metadata = {
+        "source": "dashboard",
+        "github_login": "octocat",
+    }
+    client = _FakeClient(metadata)
+    queued_messages: list[object] = []
+
+    async def fake_queue_message_for_thread(thread_id: str, message_content: object) -> bool:
+        queued_messages.append(message_content)
+        return True
+
+    monkeypatch.setattr(thread_api, "langgraph_client", lambda: client)
+    monkeypatch.setattr(thread_api, "is_thread_active", _active_thread)
+    monkeypatch.setattr(thread_api, "queue_message_for_thread", fake_queue_message_for_thread)
+    monkeypatch.setattr(
+        thread_api,
+        "create_image_block",
+        lambda *, base64, mime_type: {"type": "image", "data": base64, "mime_type": mime_type},
+    )
+
+    await thread_api.send_dashboard_message(
+        "thread-1",
+        "octocat",
+        thread_api.ThreadMessageBody(
+            content="continue in web",
+            images=[thread_api.DashboardImageBody(base64="aW1hZ2U=", mimeType="image/png")],
+        ),
+    )
+
+    assert queued_messages == [
+        {
+            "text": "continue in web",
+            "source": "dashboard",
+            "images": [{"type": "image", "data": "aW1hZ2U=", "mime_type": "image/png"}],
+        }
+    ]
 
 
 @pytest.mark.asyncio
