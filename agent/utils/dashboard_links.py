@@ -1,7 +1,5 @@
 """Shared builders for dashboard ("Open in Web") URLs."""
 
-from __future__ import annotations
-
 import os
 from urllib.parse import quote
 

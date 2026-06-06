@@ -685,11 +685,6 @@ TRACE_REPLY_TIPS: tuple[str, ...] = (
 )
 
 
-def _get_dashboard_thread_url(thread_id: str) -> str | None:
-    """Build the dashboard thread URL for a given thread ID."""
-    return dashboard_thread_url(thread_id)
-
-
 def _format_trace_reply(trace_url: str | None, dashboard_url: str | None) -> str:
     """Format the initial trace reply with a randomly selected tip."""
     tip = random.choice(TRACE_REPLY_TIPS)
@@ -707,7 +702,7 @@ async def post_slack_trace_reply(
 ) -> str | None:
     """Post a trace URL reply in a Slack thread and return its Slack timestamp."""
     trace_url = get_langsmith_trace_url(thread_id)
-    dashboard_url = _get_dashboard_thread_url(thread_id) if include_dashboard_link else None
+    dashboard_url = dashboard_thread_url(thread_id) if include_dashboard_link else None
     message_ts, _ = await post_slack_thread_reply_with_ts(
         channel_id,
         thread_ts,

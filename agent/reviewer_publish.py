@@ -18,8 +18,6 @@ After publish, the returned per-comment IDs get stored back on each Finding as
 the GraphQL ``resolveReviewThread`` mutation (REST doesn't expose this).
 """
 
-from __future__ import annotations
-
 import json
 import logging
 import re
