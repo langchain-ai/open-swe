@@ -168,3 +168,22 @@ def provider_model_kwargs(
         if effort is not None:
             kwargs["model_kwargs"] = {"reasoning_effort": effort}
     return kwargs
+
+
+def validate_llm_startup_config() -> None:
+    """Validate that the required API keys are present for the configured LLM model."""
+    import os
+    from .dashboard.options import DEFAULT_MODEL_ID
+    
+    model_id = os.environ.get("LLM_MODEL_ID", DEFAULT_MODEL_ID)
+    
+    if model_id.startswith("openai:") and not os.environ.get("OPENAI_API_KEY"):
+        raise ValueError(f"OPENAI_API_KEY is required for configured model {model_id}")
+    elif model_id.startswith("anthropic:") and not os.environ.get("ANTHROPIC_API_KEY"):
+        raise ValueError(f"ANTHROPIC_API_KEY is required for configured model {model_id}")
+    elif model_id.startswith("google_genai:") and not os.environ.get("GOOGLE_API_KEY"):
+        raise ValueError(f"GOOGLE_API_KEY is required for configured model {model_id}")
+    elif model_id.startswith("groq:") and not os.environ.get("GROQ_API_KEY"):
+        raise ValueError(f"GROQ_API_KEY is required for configured model {model_id}")
+    elif model_id.startswith("fireworks:") and not os.environ.get("FIREWORKS_API_KEY"):
+        raise ValueError(f"FIREWORKS_API_KEY is required for configured model {model_id}")
