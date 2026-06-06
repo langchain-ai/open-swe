@@ -15,8 +15,8 @@ from pydantic import BaseModel
 from .admin import is_admin
 from .agent_usage import (
     list_agent_usage_leaderboard,
-    refresh_reviewer_stats_cache,
-    refresh_usage_leaderboard_cache,
+    refresh_claimed_reviewer_stats_cache,
+    refresh_claimed_usage_leaderboard_cache,
 )
 from .analyzer_cron import remove_continual_cron
 from .enabled_repos import (
@@ -721,10 +721,10 @@ async def api_agent_usage_leaderboard(
         current_login=session["sub"],
         current_email=session.get("email"),
         schedule_usage_refresh=lambda cache_period: background_tasks.add_task(
-            refresh_usage_leaderboard_cache, cache_period
+            refresh_claimed_usage_leaderboard_cache, cache_period
         ),
         schedule_reviewer_refresh=lambda cache_period: background_tasks.add_task(
-            refresh_reviewer_stats_cache, cache_period
+            refresh_claimed_reviewer_stats_cache, cache_period
         ),
     )
 

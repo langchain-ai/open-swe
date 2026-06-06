@@ -48,7 +48,18 @@ function UsagePage() {
     queryFn: () => api.usageLeaderboard(activePeriod, 10),
     enabled: !!session.data,
     staleTime: 5 * 60 * 1000,
+    refetchInterval: (query) => {
+      const data = query.state.data
+      return data &&
+        (!data.generated_at_ms || !data.reviewer_stats.generated_at_ms)
+        ? 2000
+        : false
+    },
   })
+  const usageIsPrecomputing =
+    !!leaderboard.data && !leaderboard.data.generated_at_ms
+  const reviewerIsPrecomputing =
+    !!leaderboard.data && !leaderboard.data.reviewer_stats.generated_at_ms
 
   if (session.isLoading) {
     return (
@@ -87,7 +98,7 @@ function UsagePage() {
           </Select>
         }
       >
-        {leaderboard.isLoading ? (
+        {leaderboard.isLoading || usageIsPrecomputing ? (
           <div className="space-y-2 p-4">
             <Skeleton className="h-12 w-full" />
             <Skeleton className="h-12 w-full" />
@@ -114,7 +125,7 @@ function UsagePage() {
         title="Reviewer stats"
         description="Issues surfaced by Open SWE Review and how often users addressed them."
       >
-        {leaderboard.isLoading ? (
+        {leaderboard.isLoading || reviewerIsPrecomputing ? (
           <div className="grid gap-3 p-4 sm:grid-cols-2">
             <Skeleton className="h-24 w-full" />
             <Skeleton className="h-24 w-full" />

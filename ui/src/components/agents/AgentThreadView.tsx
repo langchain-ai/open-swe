@@ -7,7 +7,7 @@ import type { ModelSelection } from "@/lib/agents/useModelOptions";
 import { AgentPromptBar } from "@/components/agents/AgentPromptBar";
 import { AgentsShell } from "@/components/agents/AgentsSidebar";
 import { MessageView } from "@/components/agents/ported";
-import { useSendAgentMessage } from "@/lib/agents/queries";
+import { useCancelAgentThread, useSendAgentMessage } from "@/lib/agents/queries";
 import { dropPendingPrompts, getPendingPrompts } from "@/lib/agents/pendingPrompts";
 import { useAgentThreadStream } from "@/lib/agents/useThreadStream";
 import { useModelOptions } from "@/lib/agents/useModelOptions";
@@ -46,6 +46,7 @@ function isPendingPromptConfirmed(entry: PendingPrompt, messages: Array<Message>
 
 export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
   const sendMessage = useSendAgentMessage(thread.id);
+  const cancelThread = useCancelAgentThread(thread.id);
   useAgentThreadStream(thread.id, thread.status === "running");
   const [pendingPrompts, setPendingPrompts] = useState<Array<PendingPrompt>>(() =>
     getPendingPrompts(thread.id),
@@ -93,7 +94,8 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
   }, [thread.messages, pendingPrompts]);
 
   const hasMessages = displayMessages.length > 0;
-  const isStreaming = thread.status === "running" || pendingPrompts.length > 0;
+  const hasActiveRun = thread.status === "running";
+  const isStreaming = hasActiveRun || pendingPrompts.length > 0;
 
   return (
     <AgentsShell user={user} activeThreadId={thread.id}>
@@ -111,7 +113,7 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
                   <AgentPromptBar
                     placeholder="Add a follow up"
                     compact
-                    busy={isStreaming}
+                    busy={hasActiveRun}
                     disabled={sendMessage.isPending}
                     onSubmit={(content, images) =>
                       sendMessage.mutate({
@@ -121,6 +123,8 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
                         effort: activeSelection?.effort ?? null,
                       })
                     }
+                    onStop={() => cancelThread.mutate()}
+                    stopping={cancelThread.isPending}
                     models={models}
                     selection={activeSelection}
                     onSelectionChange={setSelection}
@@ -135,7 +139,7 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
                 <AgentPromptBar
                   placeholder="Send the first message"
                   compact
-                  busy={isStreaming}
+                  busy={hasActiveRun}
                   disabled={sendMessage.isPending}
                   onSubmit={(content, images) =>
                     sendMessage.mutate({
@@ -145,6 +149,8 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
                       effort: activeSelection?.effort ?? null,
                     })
                   }
+                  onStop={() => cancelThread.mutate()}
+                  stopping={cancelThread.isPending}
                   models={models}
                   selection={activeSelection}
                   onSelectionChange={setSelection}
