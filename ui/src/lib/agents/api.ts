@@ -1,9 +1,10 @@
-import type { AgentSchedule, AgentThread, Message } from "./types"
+import type { AgentSchedule, AgentThread, ImageChunk, Message } from "./types"
 
 export type { AgentSchedule, AgentThread, Message }
 
 export interface ThreadCreateRequest {
   prompt: string
+  images?: Array<ImageChunk>
   repo?: string | null
   repo_explicitly_none?: boolean
   model_id?: string | null
@@ -12,6 +13,7 @@ export interface ThreadCreateRequest {
 
 export interface ThreadMessageRequest {
   content: string
+  images?: Array<ImageChunk>
   model_id?: string | null
   effort?: string | null
 }
