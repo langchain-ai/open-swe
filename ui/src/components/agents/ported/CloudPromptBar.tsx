@@ -108,7 +108,7 @@ export const CloudPromptBar = memo(function CloudPromptBarComponent({
   }
 
   const pickerDisabled = combos.length === 0 || !onSelectionChange
-  const showStop = busy && !value.trim() && !!onStop
+  const showStop = busy && !disabled && !value.trim() && !!onStop
 
   return (
     <div

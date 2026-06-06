@@ -78,7 +78,8 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
   }, [thread.messages, pendingPrompts]);
 
   const hasMessages = displayMessages.length > 0;
-  const isStreaming = thread.status === "running" || pendingPrompts.length > 0;
+  const hasActiveRun = thread.status === "running";
+  const isStreaming = hasActiveRun || pendingPrompts.length > 0;
 
   return (
     <AgentsShell user={user} activeThreadId={thread.id}>
@@ -96,7 +97,7 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
                   <AgentPromptBar
                     placeholder="Add a follow up"
                     compact
-                    busy={isStreaming}
+                    busy={hasActiveRun}
                     disabled={sendMessage.isPending}
                     onSubmit={(content) =>
                       sendMessage.mutate({
@@ -121,7 +122,7 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
                 <AgentPromptBar
                   placeholder="Send the first message"
                   compact
-                  busy={isStreaming}
+                  busy={hasActiveRun}
                   disabled={sendMessage.isPending}
                   onSubmit={(content) =>
                     sendMessage.mutate({
