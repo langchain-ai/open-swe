@@ -1,6 +1,9 @@
+import os
 from typing import Literal, TypedDict, Unpack
 
 from langchain.chat_models import init_chat_model
+
+from ..dashboard.options import DEFAULT_MODEL_ID
 
 OPENAI_RESPONSES_WS_BASE_URL = "wss://api.openai.com/v1"
 
@@ -172,9 +175,6 @@ def provider_model_kwargs(
 
 def validate_llm_startup_config() -> None:
     """Validate that the required API keys are present for the configured LLM model."""
-    import os
-    from ..dashboard.options import DEFAULT_MODEL_ID
-    
     model_id = os.environ.get("LLM_MODEL_ID", DEFAULT_MODEL_ID)
     
     if model_id.startswith("openai:") and not os.environ.get("OPENAI_API_KEY"):
