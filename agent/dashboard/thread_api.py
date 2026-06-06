@@ -131,11 +131,14 @@ def _decode_dashboard_image(image: DashboardImageBody) -> bytes:
     return data
 
 
-def _image_blocks(images: list[DashboardImageBody], *, model_id: str) -> list[dict[str, Any]]:
+def _image_blocks(
+    images: list[DashboardImageBody], *, model_id: str | None
+) -> list[dict[str, Any]]:
     if len(images) > _MAX_DASHBOARD_IMAGES:
         raise HTTPException(422, f"at most {_MAX_DASHBOARD_IMAGES} images are supported")
-    if images and not model_supports_images(model_id):
-        raise HTTPException(422, f"model {model_id} does not support image input")
+    if images and (not model_id or not model_supports_images(model_id)):
+        model_label = model_id or "the current model"
+        raise HTTPException(422, f"model {model_label} does not support image input")
     return [
         create_image_block(
             base64=base64.b64encode(_decode_dashboard_image(image)).decode("ascii"),
@@ -146,7 +149,7 @@ def _image_blocks(images: list[DashboardImageBody], *, model_id: str) -> list[di
 
 
 def _user_message_content(
-    prompt: str, images: list[DashboardImageBody], *, model_id: str
+    prompt: str, images: list[DashboardImageBody], *, model_id: str | None = None
 ) -> str | list[dict[str, Any]]:
     text = prompt.strip()
     if not text and not images:
@@ -178,6 +181,14 @@ def _thread_owner_email(metadata: dict[str, Any]) -> str | None:
 def _thread_source(metadata: dict[str, Any]) -> str:
     source = metadata.get("source")
     return source if isinstance(source, str) and source else _DASHBOARD_SOURCE
+
+
+def _metadata_model_id(metadata: dict[str, Any]) -> str | None:
+    for key in ("resolved_model", "model"):
+        model = metadata.get(key)
+        if isinstance(model, str) and model in SUPPORTED_MODEL_IDS:
+            return model
+    return None
 
 
 def _user_owns_thread(metadata: dict[str, Any], login: str, email: str | None) -> bool:
@@ -365,7 +376,7 @@ async def _start_agent_run(
     profile = await get_profile(login) or {}
     now_ms = _now_ms()
     prompt = prompt.strip()
-    resolved_model, _resolved_effort = await _resolve_agent_model_choice(profile, model_id, effort)
+    resolved_model, resolved_effort = await _resolve_agent_model_choice(profile, model_id, effort)
     content = _user_message_content(prompt, images or [], model_id=resolved_model)
     chosen_model, chosen_effort = _normalize_model_choice(model_id, effort)
     metadata_model = chosen_model or profile.get("default_model") or "Default"
@@ -379,6 +390,8 @@ async def _start_agent_run(
         "branch_prefix": profile.get("branch_prefix"),
         "model": metadata_model,
         "effort": metadata_effort,
+        "resolved_model": resolved_model,
+        "resolved_effort": resolved_effort,
         "created_at_ms": now_ms,
         "updated_at_ms": now_ms,
     }
@@ -456,20 +469,17 @@ async def send_dashboard_message(
     owner, name, _ = _metadata_repo(metadata)
 
     prompt = body.content.strip()
-    profile = await get_profile(login) or {}
-    resolved_model, _resolved_effort = await _resolve_agent_model_choice(
-        profile, body.model_id, body.effort
-    )
-    content = _user_message_content(prompt, body.images, model_id=resolved_model)
     now_ms = _now_ms()
     chosen_model, chosen_effort = _normalize_model_choice(body.model_id, body.effort)
     metadata_update: dict[str, Any] = {"source": _DASHBOARD_SOURCE, "updated_at_ms": now_ms}
     if chosen_model and chosen_effort:
         metadata_update["model"] = chosen_model
         metadata_update["effort"] = chosen_effort
-    await client.threads.update(thread_id=thread_id, metadata=metadata_update)
 
     if await is_thread_active(thread_id):
+        active_model = _metadata_model_id(metadata) if body.images else None
+        content = _user_message_content(prompt, body.images, model_id=active_model)
+        await client.threads.update(thread_id=thread_id, metadata=metadata_update)
         queue_payload: dict[str, Any] = {"text": prompt, "source": _DASHBOARD_SOURCE}
         if isinstance(content, list):
             queue_payload["images"] = [
@@ -487,6 +497,15 @@ async def send_dashboard_message(
         return _thread_summary(
             thread if isinstance(thread, dict) else {"thread_id": thread_id, "metadata": metadata}
         )
+
+    profile = await get_profile(login) or {}
+    resolved_model, resolved_effort = await _resolve_agent_model_choice(
+        profile, body.model_id, body.effort
+    )
+    metadata_update["resolved_model"] = resolved_model
+    metadata_update["resolved_effort"] = resolved_effort
+    content = _user_message_content(prompt, body.images, model_id=resolved_model)
+    await client.threads.update(thread_id=thread_id, metadata=metadata_update)
 
     await _ensure_dashboard_github_token(login)
     configurable: dict[str, Any] = {
