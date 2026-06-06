@@ -173,7 +173,7 @@ def provider_model_kwargs(
 def validate_llm_startup_config() -> None:
     """Validate that the required API keys are present for the configured LLM model."""
     import os
-    from .dashboard.options import DEFAULT_MODEL_ID
+    from ..dashboard.options import DEFAULT_MODEL_ID
     
     model_id = os.environ.get("LLM_MODEL_ID", DEFAULT_MODEL_ID)
     
