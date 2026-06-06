@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 import json
 import logging
 import os
@@ -11,8 +13,9 @@ from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import HTTPException
+from langchain_core.messages.content import create_image_block
 from langgraph_sdk.errors import InternalServerError
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from ..utils.thread_ops import is_thread_active, langgraph_client, queue_message_for_thread
 from .message_adapter import state_messages_to_ui
@@ -25,6 +28,9 @@ logger = logging.getLogger(__name__)
 _ASSISTANT_ID = "agent"
 _DASHBOARD_SOURCE = "dashboard"
 _DASHBOARD_STREAM_MODES: tuple[str, ...] = ("values", "updates", "messages-tuple")
+_SUPPORTED_IMAGE_MIME_TYPES = frozenset({"image/png", "image/jpeg", "image/gif", "image/webp"})
+_MAX_DASHBOARD_IMAGES = 5
+_MAX_DASHBOARD_IMAGE_BYTES = 10 * 1024 * 1024
 # Sources whose threads should surface in the Agents UI (besides "dashboard").
 _SURFACED_SOURCES: tuple[str, ...] = ("dashboard", "github", "slack", "linear", "schedule")
 
@@ -45,8 +51,18 @@ async def _resolve_run_email(login: str, profile: dict[str, Any]) -> str | None:
     return mapped or profile.get("email")
 
 
+class DashboardImageBody(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    kind: str | None = None
+    base64: str = Field(min_length=1)
+    mime_type: str = Field(alias="mimeType", min_length=1)
+    file_name: str | None = Field(default=None, alias="fileName")
+
+
 class ThreadCreateBody(BaseModel):
-    prompt: str = Field(min_length=1, max_length=20_000)
+    prompt: str = Field(default="", max_length=20_000)
+    images: list[DashboardImageBody] = Field(default_factory=list)
     repo: str | None = None
     repo_explicitly_none: bool = False
     model_id: str | None = None
@@ -54,7 +70,8 @@ class ThreadCreateBody(BaseModel):
 
 
 class ThreadMessageBody(BaseModel):
-    content: str = Field(min_length=1, max_length=20_000)
+    content: str = Field(default="", max_length=20_000)
+    images: list[DashboardImageBody] = Field(default_factory=list)
     model_id: str | None = None
     effort: str | None = None
 
@@ -83,6 +100,41 @@ def _parse_repo(full_name: str | None) -> dict[str, str] | None:
     if not owner or not name:
         return None
     return {"owner": owner, "name": name}
+
+
+def _decode_dashboard_image(image: DashboardImageBody) -> bytes:
+    if image.mime_type not in _SUPPORTED_IMAGE_MIME_TYPES:
+        raise HTTPException(422, f"unsupported image type: {image.mime_type}")
+    try:
+        data = base64.b64decode(image.base64, validate=True)
+    except binascii.Error as exc:
+        raise HTTPException(422, "invalid image data") from exc
+    if len(data) > _MAX_DASHBOARD_IMAGE_BYTES:
+        raise HTTPException(422, "image exceeds 10MB limit")
+    return data
+
+
+def _image_blocks(images: list[DashboardImageBody]) -> list[dict[str, Any]]:
+    if len(images) > _MAX_DASHBOARD_IMAGES:
+        raise HTTPException(422, f"at most {_MAX_DASHBOARD_IMAGES} images are supported")
+    return [
+        create_image_block(
+            base64=base64.b64encode(_decode_dashboard_image(image)).decode("ascii"),
+            mime_type=image.mime_type,
+        )
+        for image in images
+    ]
+
+
+def _user_message_content(
+    prompt: str, images: list[DashboardImageBody]
+) -> str | list[dict[str, Any]]:
+    text = prompt.strip()
+    if not text and not images:
+        raise HTTPException(422, "prompt or image required")
+    if not images:
+        return text
+    return [*_image_blocks(images), *([{"type": "text", "text": text}] if text else [])]
 
 
 async def _ensure_dashboard_github_token(login: str) -> None:
@@ -281,12 +333,15 @@ async def _start_agent_run(
     repo_config: dict[str, str],
     repo_explicitly_none: bool = False,
     prompt: str,
+    images: list[DashboardImageBody] | None = None,
     title: str | None = None,
     model_id: str | None = None,
     effort: str | None = None,
 ) -> dict[str, Any]:
     profile = await get_profile(login) or {}
     now_ms = _now_ms()
+    prompt = prompt.strip()
+    content = _user_message_content(prompt, images or [])
     chosen_model, chosen_effort = _normalize_model_choice(model_id, effort)
     metadata_model = chosen_model or profile.get("default_model") or "Default"
     metadata_effort = chosen_effort or profile.get("reasoning_effort")
@@ -330,7 +385,7 @@ async def _start_agent_run(
     run = await client.runs.create(
         thread_id,
         _ASSISTANT_ID,
-        input={"messages": [{"role": "user", "content": prompt}]},
+        input={"messages": [{"role": "user", "content": content}]},
         config={"configurable": configurable, "metadata": _agent_version_metadata()},
         if_not_exists="create",
         stream_mode=list(_DASHBOARD_STREAM_MODES),
@@ -355,7 +410,8 @@ async def create_dashboard_thread(login: str, body: ThreadCreateBody) -> dict[st
         login=login,
         repo_config=repo_config,
         repo_explicitly_none=body.repo_explicitly_none,
-        prompt=body.prompt.strip(),
+        prompt=body.prompt,
+        images=body.images,
         model_id=body.model_id,
         effort=body.effort,
     )
@@ -375,6 +431,7 @@ async def send_dashboard_message(
     owner, name, _ = _metadata_repo(metadata)
 
     prompt = body.content.strip()
+    content = _user_message_content(prompt, body.images)
     now_ms = _now_ms()
     chosen_model, chosen_effort = _normalize_model_choice(body.model_id, body.effort)
     metadata_update: dict[str, Any] = {"source": _DASHBOARD_SOURCE, "updated_at_ms": now_ms}
@@ -384,9 +441,16 @@ async def send_dashboard_message(
     await client.threads.update(thread_id=thread_id, metadata=metadata_update)
 
     if await is_thread_active(thread_id):
+        queue_payload: dict[str, Any] = {"text": prompt, "source": _DASHBOARD_SOURCE}
+        if isinstance(content, list):
+            queue_payload["images"] = [
+                block
+                for block in content
+                if isinstance(block, dict) and block.get("type") != "text"
+            ]
         queued = await queue_message_for_thread(
             thread_id,
-            {"text": prompt, "source": _DASHBOARD_SOURCE},
+            queue_payload,
         )
         if not queued:
             raise HTTPException(502, "failed to queue follow-up message")
@@ -413,7 +477,7 @@ async def send_dashboard_message(
     run = await client.runs.create(
         thread_id,
         _ASSISTANT_ID,
-        input={"messages": [{"role": "user", "content": prompt}]},
+        input={"messages": [{"role": "user", "content": content}]},
         config={"configurable": configurable, "metadata": _agent_version_metadata()},
         stream_mode=list(_DASHBOARD_STREAM_MODES),
         stream_resumable=True,

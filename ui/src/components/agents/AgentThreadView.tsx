@@ -64,11 +64,13 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
     const baseTimestamp = new Date().toISOString();
     const result = thread.messages.slice();
     pendingPrompts.forEach((entry, i) => {
+      const chunks: Message["chunks"] = [...(entry.images ?? [])];
+      if (entry.prompt) chunks.push({ kind: "text", text: entry.prompt });
       const synth: Message = {
         id: `pending-user-${i}`,
         author: "user",
         timestamp: baseTimestamp,
-        chunks: [{ kind: "text", text: entry.prompt }],
+        chunks,
       };
       const at = Math.min(Math.max(entry.insertAt, 0), result.length);
       result.splice(at, 0, synth);
@@ -97,9 +99,10 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
                     compact
                     busy={isStreaming}
                     disabled={sendMessage.isPending}
-                    onSubmit={(content) =>
+                    onSubmit={(content, images) =>
                       sendMessage.mutate({
                         content,
+                        images,
                         model_id: activeSelection?.modelId ?? null,
                         effort: activeSelection?.effort ?? null,
                       })
@@ -120,9 +123,10 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
                   compact
                   busy={isStreaming}
                   disabled={sendMessage.isPending}
-                  onSubmit={(content) =>
+                  onSubmit={(content, images) =>
                     sendMessage.mutate({
                       content,
+                      images,
                       model_id: activeSelection?.modelId ?? null,
                       effort: activeSelection?.effort ?? null,
                     })

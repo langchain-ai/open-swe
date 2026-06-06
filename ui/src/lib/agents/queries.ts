@@ -4,6 +4,7 @@ import { useNavigate } from "@tanstack/react-router"
 import { agentsApi } from "./api"
 import { addPendingPrompt } from "./pendingPrompts"
 import type { ScheduleUpdateRequest } from "./api"
+import type { ImageChunk } from "./types"
 
 export const agentThreadKeys = {
   all: ["agent-threads"] as const,
@@ -80,7 +81,12 @@ export function useCreateAgentThread() {
   return useMutation({
     mutationFn: agentsApi.createThread,
     onSuccess: (thread, variables) => {
-      addPendingPrompt(thread.id, variables.prompt, thread.messages.length)
+      addPendingPrompt(
+        thread.id,
+        variables.prompt,
+        thread.messages.length,
+        variables.images
+      )
       queryClient.setQueryData(agentThreadKeys.detail(thread.id), {
         ...thread,
         status: thread.status === "idle" ? "running" : thread.status,
@@ -93,6 +99,7 @@ export function useCreateAgentThread() {
 
 export interface SendAgentMessageVariables {
   content: string
+  images?: Array<ImageChunk>
   model_id?: string | null
   effort?: string | null
 }
@@ -104,6 +111,7 @@ export function useSendAgentMessage(threadId: string) {
     mutationFn: (vars: SendAgentMessageVariables) =>
       agentsApi.sendMessage(threadId, {
         content: vars.content,
+        images: vars.images,
         model_id: vars.model_id,
         effort: vars.effort,
       }),
@@ -114,7 +122,7 @@ export function useSendAgentMessage(threadId: string) {
       const insertAt = Array.isArray(cached?.messages)
         ? cached.messages.length
         : 0
-      addPendingPrompt(threadId, vars.content, insertAt)
+      addPendingPrompt(threadId, vars.content, insertAt, vars.images)
     },
     onSuccess: (thread) => {
       queryClient.setQueryData(
