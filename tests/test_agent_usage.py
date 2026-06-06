@@ -9,6 +9,7 @@ class FakeStore:
     def __init__(self, values: dict[tuple[tuple[str, ...], str], dict] | None = None):
         self.values = values or {}
         self.puts: list[tuple[list[str], str, dict]] = []
+        self.searches: list[tuple[list[str], int]] = []
 
     async def get_item(self, namespace: list[str], key: str) -> dict | None:
         value = self.values.get((tuple(namespace), key))
@@ -17,6 +18,15 @@ class FakeStore:
     async def put_item(self, namespace: list[str], key: str, value: dict) -> None:
         self.puts.append((namespace, key, value))
         self.values[(tuple(namespace), key)] = value
+
+    async def search_items(self, namespace: list[str], limit: int = 1000) -> dict:
+        self.searches.append((namespace, limit))
+        items = [
+            {"value": value}
+            for (item_namespace, _), value in self.values.items()
+            if item_namespace == tuple(namespace)
+        ]
+        return {"items": items[:limit]}
 
 
 class FakeThreads:
@@ -35,6 +45,13 @@ class FakeClient:
     def __init__(self, *, store: FakeStore | None = None, threads: FakeThreads | None = None):
         self.store = store or FakeStore()
         self.threads = threads or FakeThreads([])
+
+
+@pytest.fixture(autouse=True)
+def clear_cache_refresh_guard():
+    agent_usage._CACHE_REFRESH_IN_FLIGHT.clear()
+    yield
+    agent_usage._CACHE_REFRESH_IN_FLIGHT.clear()
 
 
 @pytest.mark.asyncio
@@ -120,6 +137,85 @@ async def test_cached_usage_payload_returns_stale_snapshot_and_schedules_refresh
     assert payload["total_members"] == 2
     assert payload["reviewer_stats"]["surfaced_findings"] == 1
     assert store.puts == []
+
+
+@pytest.mark.asyncio
+async def test_cache_miss_schedules_refresh_without_blocking(monkeypatch):
+    store = FakeStore()
+    monkeypatch.setattr(agent_usage, "_client", lambda: FakeClient(store=store))
+
+    async def fail_refresh(period):
+        raise AssertionError(f"refresh should have been scheduled, not awaited: {period}")
+
+    monkeypatch.setattr(agent_usage, "refresh_usage_leaderboard_cache", fail_refresh)
+    monkeypatch.setattr(agent_usage, "refresh_reviewer_stats_cache", fail_refresh)
+    usage_refreshes: list[str] = []
+    reviewer_refreshes: list[str] = []
+
+    payload = await agent_usage.list_agent_usage_leaderboard(
+        period="7d",
+        limit=10,
+        current_login="octo",
+        current_email="octo@example.com",
+        schedule_usage_refresh=usage_refreshes.append,
+        schedule_reviewer_refresh=reviewer_refreshes.append,
+    )
+
+    duplicate_payload = await agent_usage.list_agent_usage_leaderboard(
+        period="7d",
+        limit=10,
+        current_login="octo",
+        current_email="octo@example.com",
+        schedule_usage_refresh=usage_refreshes.append,
+        schedule_reviewer_refresh=reviewer_refreshes.append,
+    )
+
+    assert usage_refreshes == ["7d"]
+    assert reviewer_refreshes == ["7d"]
+    assert payload["period"] == "7d"
+    assert payload["rows"] == []
+    assert payload["generated_at_ms"] is None
+    assert payload["reviewer_stats"]["generated_at_ms"] is None
+    assert duplicate_payload["rows"] == []
+    assert store.searches == []
+
+
+@pytest.mark.asyncio
+async def test_precompute_usage_caches_refreshes_stale_snapshots(monkeypatch):
+    store = FakeStore()
+    monkeypatch.setattr(agent_usage, "_client", lambda: FakeClient(store=store))
+    usage_refreshes: list[str | None] = []
+    reviewer_refreshes: list[str | None] = []
+
+    async def refresh_usage(period):
+        usage_refreshes.append(period)
+        snapshot = agent_usage._empty_usage_snapshot(agent_usage._normalize_period(period))
+        await store.put_item(
+            agent_usage.USAGE_LEADERBOARD_CACHE_NAMESPACE,
+            agent_usage._normalize_period(period),
+            {"generated_at_ms": agent_usage._now_ms(), "snapshot": snapshot},
+        )
+        return snapshot
+
+    async def refresh_reviewer(period):
+        reviewer_refreshes.append(period)
+        snapshot = agent_usage._empty_reviewer_stats_snapshot(agent_usage._normalize_period(period))
+        await store.put_item(
+            agent_usage.REVIEWER_STATS_CACHE_NAMESPACE,
+            agent_usage._normalize_period(period),
+            {"generated_at_ms": agent_usage._now_ms(), "snapshot": snapshot},
+        )
+        return snapshot
+
+    monkeypatch.setattr(agent_usage, "refresh_usage_leaderboard_cache", refresh_usage)
+    monkeypatch.setattr(agent_usage, "refresh_reviewer_stats_cache", refresh_reviewer)
+
+    refreshed = await agent_usage.precompute_usage_caches(("30d",))
+
+    assert refreshed == {"usage": 1, "reviewer": 1}
+    assert usage_refreshes == ["30d"]
+    assert reviewer_refreshes == ["30d"]
+    assert agent_usage._CACHE_REFRESH_IN_FLIGHT == set()
 
 
 @pytest.mark.asyncio
