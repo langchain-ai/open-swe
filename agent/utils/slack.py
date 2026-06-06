@@ -12,11 +12,12 @@ import re
 import time
 from dataclasses import dataclass
 from typing import Any
-from urllib.parse import quote, urlparse
+from urllib.parse import urlparse
 
 import httpx
 from langgraph_sdk.client import LangGraphClient
 
+from agent.utils.dashboard_links import dashboard_thread_url
 from agent.utils.langsmith import get_langsmith_trace_url
 
 logger = logging.getLogger(__name__)
@@ -686,12 +687,7 @@ TRACE_REPLY_TIPS: tuple[str, ...] = (
 
 def _get_dashboard_thread_url(thread_id: str) -> str | None:
     """Build the dashboard thread URL for a given thread ID."""
-    base_url = (
-        os.environ.get("DASHBOARD_BASE_URL", "https://openswe.vercel.app").strip().rstrip("/")
-    )
-    if not base_url:
-        return None
-    return f"{base_url}/agents/{quote(thread_id, safe='')}"
+    return dashboard_thread_url(thread_id)
 
 
 def _format_trace_reply(trace_url: str | None, dashboard_url: str | None) -> str:
