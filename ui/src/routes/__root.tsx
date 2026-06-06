@@ -12,6 +12,11 @@ import { useState } from "react"
 
 import appCss from "../styles.css?url"
 import { makeQueryClient } from "@/lib/query"
+import { THEME_STORAGE_KEY } from "@/lib/theme"
+
+const themeInitScript = `(function(){try{var t=localStorage.getItem(${JSON.stringify(
+  THEME_STORAGE_KEY
+)});var d=t==="dark"||((!t||t==="system")&&window.matchMedia("(prefers-color-scheme: dark)").matches);var r=document.documentElement;r.classList.toggle("dark",d);r.style.colorScheme=d?"dark":"light";}catch(e){}})();`
 
 export const Route = createRootRoute({
   head: () => ({
@@ -47,6 +52,7 @@ function RootDocument({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
       <head>
+        <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
         <HeadContent />
       </head>
       <body>
