@@ -17,6 +17,33 @@ interface AgentThreadViewProps {
   thread: AgentThread;
 }
 
+function messageText(message: Message): string {
+  return message.chunks
+    .filter((chunk) => chunk.kind === "text")
+    .map((chunk) => chunk.text)
+    .join("");
+}
+
+function messageImageKey(message: Message): string {
+  return message.chunks
+    .filter((chunk) => chunk.kind === "image")
+    .map((chunk) => `${chunk.mimeType}:${chunk.base64}`)
+    .join("\u0000");
+}
+
+function pendingImageKey(entry: PendingPrompt): string {
+  return (entry.images ?? [])
+    .map((image) => `${image.mimeType}:${image.base64}`)
+    .join("\u0000");
+}
+
+function isPendingPromptConfirmed(entry: PendingPrompt, messages: Array<Message>): boolean {
+  return messages.slice(entry.insertAt).some((message) => {
+    if (message.author !== "user") return false;
+    return messageText(message) === entry.prompt && messageImageKey(message) === pendingImageKey(entry);
+  });
+}
+
 export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
   const sendMessage = useSendAgentMessage(thread.id);
   const cancelThread = useCancelAgentThread(thread.id);
@@ -37,39 +64,28 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
   const [selection, setSelection] = useState<ModelSelection | null>(null);
   const activeSelection = selection ?? threadSelection ?? defaultSelection;
 
-  const userMessageTexts = useMemo(() => {
-    return new Set(
-      thread.messages
-        .filter((m) => m.author === "user")
-        .map((m) =>
-          m.chunks
-            .filter((c) => c.kind === "text")
-            .map((c) => c.text)
-            .join(""),
-        ),
-    );
-  }, [thread.messages]);
-
   useEffect(() => {
     setPendingPrompts((prev) => {
       if (prev.length === 0) return prev;
       const next = dropPendingPrompts(thread.id, (entry) =>
-        userMessageTexts.has(entry.prompt),
+        isPendingPromptConfirmed(entry, thread.messages),
       );
       return next.length === prev.length ? prev : next;
     });
-  }, [thread.id, userMessageTexts]);
+  }, [thread.id, thread.messages]);
 
   const displayMessages = useMemo<Array<Message>>(() => {
     if (pendingPrompts.length === 0) return thread.messages;
     const baseTimestamp = new Date().toISOString();
     const result = thread.messages.slice();
     pendingPrompts.forEach((entry, i) => {
+      const chunks: Message["chunks"] = [...(entry.images ?? [])];
+      if (entry.prompt) chunks.push({ kind: "text", text: entry.prompt });
       const synth: Message = {
         id: `pending-user-${i}`,
         author: "user",
         timestamp: baseTimestamp,
-        chunks: [{ kind: "text", text: entry.prompt }],
+        chunks,
       };
       const at = Math.min(Math.max(entry.insertAt, 0), result.length);
       result.splice(at, 0, synth);
@@ -99,9 +115,10 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
                     compact
                     busy={hasActiveRun}
                     disabled={sendMessage.isPending}
-                    onSubmit={(content) =>
+                    onSubmit={(content, images) =>
                       sendMessage.mutate({
                         content,
+                        images,
                         model_id: activeSelection?.modelId ?? null,
                         effort: activeSelection?.effort ?? null,
                       })
@@ -124,9 +141,10 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
                   compact
                   busy={hasActiveRun}
                   disabled={sendMessage.isPending}
-                  onSubmit={(content) =>
+                  onSubmit={(content, images) =>
                     sendMessage.mutate({
                       content,
+                      images,
                       model_id: activeSelection?.modelId ?? null,
                       effort: activeSelection?.effort ?? null,
                     })

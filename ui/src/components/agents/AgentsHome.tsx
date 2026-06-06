@@ -32,9 +32,10 @@ export function AgentsHome() {
         <div className="flex w-full flex-col items-center gap-6">
           <Logo />
           <AgentPromptBar
-            onSubmit={(prompt) =>
+            onSubmit={(prompt, images) =>
               createThread.mutate({
                 prompt,
+                images,
                 repo,
                 repo_explicitly_none: repoOverride === null,
                 model_id: activeSelection?.modelId ?? null,

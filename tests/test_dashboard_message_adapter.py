@@ -39,6 +39,38 @@ def test_state_messages_to_ui_maps_user_and_tool_calls() -> None:
     assert tool_chunk["output"] == "print('hi')"
 
 
+def test_state_messages_to_ui_maps_user_images() -> None:
+    messages = [
+        {
+            "type": "human",
+            "id": "u1",
+            "content": [
+                {
+                    "type": "image",
+                    "source_type": "base64",
+                    "data": "aW1hZ2U=",
+                    "mime_type": "image/png",
+                },
+                {"type": "text", "text": "What changed?"},
+            ],
+        }
+    ]
+
+    ui = state_messages_to_ui(messages)
+
+    assert ui == [
+        {
+            "id": "u1",
+            "author": "user",
+            "timestamp": ui[0]["timestamp"],
+            "chunks": [
+                {"kind": "image", "base64": "aW1hZ2U=", "mimeType": "image/png"},
+                {"kind": "text", "text": "What changed?"},
+            ],
+        }
+    ]
+
+
 def test_state_messages_to_ui_tags_slack_and_linear_replies() -> None:
     messages = [
         {"type": "human", "id": "u1", "content": "ping"},

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import uuid
 from datetime import UTC, datetime
 from typing import Any
@@ -14,6 +15,7 @@ _EDIT_TOOLS = frozenset({"write_file", "edit_file", "str_replace", "write", "edi
 _EXECUTE_TOOLS = frozenset({"execute", "bash", "shell", "run_terminal_cmd"})
 _SEARCH_TOOLS = frozenset({"glob", "grep", "web_search", "fetch_url", "search"})
 _INTERNAL_TOOLS = frozenset({"confirming_completion", "no_op"})
+_DATA_IMAGE_RE = re.compile(r"^data:(image/[^;]+);base64,(.+)$", re.DOTALL)
 
 
 def _now_iso() -> str:
@@ -76,6 +78,43 @@ def _parse_tool_args(raw: Any) -> dict[str, Any]:
             return {"raw": raw}
         return parsed if isinstance(parsed, dict) else {"raw": raw}
     return {}
+
+
+def _image_chunks(content: Any) -> list[dict[str, Any]]:
+    if not isinstance(content, list):
+        return []
+
+    chunks: list[dict[str, Any]] = []
+    for item in content:
+        if not isinstance(item, dict):
+            continue
+        item_type = item.get("type")
+        base64_data: str | None = None
+        mime_type: str | None = None
+        if item_type == "image":
+            data = item.get("data") or item.get("base64")
+            mime = item.get("mime_type") or item.get("mimeType")
+            if isinstance(data, str) and isinstance(mime, str):
+                base64_data = data
+                mime_type = mime
+        elif item_type == "image_url":
+            image_url = item.get("image_url")
+            url = image_url.get("url") if isinstance(image_url, dict) else None
+            if isinstance(url, str):
+                match = _DATA_IMAGE_RE.match(url)
+                if match:
+                    mime_type, base64_data = match.groups()
+        if base64_data and mime_type:
+            chunk: dict[str, Any] = {
+                "kind": "image",
+                "base64": base64_data,
+                "mimeType": mime_type,
+            }
+            file_name = item.get("fileName") or item.get("file_name")
+            if isinstance(file_name, str) and file_name:
+                chunk["fileName"] = file_name
+            chunks.append(chunk)
+    return chunks
 
 
 def _maybe_diff_from_args(name: str, args: dict[str, Any]) -> dict[str, Any] | None:
@@ -150,15 +189,19 @@ def state_messages_to_ui(messages: list[Any]) -> list[dict[str, Any]]:
                 agent_turn["chunks"] = _merge_text_chunks(agent_turn["chunks"])
                 ui_messages.append(agent_turn)
                 agent_turn = None
-            text = extract_text_content(raw.get("content", ""))
-            if not text:
+            content = raw.get("content", "")
+            chunks = _image_chunks(content)
+            text = extract_text_content(content)
+            if text:
+                chunks.append({"kind": "text", "text": text})
+            if not chunks:
                 continue
             ui_messages.append(
                 {
                     "id": msg_id,
                     "author": "user",
                     "timestamp": timestamp,
-                    "chunks": [{"kind": "text", "text": text}],
+                    "chunks": chunks,
                 }
             )
             continue
