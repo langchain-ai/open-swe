@@ -176,7 +176,7 @@ def provider_model_kwargs(
 def validate_llm_startup_config() -> None:
     """Validate that the required API keys are present for the configured LLM model."""
     model_id = os.environ.get("LLM_MODEL_ID", DEFAULT_MODEL_ID)
-    
+
     if model_id.startswith("openai:") and not os.environ.get("OPENAI_API_KEY"):
         raise ValueError(f"OPENAI_API_KEY is required for configured model {model_id}")
     elif model_id.startswith("anthropic:") and not os.environ.get("ANTHROPIC_API_KEY"):
