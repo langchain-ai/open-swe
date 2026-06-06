@@ -47,6 +47,13 @@ class FakeClient:
         self.threads = threads or FakeThreads([])
 
 
+@pytest.fixture(autouse=True)
+def clear_cache_refresh_guard():
+    agent_usage._CACHE_REFRESH_IN_FLIGHT.clear()
+    yield
+    agent_usage._CACHE_REFRESH_IN_FLIGHT.clear()
+
+
 @pytest.mark.asyncio
 async def test_cached_usage_payload_returns_stale_snapshot_and_schedules_refresh(monkeypatch):
     usage_snapshot = {
@@ -154,12 +161,22 @@ async def test_cache_miss_schedules_refresh_without_blocking(monkeypatch):
         schedule_reviewer_refresh=reviewer_refreshes.append,
     )
 
+    duplicate_payload = await agent_usage.list_agent_usage_leaderboard(
+        period="7d",
+        limit=10,
+        current_login="octo",
+        current_email="octo@example.com",
+        schedule_usage_refresh=usage_refreshes.append,
+        schedule_reviewer_refresh=reviewer_refreshes.append,
+    )
+
     assert usage_refreshes == ["7d"]
     assert reviewer_refreshes == ["7d"]
     assert payload["period"] == "7d"
     assert payload["rows"] == []
     assert payload["generated_at_ms"] is None
     assert payload["reviewer_stats"]["generated_at_ms"] is None
+    assert duplicate_payload["rows"] == []
     assert store.searches == []
 
 
@@ -198,6 +215,7 @@ async def test_precompute_usage_caches_refreshes_stale_snapshots(monkeypatch):
     assert refreshed == {"usage": 1, "reviewer": 1}
     assert usage_refreshes == ["30d"]
     assert reviewer_refreshes == ["30d"]
+    assert agent_usage._CACHE_REFRESH_IN_FLIGHT == set()
 
 
 @pytest.mark.asyncio

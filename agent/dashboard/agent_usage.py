@@ -33,6 +33,8 @@ _CACHE_SEARCH_LIMIT = 1000
 _GITHUB_API = "https://api.github.com"
 
 logger = logging.getLogger(__name__)
+_CACHE_REFRESH_IN_FLIGHT: set[tuple[tuple[str, ...], Period]] = set()
+_CACHE_REFRESH_IN_FLIGHT_LOCK = asyncio.Lock()
 
 
 def _client():
@@ -644,6 +646,68 @@ def _empty_reviewer_stats_snapshot(period: Period) -> dict[str, Any]:
     }
 
 
+def _cache_refresh_key(namespace: list[str], period: Period) -> tuple[tuple[str, ...], Period]:
+    return tuple(namespace), period
+
+
+async def _claim_cache_refresh(namespace: list[str], period: Period) -> bool:
+    key = _cache_refresh_key(namespace, period)
+    async with _CACHE_REFRESH_IN_FLIGHT_LOCK:
+        if key in _CACHE_REFRESH_IN_FLIGHT:
+            return False
+        _CACHE_REFRESH_IN_FLIGHT.add(key)
+        return True
+
+
+async def _release_cache_refresh(namespace: list[str], period: Period) -> None:
+    key = _cache_refresh_key(namespace, period)
+    async with _CACHE_REFRESH_IN_FLIGHT_LOCK:
+        _CACHE_REFRESH_IN_FLIGHT.discard(key)
+
+
+async def _schedule_refresh_if_idle(
+    namespace: list[str],
+    period: Period,
+    schedule_refresh: Callable[[Period], None],
+) -> None:
+    if not await _claim_cache_refresh(namespace, period):
+        return
+    try:
+        schedule_refresh(period)
+    except Exception:
+        await _release_cache_refresh(namespace, period)
+        raise
+
+
+async def _run_claimed_cache_refresh(
+    namespace: list[str],
+    period: Period,
+    refresh: Callable[[str | None], Awaitable[dict[str, Any]]],
+) -> dict[str, Any]:
+    try:
+        return await refresh(period)
+    finally:
+        await _release_cache_refresh(namespace, period)
+
+
+async def refresh_claimed_usage_leaderboard_cache(period: str | None = "30d") -> dict[str, Any]:
+    normalized_period = _normalize_period(period)
+    return await _run_claimed_cache_refresh(
+        USAGE_LEADERBOARD_CACHE_NAMESPACE,
+        normalized_period,
+        refresh_usage_leaderboard_cache,
+    )
+
+
+async def refresh_claimed_reviewer_stats_cache(period: str | None = "30d") -> dict[str, Any]:
+    normalized_period = _normalize_period(period)
+    return await _run_claimed_cache_refresh(
+        REVIEWER_STATS_CACHE_NAMESPACE,
+        normalized_period,
+        refresh_reviewer_stats_cache,
+    )
+
+
 async def _cached_snapshot(
     namespace: list[str],
     period: Period,
@@ -660,10 +724,10 @@ async def _cached_snapshot(
             if not generated_at_ms or _now_ms() - generated_at_ms <= _CACHE_TTL_MS:
                 return snapshot, generated_at_ms or None
             if schedule_refresh is not None:
-                schedule_refresh(period)
+                await _schedule_refresh_if_idle(namespace, period, schedule_refresh)
                 return snapshot, generated_at_ms
     if schedule_refresh is not None and empty_snapshot is not None:
-        schedule_refresh(period)
+        await _schedule_refresh_if_idle(namespace, period, schedule_refresh)
         return empty_snapshot(period), None
     snapshot = await refresh(period)
     return snapshot, _now_ms()
@@ -684,8 +748,13 @@ async def _refresh_cached_snapshot_if_stale(
             and _now_ms() - generated_at_ms <= _CACHE_TTL_MS
         ):
             return False
-    await refresh(period)
-    return True
+    if not await _claim_cache_refresh(namespace, period):
+        return False
+    try:
+        await refresh(period)
+        return True
+    finally:
+        await _release_cache_refresh(namespace, period)
 
 
 async def precompute_usage_caches(periods: Iterable[Period] = _PERIODS) -> dict[str, int]:
