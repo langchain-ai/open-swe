@@ -135,9 +135,8 @@ def set_sandbox_backend(
     sandbox_backend: SandboxBackendProtocol,
 ) -> SandboxBackendProxy:
     # Centrally wrap sandbox backend with safety gateway wrapper if not already wrapped
-    if (
-        not isinstance(sandbox_backend, SandboxBackendProxy)
-        and not isinstance(sandbox_backend, AuditingSandboxWrapper)
+    if not isinstance(sandbox_backend, SandboxBackendProxy) and not isinstance(
+        sandbox_backend, AuditingSandboxWrapper
     ):
         sandbox_backend = AuditingSandboxWrapper(sandbox_backend)
 

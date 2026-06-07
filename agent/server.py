@@ -9,6 +9,21 @@ import time
 import warnings
 from typing import Any
 
+from dotenv import load_dotenv
+
+# Robustly find and load the .env file in project root
+cur_dir = os.path.dirname(os.path.abspath(__file__))
+while cur_dir and not os.path.exists(os.path.join(cur_dir, ".env")):
+    parent = os.path.dirname(cur_dir)
+    if parent == cur_dir:
+        break
+    cur_dir = parent
+env_path = os.path.join(cur_dir, ".env")
+if os.path.exists(env_path):
+    load_dotenv(env_path, override=True)
+else:
+    load_dotenv(override=True)
+
 logger = logging.getLogger(__name__)
 
 from langgraph.graph.state import RunnableConfig

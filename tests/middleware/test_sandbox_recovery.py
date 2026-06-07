@@ -78,6 +78,7 @@ async def test_sandbox_client_error_recreates_sandbox() -> None:
         assert SANDBOX_BACKENDS["thread-1"] is proxy
         current_backend = proxy.current
         from agent.utils.sandbox_safety import AuditingSandboxWrapper
+
         if isinstance(current_backend, AuditingSandboxWrapper):
             current_backend = current_backend._raw_sandbox
         assert current_backend is backend

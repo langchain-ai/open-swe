@@ -1,6 +1,7 @@
 """Custom FastAPI routes for LangGraph server."""
 
 from dotenv import load_dotenv
+
 load_dotenv()
 
 import hashlib
@@ -138,95 +139,117 @@ app.include_router(dashboard_router)
 # ENTERPRISE SECURITY GATEWAY & AUDIT TRAIL ENDPOINTS
 # ==============================================================================
 import sqlite3
+
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
+
 
 class ApprovalRequest(BaseModel):
     approval_id: int
     status: str  # 'APPROVED' or 'REJECTED'
 
+
 @app.get("/safety/approvals")
 async def list_approvals():
     """Retrieve all safety approvals (pending and resolved)."""
     from .utils.sandbox_safety import DB_PATH
+
     try:
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
-        cursor.execute("SELECT id, timestamp, command, risk_level, reason, status FROM approvals ORDER BY id DESC")
+        cursor.execute(
+            "SELECT id, timestamp, command, risk_level, reason, status FROM approvals ORDER BY id DESC"
+        )
         rows = cursor.fetchall()
         conn.close()
-        
+
         approvals = []
         for r in rows:
-            approvals.append({
-                "id": r[0],
-                "timestamp": r[1],
-                "command": r[2],
-                "risk_level": r[3],
-                "reason": r[4],
-                "status": r[5]
-            })
+            approvals.append(
+                {
+                    "id": r[0],
+                    "timestamp": r[1],
+                    "command": r[2],
+                    "risk_level": r[3],
+                    "reason": r[4],
+                    "status": r[5],
+                }
+            )
         return {"approvals": approvals}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.get("/safety/audit")
 async def list_audit_trail():
     """Retrieve the complete sandbox safety command execution history (audit trail)."""
     from .utils.sandbox_safety import DB_PATH
+
     try:
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
-        cursor.execute("SELECT id, timestamp, command, risk_level, reason, duration, exit_code FROM audit_trail ORDER BY id DESC")
+        cursor.execute(
+            "SELECT id, timestamp, command, risk_level, reason, duration, exit_code FROM audit_trail ORDER BY id DESC"
+        )
         rows = cursor.fetchall()
         conn.close()
-        
+
         audit = []
         for r in rows:
-            audit.append({
-                "id": r[0],
-                "timestamp": r[1],
-                "command": r[2],
-                "reason": r[4],
-                "risk_level": r[3],
-                "duration": r[5],
-                "exit_code": r[6]
-            })
+            audit.append(
+                {
+                    "id": r[0],
+                    "timestamp": r[1],
+                    "command": r[2],
+                    "reason": r[4],
+                    "risk_level": r[3],
+                    "duration": r[5],
+                    "exit_code": r[6],
+                }
+            )
         return {"audit": audit}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.post("/safety/approve")
 async def approve_command(req: ApprovalRequest):
     """Approve or reject a pending command."""
     from .utils.sandbox_safety import DB_PATH
+
     if req.status not in ("APPROVED", "REJECTED"):
         raise HTTPException(status_code=400, detail="Invalid status. Must be APPROVED or REJECTED.")
-        
+
     try:
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
-        
+
         # Verify it exists
         cursor.execute("SELECT status FROM approvals WHERE id = ?", (req.approval_id,))
         row = cursor.fetchone()
         if not row:
             conn.close()
             raise HTTPException(status_code=404, detail=f"Approval ID {req.approval_id} not found.")
-            
+
         if row[0] != "PENDING":
             conn.close()
-            raise HTTPException(status_code=400, detail=f"Approval ID {req.approval_id} is already resolved to {row[0]}.")
-            
-        cursor.execute("UPDATE approvals SET status = ? WHERE id = ?", (req.status, req.approval_id))
+            raise HTTPException(
+                status_code=400,
+                detail=f"Approval ID {req.approval_id} is already resolved to {row[0]}.",
+            )
+
+        cursor.execute(
+            "UPDATE approvals SET status = ? WHERE id = ?", (req.status, req.approval_id)
+        )
         conn.commit()
         conn.close()
-        
+
         return {"status": "success", "message": f"Command {req.approval_id} has been {req.status}."}
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.get("/safety/approvals/ui", response_class=HTMLResponse)
 async def approvals_dashboard():

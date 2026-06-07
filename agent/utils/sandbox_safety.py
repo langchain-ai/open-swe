@@ -1,24 +1,27 @@
-import sqlite3
-import os
-import time
 import logging
-import shlex
+import os
 import re
+import shlex
+import sqlite3
+import time
 from pathlib import Path
+
 from deepagents.backends.protocol import ExecuteResponse, SandboxBackendProtocol
-from agent.utils.model import make_model
 from langchain_core.messages import HumanMessage
+
+from agent.utils.model import make_model
 
 logger = logging.getLogger(__name__)
 
 DB_PATH = Path(__file__).resolve().parent.parent.parent / "agent_safety.db"
+
 
 def init_db():
     """Initialize SQLite database with audit and approval tables."""
     try:
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
-        
+
         # Audit trail table
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS audit_trail (
@@ -31,7 +34,7 @@ def init_db():
                 exit_code INTEGER
             )
         """)
-        
+
         # Approvals table
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS approvals (
@@ -43,72 +46,75 @@ def init_db():
                 status TEXT DEFAULT 'PENDING'
             )
         """)
-        
+
         conn.commit()
         conn.close()
         logger.info("Sandbox safety SQLite database initialized successfully at %s", DB_PATH)
-    except Exception as e:
+    except Exception:
         logger.exception("Failed to initialize sandbox safety database")
+
 
 # Initialize DB on import
 init_db()
 
 # Static regex patterns for L1 blocklist/risk classification
 STATIC_HIGH_RISK_PATTERNS = [
-    r"\brm\s+-[rf]*\s*/",                    # rm -rf /
-    r"\brm\s+-[rf]*\s+--no-preserve-root",   # rm -rf --no-preserve-root
-    r"\bmkfs\b",                             # filesystem formatting
-    r"\bdd\s+.*of=/dev/",                    # direct disk raw sector overwrite
-    r"\bchmod\s+-[R]*\s+777\s*/",            # open permissions on root
-    r"\bchown\s+-[R]*\s+.*777",              # chown open permissions
-    r"\bshutdown\b",                         # shutting down host machine
-    r"\breboot\b",                           # rebooting host machine
-    r"\bpoweroff\b",                         # powering off host machine
+    r"\brm\s+-[rf]*\s*/",  # rm -rf /
+    r"\brm\s+-[rf]*\s+--no-preserve-root",  # rm -rf --no-preserve-root
+    r"\bmkfs\b",  # filesystem formatting
+    r"\bdd\s+.*of=/dev/",  # direct disk raw sector overwrite
+    r"\bchmod\s+-[R]*\s+777\s*/",  # open permissions on root
+    r"\bchown\s+-[R]*\s+.*777",  # chown open permissions
+    r"\bshutdown\b",  # shutting down host machine
+    r"\breboot\b",  # rebooting host machine
+    r"\bpoweroff\b",  # powering off host machine
 ]
 
 STATIC_MEDIUM_RISK_PATTERNS = [
-    r"\brm\s+-[rf]+",                        # generic rm -rf
-    r"\bcurl\b",                             # network requests (potential exfiltration/remote script runs)
-    r"\bwget\b",                             # generic wget
-    r"\bgit\s+push\b.*--force",              # destructive git push
-    r"\bkill\s+-[0-9a-zA-Z]+",               # process termination
-    r"\bkillall\b",                          # process termination
-    r"\bpkill\b",                            # process termination
-    r"\bsh\b\s+<",                           # redirecting file into shell
+    r"\brm\s+-[rf]+",  # generic rm -rf
+    r"\bcurl\b",  # network requests (potential exfiltration/remote script runs)
+    r"\bwget\b",  # generic wget
+    r"\bgit\s+push\b.*--force",  # destructive git push
+    r"\bkill\s+-[0-9a-zA-Z]+",  # process termination
+    r"\bkillall\b",  # process termination
+    r"\bpkill\b",  # process termination
+    r"\bsh\b\s+<",  # redirecting file into shell
     r"\bbash\b\s+<",
 ]
 
+
 def classify_command_statically(command: str) -> tuple[str, str]:
     """Classify command statically using regex rules.
-    
+
     Returns (risk_level, reason).
     """
     for pattern in STATIC_HIGH_RISK_PATTERNS:
         if re.search(pattern, command):
             return "HIGH", "Matched critical blocked command pattern."
-            
+
     for pattern in STATIC_MEDIUM_RISK_PATTERNS:
         if re.search(pattern, command):
             return "MEDIUM", "Matched medium-risk file deletion or network execution pattern."
-            
+
     return "LOW", "No dangerous static patterns matched."
+
 
 def classify_command_with_llm(command: str) -> tuple[str, str]:
     """Evaluate complex/ambiguous commands using a hybrid Static + LLM approach.
-    
+
     Returns (risk_level, reason) where risk_level is 'LOW', 'MEDIUM', or 'HIGH'.
     """
     # Step 1: Run fast static checks first
     static_level, static_reason = classify_command_statically(command)
     if static_level == "HIGH":
         return "HIGH", f"[Static Rule] {static_reason}"
-        
+
     # Skip LLM analysis for simple commands to save token cost and lower latency
     try:
         words = shlex.split(command) if command else []
     except Exception:
         words = command.split() if command else []
-        
+
     if len(words) <= 3 and static_level == "LOW":
         return "LOW", "Simple developer utility command."
 
@@ -116,7 +122,7 @@ def classify_command_with_llm(command: str) -> tuple[str, str]:
     model_id = os.environ.get("LLM_MODEL_ID", "openai:gpt-5.5")
     try:
         model = make_model(model_id, temperature=0.0)
-        
+
         prompt = f"""You are an enterprise AI security firewall. You audit shell commands executed by an AI agent in a Linux sandbox.
 Analyze this command:
 ```bash
@@ -136,9 +142,10 @@ Respond in EXACTLY the following JSON format:
 
         response = model.invoke([HumanMessage(content=prompt)])
         content = response.content.strip()
-        
+
         # Extract json content and parse
         import json
+
         json_match = re.search(r"\{.*\}", content, re.DOTALL)
         if json_match:
             data = json.loads(json_match.group(0))
@@ -146,20 +153,24 @@ Respond in EXACTLY the following JSON format:
             reason = data.get("reason", "Analyzed by LLM firewall.")
             if level in ("LOW", "MEDIUM", "HIGH"):
                 return level, f"[LLM] {reason}"
-        
+
     except Exception as e:
-        logger.warning("LLM Command classification failed or credentials missing: %s. Falling back to static evaluation.", e)
+        logger.warning(
+            "LLM Command classification failed or credentials missing: %s. Falling back to static evaluation.",
+            e,
+        )
         return static_level, f"[Static Fallback] {static_reason}"
-        
+
     return static_level, f"[Static Fallback] {static_reason}"
 
 
 class AuditingSandboxWrapper:
     """A proxy wrapper that intercepts shell commands executed in the sandbox.
-    
+
     Provides logging of all executed commands into an SQLite audit trail
     and halts medium-risk commands pending manual human approval.
     """
+
     def __init__(self, raw_sandbox: SandboxBackendProtocol):
         self._raw_sandbox = raw_sandbox
 
@@ -169,10 +180,10 @@ class AuditingSandboxWrapper:
 
     def execute(self, command: str, *, timeout: int | None = None) -> ExecuteResponse:
         start_time = time.time()
-        
+
         # 1. Audit classification
         risk_level, reason = classify_command_with_llm(command)
-        
+
         # 2. Block/Approval Handling
         if risk_level == "HIGH":
             duration = time.time() - start_time
@@ -180,27 +191,29 @@ class AuditingSandboxWrapper:
             return ExecuteResponse(
                 output=f"[SECURITY BLOCKED] Command rejected by Enterprise Shield Firewall.\nReason: {reason}",
                 exit_code=1,
-                truncated=False
+                truncated=False,
             )
-            
+
         elif risk_level == "MEDIUM":
             # Insert approval record
             approval_id = self._insert_approval(command, risk_level, reason)
-            
+
             # Console notification
-            print("\n" + "="*80)
+            print("\n" + "=" * 80)
             print(f"⚠️  [SECURITY WARNING] PENDING HUMAN APPROVAL (ID: {approval_id})")
             print(f"Command: {command}")
             print(f"Reason:  {reason}")
-            print(f"Action:  Run 'python scripts/approve_cmd.py --approve {approval_id}' in another terminal to authorize.")
-            print("="*80 + "\n")
-            
+            print(
+                f"Action:  Run 'python scripts/approve_cmd.py --approve {approval_id}' in another terminal to authorize."
+            )
+            print("=" * 80 + "\n")
+
             # Polling loop waiting for manual approval
             approved = False
             timeout_limit = 300  # 5 minutes
             poll_interval = 1.0
             elapsed = 0.0
-            
+
             while elapsed < timeout_limit:
                 status = self._check_approval_status(approval_id)
                 if status == "APPROVED":
@@ -210,18 +223,20 @@ class AuditingSandboxWrapper:
                     break
                 time.sleep(poll_interval)
                 elapsed += poll_interval
-                
+
             if not approved:
                 # Set as TIMEOUT if still pending
                 self._update_approval_status(approval_id, "TIMEOUT")
                 duration = time.time() - start_time
-                self._log_audit(command, risk_level, f"[REJECTED/TIMEOUT] {reason}", duration, exit_code=1)
+                self._log_audit(
+                    command, risk_level, f"[REJECTED/TIMEOUT] {reason}", duration, exit_code=1
+                )
                 return ExecuteResponse(
                     output=f"[SECURITY REJECTED] Command execution rejected or timed out by human approval (ID: {approval_id}).",
                     exit_code=1,
-                    truncated=False
+                    truncated=False,
                 )
-        
+
         # 3. Execution of safe or approved command
         try:
             res = self._raw_sandbox.execute(command, timeout=timeout)
@@ -230,21 +245,28 @@ class AuditingSandboxWrapper:
             return res
         except Exception as e:
             duration = time.time() - start_time
-            self._log_audit(command, risk_level, f"Failed with exception: {e}", duration, exit_code=1)
+            self._log_audit(
+                command, risk_level, f"Failed with exception: {e}", duration, exit_code=1
+            )
             raise
 
     def __getattr__(self, name):
         """Delegate all other standard properties/file methods to raw sandbox."""
         return getattr(self._raw_sandbox, name)
 
-    def _log_audit(self, command: str, risk_level: str, reason: str, duration: float, exit_code: int):
+    def _log_audit(
+        self, command: str, risk_level: str, reason: str, duration: float, exit_code: int
+    ):
         try:
             conn = sqlite3.connect(DB_PATH)
             cursor = conn.cursor()
-            cursor.execute("""
+            cursor.execute(
+                """
                 INSERT INTO audit_trail (command, risk_level, reason, duration, exit_code)
                 VALUES (?, ?, ?, ?, ?)
-            """, (command, risk_level, reason, duration, exit_code))
+            """,
+                (command, risk_level, reason, duration, exit_code),
+            )
             conn.commit()
             conn.close()
         except Exception as e:
@@ -254,10 +276,13 @@ class AuditingSandboxWrapper:
         try:
             conn = sqlite3.connect(DB_PATH)
             cursor = conn.cursor()
-            cursor.execute("""
+            cursor.execute(
+                """
                 INSERT INTO approvals (command, risk_level, reason, status)
                 VALUES (?, ?, ?, 'PENDING')
-            """, (command, risk_level, reason))
+            """,
+                (command, risk_level, reason),
+            )
             conn.commit()
             approval_id = cursor.lastrowid
             conn.close()

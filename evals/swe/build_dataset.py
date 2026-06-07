@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 """Build the SWE-bench private offline evaluation dataset.
 
-Supports bootstrap seeding of realistic coding tasks (calculator bugs) 
+Supports bootstrap seeding of realistic coding tasks (calculator bugs)
 to ensure a fully self-contained, offline execution pipeline.
 
 Usage:
     python evals/swe/build_dataset.py --bootstrap
 """
-import os
-import sys
-import json
+
 import argparse
+import json
+import sys
 from pathlib import Path
 
 # Resolve evaluation directories
@@ -62,8 +62,8 @@ def test_arithmetic():
 def test_division_by_zero():
     with pytest.raises(ZeroDivisionError):
         divide(5, 0)
-"""
-        }
+""",
+        },
     },
     {
         "id": "calc_bug_02",
@@ -99,8 +99,8 @@ def test_add():
 def test_negative_exponent():
     with pytest.raises(ValueError):
         power(2, -3)
-"""
-        }
+""",
+        },
     },
     {
         "id": "calc_bug_03",
@@ -138,31 +138,37 @@ def test_modulo():
     assert mod(6, 3) == 0
     with pytest.raises(ZeroDivisionError):
         mod(5, 0)
-"""
-        }
-    }
+""",
+        },
+    },
 ]
+
 
 def main():
     parser = argparse.ArgumentParser(description="Build private SWE-bench evaluation dataset.")
-    parser.add_argument("--bootstrap", action="store_true", help="Generate default calculator bug benchmarks")
-    parser.add_argument("--out", type=str, default=str(BENCHMARK_FILE), help="Output JSONL benchmark filepath")
+    parser.add_argument(
+        "--bootstrap", action="store_true", help="Generate default calculator bug benchmarks"
+    )
+    parser.add_argument(
+        "--out", type=str, default=str(BENCHMARK_FILE), help="Output JSONL benchmark filepath"
+    )
     args = parser.parse_args()
 
     if args.bootstrap:
         print(f"Generating {len(BOOTSTRAP_CASES)} bootstrap calculator bug cases...")
         out_path = Path(args.out)
         out_path.parent.mkdir(parents=True, exist_ok=True)
-        
+
         with out_path.open("w") as f:
             for case in BOOTSTRAP_CASES:
                 f.write(json.dumps(case) + "\n")
-                
+
         print(f"Success! Benchmark dataset saved to {out_path}")
         sys.exit(0)
 
     # Standard mode: scans git logs (to be extended by developer)
     print("Normal git scan mode selected. (Add --bootstrap to quickly seed mock benchmarks)")
+
 
 if __name__ == "__main__":
     main()

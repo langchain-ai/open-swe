@@ -405,10 +405,7 @@ async def resolve_github_token(
         return await _resolve_bot_installation_token(thread_id)
 
     configurable = config["configurable"]
-    if (
-        configurable.get("__is_for_execution__")
-        and os.environ.get("SANDBOX_TYPE") == "local"
-    ):
+    if configurable.get("__is_for_execution__") and os.environ.get("SANDBOX_TYPE") == "local":
         return "dummy-token", "dummy-encrypted", None
 
     source = configurable.get("source")

@@ -64,25 +64,24 @@ def _iter_work_dir_candidates(
     current = sandbox_backend
     while True:
         if hasattr(current, "current"):
-            current = getattr(current, "current")
+            current = current.current
         elif hasattr(current, "_raw_sandbox"):
-            current = getattr(current, "_raw_sandbox")
+            current = current._raw_sandbox
         else:
             break
     local_dir = None
     if hasattr(current, "root_dir"):
-        local_dir = getattr(current, "root_dir")
+        local_dir = current.root_dir
     elif hasattr(current, "cwd"):
-        local_dir = getattr(current, "cwd")
+        local_dir = current.cwd
 
     if local_dir:
         import os
+
         local_dir = os.path.abspath(str(local_dir))
         if local_dir not in seen:
             seen.add(local_dir)
             yield local_dir
-
-
 
     for candidate in _iter_provider_paths(sandbox_backend, "get_work_dir"):
         if candidate not in seen:
@@ -113,12 +112,12 @@ def _is_local_backend(sandbox_backend: SandboxBackendProtocol) -> bool:
     current = sandbox_backend
     while True:
         if hasattr(current, "current"):
-            current = getattr(current, "current")
+            current = current.current
         elif hasattr(current, "_raw_sandbox"):
-            current = getattr(current, "_raw_sandbox")
+            current = current._raw_sandbox
         else:
             break
-    return type(current).__name__ == "LocalShellBackend"
+    return "LocalShellBackend" in type(current).__name__
 
 
 def _iter_provider_paths(
@@ -173,6 +172,7 @@ def _normalize_path(raw_path: str | None, is_local: bool = False) -> str | None:
         return None
 
     import os
+
     if os.name == "nt" and is_local:
         return os.path.normpath(path)
     else:
@@ -186,6 +186,7 @@ def _is_writable_directory(
     directory: str,
 ) -> bool:
     import os
+
     is_local = _is_local_backend(sandbox_backend)
     if os.name == "nt" and is_local:
         return os.path.isdir(directory) and os.access(directory, os.W_OK)

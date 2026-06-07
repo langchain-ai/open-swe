@@ -1,18 +1,19 @@
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 from langgraph.graph.state import RunnableConfig
 
+from agent.tools.codegraph_tools import (
+    codegraph_callees,
+    codegraph_callers,
+    codegraph_impact,
+    codegraph_search,
+)
 from agent.utils.codegraph import (
-    ensure_codegraph_installed,
     ensure_codegraph_indexed,
+    ensure_codegraph_installed,
     get_affected_tests_via_codegraph,
     get_workspace_files_via_codegraph,
-)
-from agent.tools.codegraph_tools import (
-    codegraph_search,
-    codegraph_callers,
-    codegraph_callees,
-    codegraph_impact,
 )
 
 

@@ -52,7 +52,9 @@ try:
 
             @property
             def execution_info(self) -> Any:
-                return self._overrides.get("execution_info", getattr(self._original, "execution_info", None))
+                return self._overrides.get(
+                    "execution_info", getattr(self._original, "execution_info", None)
+                )
 
             @property
             def control(self) -> Any:
@@ -60,7 +62,9 @@ try:
 
             @property
             def server_info(self) -> Any:
-                return self._overrides.get("server_info", getattr(self._original, "server_info", None))
+                return self._overrides.get(
+                    "server_info", getattr(self._original, "server_info", None)
+                )
 
             @property
             def context(self) -> Any:
@@ -68,11 +72,15 @@ try:
 
             @property
             def stream_writer(self) -> Any:
-                return self._overrides.get("stream_writer", getattr(self._original, "stream_writer", _no_op_stream_writer))
+                return self._overrides.get(
+                    "stream_writer", getattr(self._original, "stream_writer", _no_op_stream_writer)
+                )
 
             @property
             def heartbeat(self) -> Any:
-                return self._overrides.get("heartbeat", getattr(self._original, "heartbeat", _no_op_heartbeat))
+                return self._overrides.get(
+                    "heartbeat", getattr(self._original, "heartbeat", _no_op_heartbeat)
+                )
 
             def merge(self, other: Any) -> Any:
                 other_writer = getattr(other, "stream_writer", _no_op_stream_writer)
@@ -81,7 +89,9 @@ try:
 
                 other_heartbeat = getattr(other, "heartbeat", _no_op_heartbeat)
                 self_heartbeat = self.heartbeat
-                heartbeat = other_heartbeat if other_heartbeat is not _no_op_heartbeat else self_heartbeat
+                heartbeat = (
+                    other_heartbeat if other_heartbeat is not _no_op_heartbeat else self_heartbeat
+                )
 
                 other_prev = getattr(other, "previous", None)
                 prev = self.previous if other_prev is None else other_prev
@@ -94,10 +104,11 @@ try:
                         "stream_writer": writer,
                         "heartbeat": heartbeat,
                         "previous": prev,
-                        "execution_info": getattr(other, "execution_info", None) or self.execution_info,
+                        "execution_info": getattr(other, "execution_info", None)
+                        or self.execution_info,
                         "server_info": getattr(other, "server_info", None) or self.server_info,
                         "control": getattr(other, "control", None) or self.control,
-                    }
+                    },
                 )
 
             def __repr__(self):
@@ -128,10 +139,12 @@ try:
 
     def _runtime_base_patch_execution_info(self, **overrides: Any) -> Any:
         raise RuntimeError("Cannot patch execution_info before it has been set")
+
     _ServerRuntimeBase.patch_execution_info = _runtime_base_patch_execution_info
 
     def _runtime_base_merge(self, other: Any) -> Any:
         return make_compat_wrapper(self).merge(other)
+
     _ServerRuntimeBase.merge = _runtime_base_merge
 
     logger.info("Successfully applied langgraph_sdk runtime compatibility monkeypatch.")
