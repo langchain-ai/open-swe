@@ -49,7 +49,7 @@ from .reviewer_findings import (
 from .reviewer_findings import (
     list_findings as list_reviewer_findings,
 )
-from .reviewer_publish import fetch_pr_review_threads
+from .reviewer_publish import fetch_pr_review_threads, post_review_started_comment
 from .reviewer_reconcile import reconcile_findings_with_review_threads
 from .utils.auth import (
     is_bot_token_only_mode,
@@ -1853,6 +1853,13 @@ async def trigger_pr_review_from_ref(
         }
     await set_reviewer_thread_metadata(
         thread_id, pr=pr_meta, watch=True, slack_thread=slack_thread_meta, head_sha=head_sha
+    )
+    await post_review_started_comment(
+        thread_id=thread_id,
+        owner=pr_ref.owner,
+        repo=pr_ref.repo,
+        pr_number=pr_ref.number,
+        token=app_token,
     )
 
     prompt = build_github_pr_review_prompt(repo_config, pr_ref.number, pr_url, base_sha, head_sha)
