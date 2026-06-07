@@ -32,7 +32,11 @@ async def pm_node(state: dict[str, Any], config: RunnableConfig) -> dict[str, An
 
     task_desc = state.get("task_description", "")
     if not task_desc and state.get("messages"):
-        task_desc = state["messages"][-1].content
+        last_msg = state["messages"][-1]
+        if isinstance(last_msg, dict):
+            task_desc = last_msg.get("content", "")
+        else:
+            task_desc = getattr(last_msg, "content", "")
 
     prompt = f"""You are a Product Manager and QA Architect Agent.
 Analyze the user's coding request:
