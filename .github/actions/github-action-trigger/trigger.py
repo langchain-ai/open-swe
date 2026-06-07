@@ -5,8 +5,8 @@ import json
 import os
 import sys
 import uuid
-import urllib.error
-import urllib.request
+
+from langgraph_sdk import get_sync_client
 
 
 def _required_env(name: str) -> str:
@@ -22,6 +22,22 @@ def _write_output(name: str, value: str) -> None:
         return
     with open(output_path, "a", encoding="utf-8") as f:
         f.write(f"{name}={value}\n")
+
+
+def _to_dict(value: object) -> dict[str, object]:
+    if isinstance(value, dict):
+        return value
+    model_dump = getattr(value, "model_dump", None)
+    if callable(model_dump):
+        dumped = model_dump()
+        if isinstance(dumped, dict):
+            return dumped
+    as_dict = getattr(value, "dict", None)
+    if callable(as_dict):
+        dumped = as_dict()
+        if isinstance(dumped, dict):
+            return dumped
+    raise TypeError("runs.create returned an unexpected response type")
 
 
 def main() -> int:
@@ -40,52 +56,35 @@ def main() -> int:
         print("INPUT_IF_NOT_EXISTS must be 'create' or 'reject'", file=sys.stderr)
         return 1
 
-    body = {
-        "assistant_id": assistant_id,
-        "input": {
-            "messages": [
-                {
-                    "role": "user",
-                    "content": prompt,
-                }
-            ]
-        },
-        "if_not_exists": if_not_exists,
-    }
-    body_bytes = json.dumps(body).encode("utf-8")
-    request = urllib.request.Request(
-        f"{open_swe_url}/threads/{thread_id}/runs",
-        data=body_bytes,
-        method="POST",
-        headers={
-            "Content-Type": "application/json",
-            "x-api-key": open_swe_api_key,
-        },
-    )
-
     try:
-        with urllib.request.urlopen(request) as response:
-            response_text = response.read().decode("utf-8")
-    except urllib.error.HTTPError as exc:
-        body = exc.read().decode("utf-8", errors="replace")
-        print(f"Open SWE runs.create call failed with HTTP {exc.code}", file=sys.stderr)
-        if body:
-            print(body, file=sys.stderr)
-        return 1
-    except urllib.error.URLError as exc:
-        print(f"Open SWE runs.create request failed: {exc.reason}", file=sys.stderr)
+        client = get_sync_client(url=open_swe_url, api_key=open_swe_api_key)
+        run = client.runs.create(
+            thread_id=thread_id,
+            assistant_id=assistant_id,
+            input={
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": prompt,
+                    }
+                ]
+            },
+            if_not_exists=if_not_exists,
+        )
+    except Exception as exc:  # noqa: BLE001
+        print(f"Open SWE runs.create call failed: {exc}", file=sys.stderr)
         return 1
 
     try:
-        response_json_obj = json.loads(response_text) if response_text else {}
-    except json.JSONDecodeError:
-        print("Open SWE runs.create response was not valid JSON", file=sys.stderr)
+        response_obj = _to_dict(run)
+    except TypeError as exc:
+        print(str(exc), file=sys.stderr)
         return 1
 
-    response_json = json.dumps(response_json_obj, separators=(",", ":"))
-    run_id = response_json_obj.get("run_id")
+    response_json = json.dumps(response_obj, separators=(",", ":"), default=str)
+    run_id = response_obj.get("run_id")
     if not isinstance(run_id, str) or not run_id:
-        candidate = response_json_obj.get("id")
+        candidate = response_obj.get("id")
         run_id = candidate if isinstance(candidate, str) else ""
 
     _write_output("thread_id", thread_id)

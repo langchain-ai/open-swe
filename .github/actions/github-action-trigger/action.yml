@@ -35,6 +35,11 @@ outputs:
 runs:
   using: composite
   steps:
+    - id: install
+      shell: bash
+      run: |
+        set -euo pipefail
+        python3 -m pip install --disable-pip-version-check --quiet "langgraph-sdk>=0.2.0"
     - id: send
       shell: bash
       env:
