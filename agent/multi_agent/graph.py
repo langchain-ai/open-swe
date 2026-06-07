@@ -71,6 +71,7 @@ Please reflect on these test failures and apply the necessary corrections."""
     else:
         coder_config["configurable"] = {}
     coder_config["configurable"]["in_coder_node"] = True
+    coder_config["configurable"]["__is_for_execution__"] = True
 
     core_agent = await get_agent(coder_config)
 

@@ -104,6 +104,31 @@ graph TD
   ```
   修改后，智能体在第二次自我纠错阶段能够平滑退回直接调用 `gh pr create` 并由宿主机 `gh` 凭证完成推送，成功打破了死循环。
 
+### 4.3. 多智能体子图调用中由于 `__is_for_execution__` 上下文丢失导致 Coder Node 初始化 Anthropic 凭证报错 (Graph & Config Level)
+* **故障现象**：在运行多智能体图的 Coder Node 时，系统触发 `core_agent.ainvoke` 立即抛出以下异常：
+  `TypeError: Could not resolve authentication method. Expected either api_key or auth_token to be set...`
+  导致整个 Multi-Agent 协作流中断。
+* **根源分析**：
+  1. 在 `agent/server.py` 的入口函数 `get_agent(config)` 中，为了防止在 LangGraph dev server 启动编译/自省图结构时创建耗时的沙盒，使用了 `graph_loaded_for_execution(config)` 守卫。该守卫会检查 `config["configurable"]` 中是否包含 `__is_for_execution__` 标记（为 `True` 时代表是真实运行期）。
+  2. 当多智能体图的 `coder_node` 在运行期调用 `get_agent(coder_config)` 动态解析 Coding 智能体时，此时处于 node 运行时。LangGraph 传给 node 的 `RunnableConfig` 中并不带有 `__is_for_execution__` 这个由 root 触发器生成的标记。
+  3. 这导致 `graph_loaded_for_execution` 返回 `False`，使得 `get_agent` 提早返回了一个没有 sandbox 且 `model=None` 的 dummy placeholder 智能体。
+  4. 该 dummy 智能体默认将模型实例化为 `ChatAnthropic`。当 `coder_node` 接着调用该智能体的 `.ainvoke` 进行真正的代码修改分析时，由于当前环境并未配置 `ANTHROPIC_API_KEY`（使用的是 DeepSeek 包装的 OpenAI client），`ChatAnthropic` 初始化代码抛出了 `TypeError`。
+* **解决方案**：
+  双重保护修复：
+  1. 在 `agent/multi_agent/graph.py` 的 `coder_node` 中，拷贝 config 之后显式设置 `coder_config["configurable"]["__is_for_execution__"] = True`，强行声明这是一个真实运行的上下文。
+  2. 在 `agent/server.py` 的 `graph_loaded_for_execution` 判定中增加 `in_coder_node` 的防御性回退判断，如果当前上下文处于 Coder 节点中，即使 `__is_for_execution__` 缺失，也视作是真实运行期：
+     ```python
+     def graph_loaded_for_execution(config: RunnableConfig) -> bool:
+         if not isinstance(config, dict) or "configurable" not in config:
+             return False
+         configurable = config["configurable"]
+         return (
+             configurable.get("__is_for_execution__", False)
+             or configurable.get("in_coder_node", False)
+         )
+     ```
+  修复后，`get_agent` 能够完美在 Coder 节点内解析出基于 DeepSeek 重写后的 OpenAI ChatModel，本地沙盒完全调通并成功运行。
+
 ---
 
 ## 5. 项目面试亮点与技术说辞

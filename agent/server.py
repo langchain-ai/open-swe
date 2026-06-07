@@ -300,10 +300,12 @@ async def _resolve_creating_sentinel(thread_id: str) -> str | None:
 
 def graph_loaded_for_execution(config: RunnableConfig) -> bool:
     """Check if the graph is loaded for actual execution vs introspection."""
+    if not isinstance(config, dict) or "configurable" not in config:
+        return False
+    configurable = config["configurable"]
     return (
-        config["configurable"].get("__is_for_execution__", False)
-        if "configurable" in config
-        else False
+        configurable.get("__is_for_execution__", False)
+        or configurable.get("in_coder_node", False)
     )
 
 
