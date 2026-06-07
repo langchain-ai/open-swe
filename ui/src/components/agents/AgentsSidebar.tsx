@@ -3,6 +3,7 @@ import {
   CalendarBlankIcon,
   ChartLineUpIcon,
   ChatCircleIcon,
+  CircleNotchIcon,
   LightningIcon,
   PlusIcon,
   XIcon,
@@ -186,6 +187,7 @@ function ThreadRow({
       ? SOURCE_META[thread.source]
       : null
   const SourceIcon = source?.icon
+  const showFinishedIndicator = thread.status === "finished" && !thread.viewed
 
   return (
     <Link
@@ -200,16 +202,24 @@ function ThreadRow({
         isDeleting && "opacity-50"
       )}
     >
-      <span
-        className={cn(
-          "size-2 shrink-0 rounded-full",
-          thread.status === "running"
-            ? "animate-pulse bg-[var(--ui-accent)]"
-            : thread.status === "finished"
+      {thread.status === "running" ? (
+        <CircleNotchIcon
+          className="size-3 shrink-0 animate-spin text-[var(--ui-accent)]"
+          aria-label="Thread running"
+        />
+      ) : (
+        <span
+          className={cn(
+            "size-2 shrink-0 rounded-full",
+            showFinishedIndicator
               ? "bg-[var(--ui-accent)]"
               : "bg-[var(--ui-border)]"
-        )}
-      />
+          )}
+          aria-label={
+            showFinishedIndicator ? "Thread finished" : "Thread viewed"
+          }
+        />
+      )}
       {source && SourceIcon && (
         <SourceIcon
           className="size-3.5 shrink-0 text-[var(--ui-text-dim)]"
