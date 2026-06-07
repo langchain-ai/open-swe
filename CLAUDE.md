@@ -85,6 +85,14 @@ Reviewer-only tools (in `agent/reviewer.py`): `add_finding`, `update_finding`, `
 
 Built-in deepagents tools (`read_file`, `write_file`, `edit_file`, `ls`, `glob`, `grep`, `execute`, `write_todos`, `task` for subagent spawning, …) are added by `create_deep_agent` itself; don't duplicate them.
 
+#### CodeGraph Integration
+
+CodeGraph is integrated as a local semantic code intelligence provider inside execution sandboxes:
+- **Architect Node**: Uses `codegraph files --quiet` via `get_workspace_files_via_codegraph` to retrieve codebase directories cleanly (falling back to a Python walk on failure or under unit tests).
+- **QA Node**: Uses `codegraph affected` via `get_affected_tests_via_codegraph` to dynamically find which test files are affected by source edits (falling back to string heuristics on failure or under tests).
+- **Coder Tools**: Exposes `codegraph_search`, `codegraph_callers`, `codegraph_callees`, and `codegraph_impact` to the coder agent to trace call dependency trees without reading files.
+- Helper scripts: [codegraph.py](file:///d:/Project/Open-SWE/agent/utils/codegraph.py) manages installation and execution of `codegraph` commands inside the sandbox.
+
 ### Models, profiles, and team defaults
 
 Model + reasoning effort are resolved per run in this precedence (highest wins):

@@ -1,4 +1,10 @@
 from .add_finding import add_finding
+from .codegraph_tools import (
+    codegraph_callees,
+    codegraph_callers,
+    codegraph_impact,
+    codegraph_search,
+)
 from .fetch_url import fetch_url
 from .http_request import http_request
 from .linear_comment import linear_comment
@@ -38,4 +44,8 @@ __all__ = [
     "slack_thread_reply",
     "update_finding",
     "web_search",
+    "codegraph_search",
+    "codegraph_callers",
+    "codegraph_callees",
+    "codegraph_impact",
 ]

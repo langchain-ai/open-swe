@@ -1,6 +1,21 @@
 import os
+import re
 
 from deepagents.backends import LocalShellBackend
+
+
+class LocalShellBackendWrapper(LocalShellBackend):
+    """Subclass of LocalShellBackend to sanitize commands for local execution."""
+
+    def execute(self, command: str, *, timeout: int | None = None):
+        if isinstance(command, str):
+            # In a local sandbox, we run directly on the host machine.
+            # There is no proxy to intercept "GH_TOKEN=dummy" and replace it with the real token.
+            # On Windows, prepending inline env vars like "GH_TOKEN=dummy" causes command execution to fail.
+            # On all platforms, using "dummy" token overrides valid local credentials.
+            # Thus, we strip "GH_TOKEN=<value>" prefixes so that the host's actual authenticated credentials are used.
+            command = re.sub(r"\bGH_TOKEN=\S+\s*", "", command)
+        return super().execute(command, timeout=timeout)
 
 
 def create_local_sandbox(sandbox_id: str | None = None):
@@ -16,11 +31,11 @@ def create_local_sandbox(sandbox_id: str | None = None):
         sandbox_id: Ignored for local sandboxes; accepted for interface compatibility.
 
     Returns:
-        LocalShellBackend instance implementing SandboxBackendProtocol.
+        LocalShellBackendWrapper instance implementing SandboxBackendProtocol.
     """
     root_dir = os.getenv("LOCAL_SANDBOX_ROOT_DIR", os.getcwd())
 
-    return LocalShellBackend(
+    return LocalShellBackendWrapper(
         root_dir=root_dir,
         inherit_env=True,
     )
