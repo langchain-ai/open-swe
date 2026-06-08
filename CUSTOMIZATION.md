@@ -161,6 +161,8 @@ model=make_model("google_genai:gemini-2.5-pro", temperature=0, max_tokens=16_000
 
 The `make_model()` helper in `agent/utils/model.py` wraps `langchain.chat_models.init_chat_model`. For OpenAI models, it automatically enables the Responses API. For full control, pass a pre-configured model instance directly:
 
+By default, supported providers (OpenAI, Anthropic, Google Gemini, Fireworks) are routed through the [LangSmith LLM Gateway](https://docs.langchain.com/langsmith/llm-gateway) instead of calling provider APIs directly. The gateway authenticates with your LangSmith API key (`LANGSMITH_API_KEY` / `LANGCHAIN_API_KEY` / `LANGSMITH_API_KEY_PROD`) and resolves real provider keys from workspace secrets, while enforcing spend policies and PII/secrets redaction. Override the gateway host with `LANGSMITH_GATEWAY_BASE_URL` (defaults to `https://gateway.smith.langchain.com`), or set `LANGSMITH_GATEWAY_DISABLED=true` to call provider APIs directly.
+
 ```python
 from langchain_anthropic import ChatAnthropic
 
