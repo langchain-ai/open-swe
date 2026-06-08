@@ -20,7 +20,11 @@ import {
   useSidebarLayout,
 } from "@/components/sidebar-layout"
 import { groupThreads } from "@/lib/agents/api"
-import { useAgentThreads, useDeleteAgentThread } from "@/lib/agents/queries"
+import {
+  useAgentThreads,
+  useDeleteAgentThread,
+  usePrefetchAgentThreadDetails,
+} from "@/lib/agents/queries"
 import { cn } from "@/lib/utils"
 
 type SourceIcon = ComponentType<SVGProps<SVGSVGElement>>
@@ -46,6 +50,7 @@ const NAV = [
 export function AgentsSidebar({ user, activeThreadId }: AgentsSidebarProps) {
   const threadsQuery = useAgentThreads()
   const threads = threadsQuery.data ?? []
+  usePrefetchAgentThreadDetails(threads, activeThreadId)
   const groups = groupThreads(threads)
   const layout = useSidebarLayout()
 
