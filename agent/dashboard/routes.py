@@ -783,9 +783,15 @@ async def api_create_thread(
 @router.get("/threads/{thread_id}")
 async def api_get_thread(
     thread_id: str,
+    mark_viewed: bool = True,
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
-    return await get_dashboard_thread(thread_id, session["sub"], email=session.get("email"))
+    return await get_dashboard_thread(
+        thread_id,
+        session["sub"],
+        email=session.get("email"),
+        mark_viewed=mark_viewed,
+    )
 
 
 @router.post("/threads/{thread_id}/messages")
