@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 dependencies = [
-    "deepagents>=0.6.7",
+    "deepagents==0.6.6",
     "fastapi>=0.136.3",
     "uvicorn>=0.48.0",
     "httpx>=0.28.1",
