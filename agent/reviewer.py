@@ -65,6 +65,7 @@ from .tools import (
     web_search,
 )
 from .utils.agents_md import fetch_agents_md
+from .utils.api_standards_skill import fetch_api_standards_skill
 from .utils.github_app import get_github_app_installation_token_with_expiry
 from .utils.github_token import cache_github_token_for_thread
 from .utils.model import DEFAULT_LLM_REASONING, make_model, provider_model_kwargs
@@ -278,6 +279,7 @@ def _reviewer_system_prompt(
     org_guidelines: str | None = None,
     repo_style_prompt: str | None = None,
     agents_md_content: str | None = None,
+    api_standards_skill: str | None = None,
 ) -> str:
     prompt = REVIEWER_PROMPT_TEMPLATE.format(
         working_dir=working_dir,
@@ -321,6 +323,21 @@ def _reviewer_system_prompt(
             "```\n"
             f"{agents_md_content}\n"
             "```"
+        )
+    if api_standards_skill:
+        prompt = (
+            f"{prompt}\n\n"
+            "# API standards skill\n\n"
+            "Apply this skill ONLY when the PR introduces a new API or modifies "
+            "an existing one (HTTP routes/handlers, RPC or GraphQL endpoints, "
+            "public SDK/library signatures, request/response schemas, status "
+            "codes, headers, or other API contracts). When the diff touches such "
+            "surfaces, verify the change against the best practices below and "
+            "file a finding when a changed line violates them and clears the "
+            "global bar above (anchored, concrete failure mode, in-diff). If the "
+            "PR does not change any API, ignore this section. Do not file "
+            "style-only nits or pre-existing violations outside the diff.\n\n"
+            f"{api_standards_skill}"
         )
     return prompt
 
@@ -788,6 +805,7 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
         repo_style_prompt,
         agents_md_content,
         org_guidelines,
+        api_standards_skill,
     ) = await asyncio.gather(
         _fetch_diff_context(),
         _fetch_pr_overview(),
@@ -795,6 +813,7 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
         _fetch_repo_style_prompt(),
         _fetch_agents_md_context(),
         _fetch_org_guidelines(),
+        fetch_api_standards_skill(),
     )
     pr_diff_text, pr_diff_line_set = diff_context
     pr_title, pr_body = pr_overview
@@ -903,6 +922,7 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
         org_guidelines=org_guidelines,
         repo_style_prompt=repo_style_prompt,
         agents_md_content=agents_md_content,
+        api_standards_skill=api_standards_skill,
     )
     if review_context:
         system_prompt = f"{system_prompt}\n\n{review_context}"
