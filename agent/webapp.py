@@ -1623,17 +1623,27 @@ def build_github_issue_prompt(
     comments_text = _build_github_issue_comments_text(comments)
     sanitized_title = sanitize_github_comment_body(title)
     formatted_body = format_github_comment_body_for_prompt(issue_author or github_login, body)
+    owner = repo_config.get("owner", "")
+    name = repo_config.get("name", "")
     return (
         "Please work on the following GitHub issue:\n\n"
-        f"## Repository: {repo_config.get('owner')}/{repo_config.get('name')}\n\n"
+        f"## Repository: {owner}/{name}\n\n"
         f"{triggered_by_line}"
         f"## GitHub Issue: #{issue_number} - Issue ID: {issue_id}\n\n"
         f"## Title: {sanitized_title}\n\n"
         f"## Description:\n{formatted_body}\n"
         f"{comments_text}\n\n"
-        "Please analyze this issue and implement the necessary changes. "
-        "When you need to communicate on GitHub, use `GH_TOKEN=dummy gh issue comment` "
-        "with the issue number."
+        "Please analyze this issue and implement the necessary changes.\n\n"
+        "If code changes are needed:\n"
+        "1. Make the changes in the sandbox\n"
+        "2. Commit and push them, then open/update a draft PR with `GH_TOKEN=dummy gh` — this is REQUIRED, do NOT skip it\n"
+        f"3. Use `GH_TOKEN=dummy gh issue comment {issue_number} --repo {owner}/{name} --body '...'` "
+        "to post a summary on the GitHub issue — this is REQUIRED\n\n"
+        "If no code changes are needed:\n"
+        f"1. Use `GH_TOKEN=dummy gh issue comment {issue_number} --repo {owner}/{name} --body '...'` "
+        "to explain your answer on the GitHub issue — this is REQUIRED, never end silently\n\n"
+        "**You MUST always post a comment on the GitHub issue before finishing — "
+        "whether or not code changes were made.**"
     )
 
 
