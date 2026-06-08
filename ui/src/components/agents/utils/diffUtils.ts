@@ -54,7 +54,8 @@ export const DIFF_UNSAFE_CSS = `
 `;
 
 export const diffOptions = {
-  theme: "pierre-light" as const,
+  theme: { light: "pierre-light", dark: "pierre-dark" } as const,
+  themeType: "system" as const,
   diffStyle: "unified" as const,
   overflow: "scroll" as const,
   disableFileHeader: true,
