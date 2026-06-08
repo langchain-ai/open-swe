@@ -654,12 +654,19 @@ const MessageBubble = memo(function MessageBubble({
   );
 });
 
-function ThinkingSpinner({ isStreaming }: { isStreaming: boolean }) {
+function ThinkingSpinner({
+  isStreaming,
+  settingUpSandbox,
+}: {
+  isStreaming: boolean;
+  settingUpSandbox: boolean;
+}) {
   const [textIdx, setTextIdx] = useState(0);
   const [done, setDone] = useState<{ past: string; elapsed: string } | null>(null);
   const startTimeRef = useRef(0);
   const textIdxRef = useRef(textIdx);
   const wasStreamingRef = useRef(false);
+  const settingUpSandboxRef = useRef(settingUpSandbox);
   textIdxRef.current = textIdx;
 
   useEffect(() => {
@@ -670,18 +677,24 @@ function ThinkingSpinner({ isStreaming }: { isStreaming: boolean }) {
       setDone(null);
     } else if (wasStreamingRef.current) {
       setDone({
-        past: BUSY_TEXTS[textIdxRef.current].past,
+        past: settingUpSandboxRef.current
+          ? "Set up sandbox"
+          : BUSY_TEXTS[textIdxRef.current].past,
         elapsed: formatElapsed(Date.now() - startTimeRef.current),
       });
     }
   }, [isStreaming]);
 
   useEffect(() => {
-    if (!isStreaming) return;
+    settingUpSandboxRef.current = settingUpSandbox;
+  }, [settingUpSandbox]);
+
+  useEffect(() => {
+    if (!isStreaming || settingUpSandbox) return;
     const BUSY_TEXT_ROTATE_INTERVAL_MS = 12000;
     const id = setInterval(() => setTextIdx((i) => (i + 1) % BUSY_TEXTS.length), BUSY_TEXT_ROTATE_INTERVAL_MS);
     return () => clearInterval(id);
-  }, [isStreaming]);
+  }, [isStreaming, settingUpSandbox]);
 
   if (!isStreaming && !done) return null;
 
@@ -696,7 +709,9 @@ function ThinkingSpinner({ isStreaming }: { isStreaming: boolean }) {
 
   return (
     <div className="my-2 flex items-center gap-2">
-      <span className="shimmer-text text-xs">{BUSY_TEXTS[textIdx].present}</span>
+      <span className="shimmer-text text-xs">
+        {settingUpSandbox ? "Setting up sandbox..." : BUSY_TEXTS[textIdx].present}
+      </span>
     </div>
   );
 }
@@ -843,6 +858,8 @@ export const MessageView = memo(function MessageView({
   }, [scheduleScrollToBottom, syncScrollButtonVisibility]);
 
   const visibleMessages = useMemo(() => messages.filter((message) => !message.hidden), [messages]);
+  const latestVisibleMessage = visibleMessages[visibleMessages.length - 1];
+  const settingUpSandbox = isStreaming && latestVisibleMessage?.author === "user";
 
   const handleScrollToBottom = useCallback(() => {
     autoScrollEnabledRef.current = true;
@@ -885,7 +902,10 @@ export const MessageView = memo(function MessageView({
               onOpenDiff={onOpenDiff}
             />
           ))}
-          <ThinkingSpinner isStreaming={isStreaming} />
+          <ThinkingSpinner
+            isStreaming={isStreaming}
+            settingUpSandbox={settingUpSandbox}
+          />
         </div>
       </div>
 
