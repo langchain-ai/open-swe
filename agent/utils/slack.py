@@ -438,6 +438,51 @@ async def get_slack_user_info(user_id: str) -> dict[str, Any] | None:
     return None
 
 
+async def get_slack_channel_info(channel_id: str) -> dict[str, Any] | None:
+    """Get Slack channel details (including topic/purpose) by channel ID."""
+    if not SLACK_BOT_TOKEN:
+        return None
+
+    async with httpx.AsyncClient() as http_client:
+        try:
+            response = await http_client.get(
+                f"{SLACK_API_BASE_URL}/conversations.info",
+                headers=_slack_headers(),
+                params={"channel": channel_id},
+            )
+            response.raise_for_status()
+            data = response.json()
+            if not data.get("ok"):
+                logger.warning("Slack conversations.info failed: %s", data.get("error"))
+                return None
+            channel = data.get("channel")
+            if isinstance(channel, dict):
+                return channel
+        except httpx.HTTPError:
+            logger.exception("Slack conversations.info request failed")
+    return None
+
+
+def extract_channel_description_text(channel: dict[str, Any] | None) -> str:
+    """Combine a Slack channel's topic and purpose text into one string."""
+    if not isinstance(channel, dict):
+        return ""
+    parts: list[str] = []
+    for key in ("topic", "purpose"):
+        section = channel.get(key)
+        if isinstance(section, dict):
+            value = section.get("value")
+            if isinstance(value, str) and value.strip():
+                parts.append(value.strip())
+    return "\n".join(parts)
+
+
+async def get_slack_channel_description(channel_id: str) -> str:
+    """Fetch a Slack channel's combined topic + purpose text."""
+    channel = await get_slack_channel_info(channel_id)
+    return extract_channel_description_text(channel)
+
+
 async def get_slack_user_names(user_ids: list[str]) -> dict[str, str]:
     """Get display names for a set of Slack user IDs."""
     unique_ids = sorted({user_id for user_id in user_ids if isinstance(user_id, str) and user_id})
