@@ -2,17 +2,25 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import logging
 import os
 import time
 from abc import ABC, abstractmethod
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FuturesTimeout
 from typing import Any
 
 import httpx
 from deepagents.backends import LangSmithSandbox
-from deepagents.backends.protocol import SandboxBackendProtocol
-from langsmith.sandbox import SandboxClient
+from deepagents.backends.protocol import ExecuteResponse, SandboxBackendProtocol
+from langsmith.sandbox import (
+    CommandTimeoutError,
+    SandboxClient,
+    SandboxConnectionError,
+    SandboxServerReloadError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +53,13 @@ def _parse_optional_int(name: str, default: int) -> int:
     except ValueError as e:
         msg = f"{name} must be an integer, got {raw!r}"
         raise ValueError(msg) from e
+
+
+def _execute_client_grace_seconds() -> int:
+    """Extra wall-clock seconds the client waits past a command's own timeout
+    before giving up and killing it. The server is meant to enforce the command
+    timeout; this is the client-side backstop for when it doesn't."""
+    return _parse_optional_int("SANDBOX_EXECUTE_CLIENT_GRACE_SECONDS", 30)
 
 
 def _get_sandbox_snapshot_config() -> tuple[str | None, int, int, int, int, int]:
@@ -250,6 +265,105 @@ def _update_thread_sandbox_metadata(sandbox_id: str) -> None:
         pass
 
 
+class TimeoutLangSmithSandbox(LangSmithSandbox):
+    """LangSmith backend that enforces a client-side execution deadline.
+
+    The langsmith SDK's default execute path is now a WebSocket stream with no
+    client-side read deadline: on a live socket where the dataplane never emits
+    an exit/error frame, ``CommandHandle.result`` blocks forever and wedges the
+    run (the blocking call sits in a thread that cancellation can't reclaim).
+
+    We drive a non-blocking ``CommandHandle`` ourselves and, if the command
+    overruns its own timeout by the grace window, kill it and surface a
+    timed-out tool result instead of hanging the graph. WebSocket connect
+    failures fall back to the base wait=True path, whose HTTP fallback carries
+    its own request deadline.
+    """
+
+    _WS_FALLBACK_ERRORS = (
+        SandboxConnectionError,
+        SandboxServerReloadError,
+        ImportError,
+        OSError,
+        TypeError,
+    )
+
+    def _deadline(self, effective_timeout: int) -> int:
+        return effective_timeout + _execute_client_grace_seconds()
+
+    @staticmethod
+    def _result_to_response(result: Any) -> ExecuteResponse:
+        output = result.stdout or ""
+        if result.stderr:
+            output += "\n" + result.stderr if output else result.stderr
+        return ExecuteResponse(output=output, exit_code=result.exit_code, truncated=False)
+
+    @staticmethod
+    def _timeout_response(seconds: int, *, server_side: bool) -> ExecuteResponse:
+        where = "on the sandbox" if server_side else "by the client and killed"
+        return ExecuteResponse(
+            output=f"Command timed out after {seconds}s {where}.",
+            exit_code=124,
+            truncated=False,
+        )
+
+    @staticmethod
+    def _safe_kill(handle: Any) -> None:
+        try:
+            handle.kill()
+        except Exception:  # noqa: BLE001 - best-effort cleanup of a wedged command
+            logger.warning("Failed to kill timed-out sandbox command", exc_info=True)
+
+    def execute(self, command: str, *, timeout: int | None = None) -> ExecuteResponse:
+        effective = timeout if timeout is not None else self._default_timeout
+        if not effective:  # 0 / None: caller opted out of any deadline
+            return super().execute(command, timeout=timeout)
+        deadline = self._deadline(effective)
+        handle = self._sandbox.run(command, timeout=effective, wait=False)
+        pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="sbx-exec")
+        try:
+            future = pool.submit(lambda: handle.result)
+            try:
+                result = future.result(timeout=deadline)
+            except FuturesTimeout:
+                self._safe_kill(handle)
+                return self._timeout_response(deadline, server_side=False)
+            except CommandTimeoutError:
+                return self._timeout_response(effective, server_side=True)
+            except self._WS_FALLBACK_ERRORS:
+                return super().execute(command, timeout=timeout)
+            return self._result_to_response(result)
+        finally:
+            # Never join: a still-wedged worker must not block the caller.
+            pool.shutdown(wait=False)
+
+    async def aexecute(
+        self,
+        command: str,
+        *,
+        timeout: int | None = None,  # noqa: ASYNC109 - forwarded semantic timeout, not an asyncio contract
+    ) -> ExecuteResponse:
+        effective = timeout if timeout is not None else self._default_timeout
+        if not effective:
+            return await super().aexecute(command, timeout=timeout)
+        deadline = self._deadline(effective)
+        handle = self._sandbox.run(command, timeout=effective, wait=False)
+        try:
+            result = await asyncio.wait_for(
+                asyncio.to_thread(lambda: handle.result), timeout=deadline
+            )
+        except TimeoutError:
+            await asyncio.to_thread(self._safe_kill, handle)
+            return self._timeout_response(deadline, server_side=False)
+        except CommandTimeoutError:
+            return self._timeout_response(effective, server_side=True)
+        except self._WS_FALLBACK_ERRORS:
+            # WS unavailable; the base wait=True path falls back to HTTP, which
+            # carries its own request deadline.
+            return await asyncio.to_thread(LangSmithSandbox.execute, self, command, timeout=timeout)
+        return self._result_to_response(result)
+
+
 class SandboxProvider(ABC):
     """Interface for creating and deleting sandbox backends."""
 
@@ -341,7 +455,7 @@ class LangSmithProvider(SandboxProvider):
             except Exception as e:
                 msg = f"Failed to connect to existing sandbox '{sandbox_id}': {e}"
                 raise RuntimeError(msg) from e
-            return LangSmithSandbox(sandbox)
+            return TimeoutLangSmithSandbox(sandbox)
 
         if not snapshot_id:
             msg = "DEFAULT_SANDBOX_SNAPSHOT_ID must be set when SANDBOX_TYPE=langsmith"
@@ -361,7 +475,7 @@ class LangSmithProvider(SandboxProvider):
             msg = f"Failed to create sandbox from snapshot '{snapshot_id}': {e}"
             raise RuntimeError(msg) from e
 
-        return LangSmithSandbox(sandbox)
+        return TimeoutLangSmithSandbox(sandbox)
 
     def delete(self, *, sandbox_id: str, **kwargs: Any) -> None:
         """Delete a LangSmith sandbox."""
