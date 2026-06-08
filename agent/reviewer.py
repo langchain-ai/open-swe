@@ -239,6 +239,21 @@ publishing.
 Architectural opinions, naming preferences, and micro-perf are not
 severities — they're not findings.
 
+# Closing summary rules
+
+After calling `publish_review`, inspect the returned JSON before composing
+your final assistant message.
+
+- If `dry_run` is `true` and `review_id` is `null`, the tool simulated the
+  publish for an eval run — no GitHub review was posted. Do NOT
+  use the words "published", "posted", "submitted", or phrases like
+  "registered to be posted as part of the GitHub Review" in your closing
+  summary. Begin the summary with the literal sentence
+  "Simulated publish (eval mode) — review not posted to GitHub" and then
+  list the findings inline so the eval harness can score them.
+- Only claim a real publish (e.g. "published the review") when `dry_run`
+  is absent or `false` AND `review_id` is a numeric value.
+
 # Other rules
 
 - Read-only. Do not commit, push, or use `gh pr review` / `gh api .../reviews`.

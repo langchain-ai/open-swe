@@ -73,7 +73,13 @@ def publish_review(
 
     Returns:
         Dictionary with ``success``, ``review_id``, ``surfaced_count``,
-        ``hidden_count``, ``resolved_thread_count``.
+        ``hidden_count``, ``resolved_thread_count``. In benchmark/eval mode
+        the dictionary additionally has ``dry_run: true`` and
+        ``review_id: null`` — no GitHub review is actually posted. When you
+        see ``dry_run: true`` you MUST NOT claim the review was published,
+        posted, submitted, or registered to be posted; report it as a
+        simulated publish (eval mode) and list findings inline so the eval
+        harness can score them.
     """
     if severity_threshold not in {"low", "medium", "high", "critical"}:
         return {"success": False, "error": f"Invalid severity_threshold: {severity_threshold}"}
