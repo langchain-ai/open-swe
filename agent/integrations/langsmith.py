@@ -314,12 +314,22 @@ class TimeoutLangSmithSandbox(LangSmithSandbox):
         except Exception:  # noqa: BLE001 - best-effort cleanup of a wedged command
             logger.warning("Failed to kill timed-out sandbox command", exc_info=True)
 
+    def _base_execute(self, command: str, timeout: int | None) -> ExecuteResponse:
+        # WS path unavailable; the base wait=True path falls back to HTTP,
+        # which carries its own request deadline.
+        return LangSmithSandbox.execute(self, command, timeout=timeout)
+
     def execute(self, command: str, *, timeout: int | None = None) -> ExecuteResponse:
         effective = timeout if timeout is not None else self._default_timeout
         if not effective:  # 0 / None: caller opted out of any deadline
             return super().execute(command, timeout=timeout)
+        # run(wait=False) eagerly opens the WS and reads the "started" frame, so
+        # connect/setup failures raise here — fall back to the base path.
+        try:
+            handle = self._sandbox.run(command, timeout=effective, wait=False)
+        except (*self._WS_FALLBACK_ERRORS, TimeoutError):
+            return self._base_execute(command, timeout)
         deadline = self._deadline(effective)
-        handle = self._sandbox.run(command, timeout=effective, wait=False)
         pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="sbx-exec")
         try:
             future = pool.submit(lambda: handle.result)
@@ -331,7 +341,7 @@ class TimeoutLangSmithSandbox(LangSmithSandbox):
             except CommandTimeoutError:
                 return self._timeout_response(effective, server_side=True)
             except self._WS_FALLBACK_ERRORS:
-                return super().execute(command, timeout=timeout)
+                return self._base_execute(command, timeout)
             return self._result_to_response(result)
         finally:
             # Never join: a still-wedged worker must not block the caller.
@@ -346,8 +356,16 @@ class TimeoutLangSmithSandbox(LangSmithSandbox):
         effective = timeout if timeout is not None else self._default_timeout
         if not effective:
             return await super().aexecute(command, timeout=timeout)
+        # run(wait=False) eagerly opens the WS and reads the "started" frame
+        # (blocking, bounded by the SDK connect timeout); connect/setup failures
+        # raise here — fall back to the base path.
+        try:
+            handle = await asyncio.to_thread(
+                self._sandbox.run, command, timeout=effective, wait=False
+            )
+        except (*self._WS_FALLBACK_ERRORS, TimeoutError):
+            return await asyncio.to_thread(self._base_execute, command, timeout)
         deadline = self._deadline(effective)
-        handle = self._sandbox.run(command, timeout=effective, wait=False)
         try:
             result = await asyncio.wait_for(
                 asyncio.to_thread(lambda: handle.result), timeout=deadline
@@ -358,9 +376,7 @@ class TimeoutLangSmithSandbox(LangSmithSandbox):
         except CommandTimeoutError:
             return self._timeout_response(effective, server_side=True)
         except self._WS_FALLBACK_ERRORS:
-            # WS unavailable; the base wait=True path falls back to HTTP, which
-            # carries its own request deadline.
-            return await asyncio.to_thread(LangSmithSandbox.execute, self, command, timeout=timeout)
+            return await asyncio.to_thread(self._base_execute, command, timeout)
         return self._result_to_response(result)
 
 

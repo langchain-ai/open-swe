@@ -32,18 +32,23 @@ class _FakeHandle:
 
 
 class _FakeSandbox:
-    def __init__(self, handle: _FakeHandle):
+    def __init__(self, handle: _FakeHandle, *, run_raises: Exception | None = None):
         self._handle = handle
+        self._run_raises = run_raises
         self.run_calls: list[dict[str, Any]] = []
 
     def run(self, command: str, *, timeout: int, wait: bool) -> _FakeHandle:
         self.run_calls.append({"command": command, "timeout": timeout, "wait": wait})
+        if self._run_raises is not None:
+            raise self._run_raises
         return self._handle
 
 
-def _backend(handle: _FakeHandle) -> TimeoutLangSmithSandbox:
+def _backend(
+    handle: _FakeHandle, *, run_raises: Exception | None = None
+) -> TimeoutLangSmithSandbox:
     sb = TimeoutLangSmithSandbox.__new__(TimeoutLangSmithSandbox)
-    sb._sandbox = _FakeSandbox(handle)
+    sb._sandbox = _FakeSandbox(handle, run_raises=run_raises)
     sb._default_timeout = 30 * 60
     return sb
 
@@ -93,17 +98,54 @@ def test_execute_kills_on_client_timeout() -> None:
     assert handle.killed
 
 
-async def test_aexecute_ws_failure_falls_back_to_base(monkeypatch: pytest.MonkeyPatch) -> None:
-    handle = _FakeHandle(raises=SandboxConnectionError("no ws"))
-    sb = _backend(handle)
-    called: dict[str, Any] = {}
-
+def _patch_base_execute(monkeypatch: pytest.MonkeyPatch, sink: dict[str, Any]) -> None:
     def fake_base_execute(self: Any, command: str, *, timeout: int | None = None) -> Any:
-        called["command"] = command
-        called["timeout"] = timeout
+        sink["command"] = command
+        sink["timeout"] = timeout
         return SimpleNamespace(output="via-http", exit_code=0, truncated=False)
 
     monkeypatch.setattr("agent.integrations.langsmith.LangSmithSandbox.execute", fake_base_execute)
+
+
+async def test_aexecute_ws_connect_failure_falls_back_to_base(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # run(wait=False) connects eagerly, so a connect failure raises from run().
+    sb = _backend(_FakeHandle(), run_raises=SandboxConnectionError("no ws"))
+    called: dict[str, Any] = {}
+    _patch_base_execute(monkeypatch, called)
     resp = await sb.aexecute("git status", timeout=5)
     assert called == {"command": "git status", "timeout": 5}
+    assert resp.output == "via-http"
+
+
+async def test_aexecute_ws_connect_timeout_falls_back_to_base(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sb = _backend(_FakeHandle(), run_raises=TimeoutError("connect timed out"))
+    called: dict[str, Any] = {}
+    _patch_base_execute(monkeypatch, called)
+    resp = await sb.aexecute("git status", timeout=5)
+    assert called["command"] == "git status"
+    assert resp.output == "via-http"
+
+
+def test_execute_ws_connect_failure_falls_back_to_base(monkeypatch: pytest.MonkeyPatch) -> None:
+    sb = _backend(_FakeHandle(), run_raises=SandboxConnectionError("no ws"))
+    called: dict[str, Any] = {}
+    _patch_base_execute(monkeypatch, called)
+    resp = sb.execute("git status", timeout=5)
+    assert called == {"command": "git status", "timeout": 5}
+    assert resp.output == "via-http"
+
+
+async def test_aexecute_midstream_ws_drop_falls_back_to_base(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Connect succeeds (run returns a handle) but the stream drops while draining.
+    sb = _backend(_FakeHandle(raises=SandboxConnectionError("dropped")))
+    called: dict[str, Any] = {}
+    _patch_base_execute(monkeypatch, called)
+    resp = await sb.aexecute("git status", timeout=5)
+    assert called["command"] == "git status"
     assert resp.output == "via-http"
