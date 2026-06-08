@@ -420,7 +420,7 @@ async def _mark_thread_viewed(
 
 
 async def get_dashboard_thread(
-    thread_id: str, login: str, *, email: str | None = None
+    thread_id: str, login: str, *, email: str | None = None, mark_viewed: bool = True
 ) -> dict[str, Any]:
     client = langgraph_client()
     try:
@@ -456,7 +456,7 @@ async def get_dashboard_thread(
             else None
         ),
     )
-    if status != "running":
+    if mark_viewed and status != "running":
         metadata = await _mark_thread_viewed(
             client,
             thread_id,

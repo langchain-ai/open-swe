@@ -33,7 +33,7 @@ export function usePrefetchAgentThreadDetails(
     threadIds.forEach((threadId) => {
       void queryClient.prefetchQuery({
         queryKey: agentThreadKeys.detail(threadId),
-        queryFn: () => agentsApi.getThread(threadId),
+        queryFn: () => agentsApi.getThread(threadId, { markViewed: false }),
       })
     })
   }, [activeThreadId, queryClient, threads])
@@ -54,6 +54,7 @@ export function useAgentThread(threadId: string) {
   return useQuery({
     queryKey: agentThreadKeys.detail(threadId),
     queryFn: () => agentsApi.getThread(threadId),
+    refetchOnMount: "always",
     refetchInterval: (query) => {
       const status = query.state.data?.status
       return status === "running" ? 2000 : false

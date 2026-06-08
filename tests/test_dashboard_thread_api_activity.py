@@ -83,6 +83,25 @@ async def test_get_dashboard_thread_marks_finished_thread_viewed(monkeypatch) ->
     assert client.threads.thread["metadata"]["last_viewed_run_id"] == "run-1"
 
 
+async def test_get_dashboard_thread_skips_mark_viewed_when_disabled(monkeypatch) -> None:
+    client = FakeClient(
+        {
+            "source": "dashboard",
+            "github_login": "octocat",
+            "latest_run_id": "run-1",
+            "latest_run_status": "success",
+        },
+        "success",
+    )
+    monkeypatch.setattr(thread_api, "langgraph_client", lambda: client)
+
+    result = await thread_api.get_dashboard_thread("tid", "octocat", mark_viewed=False)
+
+    assert result["status"] == "finished"
+    assert result["viewed"] is False
+    assert "last_viewed_run_id" not in client.threads.thread["metadata"]
+
+
 async def test_get_dashboard_thread_does_not_mark_running_thread_viewed(monkeypatch) -> None:
     client = FakeClient(
         {
