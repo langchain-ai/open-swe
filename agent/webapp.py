@@ -85,6 +85,8 @@ from .utils.multimodal import dedupe_urls, extract_image_urls, fetch_image_block
 from .utils.repo import extract_repo_from_text
 from .utils.slack import (
     GitHubPrRef,
+    extract_repo_links,
+    fetch_slack_channel_info,
     fetch_slack_thread_messages,
     format_slack_messages_for_prompt,
     get_slack_user_info,
@@ -568,14 +570,16 @@ async def get_slack_repo_config(
     channel_id: str,
     thread_ts: str,
     slack_user_id: str | None = None,
+    channel_info: dict[str, str] | None = None,
 ) -> dict[str, str]:
     """Resolve repository configuration for Slack-triggered runs.
 
     Priority:
         1. Repo carried over from the existing Slack thread's metadata.
-        2. The triggering user's dashboard ``default_repo`` (if they have a
+        2. A GitHub repo link in the channel description (topic/purpose).
+        3. The triggering user's dashboard ``default_repo`` (if they have a
            profile and their Slack email maps to a known GitHub login).
-        3. ``SLACK_REPO_*`` env defaults.
+        4. ``SLACK_REPO_*`` env defaults.
     """
     default_owner = SLACK_REPO_OWNER.strip() or DEFAULT_REPO_OWNER
     default_name = SLACK_REPO_NAME.strip() or DEFAULT_REPO_NAME
@@ -595,6 +599,21 @@ async def get_slack_repo_config(
                 "Failed to fetch Slack thread %s for repo resolution",
                 thread_id,
             )
+
+    if not repo_config and channel_info:
+        description = f"{channel_info.get('purpose', '')}\n{channel_info.get('topic', '')}"
+        github_links = [
+            link for link in extract_repo_links(description) if link["host"] == "github.com"
+        ]
+        if github_links:
+            link = github_links[0]
+            logger.info(
+                "Applying channel-description repo for channel %s: %s/%s",
+                channel_id,
+                link["owner"],
+                link["name"],
+            )
+            repo_config = {"owner": link["owner"], "name": link["name"]}
 
     if not repo_config and slack_user_id:
         try:
@@ -928,6 +947,31 @@ async def _post_account_link_prompt(
         logger.debug("Failed to post account-link prompt to Slack", exc_info=True)
 
 
+def _build_channel_description_section(channel_info: dict[str, str]) -> str:
+    """Render the channel topic/purpose (and any repo links) as a prompt section."""
+    purpose = (channel_info.get("purpose") or "").strip()
+    topic = (channel_info.get("topic") or "").strip()
+    if not purpose and not topic:
+        return ""
+
+    lines = ["## Channel Description"]
+    if purpose:
+        lines.append(f"- Description: {purpose}")
+    if topic:
+        lines.append(f"- Topic: {topic}")
+
+    repo_links = extract_repo_links(f"{purpose}\n{topic}")
+    if repo_links:
+        rendered = ", ".join(link["url"] for link in repo_links)
+        lines.append(
+            f"This channel's description references these repositories: {rendered}. "
+            "Prefer one of these over the default repository hint unless the conversation "
+            "identifies a different repository."
+        )
+
+    return "\n".join(lines) + "\n\n"
+
+
 async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[str, str]) -> None:
     """Process a Slack app mention by creating a run or queuing a mid-run message."""
     channel_id = event_data.get("channel_id", "")
@@ -936,6 +980,7 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
     user_id = event_data.get("user_id", "")
     text = event_data.get("text", "")
     bot_user_id = event_data.get("bot_user_id", "")
+    channel_info = event_data.get("channel_info") or {}
 
     if not channel_id or not thread_ts or not event_ts:
         logger.warning(
@@ -1009,12 +1054,15 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
         context_messages, user_names_by_id
     )
 
+    channel_description_section = _build_channel_description_section(channel_info)
+
     prompt = (
         "You were mentioned in Slack.\n\n"
         "## Default Repository Hint\n"
         f"{repo_config.get('owner')}/{repo_config.get('name')}\n"
         "Use this only if the Slack conversation does not identify a different repository.\n\n"
-        f"## Triggered by\n{trigger_user}\n\n"
+        + channel_description_section
+        + f"## Triggered by\n{trigger_user}\n\n"
         f"## Slack Thread\n- Channel: {channel_id}\n- Thread TS: {thread_ts}\n"
         f"- Context starts at: {context_source}\n\n"
         f"## Conversation Context\n{context_text}\n\n"
@@ -1456,6 +1504,7 @@ async def slack_webhook(request: Request, background_tasks: BackgroundTasks) -> 
     if bot_user_id and user_id == bot_user_id:
         return {"status": "ignored", "reason": "Event from this bot user"}
 
+    channel_info = await fetch_slack_channel_info(channel_id)
     event_data = {
         "channel_id": channel_id,
         "thread_ts": thread_ts,
@@ -1463,8 +1512,11 @@ async def slack_webhook(request: Request, background_tasks: BackgroundTasks) -> 
         "user_id": user_id,
         "text": text,
         "bot_user_id": bot_user_id,
+        "channel_info": channel_info,
     }
-    repo_config = await get_slack_repo_config(channel_id, thread_ts, slack_user_id=user_id)
+    repo_config = await get_slack_repo_config(
+        channel_id, thread_ts, slack_user_id=user_id, channel_info=channel_info
+    )
 
     background_tasks.add_task(process_slack_mention, event_data, repo_config)
 
@@ -1526,7 +1578,10 @@ async def slack_interactivity(
     if not channel_id or not thread_ts or not event_ts or not user_id:
         return {"status": "ignored", "reason": "Missing Slack action context"}
 
-    repo_config = await get_slack_repo_config(channel_id, thread_ts, slack_user_id=user_id)
+    channel_info = await fetch_slack_channel_info(channel_id)
+    repo_config = await get_slack_repo_config(
+        channel_id, thread_ts, slack_user_id=user_id, channel_info=channel_info
+    )
     background_tasks.add_task(
         process_slack_mention,
         {
@@ -1536,6 +1591,7 @@ async def slack_interactivity(
             "user_id": user_id,
             "text": response,
             "bot_user_id": SLACK_BOT_USER_ID,
+            "channel_info": channel_info,
         },
         repo_config,
     )

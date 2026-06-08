@@ -503,6 +503,79 @@ async def fetch_slack_thread_messages(channel_id: str, thread_ts: str) -> list[d
     return messages
 
 
+async def fetch_slack_channel_info(channel_id: str) -> dict[str, str] | None:
+    """Fetch a Slack channel's topic and purpose (the UI "Description").
+
+    Returns ``{"topic": ..., "purpose": ...}`` with empty strings when unset.
+    Failures are logged but never raised.
+    """
+    if not SLACK_BOT_TOKEN or not channel_id:
+        return None
+
+    async with httpx.AsyncClient() as http_client:
+        try:
+            response = await http_client.get(
+                f"{SLACK_API_BASE_URL}/conversations.info",
+                headers=_slack_headers(),
+                params={"channel": channel_id},
+            )
+            response.raise_for_status()
+            payload = response.json()
+        except httpx.HTTPError:
+            logger.exception("Slack conversations.info request failed for channel=%s", channel_id)
+            return None
+
+    if not payload.get("ok"):
+        logger.warning("Slack conversations.info failed: %s", payload.get("error"))
+        return None
+
+    channel = payload.get("channel")
+    if not isinstance(channel, dict):
+        return None
+
+    def _value(field: str) -> str:
+        section = channel.get(field)
+        value = section.get("value") if isinstance(section, dict) else None
+        return value if isinstance(value, str) else ""
+
+    return {"topic": _value("topic"), "purpose": _value("purpose")}
+
+
+REPO_LINK_RE = re.compile(
+    r"https?://(github\.com|gitlab\.com|codeberg\.org)/"
+    r"([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)",
+)
+
+
+def extract_repo_links(text: str) -> list[dict[str, str]]:
+    """Extract GitHub/GitLab/Codeberg repo references from free text.
+
+    Strips a trailing ``.git`` and ignores deep paths (``/tree/...`` etc.).
+    Returns de-duplicated ``{"host","owner","name","url"}`` dicts in order.
+    """
+    if not text:
+        return []
+
+    seen: set[tuple[str, str, str]] = set()
+    links: list[dict[str, str]] = []
+    for match in REPO_LINK_RE.finditer(text):
+        host, owner, name = match.group(1), match.group(2), match.group(3)
+        name = name.removesuffix(".git")
+        key = (host, owner.lower(), name.lower())
+        if key in seen:
+            continue
+        seen.add(key)
+        links.append(
+            {
+                "host": host,
+                "owner": owner,
+                "name": name,
+                "url": f"https://{host}/{owner}/{name}",
+            }
+        )
+    return links
+
+
 SLACK_MESSAGE_URL_RE = re.compile(
     r"https?://[a-zA-Z0-9\-]+\.slack\.com/archives/([A-Za-z0-9]+)/p(\d{16})(?:\?[^\s>]*)?"
 )

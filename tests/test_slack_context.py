@@ -952,3 +952,102 @@ def test_process_slack_mention_bot_only_mode_runs_without_user_token(
 
     assert "run_create" in captured
     assert "prompt" not in captured
+
+
+def test_extract_repo_links_supported_hosts() -> None:
+    links = slack_utils.extract_repo_links(
+        "see https://github.com/acme/widgets and https://gitlab.com/foo/bar "
+        "plus https://codeberg.org/baz/qux"
+    )
+    assert [(link["host"], link["owner"], link["name"]) for link in links] == [
+        ("github.com", "acme", "widgets"),
+        ("gitlab.com", "foo", "bar"),
+        ("codeberg.org", "baz", "qux"),
+    ]
+
+
+def test_extract_repo_links_strips_git_suffix_and_deep_paths() -> None:
+    links = slack_utils.extract_repo_links(
+        "https://github.com/acme/widgets.git https://github.com/acme/widgets/tree/main/src"
+    )
+    assert len(links) == 1
+    assert links[0]["name"] == "widgets"
+    assert links[0]["url"] == "https://github.com/acme/widgets"
+
+
+def test_extract_repo_links_no_match() -> None:
+    assert slack_utils.extract_repo_links("no links here, just https://example.com") == []
+    assert slack_utils.extract_repo_links("") == []
+
+
+def test_get_slack_repo_config_uses_channel_description_repo(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    threads_client = _FakeThreadsClient(thread={"metadata": {}})
+    monkeypatch.setattr(webapp, "SLACK_REPO_OWNER", "default-owner")
+    monkeypatch.setattr(webapp, "SLACK_REPO_NAME", "default-repo")
+    monkeypatch.setattr(webapp, "get_client", lambda url: _FakeClient(threads_client))
+
+    repo = asyncio.run(
+        webapp.get_slack_repo_config(
+            "C123",
+            "1.234",
+            channel_info={"purpose": "work on https://github.com/acme/widgets", "topic": ""},
+        )
+    )
+
+    assert repo == {"owner": "acme", "name": "widgets"}
+
+
+def test_get_slack_repo_config_thread_repo_beats_channel_description(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    threads_client = _FakeThreadsClient(
+        thread={"metadata": {"repo": {"owner": "saved-owner", "name": "saved-repo"}}}
+    )
+    monkeypatch.setattr(webapp, "get_client", lambda url: _FakeClient(threads_client))
+
+    repo = asyncio.run(
+        webapp.get_slack_repo_config(
+            "C123",
+            "1.234",
+            channel_info={"purpose": "https://github.com/acme/widgets", "topic": ""},
+        )
+    )
+
+    assert repo == {"owner": "saved-owner", "name": "saved-repo"}
+
+
+def test_get_slack_repo_config_ignores_non_github_channel_link(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    threads_client = _FakeThreadsClient(thread={"metadata": {}})
+    monkeypatch.setattr(webapp, "SLACK_REPO_OWNER", "default-owner")
+    monkeypatch.setattr(webapp, "SLACK_REPO_NAME", "default-repo")
+    monkeypatch.setattr(webapp, "get_client", lambda url: _FakeClient(threads_client))
+
+    repo = asyncio.run(
+        webapp.get_slack_repo_config(
+            "C123",
+            "1.234",
+            channel_info={"purpose": "https://gitlab.com/foo/bar", "topic": ""},
+        )
+    )
+
+    assert repo == {"owner": "default-owner", "name": "default-repo"}
+
+
+def test_build_channel_description_section_renders_fields_and_links() -> None:
+    section = webapp._build_channel_description_section(
+        {"purpose": "Repo: https://github.com/acme/widgets", "topic": "Standup chatter"}
+    )
+    assert "## Channel Description" in section
+    assert "- Description: Repo: https://github.com/acme/widgets" in section
+    assert "- Topic: Standup chatter" in section
+    assert "https://github.com/acme/widgets" in section
+    assert section.endswith("\n\n")
+
+
+def test_build_channel_description_section_empty() -> None:
+    assert webapp._build_channel_description_section({"purpose": "", "topic": ""}) == ""
+    assert webapp._build_channel_description_section({}) == ""
