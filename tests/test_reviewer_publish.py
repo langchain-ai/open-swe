@@ -65,8 +65,9 @@ def test_render_inline_comment_body_without_suggestion() -> None:
     assert "<!-- open-swe-review-comment" in body
     assert '"id":"f_' in body
     assert "just text" in body
-    assert "Was this helpful?" in body
+    assert "Good catch or off base?" in body
     assert "👍 or 👎" in body
+    assert "help Open SWE learn" in body
 
 
 def test_render_inline_comment_body_with_suggestion_appends_block() -> None:

@@ -103,7 +103,7 @@ def render_inline_comment_body(finding: Finding) -> str:
         *(Refers to lines X-Y)*
 
         ---
-        *Was this helpful? React with 👍 or 👎 to provide feedback.*
+        *Good catch or off base? React with 👍 or 👎 to help Open SWE learn.*
 
         ```suggestion
         <replacement>
@@ -131,7 +131,9 @@ def render_inline_comment_body(finding: Finding) -> str:
         body_parts.extend(["", detail])
     if line_ref:
         body_parts.extend(["", line_ref])
-    body_parts.extend(["", "---", "*Was this helpful? React with 👍 or 👎 to provide feedback.*"])
+    body_parts.extend(
+        ["", "---", "*Good catch or off base? React with 👍 or 👎 to help Open SWE learn.*"]
+    )
     body = "\n".join(body_parts)
 
     suggestion = finding.get("suggestion")
