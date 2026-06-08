@@ -43,6 +43,10 @@ export function useAgentThreads() {
   return useQuery({
     queryKey: agentThreadKeys.all,
     queryFn: () => agentsApi.listThreads(),
+    refetchInterval: (query) =>
+      query.state.data?.some((thread) => thread.status === "running")
+        ? 2000
+        : false,
   })
 }
 

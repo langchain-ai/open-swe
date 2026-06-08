@@ -1,11 +1,16 @@
 import { useEffect, useMemo, useState } from "react"
+import { useQueryClient } from "@tanstack/react-query"
 
 import type { PendingPrompt } from "@/lib/agents/pendingPrompts"
 import type { AgentThread, Message } from "@/lib/agents/types"
 import type { ModelSelection } from "@/lib/agents/useModelOptions"
 import { AgentPromptBar } from "@/components/agents/AgentPromptBar"
 import { MessageView } from "@/components/agents/ported"
-import { useCancelAgentThread, useSendAgentMessage } from "@/lib/agents/queries"
+import {
+  agentThreadKeys,
+  useCancelAgentThread,
+  useSendAgentMessage,
+} from "@/lib/agents/queries"
 import {
   dropPendingPrompts,
   getPendingPrompts,
@@ -51,6 +56,7 @@ function isPendingPromptConfirmed(
 }
 
 export function AgentThreadView({ thread }: AgentThreadViewProps) {
+  const queryClient = useQueryClient()
   const sendMessage = useSendAgentMessage(thread.id)
   const cancelThread = useCancelAgentThread(thread.id)
   useAgentThreadStream(thread.id, thread.status === "running")
@@ -79,6 +85,18 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
       return next.length === prev.length ? prev : next
     })
   }, [thread.id, thread.messages])
+
+  useEffect(() => {
+    queryClient.setQueryData<Array<AgentThread> | undefined>(
+      agentThreadKeys.all,
+      (threads) =>
+        threads?.map((item) =>
+          item.id === thread.id
+            ? { ...item, ...thread, messages: item.messages }
+            : item
+        )
+    )
+  }, [queryClient, thread])
 
   const displayMessages = useMemo<Array<Message>>(() => {
     if (pendingPrompts.length === 0) return thread.messages

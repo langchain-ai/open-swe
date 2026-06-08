@@ -232,8 +232,28 @@ def _run_status_to_agent_status(thread_status: str | None, run_status: str | Non
     return "idle"
 
 
+def _thread_run_id(metadata: dict[str, Any], latest_run_id: str | None) -> str | None:
+    if latest_run_id:
+        return latest_run_id
+    run_id = metadata.get("latest_run_id")
+    return run_id if isinstance(run_id, str) and run_id else None
+
+
+def _is_thread_viewed(metadata: dict[str, Any], latest_run_id: str | None) -> bool:
+    viewed_at = metadata.get("last_viewed_at_ms")
+    viewed_run_id = metadata.get("last_viewed_run_id")
+    run_id = _thread_run_id(metadata, latest_run_id)
+    if run_id:
+        return viewed_run_id == run_id
+    return isinstance(viewed_at, (int, float))
+
+
 def _thread_summary(
-    thread: dict[str, Any], *, messages: list[dict[str, Any]] | None = None
+    thread: dict[str, Any],
+    *,
+    messages: list[dict[str, Any]] | None = None,
+    latest_run_status: str | None = None,
+    latest_run_id: str | None = None,
 ) -> dict[str, Any]:
     metadata = thread.get("metadata") if isinstance(thread.get("metadata"), dict) else {}
     owner, name, full_name = _metadata_repo(metadata)
@@ -243,11 +263,11 @@ def _thread_summary(
     model = metadata.get("model") if isinstance(metadata.get("model"), str) else "Default"
     effort = metadata.get("effort") if isinstance(metadata.get("effort"), str) else None
     thread_status = thread.get("status") if isinstance(thread.get("status"), str) else "idle"
-    latest_run_status = metadata.get("latest_run_status")
-    status = _run_status_to_agent_status(
-        thread_status,
-        latest_run_status if isinstance(latest_run_status, str) else None,
+    metadata_run_status = metadata.get("latest_run_status")
+    run_status = latest_run_status or (
+        metadata_run_status if isinstance(metadata_run_status, str) else None
     )
+    status = _run_status_to_agent_status(thread_status, run_status)
 
     pr_number = metadata.get("pr_number")
     pr_url = metadata.get("pr_url")
@@ -264,6 +284,12 @@ def _thread_summary(
         "effort": effort,
         "source": _thread_source(metadata),
         "status": status,
+        "viewed": _is_thread_viewed(metadata, latest_run_id),
+        "viewedAt": (
+            int(metadata["last_viewed_at_ms"])
+            if isinstance(metadata.get("last_viewed_at_ms"), (int, float))
+            else None
+        ),
         "createdAt": int(created_at) if isinstance(created_at, (int, float)) else _now_ms(),
         "updatedAt": int(updated_at) if isinstance(updated_at, (int, float)) else _now_ms(),
     }
@@ -283,13 +309,52 @@ def _thread_summary(
     return summary
 
 
-async def _latest_run_status(thread_id: str) -> str | None:
-    runs = await langgraph_client().runs.list(thread_id, limit=1)
+async def _latest_run_info(client: Any, thread_id: str) -> tuple[str | None, str | None]:
+    try:
+        runs = await client.runs.list(thread_id, limit=1)
+    except Exception:  # noqa: BLE001
+        logger.debug("Could not fetch latest run for thread %s", thread_id, exc_info=True)
+        return None, None
     if not runs:
-        return None
+        return None, None
     run = runs[0]
-    raw = run.get("status") if isinstance(run, dict) else getattr(run, "status", None)
-    return raw.lower() if isinstance(raw, str) else None
+    raw_status = run.get("status") if isinstance(run, dict) else getattr(run, "status", None)
+    raw_id = (
+        (run.get("run_id") or run.get("id"))
+        if isinstance(run, dict)
+        else (getattr(run, "run_id", None) or getattr(run, "id", None))
+    )
+    status = raw_status.lower() if isinstance(raw_status, str) else None
+    run_id = raw_id if isinstance(raw_id, str) and raw_id else None
+    return status, run_id
+
+
+async def _latest_run_status(thread_id: str) -> str | None:
+    status, _ = await _latest_run_info(langgraph_client(), thread_id)
+    return status
+
+
+async def _refresh_latest_run_metadata(
+    client: Any, thread: dict[str, Any]
+) -> tuple[dict[str, Any], str | None, str | None]:
+    thread_id = thread.get("thread_id") or thread.get("id")
+    if not isinstance(thread_id, str) or not thread_id:
+        return thread, None, None
+    latest_run_status, latest_run_id = await _latest_run_info(client, thread_id)
+    metadata = thread.get("metadata") if isinstance(thread.get("metadata"), dict) else {}
+    metadata_update: dict[str, Any] = {}
+    if latest_run_status and latest_run_status != metadata.get("latest_run_status"):
+        metadata_update["latest_run_status"] = latest_run_status
+    if latest_run_id and latest_run_id != metadata.get("latest_run_id"):
+        metadata_update["latest_run_id"] = latest_run_id
+    if metadata_update:
+        try:
+            await client.threads.update(thread_id=thread_id, metadata=metadata_update)
+        except Exception:  # noqa: BLE001
+            logger.debug("Could not persist latest run metadata for %s", thread_id, exc_info=True)
+        else:
+            thread = {**thread, "metadata": {**metadata, **metadata_update}}
+    return thread, latest_run_status, latest_run_id
 
 
 async def list_dashboard_threads(
@@ -318,9 +383,40 @@ async def list_dashboard_threads(
             if isinstance(thread_id, str) and thread_id not in seen:
                 seen[thread_id] = thread
 
-    summaries = [_thread_summary(thread) for thread in seen.values()]
+    summaries: list[dict[str, Any]] = []
+    for thread in seen.values():
+        refreshed, latest_run_status, latest_run_id = await _refresh_latest_run_metadata(
+            client, thread
+        )
+        summaries.append(
+            _thread_summary(
+                refreshed,
+                latest_run_status=latest_run_status,
+                latest_run_id=latest_run_id,
+            )
+        )
     summaries.sort(key=lambda item: item.get("updatedAt", 0), reverse=True)
     return summaries[:limit]
+
+
+async def _mark_thread_viewed(
+    client: Any,
+    thread_id: str,
+    metadata: dict[str, Any],
+    *,
+    latest_run_id: str | None,
+) -> dict[str, Any]:
+    now_ms = _now_ms()
+    metadata_update: dict[str, Any] = {"last_viewed_at_ms": now_ms}
+    run_id = _thread_run_id(metadata, latest_run_id)
+    if run_id:
+        metadata_update["last_viewed_run_id"] = run_id
+    try:
+        await client.threads.update(thread_id=thread_id, metadata=metadata_update)
+    except Exception:  # noqa: BLE001
+        logger.debug("Could not mark thread %s viewed", thread_id, exc_info=True)
+        return metadata
+    return {**metadata, **metadata_update}
 
 
 async def get_dashboard_thread(
@@ -334,6 +430,7 @@ async def get_dashboard_thread(
         raise HTTPException(404, "thread not found") from exc
 
     metadata = thread.get("metadata") if isinstance(thread.get("metadata"), dict) else {}
+    _assert_thread_owner(metadata, login, email)
 
     messages: list[dict[str, Any]] = []
     try:
@@ -348,12 +445,32 @@ async def get_dashboard_thread(
         raw_messages = values.get("messages") if isinstance(values, dict) else []
         messages = state_messages_to_ui(raw_messages if isinstance(raw_messages, list) else [])
 
-    latest_run_status = await _latest_run_status(thread_id)
-    if latest_run_status and latest_run_status != metadata.get("latest_run_status"):
-        metadata = {**metadata, "latest_run_status": latest_run_status}
+    thread, latest_run_status, latest_run_id = await _refresh_latest_run_metadata(client, thread)
+    metadata = thread.get("metadata") if isinstance(thread.get("metadata"), dict) else metadata
+    status = _run_status_to_agent_status(
+        thread.get("status") if isinstance(thread.get("status"), str) else "idle",
+        latest_run_status
+        or (
+            metadata.get("latest_run_status")
+            if isinstance(metadata.get("latest_run_status"), str)
+            else None
+        ),
+    )
+    if status != "running":
+        metadata = await _mark_thread_viewed(
+            client,
+            thread_id,
+            metadata,
+            latest_run_id=latest_run_id,
+        )
         thread = {**thread, "metadata": metadata}
 
-    return _thread_summary(thread, messages=messages)
+    return _thread_summary(
+        thread,
+        messages=messages,
+        latest_run_status=latest_run_status,
+        latest_run_id=latest_run_id,
+    )
 
 
 def _resolve_repo_config(repo: str | None) -> dict[str, str]:

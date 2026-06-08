@@ -163,6 +163,8 @@ export interface AgentThread {
   effort?: string | null
   source?: AgentSource
   status: AgentStatus
+  viewed: boolean
+  viewedAt?: number | null
   createdAt: number
   updatedAt: number
   messages: Array<Message>
