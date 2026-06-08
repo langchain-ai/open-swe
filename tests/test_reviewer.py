@@ -62,6 +62,29 @@ def test_reviewer_system_prompt_org_guidelines_precede_repo_style() -> None:
     )
 
 
+def test_reviewer_system_prompt_includes_api_standards_section() -> None:
+    prompt = reviewer._reviewer_system_prompt(
+        "/workspace/repo",
+        repo_owner="acme",
+        repo_name="repo",
+        pr_number=42,
+        api_standards_skill="Always version your endpoints under /v1/.",
+    )
+    assert "API standards skill" in prompt
+    assert "Always version your endpoints under /v1/." in prompt
+    assert "introduces a new API or modifies" in prompt
+
+
+def test_reviewer_system_prompt_omits_api_standards_when_absent() -> None:
+    prompt = reviewer._reviewer_system_prompt(
+        "/workspace/repo",
+        repo_owner="acme",
+        repo_name="repo",
+        pr_number=42,
+    )
+    assert "API standards skill" not in prompt
+
+
 def test_finding_reply_context_wraps_reply_as_untrusted_data() -> None:
     prompt = reviewer._build_finding_reply_context(
         pr_url="https://github.com/acme/repo/pull/1",
