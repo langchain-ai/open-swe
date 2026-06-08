@@ -123,6 +123,8 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
   const hasMessages = displayMessages.length > 0
   const hasActiveRun = thread.status === "running"
   const isStreaming = hasActiveRun || pendingPrompts.length > 0
+  const settingUpSandbox =
+    hasActiveRun && thread.messages.length === 0 && pendingPrompts.length > 0
 
   return (
     <AgentsShell user={user} activeThreadId={thread.id}>
@@ -133,6 +135,7 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
               <MessageView
                 messages={displayMessages}
                 isStreaming={isStreaming}
+                settingUpSandbox={settingUpSandbox}
                 contentWidthClass="max-w-3xl"
               />
               <div className="shrink-0 px-4 pb-4">

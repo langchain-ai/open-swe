@@ -297,6 +297,7 @@ export type MessageViewScrollControl = {
 interface MessageViewProps extends ApprovalCallbacks {
   messages: Message[];
   isStreaming: boolean;
+  settingUpSandbox?: boolean;
   project?: Project | null;
   contentWidthClass?: string;
   /** Horizontal padding on centered content (scroll track stays edge-to-edge). */
@@ -721,6 +722,7 @@ const BOTTOM_LOCK_THRESHOLD_PX = 24;
 export const MessageView = memo(function MessageView({
   messages,
   isStreaming,
+  settingUpSandbox = false,
   project,
   contentWidthClass = "max-w-[42rem]",
   contentPaddingClass = "px-6",
@@ -858,8 +860,6 @@ export const MessageView = memo(function MessageView({
   }, [scheduleScrollToBottom, syncScrollButtonVisibility]);
 
   const visibleMessages = useMemo(() => messages.filter((message) => !message.hidden), [messages]);
-  const latestVisibleMessage = visibleMessages[visibleMessages.length - 1];
-  const settingUpSandbox = isStreaming && latestVisibleMessage?.author === "user";
 
   const handleScrollToBottom = useCallback(() => {
     autoScrollEnabledRef.current = true;
