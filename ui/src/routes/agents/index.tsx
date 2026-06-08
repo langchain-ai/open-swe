@@ -1,20 +1,11 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router"
 
-import { AgentsHome } from "@/components/agents/AgentsHome";
-import { AgentsShell } from "@/components/agents/AgentsSidebar";
-import { useSession } from "@/lib/session";
+import { AgentsHome } from "@/components/agents/AgentsHome"
 
 export const Route = createFileRoute("/agents/")({
   component: AgentsIndexPage,
-});
+})
 
 function AgentsIndexPage() {
-  const session = useSession();
-  if (!session.data) return null;
-
-  return (
-    <AgentsShell user={session.data}>
-      <AgentsHome />
-    </AgentsShell>
-  );
+  return <AgentsHome />
 }

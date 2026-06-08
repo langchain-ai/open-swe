@@ -1,12 +1,10 @@
 import { useEffect, useMemo, useState } from "react"
 import { useQueryClient } from "@tanstack/react-query"
 
-import type { SessionUser } from "@/lib/api"
 import type { PendingPrompt } from "@/lib/agents/pendingPrompts"
 import type { AgentThread, Message } from "@/lib/agents/types"
 import type { ModelSelection } from "@/lib/agents/useModelOptions"
 import { AgentPromptBar } from "@/components/agents/AgentPromptBar"
-import { AgentsShell } from "@/components/agents/AgentsSidebar"
 import { MessageView } from "@/components/agents/ported"
 import {
   agentThreadKeys,
@@ -21,7 +19,6 @@ import { useAgentThreadStream } from "@/lib/agents/useThreadStream"
 import { useModelOptions } from "@/lib/agents/useModelOptions"
 
 interface AgentThreadViewProps {
-  user: SessionUser
   thread: AgentThread
 }
 
@@ -58,7 +55,7 @@ function isPendingPromptConfirmed(
   })
 }
 
-export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
+export function AgentThreadView({ thread }: AgentThreadViewProps) {
   const queryClient = useQueryClient()
   const sendMessage = useSendAgentMessage(thread.id)
   const cancelThread = useCancelAgentThread(thread.id)
@@ -125,48 +122,19 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
   const isStreaming = hasActiveRun || pendingPrompts.length > 0
 
   return (
-    <AgentsShell user={user} activeThreadId={thread.id}>
-      <div className="flex min-w-0 flex-1 flex-col">
-        <div className="flex min-h-0 flex-1 flex-col">
-          {hasMessages ? (
-            <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
-              <MessageView
-                messages={displayMessages}
-                isStreaming={isStreaming}
-                contentWidthClass="max-w-3xl"
-              />
-              <div className="shrink-0 px-4 pb-4">
-                <div className="mx-auto w-full max-w-3xl min-w-0">
-                  <AgentPromptBar
-                    placeholder="Add a follow up"
-                    compact
-                    busy={hasActiveRun}
-                    disabled={sendMessage.isPending}
-                    onSubmit={(content, images) =>
-                      sendMessage.mutate({
-                        content,
-                        images,
-                        model_id: activeSelection?.modelId ?? null,
-                        effort: activeSelection?.effort ?? null,
-                      })
-                    }
-                    onStop={() => cancelThread.mutate()}
-                    stopping={cancelThread.isPending}
-                    models={models}
-                    selection={activeSelection}
-                    onSelectionChange={setSelection}
-                  />
-                </div>
-              </div>
-            </div>
-          ) : (
-            <div className="flex flex-1 flex-col items-center justify-center gap-4 px-6">
-              <p className="text-sm text-[var(--ui-text-dim)]">
-                This thread has no messages yet.
-              </p>
-              <div className="w-full max-w-3xl">
+    <div className="flex min-w-0 flex-1 flex-col">
+      <div className="flex min-h-0 flex-1 flex-col">
+        {hasMessages ? (
+          <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+            <MessageView
+              messages={displayMessages}
+              isStreaming={isStreaming}
+              contentWidthClass="max-w-3xl"
+            />
+            <div className="shrink-0 px-4 pb-4">
+              <div className="mx-auto w-full max-w-3xl min-w-0">
                 <AgentPromptBar
-                  placeholder="Send the first message"
+                  placeholder="Add a follow up"
                   compact
                   busy={hasActiveRun}
                   disabled={sendMessage.isPending}
@@ -186,9 +154,36 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
                 />
               </div>
             </div>
-          )}
-        </div>
+          </div>
+        ) : (
+          <div className="flex flex-1 flex-col items-center justify-center gap-4 px-6">
+            <p className="text-sm text-[var(--ui-text-dim)]">
+              This thread has no messages yet.
+            </p>
+            <div className="w-full max-w-3xl">
+              <AgentPromptBar
+                placeholder="Send the first message"
+                compact
+                busy={hasActiveRun}
+                disabled={sendMessage.isPending}
+                onSubmit={(content, images) =>
+                  sendMessage.mutate({
+                    content,
+                    images,
+                    model_id: activeSelection?.modelId ?? null,
+                    effort: activeSelection?.effort ?? null,
+                  })
+                }
+                onStop={() => cancelThread.mutate()}
+                stopping={cancelThread.isPending}
+                models={models}
+                selection={activeSelection}
+                onSelectionChange={setSelection}
+              />
+            </div>
+          </div>
+        )}
       </div>
-    </AgentsShell>
+    </div>
   )
 }

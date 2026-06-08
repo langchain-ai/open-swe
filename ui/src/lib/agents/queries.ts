@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
+import { useEffect } from "react"
 
 import { agentsApi } from "./api"
 import { addPendingPrompt } from "./pendingPrompts"
@@ -13,6 +14,29 @@ export const agentThreadKeys = {
 
 export const agentScheduleKeys = {
   all: ["agent-schedules"] as const,
+}
+
+const PREFETCH_THREAD_DETAIL_LIMIT = 12
+
+export function usePrefetchAgentThreadDetails(
+  threads: Array<{ id: string }>,
+  activeThreadId?: string
+) {
+  const queryClient = useQueryClient()
+
+  useEffect(() => {
+    const threadIds = threads
+      .map((thread) => thread.id)
+      .filter((threadId) => threadId !== activeThreadId)
+      .slice(0, PREFETCH_THREAD_DETAIL_LIMIT)
+
+    threadIds.forEach((threadId) => {
+      void queryClient.prefetchQuery({
+        queryKey: agentThreadKeys.detail(threadId),
+        queryFn: () => agentsApi.getThread(threadId),
+      })
+    })
+  }, [activeThreadId, queryClient, threads])
 }
 
 export function useAgentThreads() {
