@@ -337,6 +337,17 @@ async def _refresh_pr_records(records: list[dict[str, Any]]) -> list[dict[str, A
     return refreshed
 
 
+async def refresh_usage_pr_records() -> int:
+    """Refresh stale `USAGE_PR_NAMESPACE` records from GitHub on a background cadence."""
+    records = [
+        pr for pr in await _search_values(USAGE_PR_NAMESPACE) if pr.get("agent_kind") == "agent"
+    ]
+    if not records:
+        return 0
+    await _refresh_pr_records(records)
+    return len(records)
+
+
 def _serialize_usage_user(index: int, user: dict[str, Any]) -> dict[str, Any]:
     model_counts: Counter[str] = user.get("model_counts", Counter())
     favorite_model = model_counts.most_common(1)[0][0] if model_counts else "default"
@@ -380,7 +391,7 @@ async def _build_usage_leaderboard_snapshot(period: Period) -> dict[str, Any]:
         for pr in await _search_values(USAGE_PR_NAMESPACE)
         if pr.get("agent_kind") == "agent" and _in_period(pr, cutoff_ms)
     ]
-    for pr in await _refresh_pr_records(pr_records):
+    for pr in pr_records:
         user = _ensure_user(
             users,
             github_login=pr.get("github_login"),
