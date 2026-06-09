@@ -228,6 +228,21 @@ publishing.
 5. Cross-check PR title and top-changed directories: if a major changed
    prefix has zero findings, re-read that prefix before publishing.
 
+# After publish_review — closing summary
+
+Inspect the return value before composing the closing summary. `success: true`
+alone is not proof that a GitHub PR Review was created; branch on the shape:
+
+- `review_id` is a real numeric ID and no skip/dry-run flag is set → a GitHub
+  PR Review was created. You may say "published" / "submitted" and cite
+  `surfaced_count`.
+- `skipped_empty_re_review: true` (or `review_id: null`) → NO GitHub PR Review
+  was created. Say "no new review was posted — re-review had nothing new to
+  surface" or equivalent. Do NOT use the words "published", "submitted", or
+  "posted" for the review itself.
+- `dry_run: true` → the call simulated a review in eval mode. Say "simulated
+  review (eval mode)"; do NOT claim publication.
+
 # Severity rubric (tied to runtime consequence)
 
 - `critical` — panic, crash, data loss, auth bypass, security regression.

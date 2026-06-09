@@ -73,7 +73,18 @@ def publish_review(
 
     Returns:
         Dictionary with ``success``, ``review_id``, ``surfaced_count``,
-        ``hidden_count``, ``resolved_thread_count``.
+        ``hidden_count``, ``resolved_thread_count``, and
+        ``skipped_empty_re_review``.
+
+        On a re-review with nothing new to surface the tool short-circuits and
+        returns ``{"success": true, "review_id": null, "skipped_empty_re_review":
+        true, "surfaced_count": 0}``. ``success: true`` indicates the call was a
+        valid no-op — NOT that a GitHub PR Review object was created. Treat
+        ``skipped_empty_re_review: true`` (or ``review_id: null``) as
+        authoritative: no GitHub Review was posted, and the closing summary must
+        NOT claim the review was "published" / "submitted" / "posted". The same
+        rule applies to ``dry_run: true`` (eval mode): the call simulated a
+        review without posting.
     """
     if severity_threshold not in {"low", "medium", "high", "critical"}:
         return {"success": False, "error": f"Invalid severity_threshold: {severity_threshold}"}
