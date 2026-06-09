@@ -1,9 +1,9 @@
 import { memo, useState, useCallback, useMemo, useRef, useLayoutEffect } from "react";
-import { diffLines } from "diff";
 import { MultiFileDiff } from "@pierre/diffs/react";
 import type { ToolExecutionChunk, AcpToolKind } from "@/lib/agents/types";
 import { DiffView } from "./DiffView";
 import { useDiffOptions } from "@/components/agents/utils/diffUtils";
+import { countLineChanges } from "@/components/agents/utils/diffStats";
 
 interface ToolExecutionProps {
   chunk: ToolExecutionChunk;
@@ -27,29 +27,8 @@ function getFileName(path: string): string {
   return parts[parts.length - 1] || path;
 }
 
-function countLines(text: string): number {
-  if (text.length === 0) return 0;
-  const segments = text.split("\n");
-  return text.endsWith("\n") ? segments.length - 1 : segments.length;
-}
-
-function countLineChanges(originalContent: string | null | undefined, newContent: string): { additions: number; deletions: number } {
-  const before = originalContent ?? "";
-  const parts = diffLines(before, newContent, {
-    ignoreWhitespace: false,
-    newlineIsToken: false,
-  });
-
-  let additions = 0;
-  let deletions = 0;
-
-  for (const part of parts) {
-    const lineCount = countLines(part.value);
-    if (part.added) additions += lineCount;
-    else if (part.removed) deletions += lineCount;
-  }
-
-  return { additions, deletions };
+function countLineChangesForTool(originalContent: string | null | undefined, newContent: string, filePath: string) {
+  return countLineChanges(originalContent, newContent, filePath);
 }
 
 function formatToolDisplay(
@@ -227,7 +206,7 @@ export const ToolExecution = memo(function ToolExecution({
   const isCompletedEditOp = isEditOp && diffData && (status === "completed" || status === "error");
   const editedFilePath = diffData ? stripProjectPath(diffData.filePath, projectPath) : "";
   const editedFileName = editedFilePath ? getFileName(editedFilePath) : "";
-  const diffStats = diffData ? countLineChanges(diffData.originalContent, diffData.newContent) : null;
+  const diffStats = diffData ? countLineChangesForTool(diffData.originalContent, diffData.newContent, diffData.filePath) : null;
 
   if (isCompletedEditOp && diffStats && diffData) {
     return (

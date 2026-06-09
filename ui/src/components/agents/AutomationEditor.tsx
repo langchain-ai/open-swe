@@ -9,7 +9,7 @@ import {
 
 import type { ModelOption } from "@/lib/api"
 import type { AgentSchedule } from "@/lib/agents/types"
-import type { ModelSelection } from "@/lib/agents/useModelOptions"
+import type { ModelSelection } from "@/lib/agents/provider/useModelOptions"
 import { RepoSelector } from "@/components/agents/RepoSelector"
 import { ScheduleTriggerPicker } from "@/components/agents/ScheduleTriggerPicker"
 import { Button } from "@/components/ui/button"
@@ -23,7 +23,7 @@ import {
 import {
   formatModelSelection,
   useModelOptions,
-} from "@/lib/agents/useModelOptions"
+} from "@/lib/agents/provider/useModelOptions"
 import { useRepos } from "@/lib/profile"
 import { cn } from "@/lib/utils"
 

@@ -6,6 +6,9 @@ import {
   Square,
   X,
 } from "lucide-react"
+import { StopIcon } from "@phosphor-icons/react"
+import { useQueryClient } from "@tanstack/react-query"
+import { useStreamContext as useAgentThreadStream } from "@langchain/react"
 import {
   memo,
   useCallback,
@@ -18,12 +21,52 @@ import {
 
 import type { ModelOption } from "@/lib/api"
 import type { ImageChunk } from "@/lib/agents/types"
-import type { ModelSelection } from "@/lib/agents/useModelOptions"
+import type { ModelSelection } from "@/lib/agents/provider/useModelOptions"
 import { RepoSelector } from "@/components/agents/RepoSelector"
-import { formatModelSelection } from "@/lib/agents/useModelOptions"
+import { useIsInAgentThreadStream } from "@/lib/agents/provider/useIsInAgentThreadStream"
+import { agentThreadKeys } from "@/lib/agents/queries"
+import { formatModelSelection } from "@/lib/agents/provider/useModelOptions"
 import { cn } from "@/lib/utils"
 
 const PROMPT_TEXTAREA_MAX_HEIGHT = 200
+
+function RunStopButton() {
+  const stream = useAgentThreadStream()
+  const queryClient = useQueryClient()
+  const [stopping, setStopping] = useState(false)
+
+  if (!stream.isLoading) return null
+
+  const handleStop = async () => {
+    if (stopping) return
+    setStopping(true)
+    try {
+      await stream.stop()
+      const threadId = stream.threadId
+      if (threadId) {
+        queryClient.setQueryData(agentThreadKeys.detail(threadId), (prev) =>
+          prev ? { ...prev, status: "interrupted" as const } : prev
+        )
+        void queryClient.invalidateQueries({ queryKey: agentThreadKeys.all })
+      }
+    } finally {
+      setStopping(false)
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={() => void handleStop()}
+      disabled={stopping}
+      aria-label="Stop run"
+      title="Stop run"
+      className="absolute right-3 top-3 z-10 flex size-7 cursor-pointer items-center justify-center rounded-md border border-[var(--ui-border)] text-[color:var(--ui-text-muted)] transition-colors hover:bg-[var(--ui-panel-2)] hover:text-[color:var(--ui-text)] disabled:cursor-default disabled:opacity-50"
+    >
+      <StopIcon className="size-3.5" weight="fill" />
+    </button>
+  )
+}
 const MAX_IMAGE_COUNT = 5
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024
 const SUPPORTED_IMAGE_TYPES = new Set([
@@ -213,6 +256,7 @@ export const CloudPromptBar = memo(function CloudPromptBarComponent({
   }
 
   const pickerDisabled = combos.length === 0 || !onSelectionChange
+  const inAgentThreadStream = useIsInAgentThreadStream()
 
   return (
     <div
@@ -286,6 +330,8 @@ export const CloudPromptBar = memo(function CloudPromptBarComponent({
             ))}
           </div>
         )}
+
+        {inAgentThreadStream ? <RunStopButton /> : null}
 
         <textarea
           ref={inputRef}

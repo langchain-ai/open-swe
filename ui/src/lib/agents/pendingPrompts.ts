@@ -6,6 +6,8 @@ export interface PendingPrompt {
   prompt: string;
   insertAt: number;
   images?: Array<ImageChunk>;
+  modelId?: string | null;
+  effort?: string | null;
 }
 
 function isImageChunk(value: unknown): value is ImageChunk {
@@ -64,9 +66,22 @@ export function addPendingPrompt(
   threadId: string,
   prompt: string,
   insertAt: number,
-  images?: Array<ImageChunk>,
+  options?: {
+    images?: Array<ImageChunk>;
+    modelId?: string | null;
+    effort?: string | null;
+  },
 ): void {
-  safeWrite(threadId, [...safeRead(threadId), { prompt, insertAt, images }]);
+  safeWrite(threadId, [
+    ...safeRead(threadId),
+    {
+      prompt,
+      insertAt,
+      images: options?.images,
+      modelId: options?.modelId ?? null,
+      effort: options?.effort ?? null,
+    },
+  ]);
 }
 
 export function dropPendingPrompts(

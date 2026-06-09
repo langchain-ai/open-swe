@@ -1,14 +1,10 @@
 // @ts-nocheck — ported from open-swe-app (Electron); strict checks applied when wiring cloud APIs.
 import { useRef, useEffect, useLayoutEffect, useCallback, memo, useMemo, useState } from "react";
 import { ChevronDown, ChevronUp } from "lucide-react";
-import { diffLines } from "diff";
 import { MultiFileDiff } from "@pierre/diffs/react";
 import { useDiffOptions } from "@/components/agents/utils/diffUtils";
-import { CodeBlock } from "./CodeBlock";
-import { Markdown } from "./Markdown";
-import { ToolExecution } from "./ToolExecution";
-import { ShellCommand } from "./ShellCommand";
-import { ReplyCard } from "./ReplyCard";
+import { countLineChanges } from "@/components/agents/utils/diffStats";
+import { useLiveMarkdownMessageId } from "@/lib/agents/provider/useLiveMarkdownMessageId";
 import type {
   Chunk,
   Message,
@@ -16,6 +12,12 @@ import type {
   Project,
   DiffData,
 } from "@/lib/agents/types";
+
+import { CodeBlock } from "./CodeBlock";
+import { Markdown } from "./Markdown";
+import { ToolExecution } from "./ToolExecution";
+import { ShellCommand } from "./ShellCommand";
+import { ReplyCard } from "./ReplyCard";
 
 type RenderItem =
   | { type: "text-chunk"; key: string; chunk: Chunk }
@@ -67,7 +69,7 @@ function isReplyTool(chunk: ToolExecutionChunk): boolean {
   return chunk.toolKind === "slack" || chunk.toolKind === "linear";
 }
 
-function buildRenderItems(chunks: Chunk[]): RenderItem[] {
+function buildRenderItems(chunks: Chunk[], messageId?: string): RenderItem[] {
   const items: RenderItem[] = [];
   let exploredBuffer: ToolExecutionChunk[] = [];
   let exploredStartIndex = -1;
@@ -115,7 +117,7 @@ function buildRenderItems(chunks: Chunk[]): RenderItem[] {
     flushExplored();
     items.push({
       type: "text-chunk",
-      key: getChunkRenderKey(chunk, i),
+      key: messageId ? `${messageId}-text` : getChunkRenderKey(chunk, i),
       chunk,
     });
   }
@@ -135,31 +137,6 @@ export interface ChangedFileSummaryItem {
   deletions: number;
   originalContent: string;
   modifiedContent: string;
-}
-
-function countLines(text: string): number {
-  if (text.length === 0) return 0;
-  const segments = text.split("\n");
-  return text.endsWith("\n") ? segments.length - 1 : segments.length;
-}
-
-function countLineChanges(originalContent: string | null, newContent: string): { additions: number; deletions: number } {
-  const before = originalContent ?? "";
-  const parts = diffLines(before, newContent, {
-    ignoreWhitespace: false,
-    newlineIsToken: false,
-  });
-
-  let additions = 0;
-  let deletions = 0;
-
-  for (const part of parts) {
-    const lineCount = countLines(part.value);
-    if (part.added) additions += lineCount;
-    else if (part.removed) deletions += lineCount;
-  }
-
-  return { additions, deletions };
 }
 
 function stripProjectPathForDisplay(path: string, projectPath?: string): string {
@@ -272,7 +249,11 @@ export function summarizeChangedFiles(chunks: Chunk[]): ChangedFileSummaryItem[]
 
   return [...byFile.values()]
     .map((file) => {
-      const { additions, deletions } = countLineChanges(file.originalContent, file.modifiedContent);
+      const { additions, deletions } = countLineChanges(
+        file.originalContent,
+        file.modifiedContent,
+        file.filePath,
+      );
       return {
         filePath: file.filePath,
         additions,
@@ -298,6 +279,10 @@ export type MessageViewScrollControl = {
 interface MessageViewProps extends ApprovalCallbacks {
   messages: Message[];
   isStreaming: boolean;
+  /** Live run signal from `useStream().isLoading` — drives Streamdown token animation. */
+  streamIsLoading?: boolean;
+  /** When set, drives the thinking spinner (stream + pending). Falls back to streamIsLoading/isStreaming. */
+  isThinking?: boolean;
   settingUpSandbox?: boolean;
   project?: Project | null;
   contentWidthClass?: string;
@@ -312,34 +297,37 @@ interface MessageViewProps extends ApprovalCallbacks {
 }
 
 const BUSY_TEXTS: { present: string; past: string }[] = [
-  { present: "vibing...",               past: "Vibed" },
-  { present: "noodling...",             past: "Noodled" },
-  { present: "pondering...",            past: "Pondered" },
+  { present: "vibing...", past: "Vibed" },
+  { present: "noodling...", past: "Noodled" },
+  { present: "pondering...", past: "Pondered" },
   { present: "thinking really hard...", past: "Thought really hard" },
-  { present: "spinning up...",          past: "Spun up" },
-  { present: "connecting the dots...",  past: "Connected the dots" },
-  { present: "brewing ideas...",        past: "Brewed ideas" },
-  { present: "cooking...",              past: "Cooked" },
-  { present: "crunching...",            past: "Crunched" },
-  { present: "scheming...",             past: "Schemed" },
-  { present: "processing...",           past: "Processed" },
+  { present: "spinning up...", past: "Spun up" },
+  { present: "connecting the dots...", past: "Connected the dots" },
+  { present: "brewing ideas...", past: "Brewed ideas" },
+  { present: "cooking...", past: "Cooked" },
+  { present: "crunching...", past: "Crunched" },
+  { present: "scheming...", past: "Schemed" },
+  { present: "processing...", past: "Processed" },
 ];
 
 function formatElapsed(ms: number): string {
-  const secs = Math.round(ms / 1000);
+  const secs = Math.max(1, Math.ceil(ms / 1000));
   return secs < 60 ? `${secs}s` : `${Math.floor(secs / 60)}m ${secs % 60}s`;
 }
+
+const THINKING_SETTLE_MS = 300;
 
 function ChunkRenderer({
   chunk,
   projectPath,
+  isMarkdownLive,
   ...callbacks
-}: { chunk: Chunk; projectPath?: string } & ApprovalCallbacks) {
+}: { chunk: Chunk; projectPath?: string; isMarkdownLive?: boolean } & ApprovalCallbacks) {
   switch (chunk.kind) {
     case "text":
       return (
         <div className="text-[color:var(--ui-text)]">
-          <Markdown content={chunk.text} />
+          <Markdown content={chunk.text} isLive={isMarkdownLive} />
         </div>
       );
     case "code":
@@ -442,14 +430,19 @@ function UserMessage({ message }: { message: Message }) {
 function AgentMessage({
   message,
   isStreaming,
+  isMarkdownLive,
   projectPath,
   ...callbacks
 }: {
   message: Message;
   isStreaming?: boolean;
+  isMarkdownLive?: boolean;
   projectPath?: string;
 } & ApprovalCallbacks) {
-  const renderItems = useMemo(() => buildRenderItems(message.chunks), [message.chunks]);
+  const renderItems = useMemo(
+    () => buildRenderItems(message.chunks, message.id),
+    [message.chunks, message.id],
+  );
   const changedFiles = useMemo(() => summarizeChangedFiles(message.chunks), [message.chunks]);
   const changedFilesTotals = useMemo(() => {
     let additions = 0;
@@ -615,6 +608,7 @@ function AgentMessage({
                 <ChunkRenderer
                   chunk={item.chunk}
                   projectPath={projectPath}
+                  isMarkdownLive={isMarkdownLive}
                   {...callbacks}
                 />
               </div>
@@ -636,11 +630,13 @@ function AgentMessage({
 const MessageBubble = memo(function MessageBubble({
   message,
   isStreaming,
+  isMarkdownLive,
   projectPath,
   ...callbacks
 }: {
   message: Message;
   isStreaming?: boolean;
+  isMarkdownLive?: boolean;
   projectPath?: string;
 } & ApprovalCallbacks) {
   if (message.author === "user") {
@@ -650,6 +646,7 @@ const MessageBubble = memo(function MessageBubble({
     <AgentMessage
       message={message}
       isStreaming={isStreaming}
+      isMarkdownLive={isMarkdownLive}
       projectPath={projectPath}
       {...callbacks}
     />
@@ -657,50 +654,65 @@ const MessageBubble = memo(function MessageBubble({
 });
 
 function ThinkingSpinner({
-  isStreaming,
-  settingUpSandbox,
+  isActive,
+  settingUpSandbox = false,
 }: {
-  isStreaming: boolean;
-  settingUpSandbox: boolean;
+  isActive: boolean;
+  settingUpSandbox?: boolean;
 }) {
   const [textIdx, setTextIdx] = useState(0);
   const [done, setDone] = useState<{ past: string; elapsed: string } | null>(null);
+  const [settledActive, setSettledActive] = useState(isActive);
   const startTimeRef = useRef(0);
+  const sessionActiveRef = useRef(false);
   const textIdxRef = useRef(textIdx);
-  const wasStreamingRef = useRef(false);
   const settingUpSandboxRef = useRef(settingUpSandbox);
   textIdxRef.current = textIdx;
-
-  useEffect(() => {
-    if (isStreaming) {
-      wasStreamingRef.current = true;
-      startTimeRef.current = Date.now();
-      setTextIdx(Math.floor(Math.random() * BUSY_TEXTS.length));
-      setDone(null);
-    } else if (wasStreamingRef.current) {
-      setDone({
-        past: settingUpSandboxRef.current
-          ? "Set up sandbox"
-          : BUSY_TEXTS[textIdxRef.current].past,
-        elapsed: formatElapsed(Date.now() - startTimeRef.current),
-      });
-    }
-  }, [isStreaming]);
 
   useEffect(() => {
     settingUpSandboxRef.current = settingUpSandbox;
   }, [settingUpSandbox]);
 
   useEffect(() => {
-    if (!isStreaming || settingUpSandbox) return;
+    if (isActive) {
+      setSettledActive(true);
+      return;
+    }
+    const id = window.setTimeout(() => setSettledActive(false), THINKING_SETTLE_MS);
+    return () => window.clearTimeout(id);
+  }, [isActive]);
+
+  useEffect(() => {
+    if (settledActive) {
+      if (!sessionActiveRef.current) {
+        sessionActiveRef.current = true;
+        startTimeRef.current = Date.now();
+        setTextIdx(Math.floor(Math.random() * BUSY_TEXTS.length));
+        setDone(null);
+      }
+      return;
+    }
+    if (!sessionActiveRef.current) return;
+    sessionActiveRef.current = false;
+    setDone({
+      past: settingUpSandboxRef.current
+        ? "Set up sandbox"
+        : BUSY_TEXTS[textIdxRef.current].past,
+      elapsed: formatElapsed(Date.now() - startTimeRef.current),
+    });
+  }, [settledActive]);
+
+  useEffect(() => {
+    if (!settledActive || settingUpSandbox) return;
     const BUSY_TEXT_ROTATE_INTERVAL_MS = 12000;
     const id = setInterval(() => setTextIdx((i) => (i + 1) % BUSY_TEXTS.length), BUSY_TEXT_ROTATE_INTERVAL_MS);
     return () => clearInterval(id);
-  }, [isStreaming, settingUpSandbox]);
+  }, [settledActive, settingUpSandbox]);
 
-  if (!isStreaming && !done) return null;
+  const showActive = isActive || settledActive;
+  if (!showActive && !done) return null;
 
-  if (done) {
+  if (done && !showActive) {
     return (
       <div className="my-2 flex items-center gap-2">
         <span className="font-sans text-xs text-[color:var(--ui-text-dim)] select-none">*</span>
@@ -723,7 +735,9 @@ const BOTTOM_LOCK_THRESHOLD_PX = 24;
 export const MessageView = memo(function MessageView({
   messages,
   isStreaming,
-  settingUpSandbox = false,
+  streamIsLoading,
+  isThinking,
+  settingUpSandbox,
   project,
   contentWidthClass = "max-w-[42rem]",
   contentPaddingClass = "px-6",
@@ -861,6 +875,11 @@ export const MessageView = memo(function MessageView({
   }, [scheduleScrollToBottom, syncScrollButtonVisibility]);
 
   const visibleMessages = useMemo(() => messages.filter((message) => !message.hidden), [messages]);
+  const liveMarkdownMessageId = useLiveMarkdownMessageId(
+    visibleMessages,
+    streamIsLoading,
+    isStreaming,
+  );
 
   const handleScrollToBottom = useCallback(() => {
     autoScrollEnabledRef.current = true;
@@ -891,20 +910,24 @@ export const MessageView = memo(function MessageView({
           className={`w-full ${contentWidthClass} mx-auto min-w-0 ${contentPaddingClass}`}
           style={bottomInset > 0 ? { paddingBottom: bottomInset } : undefined}
         >
-          {visibleMessages.map((message, index) => (
-            <MessageBubble
-              key={message.id}
-              message={message}
-              isStreaming={isStreaming && index === visibleMessages.length - 1}
-              projectPath={project?.path}
-              onApprove={onApprove}
-              onReject={onReject}
-              onAutoApprove={onAutoApprove}
-              onOpenDiff={onOpenDiff}
-            />
-          ))}
+          {visibleMessages.map((message, index) => {
+            const isLastMessage = index === visibleMessages.length - 1;
+            return (
+              <MessageBubble
+                key={message.id}
+                message={message}
+                isStreaming={isStreaming && isLastMessage}
+                isMarkdownLive={message.id === liveMarkdownMessageId}
+                projectPath={project?.path}
+                onApprove={onApprove}
+                onReject={onReject}
+                onAutoApprove={onAutoApprove}
+                onOpenDiff={onOpenDiff}
+              />
+            );
+          })}
           <ThinkingSpinner
-            isStreaming={isStreaming}
+            isActive={isThinking ?? streamIsLoading ?? isStreaming}
             settingUpSandbox={settingUpSandbox}
           />
         </div>

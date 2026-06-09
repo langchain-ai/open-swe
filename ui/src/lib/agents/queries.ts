@@ -54,11 +54,6 @@ export function useAgentThread(threadId: string) {
   return useQuery({
     queryKey: agentThreadKeys.detail(threadId),
     queryFn: () => agentsApi.getThread(threadId),
-    refetchOnMount: "always",
-    refetchInterval: (query) => {
-      const status = query.state.data?.status
-      return status === "running" ? 2000 : false
-    },
   })
 }
 
@@ -110,12 +105,11 @@ export function useCreateAgentThread() {
   return useMutation({
     mutationFn: agentsApi.createThread,
     onSuccess: (thread, variables) => {
-      addPendingPrompt(
-        thread.id,
-        variables.prompt,
-        thread.messages.length,
-        variables.images
-      )
+      addPendingPrompt(thread.id, variables.prompt, thread.messages.length, {
+        images: variables.images,
+        modelId: variables.model_id,
+        effort: variables.effort,
+      })
       queryClient.setQueryData(agentThreadKeys.detail(thread.id), {
         ...thread,
         status: thread.status === "idle" ? "running" : thread.status,
@@ -131,34 +125,6 @@ export interface SendAgentMessageVariables {
   images?: Array<ImageChunk>
   model_id?: string | null
   effort?: string | null
-}
-
-export function useSendAgentMessage(threadId: string) {
-  const queryClient = useQueryClient()
-
-  return useMutation({
-    mutationFn: (vars: SendAgentMessageVariables) =>
-      agentsApi.sendMessage(threadId, {
-        content: vars.content,
-        images: vars.images,
-        model_id: vars.model_id,
-        effort: vars.effort,
-      }),
-    onSuccess: (thread) => {
-      queryClient.setQueryData(
-        agentThreadKeys.detail(threadId),
-        (prev: typeof thread | undefined) => {
-          if (!prev) return thread
-          return {
-            ...thread,
-            messages:
-              thread.messages.length > 0 ? thread.messages : prev.messages,
-          }
-        }
-      )
-      queryClient.invalidateQueries({ queryKey: agentThreadKeys.all })
-    },
-  })
 }
 
 export function useCancelAgentThread(threadId: string) {

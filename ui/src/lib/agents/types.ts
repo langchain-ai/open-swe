@@ -194,9 +194,21 @@ export type GitFileStatus =
   | "index-modified"
   | "index-added"
   | "index-deleted"
+  | "index-renamed"
+  | "index-copied"
   | "modified"
   | "deleted"
   | "untracked"
+  | "ignored"
+  | "type-changed"
+  | "intent-to-add"
+  | "both-modified"
+  | "both-added"
+  | "both-deleted"
+  | "added-by-us"
+  | "added-by-them"
+  | "deleted-by-us"
+  | "deleted-by-them";
 
 export interface GitStatusEntry {
   path: string
