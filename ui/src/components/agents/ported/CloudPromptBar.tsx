@@ -1,11 +1,4 @@
-import {
-  ArrowUp,
-  ChevronDown,
-  ImagePlus,
-  LoaderCircle,
-  Square,
-  X,
-} from "lucide-react"
+import { ArrowUp, ChevronDown, ImagePlus, LoaderCircle, X } from "lucide-react"
 import {
   memo,
   useCallback,
@@ -39,9 +32,6 @@ export interface CloudPromptBarProps {
   disabled?: boolean
   busy?: boolean
   onSubmit?: (value: string, images: Array<ImageChunk>) => void
-  /** Called to stop the running agent. When set, the send button becomes a stop button while busy and the input is empty. */
-  onStop?: () => void
-  stopping?: boolean
   models?: Array<ModelOption>
   selection?: ModelSelection | null
   onSelectionChange?: (next: ModelSelection) => void
@@ -84,8 +74,6 @@ export const CloudPromptBar = memo(function CloudPromptBarComponent({
   disabled = false,
   busy = false,
   onSubmit,
-  onStop,
-  stopping = false,
   models = [],
   selection = null,
   onSelectionChange,
@@ -211,8 +199,6 @@ export const CloudPromptBar = memo(function CloudPromptBarComponent({
   }
 
   const pickerDisabled = combos.length === 0 || !onSelectionChange
-  const showStop =
-    busy && !disabled && !value.trim() && pendingImages.length === 0 && !!onStop
 
   return (
     <div
@@ -360,35 +346,19 @@ export const CloudPromptBar = memo(function CloudPromptBarComponent({
             <ImagePlus className="size-4" />
           </button>
 
-          {showStop ? (
-            <button
-              type="button"
-              onClick={onStop}
-              disabled={stopping}
-              aria-label="Stop run"
-              className="flex size-7 shrink-0 items-center justify-center rounded-full bg-[var(--ui-accent)] text-white transition-opacity hover:opacity-90 disabled:cursor-default disabled:opacity-40"
-            >
-              {stopping ? (
-                <LoaderCircle className="size-3.5 animate-spin" />
-              ) : (
-                <Square className="size-3 fill-current" strokeWidth={0} />
-              )}
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={handleSubmit}
-              disabled={!canSubmit}
-              aria-label="Send message"
-              className="flex size-7 shrink-0 items-center justify-center rounded-full bg-[var(--ui-accent)] text-white transition-opacity hover:opacity-90 disabled:cursor-default disabled:opacity-40"
-            >
-              {disabled ? (
-                <LoaderCircle className="size-3.5 animate-spin" />
-              ) : (
-                <ArrowUp className="size-3.5" strokeWidth={2.5} />
-              )}
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={handleSubmit}
+            disabled={!canSubmit}
+            aria-label="Send message"
+            className="flex size-7 shrink-0 items-center justify-center rounded-full bg-[var(--ui-accent)] text-white transition-opacity hover:opacity-90 disabled:cursor-default disabled:opacity-40"
+          >
+            {disabled ? (
+              <LoaderCircle className="size-3.5 animate-spin" />
+            ) : (
+              <ArrowUp className="size-3.5" strokeWidth={2.5} />
+            )}
+          </button>
         </div>
       </div>
     </div>
