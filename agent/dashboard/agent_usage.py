@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections import Counter
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
@@ -25,6 +25,7 @@ _AGENT_SOURCES = frozenset({"dashboard", "github", "slack", "linear"})
 _PR_REFRESH_INTERVAL_MS = 10 * 60 * 1000
 _MAX_PR_REFRESH_PER_REQUEST = 25
 _PR_REFRESH_CONCURRENCY = 5
+_CACHE_TTL_MS = 10 * 60 * 1000
 _CACHE_SEARCH_LIMIT = 1000
 _GITHUB_API = "https://api.github.com"
 
@@ -604,45 +605,24 @@ async def refresh_reviewer_stats_cache(period: str | None = "30d") -> dict[str, 
     return snapshot
 
 
-def _empty_usage_snapshot(period: Period) -> dict[str, Any]:
-    return {"period": period, "users": [], "total_members": 0, "computing": True}
-
-
-def _empty_reviewer_snapshot(period: Period) -> dict[str, Any]:
-    return {
-        "period": period,
-        "reviewed_prs": 0,
-        "prs_with_findings": 0,
-        "findings_recorded": 0,
-        "surfaced_findings": 0,
-        "addressed_findings": 0,
-        "resolved_after_update": 0,
-        "dismissed_findings": 0,
-        "unresolved_surfaced_findings": 0,
-        "resolution_rate": 0.0,
-        "human_replies": 0,
-        "severity_counts": {},
-        "top_categories": [],
-        "computing": True,
-    }
-
-
 async def _cached_snapshot(
     namespace: list[str],
     period: Period,
-    empty: Callable[[Period], dict[str, Any]],
+    refresh: Callable[[str | None], Awaitable[dict[str, Any]]],
+    *,
+    schedule_refresh: Callable[[Period], None] | None = None,
 ) -> tuple[dict[str, Any], int | None]:
-    """Pure read: return the precomputed snapshot (any age) or a typed placeholder.
-
-    Never computes inline and never schedules a refresh — the scheduled builder
-    owns refresh cadence (see ``agent/usage_snapshot.py``).
-    """
     cached = await _get_value(namespace, period)
     if cached:
         snapshot = cached.get("snapshot")
+        generated_at_ms = _coerce_int(cached.get("generated_at_ms"))
         if isinstance(snapshot, dict):
-            return snapshot, _coerce_int(cached.get("generated_at_ms")) or None
-    return empty(period), None
+            if not generated_at_ms or _now_ms() - generated_at_ms <= _CACHE_TTL_MS:
+                return snapshot, generated_at_ms or None
+            if schedule_refresh is not None:
+                schedule_refresh(period)
+                return snapshot, generated_at_ms
+    return await refresh(period), _now_ms()
 
 
 def _usage_payload_from_snapshot(
@@ -697,7 +677,6 @@ def _usage_payload_from_snapshot(
         "total_members": _coerce_int(snapshot.get("total_members")),
         "current_user_rank": current_user_row["rank"] if current_user_row else None,
         "generated_at_ms": generated_at_ms,
-        "computing": bool(snapshot.get("computing")),
     }
 
 
@@ -707,18 +686,22 @@ async def list_agent_usage_leaderboard(
     limit: int,
     current_login: str | None,
     current_email: str | None,
+    schedule_usage_refresh: Callable[[Period], None] | None = None,
+    schedule_reviewer_refresh: Callable[[Period], None] | None = None,
 ) -> dict[str, Any]:
-    """Return cached Open SWE Agent and reviewer usage stats (pure cache read)."""
+    """Return cached Open SWE Agent and reviewer usage stats."""
     normalized_period = _normalize_period(period)
     usage_snapshot, generated_at_ms = await _cached_snapshot(
         USAGE_LEADERBOARD_CACHE_NAMESPACE,
         normalized_period,
-        _empty_usage_snapshot,
+        refresh_usage_leaderboard_cache,
+        schedule_refresh=schedule_usage_refresh,
     )
     reviewer_stats, reviewer_generated_at_ms = await _cached_snapshot(
         REVIEWER_STATS_CACHE_NAMESPACE,
         normalized_period,
-        _empty_reviewer_snapshot,
+        refresh_reviewer_stats_cache,
+        schedule_refresh=schedule_reviewer_refresh,
     )
     payload = _usage_payload_from_snapshot(
         usage_snapshot,
