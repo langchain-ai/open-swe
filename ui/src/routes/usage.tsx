@@ -60,7 +60,7 @@ function UsagePage() {
   if (!session.data) return <Navigate to="/login" />
 
   return (
-    <AppShell user={session.data} title="Usage">
+    <AppShell user={session.data} title="Usage" className="max-w-5xl">
       <SettingsSection
         title="Agent leaderboard"
         description="Ranked by agent lines of code, then PRs opened and agent runs."
