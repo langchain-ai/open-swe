@@ -6,11 +6,7 @@ import type { AgentThread, Message } from "@/lib/agents/types"
 import type { ModelSelection } from "@/lib/agents/useModelOptions"
 import { AgentPromptBar } from "@/components/agents/AgentPromptBar"
 import { MessageView } from "@/components/agents/ported"
-import {
-  agentThreadKeys,
-  useCancelAgentThread,
-  useSendAgentMessage,
-} from "@/lib/agents/queries"
+import { agentThreadKeys, useSendAgentMessage } from "@/lib/agents/queries"
 import {
   dropPendingPrompts,
   getPendingPrompts,
@@ -58,7 +54,6 @@ function isPendingPromptConfirmed(
 export function AgentThreadView({ thread }: AgentThreadViewProps) {
   const queryClient = useQueryClient()
   const sendMessage = useSendAgentMessage(thread.id)
-  const cancelThread = useCancelAgentThread(thread.id)
   useAgentThreadStream(thread.id, thread.status === "running")
   const [pendingPrompts, setPendingPrompts] = useState<Array<PendingPrompt>>(
     () => getPendingPrompts(thread.id)
@@ -139,7 +134,7 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
                 <AgentPromptBar
                   placeholder="Add a follow up"
                   compact
-                  busy={hasActiveRun}
+                  busy={isStreaming}
                   disabled={sendMessage.isPending}
                   onSubmit={(content, images) =>
                     sendMessage.mutate({
@@ -149,8 +144,6 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
                       effort: activeSelection?.effort ?? null,
                     })
                   }
-                  onStop={() => cancelThread.mutate()}
-                  stopping={cancelThread.isPending}
                   models={models}
                   selection={activeSelection}
                   onSelectionChange={setSelection}
@@ -167,7 +160,7 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
               <AgentPromptBar
                 placeholder="Send the first message"
                 compact
-                busy={hasActiveRun}
+                busy={isStreaming}
                 disabled={sendMessage.isPending}
                 onSubmit={(content, images) =>
                   sendMessage.mutate({
@@ -177,8 +170,6 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
                     effort: activeSelection?.effort ?? null,
                   })
                 }
-                onStop={() => cancelThread.mutate()}
-                stopping={cancelThread.isPending}
                 models={models}
                 selection={activeSelection}
                 onSelectionChange={setSelection}

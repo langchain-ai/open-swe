@@ -42,13 +42,6 @@ def test_thread_summary_keeps_repo_when_present() -> None:
     assert summary["repoFullName"] == "octo/repo"
 
 
-def test_thread_summary_reports_interrupted_run_status() -> None:
-    summary = thread_api._thread_summary(
-        {"thread_id": "t3", "metadata": {"latest_run_status": "interrupted"}}
-    )
-    assert summary["status"] == "interrupted"
-
-
 class _FakeThreadsClient:
     async def create(
         self, *, thread_id: str, metadata: dict[str, Any], if_exists: str

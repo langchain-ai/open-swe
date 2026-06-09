@@ -223,9 +223,7 @@ def _metadata_repo(metadata: dict[str, Any]) -> tuple[str, str, str]:
 def _run_status_to_agent_status(thread_status: str | None, run_status: str | None) -> str:
     if thread_status == "busy" or run_status in {"pending", "running"}:
         return "running"
-    if run_status in {"interrupted", "cancelled"}:
-        return "interrupted"
-    if run_status in {"error", "failed", "timeout"}:
+    if run_status in {"error", "failed", "timeout", "interrupted"}:
         return "error"
     if run_status == "success":
         return "finished"
@@ -672,7 +670,7 @@ async def cancel_dashboard_thread(
     run_id = metadata.get("latest_run_id")
     if isinstance(run_id, str) and run_id:
         try:
-            await client.runs.cancel(thread_id, run_id, wait=False, action="interrupt")
+            await client.runs.cancel(thread_id, run_id, wait=False)
         except Exception:
             logger.debug("Could not cancel run %s for thread %s", run_id, thread_id, exc_info=True)
 
