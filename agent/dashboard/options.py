@@ -22,6 +22,13 @@ SUPPORTED_MODELS: list[ModelOption] = [
         "supports_images": True,
     },
     {
+        "id": "anthropic:claude-fable-5",
+        "label": "Fable 5",
+        "efforts": ["low", "medium", "high", "xhigh", "max"],
+        "default_effort": "high",
+        "supports_images": True,
+    },
+    {
         "id": "openai:gpt-5.5",
         "label": "GPT-5.5",
         "efforts": ["none", "low", "medium", "high", "xhigh"],
