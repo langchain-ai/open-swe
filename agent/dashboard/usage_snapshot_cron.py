@@ -21,6 +21,15 @@ _SCHEDULE = "7,17,27,37,47,57 * * * *"  # ~every 10 min, staggered off :00
 _META_NAMESPACE: list[str] = ["agent_usage", "meta"]
 _META_CRON_KEY = "cron"
 
+# Once we've confirmed a cron is registered, steady-state requests skip the
+# loopback check entirely — there is nothing left to re-verify.
+_registered_cron_id: str | None = None
+
+
+def _cron_id_of(cron: Any) -> str | None:
+    cron_id = cron.get("cron_id") if isinstance(cron, dict) else getattr(cron, "cron_id", None)
+    return cron_id if isinstance(cron_id, str) and cron_id else None
+
 
 async def _existing_cron_id() -> str | None:
     item = await _client().store.get_item(_META_NAMESPACE, _META_CRON_KEY)
@@ -31,22 +40,30 @@ async def _existing_cron_id() -> str | None:
 
 async def ensure_usage_snapshot_cron() -> str | None:
     """Idempotently register the global usage-snapshot cron. Returns its id."""
+    global _registered_cron_id
+    if _registered_cron_id:
+        return _registered_cron_id
+
     try:
         existing = await _existing_cron_id()
     except Exception:
         logger.debug("Could not read usage snapshot cron meta", exc_info=True)
         existing = None
     if existing:
+        _registered_cron_id = existing
         return existing
 
     try:
-        crons = await _client().crons.search(metadata={"kind": _CRON_KIND}, limit=1)
-        found = crons[0] if crons else None
-        if found:
-            cron_id = found.get("cron_id") if isinstance(found, dict) else None
-            if isinstance(cron_id, str) and cron_id:
-                await _store_cron_id(cron_id)
-                return cron_id
+        crons = await _client().crons.search(metadata={"kind": _CRON_KIND}, limit=10)
+        cron_ids = [cid for c in (crons or []) if (cid := _cron_id_of(c))]
+        if cron_ids:
+            keep = cron_ids[0]
+            # search-then-create isn't atomic; concurrent replicas can each
+            # create one. Reap any extras so we don't fire the build N times.
+            await _delete_crons(cron_ids[1:])
+            await _store_cron_id(keep)
+            _registered_cron_id = keep
+            return keep
     except Exception:
         logger.debug("Usage snapshot cron search failed", exc_info=True)
 
@@ -60,11 +77,20 @@ async def ensure_usage_snapshot_cron() -> str | None:
         logger.exception("Failed to create usage snapshot cron")
         return None
 
-    cron_id = cron.get("cron_id") if isinstance(cron, dict) else getattr(cron, "cron_id", None)
-    if isinstance(cron_id, str) and cron_id:
+    cron_id = _cron_id_of(cron)
+    if cron_id:
         await _store_cron_id(cron_id)
+        _registered_cron_id = cron_id
         return cron_id
     return None
+
+
+async def _delete_crons(cron_ids: list[str]) -> None:
+    for cron_id in cron_ids:
+        try:
+            await _client().crons.delete(cron_id)
+        except Exception:
+            logger.debug("Could not delete duplicate usage cron %s", cron_id, exc_info=True)
 
 
 async def _store_cron_id(cron_id: str) -> None:

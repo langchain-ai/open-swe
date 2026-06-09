@@ -722,7 +722,7 @@ async def api_agent_usage_leaderboard(
 
 @router.post("/admin/usage/rebuild")
 async def api_admin_usage_rebuild(
-    session: dict[str, Any] = _SESSION_DEP,
+    session: dict[str, Any] = _ADMIN_DEP,
 ) -> dict[str, Any]:
     await ensure_usage_snapshot_cron()
     return await trigger_usage_snapshot_build()

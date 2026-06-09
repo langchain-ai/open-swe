@@ -24,6 +24,7 @@ class FakeCrons:
     def __init__(self, existing: list[dict] | None = None) -> None:
         self.existing = existing or []
         self.created: list[dict] = []
+        self.deleted: list[str] = []
 
     async def search(self, **kwargs):
         return self.existing
@@ -31,6 +32,16 @@ class FakeCrons:
     async def create(self, assistant_id, **kwargs):
         self.created.append({"assistant_id": assistant_id, **kwargs})
         return {"cron_id": "cron-new"}
+
+    async def delete(self, cron_id):
+        self.deleted.append(cron_id)
+
+
+@pytest.fixture(autouse=True)
+def _reset_cron_memo():
+    usage_snapshot_cron._registered_cron_id = None
+    yield
+    usage_snapshot_cron._registered_cron_id = None
 
 
 class FakeRuns:
@@ -118,6 +129,35 @@ async def test_cron_reuses_existing_search_hit(monkeypatch):
     cron_id = await usage_snapshot_cron.ensure_usage_snapshot_cron()
     assert cron_id == "cron-existing"
     assert client.crons.created == []
+
+
+@pytest.mark.asyncio
+async def test_cron_reaps_duplicate_search_hits(monkeypatch):
+    client = FakeClient(
+        crons=FakeCrons(existing=[{"cron_id": "cron-a"}, {"cron_id": "cron-b"}]),
+    )
+    monkeypatch.setattr(usage_snapshot_cron, "_client", lambda: client)
+
+    cron_id = await usage_snapshot_cron.ensure_usage_snapshot_cron()
+    assert cron_id == "cron-a"
+    assert client.crons.deleted == ["cron-b"]
+    assert client.crons.created == []
+
+
+@pytest.mark.asyncio
+async def test_cron_memoizes_and_skips_loopback(monkeypatch):
+    store = FakeStore()
+    client = FakeClient(store=store)
+    monkeypatch.setattr(usage_snapshot_cron, "_client", lambda: client)
+
+    await usage_snapshot_cron.ensure_usage_snapshot_cron()
+
+    # After registration, a poisoned client proves no further loopback happens.
+    def _boom():
+        raise AssertionError("ensure_usage_snapshot_cron should be memoized")
+
+    monkeypatch.setattr(usage_snapshot_cron, "_client", _boom)
+    assert await usage_snapshot_cron.ensure_usage_snapshot_cron() == "cron-new"
 
 
 @pytest.mark.asyncio

@@ -144,6 +144,7 @@ async def test_cold_cache_returns_computing_placeholder(monkeypatch):
     assert payload["rows"] == []
     assert payload["total_members"] == 0
     assert payload["generated_at_ms"] is None
+    assert payload["computing"] is True
     assert payload["reviewer_stats"]["computing"] is True
     assert store.puts == []
 

@@ -1,5 +1,6 @@
 """Custom FastAPI routes for LangGraph server."""
 
+import asyncio
 import hashlib
 import hmac
 import json
@@ -118,14 +119,17 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
 
     validate_sandbox_startup_config()
 
-    # One bounded, non-blocking scheduling call — never a retained/looping task
-    # (the exact #1434 bug class). Failures are logged and ignored; the cron
-    # catches up within its cadence.
+    # One bounded scheduling call — never a retained/looping task (the exact
+    # #1434 bug class). These are loopback HTTP calls into a server that is
+    # still starting, so cap them hard: a hang must not block startup. Any
+    # failure/timeout is fine — the cron and lazy per-request registration both
+    # catch up within the cadence.
     try:
-        await ensure_usage_snapshot_cron()
-        await trigger_usage_snapshot_build()
+        async with asyncio.timeout(5):
+            await ensure_usage_snapshot_cron()
+            await trigger_usage_snapshot_build()
     except Exception:
-        logger.debug("Usage snapshot bootstrap on startup failed", exc_info=True)
+        logger.debug("Usage snapshot bootstrap on startup skipped", exc_info=True)
 
     yield
 

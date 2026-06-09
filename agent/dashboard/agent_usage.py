@@ -697,6 +697,7 @@ def _usage_payload_from_snapshot(
         "total_members": _coerce_int(snapshot.get("total_members")),
         "current_user_rank": current_user_row["rank"] if current_user_row else None,
         "generated_at_ms": generated_at_ms,
+        "computing": bool(snapshot.get("computing")),
     }
 
 
