@@ -3,12 +3,17 @@
 from __future__ import annotations
 
 import base64
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
 
-from agent.integrations.langsmith import _configure_github_proxy
+from agent.integrations.langsmith import (
+    TimeoutLangSmithSandbox,
+    _configure_github_proxy,
+    _get_datadog_sandbox_env,
+)
 
 
 class TestSandboxFactoryLoading:
@@ -28,6 +33,38 @@ class TestSandboxFactoryLoading:
         assert sandbox.id == "local"
         mock_import_module.assert_called_once_with("agent.integrations.local")
         module.create_local_sandbox.assert_called_once_with("existing")
+
+
+class TestDatadogSandboxEnv:
+    def test_reads_configured_datadog_env_vars(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {"DD_SITE": "datadoghq.com", "DD_API_KEY": "api", "DD_APP_KEY": "app"},
+            clear=True,
+        ):
+            assert _get_datadog_sandbox_env() == {
+                "DD_SITE": "datadoghq.com",
+                "DD_API_KEY": "api",
+                "DD_APP_KEY": "app",
+            }
+
+    def test_execute_forwards_datadog_env_to_sandbox_run(self) -> None:
+        datadog_env = {"DD_SITE": "datadoghq.com", "DD_API_KEY": "api", "DD_APP_KEY": "app"}
+        sandbox = MagicMock()
+        sandbox.run.return_value = SimpleNamespace(
+            result=SimpleNamespace(stdout="ok", stderr="", exit_code=0)
+        )
+        backend = object.__new__(TimeoutLangSmithSandbox)
+        backend._sandbox = sandbox
+        backend._sandbox_env = datadog_env
+        backend._default_timeout = 30
+
+        response = backend.execute("pup --version")
+
+        assert response.output == "ok"
+        sandbox.run.assert_called_once_with(
+            "pup --version", timeout=30, wait=False, env=datadog_env
+        )
 
 
 class TestConfigureGithubProxy:

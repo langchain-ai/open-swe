@@ -33,6 +33,7 @@ PROXY_CONFIG_MAX_ATTEMPTS = 3
 PROXY_CONFIG_TIMEOUT_SECONDS = 10.0
 PROXY_CONFIG_RETRY_DELAYS_SECONDS = (0.5, 1.0)
 PROXY_CONFIG_RETRYABLE_STATUS_CODES = frozenset({408, 409, 425, 429, 500, 502, 503, 504, 529})
+DATADOG_SANDBOX_ENV_VARS = ("DD_SITE", "DD_API_KEY", "DD_APP_KEY")
 
 
 def _get_langsmith_api_key() -> str | None:
@@ -60,6 +61,11 @@ def _execute_client_grace_seconds() -> int:
     before giving up and killing it. The server is meant to enforce the command
     timeout; this is the client-side backstop for when it doesn't."""
     return _parse_optional_int("SANDBOX_EXECUTE_CLIENT_GRACE_SECONDS", 30)
+
+
+def _get_datadog_sandbox_env() -> dict[str, str]:
+    """Get Datadog CLI env vars to forward into sandbox commands."""
+    return {name: value for name in DATADOG_SANDBOX_ENV_VARS if (value := os.environ.get(name))}
 
 
 def _get_sandbox_snapshot_config() -> tuple[str | None, int, int, int, int, int]:
@@ -288,6 +294,10 @@ class TimeoutLangSmithSandbox(LangSmithSandbox):
         TypeError,
     )
 
+    def __init__(self, *args: Any, env: dict[str, str] | None = None, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._sandbox_env = env or {}
+
     def _deadline(self, effective_timeout: int) -> int:
         return effective_timeout + _execute_client_grace_seconds()
 
@@ -314,19 +324,31 @@ class TimeoutLangSmithSandbox(LangSmithSandbox):
         except Exception:  # noqa: BLE001 - best-effort cleanup of a wedged command
             logger.warning("Failed to kill timed-out sandbox command", exc_info=True)
 
+    def _run_sandbox_command(self, command: str, *, timeout: int | None, wait: bool) -> Any:
+        kwargs: dict[str, Any] = {"timeout": timeout, "wait": wait}
+        sandbox_env = getattr(self, "_sandbox_env", None)
+        if sandbox_env:
+            kwargs["env"] = sandbox_env
+        return self._sandbox.run(command, **kwargs)
+
     def _base_execute(self, command: str, timeout: int | None) -> ExecuteResponse:
-        # WS path unavailable; the base wait=True path falls back to HTTP,
-        # which carries its own request deadline.
-        return LangSmithSandbox.execute(self, command, timeout=timeout)
+        effective = timeout if timeout is not None else self._default_timeout
+        try:
+            result = self._run_sandbox_command(command, timeout=effective, wait=True)
+        except CommandTimeoutError:
+            return self._timeout_response(
+                effective if effective is not None else 0, server_side=True
+            )
+        return self._result_to_response(result)
 
     def execute(self, command: str, *, timeout: int | None = None) -> ExecuteResponse:
         effective = timeout if timeout is not None else self._default_timeout
         if not effective:  # 0 / None: caller opted out of any deadline
-            return super().execute(command, timeout=timeout)
+            return self._base_execute(command, timeout)
         # run(wait=False) eagerly opens the WS and reads the "started" frame, so
         # connect/setup failures raise here — fall back to the base path.
         try:
-            handle = self._sandbox.run(command, timeout=effective, wait=False)
+            handle = self._run_sandbox_command(command, timeout=effective, wait=False)
         except (*self._WS_FALLBACK_ERRORS, TimeoutError):
             return self._base_execute(command, timeout)
         deadline = self._deadline(effective)
@@ -355,13 +377,13 @@ class TimeoutLangSmithSandbox(LangSmithSandbox):
     ) -> ExecuteResponse:
         effective = timeout if timeout is not None else self._default_timeout
         if not effective:
-            return await super().aexecute(command, timeout=timeout)
+            return await asyncio.to_thread(self._base_execute, command, timeout)
         # run(wait=False) eagerly opens the WS and reads the "started" frame
         # (blocking, bounded by the SDK connect timeout); connect/setup failures
         # raise here — fall back to the base path.
         try:
             handle = await asyncio.to_thread(
-                self._sandbox.run, command, timeout=effective, wait=False
+                self._run_sandbox_command, command, timeout=effective, wait=False
             )
         except (*self._WS_FALLBACK_ERRORS, TimeoutError):
             return await asyncio.to_thread(self._base_execute, command, timeout)
@@ -471,7 +493,7 @@ class LangSmithProvider(SandboxProvider):
             except Exception as e:
                 msg = f"Failed to connect to existing sandbox '{sandbox_id}': {e}"
                 raise RuntimeError(msg) from e
-            return TimeoutLangSmithSandbox(sandbox)
+            return TimeoutLangSmithSandbox(sandbox, env=_get_datadog_sandbox_env())
 
         if not snapshot_id:
             msg = "DEFAULT_SANDBOX_SNAPSHOT_ID must be set when SANDBOX_TYPE=langsmith"
@@ -491,7 +513,7 @@ class LangSmithProvider(SandboxProvider):
             msg = f"Failed to create sandbox from snapshot '{snapshot_id}': {e}"
             raise RuntimeError(msg) from e
 
-        return TimeoutLangSmithSandbox(sandbox)
+        return TimeoutLangSmithSandbox(sandbox, env=_get_datadog_sandbox_env())
 
     def delete(self, *, sandbox_id: str, **kwargs: Any) -> None:
         """Delete a LangSmith sandbox."""
