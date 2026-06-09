@@ -57,7 +57,7 @@ class TestConfigureGithubProxy:
 
             assert "proxy_config" in payload
             rules = payload["proxy_config"]["rules"]
-            assert len(rules) == 2
+            assert len(rules) == 3
 
             api_rule = rules[0]
             assert api_rule["name"] == "github-api"
@@ -77,6 +77,15 @@ class TestConfigureGithubProxy:
             assert headers[0]["name"] == "Authorization"
             assert headers[0]["type"] == "opaque"
             assert headers[0]["value"] == f"Basic {expected_basic}"
+
+            ls_rule = rules[2]
+            assert ls_rule["name"] == "langsmith-api"
+            assert ls_rule["match_hosts"] == ["api.smith.langchain.com"]
+            ls_headers = ls_rule["headers"]
+            assert len(ls_headers) == 1
+            assert ls_headers[0]["name"] == "x-api-key"
+            assert ls_headers[0]["type"] == "opaque"
+            assert ls_headers[0]["value"] == "ls-api-key"
 
     def test_sends_to_correct_url(self) -> None:
         """Verify the PATCH hits the right endpoint."""

@@ -87,6 +87,27 @@ def _get_sandbox_snapshot_config() -> tuple[str | None, int, int, int, int, int]
     )
 
 
+def _langsmith_proxy_host() -> str:
+    endpoint = os.environ.get("LANGSMITH_ENDPOINT", "https://api.smith.langchain.com")
+    return endpoint.split("://", 1)[-1].split("/", 1)[0]
+
+
+def _langsmith_proxy_rules(langsmith_api_key: str) -> list[dict[str, Any]]:
+    return [
+        {
+            "name": "langsmith-api",
+            "match_hosts": [_langsmith_proxy_host()],
+            "headers": [
+                {
+                    "name": "x-api-key",
+                    "type": "opaque",
+                    "value": langsmith_api_key,
+                }
+            ],
+        },
+    ]
+
+
 def _github_proxy_rules(github_token: str) -> list[dict[str, Any]]:
     basic_auth = base64.b64encode(f"x-access-token:{github_token}".encode()).decode()
     return [
@@ -135,11 +156,12 @@ def _is_retryable_proxy_config_error(exc: BaseException) -> bool:
 
 
 def _configure_github_proxy(sandbox_name: str, github_token: str) -> None:
-    """Configure sandbox proxy to inject GitHub auth for GitHub traffic.
+    """Configure sandbox proxy to inject GitHub and LangSmith auth.
 
     Uses the LangSmith proxy-config API to set up header injection so that
-    git operations (clone, pull, push) authenticate via the proxy rather than
-    writing credentials to disk in the sandbox.
+    git operations (clone, pull, push) and the bundled `langsmith` CLI
+    authenticate via the proxy rather than writing credentials to disk in the
+    sandbox.
 
     Args:
         sandbox_name: The sandbox name/ID returned by the LangSmith API.
@@ -151,7 +173,8 @@ def _configure_github_proxy(sandbox_name: str, github_token: str) -> None:
         return
     langsmith_endpoint = os.environ.get("LANGSMITH_ENDPOINT", "https://api.smith.langchain.com")
     url = f"{langsmith_endpoint}/v2/sandboxes/boxes/{sandbox_name}"
-    payload = {"proxy_config": {"rules": _github_proxy_rules(github_token)}}
+    rules = _github_proxy_rules(github_token) + _langsmith_proxy_rules(api_key)
+    payload = {"proxy_config": {"rules": rules}}
     with httpx.Client(timeout=PROXY_CONFIG_TIMEOUT_SECONDS) as client:
         for attempt in range(PROXY_CONFIG_MAX_ATTEMPTS):
             try:

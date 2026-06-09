@@ -5,6 +5,7 @@ ARG NODEJS_VERSION=22.22.0-1nodesource1
 ARG UV_VERSION=0.9.26
 ARG YARN_VERSION=4.12.0
 ARG GH_VERSION=2.83.1
+ARG LANGSMITH_CLI_VERSION=0.2.35
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -42,6 +43,19 @@ RUN set -eux; \
     apt-get update; \
     apt-get install -y /tmp/gh.deb; \
     rm -rf /tmp/gh.deb /var/lib/apt/lists/*
+
+RUN set -eux; \
+    arch="$(dpkg --print-architecture)"; \
+    case "${arch}" in \
+      amd64) ls_arch="amd64"; ls_sha256="9b981465c04d8094bc84fe50f26dbda2875a99e2baeada6bedadd09f7c8ba8b1" ;; \
+      arm64) ls_arch="arm64"; ls_sha256="d42bcc2a6c04ccc62ade3b4b7c84bff64352be2edd2c5ef9802b4d36cb94f76f" ;; \
+      *) echo "unsupported architecture: ${arch}" >&2; exit 1 ;; \
+    esac; \
+    curl -fsSL "https://github.com/langchain-ai/langsmith-cli/releases/download/v${LANGSMITH_CLI_VERSION}/langsmith_linux_${ls_arch}.tar.gz" -o /tmp/langsmith.tar.gz; \
+    echo "${ls_sha256}  /tmp/langsmith.tar.gz" | sha256sum -c -; \
+    tar -xzf /tmp/langsmith.tar.gz -C /tmp; \
+    install -m 0755 /tmp/langsmith /usr/local/bin/langsmith; \
+    rm -rf /tmp/langsmith.tar.gz /tmp/langsmith
 
 RUN set -eux; \
     arch="$(dpkg --print-architecture)"; \
@@ -84,4 +98,5 @@ RUN echo "=== Installed versions ===" \
     && go version \
     && docker --version \
     && git --version \
-    && gh --version
+    && gh --version \
+    && langsmith --version
