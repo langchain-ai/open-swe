@@ -259,7 +259,15 @@ def test_execute_none_output_becomes_empty_string(monkeypatch):
     assert result.output == ""
 
 
-def test_execute_timeout_wraps_command_with_bash_timeout(monkeypatch):
+def test_execute_timeout_uses_timeout_binary_not_bash_prefix(monkeypatch):
+    """timeout must wrap the full bash subprocess, not be prefixed inside bash -c.
+
+    The correct form is ["timeout", "N", "bash", "-c", command] so that
+    heredocs/pipes within `command` are parsed by the inner bash process.
+    The incorrect form ("bash -c 'timeout N command'") would bind heredoc stdin
+    to `timeout` rather than the embedded command, silently breaking
+    BaseSandbox-generated edit/write scripts.
+    """
     module = _load_docker_module(monkeypatch)
     container = _FakeContainer()
     sandbox = module.DockerSandbox(container)
@@ -267,8 +275,34 @@ def test_execute_timeout_wraps_command_with_bash_timeout(monkeypatch):
     sandbox.execute("sleep 60", timeout=5)
 
     called_cmd = container.exec_run_calls[-1][0]
-    # cmd is ["bash", "-c", "timeout 5 sleep 60"]
-    assert any("timeout 5" in part for part in called_cmd)
+    # Must be ["timeout", "5", "bash", "-c", "sleep 60"]
+    assert called_cmd[0] == "timeout", (
+        f"Expected 'timeout' as argv[0] but got {called_cmd[0]!r}. "
+        "Did you use the broken 'bash -c \"timeout N cmd\"' form?"
+    )
+    assert called_cmd[1] == "5"
+    assert called_cmd[2] == "bash"
+    assert called_cmd[3] == "-c"
+    assert called_cmd[4] == "sleep 60"
+
+
+def test_execute_timeout_heredoc_safe(monkeypatch):
+    """Simulate a heredoc-bearing command (like BaseSandbox edit template).
+
+    With the correct [timeout, N, bash, -c, cmd] form the heredoc markers are
+    part of the script text passed to the inner bash, so they are interpreted
+    correctly.  This test verifies the command structure is preserved exactly.
+    """
+    heredoc_command = "python3 -c \"import sys; print(sys.stdin.read())\" <<'EOF'\npayload\nEOF"
+    module = _load_docker_module(monkeypatch)
+    container = _FakeContainer()
+    sandbox = module.DockerSandbox(container)
+
+    sandbox.execute(heredoc_command, timeout=10)
+
+    called_cmd = container.exec_run_calls[-1][0]
+    # The heredoc string must be passed intact as argv[4] to inner bash
+    assert called_cmd[4] == heredoc_command
 
 
 def test_execute_without_timeout_does_not_add_timeout_prefix(monkeypatch):
@@ -279,6 +313,7 @@ def test_execute_without_timeout_does_not_add_timeout_prefix(monkeypatch):
     sandbox.execute("echo hi")
 
     called_cmd = container.exec_run_calls[-1][0]
+    assert called_cmd[0] == "bash"
     assert not any("timeout" in part for part in called_cmd)
 
 
@@ -341,6 +376,25 @@ def test_upload_files_creates_parent_directory(monkeypatch):
         if isinstance(c, list) and any("mkdir" in part for part in c)
     ]
     assert len(mkdir_calls) >= 1
+
+
+def test_upload_files_mkdir_failure_returns_error_without_calling_put_archive(monkeypatch):
+    """If mkdir -p fails (e.g. permission denied), upload must surface the error
+    and must NOT proceed to put_archive with a misleading tar error.
+    """
+    module = _load_docker_module(monkeypatch)
+    container = _FakeContainer(
+        exec_result=_FakeExecResult(exit_code=1, output=b"permission denied")
+    )
+    sandbox = module.DockerSandbox(container)
+
+    results = sandbox.upload_files([("/readonly/file.txt", b"data")])
+
+    assert len(results) == 1
+    assert results[0].error is not None
+    assert "mkdir" in results[0].error or "permission denied" in results[0].error
+    # put_archive must never have been called
+    assert len(container.put_archive_calls) == 0
 
 
 def test_upload_files_handles_put_archive_exception(monkeypatch):
