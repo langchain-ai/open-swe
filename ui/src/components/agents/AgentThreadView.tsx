@@ -70,6 +70,8 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
   }, [models, thread.model, thread.effort])
   const [selection, setSelection] = useState<ModelSelection | null>(null)
   const activeSelection = selection ?? threadSelection ?? defaultSelection
+  const [planMode, setPlanMode] = useState<boolean | null>(null)
+  const activePlanMode = planMode ?? thread.planMode ?? false
 
   useEffect(() => {
     setPendingPrompts((prev) => {
@@ -142,11 +144,14 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
                       images,
                       model_id: activeSelection?.modelId ?? null,
                       effort: activeSelection?.effort ?? null,
+                      plan_mode: activePlanMode,
                     })
                   }
                   models={models}
                   selection={activeSelection}
                   onSelectionChange={setSelection}
+                  planMode={activePlanMode}
+                  onPlanModeChange={setPlanMode}
                 />
               </div>
             </div>
@@ -168,11 +173,14 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
                     images,
                     model_id: activeSelection?.modelId ?? null,
                     effort: activeSelection?.effort ?? null,
+                    plan_mode: activePlanMode,
                   })
                 }
                 models={models}
                 selection={activeSelection}
                 onSelectionChange={setSelection}
+                planMode={activePlanMode}
+                onPlanModeChange={setPlanMode}
               />
             </div>
           </div>

@@ -1,4 +1,11 @@
-import { ArrowUp, ChevronDown, ImagePlus, LoaderCircle, X } from "lucide-react"
+import {
+  ArrowUp,
+  ChevronDown,
+  ImagePlus,
+  LoaderCircle,
+  Map as MapIcon,
+  X,
+} from "lucide-react"
 import {
   memo,
   useCallback,
@@ -39,6 +46,9 @@ export interface CloudPromptBarProps {
   repos?: Array<{ full_name: string }>
   selectedRepo?: string | null
   onRepoChange?: (repo: string | null) => void
+  /** When provided, a Plan mode toggle is shown. Plan mode researches read-only and proposes a plan before editing. */
+  planMode?: boolean
+  onPlanModeChange?: (next: boolean) => void
 }
 
 function fileToImageChunk(file: File): Promise<ImageChunk | null> {
@@ -80,6 +90,8 @@ export const CloudPromptBar = memo(function CloudPromptBarComponent({
   repos,
   selectedRepo = null,
   onRepoChange,
+  planMode = false,
+  onPlanModeChange,
 }: CloudPromptBarProps) {
   const [value, setValue] = useState("")
   const [pendingImages, setPendingImages] = useState<Array<ImageChunk>>([])
@@ -195,6 +207,10 @@ export const CloudPromptBar = memo(function CloudPromptBarComponent({
     if (e.key === "Enter" && !e.shiftKey && canSubmit) {
       e.preventDefault()
       handleSubmit()
+    }
+    if (e.key === "Tab" && e.shiftKey && onPlanModeChange) {
+      e.preventDefault()
+      onPlanModeChange(!planMode)
     }
   }
 
@@ -335,6 +351,24 @@ export const CloudPromptBar = memo(function CloudPromptBarComponent({
               </div>
             )}
           </div>
+
+          {onPlanModeChange && (
+            <button
+              type="button"
+              onClick={() => onPlanModeChange(!planMode)}
+              aria-pressed={planMode}
+              title="Plan mode: research read-only and propose a plan before editing (Shift+Tab)"
+              className={cn(
+                "flex shrink-0 items-center gap-1 rounded-full border px-2 py-1 text-[12px] transition-colors",
+                planMode
+                  ? "border-[var(--ui-accent)] bg-[var(--ui-accent)]/10 text-[color:var(--ui-accent)]"
+                  : "border-[var(--ui-border)] text-[color:var(--ui-text-muted)] hover:bg-[var(--ui-panel-2)] hover:text-[color:var(--ui-text)]"
+              )}
+            >
+              <MapIcon className="size-3.5" />
+              <span>Plan</span>
+            </button>
+          )}
 
           <button
             type="button"

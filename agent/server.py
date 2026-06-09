@@ -42,6 +42,7 @@ from .dashboard.options import DEFAULT_MODEL_ID, SUPPORTED_MODEL_IDS, model_supp
 from .dashboard.team_settings import get_team_default_model_pair, get_team_default_repo
 from .integrations.langsmith import _configure_github_proxy
 from .middleware import (
+    ExcludeToolsMiddleware,
     ModelFallbackMiddleware,
     SandboxCircuitBreakerMiddleware,
     SanitizeThinkingBlocksMiddleware,
@@ -399,6 +400,21 @@ DEFAULT_LLM_MAX_TOKENS = 64_000
 DEFAULT_RECURSION_LIMIT = 9_999
 MODEL_CALL_RECURSION_LIMIT = 5_000  # ~half the recursion limit to account for tool calls
 
+# Mutating tools hidden from the model while plan mode is active so it can only
+# research and propose a plan. `execute` stays available for read-only commands
+# (git clone/status/diff, grep) and is constrained by the plan-mode prompt.
+PLAN_MODE_EXCLUDED_TOOLS: frozenset[str] = frozenset(
+    {
+        "write_file",
+        "edit_file",
+        "open_pull_request",
+        "request_pr_review",
+        "linear_create_issue",
+        "linear_update_issue",
+        "linear_delete_issue",
+    }
+)
+
 
 def _general_purpose_subagent(model: BaseChatModel) -> SubAgent:
     return {
@@ -533,6 +549,13 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         )
         logger.info("Configured model fallback %s -> %s", model_id, fallback_model_id)
 
+    plan_mode = configurable.get("plan_mode") is True
+    if plan_mode:
+        logger.info("Plan mode enabled for thread %s", thread_id)
+    plan_mode_middleware: list[Any] = (
+        [ExcludeToolsMiddleware(excluded=PLAN_MODE_EXCLUDED_TOOLS)] if plan_mode else []
+    )
+
     source = (
         configurable.get("source") if isinstance(configurable.get("source"), str) else "dashboard"
     )
@@ -546,6 +569,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 "model": model_id,
                 "effort": profile_effort,
                 "source": source,
+                "plan_mode": plan_mode,
             },
         )
         await record_agent_thread_usage(
@@ -573,6 +597,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             triggering_user_identity=triggering_user_identity,
             create_prs=always_create_prs,
             default_repo=prompt_default_repo,
+            plan_mode=plan_mode,
         ),
         tools=[
             http_request,
@@ -602,6 +627,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             notify_step_limit_reached,
             SandboxCircuitBreakerMiddleware(),
             *fallback_middleware,
+            *plan_mode_middleware,
             SanitizeThinkingBlocksMiddleware(),
         ],
     ).with_config(config)

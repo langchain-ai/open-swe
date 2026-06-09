@@ -13,6 +13,7 @@ export function AgentsHome() {
   const { models, defaultSelection } = useModelOptions()
   const [selection, setSelection] = useState<ModelSelection | null>(null)
   const activeSelection = selection ?? defaultSelection
+  const [planMode, setPlanMode] = useState(false)
 
   const reposQuery = useRepos()
   const profileQuery = useProfile()
@@ -40,6 +41,7 @@ export function AgentsHome() {
                 repo_explicitly_none: repoOverride === null,
                 model_id: activeSelection?.modelId ?? null,
                 effort: activeSelection?.effort ?? null,
+                plan_mode: planMode,
               })
             }
             disabled={createThread.isPending}
@@ -49,6 +51,8 @@ export function AgentsHome() {
             repos={reposQuery.data?.repositories}
             selectedRepo={repo}
             onRepoChange={setRepoOverride}
+            planMode={planMode}
+            onPlanModeChange={setPlanMode}
           />
         </div>
       </div>

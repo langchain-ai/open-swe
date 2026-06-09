@@ -131,6 +131,7 @@ export interface SendAgentMessageVariables {
   images?: Array<ImageChunk>
   model_id?: string | null
   effort?: string | null
+  plan_mode?: boolean
 }
 
 export function useSendAgentMessage(threadId: string) {
@@ -143,6 +144,7 @@ export function useSendAgentMessage(threadId: string) {
         images: vars.images,
         model_id: vars.model_id,
         effort: vars.effort,
+        plan_mode: vars.plan_mode,
       }),
     onMutate: (vars) => {
       const cached = queryClient.getQueryData<{ messages?: Array<unknown> }>(

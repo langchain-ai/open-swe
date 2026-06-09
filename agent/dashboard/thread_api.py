@@ -69,6 +69,7 @@ class ThreadCreateBody(BaseModel):
     repo_explicitly_none: bool = False
     model_id: str | None = None
     effort: str | None = None
+    plan_mode: bool = False
 
 
 class ThreadMessageBody(BaseModel):
@@ -76,6 +77,7 @@ class ThreadMessageBody(BaseModel):
     images: list[DashboardImageBody] = Field(default_factory=list)
     model_id: str | None = None
     effort: str | None = None
+    plan_mode: bool = False
 
 
 def _normalize_model_choice(
@@ -280,6 +282,7 @@ def _thread_summary(
         "branch": metadata.get("branch_name") or metadata.get("base_branch") or "main",
         "model": model,
         "effort": effort,
+        "planMode": metadata.get("plan_mode") is True,
         "source": _thread_source(metadata),
         "status": status,
         "viewed": _is_thread_viewed(metadata, latest_run_id),
@@ -487,6 +490,7 @@ async def _start_agent_run(
     title: str | None = None,
     model_id: str | None = None,
     effort: str | None = None,
+    plan_mode: bool = False,
 ) -> dict[str, Any]:
     profile = await get_profile(login) or {}
     now_ms = _now_ms()
@@ -507,6 +511,7 @@ async def _start_agent_run(
         "effort": metadata_effort,
         "resolved_model": resolved_model,
         "resolved_effort": resolved_effort,
+        "plan_mode": plan_mode,
         "created_at_ms": now_ms,
         "updated_at_ms": now_ms,
     }
@@ -534,6 +539,8 @@ async def _start_agent_run(
     if chosen_model and chosen_effort:
         configurable["agent_model_id"] = chosen_model
         configurable["agent_effort"] = chosen_effort
+    if plan_mode:
+        configurable["plan_mode"] = True
 
     run = await client.runs.create(
         thread_id,
@@ -567,6 +574,7 @@ async def create_dashboard_thread(login: str, body: ThreadCreateBody) -> dict[st
         images=body.images,
         model_id=body.model_id,
         effort=body.effort,
+        plan_mode=body.plan_mode,
     )
 
 
@@ -586,7 +594,11 @@ async def send_dashboard_message(
     prompt = body.content.strip()
     now_ms = _now_ms()
     chosen_model, chosen_effort = _normalize_model_choice(body.model_id, body.effort)
-    metadata_update: dict[str, Any] = {"source": _DASHBOARD_SOURCE, "updated_at_ms": now_ms}
+    metadata_update: dict[str, Any] = {
+        "source": _DASHBOARD_SOURCE,
+        "updated_at_ms": now_ms,
+        "plan_mode": body.plan_mode,
+    }
     if chosen_model and chosen_effort:
         metadata_update["model"] = chosen_model
         metadata_update["effort"] = chosen_effort
@@ -633,6 +645,8 @@ async def send_dashboard_message(
         configurable["repo"] = {"owner": owner, "name": name}
     elif metadata.get("repo_explicitly_none") is True:
         configurable["repo_explicitly_none"] = True
+    if body.plan_mode:
+        configurable["plan_mode"] = True
     if chosen_model and chosen_effort:
         configurable["agent_model_id"] = chosen_model
         configurable["agent_effort"] = chosen_effort

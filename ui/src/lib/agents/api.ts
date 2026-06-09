@@ -9,6 +9,7 @@ export interface ThreadCreateRequest {
   repo_explicitly_none?: boolean
   model_id?: string | null
   effort?: string | null
+  plan_mode?: boolean
 }
 
 export interface ThreadMessageRequest {
@@ -16,6 +17,7 @@ export interface ThreadMessageRequest {
   images?: Array<ImageChunk>
   model_id?: string | null
   effort?: string | null
+  plan_mode?: boolean
 }
 
 export interface ScheduleCreateRequest {
