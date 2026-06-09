@@ -173,8 +173,18 @@ def provider_model_kwargs(
     return kwargs
 
 
-def validate_llm_startup_config() -> None:
-    """Validate that the required API keys are present for the configured LLM model."""
+def validate_local_dev_llm_config() -> None:
+    """Validate API keys for the locally configured default model.
+
+    This check only runs in localhost development environments and is
+    intended to catch missing credentials for the default model specified
+    via LLM_MODEL_ID/DEFAULT_MODEL_ID. Runtime model selection may come
+    from team, profile, or thread configuration and is not validated here.
+    """
+    dashboard_url = os.environ.get("DASHBOARD_BASE_URL", "")
+    if not dashboard_url.startswith("http://localhost"):
+        return
+
     model_id = os.environ.get("LLM_MODEL_ID", DEFAULT_MODEL_ID)
 
     if model_id.startswith("openai:") and not os.environ.get("OPENAI_API_KEY"):
