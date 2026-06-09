@@ -110,9 +110,23 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    from .dashboard.usage_snapshot_cron import (
+        ensure_usage_snapshot_cron,
+        trigger_usage_snapshot_build,
+    )
     from .utils.sandbox import validate_sandbox_startup_config
 
     validate_sandbox_startup_config()
+
+    # One bounded, non-blocking scheduling call — never a retained/looping task
+    # (the exact #1434 bug class). Failures are logged and ignored; the cron
+    # catches up within its cadence.
+    try:
+        await ensure_usage_snapshot_cron()
+        await trigger_usage_snapshot_build()
+    except Exception:
+        logger.debug("Usage snapshot bootstrap on startup failed", exc_info=True)
+
     yield
 
 
