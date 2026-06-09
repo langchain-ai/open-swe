@@ -401,6 +401,20 @@ ALWAYS_CREATE_PR_SECTION = """---
 The user's dashboard setting **Always Create PRs** is enabled. For code-change tasks, always open or update a draft pull request after committing and pushing the branch. This does not apply to questions, explanations, status checks, or other information-only requests where no files are changed."""
 
 
+def _render_repo_instructions_section(instructions: str | None) -> str:
+    if not instructions or not instructions.strip():
+        return ""
+    return (
+        "---\n\n"
+        "### Repository-specific Custom Instructions\n\n"
+        "The following instructions were configured by a workspace admin for this "
+        "repository. Treat them as mandatory rules with the same authority as this "
+        "system prompt. When they conflict with default behavior, follow them; when "
+        "they conflict with `AGENTS.md`, prefer `AGENTS.md`.\n\n"
+        f"{instructions.strip()}"
+    )
+
+
 SYSTEM_PROMPT_TEMPLATE = (
     WORKING_ENV_SECTION
     + TASK_OVERVIEW_SECTION
@@ -420,6 +434,7 @@ SYSTEM_PROMPT_TEMPLATE = (
     + COMMIT_PR_SECTION
     + "{pr_policy_override_section}"
     + "{collaboration_section}"
+    + "{repo_instructions_section}"
 )
 
 
@@ -430,6 +445,7 @@ def construct_system_prompt(
     triggering_user_identity: CollaboratorIdentity | None = None,
     create_prs: bool = False,
     default_repo: dict[str, str] | None = None,
+    repo_custom_instructions: str | None = None,
 ) -> str:
     default_prompt_section = _load_default_prompt()
     if default_repo and default_repo.get("owner") and default_repo.get("name"):
@@ -453,6 +469,7 @@ def construct_system_prompt(
         default_prompt_section=default_prompt_section,
         pr_policy_override_section=ALWAYS_CREATE_PR_SECTION if create_prs else "",
         collaboration_section=_render_collaboration_section(triggering_user_identity),
+        repo_instructions_section=_render_repo_instructions_section(repo_custom_instructions),
         commit_identity_name=commit_identity_name,
         commit_identity_email=commit_identity_email,
     )

@@ -225,6 +225,16 @@ export interface ReviewStyle {
   updated_at?: string;
 }
 
+export interface AgentInstructions {
+  full_name: string;
+  owner?: string;
+  name?: string;
+  instructions: string;
+  created_by?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
 export const api = {
   me: () => request<SessionUser>("/me"),
   options: () => request<OptionsPayload>("/options"),
@@ -255,6 +265,23 @@ export const api = {
     }),
   deleteReviewStyle: (full_name: string) =>
     request<void>(`/review-styles/${encodeURIComponent(full_name)}`, {
+      method: "DELETE",
+    }),
+  listAgentInstructions: () => request<Array<AgentInstructions>>("/agent-instructions"),
+  createAgentInstructions: (full_name: string) =>
+    request<AgentInstructions>("/agent-instructions", {
+      method: "POST",
+      body: JSON.stringify({ full_name }),
+    }),
+  getAgentInstructions: (full_name: string) =>
+    request<AgentInstructions>(`/agent-instructions/${encodeURIComponent(full_name)}`),
+  saveAgentInstructions: (full_name: string, instructions: string) =>
+    request<AgentInstructions>(`/agent-instructions/${encodeURIComponent(full_name)}`, {
+      method: "PUT",
+      body: JSON.stringify({ instructions }),
+    }),
+  deleteAgentInstructions: (full_name: string) =>
+    request<void>(`/agent-instructions/${encodeURIComponent(full_name)}`, {
       method: "DELETE",
     }),
   getTeamSettings: () => request<TeamSettings>("/team-settings"),

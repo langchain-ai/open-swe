@@ -118,6 +118,21 @@ async def _resolve_prompt_default_repo(configurable: dict[str, Any]) -> dict[str
         return None
 
 
+async def _resolve_repo_custom_instructions(
+    default_repo: dict[str, str] | None,
+) -> str | None:
+    """Load per-repo custom agent instructions for the resolved default repo."""
+    if not default_repo or not default_repo.get("owner") or not default_repo.get("name"):
+        return None
+    try:
+        from .dashboard.agent_instructions import get_repo_agent_instructions
+
+        return await get_repo_agent_instructions(default_repo["owner"], default_repo["name"])
+    except Exception:
+        logger.debug("Failed to load repo custom agent instructions", exc_info=True)
+        return None
+
+
 async def _start_langsmith_sandbox_if_needed(sandbox_backend: SandboxBackendProtocol) -> None:
     """Start a LangSmith sandbox before operations that require it to be running."""
     if os.getenv("SANDBOX_TYPE", "langsmith") != "langsmith":
@@ -560,6 +575,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         logger.debug("Failed to record agent usage for thread %s", thread_id, exc_info=True)
 
     prompt_default_repo = await _resolve_prompt_default_repo(configurable)
+    repo_custom_instructions = await _resolve_repo_custom_instructions(prompt_default_repo)
 
     logger.info("Returning agent with sandbox for thread %s", thread_id)
     main_model = make_model(model_id, **model_kwargs)
@@ -573,6 +589,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             triggering_user_identity=triggering_user_identity,
             create_prs=always_create_prs,
             default_repo=prompt_default_repo,
+            repo_custom_instructions=repo_custom_instructions,
         ),
         tools=[
             http_request,

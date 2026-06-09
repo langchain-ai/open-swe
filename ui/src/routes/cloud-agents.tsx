@@ -1,4 +1,5 @@
-import { Navigate, createFileRoute } from "@tanstack/react-router"
+import { Link, Navigate, createFileRoute } from "@tanstack/react-router"
+import { CaretRightIcon } from "@phosphor-icons/react"
 import { useEffect, useRef, useState } from "react"
 
 import type { ModelOption } from "@/lib/api"
@@ -314,6 +315,21 @@ function CloudAgentsPage() {
             }
           />
         </div>
+      </SettingsSection>
+
+      <SettingsSection title="Rules">
+        <Link
+          to="/agents/instructions"
+          className="flex items-center justify-between gap-6 px-4 py-3 hover:bg-muted/40"
+        >
+          <div className="flex flex-col gap-0.5">
+            <span className="text-xs font-medium text-foreground">Repository Instructions</span>
+            <span className="text-xs text-muted-foreground">
+              Per-repo custom instructions injected into the agent's system prompt.
+            </span>
+          </div>
+          <CaretRightIcon className="size-3.5 shrink-0 text-muted-foreground" />
+        </Link>
       </SettingsSection>
 
       {error && <p className="text-xs text-destructive">{error}</p>}
