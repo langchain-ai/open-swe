@@ -10,15 +10,23 @@ interface AppShellProps {
   title: string;
   description?: string;
   backTo?: { to: string; label: string };
+  maxWidthClassName?: string;
   children: ReactNode;
 }
 
-export function AppShell({ user, title, description, backTo, children }: AppShellProps) {
+export function AppShell({
+  user,
+  title,
+  description,
+  backTo,
+  maxWidthClassName = "max-w-3xl",
+  children,
+}: AppShellProps) {
   return (
     <div className="flex h-svh overflow-hidden bg-background text-foreground">
       <AppSidebar user={user} />
       <main className="flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-3xl px-4 pt-14 pb-6 sm:px-8 sm:py-10">
+        <div className={`mx-auto ${maxWidthClassName} px-4 pt-14 pb-6 sm:px-8 sm:py-10`}>
           {backTo && (
             <Link
               to={backTo.to}
