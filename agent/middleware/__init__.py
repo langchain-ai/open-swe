@@ -3,6 +3,7 @@ from .ensure_no_empty_msg import ensure_no_empty_msg
 from .exclude_tools import ExcludeToolsMiddleware
 from .model_fallback import ModelFallbackMiddleware
 from .notify_step_limit import notify_step_limit_reached
+from .plan_mode_shell_guard import PlanModeShellGuardMiddleware
 from .refresh_slack_status import SlackAssistantStatusMiddleware
 from .sandbox_circuit_breaker import SandboxCircuitBreakerMiddleware
 from .sanitize_thinking_blocks import SanitizeThinkingBlocksMiddleware
@@ -12,6 +13,7 @@ from .tool_error_handler import ToolErrorMiddleware
 __all__ = [
     "ExcludeToolsMiddleware",
     "ModelFallbackMiddleware",
+    "PlanModeShellGuardMiddleware",
     "SanitizeThinkingBlocksMiddleware",
     "SanitizeToolInputsMiddleware",
     "ToolErrorMiddleware",
