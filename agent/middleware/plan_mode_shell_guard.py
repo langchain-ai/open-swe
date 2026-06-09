@@ -50,7 +50,6 @@ READ_ONLY_COMMANDS: frozenset[str] = frozenset(
         "dirname",
         "echo",
         "printf",
-        "env",
         "printenv",
         "whoami",
         "hostname",
@@ -137,6 +136,34 @@ GIT_WRITE_SUBCOMMANDS: frozenset[str] = frozenset(
     }
 )
 
+# git global options (before the subcommand) that consume the following token as
+# their value, e.g. `git -C <path> status`. Their values must be skipped so the
+# real subcommand is identified correctly.
+_GIT_VALUE_OPTIONS: frozenset[str] = frozenset(
+    {"-C", "--git-dir", "--work-tree", "--namespace", "--super-prefix"}
+)
+
+# git global options that can run arbitrary commands or otherwise subvert the
+# read-only guarantee regardless of the subcommand (e.g. `-c alias.x='!sh'`).
+_GIT_BLOCKED_OPTIONS: frozenset[str] = frozenset({"-c", "--config-env", "--exec-path"})
+
+
+def _git_subcommand(rest: list[str]) -> str | None:
+    """Return the git subcommand, skipping global options; raise on blocked ones."""
+    index = 0
+    while index < len(rest):
+        token = rest[index]
+        if not token.startswith("-"):
+            return token
+        name = token.split("=", 1)[0]
+        if name in _GIT_BLOCKED_OPTIONS:
+            raise PlanModeBlockedError(f"`git {name}` is not allowed in plan mode")
+        if name in _GIT_VALUE_OPTIONS and "=" not in token:
+            index += 1  # skip the option's value argument
+        index += 1
+    return None
+
+
 # find predicates that execute commands or write files.
 _FIND_WRITE_PREDICATES: frozenset[str] = frozenset(
     {"-exec", "-execdir", "-ok", "-okdir", "-delete", "-fprint", "-fprint0", "-fprintf", "-fls"}
@@ -161,7 +188,7 @@ def _check_segment(tokens: list[str]) -> None:
         raise PlanModeBlockedError(f"`{base}` is not an allowed read-only command in plan mode")
     rest = tokens[index + 1 :]
     if base == "git":
-        sub = next((t for t in rest if not t.startswith("-")), None)
+        sub = _git_subcommand(rest)
         if sub and sub in GIT_WRITE_SUBCOMMANDS:
             raise PlanModeBlockedError(f"`git {sub}` changes state and is not allowed in plan mode")
     if base == "find":
