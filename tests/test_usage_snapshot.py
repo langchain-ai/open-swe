@@ -49,7 +49,7 @@ class FakeRuns:
         self.created: list[tuple] = []
 
     async def create(self, thread, assistant_id, **kwargs):
-        self.created.append((thread, assistant_id))
+        self.created.append((thread, assistant_id, kwargs))
         return {"run_id": "run-1"}
 
 
@@ -114,6 +114,9 @@ async def test_cron_registration_idempotent_and_creates_once(monkeypatch):
     first = await usage_snapshot_cron.ensure_usage_snapshot_cron()
     assert first == "cron-new"
     assert len(client.crons.created) == 1
+    created = client.crons.created[0]
+    assert created["input"] == {}
+    assert created["metadata"]["rev"] == usage_snapshot_cron._CRON_REV
 
     # Second call reads the persisted id, creates nothing new.
     second = await usage_snapshot_cron.ensure_usage_snapshot_cron()
@@ -123,7 +126,10 @@ async def test_cron_registration_idempotent_and_creates_once(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_cron_reuses_existing_search_hit(monkeypatch):
-    client = FakeClient(crons=FakeCrons(existing=[{"cron_id": "cron-existing"}]))
+    rev = usage_snapshot_cron._CRON_REV
+    client = FakeClient(
+        crons=FakeCrons(existing=[{"cron_id": "cron-existing", "metadata": {"rev": rev}}])
+    )
     monkeypatch.setattr(usage_snapshot_cron, "_client", lambda: client)
 
     cron_id = await usage_snapshot_cron.ensure_usage_snapshot_cron()
@@ -133,8 +139,14 @@ async def test_cron_reuses_existing_search_hit(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_cron_reaps_duplicate_search_hits(monkeypatch):
+    rev = usage_snapshot_cron._CRON_REV
     client = FakeClient(
-        crons=FakeCrons(existing=[{"cron_id": "cron-a"}, {"cron_id": "cron-b"}]),
+        crons=FakeCrons(
+            existing=[
+                {"cron_id": "cron-a", "metadata": {"rev": rev}},
+                {"cron_id": "cron-b", "metadata": {"rev": rev}},
+            ]
+        ),
     )
     monkeypatch.setattr(usage_snapshot_cron, "_client", lambda: client)
 
@@ -142,6 +154,29 @@ async def test_cron_reaps_duplicate_search_hits(monkeypatch):
     assert cron_id == "cron-a"
     assert client.crons.deleted == ["cron-b"]
     assert client.crons.created == []
+
+
+@pytest.mark.asyncio
+async def test_cron_replaces_stale_rev(monkeypatch):
+    """Crons created without input (rev 1) fail at __start__ — reap and recreate."""
+    client = FakeClient(crons=FakeCrons(existing=[{"cron_id": "cron-old"}]))
+    monkeypatch.setattr(usage_snapshot_cron, "_client", lambda: client)
+
+    cron_id = await usage_snapshot_cron.ensure_usage_snapshot_cron()
+    assert cron_id == "cron-new"
+    assert client.crons.deleted == ["cron-old"]
+    assert client.crons.created[0]["input"] == {}
+
+
+@pytest.mark.asyncio
+async def test_stale_stored_cron_id_is_ignored(monkeypatch):
+    store = FakeStore()
+    store.values[(("agent_usage", "meta"), "cron")] = {"cron_id": "cron-old"}
+    client = FakeClient(store=store)
+    monkeypatch.setattr(usage_snapshot_cron, "_client", lambda: client)
+
+    cron_id = await usage_snapshot_cron.ensure_usage_snapshot_cron()
+    assert cron_id == "cron-new"
 
 
 @pytest.mark.asyncio
@@ -167,7 +202,7 @@ async def test_trigger_build_schedules_threadless_run(monkeypatch):
 
     result = await usage_snapshot_cron.trigger_usage_snapshot_build()
     assert result["status"] == "scheduled"
-    assert client.runs.created == [(None, "usage_snapshot")]
+    assert client.runs.created == [(None, "usage_snapshot", {"input": {}})]
 
 
 def test_lifespan_retains_no_background_task():
