@@ -38,7 +38,7 @@ class FakeClient:
 
 
 @pytest.mark.asyncio
-async def test_cached_usage_payload_returns_stale_snapshot_and_schedules_refresh(monkeypatch):
+async def test_cached_usage_payload_returns_snapshot_without_refresh(monkeypatch):
     usage_snapshot = {
         "period": "30d",
         "total_members": 2,
@@ -101,24 +101,51 @@ async def test_cached_usage_payload_returns_stale_snapshot_and_schedules_refresh
         }
     )
     monkeypatch.setattr(agent_usage, "_client", lambda: FakeClient(store=store))
-    monkeypatch.setattr(agent_usage, "_now_ms", lambda: agent_usage._CACHE_TTL_MS + 2)
 
-    usage_refreshes: list[str] = []
-    reviewer_refreshes: list[str] = []
+    refreshed: list[str] = []
+    monkeypatch.setattr(
+        agent_usage,
+        "refresh_usage_leaderboard_cache",
+        lambda *a, **k: refreshed.append("usage"),
+    )
+    monkeypatch.setattr(
+        agent_usage,
+        "refresh_reviewer_stats_cache",
+        lambda *a, **k: refreshed.append("reviewer"),
+    )
+
     payload = await agent_usage.list_agent_usage_leaderboard(
         period="30d",
         limit=1,
         current_login="octo",
         current_email="octo@example.com",
-        schedule_usage_refresh=usage_refreshes.append,
-        schedule_reviewer_refresh=reviewer_refreshes.append,
     )
 
-    assert usage_refreshes == ["30d"]
-    assert reviewer_refreshes == ["30d"]
+    # Pure read: stale snapshot is served as-is, never refreshed inline.
+    assert refreshed == []
     assert payload["rows"][0]["user"]["email"] == "octo@example.com"
     assert payload["total_members"] == 2
     assert payload["reviewer_stats"]["surfaced_findings"] == 1
+    assert store.puts == []
+
+
+@pytest.mark.asyncio
+async def test_cold_cache_returns_computing_placeholder(monkeypatch):
+    store = FakeStore({})
+    monkeypatch.setattr(agent_usage, "_client", lambda: FakeClient(store=store))
+
+    payload = await agent_usage.list_agent_usage_leaderboard(
+        period="7d",
+        limit=10,
+        current_login="octo",
+        current_email="octo@example.com",
+    )
+
+    assert payload["rows"] == []
+    assert payload["total_members"] == 0
+    assert payload["generated_at_ms"] is None
+    assert payload["computing"] is True
+    assert payload["reviewer_stats"]["computing"] is True
     assert store.puts == []
 
 
