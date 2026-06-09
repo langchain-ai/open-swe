@@ -57,6 +57,10 @@ RUN set -eux; \
     install -m 0755 /tmp/langsmith /usr/local/bin/langsmith; \
     rm -rf /tmp/langsmith.tar.gz /tmp/langsmith
 
+# Placeholder so the langsmith CLI passes its local auth check; the sandbox
+# proxy swaps in the real key in flight (mirrors the GH_TOKEN=dummy pattern).
+ENV LANGSMITH_API_KEY=dummy
+
 RUN set -eux; \
     arch="$(dpkg --print-architecture)"; \
     case "${arch}" in \

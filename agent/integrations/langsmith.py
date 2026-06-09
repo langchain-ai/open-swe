@@ -44,6 +44,18 @@ def _get_langsmith_api_key() -> str | None:
     return os.environ.get("LANGSMITH_API_KEY") or os.environ.get("LANGSMITH_API_KEY_PROD")
 
 
+def _get_sandbox_langsmith_api_key() -> str | None:
+    """Dedicated LangSmith key injected into sandbox proxy traffic, or None.
+
+    Deliberately distinct from the server's own key: the sandbox runs untrusted
+    repo/agent code, so the broad, long-lived production credential must never be
+    exposed there. Operators opt in by setting LANGSMITH_SANDBOX_API_KEY to a
+    least-privileged, ideally short-lived key. When unset, no LangSmith proxy
+    rule is added.
+    """
+    return os.environ.get("LANGSMITH_SANDBOX_API_KEY")
+
+
 def _parse_optional_int(name: str, default: int) -> int:
     raw = os.environ.get(name)
     if not raw:
@@ -159,9 +171,10 @@ def _configure_github_proxy(sandbox_name: str, github_token: str) -> None:
     """Configure sandbox proxy to inject GitHub and LangSmith auth.
 
     Uses the LangSmith proxy-config API to set up header injection so that
-    git operations (clone, pull, push) and the bundled `langsmith` CLI
-    authenticate via the proxy rather than writing credentials to disk in the
-    sandbox.
+    git operations (clone, pull, push) authenticate via the proxy rather than
+    writing credentials to disk in the sandbox. When LANGSMITH_SANDBOX_API_KEY
+    is set, a LangSmith ``x-api-key`` rule is also added so the bundled
+    ``langsmith`` CLI can reach the LangSmith API without storing a key.
 
     Args:
         sandbox_name: The sandbox name/ID returned by the LangSmith API.
@@ -173,7 +186,10 @@ def _configure_github_proxy(sandbox_name: str, github_token: str) -> None:
         return
     langsmith_endpoint = os.environ.get("LANGSMITH_ENDPOINT", "https://api.smith.langchain.com")
     url = f"{langsmith_endpoint}/v2/sandboxes/boxes/{sandbox_name}"
-    rules = _github_proxy_rules(github_token) + _langsmith_proxy_rules(api_key)
+    rules = _github_proxy_rules(github_token)
+    sandbox_ls_key = _get_sandbox_langsmith_api_key()
+    if sandbox_ls_key:
+        rules = rules + _langsmith_proxy_rules(sandbox_ls_key)
     payload = {"proxy_config": {"rules": rules}}
     with httpx.Client(timeout=PROXY_CONFIG_TIMEOUT_SECONDS) as client:
         for attempt in range(PROXY_CONFIG_MAX_ATTEMPTS):

@@ -40,7 +40,10 @@ class TestConfigureGithubProxy:
 
         with (
             patch("agent.integrations.langsmith.httpx.Client") as mock_client_cls,
-            patch.dict("os.environ", {"LANGSMITH_API_KEY": "ls-api-key"}),
+            patch.dict(
+                "os.environ",
+                {"LANGSMITH_API_KEY": "ls-api-key", "LANGSMITH_SANDBOX_API_KEY": "ls-sandbox-key"},
+            ),
         ):
             mock_client = MagicMock()
             mock_response = MagicMock()
@@ -85,7 +88,29 @@ class TestConfigureGithubProxy:
             assert len(ls_headers) == 1
             assert ls_headers[0]["name"] == "x-api-key"
             assert ls_headers[0]["type"] == "opaque"
-            assert ls_headers[0]["value"] == "ls-api-key"
+            assert ls_headers[0]["value"] == "ls-sandbox-key"
+
+    def test_omits_langsmith_rule_when_sandbox_key_unset(self) -> None:
+        """Without LANGSMITH_SANDBOX_API_KEY, no LangSmith rule is injected."""
+        with (
+            patch("agent.integrations.langsmith.httpx.Client") as mock_client_cls,
+            patch.dict("os.environ", {"LANGSMITH_API_KEY": "ls-api-key"}, clear=False),
+        ):
+            import os as _os
+
+            _os.environ.pop("LANGSMITH_SANDBOX_API_KEY", None)
+            mock_client = MagicMock()
+            mock_response = MagicMock()
+            mock_response.raise_for_status = MagicMock()
+            mock_client.patch.return_value = mock_response
+            mock_client_cls.return_value.__enter__ = MagicMock(return_value=mock_client)
+            mock_client_cls.return_value.__exit__ = MagicMock(return_value=False)
+
+            _configure_github_proxy("sandbox-abc123", "ghs_token")
+
+            rules = mock_client.patch.call_args.kwargs["json"]["proxy_config"]["rules"]
+            assert len(rules) == 2
+            assert all(rule["name"] != "langsmith-api" for rule in rules)
 
     def test_sends_to_correct_url(self) -> None:
         """Verify the PATCH hits the right endpoint."""
