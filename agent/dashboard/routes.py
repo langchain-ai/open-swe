@@ -13,6 +13,15 @@ from fastapi.responses import RedirectResponse, Response, StreamingResponse
 from pydantic import BaseModel
 
 from .admin import is_admin
+from .agent_instructions import (
+    AgentInstructionsCreate,
+    AgentInstructionsUpdate,
+    create_agent_instructions,
+    delete_agent_instructions,
+    get_agent_instructions,
+    list_agent_instructions,
+    set_agent_instructions,
+)
 from .agent_usage import (
     list_agent_usage_leaderboard,
     refresh_claimed_reviewer_stats_cache,
@@ -705,6 +714,61 @@ async def api_delete_review_style(
         await cancel_review_style_analysis(full_name)
     await remove_continual_cron(full_name)
     await delete_review_style(full_name)
+    return Response(status_code=204)
+
+
+@router.get("/agent-instructions")
+async def api_list_agent_instructions(
+    session: dict[str, Any] = _SESSION_DEP,
+) -> list[dict[str, Any]]:
+    del session
+    return await list_agent_instructions()
+
+
+@router.post("/agent-instructions")
+async def api_create_agent_instructions(
+    body: AgentInstructionsCreate,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    await require_repo_access_for_user(session["sub"], body.full_name)
+    return await create_agent_instructions(body.full_name, session["sub"])
+
+
+@router.get("/agent-instructions/{full_name:path}")
+async def api_get_agent_instructions(
+    full_name: str,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    del session
+    full_name = normalize_repo_full_name(full_name)
+    record = await get_agent_instructions(full_name)
+    if not record:
+        raise HTTPException(404, "agent instructions not found")
+    return record
+
+
+@router.put("/agent-instructions/{full_name:path}")
+async def api_update_agent_instructions(
+    full_name: str,
+    body: AgentInstructionsUpdate,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    full_name = normalize_repo_full_name(full_name)
+    await require_repo_access_for_user(session["sub"], full_name)
+    return await set_agent_instructions(full_name, body.instructions)
+
+
+@router.delete("/agent-instructions/{full_name:path}")
+async def api_delete_agent_instructions(
+    full_name: str,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> Response:
+    del session
+    full_name = normalize_repo_full_name(full_name)
+    record = await get_agent_instructions(full_name)
+    if not record:
+        raise HTTPException(404, "agent instructions not found")
+    await delete_agent_instructions(full_name)
     return Response(status_code=204)
 
 

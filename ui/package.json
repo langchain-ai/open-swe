@@ -14,6 +14,7 @@
   "dependencies": {
     "@base-ui/react": "^1.4.1",
     "@fontsource-variable/inter": "^5.2.8",
+    "@monaco-editor/react": "^4.7.0",
     "@phosphor-icons/react": "^2.1.10",
     "@pierre/diffs": "^1.2.1",
     "@tailwindcss/vite": "^4.2.1",
@@ -29,6 +30,7 @@
     "clsx": "^2.1.1",
     "diff": "^9.0.0",
     "lucide-react": "^1.16.0",
+    "monaco-editor": "^0.52.2",
     "nitro": "latest",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
