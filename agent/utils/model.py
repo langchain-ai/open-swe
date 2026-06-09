@@ -55,12 +55,17 @@ def fallback_model_id_for(primary_model_id: str) -> str | None:
 
     Anthropic primaries fall back to OpenAI and vice versa. Returns ``None``
     when the provider has no configured cross-provider fallback (e.g. Google,
-    local, or self-hosted providers we don't want to silently route off-host).
+    local, or self-hosted providers we don't want to silently route off-host),
+    or when the fallback provider's API key is not configured.
     """
+    import os
+
     if primary_model_id.startswith("anthropic:"):
-        return "openai:gpt-5.5"
+        if os.environ.get("OPENAI_API_KEY") or os.environ.get("DEEPSEEK_API_KEY"):
+            return "openai:gpt-5.5"
     if primary_model_id.startswith("openai:"):
-        return "anthropic:claude-opus-4-5"
+        if os.environ.get("ANTHROPIC_API_KEY"):
+            return "anthropic:claude-opus-4-5"
     return None
 
 
