@@ -208,6 +208,8 @@ DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS="86400"
 
 `DEFAULT_SANDBOX_SNAPSHOT_ID` is required when `SANDBOX_TYPE=langsmith`. The server validates this at startup and refuses to boot if it's missing. The snapshot should include the GitHub CLI from the project Dockerfile; Open SWE authenticates `git` and `gh` through the LangSmith sandbox proxy using runtime-minted GitHub App installation tokens, not deployment-stored GitHub access tokens.
 
+The snapshot also bundles the [`pup`](https://github.com/DataDog/pup) Datadog CLI for read-only observability queries. `pup` reads `DD_SITE`, `DD_API_KEY`, and `DD_APP_KEY` from the environment. To enable it, set those variables in your deployment config (see the Datadog section in step 6); use a dedicated, read-only scoped Datadog Application key rather than reusing a personal key. If they're unset, `pup` is simply unavailable at runtime — no other functionality is affected.
+
 ## 5. Set up triggers
 
 Open SWE can be triggered from GitHub, Linear, and/or Slack. **Configure whichever surfaces your team uses — you don't need all of them.**
@@ -507,6 +509,14 @@ DEFAULT_SANDBOX_VCPUS=""               # vCPUs per sandbox (default: 4)
 DEFAULT_SANDBOX_MEM_BYTES=""           # Memory in bytes per sandbox (default: 15 GiB)
 DEFAULT_SANDBOX_IDLE_TTL_SECONDS=""    # Auto-stop after N seconds idle (default: 600; 0 disables)
 DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS=""  # Delete N seconds after stop (default: 86400; 0 disables)
+
+# === Datadog (optional) ===
+# Enables the bundled `pup` Datadog CLI inside the sandbox for read-only
+# observability queries. All three must be set for `pup` to work.
+# Use a dedicated, read-only scoped Datadog Application key (not a personal key).
+DD_SITE=""                             # e.g. datadoghq.com, us5.datadoghq.com
+DD_API_KEY=""                          # Datadog API key
+DD_APP_KEY=""                          # Datadog Application key (read-only scopes)
 
 # === Token Encryption ===
 TOKEN_ENCRYPTION_KEY=""                # Generate with: openssl rand -base64 32

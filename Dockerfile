@@ -5,6 +5,7 @@ ARG NODEJS_VERSION=22.22.0-1nodesource1
 ARG UV_VERSION=0.9.26
 ARG YARN_VERSION=4.12.0
 ARG GH_VERSION=2.83.1
+ARG PUP_VERSION=1.0.0
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -58,6 +59,20 @@ RUN set -eux; \
     install -m 0755 "/tmp/uv-${uv_arch}/uvx" /root/.local/bin/uvx; \
     rm -rf /tmp/uv.tar.gz "/tmp/uv-${uv_arch}"
 
+RUN set -eux; \
+    arch="$(dpkg --print-architecture)"; \
+    case "${arch}" in \
+      amd64) pup_arch="Linux_x86_64"; pup_sha256="f672ee800cb48090df1336fe4fff0b923e6ea22ab7bacf81c60bf1fbe686fe0a" ;; \
+      arm64) pup_arch="Linux_arm64"; pup_sha256="2afa4e44b559072b1b871672c93cd4ba1f6913fae20a37bebf61950a946c041b" ;; \
+      *) echo "unsupported architecture: ${arch}" >&2; exit 1 ;; \
+    esac; \
+    curl -fsSL "https://github.com/DataDog/pup/releases/download/v${PUP_VERSION}/pup_${PUP_VERSION}_${pup_arch}.tar.gz" -o /tmp/pup.tar.gz; \
+    echo "${pup_sha256}  /tmp/pup.tar.gz" | sha256sum -c -; \
+    tar -xzf /tmp/pup.tar.gz -C /tmp pup; \
+    install -m 0755 -d /root/.local/bin; \
+    install -m 0755 /tmp/pup /root/.local/bin/pup; \
+    rm -rf /tmp/pup.tar.gz /tmp/pup
+
 ENV PATH=/root/.local/bin:/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
@@ -84,4 +99,5 @@ RUN echo "=== Installed versions ===" \
     && go version \
     && docker --version \
     && git --version \
-    && gh --version
+    && gh --version \
+    && pup --version
