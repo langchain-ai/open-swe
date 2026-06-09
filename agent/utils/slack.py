@@ -12,11 +12,12 @@ import re
 import time
 from dataclasses import dataclass
 from typing import Any
-from urllib.parse import quote, urlparse
+from urllib.parse import urlparse
 
 import httpx
 from langgraph_sdk.client import LangGraphClient
 
+from agent.utils.dashboard_links import dashboard_thread_url
 from agent.utils.langsmith import get_langsmith_trace_url
 
 logger = logging.getLogger(__name__)
@@ -437,6 +438,51 @@ async def get_slack_user_info(user_id: str) -> dict[str, Any] | None:
     return None
 
 
+async def get_slack_channel_info(channel_id: str) -> dict[str, Any] | None:
+    """Get Slack channel details (including topic/purpose) by channel ID."""
+    if not SLACK_BOT_TOKEN:
+        return None
+
+    async with httpx.AsyncClient() as http_client:
+        try:
+            response = await http_client.get(
+                f"{SLACK_API_BASE_URL}/conversations.info",
+                headers=_slack_headers(),
+                params={"channel": channel_id},
+            )
+            response.raise_for_status()
+            data = response.json()
+            if not data.get("ok"):
+                logger.warning("Slack conversations.info failed: %s", data.get("error"))
+                return None
+            channel = data.get("channel")
+            if isinstance(channel, dict):
+                return channel
+        except httpx.HTTPError:
+            logger.exception("Slack conversations.info request failed")
+    return None
+
+
+def extract_channel_description_text(channel: dict[str, Any] | None) -> str:
+    """Combine a Slack channel's topic and purpose text into one string."""
+    if not isinstance(channel, dict):
+        return ""
+    parts: list[str] = []
+    for key in ("topic", "purpose"):
+        section = channel.get(key)
+        if isinstance(section, dict):
+            value = section.get("value")
+            if isinstance(value, str) and value.strip():
+                parts.append(value.strip())
+    return "\n".join(parts)
+
+
+async def get_slack_channel_description(channel_id: str) -> str:
+    """Fetch a Slack channel's combined topic + purpose text."""
+    channel = await get_slack_channel_info(channel_id)
+    return extract_channel_description_text(channel)
+
+
 async def get_slack_user_names(user_ids: list[str]) -> dict[str, str]:
     """Get display names for a set of Slack user IDs."""
     unique_ids = sorted({user_id for user_id in user_ids if isinstance(user_id, str) and user_id})
@@ -684,16 +730,6 @@ TRACE_REPLY_TIPS: tuple[str, ...] = (
 )
 
 
-def _get_dashboard_thread_url(thread_id: str) -> str | None:
-    """Build the dashboard thread URL for a given thread ID."""
-    base_url = (
-        os.environ.get("DASHBOARD_BASE_URL", "https://openswe.vercel.app").strip().rstrip("/")
-    )
-    if not base_url:
-        return None
-    return f"{base_url}/agents/{quote(thread_id, safe='')}"
-
-
 def _format_trace_reply(trace_url: str | None, dashboard_url: str | None) -> str:
     """Format the initial trace reply with a randomly selected tip."""
     tip = random.choice(TRACE_REPLY_TIPS)
@@ -711,7 +747,7 @@ async def post_slack_trace_reply(
 ) -> str | None:
     """Post a trace URL reply in a Slack thread and return its Slack timestamp."""
     trace_url = get_langsmith_trace_url(thread_id)
-    dashboard_url = _get_dashboard_thread_url(thread_id) if include_dashboard_link else None
+    dashboard_url = dashboard_thread_url(thread_id) if include_dashboard_link else None
     message_ts, _ = await post_slack_thread_reply_with_ts(
         channel_id,
         thread_ts,

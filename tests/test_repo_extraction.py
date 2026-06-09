@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from agent.utils.repo import extract_repo_from_text
+from agent.utils.slack import extract_channel_description_text
 
 
 class TestExtractRepoFromText:
@@ -52,6 +53,33 @@ class TestExtractRepoFromText:
     def test_trailing_slash_stripped(self) -> None:
         result = extract_repo_from_text("repo:my-org/my-repo/")
         assert result == {"owner": "my-org", "name": "my-repo"}
+
+
+class TestExtractChannelDescriptionText:
+    def test_combines_topic_and_purpose(self) -> None:
+        channel = {
+            "topic": {"value": "repo:my-org/my-repo"},
+            "purpose": {"value": "Team channel"},
+        }
+        assert extract_channel_description_text(channel) == "repo:my-org/my-repo\nTeam channel"
+
+    def test_handles_missing_sections(self) -> None:
+        assert extract_channel_description_text({"topic": {"value": "hi"}}) == "hi"
+
+    def test_empty_for_none(self) -> None:
+        assert extract_channel_description_text(None) == ""
+
+    def test_empty_for_blank_values(self) -> None:
+        channel = {"topic": {"value": "  "}, "purpose": {"value": ""}}
+        assert extract_channel_description_text(channel) == ""
+
+    def test_repo_token_extractable_from_description(self) -> None:
+        channel = {"topic": {"value": "Use repo:langchain-ai/open-swe here"}, "purpose": {}}
+        description = extract_channel_description_text(channel)
+        assert extract_repo_from_text(description) == {
+            "owner": "langchain-ai",
+            "name": "open-swe",
+        }
 
 
 class TestLinearWebhookRepoOverride:

@@ -10,6 +10,7 @@ class ModelOption(TypedDict):
     label: str
     efforts: list[str]
     default_effort: str
+    supports_images: bool
 
 
 SUPPORTED_MODELS: list[ModelOption] = [
@@ -18,36 +19,42 @@ SUPPORTED_MODELS: list[ModelOption] = [
         "label": "Opus 4.8",
         "efforts": ["low", "medium", "high", "xhigh", "max"],
         "default_effort": "high",
+        "supports_images": True,
     },
     {
         "id": "openai:gpt-5.5",
         "label": "GPT-5.5",
         "efforts": ["none", "low", "medium", "high", "xhigh"],
         "default_effort": "xhigh",
+        "supports_images": True,
     },
     {
         "id": "google_genai:gemini-3.5-flash",
         "label": "Gemini 3.5 Flash",
         "efforts": ["minimal", "low", "medium", "high"],
         "default_effort": "medium",
+        "supports_images": True,
     },
     {
         "id": "fireworks:accounts/fireworks/models/kimi-k2p6",
         "label": "Kimi K2.6",
         "efforts": ["none", "low", "medium", "high"],
         "default_effort": "high",
+        "supports_images": False,
     },
     {
         "id": "fireworks:accounts/fireworks/models/deepseek-v4-pro",
         "label": "DeepSeek V4 Pro",
         "efforts": ["none", "low", "medium", "high", "xhigh", "max"],
         "default_effort": "high",
+        "supports_images": False,
     },
     {
         "id": "fireworks:accounts/fireworks/models/glm-5p1",
         "label": "GLM 5.1",
         "efforts": ["none", "low", "medium", "high"],
         "default_effort": "high",
+        "supports_images": False,
     },
 ]
 
@@ -61,6 +68,13 @@ def model_supports_effort(model_id: str, effort: str) -> bool:
     for m in SUPPORTED_MODELS:
         if m["id"] == model_id:
             return effort in m["efforts"]
+    return False
+
+
+def model_supports_images(model_id: str) -> bool:
+    for m in SUPPORTED_MODELS:
+        if m["id"] == model_id:
+            return m["supports_images"]
     return False
 
 

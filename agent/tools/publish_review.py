@@ -25,6 +25,7 @@ from ..reviewer_findings import (
     list_findings as list_findings_async,
 )
 from ..reviewer_publish import (
+    clear_review_started_comment,
     fetch_pr_review_threads,
     fetch_review_comments,
     fetch_review_thread_id_for_comment,
@@ -38,6 +39,7 @@ from ..reviewer_publish import (
     resolve_review_thread,
 )
 from ..reviewer_reconcile import reconcile_findings_with_review_threads
+from ..utils.dashboard_links import dashboard_thread_url
 from ..utils.github_token import (
     GitHubAuthError,
     get_github_token,
@@ -219,6 +221,7 @@ async def _publish_review_async(
     # reviewed, not the stale one this run was created for.
     head_sha = await resolve_review_head_sha(thread_id, {"head_sha": head_sha})
     review_trace_url = await _resolve_review_trace_url(thread_id, trace_link_config_override)
+    review_ui_url = dashboard_thread_url(thread_id)
     findings = await _backfill_findings_from_pr_threads(
         thread_id=thread_id,
         owner=owner,
@@ -293,6 +296,7 @@ async def _publish_review_async(
             findings=findings,
         )
         await set_reviewer_thread_metadata(thread_id, last_reviewed_sha=head_sha)
+        await clear_review_started_comment(thread_id=thread_id, owner=owner, repo=repo, token=token)
         return {
             "success": True,
             "review_id": None,
@@ -306,6 +310,7 @@ async def _publish_review_async(
         pr_number=pr_number,
         surfaced_count=len(inline_comments),
         trace_url=review_trace_url,
+        ui_url=review_ui_url,
         out_of_diff_findings=eligible_out_of_diff,
     )
 
@@ -340,6 +345,7 @@ async def _publish_review_async(
                 pr_number=pr_number,
                 surfaced_count=len(retry_inline),
                 trace_url=review_trace_url,
+                ui_url=review_ui_url,
                 out_of_diff_findings=eligible_out_of_diff,
             )
             retry_response = await post_pull_request_review(
@@ -470,6 +476,7 @@ async def _publish_review_async(
         )
 
     await set_reviewer_thread_metadata(thread_id, last_reviewed_sha=head_sha)
+    await clear_review_started_comment(thread_id=thread_id, owner=owner, repo=repo, token=token)
 
     result: dict[str, Any] = {
         "success": True,

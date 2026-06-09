@@ -767,9 +767,15 @@ def test_process_github_pr_ready_creates_reviewer_run(monkeypatch) -> None:
         "get_github_app_installation_token_with_expiry",
         fake_get_github_app_installation_token_with_expiry,
     )
+
+    async def fake_post_review_started_comment(**kwargs: object) -> int:
+        captured["status_comment_kwargs"] = kwargs
+        return 1
+
     monkeypatch.setattr(webapp, "cache_github_token_for_thread", fake_cache_github_token)
     monkeypatch.setattr(webapp, "is_thread_active", fake_is_thread_active)
     monkeypatch.setattr(webapp, "set_reviewer_thread_metadata", fake_set_reviewer_thread_metadata)
+    monkeypatch.setattr(webapp, "post_review_started_comment", fake_post_review_started_comment)
     monkeypatch.setattr(webapp, "get_client", lambda url: _FakeLangGraphClient())
 
     asyncio.run(
@@ -862,10 +868,16 @@ def test_trigger_pr_review_from_ref_creates_reviewer_run(monkeypatch) -> None:
         "get_github_app_installation_token_with_expiry",
         fake_get_github_app_installation_token_with_expiry,
     )
+
+    async def fake_post_review_started_comment(**kwargs: object) -> int:
+        captured["status_comment_kwargs"] = kwargs
+        return 1
+
     monkeypatch.setattr(webapp, "fetch_github_pr_metadata", fake_fetch_github_pr_metadata)
     monkeypatch.setattr(webapp, "cache_github_token_for_thread", fake_cache_github_token)
     monkeypatch.setattr(webapp, "is_thread_active", fake_is_thread_active)
     monkeypatch.setattr(webapp, "set_reviewer_thread_metadata", fake_set_reviewer_thread_metadata)
+    monkeypatch.setattr(webapp, "post_review_started_comment", fake_post_review_started_comment)
     monkeypatch.setattr(webapp, "get_client", lambda url: _FakeLangGraphClient())
 
     result = asyncio.run(
@@ -905,6 +917,8 @@ def test_trigger_pr_review_from_ref_creates_reviewer_run(monkeypatch) -> None:
     # The live head must be persisted to metadata so resolve_review_head_sha
     # doesn't return a stale head left by a prior push/ready dispatch.
     assert captured["set_metadata_kwargs"]["head_sha"] == "head-sha"
+    # A live status comment is posted on dispatch so the PR shows "reviewing".
+    assert captured["status_comment_kwargs"]["pr_number"] == 1244
 
 
 def test_trigger_pr_review_from_ref_respects_dashboard_opt_in(monkeypatch) -> None:

@@ -18,8 +18,6 @@ After publish, the returned per-comment IDs get stored back on each Finding as
 the GraphQL ``resolveReviewThread`` mutation (REST doesn't expose this).
 """
 
-from __future__ import annotations
-
 import json
 import logging
 import re
@@ -27,7 +25,14 @@ from typing import Any, TypedDict
 
 import httpx
 
-from .reviewer_findings import DiffSide, Finding, normalize_finding_title
+from .reviewer_findings import (
+    DiffSide,
+    Finding,
+    get_thread_metadata,
+    normalize_finding_title,
+    set_reviewer_thread_metadata,
+)
+from .utils.dashboard_links import dashboard_thread_url
 from .utils.github_token import GitHubAuthError
 
 logger = logging.getLogger(__name__)
@@ -98,7 +103,7 @@ def render_inline_comment_body(finding: Finding) -> str:
         *(Refers to lines X-Y)*
 
         ---
-        *Was this helpful? React with 👍 or 👎 to provide feedback.*
+        *Your feedback helps Open SWE learn. React with 👍 or 👎 to tell us if this review comment was useful.*
 
         ```suggestion
         <replacement>
@@ -126,7 +131,13 @@ def render_inline_comment_body(finding: Finding) -> str:
         body_parts.extend(["", detail])
     if line_ref:
         body_parts.extend(["", line_ref])
-    body_parts.extend(["", "---", "*Was this helpful? React with 👍 or 👎 to provide feedback.*"])
+    body_parts.extend(
+        [
+            "",
+            "---",
+            "*Your feedback helps Open SWE learn. React with 👍 or 👎 to tell us if this review comment was useful.*",
+        ]
+    )
     body = "\n".join(body_parts)
 
     suggestion = finding.get("suggestion")
@@ -265,6 +276,7 @@ def render_review_body(
     pr_number: int,
     surfaced_count: int,
     trace_url: str | None = None,
+    ui_url: str | None = None,
     out_of_diff_findings: list[Finding] | None = None,
 ) -> str:
     """Compose the top-level review body."""
@@ -283,10 +295,134 @@ def render_review_body(
     parts = [headline]
     if out_of_diff_findings:
         parts.append(render_out_of_diff_section(out_of_diff_findings))
+    links = []
+    if ui_url:
+        links.append(f"[Open in Web]({ui_url})")
     if trace_url:
-        parts.append(f"[View Open SWE trace]({trace_url})")
+        links.append(f"[View Open SWE trace]({trace_url})")
+    if links:
+        parts.append(" • ".join(links))
     parts.append(review_summary_marker(pr_number))
     return "\n\n".join(parts)
+
+
+def status_comment_marker(pr_number: int) -> str:
+    """Hidden marker stamped on the live status comment for a PR."""
+    return f"<!-- open-swe-reviewer-status pr={pr_number} -->"
+
+
+def render_status_comment(
+    *,
+    pr_number: int,
+    thread_id: str | None = None,
+    trace_url: str | None = None,
+) -> str:
+    """Compose the transient "review in progress" comment.
+
+    Posted when a review starts so the PR shows activity and a clickable
+    "Open in Web" link while the run is live; deleted once ``publish_review``
+    posts the review (which carries the same link).
+    """
+    parts = ["## 🔍 Open SWE Review: in progress\n\nOpen SWE is reviewing this PR…"]
+    links = []
+    ui_url = dashboard_thread_url(thread_id) if thread_id else None
+    if ui_url:
+        links.append(f"[Open in Web]({ui_url})")
+    if trace_url:
+        links.append(f"[View Open SWE trace]({trace_url})")
+    if links:
+        parts.append(" • ".join(links))
+    parts.append(status_comment_marker(pr_number))
+    return "\n\n".join(parts)
+
+
+async def post_status_comment(
+    *,
+    owner: str,
+    repo: str,
+    pr_number: int,
+    body: str,
+    token: str,
+) -> int | None:
+    """POST the live status comment to a PR. Returns its comment id or None."""
+    url = f"{_GITHUB_API_BASE}/repos/{owner}/{repo}/issues/{pr_number}/comments"
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.post(
+                url, headers=_github_headers(token), json={"body": body}, timeout=30
+            )
+            response.raise_for_status()
+        except httpx.HTTPError:
+            logger.exception("Failed to post status comment for %s/%s#%s", owner, repo, pr_number)
+            return None
+    data = response.json()
+    comment_id = data.get("id") if isinstance(data, dict) else None
+    return comment_id if isinstance(comment_id, int) else None
+
+
+async def delete_status_comment(
+    *,
+    owner: str,
+    repo: str,
+    comment_id: int,
+    token: str,
+) -> bool:
+    """DELETE a status comment by id. Returns True on success (or if gone)."""
+    url = f"{_GITHUB_API_BASE}/repos/{owner}/{repo}/issues/comments/{comment_id}"
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.delete(url, headers=_github_headers(token), timeout=30)
+            if response.status_code == 404:  # noqa: PLR2004
+                return True
+            response.raise_for_status()
+        except httpx.HTTPError:
+            logger.exception("Failed to delete status comment %s on %s/%s", comment_id, owner, repo)
+            return False
+    return True
+
+
+async def post_review_started_comment(
+    *,
+    thread_id: str,
+    owner: str,
+    repo: str,
+    pr_number: int,
+    token: str,
+    trace_url: str | None = None,
+) -> int | None:
+    """Post (or refresh) the transient "review in progress" comment.
+
+    Reuses the ``status_comment_id`` persisted in reviewer thread metadata when
+    one already lingers (a prior run that never settled), otherwise posts a
+    fresh comment and stores its id so ``clear_review_started_comment`` can
+    delete it once the review lands.
+    """
+    metadata = await get_thread_metadata(thread_id)
+    existing_id = metadata.get("status_comment_id")
+    if isinstance(existing_id, int):
+        await delete_status_comment(owner=owner, repo=repo, comment_id=existing_id, token=token)
+    body = render_status_comment(pr_number=pr_number, thread_id=thread_id, trace_url=trace_url)
+    new_id = await post_status_comment(
+        owner=owner, repo=repo, pr_number=pr_number, body=body, token=token
+    )
+    await set_reviewer_thread_metadata(thread_id, extra={"status_comment_id": new_id})
+    return new_id
+
+
+async def clear_review_started_comment(
+    *,
+    thread_id: str,
+    owner: str,
+    repo: str,
+    token: str,
+) -> None:
+    """Delete the transient "review in progress" comment, if one is tracked."""
+    metadata = await get_thread_metadata(thread_id)
+    comment_id = metadata.get("status_comment_id")
+    if not isinstance(comment_id, int):
+        return
+    await delete_status_comment(owner=owner, repo=repo, comment_id=comment_id, token=token)
+    await set_reviewer_thread_metadata(thread_id, extra={"status_comment_id": None})
 
 
 async def open_swe_review_exists(

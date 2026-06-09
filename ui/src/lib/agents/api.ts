@@ -93,8 +93,12 @@ export const agentsApi = {
     agentsRequest<void>(`/schedules/${encodeURIComponent(scheduleId)}`, {
       method: "DELETE",
     }),
-  getThread: (threadId: string) =>
-    agentsRequest<AgentThread>(`/threads/${encodeURIComponent(threadId)}`),
+  getThread: (threadId: string, options?: { markViewed?: boolean }) =>
+    agentsRequest<AgentThread>(
+      `/threads/${encodeURIComponent(threadId)}${
+        options?.markViewed === false ? "?mark_viewed=false" : ""
+      }`
+    ),
   createThread: (body: ThreadCreateRequest) =>
     agentsRequest<AgentThread>("/threads", {
       method: "POST",
@@ -135,17 +139,19 @@ export function formatRelativeTime(ts: number): string {
   return `${weeks}w`
 }
 
-export type ThreadGroup = "today" | "last30" | "older"
+export type ThreadGroup = "today" | "last7" | "last30" | "older"
 
 export function groupThreads(
   threads: Array<AgentThread>
 ): Record<ThreadGroup, Array<AgentThread>> {
   const todayStart = new Date()
   todayStart.setHours(0, 0, 0, 0)
+  const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000
   const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000
 
   const groups: Record<ThreadGroup, Array<AgentThread>> = {
     today: [],
+    last7: [],
     last30: [],
     older: [],
   }
@@ -153,6 +159,8 @@ export function groupThreads(
   for (const thread of [...threads].sort((a, b) => b.updatedAt - a.updatedAt)) {
     if (thread.updatedAt >= todayStart.getTime()) {
       groups.today.push(thread)
+    } else if (thread.updatedAt >= sevenDaysAgo) {
+      groups.last7.push(thread)
     } else if (thread.updatedAt >= thirtyDaysAgo) {
       groups.last30.push(thread)
     } else {

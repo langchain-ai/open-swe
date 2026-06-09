@@ -10,17 +10,21 @@ import pytest
 
 from agent.reviewer_findings import Finding, new_finding
 from agent.reviewer_publish import (
+    clear_review_started_comment,
     fetch_pr_review_threads,
     open_swe_review_exists,
     parse_review_comment_marker,
     post_pull_request_review,
+    post_review_started_comment,
     render_inline_comment_body,
     render_inline_comment_payload,
     render_resolution_comment,
     render_review_body,
+    render_status_comment,
     reply_to_review_comment,
     resolve_review_thread,
     review_summary_marker,
+    status_comment_marker,
 )
 
 
@@ -45,6 +49,7 @@ def _isolate_publish_review_pr_state() -> Iterator[None]:
         patch("agent.tools.publish_review.fetch_pr_review_threads", AsyncMock(return_value=[])),
         patch("agent.tools.publish_review.replace_findings", AsyncMock()),
         patch("agent.tools.publish_review.open_swe_review_exists", AsyncMock(return_value=False)),
+        patch("agent.tools.publish_review.clear_review_started_comment", AsyncMock()),
         patch(
             "agent.tools.publish_review.resolve_review_head_sha",
             AsyncMock(
@@ -60,8 +65,9 @@ def test_render_inline_comment_body_without_suggestion() -> None:
     assert "<!-- open-swe-review-comment" in body
     assert '"id":"f_' in body
     assert "just text" in body
-    assert "Was this helpful?" in body
+    assert "Your feedback helps Open SWE learn." in body
     assert "👍 or 👎" in body
+    assert "tell us if this review comment was useful" in body
 
 
 def test_render_inline_comment_body_with_suggestion_appends_block() -> None:
@@ -206,6 +212,103 @@ def test_render_review_body_no_findings_message() -> None:
     body = render_review_body(pr_number=99, surfaced_count=0)
     assert "## ✅ Open SWE Review: No issues found" in body
     assert "Open SWE reviewed this PR and found no potential bugs to report." in body
+
+
+def test_render_status_comment_reviewing_includes_ui_link(monkeypatch: Any) -> None:
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dash.example")
+    body = render_status_comment(pr_number=7, thread_id="tid-1")
+    assert "🔍 Open SWE Review: in progress" in body
+    assert "[Open in Web](https://dash.example/agents/tid-1)" in body
+    assert status_comment_marker(7) in body
+
+
+def test_render_review_body_includes_ui_link() -> None:
+    body = render_review_body(
+        pr_number=7, surfaced_count=0, ui_url="https://dash.example/agents/tid-1"
+    )
+    assert "[Open in Web](https://dash.example/agents/tid-1)" in body
+
+
+def test_render_review_body_orders_ui_link_before_trace() -> None:
+    body = render_review_body(
+        pr_number=7,
+        surfaced_count=1,
+        ui_url="https://dash.example/agents/tid-1",
+        trace_url="https://trace.example/x",
+    )
+    assert "[Open in Web](https://dash.example/agents/tid-1) • [View Open SWE trace]" in body
+
+
+@pytest.mark.asyncio
+async def test_post_review_started_comment_posts_and_persists_id() -> None:
+    post = AsyncMock(return_value=4242)
+    set_meta = AsyncMock()
+    with (
+        patch("agent.reviewer_publish.get_thread_metadata", AsyncMock(return_value={})),
+        patch("agent.reviewer_publish.post_status_comment", post),
+        patch("agent.reviewer_publish.delete_status_comment", AsyncMock()) as delete,
+        patch("agent.reviewer_publish.set_reviewer_thread_metadata", set_meta),
+    ):
+        cid = await post_review_started_comment(
+            thread_id="tid", owner="o", repo="r", pr_number=7, token="t"
+        )
+    assert cid == 4242
+    delete.assert_not_called()
+    post.assert_awaited_once()
+    set_meta.assert_awaited_once_with("tid", extra={"status_comment_id": 4242})
+
+
+@pytest.mark.asyncio
+async def test_post_review_started_comment_deletes_lingering_before_reposting() -> None:
+    post = AsyncMock(return_value=500)
+    delete = AsyncMock(return_value=True)
+    with (
+        patch(
+            "agent.reviewer_publish.get_thread_metadata",
+            AsyncMock(return_value={"status_comment_id": 99}),
+        ),
+        patch("agent.reviewer_publish.post_status_comment", post),
+        patch("agent.reviewer_publish.delete_status_comment", delete),
+        patch("agent.reviewer_publish.set_reviewer_thread_metadata", AsyncMock()),
+    ):
+        cid = await post_review_started_comment(
+            thread_id="tid", owner="o", repo="r", pr_number=7, token="t"
+        )
+    assert cid == 500
+    delete.assert_awaited_once()
+    assert delete.await_args.kwargs["comment_id"] == 99
+
+
+@pytest.mark.asyncio
+async def test_clear_review_started_comment_deletes_and_clears_metadata() -> None:
+    delete = AsyncMock(return_value=True)
+    set_meta = AsyncMock()
+    with (
+        patch(
+            "agent.reviewer_publish.get_thread_metadata",
+            AsyncMock(return_value={"status_comment_id": 99}),
+        ),
+        patch("agent.reviewer_publish.delete_status_comment", delete),
+        patch("agent.reviewer_publish.set_reviewer_thread_metadata", set_meta),
+    ):
+        await clear_review_started_comment(thread_id="tid", owner="o", repo="r", token="t")
+    delete.assert_awaited_once()
+    assert delete.await_args.kwargs["comment_id"] == 99
+    set_meta.assert_awaited_once_with("tid", extra={"status_comment_id": None})
+
+
+@pytest.mark.asyncio
+async def test_clear_review_started_comment_noop_without_tracked_id() -> None:
+    delete = AsyncMock()
+    set_meta = AsyncMock()
+    with (
+        patch("agent.reviewer_publish.get_thread_metadata", AsyncMock(return_value={})),
+        patch("agent.reviewer_publish.delete_status_comment", delete),
+        patch("agent.reviewer_publish.set_reviewer_thread_metadata", set_meta),
+    ):
+        await clear_review_started_comment(thread_id="tid", owner="o", repo="r", token="t")
+    delete.assert_not_called()
+    set_meta.assert_not_called()
 
 
 def test_render_review_body_with_only_out_of_diff_findings() -> None:

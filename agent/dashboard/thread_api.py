@@ -18,9 +18,11 @@ from langgraph_sdk.errors import InternalServerError
 from pydantic import BaseModel, ConfigDict, Field
 
 from ..utils.thread_ops import is_thread_active, langgraph_client, queue_message_for_thread
+from .agent_overrides import normalize_profile_overrides
 from .message_adapter import state_messages_to_ui
-from .options import SUPPORTED_MODEL_IDS, model_supports_effort
+from .options import SUPPORTED_MODEL_IDS, model_supports_effort, model_supports_images
 from .profiles import get_profile, get_valid_access_token
+from .team_settings import get_team_default_model
 from .user_mappings import email_for_login
 
 logger = logging.getLogger(__name__)
@@ -86,6 +88,21 @@ def _normalize_model_choice(
     return model_id, effort
 
 
+async def _resolve_agent_model_choice(
+    profile: dict[str, Any],
+    model_id: str | None,
+    effort: str | None,
+) -> tuple[str, str]:
+    resolved_model, resolved_effort = await get_team_default_model("agent")
+    profile_model, profile_effort = normalize_profile_overrides(profile)
+    if profile_model and profile_effort:
+        resolved_model, resolved_effort = profile_model, profile_effort
+    chosen_model, chosen_effort = _normalize_model_choice(model_id, effort)
+    if chosen_model and chosen_effort:
+        resolved_model, resolved_effort = chosen_model, chosen_effort
+    return resolved_model, resolved_effort
+
+
 def _now_ms() -> int:
     return int(datetime.now(UTC).timestamp() * 1000)
 
@@ -114,9 +131,14 @@ def _decode_dashboard_image(image: DashboardImageBody) -> bytes:
     return data
 
 
-def _image_blocks(images: list[DashboardImageBody]) -> list[dict[str, Any]]:
+def _image_blocks(
+    images: list[DashboardImageBody], *, model_id: str | None
+) -> list[dict[str, Any]]:
     if len(images) > _MAX_DASHBOARD_IMAGES:
         raise HTTPException(422, f"at most {_MAX_DASHBOARD_IMAGES} images are supported")
+    if images and (not model_id or not model_supports_images(model_id)):
+        model_label = model_id or "the current model"
+        raise HTTPException(422, f"model {model_label} does not support image input")
     return [
         create_image_block(
             base64=base64.b64encode(_decode_dashboard_image(image)).decode("ascii"),
@@ -127,14 +149,17 @@ def _image_blocks(images: list[DashboardImageBody]) -> list[dict[str, Any]]:
 
 
 def _user_message_content(
-    prompt: str, images: list[DashboardImageBody]
+    prompt: str, images: list[DashboardImageBody], *, model_id: str | None = None
 ) -> str | list[dict[str, Any]]:
     text = prompt.strip()
     if not text and not images:
         raise HTTPException(422, "prompt or image required")
     if not images:
         return text
-    return [*_image_blocks(images), *([{"type": "text", "text": text}] if text else [])]
+    return [
+        *_image_blocks(images, model_id=model_id),
+        *([{"type": "text", "text": text}] if text else []),
+    ]
 
 
 async def _ensure_dashboard_github_token(login: str) -> None:
@@ -156,6 +181,14 @@ def _thread_owner_email(metadata: dict[str, Any]) -> str | None:
 def _thread_source(metadata: dict[str, Any]) -> str:
     source = metadata.get("source")
     return source if isinstance(source, str) and source else _DASHBOARD_SOURCE
+
+
+def _metadata_model_id(metadata: dict[str, Any]) -> str | None:
+    for key in ("resolved_model", "model"):
+        model = metadata.get(key)
+        if isinstance(model, str) and model in SUPPORTED_MODEL_IDS:
+            return model
+    return None
 
 
 def _user_owns_thread(metadata: dict[str, Any], login: str, email: str | None) -> bool:
@@ -199,8 +232,28 @@ def _run_status_to_agent_status(thread_status: str | None, run_status: str | Non
     return "idle"
 
 
+def _thread_run_id(metadata: dict[str, Any], latest_run_id: str | None) -> str | None:
+    if latest_run_id:
+        return latest_run_id
+    run_id = metadata.get("latest_run_id")
+    return run_id if isinstance(run_id, str) and run_id else None
+
+
+def _is_thread_viewed(metadata: dict[str, Any], latest_run_id: str | None) -> bool:
+    viewed_at = metadata.get("last_viewed_at_ms")
+    viewed_run_id = metadata.get("last_viewed_run_id")
+    run_id = _thread_run_id(metadata, latest_run_id)
+    if run_id:
+        return viewed_run_id == run_id
+    return isinstance(viewed_at, (int, float))
+
+
 def _thread_summary(
-    thread: dict[str, Any], *, messages: list[dict[str, Any]] | None = None
+    thread: dict[str, Any],
+    *,
+    messages: list[dict[str, Any]] | None = None,
+    latest_run_status: str | None = None,
+    latest_run_id: str | None = None,
 ) -> dict[str, Any]:
     metadata = thread.get("metadata") if isinstance(thread.get("metadata"), dict) else {}
     owner, name, full_name = _metadata_repo(metadata)
@@ -210,11 +263,11 @@ def _thread_summary(
     model = metadata.get("model") if isinstance(metadata.get("model"), str) else "Default"
     effort = metadata.get("effort") if isinstance(metadata.get("effort"), str) else None
     thread_status = thread.get("status") if isinstance(thread.get("status"), str) else "idle"
-    latest_run_status = metadata.get("latest_run_status")
-    status = _run_status_to_agent_status(
-        thread_status,
-        latest_run_status if isinstance(latest_run_status, str) else None,
+    metadata_run_status = metadata.get("latest_run_status")
+    run_status = latest_run_status or (
+        metadata_run_status if isinstance(metadata_run_status, str) else None
     )
+    status = _run_status_to_agent_status(thread_status, run_status)
 
     pr_number = metadata.get("pr_number")
     pr_url = metadata.get("pr_url")
@@ -231,6 +284,12 @@ def _thread_summary(
         "effort": effort,
         "source": _thread_source(metadata),
         "status": status,
+        "viewed": _is_thread_viewed(metadata, latest_run_id),
+        "viewedAt": (
+            int(metadata["last_viewed_at_ms"])
+            if isinstance(metadata.get("last_viewed_at_ms"), (int, float))
+            else None
+        ),
         "createdAt": int(created_at) if isinstance(created_at, (int, float)) else _now_ms(),
         "updatedAt": int(updated_at) if isinstance(updated_at, (int, float)) else _now_ms(),
     }
@@ -250,13 +309,52 @@ def _thread_summary(
     return summary
 
 
-async def _latest_run_status(thread_id: str) -> str | None:
-    runs = await langgraph_client().runs.list(thread_id, limit=1)
+async def _latest_run_info(client: Any, thread_id: str) -> tuple[str | None, str | None]:
+    try:
+        runs = await client.runs.list(thread_id, limit=1)
+    except Exception:  # noqa: BLE001
+        logger.debug("Could not fetch latest run for thread %s", thread_id, exc_info=True)
+        return None, None
     if not runs:
-        return None
+        return None, None
     run = runs[0]
-    raw = run.get("status") if isinstance(run, dict) else getattr(run, "status", None)
-    return raw.lower() if isinstance(raw, str) else None
+    raw_status = run.get("status") if isinstance(run, dict) else getattr(run, "status", None)
+    raw_id = (
+        (run.get("run_id") or run.get("id"))
+        if isinstance(run, dict)
+        else (getattr(run, "run_id", None) or getattr(run, "id", None))
+    )
+    status = raw_status.lower() if isinstance(raw_status, str) else None
+    run_id = raw_id if isinstance(raw_id, str) and raw_id else None
+    return status, run_id
+
+
+async def _latest_run_status(thread_id: str) -> str | None:
+    status, _ = await _latest_run_info(langgraph_client(), thread_id)
+    return status
+
+
+async def _refresh_latest_run_metadata(
+    client: Any, thread: dict[str, Any]
+) -> tuple[dict[str, Any], str | None, str | None]:
+    thread_id = thread.get("thread_id") or thread.get("id")
+    if not isinstance(thread_id, str) or not thread_id:
+        return thread, None, None
+    latest_run_status, latest_run_id = await _latest_run_info(client, thread_id)
+    metadata = thread.get("metadata") if isinstance(thread.get("metadata"), dict) else {}
+    metadata_update: dict[str, Any] = {}
+    if latest_run_status and latest_run_status != metadata.get("latest_run_status"):
+        metadata_update["latest_run_status"] = latest_run_status
+    if latest_run_id and latest_run_id != metadata.get("latest_run_id"):
+        metadata_update["latest_run_id"] = latest_run_id
+    if metadata_update:
+        try:
+            await client.threads.update(thread_id=thread_id, metadata=metadata_update)
+        except Exception:  # noqa: BLE001
+            logger.debug("Could not persist latest run metadata for %s", thread_id, exc_info=True)
+        else:
+            thread = {**thread, "metadata": {**metadata, **metadata_update}}
+    return thread, latest_run_status, latest_run_id
 
 
 async def list_dashboard_threads(
@@ -285,13 +383,44 @@ async def list_dashboard_threads(
             if isinstance(thread_id, str) and thread_id not in seen:
                 seen[thread_id] = thread
 
-    summaries = [_thread_summary(thread) for thread in seen.values()]
+    summaries: list[dict[str, Any]] = []
+    for thread in seen.values():
+        refreshed, latest_run_status, latest_run_id = await _refresh_latest_run_metadata(
+            client, thread
+        )
+        summaries.append(
+            _thread_summary(
+                refreshed,
+                latest_run_status=latest_run_status,
+                latest_run_id=latest_run_id,
+            )
+        )
     summaries.sort(key=lambda item: item.get("updatedAt", 0), reverse=True)
     return summaries[:limit]
 
 
+async def _mark_thread_viewed(
+    client: Any,
+    thread_id: str,
+    metadata: dict[str, Any],
+    *,
+    latest_run_id: str | None,
+) -> dict[str, Any]:
+    now_ms = _now_ms()
+    metadata_update: dict[str, Any] = {"last_viewed_at_ms": now_ms}
+    run_id = _thread_run_id(metadata, latest_run_id)
+    if run_id:
+        metadata_update["last_viewed_run_id"] = run_id
+    try:
+        await client.threads.update(thread_id=thread_id, metadata=metadata_update)
+    except Exception:  # noqa: BLE001
+        logger.debug("Could not mark thread %s viewed", thread_id, exc_info=True)
+        return metadata
+    return {**metadata, **metadata_update}
+
+
 async def get_dashboard_thread(
-    thread_id: str, login: str, *, email: str | None = None
+    thread_id: str, login: str, *, email: str | None = None, mark_viewed: bool = True
 ) -> dict[str, Any]:
     client = langgraph_client()
     try:
@@ -301,6 +430,7 @@ async def get_dashboard_thread(
         raise HTTPException(404, "thread not found") from exc
 
     metadata = thread.get("metadata") if isinstance(thread.get("metadata"), dict) else {}
+    _assert_thread_owner(metadata, login, email)
 
     messages: list[dict[str, Any]] = []
     try:
@@ -315,12 +445,32 @@ async def get_dashboard_thread(
         raw_messages = values.get("messages") if isinstance(values, dict) else []
         messages = state_messages_to_ui(raw_messages if isinstance(raw_messages, list) else [])
 
-    latest_run_status = await _latest_run_status(thread_id)
-    if latest_run_status and latest_run_status != metadata.get("latest_run_status"):
-        metadata = {**metadata, "latest_run_status": latest_run_status}
+    thread, latest_run_status, latest_run_id = await _refresh_latest_run_metadata(client, thread)
+    metadata = thread.get("metadata") if isinstance(thread.get("metadata"), dict) else metadata
+    status = _run_status_to_agent_status(
+        thread.get("status") if isinstance(thread.get("status"), str) else "idle",
+        latest_run_status
+        or (
+            metadata.get("latest_run_status")
+            if isinstance(metadata.get("latest_run_status"), str)
+            else None
+        ),
+    )
+    if mark_viewed and status != "running":
+        metadata = await _mark_thread_viewed(
+            client,
+            thread_id,
+            metadata,
+            latest_run_id=latest_run_id,
+        )
         thread = {**thread, "metadata": metadata}
 
-    return _thread_summary(thread, messages=messages)
+    return _thread_summary(
+        thread,
+        messages=messages,
+        latest_run_status=latest_run_status,
+        latest_run_id=latest_run_id,
+    )
 
 
 def _resolve_repo_config(repo: str | None) -> dict[str, str]:
@@ -343,7 +493,8 @@ async def _start_agent_run(
     profile = await get_profile(login) or {}
     now_ms = _now_ms()
     prompt = prompt.strip()
-    content = _user_message_content(prompt, images or [])
+    resolved_model, resolved_effort = await _resolve_agent_model_choice(profile, model_id, effort)
+    content = _user_message_content(prompt, images or [], model_id=resolved_model)
     chosen_model, chosen_effort = _normalize_model_choice(model_id, effort)
     metadata_model = chosen_model or profile.get("default_model") or "Default"
     metadata_effort = chosen_effort or profile.get("reasoning_effort")
@@ -356,6 +507,8 @@ async def _start_agent_run(
         "branch_prefix": profile.get("branch_prefix"),
         "model": metadata_model,
         "effort": metadata_effort,
+        "resolved_model": resolved_model,
+        "resolved_effort": resolved_effort,
         "created_at_ms": now_ms,
         "updated_at_ms": now_ms,
     }
@@ -433,16 +586,17 @@ async def send_dashboard_message(
     owner, name, _ = _metadata_repo(metadata)
 
     prompt = body.content.strip()
-    content = _user_message_content(prompt, body.images)
     now_ms = _now_ms()
     chosen_model, chosen_effort = _normalize_model_choice(body.model_id, body.effort)
     metadata_update: dict[str, Any] = {"source": _DASHBOARD_SOURCE, "updated_at_ms": now_ms}
     if chosen_model and chosen_effort:
         metadata_update["model"] = chosen_model
         metadata_update["effort"] = chosen_effort
-    await client.threads.update(thread_id=thread_id, metadata=metadata_update)
 
     if await is_thread_active(thread_id):
+        active_model = _metadata_model_id(metadata) if body.images else None
+        content = _user_message_content(prompt, body.images, model_id=active_model)
+        await client.threads.update(thread_id=thread_id, metadata=metadata_update)
         queue_payload: dict[str, Any] = {"text": prompt, "source": _DASHBOARD_SOURCE}
         if isinstance(content, list):
             queue_payload["images"] = [
@@ -461,8 +615,16 @@ async def send_dashboard_message(
             thread if isinstance(thread, dict) else {"thread_id": thread_id, "metadata": metadata}
         )
 
-    await _ensure_dashboard_github_token(login)
     profile = await get_profile(login) or {}
+    resolved_model, resolved_effort = await _resolve_agent_model_choice(
+        profile, body.model_id, body.effort
+    )
+    metadata_update["resolved_model"] = resolved_model
+    metadata_update["resolved_effort"] = resolved_effort
+    content = _user_message_content(prompt, body.images, model_id=resolved_model)
+    await client.threads.update(thread_id=thread_id, metadata=metadata_update)
+
+    await _ensure_dashboard_github_token(login)
     configurable: dict[str, Any] = {
         "thread_id": thread_id,
         "source": _DASHBOARD_SOURCE,

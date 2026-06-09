@@ -49,7 +49,7 @@ from .reviewer_findings import (
 from .reviewer_findings import (
     list_findings as list_reviewer_findings,
 )
-from .reviewer_publish import fetch_pr_review_threads
+from .reviewer_publish import fetch_pr_review_threads, post_review_started_comment
 from .reviewer_reconcile import reconcile_findings_with_review_threads
 from .utils.auth import (
     is_bot_token_only_mode,
@@ -87,6 +87,7 @@ from .utils.slack import (
     GitHubPrRef,
     fetch_slack_thread_messages,
     format_slack_messages_for_prompt,
+    get_slack_channel_description,
     get_slack_user_info,
     get_slack_user_names,
     post_slack_thread_reply,
@@ -575,9 +576,11 @@ async def get_slack_repo_config(
 
     Priority:
         1. Repo carried over from the existing Slack thread's metadata.
-        2. The triggering user's dashboard ``default_repo`` (if they have a
+        2. A ``repo:owner/name`` token in the channel's topic/purpose.
+        3. The triggering user's dashboard ``default_repo`` (if they have a
            profile and their Slack email maps to a known GitHub login).
-        3. ``SLACK_REPO_*`` env defaults.
+        4. Team default repo.
+        5. ``SLACK_REPO_*`` env defaults.
     """
     default_owner = SLACK_REPO_OWNER.strip() or DEFAULT_REPO_OWNER
     default_name = SLACK_REPO_NAME.strip() or DEFAULT_REPO_NAME
@@ -597,6 +600,24 @@ async def get_slack_repo_config(
                 "Failed to fetch Slack thread %s for repo resolution",
                 thread_id,
             )
+
+    if not repo_config:
+        try:
+            channel_description = await get_slack_channel_description(channel_id)
+            if channel_description:
+                channel_repo_config = extract_repo_from_text(
+                    channel_description, default_owner=default_owner
+                )
+                if channel_repo_config:
+                    logger.info(
+                        "Applying repo from Slack channel %s description: %s/%s",
+                        channel_id,
+                        channel_repo_config["owner"],
+                        channel_repo_config["name"],
+                    )
+                    repo_config = channel_repo_config
+        except Exception:  # noqa: BLE001
+            logger.exception("Failed to resolve repo from Slack channel description")
 
     if not repo_config and slack_user_id:
         try:
@@ -1855,6 +1876,13 @@ async def trigger_pr_review_from_ref(
         }
     await set_reviewer_thread_metadata(
         thread_id, pr=pr_meta, watch=True, slack_thread=slack_thread_meta, head_sha=head_sha
+    )
+    await post_review_started_comment(
+        thread_id=thread_id,
+        owner=pr_ref.owner,
+        repo=pr_ref.repo,
+        pr_number=pr_ref.number,
+        token=app_token,
     )
 
     prompt = build_github_pr_review_prompt(repo_config, pr_ref.number, pr_url, base_sha, head_sha)

@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+from fastapi import HTTPException
 
 from agent.dashboard import thread_api
 
@@ -174,6 +175,7 @@ async def test_dashboard_followup_on_busy_thread_queues_images(
     metadata = {
         "source": "dashboard",
         "github_login": "octocat",
+        "resolved_model": "openai:gpt-5.5",
     }
     client = _FakeClient(metadata)
     queued_messages: list[object] = []
@@ -207,6 +209,72 @@ async def test_dashboard_followup_on_busy_thread_queues_images(
             "images": [{"type": "image", "data": "aW1hZ2U=", "mime_type": "image/png"}],
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_dashboard_followup_on_busy_text_only_thread_rejects_images(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    metadata = {
+        "source": "dashboard",
+        "github_login": "octocat",
+        "resolved_model": "fireworks:accounts/fireworks/models/deepseek-v4-pro",
+    }
+    client = _FakeClient(metadata)
+    queued_messages: list[object] = []
+
+    async def fake_queue_message_for_thread(thread_id: str, message_content: object) -> bool:
+        queued_messages.append(message_content)
+        return True
+
+    monkeypatch.setattr(thread_api, "langgraph_client", lambda: client)
+    monkeypatch.setattr(thread_api, "is_thread_active", _active_thread)
+    monkeypatch.setattr(thread_api, "queue_message_for_thread", fake_queue_message_for_thread)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await thread_api.send_dashboard_message(
+            "thread-1",
+            "octocat",
+            thread_api.ThreadMessageBody(
+                content="continue in web",
+                images=[thread_api.DashboardImageBody(base64="aW1hZ2U=", mimeType="image/png")],
+                model_id="openai:gpt-5.5",
+                effort="medium",
+            ),
+        )
+
+    assert exc_info.value.status_code == 422
+    assert "does not support image input" in exc_info.value.detail
+    assert queued_messages == []
+    assert client.threads.updates == []
+
+
+@pytest.mark.asyncio
+async def test_dashboard_followup_on_busy_unknown_model_rejects_images(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    metadata = {
+        "source": "dashboard",
+        "github_login": "octocat",
+    }
+    client = _FakeClient(metadata)
+
+    monkeypatch.setattr(thread_api, "langgraph_client", lambda: client)
+    monkeypatch.setattr(thread_api, "is_thread_active", _active_thread)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await thread_api.send_dashboard_message(
+            "thread-1",
+            "octocat",
+            thread_api.ThreadMessageBody(
+                content="continue in web",
+                images=[thread_api.DashboardImageBody(base64="aW1hZ2U=", mimeType="image/png")],
+            ),
+        )
+
+    assert exc_info.value.status_code == 422
+    assert "does not support image input" in exc_info.value.detail
+    assert client.threads.updates == []
 
 
 @pytest.mark.asyncio

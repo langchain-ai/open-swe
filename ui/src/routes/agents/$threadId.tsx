@@ -1,33 +1,28 @@
-import { Navigate, createFileRoute } from "@tanstack/react-router";
+import { Navigate, createFileRoute } from "@tanstack/react-router"
 
-import { AgentThreadView } from "@/components/agents/AgentThreadView";
-import { Skeleton } from "@/components/ui/skeleton";
-import { useAgentThread } from "@/lib/agents/queries";
-import { useSession } from "@/lib/session";
+import { AgentThreadView } from "@/components/agents/AgentThreadView"
+import { Skeleton } from "@/components/ui/skeleton"
+import { useAgentThread } from "@/lib/agents/queries"
 
 export const Route = createFileRoute("/agents/$threadId")({
   component: AgentThreadPage,
-});
+})
 
 function AgentThreadPage() {
-  const { threadId } = Route.useParams();
-  const session = useSession();
-  const threadQuery = useAgentThread(threadId);
-
-  if (session.isLoading) return null;
-  if (!session.data) return <Navigate to="/login" />;
+  const { threadId } = Route.useParams()
+  const threadQuery = useAgentThread(threadId)
 
   if (threadQuery.isLoading) {
     return (
-      <main className="agents-ui flex h-svh items-center justify-center bg-[var(--ui-bg)] p-6">
+      <main className="flex min-w-0 flex-1 items-center justify-center p-6">
         <Skeleton className="h-40 w-full max-w-md" />
       </main>
-    );
+    )
   }
 
   if (threadQuery.isError || !threadQuery.data) {
-    return <Navigate to="/agents" />;
+    return <Navigate to="/agents" />
   }
 
-  return <AgentThreadView user={session.data} thread={threadQuery.data} />;
+  return <AgentThreadView thread={threadQuery.data} />
 }
