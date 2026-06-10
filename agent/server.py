@@ -40,7 +40,9 @@ from .dashboard.agent_overrides import (
 from .dashboard.agent_usage import record_agent_thread_usage
 from .dashboard.options import DEFAULT_MODEL_ID, SUPPORTED_MODEL_IDS, model_supports_effort
 from .dashboard.team_settings import get_team_default_model_pair, get_team_default_repo
+from .integrations.datadog_mcp import load_datadog_tools
 from .integrations.langsmith import _configure_github_proxy
+from .integrations.langsmith_tools import load_langsmith_tools
 from .middleware import (
     ModelFallbackMiddleware,
     SandboxCircuitBreakerMiddleware,
@@ -431,6 +433,23 @@ def _get_cached_sandbox_backend(thread_id: str) -> SandboxBackendProtocol:
     return sandbox_backend
 
 
+async def _load_observability_tools() -> list[Any]:
+    """Datadog (MCP) + LangSmith read tools when the team has connected them.
+
+    Credentials live server-side in team settings; the sandbox never holds them.
+    Failures degrade to no tools so the agent still starts.
+    """
+    try:
+        datadog_tools, langsmith_tools = await asyncio.gather(
+            load_datadog_tools(),
+            load_langsmith_tools(),
+        )
+    except Exception:
+        logger.warning("Failed to load observability tools", exc_info=True)
+        return []
+    return [*datadog_tools, *langsmith_tools]
+
+
 async def get_agent(config: RunnableConfig) -> Pregel:
     """Get or create an agent with a sandbox for the given thread."""
     thread_id = config["configurable"].get("thread_id", None)
@@ -577,6 +596,8 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     prompt_default_repo = await _resolve_prompt_default_repo(configurable)
     repo_custom_instructions = await _resolve_repo_custom_instructions(prompt_default_repo)
 
+    observability_tools = await _load_observability_tools()
+
     logger.info("Returning agent with sandbox for thread %s", thread_id)
     main_model = make_model(model_id, **model_kwargs)
     subagent_model = make_model(subagent_model_id, **subagent_model_kwargs)
@@ -606,6 +627,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             request_pr_review,
             slack_read_thread_messages,
             slack_thread_reply,
+            *observability_tools,
         ],
         subagents=[_general_purpose_subagent(subagent_model)],
         backend=backend_factory,

@@ -123,6 +123,30 @@ export interface TeamSettings {
   updated_at?: string | null;
 }
 
+export interface ProviderCredentialStatus {
+  connected: boolean;
+  site?: string;
+  endpoint?: string;
+  api_key_last4?: string;
+  updated_at?: string | null;
+}
+
+export interface TeamCredentialsStatus {
+  datadog: ProviderCredentialStatus;
+  langsmith: ProviderCredentialStatus;
+}
+
+export interface DatadogConnectBody {
+  site: string;
+  api_key: string;
+  app_key: string;
+}
+
+export interface LangSmithConnectBody {
+  api_key: string;
+  endpoint?: string | null;
+}
+
 export interface UserMapping {
   github_login: string;
   work_email: string;
@@ -287,6 +311,21 @@ export const api = {
   getTeamSettings: () => request<TeamSettings>("/team-settings"),
   saveTeamSettings: (body: TeamSettings) =>
     request<TeamSettings>("/team-settings", { method: "PUT", body: JSON.stringify(body) }),
+  getTeamCredentials: () => request<TeamCredentialsStatus>("/team-credentials"),
+  connectDatadog: (body: DatadogConnectBody) =>
+    request<TeamCredentialsStatus>("/team-credentials/datadog", {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  disconnectDatadog: () =>
+    request<TeamCredentialsStatus>("/team-credentials/datadog", { method: "DELETE" }),
+  connectLangSmith: (body: LangSmithConnectBody) =>
+    request<TeamCredentialsStatus>("/team-credentials/langsmith", {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  disconnectLangSmith: () =>
+    request<TeamCredentialsStatus>("/team-credentials/langsmith", { method: "DELETE" }),
   listEnabledReviewRepos: () =>
     request<{ repos: Array<string> }>("/enabled-review-repos"),
   setEnabledReviewRepo: (full_name: string, enabled: boolean) =>
