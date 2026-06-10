@@ -1658,6 +1658,14 @@
   resolved "https://registry.yarnpkg.com/@pierre/theme/-/theme-1.0.3.tgz#eec66e55576f981000f4816263632d3ba1479229"
   integrity sha512-sWHv11TMoqKxKDgTIk5VbhQjdPhs8DCcBxbjh3mRlS3YOM/OcrWoGX6MM8eBGn9cUu3M46Py0JnxsG2nJaFTuA==
 
+"@pierre/trees@1.0.0-beta.4":
+  version "1.0.0-beta.4"
+  resolved "https://registry.yarnpkg.com/@pierre/trees/-/trees-1.0.0-beta.4.tgz#d19881431e2396c19641b6bd36d1d4e5a267cac8"
+  integrity sha512-OfT1yk9ne8Te5+GB5zUY8yqE6B8BqjBHQJleH4lu8ltwNpoocZl4vXt1AzlEExpxI/pp+AFX5QG+lR3JjtTEag==
+  dependencies:
+    preact "11.0.0-beta.0"
+    preact-render-to-string "6.6.5"
+
 "@rolldown/binding-android-arm64@1.0.2":
   version "1.0.2"
   resolved "https://registry.yarnpkg.com/@rolldown/binding-android-arm64/-/binding-android-arm64-1.0.2.tgz#ebe1264e43ba5bb224c58c85e0ac238f87e5ad14"
@@ -6709,6 +6717,16 @@ powershell-utils@^0.1.0:
   version "0.1.0"
   resolved "https://registry.yarnpkg.com/powershell-utils/-/powershell-utils-0.1.0.tgz#5a42c9a824fb4f2f251ccb41aaae73314f5d6ac2"
   integrity sha512-dM0jVuXJPsDN6DvRpea484tCUaMiXWjuCn++HGTqUWzGDjv5tZkEZldAJ/UMlqRYGFrD/etByo4/xOuC/snX2A==
+
+preact-render-to-string@6.6.5:
+  version "6.6.5"
+  resolved "https://registry.yarnpkg.com/preact-render-to-string/-/preact-render-to-string-6.6.5.tgz#1be84cc8565e3bcfcf2a33cb9c61185e6498ab31"
+  integrity sha512-O6MHzYNIKYaiSX3bOw0gGZfEbOmlIDtDfWwN1JJdc/T3ihzRT6tGGSEWE088dWrEDGa1u7101q+6fzQnO9XCPA==
+
+preact@11.0.0-beta.0:
+  version "11.0.0-beta.0"
+  resolved "https://registry.yarnpkg.com/preact/-/preact-11.0.0-beta.0.tgz#c6e5c6e8657abf18b4a637eae88b5b377d36973f"
+  integrity sha512-IcODoASASYwJ9kxz7+MJeiJhvLriwSb4y4mHIyxdgaRZp6kPUud7xytrk/6GZw8U3y6EFJaRb5wi9SrEK+8+lg==
 
 prettier-plugin-tailwindcss@^0.7.2:
   version "0.7.4"
