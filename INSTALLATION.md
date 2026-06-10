@@ -1,7 +1,7 @@
 
 # Installation Guide
 
-This guide walks you through setting up Open SWE end-to-end: local development, GitHub App creation, LangSmith configuration, webhooks, the web dashboard, and production deployment.
+This guide walks you through setting up Open SWE end-to-end: local development, GitHub App creation, LangSmith configuration, webhooks, the web dashboard, and production deployment. Follow the steps in order.
 
 Open SWE has two runnable pieces:
 
