@@ -76,6 +76,7 @@ Write this down. You'll use it in the callback URL below and again in step 4 whe
      - Contents: Read & write
      - Pull requests: Read & write
      - Issues: Read & write
+     - Checks: Read & write — reports an "Open SWE Review" check run on PRs while an auto-review runs. Without it, check-run creation fails (logged, best-effort) but reviews still work.
      - Metadata: Read-only
    - **Organization permissions** (required only if you plan to set `ALLOWED_GITHUB_ORGS` — see step 5 / Security):
      - Members: Read-only — used to verify org membership for the dashboard-login gate via `GET /orgs/{org}/memberships/{username}`. Without this permission that call returns 403, the check fails closed, and **every** dashboard login is rejected.

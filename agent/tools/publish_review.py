@@ -40,9 +40,11 @@ from ..reviewer_publish import (
     render_review_body,
     reply_to_review_comment,
     resolve_review_thread,
+    settle_review_check_run,
 )
 from ..reviewer_reconcile import reconcile_findings_with_review_threads
 from ..utils.dashboard_links import dashboard_thread_url
+from ..utils.github_checks import review_check_conclusion
 from ..utils.github_token import (
     GitHubAuthError,
     get_github_token,
@@ -322,6 +324,16 @@ async def _publish_review_async(
         )
         await set_reviewer_thread_metadata(thread_id, last_reviewed_sha=head_sha)
         await clear_review_started_comment(thread_id=thread_id, owner=owner, repo=repo, token=token)
+        conclusion, check_title, check_summary = review_check_conclusion(0)
+        await settle_review_check_run(
+            thread_id=thread_id,
+            owner=owner,
+            repo=repo,
+            token=token,
+            conclusion=conclusion,
+            title=check_title,
+            summary=check_summary,
+        )
         return {
             "success": True,
             "review_id": None,
@@ -498,6 +510,18 @@ async def _publish_review_async(
 
     await set_reviewer_thread_metadata(thread_id, last_reviewed_sha=head_sha)
     await clear_review_started_comment(thread_id=thread_id, owner=owner, repo=repo, token=token)
+    conclusion, check_title, check_summary = review_check_conclusion(
+        len(inline_comments) + len(eligible_out_of_diff)
+    )
+    await settle_review_check_run(
+        thread_id=thread_id,
+        owner=owner,
+        repo=repo,
+        token=token,
+        conclusion=conclusion,
+        title=check_title,
+        summary=check_summary,
+    )
 
     result: dict[str, Any] = {
         "success": True,

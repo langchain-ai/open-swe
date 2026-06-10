@@ -33,6 +33,7 @@ from .reviewer_findings import (
     set_reviewer_thread_metadata,
 )
 from .utils.dashboard_links import dashboard_thread_url
+from .utils.github_checks import CheckConclusion, complete_review_check_run
 from .utils.github_token import GitHubAuthError
 
 logger = logging.getLogger(__name__)
@@ -423,6 +424,58 @@ async def clear_review_started_comment(
         return
     await delete_status_comment(owner=owner, repo=repo, comment_id=comment_id, token=token)
     await set_reviewer_thread_metadata(thread_id, extra={"status_comment_id": None})
+
+
+async def settle_review_check_run(
+    *,
+    thread_id: str,
+    owner: str,
+    repo: str,
+    token: str,
+    conclusion: CheckConclusion,
+    title: str,
+    summary: str,
+) -> None:
+    """Complete the tracked ``Open SWE Review`` check run, if one is open.
+
+    The dispatching webhook stores ``review_check_run_id`` in reviewer thread
+    metadata when it creates the check. No-op when none is tracked. The id is
+    only cleared after a successful PATCH so a transient failure (timeout,
+    5xx, rate limit) leaves it in place for the after-agent hook or a later
+    publish to retry — otherwise the check would hang in-progress forever.
+    On failure the intended result is persisted as
+    ``review_check_pending_result`` so the retry reports this conclusion, not
+    a generic failure that would misreport a published review.
+    """
+    metadata = await get_thread_metadata(thread_id)
+    check_run_id = metadata.get("review_check_run_id")
+    if not isinstance(check_run_id, int):
+        return
+    ok = await complete_review_check_run(
+        owner=owner,
+        repo=repo,
+        check_run_id=check_run_id,
+        token=token,
+        conclusion=conclusion,
+        title=title,
+        summary=summary,
+    )
+    if ok:
+        await set_reviewer_thread_metadata(
+            thread_id,
+            extra={"review_check_run_id": None, "review_check_pending_result": None},
+        )
+    else:
+        await set_reviewer_thread_metadata(
+            thread_id,
+            extra={
+                "review_check_pending_result": {
+                    "conclusion": conclusion,
+                    "title": title,
+                    "summary": summary,
+                }
+            },
+        )
 
 
 async def open_swe_review_exists(
