@@ -187,3 +187,34 @@ async def test_settle_review_check_run_completes_and_clears(
     assert completed[0]["check_run_id"] == 42
     assert completed[0]["conclusion"] == "neutral"
     assert metadata_writes == [{"thread_id": "t1", "extra": {"review_check_run_id": None}}]
+
+
+async def test_settle_review_check_run_keeps_id_on_patch_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_get_thread_metadata(thread_id: str) -> dict[str, Any]:
+        return {"review_check_run_id": 42}
+
+    metadata_writes: list[dict[str, Any]] = []
+
+    async def fake_complete(**kwargs: Any) -> bool:
+        return False
+
+    async def fake_set_metadata(thread_id: str, **kwargs: Any) -> None:
+        metadata_writes.append({"thread_id": thread_id, **kwargs})
+
+    monkeypatch.setattr(reviewer_publish, "get_thread_metadata", fake_get_thread_metadata)
+    monkeypatch.setattr(reviewer_publish, "complete_review_check_run", fake_complete)
+    monkeypatch.setattr(reviewer_publish, "set_reviewer_thread_metadata", fake_set_metadata)
+
+    await reviewer_publish.settle_review_check_run(
+        thread_id="t1",
+        owner="acme",
+        repo="widgets",
+        token="tok",
+        conclusion="success",
+        title="t",
+        summary="s",
+    )
+
+    assert metadata_writes == []

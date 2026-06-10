@@ -440,14 +440,15 @@ async def settle_review_check_run(
 
     The dispatching webhook stores ``review_check_run_id`` in reviewer thread
     metadata when it creates the check. No-op when none is tracked. The id is
-    cleared even if the PATCH fails — a retry with a stale id can't succeed
-    and would only re-log the same error on every subsequent publish.
+    only cleared after a successful PATCH so a transient failure (timeout,
+    5xx, rate limit) leaves it in place for the after-agent hook or a later
+    publish to retry — otherwise the check would hang in-progress forever.
     """
     metadata = await get_thread_metadata(thread_id)
     check_run_id = metadata.get("review_check_run_id")
     if not isinstance(check_run_id, int):
         return
-    await complete_review_check_run(
+    ok = await complete_review_check_run(
         owner=owner,
         repo=repo,
         check_run_id=check_run_id,
@@ -456,7 +457,8 @@ async def settle_review_check_run(
         title=title,
         summary=summary,
     )
-    await set_reviewer_thread_metadata(thread_id, extra={"review_check_run_id": None})
+    if ok:
+        await set_reviewer_thread_metadata(thread_id, extra={"review_check_run_id": None})
 
 
 async def open_swe_review_exists(

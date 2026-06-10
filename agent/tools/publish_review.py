@@ -510,7 +510,9 @@ async def _publish_review_async(
 
     await set_reviewer_thread_metadata(thread_id, last_reviewed_sha=head_sha)
     await clear_review_started_comment(thread_id=thread_id, owner=owner, repo=repo, token=token)
-    conclusion, check_title, check_summary = review_check_conclusion(len(inline_comments))
+    conclusion, check_title, check_summary = review_check_conclusion(
+        len(inline_comments) + len(eligible_out_of_diff)
+    )
     await settle_review_check_run(
         thread_id=thread_id,
         owner=owner,
