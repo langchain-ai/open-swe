@@ -117,7 +117,7 @@ function buildRenderItems(chunks: Chunk[], messageId?: string): RenderItem[] {
     flushExplored();
     items.push({
       type: "text-chunk",
-      key: messageId ? `${messageId}-text` : getChunkRenderKey(chunk, i),
+      key: messageId ? `${messageId}-${getChunkRenderKey(chunk, i)}` : getChunkRenderKey(chunk, i),
       chunk,
     });
   }

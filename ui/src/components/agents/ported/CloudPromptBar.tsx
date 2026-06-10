@@ -23,6 +23,7 @@ import type { ModelOption } from "@/lib/api"
 import type { ImageChunk } from "@/lib/agents/types"
 import type { ModelSelection } from "@/lib/agents/provider/useModelOptions"
 import { RepoSelector } from "@/components/agents/RepoSelector"
+import { Button } from "@/components/ui/button"
 import { useIsInAgentThreadStream } from "@/lib/agents/provider/useIsInAgentThreadStream"
 import { agentThreadKeys } from "@/lib/agents/queries"
 import { formatModelSelection } from "@/lib/agents/provider/useModelOptions"
@@ -55,16 +56,18 @@ function RunStopButton() {
   }
 
   return (
-    <button
+    <Button
       type="button"
+      variant="outline"
+      size="icon"
       onClick={() => void handleStop()}
       disabled={stopping}
       aria-label="Stop run"
       title="Stop run"
-      className="absolute right-3 top-3 z-10 flex size-7 cursor-pointer items-center justify-center rounded-md border border-[var(--ui-border)] text-[color:var(--ui-text-muted)] transition-colors hover:bg-[var(--ui-panel-2)] hover:text-[color:var(--ui-text)] disabled:cursor-default disabled:opacity-50"
+      className="absolute right-3 top-3 z-10 cursor-pointer text-[color:var(--ui-text-muted)] hover:bg-[var(--ui-panel-2)] hover:text-[color:var(--ui-text)] disabled:cursor-default"
     >
       <StopIcon className="size-3.5" weight="fill" />
-    </button>
+    </Button>
   )
 }
 const MAX_IMAGE_COUNT = 5

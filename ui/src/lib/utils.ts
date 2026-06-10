@@ -34,21 +34,21 @@ const rtf = new Intl.RelativeTimeFormat("en", { numeric: "auto" });
  */
 export function formatRelativeTime(ts: number): string {
   const diffMs = ts - Date.now(); // negative for past
+  const absMs = Math.abs(diffMs);
 
-  const units: [Intl.RelativeTimeFormatUnit, number][] = [
-    ["minute", 60 * 1000],
-    ["hour", 60 * 60 * 1000],
-    ["day", 24 * 60 * 60 * 1000],
-    ["week", 7 * 24 * 60 * 60 * 1000],
-  ];
-
-  for (const [unit, ms] of units) {
-    const value = Math.round(diffMs / ms);
-
-    if (Math.abs(value) < (unit === "week" ? Infinity : 60)) {
-      return rtf.format(value, unit);
-    }
+  if (absMs < 60_000) return rtf.format(Math.round(diffMs / 1000), "second");
+  if (absMs < 60 * 60_000) return rtf.format(Math.round(diffMs / 60_000), "minute");
+  if (absMs < 24 * 60 * 60_000) {
+    return rtf.format(Math.round(diffMs / (60 * 60_000)), "hour");
   }
-
-  return rtf.format(Math.round(diffMs / 604_800_000), "week");
+  if (absMs < 7 * 24 * 60 * 60_000) {
+    return rtf.format(Math.round(diffMs / (24 * 60 * 60_000)), "day");
+  }
+  if (absMs < 30 * 24 * 60 * 60_000) {
+    return rtf.format(Math.round(diffMs / (7 * 24 * 60 * 60_000)), "week");
+  }
+  if (absMs < 365 * 24 * 60 * 60_000) {
+    return rtf.format(Math.round(diffMs / (30 * 24 * 60 * 60_000)), "month");
+  }
+  return rtf.format(Math.round(diffMs / (365 * 24 * 60 * 60_000)), "year");
 }

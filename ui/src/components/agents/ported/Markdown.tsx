@@ -69,7 +69,13 @@ const STREAMDOWN_COMPONENTS = {
   },
 };
 
-const STREAMDOWN_ANIMATED = { sep: "word", animation: "slideUp" } as const;
+const STREAMDOWN_ANIMATED = {
+  sep: "word",
+  animation: "slideUp",
+  duration: 140,
+  stagger: 35,
+  easing: "ease-out",
+} as const;
 const SHIKI_THEME: ["github-light", "github-dark"] = ["github-light", "github-dark"];
 
 export const Markdown = memo(function Markdown({ content, isLive = false }: MarkdownProps) {

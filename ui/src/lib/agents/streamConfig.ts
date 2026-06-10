@@ -31,9 +31,10 @@ export const agentStreamApiUrl = toAbsoluteApiUrl(agentsApi.langGraphApiUrl);
  * dashboard session cookie.
  */
 export function agentStreamPaths(threadId: string) {
+  const encodedThreadId = encodeURIComponent(threadId);
   return {
-    commands: `/threads/${threadId}/commands`,
-    stream: `/threads/${threadId}/stream/events`,
-    state: `/threads/${threadId}/state`,
+    commands: `/threads/${encodedThreadId}/commands`,
+    stream: `/threads/${encodedThreadId}/stream/events`,
+    state: `/threads/${encodedThreadId}/state`,
   };
 }

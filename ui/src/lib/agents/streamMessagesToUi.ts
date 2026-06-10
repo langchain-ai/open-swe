@@ -78,6 +78,64 @@ function mergeTextChunks(chunks: Array<Chunk>): Array<Chunk> {
 
 type AgentTurn = { id: string; author: Message["author"]; timestamp: string; chunks: Array<Chunk> };
 
+function messageTimestamp(raw: BaseMessage): string {
+  const msg = raw as unknown as Record<string, unknown>;
+  const createdAt = msg.created_at;
+  if (typeof createdAt === "string" && createdAt) return createdAt;
+  const responseMetadata = msg.response_metadata;
+  if (responseMetadata && typeof responseMetadata === "object") {
+    const metadataCreatedAt = (responseMetadata as Record<string, unknown>).created_at;
+    if (typeof metadataCreatedAt === "string" && metadataCreatedAt) return metadataCreatedAt;
+  }
+  return new Date().toISOString();
+}
+
+function imageChunks(content: unknown): Array<Chunk> {
+  if (!Array.isArray(content)) return [];
+
+  const chunks: Array<Chunk> = [];
+  for (const item of content) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+    const block = item as Record<string, unknown>;
+    const type = block.type;
+    let base64: string | undefined;
+    let mimeType: string | undefined;
+
+    if (type === "image") {
+      const data = block.data ?? block.base64;
+      const mime = block.mime_type ?? block.mimeType;
+      if (typeof data === "string" && typeof mime === "string") {
+        base64 = data;
+        mimeType = mime;
+      }
+    } else if (type === "image_url") {
+      const imageUrl = block.image_url;
+      const url =
+        imageUrl && typeof imageUrl === "object"
+          ? (imageUrl as Record<string, unknown>).url
+          : undefined;
+      if (typeof url === "string") {
+        const match = /^data:(image\/[^;]+);base64,(.+)$/s.exec(url);
+        if (match) {
+          mimeType = match[1];
+          base64 = match[2];
+        }
+      }
+    }
+
+    if (base64 && mimeType) {
+      const fileName = block.fileName ?? block.file_name;
+      chunks.push({
+        kind: "image",
+        base64,
+        mimeType,
+        ...(typeof fileName === "string" && fileName ? { fileName } : {}),
+      });
+    }
+  }
+  return chunks;
+}
+
 /**
  * Client-side mirror of the server's ``state_messages_to_ui`` (see
  * ``agent/dashboard/message_adapter.py``). Converts the SDK's live
@@ -89,7 +147,6 @@ export function streamMessagesToUi(messages: Array<BaseMessage>): Array<Message>
   const pendingTools = new Map<string, ToolExecutionChunk>();
   const uiMessages: Array<Message> = [];
   let agentTurn: AgentTurn | null = null;
-  let agentTurnSeq = 0;
 
   const flushAgentTurn = () => {
     if (!agentTurn) return;
@@ -97,10 +154,10 @@ export function streamMessagesToUi(messages: Array<BaseMessage>): Array<Message>
     agentTurn = null;
   };
 
-  const appendAgentChunks = (timestamp: string, chunks: Array<Chunk>) => {
+  const appendAgentChunks = (msgId: string, timestamp: string, chunks: Array<Chunk>) => {
     if (!agentTurn) {
       agentTurn = {
-        id: `agent-turn-${++agentTurnSeq}`,
+        id: msgId,
         author: "agent",
         timestamp,
         chunks: [...chunks],
@@ -113,17 +170,20 @@ export function streamMessagesToUi(messages: Array<BaseMessage>): Array<Message>
 
   messages.forEach((raw, index) => {
     const msgId = typeof raw.id === "string" && raw.id ? raw.id : `msg-${index}`;
-    const timestamp = new Date().toISOString();
+    const timestamp = messageTimestamp(raw);
 
     if (HumanMessage.isInstance(raw)) {
       flushAgentTurn();
+      const content = (raw as unknown as { content?: unknown }).content;
+      const chunks = imageChunks(content);
       const text = raw.text.trim();
-      if (!text) return;
+      if (text) chunks.push({ kind: "text", text });
+      if (!chunks.length) return;
       uiMessages.push({
         id: msgId,
         author: "user",
         timestamp,
-        chunks: [{ kind: "text", text }],
+        chunks,
       });
       return;
     }
@@ -152,7 +212,7 @@ export function streamMessagesToUi(messages: Array<BaseMessage>): Array<Message>
         pendingTools.set(toolCallId, chunk);
       }
 
-      if (chunks.length) appendAgentChunks(timestamp, chunks);
+      if (chunks.length) appendAgentChunks(msgId, timestamp, chunks);
       return;
     }
 

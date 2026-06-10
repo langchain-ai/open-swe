@@ -2,6 +2,16 @@ import type { AgentSchedule, AgentThread, ImageChunk, Message } from "./types"
 
 export type { AgentSchedule, AgentThread, Message }
 
+export class AgentsApiError extends Error {
+  constructor(
+    public readonly status: number,
+    message: string
+  ) {
+    super(message)
+    this.name = "AgentsApiError"
+  }
+}
+
 export interface ThreadCreateRequest {
   prompt: string
   images?: Array<ImageChunk>
@@ -69,7 +79,7 @@ async function agentsRequest<T>(
     } catch {
       /* ignore */
     }
-    throw new Error(message)
+    throw new AgentsApiError(res.status, message)
   }
   if (res.status === 204) return undefined as T
   return (await res.json()) as T

@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { MultiFileDiff } from "@pierre/diffs/react";
 import { diffOptions } from "@/components/agents/utils/diffUtils";
 import { countLineChanges } from "@/components/agents/utils/diffStats";
@@ -10,6 +11,10 @@ interface DiffViewProps {
 export function DiffView({ diffData }: DiffViewProps) {
   const { originalContent, newContent, filePath, isBinary } = diffData;
   const displayPath = filePath.split("/").pop() || filePath;
+  const stats = useMemo(
+    () => countLineChanges(originalContent, newContent, filePath),
+    [filePath, newContent, originalContent],
+  );
 
   if (isBinary) {
     return (
@@ -19,7 +24,6 @@ export function DiffView({ diffData }: DiffViewProps) {
     );
   }
 
-  const stats = countLineChanges(originalContent, newContent, filePath);
   if (stats.additions === 0 && stats.deletions === 0) {
     return (
       <div className="mt-2 text-gray-500 text-xs font-mono">

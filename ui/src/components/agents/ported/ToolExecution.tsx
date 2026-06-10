@@ -27,10 +27,6 @@ function getFileName(path: string): string {
   return parts[parts.length - 1] || path;
 }
 
-function countLineChangesForTool(originalContent: string | null | undefined, newContent: string, filePath: string) {
-  return countLineChanges(originalContent, newContent, filePath);
-}
-
 function formatToolDisplay(
   title: string,
   toolKind: AcpToolKind,
@@ -206,7 +202,7 @@ export const ToolExecution = memo(function ToolExecution({
   const isCompletedEditOp = isEditOp && diffData && (status === "completed" || status === "error");
   const editedFilePath = diffData ? stripProjectPath(diffData.filePath, projectPath) : "";
   const editedFileName = editedFilePath ? getFileName(editedFilePath) : "";
-  const diffStats = diffData ? countLineChangesForTool(diffData.originalContent, diffData.newContent, diffData.filePath) : null;
+  const diffStats = diffData ? countLineChanges(diffData.originalContent, diffData.newContent, diffData.filePath) : null;
 
   if (isCompletedEditOp && diffStats && diffData) {
     return (

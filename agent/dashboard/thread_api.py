@@ -20,7 +20,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from ..utils.langsmith import get_langsmith_trace_url
 from ..utils.thread_ops import (
-    is_thread_active,
+    get_thread_active_status,
     langgraph_client,
     langgraph_url,
     queue_message_for_thread,
@@ -51,6 +51,8 @@ _DASHBOARD_STREAM_MODES: tuple[str, ...] = (
 _SUPPORTED_IMAGE_MIME_TYPES = frozenset({"image/png", "image/jpeg", "image/gif", "image/webp"})
 _MAX_DASHBOARD_IMAGES = 5
 _MAX_DASHBOARD_IMAGE_BYTES = 10 * 1024 * 1024
+_PROXY_REQUEST_TIMEOUT = httpx.Timeout(30.0, connect=5.0)
+_PROXY_STREAM_TIMEOUT = httpx.Timeout(None)
 # Sources whose threads should surface in the Agents UI (besides "dashboard").
 _SURFACED_SOURCES: tuple[str, ...] = ("dashboard", "github", "slack", "linear", "schedule")
 
@@ -58,6 +60,26 @@ _SURFACED_SOURCES: tuple[str, ...] = ("dashboard", "github", "slack", "linear", 
 def _agent_version_metadata() -> dict[str, str]:
     revision = os.environ.get("LANGCHAIN_REVISION_ID")
     return {"LANGSMITH_AGENT_VERSION": revision} if revision else {}
+
+
+def _langgraph_proxy_headers(
+    *, content_type: str = "application/json", accept: str | None = None
+) -> dict[str, str]:
+    headers = {"Content-Type": content_type}
+    if accept:
+        headers["Accept"] = accept
+    api_key = (
+        os.environ.get("LANGSMITH_API_KEY")
+        or os.environ.get("LANGCHAIN_API_KEY")
+        or os.environ.get("LANGSMITH_API_KEY_PROD")
+    )
+    if api_key:
+        headers["X-API-Key"] = api_key
+    return headers
+
+
+def _thread_is_busy(thread: dict[str, Any]) -> bool:
+    return thread.get("status") == "busy"
 
 
 async def _resolve_run_email(login: str, profile: dict[str, Any]) -> str | None:
@@ -607,16 +629,16 @@ async def _enrich_run_start_command(
     login: str,
     command: dict[str, Any],
     *,
-    email: str | None = None,
+    metadata: dict[str, Any],
+    thread_busy: bool = False,
 ) -> dict[str, Any]:
     if command.get("method") != "run.start":
         return command
 
-    client = langgraph_client()
-    thread = await client.threads.get(thread_id)
-    metadata = thread.get("metadata") if isinstance(thread.get("metadata"), dict) else {}
-    _assert_thread_owner(metadata, login, email)
+    if thread_busy:
+        raise HTTPException(409, "thread is already running; queue message instead")
 
+    client = langgraph_client()
     params = command.get("params")
     if not isinstance(params, dict):
         params = {}
@@ -653,8 +675,6 @@ async def _enrich_run_start_command(
         metadata,
         overrides=overrides,
     )
-    if isinstance(client_configurable, dict):
-        merged_configurable = {**merged_configurable, **client_configurable}
 
     run_metadata = params.get("metadata")
     if not isinstance(run_metadata, dict):
@@ -734,7 +754,10 @@ async def send_dashboard_message(
         metadata_update["model"] = chosen_model
         metadata_update["effort"] = chosen_effort
 
-    if not await is_thread_active(thread_id):
+    active = await get_thread_active_status(thread_id)
+    if active is None:
+        raise HTTPException(502, "could not determine whether thread is active")
+    if not active:
         raise HTTPException(
             409,
             "thread is idle; start a run via the stream commands endpoint",
@@ -809,19 +832,28 @@ async def delete_dashboard_thread(thread_id: str, login: str, *, email: str | No
 async def _authorized_thread_metadata(
     thread_id: str, login: str, *, email: str | None = None
 ) -> dict[str, Any]:
+    thread = await _authorized_thread(thread_id, login, email=email)
+    metadata = thread.get("metadata") if isinstance(thread.get("metadata"), dict) else {}
+    return metadata
+
+
+async def _authorized_thread(
+    thread_id: str, login: str, *, email: str | None = None
+) -> dict[str, Any]:
     try:
         thread = await langgraph_client().threads.get(thread_id)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(404, "thread not found") from exc
     metadata = thread.get("metadata") if isinstance(thread.get("metadata"), dict) else {}
     _assert_thread_owner(metadata, login, email)
-    return metadata
+    return thread
 
 
 async def get_dashboard_thread_state(
     thread_id: str, login: str, *, email: str | None = None
 ) -> dict[str, Any]:
-    await _authorized_thread_metadata(thread_id, login, email=email)
+    thread = await _authorized_thread(thread_id, login, email=email)
+    metadata = thread.get("metadata") if isinstance(thread.get("metadata"), dict) else {}
     state = await langgraph_client().threads.get_state(thread_id)
     result = state if isinstance(state, dict) else dict(state)
     # The SDK's `useStream` opens its live event subscription only when the
@@ -830,8 +862,8 @@ async def get_dashboard_thread_state(
     # checkpoint can still be the previous finished one with `next == []`,
     # which the SDK reads as idle and never opens the stream. Drop `next`
     # while a run is pending/running so the SDK treats the thread as active.
-    run_status = await _latest_run_status(thread_id)
-    if run_status in {"pending", "running"}:
+    metadata_run_status = metadata.get("latest_run_status")
+    if _thread_is_busy(thread) or metadata_run_status in {"pending", "running"}:
         result.pop("next", None)
     return result
 
@@ -846,19 +878,21 @@ async def proxy_dashboard_thread_stream_events(
 ) -> AsyncIterator[bytes]:
     await _authorized_thread_metadata(thread_id, login, email=email)
     url = f"{langgraph_url().rstrip('/')}/threads/{thread_id}/stream/events"
-    headers = {
-        "Content-Type": content_type,
-        "Accept": "text/event-stream",
-    }
+    headers = _langgraph_proxy_headers(content_type=content_type, accept="text/event-stream")
 
     try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(None)) as client:
+        async with httpx.AsyncClient(timeout=_PROXY_STREAM_TIMEOUT) as client:
             async with client.stream("POST", url, content=body, headers=headers) as response:
-                response.raise_for_status()
+                if response.status_code >= 400:
+                    error_body = await response.aread()
+                    payload = {
+                        "status": response.status_code,
+                        "detail": error_body.decode(errors="replace") or response.reason_phrase,
+                    }
+                    yield f"event: error\ndata: {json.dumps(payload)}\n\n".encode()
+                    return
                 async for chunk in response.aiter_bytes():
                     yield chunk
-    except httpx.HTTPStatusError:
-        logger.warning("LangGraph stream/events proxy failed for %s", thread_id, exc_info=True)
     except Exception:
         logger.warning("LangGraph stream/events proxy closed for %s", thread_id, exc_info=True)
 
@@ -871,25 +905,33 @@ async def proxy_dashboard_thread_commands(
     email: str | None = None,
     content_type: str = "application/json",
 ) -> tuple[int, bytes, str | None]:
-    await _authorized_thread_metadata(thread_id, login, email=email)
+    thread = await _authorized_thread(thread_id, login, email=email)
+    metadata = thread.get("metadata") if isinstance(thread.get("metadata"), dict) else {}
     url = f"{langgraph_url().rstrip('/')}/threads/{thread_id}/commands"
-    headers = {"Content-Type": content_type}
+    headers = _langgraph_proxy_headers(content_type=content_type)
 
-    outgoing = body
     try:
         parsed = json.loads(body)
-    except json.JSONDecodeError:
-        parsed = None
-    if isinstance(parsed, dict):
-        enriched = await _enrich_run_start_command(thread_id, login, parsed, email=email)
-        outgoing = json.dumps(enriched).encode()
+    except json.JSONDecodeError as exc:
+        raise HTTPException(400, "command body must be a JSON object") from exc
+    if not isinstance(parsed, dict):
+        raise HTTPException(400, "command body must be a JSON object")
 
-    async with httpx.AsyncClient(timeout=httpx.Timeout(None)) as client:
+    metadata_run_status = metadata.get("latest_run_status")
+    enriched = await _enrich_run_start_command(
+        thread_id,
+        login,
+        parsed,
+        metadata=metadata,
+        thread_busy=_thread_is_busy(thread) or metadata_run_status in {"pending", "running"},
+    )
+    outgoing = json.dumps(enriched).encode()
+
+    async with httpx.AsyncClient(timeout=_PROXY_REQUEST_TIMEOUT) as client:
         response = await client.post(url, content=outgoing, headers=headers)
 
     if (
-        isinstance(parsed, dict)
-        and parsed.get("method") == "run.start"
+        parsed.get("method") == "run.start"
         and response.status_code in {200, 202, 204}
         and response.content
     ):
@@ -922,8 +964,8 @@ async def proxy_dashboard_thread_history(
 ) -> tuple[int, bytes, str | None]:
     await _authorized_thread_metadata(thread_id, login, email=email)
     url = f"{langgraph_url().rstrip('/')}/threads/{thread_id}/history"
-    headers = {"Content-Type": content_type}
-    async with httpx.AsyncClient(timeout=httpx.Timeout(None)) as client:
+    headers = _langgraph_proxy_headers(content_type=content_type)
+    async with httpx.AsyncClient(timeout=_PROXY_REQUEST_TIMEOUT) as client:
         response = await client.post(url, content=body or b"{}", headers=headers)
     media_type = response.headers.get("content-type")
     return response.status_code, response.content, media_type

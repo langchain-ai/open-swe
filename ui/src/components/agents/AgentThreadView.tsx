@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import { useStreamContext as useAgentThreadStream } from "@langchain/react"
 
 import type { PendingPrompt } from "@/lib/agents/pendingPrompts"
-import type { AgentThread, Message } from "@/lib/agents/types"
+import type { AgentThread, ImageChunk, Message } from "@/lib/agents/types"
 import type { ModelSelection } from "@/lib/agents/provider/useModelOptions"
 import { AgentGitPanel } from "@/components/agents/AgentGitPanel"
 import { AgentPromptBar } from "@/components/agents/AgentPromptBar"
@@ -21,6 +21,43 @@ import { useModelOptions } from "@/lib/agents/provider/useModelOptions"
 
 interface AgentThreadViewProps {
   thread: AgentThread
+}
+
+function sameImages(a: Array<ImageChunk> = [], b: Array<ImageChunk> = []) {
+  if (a.length !== b.length) return false
+  return a.every((image, i) => {
+    const other = b[i]
+    return (
+      other?.base64 === image.base64 &&
+      other.mimeType === image.mimeType &&
+      (other.fileName ?? null) === (image.fileName ?? null)
+    )
+  })
+}
+
+function samePendingPrompt(a: PendingPrompt, b: PendingPrompt) {
+  return (
+    a.prompt === b.prompt &&
+    a.insertAt === b.insertAt &&
+    sameImages(a.images, b.images) &&
+    (a.modelId ?? null) === (b.modelId ?? null) &&
+    (a.effort ?? null) === (b.effort ?? null)
+  )
+}
+
+function userMessageMatchesPending(message: Message, entry: PendingPrompt) {
+  if (message.author !== "user") return false
+  const text = message.chunks
+    .flatMap((chunk) => (chunk.kind === "text" ? [chunk.text] : []))
+    .join("")
+  const images = message.chunks.flatMap((chunk) =>
+    chunk.kind === "image" ? [chunk] : []
+  )
+  return text === entry.prompt && sameImages(images, entry.images)
+}
+
+function isPendingPromptConfirmed(messages: Array<Message>, entry: PendingPrompt) {
+  return messages.some((message) => userMessageMatchesPending(message, entry))
 }
 
 export function AgentThreadView({ thread }: AgentThreadViewProps) {
@@ -65,11 +102,17 @@ function AgentThreadViewContent({ thread }: AgentThreadViewProps) {
       model_id: entry.modelId ?? activeSelection?.modelId ?? null,
       effort: entry.effort ?? activeSelection?.effort ?? null,
     })
-      .catch(() => {
+      .then(() => {
+        setPendingPrompts((prev) => {
+          const next = dropPendingPrompts(thread.id, (candidate) =>
+            samePendingPrompt(candidate, entry)
+          )
+          return next.length === prev.length ? prev : next
+        })
         pendingSubmitStarted.current = false
       })
-      .finally(() => {
-        pendingSubmitStarted.current = false
+      .catch(() => {
+        // Leave the pending entry in place, but do not automatically resubmit it.
       })
   }, [
     pendingPrompts,
@@ -78,6 +121,7 @@ function AgentThreadViewContent({ thread }: AgentThreadViewProps) {
     stream,
     stream.isLoading,
     stream.isThreadLoading,
+    thread.id,
   ])
 
   const baseMessages = useMemo<Array<Message>>(() => {
@@ -86,25 +130,15 @@ function AgentThreadViewContent({ thread }: AgentThreadViewProps) {
     return thread.messages
   }, [stream.isLoading, stream.messages, thread.messages])
 
-  const userMessageTexts = useMemo(() => {
-    return new Set(
-      baseMessages
-        .filter((m) => m.author === "user")
-        .map((m) =>
-          m.chunks.flatMap((c) => (c.kind === "text" ? [c.text] : [])).join("")
-        )
-    )
-  }, [baseMessages])
-
   useEffect(() => {
     setPendingPrompts((prev) => {
       if (prev.length === 0) return prev
       const next = dropPendingPrompts(thread.id, (entry) =>
-        userMessageTexts.has(entry.prompt)
+        isPendingPromptConfirmed(baseMessages, entry)
       )
       return next.length === prev.length ? prev : next
     })
-  }, [thread.id, userMessageTexts])
+  }, [baseMessages, thread.id])
 
   const displayMessages = useMemo<Array<Message>>(() => {
     if (pendingPrompts.length === 0) return baseMessages
