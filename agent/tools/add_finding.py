@@ -130,7 +130,10 @@ def add_finding(
     clipped_suggestion, suggestion_dropped = clip_suggestion(suggestion)
 
     thread_id = get_thread_id_from_runtime()
-    head_sha = asyncio.run(resolve_review_head_sha(thread_id, configurable))
+    try:
+        head_sha = asyncio.run(resolve_review_head_sha(thread_id, configurable))
+    except ReviewerThreadMissingError as exc:
+        return thread_missing_tool_result(exc)
 
     finding: Finding = new_finding(
         severity=_cast_severity(severity),

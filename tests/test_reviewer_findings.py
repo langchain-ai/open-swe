@@ -280,3 +280,55 @@ async def test_replace_findings_raises_domain_error_when_thread_missing() -> Non
 
     assert excinfo.value.thread_id == "tid"
     assert "not found" in str(excinfo.value)
+
+
+def _not_found(method: str = "GET") -> Exception:
+    import httpx
+    from langgraph_sdk.errors import NotFoundError
+
+    return NotFoundError(
+        "thread tid not found",
+        response=httpx.Response(404, request=httpx.Request(method, "http://x")),
+        body=None,
+    )
+
+
+@pytest.mark.asyncio
+async def test_get_thread_metadata_raises_domain_error_when_thread_missing() -> None:
+    """A missing thread must surface as ReviewerThreadMissingError, not be
+    swallowed into ``{}`` — that produced misleading tool results like
+    "No finding found" instead of the do-not-retry contract."""
+    from agent.reviewer_findings import ReviewerThreadMissingError, get_thread_metadata
+
+    fake_client = AsyncMock()
+    fake_client.threads.get.side_effect = _not_found()
+
+    with patch("agent.reviewer_findings.get_client", return_value=fake_client):
+        with pytest.raises(ReviewerThreadMissingError):
+            await get_thread_metadata("tid")
+
+
+@pytest.mark.asyncio
+async def test_get_thread_metadata_still_degrades_on_other_failures() -> None:
+    from agent.reviewer_findings import get_thread_metadata
+
+    fake_client = AsyncMock()
+    fake_client.threads.get.side_effect = RuntimeError("transient")
+
+    with patch("agent.reviewer_findings.get_client", return_value=fake_client):
+        assert await get_thread_metadata("tid") == {}
+
+
+@pytest.mark.asyncio
+async def test_set_reviewer_thread_metadata_raises_domain_error_when_thread_missing() -> None:
+    from agent.reviewer_findings import (
+        ReviewerThreadMissingError,
+        set_reviewer_thread_metadata,
+    )
+
+    fake_client = AsyncMock()
+    fake_client.threads.update.side_effect = _not_found("PATCH")
+
+    with patch("agent.reviewer_findings.get_client", return_value=fake_client):
+        with pytest.raises(ReviewerThreadMissingError):
+            await set_reviewer_thread_metadata("tid", last_reviewed_sha="sha")

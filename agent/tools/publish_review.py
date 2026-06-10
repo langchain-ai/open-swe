@@ -116,13 +116,16 @@ def publish_review(
         return {"success": False, "error": "Missing head_sha in run config"}
 
     if _is_reviewer_eval_mode(configurable):
-        return asyncio.run(
-            _publish_review_eval_dry_run_async(
-                head_sha=head_sha,
-                severity_threshold=_cast_severity(severity_threshold),
-                cap=cap,
+        try:
+            return asyncio.run(
+                _publish_review_eval_dry_run_async(
+                    head_sha=head_sha,
+                    severity_threshold=_cast_severity(severity_threshold),
+                    cap=cap,
+                )
             )
-        )
+        except ReviewerThreadMissingError as exc:
+            return thread_missing_tool_result(exc)
 
     token = get_github_token()
     if not token:

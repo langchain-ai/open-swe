@@ -302,10 +302,18 @@ def get_thread_id_from_runtime() -> str:
 
 
 async def get_thread_metadata(thread_id: str) -> dict[str, Any]:
-    """Fetch the current metadata for a thread. Returns ``{}`` on miss."""
+    """Fetch the current metadata for a thread.
+
+    Raises :class:`ReviewerThreadMissingError` when the thread does not exist
+    (swallowing it as ``{}`` made tools report misleading results like "No
+    finding found" instead of the do-not-retry contract). Other transient
+    failures still degrade to ``{}``.
+    """
     client = get_client()
     try:
         thread = await client.threads.get(thread_id)
+    except LangGraphSDKNotFoundError as exc:
+        raise ReviewerThreadMissingError(thread_id, exc) from exc
     except Exception:  # noqa: BLE001
         logger.exception("Failed to fetch thread metadata for %s", thread_id)
         return {}
@@ -556,7 +564,10 @@ async def set_reviewer_thread_metadata(
         metadata["slack_thread"] = slack_thread
     if extra:
         metadata.update(extra)
-    await client.threads.update(thread_id=thread_id, metadata=metadata)
+    try:
+        await client.threads.update(thread_id=thread_id, metadata=metadata)
+    except LangGraphSDKNotFoundError as exc:
+        raise ReviewerThreadMissingError(thread_id, exc) from exc
 
 
 def get_thread_watch_flag(metadata: dict[str, Any]) -> bool:
