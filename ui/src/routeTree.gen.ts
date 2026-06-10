@@ -125,8 +125,8 @@ export interface FileRoutesByFullPath {
   '/review': typeof ReviewRoute
   '/usage': typeof UsageRoute
   '/agents/$threadId': typeof AgentsThreadIdRoute
-  '/review/styles': typeof ReviewStylesRoute
   '/agents/instructions': typeof AgentsInstructionsRoute
+  '/review/styles': typeof ReviewStylesRoute
   '/agents/': typeof AgentsIndexRoute
   '/agents/automations/$scheduleId': typeof AgentsAutomationsScheduleIdRoute
   '/agents/automations/new': typeof AgentsAutomationsNewRoute
@@ -143,8 +143,8 @@ export interface FileRoutesByTo {
   '/review': typeof ReviewRoute
   '/usage': typeof UsageRoute
   '/agents/$threadId': typeof AgentsThreadIdRoute
-  '/review/styles': typeof ReviewStylesRoute
   '/agents/instructions': typeof AgentsInstructionsRoute
+  '/review/styles': typeof ReviewStylesRoute
   '/agents': typeof AgentsIndexRoute
   '/agents/automations/$scheduleId': typeof AgentsAutomationsScheduleIdRoute
   '/agents/automations/new': typeof AgentsAutomationsNewRoute
@@ -163,8 +163,8 @@ export interface FileRoutesById {
   '/review': typeof ReviewRoute
   '/usage': typeof UsageRoute
   '/agents/$threadId': typeof AgentsThreadIdRoute
-  '/review_/styles': typeof ReviewStylesRoute
   '/agents_/instructions': typeof AgentsInstructionsRoute
+  '/review_/styles': typeof ReviewStylesRoute
   '/agents/': typeof AgentsIndexRoute
   '/agents/automations/$scheduleId': typeof AgentsAutomationsScheduleIdRoute
   '/agents/automations/new': typeof AgentsAutomationsNewRoute
@@ -184,8 +184,8 @@ export interface FileRouteTypes {
     | '/review'
     | '/usage'
     | '/agents/$threadId'
-    | '/review/styles'
     | '/agents/instructions'
+    | '/review/styles'
     | '/agents/'
     | '/agents/automations/$scheduleId'
     | '/agents/automations/new'
@@ -202,8 +202,8 @@ export interface FileRouteTypes {
     | '/review'
     | '/usage'
     | '/agents/$threadId'
-    | '/review/styles'
     | '/agents/instructions'
+    | '/review/styles'
     | '/agents'
     | '/agents/automations/$scheduleId'
     | '/agents/automations/new'
@@ -221,8 +221,8 @@ export interface FileRouteTypes {
     | '/review'
     | '/usage'
     | '/agents/$threadId'
-    | '/review_/styles'
     | '/agents_/instructions'
+    | '/review_/styles'
     | '/agents/'
     | '/agents/automations/$scheduleId'
     | '/agents/automations/new'
@@ -240,8 +240,8 @@ export interface RootRouteChildren {
   MySettingsRoute: typeof MySettingsRoute
   ReviewRoute: typeof ReviewRoute
   UsageRoute: typeof UsageRoute
-  ReviewStylesRoute: typeof ReviewStylesRoute
   AgentsInstructionsRoute: typeof AgentsInstructionsRoute
+  ReviewStylesRoute: typeof ReviewStylesRoute
   ReviewRepositoriesOwnerRoute: typeof ReviewRepositoriesOwnerRoute
 }
 
@@ -398,8 +398,8 @@ const rootRouteChildren: RootRouteChildren = {
   MySettingsRoute: MySettingsRoute,
   ReviewRoute: ReviewRoute,
   UsageRoute: UsageRoute,
-  ReviewStylesRoute: ReviewStylesRoute,
   AgentsInstructionsRoute: AgentsInstructionsRoute,
+  ReviewStylesRoute: ReviewStylesRoute,
   ReviewRepositoriesOwnerRoute: ReviewRepositoriesOwnerRoute,
 }
 export const routeTree = rootRouteImport
