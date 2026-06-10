@@ -119,13 +119,15 @@ async def complete_review_check_run(
 def review_check_conclusion(surfaced_count: int) -> tuple[CheckConclusion, str, str]:
     """Map a publish result to (conclusion, title, summary).
 
-    Findings surfaced → ``neutral`` so the check never blocks merges; a clean
-    review → ``success``.
+    Always ``success`` so the check is informational and non-blocking, and so
+    GitHub groups it under "successful checks" rather than a confusing
+    "neutral check". The finding count is surfaced in the title; the findings
+    themselves are posted as PR comments.
     """
     if surfaced_count > 0:
         issue_word = "issue" if surfaced_count == 1 else "issues"
         return (
-            "neutral",
+            "success",
             f"Found {surfaced_count} potential {issue_word}",
             f"Open SWE surfaced {surfaced_count} potential {issue_word} on this pull request.",
         )
