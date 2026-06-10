@@ -117,11 +117,11 @@ def test_review_check_conclusion_mapping() -> None:
     assert title == "No issues found"
 
     conclusion, title, _ = github_checks.review_check_conclusion(1)
-    assert conclusion == "neutral"
+    assert conclusion == "success"
     assert "1 potential issue" in title
 
     conclusion, title, _ = github_checks.review_check_conclusion(3)
-    assert conclusion == "neutral"
+    assert conclusion == "success"
     assert "3 potential issues" in title
 
 

@@ -60,7 +60,7 @@ from .utils.github_app import (
     get_github_app_installation_token,
     get_github_app_installation_token_with_expiry,
 )
-from .utils.github_checks import create_review_check_run
+from .utils.github_checks import complete_review_check_run, create_review_check_run
 from .utils.github_comments import (
     OPEN_SWE_TAGS,
     GitHubAuthError,
@@ -2385,6 +2385,29 @@ async def process_github_push_event(payload: dict[str, Any]) -> None:
         )
     ):
         await set_reviewer_thread_metadata(thread_id, last_reviewed_sha=head_sha)
+        # The old head's check disappears once the head moves (GitHub only
+        # shows checks on the current head), so even though no re-review runs,
+        # surface a settled check on the new head.
+        unchanged_check_id = await create_review_check_run(
+            owner=repo_config["owner"],
+            repo=repo_config["name"],
+            head_sha=head_sha,
+            token=app_token,
+            details_url=dashboard_thread_url(thread_id),
+        )
+        if unchanged_check_id is not None:
+            await complete_review_check_run(
+                owner=repo_config["owner"],
+                repo=repo_config["name"],
+                check_run_id=unchanged_check_id,
+                token=app_token,
+                conclusion="success",
+                title="No new changes to review",
+                summary=(
+                    "The pull request diff is unchanged since the last reviewed "
+                    f"commit {last_reviewed_sha}."
+                ),
+            )
         logger.info(
             "Push to %s ignored: PR diff unchanged since last reviewed SHA %s",
             head_ref,
@@ -2416,6 +2439,20 @@ async def process_github_push_event(payload: dict[str, Any]) -> None:
         "base_ref": base_ref,
     }
     await set_reviewer_thread_metadata(thread_id, pr=pr_meta, watch=True, head_sha=head_sha)
+
+    # GitHub only shows check runs on a PR's current head commit, so the check
+    # created on the previous head disappears after a follow-up push. Create a
+    # fresh in-progress check on the new head SHA so the review stays visible;
+    # publish (or the after-agent hook) settles this id.
+    check_run_id = await create_review_check_run(
+        owner=repo_config["owner"],
+        repo=repo_config["name"],
+        head_sha=head_sha,
+        token=app_token,
+        details_url=dashboard_thread_url(thread_id),
+    )
+    if check_run_id is not None:
+        await set_reviewer_thread_metadata(thread_id, extra={"review_check_run_id": check_run_id})
 
     re_review_prompt = (
         f"A new commit has been pushed to PR #{pr_number}. The new HEAD is "
