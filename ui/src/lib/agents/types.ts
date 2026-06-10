@@ -167,6 +167,7 @@ export interface AgentThread {
   viewedAt?: number | null
   createdAt: number
   updatedAt: number
+  traceUrl?: string | null
   messages: Array<Message>
   pr?: {
     number: number

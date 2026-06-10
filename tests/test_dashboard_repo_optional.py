@@ -42,6 +42,18 @@ def test_thread_summary_keeps_repo_when_present() -> None:
     assert summary["repoFullName"] == "octo/repo"
 
 
+def test_thread_summary_includes_trace_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        thread_api,
+        "get_langsmith_trace_url",
+        lambda thread_id: f"https://smith.example/t/{thread_id}",
+    )
+    summary = thread_api._thread_summary(
+        {"thread_id": "t3", "metadata": {"source": "dashboard", "title": "traced run"}}
+    )
+    assert summary["traceUrl"] == "https://smith.example/t/t3"
+
+
 class _FakeThreadsClient:
     async def create(
         self, *, thread_id: str, metadata: dict[str, Any], if_exists: str
