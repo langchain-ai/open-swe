@@ -17,6 +17,7 @@ from langchain_core.messages.content import create_image_block
 from langgraph_sdk.errors import InternalServerError
 from pydantic import BaseModel, ConfigDict, Field
 
+from ..utils.langsmith import get_langsmith_trace_url
 from ..utils.thread_ops import is_thread_active, langgraph_client, queue_message_for_thread
 from .agent_overrides import normalize_profile_overrides
 from .message_adapter import state_messages_to_ui
@@ -272,8 +273,11 @@ def _thread_summary(
     pr_title = metadata.get("pr_title")
     pr_state = metadata.get("pr_state")
 
+    thread_id = thread.get("thread_id") or thread.get("id")
+    trace_url = get_langsmith_trace_url(thread_id) if isinstance(thread_id, str) else None
+
     summary: dict[str, Any] = {
-        "id": thread.get("thread_id") or thread.get("id"),
+        "id": thread_id,
         "title": title,
         "repo": name,
         "repoFullName": full_name,
@@ -290,6 +294,7 @@ def _thread_summary(
         ),
         "createdAt": int(created_at) if isinstance(created_at, (int, float)) else _now_ms(),
         "updatedAt": int(updated_at) if isinstance(updated_at, (int, float)) else _now_ms(),
+        "traceUrl": trace_url,
     }
     if isinstance(pr_number, int) and isinstance(pr_url, str):
         summary["pr"] = {
