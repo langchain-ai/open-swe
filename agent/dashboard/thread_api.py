@@ -428,7 +428,7 @@ async def get_dashboard_thread(
         raise HTTPException(404, "thread not found") from exc
 
     metadata = thread.get("metadata") if isinstance(thread.get("metadata"), dict) else {}
-    _assert_thread_owner(metadata, login, email)
+    is_owner = _user_owns_thread(metadata, login, email)
 
     messages: list[dict[str, Any]] = []
     try:
@@ -454,7 +454,7 @@ async def get_dashboard_thread(
             else None
         ),
     )
-    if mark_viewed and status != "running":
+    if mark_viewed and is_owner and status != "running":
         metadata = await _mark_thread_viewed(
             client,
             thread_id,

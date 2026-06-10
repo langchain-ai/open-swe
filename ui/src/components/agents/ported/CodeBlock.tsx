@@ -1,10 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { getSingletonHighlighter, type ThemedToken } from "shiki";
+import { useResolvedTheme } from "@/lib/theme";
 
 interface CodeBlockProps {
   text: string;
   language?: string;
 }
+
+const SHIKI_THEME = { light: "github-light", dark: "github-dark" } as const;
 
 const TOKEN_CACHE = new Map<string, ThemedToken[][]>();
 
@@ -44,6 +47,8 @@ function languageLabel(language: string): string {
 export function CodeBlock({ text, language }: CodeBlockProps) {
   const [tokens, setTokens] = useState<ThemedToken[][] | null>(null);
   const [copied, setCopied] = useState(false);
+  const resolvedTheme = useResolvedTheme();
+  const shikiTheme = SHIKI_THEME[resolvedTheme];
   const normalizedLanguage = useMemo(() => normalizeLanguage(language), [language]);
   const displayLanguage = useMemo(() => languageLabel(normalizedLanguage), [normalizedLanguage]);
 
@@ -53,7 +58,7 @@ export function CodeBlock({ text, language }: CodeBlockProps) {
 
     if (normalizedLanguage === "text") return;
 
-    const cacheKey = `${normalizedLanguage}::${text}`;
+    const cacheKey = `${shikiTheme}::${normalizedLanguage}::${text}`;
     const cached = TOKEN_CACHE.get(cacheKey);
     if (cached) {
       setTokens(cached);
@@ -61,7 +66,7 @@ export function CodeBlock({ text, language }: CodeBlockProps) {
     }
 
     getSingletonHighlighter({
-      themes: ["github-dark"],
+      themes: [shikiTheme],
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       langs: [normalizedLanguage as any],
     })
@@ -70,7 +75,7 @@ export function CodeBlock({ text, language }: CodeBlockProps) {
         const result = highlighter.codeToTokens(text, {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           lang: normalizedLanguage as any,
-          theme: "github-dark",
+          theme: shikiTheme,
         });
         if (TOKEN_CACHE.size >= 500) TOKEN_CACHE.clear();
         TOKEN_CACHE.set(cacheKey, result.tokens);
@@ -86,7 +91,7 @@ export function CodeBlock({ text, language }: CodeBlockProps) {
     return () => {
       cancelled = true;
     };
-  }, [text, normalizedLanguage]);
+  }, [text, normalizedLanguage, shikiTheme]);
 
   const handleCopy = async () => {
     try {
