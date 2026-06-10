@@ -515,6 +515,10 @@ async def _create_dashboard_thread_record(
     now_ms = _now_ms()
     prompt = prompt.strip()
     resolved_model, resolved_effort = await _resolve_agent_model_choice(profile, model_id, effort)
+    # Validate any attached images against the resolved model (raises 422 for
+    # text-only models). The run itself is started client-side via the stream
+    # commands endpoint, so we only need the validation side effect here.
+    _user_message_content(prompt, images or [], model_id=resolved_model)
     chosen_model, chosen_effort = _normalize_model_choice(model_id, effort)
     metadata_model = chosen_model or profile.get("default_model") or "Default"
     metadata_effort = chosen_effort or profile.get("reasoning_effort")
