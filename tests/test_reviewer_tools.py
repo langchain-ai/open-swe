@@ -712,3 +712,54 @@ def test_list_findings_returns_all_when_filter_omitted() -> None:
         result = list_findings()
 
     assert result["count"] == 2
+
+
+def test_add_finding_returns_structured_error_when_thread_missing() -> None:
+    """A missing reviewer thread must come back as a do-not-retry tool result,
+    not a raised exception the agent retries against 10-30 times."""
+    from agent.reviewer_findings import ReviewerThreadMissingError
+
+    async def fake_append(thread_id: str, finding: Any) -> Any:
+        raise ReviewerThreadMissingError(thread_id, RuntimeError("thread X not found"))
+
+    with (
+        patch("agent.tools.add_finding.get_config", return_value=_config()),
+        patch("agent.tools.add_finding.get_thread_id_from_runtime", return_value="tid-1"),
+        patch("agent.tools.add_finding.append_finding", side_effect=fake_append),
+    ):
+        result = add_finding(
+            severity="medium",
+            confidence="high",
+            category="correctness",
+            file="foo.py",
+            title="Rename breaks reference",
+            description="rename",
+            start_line=11,
+        )
+
+    assert result["success"] is False
+    assert result["error"] == "thread_not_found"
+    assert result["thread_id"] == "tid-1"
+    assert "Do not retry" in result["note"]
+
+
+def test_update_finding_returns_structured_error_when_thread_missing() -> None:
+    from agent.reviewer_findings import ReviewerThreadMissingError
+
+    async def fake_update(thread_id: str, finding_id: str, updates: Any) -> Any:
+        raise ReviewerThreadMissingError(thread_id, RuntimeError("thread X not found"))
+
+    with (
+        patch("agent.tools.update_finding.get_config", return_value=_config()),
+        patch("agent.tools.update_finding.get_thread_id_from_runtime", return_value="tid-1"),
+        patch(
+            "agent.tools.update_finding.list_findings",
+            AsyncMock(return_value=[_existing_finding()]),
+        ),
+        patch("agent.tools.update_finding.update_finding_fields", side_effect=fake_update),
+    ):
+        result = update_finding(finding_id="f_a", status="resolved", note="fixed")
+
+    assert result["success"] is False
+    assert result["error"] == "thread_not_found"
+    assert result["thread_id"] == "tid-1"

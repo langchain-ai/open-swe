@@ -7,9 +7,11 @@ from langgraph.config import get_config
 
 from ..reviewer_findings import (
     FindingInteraction,
+    ReviewerThreadMissingError,
     append_finding_interaction,
     get_finding,
     get_thread_id_from_runtime,
+    thread_missing_tool_result,
     update_finding_fields,
 )
 from ..reviewer_publish import reply_to_review_comment
@@ -37,16 +39,19 @@ def reply_to_finding_thread(finding_id: str, body: str) -> dict[str, Any]:
     if not token:
         return {"success": False, "error": "No GitHub token available"}
 
-    return asyncio.run(
-        _reply_to_finding_thread_async(
-            finding_id=finding_id,
-            body=body,
-            owner=str(repo_config["owner"]),
-            repo=str(repo_config["name"]),
-            pr_number=pr_number,
-            token=token,
+    try:
+        return asyncio.run(
+            _reply_to_finding_thread_async(
+                finding_id=finding_id,
+                body=body,
+                owner=str(repo_config["owner"]),
+                repo=str(repo_config["name"]),
+                pr_number=pr_number,
+                token=token,
+            )
         )
-    )
+    except ReviewerThreadMissingError as exc:
+        return thread_missing_tool_result(exc)
 
 
 async def _reply_to_finding_thread_async(

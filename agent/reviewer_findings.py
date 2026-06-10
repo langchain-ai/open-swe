@@ -19,8 +19,23 @@ from typing import Any, Literal, TypedDict, cast
 
 from langgraph.config import get_config
 from langgraph_sdk import get_client
+from langgraph_sdk.errors import NotFoundError as LangGraphSDKNotFoundError
 
 logger = logging.getLogger(__name__)
+
+
+class ReviewerThreadMissingError(RuntimeError):
+    """The reviewer thread backing findings storage does not exist.
+
+    Raised instead of the SDK's ``NotFoundError`` so tool wrappers can return a
+    structured do-not-retry result: the thread won't appear on retry (evicted,
+    eval-mode, or never created), and blind retries burn the whole run.
+    """
+
+    def __init__(self, thread_id: str, original: Exception) -> None:
+        super().__init__(f"Reviewer thread {thread_id!r} not found: {original}")
+        self.thread_id = thread_id
+
 
 REVIEWER_THREAD_KIND = "reviewer"
 
@@ -287,10 +302,18 @@ def get_thread_id_from_runtime() -> str:
 
 
 async def get_thread_metadata(thread_id: str) -> dict[str, Any]:
-    """Fetch the current metadata for a thread. Returns ``{}`` on miss."""
+    """Fetch the current metadata for a thread.
+
+    Raises :class:`ReviewerThreadMissingError` when the thread does not exist
+    (swallowing it as ``{}`` made tools report misleading results like "No
+    finding found" instead of the do-not-retry contract). Other transient
+    failures still degrade to ``{}``.
+    """
     client = get_client()
     try:
         thread = await client.threads.get(thread_id)
+    except LangGraphSDKNotFoundError as exc:
+        raise ReviewerThreadMissingError(thread_id, exc) from exc
     except Exception:  # noqa: BLE001
         logger.exception("Failed to fetch thread metadata for %s", thread_id)
         return {}
@@ -339,7 +362,28 @@ async def replace_findings(thread_id: str, findings: list[Finding]) -> None:
     lost-update window a blind overwrite here leaves open.
     """
     client = get_client()
-    await client.threads.update(thread_id=thread_id, metadata={"findings": findings})
+    try:
+        await client.threads.update(thread_id=thread_id, metadata={"findings": findings})
+    except LangGraphSDKNotFoundError as exc:
+        raise ReviewerThreadMissingError(thread_id, exc) from exc
+
+
+def thread_missing_tool_result(exc: ReviewerThreadMissingError) -> dict[str, Any]:
+    """Structured tool result for a missing reviewer thread.
+
+    Returned (not raised) so the agent sees an explicit do-not-retry contract
+    instead of an empty error blob it retries against.
+    """
+    return {
+        "success": False,
+        "error": "thread_not_found",
+        "thread_id": exc.thread_id,
+        "note": (
+            "Reviewer findings storage is unavailable. Do not retry; report the "
+            "blocker and include intended findings inline in the final message."
+        ),
+        "detail": str(exc),
+    }
 
 
 async def mutate_findings(
@@ -520,7 +564,10 @@ async def set_reviewer_thread_metadata(
         metadata["slack_thread"] = slack_thread
     if extra:
         metadata.update(extra)
-    await client.threads.update(thread_id=thread_id, metadata=metadata)
+    try:
+        await client.threads.update(thread_id=thread_id, metadata=metadata)
+    except LangGraphSDKNotFoundError as exc:
+        raise ReviewerThreadMissingError(thread_id, exc) from exc
 
 
 def get_thread_watch_flag(metadata: dict[str, Any]) -> bool:

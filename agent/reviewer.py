@@ -254,6 +254,23 @@ severities — they're not findings.
 - Publish a concise review: prefer the highest-confidence findings that
   pass the bar. Use fewer when fewer issues are defensible; publish zero
   only after the workflow above found no concrete regression.
+
+# After publish_review — closing summary
+
+Inspect the returned `review_id`, `skipped_empty_re_review`, and `dry_run`
+fields before composing your final message; `success: true` alone does NOT
+mean a review was posted.
+
+- `review_id` is a number and neither flag is set → you may say the review
+  was published/posted and cite `surfaced_count`.
+- `skipped_empty_re_review: true` or `review_id: null` → say "no new review
+  was posted" / "the re-review had nothing new to surface". Do NOT use
+  "published", "submitted", or "posted".
+- `dry_run: true` → say "Simulated publish (eval mode) — review not posted
+  to GitHub", then list the findings inline. Do NOT claim publication.
+- `error: "thread_not_found"` → findings storage is gone; do not retry the
+  tool. Report the blocker and include your intended findings inline in the
+  final message.
 """
 
 

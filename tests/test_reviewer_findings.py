@@ -257,3 +257,78 @@ async def test_resolve_review_head_sha_falls_back_without_thread_id() -> None:
         head = await resolve_review_head_sha("", {"head_sha": "confighead"})
     assert head == "confighead"
     fake_client.threads.get.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_replace_findings_raises_domain_error_when_thread_missing() -> None:
+    import httpx
+    from langgraph_sdk.errors import NotFoundError
+
+    from agent.reviewer_findings import ReviewerThreadMissingError
+
+    not_found = NotFoundError(
+        "thread tid not found",
+        response=httpx.Response(404, request=httpx.Request("PATCH", "http://x")),
+        body=None,
+    )
+    fake_client = AsyncMock()
+    fake_client.threads.update.side_effect = not_found
+
+    with patch("agent.reviewer_findings.get_client", return_value=fake_client):
+        with pytest.raises(ReviewerThreadMissingError) as excinfo:
+            await replace_findings("tid", [_f(id="f_a")])
+
+    assert excinfo.value.thread_id == "tid"
+    assert "not found" in str(excinfo.value)
+
+
+def _not_found(method: str = "GET") -> Exception:
+    import httpx
+    from langgraph_sdk.errors import NotFoundError
+
+    return NotFoundError(
+        "thread tid not found",
+        response=httpx.Response(404, request=httpx.Request(method, "http://x")),
+        body=None,
+    )
+
+
+@pytest.mark.asyncio
+async def test_get_thread_metadata_raises_domain_error_when_thread_missing() -> None:
+    """A missing thread must surface as ReviewerThreadMissingError, not be
+    swallowed into ``{}`` — that produced misleading tool results like
+    "No finding found" instead of the do-not-retry contract."""
+    from agent.reviewer_findings import ReviewerThreadMissingError, get_thread_metadata
+
+    fake_client = AsyncMock()
+    fake_client.threads.get.side_effect = _not_found()
+
+    with patch("agent.reviewer_findings.get_client", return_value=fake_client):
+        with pytest.raises(ReviewerThreadMissingError):
+            await get_thread_metadata("tid")
+
+
+@pytest.mark.asyncio
+async def test_get_thread_metadata_still_degrades_on_other_failures() -> None:
+    from agent.reviewer_findings import get_thread_metadata
+
+    fake_client = AsyncMock()
+    fake_client.threads.get.side_effect = RuntimeError("transient")
+
+    with patch("agent.reviewer_findings.get_client", return_value=fake_client):
+        assert await get_thread_metadata("tid") == {}
+
+
+@pytest.mark.asyncio
+async def test_set_reviewer_thread_metadata_raises_domain_error_when_thread_missing() -> None:
+    from agent.reviewer_findings import (
+        ReviewerThreadMissingError,
+        set_reviewer_thread_metadata,
+    )
+
+    fake_client = AsyncMock()
+    fake_client.threads.update.side_effect = _not_found("PATCH")
+
+    with patch("agent.reviewer_findings.get_client", return_value=fake_client):
+        with pytest.raises(ReviewerThreadMissingError):
+            await set_reviewer_thread_metadata("tid", last_reviewed_sha="sha")

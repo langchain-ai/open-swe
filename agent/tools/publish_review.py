@@ -11,6 +11,7 @@ from ..dashboard.team_settings import get_team_review_trace_links_enabled
 from ..reviewer_diff import compute_diff_line_set, fetch_pr_diff, is_range_in_diff
 from ..reviewer_findings import (
     Finding,
+    ReviewerThreadMissingError,
     Severity,
     _coerce_surface,
     filter_findings_for_publish,
@@ -21,6 +22,7 @@ from ..reviewer_findings import (
     replace_findings,
     resolve_review_head_sha,
     set_reviewer_thread_metadata,
+    thread_missing_tool_result,
 )
 from ..reviewer_findings import (
     list_findings as list_findings_async,
@@ -74,7 +76,22 @@ def publish_review(
 
     Returns:
         Dictionary with ``success``, ``review_id``, ``surfaced_count``,
-        ``hidden_count``, ``resolved_thread_count``.
+        ``hidden_count``, ``resolved_thread_count``, and sometimes
+        ``out_of_diff_count``, ``unresolvable_findings``, plus the flags below.
+
+        ``success: true`` alone does NOT mean a GitHub Review was posted —
+        check the flags:
+
+        - ``skipped_empty_re_review: true`` (with ``review_id: null``): an
+          empty re-review was deliberately skipped. No GitHub Review was
+          created; the call was a valid no-op. Do not describe the review as
+          published/posted/submitted.
+        - ``dry_run: true`` (with ``review_id: null``): eval/benchmark mode —
+          the publish was simulated and nothing was posted to GitHub. Do not
+          claim publication.
+
+        Only a numeric ``review_id`` (with neither flag set) confirms a real
+        GitHub Review was created.
     """
     if severity_threshold not in {"low", "medium", "high", "critical"}:
         return {"success": False, "error": f"Invalid severity_threshold: {severity_threshold}"}
@@ -99,13 +116,16 @@ def publish_review(
         return {"success": False, "error": "Missing head_sha in run config"}
 
     if _is_reviewer_eval_mode(configurable):
-        return asyncio.run(
-            _publish_review_eval_dry_run_async(
-                head_sha=head_sha,
-                severity_threshold=_cast_severity(severity_threshold),
-                cap=cap,
+        try:
+            return asyncio.run(
+                _publish_review_eval_dry_run_async(
+                    head_sha=head_sha,
+                    severity_threshold=_cast_severity(severity_threshold),
+                    cap=cap,
+                )
             )
-        )
+        except ReviewerThreadMissingError as exc:
+            return thread_missing_tool_result(exc)
 
     token = get_github_token()
     if not token:
@@ -126,6 +146,8 @@ def publish_review(
                 trace_link_config_override=configurable.get("review_trace_link_enabled"),
             )
         )
+    except ReviewerThreadMissingError as exc:
+        return thread_missing_tool_result(exc)
     except GitHubAuthError as exc:
         thread_id = get_thread_id_from_runtime()
         if thread_id:
