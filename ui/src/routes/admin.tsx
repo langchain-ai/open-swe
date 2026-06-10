@@ -2,7 +2,13 @@ import { Navigate, createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
-import type { ModelOption, TeamSettings, UserMapping } from "@/lib/api";
+import type {
+  DatadogConnectBody,
+  LangSmithConnectBody,
+  ModelOption,
+  TeamSettings,
+  UserMapping,
+} from "@/lib/api";
 import { AppShell, SettingsRow, SettingsSection } from "@/components/AppShell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -45,6 +51,8 @@ function AdminPage() {
       description="Workspace-wide defaults and user mappings."
     >
       <GlobalDefaultsSection models={options.data?.models ?? []} />
+
+      <ObservabilityCredentialsSection />
 
       <UserMappingsSection enabled={!!session.data.is_admin} />
     </AppShell>
@@ -146,6 +154,184 @@ function UserMappingsSection({ enabled }: { enabled: boolean }) {
           </div>
         )}
       </div>
+    </SettingsSection>
+  );
+}
+
+function ObservabilityCredentialsSection() {
+  const qc = useQueryClient();
+  const creds = useQuery({
+    queryKey: ["teamCredentials"],
+    queryFn: api.getTeamCredentials,
+  });
+  const [error, setError] = useState<string | null>(null);
+
+  const [ddSite, setDdSite] = useState("datadoghq.com");
+  const [ddApiKey, setDdApiKey] = useState("");
+  const [ddAppKey, setDdAppKey] = useState("");
+  const [lsApiKey, setLsApiKey] = useState("");
+  const [lsEndpoint, setLsEndpoint] = useState("");
+
+  const onError = (e: Error) => setError(e.message);
+  const onSuccess = (saved: Awaited<ReturnType<typeof api.getTeamCredentials>>) => {
+    qc.setQueryData(["teamCredentials"], saved);
+    setError(null);
+  };
+
+  const connectDd = useMutation({
+    mutationFn: (body: DatadogConnectBody) => api.connectDatadog(body),
+    onSuccess: (saved) => {
+      onSuccess(saved);
+      setDdApiKey("");
+      setDdAppKey("");
+    },
+    onError,
+  });
+  const disconnectDd = useMutation({
+    mutationFn: () => api.disconnectDatadog(),
+    onSuccess,
+    onError,
+  });
+  const connectLs = useMutation({
+    mutationFn: (body: LangSmithConnectBody) => api.connectLangSmith(body),
+    onSuccess: (saved) => {
+      onSuccess(saved);
+      setLsApiKey("");
+    },
+    onError,
+  });
+  const disconnectLs = useMutation({
+    mutationFn: () => api.disconnectLangSmith(),
+    onSuccess,
+    onError,
+  });
+
+  const datadog = creds.data?.datadog;
+  const langsmith = creds.data?.langsmith;
+  const busy = creds.isLoading;
+
+  return (
+    <SettingsSection
+      title="Observability credentials"
+      description="Team-wide Datadog and LangSmith credentials. Stored encrypted server-side and never exposed to the sandbox. Connecting enables read-only observability tools for agent runs."
+    >
+      <div className="divide-y divide-border">
+        <SettingsRow
+          label="Datadog"
+          description={
+            datadog?.connected
+              ? `Connected · ${datadog.site ?? ""} · key ••••${datadog.api_key_last4 ?? ""}`
+              : "Connect Datadog to enable read-only metrics, logs, traces, and monitor tools."
+          }
+          control={
+            datadog?.connected ? (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => disconnectDd.mutate()}
+                disabled={disconnectDd.isPending}
+              >
+                Disconnect
+              </Button>
+            ) : (
+              <div className="flex flex-col items-end gap-2">
+                <Input
+                  className="w-56"
+                  placeholder="datadoghq.com"
+                  value={ddSite}
+                  onChange={(e) => setDdSite(e.target.value)}
+                  disabled={busy}
+                />
+                <Input
+                  className="w-56"
+                  placeholder="API key"
+                  type="password"
+                  value={ddApiKey}
+                  onChange={(e) => setDdApiKey(e.target.value)}
+                  disabled={busy}
+                />
+                <Input
+                  className="w-56"
+                  placeholder="Application key"
+                  type="password"
+                  value={ddAppKey}
+                  onChange={(e) => setDdAppKey(e.target.value)}
+                  disabled={busy}
+                />
+                <Button
+                  size="sm"
+                  onClick={() =>
+                    connectDd.mutate({
+                      site: ddSite.trim(),
+                      api_key: ddApiKey.trim(),
+                      app_key: ddAppKey.trim(),
+                    })
+                  }
+                  disabled={
+                    connectDd.isPending ||
+                    !ddSite.trim() ||
+                    !ddApiKey.trim() ||
+                    !ddAppKey.trim()
+                  }
+                >
+                  Connect
+                </Button>
+              </div>
+            )
+          }
+        />
+        <SettingsRow
+          label="LangSmith"
+          description={
+            langsmith?.connected
+              ? `Connected · key ••••${langsmith.api_key_last4 ?? ""}${langsmith.endpoint ? ` · ${langsmith.endpoint}` : ""}`
+              : "Connect LangSmith to enable read-only trace and run lookup tools."
+          }
+          control={
+            langsmith?.connected ? (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => disconnectLs.mutate()}
+                disabled={disconnectLs.isPending}
+              >
+                Disconnect
+              </Button>
+            ) : (
+              <div className="flex flex-col items-end gap-2">
+                <Input
+                  className="w-56"
+                  placeholder="API key"
+                  type="password"
+                  value={lsApiKey}
+                  onChange={(e) => setLsApiKey(e.target.value)}
+                  disabled={busy}
+                />
+                <Input
+                  className="w-56"
+                  placeholder="Endpoint (optional)"
+                  value={lsEndpoint}
+                  onChange={(e) => setLsEndpoint(e.target.value)}
+                  disabled={busy}
+                />
+                <Button
+                  size="sm"
+                  onClick={() =>
+                    connectLs.mutate({
+                      api_key: lsApiKey.trim(),
+                      endpoint: lsEndpoint.trim() || null,
+                    })
+                  }
+                  disabled={connectLs.isPending || !lsApiKey.trim()}
+                >
+                  Connect
+                </Button>
+              </div>
+            )
+          }
+        />
+      </div>
+      {error && <p className="px-4 pb-3 text-xs text-destructive">{error}</p>}
     </SettingsSection>
   );
 }

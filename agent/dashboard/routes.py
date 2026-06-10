@@ -88,6 +88,15 @@ from .slack_oauth import (
     slack_oauth_configured,
     verify_team,
 )
+from .team_credentials import (
+    DatadogCredentialsUpdate,
+    LangSmithCredentialsUpdate,
+    connect_datadog,
+    connect_langsmith,
+    disconnect_datadog,
+    disconnect_langsmith,
+    get_team_credentials_status,
+)
 from .team_settings import (
     TeamSettingsUpdate,
     get_team_default_model,
@@ -437,6 +446,43 @@ async def api_put_team_settings(
     _admin: dict[str, Any] = _ADMIN_DEP,
 ) -> dict[str, Any]:
     return await upsert_team_settings(update)
+
+
+@router.get("/team-credentials")
+async def api_get_team_credentials(
+    _admin: dict[str, Any] = _ADMIN_DEP,
+) -> dict[str, Any]:
+    return await get_team_credentials_status()
+
+
+@router.put("/team-credentials/datadog")
+async def api_connect_datadog(
+    update: DatadogCredentialsUpdate,
+    _admin: dict[str, Any] = _ADMIN_DEP,
+) -> dict[str, Any]:
+    return await connect_datadog(update)
+
+
+@router.delete("/team-credentials/datadog")
+async def api_disconnect_datadog(
+    _admin: dict[str, Any] = _ADMIN_DEP,
+) -> dict[str, Any]:
+    return await disconnect_datadog()
+
+
+@router.put("/team-credentials/langsmith")
+async def api_connect_langsmith(
+    update: LangSmithCredentialsUpdate,
+    _admin: dict[str, Any] = _ADMIN_DEP,
+) -> dict[str, Any]:
+    return await connect_langsmith(update)
+
+
+@router.delete("/team-credentials/langsmith")
+async def api_disconnect_langsmith(
+    _admin: dict[str, Any] = _ADMIN_DEP,
+) -> dict[str, Any]:
+    return await disconnect_langsmith()
 
 
 class EnabledReviewRepoUpdate(BaseModel):

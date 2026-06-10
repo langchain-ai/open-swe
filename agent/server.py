@@ -30,6 +30,7 @@ from langchain.agents.middleware import ModelCallLimitMiddleware
 from langchain_core.language_models import BaseChatModel
 from langsmith.sandbox import SandboxClientError
 
+from .dashboard.admin import is_observability_authorized
 from .dashboard.agent_overrides import (
     load_profile,
     normalize_profile_overrides,
@@ -40,7 +41,10 @@ from .dashboard.agent_overrides import (
 from .dashboard.agent_usage import record_agent_thread_usage
 from .dashboard.options import DEFAULT_MODEL_ID, SUPPORTED_MODEL_IDS, model_supports_effort
 from .dashboard.team_settings import get_team_default_model_pair, get_team_default_repo
+from .dashboard.user_mappings import email_for_login
+from .integrations.datadog_mcp import load_datadog_tools
 from .integrations.langsmith import _configure_github_proxy
+from .integrations.langsmith_tools import load_langsmith_tools
 from .middleware import (
     ModelFallbackMiddleware,
     SandboxCircuitBreakerMiddleware,
@@ -431,6 +435,44 @@ def _get_cached_sandbox_backend(thread_id: str) -> SandboxBackendProtocol:
     return sandbox_backend
 
 
+async def _observability_authorized(config: RunnableConfig, profile_login: str | None) -> bool:
+    """Whether the triggering user may use the team observability tools.
+
+    Gates on admin / explicitly-authorized emails so prompt-injected runs from
+    untrusted contributors cannot reach the team's Datadog/LangSmith data.
+    """
+    configurable = (config or {}).get("configurable") or {}
+    slack_thread = configurable.get("slack_thread") or {}
+    candidate_emails = [
+        configurable.get("user_email"),
+        slack_thread.get("triggering_user_email"),
+    ]
+    if any(is_observability_authorized(email) for email in candidate_emails):
+        return True
+    return is_observability_authorized(await email_for_login(profile_login))
+
+
+async def _load_observability_tools(authorized: bool) -> list[Any]:
+    """Datadog (MCP) + LangSmith read tools when the team has connected them.
+
+    Credentials live server-side in team settings; the sandbox never holds them.
+    Only loaded for authorized (admin / allow-listed) triggering users so an
+    untrusted run cannot exfiltrate team observability data. Failures degrade to
+    no tools so the agent still starts.
+    """
+    if not authorized:
+        return []
+    try:
+        datadog_tools, langsmith_tools = await asyncio.gather(
+            load_datadog_tools(),
+            load_langsmith_tools(),
+        )
+    except Exception:
+        logger.warning("Failed to load observability tools", exc_info=True)
+        return []
+    return [*datadog_tools, *langsmith_tools]
+
+
 async def get_agent(config: RunnableConfig) -> Pregel:
     """Get or create an agent with a sandbox for the given thread."""
     thread_id = config["configurable"].get("thread_id", None)
@@ -577,6 +619,10 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     prompt_default_repo = await _resolve_prompt_default_repo(configurable)
     repo_custom_instructions = await _resolve_repo_custom_instructions(prompt_default_repo)
 
+    observability_tools = await _load_observability_tools(
+        await _observability_authorized(config, profile_login)
+    )
+
     logger.info("Returning agent with sandbox for thread %s", thread_id)
     main_model = make_model(model_id, **model_kwargs)
     subagent_model = make_model(subagent_model_id, **subagent_model_kwargs)
@@ -606,6 +652,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             request_pr_review,
             slack_read_thread_messages,
             slack_thread_reply,
+            *observability_tools,
         ],
         subagents=[_general_purpose_subagent(subagent_model)],
         backend=backend_factory,
