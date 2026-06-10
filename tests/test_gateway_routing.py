@@ -9,8 +9,8 @@ from agent.utils.model import make_model
 @pytest.fixture(autouse=True)
 def _gateway_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("LANGSMITH_API_KEY", "lsv2_test_key")
+    monkeypatch.setenv("LANGSMITH_GATEWAY_ENABLED", "true")
     monkeypatch.delenv("LANGSMITH_GATEWAY_BASE_URL", raising=False)
-    monkeypatch.delenv("LANGSMITH_GATEWAY_DISABLED", raising=False)
 
 
 def test_openai_routes_through_gateway() -> None:
@@ -49,12 +49,19 @@ def test_custom_gateway_base_url(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_gateway_disabled_falls_back_to_direct(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("LANGSMITH_GATEWAY_DISABLED", "true")
+    monkeypatch.delenv("LANGSMITH_GATEWAY_ENABLED", raising=False)
     with patch.object(model_module, "init_chat_model") as init:
         make_model("openai:gpt-5.5")
     kwargs = init.call_args.kwargs
     assert kwargs["base_url"] == model_module.OPENAI_RESPONSES_WS_BASE_URL
     assert "api_key" not in kwargs
+
+
+def test_gateway_opt_in_default_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("LANGSMITH_GATEWAY_ENABLED", raising=False)
+    with patch.object(model_module, "init_chat_model") as init:
+        make_model("anthropic:claude-opus-4-8")
+    assert "base_url" not in init.call_args.kwargs
 
 
 def test_missing_api_key_falls_back_to_direct(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -5,10 +5,11 @@ from langchain.chat_models import init_chat_model
 
 OPENAI_RESPONSES_WS_BASE_URL = "wss://api.openai.com/v1"
 
-# LangSmith LLM Gateway: proxy provider calls through LangSmith so credentials,
-# spend policies, and PII/secrets redaction are centrally enforced. Clients
-# authenticate with a LangSmith API key; the gateway resolves the real provider
-# key from workspace secrets. See https://docs.langchain.com/langsmith/llm-gateway.
+# LangSmith LLM Gateway: opt-in proxy for provider calls so credentials, spend
+# policies, and PII/secrets redaction are centrally enforced. Clients authenticate
+# with a LangSmith API key; the gateway resolves the real provider key from
+# workspace secrets. Enable via LANGSMITH_GATEWAY_ENABLED=true. See
+# https://docs.langchain.com/langsmith/llm-gateway.
 DEFAULT_GATEWAY_BASE_URL = "https://gateway.smith.langchain.com"
 
 # Provider prefix (in the model id) -> gateway sub-path.
@@ -55,8 +56,12 @@ _ANTHROPIC_EFFORTS: set[AnthropicEffort] = {"low", "medium", "high", "xhigh", "m
 
 
 def _gateway_base_url() -> str | None:
-    """Return the LangSmith LLM Gateway base URL when gateway routing is enabled."""
-    if os.environ.get("LANGSMITH_GATEWAY_DISABLED", "").lower() in ("1", "true", "yes"):
+    """Return the LangSmith LLM Gateway base URL when gateway routing is enabled.
+
+    Gateway routing is opt-in: the gateway is in private beta, so default installs
+    keep calling provider APIs directly with their own keys.
+    """
+    if os.environ.get("LANGSMITH_GATEWAY_ENABLED", "").lower() not in ("1", "true", "yes"):
         return None
     return os.environ.get("LANGSMITH_GATEWAY_BASE_URL", DEFAULT_GATEWAY_BASE_URL).rstrip("/")
 
