@@ -41,7 +41,7 @@ from .dashboard.agent_overrides import (
 from .dashboard.agent_usage import record_agent_thread_usage
 from .dashboard.options import DEFAULT_MODEL_ID, SUPPORTED_MODEL_IDS, model_supports_effort
 from .dashboard.team_settings import get_team_default_model_pair, get_team_default_repo
-from .dashboard.user_mappings import cached_email_for_login
+from .dashboard.user_mappings import email_for_login
 from .integrations.datadog_mcp import load_datadog_tools
 from .integrations.langsmith import _configure_github_proxy
 from .integrations.langsmith_tools import load_langsmith_tools
@@ -435,7 +435,7 @@ def _get_cached_sandbox_backend(thread_id: str) -> SandboxBackendProtocol:
     return sandbox_backend
 
 
-def _observability_authorized(config: RunnableConfig, profile_login: str | None) -> bool:
+async def _observability_authorized(config: RunnableConfig, profile_login: str | None) -> bool:
     """Whether the triggering user may use the team observability tools.
 
     Gates on admin / explicitly-authorized emails so prompt-injected runs from
@@ -446,9 +446,10 @@ def _observability_authorized(config: RunnableConfig, profile_login: str | None)
     candidate_emails = [
         configurable.get("user_email"),
         slack_thread.get("triggering_user_email"),
-        cached_email_for_login(profile_login),
     ]
-    return any(is_observability_authorized(email) for email in candidate_emails)
+    if any(is_observability_authorized(email) for email in candidate_emails):
+        return True
+    return is_observability_authorized(await email_for_login(profile_login))
 
 
 async def _load_observability_tools(authorized: bool) -> list[Any]:
@@ -619,7 +620,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     repo_custom_instructions = await _resolve_repo_custom_instructions(prompt_default_repo)
 
     observability_tools = await _load_observability_tools(
-        _observability_authorized(config, profile_login)
+        await _observability_authorized(config, profile_login)
     )
 
     logger.info("Returning agent with sandbox for thread %s", thread_id)
