@@ -69,6 +69,7 @@ from .utils.api_standards_skill import fetch_api_standards_skill
 from .utils.github_app import get_github_app_installation_token_with_expiry
 from .utils.github_token import cache_github_token_for_thread
 from .utils.model import DEFAULT_LLM_REASONING, make_model, provider_model_kwargs
+from .utils.repo_prep import discover_skill_sources, prepare_review_repo
 from .utils.sandbox_paths import aresolve_sandbox_work_dir
 
 REVIEWER_PROMPT_TEMPLATE = """You are a specialized code reviewer agent. Your job is to review one GitHub PR and publish a single review.
@@ -87,11 +88,16 @@ Re-review (user message says "A new commit has been pushed"):
 GH_TOKEN=dummy gh api repos/{repo_owner}/{repo_name}/compare/<last_reviewed_sha>...<head_sha> -H "Accept: application/vnd.github.v3.diff"
 ```
 
-Clone the repo so you can grep for full file context:
+The repo is normally already cloned and checked out at the PR head in
+`{working_dir}` — `cd` there and grep for full file context. If that directory
+is missing (prep can occasionally fail), clone it yourself:
 
 ```
 GH_TOKEN=dummy gh repo clone {repo_owner}/{repo_name} && cd {repo_name} && git checkout <head_sha>
 ```
+
+If a skills section appears below, the repo ships reviewer-relevant skills. Read
+the `SKILL.md` that matches the area you're reviewing and apply it.
 
 Tools: `add_finding`, `update_finding`, `list_findings`, `publish_review`,
 `resolve_finding_thread`, `reply_to_finding_thread`.
@@ -696,6 +702,23 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
     repo_name = str(repo_config.get("name", ""))
     base_sha = str(config["configurable"].get("base_sha", "") or "")
     head_sha = str(config["configurable"].get("head_sha", "") or "")
+
+    # Prep the repo on the sandbox before the first model call so the LLM does
+    # not narrate `gh repo clone`, and so SkillsMiddleware can discover the
+    # repo's skills from disk at its one-shot scan.
+    repo_ready = await prepare_review_repo(
+        sandbox_backend,
+        work_dir=work_dir,
+        repo_owner=repo_owner,
+        repo_name=repo_name,
+        head_sha=head_sha,
+    )
+    skill_sources: list[str] = []
+    if repo_ready and repo_name:
+        skill_sources = await discover_skill_sources(
+            sandbox_backend, repo_dir=f"{work_dir}/{repo_name}"
+        )
+
     pr_number = config["configurable"].get("pr_number")
     pr_url = str(config["configurable"].get("pr_url", "") or "")
     last_reviewed_sha = str(config["configurable"].get("last_reviewed_sha", "") or "")
@@ -945,6 +968,7 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
         ],
         subagents=[_general_purpose_subagent(reviewer_subagent_model)],
         backend=sandbox_backend,
+        skills=skill_sources or None,
         middleware=[
             SanitizeToolInputsMiddleware(),
             ModelCallLimitMiddleware(run_limit=MODEL_CALL_RECURSION_LIMIT, exit_behavior="end"),
