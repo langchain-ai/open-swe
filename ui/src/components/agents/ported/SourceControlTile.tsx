@@ -21,7 +21,7 @@ import {
   X,
   Undo2,
 } from "lucide-react";
-import { diffOptions } from "@/components/agents/utils/diffUtils";
+import { useDiffOptions } from "@/components/agents/utils/diffUtils";
 
 const STATUS_LABELS: Partial<Record<GitFileStatus, string>> = {
   "index-modified": "M",
@@ -961,6 +961,7 @@ const DiffCard = memo(function DiffCard({
   defaultExpanded: boolean;
 }) {
   const [expanded, setExpanded] = useState(defaultExpanded);
+  const diffOptions = useDiffOptions();
 
   return (
     <div

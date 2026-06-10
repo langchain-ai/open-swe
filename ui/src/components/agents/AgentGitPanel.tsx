@@ -16,7 +16,7 @@ import type { GitStatus, GitStatusEntry } from "@pierre/trees"
 
 import type { AgentThread } from "@/lib/agents/types"
 import type { ChangedFileSummaryItem } from "@/components/agents/ported"
-import { diffOptions } from "@/components/agents/utils/diffUtils"
+import { useDiffOptions } from "@/components/agents/utils/diffUtils"
 import { summarizeChangedFiles } from "@/components/agents/ported"
 import { Z } from "@/components/agents/z-index"
 import { cn } from "@/lib/utils"
@@ -404,6 +404,7 @@ function FileDiffSection({
   sectionRef: (node: HTMLDivElement | null) => void
 }) {
   const [open, setOpen] = useState(true)
+  const diffOptions = useDiffOptions()
 
   return (
     <div

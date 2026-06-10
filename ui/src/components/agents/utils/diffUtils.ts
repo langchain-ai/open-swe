@@ -1,3 +1,6 @@
+import { useMemo } from "react";
+import { useResolvedTheme } from "@/lib/theme";
+
 export const DIFF_UNSAFE_CSS = `
 [data-diffs-header],
 [data-diff],
@@ -62,3 +65,11 @@ export const diffOptions = {
   unsafeCSS: DIFF_UNSAFE_CSS,
   collapsedContextThreshold: 4,
 };
+
+export function useDiffOptions() {
+  const resolvedTheme = useResolvedTheme();
+  return useMemo(
+    () => ({ ...diffOptions, themeType: resolvedTheme }),
+    [resolvedTheme]
+  );
+}
