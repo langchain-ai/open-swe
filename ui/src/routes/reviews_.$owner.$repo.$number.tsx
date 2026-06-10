@@ -1,6 +1,6 @@
-import { Link, Navigate, createFileRoute } from "@tanstack/react-router";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Link, Navigate, createFileRoute } from "@tanstack/react-router"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   ArrowClockwiseIcon,
   ArrowLeftIcon,
@@ -15,8 +15,8 @@ import {
   InfoIcon,
   XCircleIcon,
   XIcon,
-} from "@phosphor-icons/react";
-import { IoLogoGithub } from "react-icons/io5";
+} from "@phosphor-icons/react"
+import { IoLogoGithub } from "react-icons/io5"
 
 import type {
   ReviewCheckRun,
@@ -25,91 +25,127 @@ import type {
   ReviewDiffLine,
   ReviewFinding,
   ReviewUserRef,
-} from "@/lib/api";
-import { Markdown } from "@/components/agents/ported";
-import { Skeleton } from "@/components/ui/skeleton";
-import { api } from "@/lib/api";
-import { useSession } from "@/lib/session";
-import { cn } from "@/lib/utils";
-import { prSizeLabel } from "@/routes/reviews";
+} from "@/lib/api"
+import { Markdown } from "@/components/agents/ported"
+import { Skeleton } from "@/components/ui/skeleton"
+import { api } from "@/lib/api"
+import { useSession } from "@/lib/session"
+import { cn } from "@/lib/utils"
+import { prSizeLabel } from "@/routes/reviews"
 
 export const Route = createFileRoute("/reviews_/$owner/$repo/$number")({
   component: ReviewDetailPage,
-});
+})
 
-type CenterTab = "description" | "changes";
-type SideTab = "info" | "chat";
+type CenterTab = "description" | "changes"
+type SideTab = "info" | "chat"
 
 const GROUP_STYLES = {
   bug: { label: "Bug", className: "text-destructive", Icon: BugBeetleIcon },
-  investigate: { label: "Investigate", className: "text-amber-500", Icon: FlagIcon },
-  informational: { label: "Informational", className: "text-muted-foreground", Icon: InfoIcon },
-} as const;
+  investigate: {
+    label: "Investigate",
+    className: "text-amber-500",
+    Icon: FlagIcon,
+  },
+  informational: {
+    label: "Informational",
+    className: "text-muted-foreground",
+    Icon: InfoIcon,
+  },
+} as const
 
 function findingAnchorLabel(finding: ReviewFinding): string {
-  if (finding.start_line === null || finding.end_line === null) return finding.file;
-  if (finding.start_line === finding.end_line) return `${finding.file}:${finding.end_line}`;
-  return `${finding.file}:${finding.start_line}-${finding.end_line}`;
+  if (finding.start_line === null || finding.end_line === null)
+    return finding.file
+  if (finding.start_line === finding.end_line)
+    return `${finding.file}:${finding.end_line}`
+  return `${finding.file}:${finding.start_line}-${finding.end_line}`
 }
 
 function isAnchored(finding: ReviewFinding): boolean {
-  return Boolean(finding.file) && finding.in_diff && finding.end_line !== null;
+  return Boolean(finding.file) && finding.in_diff && finding.end_line !== null
 }
 
-function lineMatchesFinding(line: ReviewDiffLine, finding: ReviewFinding): boolean {
-  if (finding.end_line === null) return false;
-  const start = finding.start_line ?? finding.end_line;
-  const lineNumber = finding.side === "LEFT" ? line.old_line : line.new_line;
-  if (lineNumber === undefined) return false;
-  if (finding.side === "LEFT" && line.kind !== "del") return false;
-  if (finding.side === "RIGHT" && line.kind === "del") return false;
-  return lineNumber >= start && lineNumber <= finding.end_line;
+type HighlightEdge = { top: boolean; bottom: boolean } | null
+
+function highlightRange(
+  lines: Array<ReviewDiffLine>,
+  finding: ReviewFinding
+): { start: number; end: number } | null {
+  let start = -1
+  let end = -1
+  for (let index = 0; index < lines.length; index++) {
+    const line = lines[index]
+    if (line && lineMatchesFinding(line, finding)) {
+      if (start === -1) start = index
+      end = index
+    }
+  }
+  return start === -1 ? null : { start, end }
 }
 
-function isFindingAnchorRow(line: ReviewDiffLine, finding: ReviewFinding): boolean {
-  if (finding.end_line === null) return false;
-  const lineNumber = finding.side === "LEFT" ? line.old_line : line.new_line;
-  if (finding.side === "LEFT" && line.kind !== "del") return false;
-  if (finding.side === "RIGHT" && line.kind === "del") return false;
-  return lineNumber === finding.end_line;
+function lineMatchesFinding(
+  line: ReviewDiffLine,
+  finding: ReviewFinding
+): boolean {
+  if (finding.end_line === null) return false
+  const start = finding.start_line ?? finding.end_line
+  const lineNumber = finding.side === "LEFT" ? line.old_line : line.new_line
+  if (lineNumber === undefined) return false
+  if (finding.side === "LEFT" && line.kind !== "del") return false
+  if (finding.side === "RIGHT" && line.kind === "del") return false
+  return lineNumber >= start && lineNumber <= finding.end_line
+}
+
+function isFindingAnchorRow(
+  line: ReviewDiffLine,
+  finding: ReviewFinding
+): boolean {
+  if (finding.end_line === null) return false
+  const lineNumber = finding.side === "LEFT" ? line.old_line : line.new_line
+  if (finding.side === "LEFT" && line.kind !== "del") return false
+  if (finding.side === "RIGHT" && line.kind === "del") return false
+  return lineNumber === finding.end_line
 }
 
 function findingClipboardText(finding: ReviewFinding): string {
-  const style = GROUP_STYLES[finding.group];
+  const style = GROUP_STYLES[finding.group]
   const lines = [
     `**${style.label}: ${finding.title}**`,
     `${findingAnchorLabel(finding)}`,
     "",
     finding.description,
-  ];
-  if (finding.suggestion) lines.push("", "```suggestion", finding.suggestion, "```");
-  return lines.join("\n");
+  ]
+  if (finding.suggestion)
+    lines.push("", "```suggestion", finding.suggestion, "```")
+  return lines.join("\n")
 }
 
 function ReviewDetailPage() {
-  const { owner, repo, number } = Route.useParams();
-  const prNumber = Number(number);
-  const session = useSession();
+  const { owner, repo, number } = Route.useParams()
+  const prNumber = Number(number)
+  const session = useSession()
   const detail = useQuery({
     queryKey: ["review", owner, repo, prNumber],
     queryFn: () => api.getReview(owner, repo, prNumber),
     enabled: !!session.data && Number.isFinite(prNumber),
-    refetchInterval: (query) => (query.state.data?.status === "running" ? 5000 : false),
-  });
+    refetchInterval: (query) =>
+      query.state.data?.status === "running" ? 5000 : false,
+  })
   const diff = useQuery({
     queryKey: ["reviewDiff", owner, repo, prNumber, detail.data?.head_sha],
     queryFn: () => api.getReviewDiff(owner, repo, prNumber),
     enabled: !!session.data && Number.isFinite(prNumber),
-  });
+  })
 
   if (session.isLoading) {
     return (
       <main className="p-6">
         <Skeleton className="h-64 w-full" />
       </main>
-    );
+    )
   }
-  if (!session.data) return <Navigate to="/login" />;
+  if (!session.data) return <Navigate to="/login" />
 
   return (
     <div className="flex h-svh flex-col overflow-hidden bg-background text-foreground">
@@ -137,7 +173,9 @@ function ReviewDetailPage() {
       </header>
 
       {detail.error ? (
-        <div className="p-6 text-xs text-destructive">{detail.error.message}</div>
+        <div className="p-6 text-xs text-destructive">
+          {detail.error.message}
+        </div>
       ) : !detail.data ? (
         <div className="space-y-3 p-6">
           <Skeleton className="h-24 w-full" />
@@ -147,138 +185,152 @@ function ReviewDetailPage() {
         <ReviewBody detail={detail.data} diffFiles={diff.data?.files ?? null} />
       )}
     </div>
-  );
+  )
 }
 
 function ReviewBody({
   detail,
   diffFiles,
 }: {
-  detail: ReviewDetail;
-  diffFiles: Array<ReviewDiffFile> | null;
+  detail: ReviewDetail
+  diffFiles: Array<ReviewDiffFile> | null
 }) {
-  const [centerTab, setCenterTab] = useState<CenterTab>("description");
-  const [sideTab, setSideTab] = useState<SideTab>("info");
-  const [selectedFile, setSelectedFile] = useState<string | null>(null);
-  const fileRefs = useRef<Record<string, HTMLDivElement | null>>({});
-  const anchorRefs = useRef<Record<string, HTMLDivElement | null>>({});
-  const [expandedFiles, setExpandedFiles] = useState<Record<string, boolean>>({});
-  const [focused, setFocused] = useState<ReviewFinding | null>(null);
-  const [cardTop, setCardTop] = useState(96);
+  const [centerTab, setCenterTab] = useState<CenterTab>("description")
+  const [sideTab, setSideTab] = useState<SideTab>("info")
+  const [selectedFile, setSelectedFile] = useState<string | null>(null)
+  const fileRefs = useRef<Record<string, HTMLDivElement | null>>({})
+  const anchorRefs = useRef<Record<string, HTMLDivElement | null>>({})
+  const [expandedFiles, setExpandedFiles] = useState<Record<string, boolean>>(
+    {}
+  )
+  const [focused, setFocused] = useState<ReviewFinding | null>(null)
+  const [cardTop, setCardTop] = useState(96)
 
-  const viewedStorageKey = `open-swe.review.viewed.${detail.owner}/${detail.repo}/${detail.number}.${detail.head_sha}`;
+  const viewedStorageKey = `open-swe.review.viewed.${detail.owner}/${detail.repo}/${detail.number}.${detail.head_sha}`
   const [viewed, setViewed] = useState<Set<string>>(() => {
-    if (typeof window === "undefined") return new Set();
+    if (typeof window === "undefined") return new Set()
     try {
-      const raw = window.localStorage.getItem(viewedStorageKey);
-      return new Set(raw ? (JSON.parse(raw) as Array<string>) : []);
+      const raw = window.localStorage.getItem(viewedStorageKey)
+      return new Set(raw ? (JSON.parse(raw) as Array<string>) : [])
     } catch {
-      return new Set();
+      return new Set()
     }
-  });
+  })
   const toggleViewed = useCallback(
     (path: string) => {
       setViewed((prev) => {
-        const next = new Set(prev);
-        if (next.has(path)) next.delete(path);
-        else next.add(path);
-        window.localStorage.setItem(viewedStorageKey, JSON.stringify(Array.from(next)));
-        return next;
-      });
+        const next = new Set(prev)
+        if (next.has(path)) next.delete(path)
+        else next.add(path)
+        window.localStorage.setItem(
+          viewedStorageKey,
+          JSON.stringify(Array.from(next))
+        )
+        return next
+      })
     },
-    [viewedStorageKey],
-  );
+    [viewedStorageKey]
+  )
 
-  const readStorageKey = `open-swe.review.read.${detail.thread_id}`;
+  const readStorageKey = `open-swe.review.read.${detail.thread_id}`
   const [read, setRead] = useState<Set<string>>(() => {
-    if (typeof window === "undefined") return new Set();
+    if (typeof window === "undefined") return new Set()
     try {
-      const raw = window.localStorage.getItem(readStorageKey);
-      return new Set(raw ? (JSON.parse(raw) as Array<string>) : []);
+      const raw = window.localStorage.getItem(readStorageKey)
+      return new Set(raw ? (JSON.parse(raw) as Array<string>) : [])
     } catch {
-      return new Set();
+      return new Set()
     }
-  });
+  })
   const persistRead = useCallback(
     (next: Set<string>) => {
-      setRead(next);
-      window.localStorage.setItem(readStorageKey, JSON.stringify(Array.from(next)));
+      setRead(next)
+      window.localStorage.setItem(
+        readStorageKey,
+        JSON.stringify(Array.from(next))
+      )
     },
-    [readStorageKey],
-  );
+    [readStorageKey]
+  )
   const markRead = useCallback(
     (id: string) => {
-      persistRead(new Set(read).add(id));
+      persistRead(new Set(read).add(id))
     },
-    [persistRead, read],
-  );
+    [persistRead, read]
+  )
   const markAllRead = useCallback(() => {
-    persistRead(new Set(detail.findings.map((f) => f.id)));
-  }, [detail.findings, persistRead]);
+    persistRead(new Set(detail.findings.map((f) => f.id)))
+  }, [detail.findings, persistRead])
 
   const findingsByFile = useMemo(() => {
-    const byFile = new Map<string, Array<ReviewFinding>>();
+    const byFile = new Map<string, Array<ReviewFinding>>()
     for (const finding of detail.findings) {
-      if (!isAnchored(finding)) continue;
-      const list = byFile.get(finding.file) ?? [];
-      list.push(finding);
-      byFile.set(finding.file, list);
+      if (!isAnchored(finding)) continue
+      const list = byFile.get(finding.file) ?? []
+      list.push(finding)
+      byFile.set(finding.file, list)
     }
-    return byFile;
-  }, [detail.findings]);
+    return byFile
+  }, [detail.findings])
 
   const linesLeft = useMemo(() => {
-    if (!diffFiles) return null;
+    if (!diffFiles) return null
     return diffFiles
       .filter((file) => !viewed.has(file.path))
-      .reduce((acc, file) => acc + file.additions + file.deletions, 0);
-  }, [diffFiles, viewed]);
+      .reduce((acc, file) => acc + file.additions + file.deletions, 0)
+  }, [diffFiles, viewed])
 
   const scrollToFile = useCallback((path: string) => {
-    setCenterTab("changes");
-    setSelectedFile(path);
-    setExpandedFiles((prev) => ({ ...prev, [path]: true }));
+    setCenterTab("changes")
+    setSelectedFile(path)
+    setExpandedFiles((prev) => ({ ...prev, [path]: true }))
     requestAnimationFrame(() => {
-      fileRefs.current[path]?.scrollIntoView({ block: "start", behavior: "smooth" });
-    });
-  }, []);
+      fileRefs.current[path]?.scrollIntoView({
+        block: "start",
+        behavior: "smooth",
+      })
+    })
+  }, [])
 
   const openFinding = useCallback(
     (finding: ReviewFinding) => {
-      markRead(finding.id);
-      setFocused(finding);
+      markRead(finding.id)
+      setFocused(finding)
       if (!isAnchored(finding)) {
-        setCardTop(96);
-        return;
+        setCardTop(96)
+        return
       }
-      setCenterTab("changes");
-      setExpandedFiles((prev) => ({ ...prev, [finding.file]: true }));
+      setCenterTab("changes")
+      setExpandedFiles((prev) => ({ ...prev, [finding.file]: true }))
       requestAnimationFrame(() => {
-        const node = anchorRefs.current[finding.id] ?? fileRefs.current[finding.file];
-        node?.scrollIntoView({ block: "center" });
+        const node =
+          anchorRefs.current[finding.id] ?? fileRefs.current[finding.file]
+        node?.scrollIntoView({ block: "center" })
         requestAnimationFrame(() => {
-          const rect = anchorRefs.current[finding.id]?.getBoundingClientRect();
+          const rect = anchorRefs.current[finding.id]?.getBoundingClientRect()
           if (rect) {
-            setCardTop(Math.min(Math.max(rect.top - 40, 64), window.innerHeight - 360));
+            setCardTop(
+              Math.min(Math.max(rect.top - 40, 64), window.innerHeight - 360)
+            )
           } else {
-            setCardTop(96);
+            setCardTop(96)
           }
-        });
-      });
+        })
+      })
     },
-    [markRead],
-  );
+    [markRead]
+  )
 
-  const closeFinding = useCallback(() => setFocused(null), []);
+  const closeFinding = useCallback(() => setFocused(null), [])
 
   useEffect(() => {
-    if (!focused) return;
+    if (!focused) return
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setFocused(null);
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [focused]);
+      if (event.key === "Escape") setFocused(null)
+    }
+    window.addEventListener("keydown", onKeyDown)
+    return () => window.removeEventListener("keydown", onKeyDown)
+  }, [focused])
 
   return (
     <div className="relative flex min-h-0 flex-1">
@@ -291,13 +343,19 @@ function ReviewBody({
 
       <main className="min-w-0 flex-1 overflow-y-auto">
         <div className="mx-auto max-w-4xl px-6 py-6">
-          <PrHeader detail={detail} centerTab={centerTab} onTabChange={setCenterTab} />
+          <PrHeader
+            detail={detail}
+            centerTab={centerTab}
+            onTabChange={setCenterTab}
+          />
           {centerTab === "description" ? (
             <div className="mt-4 rounded-lg border border-border bg-card p-4">
               {detail.pr.body ? (
                 <Markdown content={detail.pr.body} />
               ) : (
-                <p className="text-xs text-muted-foreground">This PR has no description.</p>
+                <p className="text-xs text-muted-foreground">
+                  This PR has no description.
+                </p>
               )}
             </div>
           ) : null}
@@ -307,14 +365,18 @@ function ReviewBody({
               <h2 className="text-sm font-medium">Changes</h2>
               {linesLeft !== null && (
                 <span className="text-xs text-muted-foreground">
-                  {linesLeft === 0 ? "All lines reviewed" : `${linesLeft} lines left`}
+                  {linesLeft === 0
+                    ? "All lines reviewed"
+                    : `${linesLeft} lines left`}
                 </span>
               )}
             </div>
             {!diffFiles ? (
               <Skeleton className="h-64 w-full" />
             ) : diffFiles.length === 0 ? (
-              <p className="text-xs text-muted-foreground">No diff available.</p>
+              <p className="text-xs text-muted-foreground">
+                No diff available.
+              </p>
             ) : (
               <div className="space-y-3">
                 {diffFiles.map((file) => (
@@ -325,19 +387,23 @@ function ReviewBody({
                     focused={focused}
                     viewed={viewed.has(file.path)}
                     onToggleViewed={() => toggleViewed(file.path)}
-                    expanded={expandedFiles[file.path] ?? !viewed.has(file.path)}
+                    expanded={
+                      expandedFiles[file.path] ?? !viewed.has(file.path)
+                    }
                     onToggleExpanded={() =>
                       setExpandedFiles((prev) => ({
                         ...prev,
-                        [file.path]: !(prev[file.path] ?? !viewed.has(file.path)),
+                        [file.path]: !(
+                          prev[file.path] ?? !viewed.has(file.path)
+                        ),
                       }))
                     }
                     onFindingClick={openFinding}
                     sectionRef={(node) => {
-                      fileRefs.current[file.path] = node;
+                      fileRefs.current[file.path] = node
                     }}
                     anchorRef={(id, node) => {
-                      anchorRefs.current[id] = node;
+                      anchorRefs.current[id] = node
                     }}
                   />
                 ))}
@@ -352,27 +418,21 @@ function ReviewBody({
         tab={sideTab}
         onTabChange={setSideTab}
         read={read}
+        dimmed={focused !== null}
         onMarkAllRead={markAllRead}
         onFindingClick={openFinding}
       />
 
       {focused && (
-        <>
-          <div
-            className="fixed inset-0 z-40 bg-black/50"
-            role="presentation"
-            onClick={closeFinding}
-          />
-          <FindingFloatingCard
-            detail={detail}
-            finding={focused}
-            top={cardTop}
-            onClose={closeFinding}
-          />
-        </>
+        <FindingFloatingCard
+          detail={detail}
+          finding={focused}
+          top={cardTop}
+          onClose={closeFinding}
+        />
       )}
     </div>
-  );
+  )
 }
 
 function PrHeader({
@@ -380,35 +440,42 @@ function PrHeader({
   centerTab,
   onTabChange,
 }: {
-  detail: ReviewDetail;
-  centerTab: CenterTab;
-  onTabChange: (tab: CenterTab) => void;
+  detail: ReviewDetail
+  centerTab: CenterTab
+  onTabChange: (tab: CenterTab) => void
 }) {
-  const { pr } = detail;
+  const { pr } = detail
   const stateStyles: Record<string, string> = {
     open: "border-emerald-600/40 text-emerald-500",
     draft: "border-border text-muted-foreground",
     merged: "border-purple-600/40 text-purple-500",
     closed: "border-red-600/40 text-red-500",
-  };
+  }
   return (
     <div>
       <span
         className={cn(
           "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] capitalize",
-          stateStyles[pr.state] ?? stateStyles.open,
+          stateStyles[pr.state] ?? stateStyles.open
         )}
       >
         <GitPullRequestIcon className="size-3" />
         {pr.state}
       </span>
       <h1 className="mt-2 text-lg font-medium">
-        <a href={detail.url} target="_blank" rel="noreferrer" className="hover:underline">
+        <a
+          href={detail.url}
+          target="_blank"
+          rel="noreferrer"
+          className="hover:underline"
+        >
           {pr.title}
         </a>
       </h1>
       <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-        {pr.author && <span className="font-medium text-foreground">{pr.author.login}</span>}
+        {pr.author && (
+          <span className="font-medium text-foreground">{pr.author.login}</span>
+        )}
         <span className="rounded border border-border px-1.5 py-0.5 font-mono text-[11px]">
           {pr.base_ref}
         </span>
@@ -437,7 +504,7 @@ function PrHeader({
               "border-b-2 px-3 py-2 text-xs transition-colors",
               centerTab === id
                 ? "border-foreground font-medium text-foreground"
-                : "border-transparent text-muted-foreground hover:text-foreground",
+                : "border-transparent text-muted-foreground hover:text-foreground"
             )}
           >
             {label}
@@ -445,7 +512,7 @@ function PrHeader({
         ))}
       </div>
     </div>
-  );
+  )
 }
 
 function FileTreeSidebar({
@@ -454,22 +521,22 @@ function FileTreeSidebar({
   viewed,
   onSelect,
 }: {
-  files: Array<ReviewDiffFile> | null;
-  selected: string | null;
-  viewed: Set<string>;
-  onSelect: (path: string) => void;
+  files: Array<ReviewDiffFile> | null
+  selected: string | null
+  viewed: Set<string>
+  onSelect: (path: string) => void
 }) {
   const grouped = useMemo(() => {
-    const byDir = new Map<string, Array<ReviewDiffFile>>();
+    const byDir = new Map<string, Array<ReviewDiffFile>>()
     for (const file of files ?? []) {
-      const idx = file.path.lastIndexOf("/");
-      const dir = idx === -1 ? "" : file.path.slice(0, idx);
-      const list = byDir.get(dir) ?? [];
-      list.push(file);
-      byDir.set(dir, list);
+      const idx = file.path.lastIndexOf("/")
+      const dir = idx === -1 ? "" : file.path.slice(0, idx)
+      const list = byDir.get(dir) ?? []
+      list.push(file)
+      byDir.set(dir, list)
     }
-    return Array.from(byDir.entries()).sort(([a], [b]) => a.localeCompare(b));
-  }, [files]);
+    return Array.from(byDir.entries()).sort(([a], [b]) => a.localeCompare(b))
+  }, [files])
 
   return (
     <aside className="hidden w-64 shrink-0 overflow-y-auto border-r border-border py-3 lg:block">
@@ -481,10 +548,12 @@ function FileTreeSidebar({
         grouped.map(([dir, dirFiles]) => (
           <div key={dir || "."} className="mb-2">
             {dir && (
-              <div className="truncate px-3 py-1 text-[11px] text-muted-foreground">{dir}</div>
+              <div className="truncate px-3 py-1 text-[11px] text-muted-foreground">
+                {dir}
+              </div>
             )}
             {dirFiles.map((file) => {
-              const name = file.path.slice(dir ? dir.length + 1 : 0);
+              const name = file.path.slice(dir ? dir.length + 1 : 0)
               return (
                 <button
                   key={file.path}
@@ -493,32 +562,36 @@ function FileTreeSidebar({
                   className={cn(
                     "flex w-full items-center gap-2 px-3 py-1 text-left text-xs transition-colors hover:bg-muted/40",
                     selected === file.path && "bg-muted/60",
-                    viewed.has(file.path) && "opacity-50",
+                    viewed.has(file.path) && "opacity-50"
                   )}
                 >
                   <span
                     className={cn(
                       "truncate",
                       file.status === "added" && "text-emerald-500",
-                      file.status === "deleted" && "text-red-500",
+                      file.status === "deleted" && "text-red-500"
                     )}
                   >
                     {name}
                   </span>
                   <span className="ml-auto flex shrink-0 items-center gap-1.5 font-mono text-[10px]">
                     {file.additions > 0 && (
-                      <span className="text-emerald-500">+{file.additions}</span>
+                      <span className="text-emerald-500">
+                        +{file.additions}
+                      </span>
                     )}
-                    {file.deletions > 0 && <span className="text-red-500">-{file.deletions}</span>}
+                    {file.deletions > 0 && (
+                      <span className="text-red-500">-{file.deletions}</span>
+                    )}
                   </span>
                 </button>
-              );
+              )
             })}
           </div>
         ))
       )}
     </aside>
-  );
+  )
 }
 
 function FileDiffCard({
@@ -533,21 +606,25 @@ function FileDiffCard({
   sectionRef,
   anchorRef,
 }: {
-  file: ReviewDiffFile;
-  findings: Array<ReviewFinding>;
-  focused: ReviewFinding | null;
-  viewed: boolean;
-  onToggleViewed: () => void;
-  expanded: boolean;
-  onToggleExpanded: () => void;
-  onFindingClick: (finding: ReviewFinding) => void;
-  sectionRef: (node: HTMLDivElement | null) => void;
-  anchorRef: (id: string, node: HTMLDivElement | null) => void;
+  file: ReviewDiffFile
+  findings: Array<ReviewFinding>
+  focused: ReviewFinding | null
+  viewed: boolean
+  onToggleViewed: () => void
+  expanded: boolean
+  onToggleExpanded: () => void
+  onFindingClick: (finding: ReviewFinding) => void
+  sectionRef: (node: HTMLDivElement | null) => void
+  anchorRef: (id: string, node: HTMLDivElement | null) => void
 }) {
-  const fileFocused = focused?.file === file.path && isAnchored(focused) ? focused : null;
+  const fileFocused =
+    focused?.file === file.path && isAnchored(focused) ? focused : null
 
   return (
-    <div ref={sectionRef} className="scroll-mt-4 overflow-hidden rounded-lg border border-border">
+    <div
+      ref={sectionRef}
+      className="scroll-mt-4 overflow-hidden rounded-lg border border-border"
+    >
       <div className="flex items-center gap-2 bg-muted/40 px-3 py-2 text-xs">
         <button
           type="button"
@@ -555,7 +632,10 @@ function FileDiffCard({
           className="inline-flex items-center gap-2 text-left"
         >
           <CaretDownIcon
-            className={cn("size-3 transition-transform", !expanded && "-rotate-90")}
+            className={cn(
+              "size-3 transition-transform",
+              !expanded && "-rotate-90"
+            )}
           />
           <span className="font-mono font-medium">{file.path}</span>
         </button>
@@ -578,7 +658,7 @@ function FileDiffCard({
             onClick={onToggleViewed}
             className={cn(
               "flex size-4 items-center justify-center rounded border border-border",
-              viewed && "bg-foreground text-background",
+              viewed && "bg-foreground text-background"
             )}
           >
             {viewed && <CheckIcon className="size-3" />}
@@ -587,52 +667,71 @@ function FileDiffCard({
       </div>
       {expanded && (
         <div className="overflow-x-auto bg-card font-mono text-[11px] leading-5">
-          {file.hunks.map((hunk, hunkIndex) => (
-            <div key={hunkIndex}>
-              <div className="bg-muted/60 px-3 py-1 text-muted-foreground">{hunk.header}</div>
-              {hunk.lines.map((line, lineIndex) => {
-                const lineFindings = findings.filter((finding) =>
-                  isFindingAnchorRow(line, finding),
-                );
-                return (
-                  <DiffLineRow
-                    key={lineIndex}
-                    line={line}
-                    findings={lineFindings}
-                    highlighted={fileFocused !== null && lineMatchesFinding(line, fileFocused)}
-                    onFindingClick={onFindingClick}
-                    anchorRef={anchorRef}
-                  />
-                );
-              })}
-            </div>
-          ))}
+          {file.hunks.map((hunk, hunkIndex) => {
+            const range =
+              fileFocused !== null
+                ? highlightRange(hunk.lines, fileFocused)
+                : null
+            return (
+              <div key={hunkIndex}>
+                <div className="bg-muted/60 px-3 py-1 text-muted-foreground">
+                  {hunk.header}
+                </div>
+                {hunk.lines.map((line, lineIndex) => {
+                  const lineFindings = findings.filter((finding) =>
+                    isFindingAnchorRow(line, finding)
+                  )
+                  let highlight: HighlightEdge = null
+                  if (
+                    range &&
+                    lineIndex >= range.start &&
+                    lineIndex <= range.end
+                  ) {
+                    highlight = {
+                      top: lineIndex === range.start,
+                      bottom: lineIndex === range.end,
+                    }
+                  }
+                  return (
+                    <DiffLineRow
+                      key={lineIndex}
+                      line={line}
+                      findings={lineFindings}
+                      highlight={highlight}
+                      onFindingClick={onFindingClick}
+                      anchorRef={anchorRef}
+                    />
+                  )
+                })}
+              </div>
+            )
+          })}
         </div>
       )}
     </div>
-  );
+  )
 }
 
 function DiffLineRow({
   line,
   findings,
-  highlighted,
+  highlight,
   onFindingClick,
   anchorRef,
 }: {
-  line: ReviewDiffLine;
-  findings: Array<ReviewFinding>;
-  highlighted: boolean;
-  onFindingClick: (finding: ReviewFinding) => void;
-  anchorRef: (id: string, node: HTMLDivElement | null) => void;
+  line: ReviewDiffLine
+  findings: Array<ReviewFinding>
+  highlight: HighlightEdge
+  onFindingClick: (finding: ReviewFinding) => void
+  anchorRef: (id: string, node: HTMLDivElement | null) => void
 }) {
-  const first = findings[0];
+  const first = findings[0]
   return (
     <div
       ref={
         first
           ? (node) => {
-              for (const finding of findings) anchorRef(finding.id, node);
+              for (const finding of findings) anchorRef(finding.id, node)
             }
           : undefined
       }
@@ -640,41 +739,43 @@ function DiffLineRow({
         "flex",
         line.kind === "add" && "bg-emerald-500/10",
         line.kind === "del" && "bg-red-500/10",
-        highlighted && "relative z-50 bg-background ring-1 ring-inset ring-amber-400/70",
+        highlight && "border-x border-sky-400/50 bg-sky-400/10",
+        highlight?.top && "rounded-t-sm border-t",
+        highlight?.bottom && "rounded-b-sm border-b"
       )}
     >
-      <span className="w-10 shrink-0 select-none px-1 text-right text-muted-foreground/60">
+      <span className="w-10 shrink-0 px-1 text-right text-muted-foreground/60 select-none">
         {line.old_line ?? ""}
       </span>
-      <span className="w-10 shrink-0 select-none px-1 text-right text-muted-foreground/60">
+      <span className="w-10 shrink-0 px-1 text-right text-muted-foreground/60 select-none">
         {line.new_line ?? ""}
       </span>
       <span
         className={cn(
-          "w-4 shrink-0 select-none text-center",
+          "w-4 shrink-0 text-center select-none",
           line.kind === "add" && "text-emerald-500",
-          line.kind === "del" && "text-red-500",
+          line.kind === "del" && "text-red-500"
         )}
       >
         {line.kind === "add" ? "+" : line.kind === "del" ? "-" : ""}
       </span>
-      <span className="whitespace-pre pr-3">{line.text}</span>
+      <span className="pr-3 whitespace-pre">{line.text}</span>
       {first && (
         <button
           type="button"
           onClick={() => onFindingClick(first)}
           aria-label={`Open finding: ${first.title}`}
-          className="ml-auto mr-2 shrink-0 self-center"
+          className="mr-2 ml-auto shrink-0 self-center"
         >
           {(() => {
-            const style = GROUP_STYLES[first.group];
-            const Icon = style.Icon;
-            return <Icon className={cn("size-3.5", style.className)} />;
+            const style = GROUP_STYLES[first.group]
+            const Icon = style.Icon
+            return <Icon className={cn("size-3.5", style.className)} />
           })()}
         </button>
       )}
     </div>
-  );
+  )
 }
 
 function FindingFloatingCard({
@@ -683,18 +784,18 @@ function FindingFloatingCard({
   top,
   onClose,
 }: {
-  detail: ReviewDetail;
-  finding: ReviewFinding;
-  top: number;
-  onClose: () => void;
+  detail: ReviewDetail
+  finding: ReviewFinding
+  top: number
+  onClose: () => void
 }) {
-  const [copied, setCopied] = useState(false);
-  const style = GROUP_STYLES[finding.group];
-  const Icon = style.Icon;
+  const [copied, setCopied] = useState(false)
+  const style = GROUP_STYLES[finding.group]
+  const Icon = style.Icon
   const githubUrl =
     finding.github_review_comment_id !== null
       ? `${detail.url}#discussion_r${finding.github_review_comment_id}`
-      : null;
+      : null
   const rangeLabel =
     finding.end_line !== null
       ? `${finding.side === "LEFT" ? "L" : "R"}${finding.start_line ?? finding.end_line}${
@@ -702,14 +803,16 @@ function FindingFloatingCard({
             ? `-${finding.end_line}`
             : ""
         }`
-      : finding.file;
+      : finding.file
 
   const copy = () => {
-    void navigator.clipboard.writeText(findingClipboardText(finding)).then(() => {
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1500);
-    });
-  };
+    void navigator.clipboard
+      .writeText(findingClipboardText(finding))
+      .then(() => {
+        setCopied(true)
+        window.setTimeout(() => setCopied(false), 1500)
+      })
+  }
 
   return (
     <div
@@ -720,7 +823,9 @@ function FindingFloatingCard({
     >
       <div className="flex items-center gap-2 border-b border-border px-4 py-2.5 text-xs">
         <Icon className={cn("size-3.5", style.className)} />
-        <span className={cn("font-medium", style.className)}>{style.label}</span>
+        <span className={cn("font-medium", style.className)}>
+          {style.label}
+        </span>
         <span className="rounded border border-border px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
           {rangeLabel}
         </span>
@@ -773,15 +878,15 @@ function FindingFloatingCard({
         )}
       </div>
     </div>
-  );
+  )
 }
 
 function Badgeish({ children }: { children: React.ReactNode }) {
   return (
-    <span className="rounded border border-border px-1.5 py-0.5 text-[10px] capitalize text-muted-foreground">
+    <span className="rounded border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground capitalize">
       {children}
     </span>
-  );
+  )
 }
 
 function SidePanel({
@@ -789,31 +894,40 @@ function SidePanel({
   tab,
   onTabChange,
   read,
+  dimmed,
   onMarkAllRead,
   onFindingClick,
 }: {
-  detail: ReviewDetail;
-  tab: SideTab;
-  onTabChange: (tab: SideTab) => void;
-  read: Set<string>;
-  onMarkAllRead: () => void;
-  onFindingClick: (finding: ReviewFinding) => void;
+  detail: ReviewDetail
+  tab: SideTab
+  onTabChange: (tab: SideTab) => void
+  read: Set<string>
+  dimmed: boolean
+  onMarkAllRead: () => void
+  onFindingClick: (finding: ReviewFinding) => void
 }) {
-  const qc = useQueryClient();
+  const qc = useQueryClient()
   const reReview = useMutation({
     mutationFn: () => api.reReview(detail.owner, detail.repo, detail.number),
     onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ["review", detail.owner, detail.repo, detail.number] });
+      void qc.invalidateQueries({
+        queryKey: ["review", detail.owner, detail.repo, detail.number],
+      })
     },
-  });
+  })
 
-  const bugs = detail.findings.filter((f) => f.group === "bug");
-  const flags = detail.findings.filter((f) => f.group !== "bug");
-  const openBugs = bugs.filter((f) => f.status === "open");
-  const openFlags = flags.filter((f) => f.status === "open");
+  const bugs = detail.findings.filter((f) => f.group === "bug")
+  const flags = detail.findings.filter((f) => f.group !== "bug")
+  const openBugs = bugs.filter((f) => f.status === "open")
+  const openFlags = flags.filter((f) => f.status === "open")
 
   return (
-    <aside className="hidden w-80 shrink-0 flex-col overflow-y-auto border-l border-border xl:flex">
+    <aside
+      className={cn(
+        "hidden w-80 shrink-0 flex-col overflow-y-auto border-l border-border transition-opacity xl:flex",
+        dimmed && "pointer-events-none opacity-30"
+      )}
+    >
       <div className="flex items-center gap-1 border-b border-border px-3 py-2">
         {(
           [
@@ -829,7 +943,7 @@ function SidePanel({
               "rounded-md px-2.5 py-1 text-xs transition-colors",
               tab === id
                 ? "bg-muted font-medium text-foreground"
-                : "text-muted-foreground hover:bg-muted/50",
+                : "text-muted-foreground hover:bg-muted/50"
             )}
           >
             {label}
@@ -865,7 +979,9 @@ function SidePanel({
             <div className="mt-2 space-y-1 text-[11px] text-muted-foreground">
               <div>Reviewing commit {detail.head_sha.slice(0, 7) || "—"}</div>
               {detail.watch && <div>Watching for new pushes</div>}
-              {reReview.error && <div className="text-destructive">{reReview.error.message}</div>}
+              {reReview.error && (
+                <div className="text-destructive">{reReview.error.message}</div>
+              )}
             </div>
           </section>
 
@@ -899,7 +1015,10 @@ function SidePanel({
           />
 
           <ChecksSection checks={detail.checks} />
-          <PeopleSection title="Reviewers" people={detail.pr.requested_reviewers} />
+          <PeopleSection
+            title="Reviewers"
+            people={detail.pr.requested_reviewers}
+          />
           <PeopleSection title="Assignees" people={detail.pr.assignees} />
           <section className="px-3 py-3">
             <h3 className="mb-2 text-xs font-medium">Labels</h3>
@@ -921,7 +1040,7 @@ function SidePanel({
         </div>
       )}
     </aside>
-  );
+  )
 }
 
 function FindingSection({
@@ -933,15 +1052,15 @@ function FindingSection({
   onFindingClick,
   action,
 }: {
-  icon: (typeof GROUP_STYLES)["bug"]["Icon"];
-  label: string;
-  emptyLabel: string;
-  findings: Array<ReviewFinding>;
-  read: Set<string>;
-  onFindingClick: (finding: ReviewFinding) => void;
-  action?: React.ReactNode;
+  icon: (typeof GROUP_STYLES)["bug"]["Icon"]
+  label: string
+  emptyLabel: string
+  findings: Array<ReviewFinding>
+  read: Set<string>
+  onFindingClick: (finding: ReviewFinding) => void
+  action?: React.ReactNode
 }) {
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(false)
   return (
     <section className="px-3 py-3">
       <div className="mb-2 flex items-center justify-between text-xs">
@@ -955,7 +1074,7 @@ function FindingSection({
           <CaretDownIcon
             className={cn(
               "size-3 text-muted-foreground transition-transform",
-              collapsed && "-rotate-90",
+              collapsed && "-rotate-90"
             )}
           />
         </button>
@@ -967,10 +1086,10 @@ function FindingSection({
         ) : (
           <div className="space-y-0.5">
             {findings.map((finding) => {
-              const style = GROUP_STYLES[finding.group];
-              const Icon = style.Icon;
-              const isRead = read.has(finding.id);
-              const muted = finding.status !== "open" || isRead;
+              const style = GROUP_STYLES[finding.group]
+              const Icon = style.Icon
+              const isRead = read.has(finding.id)
+              const muted = finding.status !== "open" || isRead
               return (
                 <button
                   key={finding.id}
@@ -978,31 +1097,42 @@ function FindingSection({
                   onClick={() => onFindingClick(finding)}
                   className={cn(
                     "block w-full rounded-md border border-transparent px-2 py-1.5 text-left transition-colors hover:border-border hover:bg-muted/40",
-                    muted && "opacity-50",
+                    muted && "opacity-50"
                   )}
                 >
                   <span className="flex items-start gap-1.5 text-xs">
-                    <Icon className={cn("mt-0.5 size-3.5 shrink-0", style.className)} />
+                    <Icon
+                      className={cn(
+                        "mt-0.5 size-3.5 shrink-0",
+                        style.className
+                      )}
+                    />
                     <span className="min-w-0">
                       <span className="line-clamp-1 font-medium text-foreground">
                         {finding.title || finding.description}
                       </span>
                       <span className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
                         <span className={style.className}>{style.label}</span>
-                        <span className="truncate font-mono">{findingAnchorLabel(finding)}</span>
+                        <span className="truncate font-mono">
+                          {findingAnchorLabel(finding)}
+                        </span>
                         {finding.outdated && <Badgeish>Outdated</Badgeish>}
-                        {finding.status !== "open" && <Badgeish>{finding.status}</Badgeish>}
-                        {isRead && finding.status === "open" && <span>• Read</span>}
+                        {finding.status !== "open" && (
+                          <Badgeish>{finding.status}</Badgeish>
+                        )}
+                        {isRead && finding.status === "open" && (
+                          <span>• Read</span>
+                        )}
                       </span>
                     </span>
                   </span>
                 </button>
-              );
+              )
             })}
           </div>
         ))}
     </section>
-  );
+  )
 }
 
 function ChecksSection({ checks }: { checks: Array<ReviewCheckRun> }) {
@@ -1028,23 +1158,31 @@ function ChecksSection({ checks }: { checks: Array<ReviewCheckRun> }) {
         </div>
       )}
     </section>
-  );
+  )
 }
 
 function CheckStatusIcon({ check }: { check: ReviewCheckRun }) {
   if (check.status !== "completed") {
-    return <CircleIcon className="size-3.5 shrink-0 animate-pulse text-amber-500" />;
+    return (
+      <CircleIcon className="size-3.5 shrink-0 animate-pulse text-amber-500" />
+    )
   }
   if (check.conclusion === "success" || check.conclusion === "neutral") {
-    return <CheckCircleIcon className="size-3.5 shrink-0 text-emerald-500" />;
+    return <CheckCircleIcon className="size-3.5 shrink-0 text-emerald-500" />
   }
   if (check.conclusion === "skipped") {
-    return <CircleIcon className="size-3.5 shrink-0 text-muted-foreground" />;
+    return <CircleIcon className="size-3.5 shrink-0 text-muted-foreground" />
   }
-  return <XCircleIcon className="size-3.5 shrink-0 text-red-500" />;
+  return <XCircleIcon className="size-3.5 shrink-0 text-red-500" />
 }
 
-function PeopleSection({ title, people }: { title: string; people: Array<ReviewUserRef> }) {
+function PeopleSection({
+  title,
+  people,
+}: {
+  title: string
+  people: Array<ReviewUserRef>
+}) {
   return (
     <section className="px-3 py-3">
       <h3 className="mb-2 text-xs font-medium">{title}</h3>
@@ -1053,9 +1191,16 @@ function PeopleSection({ title, people }: { title: string; people: Array<ReviewU
       ) : (
         <div className="space-y-1">
           {people.map((person) => (
-            <div key={person.login} className="flex items-center gap-2 text-[11px]">
+            <div
+              key={person.login}
+              className="flex items-center gap-2 text-[11px]"
+            >
               {person.avatar_url ? (
-                <img src={person.avatar_url} alt="" className="size-4 rounded-full" />
+                <img
+                  src={person.avatar_url}
+                  alt=""
+                  className="size-4 rounded-full"
+                />
               ) : (
                 <span className="size-4 rounded-full bg-muted" />
               )}
@@ -1065,5 +1210,5 @@ function PeopleSection({ title, people }: { title: string; people: Array<ReviewU
         </div>
       )}
     </section>
-  );
+  )
 }
