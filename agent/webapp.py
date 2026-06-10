@@ -2417,6 +2417,20 @@ async def process_github_push_event(payload: dict[str, Any]) -> None:
     }
     await set_reviewer_thread_metadata(thread_id, pr=pr_meta, watch=True, head_sha=head_sha)
 
+    # GitHub only shows check runs on a PR's current head commit, so the check
+    # created on the previous head disappears after a follow-up push. Create a
+    # fresh in-progress check on the new head SHA so the review stays visible;
+    # publish (or the after-agent hook) settles this id.
+    check_run_id = await create_review_check_run(
+        owner=repo_config["owner"],
+        repo=repo_config["name"],
+        head_sha=head_sha,
+        token=app_token,
+        details_url=dashboard_thread_url(thread_id),
+    )
+    if check_run_id is not None:
+        await set_reviewer_thread_metadata(thread_id, extra={"review_check_run_id": check_run_id})
+
     re_review_prompt = (
         f"A new commit has been pushed to PR #{pr_number}. The new HEAD is "
         f"{head_sha}. Reconcile existing findings against the new diff, add any "

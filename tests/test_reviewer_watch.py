@@ -258,6 +258,11 @@ async def test_push_event_triggers_re_review_run_when_watching() -> None:
             "agent.webapp.set_reviewer_thread_metadata",
             new_callable=AsyncMock,
         ) as set_meta,
+        patch(
+            "agent.webapp.create_review_check_run",
+            new_callable=AsyncMock,
+            return_value=99,
+        ) as create_check,
         patch("agent.webapp.is_thread_active", new_callable=AsyncMock, return_value=False),
         patch("agent.webapp.get_client", return_value=fake_client),
     ):
@@ -278,6 +283,16 @@ async def test_push_event_triggers_re_review_run_when_watching() -> None:
         if c.kwargs.get("head_sha") is not None
     ]
     assert "newsha" in head_sha_writes
+    # A fresh check run is created on the new head SHA (GitHub only shows
+    # checks on the current head), and its id is persisted for settling.
+    create_check.assert_awaited_once()
+    assert create_check.await_args.kwargs["head_sha"] == "newsha"
+    check_id_writes = [
+        c.kwargs.get("extra", {}).get("review_check_run_id")
+        for c in set_meta.await_args_list
+        if "review_check_run_id" in (c.kwargs.get("extra") or {})
+    ]
+    assert 99 in check_id_writes
 
 
 @pytest.mark.asyncio
