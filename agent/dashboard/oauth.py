@@ -198,6 +198,28 @@ def expires_at_from_github_response(data: dict[str, Any], *, field: str) -> str 
     return (datetime.now(UTC) + timedelta(seconds=int(raw))).isoformat()
 
 
+class GithubOAuthError(HTTPException):
+    """A GitHub OAuth token endpoint error, carrying GitHub's ``error`` code."""
+
+    def __init__(self, status_code: int, detail: str, *, error_code: str | None = None) -> None:
+        super().__init__(status_code, detail)
+        self.error_code = error_code
+
+
+# Error codes GitHub returns when a refresh token can never mint a new access
+# token again (the user must re-authorize). Anything else is treated as
+# transient so we don't needlessly drop a usable authorization.
+UNRECOVERABLE_REFRESH_ERROR_CODES = frozenset({"bad_refresh_token", "unauthorized_client"})
+
+
+def is_unrecoverable_refresh_error(exc: BaseException) -> bool:
+    """Whether ``exc`` means the stored refresh token is permanently dead."""
+    return (
+        isinstance(exc, GithubOAuthError)
+        and (exc.error_code or "") in UNRECOVERABLE_REFRESH_ERROR_CODES
+    )
+
+
 async def _request_github_tokens(body: dict[str, str]) -> dict[str, Any]:
     if not GITHUB_APP_CLIENT_ID or not GITHUB_APP_CLIENT_SECRET:
         raise HTTPException(500, "GitHub App OAuth not configured")
@@ -212,8 +234,10 @@ async def _request_github_tokens(body: dict[str, str]) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise HTTPException(502, "unexpected GitHub OAuth response")
     if data.get("error"):
-        raise HTTPException(
-            400, f"github oauth error: {data.get('error_description') or data['error']}"
+        raise GithubOAuthError(
+            400,
+            f"github oauth error: {data.get('error_description') or data['error']}",
+            error_code=str(data["error"]),
         )
     return data
 

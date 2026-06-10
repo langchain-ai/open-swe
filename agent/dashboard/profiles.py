@@ -18,12 +18,15 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import httpx
-from fastapi import HTTPException
 from langgraph_sdk import get_client
 from pydantic import BaseModel, field_validator
 
 from ..encryption import decrypt_token, encrypt_token
-from .oauth import expires_at_from_github_response, refresh_user_access_token
+from .oauth import (
+    expires_at_from_github_response,
+    is_unrecoverable_refresh_error,
+    refresh_user_access_token,
+)
 from .options import SUPPORTED_MODEL_IDS, model_supports_effort
 
 logger = logging.getLogger(__name__)
@@ -206,6 +209,19 @@ async def upsert_access_token_from_github_response(
     )
 
 
+async def delete_access_token(login: str) -> None:
+    """Drop the user's stored OAuth tokens.
+
+    Used when a refresh token is permanently dead so we stop handing out a
+    known-stale access token and callers prompt a clean re-login instead.
+    """
+    try:
+        await _client().store.delete_item(OAUTH_TOKENS_NAMESPACE, login)
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code != 404:
+            raise
+
+
 def _decrypt_access_token(record: dict[str, Any]) -> str | None:
     encrypted = record.get("encrypted_gh_token")
     if not encrypted:
@@ -220,21 +236,25 @@ def _decrypt_refresh_token(record: dict[str, Any]) -> str | None:
     return decrypt_token(encrypted) or None
 
 
-async def _refresh_stored_token(login: str, record: dict[str, Any]) -> str | None:
+async def _refresh_stored_token(login: str, record: dict[str, Any]) -> tuple[str | None, bool]:
+    """Refresh the stored token, returning ``(access_token, refresh_token_dead)``.
+
+    ``refresh_token_dead`` is True when GitHub says the refresh token can never
+    mint a new token again, so the caller should drop the stored authorization
+    rather than keep serving a stale access token.
+    """
     refresh_token = _decrypt_refresh_token(record)
     if not refresh_token:
-        return None
+        return None, False
     try:
         data = await refresh_user_access_token(refresh_token)
-    except HTTPException:
+    except Exception as exc:  # noqa: BLE001
         logger.warning("GitHub token refresh failed for %s", login, exc_info=True)
-        return None
-    except Exception:
-        logger.warning("GitHub token refresh failed for %s", login, exc_info=True)
-        return None
+        return None, is_unrecoverable_refresh_error(exc)
     email = record.get("email") if isinstance(record.get("email"), str) else ""
     await upsert_access_token_from_github_response(login, email, data)
-    return data.get("access_token") if isinstance(data.get("access_token"), str) else None
+    access_token = data.get("access_token")
+    return (access_token if isinstance(access_token, str) else None), False
 
 
 async def get_valid_access_token(login: str, *, force_refresh: bool = False) -> str | None:
@@ -262,8 +282,17 @@ async def get_valid_access_token(login: str, *, force_refresh: bool = False) -> 
             return None
         if not force_refresh and not _token_expired(record.get("token_expires_at")):
             return access_token
-        refreshed = await _refresh_stored_token(login, record)
-        return refreshed or access_token
+        refreshed, refresh_token_dead = await _refresh_stored_token(login, record)
+        if refreshed:
+            return refreshed
+        if refresh_token_dead:
+            # The refresh token is permanently invalid (revoked / expired), so
+            # the cached access token is dead too. Drop it so callers prompt a
+            # clean re-login instead of repeatedly handing out a stale token.
+            logger.info("Dropping dead GitHub authorization for %s; re-login required", login)
+            await delete_access_token(login)
+            return None
+        return access_token
 
 
 async def get_access_token(login: str) -> str | None:
