@@ -1,9 +1,11 @@
-import { memo, useState, useRef, useCallback, useLayoutEffect } from "react";
+import { memo, useState, useRef, useCallback, useEffect, useLayoutEffect } from "react";
 import type { ToolExecutionChunk } from "@/lib/agents/types";
 
 interface ShellCommandProps {
   chunk: ToolExecutionChunk;
   projectPath?: string;
+  /** True while this command is the agent's current (last, streaming) step. */
+  isActive?: boolean;
 }
 
 function getHeaderText(chunk: ToolExecutionChunk): string {
@@ -11,14 +13,17 @@ function getHeaderText(chunk: ToolExecutionChunk): string {
   const truncated = cmd.length > 80 ? cmd.slice(0, 80) + "..." : cmd;
   if (chunk.status === "in_progress") return `Running ${truncated}`;
   if (chunk.status === "pending") return `Run ${truncated}`;
-  return `Background terminal finished with ${truncated}`;
+  return `Ran ${truncated}`;
 }
 
 export const ShellCommand = memo(function ShellCommand({
   chunk,
+  isActive = false,
 }: ShellCommandProps) {
   const isSettled = chunk.status === "completed" || chunk.status === "error";
-  const [expanded, setExpanded] = useState(!isSettled);
+  const autoExpanded = !isSettled || isActive;
+  const [expanded, setExpanded] = useState(autoExpanded);
+  const prevAutoExpandedRef = useRef(autoExpanded);
   const [scrolledFromTop, setScrolledFromTop] = useState(false);
   const [scrolledFromBottom, setScrolledFromBottom] = useState(true);
   const outputRef = useRef<HTMLDivElement>(null);
@@ -29,6 +34,15 @@ export const ShellCommand = memo(function ShellCommand({
     setScrolledFromTop(el.scrollTop > 0);
     setScrolledFromBottom(el.scrollTop < el.scrollHeight - el.clientHeight - 1);
   }, []);
+
+  // Follow the active step: expand while this command is the current process,
+  // collapse once the agent moves on. Manual toggles still win until that flips.
+  useEffect(() => {
+    if (prevAutoExpandedRef.current !== autoExpanded) {
+      setExpanded(autoExpanded);
+      prevAutoExpandedRef.current = autoExpanded;
+    }
+  }, [autoExpanded]);
 
   const command = (chunk.input?.command as string) || "";
   const output = chunk.output || "";

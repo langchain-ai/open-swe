@@ -475,45 +475,42 @@ function AgentMessage({
     [renderItems],
   );
   const hasExploredGroups = exploredGroupIds.length > 0;
+
+  // The agent's current step is the last render item while the message is still
+  // streaming. Tool groups stay expanded only while they are the active step and
+  // collapse once the agent moves on to the next process.
+  const activeItemKey = useMemo(() => {
+    if (!isStreaming || renderItems.length === 0) return null;
+    return renderItems[renderItems.length - 1].key;
+  }, [isStreaming, renderItems]);
+
   const [expandedExploredGroups, setExpandedExploredGroups] = useState<Record<string, boolean>>({});
-  const wasExplorationLiveRef = useRef(false);
+  const prevAutoExploredRef = useRef<Record<string, boolean>>({});
 
   useEffect(() => {
-    const isLive = !!isStreaming;
-
     if (!hasExploredGroups) {
       setExpandedExploredGroups({});
-      wasExplorationLiveRef.current = isLive;
+      prevAutoExploredRef.current = {};
       return;
     }
 
-    if (isLive) {
-      const next: Record<string, boolean> = {};
-      for (const id of exploredGroupIds) {
-        next[id] = true;
-      }
-      setExpandedExploredGroups(next);
-      wasExplorationLiveRef.current = true;
-      return;
-    }
-
-    const shouldAutoCollapse = wasExplorationLiveRef.current;
     setExpandedExploredGroups((prev) => {
       const next: Record<string, boolean> = {};
+      let changed = Object.keys(prev).length !== exploredGroupIds.length;
       for (const id of exploredGroupIds) {
-        next[id] = shouldAutoCollapse ? false : (prev[id] ?? false);
+        const autoExpanded = id === activeItemKey;
+        const prevAuto = prevAutoExploredRef.current[id];
+        // Follow the auto state when it flips; otherwise keep the user's choice.
+        next[id] = prevAuto !== autoExpanded ? autoExpanded : (prev[id] ?? autoExpanded);
+        if (next[id] !== prev[id]) changed = true;
       }
-
-      const prevKeys = Object.keys(prev);
-      const nextKeys = Object.keys(next);
-      if (prevKeys.length !== nextKeys.length) return next;
-      for (const key of nextKeys) {
-        if (prev[key] !== next[key]) return next;
-      }
-      return prev;
+      prevAutoExploredRef.current = exploredGroupIds.reduce<Record<string, boolean>>((acc, id) => {
+        acc[id] = id === activeItemKey;
+        return acc;
+      }, {});
+      return changed ? next : prev;
     });
-    wasExplorationLiveRef.current = false;
-  }, [hasExploredGroups, isStreaming, exploredGroupIds, message.id]);
+  }, [hasExploredGroups, activeItemKey, exploredGroupIds, message.id]);
 
   return (
     <div className="my-2 min-w-0 space-y-2">
@@ -521,7 +518,7 @@ function AgentMessage({
         switch (item.type) {
           case "explored-group": {
             const summary = summarizeExploration(item.chunks);
-            const isExpanded = expandedExploredGroups[item.id] ?? false;
+            const isExpanded = expandedExploredGroups[item.id] ?? (item.key === activeItemKey);
             return (
               <div key={item.key}>
                 <button
@@ -583,6 +580,7 @@ function AgentMessage({
                 <ShellCommand
                   chunk={item.chunk}
                   projectPath={projectPath}
+                  isActive={item.key === activeItemKey}
                 />
               </div>
             );
