@@ -443,6 +443,9 @@ async def settle_review_check_run(
     only cleared after a successful PATCH so a transient failure (timeout,
     5xx, rate limit) leaves it in place for the after-agent hook or a later
     publish to retry — otherwise the check would hang in-progress forever.
+    On failure the intended result is persisted as
+    ``review_check_pending_result`` so the retry reports this conclusion, not
+    a generic failure that would misreport a published review.
     """
     metadata = await get_thread_metadata(thread_id)
     check_run_id = metadata.get("review_check_run_id")
@@ -458,7 +461,21 @@ async def settle_review_check_run(
         summary=summary,
     )
     if ok:
-        await set_reviewer_thread_metadata(thread_id, extra={"review_check_run_id": None})
+        await set_reviewer_thread_metadata(
+            thread_id,
+            extra={"review_check_run_id": None, "review_check_pending_result": None},
+        )
+    else:
+        await set_reviewer_thread_metadata(
+            thread_id,
+            extra={
+                "review_check_pending_result": {
+                    "conclusion": conclusion,
+                    "title": title,
+                    "summary": summary,
+                }
+            },
+        )
 
 
 async def open_swe_review_exists(

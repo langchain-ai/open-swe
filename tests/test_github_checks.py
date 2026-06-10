@@ -186,7 +186,12 @@ async def test_settle_review_check_run_completes_and_clears(
     assert len(completed) == 1
     assert completed[0]["check_run_id"] == 42
     assert completed[0]["conclusion"] == "neutral"
-    assert metadata_writes == [{"thread_id": "t1", "extra": {"review_check_run_id": None}}]
+    assert metadata_writes == [
+        {
+            "thread_id": "t1",
+            "extra": {"review_check_run_id": None, "review_check_pending_result": None},
+        }
+    ]
 
 
 async def test_settle_review_check_run_keeps_id_on_patch_failure(
@@ -217,4 +222,15 @@ async def test_settle_review_check_run_keeps_id_on_patch_failure(
         summary="s",
     )
 
-    assert metadata_writes == []
+    assert metadata_writes == [
+        {
+            "thread_id": "t1",
+            "extra": {
+                "review_check_pending_result": {
+                    "conclusion": "success",
+                    "title": "t",
+                    "summary": "s",
+                }
+            },
+        }
+    ]

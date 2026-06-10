@@ -50,17 +50,33 @@ async def settle_review_check_on_exit(
         if not token:
             logger.warning("No GitHub token to settle stale review check on thread %s", thread_id)
             return None
+        # A pending result means publish_review DID finish but its completion
+        # PATCH failed transiently — retry with the real conclusion instead of
+        # misreporting a published review as failed.
+        pending = metadata.get("review_check_pending_result")
+        if isinstance(pending, dict) and pending.get("conclusion") in {
+            "success",
+            "neutral",
+            "failure",
+        }:
+            conclusion = pending["conclusion"]
+            title = str(pending.get("title") or "Review completed")
+            summary = str(pending.get("summary") or "")
+        else:
+            conclusion = "failure"
+            title = "Review did not complete"
+            summary = (
+                "The Open SWE review run ended without publishing a review. "
+                "Re-trigger the review by pushing a commit or re-requesting it."
+            )
         await settle_review_check_run(
             thread_id=thread_id,
             owner=owner,
             repo=repo,
             token=token,
-            conclusion="failure",
-            title="Review did not complete",
-            summary=(
-                "The Open SWE review run ended without publishing a review. "
-                "Re-trigger the review by pushing a commit or re-requesting it."
-            ),
+            conclusion=conclusion,
+            title=title,
+            summary=summary,
         )
         logger.info("Settled stale review check run for thread %s", thread_id)
     except Exception:
