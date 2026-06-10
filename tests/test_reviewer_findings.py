@@ -13,6 +13,7 @@ from agent.reviewer_findings import (
     append_finding,
     filter_findings_for_publish,
     list_findings,
+    mutate_findings,
     new_finding,
     new_finding_id,
     replace_findings,
@@ -140,6 +141,42 @@ async def test_append_finding_appends_to_existing_list() -> None:
     args = fake_client.threads.update.await_args
     persisted = args.kwargs["metadata"]["findings"]
     assert [f["id"] for f in persisted] == ["f_a", "f_b"]
+
+
+@pytest.mark.asyncio
+async def test_mutate_findings_reads_latest_before_mutating() -> None:
+    """mutate_findings must operate on the freshest persisted list, not a stale
+    snapshot — the mutator receives whatever ``list_findings`` returns now."""
+    latest = [_f(id="f_fresh")]
+    fake_client = AsyncMock()
+    fake_client.threads.get.return_value = {"metadata": {"findings": latest}}
+
+    seen: list[str] = []
+
+    def _mutator(findings: list[Finding]) -> bool:
+        seen.extend(f["id"] for f in findings)
+        findings[0]["status"] = "resolved"
+        return True
+
+    with patch("agent.reviewer_findings.get_client", return_value=fake_client):
+        result = await mutate_findings("tid", _mutator)
+
+    assert seen == ["f_fresh"]
+    assert result[0]["status"] == "resolved"
+    fake_client.threads.update.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_mutate_findings_skips_write_when_unchanged() -> None:
+    """A no-op mutation must NOT persist, so it can never clobber a concurrent
+    update that landed between the read and a would-be write."""
+    fake_client = AsyncMock()
+    fake_client.threads.get.return_value = {"metadata": {"findings": [_f(id="f_a")]}}
+
+    with patch("agent.reviewer_findings.get_client", return_value=fake_client):
+        await mutate_findings("tid", lambda _findings: False)
+
+    fake_client.threads.update.assert_not_called()
 
 
 @pytest.mark.asyncio
