@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { useQueryClient } from "@tanstack/react-query"
 
 import type { PendingPrompt } from "@/lib/agents/pendingPrompts"
-import type { AgentThread, Message } from "@/lib/agents/types"
+import type { AgentThread, ImageChunk, Message } from "@/lib/agents/types"
 import type { ModelSelection } from "@/lib/agents/useModelOptions"
 import { AgentPromptBar } from "@/components/agents/AgentPromptBar"
 import { MessageView } from "@/components/agents/ported"
@@ -93,6 +93,22 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
     )
   }, [queryClient, thread])
 
+  const handleSubmit = useCallback(
+    (content: string, images: Array<ImageChunk>) => {
+      setPendingPrompts((prev) => [
+        ...prev,
+        { prompt: content, insertAt: thread.messages.length, images },
+      ])
+      sendMessage.mutate({
+        content,
+        images,
+        model_id: activeSelection?.modelId ?? null,
+        effort: activeSelection?.effort ?? null,
+      })
+    },
+    [sendMessage, thread.messages.length, activeSelection]
+  )
+
   const displayMessages = useMemo<Array<Message>>(() => {
     if (pendingPrompts.length === 0) return thread.messages
     const baseTimestamp = new Date().toISOString()
@@ -136,14 +152,7 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
                   compact
                   busy={isStreaming}
                   disabled={sendMessage.isPending}
-                  onSubmit={(content, images) =>
-                    sendMessage.mutate({
-                      content,
-                      images,
-                      model_id: activeSelection?.modelId ?? null,
-                      effort: activeSelection?.effort ?? null,
-                    })
-                  }
+                  onSubmit={handleSubmit}
                   models={models}
                   selection={activeSelection}
                   onSelectionChange={setSelection}
@@ -162,14 +171,7 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
                 compact
                 busy={isStreaming}
                 disabled={sendMessage.isPending}
-                onSubmit={(content, images) =>
-                  sendMessage.mutate({
-                    content,
-                    images,
-                    model_id: activeSelection?.modelId ?? null,
-                    effort: activeSelection?.effort ?? null,
-                  })
-                }
+                onSubmit={handleSubmit}
                 models={models}
                 selection={activeSelection}
                 onSelectionChange={setSelection}
