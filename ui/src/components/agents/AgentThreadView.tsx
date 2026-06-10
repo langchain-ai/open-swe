@@ -1,13 +1,14 @@
-import { useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { useQueryClient } from "@tanstack/react-query"
 
 import type { PendingPrompt } from "@/lib/agents/pendingPrompts"
-import type { AgentThread, Message } from "@/lib/agents/types"
+import type { AgentThread, ImageChunk, Message } from "@/lib/agents/types"
 import type { ModelSelection } from "@/lib/agents/useModelOptions"
 import { AgentPromptBar } from "@/components/agents/AgentPromptBar"
 import { MessageView } from "@/components/agents/ported"
 import { agentThreadKeys, useSendAgentMessage } from "@/lib/agents/queries"
 import {
+  addPendingPrompt,
   dropPendingPrompts,
   getPendingPrompts,
 } from "@/lib/agents/pendingPrompts"
@@ -93,6 +94,46 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
     )
   }, [queryClient, thread])
 
+  const handleSubmit = useCallback(
+    (content: string, images: Array<ImageChunk>) => {
+      const entry: PendingPrompt = {
+        prompt: content,
+        insertAt: thread.messages.length + pendingPrompts.length,
+        images,
+      }
+      addPendingPrompt(thread.id, entry.prompt, entry.insertAt, entry.images)
+      setPendingPrompts((prev) => [...prev, entry])
+      sendMessage.mutate(
+        {
+          content,
+          images,
+          model_id: activeSelection?.modelId ?? null,
+          effort: activeSelection?.effort ?? null,
+        },
+        {
+          onError: () => {
+            setPendingPrompts(
+              dropPendingPrompts(
+                thread.id,
+                (p) =>
+                  p.insertAt === entry.insertAt &&
+                  p.prompt === entry.prompt &&
+                  pendingImageKey(p) === pendingImageKey(entry)
+              )
+            )
+          },
+        }
+      )
+    },
+    [
+      sendMessage,
+      thread.id,
+      thread.messages.length,
+      pendingPrompts.length,
+      activeSelection,
+    ]
+  )
+
   const displayMessages = useMemo<Array<Message>>(() => {
     if (pendingPrompts.length === 0) return thread.messages
     const baseTimestamp = new Date().toISOString()
@@ -136,14 +177,7 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
                   compact
                   busy={isStreaming}
                   disabled={sendMessage.isPending}
-                  onSubmit={(content, images) =>
-                    sendMessage.mutate({
-                      content,
-                      images,
-                      model_id: activeSelection?.modelId ?? null,
-                      effort: activeSelection?.effort ?? null,
-                    })
-                  }
+                  onSubmit={handleSubmit}
                   models={models}
                   selection={activeSelection}
                   onSelectionChange={setSelection}
@@ -162,14 +196,7 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
                 compact
                 busy={isStreaming}
                 disabled={sendMessage.isPending}
-                onSubmit={(content, images) =>
-                  sendMessage.mutate({
-                    content,
-                    images,
-                    model_id: activeSelection?.modelId ?? null,
-                    effort: activeSelection?.effort ?? null,
-                  })
-                }
+                onSubmit={handleSubmit}
                 models={models}
                 selection={activeSelection}
                 onSelectionChange={setSelection}
