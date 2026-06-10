@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from agent import server
 from agent.dashboard.team_credentials import DatadogCredentials, LangSmithCredentials
 from agent.integrations import datadog_mcp, langsmith_tools
 
@@ -96,3 +97,51 @@ async def test_langsmith_list_runs_caps_limit() -> None:
         result = await list_runs.ainvoke({"project_name": "p", "limit": 9999})
     assert result["success"] is True
     assert captured["limit"] == langsmith_tools._MAX_LIST_RUNS
+
+
+@pytest.mark.asyncio
+async def test_load_observability_tools_skipped_when_unauthorized() -> None:
+    with (
+        patch.object(server, "load_datadog_tools", AsyncMock(return_value=["dd"])),
+        patch.object(server, "load_langsmith_tools", AsyncMock(return_value=["ls"])),
+    ):
+        assert await server._load_observability_tools(authorized=False) == []
+
+
+@pytest.mark.asyncio
+async def test_load_observability_tools_loaded_when_authorized() -> None:
+    with (
+        patch.object(server, "load_datadog_tools", AsyncMock(return_value=["dd"])),
+        patch.object(server, "load_langsmith_tools", AsyncMock(return_value=["ls"])),
+    ):
+        assert await server._load_observability_tools(authorized=True) == ["dd", "ls"]
+
+
+def test_observability_authorized_gates_on_admin(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CONFIGURED_ADMINS", "admin@example.com")
+    monkeypatch.delenv("OBSERVABILITY_AUTHORIZED_EMAILS", raising=False)
+
+    admin_config = {"configurable": {"user_email": "admin@example.com"}}
+    other_config = {"configurable": {"user_email": "attacker@example.com"}}
+
+    assert server._observability_authorized(admin_config, None) is True
+    assert server._observability_authorized(other_config, None) is False
+
+
+def test_observability_authorized_allowlist(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CONFIGURED_ADMINS", "")
+    monkeypatch.setenv("OBSERVABILITY_AUTHORIZED_EMAILS", "trusted@example.com")
+
+    config = {"configurable": {"user_email": "trusted@example.com"}}
+    assert server._observability_authorized(config, None) is True
+
+
+def test_observability_authorized_resolves_login_email(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CONFIGURED_ADMINS", "dev@example.com")
+    monkeypatch.delenv("OBSERVABILITY_AUTHORIZED_EMAILS", raising=False)
+    monkeypatch.setattr(
+        server, "cached_email_for_login", lambda login: "dev@example.com" if login else None
+    )
+
+    config = {"configurable": {"github_login": "dev"}}
+    assert server._observability_authorized(config, "dev") is True

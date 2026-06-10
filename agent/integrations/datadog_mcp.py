@@ -1,7 +1,7 @@
 """Server-side Datadog tools backed by Datadog's hosted MCP server.
 
 Credentials live in team settings (encrypted at rest) and are attached as
-``DD-API-KEY`` / ``DD-APPLICATION-KEY`` headers to the MCP connection, which runs
+``DD_API_KEY`` / ``DD_APPLICATION_KEY`` headers to the MCP connection, which runs
 in the LangGraph server process. The sandbox never holds Datadog credentials.
 
 The default toolset is ``core`` (query-oriented: logs, metrics, traces,
@@ -40,8 +40,8 @@ async def _build_mcp_tools(creds: DatadogCredentials) -> list[BaseTool]:
                 "transport": "streamable_http",
                 "url": creds.mcp_url(_toolsets()),
                 "headers": {
-                    "DD-API-KEY": creds.api_key,
-                    "DD-APPLICATION-KEY": creds.app_key,
+                    "DD_API_KEY": creds.api_key,
+                    "DD_APPLICATION_KEY": creds.app_key,
                 },
                 "timeout": timedelta(seconds=_MCP_TIMEOUT_SECONDS),
             }

@@ -21,7 +21,8 @@ from ..encryption import decrypt_token, encrypt_token
 logger = logging.getLogger(__name__)
 
 TEAM_CREDENTIALS_NAMESPACE: list[str] = ["team_credentials"]
-TEAM_CREDENTIALS_KEY = "default"
+DATADOG_KEY = "datadog"
+LANGSMITH_KEY = "langsmith"
 
 # Datadog sites that expose a hosted MCP server. The MCP host is derived by
 # swapping the leading ``app.`` (or bare site) for ``mcp.``.
@@ -124,27 +125,33 @@ def _last4(value: str) -> str:
     return value[-4:] if len(value) >= 4 else value
 
 
-async def _get_record() -> dict[str, Any]:
+async def _get_provider(key: str) -> dict[str, Any] | None:
     try:
-        item = await _client().store.get_item(TEAM_CREDENTIALS_NAMESPACE, TEAM_CREDENTIALS_KEY)
+        item = await _client().store.get_item(TEAM_CREDENTIALS_NAMESPACE, key)
     except Exception as e:  # noqa: BLE001
-        logger.debug("team credentials lookup failed: %s", e)
-        return {}
+        logger.debug("team credentials lookup failed for %s: %s", key, e)
+        return None
     if item is None:
-        return {}
+        return None
     value = item.get("value") if isinstance(item, dict) else getattr(item, "value", None)
-    return value if isinstance(value, dict) else {}
+    return value if isinstance(value, dict) else None
 
 
-async def _put_record(value: dict[str, Any]) -> None:
-    await _client().store.put_item(TEAM_CREDENTIALS_NAMESPACE, TEAM_CREDENTIALS_KEY, value)
+async def _put_provider(key: str, value: dict[str, Any]) -> None:
+    await _client().store.put_item(TEAM_CREDENTIALS_NAMESPACE, key, value)
+
+
+async def _delete_provider(key: str) -> None:
+    try:
+        await _client().store.delete_item(TEAM_CREDENTIALS_NAMESPACE, key)
+    except Exception as e:  # noqa: BLE001
+        logger.debug("team credentials delete failed for %s: %s", key, e)
 
 
 async def get_team_credentials_status() -> dict[str, Any]:
     """Return a redacted, dashboard-safe view of connected providers."""
-    record = await _get_record()
-    datadog = record.get("datadog") if isinstance(record.get("datadog"), dict) else None
-    langsmith = record.get("langsmith") if isinstance(record.get("langsmith"), dict) else None
+    datadog = await _get_provider(DATADOG_KEY)
+    langsmith = await _get_provider(LANGSMITH_KEY)
     return {
         "datadog": {
             "connected": True,
@@ -166,48 +173,45 @@ async def get_team_credentials_status() -> dict[str, Any]:
 
 
 async def connect_datadog(update: DatadogCredentialsUpdate) -> dict[str, Any]:
-    record = await _get_record()
-    record["datadog"] = {
-        "site": update.site,
-        "encrypted_api_key": encrypt_token(update.api_key),
-        "encrypted_app_key": encrypt_token(update.app_key),
-        "api_key_last4": _last4(update.api_key),
-        "updated_at": datetime.now(UTC).isoformat(),
-    }
-    await _put_record(record)
+    await _put_provider(
+        DATADOG_KEY,
+        {
+            "site": update.site,
+            "encrypted_api_key": encrypt_token(update.api_key),
+            "encrypted_app_key": encrypt_token(update.app_key),
+            "api_key_last4": _last4(update.api_key),
+            "updated_at": datetime.now(UTC).isoformat(),
+        },
+    )
     return await get_team_credentials_status()
 
 
 async def disconnect_datadog() -> dict[str, Any]:
-    record = await _get_record()
-    record.pop("datadog", None)
-    await _put_record(record)
+    await _delete_provider(DATADOG_KEY)
     return await get_team_credentials_status()
 
 
 async def connect_langsmith(update: LangSmithCredentialsUpdate) -> dict[str, Any]:
-    record = await _get_record()
-    record["langsmith"] = {
-        "endpoint": update.endpoint or DEFAULT_LANGSMITH_ENDPOINT,
-        "encrypted_api_key": encrypt_token(update.api_key),
-        "api_key_last4": _last4(update.api_key),
-        "updated_at": datetime.now(UTC).isoformat(),
-    }
-    await _put_record(record)
+    await _put_provider(
+        LANGSMITH_KEY,
+        {
+            "endpoint": update.endpoint or DEFAULT_LANGSMITH_ENDPOINT,
+            "encrypted_api_key": encrypt_token(update.api_key),
+            "api_key_last4": _last4(update.api_key),
+            "updated_at": datetime.now(UTC).isoformat(),
+        },
+    )
     return await get_team_credentials_status()
 
 
 async def disconnect_langsmith() -> dict[str, Any]:
-    record = await _get_record()
-    record.pop("langsmith", None)
-    await _put_record(record)
+    await _delete_provider(LANGSMITH_KEY)
     return await get_team_credentials_status()
 
 
 async def get_datadog_credentials() -> DatadogCredentials | None:
     """Return decrypted Datadog credentials, or ``None`` when not connected."""
-    record = await _get_record()
-    datadog = record.get("datadog")
+    datadog = await _get_provider(DATADOG_KEY)
     if not isinstance(datadog, dict):
         return None
     api_key = decrypt_token(datadog.get("encrypted_api_key", ""))
@@ -223,8 +227,7 @@ async def get_datadog_credentials() -> DatadogCredentials | None:
 
 async def get_langsmith_credentials() -> LangSmithCredentials | None:
     """Return decrypted LangSmith credentials, or ``None`` when not connected."""
-    record = await _get_record()
-    langsmith = record.get("langsmith")
+    langsmith = await _get_provider(LANGSMITH_KEY)
     if not isinstance(langsmith, dict):
         return None
     api_key = decrypt_token(langsmith.get("encrypted_api_key", ""))

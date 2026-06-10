@@ -24,6 +24,9 @@ class _FakeStore:
     async def put_item(self, namespace: list[str], key: str, value: dict[str, Any]) -> None:
         self.items[(tuple(namespace), key)] = value
 
+    async def delete_item(self, namespace: list[str], key: str) -> None:
+        self.items.pop((tuple(namespace), key), None)
+
 
 class _FakeClient:
     def __init__(self, store: _FakeStore) -> None:
@@ -78,8 +81,8 @@ async def test_datadog_roundtrip_and_redaction(fake_store: _FakeStore) -> None:
     assert status["datadog"]["connected"] is True
     assert status["datadog"]["api_key_last4"] == "1234"
     # Stored record holds ciphertext, not the plaintext key.
-    record = fake_store.items[(("team_credentials",), "default")]
-    assert record["datadog"]["encrypted_api_key"] != "secret-api-1234"
+    record = fake_store.items[(("team_credentials",), "datadog")]
+    assert record["encrypted_api_key"] != "secret-api-1234"
 
     creds = await tc.get_datadog_credentials()
     assert creds is not None
