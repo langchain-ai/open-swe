@@ -55,10 +55,12 @@ from .utils.auth import (
     resolve_github_token_from_email,
 )
 from .utils.comments import get_recent_comments
+from .utils.dashboard_links import dashboard_thread_url
 from .utils.github_app import (
     get_github_app_installation_token,
     get_github_app_installation_token_with_expiry,
 )
+from .utils.github_checks import create_review_check_run
 from .utils.github_comments import (
     OPEN_SWE_TAGS,
     GitHubAuthError,
@@ -2042,6 +2044,16 @@ async def _dispatch_first_review_from_pr_payload(payload: dict[str, Any], *, sou
         return
 
     await set_reviewer_thread_metadata(thread_id, pr=pr_meta, watch=True, head_sha=head_sha)
+
+    check_run_id = await create_review_check_run(
+        owner=repo_config.get("owner", ""),
+        repo=repo_config.get("name", ""),
+        head_sha=head_sha,
+        token=app_token,
+        details_url=dashboard_thread_url(thread_id),
+    )
+    if check_run_id is not None:
+        await set_reviewer_thread_metadata(thread_id, extra={"review_check_run_id": check_run_id})
 
     is_re_review = bool(last_reviewed_sha)
     if is_re_review:
