@@ -1,0 +1,54 @@
+name: Open SWE Trigger
+description: Trigger Open SWE from a GitHub workflow via LangGraph runs.create.
+
+inputs:
+  open_swe_url:
+    description: Base URL for the Open SWE deployment.
+    required: true
+  open_swe_api_key:
+    description: LangGraph API key for the Open SWE deployment.
+    required: true
+  prompt:
+    description: Prompt text to send to Open SWE.
+    required: true
+  assistant_id:
+    description: Assistant id to run (defaults to agent).
+    required: false
+  thread_id:
+    description: Optional explicit thread id. If omitted, a UUID is generated.
+    required: false
+  if_not_exists:
+    description: Thread behavior when thread_id does not exist (create or reject).
+    required: false
+
+outputs:
+  thread_id:
+    description: Open SWE thread id.
+    value: ${{ steps.send.outputs.thread_id }}
+  run_id:
+    description: Open SWE run id.
+    value: ${{ steps.send.outputs.run_id }}
+  response_json:
+    description: Raw JSON response as a compact string.
+    value: ${{ steps.send.outputs.response_json }}
+
+runs:
+  using: composite
+  steps:
+    - id: install
+      shell: bash
+      run: |
+        set -euo pipefail
+        python3 -m pip install --disable-pip-version-check --quiet "langgraph-sdk>=0.2.0"
+    - id: send
+      shell: bash
+      env:
+        INPUT_OPEN_SWE_URL: ${{ inputs.open_swe_url }}
+        INPUT_OPEN_SWE_API_KEY: ${{ inputs.open_swe_api_key }}
+        INPUT_PROMPT: ${{ inputs.prompt }}
+        INPUT_ASSISTANT_ID: ${{ inputs.assistant_id }}
+        INPUT_THREAD_ID: ${{ inputs.thread_id }}
+        INPUT_IF_NOT_EXISTS: ${{ inputs.if_not_exists }}
+      run: |
+        set -euo pipefail
+        python3 "${{ github.action_path }}/trigger.py"
