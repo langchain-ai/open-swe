@@ -289,6 +289,7 @@ export interface ReviewFinding {
   resolution_note: string | null;
   diff_hunk: string | null;
   github_thread_resolved: boolean;
+  github_review_comment_id: number | null;
   interactions: Array<FindingInteraction>;
   group: FindingGroup;
 }

@@ -1,6 +1,6 @@
 import { Link, Navigate, createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowClockwiseIcon,
   ArrowLeftIcon,
@@ -9,11 +9,14 @@ import {
   CheckCircleIcon,
   CheckIcon,
   CircleIcon,
+  CopyIcon,
   FlagIcon,
   GitPullRequestIcon,
   InfoIcon,
   XCircleIcon,
+  XIcon,
 } from "@phosphor-icons/react";
+import { IoLogoGithub } from "react-icons/io5";
 
 import type {
   ReviewCheckRun,
@@ -37,26 +40,6 @@ export const Route = createFileRoute("/reviews_/$owner/$repo/$number")({
 type CenterTab = "description" | "changes";
 type SideTab = "info" | "chat";
 
-interface FindingsByFile {
-  byFile: Map<string, Array<ReviewFinding>>;
-  unanchored: Array<ReviewFinding>;
-}
-
-function groupFindingsByFile(findings: Array<ReviewFinding>): FindingsByFile {
-  const byFile = new Map<string, Array<ReviewFinding>>();
-  const unanchored: Array<ReviewFinding> = [];
-  for (const finding of findings) {
-    if (finding.file && finding.in_diff && finding.end_line !== null) {
-      const list = byFile.get(finding.file) ?? [];
-      list.push(finding);
-      byFile.set(finding.file, list);
-    } else {
-      unanchored.push(finding);
-    }
-  }
-  return { byFile, unanchored };
-}
-
 const GROUP_STYLES = {
   bug: { label: "Bug", className: "text-destructive", Icon: BugBeetleIcon },
   investigate: { label: "Investigate", className: "text-amber-500", Icon: FlagIcon },
@@ -67,6 +50,40 @@ function findingAnchorLabel(finding: ReviewFinding): string {
   if (finding.start_line === null || finding.end_line === null) return finding.file;
   if (finding.start_line === finding.end_line) return `${finding.file}:${finding.end_line}`;
   return `${finding.file}:${finding.start_line}-${finding.end_line}`;
+}
+
+function isAnchored(finding: ReviewFinding): boolean {
+  return Boolean(finding.file) && finding.in_diff && finding.end_line !== null;
+}
+
+function lineMatchesFinding(line: ReviewDiffLine, finding: ReviewFinding): boolean {
+  if (finding.end_line === null) return false;
+  const start = finding.start_line ?? finding.end_line;
+  const lineNumber = finding.side === "LEFT" ? line.old_line : line.new_line;
+  if (lineNumber === undefined) return false;
+  if (finding.side === "LEFT" && line.kind !== "del") return false;
+  if (finding.side === "RIGHT" && line.kind === "del") return false;
+  return lineNumber >= start && lineNumber <= finding.end_line;
+}
+
+function isFindingAnchorRow(line: ReviewDiffLine, finding: ReviewFinding): boolean {
+  if (finding.end_line === null) return false;
+  const lineNumber = finding.side === "LEFT" ? line.old_line : line.new_line;
+  if (finding.side === "LEFT" && line.kind !== "del") return false;
+  if (finding.side === "RIGHT" && line.kind === "del") return false;
+  return lineNumber === finding.end_line;
+}
+
+function findingClipboardText(finding: ReviewFinding): string {
+  const style = GROUP_STYLES[finding.group];
+  const lines = [
+    `**${style.label}: ${finding.title}**`,
+    `${findingAnchorLabel(finding)}`,
+    "",
+    finding.description,
+  ];
+  if (finding.suggestion) lines.push("", "```suggestion", finding.suggestion, "```");
+  return lines.join("\n");
 }
 
 function ReviewDetailPage() {
@@ -144,8 +161,10 @@ function ReviewBody({
   const [sideTab, setSideTab] = useState<SideTab>("info");
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const fileRefs = useRef<Record<string, HTMLDivElement | null>>({});
-  const findingRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const anchorRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const [expandedFiles, setExpandedFiles] = useState<Record<string, boolean>>({});
+  const [focused, setFocused] = useState<ReviewFinding | null>(null);
+  const [cardTop, setCardTop] = useState(96);
 
   const viewedStorageKey = `open-swe.review.viewed.${detail.owner}/${detail.repo}/${detail.number}.${detail.head_sha}`;
   const [viewed, setViewed] = useState<Set<string>>(() => {
@@ -170,7 +189,43 @@ function ReviewBody({
     [viewedStorageKey],
   );
 
-  const findingsByFile = useMemo(() => groupFindingsByFile(detail.findings), [detail.findings]);
+  const readStorageKey = `open-swe.review.read.${detail.thread_id}`;
+  const [read, setRead] = useState<Set<string>>(() => {
+    if (typeof window === "undefined") return new Set();
+    try {
+      const raw = window.localStorage.getItem(readStorageKey);
+      return new Set(raw ? (JSON.parse(raw) as Array<string>) : []);
+    } catch {
+      return new Set();
+    }
+  });
+  const persistRead = useCallback(
+    (next: Set<string>) => {
+      setRead(next);
+      window.localStorage.setItem(readStorageKey, JSON.stringify(Array.from(next)));
+    },
+    [readStorageKey],
+  );
+  const markRead = useCallback(
+    (id: string) => {
+      persistRead(new Set(read).add(id));
+    },
+    [persistRead, read],
+  );
+  const markAllRead = useCallback(() => {
+    persistRead(new Set(detail.findings.map((f) => f.id)));
+  }, [detail.findings, persistRead]);
+
+  const findingsByFile = useMemo(() => {
+    const byFile = new Map<string, Array<ReviewFinding>>();
+    for (const finding of detail.findings) {
+      if (!isAnchored(finding)) continue;
+      const list = byFile.get(finding.file) ?? [];
+      list.push(finding);
+      byFile.set(finding.file, list);
+    }
+    return byFile;
+  }, [detail.findings]);
 
   const linesLeft = useMemo(() => {
     if (!diffFiles) return null;
@@ -188,21 +243,45 @@ function ReviewBody({
     });
   }, []);
 
-  const scrollToFinding = useCallback(
+  const openFinding = useCallback(
     (finding: ReviewFinding) => {
-      if (!finding.file || !finding.in_diff || finding.end_line === null) return;
+      markRead(finding.id);
+      setFocused(finding);
+      if (!isAnchored(finding)) {
+        setCardTop(96);
+        return;
+      }
       setCenterTab("changes");
       setExpandedFiles((prev) => ({ ...prev, [finding.file]: true }));
       requestAnimationFrame(() => {
-        const node = findingRefs.current[finding.id] ?? fileRefs.current[finding.file];
-        node?.scrollIntoView({ block: "center", behavior: "smooth" });
+        const node = anchorRefs.current[finding.id] ?? fileRefs.current[finding.file];
+        node?.scrollIntoView({ block: "center" });
+        requestAnimationFrame(() => {
+          const rect = anchorRefs.current[finding.id]?.getBoundingClientRect();
+          if (rect) {
+            setCardTop(Math.min(Math.max(rect.top - 40, 64), window.innerHeight - 360));
+          } else {
+            setCardTop(96);
+          }
+        });
       });
     },
-    [],
+    [markRead],
   );
 
+  const closeFinding = useCallback(() => setFocused(null), []);
+
+  useEffect(() => {
+    if (!focused) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setFocused(null);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [focused]);
+
   return (
-    <div className="flex min-h-0 flex-1">
+    <div className="relative flex min-h-0 flex-1">
       <FileTreeSidebar
         files={diffFiles}
         selected={selectedFile}
@@ -242,7 +321,8 @@ function ReviewBody({
                   <FileDiffCard
                     key={file.path}
                     file={file}
-                    findings={findingsByFile.byFile.get(file.path) ?? []}
+                    findings={findingsByFile.get(file.path) ?? []}
+                    focused={focused}
                     viewed={viewed.has(file.path)}
                     onToggleViewed={() => toggleViewed(file.path)}
                     expanded={expandedFiles[file.path] ?? !viewed.has(file.path)}
@@ -252,11 +332,12 @@ function ReviewBody({
                         [file.path]: !(prev[file.path] ?? !viewed.has(file.path)),
                       }))
                     }
+                    onFindingClick={openFinding}
                     sectionRef={(node) => {
                       fileRefs.current[file.path] = node;
                     }}
-                    findingRef={(id, node) => {
-                      findingRefs.current[id] = node;
+                    anchorRef={(id, node) => {
+                      anchorRefs.current[id] = node;
                     }}
                   />
                 ))}
@@ -270,8 +351,26 @@ function ReviewBody({
         detail={detail}
         tab={sideTab}
         onTabChange={setSideTab}
-        onFindingClick={scrollToFinding}
+        read={read}
+        onMarkAllRead={markAllRead}
+        onFindingClick={openFinding}
       />
+
+      {focused && (
+        <>
+          <div
+            className="fixed inset-0 z-40 bg-black/50"
+            role="presentation"
+            onClick={closeFinding}
+          />
+          <FindingFloatingCard
+            detail={detail}
+            finding={focused}
+            top={cardTop}
+            onClose={closeFinding}
+          />
+        </>
+      )}
     </div>
   );
 }
@@ -425,39 +524,30 @@ function FileTreeSidebar({
 function FileDiffCard({
   file,
   findings,
+  focused,
   viewed,
   onToggleViewed,
   expanded,
   onToggleExpanded,
+  onFindingClick,
   sectionRef,
-  findingRef,
+  anchorRef,
 }: {
   file: ReviewDiffFile;
   findings: Array<ReviewFinding>;
+  focused: ReviewFinding | null;
   viewed: boolean;
   onToggleViewed: () => void;
   expanded: boolean;
   onToggleExpanded: () => void;
+  onFindingClick: (finding: ReviewFinding) => void;
   sectionRef: (node: HTMLDivElement | null) => void;
-  findingRef: (id: string, node: HTMLDivElement | null) => void;
+  anchorRef: (id: string, node: HTMLDivElement | null) => void;
 }) {
-  const findingsByLine = useMemo(() => {
-    const map = new Map<string, Array<ReviewFinding>>();
-    for (const finding of findings) {
-      if (finding.end_line === null) continue;
-      const key = `${finding.side}:${finding.end_line}`;
-      const list = map.get(key) ?? [];
-      list.push(finding);
-      map.set(key, list);
-    }
-    return map;
-  }, [findings]);
+  const fileFocused = focused?.file === file.path && isAnchored(focused) ? focused : null;
 
   return (
-    <div
-      ref={sectionRef}
-      className="scroll-mt-4 overflow-hidden rounded-lg border border-border"
-    >
+    <div ref={sectionRef} className="scroll-mt-4 overflow-hidden rounded-lg border border-border">
       <div className="flex items-center gap-2 bg-muted/40 px-3 py-2 text-xs">
         <button
           type="button"
@@ -500,20 +590,21 @@ function FileDiffCard({
           {file.hunks.map((hunk, hunkIndex) => (
             <div key={hunkIndex}>
               <div className="bg-muted/60 px-3 py-1 text-muted-foreground">{hunk.header}</div>
-              {hunk.lines.map((line, lineIndex) => (
-                <DiffLineRow
-                  key={lineIndex}
-                  line={line}
-                  findings={
-                    findingsByLine.get(
-                      line.kind === "del"
-                        ? `LEFT:${line.old_line}`
-                        : `RIGHT:${line.new_line}`,
-                    ) ?? []
-                  }
-                  findingRef={findingRef}
-                />
-              ))}
+              {hunk.lines.map((line, lineIndex) => {
+                const lineFindings = findings.filter((finding) =>
+                  isFindingAnchorRow(line, finding),
+                );
+                return (
+                  <DiffLineRow
+                    key={lineIndex}
+                    line={line}
+                    findings={lineFindings}
+                    highlighted={fileFocused !== null && lineMatchesFinding(line, fileFocused)}
+                    onFindingClick={onFindingClick}
+                    anchorRef={anchorRef}
+                  />
+                );
+              })}
             </div>
           ))}
         </div>
@@ -525,71 +616,162 @@ function FileDiffCard({
 function DiffLineRow({
   line,
   findings,
-  findingRef,
+  highlighted,
+  onFindingClick,
+  anchorRef,
 }: {
   line: ReviewDiffLine;
   findings: Array<ReviewFinding>;
-  findingRef: (id: string, node: HTMLDivElement | null) => void;
+  highlighted: boolean;
+  onFindingClick: (finding: ReviewFinding) => void;
+  anchorRef: (id: string, node: HTMLDivElement | null) => void;
 }) {
+  const first = findings[0];
   return (
-    <>
-      <div
+    <div
+      ref={
+        first
+          ? (node) => {
+              for (const finding of findings) anchorRef(finding.id, node);
+            }
+          : undefined
+      }
+      className={cn(
+        "flex",
+        line.kind === "add" && "bg-emerald-500/10",
+        line.kind === "del" && "bg-red-500/10",
+        highlighted && "relative z-50 bg-background ring-1 ring-inset ring-amber-400/70",
+      )}
+    >
+      <span className="w-10 shrink-0 select-none px-1 text-right text-muted-foreground/60">
+        {line.old_line ?? ""}
+      </span>
+      <span className="w-10 shrink-0 select-none px-1 text-right text-muted-foreground/60">
+        {line.new_line ?? ""}
+      </span>
+      <span
         className={cn(
-          "flex",
-          line.kind === "add" && "bg-emerald-500/10",
-          line.kind === "del" && "bg-red-500/10",
+          "w-4 shrink-0 select-none text-center",
+          line.kind === "add" && "text-emerald-500",
+          line.kind === "del" && "text-red-500",
         )}
       >
-        <span className="w-10 shrink-0 select-none px-1 text-right text-muted-foreground/60">
-          {line.old_line ?? ""}
-        </span>
-        <span className="w-10 shrink-0 select-none px-1 text-right text-muted-foreground/60">
-          {line.new_line ?? ""}
-        </span>
-        <span
-          className={cn(
-            "w-4 shrink-0 select-none text-center",
-            line.kind === "add" && "text-emerald-500",
-            line.kind === "del" && "text-red-500",
-          )}
+        {line.kind === "add" ? "+" : line.kind === "del" ? "-" : ""}
+      </span>
+      <span className="whitespace-pre pr-3">{line.text}</span>
+      {first && (
+        <button
+          type="button"
+          onClick={() => onFindingClick(first)}
+          aria-label={`Open finding: ${first.title}`}
+          className="ml-auto mr-2 shrink-0 self-center"
         >
-          {line.kind === "add" ? "+" : line.kind === "del" ? "-" : ""}
-        </span>
-        <span className="whitespace-pre pr-3">{line.text}</span>
-      </div>
-      {findings.map((finding) => (
-        <div
-          key={finding.id}
-          ref={(node) => findingRef(finding.id, node)}
-          className="border-y border-border bg-background px-3 py-2 font-sans"
-        >
-          <InlineFindingCard finding={finding} />
-        </div>
-      ))}
-    </>
+          {(() => {
+            const style = GROUP_STYLES[first.group];
+            const Icon = style.Icon;
+            return <Icon className={cn("size-3.5", style.className)} />;
+          })()}
+        </button>
+      )}
+    </div>
   );
 }
 
-function InlineFindingCard({ finding }: { finding: ReviewFinding }) {
+function FindingFloatingCard({
+  detail,
+  finding,
+  top,
+  onClose,
+}: {
+  detail: ReviewDetail;
+  finding: ReviewFinding;
+  top: number;
+  onClose: () => void;
+}) {
+  const [copied, setCopied] = useState(false);
   const style = GROUP_STYLES[finding.group];
   const Icon = style.Icon;
+  const githubUrl =
+    finding.github_review_comment_id !== null
+      ? `${detail.url}#discussion_r${finding.github_review_comment_id}`
+      : null;
+  const rangeLabel =
+    finding.end_line !== null
+      ? `${finding.side === "LEFT" ? "L" : "R"}${finding.start_line ?? finding.end_line}${
+          finding.start_line !== null && finding.start_line !== finding.end_line
+            ? `-${finding.end_line}`
+            : ""
+        }`
+      : finding.file;
+
+  const copy = () => {
+    void navigator.clipboard.writeText(findingClipboardText(finding)).then(() => {
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    });
+  };
+
   return (
-    <div className={cn(finding.status !== "open" && "opacity-60")}>
-      <div className="flex items-center gap-2 text-xs">
+    <div
+      className="fixed right-6 z-50 flex max-h-[70vh] w-[420px] flex-col overflow-hidden rounded-lg border border-border bg-background shadow-2xl"
+      style={{ top }}
+      role="dialog"
+      aria-label={finding.title}
+    >
+      <div className="flex items-center gap-2 border-b border-border px-4 py-2.5 text-xs">
         <Icon className={cn("size-3.5", style.className)} />
         <span className={cn("font-medium", style.className)}>{style.label}</span>
-        <span className="font-medium text-foreground">{finding.title}</span>
+        <span className="rounded border border-border px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+          {rangeLabel}
+        </span>
         {finding.outdated && <Badgeish>Outdated</Badgeish>}
         {finding.status !== "open" && <Badgeish>{finding.status}</Badgeish>}
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close finding"
+          className="ml-auto rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+        >
+          <XIcon className="size-3.5" />
+        </button>
       </div>
-      <div className="mt-1 text-xs text-muted-foreground">
-        <Markdown content={finding.description} />
+      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+        <div className="text-sm font-medium">{finding.title}</div>
+        <div className="mt-1.5 text-xs text-muted-foreground">
+          <Markdown content={finding.description} />
+        </div>
+        {finding.suggestion && (
+          <pre className="mt-2 overflow-x-auto rounded border border-border bg-muted/40 p-2 font-mono text-[11px]">
+            {finding.suggestion}
+          </pre>
+        )}
+        {finding.resolution_note && (
+          <p className="mt-2 text-[11px] text-muted-foreground">
+            Resolution: {finding.resolution_note}
+          </p>
+        )}
       </div>
-      {finding.suggestion && (
-        <pre className="mt-2 overflow-x-auto rounded border border-border bg-muted/40 p-2 font-mono text-[11px]">
-          {finding.suggestion}
-        </pre>
-      )}
+      <div className="flex items-center gap-2 border-t border-border px-4 py-2.5">
+        <button
+          type="button"
+          onClick={copy}
+          className="inline-flex items-center gap-1.5 rounded border border-border px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground"
+        >
+          <CopyIcon className="size-3" />
+          {copied ? "Copied" : "Copy"}
+        </button>
+        {githubUrl && (
+          <a
+            href={githubUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-1.5 rounded border border-border px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground"
+          >
+            <IoLogoGithub className="size-3" />
+            View on GitHub
+          </a>
+        )}
+      </div>
     </div>
   );
 }
@@ -606,11 +788,15 @@ function SidePanel({
   detail,
   tab,
   onTabChange,
+  read,
+  onMarkAllRead,
   onFindingClick,
 }: {
   detail: ReviewDetail;
   tab: SideTab;
   onTabChange: (tab: SideTab) => void;
+  read: Set<string>;
+  onMarkAllRead: () => void;
   onFindingClick: (finding: ReviewFinding) => void;
 }) {
   const qc = useQueryClient();
@@ -621,25 +807,10 @@ function SidePanel({
     },
   });
 
-  const readStorageKey = `open-swe.review.read.${detail.thread_id}`;
-  const [read, setRead] = useState<Set<string>>(() => {
-    if (typeof window === "undefined") return new Set();
-    try {
-      const raw = window.localStorage.getItem(readStorageKey);
-      return new Set(raw ? (JSON.parse(raw) as Array<string>) : []);
-    } catch {
-      return new Set();
-    }
-  });
-  const markAllRead = () => {
-    const next = new Set(detail.findings.map((f) => f.id));
-    setRead(next);
-    window.localStorage.setItem(readStorageKey, JSON.stringify(Array.from(next)));
-  };
-
   const bugs = detail.findings.filter((f) => f.group === "bug");
   const flags = detail.findings.filter((f) => f.group !== "bug");
   const openBugs = bugs.filter((f) => f.status === "open");
+  const openFlags = flags.filter((f) => f.status === "open");
 
   return (
     <aside className="hidden w-80 shrink-0 flex-col overflow-y-auto border-l border-border xl:flex">
@@ -694,40 +865,38 @@ function SidePanel({
             <div className="mt-2 space-y-1 text-[11px] text-muted-foreground">
               <div>Reviewing commit {detail.head_sha.slice(0, 7) || "—"}</div>
               {detail.watch && <div>Watching for new pushes</div>}
-              {reReview.error && (
-                <div className="text-destructive">{reReview.error.message}</div>
-              )}
+              {reReview.error && <div className="text-destructive">{reReview.error.message}</div>}
             </div>
           </section>
 
-          <section className="px-3 py-3">
-            <div className="mb-2 flex items-center justify-between text-xs">
-              <span className="inline-flex items-center gap-1.5 font-medium">
-                <BugBeetleIcon className="size-3.5" />
-                {openBugs.length === 0 ? "0 Bugs" : `${openBugs.length} Bugs`}
-              </span>
-            </div>
-            <FindingList findings={bugs} read={read} onFindingClick={onFindingClick} />
-          </section>
+          <FindingSection
+            icon={BugBeetleIcon}
+            label={`${openBugs.length} Bug${openBugs.length === 1 ? "" : "s"}`}
+            emptyLabel="No bugs found."
+            findings={bugs}
+            read={read}
+            onFindingClick={onFindingClick}
+          />
 
-          <section className="px-3 py-3">
-            <div className="mb-2 flex items-center justify-between text-xs">
-              <span className="inline-flex items-center gap-1.5 font-medium">
-                <FlagIcon className="size-3.5" />
-                {flags.filter((f) => f.status === "open").length} Flags
-              </span>
-              {detail.findings.length > 0 && (
+          <FindingSection
+            icon={FlagIcon}
+            label={`${openFlags.length} Flag${openFlags.length === 1 ? "" : "s"}`}
+            emptyLabel="No issues found."
+            findings={flags}
+            read={read}
+            onFindingClick={onFindingClick}
+            action={
+              detail.findings.length > 0 ? (
                 <button
                   type="button"
-                  onClick={markAllRead}
+                  onClick={onMarkAllRead}
                   className="rounded border border-border px-1.5 py-0.5 text-[11px] text-muted-foreground hover:text-foreground"
                 >
                   Mark all as read
                 </button>
-              )}
-            </div>
-            <FindingList findings={flags} read={read} onFindingClick={onFindingClick} />
-          </section>
+              ) : null
+            }
+          />
 
           <ChecksSection checks={detail.checks} />
           <PeopleSection title="Reviewers" people={detail.pr.requested_reviewers} />
@@ -755,52 +924,84 @@ function SidePanel({
   );
 }
 
-function FindingList({
+function FindingSection({
+  icon: HeaderIcon,
+  label,
+  emptyLabel,
   findings,
   read,
   onFindingClick,
+  action,
 }: {
+  icon: (typeof GROUP_STYLES)["bug"]["Icon"];
+  label: string;
+  emptyLabel: string;
   findings: Array<ReviewFinding>;
   read: Set<string>;
   onFindingClick: (finding: ReviewFinding) => void;
+  action?: React.ReactNode;
 }) {
-  if (findings.length === 0) {
-    return <p className="text-[11px] text-muted-foreground">No issues found.</p>;
-  }
+  const [collapsed, setCollapsed] = useState(false);
   return (
-    <div className="space-y-1.5">
-      {findings.map((finding) => {
-        const style = GROUP_STYLES[finding.group];
-        const Icon = style.Icon;
-        const muted = finding.status !== "open" || read.has(finding.id);
-        return (
-          <button
-            key={finding.id}
-            type="button"
-            onClick={() => onFindingClick(finding)}
+    <section className="px-3 py-3">
+      <div className="mb-2 flex items-center justify-between text-xs">
+        <button
+          type="button"
+          onClick={() => setCollapsed((v) => !v)}
+          className="inline-flex items-center gap-1.5 font-medium"
+        >
+          <HeaderIcon className="size-3.5" />
+          {label}
+          <CaretDownIcon
             className={cn(
-              "block w-full rounded-md border border-transparent px-2 py-1.5 text-left transition-colors hover:border-border hover:bg-muted/40",
-              muted && "opacity-50",
+              "size-3 text-muted-foreground transition-transform",
+              collapsed && "-rotate-90",
             )}
-          >
-            <span className="flex items-start gap-1.5 text-xs">
-              <Icon className={cn("mt-0.5 size-3.5 shrink-0", style.className)} />
-              <span className="min-w-0">
-                <span className="line-clamp-2 font-medium text-foreground">
-                  {finding.title || finding.description}
-                </span>
-                <span className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
-                  <span className={style.className}>{style.label}</span>
-                  <span className="truncate font-mono">{findingAnchorLabel(finding)}</span>
-                  {finding.outdated && <Badgeish>Outdated</Badgeish>}
-                  {finding.status !== "open" && <Badgeish>{finding.status}</Badgeish>}
-                </span>
-              </span>
-            </span>
-          </button>
-        );
-      })}
-    </div>
+          />
+        </button>
+        {action}
+      </div>
+      {!collapsed &&
+        (findings.length === 0 ? (
+          <p className="text-[11px] text-muted-foreground">{emptyLabel}</p>
+        ) : (
+          <div className="space-y-0.5">
+            {findings.map((finding) => {
+              const style = GROUP_STYLES[finding.group];
+              const Icon = style.Icon;
+              const isRead = read.has(finding.id);
+              const muted = finding.status !== "open" || isRead;
+              return (
+                <button
+                  key={finding.id}
+                  type="button"
+                  onClick={() => onFindingClick(finding)}
+                  className={cn(
+                    "block w-full rounded-md border border-transparent px-2 py-1.5 text-left transition-colors hover:border-border hover:bg-muted/40",
+                    muted && "opacity-50",
+                  )}
+                >
+                  <span className="flex items-start gap-1.5 text-xs">
+                    <Icon className={cn("mt-0.5 size-3.5 shrink-0", style.className)} />
+                    <span className="min-w-0">
+                      <span className="line-clamp-1 font-medium text-foreground">
+                        {finding.title || finding.description}
+                      </span>
+                      <span className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
+                        <span className={style.className}>{style.label}</span>
+                        <span className="truncate font-mono">{findingAnchorLabel(finding)}</span>
+                        {finding.outdated && <Badgeish>Outdated</Badgeish>}
+                        {finding.status !== "open" && <Badgeish>{finding.status}</Badgeish>}
+                        {isRead && finding.status === "open" && <span>• Read</span>}
+                      </span>
+                    </span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        ))}
+    </section>
   );
 }
 

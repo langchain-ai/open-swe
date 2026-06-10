@@ -105,6 +105,11 @@ def _serialize_finding(finding: dict[str, Any], head_sha: str | None) -> dict[st
         "resolution_note": finding.get("resolution_note"),
         "diff_hunk": finding.get("diff_hunk"),
         "github_thread_resolved": bool(finding.get("github_thread_resolved")),
+        "github_review_comment_id": (
+            finding["github_review_comment_id"]
+            if isinstance(finding.get("github_review_comment_id"), int)
+            else None
+        ),
         "interactions": interactions if isinstance(interactions, list) else [],
     }
 
