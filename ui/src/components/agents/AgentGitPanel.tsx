@@ -292,7 +292,7 @@ export function AgentGitPanel({ thread }: AgentGitPanelProps) {
       <div
         className={cn(
           "flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface)] shadow-sm",
-          fullScreen ? "mx-3 mb-3" : "mr-3 mb-3 ml-1"
+          fullScreen ? "mx-3 mb-3" : "mr-4 mb-4 ml-1"
         )}
       >
       {topTab !== "git" ? (
