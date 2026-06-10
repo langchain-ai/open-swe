@@ -6,7 +6,7 @@ import type { AgentThread, ImageChunk, Message } from "@/lib/agents/types"
 import type { ModelSelection } from "@/lib/agents/useModelOptions"
 import { AgentGitPanel } from "@/components/agents/AgentGitPanel"
 import { AgentPromptBar } from "@/components/agents/AgentPromptBar"
-import { MessageView, summarizeChangedFiles } from "@/components/agents/ported"
+import { MessageView } from "@/components/agents/ported"
 import {
   agentThreadKeys,
   useCancelAgentThread,
@@ -169,12 +169,6 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
   const settingUpSandbox =
     hasActiveRun && thread.messages.length === 0 && pendingPrompts.length > 0
 
-  const hasChanges = useMemo(() => {
-    const chunks = thread.messages.flatMap((message) => message.chunks)
-    return summarizeChangedFiles(chunks).length > 0
-  }, [thread.messages])
-  const showGitPanel = hasChanges || Boolean(thread.pr)
-
   return (
     <div className="flex min-w-0 flex-1">
       <div className="flex min-w-0 flex-1 flex-col">
@@ -227,7 +221,7 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
           </div>
         )}
       </div>
-      {showGitPanel && <AgentGitPanel thread={thread} />}
+      <AgentGitPanel thread={thread} />
     </div>
   )
 }

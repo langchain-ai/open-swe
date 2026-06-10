@@ -360,14 +360,14 @@ export const CloudPromptBar = memo(function CloudPromptBarComponent({
             <ImagePlus className="size-4" />
           </button>
 
-          {canCancel && (
+          {canCancel && !canSubmit ? (
             <button
               type="button"
               onClick={onCancel}
               disabled={cancelling}
               aria-label="Cancel run"
               title="Cancel run"
-              className="flex size-7 shrink-0 items-center justify-center rounded-full border border-[var(--ui-border)] bg-[var(--ui-panel-2)] text-[color:var(--ui-text-muted)] transition-colors hover:text-[color:var(--ui-text)] disabled:cursor-default disabled:opacity-60"
+              className="flex size-7 shrink-0 items-center justify-center rounded-full bg-[var(--ui-accent)] text-white transition-opacity hover:opacity-90 disabled:cursor-default disabled:opacity-60"
             >
               {cancelling ? (
                 <LoaderCircle className="size-3.5 animate-spin" />
@@ -379,21 +379,21 @@ export const CloudPromptBar = memo(function CloudPromptBarComponent({
                 />
               )}
             </button>
+          ) : (
+            <button
+              type="button"
+              onClick={handleSubmit}
+              disabled={!canSubmit}
+              aria-label="Send message"
+              className="flex size-7 shrink-0 items-center justify-center rounded-full bg-[var(--ui-accent)] text-white transition-opacity hover:opacity-90 disabled:cursor-default disabled:opacity-40"
+            >
+              {disabled ? (
+                <LoaderCircle className="size-3.5 animate-spin" />
+              ) : (
+                <ArrowUp className="size-3.5" strokeWidth={2.5} />
+              )}
+            </button>
           )}
-
-          <button
-            type="button"
-            onClick={handleSubmit}
-            disabled={!canSubmit}
-            aria-label="Send message"
-            className="flex size-7 shrink-0 items-center justify-center rounded-full bg-[var(--ui-accent)] text-white transition-opacity hover:opacity-90 disabled:cursor-default disabled:opacity-40"
-          >
-            {disabled ? (
-              <LoaderCircle className="size-3.5 animate-spin" />
-            ) : (
-              <ArrowUp className="size-3.5" strokeWidth={2.5} />
-            )}
-          </button>
         </div>
       </div>
     </div>

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { MultiFileDiff } from "@pierre/diffs/react"
 import {
   FileTree,
@@ -10,6 +10,7 @@ import {
   ArrowsOutIcon,
   CaretDownIcon,
   GitPullRequestIcon,
+  SidebarSimpleIcon,
 } from "@phosphor-icons/react"
 import type { GitStatus, GitStatusEntry } from "@pierre/trees"
 
@@ -58,6 +59,82 @@ function commonDirPrefix(paths: Array<string>): string {
   return depth === 0 ? "" : `${base.slice(0, depth).join("/")}/`
 }
 
+const PANEL_STORAGE_WIDTH = "open-swe.gitpanel.width"
+const PANEL_STORAGE_COLLAPSED = "open-swe.gitpanel.collapsed"
+const PANEL_DEFAULT_WIDTH = 420
+const PANEL_MIN_WIDTH = 320
+const PANEL_MAX_WIDTH = 720
+
+function readStoredPanelWidth(): number {
+  if (typeof window === "undefined") return PANEL_DEFAULT_WIDTH
+  const raw = window.localStorage.getItem(PANEL_STORAGE_WIDTH)
+  const parsed = raw ? Number(raw) : NaN
+  if (!Number.isFinite(parsed)) return PANEL_DEFAULT_WIDTH
+  return Math.min(PANEL_MAX_WIDTH, Math.max(PANEL_MIN_WIDTH, parsed))
+}
+
+function readStoredPanelCollapsed(): boolean {
+  if (typeof window === "undefined") return false
+  return window.localStorage.getItem(PANEL_STORAGE_COLLAPSED) === "1"
+}
+
+function PanelResizeHandle({
+  width,
+  onResize,
+}: {
+  width: number
+  onResize: (next: number) => void
+}) {
+  const startRef = useRef<{ x: number; width: number } | null>(null)
+  const [dragging, setDragging] = useState(false)
+
+  const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    startRef.current = { x: e.clientX, width }
+    setDragging(true)
+    e.currentTarget.setPointerCapture(e.pointerId)
+  }
+
+  const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!startRef.current) return
+    onResize(startRef.current.width - (e.clientX - startRef.current.x))
+  }
+
+  const onPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    startRef.current = null
+    setDragging(false)
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId)
+    }
+  }
+
+  useEffect(() => {
+    if (!dragging) return
+    const prev = document.body.style.cursor
+    document.body.style.cursor = "col-resize"
+    return () => {
+      document.body.style.cursor = prev
+    }
+  }, [dragging])
+
+  return (
+    <div
+      role="separator"
+      aria-orientation="vertical"
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onPointerCancel={onPointerUp}
+      className={cn(
+        "absolute top-0 left-0 z-20 h-full w-1 cursor-col-resize touch-none select-none",
+        "after:absolute after:inset-y-0 after:left-0 after:w-px after:bg-transparent after:transition-colors",
+        "hover:after:bg-[var(--ui-border)]",
+        dragging && "after:bg-[var(--ui-border)]"
+      )}
+    />
+  )
+}
+
 function treeThemeStyle(): React.CSSProperties {
   return {
     "--trees-theme-sidebar-bg": "var(--ui-surface)",
@@ -78,8 +155,22 @@ function treeThemeStyle(): React.CSSProperties {
 }
 
 export function AgentGitPanel({ thread }: AgentGitPanelProps) {
+  const [topTab, setTopTab] = useState<"git" | "desktop" | "terminal">("git")
   const [tab, setTab] = useState<"diff" | "review" | "commits">("diff")
+  const [collapsed, setCollapsedState] = useState(() => readStoredPanelCollapsed())
+  const [width, setWidthState] = useState(() => readStoredPanelWidth())
   const [fullScreen, setFullScreen] = useState(false)
+
+  const setCollapsed = useCallback((next: boolean) => {
+    setCollapsedState(next)
+    window.localStorage.setItem(PANEL_STORAGE_COLLAPSED, next ? "1" : "0")
+  }, [])
+
+  const setWidth = useCallback((next: number) => {
+    const clamped = Math.min(PANEL_MAX_WIDTH, Math.max(PANEL_MIN_WIDTH, next))
+    setWidthState(clamped)
+    window.localStorage.setItem(PANEL_STORAGE_WIDTH, String(clamped))
+  }, [])
   const [selectedTreePath, setSelectedTreePath] = useState<string | null>(null)
   const sectionRefs = useRef<Record<string, HTMLDivElement | null>>({})
   const pr = thread.pr
@@ -128,22 +219,43 @@ export function AgentGitPanel({ thread }: AgentGitPanelProps) {
     })
   }, [selectedTreePath, files])
 
+  if (collapsed) {
+    return (
+      <button
+        type="button"
+        onClick={() => setCollapsed(false)}
+        aria-label="Expand git panel"
+        title="Expand git panel"
+        className="fixed top-3 right-3 z-30 flex size-7 items-center justify-center rounded-md border border-border bg-background text-muted-foreground shadow-sm hover:bg-accent hover:text-foreground"
+      >
+        <SidebarSimpleIcon className="size-4" />
+      </button>
+    )
+  }
+
   return (
     <aside
       className={cn(
-        "flex shrink-0 flex-col border-l border-[var(--ui-border)] bg-[var(--ui-surface)]",
-        fullScreen ? "fixed inset-0 w-full" : "h-full w-[420px]"
+        "relative flex shrink-0 flex-col bg-[var(--ui-bg)]",
+        fullScreen ? "fixed inset-0 !w-full" : "h-full"
       )}
-      style={fullScreen ? { zIndex: Z.MODAL } : undefined}
+      style={fullScreen ? { zIndex: Z.MODAL } : { width }}
     >
-      <div className="flex h-11 shrink-0 items-center gap-1 border-b border-[var(--ui-border)] px-3">
-        {(["Git", "Desktop", "Terminal"] as const).map((label, i) => (
+      <div className="flex h-11 shrink-0 items-center gap-1 px-3">
+        {(
+          [
+            ["git", "Git"],
+            ["desktop", "Desktop"],
+            ["terminal", "Terminal"],
+          ] as const
+        ).map(([id, label]) => (
           <button
-            key={label}
+            key={id}
             type="button"
+            onClick={() => setTopTab(id)}
             className={cn(
               "rounded-md px-2.5 py-1 text-xs transition-colors",
-              i === 0
+              topTab === id
                 ? "bg-[var(--ui-accent-bubble)] font-medium text-[var(--ui-text)]"
                 : "text-[var(--ui-text-dim)] hover:bg-[var(--ui-panel-2)]"
             )}
@@ -153,9 +265,21 @@ export function AgentGitPanel({ thread }: AgentGitPanelProps) {
         ))}
         <button
           type="button"
+          onClick={() => {
+            setFullScreen(false)
+            setCollapsed(true)
+          }}
+          aria-label="Collapse git panel"
+          title="Collapse git panel"
+          className="ml-auto rounded-md p-1.5 text-[var(--ui-text-dim)] transition-colors hover:bg-[var(--ui-panel-2)] hover:text-[var(--ui-text)]"
+        >
+          <SidebarSimpleIcon className="size-4" />
+        </button>
+        <button
+          type="button"
           onClick={() => setFullScreen((v) => !v)}
           aria-label={fullScreen ? "Exit full screen" : "Enter full screen"}
-          className="ml-auto rounded-md p-1.5 text-[var(--ui-text-dim)] transition-colors hover:bg-[var(--ui-panel-2)] hover:text-[var(--ui-text)]"
+          className="rounded-md p-1.5 text-[var(--ui-text-dim)] transition-colors hover:bg-[var(--ui-panel-2)] hover:text-[var(--ui-text)]"
         >
           {fullScreen ? (
             <ArrowsInIcon className="size-4" />
@@ -165,6 +289,18 @@ export function AgentGitPanel({ thread }: AgentGitPanelProps) {
         </button>
       </div>
 
+      <div
+        className={cn(
+          "flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface)] shadow-sm",
+          fullScreen ? "mx-3 mb-3" : "mr-3 mb-3 ml-1"
+        )}
+      >
+      {topTab !== "git" ? (
+        <div className="flex flex-1 items-center justify-center p-6 text-xs text-[var(--ui-text-dim)]">
+          Coming Soon
+        </div>
+      ) : (
+        <>
       {pr && (
         <div className="border-b border-[var(--ui-border)] px-4 py-3">
           <div className="flex items-start justify-between gap-3">
@@ -237,11 +373,7 @@ export function AgentGitPanel({ thread }: AgentGitPanelProps) {
             </div>
           ) : (
             <div className="p-6 text-center text-xs text-[var(--ui-text-dim)]">
-              {tab === "commits"
-                ? "Commit history will appear here."
-                : tab === "review"
-                  ? "Review comments will appear here."
-                  : "No diff available."}
+              {tab === "diff" ? "No diff available." : "Coming Soon"}
             </div>
           )}
         </div>
@@ -256,6 +388,10 @@ export function AgentGitPanel({ thread }: AgentGitPanelProps) {
           </div>
         )}
       </div>
+        </>
+      )}
+      </div>
+      {!fullScreen && <PanelResizeHandle width={width} onResize={setWidth} />}
     </aside>
   )
 }
