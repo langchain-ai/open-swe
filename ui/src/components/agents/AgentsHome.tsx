@@ -1,11 +1,11 @@
 import { useState } from "react"
 
-import type { ModelSelection } from "@/lib/agents/useModelOptions"
+import type { ModelSelection } from "@/lib/agents/provider/useModelOptions"
 import { AgentPromptBar } from "@/components/agents/AgentPromptBar"
 import { SlackConnectDialog } from "@/components/agents/SlackConnectDialog"
 import { Logo } from "@/components/agents/ported/Logo"
 import { useCreateAgentThread } from "@/lib/agents/queries"
-import { useModelOptions } from "@/lib/agents/useModelOptions"
+import { useModelOptions } from "@/lib/agents/provider/useModelOptions"
 import { useProfile, useRepos } from "@/lib/profile"
 
 export function AgentsHome() {

@@ -2,7 +2,7 @@ import { useMemo, type ReactNode } from "react";
 import { HttpAgentServerAdapter, StreamProvider } from "@langchain/react";
 import { useQueryClient } from "@tanstack/react-query";
 
-import { AgentThreadStreamBoundary } from "./agentThreadStreamBoundary";
+import { AgentThreadStreamBoundary } from "./provider/useIsInAgentThreadStream";
 import { agentThreadKeys } from "./queries";
 import {
   agentStreamApiUrl,
