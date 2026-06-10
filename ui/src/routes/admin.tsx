@@ -1,6 +1,6 @@
-import { Navigate, createFileRoute } from "@tanstack/react-router";
+import { Link, Navigate, createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import type {
   DatadogConnectBody,
@@ -52,10 +52,98 @@ function AdminPage() {
     >
       <GlobalDefaultsSection models={options.data?.models ?? []} />
 
+      <TriggerReviewSection />
+
       <ObservabilityCredentialsSection />
 
       <UserMappingsSection enabled={!!session.data.is_admin} />
     </AppShell>
+  );
+}
+
+const PR_URL_RE = /^https:\/\/github\.com\/([^/\s]+)\/([^/\s]+)\/pull\/(\d+)/;
+
+function TriggerReviewSection() {
+  const [url, setUrl] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+
+  const parsed = useMemo(() => {
+    const match = PR_URL_RE.exec(url.trim());
+    if (!match) return null;
+    const [, owner, repo, number] = match;
+    if (!owner || !repo || !number) return null;
+    return { owner, repo, number: Number(number) };
+  }, [url]);
+
+  const trigger = useMutation({
+    mutationFn: () => {
+      if (!parsed) throw new Error("invalid PR URL");
+      return api.reReview(parsed.owner, parsed.repo, parsed.number);
+    },
+    onSuccess: (result) => {
+      setError(null);
+      setMessage(
+        result.queued
+          ? "Review queued — a run is already in progress on this PR."
+          : "Review started.",
+      );
+    },
+    onError: (e: Error) => {
+      setMessage(null);
+      setError(e.message);
+    },
+  });
+
+  return (
+    <SettingsSection
+      title="Trigger a review"
+      description="Manually start an Open SWE Review run on a pull request. The repository must be enabled for review."
+    >
+      <div className="flex flex-col gap-2 p-4">
+        <div className="flex items-center gap-2">
+          <Input
+            className="flex-1"
+            placeholder="https://github.com/owner/repo/pull/123"
+            value={url}
+            onChange={(e) => {
+              setUrl(e.target.value);
+              setMessage(null);
+              setError(null);
+            }}
+          />
+          <Button
+            size="sm"
+            onClick={() => trigger.mutate()}
+            disabled={!parsed || trigger.isPending}
+          >
+            {trigger.isPending ? "Starting…" : "Start review"}
+          </Button>
+        </div>
+        {url.trim() && !parsed && (
+          <p className="text-xs text-muted-foreground">
+            Enter a full PR URL like https://github.com/owner/repo/pull/123
+          </p>
+        )}
+        {message && parsed && (
+          <p className="text-xs text-muted-foreground">
+            {message}{" "}
+            <Link
+              to="/reviews/$owner/$repo/$number"
+              params={{
+                owner: parsed.owner,
+                repo: parsed.repo,
+                number: String(parsed.number),
+              }}
+              className="underline hover:text-foreground"
+            >
+              View review
+            </Link>
+          </p>
+        )}
+        {error && <p className="text-xs text-destructive">{error}</p>}
+      </div>
+    </SettingsSection>
   );
 }
 
