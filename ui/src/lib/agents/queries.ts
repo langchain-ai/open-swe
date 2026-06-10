@@ -167,7 +167,17 @@ export function useCancelAgentThread(threadId: string) {
   return useMutation({
     mutationFn: () => agentsApi.cancelThread(threadId),
     onSuccess: (thread) => {
-      queryClient.setQueryData(agentThreadKeys.detail(threadId), thread)
+      queryClient.setQueryData(
+        agentThreadKeys.detail(threadId),
+        (prev: typeof thread | undefined) => {
+          if (!prev) return thread
+          return {
+            ...thread,
+            messages:
+              thread.messages.length > 0 ? thread.messages : prev.messages,
+          }
+        }
+      )
       queryClient.invalidateQueries({ queryKey: agentThreadKeys.all })
     },
   })
