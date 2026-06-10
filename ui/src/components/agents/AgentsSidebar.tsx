@@ -1,3 +1,4 @@
+import { ContextMenu } from "@base-ui/react/context-menu"
 import { Dialog } from "@base-ui/react/dialog"
 import { Link } from "@tanstack/react-router"
 import {
@@ -9,6 +10,8 @@ import {
   CircleNotchIcon,
   LightningIcon,
   PlusIcon,
+  TrashIcon,
+  TreeStructureIcon,
   XIcon,
 } from "@phosphor-icons/react"
 import { IoLogoGithub, IoLogoSlack } from "react-icons/io5"
@@ -226,62 +229,97 @@ function ThreadRow({
   const SourceIcon = source?.icon
   const showFinishedIndicator = thread.status === "finished" && !thread.viewed
 
+  const openTrace = () => {
+    if (!thread.traceUrl) return
+    window.open(thread.traceUrl, "_blank", "noopener,noreferrer")
+  }
+
   return (
     <>
-      <Link
-        to="/agents/$threadId"
-        params={{ threadId: thread.id }}
-        onClick={onNavigate}
-        className={cn(
-          "group mb-0.5 flex items-center gap-2 rounded-lg px-2.5 py-1.5 transition-colors",
-          isActive
-            ? "bg-[var(--ui-accent-bubble)] text-[var(--ui-text)]"
-            : "text-[var(--ui-text-muted)] hover:bg-[var(--ui-sidebar-hover)]",
-          isDeleting && "opacity-50"
-        )}
-      >
-        {thread.status === "running" ? (
-          <CircleNotchIcon
-            className="size-3 shrink-0 animate-spin text-[var(--ui-accent)]"
-            aria-label="Thread running"
-          />
-        ) : (
-          <span
-            className={cn(
-              "size-2 shrink-0 rounded-full",
-              showFinishedIndicator
-                ? "bg-[var(--ui-accent)]"
-                : "bg-[var(--ui-border)]"
-            )}
-            aria-label={
-              showFinishedIndicator ? "Thread finished" : "Thread viewed"
-            }
-          />
-        )}
-        {source && SourceIcon && (
-          <SourceIcon
-            className="size-3.5 shrink-0 text-[var(--ui-text-dim)]"
-            aria-label={source.label}
-          >
-            <title>{source.label}</title>
-          </SourceIcon>
-        )}
-        <span className="min-w-0 flex-1 truncate text-xs">{thread.title}</span>
-        {badge && (
-          <span className="shrink-0 rounded bg-[var(--ui-panel-2)] px-1.5 py-0.5 text-[10px] text-[var(--ui-text-dim)] group-hover:hidden">
-            {badge}
-          </span>
-        )}
-        <button
-          type="button"
-          aria-label="Delete thread"
-          onClick={onDelete}
-          disabled={isDeleting}
-          className="hidden size-4 shrink-0 items-center justify-center rounded text-[var(--ui-text-dim)] group-hover:flex hover:bg-[var(--ui-panel-2)] hover:text-[var(--ui-text)]"
+      <ContextMenu.Root>
+        <ContextMenu.Trigger
+          render={
+            <Link
+              to="/agents/$threadId"
+              params={{ threadId: thread.id }}
+              onClick={onNavigate}
+              className={cn(
+                "group mb-0.5 flex items-center gap-2 rounded-lg px-2.5 py-1.5 transition-colors",
+                isActive
+                  ? "bg-[var(--ui-accent-bubble)] text-[var(--ui-text)]"
+                  : "text-[var(--ui-text-muted)] hover:bg-[var(--ui-sidebar-hover)]",
+                isDeleting && "opacity-50"
+              )}
+            />
+          }
         >
-          <XIcon className="size-3" weight="bold" />
-        </button>
-      </Link>
+          {thread.status === "running" ? (
+            <CircleNotchIcon
+              className="size-3 shrink-0 animate-spin text-[var(--ui-accent)]"
+              aria-label="Thread running"
+            />
+          ) : (
+            <span
+              className={cn(
+                "size-2 shrink-0 rounded-full",
+                showFinishedIndicator
+                  ? "bg-[var(--ui-accent)]"
+                  : "bg-[var(--ui-border)]"
+              )}
+              aria-label={
+                showFinishedIndicator ? "Thread finished" : "Thread viewed"
+              }
+            />
+          )}
+          {source && SourceIcon && (
+            <SourceIcon
+              className="size-3.5 shrink-0 text-[var(--ui-text-dim)]"
+              aria-label={source.label}
+            >
+              <title>{source.label}</title>
+            </SourceIcon>
+          )}
+          <span className="min-w-0 flex-1 truncate text-xs">
+            {thread.title}
+          </span>
+          {badge && (
+            <span className="shrink-0 rounded bg-[var(--ui-panel-2)] px-1.5 py-0.5 text-[10px] text-[var(--ui-text-dim)] group-hover:hidden">
+              {badge}
+            </span>
+          )}
+          <button
+            type="button"
+            aria-label="Delete thread"
+            onClick={onDelete}
+            disabled={isDeleting}
+            className="hidden size-4 shrink-0 items-center justify-center rounded text-[var(--ui-text-dim)] group-hover:flex hover:bg-[var(--ui-panel-2)] hover:text-[var(--ui-text)]"
+          >
+            <XIcon className="size-3" weight="bold" />
+          </button>
+        </ContextMenu.Trigger>
+        <ContextMenu.Portal>
+          <ContextMenu.Positioner className="z-50 outline-none">
+            <ContextMenu.Popup className="min-w-[10rem] overflow-hidden rounded-md border border-[var(--ui-border)] bg-popover p-1 text-popover-foreground shadow-md outline-none data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95">
+              <ContextMenu.Item
+                disabled={!thread.traceUrl}
+                onClick={openTrace}
+                className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-xs outline-none select-none data-highlighted:bg-[var(--ui-sidebar-hover)] data-disabled:pointer-events-none data-disabled:opacity-50"
+              >
+                <TreeStructureIcon className="size-3.5" />
+                Open trace
+              </ContextMenu.Item>
+              <ContextMenu.Item
+                onClick={onDelete}
+                disabled={isDeleting}
+                className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-xs text-[var(--ui-danger)] outline-none select-none data-highlighted:bg-[var(--ui-sidebar-hover)] data-disabled:pointer-events-none data-disabled:opacity-50"
+              >
+                <TrashIcon className="size-3.5" />
+                Delete thread
+              </ContextMenu.Item>
+            </ContextMenu.Popup>
+          </ContextMenu.Positioner>
+        </ContextMenu.Portal>
+      </ContextMenu.Root>
       <Dialog.Root open={deleteOpen} onOpenChange={setDeleteOpen}>
         <Dialog.Portal>
           <Dialog.Backdrop className="fixed inset-0 z-50 bg-black/50 data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0" />

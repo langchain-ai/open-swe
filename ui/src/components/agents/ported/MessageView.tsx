@@ -3,7 +3,7 @@ import { useRef, useEffect, useLayoutEffect, useCallback, memo, useMemo, useStat
 import { ChevronDown, ChevronUp } from "lucide-react";
 import { diffLines } from "diff";
 import { MultiFileDiff } from "@pierre/diffs/react";
-import { diffOptions } from "@/components/agents/utils/diffUtils";
+import { useDiffOptions } from "@/components/agents/utils/diffUtils";
 import { CodeBlock } from "./CodeBlock";
 import { Markdown } from "./Markdown";
 import { ToolExecution } from "./ToolExecution";
@@ -180,6 +180,7 @@ const TurnChangedFilesCard = memo(function TurnChangedFilesCard({
   projectPath?: string;
 }) {
   const [expandedByPath, setExpandedByPath] = useState<Record<string, boolean>>({});
+  const diffOptions = useDiffOptions();
 
   const toggleFile = useCallback((filePath: string) => {
     setExpandedByPath((prev) => ({ ...prev, [filePath]: !prev[filePath] }));

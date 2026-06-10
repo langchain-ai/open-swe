@@ -1,9 +1,9 @@
-import { memo, useState, useCallback, useRef, useLayoutEffect } from "react";
+import { memo, useState, useCallback, useMemo, useRef, useLayoutEffect } from "react";
 import { diffLines } from "diff";
 import { MultiFileDiff } from "@pierre/diffs/react";
 import type { ToolExecutionChunk, AcpToolKind } from "@/lib/agents/types";
 import { DiffView } from "./DiffView";
-import { diffOptions } from "@/components/agents/utils/diffUtils";
+import { useDiffOptions } from "@/components/agents/utils/diffUtils";
 
 interface ToolExecutionProps {
   chunk: ToolExecutionChunk;
@@ -106,11 +106,6 @@ function formatToolDisplay(
   }
 }
 
-const inlineDiffOptions = {
-  ...diffOptions,
-  disableFileHeader: true,
-};
-
 const InlineDiffCollapsible = memo(function InlineDiffCollapsible({
   filePath,
   fileName,
@@ -130,6 +125,11 @@ const InlineDiffCollapsible = memo(function InlineDiffCollapsible({
 }) {
   const [expanded, setExpanded] = useState(false);
   const toggle = useCallback(() => setExpanded((prev) => !prev), []);
+  const diffOptions = useDiffOptions();
+  const inlineDiffOptions = useMemo(
+    () => ({ ...diffOptions, disableFileHeader: true }),
+    [diffOptions]
+  );
   const scrollRef = useRef<HTMLDivElement>(null);
   const [scrolledFromTop, setScrolledFromTop] = useState(false);
   const [scrolledFromBottom, setScrolledFromBottom] = useState(false);
