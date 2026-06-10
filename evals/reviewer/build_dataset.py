@@ -21,8 +21,6 @@ from pathlib import Path
 from dotenv import load_dotenv
 from langsmith import Client
 
-load_dotenv()
-
 GOLDENS_DIR = Path(__file__).parent / "golden_comments"
 PR_URL_RE = re.compile(r"github\.com/([^/]+)/([^/]+)/pull/(\d+)")
 
@@ -115,6 +113,7 @@ def upload(dataset_name: str, examples: list[dict]) -> None:
 
 
 def main() -> None:
+    load_dotenv()
     ap = argparse.ArgumentParser()
     ap.add_argument("--dataset-name", default="openswe-reviewer-v1")
     ap.add_argument("--dry-run", action="store_true", help="Build examples but don't upload.")

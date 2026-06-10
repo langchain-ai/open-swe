@@ -323,12 +323,17 @@ def test_get_slack_repo_config_uses_existing_thread_repo(
     assert not posted
 
 
+async def _no_team_default_repo() -> dict[str, str] | None:
+    return None
+
+
 def test_get_slack_repo_config_new_thread_uses_default(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     threads_client = _FakeThreadsClient(raise_not_found=True)
     monkeypatch.setattr(webapp, "SLACK_REPO_OWNER", "default-owner")
     monkeypatch.setattr(webapp, "SLACK_REPO_NAME", "default-repo")
+    monkeypatch.setattr(webapp, "get_team_default_repo", _no_team_default_repo)
 
     monkeypatch.setattr(webapp, "get_client", lambda url: _FakeClient(threads_client))
 
@@ -343,6 +348,7 @@ def test_get_slack_repo_config_existing_thread_without_repo_uses_default(
     threads_client = _FakeThreadsClient(thread={"metadata": {}})
     monkeypatch.setattr(webapp, "SLACK_REPO_OWNER", "default-owner")
     monkeypatch.setattr(webapp, "SLACK_REPO_NAME", "default-repo")
+    monkeypatch.setattr(webapp, "get_team_default_repo", _no_team_default_repo)
 
     monkeypatch.setattr(webapp, "get_client", lambda url: _FakeClient(threads_client))
 

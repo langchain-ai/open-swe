@@ -13,12 +13,9 @@ import os
 import threading
 from typing import Any, Literal, cast
 
-from dotenv import load_dotenv
 from langgraph_sdk import get_client
 
 from agent.reviewer_findings import Finding, Severity, filter_findings_for_publish
-
-load_dotenv()
 
 DEFAULT_REVIEWER_ASSISTANT_ID = "reviewer"
 DEFAULT_LANGGRAPH_URL = "http://localhost:2024"

@@ -22,8 +22,6 @@ from langsmith.schemas import Example
 from evals.reviewer.judge import aggregate_pr, judge_match
 from evals.reviewer.target import drain_thread_ids, get_langgraph_url, review_pr
 
-load_dotenv()
-
 logger = logging.getLogger(__name__)
 
 CONFIG_PATH = Path(__file__).with_name("config.toml")
@@ -127,6 +125,7 @@ async def _cleanup_threads(thread_ids: Iterable[str]) -> None:
 
 
 async def main() -> None:
+    load_dotenv()
     config = _load_config()
     _apply_config_to_env(config)
 
