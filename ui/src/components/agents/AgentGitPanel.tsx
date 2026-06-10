@@ -74,8 +74,8 @@ function readStoredPanelWidth(): number {
 }
 
 function readStoredPanelCollapsed(): boolean {
-  if (typeof window === "undefined") return false
-  return window.localStorage.getItem(PANEL_STORAGE_COLLAPSED) === "1"
+  if (typeof window === "undefined") return true
+  return window.localStorage.getItem(PANEL_STORAGE_COLLAPSED) !== "0"
 }
 
 function PanelResizeHandle({
