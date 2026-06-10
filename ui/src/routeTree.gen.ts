@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as UsageRouteImport } from './routes/usage'
+import { Route as ReviewsRouteImport } from './routes/reviews'
 import { Route as ReviewRouteImport } from './routes/review'
 import { Route as MySettingsRouteImport } from './routes/my-settings'
 import { Route as LoginRouteImport } from './routes/login'
@@ -26,10 +27,16 @@ import { Route as AgentsAutomationsIndexRouteImport } from './routes/agents/auto
 import { Route as ReviewRepositoriesOwnerRouteImport } from './routes/review_.repositories.$owner'
 import { Route as AgentsAutomationsNewRouteImport } from './routes/agents/automations/new'
 import { Route as AgentsAutomationsScheduleIdRouteImport } from './routes/agents/automations/$scheduleId'
+import { Route as ReviewsOwnerRepoNumberRouteImport } from './routes/reviews_.$owner.$repo.$number'
 
 const UsageRoute = UsageRouteImport.update({
   id: '/usage',
   path: '/usage',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ReviewsRoute = ReviewsRouteImport.update({
+  id: '/reviews',
+  path: '/reviews',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ReviewRoute = ReviewRouteImport.update({
@@ -113,6 +120,11 @@ const AgentsAutomationsScheduleIdRoute =
     path: '/automations/$scheduleId',
     getParentRoute: () => AgentsRoute,
   } as any)
+const ReviewsOwnerRepoNumberRoute = ReviewsOwnerRepoNumberRouteImport.update({
+  id: '/reviews_/$owner/$repo/$number',
+  path: '/reviews/$owner/$repo/$number',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -123,6 +135,7 @@ export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute
   '/my-settings': typeof MySettingsRoute
   '/review': typeof ReviewRoute
+  '/reviews': typeof ReviewsRoute
   '/usage': typeof UsageRoute
   '/agents/$threadId': typeof AgentsThreadIdRoute
   '/agents/instructions': typeof AgentsInstructionsRoute
@@ -132,6 +145,7 @@ export interface FileRoutesByFullPath {
   '/agents/automations/new': typeof AgentsAutomationsNewRoute
   '/review/repositories/$owner': typeof ReviewRepositoriesOwnerRoute
   '/agents/automations/': typeof AgentsAutomationsIndexRoute
+  '/reviews/$owner/$repo/$number': typeof ReviewsOwnerRepoNumberRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -141,6 +155,7 @@ export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/my-settings': typeof MySettingsRoute
   '/review': typeof ReviewRoute
+  '/reviews': typeof ReviewsRoute
   '/usage': typeof UsageRoute
   '/agents/$threadId': typeof AgentsThreadIdRoute
   '/agents/instructions': typeof AgentsInstructionsRoute
@@ -150,6 +165,7 @@ export interface FileRoutesByTo {
   '/agents/automations/new': typeof AgentsAutomationsNewRoute
   '/review/repositories/$owner': typeof ReviewRepositoriesOwnerRoute
   '/agents/automations': typeof AgentsAutomationsIndexRoute
+  '/reviews/$owner/$repo/$number': typeof ReviewsOwnerRepoNumberRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -161,6 +177,7 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/my-settings': typeof MySettingsRoute
   '/review': typeof ReviewRoute
+  '/reviews': typeof ReviewsRoute
   '/usage': typeof UsageRoute
   '/agents/$threadId': typeof AgentsThreadIdRoute
   '/agents_/instructions': typeof AgentsInstructionsRoute
@@ -170,6 +187,7 @@ export interface FileRoutesById {
   '/agents/automations/new': typeof AgentsAutomationsNewRoute
   '/review_/repositories/$owner': typeof ReviewRepositoriesOwnerRoute
   '/agents/automations/': typeof AgentsAutomationsIndexRoute
+  '/reviews_/$owner/$repo/$number': typeof ReviewsOwnerRepoNumberRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -182,6 +200,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/my-settings'
     | '/review'
+    | '/reviews'
     | '/usage'
     | '/agents/$threadId'
     | '/agents/instructions'
@@ -191,6 +210,7 @@ export interface FileRouteTypes {
     | '/agents/automations/new'
     | '/review/repositories/$owner'
     | '/agents/automations/'
+    | '/reviews/$owner/$repo/$number'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -200,6 +220,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/my-settings'
     | '/review'
+    | '/reviews'
     | '/usage'
     | '/agents/$threadId'
     | '/agents/instructions'
@@ -209,6 +230,7 @@ export interface FileRouteTypes {
     | '/agents/automations/new'
     | '/review/repositories/$owner'
     | '/agents/automations'
+    | '/reviews/$owner/$repo/$number'
   id:
     | '__root__'
     | '/'
@@ -219,6 +241,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/my-settings'
     | '/review'
+    | '/reviews'
     | '/usage'
     | '/agents/$threadId'
     | '/agents_/instructions'
@@ -228,6 +251,7 @@ export interface FileRouteTypes {
     | '/agents/automations/new'
     | '/review_/repositories/$owner'
     | '/agents/automations/'
+    | '/reviews_/$owner/$repo/$number'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -239,10 +263,12 @@ export interface RootRouteChildren {
   LoginRoute: typeof LoginRoute
   MySettingsRoute: typeof MySettingsRoute
   ReviewRoute: typeof ReviewRoute
+  ReviewsRoute: typeof ReviewsRoute
   UsageRoute: typeof UsageRoute
   AgentsInstructionsRoute: typeof AgentsInstructionsRoute
   ReviewStylesRoute: typeof ReviewStylesRoute
   ReviewRepositoriesOwnerRoute: typeof ReviewRepositoriesOwnerRoute
+  ReviewsOwnerRepoNumberRoute: typeof ReviewsOwnerRepoNumberRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -252,6 +278,13 @@ declare module '@tanstack/react-router' {
       path: '/usage'
       fullPath: '/usage'
       preLoaderRoute: typeof UsageRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/reviews': {
+      id: '/reviews'
+      path: '/reviews'
+      fullPath: '/reviews'
+      preLoaderRoute: typeof ReviewsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/review': {
@@ -366,6 +399,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AgentsAutomationsScheduleIdRouteImport
       parentRoute: typeof AgentsRoute
     }
+    '/reviews_/$owner/$repo/$number': {
+      id: '/reviews_/$owner/$repo/$number'
+      path: '/reviews/$owner/$repo/$number'
+      fullPath: '/reviews/$owner/$repo/$number'
+      preLoaderRoute: typeof ReviewsOwnerRepoNumberRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -397,10 +437,12 @@ const rootRouteChildren: RootRouteChildren = {
   LoginRoute: LoginRoute,
   MySettingsRoute: MySettingsRoute,
   ReviewRoute: ReviewRoute,
+  ReviewsRoute: ReviewsRoute,
   UsageRoute: UsageRoute,
   AgentsInstructionsRoute: AgentsInstructionsRoute,
   ReviewStylesRoute: ReviewStylesRoute,
   ReviewRepositoriesOwnerRoute: ReviewRepositoriesOwnerRoute,
+  ReviewsOwnerRepoNumberRoute: ReviewsOwnerRepoNumberRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
