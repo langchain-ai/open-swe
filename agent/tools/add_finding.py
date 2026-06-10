@@ -14,6 +14,7 @@ from ..reviewer_findings import (
     Confidence,
     DiffSide,
     Finding,
+    ReviewerThreadMissingError,
     Severity,
     append_finding,
     clip_suggestion,
@@ -21,6 +22,7 @@ from ..reviewer_findings import (
     new_finding,
     normalize_finding_title,
     resolve_review_head_sha,
+    thread_missing_tool_result,
 )
 
 
@@ -146,7 +148,10 @@ def add_finding(
         in_diff=in_diff,
     )
 
-    asyncio.run(append_finding(thread_id, finding))
+    try:
+        asyncio.run(append_finding(thread_id, finding))
+    except ReviewerThreadMissingError as exc:
+        return thread_missing_tool_result(exc)
     result: dict[str, Any] = {"success": True, "finding_id": finding["id"]}
     if not in_diff:
         result["in_diff"] = False

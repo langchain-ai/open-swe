@@ -19,8 +19,23 @@ from typing import Any, Literal, TypedDict, cast
 
 from langgraph.config import get_config
 from langgraph_sdk import get_client
+from langgraph_sdk.errors import NotFoundError as LangGraphSDKNotFoundError
 
 logger = logging.getLogger(__name__)
+
+
+class ReviewerThreadMissingError(RuntimeError):
+    """The reviewer thread backing findings storage does not exist.
+
+    Raised instead of the SDK's ``NotFoundError`` so tool wrappers can return a
+    structured do-not-retry result: the thread won't appear on retry (evicted,
+    eval-mode, or never created), and blind retries burn the whole run.
+    """
+
+    def __init__(self, thread_id: str, original: Exception) -> None:
+        super().__init__(f"Reviewer thread {thread_id!r} not found: {original}")
+        self.thread_id = thread_id
+
 
 REVIEWER_THREAD_KIND = "reviewer"
 
@@ -339,7 +354,28 @@ async def replace_findings(thread_id: str, findings: list[Finding]) -> None:
     lost-update window a blind overwrite here leaves open.
     """
     client = get_client()
-    await client.threads.update(thread_id=thread_id, metadata={"findings": findings})
+    try:
+        await client.threads.update(thread_id=thread_id, metadata={"findings": findings})
+    except LangGraphSDKNotFoundError as exc:
+        raise ReviewerThreadMissingError(thread_id, exc) from exc
+
+
+def thread_missing_tool_result(exc: ReviewerThreadMissingError) -> dict[str, Any]:
+    """Structured tool result for a missing reviewer thread.
+
+    Returned (not raised) so the agent sees an explicit do-not-retry contract
+    instead of an empty error blob it retries against.
+    """
+    return {
+        "success": False,
+        "error": "thread_not_found",
+        "thread_id": exc.thread_id,
+        "note": (
+            "Reviewer findings storage is unavailable. Do not retry; report the "
+            "blocker and include intended findings inline in the final message."
+        ),
+        "detail": str(exc),
+    }
 
 
 async def mutate_findings(

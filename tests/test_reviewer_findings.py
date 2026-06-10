@@ -257,3 +257,26 @@ async def test_resolve_review_head_sha_falls_back_without_thread_id() -> None:
         head = await resolve_review_head_sha("", {"head_sha": "confighead"})
     assert head == "confighead"
     fake_client.threads.get.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_replace_findings_raises_domain_error_when_thread_missing() -> None:
+    import httpx
+    from langgraph_sdk.errors import NotFoundError
+
+    from agent.reviewer_findings import ReviewerThreadMissingError
+
+    not_found = NotFoundError(
+        "thread tid not found",
+        response=httpx.Response(404, request=httpx.Request("PATCH", "http://x")),
+        body=None,
+    )
+    fake_client = AsyncMock()
+    fake_client.threads.update.side_effect = not_found
+
+    with patch("agent.reviewer_findings.get_client", return_value=fake_client):
+        with pytest.raises(ReviewerThreadMissingError) as excinfo:
+            await replace_findings("tid", [_f(id="f_a")])
+
+    assert excinfo.value.thread_id == "tid"
+    assert "not found" in str(excinfo.value)
