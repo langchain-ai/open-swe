@@ -6,7 +6,11 @@ import type { AgentThread, ImageChunk, Message } from "@/lib/agents/types"
 import type { ModelSelection } from "@/lib/agents/useModelOptions"
 import { AgentPromptBar } from "@/components/agents/AgentPromptBar"
 import { MessageView } from "@/components/agents/ported"
-import { agentThreadKeys, useSendAgentMessage } from "@/lib/agents/queries"
+import {
+  agentThreadKeys,
+  useCancelAgentThread,
+  useSendAgentMessage,
+} from "@/lib/agents/queries"
 import {
   addPendingPrompt,
   dropPendingPrompts,
@@ -55,6 +59,7 @@ function isPendingPromptConfirmed(
 export function AgentThreadView({ thread }: AgentThreadViewProps) {
   const queryClient = useQueryClient()
   const sendMessage = useSendAgentMessage(thread.id)
+  const cancelThread = useCancelAgentThread(thread.id)
   useAgentThreadStream(thread.id, thread.status === "running")
   const [pendingPrompts, setPendingPrompts] = useState<Array<PendingPrompt>>(
     () => getPendingPrompts(thread.id)
@@ -134,6 +139,10 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
     ]
   )
 
+  const handleCancel = useCallback(() => {
+    cancelThread.mutate()
+  }, [cancelThread])
+
   const displayMessages = useMemo<Array<Message>>(() => {
     if (pendingPrompts.length === 0) return thread.messages
     const baseTimestamp = new Date().toISOString()
@@ -177,6 +186,9 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
                   compact
                   busy={isStreaming}
                   disabled={sendMessage.isPending}
+                  canCancel={hasActiveRun}
+                  cancelling={cancelThread.isPending}
+                  onCancel={handleCancel}
                   onSubmit={handleSubmit}
                   models={models}
                   selection={activeSelection}
@@ -196,6 +208,9 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
                 compact
                 busy={isStreaming}
                 disabled={sendMessage.isPending}
+                canCancel={hasActiveRun}
+                cancelling={cancelThread.isPending}
+                onCancel={handleCancel}
                 onSubmit={handleSubmit}
                 models={models}
                 selection={activeSelection}
