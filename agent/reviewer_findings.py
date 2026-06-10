@@ -18,10 +18,16 @@ from typing import Any, Literal, TypedDict, cast
 
 from langgraph.config import get_config
 from langgraph_sdk import get_client
+from langgraph_sdk.errors import NotFoundError as LangGraphSDKNotFoundError
 
 logger = logging.getLogger(__name__)
 
 REVIEWER_THREAD_KIND = "reviewer"
+
+
+class ReviewerThreadMissingError(RuntimeError):
+    """Raised when the reviewer thread used for findings persistence is gone."""
+
 
 # Suggestions are only useful when the reader can scan them at a glance and
 # accept with one click. Anything longer reads as the reviewer rewriting the
@@ -333,7 +339,10 @@ async def get_finding(thread_id: str, finding_id: str) -> Finding | None:
 async def replace_findings(thread_id: str, findings: list[Finding]) -> None:
     """Overwrite the findings list on a thread's metadata."""
     client = get_client()
-    await client.threads.update(thread_id=thread_id, metadata={"findings": findings})
+    try:
+        await client.threads.update(thread_id=thread_id, metadata={"findings": findings})
+    except LangGraphSDKNotFoundError as exc:
+        raise ReviewerThreadMissingError(str(exc)) from exc
 
 
 async def append_finding(thread_id: str, finding: Finding) -> Finding:

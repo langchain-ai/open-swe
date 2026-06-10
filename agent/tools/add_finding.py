@@ -14,6 +14,7 @@ from ..reviewer_findings import (
     Confidence,
     DiffSide,
     Finding,
+    ReviewerThreadMissingError,
     Severity,
     append_finding,
     clip_suggestion,
@@ -146,7 +147,20 @@ def add_finding(
         in_diff=in_diff,
     )
 
-    asyncio.run(append_finding(thread_id, finding))
+    try:
+        asyncio.run(append_finding(thread_id, finding))
+    except ReviewerThreadMissingError as exc:
+        return {
+            "success": False,
+            "error": "thread_not_found",
+            "thread_id": thread_id,
+            "note": (
+                "Reviewer findings storage is unavailable (thread metadata missing). "
+                "Do not retry add_finding/publish_review; report the blocker and include "
+                "the intended findings inline in your final message."
+            ),
+            "detail": str(exc),
+        }
     result: dict[str, Any] = {"success": True, "finding_id": finding["id"]}
     if not in_diff:
         result["in_diff"] = False

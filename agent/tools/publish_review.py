@@ -11,6 +11,7 @@ from ..dashboard.team_settings import get_team_review_trace_links_enabled
 from ..reviewer_diff import compute_diff_line_set, fetch_pr_diff, is_range_in_diff
 from ..reviewer_findings import (
     Finding,
+    ReviewerThreadMissingError,
     Severity,
     _coerce_surface,
     filter_findings_for_publish,
@@ -98,13 +99,16 @@ def publish_review(
         return {"success": False, "error": "Missing head_sha in run config"}
 
     if _is_reviewer_eval_mode(configurable):
-        return asyncio.run(
-            _publish_review_eval_dry_run_async(
-                head_sha=head_sha,
-                severity_threshold=_cast_severity(severity_threshold),
-                cap=cap,
+        try:
+            return asyncio.run(
+                _publish_review_eval_dry_run_async(
+                    head_sha=head_sha,
+                    severity_threshold=_cast_severity(severity_threshold),
+                    cap=cap,
+                )
             )
-        )
+        except ReviewerThreadMissingError as exc:
+            return _reviewer_thread_missing_result(exc)
 
     token = get_github_token()
     if not token:
@@ -125,6 +129,8 @@ def publish_review(
                 trace_link_config_override=configurable.get("review_trace_link_enabled"),
             )
         )
+    except ReviewerThreadMissingError as exc:
+        return _reviewer_thread_missing_result(exc)
     except GitHubAuthError as exc:
         thread_id = get_thread_id_from_runtime()
         if thread_id:
@@ -137,6 +143,25 @@ def publish_review(
             ),
             "auth_error": str(exc),
         }
+
+
+def _reviewer_thread_missing_result(exc: ReviewerThreadMissingError) -> dict[str, Any]:
+    """Structured failure for the reviewer when thread metadata is gone."""
+    try:
+        thread_id = get_thread_id_from_runtime()
+    except Exception:  # noqa: BLE001
+        thread_id = ""
+    return {
+        "success": False,
+        "error": "thread_not_found",
+        "thread_id": thread_id,
+        "note": (
+            "Reviewer findings storage is unavailable (thread metadata missing). "
+            "Do not retry add_finding/publish_review; report the blocker and include "
+            "the intended findings inline in your final message."
+        ),
+        "detail": str(exc),
+    }
 
 
 def _cast_severity(value: str) -> Severity:

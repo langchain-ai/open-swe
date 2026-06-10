@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from agent.reviewer_findings import ReviewerThreadMissingError
 from agent.tools.add_finding import add_finding
 from agent.tools.list_findings import list_findings
 from agent.tools.resolve_finding_thread import resolve_finding_thread
@@ -712,3 +713,30 @@ def test_list_findings_returns_all_when_filter_omitted() -> None:
         result = list_findings()
 
     assert result["count"] == 2
+
+
+def test_add_finding_returns_structured_error_when_thread_missing() -> None:
+    async def boom(_thread_id: str, _finding: Any) -> None:
+        raise ReviewerThreadMissingError("thread tid-1 not found")
+
+    with (
+        patch("agent.tools.add_finding.get_config", return_value=_config()),
+        patch("agent.tools.add_finding.get_thread_id_from_runtime", return_value="tid-1"),
+        patch("agent.tools.add_finding.append_finding", side_effect=boom),
+    ):
+        result = add_finding(
+            severity="high",
+            confidence="high",
+            category="correctness",
+            file="foo.py",
+            title="Generated title",
+            description="d",
+            start_line=11,
+            end_line=11,
+        )
+
+    assert result["success"] is False
+    assert result["error"] == "thread_not_found"
+    assert result["thread_id"] == "tid-1"
+    assert "thread tid-1 not found" in result["detail"]
+    assert "Do not retry" in result["note"]
