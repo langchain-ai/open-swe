@@ -593,7 +593,9 @@ def _extract_run_id_from_command_response(payload: Any) -> str | None:
         return None
     for candidate in (
         payload.get("run_id"),
-        payload.get("result", {}).get("run_id") if isinstance(payload.get("result"), dict) else None,
+        payload.get("result", {}).get("run_id")
+        if isinstance(payload.get("result"), dict)
+        else None,
     ):
         if isinstance(candidate, str) and candidate:
             return candidate
@@ -631,7 +633,9 @@ async def _enrich_run_start_command(
         chosen_model = client_configurable.get("agent_model_id")
         chosen_effort = client_configurable.get("agent_effort")
         if isinstance(chosen_model, str) and isinstance(chosen_effort, str):
-            normalized_model, normalized_effort = _normalize_model_choice(chosen_model, chosen_effort)
+            normalized_model, normalized_effort = _normalize_model_choice(
+                chosen_model, chosen_effort
+            )
             if normalized_model and normalized_effort:
                 overrides["agent_model_id"] = normalized_model
                 overrides["agent_effort"] = normalized_effort
@@ -742,9 +746,7 @@ async def send_dashboard_message(
     queue_payload: dict[str, Any] = {"text": prompt, "source": _DASHBOARD_SOURCE}
     if isinstance(content, list):
         queue_payload["images"] = [
-            block
-            for block in content
-            if isinstance(block, dict) and block.get("type") != "text"
+            block for block in content if isinstance(block, dict) and block.get("type") != "text"
         ]
     queued = await queue_message_for_thread(thread_id, queue_payload)
     if not queued:
