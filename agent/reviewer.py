@@ -69,7 +69,7 @@ from .utils.api_standards_skill import fetch_api_standards_skill
 from .utils.github_app import get_github_app_installation_token_with_expiry
 from .utils.github_token import cache_github_token_for_thread
 from .utils.model import DEFAULT_LLM_REASONING, make_model, provider_model_kwargs
-from .utils.repo_prep import discover_skill_sources, prepare_review_repo
+from .utils.repo_prep import materialize_trusted_skills, prepare_review_repo
 from .utils.sandbox_paths import aresolve_sandbox_work_dir
 
 REVIEWER_PROMPT_TEMPLATE = """You are a specialized code reviewer agent. Your job is to review one GitHub PR and publish a single review.
@@ -702,24 +702,27 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
     repo_name = str(repo_config.get("name", ""))
     base_sha = str(config["configurable"].get("base_sha", "") or "")
     head_sha = str(config["configurable"].get("head_sha", "") or "")
+    pr_number = config["configurable"].get("pr_number")
 
     # Prep the repo on the sandbox before the first model call so the LLM does
     # not narrate `gh repo clone`, and so SkillsMiddleware can discover the
-    # repo's skills from disk at its one-shot scan.
+    # repo's skills at its one-shot scan. Skills are materialized from the PR
+    # base sha (trusted), never the PR head (author-controlled).
     repo_ready = await prepare_review_repo(
         sandbox_backend,
         work_dir=work_dir,
         repo_owner=repo_owner,
         repo_name=repo_name,
         head_sha=head_sha,
+        pr_number=pr_number if isinstance(pr_number, int) else None,
+        base_sha=base_sha,
     )
     skill_sources: list[str] = []
     if repo_ready and repo_name:
-        skill_sources = await discover_skill_sources(
-            sandbox_backend, repo_dir=f"{work_dir}/{repo_name}"
+        skill_sources = await materialize_trusted_skills(
+            sandbox_backend, repo_dir=f"{work_dir}/{repo_name}", trusted_ref=base_sha
         )
 
-    pr_number = config["configurable"].get("pr_number")
     pr_url = str(config["configurable"].get("pr_url", "") or "")
     last_reviewed_sha = str(config["configurable"].get("last_reviewed_sha", "") or "")
     is_re_review = bool(config["configurable"].get("re_review"))
