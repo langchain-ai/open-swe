@@ -23,7 +23,6 @@ import type { ModelOption } from "@/lib/api"
 import type { ImageChunk } from "@/lib/agents/types"
 import type { ModelSelection } from "@/lib/agents/provider/useModelOptions"
 import { RepoSelector } from "@/components/agents/RepoSelector"
-import { Button } from "@/components/ui/button"
 import { useIsInAgentThreadStream } from "@/lib/agents/provider/useIsInAgentThreadStream"
 import { agentThreadKeys } from "@/lib/agents/queries"
 import { formatModelSelection } from "@/lib/agents/provider/useModelOptions"
@@ -31,12 +30,42 @@ import { cn } from "@/lib/utils"
 
 const PROMPT_TEXTAREA_MAX_HEIGHT = 200
 
-function RunStopButton() {
+interface SubmitButtonProps {
+  canSubmit: boolean
+  disabled: boolean
+  onSubmit: () => void
+}
+
+function PlainSubmitButton({ canSubmit, disabled, onSubmit }: SubmitButtonProps) {
+  return (
+    <button
+      type="button"
+      onClick={onSubmit}
+      disabled={!canSubmit}
+      aria-label="Send message"
+      className="flex size-7 shrink-0 items-center justify-center rounded-full bg-[var(--ui-accent)] text-white transition-opacity hover:opacity-90 disabled:cursor-default disabled:opacity-40 cursor-pointer"
+    >
+      {disabled ? (
+        <LoaderCircle className="size-3.5 animate-spin" />
+      ) : (
+        <ArrowUp className="size-3.5" strokeWidth={2.5} />
+      )}
+    </button>
+  )
+}
+
+function SubmitButton(props: SubmitButtonProps) {
+  const inAgentThreadStream = useIsInAgentThreadStream()
+
+  if (inAgentThreadStream) return <StreamSubmitButton {...props} />
+
+  return <PlainSubmitButton {...props} />
+}
+
+function StreamSubmitButton(props: SubmitButtonProps) {
   const stream = useAgentThreadStream()
   const queryClient = useQueryClient()
   const [stopping, setStopping] = useState(false)
-
-  if (!stream.isLoading) return null
 
   const handleStop = async () => {
     if (stopping) return
@@ -55,19 +84,23 @@ function RunStopButton() {
     }
   }
 
+  if (!stream.isLoading) return <PlainSubmitButton {...props} />
+
   return (
-    <Button
+    <button
       type="button"
-      variant="outline"
-      size="icon"
       onClick={() => void handleStop()}
       disabled={stopping}
       aria-label="Stop run"
       title="Stop run"
-      className="absolute right-3 top-3 z-10 cursor-pointer text-[color:var(--ui-text-muted)] hover:bg-[var(--ui-panel-2)] hover:text-[color:var(--ui-text)] disabled:cursor-default"
+      className="flex size-7 shrink-0 items-center justify-center rounded-full bg-[var(--ui-accent)] text-white transition-opacity hover:opacity-90 disabled:cursor-default disabled:opacity-40"
     >
-      <StopIcon className="size-3.5" weight="fill" />
-    </Button>
+      {stopping ? (
+        <LoaderCircle className="size-3.5 animate-spin" />
+      ) : (
+        <StopIcon className="size-3.5" weight="fill" />
+      )}
+    </button>
   )
 }
 const MAX_IMAGE_COUNT = 5
@@ -111,11 +144,11 @@ function fileToImageChunk(file: File): Promise<ImageChunk | null> {
       resolve(
         base64
           ? {
-              kind: "image",
-              base64,
-              mimeType: file.type,
-              fileName: file.name,
-            }
+            kind: "image",
+            base64,
+            mimeType: file.type,
+            fileName: file.name,
+          }
           : null
       )
     }
@@ -259,7 +292,6 @@ export const CloudPromptBar = memo(function CloudPromptBarComponent({
   }
 
   const pickerDisabled = combos.length === 0 || !onSelectionChange
-  const inAgentThreadStream = useIsInAgentThreadStream()
 
   return (
     <div
@@ -334,8 +366,6 @@ export const CloudPromptBar = memo(function CloudPromptBarComponent({
           </div>
         )}
 
-        {inAgentThreadStream ? <RunStopButton /> : null}
-
         <textarea
           ref={inputRef}
           rows={1}
@@ -409,40 +439,11 @@ export const CloudPromptBar = memo(function CloudPromptBarComponent({
             <ImagePlus className="size-4" />
           </button>
 
-          {canCancel && !canSubmit ? (
-            <button
-              type="button"
-              onClick={onCancel}
-              disabled={cancelling}
-              aria-label="Cancel run"
-              title="Cancel run"
-              className="flex size-7 shrink-0 items-center justify-center rounded-full bg-[var(--ui-accent)] text-white transition-opacity hover:opacity-90 disabled:cursor-default disabled:opacity-60"
-            >
-              {cancelling ? (
-                <LoaderCircle className="size-3.5 animate-spin" />
-              ) : (
-                <Square
-                  className="size-3"
-                  fill="currentColor"
-                  strokeWidth={0}
-                />
-              )}
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={handleSubmit}
-              disabled={!canSubmit}
-              aria-label="Send message"
-              className="flex size-7 shrink-0 items-center justify-center rounded-full bg-[var(--ui-accent)] text-white transition-opacity hover:opacity-90 disabled:cursor-default disabled:opacity-40"
-            >
-              {disabled ? (
-                <LoaderCircle className="size-3.5 animate-spin" />
-              ) : (
-                <ArrowUp className="size-3.5" strokeWidth={2.5} />
-              )}
-            </button>
-          )}
+          <SubmitButton
+            canSubmit={canSubmit}
+            disabled={disabled}
+            onSubmit={handleSubmit}
+          />
         </div>
       </div>
     </div>

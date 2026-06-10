@@ -33,6 +33,21 @@ def _openai_5xx() -> openai.APIStatusError:
     return openai.APIStatusError("unavailable", response=response, body=response.json())
 
 
+def _anthropic_model_not_available_error() -> anthropic.BadRequestError:
+    body = {
+        "type": "error",
+        "error": {
+            "type": "invalid_request_error",
+            "message": "In order to access this model, your organization or workspace must have data retention enabled.",
+            "details": {"error_code": "model_not_available"},
+        },
+        "request_id": "req_test",
+    }
+    request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+    response = httpx.Response(400, request=request, json=body)
+    return anthropic.BadRequestError("model unavailable", response=response, body=body)
+
+
 def _make_request() -> MagicMock:
     request = MagicMock()
     request.override = MagicMock(return_value=MagicMock(name="overridden_request"))
@@ -98,6 +113,19 @@ class TestModelFallbackMiddleware:
             await middleware.awrap_model_call(_make_request(), handler)
 
         assert len(calls) == 1
+
+    @pytest.mark.asyncio
+    async def test_async_surfaces_model_unavailable_error(self) -> None:
+        middleware = ModelFallbackMiddleware(MagicMock())
+
+        async def handler(_req: object) -> object:
+            raise _anthropic_model_not_available_error()
+
+        result = await middleware.awrap_model_call(_make_request(), handler)
+
+        assert isinstance(result, AIMessage)
+        assert "selected Anthropic model is not available" in result.text
+        assert "data retention enabled" in result.text
 
     @pytest.mark.asyncio
     async def test_async_does_not_double_fall_back(self) -> None:
