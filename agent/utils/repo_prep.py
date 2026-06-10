@@ -152,9 +152,7 @@ async def materialize_trusted_skills(
         try:
             result = await asyncio.to_thread(sandbox_backend.execute, command)
         except Exception:  # noqa: BLE001
-            logger.warning(
-                "Failed to extract trusted skills %s from %s", skill_dir, trusted_ref, exc_info=True
-            )
+            logger.warning("Failed to extract trusted skills %s", skill_dir, exc_info=True)
             continue
         output = getattr(result, "output", "") or ""
         if dest in output.splitlines():
