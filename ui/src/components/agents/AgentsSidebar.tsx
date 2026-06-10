@@ -311,7 +311,7 @@ function ThreadRow({
               <ContextMenu.Item
                 onClick={onDelete}
                 disabled={isDeleting}
-                className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-xs text-[var(--ui-danger,#ef4444)] outline-none select-none data-highlighted:bg-[var(--ui-sidebar-hover)] data-disabled:pointer-events-none data-disabled:opacity-50"
+                className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-xs text-[var(--ui-danger)] outline-none select-none data-highlighted:bg-[var(--ui-sidebar-hover)] data-disabled:pointer-events-none data-disabled:opacity-50"
               >
                 <TrashIcon className="size-3.5" />
                 Delete thread

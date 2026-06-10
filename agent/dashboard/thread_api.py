@@ -277,7 +277,7 @@ def _thread_summary(
     trace_url = get_langsmith_trace_url(thread_id) if isinstance(thread_id, str) else None
 
     summary: dict[str, Any] = {
-        "id": thread.get("thread_id") or thread.get("id"),
+        "id": thread_id,
         "title": title,
         "repo": name,
         "repoFullName": full_name,
