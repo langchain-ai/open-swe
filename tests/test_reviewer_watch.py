@@ -134,6 +134,16 @@ async def test_push_event_skips_when_pr_diff_unchanged_since_last_review() -> No
             side_effect=["same diff", "same diff"],
         ),
         patch("agent.webapp.set_reviewer_thread_metadata", new=set_metadata),
+        patch(
+            "agent.webapp.create_review_check_run",
+            new_callable=AsyncMock,
+            return_value=42,
+        ) as create_check,
+        patch(
+            "agent.webapp.complete_review_check_run",
+            new_callable=AsyncMock,
+            return_value=True,
+        ) as complete_check,
         patch("agent.webapp.is_thread_active", new_callable=AsyncMock, return_value=False),
         patch("agent.webapp.get_client", return_value=fake_client),
     ):
@@ -142,6 +152,13 @@ async def test_push_event_skips_when_pr_diff_unchanged_since_last_review() -> No
     fake_client.runs.create.assert_not_called()
     set_metadata.assert_awaited_once()
     assert set_metadata.await_args.kwargs["last_reviewed_sha"] == "newsha"
+    # Even without a re-review, a settled check lands on the new head so the
+    # review stays visible after the head moves.
+    create_check.assert_awaited_once()
+    assert create_check.await_args.kwargs["head_sha"] == "newsha"
+    complete_check.assert_awaited_once()
+    assert complete_check.await_args.kwargs["check_run_id"] == 42
+    assert complete_check.await_args.kwargs["conclusion"] == "success"
 
 
 @pytest.mark.asyncio
