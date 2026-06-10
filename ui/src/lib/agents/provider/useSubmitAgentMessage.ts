@@ -20,8 +20,8 @@ function imageContentBlocks(images: Array<ImageChunk> = []) {
   return images.map((image) => ({
     type: "image",
     base64: image.base64,
-    mimeType: image.mimeType,
-    ...(image.fileName ? { fileName: image.fileName } : {}),
+    mime_type: image.mimeType,
+    ...(image.fileName ? { file_name: image.fileName } : {}),
   }));
 }
 

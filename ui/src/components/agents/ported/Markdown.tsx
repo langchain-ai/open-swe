@@ -70,11 +70,11 @@ const STREAMDOWN_COMPONENTS = {
 };
 
 const STREAMDOWN_ANIMATED = {
-  sep: "word",
-  animation: "slideUp",
-  duration: 140,
-  stagger: 35,
-  easing: "ease-out",
+  sep: "char",
+  animation: "blurIn",
+  duration: 0,
+  stagger: 0,
+  easing: "linear",
 } as const;
 const SHIKI_THEME: ["github-light", "github-dark"] = ["github-light", "github-dark"];
 
