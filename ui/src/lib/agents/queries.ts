@@ -3,7 +3,7 @@ import { useNavigate } from "@tanstack/react-router"
 import { useEffect } from "react"
 
 import { agentsApi } from "./api"
-import { addPendingPrompt } from "./pendingPrompts"
+import { addPendingPrompt, getPendingPrompts } from "./pendingPrompts"
 import type { ScheduleUpdateRequest } from "./api"
 import type { ImageChunk } from "./types"
 
@@ -148,9 +148,10 @@ export function useSendAgentMessage(threadId: string) {
       const cached = queryClient.getQueryData<{ messages?: Array<unknown> }>(
         agentThreadKeys.detail(threadId)
       )
-      const insertAt = Array.isArray(cached?.messages)
+      const baseLength = Array.isArray(cached?.messages)
         ? cached.messages.length
         : 0
+      const insertAt = baseLength + getPendingPrompts(threadId).length
       addPendingPrompt(threadId, vars.content, insertAt, vars.images)
     },
     onSuccess: (thread) => {

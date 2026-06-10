@@ -97,7 +97,7 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
     (content: string, images: Array<ImageChunk>) => {
       setPendingPrompts((prev) => [
         ...prev,
-        { prompt: content, insertAt: thread.messages.length, images },
+        { prompt: content, insertAt: thread.messages.length + prev.length, images },
       ])
       sendMessage.mutate({
         content,
