@@ -8,6 +8,7 @@ import { AgentPromptBar } from "@/components/agents/AgentPromptBar"
 import { MessageView } from "@/components/agents/ported"
 import { agentThreadKeys, useSendAgentMessage } from "@/lib/agents/queries"
 import {
+  addPendingPrompt,
   dropPendingPrompts,
   getPendingPrompts,
 } from "@/lib/agents/pendingPrompts"
@@ -95,18 +96,42 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
 
   const handleSubmit = useCallback(
     (content: string, images: Array<ImageChunk>) => {
-      setPendingPrompts((prev) => [
-        ...prev,
-        { prompt: content, insertAt: thread.messages.length + prev.length, images },
-      ])
-      sendMessage.mutate({
-        content,
+      const entry: PendingPrompt = {
+        prompt: content,
+        insertAt: thread.messages.length + pendingPrompts.length,
         images,
-        model_id: activeSelection?.modelId ?? null,
-        effort: activeSelection?.effort ?? null,
-      })
+      }
+      addPendingPrompt(thread.id, entry.prompt, entry.insertAt, entry.images)
+      setPendingPrompts((prev) => [...prev, entry])
+      sendMessage.mutate(
+        {
+          content,
+          images,
+          model_id: activeSelection?.modelId ?? null,
+          effort: activeSelection?.effort ?? null,
+        },
+        {
+          onError: () => {
+            setPendingPrompts(
+              dropPendingPrompts(
+                thread.id,
+                (p) =>
+                  p.insertAt === entry.insertAt &&
+                  p.prompt === entry.prompt &&
+                  pendingImageKey(p) === pendingImageKey(entry)
+              )
+            )
+          },
+        }
+      )
     },
-    [sendMessage, thread.messages.length, activeSelection]
+    [
+      sendMessage,
+      thread.id,
+      thread.messages.length,
+      pendingPrompts.length,
+      activeSelection,
+    ]
   )
 
   const displayMessages = useMemo<Array<Message>>(() => {
