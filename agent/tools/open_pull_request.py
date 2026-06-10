@@ -19,6 +19,17 @@ GITHUB_API = "https://api.github.com"
 _USER_TOKEN_SOURCES = ("slack", "dashboard")
 
 
+def _derive_pr_state(*, state: str, merged: bool, draft: bool) -> str:
+    """Map GitHub PR fields to the dashboard's pr_state vocabulary."""
+    if merged:
+        return "merged"
+    if state == "closed":
+        return "closed"
+    if draft:
+        return "draft"
+    return "open"
+
+
 async def _resolve_pr_author_token() -> tuple[str | None, str]:
     """Return ``(token, kind)`` for opening the PR.
 
@@ -118,6 +129,7 @@ async def _record_pr_telemetry(
             )
         pr_url = details.get("html_url") or pr.get("html_url")
         merged = bool(details.get("merged"))
+        is_draft = bool(details.get("draft", pr.get("draft")))
         state = details.get("state") if isinstance(details.get("state"), str) else "open"
         additions = details.get("additions") if isinstance(details.get("additions"), int) else 0
         deletions = details.get("deletions") if isinstance(details.get("deletions"), int) else 0
@@ -147,7 +159,8 @@ async def _record_pr_telemetry(
                     "agent_kind": "agent",
                     "pr_url": pr_url if isinstance(pr_url, str) else "",
                     "pr_number": pr_number,
-                    "pr_state": "merged" if merged else state,
+                    "pr_state": _derive_pr_state(state=state, merged=merged, draft=is_draft),
+                    "pr_title": details.get("title") or pr.get("title"),
                     "branch_name": head,
                     "base_branch": base,
                     "diff_stats": {

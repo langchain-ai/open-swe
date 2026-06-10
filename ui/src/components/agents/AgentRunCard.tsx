@@ -62,7 +62,7 @@ export function AgentRunCard({ thread }: AgentRunCardProps) {
           {hasPr ? (
             <>
               <GitPullRequestIcon className="size-3" />
-              Draft
+              <span className="capitalize">{thread.pr?.state ?? "open"}</span>
             </>
           ) : (
             <>

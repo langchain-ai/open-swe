@@ -90,3 +90,56 @@ async def test_create_dashboard_thread_rejects_images_for_resolved_text_only_mod
 
     assert exc_info.value.status_code == 422
     assert "does not support image input" in exc_info.value.detail
+
+
+def _thread_with_metadata(metadata: dict) -> dict:
+    return {"thread_id": "t1", "status": "idle", "metadata": metadata}
+
+
+def test_thread_summary_includes_pr_and_diff_stats() -> None:
+    summary = thread_api._thread_summary(
+        _thread_with_metadata(
+            {
+                "repo_full_name": "langchain-ai/open-swe",
+                "title": "Add feature",
+                "pr_number": 42,
+                "pr_url": "https://github.com/langchain-ai/open-swe/pull/42",
+                "pr_state": "draft",
+                "pr_title": "feat: add feature",
+                "branch_name": "open-swe/feature",
+                "base_branch": "main",
+                "diff_stats": {"files": 3, "additions": 10, "deletions": 2},
+            }
+        )
+    )
+
+    assert summary["pr"] == {
+        "number": 42,
+        "title": "feat: add feature",
+        "state": "draft",
+        "headRef": "open-swe/feature",
+        "baseRef": "main",
+        "url": "https://github.com/langchain-ai/open-swe/pull/42",
+    }
+    assert summary["diffStats"] == {"files": 3, "additions": 10, "deletions": 2}
+
+
+def test_thread_summary_defaults_unknown_pr_state_to_open() -> None:
+    summary = thread_api._thread_summary(
+        _thread_with_metadata(
+            {
+                "pr_number": 7,
+                "pr_url": "https://example.com/pull/7",
+                "pr_state": "bogus",
+            }
+        )
+    )
+
+    assert summary["pr"]["state"] == "open"
+
+
+def test_thread_summary_omits_pr_when_no_pr_metadata() -> None:
+    summary = thread_api._thread_summary(_thread_with_metadata({"title": "No PR"}))
+
+    assert "pr" not in summary
+    assert "diffStats" not in summary
