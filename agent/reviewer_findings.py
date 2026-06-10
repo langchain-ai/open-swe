@@ -14,12 +14,28 @@ from __future__ import annotations
 
 import logging
 import uuid
+from collections.abc import Callable
 from typing import Any, Literal, TypedDict, cast
 
 from langgraph.config import get_config
 from langgraph_sdk import get_client
+from langgraph_sdk.errors import NotFoundError as LangGraphSDKNotFoundError
 
 logger = logging.getLogger(__name__)
+
+
+class ReviewerThreadMissingError(RuntimeError):
+    """The reviewer thread backing findings storage does not exist.
+
+    Raised instead of the SDK's ``NotFoundError`` so tool wrappers can return a
+    structured do-not-retry result: the thread won't appear on retry (evicted,
+    eval-mode, or never created), and blind retries burn the whole run.
+    """
+
+    def __init__(self, thread_id: str, original: Exception) -> None:
+        super().__init__(f"Reviewer thread {thread_id!r} not found: {original}")
+        self.thread_id = thread_id
+
 
 REVIEWER_THREAD_KIND = "reviewer"
 
@@ -286,10 +302,18 @@ def get_thread_id_from_runtime() -> str:
 
 
 async def get_thread_metadata(thread_id: str) -> dict[str, Any]:
-    """Fetch the current metadata for a thread. Returns ``{}`` on miss."""
+    """Fetch the current metadata for a thread.
+
+    Raises :class:`ReviewerThreadMissingError` when the thread does not exist
+    (swallowing it as ``{}`` made tools report misleading results like "No
+    finding found" instead of the do-not-retry contract). Other transient
+    failures still degrade to ``{}``.
+    """
     client = get_client()
     try:
         thread = await client.threads.get(thread_id)
+    except LangGraphSDKNotFoundError as exc:
+        raise ReviewerThreadMissingError(thread_id, exc) from exc
     except Exception:  # noqa: BLE001
         logger.exception("Failed to fetch thread metadata for %s", thread_id)
         return {}
@@ -331,16 +355,62 @@ async def get_finding(thread_id: str, finding_id: str) -> Finding | None:
 
 
 async def replace_findings(thread_id: str, findings: list[Finding]) -> None:
-    """Overwrite the findings list on a thread's metadata."""
+    """Overwrite the findings list on a thread's metadata.
+
+    Prefer :func:`mutate_findings` for read-modify-write updates: it re-reads the
+    freshest persisted list immediately before mutating, which shrinks the
+    lost-update window a blind overwrite here leaves open.
+    """
     client = get_client()
-    await client.threads.update(thread_id=thread_id, metadata={"findings": findings})
+    try:
+        await client.threads.update(thread_id=thread_id, metadata={"findings": findings})
+    except LangGraphSDKNotFoundError as exc:
+        raise ReviewerThreadMissingError(thread_id, exc) from exc
+
+
+def thread_missing_tool_result(exc: ReviewerThreadMissingError) -> dict[str, Any]:
+    """Structured tool result for a missing reviewer thread.
+
+    Returned (not raised) so the agent sees an explicit do-not-retry contract
+    instead of an empty error blob it retries against.
+    """
+    return {
+        "success": False,
+        "error": "thread_not_found",
+        "thread_id": exc.thread_id,
+        "note": (
+            "Reviewer findings storage is unavailable. Do not retry; report the "
+            "blocker and include intended findings inline in the final message."
+        ),
+        "detail": str(exc),
+    }
+
+
+async def mutate_findings(
+    thread_id: str,
+    mutator: Callable[[list[Finding]], bool],
+) -> list[Finding]:
+    """Read the latest findings, apply ``mutator`` in place, persist iff changed.
+
+    Centralizes the read-modify-write so every mutation operates on the freshest
+    persisted list rather than a stale in-memory snapshot. ``mutator`` edits the
+    list in place and returns ``True`` when it changed something; we only write
+    on change, so a no-op mutation never clobbers a concurrent update.
+    """
+    findings = await list_findings(thread_id)
+    if mutator(findings):
+        await replace_findings(thread_id, findings)
+    return findings
 
 
 async def append_finding(thread_id: str, finding: Finding) -> Finding:
     """Append a finding and persist the new list."""
-    findings = await list_findings(thread_id)
-    findings.append(finding)
-    await replace_findings(thread_id, findings)
+
+    def _append(findings: list[Finding]) -> bool:
+        findings.append(finding)
+        return True
+
+    await mutate_findings(thread_id, _append)
     return finding
 
 
@@ -350,17 +420,18 @@ async def update_finding_fields(
     updates: dict[str, Any],
 ) -> Finding | None:
     """Apply field updates to one finding by id and persist."""
-    findings = await list_findings(thread_id)
-    updated: Finding | None = None
-    for finding in findings:
-        if finding.get("id") == finding_id:
-            finding.update(updates)
-            updated = finding
-            break
-    if updated is None:
-        return None
-    await replace_findings(thread_id, findings)
-    return updated
+    captured: dict[str, Finding] = {}
+
+    def _apply(findings: list[Finding]) -> bool:
+        for finding in findings:
+            if finding.get("id") == finding_id:
+                finding.update(updates)
+                captured["finding"] = finding
+                return True
+        return False
+
+    await mutate_findings(thread_id, _apply)
+    return captured.get("finding")
 
 
 async def update_finding_surface(
@@ -369,21 +440,22 @@ async def update_finding_surface(
     updates: dict[str, Any],
 ) -> Finding | None:
     """Apply updates to the nested surface record and legacy GitHub fields."""
-    findings = await list_findings(thread_id)
-    updated: Finding | None = None
-    for finding in findings:
-        if finding.get("id") != finding_id:
-            continue
-        surface = _coerce_surface(finding, finding_id)
-        surface.update(updates)
-        finding["surface"] = surface
-        _sync_legacy_surface_fields(finding, surface)
-        updated = finding
-        break
-    if updated is None:
-        return None
-    await replace_findings(thread_id, findings)
-    return updated
+    captured: dict[str, Finding] = {}
+
+    def _apply(findings: list[Finding]) -> bool:
+        for finding in findings:
+            if finding.get("id") != finding_id:
+                continue
+            surface = _coerce_surface(finding, finding_id)
+            surface.update(updates)
+            finding["surface"] = surface
+            _sync_legacy_surface_fields(finding, surface)
+            captured["finding"] = finding
+            return True
+        return False
+
+    await mutate_findings(thread_id, _apply)
+    return captured.get("finding")
 
 
 async def append_finding_interaction(
@@ -392,29 +464,29 @@ async def append_finding_interaction(
     interaction: FindingInteraction,
 ) -> Finding | None:
     """Persist a GitHub review-thread interaction on one finding."""
-    findings = await list_findings(thread_id)
-    updated: Finding | None = None
-    for finding in findings:
-        if finding.get("id") != finding_id:
-            continue
-        interactions = finding.get("interactions")
-        if not isinstance(interactions, list):
-            interactions = []
-        github_comment_id = interaction.get("github_comment_id")
-        if isinstance(github_comment_id, int) and any(
-            isinstance(item, dict) and item.get("github_comment_id") == github_comment_id
-            for item in interactions
-        ):
-            updated = finding
-            break
-        interactions.append(interaction)
-        finding["interactions"] = interactions
-        updated = finding
-        break
-    if updated is None:
-        return None
-    await replace_findings(thread_id, findings)
-    return updated
+    captured: dict[str, Finding] = {}
+
+    def _apply(findings: list[Finding]) -> bool:
+        for finding in findings:
+            if finding.get("id") != finding_id:
+                continue
+            captured["finding"] = finding
+            interactions = finding.get("interactions")
+            if not isinstance(interactions, list):
+                interactions = []
+            github_comment_id = interaction.get("github_comment_id")
+            if isinstance(github_comment_id, int) and any(
+                isinstance(item, dict) and item.get("github_comment_id") == github_comment_id
+                for item in interactions
+            ):
+                return False
+            interactions.append(interaction)
+            finding["interactions"] = interactions
+            return True
+        return False
+
+    await mutate_findings(thread_id, _apply)
+    return captured.get("finding")
 
 
 def _coerce_surface(finding: Finding, finding_id: str) -> FindingSurface:
@@ -492,7 +564,10 @@ async def set_reviewer_thread_metadata(
         metadata["slack_thread"] = slack_thread
     if extra:
         metadata.update(extra)
-    await client.threads.update(thread_id=thread_id, metadata=metadata)
+    try:
+        await client.threads.update(thread_id=thread_id, metadata=metadata)
+    except LangGraphSDKNotFoundError as exc:
+        raise ReviewerThreadMissingError(thread_id, exc) from exc
 
 
 def get_thread_watch_flag(metadata: dict[str, Any]) -> bool:

@@ -144,15 +144,6 @@ export function useSendAgentMessage(threadId: string) {
         model_id: vars.model_id,
         effort: vars.effort,
       }),
-    onMutate: (vars) => {
-      const cached = queryClient.getQueryData<{ messages?: Array<unknown> }>(
-        agentThreadKeys.detail(threadId)
-      )
-      const insertAt = Array.isArray(cached?.messages)
-        ? cached.messages.length
-        : 0
-      addPendingPrompt(threadId, vars.content, insertAt, vars.images)
-    },
     onSuccess: (thread) => {
       queryClient.setQueryData(
         agentThreadKeys.detail(threadId),

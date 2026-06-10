@@ -431,8 +431,8 @@ async def open_swe_review_exists(
     repo: str,
     pr_number: int,
     token: str,
-) -> bool:
-    """Return True if Open SWE has already posted a review summary on this PR.
+) -> bool | None:
+    """Return whether Open SWE has already posted a review summary on this PR.
 
     Detected via the ``review_summary_marker`` that ``render_review_body``
     embeds in every Open SWE review body. The reviewer uses this to avoid
@@ -441,8 +441,14 @@ async def open_swe_review_exists(
     into the still-running first-review run, whose configurable still says
     ``re_review=False``, so the empty-review guard can't trust that flag alone.
 
-    On any API failure this returns False (fail open): the only consequence is
-    a possible duplicate summary, never a suppressed first review.
+    Tri-state on purpose:
+    - ``True``  — an Open SWE review summary was found.
+    - ``False`` — the full review list was paginated successfully and carried
+      no Open SWE summary.
+    - ``None``  — the answer is unknown because an API call (or a page partway
+      through pagination) failed. Callers must not treat ``None`` as "no review
+      exists": the old fail-open-as-False behaviour double-posted "no issues"
+      summaries whenever pagination failed mid-walk.
     """
     marker = review_summary_marker(pr_number)
     url = f"{_GITHUB_API_BASE}/repos/{owner}/{repo}/pulls/{pr_number}/reviews"
@@ -460,9 +466,11 @@ async def open_swe_review_exists(
                     repo,
                     pr_number,
                 )
-                return False
+                return None
             data = response.json()
-            if not isinstance(data, list) or not data:
+            if not isinstance(data, list):
+                return None
+            if not data:
                 return False
             for review in data:
                 if isinstance(review, dict) and marker in (review.get("body") or ""):

@@ -6,7 +6,9 @@ import asyncio
 from typing import Any
 
 from ..reviewer_findings import (
+    ReviewerThreadMissingError,
     get_thread_id_from_runtime,
+    thread_missing_tool_result,
 )
 from ..reviewer_findings import (
     list_findings as list_findings_async,
@@ -30,7 +32,10 @@ def list_findings(status_filter: str | None = None) -> dict[str, Any]:
         return {"findings": [], "count": 0, "error": f"Invalid status_filter: {status_filter}"}
 
     thread_id = get_thread_id_from_runtime()
-    findings = asyncio.run(list_findings_async(thread_id))
+    try:
+        findings = asyncio.run(list_findings_async(thread_id))
+    except ReviewerThreadMissingError as exc:
+        return thread_missing_tool_result(exc)
     if status_filter is not None:
         findings = [f for f in findings if f.get("status") == status_filter]
     return {"findings": findings, "count": len(findings)}

@@ -1273,3 +1273,18 @@ async def test_reviewer_injects_pr_title_and_body_into_context() -> None:
     assert "PR title and description" in captured["system_prompt"]
     assert "Add retry logic for uploads" in captured["system_prompt"]
     assert "Retries flaky uploads up to 3 times." in captured["system_prompt"]
+
+
+def test_reviewer_system_prompt_includes_closing_summary_contract() -> None:
+    """The prompt must tell the agent how to report publish_review outcomes:
+    dry_run / skipped_empty_re_review / thread_not_found are not publications."""
+    prompt = reviewer._reviewer_system_prompt(
+        "/tmp/wd",
+        repo_owner="o",
+        repo_name="r",
+        pr_number=1,
+    )
+    assert "skipped_empty_re_review" in prompt
+    assert "dry_run" in prompt
+    assert "Simulated publish (eval mode)" in prompt
+    assert "thread_not_found" in prompt
