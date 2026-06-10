@@ -1,4 +1,11 @@
-import { ArrowUp, ChevronDown, ImagePlus, LoaderCircle, X } from "lucide-react"
+import {
+  ArrowUp,
+  ChevronDown,
+  ImagePlus,
+  LoaderCircle,
+  Square,
+  X,
+} from "lucide-react"
 import {
   memo,
   useCallback,
@@ -31,6 +38,10 @@ export interface CloudPromptBarProps {
   compact?: boolean
   disabled?: boolean
   busy?: boolean
+  /** When true, a stop button is shown next to send to cancel the active run. */
+  canCancel?: boolean
+  cancelling?: boolean
+  onCancel?: () => void
   onSubmit?: (value: string, images: Array<ImageChunk>) => void
   models?: Array<ModelOption>
   selection?: ModelSelection | null
@@ -73,6 +84,9 @@ export const CloudPromptBar = memo(function CloudPromptBarComponent({
   compact = false,
   disabled = false,
   busy = false,
+  canCancel = false,
+  cancelling = false,
+  onCancel,
   onSubmit,
   models = [],
   selection = null,
@@ -345,6 +359,27 @@ export const CloudPromptBar = memo(function CloudPromptBarComponent({
           >
             <ImagePlus className="size-4" />
           </button>
+
+          {canCancel && (
+            <button
+              type="button"
+              onClick={onCancel}
+              disabled={cancelling}
+              aria-label="Cancel run"
+              title="Cancel run"
+              className="flex size-7 shrink-0 items-center justify-center rounded-full border border-[var(--ui-border)] bg-[var(--ui-panel-2)] text-[color:var(--ui-text-muted)] transition-colors hover:text-[color:var(--ui-text)] disabled:cursor-default disabled:opacity-60"
+            >
+              {cancelling ? (
+                <LoaderCircle className="size-3.5 animate-spin" />
+              ) : (
+                <Square
+                  className="size-3"
+                  fill="currentColor"
+                  strokeWidth={0}
+                />
+              )}
+            </button>
+          )}
 
           <button
             type="button"
