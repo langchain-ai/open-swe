@@ -1,9 +1,25 @@
+import { overrideFetchImplementation } from "@langchain/langgraph-sdk";
+
 import { agentsApi } from "./api";
 
 export const AGENT_ASSISTANT_ID = "agent";
 
 export const dashboardFetch: typeof fetch = (input, init) =>
   fetch(input, { ...init, credentials: "include" });
+
+/**
+ * The custom {@link HttpAgentServerAdapter} only routes `commands`,
+ * `stream`, and `state` through {@link dashboardFetch}. History reads
+ * (`POST /threads/:id/history`, used for subagent/subgraph discovery on
+ * hydrate) are issued by the SDK's internal `Client`, whose
+ * `callerOptions`/`fetch` are typed `never` in the custom-adapter branch
+ * and therefore can't receive the credentialed fetch. Without this, the
+ * `Client` falls back to a bare `fetch` that omits the dashboard session
+ * cookie cross-origin, so the proxy rejects history with
+ * `401 "not authenticated"`. Override the SDK's global fetch so every
+ * `Client` read carries the same credentials as the transport.
+ */
+overrideFetchImplementation(dashboardFetch);
 
 /**
  * The SDK transport builds request URLs as `new URL(apiUrl + path)`, so

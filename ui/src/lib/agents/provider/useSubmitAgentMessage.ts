@@ -84,7 +84,7 @@ export function useSubmitAgentMessage(threadId: string) {
       queryClient.setQueryData(agentThreadKeys.detail(threadId), (prev) =>
         prev ? { ...prev, status: "running" as const } : prev,
       );
-      void queryClient.invalidateQueries({ queryKey: agentThreadKeys.all });
+      void queryClient.invalidateQueries({ queryKey: agentThreadKeys.all, exact: true });
     },
   });
 }

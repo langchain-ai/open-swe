@@ -5,7 +5,7 @@ import { useEffect } from "react"
 import { agentsApi } from "./api"
 import { addPendingPrompt } from "./pendingPrompts"
 import type { ScheduleUpdateRequest } from "./api"
-import type { ImageChunk } from "./types"
+import type { AgentThread, ImageChunk } from "./types"
 
 export const agentThreadKeys = {
   all: ["agent-threads"] as const,
@@ -16,26 +16,23 @@ export const agentScheduleKeys = {
   all: ["agent-schedules"] as const,
 }
 
-const PREFETCH_THREAD_DETAIL_LIMIT = 12
-
-export function usePrefetchAgentThreadDetails(
-  threads: Array<{ id: string }>,
+// The list endpoint (`GET /threads`) and the detail endpoint
+// (`GET /threads/{id}`) return the same per-thread summary, so warming the
+// detail cache from the already-fetched list avoids a fan-out of one request
+// per sidebar thread. Navigation stays instant; the real (mark-viewed) fetch
+// fires only when a thread is actually opened. The active thread is skipped so
+// its live detail query stays the source of truth.
+export function useSeedAgentThreadDetails(
+  threads: Array<AgentThread>,
   activeThreadId?: string
 ) {
   const queryClient = useQueryClient()
 
   useEffect(() => {
-    const threadIds = threads
-      .map((thread) => thread.id)
-      .filter((threadId) => threadId !== activeThreadId)
-      .slice(0, PREFETCH_THREAD_DETAIL_LIMIT)
-
-    threadIds.forEach((threadId) => {
-      void queryClient.prefetchQuery({
-        queryKey: agentThreadKeys.detail(threadId),
-        queryFn: () => agentsApi.getThread(threadId, { markViewed: false }),
-      })
-    })
+    for (const thread of threads) {
+      if (thread.id === activeThreadId) continue
+      queryClient.setQueryData(agentThreadKeys.detail(thread.id), thread)
+    }
   }, [activeThreadId, queryClient, threads])
 }
 
@@ -114,7 +111,7 @@ export function useCreateAgentThread() {
         ...thread,
         status: thread.status === "idle" ? "running" : thread.status,
       })
-      queryClient.invalidateQueries({ queryKey: agentThreadKeys.all })
+      queryClient.invalidateQueries({ queryKey: agentThreadKeys.all, exact: true })
       navigate({ to: "/agents/$threadId", params: { threadId: thread.id } })
     },
   })
@@ -133,18 +130,8 @@ export function useCancelAgentThread(threadId: string) {
   return useMutation({
     mutationFn: () => agentsApi.cancelThread(threadId),
     onSuccess: (thread) => {
-      queryClient.setQueryData(
-        agentThreadKeys.detail(threadId),
-        (prev: typeof thread | undefined) => {
-          if (!prev) return thread
-          return {
-            ...thread,
-            messages:
-              thread.messages.length > 0 ? thread.messages : prev.messages,
-          }
-        }
-      )
-      queryClient.invalidateQueries({ queryKey: agentThreadKeys.all })
+      queryClient.setQueryData(agentThreadKeys.detail(threadId), thread)
+      queryClient.invalidateQueries({ queryKey: agentThreadKeys.all, exact: true })
     },
   })
 }
@@ -157,7 +144,7 @@ export function useDeleteAgentThread() {
     mutationFn: (threadId: string) => agentsApi.deleteThread(threadId),
     onSuccess: (_, threadId) => {
       queryClient.removeQueries({ queryKey: agentThreadKeys.detail(threadId) })
-      queryClient.invalidateQueries({ queryKey: agentThreadKeys.all })
+      queryClient.invalidateQueries({ queryKey: agentThreadKeys.all, exact: true })
       const path = window.location.pathname
       if (path.includes(`/agents/${threadId}`)) {
         navigate({ to: "/agents" })

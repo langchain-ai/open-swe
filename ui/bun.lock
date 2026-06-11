@@ -8,7 +8,8 @@
         "@base-ui/react": "^1.4.1",
         "@fontsource-variable/inter": "^5.2.8",
         "@langchain/core": "^1.1.48",
-        "@langchain/react": "^1.0.20",
+        "@langchain/langgraph-sdk": "^1.9.21",
+        "@langchain/react": "^1.0.22",
         "@monaco-editor/react": "^4.7.0",
         "@phosphor-icons/react": "^2.1.10",
         "@pierre/diffs": "^1.2.1",
@@ -411,11 +412,11 @@
 
     "@langchain/core": ["@langchain/core@1.1.48", "", { "dependencies": { "@cfworker/json-schema": "^4.0.2", "@standard-schema/spec": "^1.1.0", "js-tiktoken": "^1.0.12", "langsmith": ">=0.5.0 <1.0.0", "mustache": "^4.2.0", "p-queue": "^6.6.2", "zod": "^3.25.76 || ^4" } }, "sha512-fQU6Guyb1pwc2fEplmA8FPbKfOMAofjnyJzExevro0FxEiuGHE18Ov/ZHmT9trWCDTZRI9eW1VIc6aChxV8pAQ=="],
 
-    "@langchain/langgraph-sdk": ["@langchain/langgraph-sdk@1.9.20", "", { "dependencies": { "@langchain/protocol": "^0.0.16", "@types/json-schema": "^7.0.15", "p-queue": "^9.0.1", "p-retry": "^7.1.1", "uuid": "^14.0.0" }, "peerDependencies": { "@langchain/core": "^1.1.48", "react": "^18 || ^19", "react-dom": "^18 || ^19", "svelte": "^4.0.0 || ^5.0.0", "vue": "^3.0.0" }, "optionalPeers": ["react", "react-dom", "svelte", "vue"] }, "sha512-waZQNUN6apVg3jvDApy16wUGwrCvJB8WXHbIPvVrrUZHObqx0w5tk7P/Ite5Qvu4abWrvNtrmqk2zmcqCx7jVw=="],
+    "@langchain/langgraph-sdk": ["@langchain/langgraph-sdk@1.9.21", "", { "dependencies": { "@langchain/protocol": "^0.0.16", "@types/json-schema": "^7.0.15", "p-queue": "^9.0.1", "p-retry": "^7.1.1", "uuid": "^14.0.0" }, "peerDependencies": { "@langchain/core": "^1.1.48", "react": "^18 || ^19", "react-dom": "^18 || ^19", "svelte": "^4.0.0 || ^5.0.0", "vue": "^3.0.0" }, "optionalPeers": ["react", "react-dom", "svelte", "vue"] }, "sha512-XE4DL12BkVTjTRUWi9CJN8s/hZ/mn4k2VcIsC5mWVHIepWZLmuW7T1NhVmRRZ7Kv4HpZ4O1plZkVtLpl6YLsoQ=="],
 
     "@langchain/protocol": ["@langchain/protocol@0.0.16", "", {}, "sha512-ws+J7MaHyhO5dG7f0vdyHQiUn9hoCnki0f3crJPa4MCTGzcRC39jYSCghyrGtBPYQnZbUQiGyRVpW3z3M8IpJg=="],
 
-    "@langchain/react": ["@langchain/react@1.0.20", "", { "dependencies": { "@langchain/langgraph-sdk": "1.9.20" }, "peerDependencies": { "@langchain/core": "^1.1.48", "react": "^18 || ^19" } }, "sha512-KF6/88Ib847SPSRzOdvUcSu5E0Qlln6h4uB6ywdkPmVd+Ol3y9RcteFpF84dWAPdYl411nyOrIfA08PoO4M0hw=="],
+    "@langchain/react": ["@langchain/react@1.0.22", "", { "dependencies": { "@langchain/langgraph-sdk": "1.9.21" }, "peerDependencies": { "@langchain/core": "^1.1.48", "react": "^18 || ^19" } }, "sha512-e3llirWyH6RI6XoTwm7i9e7jiV3A6GDp50JCFKyo8XfZiufE6HiMzZHtpiMLkR/JezfdOTEHDyEC148C0gVB8A=="],
 
     "@mermaid-js/parser": ["@mermaid-js/parser@1.1.1", "", { "dependencies": { "@chevrotain/types": "~11.1.1" } }, "sha512-VuHdsYMK1bT6X2JbcAaWAhugTRvRBRyuZgd+c22swUeI9g/ntaxF7CY7dYarhZovofCbUNO0G7JesfmNtjYOCw=="],
 

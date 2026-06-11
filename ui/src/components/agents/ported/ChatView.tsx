@@ -1,7 +1,7 @@
 import { useCallback, useRef, useEffect, useState, forwardRef } from "react";
 import { useStore } from "../../store";
 import { useShallow } from 'zustand/react/shallow';
-import { MessageView, summarizeChangedFiles } from "./MessageView";
+import { Messages, summarizeChangedFiles } from "@/components/agents/messages";
 import { PromptBar } from "./PromptBar";
 import { TodoList } from "./TodoList";
 import { Logo } from "./Logo";
@@ -408,7 +408,7 @@ export function ChatView({ tabId }: ChatViewProps) {
       onClick={handleContainerClick}
       {...dragProps}
     >
-      <MessageView
+      <Messages
         messages={session!.messages}
         isStreaming={session!.isStreaming}
         contentWidthClass={MESSAGE_CONTENT_WIDTH}

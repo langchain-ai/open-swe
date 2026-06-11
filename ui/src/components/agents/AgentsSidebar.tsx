@@ -32,7 +32,7 @@ import { groupThreads } from "@/lib/agents/api"
 import {
   useAgentThreads,
   useDeleteAgentThread,
-  usePrefetchAgentThreadDetails,
+  useSeedAgentThreadDetails,
 } from "@/lib/agents/queries"
 import { cn } from "@/lib/utils"
 
@@ -59,7 +59,7 @@ const NAV = [
 export function AgentsSidebar({ user, activeThreadId }: AgentsSidebarProps) {
   const threadsQuery = useAgentThreads()
   const threads = threadsQuery.data ?? []
-  usePrefetchAgentThreadDetails(threads, activeThreadId)
+  useSeedAgentThreadDetails(threads, activeThreadId)
   const groups = groupThreads(threads)
   const layout = useSidebarLayout()
 

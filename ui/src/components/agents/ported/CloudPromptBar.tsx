@@ -77,7 +77,7 @@ function StreamSubmitButton(props: SubmitButtonProps) {
         queryClient.setQueryData(agentThreadKeys.detail(threadId), (prev) =>
           prev ? { ...prev, status: "interrupted" as const } : prev
         )
-        void queryClient.invalidateQueries({ queryKey: agentThreadKeys.all })
+        void queryClient.invalidateQueries({ queryKey: agentThreadKeys.all, exact: true })
       }
     } finally {
       setStopping(false)

@@ -8,6 +8,20 @@ interface MarkdownProps {
   isLive?: boolean;
 }
 
+/**
+ * Must stay referentially and structurally stable while a message is streaming.
+ * Streamdown keys its animate plugin on JSON.stringify(animated); changing
+ * stagger/duration recreates the plugin, resets prevContentLength, and
+ * re-animates text that was already on screen.
+ */
+const STREAMDOWN_ANIMATED = {
+  sep: "word",
+  animation: "slideUp",
+  duration: 60,
+  stagger: 10,
+  easing: "ease-out",
+} as const;
+
 const STREAMDOWN_COMPONENTS = {
   h1: ({ children }: { children?: ReactNode }) => (
     <div className="text-[color:var(--ui-accent)] text-[20px] font-semibold mt-4 mb-2 tracking-tight">
@@ -69,13 +83,6 @@ const STREAMDOWN_COMPONENTS = {
   },
 };
 
-const STREAMDOWN_ANIMATED = {
-  sep: "char",
-  animation: "blurIn",
-  duration: 0,
-  stagger: 0,
-  easing: "linear",
-} as const;
 const SHIKI_THEME: ["github-light", "github-dark"] = ["github-light", "github-dark"];
 
 export const Markdown = memo(function Markdown({ content, isLive = false }: MarkdownProps) {

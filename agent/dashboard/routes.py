@@ -115,6 +115,7 @@ from .thread_api import (
     list_dashboard_threads,
     proxy_dashboard_thread_commands,
     proxy_dashboard_thread_history,
+    proxy_dashboard_thread_run_cancel,
     proxy_dashboard_thread_stream_events,
     send_dashboard_message,
     stream_dashboard_thread,
@@ -934,6 +935,25 @@ async def api_send_thread_message(
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
     return await send_dashboard_message(thread_id, session["sub"], body, email=session.get("email"))
+
+
+@router.post("/threads/{thread_id}/runs/{run_id}/cancel")
+async def api_cancel_thread_run(
+    thread_id: str,
+    run_id: str,
+    session: dict[str, Any] = _SESSION_DEP,
+    wait: str = "0",
+    action: str = "interrupt",
+) -> Response:
+    status_code, content, media_type = await proxy_dashboard_thread_run_cancel(
+        thread_id,
+        run_id,
+        session["sub"],
+        wait=wait,
+        action=action,
+        email=session.get("email"),
+    )
+    return Response(content=content, status_code=status_code, media_type=media_type)
 
 
 @router.post("/threads/{thread_id}/cancel")

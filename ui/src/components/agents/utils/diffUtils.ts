@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import { useResolvedTheme } from "@/lib/theme";
+import { preloadHighlighter } from "@pierre/diffs";
 
 export const DIFF_UNSAFE_CSS = `
 [data-diffs-header],
@@ -72,4 +73,30 @@ export function useDiffOptions() {
     () => ({ ...diffOptions, themeType: resolvedTheme }),
     [resolvedTheme]
   );
+}
+
+let highlighterWarmup: Promise<void> | null = null;
+
+/**
+ * Pierre's <MultiFileDiff> renders an empty <diffs-container> on its first mount
+ * when the shared Shiki highlighter (specifically its themes) hasn't loaded yet:
+ * the cold-start render bails before painting and relies on an async repaint that
+ * can be dropped — most reliably under React StrictMode's mount/unmount/mount,
+ * which leaves a stale empty <pre> behind so the remounted instance no-ops.
+ *
+ * Warming the themes up-front makes that first render synchronous and non-empty.
+ * Idempotent and client-only (preloadHighlighter creates a Shiki instance).
+ */
+export function warmDiffHighlighter(): Promise<void> {
+  if (typeof window === "undefined") return Promise.resolve();
+  if (highlighterWarmup == null) {
+    highlighterWarmup = preloadHighlighter({
+      themes: [diffOptions.theme.light, diffOptions.theme.dark],
+      langs: ["text"],
+    }).catch((error) => {
+      highlighterWarmup = null;
+      throw error;
+    });
+  }
+  return highlighterWarmup;
 }

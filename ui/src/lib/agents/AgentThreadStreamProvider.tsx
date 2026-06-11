@@ -39,7 +39,7 @@ export function AgentThreadStreamProvider({
         threadId={threadId}
         onCompleted={() => {
           void queryClient.invalidateQueries({ queryKey: agentThreadKeys.detail(threadId) });
-          void queryClient.invalidateQueries({ queryKey: agentThreadKeys.all });
+          void queryClient.invalidateQueries({ queryKey: agentThreadKeys.all, exact: true });
         }}
       >
         {children}

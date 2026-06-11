@@ -8,6 +8,7 @@ from .sandbox_circuit_breaker import SandboxCircuitBreakerMiddleware
 from .sanitize_thinking_blocks import SanitizeThinkingBlocksMiddleware
 from .sanitize_tool_inputs import SanitizeToolInputsMiddleware
 from .settle_review_check import settle_review_check_on_exit
+from .tool_artifact import ToolArtifactMiddleware
 from .tool_error_handler import ToolErrorMiddleware
 
 __all__ = [
@@ -15,6 +16,7 @@ __all__ = [
     "ModelFallbackMiddleware",
     "SanitizeThinkingBlocksMiddleware",
     "SanitizeToolInputsMiddleware",
+    "ToolArtifactMiddleware",
     "ToolErrorMiddleware",
     "SandboxCircuitBreakerMiddleware",
     "SlackAssistantStatusMiddleware",

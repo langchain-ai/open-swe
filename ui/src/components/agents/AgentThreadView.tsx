@@ -2,11 +2,15 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import { useStreamContext as useAgentThreadStream } from "@langchain/react"
 
 import type { PendingPrompt } from "@/lib/agents/pendingPrompts"
-import type { AgentThread, ImageChunk, Message } from "@/lib/agents/types"
+import type {
+  AgentThread,
+  ImageChunk,
+  Message,
+} from "@/lib/agents/types"
 import type { ModelSelection } from "@/lib/agents/provider/useModelOptions"
 import { AgentGitPanel } from "@/components/agents/AgentGitPanel"
 import { AgentPromptBar } from "@/components/agents/AgentPromptBar"
-import { MessageView } from "@/components/agents/ported"
+import { Messages } from "@/components/agents/messages"
 import { AgentThreadStreamProvider } from "@/lib/agents/AgentThreadStreamProvider"
 import { streamMessagesToUi } from "@/lib/agents/streamMessagesToUi"
 import {
@@ -125,10 +129,16 @@ function AgentThreadViewContent({ thread }: AgentThreadViewProps) {
   ])
 
   const baseMessages = useMemo<Array<Message>>(() => {
-    const live = streamMessagesToUi(stream.messages)
+    const live = streamMessagesToUi(stream.messages, stream.toolCalls, stream.subagents)
     if (live.length > 0 || stream.isLoading) return live
     return thread.messages
-  }, [stream.isLoading, stream.messages, thread.messages])
+  }, [
+    stream.isLoading,
+    stream.messages,
+    stream.toolCalls,
+    stream.subagents,
+    thread.messages,
+  ])
 
   useEffect(() => {
     setPendingPrompts((prev) => {
@@ -165,13 +175,16 @@ function AgentThreadViewContent({ thread }: AgentThreadViewProps) {
     thread.status === "running" || stream.isLoading || pendingPrompts.length > 0
   const isThinking = stream.isLoading || pendingPrompts.length > 0
   const settingUpSandbox = isThinking && baseMessages.length === 0
+  // The transcript hydrates from the SDK (`GET …/state` → `stream.messages`).
+  // Show a loading state during that one-time fetch instead of the empty state.
+  const isHydrating = stream.isThreadLoading && !hasMessages
 
   return (
     <div className="flex min-w-0 flex-1">
       <div className="flex min-w-0 flex-1 flex-col">
         {hasMessages ? (
           <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
-            <MessageView
+            <Messages
               messages={displayMessages}
               isStreaming={isStreaming}
               streamIsLoading={stream.isLoading}
@@ -200,6 +213,10 @@ function AgentThreadViewContent({ thread }: AgentThreadViewProps) {
                 />
               </div>
             </div>
+          </div>
+        ) : isHydrating ? (
+          <div className="flex flex-1 flex-col items-center justify-center gap-4 px-6">
+            <p className="text-sm text-[var(--ui-text-dim)]">Loading conversation…</p>
           </div>
         ) : (
           <div className="flex flex-1 flex-col items-center justify-center gap-4 px-6">

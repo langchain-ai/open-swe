@@ -15,7 +15,6 @@ from typing import Any
 import httpx
 from fastapi import HTTPException
 from langchain_core.messages.content import create_image_block
-from langgraph_sdk.errors import InternalServerError
 from pydantic import BaseModel, ConfigDict, Field
 
 from ..utils.langsmith import get_langsmith_trace_url
@@ -26,7 +25,6 @@ from ..utils.thread_ops import (
     queue_message_for_thread,
 )
 from .agent_overrides import normalize_profile_overrides
-from .message_adapter import state_messages_to_ui
 from .options import SUPPORTED_MODEL_IDS, model_supports_effort, model_supports_images
 from .profiles import get_profile, get_valid_access_token
 from .team_settings import get_team_default_model
@@ -289,7 +287,6 @@ def _is_thread_viewed(metadata: dict[str, Any], latest_run_id: str | None) -> bo
 def _thread_summary(
     thread: dict[str, Any],
     *,
-    messages: list[dict[str, Any]] | None = None,
     latest_run_status: str | None = None,
     latest_run_id: str | None = None,
 ) -> dict[str, Any]:
@@ -344,10 +341,9 @@ def _thread_summary(
             "baseRef": metadata.get("base_branch") or "main",
             "url": pr_url,
         }
-    if messages is not None:
-        summary["messages"] = messages
-    else:
-        summary["messages"] = []
+    # The transcript hydrates client-side from the SDK (`GET …/state` →
+    # `stream.messages`); the summary only carries metadata.
+    summary["messages"] = []
     return summary
 
 
@@ -474,19 +470,9 @@ async def get_dashboard_thread(
     metadata = thread.get("metadata") if isinstance(thread.get("metadata"), dict) else {}
     is_owner = _user_owns_thread(metadata, login, email)
 
-    messages: list[dict[str, Any]] = []
-    try:
-        state = await client.threads.get_state(thread_id)
-    except InternalServerError:
-        logger.warning(
-            "Thread state unavailable for %s (checkpoint replay failed); returning metadata only",
-            thread_id,
-        )
-    else:
-        values = state.get("values") if isinstance(state, dict) else {}
-        raw_messages = values.get("messages") if isinstance(values, dict) else []
-        messages = state_messages_to_ui(raw_messages if isinstance(raw_messages, list) else [])
-
+    # The transcript is hydrated client-side by the SDK (`StreamProvider` reads
+    # `GET …/state` → `stream.messages`), so the detail endpoint returns
+    # metadata only — no server-side message conversion.
     thread, latest_run_status, latest_run_id = await _refresh_latest_run_metadata(client, thread)
     metadata = thread.get("metadata") if isinstance(thread.get("metadata"), dict) else metadata
     status = _run_status_to_agent_status(
@@ -509,7 +495,6 @@ async def get_dashboard_thread(
 
     return _thread_summary(
         thread,
-        messages=messages,
         latest_run_status=latest_run_status,
         latest_run_id=latest_run_id,
     )
@@ -967,6 +952,43 @@ async def proxy_dashboard_thread_history(
     headers = _langgraph_proxy_headers(content_type=content_type)
     async with httpx.AsyncClient(timeout=_PROXY_REQUEST_TIMEOUT) as client:
         response = await client.post(url, content=body or b"{}", headers=headers)
+    media_type = response.headers.get("content-type")
+    return response.status_code, response.content, media_type
+
+
+async def proxy_dashboard_thread_run_cancel(
+    thread_id: str,
+    run_id: str,
+    login: str,
+    *,
+    wait: str = "0",
+    action: str = "interrupt",
+    email: str | None = None,
+) -> tuple[int, bytes, str | None]:
+    await _authorized_thread_metadata(thread_id, login, email=email)
+    url = f"{langgraph_url().rstrip('/')}/threads/{thread_id}/runs/{run_id}/cancel"
+    headers = _langgraph_proxy_headers()
+    async with httpx.AsyncClient(timeout=_PROXY_REQUEST_TIMEOUT) as client:
+        response = await client.post(
+            url,
+            headers=headers,
+            params={"wait": wait, "action": action},
+        )
+    if response.status_code in {200, 202, 204}:
+        try:
+            await langgraph_client().threads.update(
+                thread_id=thread_id,
+                metadata={
+                    "latest_run_status": "interrupted",
+                    "updated_at_ms": _now_ms(),
+                },
+            )
+        except Exception:
+            logger.debug(
+                "Could not update thread metadata after run cancel for %s",
+                thread_id,
+                exc_info=True,
+            )
     media_type = response.headers.get("content-type")
     return response.status_code, response.content, media_type
 
