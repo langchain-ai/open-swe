@@ -107,16 +107,19 @@ from .team_settings import (
 )
 from .thread_api import (
     ThreadMessageBody,
+    ThreadResolveBody,
     cancel_dashboard_thread,
     delete_dashboard_thread,
     get_dashboard_thread,
     get_dashboard_thread_pr_diff,
     get_dashboard_thread_state,
     list_dashboard_threads,
+    list_dashboard_threads_page,
     proxy_dashboard_thread_commands,
     proxy_dashboard_thread_history,
     proxy_dashboard_thread_run_cancel,
     proxy_dashboard_thread_stream_events,
+    resolve_dashboard_thread,
     send_dashboard_message,
     stream_dashboard_thread,
 )
@@ -910,6 +913,32 @@ async def api_list_threads(
     return await list_dashboard_threads(session["sub"], email=session.get("email"), include_all=all)
 
 
+@router.get("/threads/page")
+async def api_list_threads_page(
+    limit: int = 25,
+    offset: int = 0,
+    all: bool = False,
+    resolved: bool | None = None,
+    viewed: bool | None = None,
+    source: str | None = None,
+    status: str | None = None,
+    q: str | None = None,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    return await list_dashboard_threads_page(
+        session["sub"],
+        email=session.get("email"),
+        limit=limit,
+        offset=offset,
+        include_all=all,
+        resolved=resolved,
+        viewed=viewed,
+        source=source,
+        status=status,
+        query=q,
+    )
+
+
 @router.get("/threads/{thread_id}")
 async def api_get_thread(
     thread_id: str,
@@ -943,6 +972,20 @@ async def api_send_thread_message(
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
     return await send_dashboard_message(thread_id, session["sub"], body, email=session.get("email"))
+
+
+@router.post("/threads/{thread_id}/resolve")
+async def api_resolve_thread(
+    thread_id: str,
+    body: ThreadResolveBody,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    return await resolve_dashboard_thread(
+        thread_id,
+        session["sub"],
+        resolved=body.resolved,
+        email=session.get("email"),
+    )
 
 
 @router.post("/threads/{thread_id}/runs/{run_id}/cancel")

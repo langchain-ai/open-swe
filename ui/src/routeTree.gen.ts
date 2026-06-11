@@ -21,6 +21,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as AgentsIndexRouteImport } from './routes/agents/index'
 import { Route as ReviewStylesRouteImport } from './routes/review_.styles'
 import { Route as AgentsInstructionsRouteImport } from './routes/agents_.instructions'
+import { Route as AgentsThreadsRouteImport } from './routes/agents/threads'
 import { Route as AgentsThreadIdRouteImport } from './routes/agents/$threadId'
 import { Route as AgentsAutomationsIndexRouteImport } from './routes/agents/automations/index'
 import { Route as ReviewRepositoriesOwnerRouteImport } from './routes/review_.repositories.$owner'
@@ -87,6 +88,11 @@ const AgentsInstructionsRoute = AgentsInstructionsRouteImport.update({
   path: '/agents/instructions',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AgentsThreadsRoute = AgentsThreadsRouteImport.update({
+  id: '/threads',
+  path: '/threads',
+  getParentRoute: () => AgentsRoute,
+} as any)
 const AgentsThreadIdRoute = AgentsThreadIdRouteImport.update({
   id: '/$threadId',
   path: '/$threadId',
@@ -125,6 +131,7 @@ export interface FileRoutesByFullPath {
   '/review': typeof ReviewRoute
   '/usage': typeof UsageRoute
   '/agents/$threadId': typeof AgentsThreadIdRoute
+  '/agents/threads': typeof AgentsThreadsRoute
   '/agents/instructions': typeof AgentsInstructionsRoute
   '/review/styles': typeof ReviewStylesRoute
   '/agents/': typeof AgentsIndexRoute
@@ -143,6 +150,7 @@ export interface FileRoutesByTo {
   '/review': typeof ReviewRoute
   '/usage': typeof UsageRoute
   '/agents/$threadId': typeof AgentsThreadIdRoute
+  '/agents/threads': typeof AgentsThreadsRoute
   '/agents/instructions': typeof AgentsInstructionsRoute
   '/review/styles': typeof ReviewStylesRoute
   '/agents': typeof AgentsIndexRoute
@@ -163,6 +171,7 @@ export interface FileRoutesById {
   '/review': typeof ReviewRoute
   '/usage': typeof UsageRoute
   '/agents/$threadId': typeof AgentsThreadIdRoute
+  '/agents/threads': typeof AgentsThreadsRoute
   '/agents_/instructions': typeof AgentsInstructionsRoute
   '/review_/styles': typeof ReviewStylesRoute
   '/agents/': typeof AgentsIndexRoute
@@ -184,6 +193,7 @@ export interface FileRouteTypes {
     | '/review'
     | '/usage'
     | '/agents/$threadId'
+    | '/agents/threads'
     | '/agents/instructions'
     | '/review/styles'
     | '/agents/'
@@ -202,6 +212,7 @@ export interface FileRouteTypes {
     | '/review'
     | '/usage'
     | '/agents/$threadId'
+    | '/agents/threads'
     | '/agents/instructions'
     | '/review/styles'
     | '/agents'
@@ -221,6 +232,7 @@ export interface FileRouteTypes {
     | '/review'
     | '/usage'
     | '/agents/$threadId'
+    | '/agents/threads'
     | '/agents_/instructions'
     | '/review_/styles'
     | '/agents/'
@@ -331,6 +343,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AgentsInstructionsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/agents/threads': {
+      id: '/agents/threads'
+      path: '/threads'
+      fullPath: '/agents/threads'
+      preLoaderRoute: typeof AgentsThreadsRouteImport
+      parentRoute: typeof AgentsRoute
+    }
     '/agents/$threadId': {
       id: '/agents/$threadId'
       path: '/$threadId'
@@ -371,6 +390,7 @@ declare module '@tanstack/react-router' {
 
 interface AgentsRouteChildren {
   AgentsThreadIdRoute: typeof AgentsThreadIdRoute
+  AgentsThreadsRoute: typeof AgentsThreadsRoute
   AgentsIndexRoute: typeof AgentsIndexRoute
   AgentsAutomationsScheduleIdRoute: typeof AgentsAutomationsScheduleIdRoute
   AgentsAutomationsNewRoute: typeof AgentsAutomationsNewRoute
@@ -379,6 +399,7 @@ interface AgentsRouteChildren {
 
 const AgentsRouteChildren: AgentsRouteChildren = {
   AgentsThreadIdRoute: AgentsThreadIdRoute,
+  AgentsThreadsRoute: AgentsThreadsRoute,
   AgentsIndexRoute: AgentsIndexRoute,
   AgentsAutomationsScheduleIdRoute: AgentsAutomationsScheduleIdRoute,
   AgentsAutomationsNewRoute: AgentsAutomationsNewRoute,
@@ -405,12 +426,3 @@ const rootRouteChildren: RootRouteChildren = {
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
-
-import type { getRouter } from './router.tsx'
-import type { createStart } from '@tanstack/react-start'
-declare module '@tanstack/react-start' {
-  interface Register {
-    ssr: true
-    router: Awaited<ReturnType<typeof getRouter>>
-  }
-}

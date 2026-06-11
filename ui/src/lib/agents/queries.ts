@@ -3,13 +3,15 @@ import { useNavigate } from "@tanstack/react-router"
 import { useEffect } from "react"
 
 import { agentsApi } from "./api"
-import type { ScheduleUpdateRequest } from "./api"
+import type { ScheduleUpdateRequest, ThreadsPageParams } from "./api"
 import type { AgentThread, Chunk, ImageChunk, Message } from "./types"
 
 export const agentThreadKeys = {
   all: ["agent-threads"] as const,
   detail: (threadId: string) => ["agent-threads", threadId] as const,
   prDiff: (threadId: string) => ["agent-threads", threadId, "pr-diff"] as const,
+  page: (params: ThreadsPageParams) =>
+    ["agent-threads", "page", params] as const,
 }
 
 export const agentScheduleKeys = {
@@ -172,7 +174,10 @@ export function useCancelAgentThread(threadId: string) {
     mutationFn: () => agentsApi.cancelThread(threadId),
     onSuccess: (thread) => {
       queryClient.setQueryData(agentThreadKeys.detail(threadId), thread)
-      queryClient.invalidateQueries({ queryKey: agentThreadKeys.all, exact: true })
+      queryClient.invalidateQueries({
+        queryKey: agentThreadKeys.all,
+        exact: true,
+      })
     },
   })
 }
@@ -185,11 +190,35 @@ export function useDeleteAgentThread() {
     mutationFn: (threadId: string) => agentsApi.deleteThread(threadId),
     onSuccess: (_, threadId) => {
       queryClient.removeQueries({ queryKey: agentThreadKeys.detail(threadId) })
-      queryClient.invalidateQueries({ queryKey: agentThreadKeys.all, exact: true })
+      queryClient.invalidateQueries({
+        queryKey: agentThreadKeys.all,
+        exact: true,
+      })
       const path = window.location.pathname
       if (path.includes(`/agents/${threadId}`)) {
         navigate({ to: "/agents" })
       }
     },
+  })
+}
+
+export function useResolveAgentThread() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (vars: { threadId: string; resolved: boolean }) =>
+      agentsApi.resolveThread(vars.threadId, vars.resolved),
+    onSuccess: (thread, vars) => {
+      queryClient.setQueryData(agentThreadKeys.detail(vars.threadId), thread)
+      queryClient.invalidateQueries({ queryKey: agentThreadKeys.all })
+    },
+  })
+}
+
+export function useThreadsPage(params: ThreadsPageParams) {
+  return useQuery({
+    queryKey: agentThreadKeys.page(params),
+    queryFn: () => agentsApi.listThreadsPage(params),
+    placeholderData: (prev) => prev,
   })
 }
