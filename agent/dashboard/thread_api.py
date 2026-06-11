@@ -59,6 +59,12 @@ def _agent_version_metadata() -> dict[str, str]:
     return {"LANGSMITH_AGENT_VERSION": revision} if revision else {}
 
 
+def _require_json_content_type(content_type: str) -> None:
+    media_type = content_type.split(";", 1)[0].strip().lower()
+    if media_type != "application/json":
+        raise HTTPException(415, "Content-Type must be application/json")
+
+
 def _langgraph_proxy_headers(
     *, content_type: str = "application/json", accept: str | None = None
 ) -> dict[str, str]:
@@ -893,6 +899,7 @@ async def proxy_dashboard_thread_stream_events(
     email: str | None = None,
     content_type: str = "application/json",
 ) -> AsyncIterator[bytes]:
+    _require_json_content_type(content_type)
     await _authorized_thread_metadata(thread_id, login, email=email)
     url = f"{langgraph_url().rstrip('/')}/threads/{thread_id}/stream/events"
     headers = _langgraph_proxy_headers(content_type=content_type, accept="text/event-stream")
@@ -922,6 +929,7 @@ async def proxy_dashboard_thread_commands(
     email: str | None = None,
     content_type: str = "application/json",
 ) -> tuple[int, bytes, str | None]:
+    _require_json_content_type(content_type)
     try:
         parsed = json.loads(body)
     except json.JSONDecodeError as exc:
@@ -1002,6 +1010,7 @@ async def proxy_dashboard_thread_history(
     email: str | None = None,
     content_type: str = "application/json",
 ) -> tuple[int, bytes, str | None]:
+    _require_json_content_type(content_type)
     await _authorized_thread_metadata(thread_id, login, email=email)
     url = f"{langgraph_url().rstrip('/')}/threads/{thread_id}/history"
     headers = _langgraph_proxy_headers(content_type=content_type)

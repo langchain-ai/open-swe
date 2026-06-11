@@ -45,6 +45,7 @@ from .oauth import (
     issue_session,
     issue_state,
     new_state_nonce,
+    require_same_origin_for_mutations,
     require_session,
     sanitize_redirect_to,
 )
@@ -127,7 +128,11 @@ from .user_mappings import (
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/dashboard/api", tags=["dashboard"])
+router = APIRouter(
+    prefix="/dashboard/api",
+    tags=["dashboard"],
+    dependencies=[Depends(require_same_origin_for_mutations)],
+)
 _GITHUB_API_TIMEOUT = httpx.Timeout(10.0, connect=3.0)
 _SKIPPABLE_INSTALLATION_REPO_STATUS_CODES = frozenset({403, 404})
 

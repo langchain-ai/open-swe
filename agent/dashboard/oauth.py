@@ -37,12 +37,12 @@ def _secret() -> str:
     return s
 
 
-def _allowed_redirect_origins() -> set[str]:
-    """Origins permitted for the post-login redirect.
+def allowed_dashboard_origins() -> set[str]:
+    """Origins permitted for dashboard frontend requests and post-login redirects.
 
     Built from DASHBOARD_BASE_URL plus any DASHBOARD_ALLOWED_ORIGINS entries
-    so the dashboard itself and its preview deploys can all be redirect
-    targets — but nothing else.
+    so the dashboard itself and its preview deploys are allowed — but nothing
+    else.
     """
     origins: set[str] = set()
     base = os.environ.get("DASHBOARD_BASE_URL", "").strip()
@@ -76,7 +76,7 @@ def sanitize_redirect_to(redirect_to: str | None) -> str:
     candidate_origin = _origin_of(redirect_to)
     if not candidate_origin:
         return fallback
-    if candidate_origin in _allowed_redirect_origins():
+    if candidate_origin in allowed_dashboard_origins():
         return redirect_to
     logger.warning("Rejected redirect_to=%r — origin not in allowlist", redirect_to)
     return fallback
@@ -188,6 +188,43 @@ def require_session(request: Request) -> dict[str, Any]:
     if not token:
         raise HTTPException(401, "not authenticated")
     return decode_session(token)
+
+
+def request_origin(request: Request) -> str | None:
+    """Return the request's origin (scheme + host + port), if present."""
+    raw_origin = request.headers.get("origin")
+    if raw_origin:
+        return _origin_of(raw_origin)
+    referer = request.headers.get("referer")
+    if referer:
+        return _origin_of(referer)
+    return None
+
+
+def require_same_origin(request: Request) -> None:
+    """Reject cross-site cookie-authenticated mutations (CSRF defense).
+
+    No-op when no dashboard origins are configured (local setups without
+    ``DASHBOARD_BASE_URL`` / ``DASHBOARD_ALLOWED_ORIGINS``).
+    """
+    allowed = allowed_dashboard_origins()
+    if not allowed:
+        return
+    origin = request_origin(request)
+    if not origin or origin not in allowed:
+        logger.warning(
+            "Rejected %s %s — origin %r not in allowlist",
+            request.method,
+            request.url.path,
+            origin,
+        )
+        raise HTTPException(403, "CSRF check failed")
+
+
+def require_same_origin_for_mutations(request: Request) -> None:
+    if request.method in {"GET", "HEAD", "OPTIONS"}:
+        return
+    require_same_origin(request)
 
 
 def expires_at_from_github_response(data: dict[str, Any], *, field: str) -> str | None:
