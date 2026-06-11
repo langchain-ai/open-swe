@@ -11,8 +11,7 @@ import { SiLinear } from "react-icons/si"
 import type { ComponentType, SVGProps } from "react"
 
 import type { AgentSource, AgentThread } from "@/lib/agents/types"
-import { formatRelativeTime } from "@/lib/agents/api"
-import { cn } from "@/lib/utils"
+import { cn, formatRelativeTime } from "@/lib/utils"
 
 type SourceIcon = ComponentType<SVGProps<SVGSVGElement>>
 
