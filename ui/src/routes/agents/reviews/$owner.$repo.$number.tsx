@@ -30,7 +30,6 @@ import { Markdown } from "@/components/agents/ported"
 import { useRegisterReviewSidebar } from "@/components/agents/ReviewSidebar"
 import { Skeleton } from "@/components/ui/skeleton"
 import { api } from "@/lib/api"
-import { prSizeLabel } from "@/lib/reviews"
 import { useSession } from "@/lib/session"
 import { cn } from "@/lib/utils"
 
@@ -165,11 +164,6 @@ function ReviewDetailPage() {
             {detail.data ? ` ${detail.data.pr.title}` : ""}
           </span>
         </span>
-        {detail.data && (
-          <span className="ml-auto rounded border border-border px-1.5 py-0.5 text-[11px] text-muted-foreground">
-            {prSizeLabel(detail.data.pr.additions, detail.data.pr.deletions)}
-          </span>
-        )}
       </header>
 
       {detail.error ? (
@@ -1057,18 +1051,28 @@ function ChecksSection({ checks }: { checks: Array<ReviewCheckRun> }) {
         <p className="text-[11px] text-muted-foreground">No checks reported.</p>
       ) : (
         <div className="space-y-1">
-          {checks.map((check, index) => (
-            <a
-              key={`${check.name}-${index}`}
-              href={check.url ?? undefined}
-              target="_blank"
-              rel="noreferrer"
-              className="flex items-center gap-1.5 text-[11px] text-muted-foreground hover:text-foreground"
-            >
-              <CheckStatusIcon check={check} />
-              <span className="truncate">{check.name}</span>
-            </a>
-          ))}
+          {checks.map((check, index) =>
+            check.url ? (
+              <a
+                key={`${check.name}-${index}`}
+                href={check.url}
+                target="_blank"
+                rel="noreferrer"
+                className="flex items-center gap-1.5 text-[11px] text-muted-foreground hover:text-foreground"
+              >
+                <CheckStatusIcon check={check} />
+                <span className="truncate">{check.name}</span>
+              </a>
+            ) : (
+              <span
+                key={`${check.name}-${index}`}
+                className="flex items-center gap-1.5 text-[11px] text-muted-foreground"
+              >
+                <CheckStatusIcon check={check} />
+                <span className="truncate">{check.name}</span>
+              </span>
+            )
+          )}
         </div>
       )}
     </section>
