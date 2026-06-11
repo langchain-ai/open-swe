@@ -122,7 +122,7 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
           </div>
         )}
       </div>
-      <AgentGitPanel thread={thread} />
+      <AgentGitPanel thread={thread} messages={baseMessages} />
     </div>
   )
 }

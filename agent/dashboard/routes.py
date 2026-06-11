@@ -110,6 +110,7 @@ from .thread_api import (
     cancel_dashboard_thread,
     delete_dashboard_thread,
     get_dashboard_thread,
+    get_dashboard_thread_pr_diff,
     get_dashboard_thread_state,
     list_dashboard_threads,
     proxy_dashboard_thread_commands,
@@ -920,6 +921,18 @@ async def api_get_thread(
         session["sub"],
         email=session.get("email"),
         mark_viewed=mark_viewed,
+    )
+
+
+@router.get("/threads/{thread_id}/pr-diff")
+async def api_get_thread_pr_diff(
+    thread_id: str,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    return await get_dashboard_thread_pr_diff(
+        thread_id,
+        session["sub"],
+        email=session.get("email"),
     )
 
 

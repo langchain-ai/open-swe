@@ -9,6 +9,7 @@ import type { AgentThread, Chunk, ImageChunk, Message } from "./types"
 export const agentThreadKeys = {
   all: ["agent-threads"] as const,
   detail: (threadId: string) => ["agent-threads", threadId] as const,
+  prDiff: (threadId: string) => ["agent-threads", threadId, "pr-diff"] as const,
 }
 
 export const agentScheduleKeys = {
@@ -50,6 +51,16 @@ export function useAgentThread(threadId: string) {
   return useQuery({
     queryKey: agentThreadKeys.detail(threadId),
     queryFn: () => agentsApi.getThread(threadId),
+  })
+}
+
+export function useAgentThreadPrDiff(threadId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: agentThreadKeys.prDiff(threadId),
+    queryFn: () => agentsApi.getThreadPrDiff(threadId),
+    enabled,
+    staleTime: 30_000,
+    retry: false,
   })
 }
 

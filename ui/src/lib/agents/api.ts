@@ -38,6 +38,25 @@ export interface ScheduleUpdateRequest {
   enabled?: boolean | null
 }
 
+export interface ThreadPrDiffFile {
+  path: string
+  previousPath: string | null
+  status: "added" | "removed" | "modified" | "renamed" | string
+  additions: number
+  deletions: number
+  originalContent: string | null
+  modifiedContent: string | null
+  unrenderable: boolean
+}
+
+export interface ThreadPrDiff {
+  prNumber: number
+  baseSha: string
+  headSha: string
+  truncated: boolean
+  files: Array<ThreadPrDiffFile>
+}
+
 const API_BASE = (import.meta.env.VITE_DASHBOARD_API_BASE_URL ?? "").replace(
   /\/$/,
   ""
@@ -122,6 +141,10 @@ export const agentsApi = {
     agentsRequest<void>(`/threads/${encodeURIComponent(threadId)}`, {
       method: "DELETE",
     }),
+  getThreadPrDiff: (threadId: string) =>
+    agentsRequest<ThreadPrDiff>(
+      `/threads/${encodeURIComponent(threadId)}/pr-diff`
+    ),
   streamUrl: (threadId: string) =>
     `${API_BASE}/dashboard/api/threads/${encodeURIComponent(threadId)}/stream`,
 }
