@@ -16,6 +16,7 @@ import {
 import type { GitStatus, GitStatusEntry } from "@pierre/trees"
 
 import type { AgentThread } from "@/lib/agents/types"
+import { buttonVariants } from "@/components/ui/button"
 import type { ChangedFileSummaryItem } from "@/components/agents/ported"
 import { useDiffOptions } from "@/components/agents/utils/diffUtils"
 import { summarizeChangedFiles } from "@/components/agents/ported"
@@ -324,7 +325,7 @@ export function AgentGitPanel({ thread }: AgentGitPanelProps) {
                 href={pr.url}
                 target="_blank"
                 rel="noreferrer"
-                className="inline-flex shrink-0 items-center gap-1 rounded-md border border-[var(--ui-border)] px-2 py-1 text-[11px] font-medium text-[var(--ui-text-dim)] transition-colors hover:bg-[var(--ui-panel-2)] hover:text-[var(--ui-text)]"
+                className={buttonVariants({ variant: "outline", size: "sm" })}
               >
                 <ArrowSquareOutIcon className="size-3" />
                 View PR
