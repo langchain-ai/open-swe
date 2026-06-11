@@ -47,7 +47,7 @@ class ReviewStyleSamples:
     reviews_scanned: int = 0
 
 
-def _github_headers(token: str) -> dict[str, str]:
+def github_headers(token: str) -> dict[str, str]:
     return {
         "Authorization": f"Bearer {token}",
         "Accept": "application/vnd.github+json",
@@ -157,7 +157,7 @@ async def collect_review_samples(
 ) -> ReviewStyleSamples:
     """Sample recent merged PR feedback to identify reviewer style."""
     full_name = f"{owner}/{repo}"
-    headers = _github_headers(token)
+    headers = github_headers(token)
 
     raw_entries: list[tuple[str, int, ReviewSample]] = []
     reviewer_counts: Counter[str] = Counter()

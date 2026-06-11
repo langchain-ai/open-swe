@@ -19,6 +19,7 @@ from fastapi import HTTPException
 from ..reviewer_diff import parse_unified_diff
 from ..reviewer_findings import REVIEWER_THREAD_KIND
 from ..utils.github_app import get_github_app_installation_token
+from ..utils.github_checks import github_headers
 from ..utils.thread_ops import langgraph_client
 
 logger = logging.getLogger(__name__)
@@ -33,14 +34,6 @@ _DIFF_DELETED_FILE_RE = re.compile(r"^deleted file mode", re.MULTILINE)
 _DIFF_RENAME_RE = re.compile(r"^rename from ", re.MULTILINE)
 
 
-def _github_headers(token: str) -> dict[str, str]:
-    return {
-        "Accept": "application/vnd.github+json",
-        "Authorization": f"Bearer {token}",
-        "X-GitHub-Api-Version": "2022-11-28",
-    }
-
-
 async def _require_app_token() -> str:
     token = await get_github_app_installation_token()
     if not token:
@@ -51,7 +44,7 @@ async def _require_app_token() -> str:
 async def _github_get(
     path: str, token: str, *, accept: str | None = None, params: dict[str, Any] | None = None
 ) -> Any:
-    headers = _github_headers(token)
+    headers = github_headers(token)
     if accept:
         headers["Accept"] = accept
     async with httpx.AsyncClient(timeout=_GITHUB_TIMEOUT) as client:

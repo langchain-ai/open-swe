@@ -480,7 +480,12 @@ export const api = {
       `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/diff`,
     ),
   reReview: (owner: string, repo: string, number: number) =>
-    request<{ success: boolean; queued?: boolean }>(
+    request<{
+      success: boolean;
+      queued: boolean;
+      thread_id: string;
+      pr_url: string;
+    }>(
       `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/re-review`,
       { method: "POST" },
     ),

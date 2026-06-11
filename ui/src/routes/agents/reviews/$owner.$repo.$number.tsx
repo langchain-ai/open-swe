@@ -132,10 +132,22 @@ function ReviewDetailPage() {
       query.state.data?.status === "running" ? 5000 : false,
   })
   const diff = useQuery({
-    queryKey: ["reviewDiff", owner, repo, prNumber, detail.data?.head_sha],
+    queryKey: ["reviewDiff", owner, repo, prNumber],
     queryFn: () => api.getReviewDiff(owner, repo, prNumber),
     enabled: !!session.data && Number.isFinite(prNumber),
   })
+
+  const queryClient = useQueryClient()
+  const headSha = detail.data?.head_sha
+  const seenShaRef = useRef(headSha)
+  useEffect(() => {
+    if (headSha && seenShaRef.current && headSha !== seenShaRef.current) {
+      void queryClient.invalidateQueries({
+        queryKey: ["reviewDiff", owner, repo, prNumber],
+      })
+    }
+    if (headSha) seenShaRef.current = headSha
+  }, [headSha, queryClient, owner, repo, prNumber])
 
   if (session.isLoading) {
     return (
