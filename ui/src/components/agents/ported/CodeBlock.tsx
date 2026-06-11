@@ -106,7 +106,7 @@ export function CodeBlock({ text, language }: CodeBlockProps) {
   return (
     <div className="my-2 max-w-full overflow-hidden rounded-xl border border-[var(--ui-border-subtle)] bg-[var(--ui-code-bubble)]">
       <div className="flex items-center justify-between px-3 py-2 text-xs">
-        <span className="text-[color:var(--ui-text-muted)]">{displayLanguage}</span>
+        <span className="font-mono text-[color:var(--ui-accent-2)]">{displayLanguage}</span>
         <button
           type="button"
           onClick={handleCopy}
