@@ -87,10 +87,17 @@ export function AgentsHome() {
     if (repo) configurable.repo = repo
     if (repoOverride === null) configurable.repo_explicitly_none = true
 
-    void stream.submit(
-      { messages: [{ type: "human", content: promptContent(prompt, images) }] },
-      { config: { configurable } }
-    )
+    stream
+      .submit(
+        { messages: [{ type: "human", content: promptContent(prompt, images) }] },
+        { config: { configurable } }
+      )
+      .catch(() => {
+        // Submit failed before the SDK minted a thread id — re-enable the
+        // prompt instead of leaving it disabled until a reload.
+        draftRef.current = null
+        setSubmitting(false)
+      })
   }
 
   return (

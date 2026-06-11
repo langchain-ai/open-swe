@@ -93,6 +93,16 @@ async def test_require_same_origin_rejects_null_origin(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_require_same_origin_rejects_malformed_port(monkeypatch) -> None:
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dashboard.example")
+
+    with pytest.raises(HTTPException) as exc:
+        oauth.require_same_origin(_request(origin="https://dashboard.example:notaport"))
+
+    assert exc.value.status_code == 403
+
+
+@pytest.mark.asyncio
 async def test_require_same_origin_rejects_unknown_origin(monkeypatch) -> None:
     monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dashboard.example")
 
