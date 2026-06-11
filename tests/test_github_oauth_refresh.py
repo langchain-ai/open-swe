@@ -113,6 +113,49 @@ async def test_get_valid_access_token_drops_record_on_dead_refresh_token() -> No
 
 
 @pytest.mark.asyncio
+async def test_get_valid_access_token_keeps_fresh_reauth_on_dead_refresh_token() -> None:
+    soon = (datetime.now(UTC) + timedelta(minutes=1)).isoformat()
+    stale = {
+        "email": "u@example.com",
+        "encrypted_gh_token": "enc-access",
+        "encrypted_gh_refresh_token": "enc-refresh-dead",
+        "token_expires_at": soon,
+    }
+    reauthed = {
+        "email": "u@example.com",
+        "encrypted_gh_token": "enc-access-new",
+        "encrypted_gh_refresh_token": "enc-refresh-new",
+        "token_expires_at": (datetime.now(UTC) + timedelta(hours=8)).isoformat(),
+    }
+    with (
+        patch(
+            "agent.dashboard.profiles._get_value",
+            new_callable=AsyncMock,
+            side_effect=[stale, stale, reauthed],
+        ),
+        patch(
+            "agent.dashboard.profiles._decrypt_access_token",
+            side_effect=lambda r: "fresh-access" if r is reauthed else "stale-access",
+        ),
+        patch("agent.dashboard.profiles._decrypt_refresh_token", return_value="ghr_dead"),
+        patch(
+            "agent.dashboard.profiles.refresh_user_access_token",
+            new_callable=AsyncMock,
+            side_effect=GithubOAuthError(
+                400, "github oauth error: bad refresh token", error_code="bad_refresh_token"
+            ),
+        ),
+        patch(
+            "agent.dashboard.profiles.delete_access_token",
+            new_callable=AsyncMock,
+        ) as mock_delete,
+    ):
+        token = await get_valid_access_token("octo")
+    assert token == "fresh-access"
+    mock_delete.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_get_valid_access_token_keeps_record_on_transient_refresh_failure() -> None:
     soon = (datetime.now(UTC) + timedelta(minutes=1)).isoformat()
     record = {

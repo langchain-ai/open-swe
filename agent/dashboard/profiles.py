@@ -289,6 +289,14 @@ async def get_valid_access_token(login: str, *, force_refresh: bool = False) -> 
             # The refresh token is permanently invalid (revoked / expired), so
             # the cached access token is dead too. Drop it so callers prompt a
             # clean re-login instead of repeatedly handing out a stale token.
+            # The OAuth callback can write a fresh authorization while the
+            # refresh request is in flight (it doesn't take this lock), so only
+            # delete if the stored record is still the one that failed.
+            latest = await _get_value(OAUTH_TOKENS_NAMESPACE, login)
+            if latest and latest.get("encrypted_gh_refresh_token") != record.get(
+                "encrypted_gh_refresh_token"
+            ):
+                return _decrypt_access_token(latest)
             logger.info("Dropping dead GitHub authorization for %s; re-login required", login)
             await delete_access_token(login)
             return None
