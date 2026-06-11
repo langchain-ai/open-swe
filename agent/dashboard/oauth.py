@@ -57,10 +57,22 @@ def allowed_dashboard_origins() -> set[str]:
 
 
 def _origin_of(url: str) -> str:
-    parsed = urlparse(url)
-    if not parsed.scheme or not parsed.netloc:
+    """Normalize a URL or Origin header value to ``scheme://host[:port]``."""
+    trimmed = url.strip().rstrip("/")
+    if not trimmed or trimmed.lower() == "null":
         return ""
-    return f"{parsed.scheme}://{parsed.netloc}"
+    parsed = urlparse(trimmed)
+    if not parsed.scheme or not parsed.hostname:
+        return ""
+    scheme = parsed.scheme.lower()
+    host = parsed.hostname.lower()
+    port = parsed.port
+    if port is None:
+        return f"{scheme}://{host}"
+    default_port = 443 if scheme == "https" else 80 if scheme == "http" else None
+    if default_port is not None and port == default_port:
+        return f"{scheme}://{host}"
+    return f"{scheme}://{host}:{port}"
 
 
 def sanitize_redirect_to(redirect_to: str | None) -> str:
@@ -191,13 +203,17 @@ def require_session(request: Request) -> dict[str, Any]:
 
 
 def request_origin(request: Request) -> str | None:
-    """Return the request's origin (scheme + host + port), if present."""
+    """Return the request's origin (scheme + host + port), if present and valid."""
     raw_origin = request.headers.get("origin")
-    if raw_origin:
-        return _origin_of(raw_origin)
+    if raw_origin is not None:
+        if raw_origin.strip().lower() == "null":
+            return None
+        origin = _origin_of(raw_origin)
+        return origin if origin else None
     referer = request.headers.get("referer")
     if referer:
-        return _origin_of(referer)
+        origin = _origin_of(referer)
+        return origin if origin else None
     return None
 
 
