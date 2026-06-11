@@ -14,7 +14,7 @@ Open SWE has two runnable pieces:
 
 - **Python 3.11 – 3.13** (3.14 is not yet supported due to dependency constraints)
 - [uv](https://docs.astral.sh/uv/) package manager
-- [LangGraph CLI](https://langchain-ai.github.io/langgraph/cloud/reference/cli/)
+- [LangGraph CLI](https://docs.langchain.com/langsmith/cli)
 - [ngrok](https://ngrok.com/) (for local development — exposes webhook endpoints to the internet)
 - [Bun](https://bun.sh/) (only if you want to run the dashboard UI locally — see step 8). Node 20+ also works, but `ui/bun.lock` is the canonical lockfile.
 
@@ -58,7 +58,7 @@ Write this down. You'll use it in the callback URL below and again in step 4 whe
 
 ### 3b. Create the app
 
-1. Go to **GitHub Settings → Developer settings → GitHub Apps → New GitHub App**
+1. Go to **GitHub Settings → Developer settings → [GitHub Apps](https://github.com/settings/apps) → [New GitHub App](https://github.com/settings/apps/new)**
 2. Fill in:
    - **App name**: `open-swe` (or your preferred name)
    - **Homepage URL**: This can be any valid URL — it's only shown on the GitHub Marketplace page (which you won't be using). Use something like `https://github.com/langchain-ai/open-swe`

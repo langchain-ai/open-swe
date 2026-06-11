@@ -1,11 +1,7 @@
-import {
-  ArrowUp,
-  ChevronDown,
-  ImagePlus,
-  LoaderCircle,
-  Square,
-  X,
-} from "lucide-react"
+import { ArrowUp, ChevronDown, ImagePlus, LoaderCircle, X } from "lucide-react"
+import { StopIcon } from "@phosphor-icons/react"
+import { useQueryClient } from "@tanstack/react-query"
+import { useStreamContext as useAgentThreadStream } from "@langchain/react"
 import {
   memo,
   useCallback,
@@ -18,12 +14,89 @@ import {
 
 import type { ModelOption } from "@/lib/api"
 import type { ImageChunk } from "@/lib/agents/types"
-import type { ModelSelection } from "@/lib/agents/useModelOptions"
+import type { ModelSelection } from "@/lib/agents/provider/useModelOptions"
 import { RepoSelector } from "@/components/agents/RepoSelector"
-import { formatModelSelection } from "@/lib/agents/useModelOptions"
+import { useIsInAgentThreadStream } from "@/lib/agents/provider/useIsInAgentThreadStream"
+import { agentThreadKeys } from "@/lib/agents/queries"
+import { formatModelSelection } from "@/lib/agents/provider/useModelOptions"
+import { IconButton } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 
 const PROMPT_TEXTAREA_MAX_HEIGHT = 200
+
+interface SubmitButtonProps {
+  canSubmit: boolean
+  disabled: boolean
+  onSubmit: () => void
+}
+
+function PlainSubmitButton({ canSubmit, disabled, onSubmit }: SubmitButtonProps) {
+  return (
+    <IconButton
+      type="button"
+      onClick={onSubmit}
+      disabled={!canSubmit}
+      aria-label="Send message"
+      className="shrink-0 rounded-full bg-[var(--ui-accent)] text-white hover:bg-[var(--ui-accent)] hover:opacity-90 disabled:cursor-default disabled:opacity-40"
+    >
+      {disabled ? (
+        <LoaderCircle className="size-3.5 animate-spin" />
+      ) : (
+        <ArrowUp className="size-3.5" strokeWidth={2.5} />
+      )}
+    </IconButton>
+  )
+}
+
+function SubmitButton(props: SubmitButtonProps) {
+  const inAgentThreadStream = useIsInAgentThreadStream()
+
+  if (inAgentThreadStream) return <StreamSubmitButton {...props} />
+
+  return <PlainSubmitButton {...props} />
+}
+
+function StreamSubmitButton(props: SubmitButtonProps) {
+  const stream = useAgentThreadStream()
+  const queryClient = useQueryClient()
+  const [stopping, setStopping] = useState(false)
+
+  const handleStop = async () => {
+    if (stopping) return
+    setStopping(true)
+    try {
+      await stream.stop()
+      const threadId = stream.threadId
+      if (threadId) {
+        queryClient.setQueryData(agentThreadKeys.detail(threadId), (prev) =>
+          prev ? { ...prev, status: "interrupted" as const } : prev
+        )
+        void queryClient.invalidateQueries({ queryKey: agentThreadKeys.all, exact: true })
+      }
+    } finally {
+      setStopping(false)
+    }
+  }
+
+  if (!stream.isLoading) return <PlainSubmitButton {...props} />
+
+  return (
+    <IconButton
+      type="button"
+      onClick={() => void handleStop()}
+      disabled={stopping}
+      aria-label="Stop run"
+      title="Stop run"
+      className="shrink-0 rounded-full bg-[var(--ui-accent)] text-white hover:bg-[var(--ui-accent)] hover:opacity-90 disabled:cursor-default disabled:opacity-40"
+    >
+      {stopping ? (
+        <LoaderCircle className="size-3.5 animate-spin" />
+      ) : (
+        <StopIcon className="size-3.5" weight="fill" />
+      )}
+    </IconButton>
+  )
+}
 const MAX_IMAGE_COUNT = 5
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024
 const SUPPORTED_IMAGE_TYPES = new Set([
@@ -38,10 +111,6 @@ export interface CloudPromptBarProps {
   compact?: boolean
   disabled?: boolean
   busy?: boolean
-  /** When true, a stop button is shown next to send to cancel the active run. */
-  canCancel?: boolean
-  cancelling?: boolean
-  onCancel?: () => void
   onSubmit?: (value: string, images: Array<ImageChunk>) => void
   models?: Array<ModelOption>
   selection?: ModelSelection | null
@@ -65,11 +134,11 @@ function fileToImageChunk(file: File): Promise<ImageChunk | null> {
       resolve(
         base64
           ? {
-              kind: "image",
-              base64,
-              mimeType: file.type,
-              fileName: file.name,
-            }
+            kind: "image",
+            base64,
+            mimeType: file.type,
+            fileName: file.name,
+          }
           : null
       )
     }
@@ -84,9 +153,6 @@ export const CloudPromptBar = memo(function CloudPromptBarComponent({
   compact = false,
   disabled = false,
   busy = false,
-  canCancel = false,
-  cancelling = false,
-  onCancel,
   onSubmit,
   models = [],
   selection = null,
@@ -360,40 +426,11 @@ export const CloudPromptBar = memo(function CloudPromptBarComponent({
             <ImagePlus className="size-4" />
           </button>
 
-          {canCancel && !canSubmit ? (
-            <button
-              type="button"
-              onClick={onCancel}
-              disabled={cancelling}
-              aria-label="Cancel run"
-              title="Cancel run"
-              className="flex size-7 shrink-0 items-center justify-center rounded-full bg-[var(--ui-accent)] text-white transition-opacity hover:opacity-90 disabled:cursor-default disabled:opacity-60"
-            >
-              {cancelling ? (
-                <LoaderCircle className="size-3.5 animate-spin" />
-              ) : (
-                <Square
-                  className="size-3"
-                  fill="currentColor"
-                  strokeWidth={0}
-                />
-              )}
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={handleSubmit}
-              disabled={!canSubmit}
-              aria-label="Send message"
-              className="flex size-7 shrink-0 items-center justify-center rounded-full bg-[var(--ui-accent)] text-white transition-opacity hover:opacity-90 disabled:cursor-default disabled:opacity-40"
-            >
-              {disabled ? (
-                <LoaderCircle className="size-3.5 animate-spin" />
-              ) : (
-                <ArrowUp className="size-3.5" strokeWidth={2.5} />
-              )}
-            </button>
-          )}
+          <SubmitButton
+            canSubmit={canSubmit}
+            disabled={disabled}
+            onSubmit={handleSubmit}
+          />
         </div>
       </div>
     </div>

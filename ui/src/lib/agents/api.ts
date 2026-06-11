@@ -2,13 +2,14 @@ import type { AgentSchedule, AgentThread, ImageChunk, Message } from "./types"
 
 export type { AgentSchedule, AgentThread, Message }
 
-export interface ThreadCreateRequest {
-  prompt: string
-  images?: Array<ImageChunk>
-  repo?: string | null
-  repo_explicitly_none?: boolean
-  model_id?: string | null
-  effort?: string | null
+export class AgentsApiError extends Error {
+  constructor(
+    public readonly status: number,
+    message: string
+  ) {
+    super(message)
+    this.name = "AgentsApiError"
+  }
 }
 
 export interface ThreadMessageRequest {
@@ -42,6 +43,8 @@ const API_BASE = (import.meta.env.VITE_DASHBOARD_API_BASE_URL ?? "").replace(
   ""
 )
 
+export const agentsLangGraphApiUrl = `${API_BASE}/dashboard/api`
+
 async function agentsRequest<T>(
   path: string,
   init: RequestInit = {}
@@ -67,13 +70,14 @@ async function agentsRequest<T>(
     } catch {
       /* ignore */
     }
-    throw new Error(message)
+    throw new AgentsApiError(res.status, message)
   }
   if (res.status === 204) return undefined as T
   return (await res.json()) as T
 }
 
 export const agentsApi = {
+  langGraphApiUrl: agentsLangGraphApiUrl,
   listThreads: () => agentsRequest<Array<AgentThread>>("/threads"),
   listSchedules: () => agentsRequest<Array<AgentSchedule>>("/schedules"),
   createSchedule: (body: ScheduleCreateRequest) =>
@@ -99,12 +103,7 @@ export const agentsApi = {
         options?.markViewed === false ? "?mark_viewed=false" : ""
       }`
     ),
-  createThread: (body: ThreadCreateRequest) =>
-    agentsRequest<AgentThread>("/threads", {
-      method: "POST",
-      body: JSON.stringify(body),
-    }),
-  sendMessage: (threadId: string, body: ThreadMessageRequest) =>
+  queueMessage: (threadId: string, body: ThreadMessageRequest) =>
     agentsRequest<AgentThread>(
       `/threads/${encodeURIComponent(threadId)}/messages`,
       {
@@ -125,18 +124,6 @@ export const agentsApi = {
     }),
   streamUrl: (threadId: string) =>
     `${API_BASE}/dashboard/api/threads/${encodeURIComponent(threadId)}/stream`,
-}
-
-export function formatRelativeTime(ts: number): string {
-  const diff = Date.now() - ts
-  const mins = Math.floor(diff / 60000)
-  if (mins < 60) return `${mins}m`
-  const hours = Math.floor(mins / 60)
-  if (hours < 24) return `${hours}h`
-  const days = Math.floor(hours / 24)
-  if (days < 7) return `${days}d`
-  const weeks = Math.floor(days / 7)
-  return `${weeks}w`
 }
 
 export type ThreadGroup = "today" | "last7" | "last30" | "older"

@@ -15,7 +15,7 @@ import {
 import type { GitStatus, GitStatusEntry } from "@pierre/trees"
 
 import type { AgentThread } from "@/lib/agents/types"
-import type { ChangedFileSummaryItem } from "@/components/agents/ported"
+import type { ChangedFileSummaryItem } from "@/components/agents/messages"
 import { useDiffOptions } from "@/components/agents/utils/diffUtils"
 import { summarizeChangedFiles } from "@/components/agents/ported"
 import { Z } from "@/components/agents/z-index"

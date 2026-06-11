@@ -8,10 +8,13 @@ OPENAI_RESPONSES_WS_BASE_URL = "wss://api.openai.com/v1"
 # primary provider a fair chance before the fallback middleware kicks in.
 DEFAULT_MAX_RETRIES = 6
 
-DEFAULT_LLM_REASONING: "OpenAIReasoning" = {"effort": "medium"}
-
 OpenAIReasoningEffort = Literal["none", "low", "medium", "high", "xhigh"]
+# OpenAI's Responses API only returns human-readable reasoning text when a
+# summary is requested; without it, reasoning happens silently (billed in
+# output tokens) and the reasoning content block arrives empty.
+OpenAIReasoningSummary = Literal["auto", "concise", "detailed"]
 AnthropicThinkingType = Literal["adaptive"]
+AnthropicThinkingDisplay = Literal["summarized", "omitted"]
 AnthropicEffort = Literal["low", "medium", "high", "xhigh", "max"]
 GoogleThinkingLevel = Literal["minimal", "low", "medium", "high"]
 FireworksReasoningEffort = Literal["none", "low", "medium", "high", "xhigh", "max"]
@@ -19,10 +22,15 @@ FireworksReasoningEffort = Literal["none", "low", "medium", "high", "xhigh", "ma
 
 class OpenAIReasoning(TypedDict, total=False):
     effort: OpenAIReasoningEffort
+    summary: OpenAIReasoningSummary
+
+
+DEFAULT_LLM_REASONING: "OpenAIReasoning" = {"effort": "medium", "summary": "auto"}
 
 
 class AnthropicThinking(TypedDict, total=False):
     type: AnthropicThinkingType
+    display: AnthropicThinkingDisplay
 
 
 class ModelKwargs(TypedDict, total=False):
@@ -74,24 +82,33 @@ def openai_reasoning_for(
     *,
     default_effort: OpenAIReasoningEffort | None = None,
 ) -> OpenAIReasoning | None:
-    """Return an OpenAI reasoning kwarg from a profile effort string."""
+    """Return an OpenAI reasoning kwarg from a profile effort string.
+
+    Requests ``summary: "auto"`` for every reasoning effort so the Responses
+    API emits visible reasoning text. ``effort: "none"`` disables reasoning
+    entirely, so no summary is attached.
+    """
     effort = profile_effort or default_effort or DEFAULT_LLM_REASONING.get("effort")
     if effort == "none":
         return {"effort": "none"}
     if effort == "low":
-        return {"effort": "low"}
+        return {"effort": "low", "summary": "auto"}
     if effort == "medium":
-        return {"effort": "medium"}
+        return {"effort": "medium", "summary": "auto"}
     if effort == "high":
-        return {"effort": "high"}
+        return {"effort": "high", "summary": "auto"}
     if effort == "xhigh":
-        return {"effort": "xhigh"}
+        return {"effort": "xhigh", "summary": "auto"}
     return None
 
 
 def anthropic_thinking_for(profile_effort: str | None) -> AnthropicThinking | None:
     if profile_effort in _ANTHROPIC_EFFORTS:
-        return {"type": "adaptive"}
+        # `display: "summarized"` makes Opus 4.7+ return the (summarized) reasoning
+        # text in the response. The adaptive default is "omitted", which streams a
+        # reasoning block carrying only a signature and no visible thinking — so the
+        # dashboard never has any text to render.
+        return {"type": "adaptive", "display": "summarized"}
     return None
 
 

@@ -112,11 +112,15 @@ def dashboard_run_client(monkeypatch: pytest.MonkeyPatch) -> _FakeLangGraphClien
     return client
 
 
-def test_start_agent_run_omits_repo_less_marker_when_repo_unset(
+def test_create_thread_record_omits_repo_less_marker_when_repo_unset(
     dashboard_run_client: _FakeLangGraphClient,
 ) -> None:
+    # Runs now start client-side via the stream commands endpoint, so the run
+    # configurable is assembled from thread metadata by
+    # ``_build_dashboard_configurable``. The thread record must not persist a
+    # repo-less marker when the repo is simply unset (not explicitly cleared).
     asyncio.run(
-        thread_api._start_agent_run(
+        thread_api._create_dashboard_thread_record(
             "thread-id",
             login="octo",
             repo_config={},
@@ -124,44 +128,36 @@ def test_start_agent_run_omits_repo_less_marker_when_repo_unset(
         )
     )
 
-    configurable = dashboard_run_client.runs.configurable
-    assert configurable is not None
+    configurable = asyncio.run(
+        thread_api._build_dashboard_configurable("thread-id", "octo", {"source": "dashboard"})
+    )
     assert "repo_explicitly_none" not in configurable
     assert "repo" not in configurable
 
 
-def test_start_agent_run_marks_repo_less_config_when_explicit(
+def test_build_configurable_marks_repo_less_config_when_explicit(
     dashboard_run_client: _FakeLangGraphClient,
 ) -> None:
-    asyncio.run(
-        thread_api._start_agent_run(
+    configurable = asyncio.run(
+        thread_api._build_dashboard_configurable(
             "thread-id",
-            login="octo",
-            repo_config={},
-            repo_explicitly_none=True,
-            prompt="do work",
+            "octo",
+            {"source": "dashboard", "repo_explicitly_none": True},
         )
     )
-
-    configurable = dashboard_run_client.runs.configurable
-    assert configurable is not None
     assert configurable["repo_explicitly_none"] is True
     assert "repo" not in configurable
 
 
-def test_start_agent_run_omits_repo_less_marker_when_repo_configured(
+def test_build_configurable_includes_repo_when_configured(
     dashboard_run_client: _FakeLangGraphClient,
 ) -> None:
-    asyncio.run(
-        thread_api._start_agent_run(
+    configurable = asyncio.run(
+        thread_api._build_dashboard_configurable(
             "thread-id",
-            login="octo",
-            repo_config={"owner": "octo", "name": "repo"},
-            prompt="do work",
+            "octo",
+            {"source": "dashboard", "repo_owner": "octo", "repo_name": "repo"},
         )
     )
-
-    configurable = dashboard_run_client.runs.configurable
-    assert configurable is not None
     assert configurable["repo"] == {"owner": "octo", "name": "repo"}
     assert "repo_explicitly_none" not in configurable
