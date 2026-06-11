@@ -17,6 +17,7 @@ agent for code review only:
 
 import asyncio
 import logging
+import posixpath
 import re
 import warnings
 
@@ -90,13 +91,7 @@ Re-review (user message says "A new commit has been pushed"):
 GH_TOKEN=dummy gh api repos/{repo_owner}/{repo_name}/compare/<last_reviewed_sha>...<head_sha> -H "Accept: application/vnd.github.v3.diff"
 ```
 
-The repo is normally already cloned and checked out at the PR head in
-`{working_dir}` — `cd` there and grep for full file context. If that directory
-is missing (prep can occasionally fail), clone it yourself:
-
-```
-GH_TOKEN=dummy gh repo clone {repo_owner}/{repo_name} && cd {repo_name} && git checkout <head_sha>
-```
+{repo_checkout_note}
 
 If a skills section appears below, the repo ships reviewer-relevant skills. Read
 the `SKILL.md` that matches the area you're reviewing and apply it.
@@ -294,12 +289,55 @@ The dataset expects 1-5 comments per PR (mean ~2).
 """
 
 
+_REPO_READY_NOTE = """The repo is already cloned and checked out at the PR head in
+`{working_dir}` — `cd` there and grep for full file context."""
+
+_REPO_NOT_READY_NOTE = """Repo prep FAILED: the checkout in `{working_dir}` may be missing or — worse —
+present but stale (at an old commit). Do NOT trust local files until you have
+re-prepped the tree yourself. Run:
+
+```
+cd {working_dir} || {{ cd {parent_dir} && GH_TOKEN=dummy gh repo clone {repo_owner}/{repo_name} && cd {repo_name}; }}
+GH_TOKEN=dummy git fetch origin {head_sha_or_placeholder} --quiet || GH_TOKEN=dummy git fetch origin refs/pull/{pr_number}/head --quiet
+git checkout --force {head_sha_or_placeholder} --quiet
+```
+
+and verify `git rev-parse HEAD` matches the PR head before reading local
+files. If you cannot get the tree onto the PR head, rely exclusively on the
+diff and `gh api` file contents (`GH_TOKEN=dummy gh api
+repos/{repo_owner}/{repo_name}/contents/<path>?ref=<head_sha>`) — never on
+the local checkout."""
+
+
+def _repo_checkout_note(
+    *,
+    repo_ready: bool,
+    working_dir: str,
+    repo_owner: str,
+    repo_name: str,
+    pr_number: int | str,
+    head_sha: str,
+) -> str:
+    if repo_ready:
+        return _REPO_READY_NOTE.format(working_dir=working_dir)
+    return _REPO_NOT_READY_NOTE.format(
+        working_dir=working_dir,
+        parent_dir=posixpath.dirname(working_dir) or working_dir,
+        repo_owner=repo_owner or "<owner>",
+        repo_name=repo_name or "<repo>",
+        pr_number=pr_number if pr_number != "" else "<pr_number>",
+        head_sha_or_placeholder=head_sha or "<head_sha>",
+    )
+
+
 def _reviewer_system_prompt(
     working_dir: str,
     *,
     repo_owner: str,
     repo_name: str,
     pr_number: int | str,
+    repo_ready: bool = True,
+    head_sha: str = "",
     reviewer_eval: bool = False,
     org_guidelines: str | None = None,
     repo_style_prompt: str | None = None,
@@ -311,6 +349,14 @@ def _reviewer_system_prompt(
         repo_owner=repo_owner or "<owner>",
         repo_name=repo_name or "<repo>",
         pr_number=pr_number if pr_number != "" else "<pr_number>",
+        repo_checkout_note=_repo_checkout_note(
+            repo_ready=repo_ready,
+            working_dir=working_dir,
+            repo_owner=repo_owner,
+            repo_name=repo_name,
+            pr_number=pr_number,
+            head_sha=head_sha,
+        ),
     )
     if reviewer_eval:
         prompt = f"{prompt}\n{REVIEWER_EVAL_PROMPT_SUFFIX}"
@@ -965,6 +1011,8 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
         repo_owner=repo_owner,
         repo_name=repo_name,
         pr_number=pr_number if isinstance(pr_number, int) else "",
+        repo_ready=repo_ready,
+        head_sha=head_sha,
         reviewer_eval=reviewer_eval,
         org_guidelines=org_guidelines,
         repo_style_prompt=repo_style_prompt,
