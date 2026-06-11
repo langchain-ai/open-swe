@@ -38,6 +38,7 @@ interface PanelFile {
   originalContent: string
   modifiedContent: string
   status: GitStatus
+  unrenderable?: boolean
 }
 
 function prFileStatus(file: ThreadPrDiffFile): GitStatus {
@@ -205,6 +206,7 @@ export function AgentGitPanel({ thread, messages }: AgentGitPanelProps) {
         originalContent: file.originalContent ?? "",
         modifiedContent: file.modifiedContent ?? "",
         status: prFileStatus(file),
+        unrenderable: file.unrenderable,
       }))
     }
     const summary = summarizeChangedFiles(chunks)
@@ -468,15 +470,20 @@ function FileDiffSection({
           <span className="text-[var(--ui-danger)]">-{file.deletions}</span>
         </span>
       </button>
-      {open && (
-        <div className="max-h-[420px] overflow-auto bg-[var(--ui-panel)] p-2 font-mono text-[11px] leading-5">
-          <MultiFileDiff
-            oldFile={{ name: file.treePath, contents: file.originalContent }}
-            newFile={{ name: file.treePath, contents: file.modifiedContent }}
-            options={diffOptions}
-          />
-        </div>
-      )}
+      {open &&
+        (file.unrenderable ? (
+          <div className="bg-[var(--ui-panel)] p-4 text-center text-xs text-[var(--ui-text-dim)]">
+            Binary or large file — diff not shown.
+          </div>
+        ) : (
+          <div className="max-h-[420px] overflow-auto bg-[var(--ui-panel)] p-2 font-mono text-[11px] leading-5">
+            <MultiFileDiff
+              oldFile={{ name: file.treePath, contents: file.originalContent }}
+              newFile={{ name: file.treePath, contents: file.modifiedContent }}
+              options={diffOptions}
+            />
+          </div>
+        ))}
     </div>
   )
 }

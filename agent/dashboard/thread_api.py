@@ -17,7 +17,6 @@ from fastapi import HTTPException
 from langchain_core.messages.content import create_image_block
 from pydantic import BaseModel, ConfigDict, Field
 
-from ..utils.github_app import get_github_app_installation_token
 from ..utils.langsmith import get_langsmith_trace_url
 from ..utils.thread_ops import (
     get_thread_active_status,
@@ -899,14 +898,13 @@ _PR_DIFF_FETCH_CONCURRENCY = 5
 _GITHUB_API = "https://api.github.com"
 
 
+# No app-installation-token fallback: PR file contents must be fetched with
+# the user's own credential so GitHub enforces their current repo access.
 async def _github_token_for_login(login: str) -> str:
     token = await get_valid_access_token(login)
-    if token:
-        return token
-    try:
-        return await get_github_app_installation_token()
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(401, "github token unavailable, re-login required") from exc
+    if not token:
+        raise HTTPException(401, "github token unavailable, re-login required")
+    return token
 
 
 async def _fetch_file_at_ref(
