@@ -209,16 +209,16 @@ async def _coro(value: Any) -> Any:
 
 
 def test_derive_pr_state_prefers_merged() -> None:
-    assert opr._derive_pr_state(state="closed", merged=True, draft=True) == "merged"
+    assert opr.derive_pr_state(state="closed", merged=True, draft=True) == "merged"
 
 
 def test_derive_pr_state_closed_over_draft() -> None:
-    assert opr._derive_pr_state(state="closed", merged=False, draft=True) == "closed"
+    assert opr.derive_pr_state(state="closed", merged=False, draft=True) == "closed"
 
 
 def test_derive_pr_state_draft() -> None:
-    assert opr._derive_pr_state(state="open", merged=False, draft=True) == "draft"
+    assert opr.derive_pr_state(state="open", merged=False, draft=True) == "draft"
 
 
 def test_derive_pr_state_open() -> None:
-    assert opr._derive_pr_state(state="open", merged=False, draft=False) == "open"
+    assert opr.derive_pr_state(state="open", merged=False, draft=False) == "open"

@@ -65,6 +65,7 @@ from .utils.github_comments import (
     OPEN_SWE_TAGS,
     GitHubAuthError,
     build_pr_prompt,
+    derive_pr_state,
     extract_pr_context,
     fetch_issue_comments,
     fetch_pr_comments_since_last_tag,
@@ -2225,17 +2226,15 @@ async def _get_thread_metadata_safe(thread_id: str) -> dict[str, Any] | None:
 
 
 def _pr_state_from_payload(payload: dict[str, Any]) -> str | None:
-    """Map a GitHub pull_request webhook to the dashboard's pr_state vocabulary."""
     pull_request = payload.get("pull_request") if isinstance(payload, dict) else None
     if not isinstance(pull_request, dict):
         return None
-    if pull_request.get("merged"):
-        return "merged"
-    if pull_request.get("state") == "closed":
-        return "closed"
-    if pull_request.get("draft"):
-        return "draft"
-    return "open"
+    state = pull_request.get("state")
+    return derive_pr_state(
+        state=state if isinstance(state, str) else None,
+        merged=bool(pull_request.get("merged")),
+        draft=bool(pull_request.get("draft")),
+    )
 
 
 async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:

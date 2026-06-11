@@ -12,22 +12,12 @@ from langgraph_sdk import get_client
 
 from ..dashboard.agent_usage import record_agent_pr_usage
 from ..utils.github_app import get_github_app_installation_token
+from ..utils.github_comments import derive_pr_state
 
 logger = logging.getLogger(__name__)
 
 GITHUB_API = "https://api.github.com"
 _USER_TOKEN_SOURCES = ("slack", "dashboard")
-
-
-def _derive_pr_state(*, state: str, merged: bool, draft: bool) -> str:
-    """Map GitHub PR fields to the dashboard's pr_state vocabulary."""
-    if merged:
-        return "merged"
-    if state == "closed":
-        return "closed"
-    if draft:
-        return "draft"
-    return "open"
 
 
 async def _resolve_pr_author_token() -> tuple[str | None, str]:
@@ -159,7 +149,7 @@ async def _record_pr_telemetry(
                     "agent_kind": "agent",
                     "pr_url": pr_url if isinstance(pr_url, str) else "",
                     "pr_number": pr_number,
-                    "pr_state": _derive_pr_state(state=state, merged=merged, draft=is_draft),
+                    "pr_state": derive_pr_state(state=state, merged=merged, draft=is_draft),
                     "pr_title": details.get("title") or pr.get("title"),
                     "branch_name": head,
                     "base_branch": base,
