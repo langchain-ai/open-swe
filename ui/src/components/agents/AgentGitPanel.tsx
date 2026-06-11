@@ -186,6 +186,19 @@ export function AgentGitPanel({ thread, messages }: AgentGitPanelProps) {
   const sectionRefs = useRef<Record<string, HTMLDivElement | null>>({})
   const pr = thread.pr
 
+  // Uncollapse when a PR lands mid-session (not when opening a thread that
+  // already has one), without persisting — manual toggles remain the stored
+  // preference for future threads.
+  const [prSeen, setPrSeen] = useState<{ threadId: string; hadPr: boolean }>(
+    () => ({ threadId: thread.id, hadPr: Boolean(pr) })
+  )
+  if (prSeen.threadId !== thread.id) {
+    setPrSeen({ threadId: thread.id, hadPr: Boolean(pr) })
+  } else if (pr && !prSeen.hadPr) {
+    setPrSeen({ threadId: thread.id, hadPr: true })
+    setCollapsedState(false)
+  }
+
   const prDiff = useAgentThreadPrDiff(thread.id, Boolean(pr))
 
   const chunks = useMemo(
