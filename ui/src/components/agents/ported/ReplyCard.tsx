@@ -183,7 +183,7 @@ export const ReplyCard = memo(function ReplyCard({ chunk }: ReplyCardProps) {
         <span>{headerLabel(isLinear, chunk.status)}</span>
       </div>
       {body && (
-        <div className="overflow-hidden rounded-xl bg-[var(--ui-accent-bubble)]">
+        <div className="overflow-hidden rounded-xl border border-[var(--ui-border-subtle)] bg-[var(--ui-code-bubble)]">
           <div className="max-h-[250px] overflow-auto px-3 py-2 text-[13px] text-[color:var(--ui-text)]">
             {isLinear ? (
               <Markdown content={body} />

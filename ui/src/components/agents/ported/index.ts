@@ -8,11 +8,10 @@ export { Logo } from "./Logo";
 export { Markdown } from "./Markdown";
 export { MarkdownTable } from "./MarkdownTable";
 export {
-  MessageView,
+  Messages,
   summarizeChangedFiles,
-  type ChangedFileSummaryItem,
-  type MessageViewScrollControl,
-} from "./MessageView";
+  type MessagesScrollControl,
+} from "@/components/agents/messages";
 export { PanelResizeHandle } from "./PanelResizeHandle";
 export { ShellCommand } from "./ShellCommand";
 export { TodoList } from "./TodoList";

@@ -64,19 +64,35 @@ export const ShellCommand = memo(function ShellCommand({
       </button>
 
       {expanded && (
-        <div className="rounded-xl bg-[var(--ui-accent-bubble)] mt-1 overflow-hidden max-h-[250px] flex flex-col">
+        <div className="rounded-xl border border-[var(--ui-border-subtle)] bg-[var(--ui-code-bubble)] mt-1 overflow-hidden max-h-[250px] flex flex-col">
           <div className="px-3 pt-2 pb-1 font-mono text-xs shrink-0">
-            <div className="text-[color:var(--ui-text-dim)] mb-2">bash</div>
-            <div className="text-[color:var(--ui-text)] font-semibold whitespace-pre overflow-x-auto">
-              <span className="text-[color:var(--ui-text-dim)]">$ </span>
-              {command}
+            <div className="flex items-center justify-between gap-2 mb-2">
+              <span className="text-[color:var(--ui-accent-2)]">bash</span>
+              {chunk.status === "in_progress" && (
+                <span className="text-yellow-400 shrink-0">Running...</span>
+              )}
+              {chunk.status === "completed" && (
+                <span className="text-[color:var(--ui-text-muted)] shrink-0">✓ Success</span>
+              )}
+              {chunk.status === "error" && (
+                <span className="text-red-400 shrink-0">✗ Failed</span>
+              )}
+              {chunk.status === "pending" && (
+                <span className="text-yellow-400 shrink-0">Waiting for approval...</span>
+              )}
+            </div>
+            <div className="max-h-[120px] overflow-y-auto">
+              <div className="text-[color:var(--ui-text)] font-semibold whitespace-pre overflow-x-auto">
+                <span className="text-[color:var(--ui-text-dim)]">$ </span>
+                {command}
+              </div>
             </div>
           </div>
           {output && (
             <div
               ref={outputRef}
               onScroll={handleOutputScroll}
-              className="min-h-0 flex-1 overflow-auto px-3 pb-1"
+              className="min-h-0 flex-1 overflow-auto px-3 pb-2"
               style={{ boxShadow: outputEdgeShadows || "none" }}
             >
               <pre className="mt-1 text-[color:var(--ui-text-muted)] whitespace-pre font-mono text-xs w-max min-w-full">
@@ -84,20 +100,6 @@ export const ShellCommand = memo(function ShellCommand({
               </pre>
             </div>
           )}
-          <div className="px-3 py-1.5 flex justify-end shrink-0">
-            {chunk.status === "in_progress" && (
-              <span className="text-yellow-400 text-xs">Running...</span>
-            )}
-            {chunk.status === "completed" && (
-              <span className="text-[color:var(--ui-text-muted)] text-xs">✓ Success</span>
-            )}
-            {chunk.status === "error" && (
-              <span className="text-red-400 text-xs">✗ Failed</span>
-            )}
-            {chunk.status === "pending" && (
-              <span className="text-yellow-400 text-xs">Waiting for approval...</span>
-            )}
-          </div>
         </div>
       )}
     </div>

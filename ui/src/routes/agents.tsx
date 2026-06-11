@@ -8,6 +8,7 @@ import {
 import { AgentsShell } from "@/components/agents/AgentsSidebar"
 import { Skeleton } from "@/components/ui/skeleton"
 import agentsCss from "@/styles/agents.css?url"
+import { AgentThreadStreamProvider } from "@/lib/agents/AgentThreadStreamProvider"
 import { useSession } from "@/lib/session"
 
 export const Route = createFileRoute("/agents")({
@@ -43,7 +44,9 @@ function AgentsLayout() {
 
   return (
     <AgentsShell user={session.data} activeThreadId={activeThreadId}>
-      <Outlet />
+      <AgentThreadStreamProvider threadId={activeThreadId ?? null}>
+        <Outlet />
+      </AgentThreadStreamProvider>
     </AgentsShell>
   )
 }

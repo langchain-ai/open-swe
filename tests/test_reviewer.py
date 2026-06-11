@@ -202,6 +202,7 @@ async def test_reviewer_reuses_app_token_for_sandbox_proxy() -> None:
     mock_sandbox.assert_awaited_once_with(
         "reviewer-thread-id",
         github_proxy_token="app-token",
+        github_proxy_repositories=["repo"],
     )
 
 
@@ -279,11 +280,11 @@ async def test_reviewer_applies_eval_model_and_effort_overrides() -> None:
 
     main_model_call = make_model.call_args_list[0]
     assert main_model_call.args == ("anthropic:claude-opus-4-8",)
-    assert main_model_call.kwargs["thinking"] == {"type": "adaptive"}
+    assert main_model_call.kwargs["thinking"] == {"type": "adaptive", "display": "summarized"}
     assert main_model_call.kwargs["effort"] == "high"
     subagent_model_call = make_model.call_args_list[1]
     assert subagent_model_call.args == ("openai:gpt-5.5",)
-    assert subagent_model_call.kwargs["reasoning"] == {"effort": "low"}
+    assert subagent_model_call.kwargs["reasoning"] == {"effort": "low", "summary": "auto"}
 
 
 @pytest.mark.asyncio
@@ -327,11 +328,11 @@ async def test_reviewer_subagent_inherits_eval_model_without_explicit_override()
 
     main_model_call = make_model.call_args_list[0]
     assert main_model_call.args == ("anthropic:claude-opus-4-8",)
-    assert main_model_call.kwargs["thinking"] == {"type": "adaptive"}
+    assert main_model_call.kwargs["thinking"] == {"type": "adaptive", "display": "summarized"}
     assert main_model_call.kwargs["effort"] == "high"
     subagent_model_call = make_model.call_args_list[1]
     assert subagent_model_call.args == ("anthropic:claude-opus-4-8",)
-    assert subagent_model_call.kwargs["thinking"] == {"type": "adaptive"}
+    assert subagent_model_call.kwargs["thinking"] == {"type": "adaptive", "display": "summarized"}
     assert subagent_model_call.kwargs["effort"] == "high"
 
 

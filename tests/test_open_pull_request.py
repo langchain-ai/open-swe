@@ -206,3 +206,19 @@ def test_error_surfaced_on_failure(monkeypatch: pytest.MonkeyPatch) -> None:
 
 async def _coro(value: Any) -> Any:
     return value
+
+
+def test_derive_pr_state_prefers_merged() -> None:
+    assert opr.derive_pr_state(state="closed", merged=True, draft=True) == "merged"
+
+
+def test_derive_pr_state_closed_over_draft() -> None:
+    assert opr.derive_pr_state(state="closed", merged=False, draft=True) == "closed"
+
+
+def test_derive_pr_state_draft() -> None:
+    assert opr.derive_pr_state(state="open", merged=False, draft=True) == "draft"
+
+
+def test_derive_pr_state_open() -> None:
+    assert opr.derive_pr_state(state="open", merged=False, draft=False) == "open"

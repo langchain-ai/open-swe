@@ -8,6 +8,7 @@ import {
   ChartLineUpIcon,
   ChatCircleIcon,
   CircleNotchIcon,
+  GitMergeIcon,
   GitPullRequestIcon,
   LightningIcon,
   PlusIcon,
@@ -38,7 +39,7 @@ import { groupThreads } from "@/lib/agents/api"
 import {
   useAgentThreads,
   useDeleteAgentThread,
-  usePrefetchAgentThreadDetails,
+  useSeedAgentThreadDetails,
 } from "@/lib/agents/queries"
 import { cn } from "@/lib/utils"
 
@@ -50,6 +51,34 @@ const SOURCE_META: Record<AgentSource, { icon: SourceIcon; label: string }> = {
   slack: { icon: IoLogoSlack, label: "Triggered from Slack" },
   linear: { icon: SiLinear, label: "Triggered from Linear" },
   schedule: { icon: CalendarBlankIcon, label: "Triggered from a schedule" },
+}
+
+type PrState = NonNullable<AgentThread["pr"]>["state"]
+
+const PR_STATE_META: Record<
+  PrState,
+  { icon: SourceIcon; label: string; className: string }
+> = {
+  draft: {
+    icon: GitPullRequestIcon,
+    label: "Draft pull request",
+    className: "text-[var(--ui-text-dim)]",
+  },
+  open: {
+    icon: GitPullRequestIcon,
+    label: "Open pull request",
+    className: "text-[var(--ui-success)]",
+  },
+  merged: {
+    icon: GitMergeIcon,
+    label: "Merged pull request",
+    className: "text-[var(--ui-accent)]",
+  },
+  closed: {
+    icon: GitPullRequestIcon,
+    label: "Closed pull request",
+    className: "text-[var(--ui-danger)]",
+  },
 }
 
 interface AgentsSidebarProps {
@@ -66,7 +95,7 @@ const NAV = [
 export function AgentsSidebar({ user, activeThreadId }: AgentsSidebarProps) {
   const threadsQuery = useAgentThreads()
   const threads = threadsQuery.data ?? []
-  usePrefetchAgentThreadDetails(threads, activeThreadId)
+  useSeedAgentThreadDetails(threads, activeThreadId)
   const groups = groupThreads(threads)
   const layout = useSidebarLayout()
   const reviewSidebar = useReviewSidebarData()
@@ -239,6 +268,8 @@ function ThreadRow({
       ? SOURCE_META[thread.source]
       : null
   const SourceIcon = source?.icon
+  const prMeta = thread.pr ? PR_STATE_META[thread.pr.state] : null
+  const PrIcon = prMeta?.icon
   const showFinishedIndicator = thread.status === "finished" && !thread.viewed
 
   const openTrace = () => {
@@ -294,6 +325,17 @@ function ThreadRow({
           <span className="min-w-0 flex-1 truncate text-xs">
             {thread.title}
           </span>
+          {prMeta && PrIcon && (
+            <PrIcon
+              className={cn(
+                "size-3.5 shrink-0 group-hover:hidden",
+                prMeta.className
+              )}
+              aria-label={prMeta.label}
+            >
+              <title>{prMeta.label}</title>
+            </PrIcon>
+          )}
           {badge && (
             <span className="shrink-0 rounded bg-[var(--ui-panel-2)] px-1.5 py-0.5 text-[10px] text-[var(--ui-text-dim)] group-hover:hidden">
               {badge}
