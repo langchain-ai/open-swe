@@ -202,6 +202,7 @@ async def test_reviewer_reuses_app_token_for_sandbox_proxy() -> None:
     mock_sandbox.assert_awaited_once_with(
         "reviewer-thread-id",
         github_proxy_token="app-token",
+        github_proxy_repositories=["repo"],
     )
 
 

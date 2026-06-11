@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -25,8 +26,8 @@ PROXY_TOKEN_REFRESH_WINDOW = timedelta(minutes=5)
 # Used only when the token's own expiry is unknown: refresh after this age.
 PROXY_TOKEN_FALLBACK_TTL = timedelta(minutes=50)
 
-# thread_id -> (token_expires_at | None, recorded_at)
-_PROXY_TOKEN_EXPIRY: dict[str, tuple[datetime | None, datetime]] = {}
+# thread_id -> (token_expires_at | None, recorded_at, repositories scope | None)
+_PROXY_TOKEN_EXPIRY: dict[str, tuple[datetime | None, datetime, tuple[str, ...] | None]] = {}
 
 
 def _parse_expiry(expires_at: Any) -> datetime | None:
@@ -54,11 +55,22 @@ def _parse_expiry(expires_at: Any) -> datetime | None:
     return None
 
 
-def record_proxy_token_expiry(thread_id: str | None, expires_at: Any) -> None:
-    """Record when the proxy token configured for ``thread_id`` expires."""
+def record_proxy_token_expiry(
+    thread_id: str | None,
+    expires_at: Any,
+    *,
+    repositories: Sequence[str] | None = None,
+) -> None:
+    """Record when ``thread_id``'s proxy token expires and the repo scope it was minted with.
+
+    ``repositories`` preserves the original token scope (reviewer runs mint a
+    repo-scoped installation token) so a later refresh doesn't broaden it to an
+    installation-wide token.
+    """
     if not thread_id:
         return
-    _PROXY_TOKEN_EXPIRY[thread_id] = (_parse_expiry(expires_at), datetime.now(UTC))
+    scope = tuple(repositories) if repositories else None
+    _PROXY_TOKEN_EXPIRY[thread_id] = (_parse_expiry(expires_at), datetime.now(UTC), scope)
 
 
 def clear_proxy_token_expiry(thread_id: str | None) -> None:
@@ -73,7 +85,7 @@ def proxy_token_needs_refresh(thread_id: str | None, *, now: datetime | None = N
     record = _PROXY_TOKEN_EXPIRY.get(thread_id)
     if record is None:
         return False
-    expires_at, recorded_at = record
+    expires_at, recorded_at, _scope = record
     current = (now or datetime.now(UTC)).astimezone(UTC)
     if expires_at is not None:
         return (expires_at - current) <= PROXY_TOKEN_REFRESH_WINDOW
@@ -95,7 +107,12 @@ async def maybe_refresh_proxy_token(thread_id: str | None, *, now: datetime | No
     if sandbox_backend is None:
         return False
 
-    token, expires_at = await get_github_app_installation_token_with_expiry()
+    # Preserve the original token scope: reviewer runs mint a repo-scoped token,
+    # so refreshing must not broaden it to an installation-wide token.
+    _expires, _recorded, repositories = _PROXY_TOKEN_EXPIRY.get(thread_id, (None, None, None))
+    token, expires_at = await get_github_app_installation_token_with_expiry(
+        repositories=list(repositories) if repositories else None
+    )
     if not token:
         logger.warning(
             "Proxy token for thread %s is near expiry but no installation token is available",
@@ -107,6 +124,6 @@ async def maybe_refresh_proxy_token(thread_id: str | None, *, now: datetime | No
 
     current_backend = unwrap_sandbox_backend(sandbox_backend)
     await asyncio.to_thread(_configure_github_proxy, current_backend.id, token)
-    record_proxy_token_expiry(thread_id, expires_at)
+    record_proxy_token_expiry(thread_id, expires_at, repositories=repositories)
     logger.info("Refreshed GitHub proxy token for thread %s before expiry", thread_id)
     return True

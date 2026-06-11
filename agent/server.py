@@ -7,6 +7,7 @@ import logging
 import os
 import time
 import warnings
+from collections.abc import Sequence
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -181,6 +182,7 @@ async def _create_sandbox_with_proxy(
     github_proxy_token: str | None = None,
     *,
     thread_id: str | None = None,
+    github_proxy_repositories: Sequence[str] | None = None,
 ) -> SandboxBackendProtocol:
     """Create a new sandbox with GitHub proxy auth configured."""
     sandbox_backend = await asyncio.to_thread(create_sandbox)
@@ -194,7 +196,7 @@ async def _create_sandbox_with_proxy(
             raise ValueError(msg)
         await _start_langsmith_sandbox_if_needed(sandbox_backend)
         await asyncio.to_thread(_configure_github_proxy, sandbox_backend.id, token)
-        record_proxy_token_expiry(thread_id, expires_at)
+        record_proxy_token_expiry(thread_id, expires_at, repositories=github_proxy_repositories)
 
     return sandbox_backend
 
@@ -204,6 +206,7 @@ async def _refresh_github_proxy(
     github_proxy_token: str | None = None,
     *,
     thread_id: str | None = None,
+    github_proxy_repositories: Sequence[str] | None = None,
 ) -> None:
     """Refresh GitHub proxy credentials for reused LangSmith sandboxes."""
     if os.getenv("SANDBOX_TYPE", "langsmith") != "langsmith":
@@ -220,17 +223,23 @@ async def _refresh_github_proxy(
     current_backend = unwrap_sandbox_backend(sandbox_backend)
     await _start_langsmith_sandbox_if_needed(current_backend)
     await asyncio.to_thread(_configure_github_proxy, current_backend.id, token)
-    record_proxy_token_expiry(thread_id, expires_at)
+    record_proxy_token_expiry(thread_id, expires_at, repositories=github_proxy_repositories)
 
 
 async def _refresh_github_proxy_or_recreate(
     sandbox_backend: SandboxBackendProtocol,
     thread_id: str,
     github_proxy_token: str | None = None,
+    github_proxy_repositories: Sequence[str] | None = None,
 ) -> SandboxBackendProtocol:
     """Refresh proxy credentials, recreating stale LangSmith sandboxes on failure."""
     try:
-        await _refresh_github_proxy(sandbox_backend, github_proxy_token, thread_id=thread_id)
+        await _refresh_github_proxy(
+            sandbox_backend,
+            github_proxy_token,
+            thread_id=thread_id,
+            github_proxy_repositories=github_proxy_repositories,
+        )
     except Exception:  # noqa: BLE001
         logger.warning(
             "Failed to refresh GitHub proxy for sandbox %s on thread %s, recreating sandbox",
@@ -238,7 +247,11 @@ async def _refresh_github_proxy_or_recreate(
             thread_id,
             exc_info=True,
         )
-        return await _recreate_sandbox(thread_id, github_proxy_token=github_proxy_token)
+        return await _recreate_sandbox(
+            thread_id,
+            github_proxy_token=github_proxy_token,
+            github_proxy_repositories=github_proxy_repositories,
+        )
     return sandbox_backend
 
 
@@ -254,6 +267,7 @@ async def _recreate_sandbox(
     thread_id: str,
     *,
     github_proxy_token: str | None = None,
+    github_proxy_repositories: Sequence[str] | None = None,
 ) -> SandboxBackendProtocol:
     """Recreate a sandbox after a connection failure.
 
@@ -265,7 +279,11 @@ async def _recreate_sandbox(
     try:
         sandbox_backend = set_sandbox_backend(
             thread_id,
-            await _create_sandbox_with_proxy(github_proxy_token, thread_id=thread_id),
+            await _create_sandbox_with_proxy(
+                github_proxy_token,
+                thread_id=thread_id,
+                github_proxy_repositories=github_proxy_repositories,
+            ),
         )
     except Exception:
         logger.exception("Failed to recreate sandbox after connection failure")
@@ -278,6 +296,7 @@ async def check_or_recreate_sandbox(
     sandbox_backend: SandboxBackendProtocol,
     thread_id: str,
     github_proxy_token: str | None = None,
+    github_proxy_repositories: Sequence[str] | None = None,
 ) -> SandboxBackendProtocol:
     """Check if a cached sandbox is reachable; recreate it if not.
 
@@ -294,7 +313,11 @@ async def check_or_recreate_sandbox(
             "Cached sandbox is no longer reachable for thread %s, recreating",
             thread_id,
         )
-        sandbox_backend = await _recreate_sandbox(thread_id, github_proxy_token=github_proxy_token)
+        sandbox_backend = await _recreate_sandbox(
+            thread_id,
+            github_proxy_token=github_proxy_token,
+            github_proxy_repositories=github_proxy_repositories,
+        )
     return sandbox_backend
 
 
@@ -349,6 +372,7 @@ async def ensure_sandbox_for_thread(
     thread_id: str,
     *,
     github_proxy_token: str | None = None,
+    github_proxy_repositories: Sequence[str] | None = None,
 ) -> SandboxBackendProtocol:
     """Get-or-create a healthy sandbox bound to ``thread_id``.
 
@@ -375,18 +399,20 @@ async def ensure_sandbox_for_thread(
         logger.info("Using cached sandbox backend for thread %s", thread_id)
         original_sandbox_id = sandbox_backend.id
         sandbox_backend = await check_or_recreate_sandbox(
-            sandbox_backend, thread_id, github_proxy_token
+            sandbox_backend, thread_id, github_proxy_token, github_proxy_repositories
         )
         if sandbox_backend.id == original_sandbox_id:
             sandbox_backend = await _refresh_github_proxy_or_recreate(
-                sandbox_backend, thread_id, github_proxy_token
+                sandbox_backend, thread_id, github_proxy_token, github_proxy_repositories
             )
     elif sandbox_id is None:
         logger.info("Creating new sandbox for thread %s", thread_id)
         await client.threads.update(thread_id=thread_id, metadata=_creating_metadata())
         try:
             sandbox_backend = await _create_sandbox_with_proxy(
-                github_proxy_token, thread_id=thread_id
+                github_proxy_token,
+                thread_id=thread_id,
+                github_proxy_repositories=github_proxy_repositories,
             )
             logger.info("Sandbox created: %s", sandbox_backend.id)
         except Exception:
@@ -406,7 +432,9 @@ async def ensure_sandbox_for_thread(
             await client.threads.update(thread_id=thread_id, metadata=_creating_metadata())
             try:
                 sandbox_backend = await _create_sandbox_with_proxy(
-                    github_proxy_token, thread_id=thread_id
+                    github_proxy_token,
+                    thread_id=thread_id,
+                    github_proxy_repositories=github_proxy_repositories,
                 )
                 created_replacement_sandbox = True
             except Exception:
@@ -416,11 +444,11 @@ async def ensure_sandbox_for_thread(
         if not created_replacement_sandbox:
             original_sandbox_id = sandbox_backend.id
             sandbox_backend = await check_or_recreate_sandbox(
-                sandbox_backend, thread_id, github_proxy_token
+                sandbox_backend, thread_id, github_proxy_token, github_proxy_repositories
             )
             if sandbox_backend.id == original_sandbox_id:
                 sandbox_backend = await _refresh_github_proxy_or_recreate(
-                    sandbox_backend, thread_id, github_proxy_token
+                    sandbox_backend, thread_id, github_proxy_token, github_proxy_repositories
                 )
 
     sandbox_backend = set_sandbox_backend(thread_id, sandbox_backend)
