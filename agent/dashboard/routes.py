@@ -996,19 +996,15 @@ async def api_thread_stream_events(
     session: dict[str, Any] = _SESSION_DEP,
 ) -> StreamingResponse:
     body = await request.body()
-
-    async def event_generator():
-        async for chunk in proxy_dashboard_thread_stream_events(
-            thread_id,
-            session["sub"],
-            body,
-            email=session.get("email"),
-            content_type=request.headers.get("content-type", "application/json"),
-        ):
-            yield chunk
-
+    stream = await proxy_dashboard_thread_stream_events(
+        thread_id,
+        session["sub"],
+        body,
+        email=session.get("email"),
+        content_type=request.headers.get("content-type", "application/json"),
+    )
     return StreamingResponse(
-        event_generator(),
+        stream,
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
     )

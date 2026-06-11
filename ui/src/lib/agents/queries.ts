@@ -51,6 +51,10 @@ export function useAgentThread(threadId: string) {
   return useQuery({
     queryKey: agentThreadKeys.detail(threadId),
     queryFn: () => agentsApi.getThread(threadId),
+    // Lets the optimistic detail seeded by `AgentsHome` survive until the
+    // proxied run.start stamps the server-side thread; an immediate refetch
+    // would 404 and bounce the route back to /agents.
+    staleTime: 30_000,
   })
 }
 
