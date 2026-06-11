@@ -110,6 +110,7 @@ export function buildRenderItems(chunks: Chunk[], messageId?: string): RenderIte
 
   for (let i = 0; i < chunks.length; i += 1) {
     const chunk = chunks[i];
+    if (!chunk) continue;
 
     if (chunk.kind === "tool-execution") {
       if (isSubagentTool(chunk)) {

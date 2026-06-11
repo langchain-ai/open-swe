@@ -1,11 +1,4 @@
-import {
-  ArrowUp,
-  ChevronDown,
-  ImagePlus,
-  LoaderCircle,
-  Square,
-  X,
-} from "lucide-react"
+import { ArrowUp, ChevronDown, ImagePlus, LoaderCircle, X } from "lucide-react"
 import { StopIcon } from "@phosphor-icons/react"
 import { useQueryClient } from "@tanstack/react-query"
 import { useStreamContext as useAgentThreadStream } from "@langchain/react"
@@ -117,10 +110,6 @@ export interface CloudPromptBarProps {
   compact?: boolean
   disabled?: boolean
   busy?: boolean
-  /** When true, a stop button is shown next to send to cancel the active run. */
-  canCancel?: boolean
-  cancelling?: boolean
-  onCancel?: () => void
   onSubmit?: (value: string, images: Array<ImageChunk>) => void
   models?: Array<ModelOption>
   selection?: ModelSelection | null
@@ -163,9 +152,6 @@ export const CloudPromptBar = memo(function CloudPromptBarComponent({
   compact = false,
   disabled = false,
   busy = false,
-  canCancel = false,
-  cancelling = false,
-  onCancel,
   onSubmit,
   models = [],
   selection = null,

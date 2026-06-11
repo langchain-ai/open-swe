@@ -65,7 +65,7 @@ export function ThinkingSpinner({
     setDone({
       past: settingUpSandboxRef.current
         ? "Set up sandbox"
-        : BUSY_TEXTS[textIdxRef.current].past,
+        : BUSY_TEXTS[textIdxRef.current]?.past ?? "",
       elapsed: formatElapsed(Date.now() - startTimeRef.current),
     });
   }, [settledActive]);
@@ -91,7 +91,7 @@ export function ThinkingSpinner({
   return (
     <div className="my-2 flex items-center gap-2">
       <span className="shimmer-text text-xs">
-        {settingUpSandbox ? "Setting up sandbox..." : BUSY_TEXTS[textIdx].present}
+        {settingUpSandbox ? "Setting up sandbox..." : BUSY_TEXTS[textIdx]?.present ?? ""}
       </span>
     </div>
   );
