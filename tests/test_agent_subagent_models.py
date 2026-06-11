@@ -77,12 +77,12 @@ async def test_agent_uses_profile_subagent_model_override() -> None:
 
     main_call = make_model.call_args_list[0]
     assert main_call.args == ("anthropic:claude-opus-4-8",)
-    assert main_call.kwargs["thinking"] == {"type": "adaptive"}
+    assert main_call.kwargs["thinking"] == {"type": "adaptive", "display": "summarized"}
     assert main_call.kwargs["effort"] == "high"
 
     subagent_call = make_model.call_args_list[1]
     assert subagent_call.args == ("openai:gpt-5.5",)
-    assert subagent_call.kwargs["reasoning"] == {"effort": "xhigh"}
+    assert subagent_call.kwargs["reasoning"] == {"effort": "xhigh", "summary": "auto"}
 
 
 @pytest.mark.asyncio
@@ -145,5 +145,8 @@ async def test_agent_subagent_inherits_profile_model_override_without_explicit_p
     assert subagents[0]["model"] is subagent_model
     assert make_model.call_args_list[0].args == ("anthropic:claude-opus-4-8",)
     assert make_model.call_args_list[1].args == ("anthropic:claude-opus-4-8",)
-    assert make_model.call_args_list[1].kwargs["thinking"] == {"type": "adaptive"}
+    assert make_model.call_args_list[1].kwargs["thinking"] == {
+        "type": "adaptive",
+        "display": "summarized",
+    }
     assert make_model.call_args_list[1].kwargs["effort"] == "high"

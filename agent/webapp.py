@@ -124,11 +124,15 @@ DASHBOARD_ALLOWED_ORIGINS: list[str] = [
     o.strip() for o in os.environ.get("DASHBOARD_ALLOWED_ORIGINS", "").split(",") if o.strip()
 ]
 if DASHBOARD_ALLOWED_ORIGINS:
+    if "*" in DASHBOARD_ALLOWED_ORIGINS:
+        raise RuntimeError(
+            "DASHBOARD_ALLOWED_ORIGINS must not include '*' when allow_credentials=True"
+        )
     app.add_middleware(
         CORSMiddleware,
         allow_origins=DASHBOARD_ALLOWED_ORIGINS,
         allow_credentials=True,
-        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
         allow_headers=["*"],
     )
 
