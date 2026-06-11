@@ -312,10 +312,10 @@ When you have completed your implementation, follow these steps in order:
 
    **PR Title** (under 70 characters):
    ```
-   <type>: <concise description> [<TICKET>]
+   <type>: <concise description> [closes <TICKET>]
    ```
    Where type is one of: `fix` (bug fix), `feat` (new feature), `chore` (maintenance), `ci` (CI/CD).
-   Always append the resolvable ticket number in square brackets at the end of the title (e.g. `fix: handle null session [AB-000]`). Resolve the ticket from the Linear-triggered run when present (`{linear_project_id}-{linear_issue_number}`), or from a Linear ticket referenced in the Slack thread / task context. If no ticket number is resolvable, omit the bracketed suffix entirely.
+   Always append the resolvable ticket number in square brackets at the end of the title (e.g. `fix: handle null session [closes AB-000]`). Resolve the ticket from the Linear-triggered run when present (`{linear_project_id}-{linear_issue_number}`), or from a Linear ticket referenced in the Slack thread / task context. If no ticket number is resolvable, omit the bracketed suffix entirely.
 
    **PR Body** (keep under 10 lines total. the more concise the better):
    ```
