@@ -6,6 +6,7 @@ import {
   useFileTreeSelection,
 } from "@pierre/trees/react"
 import {
+  ArrowSquareOutIcon,
   ArrowsInIcon,
   ArrowsOutIcon,
   CaretDownIcon,
@@ -318,6 +319,17 @@ export function AgentGitPanel({ thread }: AgentGitPanelProps) {
                 </span>
               </div>
             </div>
+            {pr.url && (
+              <a
+                href={pr.url}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex shrink-0 items-center gap-1 rounded-md border border-[var(--ui-border)] px-2 py-1 text-[11px] font-medium text-[var(--ui-text-dim)] transition-colors hover:bg-[var(--ui-panel-2)] hover:text-[var(--ui-text)]"
+              >
+                <ArrowSquareOutIcon className="size-3" />
+                View PR
+              </a>
+            )}
           </div>
         </div>
       )}
