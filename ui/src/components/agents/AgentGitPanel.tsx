@@ -15,7 +15,9 @@ import {
 } from "@phosphor-icons/react"
 import type { GitStatus, GitStatusEntry } from "@pierre/trees"
 
-import type { AgentThread } from "@/lib/agents/types"
+import type { AgentThread, Message } from "@/lib/agents/types"
+import type { ThreadPrDiffFile } from "@/lib/agents/api"
+import { useAgentThreadPrDiff } from "@/lib/agents/queries"
 import { buttonVariants } from "@/components/ui/button"
 import type { ChangedFileSummaryItem } from "@/components/agents/messages"
 import { useDiffOptions } from "@/components/agents/utils/diffUtils"
@@ -25,6 +27,7 @@ import { cn } from "@/lib/utils"
 
 interface AgentGitPanelProps {
   thread: AgentThread
+  messages: Array<Message>
 }
 
 interface PanelFile {
@@ -35,6 +38,12 @@ interface PanelFile {
   originalContent: string
   modifiedContent: string
   status: GitStatus
+}
+
+function prFileStatus(file: ThreadPrDiffFile): GitStatus {
+  if (file.status === "added") return "added"
+  if (file.status === "removed") return "deleted"
+  return "modified"
 }
 
 function deriveStatus(file: ChangedFileSummaryItem): GitStatus {
@@ -156,7 +165,7 @@ function treeThemeStyle(): React.CSSProperties {
   } as React.CSSProperties
 }
 
-export function AgentGitPanel({ thread }: AgentGitPanelProps) {
+export function AgentGitPanel({ thread, messages }: AgentGitPanelProps) {
   const [topTab, setTopTab] = useState<"git" | "desktop" | "terminal">("git")
   const [tab, setTab] = useState<"diff" | "review" | "commits">("diff")
   const [collapsed, setCollapsedState] = useState(() => readStoredPanelCollapsed())
@@ -177,12 +186,25 @@ export function AgentGitPanel({ thread }: AgentGitPanelProps) {
   const sectionRefs = useRef<Record<string, HTMLDivElement | null>>({})
   const pr = thread.pr
 
+  const prDiff = useAgentThreadPrDiff(thread.id, Boolean(pr))
+
   const chunks = useMemo(
-    () => thread.messages.flatMap((message) => message.chunks),
-    [thread.messages]
+    () => messages.flatMap((message) => message.chunks),
+    [messages]
   )
 
   const files = useMemo<Array<PanelFile>>(() => {
+    if (prDiff.data) {
+      return prDiff.data.files.map((file) => ({
+        filePath: file.path,
+        treePath: file.path,
+        additions: file.additions,
+        deletions: file.deletions,
+        originalContent: file.originalContent ?? "",
+        modifiedContent: file.modifiedContent ?? "",
+        status: prFileStatus(file),
+      }))
+    }
     const summary = summarizeChangedFiles(chunks)
     const prefix = commonDirPrefix(summary.map((file) => file.filePath))
     return summary.map((file) => ({
@@ -197,7 +219,7 @@ export function AgentGitPanel({ thread }: AgentGitPanelProps) {
       modifiedContent: file.modifiedContent,
       status: deriveStatus(file),
     }))
-  }, [chunks])
+  }, [chunks, prDiff.data])
 
   const totals = useMemo(
     () =>
@@ -386,7 +408,11 @@ export function AgentGitPanel({ thread }: AgentGitPanelProps) {
             </div>
           ) : (
             <div className="p-6 text-center text-xs text-[var(--ui-text-dim)]">
-              {tab === "diff" ? "No diff available." : "Coming Soon"}
+              {tab !== "diff"
+                ? "Coming Soon"
+                : prDiff.isLoading
+                  ? "Loading PR diff…"
+                  : "No diff available."}
             </div>
           )}
         </div>
