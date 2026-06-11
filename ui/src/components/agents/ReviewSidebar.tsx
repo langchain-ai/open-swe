@@ -1,8 +1,14 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react"
+import {
+  FileTree,
+  useFileTree,
+  useFileTreeSelection,
+} from "@pierre/trees/react"
 
+import type { GitStatusEntry } from "@pierre/trees"
 import type { ReviewDiffFile } from "@/lib/api"
 import { Skeleton } from "@/components/ui/skeleton"
-import { cn } from "@/lib/utils"
+import { treeThemeStyle } from "@/components/agents/AgentGitPanel"
 
 export interface ReviewSidebarData {
   title: string
@@ -45,20 +51,8 @@ export function useRegisterReviewSidebar(data: ReviewSidebarData) {
 }
 
 export function ReviewFileTree({ data }: { data: ReviewSidebarData }) {
-  const grouped = useMemo(() => {
-    const byDir = new Map<string, Array<ReviewDiffFile>>()
-    for (const file of data.files ?? []) {
-      const idx = file.path.lastIndexOf("/")
-      const dir = idx === -1 ? "" : file.path.slice(0, idx)
-      const list = byDir.get(dir) ?? []
-      list.push(file)
-      byDir.set(dir, list)
-    }
-    return Array.from(byDir.entries()).sort(([a], [b]) => a.localeCompare(b))
-  }, [data.files])
-
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto pb-2">
+    <div className="flex min-h-0 flex-1 flex-col pb-2">
       <div className="px-4 py-1 text-[10px] font-semibold tracking-wide text-[var(--ui-text-dim)] uppercase">
         {data.title}
       </div>
@@ -67,52 +61,71 @@ export function ReviewFileTree({ data }: { data: ReviewSidebarData }) {
           <Skeleton className="h-40 w-full" />
         </div>
       ) : (
-        grouped.map(([dir, dirFiles]) => (
-          <div key={dir || "."} className="mb-1">
-            {dir && (
-              <div className="truncate px-4 py-1 text-[11px] text-[var(--ui-text-dim)]">
-                {dir}
-              </div>
-            )}
-            {dirFiles.map((file) => {
-              const name = file.path.slice(dir ? dir.length + 1 : 0)
-              return (
-                <button
-                  key={file.path}
-                  type="button"
-                  onClick={() => data.onSelect(file.path)}
-                  className={cn(
-                    "flex w-full items-center gap-2 px-4 py-1 text-left text-xs text-[var(--ui-text-muted)] transition-colors hover:bg-[var(--ui-sidebar-hover)]",
-                    data.selected === file.path &&
-                      "bg-[var(--ui-accent-bubble)] text-[var(--ui-text)]",
-                    data.viewed.has(file.path) && "opacity-50"
-                  )}
-                >
-                  <span
-                    className={cn(
-                      "truncate",
-                      file.status === "added" && "text-emerald-500",
-                      file.status === "deleted" && "text-red-500"
-                    )}
-                  >
-                    {name}
-                  </span>
-                  <span className="ml-auto flex shrink-0 items-center gap-1.5 font-mono text-[10px]">
-                    {file.additions > 0 && (
-                      <span className="text-emerald-500">
-                        +{file.additions}
-                      </span>
-                    )}
-                    {file.deletions > 0 && (
-                      <span className="text-red-500">-{file.deletions}</span>
-                    )}
-                  </span>
-                </button>
-              )
-            })}
-          </div>
-        ))
+        <ReviewFileTreeExplorer
+          files={data.files}
+          selected={data.selected}
+          onSelect={data.onSelect}
+        />
       )}
+    </div>
+  )
+}
+
+function ReviewFileTreeExplorer({
+  files,
+  selected,
+  onSelect,
+}: {
+  files: Array<ReviewDiffFile>
+  selected: string | null
+  onSelect: (path: string) => void
+}) {
+  const paths = useMemo(() => files.map((file) => file.path), [files])
+  const gitStatus = useMemo<Array<GitStatusEntry>>(
+    () => files.map((file) => ({ path: file.path, status: file.status })),
+    [files]
+  )
+
+  const { model } = useFileTree({
+    paths,
+    gitStatus,
+    initialExpansion: "open",
+    flattenEmptyDirectories: true,
+    icons: "standard",
+  })
+
+  useEffect(() => {
+    model.resetPaths(paths)
+  }, [model, paths])
+
+  useEffect(() => {
+    model.setGitStatus(gitStatus)
+  }, [model, gitStatus])
+
+  const selection = useFileTreeSelection(model)
+  useEffect(() => {
+    const path = selection[0]
+    if (path) onSelect(path)
+  }, [selection, onSelect])
+
+  useEffect(() => {
+    if (selected) {
+      model.scrollToPath(selected, { focus: false })
+    }
+  }, [model, selected])
+
+  return (
+    <div className="min-h-0 flex-1">
+      <FileTree
+        model={model}
+        style={
+          {
+            height: "100%",
+            ...treeThemeStyle(),
+            "--trees-theme-sidebar-bg": "transparent",
+          } as React.CSSProperties
+        }
+      />
     </div>
   )
 }

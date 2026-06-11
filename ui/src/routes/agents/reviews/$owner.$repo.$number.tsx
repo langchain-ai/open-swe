@@ -38,7 +38,6 @@ export const Route = createFileRoute("/agents/reviews/$owner/$repo/$number")({
   component: ReviewDetailPage,
 })
 
-type CenterTab = "description" | "changes"
 type SideTab = "info" | "chat"
 
 const GROUP_STYLES = {
@@ -200,7 +199,6 @@ function ReviewBody({
   detail: ReviewDetail
   diffFiles: Array<ReviewDiffFile> | null
 }) {
-  const [centerTab, setCenterTab] = useState<CenterTab>("description")
   const [sideTab, setSideTab] = useState<SideTab>("info")
   const [selectedFile, setSelectedFile] = useState<string | null>(null)
   const fileRefs = useRef<Record<string, HTMLDivElement | null>>({})
@@ -209,7 +207,9 @@ function ReviewBody({
     {}
   )
   const [focused, setFocused] = useState<ReviewFinding | null>(null)
-  const [cardTop, setCardTop] = useState(96)
+  const [cardPos, setCardPos] = useState<{ top: number; left: number | null }>(
+    { top: 96, left: null }
+  )
 
   const viewedStorageKey = `open-swe.review.viewed.${detail.owner}/${detail.repo}/${detail.number}.${detail.head_sha}`
   const [viewed, setViewed] = useState<Set<string>>(() => {
@@ -286,7 +286,6 @@ function ReviewBody({
   }, [diffFiles, viewed])
 
   const scrollToFile = useCallback((path: string) => {
-    setCenterTab("changes")
     setSelectedFile(path)
     setExpandedFiles((prev) => ({ ...prev, [path]: true }))
     requestAnimationFrame(() => {
@@ -302,10 +301,9 @@ function ReviewBody({
       markRead(finding.id)
       setFocused(finding)
       if (!isAnchored(finding)) {
-        setCardTop(96)
+        setCardPos({ top: 96, left: null })
         return
       }
-      setCenterTab("changes")
       setExpandedFiles((prev) => ({ ...prev, [finding.file]: true }))
       requestAnimationFrame(() => {
         const node =
@@ -314,11 +312,15 @@ function ReviewBody({
         requestAnimationFrame(() => {
           const rect = anchorRefs.current[finding.id]?.getBoundingClientRect()
           if (rect) {
-            setCardTop(
-              Math.min(Math.max(rect.top - 40, 64), window.innerHeight - 360)
-            )
+            setCardPos({
+              top: Math.min(
+                Math.max(rect.top, 64),
+                window.innerHeight - 360
+              ),
+              left: Math.min(rect.right + 12, window.innerWidth - 412 - 8),
+            })
           } else {
-            setCardTop(96)
+            setCardPos({ top: 96, left: null })
           }
         })
       })
@@ -352,23 +354,17 @@ function ReviewBody({
   return (
     <div className="relative flex min-h-0 flex-1">
       <main className="min-w-0 flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-4xl px-6 py-6">
-          <PrHeader
-            detail={detail}
-            centerTab={centerTab}
-            onTabChange={setCenterTab}
-          />
-          {centerTab === "description" ? (
-            <div className="mt-4 rounded-lg border border-border bg-card p-4">
-              {detail.pr.body ? (
-                <Markdown content={detail.pr.body} />
-              ) : (
-                <p className="text-xs text-muted-foreground">
-                  This PR has no description.
-                </p>
-              )}
-            </div>
-          ) : null}
+        <div className="mx-auto max-w-6xl px-6 py-6">
+          <PrHeader detail={detail} />
+          <div className="mt-4 rounded-lg border border-border bg-card p-4">
+            {detail.pr.body ? (
+              <Markdown content={detail.pr.body} />
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                This PR has no description.
+              </p>
+            )}
+          </div>
 
           <div className="mt-6">
             <div className="mb-2 flex items-center justify-between">
@@ -437,7 +433,8 @@ function ReviewBody({
         <FindingFloatingCard
           detail={detail}
           finding={focused}
-          top={cardTop}
+          top={cardPos.top}
+          left={cardPos.left}
           onClose={closeFinding}
         />
       )}
@@ -445,15 +442,7 @@ function ReviewBody({
   )
 }
 
-function PrHeader({
-  detail,
-  centerTab,
-  onTabChange,
-}: {
-  detail: ReviewDetail
-  centerTab: CenterTab
-  onTabChange: (tab: CenterTab) => void
-}) {
+function PrHeader({ detail }: { detail: ReviewDetail }) {
   const { pr } = detail
   const stateStyles: Record<string, string> = {
     open: "border-emerald-600/40 text-emerald-500",
@@ -498,28 +487,6 @@ function PrHeader({
         </span>
         <span className="text-emerald-500">+{pr.additions}</span>
         <span className="text-red-500">-{pr.deletions}</span>
-      </div>
-      <div className="mt-4 flex items-center gap-1 border-b border-border">
-        {(
-          [
-            ["description", "Description"],
-            ["changes", "Changes"],
-          ] as const
-        ).map(([id, label]) => (
-          <button
-            key={id}
-            type="button"
-            onClick={() => onTabChange(id)}
-            className={cn(
-              "border-b-2 px-3 py-2 text-xs transition-colors",
-              centerTab === id
-                ? "border-foreground font-medium text-foreground"
-                : "border-transparent text-muted-foreground hover:text-foreground"
-            )}
-          >
-            {label}
-          </button>
-        ))}
       </div>
     </div>
   )
@@ -603,6 +570,18 @@ function FileDiffCard({
               fileFocused !== null
                 ? highlightRange(hunk.lines, fileFocused)
                 : null
+            const anchorRows = new Map<number, Array<ReviewFinding>>()
+            for (const finding of findings) {
+              const index = hunk.lines.findIndex((hunkLine) =>
+                lineMatchesFinding(hunkLine, finding)
+              )
+              if (index !== -1) {
+                anchorRows.set(index, [
+                  ...(anchorRows.get(index) ?? []),
+                  finding,
+                ])
+              }
+            }
             return (
               <div key={hunkIndex}>
                 <div className="bg-muted/60 px-3 py-1 text-muted-foreground">
@@ -612,6 +591,7 @@ function FileDiffCard({
                   const lineFindings = findings.filter((finding) =>
                     isFindingAnchorRow(line, finding)
                   )
+                  const anchorFindings = anchorRows.get(lineIndex) ?? []
                   let highlight: HighlightEdge = null
                   if (
                     range &&
@@ -628,6 +608,7 @@ function FileDiffCard({
                       key={lineIndex}
                       line={line}
                       findings={lineFindings}
+                      anchorFindings={anchorFindings}
                       highlight={highlight}
                       onFindingClick={onFindingClick}
                       anchorRef={anchorRef}
@@ -646,12 +627,14 @@ function FileDiffCard({
 function DiffLineRow({
   line,
   findings,
+  anchorFindings,
   highlight,
   onFindingClick,
   anchorRef,
 }: {
   line: ReviewDiffLine
   findings: Array<ReviewFinding>
+  anchorFindings: Array<ReviewFinding>
   highlight: HighlightEdge
   onFindingClick: (finding: ReviewFinding) => void
   anchorRef: (id: string, node: HTMLDivElement | null) => void
@@ -660,9 +643,9 @@ function DiffLineRow({
   return (
     <div
       ref={
-        first
+        anchorFindings.length > 0
           ? (node) => {
-              for (const finding of findings) anchorRef(finding.id, node)
+              for (const finding of anchorFindings) anchorRef(finding.id, node)
             }
           : undefined
       }
@@ -713,11 +696,13 @@ function FindingFloatingCard({
   detail,
   finding,
   top,
+  left,
   onClose,
 }: {
   detail: ReviewDetail
   finding: ReviewFinding
   top: number
+  left: number | null
   onClose: () => void
 }) {
   const [copied, setCopied] = useState(false)
@@ -747,8 +732,11 @@ function FindingFloatingCard({
 
   return (
     <div
-      className="fixed right-6 z-50 flex max-h-[70vh] w-[420px] flex-col overflow-hidden rounded-lg border border-border bg-background shadow-2xl"
-      style={{ top }}
+      className={cn(
+        "fixed z-50 flex max-h-[70vh] w-[412px] flex-col overflow-hidden rounded-lg border border-border bg-background shadow-2xl",
+        left === null && "right-1"
+      )}
+      style={left === null ? { top } : { top, left }}
       role="dialog"
       aria-label={finding.title}
     >
@@ -776,11 +764,6 @@ function FindingFloatingCard({
         <div className="mt-1.5 text-xs text-muted-foreground">
           <Markdown content={finding.description} />
         </div>
-        {finding.suggestion && (
-          <pre className="mt-2 overflow-x-auto rounded border border-border bg-muted/40 p-2 font-mono text-[11px]">
-            {finding.suggestion}
-          </pre>
-        )}
         {finding.resolution_note && (
           <p className="mt-2 text-[11px] text-muted-foreground">
             Resolution: {finding.resolution_note}
@@ -855,7 +838,7 @@ function SidePanel({
   return (
     <aside
       className={cn(
-        "hidden w-80 shrink-0 flex-col overflow-y-auto border-l border-border transition-opacity xl:flex",
+        "hidden w-[420px] shrink-0 flex-col overflow-y-auto border-l border-border transition-opacity xl:flex",
         dimmed && "pointer-events-none opacity-30"
       )}
     >
