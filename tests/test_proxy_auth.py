@@ -184,9 +184,9 @@ class TestCreateSandboxWithProxy:
         """Installation token should be used for proxy auth on langsmith sandboxes."""
         with (
             patch(
-                "agent.server.get_github_app_installation_token",
+                "agent.server.get_github_app_installation_token_with_expiry",
                 new_callable=AsyncMock,
-                return_value="ghs_install",
+                return_value=("ghs_install", None),
             ),
             patch("agent.server.create_sandbox") as mock_create,
             patch("agent.server._configure_github_proxy") as mock_proxy,
@@ -224,9 +224,9 @@ class TestCreateSandboxWithProxy:
         with (
             patch("agent.server.create_sandbox") as mock_create,
             patch(
-                "agent.server.get_github_app_installation_token",
+                "agent.server.get_github_app_installation_token_with_expiry",
                 new_callable=AsyncMock,
-                return_value=None,
+                return_value=(None, None),
             ),
             patch.dict("os.environ", {"SANDBOX_TYPE": "langsmith"}),
         ):
@@ -275,9 +275,9 @@ class TestRefreshProxyOnSandboxReuse:
                 return_value="sandbox-cached",
             ),
             patch(
-                "agent.server.get_github_app_installation_token",
+                "agent.server.get_github_app_installation_token_with_expiry",
                 new_callable=AsyncMock,
-                return_value="ghs_fresh",
+                return_value=("ghs_fresh", None),
             ),
             patch("agent.server._configure_github_proxy") as mock_proxy,
             patch(
@@ -325,9 +325,9 @@ class TestRefreshProxyOnSandboxReuse:
             ),
             patch("agent.server.create_sandbox", return_value=mock_sandbox) as mock_create,
             patch(
-                "agent.server.get_github_app_installation_token",
+                "agent.server.get_github_app_installation_token_with_expiry",
                 new_callable=AsyncMock,
-                return_value="ghs_fresh",
+                return_value=("ghs_fresh", None),
             ),
             patch("agent.server._configure_github_proxy") as mock_proxy,
             patch(
@@ -360,9 +360,9 @@ class TestRefreshProxyOnSandboxReuse:
 
         with (
             patch(
-                "agent.server.get_github_app_installation_token",
+                "agent.server.get_github_app_installation_token_with_expiry",
                 new_callable=AsyncMock,
-                return_value="ghs_fresh",
+                return_value=("ghs_fresh", None),
             ),
             patch(
                 "agent.server._configure_github_proxy",
@@ -396,9 +396,9 @@ class TestRefreshProxyOnSandboxReuse:
 
         with (
             patch(
-                "agent.server.get_github_app_installation_token",
+                "agent.server.get_github_app_installation_token_with_expiry",
                 new_callable=AsyncMock,
-                return_value="ghs_fresh",
+                return_value=("ghs_fresh", None),
             ),
             patch("agent.server._configure_github_proxy") as mock_proxy,
             patch.dict("os.environ", {"SANDBOX_TYPE": "langsmith"}),
@@ -423,9 +423,9 @@ class TestRefreshProxyOnSandboxReuse:
 
         with (
             patch(
-                "agent.server.get_github_app_installation_token",
+                "agent.server.get_github_app_installation_token_with_expiry",
                 new_callable=AsyncMock,
-                return_value="ghs_fresh",
+                return_value=("ghs_fresh", None),
             ),
             patch("agent.server._configure_github_proxy") as mock_proxy,
             patch.dict("os.environ", {"SANDBOX_TYPE": "langsmith"}),

@@ -38,6 +38,7 @@ from .middleware import (
     SlackAssistantStatusMiddleware,
     ToolErrorMiddleware,
     check_message_queue_before_model,
+    refresh_github_proxy_before_model,
     settle_review_check_on_exit,
 )
 from .reviewer_diff import compute_diff_line_set, fetch_pr_diff, fetch_pr_metadata
@@ -994,6 +995,7 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
             SanitizeToolInputsMiddleware(),
             ModelCallLimitMiddleware(run_limit=MODEL_CALL_RECURSION_LIMIT, exit_behavior="end"),
             ToolErrorMiddleware(),
+            refresh_github_proxy_before_model,
             check_message_queue_before_model,
             SlackAssistantStatusMiddleware(),
             SanitizeThinkingBlocksMiddleware(),
