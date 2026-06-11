@@ -3,8 +3,8 @@
 ``publish_review`` normally completes the ``Open SWE Review`` check run and
 clears ``review_check_run_id`` from reviewer thread metadata. If the run ends
 without ever publishing (crash, model-call limit, sandbox failure), the check
-would hang "in progress" on the PR forever. This hook closes it as a failure
-so the PR's checks section reflects reality.
+would hang "in progress" on the PR forever. This hook closes it as neutral —
+the review not completing is reviewer infrastructure failing, not the PR.
 """
 
 from __future__ import annotations
@@ -63,7 +63,9 @@ async def settle_review_check_on_exit(
             title = str(pending.get("title") or "Review completed")
             summary = str(pending.get("summary") or "")
         else:
-            conclusion = "failure"
+            # Neutral, not failure: an incomplete review is a reviewer-infra
+            # problem, and a red X on the PR misreads as a code problem.
+            conclusion = "neutral"
             title = "Review did not complete"
             summary = (
                 "The Open SWE review run ended without publishing a review. "
