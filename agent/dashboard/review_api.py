@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Awaitable, Callable
 from typing import Any, Literal
 
 import httpx
@@ -29,6 +30,7 @@ DiffLineKind = Literal["context", "add", "del"]
 
 _DIFF_NEW_FILE_RE = re.compile(r"^new file mode", re.MULTILINE)
 _DIFF_DELETED_FILE_RE = re.compile(r"^deleted file mode", re.MULTILINE)
+_DIFF_RENAME_RE = re.compile(r"^rename from ", re.MULTILINE)
 
 
 def _github_headers(token: str) -> dict[str, str]:
@@ -169,6 +171,7 @@ def _thread_review_summary(thread: dict[str, Any]) -> dict[str, Any] | None:
         "thread_id": thread.get("thread_id"),
         "owner": owner,
         "repo": name,
+        "full_name": f"{owner}/{name}",
         "number": number,
         "title": pr.get("title") or f"PR #{number}",
         "url": pr.get("url") or f"https://github.com/{owner}/{name}/pull/{number}",
@@ -182,21 +185,47 @@ def _thread_review_summary(thread: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
-async def list_reviews(limit: int = 100) -> list[dict[str, Any]]:
+async def list_reviews(
+    limit: int = 100,
+    *,
+    is_accessible: Callable[[dict[str, Any]], Awaitable[bool]] | None = None,
+    page_size: int = 100,
+    max_scan: int = 1000,
+) -> list[dict[str, Any]]:
+    """List review summaries, newest first.
+
+    When ``is_accessible`` is given, keeps paging through reviewer threads
+    until ``limit`` accessible summaries are collected (or ``max_scan``
+    threads have been examined), so inaccessible records don't crowd
+    accessible ones out of a single fixed-size page.
+    """
     client = langgraph_client()
-    threads = await client.threads.search(
-        metadata={"kind": REVIEWER_THREAD_KIND},
-        limit=limit,
-        sort_by="updated_at",
-        sort_order="desc",
-    )
-    summaries = []
-    for thread in threads or []:
-        if not isinstance(thread, dict):
-            continue
-        summary = _thread_review_summary(thread)
-        if summary:
+    summaries: list[dict[str, Any]] = []
+    offset = 0
+    while len(summaries) < limit and offset < max_scan:
+        threads = await client.threads.search(
+            metadata={"kind": REVIEWER_THREAD_KIND},
+            limit=page_size,
+            offset=offset,
+            sort_by="updated_at",
+            sort_order="desc",
+        )
+        if not threads:
+            break
+        for thread in threads:
+            if not isinstance(thread, dict):
+                continue
+            summary = _thread_review_summary(thread)
+            if not summary:
+                continue
+            if is_accessible is not None and not await is_accessible(summary):
+                continue
             summaries.append(summary)
+            if len(summaries) >= limit:
+                break
+        if len(threads) < page_size:
+            break
+        offset += page_size
     return summaries
 
 
@@ -309,20 +338,27 @@ async def get_review(owner: str, repo: str, pr_number: int) -> dict[str, Any]:
 
 
 def parse_diff_files(diff_text: str) -> list[dict[str, Any]]:
-    """Parse a unified diff into renderable per-file hunk/line records."""
+    """Parse a unified diff into renderable per-file hunk/line records.
+
+    Iterates the raw ``diff --git`` sections so metadata-only changes
+    (pure renames, mode changes) still appear, with empty hunks.
+    """
     raw_sections = _split_file_sections(diff_text)
+    parsed_by_file = {file_diff.file: file_diff for file_diff in parse_unified_diff(diff_text)}
     files: list[dict[str, Any]] = []
-    for file_diff in parse_unified_diff(diff_text):
-        section = raw_sections.get(file_diff.file, "")
+    for path, section in raw_sections.items():
         status = "modified"
         if _DIFF_NEW_FILE_RE.search(section):
             status = "added"
         elif _DIFF_DELETED_FILE_RE.search(section):
             status = "deleted"
+        elif _DIFF_RENAME_RE.search(section):
+            status = "renamed"
+        file_diff = parsed_by_file.get(path)
         hunks = []
         additions = 0
         deletions = 0
-        for hunk in file_diff.hunks:
+        for hunk in file_diff.hunks if file_diff else ():
             lines: list[dict[str, Any]] = []
             old_line = hunk.old_start
             new_line = hunk.new_start
@@ -359,7 +395,7 @@ def parse_diff_files(diff_text: str) -> list[dict[str, Any]]:
             )
         files.append(
             {
-                "path": file_diff.file,
+                "path": path,
                 "status": status,
                 "additions": additions,
                 "deletions": deletions,

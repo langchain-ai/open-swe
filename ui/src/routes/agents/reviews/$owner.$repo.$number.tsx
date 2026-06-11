@@ -183,7 +183,11 @@ function ReviewDetailPage() {
           <Skeleton className="h-96 w-full" />
         </div>
       ) : (
-        <ReviewBody detail={detail.data} diffFiles={diff.data?.files ?? null} />
+        <ReviewBody
+          key={detail.data.head_sha}
+          detail={detail.data}
+          diffFiles={diff.data?.files ?? null}
+        />
       )}
     </div>
   )

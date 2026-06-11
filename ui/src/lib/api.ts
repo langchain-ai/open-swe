@@ -370,7 +370,7 @@ export interface ReviewDiffHunk {
 
 export interface ReviewDiffFile {
   path: string;
-  status: "added" | "deleted" | "modified";
+  status: "added" | "deleted" | "modified" | "renamed";
   additions: number;
   deletions: number;
   hunks: Array<ReviewDiffHunk>;

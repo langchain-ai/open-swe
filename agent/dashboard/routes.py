@@ -713,10 +713,22 @@ async def api_list_review_styles(
 async def api_list_reviews(
     session: dict[str, Any] = _SESSION_DEP,
 ) -> list[dict[str, Any]]:
-    reviews = await list_reviews()
-    for review in reviews:
-        review["full_name"] = f"{review['owner']}/{review['repo']}"
-    return await _filter_repo_records_for_user(session["sub"], reviews)
+    login = session["sub"]
+    access_cache: dict[str, bool] = {}
+
+    async def is_accessible(summary: dict[str, Any]) -> bool:
+        full_name = summary["full_name"]
+        if full_name not in access_cache:
+            try:
+                await require_repo_access_for_user(login, full_name)
+                access_cache[full_name] = True
+            except HTTPException as exc:
+                if exc.status_code not in {403, 404}:
+                    raise
+                access_cache[full_name] = False
+        return access_cache[full_name]
+
+    return await list_reviews(is_accessible=is_accessible)
 
 
 @router.get("/reviews/{owner}/{repo}/{pr_number}")
