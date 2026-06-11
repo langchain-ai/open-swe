@@ -45,6 +45,7 @@ from .oauth import (
     issue_session,
     issue_state,
     new_state_nonce,
+    require_same_origin_for_mutations,
     require_session,
     sanitize_redirect_to,
 )
@@ -105,13 +106,17 @@ from .team_settings import (
     upsert_team_settings,
 )
 from .thread_api import (
-    ThreadCreateBody,
     ThreadMessageBody,
     cancel_dashboard_thread,
-    create_dashboard_thread,
     delete_dashboard_thread,
     get_dashboard_thread,
+    get_dashboard_thread_pr_diff,
+    get_dashboard_thread_state,
     list_dashboard_threads,
+    proxy_dashboard_thread_commands,
+    proxy_dashboard_thread_history,
+    proxy_dashboard_thread_run_cancel,
+    proxy_dashboard_thread_stream_events,
     send_dashboard_message,
     stream_dashboard_thread,
 )
@@ -124,7 +129,11 @@ from .user_mappings import (
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/dashboard/api", tags=["dashboard"])
+router = APIRouter(
+    prefix="/dashboard/api",
+    tags=["dashboard"],
+    dependencies=[Depends(require_same_origin_for_mutations)],
+)
 _GITHUB_API_TIMEOUT = httpx.Timeout(10.0, connect=3.0)
 _SKIPPABLE_INSTALLATION_REPO_STATUS_CODES = frozenset({403, 404})
 
@@ -901,14 +910,6 @@ async def api_list_threads(
     return await list_dashboard_threads(session["sub"], email=session.get("email"), include_all=all)
 
 
-@router.post("/threads")
-async def api_create_thread(
-    body: ThreadCreateBody,
-    session: dict[str, Any] = _SESSION_DEP,
-) -> dict[str, Any]:
-    return await create_dashboard_thread(session["sub"], body)
-
-
 @router.get("/threads/{thread_id}")
 async def api_get_thread(
     thread_id: str,
@@ -923,6 +924,18 @@ async def api_get_thread(
     )
 
 
+@router.get("/threads/{thread_id}/pr-diff")
+async def api_get_thread_pr_diff(
+    thread_id: str,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    return await get_dashboard_thread_pr_diff(
+        thread_id,
+        session["sub"],
+        email=session.get("email"),
+    )
+
+
 @router.post("/threads/{thread_id}/messages")
 async def api_send_thread_message(
     thread_id: str,
@@ -930,6 +943,25 @@ async def api_send_thread_message(
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
     return await send_dashboard_message(thread_id, session["sub"], body, email=session.get("email"))
+
+
+@router.post("/threads/{thread_id}/runs/{run_id}/cancel")
+async def api_cancel_thread_run(
+    thread_id: str,
+    run_id: str,
+    session: dict[str, Any] = _SESSION_DEP,
+    wait: str = "0",
+    action: str = "interrupt",
+) -> Response:
+    status_code, content, media_type = await proxy_dashboard_thread_run_cancel(
+        thread_id,
+        run_id,
+        session["sub"],
+        wait=wait,
+        action=action,
+        email=session.get("email"),
+    )
+    return Response(content=content, status_code=status_code, media_type=media_type)
 
 
 @router.post("/threads/{thread_id}/cancel")
@@ -947,6 +979,73 @@ async def api_delete_thread(
 ) -> Response:
     await delete_dashboard_thread(thread_id, session["sub"], email=session.get("email"))
     return Response(status_code=204)
+
+
+@router.get("/threads/{thread_id}/state")
+async def api_get_thread_state(
+    thread_id: str,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    return await get_dashboard_thread_state(thread_id, session["sub"], email=session.get("email"))
+
+
+@router.post("/threads/{thread_id}/stream/events")
+async def api_thread_stream_events(
+    thread_id: str,
+    request: Request,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> StreamingResponse:
+    body = await request.body()
+
+    async def event_generator():
+        async for chunk in proxy_dashboard_thread_stream_events(
+            thread_id,
+            session["sub"],
+            body,
+            email=session.get("email"),
+            content_type=request.headers.get("content-type", "application/json"),
+        ):
+            yield chunk
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
+    )
+
+
+@router.post("/threads/{thread_id}/commands")
+async def api_thread_commands(
+    thread_id: str,
+    request: Request,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> Response:
+    body = await request.body()
+    status_code, content, media_type = await proxy_dashboard_thread_commands(
+        thread_id,
+        session["sub"],
+        body,
+        email=session.get("email"),
+        content_type=request.headers.get("content-type", "application/json"),
+    )
+    return Response(content=content, status_code=status_code, media_type=media_type)
+
+
+@router.post("/threads/{thread_id}/history")
+async def api_thread_history(
+    thread_id: str,
+    request: Request,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> Response:
+    body = await request.body()
+    status_code, content, media_type = await proxy_dashboard_thread_history(
+        thread_id,
+        session["sub"],
+        body,
+        email=session.get("email"),
+        content_type=request.headers.get("content-type", "application/json"),
+    )
+    return Response(content=content, status_code=status_code, media_type=media_type)
 
 
 @router.get("/threads/{thread_id}/stream")

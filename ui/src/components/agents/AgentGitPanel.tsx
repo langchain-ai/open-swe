@@ -6,6 +6,7 @@ import {
   useFileTreeSelection,
 } from "@pierre/trees/react"
 import {
+  ArrowSquareOutIcon,
   ArrowsInIcon,
   ArrowsOutIcon,
   CaretDownIcon,
@@ -14,8 +15,11 @@ import {
 } from "@phosphor-icons/react"
 import type { GitStatus, GitStatusEntry } from "@pierre/trees"
 
-import type { AgentThread } from "@/lib/agents/types"
-import type { ChangedFileSummaryItem } from "@/components/agents/ported"
+import type { AgentThread, Message } from "@/lib/agents/types"
+import type { ThreadPrDiffFile } from "@/lib/agents/api"
+import { useAgentThreadPrDiff } from "@/lib/agents/queries"
+import { buttonVariants } from "@/components/ui/button"
+import type { ChangedFileSummaryItem } from "@/components/agents/messages"
 import { useDiffOptions } from "@/components/agents/utils/diffUtils"
 import { summarizeChangedFiles } from "@/components/agents/ported"
 import { Z } from "@/components/agents/z-index"
@@ -23,6 +27,7 @@ import { cn } from "@/lib/utils"
 
 interface AgentGitPanelProps {
   thread: AgentThread
+  messages: Array<Message>
 }
 
 interface PanelFile {
@@ -33,6 +38,13 @@ interface PanelFile {
   originalContent: string
   modifiedContent: string
   status: GitStatus
+  unrenderable?: boolean
+}
+
+function prFileStatus(file: ThreadPrDiffFile): GitStatus {
+  if (file.status === "added") return "added"
+  if (file.status === "removed") return "deleted"
+  return "modified"
 }
 
 function deriveStatus(file: ChangedFileSummaryItem): GitStatus {
@@ -60,7 +72,6 @@ function commonDirPrefix(paths: Array<string>): string {
 }
 
 const PANEL_STORAGE_WIDTH = "open-swe.gitpanel.width"
-const PANEL_STORAGE_COLLAPSED = "open-swe.gitpanel.collapsed"
 const PANEL_DEFAULT_WIDTH = 420
 const PANEL_MIN_WIDTH = 320
 const PANEL_MAX_WIDTH = 720
@@ -71,11 +82,6 @@ function readStoredPanelWidth(): number {
   const parsed = raw ? Number(raw) : NaN
   if (!Number.isFinite(parsed)) return PANEL_DEFAULT_WIDTH
   return Math.min(PANEL_MAX_WIDTH, Math.max(PANEL_MIN_WIDTH, parsed))
-}
-
-function readStoredPanelCollapsed(): boolean {
-  if (typeof window === "undefined") return true
-  return window.localStorage.getItem(PANEL_STORAGE_COLLAPSED) !== "0"
 }
 
 function PanelResizeHandle({
@@ -154,17 +160,12 @@ function treeThemeStyle(): React.CSSProperties {
   } as React.CSSProperties
 }
 
-export function AgentGitPanel({ thread }: AgentGitPanelProps) {
+export function AgentGitPanel({ thread, messages }: AgentGitPanelProps) {
   const [topTab, setTopTab] = useState<"git" | "desktop" | "terminal">("git")
   const [tab, setTab] = useState<"diff" | "review" | "commits">("diff")
-  const [collapsed, setCollapsedState] = useState(() => readStoredPanelCollapsed())
+  const [collapsed, setCollapsed] = useState(true)
   const [width, setWidthState] = useState(() => readStoredPanelWidth())
   const [fullScreen, setFullScreen] = useState(false)
-
-  const setCollapsed = useCallback((next: boolean) => {
-    setCollapsedState(next)
-    window.localStorage.setItem(PANEL_STORAGE_COLLAPSED, next ? "1" : "0")
-  }, [])
 
   const setWidth = useCallback((next: number) => {
     const clamped = Math.min(PANEL_MAX_WIDTH, Math.max(PANEL_MIN_WIDTH, next))
@@ -175,12 +176,39 @@ export function AgentGitPanel({ thread }: AgentGitPanelProps) {
   const sectionRefs = useRef<Record<string, HTMLDivElement | null>>({})
   const pr = thread.pr
 
+  // Always start collapsed; re-collapse when switching threads, and
+  // uncollapse when a PR lands mid-session.
+  const [prSeen, setPrSeen] = useState<{ threadId: string; hadPr: boolean }>(
+    () => ({ threadId: thread.id, hadPr: Boolean(pr) })
+  )
+  if (prSeen.threadId !== thread.id) {
+    setPrSeen({ threadId: thread.id, hadPr: Boolean(pr) })
+    setCollapsed(true)
+  } else if (pr && !prSeen.hadPr) {
+    setPrSeen({ threadId: thread.id, hadPr: true })
+    setCollapsed(false)
+  }
+
+  const prDiff = useAgentThreadPrDiff(thread.id, Boolean(pr))
+
   const chunks = useMemo(
-    () => thread.messages.flatMap((message) => message.chunks),
-    [thread.messages]
+    () => messages.flatMap((message) => message.chunks),
+    [messages]
   )
 
   const files = useMemo<Array<PanelFile>>(() => {
+    if (prDiff.data) {
+      return prDiff.data.files.map((file) => ({
+        filePath: file.path,
+        treePath: file.path,
+        additions: file.additions,
+        deletions: file.deletions,
+        originalContent: file.originalContent ?? "",
+        modifiedContent: file.modifiedContent ?? "",
+        status: prFileStatus(file),
+        unrenderable: file.unrenderable,
+      }))
+    }
     const summary = summarizeChangedFiles(chunks)
     const prefix = commonDirPrefix(summary.map((file) => file.filePath))
     return summary.map((file) => ({
@@ -195,7 +223,7 @@ export function AgentGitPanel({ thread }: AgentGitPanelProps) {
       modifiedContent: file.modifiedContent,
       status: deriveStatus(file),
     }))
-  }, [chunks])
+  }, [chunks, prDiff.data])
 
   const totals = useMemo(
     () =>
@@ -318,6 +346,17 @@ export function AgentGitPanel({ thread }: AgentGitPanelProps) {
                 </span>
               </div>
             </div>
+            {pr.url && (
+              <a
+                href={pr.url}
+                target="_blank"
+                rel="noreferrer"
+                className={buttonVariants({ variant: "outline", size: "sm" })}
+              >
+                <ArrowSquareOutIcon className="size-3" />
+                View PR
+              </a>
+            )}
           </div>
         </div>
       )}
@@ -373,7 +412,11 @@ export function AgentGitPanel({ thread }: AgentGitPanelProps) {
             </div>
           ) : (
             <div className="p-6 text-center text-xs text-[var(--ui-text-dim)]">
-              {tab === "diff" ? "No diff available." : "Coming Soon"}
+              {tab !== "diff"
+                ? "Coming Soon"
+                : prDiff.isLoading
+                  ? "Loading PR diff…"
+                  : "No diff available."}
             </div>
           )}
         </div>
@@ -427,15 +470,20 @@ function FileDiffSection({
           <span className="text-[var(--ui-danger)]">-{file.deletions}</span>
         </span>
       </button>
-      {open && (
-        <div className="max-h-[420px] overflow-auto bg-[var(--ui-panel)] p-2 font-mono text-[11px] leading-5">
-          <MultiFileDiff
-            oldFile={{ name: file.treePath, contents: file.originalContent }}
-            newFile={{ name: file.treePath, contents: file.modifiedContent }}
-            options={diffOptions}
-          />
-        </div>
-      )}
+      {open &&
+        (file.unrenderable ? (
+          <div className="bg-[var(--ui-panel)] p-4 text-center text-xs text-[var(--ui-text-dim)]">
+            Binary or large file — diff not shown.
+          </div>
+        ) : (
+          <div className="max-h-[420px] overflow-auto bg-[var(--ui-panel)] p-2 font-mono text-[11px] leading-5">
+            <MultiFileDiff
+              oldFile={{ name: file.treePath, contents: file.originalContent }}
+              newFile={{ name: file.treePath, contents: file.modifiedContent }}
+              options={diffOptions}
+            />
+          </div>
+        ))}
     </div>
   )
 }

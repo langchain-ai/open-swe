@@ -37,12 +37,12 @@ def _secret() -> str:
     return s
 
 
-def _allowed_redirect_origins() -> set[str]:
-    """Origins permitted for the post-login redirect.
+def allowed_dashboard_origins() -> set[str]:
+    """Origins permitted for dashboard frontend requests and post-login redirects.
 
     Built from DASHBOARD_BASE_URL plus any DASHBOARD_ALLOWED_ORIGINS entries
-    so the dashboard itself and its preview deploys can all be redirect
-    targets — but nothing else.
+    so the dashboard itself and its preview deploys are allowed — but nothing
+    else.
     """
     origins: set[str] = set()
     base = os.environ.get("DASHBOARD_BASE_URL", "").strip()
@@ -57,10 +57,25 @@ def _allowed_redirect_origins() -> set[str]:
 
 
 def _origin_of(url: str) -> str:
-    parsed = urlparse(url)
-    if not parsed.scheme or not parsed.netloc:
+    """Normalize a URL or Origin header value to ``scheme://host[:port]``."""
+    trimmed = url.strip().rstrip("/")
+    if not trimmed or trimmed.lower() == "null":
         return ""
-    return f"{parsed.scheme}://{parsed.netloc}"
+    parsed = urlparse(trimmed)
+    if not parsed.scheme or not parsed.hostname:
+        return ""
+    scheme = parsed.scheme.lower()
+    host = parsed.hostname.lower()
+    try:
+        port = parsed.port
+    except ValueError:
+        return ""
+    if port is None:
+        return f"{scheme}://{host}"
+    default_port = 443 if scheme == "https" else 80 if scheme == "http" else None
+    if default_port is not None and port == default_port:
+        return f"{scheme}://{host}"
+    return f"{scheme}://{host}:{port}"
 
 
 def sanitize_redirect_to(redirect_to: str | None) -> str:
@@ -76,7 +91,7 @@ def sanitize_redirect_to(redirect_to: str | None) -> str:
     candidate_origin = _origin_of(redirect_to)
     if not candidate_origin:
         return fallback
-    if candidate_origin in _allowed_redirect_origins():
+    if candidate_origin in allowed_dashboard_origins():
         return redirect_to
     logger.warning("Rejected redirect_to=%r — origin not in allowlist", redirect_to)
     return fallback
@@ -190,12 +205,75 @@ def require_session(request: Request) -> dict[str, Any]:
     return decode_session(token)
 
 
+def request_origin(request: Request) -> str | None:
+    """Return the request's origin (scheme + host + port), if present and valid."""
+    raw_origin = request.headers.get("origin")
+    if raw_origin is not None:
+        if raw_origin.strip().lower() == "null":
+            return None
+        origin = _origin_of(raw_origin)
+        return origin if origin else None
+    referer = request.headers.get("referer")
+    if referer:
+        origin = _origin_of(referer)
+        return origin if origin else None
+    return None
+
+
+def require_same_origin(request: Request) -> None:
+    """Reject cross-site cookie-authenticated mutations (CSRF defense).
+
+    No-op when no dashboard origins are configured (local setups without
+    ``DASHBOARD_BASE_URL`` / ``DASHBOARD_ALLOWED_ORIGINS``).
+    """
+    allowed = allowed_dashboard_origins()
+    if not allowed:
+        return
+    origin = request_origin(request)
+    if not origin or origin not in allowed:
+        logger.warning(
+            "Rejected %s %s — origin %r not in allowlist",
+            request.method,
+            request.url.path,
+            origin,
+        )
+        raise HTTPException(403, "CSRF check failed")
+
+
+def require_same_origin_for_mutations(request: Request) -> None:
+    if request.method in {"GET", "HEAD", "OPTIONS"}:
+        return
+    require_same_origin(request)
+
+
 def expires_at_from_github_response(data: dict[str, Any], *, field: str) -> str | None:
     """Convert GitHub ``expires_in`` / ``refresh_token_expires_in`` to an ISO timestamp."""
     raw = data.get(field)
     if not isinstance(raw, int | float) or raw <= 0:
         return None
     return (datetime.now(UTC) + timedelta(seconds=int(raw))).isoformat()
+
+
+class GithubOAuthError(HTTPException):
+    """A GitHub OAuth token endpoint error, carrying GitHub's ``error`` code."""
+
+    def __init__(self, status_code: int, detail: str, *, error_code: str | None = None) -> None:
+        super().__init__(status_code, detail)
+        self.error_code = error_code
+
+
+# Error codes GitHub returns when a refresh token can never mint a new access
+# token again (the user must re-authorize). Anything else is treated as
+# transient so we don't needlessly drop a usable authorization.
+UNRECOVERABLE_REFRESH_ERROR_CODES = frozenset({"bad_refresh_token", "unauthorized_client"})
+
+
+def is_unrecoverable_refresh_error(exc: BaseException) -> bool:
+    """Whether ``exc`` means the stored refresh token is permanently dead."""
+    return (
+        isinstance(exc, GithubOAuthError)
+        and (exc.error_code or "") in UNRECOVERABLE_REFRESH_ERROR_CODES
+    )
 
 
 async def _request_github_tokens(body: dict[str, str]) -> dict[str, Any]:
@@ -212,8 +290,10 @@ async def _request_github_tokens(body: dict[str, str]) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise HTTPException(502, "unexpected GitHub OAuth response")
     if data.get("error"):
-        raise HTTPException(
-            400, f"github oauth error: {data.get('error_description') or data['error']}"
+        raise GithubOAuthError(
+            400,
+            f"github oauth error: {data.get('error_description') or data['error']}",
+            error_code=str(data["error"]),
         )
     return data
 
