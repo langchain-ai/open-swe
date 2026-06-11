@@ -312,9 +312,10 @@ When you have completed your implementation, follow these steps in order:
 
    **PR Title** (under 70 characters):
    ```
-   <type>: <concise description> [closes {linear_project_id}-{linear_issue_number}]
+   <type>: <concise description> [closes <TICKET>]
    ```
-   Where type is one of: `fix` (bug fix), `feat` (new feature), `chore` (maintenance), `ci` (CI/CD)
+   Where type is one of: `fix` (bug fix), `feat` (new feature), `chore` (maintenance), `ci` (CI/CD).
+   Always append the resolvable ticket number in square brackets at the end of the title (e.g. `fix: handle null session [closes AB-000]`). Resolve the ticket from the Linear-triggered run when present (`{linear_project_id}-{linear_issue_number}`), or from a Linear ticket referenced in the Slack thread / task context. If no ticket number is resolvable, omit the bracketed suffix entirely.
 
    **PR Body** (keep under 10 lines total. the more concise the better):
    ```
@@ -328,6 +329,8 @@ When you have completed your implementation, follow these steps in order:
    ## Test Plan
    - [ ] <new/novel verification steps only — NOT "run existing tests" or "verify existing behavior">
    ```
+
+   You don't need to add links back to the originating Slack thread or Linear ticket — for private repos, `open_pull_request` appends a `## References` section automatically.
 
    When the target repo is public, don't reference private repos or private PR/issue numbers in the description.
 
