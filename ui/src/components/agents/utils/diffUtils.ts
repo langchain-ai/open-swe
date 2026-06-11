@@ -1,6 +1,6 @@
 import { useMemo } from "react";
-import { useResolvedTheme } from "@/lib/theme";
 import { preloadHighlighter } from "@pierre/diffs";
+import { useResolvedTheme } from "@/lib/theme";
 
 export const DIFF_UNSAFE_CSS = `
 [data-diffs-header],

@@ -170,7 +170,10 @@ async def test_proxy_commands_rejects_non_object_body(monkeypatch) -> None:
     class FakeThreads:
         async def get(self, thread_id: str) -> dict[str, object]:
             assert thread_id == "tid"
-            return {"thread_id": "tid", "metadata": {"source": "dashboard", "github_login": "octocat"}}
+            return {
+                "thread_id": "tid",
+                "metadata": {"source": "dashboard", "github_login": "octocat"},
+            }
 
     class FakeClient:
         threads = FakeThreads()
@@ -187,7 +190,10 @@ async def test_proxy_endpoints_enforce_thread_ownership(monkeypatch) -> None:
     class FakeThreads:
         async def get(self, thread_id: str) -> dict[str, object]:
             assert thread_id == "tid"
-            return {"thread_id": "tid", "metadata": {"source": "dashboard", "github_login": "owner"}}
+            return {
+                "thread_id": "tid",
+                "metadata": {"source": "dashboard", "github_login": "owner"},
+            }
 
     class FakeClient:
         threads = FakeThreads()
@@ -219,7 +225,10 @@ async def test_send_dashboard_message_returns_502_when_activity_unknown(monkeypa
     class FakeThreads:
         async def get(self, thread_id: str) -> dict[str, object]:
             assert thread_id == "tid"
-            return {"thread_id": "tid", "metadata": {"source": "dashboard", "github_login": "octocat"}}
+            return {
+                "thread_id": "tid",
+                "metadata": {"source": "dashboard", "github_login": "octocat"},
+            }
 
     class FakeClient:
         threads = FakeThreads()

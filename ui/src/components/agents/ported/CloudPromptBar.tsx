@@ -19,6 +19,7 @@ import { RepoSelector } from "@/components/agents/RepoSelector"
 import { useIsInAgentThreadStream } from "@/lib/agents/provider/useIsInAgentThreadStream"
 import { agentThreadKeys } from "@/lib/agents/queries"
 import { formatModelSelection } from "@/lib/agents/provider/useModelOptions"
+import { IconButton } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 
 const PROMPT_TEXTAREA_MAX_HEIGHT = 200
@@ -31,19 +32,19 @@ interface SubmitButtonProps {
 
 function PlainSubmitButton({ canSubmit, disabled, onSubmit }: SubmitButtonProps) {
   return (
-    <button
+    <IconButton
       type="button"
       onClick={onSubmit}
       disabled={!canSubmit}
       aria-label="Send message"
-      className="flex size-7 shrink-0 items-center justify-center rounded-full bg-[var(--ui-accent)] text-white transition-opacity hover:opacity-90 disabled:cursor-default disabled:opacity-40 cursor-pointer"
+      className="shrink-0 rounded-full bg-[var(--ui-accent)] text-white hover:bg-[var(--ui-accent)] hover:opacity-90 disabled:cursor-default disabled:opacity-40"
     >
       {disabled ? (
         <LoaderCircle className="size-3.5 animate-spin" />
       ) : (
         <ArrowUp className="size-3.5" strokeWidth={2.5} />
       )}
-    </button>
+    </IconButton>
   )
 }
 
@@ -80,20 +81,20 @@ function StreamSubmitButton(props: SubmitButtonProps) {
   if (!stream.isLoading) return <PlainSubmitButton {...props} />
 
   return (
-    <button
+    <IconButton
       type="button"
       onClick={() => void handleStop()}
       disabled={stopping}
       aria-label="Stop run"
       title="Stop run"
-      className="flex size-7 shrink-0 items-center justify-center rounded-full bg-[var(--ui-accent)] text-white transition-opacity hover:opacity-90 disabled:cursor-default disabled:opacity-40"
+      className="shrink-0 rounded-full bg-[var(--ui-accent)] text-white hover:bg-[var(--ui-accent)] hover:opacity-90 disabled:cursor-default disabled:opacity-40"
     >
       {stopping ? (
         <LoaderCircle className="size-3.5 animate-spin" />
       ) : (
         <StopIcon className="size-3.5" weight="fill" />
       )}
-    </button>
+    </IconButton>
   )
 }
 const MAX_IMAGE_COUNT = 5

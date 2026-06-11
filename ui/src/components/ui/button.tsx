@@ -54,4 +54,20 @@ function Button({
   )
 }
 
-export { Button, buttonVariants }
+function IconButton({
+  className,
+  variant = "default",
+  size = "icon",
+  ...props
+}: ButtonPrimitive.Props & VariantProps<typeof buttonVariants>) {
+  return (
+    <Button
+      variant={variant}
+      size={size}
+      className={className}
+      {...props}
+    />
+  )
+}
+
+export { Button, IconButton, buttonVariants }
