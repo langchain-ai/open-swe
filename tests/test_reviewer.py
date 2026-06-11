@@ -24,6 +24,45 @@ def test_reviewer_system_prompt_formats_without_keyerror() -> None:
     assert "at least 1 finding" not in prompt.lower()
 
 
+def test_reviewer_system_prompt_repo_ready_note() -> None:
+    prompt = reviewer._reviewer_system_prompt(
+        "/workspace/repo",
+        repo_owner="acme",
+        repo_name="repo",
+        pr_number=42,
+        repo_ready=True,
+    )
+    assert "already cloned and checked out at the PR head" in prompt
+    assert "Repo prep FAILED" not in prompt
+
+
+def test_reviewer_system_prompt_repo_not_ready_warns_stale() -> None:
+    prompt = reviewer._reviewer_system_prompt(
+        "/workspace/repo",
+        repo_owner="acme",
+        repo_name="repo",
+        pr_number=42,
+        repo_ready=False,
+        head_sha="abc123",
+    )
+    assert "Repo prep FAILED" in prompt
+    assert "stale" in prompt
+    assert "git checkout --force abc123" in prompt
+    assert "git rev-parse HEAD" in prompt
+    assert "already cloned and checked out at the PR head" not in prompt
+
+
+def test_reviewer_system_prompt_repo_not_ready_without_head_sha() -> None:
+    prompt = reviewer._reviewer_system_prompt(
+        "/workspace/repo",
+        repo_owner="acme",
+        repo_name="repo",
+        pr_number=42,
+        repo_ready=False,
+    )
+    assert "git checkout --force <head_sha>" in prompt
+
+
 def test_reviewer_system_prompt_includes_repo_style_section() -> None:
     prompt = reviewer._reviewer_system_prompt(
         "/workspace/repo",
