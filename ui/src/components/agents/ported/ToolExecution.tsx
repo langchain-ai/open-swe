@@ -161,7 +161,7 @@ const InlineDiffCollapsible = memo(function InlineDiffCollapsible({
         </button>
       </div>
 
-      <div className="rounded-lg bg-[var(--ui-accent-bubble)] overflow-hidden border border-[var(--ui-border-subtle)]">
+      <div className="rounded-lg bg-[var(--ui-code-bubble)] overflow-hidden border border-[var(--ui-border-subtle)]">
         <div className="px-3 py-2 flex items-center gap-2">
           <span className={`text-[13px] truncate flex-1 min-w-0 ${isError ? "text-red-400" : "text-[color:var(--ui-accent)]"}`}>
             {filePath}
