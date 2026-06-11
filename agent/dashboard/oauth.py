@@ -66,7 +66,10 @@ def _origin_of(url: str) -> str:
         return ""
     scheme = parsed.scheme.lower()
     host = parsed.hostname.lower()
-    port = parsed.port
+    try:
+        port = parsed.port
+    except ValueError:
+        return ""
     if port is None:
         return f"{scheme}://{host}"
     default_port = 443 if scheme == "https" else 80 if scheme == "http" else None
