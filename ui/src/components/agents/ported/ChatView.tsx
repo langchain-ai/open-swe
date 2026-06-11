@@ -449,7 +449,7 @@ export function ChatView({ tabId }: ChatViewProps) {
                 )}
                 {hasStreamingChangedFiles && (
                   <div
-                    className={`border border-[var(--ui-border)] bg-[var(--ui-accent-bubble)] px-3 pt-2 pb-4 flex items-center justify-between gap-3 text-xs rounded-b-none ${(hasTodos || hasActiveLoops) ? "rounded-t-none border-t-0" : "rounded-t-xl"}`}
+                    className={`border border-[var(--ui-border)] bg-[var(--ui-code-bubble)] px-3 pt-2 pb-4 flex items-center justify-between gap-3 text-xs rounded-b-none ${(hasTodos || hasActiveLoops) ? "rounded-t-none border-t-0" : "rounded-t-xl"}`}
                   >
                     <span className="text-[color:var(--ui-text-muted)] truncate">
                       {streamingChangedFiles.length} file{streamingChangedFiles.length === 1 ? "" : "s"} changed
@@ -537,7 +537,7 @@ const LoopManagerBlock = forwardRef<HTMLDivElement, LoopManagerBlockProps>(funct
       <button
         type="button"
         onClick={onOpenLoopManager}
-        className="w-full border border-[var(--ui-border)] bg-[var(--ui-accent-bubble)] px-3 pt-2 pb-4 flex items-center justify-between gap-3 text-xs rounded-t-xl rounded-b-none mb-0 hover:bg-[var(--ui-bg-hover)] transition-colors"
+        className="w-full border border-[var(--ui-border)] bg-[var(--ui-code-bubble)] px-3 pt-2 pb-4 flex items-center justify-between gap-3 text-xs rounded-t-xl rounded-b-none mb-0 hover:bg-[var(--ui-bg-hover)] transition-colors"
       >
         <span className="flex items-center gap-3">
           <span className="relative flex h-2 w-2">

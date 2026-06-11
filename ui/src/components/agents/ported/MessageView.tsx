@@ -187,7 +187,7 @@ const TurnChangedFilesCard = memo(function TurnChangedFilesCard({
   }, []);
 
   return (
-    <div className="mt-3 rounded-xl bg-[var(--ui-accent-bubble)] overflow-hidden">
+    <div className="mt-3 rounded-xl border border-[var(--ui-border-subtle)] bg-[var(--ui-code-bubble)] overflow-hidden">
       <div className="px-3 py-2 text-xs text-[color:var(--ui-text-muted)] border-b border-[var(--ui-border)] flex items-center gap-2">
         <span>{files.length} file{files.length === 1 ? "" : "s"} changed</span>
         <span className="text-green-400">+{totals.additions}</span>
