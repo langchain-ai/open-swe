@@ -27,13 +27,14 @@ import type {
   ReviewUserRef,
 } from "@/lib/api"
 import { Markdown } from "@/components/agents/ported"
+import { useRegisterReviewSidebar } from "@/components/agents/ReviewSidebar"
 import { Skeleton } from "@/components/ui/skeleton"
 import { api } from "@/lib/api"
+import { prSizeLabel } from "@/lib/reviews"
 import { useSession } from "@/lib/session"
 import { cn } from "@/lib/utils"
-import { prSizeLabel } from "@/routes/reviews"
 
-export const Route = createFileRoute("/reviews_/$owner/$repo/$number")({
+export const Route = createFileRoute("/agents/reviews/$owner/$repo/$number")({
   component: ReviewDetailPage,
 })
 
@@ -148,10 +149,10 @@ function ReviewDetailPage() {
   if (!session.data) return <Navigate to="/login" />
 
   return (
-    <div className="flex h-svh flex-col overflow-hidden bg-background text-foreground">
+    <div className="flex min-w-0 flex-1 flex-col overflow-hidden bg-background text-foreground">
       <header className="flex h-12 shrink-0 items-center gap-3 border-b border-border px-4 text-xs">
         <Link
-          to="/reviews"
+          to="/agents/reviews"
           className="inline-flex items-center gap-1.5 text-muted-foreground hover:text-foreground"
         >
           <ArrowLeftIcon className="size-3.5" />
@@ -323,6 +324,18 @@ function ReviewBody({
 
   const closeFinding = useCallback(() => setFocused(null), [])
 
+  const sidebarData = useMemo(
+    () => ({
+      title: `PR #${detail.number}`,
+      files: diffFiles,
+      selected: selectedFile,
+      viewed,
+      onSelect: scrollToFile,
+    }),
+    [detail.number, diffFiles, selectedFile, viewed, scrollToFile]
+  )
+  useRegisterReviewSidebar(sidebarData)
+
   useEffect(() => {
     if (!focused) return
     const onKeyDown = (event: KeyboardEvent) => {
@@ -334,13 +347,6 @@ function ReviewBody({
 
   return (
     <div className="relative flex min-h-0 flex-1">
-      <FileTreeSidebar
-        files={diffFiles}
-        selected={selectedFile}
-        viewed={viewed}
-        onSelect={scrollToFile}
-      />
-
       <main className="min-w-0 flex-1 overflow-y-auto">
         <div className="mx-auto max-w-4xl px-6 py-6">
           <PrHeader
@@ -512,85 +518,6 @@ function PrHeader({
         ))}
       </div>
     </div>
-  )
-}
-
-function FileTreeSidebar({
-  files,
-  selected,
-  viewed,
-  onSelect,
-}: {
-  files: Array<ReviewDiffFile> | null
-  selected: string | null
-  viewed: Set<string>
-  onSelect: (path: string) => void
-}) {
-  const grouped = useMemo(() => {
-    const byDir = new Map<string, Array<ReviewDiffFile>>()
-    for (const file of files ?? []) {
-      const idx = file.path.lastIndexOf("/")
-      const dir = idx === -1 ? "" : file.path.slice(0, idx)
-      const list = byDir.get(dir) ?? []
-      list.push(file)
-      byDir.set(dir, list)
-    }
-    return Array.from(byDir.entries()).sort(([a], [b]) => a.localeCompare(b))
-  }, [files])
-
-  return (
-    <aside className="hidden w-64 shrink-0 overflow-y-auto border-r border-border py-3 lg:block">
-      {!files ? (
-        <div className="px-3">
-          <Skeleton className="h-40 w-full" />
-        </div>
-      ) : (
-        grouped.map(([dir, dirFiles]) => (
-          <div key={dir || "."} className="mb-2">
-            {dir && (
-              <div className="truncate px-3 py-1 text-[11px] text-muted-foreground">
-                {dir}
-              </div>
-            )}
-            {dirFiles.map((file) => {
-              const name = file.path.slice(dir ? dir.length + 1 : 0)
-              return (
-                <button
-                  key={file.path}
-                  type="button"
-                  onClick={() => onSelect(file.path)}
-                  className={cn(
-                    "flex w-full items-center gap-2 px-3 py-1 text-left text-xs transition-colors hover:bg-muted/40",
-                    selected === file.path && "bg-muted/60",
-                    viewed.has(file.path) && "opacity-50"
-                  )}
-                >
-                  <span
-                    className={cn(
-                      "truncate",
-                      file.status === "added" && "text-emerald-500",
-                      file.status === "deleted" && "text-red-500"
-                    )}
-                  >
-                    {name}
-                  </span>
-                  <span className="ml-auto flex shrink-0 items-center gap-1.5 font-mono text-[10px]">
-                    {file.additions > 0 && (
-                      <span className="text-emerald-500">
-                        +{file.additions}
-                      </span>
-                    )}
-                    {file.deletions > 0 && (
-                      <span className="text-red-500">-{file.deletions}</span>
-                    )}
-                  </span>
-                </button>
-              )
-            })}
-          </div>
-        ))
-      )}
-    </aside>
   )
 }
 

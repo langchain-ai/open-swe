@@ -1,6 +1,6 @@
-import { Link, Navigate, createFileRoute } from "@tanstack/react-router";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { Link, Navigate, createFileRoute } from "@tanstack/react-router"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useEffect, useMemo, useState } from "react"
 
 import type {
   DatadogConnectBody,
@@ -8,41 +8,41 @@ import type {
   ModelOption,
   TeamSettings,
   UserMapping,
-} from "@/lib/api";
-import { AppShell, SettingsRow, SettingsSection } from "@/components/AppShell";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+} from "@/lib/api"
+import { AppShell, SettingsRow, SettingsSection } from "@/components/AppShell"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
-import { Skeleton } from "@/components/ui/skeleton";
-import { api } from "@/lib/api";
-import { useSession } from "@/lib/session";
+} from "@/components/ui/select"
+import { Skeleton } from "@/components/ui/skeleton"
+import { api } from "@/lib/api"
+import { useSession } from "@/lib/session"
 
-export const Route = createFileRoute("/admin")({ component: AdminPage });
+export const Route = createFileRoute("/admin")({ component: AdminPage })
 
 function AdminPage() {
-  const session = useSession();
+  const session = useSession()
 
   const options = useQuery({
     queryKey: ["options"],
     queryFn: api.options,
     enabled: !!session.data?.is_admin,
-  });
+  })
 
   if (session.isLoading) {
     return (
       <main className="p-6">
         <Skeleton className="h-64 w-full" />
       </main>
-    );
+    )
   }
-  if (!session.data) return <Navigate to="/login" />;
-  if (!session.data.is_admin) return <Navigate to="/my-settings" />;
+  if (!session.data) return <Navigate to="/login" />
+  if (!session.data.is_admin) return <Navigate to="/my-settings" />
 
   return (
     <AppShell
@@ -58,42 +58,42 @@ function AdminPage() {
 
       <UserMappingsSection enabled={!!session.data.is_admin} />
     </AppShell>
-  );
+  )
 }
 
-const PR_URL_RE = /^https:\/\/github\.com\/([^/\s]+)\/([^/\s]+)\/pull\/(\d+)/;
+const PR_URL_RE = /^https:\/\/github\.com\/([^/\s]+)\/([^/\s]+)\/pull\/(\d+)/
 
 function TriggerReviewSection() {
-  const [url, setUrl] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
+  const [url, setUrl] = useState("")
+  const [error, setError] = useState<string | null>(null)
+  const [message, setMessage] = useState<string | null>(null)
 
   const parsed = useMemo(() => {
-    const match = PR_URL_RE.exec(url.trim());
-    if (!match) return null;
-    const [, owner, repo, number] = match;
-    if (!owner || !repo || !number) return null;
-    return { owner, repo, number: Number(number) };
-  }, [url]);
+    const match = PR_URL_RE.exec(url.trim())
+    if (!match) return null
+    const [, owner, repo, number] = match
+    if (!owner || !repo || !number) return null
+    return { owner, repo, number: Number(number) }
+  }, [url])
 
   const trigger = useMutation({
     mutationFn: () => {
-      if (!parsed) throw new Error("invalid PR URL");
-      return api.reReview(parsed.owner, parsed.repo, parsed.number);
+      if (!parsed) throw new Error("invalid PR URL")
+      return api.reReview(parsed.owner, parsed.repo, parsed.number)
     },
     onSuccess: (result) => {
-      setError(null);
+      setError(null)
       setMessage(
         result.queued
           ? "Review queued — a run is already in progress on this PR."
-          : "Review started.",
-      );
+          : "Review started."
+      )
     },
     onError: (e: Error) => {
-      setMessage(null);
-      setError(e.message);
+      setMessage(null)
+      setError(e.message)
     },
-  });
+  })
 
   return (
     <SettingsSection
@@ -107,9 +107,9 @@ function TriggerReviewSection() {
             placeholder="https://github.com/owner/repo/pull/123"
             value={url}
             onChange={(e) => {
-              setUrl(e.target.value);
-              setMessage(null);
-              setError(null);
+              setUrl(e.target.value)
+              setMessage(null)
+              setError(null)
             }}
           />
           <Button
@@ -129,7 +129,7 @@ function TriggerReviewSection() {
           <p className="text-xs text-muted-foreground">
             {message}{" "}
             <Link
-              to="/reviews/$owner/$repo/$number"
+              to="/agents/reviews/$owner/$repo/$number"
               params={{
                 owner: parsed.owner,
                 repo: parsed.repo,
@@ -144,37 +144,37 @@ function TriggerReviewSection() {
         {error && <p className="text-xs text-destructive">{error}</p>}
       </div>
     </SettingsSection>
-  );
+  )
 }
 
-const PAGE_SIZE = 20;
+const PAGE_SIZE = 20
 
 function UserMappingsSection({ enabled }: { enabled: boolean }) {
-  const [error, setError] = useState<string | null>(null);
-  const [page, setPage] = useState(1);
+  const [error, setError] = useState<string | null>(null)
+  const [page, setPage] = useState(1)
 
   const mappings = useQuery({
     queryKey: ["adminUserMappings", page],
     queryFn: () => api.adminListUserMappings(page, PAGE_SIZE),
     enabled,
-  });
+  })
 
-  const total = mappings.data?.total ?? 0;
-  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const total = mappings.data?.total ?? 0
+  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE))
 
   useEffect(() => {
     if (!mappings.isFetching && page > pageCount) {
-      setPage(pageCount);
+      setPage(pageCount)
     }
-  }, [mappings.isFetching, page, pageCount]);
+  }, [mappings.isFetching, page, pageCount])
 
   const remove = useMutation({
     mutationFn: (gh: string) => api.adminDeleteUserMapping(gh),
     onSuccess: () => void mappings.refetch(),
     onError: (e: Error) => setError(e.message),
-  });
+  })
 
-  const items = mappings.data?.items ?? [];
+  const items = mappings.data?.items ?? []
 
   return (
     <SettingsSection
@@ -219,7 +219,8 @@ function UserMappingsSection({ enabled }: { enabled: boolean }) {
         {total > PAGE_SIZE && (
           <div className="flex items-center justify-between pt-1 text-xs text-muted-foreground">
             <span>
-              {total} mapping{total === 1 ? "" : "s"} · page {page} of {pageCount}
+              {total} mapping{total === 1 ? "" : "s"} · page {page} of{" "}
+              {pageCount}
             </span>
             <div className="flex items-center gap-2">
               <Button
@@ -243,60 +244,62 @@ function UserMappingsSection({ enabled }: { enabled: boolean }) {
         )}
       </div>
     </SettingsSection>
-  );
+  )
 }
 
 function ObservabilityCredentialsSection() {
-  const qc = useQueryClient();
+  const qc = useQueryClient()
   const creds = useQuery({
     queryKey: ["teamCredentials"],
     queryFn: api.getTeamCredentials,
-  });
-  const [error, setError] = useState<string | null>(null);
+  })
+  const [error, setError] = useState<string | null>(null)
 
-  const [ddSite, setDdSite] = useState("datadoghq.com");
-  const [ddApiKey, setDdApiKey] = useState("");
-  const [ddAppKey, setDdAppKey] = useState("");
-  const [lsApiKey, setLsApiKey] = useState("");
-  const [lsEndpoint, setLsEndpoint] = useState("");
+  const [ddSite, setDdSite] = useState("datadoghq.com")
+  const [ddApiKey, setDdApiKey] = useState("")
+  const [ddAppKey, setDdAppKey] = useState("")
+  const [lsApiKey, setLsApiKey] = useState("")
+  const [lsEndpoint, setLsEndpoint] = useState("")
 
-  const onError = (e: Error) => setError(e.message);
-  const onSuccess = (saved: Awaited<ReturnType<typeof api.getTeamCredentials>>) => {
-    qc.setQueryData(["teamCredentials"], saved);
-    setError(null);
-  };
+  const onError = (e: Error) => setError(e.message)
+  const onSuccess = (
+    saved: Awaited<ReturnType<typeof api.getTeamCredentials>>
+  ) => {
+    qc.setQueryData(["teamCredentials"], saved)
+    setError(null)
+  }
 
   const connectDd = useMutation({
     mutationFn: (body: DatadogConnectBody) => api.connectDatadog(body),
     onSuccess: (saved) => {
-      onSuccess(saved);
-      setDdApiKey("");
-      setDdAppKey("");
+      onSuccess(saved)
+      setDdApiKey("")
+      setDdAppKey("")
     },
     onError,
-  });
+  })
   const disconnectDd = useMutation({
     mutationFn: () => api.disconnectDatadog(),
     onSuccess,
     onError,
-  });
+  })
   const connectLs = useMutation({
     mutationFn: (body: LangSmithConnectBody) => api.connectLangSmith(body),
     onSuccess: (saved) => {
-      onSuccess(saved);
-      setLsApiKey("");
+      onSuccess(saved)
+      setLsApiKey("")
     },
     onError,
-  });
+  })
   const disconnectLs = useMutation({
     mutationFn: () => api.disconnectLangSmith(),
     onSuccess,
     onError,
-  });
+  })
 
-  const datadog = creds.data?.datadog;
-  const langsmith = creds.data?.langsmith;
-  const busy = creds.isLoading;
+  const datadog = creds.data?.datadog
+  const langsmith = creds.data?.langsmith
+  const busy = creds.isLoading
 
   return (
     <SettingsSection
@@ -421,30 +424,30 @@ function ObservabilityCredentialsSection() {
       </div>
       {error && <p className="px-4 pb-3 text-xs text-destructive">{error}</p>}
     </SettingsSection>
-  );
+  )
 }
 
 function GlobalDefaultsSection({ models }: { models: Array<ModelOption> }) {
-  const qc = useQueryClient();
+  const qc = useQueryClient()
   const settings = useQuery({
     queryKey: ["teamSettings"],
     queryFn: api.getTeamSettings,
-  });
-  const [error, setError] = useState<string | null>(null);
-  const [defaultRepoDraft, setDefaultRepoDraft] = useState("");
+  })
+  const [error, setError] = useState<string | null>(null)
+  const [defaultRepoDraft, setDefaultRepoDraft] = useState("")
 
   useEffect(() => {
-    setDefaultRepoDraft(settings.data?.default_repo ?? "");
-  }, [settings.data?.default_repo]);
+    setDefaultRepoDraft(settings.data?.default_repo ?? "")
+  }, [settings.data?.default_repo])
 
   const save = useMutation({
     mutationFn: (body: TeamSettings) => api.saveTeamSettings(body),
     onSuccess: (saved) => {
-      qc.setQueryData(["teamSettings"], saved);
-      setError(null);
+      qc.setQueryData(["teamSettings"], saved)
+      setError(null)
     },
     onError: (e: Error) => setError(e.message),
-  });
+  })
 
   return (
     <SettingsSection
@@ -473,7 +476,9 @@ function GlobalDefaultsSection({ models }: { models: Array<ModelOption> }) {
           description="Model used by delegated main-agent tasks."
           models={models}
           model={settings.data?.default_agent_subagent_model ?? null}
-          effort={settings.data?.default_agent_subagent_reasoning_effort ?? null}
+          effort={
+            settings.data?.default_agent_subagent_reasoning_effort ?? null
+          }
           onChange={(model, effort) =>
             settings.data &&
             save.mutate({
@@ -525,7 +530,9 @@ function GlobalDefaultsSection({ models }: { models: Array<ModelOption> }) {
           description="Model used by delegated reviewer tasks."
           models={models}
           model={settings.data?.default_reviewer_subagent_model ?? null}
-          effort={settings.data?.default_reviewer_subagent_reasoning_effort ?? null}
+          effort={
+            settings.data?.default_reviewer_subagent_reasoning_effort ?? null
+          }
           onChange={(model, effort) =>
             settings.data &&
             save.mutate({
@@ -539,17 +546,17 @@ function GlobalDefaultsSection({ models }: { models: Array<ModelOption> }) {
       </div>
       {error && <p className="px-4 pb-3 text-xs text-destructive">{error}</p>}
     </SettingsSection>
-  );
+  )
 }
 
 interface RolePickerProps {
-  label: string;
-  description: string;
-  models: Array<ModelOption>;
-  model: string | null;
-  effort: string | null;
-  onChange: (model: string, effort: string) => void;
-  disabled: boolean;
+  label: string
+  description: string
+  models: Array<ModelOption>
+  model: string | null
+  effort: string | null
+  onChange: (model: string, effort: string) => void
+  disabled: boolean
 }
 
 function RolePicker({
@@ -561,34 +568,34 @@ function RolePicker({
   onChange,
   disabled,
 }: RolePickerProps) {
-  const [localModel, setLocalModel] = useState<string>(model ?? "");
-  const [localEffort, setLocalEffort] = useState<string>(effort ?? "");
+  const [localModel, setLocalModel] = useState<string>(model ?? "")
+  const [localEffort, setLocalEffort] = useState<string>(effort ?? "")
 
   useEffect(() => {
-    setLocalModel(model ?? "");
-    setLocalEffort(effort ?? "");
-  }, [model, effort]);
+    setLocalModel(model ?? "")
+    setLocalEffort(effort ?? "")
+  }, [model, effort])
 
-  const selectedModel = models.find((m) => m.id === localModel);
-  const availableEfforts = selectedModel?.efforts ?? [];
+  const selectedModel = models.find((m) => m.id === localModel)
+  const availableEfforts = selectedModel?.efforts ?? []
 
   const handleModelChange = (value: string | null) => {
-    if (!value) return;
-    const nextModel = models.find((m) => m.id === value);
-    if (!nextModel) return;
+    if (!value) return
+    const nextModel = models.find((m) => m.id === value)
+    if (!nextModel) return
     const nextEffort = nextModel.efforts.includes(localEffort)
       ? localEffort
-      : nextModel.default_effort;
-    setLocalModel(value);
-    setLocalEffort(nextEffort);
-    onChange(value, nextEffort);
-  };
+      : nextModel.default_effort
+    setLocalModel(value)
+    setLocalEffort(nextEffort)
+    onChange(value, nextEffort)
+  }
 
   const handleEffortChange = (value: string | null) => {
-    if (!value || !localModel) return;
-    setLocalEffort(value);
-    onChange(localModel, value);
-  };
+    if (!value || !localModel) return
+    setLocalEffort(value)
+    onChange(localModel, value)
+  }
 
   return (
     <SettingsRow
@@ -596,7 +603,11 @@ function RolePicker({
       description={description}
       control={
         <div className="flex items-center gap-2">
-          <Select value={localModel} onValueChange={handleModelChange} disabled={disabled}>
+          <Select
+            value={localModel}
+            onValueChange={handleModelChange}
+            disabled={disabled}
+          >
             <SelectTrigger className="w-40">
               <SelectValue />
             </SelectTrigger>
@@ -627,5 +638,5 @@ function RolePicker({
         </div>
       }
     />
-  );
+  )
 }

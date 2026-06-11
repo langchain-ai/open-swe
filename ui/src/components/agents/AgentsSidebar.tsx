@@ -8,6 +8,7 @@ import {
   ChartLineUpIcon,
   ChatCircleIcon,
   CircleNotchIcon,
+  GitPullRequestIcon,
   LightningIcon,
   PlusIcon,
   TrashIcon,
@@ -22,6 +23,11 @@ import type { ComponentType, SVGProps } from "react"
 import type { SessionUser } from "@/lib/api"
 import type { AgentSource, AgentThread } from "@/lib/agents/types"
 import { SidebarUserMenu } from "@/components/SidebarUserMenu"
+import {
+  ReviewFileTree,
+  ReviewSidebarProvider,
+  useReviewSidebarData,
+} from "@/components/agents/ReviewSidebar"
 import { Button } from "@/components/ui/button"
 import {
   SidebarCollapseButton,
@@ -54,6 +60,7 @@ interface AgentsSidebarProps {
 const NAV = [
   { to: "/agents/automations", label: "Automations", icon: LightningIcon },
   { to: "/my-settings", label: "Dashboard", icon: ChartLineUpIcon },
+  { to: "/agents/reviews", label: "Reviews", icon: GitPullRequestIcon },
 ] as const
 
 export function AgentsSidebar({ user, activeThreadId }: AgentsSidebarProps) {
@@ -62,6 +69,7 @@ export function AgentsSidebar({ user, activeThreadId }: AgentsSidebarProps) {
   usePrefetchAgentThreadDetails(threads, activeThreadId)
   const groups = groupThreads(threads)
   const layout = useSidebarLayout()
+  const reviewSidebar = useReviewSidebarData()
 
   return (
     <SidebarFrame
@@ -111,34 +119,38 @@ export function AgentsSidebar({ user, activeThreadId }: AgentsSidebarProps) {
         })}
       </nav>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
-        <ThreadGroup
-          label="Today"
-          threads={groups.today}
-          activeThreadId={activeThreadId}
-          onNavigate={layout.closeOnMobile}
-        />
-        <ThreadGroup
-          label="Last 7 days"
-          threads={groups.last7}
-          activeThreadId={activeThreadId}
-          onNavigate={layout.closeOnMobile}
-          defaultCollapsed
-        />
-        <ThreadGroup
-          label="Last 30 days"
-          threads={groups.last30}
-          activeThreadId={activeThreadId}
-          onNavigate={layout.closeOnMobile}
-          defaultCollapsed
-        />
-        <ThreadGroup
-          label="Older"
-          threads={groups.older}
-          activeThreadId={activeThreadId}
-          onNavigate={layout.closeOnMobile}
-        />
-      </div>
+      {reviewSidebar ? (
+        <ReviewFileTree data={reviewSidebar} />
+      ) : (
+        <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
+          <ThreadGroup
+            label="Today"
+            threads={groups.today}
+            activeThreadId={activeThreadId}
+            onNavigate={layout.closeOnMobile}
+          />
+          <ThreadGroup
+            label="Last 7 days"
+            threads={groups.last7}
+            activeThreadId={activeThreadId}
+            onNavigate={layout.closeOnMobile}
+            defaultCollapsed
+          />
+          <ThreadGroup
+            label="Last 30 days"
+            threads={groups.last30}
+            activeThreadId={activeThreadId}
+            onNavigate={layout.closeOnMobile}
+            defaultCollapsed
+          />
+          <ThreadGroup
+            label="Older"
+            threads={groups.older}
+            activeThreadId={activeThreadId}
+            onNavigate={layout.closeOnMobile}
+          />
+        </div>
+      )}
 
       <div className="p-2">
         <SidebarUserMenu user={user} showSettingsLink />
@@ -367,9 +379,11 @@ export function AgentsShell({
   children: React.ReactNode
 }) {
   return (
-    <div className="agents-ui flex h-svh overflow-hidden bg-[var(--ui-bg)]">
-      <AgentsSidebar user={user} activeThreadId={activeThreadId} />
-      <div className="flex min-w-0 flex-1">{children}</div>
-    </div>
+    <ReviewSidebarProvider>
+      <div className="agents-ui flex h-svh overflow-hidden bg-[var(--ui-bg)]">
+        <AgentsSidebar user={user} activeThreadId={activeThreadId} />
+        <div className="flex min-w-0 flex-1">{children}</div>
+      </div>
+    </ReviewSidebarProvider>
   )
 }
