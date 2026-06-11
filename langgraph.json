@@ -1,13 +1,16 @@
 {
   "$schema": "https://langgra.ph/schema.json",
   "python_version": "3.12",
+  "api_version": "0.10.0rc3",
   "graphs": {
     "agent": "agent.server:get_agent",
     "reviewer": "agent.reviewer:get_reviewer_agent",
     "analyzer": "agent.analyzer:get_analyzer",
     "scheduler": "agent.scheduler:get_scheduler"
   },
-  "dependencies": ["."],
+  "dependencies": [
+    "."
+  ],
   "http": {
     "app": "agent.webapp:app"
   },
