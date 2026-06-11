@@ -330,7 +330,7 @@ When you have completed your implementation, follow these steps in order:
    - [ ] <new/novel verification steps only — NOT "run existing tests" or "verify existing behavior">
    ```
 
-   **Source references**: When the task was triggered from or references a Slack thread or Linear ticket, link them in the PR description under a `## References` section. Include the Slack thread link (the `Slack Thread` → `Link` provided in the task context, or any Slack message link from the conversation) and any referenced Linear ticket (its URL or identifier like `AB-000`). Only include references that actually exist in the task context — never fabricate a link.
+   You don't need to add links back to the originating Slack thread or Linear ticket — for private repos, `open_pull_request` appends a `## References` section automatically.
 
    When the target repo is public, don't reference private repos or private PR/issue numbers in the description.
 

@@ -90,7 +90,6 @@ from .utils.slack import (
     fetch_slack_thread_messages,
     format_slack_messages_for_prompt,
     get_slack_channel_description,
-    get_slack_permalink,
     get_slack_user_info,
     get_slack_user_names,
     post_slack_thread_reply,
@@ -1027,9 +1026,6 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
         context_messages, user_names_by_id
     )
 
-    thread_permalink = await get_slack_permalink(channel_id, thread_ts)
-    thread_link_line = f"- Link: {thread_permalink}\n" if thread_permalink else ""
-
     prompt = (
         "You were mentioned in Slack.\n\n"
         "## Default Repository Hint\n"
@@ -1037,7 +1033,6 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
         "Use this only if the Slack conversation does not identify a different repository.\n\n"
         f"## Triggered by\n{trigger_user}\n\n"
         f"## Slack Thread\n- Channel: {channel_id}\n- Thread TS: {thread_ts}\n"
-        f"{thread_link_line}"
         f"- Context starts at: {context_source}\n\n"
         f"## Conversation Context\n{context_text}\n\n"
         f"## Latest Mention Request\n{clean_text}\n\n"
