@@ -622,6 +622,39 @@ async def fetch_slack_message_by_ts(channel_id: str, message_ts: str) -> dict[st
     return None
 
 
+async def get_slack_permalink(channel_id: str, message_ts: str) -> str | None:
+    """Return the public permalink for a Slack message, or None if unavailable."""
+    if not SLACK_BOT_TOKEN or not channel_id or not message_ts:
+        return None
+
+    async with httpx.AsyncClient() as http_client:
+        try:
+            response = await http_client.get(
+                f"{SLACK_API_BASE_URL}/chat.getPermalink",
+                headers=_slack_headers(),
+                params={"channel": channel_id, "message_ts": message_ts},
+            )
+            response.raise_for_status()
+            data = response.json()
+            if not data.get("ok"):
+                logger.warning(
+                    "Slack chat.getPermalink failed for channel=%s ts=%s: %s",
+                    channel_id,
+                    message_ts,
+                    data.get("error"),
+                )
+                return None
+            permalink = data.get("permalink")
+            return permalink if isinstance(permalink, str) and permalink else None
+        except httpx.HTTPError:
+            logger.exception(
+                "Slack chat.getPermalink request failed for channel=%s ts=%s",
+                channel_id,
+                message_ts,
+            )
+    return None
+
+
 async def resolve_slack_message_url(url: str) -> dict[str, Any] | None:
     """Resolve a Slack message URL to its message content.
 
