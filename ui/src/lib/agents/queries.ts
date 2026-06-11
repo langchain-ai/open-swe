@@ -31,7 +31,12 @@ export function useSeedAgentThreadDetails(
   useEffect(() => {
     for (const thread of threads) {
       if (thread.id === activeThreadId) continue
-      queryClient.setQueryData(agentThreadKeys.detail(thread.id), thread)
+      // Seed as already-stale: the detail GET is what marks a thread viewed
+      // server-side, so opening a seeded entry must still refetch despite the
+      // detail query's `staleTime` (which exists for the optimistic seed).
+      queryClient.setQueryData(agentThreadKeys.detail(thread.id), thread, {
+        updatedAt: 0,
+      })
     }
   }, [activeThreadId, queryClient, threads])
 }
@@ -51,6 +56,10 @@ export function useAgentThread(threadId: string) {
   return useQuery({
     queryKey: agentThreadKeys.detail(threadId),
     queryFn: () => agentsApi.getThread(threadId),
+    // Lets the optimistic detail seeded by `AgentsHome` survive until the
+    // proxied run.start stamps the server-side thread; an immediate refetch
+    // would 404 and bounce the route back to /agents.
+    staleTime: 30_000,
   })
 }
 

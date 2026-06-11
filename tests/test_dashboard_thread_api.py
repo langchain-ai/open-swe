@@ -424,7 +424,7 @@ async def test_proxy_endpoints_enforce_thread_ownership(monkeypatch) -> None:
     assert exc_info.value.status_code == 404
 
     with pytest.raises(HTTPException) as exc_info:
-        await anext(thread_api.proxy_dashboard_thread_stream_events("tid", "intruder", b"{}"))
+        await thread_api.proxy_dashboard_thread_stream_events("tid", "intruder", b"{}")
     assert exc_info.value.status_code == 404
 
 

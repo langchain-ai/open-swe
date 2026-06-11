@@ -1032,8 +1032,18 @@ async def proxy_dashboard_thread_stream_events(
     email: str | None = None,
     content_type: str = "application/json",
 ) -> AsyncIterator[bytes]:
+    # Preflight here (not in the generator) so auth/content-type failures
+    # surface as real HTTP errors before the SSE response starts streaming.
     _require_json_content_type(content_type)
     await _authorized_thread_metadata(thread_id, login, email=email)
+    return _stream_thread_events(thread_id, body, content_type)
+
+
+async def _stream_thread_events(
+    thread_id: str,
+    body: bytes,
+    content_type: str,
+) -> AsyncIterator[bytes]:
     url = f"{langgraph_url().rstrip('/')}/threads/{thread_id}/stream/events"
     headers = _langgraph_proxy_headers(content_type=content_type, accept="text/event-stream")
 
