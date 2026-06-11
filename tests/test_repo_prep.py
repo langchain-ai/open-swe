@@ -53,8 +53,10 @@ async def test_prepare_review_repo_clones_and_checks_out_head() -> None:
     assert "/work/widget/.git" in cmd
     assert "git fetch origin def456" in cmd
     assert "git fetch origin refs/pull/42/head" in cmd
-    assert "git checkout abc123 --quiet" in cmd
-    assert "git checkout abc123 --quiet 2>/dev/null || true" not in cmd
+    assert "git checkout --force abc123 --quiet" in cmd
+    assert "git checkout --force abc123 --quiet 2>/dev/null || true" not in cmd
+    assert '[ "$(git rev-parse HEAD)" = abc123 ]' in cmd
+    assert "git fetch --all --quiet || true" in cmd
 
 
 async def test_prepare_review_repo_skips_pull_ref_without_pr_number() -> None:
