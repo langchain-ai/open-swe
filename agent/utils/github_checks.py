@@ -26,7 +26,7 @@ _GITHUB_API_BASE = "https://api.github.com"
 CheckConclusion = Literal["success", "neutral", "failure"]
 
 
-def _github_headers(token: str) -> dict[str, str]:
+def github_headers(token: str) -> dict[str, str]:
     return {
         "Authorization": f"Bearer {token}",
         "Accept": "application/vnd.github+json",
@@ -67,7 +67,7 @@ async def create_review_check_run(
     try:
         async with httpx.AsyncClient() as client:
             response = await client.post(
-                url, headers=_github_headers(token), json=payload, timeout=30
+                url, headers=github_headers(token), json=payload, timeout=30
             )
             response.raise_for_status()
     except httpx.HTTPError:
@@ -105,7 +105,7 @@ async def complete_review_check_run(
     try:
         async with httpx.AsyncClient() as client:
             response = await client.patch(
-                url, headers=_github_headers(token), json=payload, timeout=30
+                url, headers=github_headers(token), json=payload, timeout=30
             )
             response.raise_for_status()
     except httpx.HTTPError:

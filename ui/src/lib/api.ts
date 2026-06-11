@@ -259,6 +259,129 @@ export interface AgentInstructions {
   updated_at?: string;
 }
 
+export type FindingSeverity = "low" | "medium" | "high" | "critical";
+export type FindingConfidence = "low" | "medium" | "high";
+export type FindingStatus = "open" | "resolved" | "dismissed";
+export type FindingGroup = "bug" | "investigate" | "informational";
+
+export interface FindingInteraction {
+  kind: "human_reply" | "bot_reply";
+  author?: string;
+  body?: string;
+  created_at?: string;
+}
+
+export interface ReviewFinding {
+  id: string;
+  severity: FindingSeverity;
+  confidence: FindingConfidence;
+  category: string;
+  title: string;
+  description: string;
+  suggestion: string | null;
+  file: string;
+  start_line: number | null;
+  end_line: number | null;
+  side: "LEFT" | "RIGHT";
+  in_diff: boolean;
+  status: FindingStatus;
+  outdated: boolean;
+  resolution_note: string | null;
+  diff_hunk: string | null;
+  github_thread_resolved: boolean;
+  github_review_comment_id: number | null;
+  interactions: Array<FindingInteraction>;
+  group: FindingGroup;
+}
+
+export interface ReviewCounts {
+  open: number;
+  resolved: number;
+  dismissed: number;
+  bugs: number;
+  flags: number;
+}
+
+export interface ReviewSummary {
+  thread_id: string;
+  owner: string;
+  repo: string;
+  number: number;
+  title: string;
+  url: string;
+  head_ref: string;
+  base_ref: string;
+  head_sha: string;
+  watch: boolean;
+  status: "running" | "error" | "idle";
+  counts: ReviewCounts;
+  updated_at: string | null;
+  full_name?: string;
+}
+
+export interface ReviewUserRef {
+  login: string;
+  avatar_url?: string | null;
+}
+
+export interface ReviewCheckRun {
+  name: string;
+  status: string;
+  conclusion: string | null;
+  url: string | null;
+}
+
+export interface ReviewPrDetails {
+  state: string;
+  title: string;
+  body: string;
+  additions: number;
+  deletions: number;
+  changed_files: number;
+  commits: number;
+  head_sha: string;
+  head_ref: string;
+  base_ref: string;
+  author: ReviewUserRef | null;
+  assignees: Array<ReviewUserRef>;
+  requested_reviewers: Array<ReviewUserRef>;
+  labels: Array<{ name: string; color: string | null }>;
+}
+
+export interface ReviewDetail extends ReviewSummary {
+  pr: ReviewPrDetails;
+  checks: Array<ReviewCheckRun>;
+  findings: Array<ReviewFinding>;
+}
+
+export interface ReviewDiffLine {
+  kind: "context" | "add" | "del";
+  old_line?: number;
+  new_line?: number;
+  text: string;
+}
+
+export interface ReviewDiffHunk {
+  header: string;
+  old_start: number;
+  new_start: number;
+  lines: Array<ReviewDiffLine>;
+}
+
+export interface ReviewDiffFile {
+  path: string;
+  status: "added" | "deleted" | "modified" | "renamed";
+  additions: number;
+  deletions: number;
+  hunks: Array<ReviewDiffHunk>;
+}
+
+export interface ReviewDiffPayload {
+  files: Array<ReviewDiffFile>;
+  total_additions: number;
+  total_deletions: number;
+}
+
 export const api = {
   me: () => request<SessionUser>("/me"),
   options: () => request<OptionsPayload>("/options"),
@@ -346,6 +469,25 @@ export const api = {
     request<{ deleted: boolean }>(
       `/admin/user-mappings/${encodeURIComponent(github_login)}`,
       { method: "DELETE" },
+    ),
+  listReviews: () => request<Array<ReviewSummary>>("/reviews"),
+  getReview: (owner: string, repo: string, number: number) =>
+    request<ReviewDetail>(
+      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}`,
+    ),
+  getReviewDiff: (owner: string, repo: string, number: number) =>
+    request<ReviewDiffPayload>(
+      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/diff`,
+    ),
+  reReview: (owner: string, repo: string, number: number) =>
+    request<{
+      success: boolean;
+      queued: boolean;
+      thread_id: string;
+      pr_url: string;
+    }>(
+      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/re-review`,
+      { method: "POST" },
     ),
   logout: () => request<void>("/auth/logout", { method: "POST" }),
 };

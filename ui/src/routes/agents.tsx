@@ -25,7 +25,10 @@ function AgentsLayout() {
   })
   const [, section, threadId] = pathname.split("/")
   const activeThreadId =
-    section === "agents" && threadId && threadId !== "automations"
+    section === "agents" &&
+    threadId &&
+    threadId !== "automations" &&
+    threadId !== "reviews"
       ? threadId
       : undefined
 

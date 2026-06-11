@@ -141,7 +141,7 @@ function PanelResizeHandle({
   )
 }
 
-function treeThemeStyle(): React.CSSProperties {
+export function treeThemeStyle(): React.CSSProperties {
   return {
     "--trees-theme-sidebar-bg": "var(--ui-surface)",
     "--trees-theme-sidebar-fg": "var(--ui-text)",

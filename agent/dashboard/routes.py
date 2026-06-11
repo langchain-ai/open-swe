@@ -58,6 +58,12 @@ from .profiles import (
     upsert_profile,
 )
 from .repo_access import require_repo_access_for_user
+from .review_api import (
+    get_review,
+    get_review_diff,
+    list_reviews,
+    trigger_re_review,
+)
 from .review_style_jobs import (
     cancel_review_style_analysis,
     start_bootstrap_analysis,
@@ -701,6 +707,61 @@ async def api_list_review_styles(
         else:
             out.append(record)
     return out
+
+
+@router.get("/reviews")
+async def api_list_reviews(
+    session: dict[str, Any] = _SESSION_DEP,
+) -> list[dict[str, Any]]:
+    login = session["sub"]
+    access_cache: dict[str, bool] = {}
+
+    async def is_accessible(summary: dict[str, Any]) -> bool:
+        full_name = summary["full_name"]
+        if full_name not in access_cache:
+            try:
+                await require_repo_access_for_user(login, full_name)
+                access_cache[full_name] = True
+            except HTTPException as exc:
+                if exc.status_code not in {403, 404}:
+                    raise
+                access_cache[full_name] = False
+        return access_cache[full_name]
+
+    return await list_reviews(is_accessible=is_accessible)
+
+
+@router.get("/reviews/{owner}/{repo}/{pr_number}")
+async def api_get_review(
+    owner: str,
+    repo: str,
+    pr_number: int,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
+    return await get_review(owner, repo, pr_number)
+
+
+@router.get("/reviews/{owner}/{repo}/{pr_number}/diff")
+async def api_get_review_diff(
+    owner: str,
+    repo: str,
+    pr_number: int,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
+    return await get_review_diff(owner, repo, pr_number)
+
+
+@router.post("/reviews/{owner}/{repo}/{pr_number}/re-review")
+async def api_re_review(
+    owner: str,
+    repo: str,
+    pr_number: int,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
+    return await trigger_re_review(owner, repo, pr_number, session["sub"])
 
 
 @router.post("/review-styles")
