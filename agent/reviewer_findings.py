@@ -171,6 +171,7 @@ class ReviewerPRMeta(TypedDict, total=False):
     title: str
     head_ref: str
     base_ref: str
+    author: str
 
 
 class ReviewerSlackThread(TypedDict, total=False):

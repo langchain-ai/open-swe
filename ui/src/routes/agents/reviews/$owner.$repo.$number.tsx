@@ -207,6 +207,7 @@ function ReviewBody({
 }) {
   const [sideTab, setSideTab] = useState<SideTab>("info")
   const [selectedFile, setSelectedFile] = useState<string | null>(null)
+  const scrollRef = useRef<HTMLElement | null>(null)
   const fileRefs = useRef<Record<string, HTMLDivElement | null>>({})
   const anchorRefs = useRef<Record<string, HTMLDivElement | null>>({})
   const [expandedFiles, setExpandedFiles] = useState<Record<string, boolean>>(
@@ -302,6 +303,18 @@ function ReviewBody({
     })
   }, [])
 
+  const updateCardPos = useCallback((finding: ReviewFinding) => {
+    const rect = anchorRefs.current[finding.id]?.getBoundingClientRect()
+    if (rect) {
+      setCardPos({
+        top: Math.min(Math.max(rect.top, 64), window.innerHeight - 360),
+        left: Math.min(rect.right + 12, window.innerWidth - 412 - 8),
+      })
+    } else {
+      setCardPos({ top: 96, left: null })
+    }
+  }, [])
+
   const openFinding = useCallback(
     (finding: ReviewFinding) => {
       markRead(finding.id)
@@ -315,24 +328,23 @@ function ReviewBody({
         const node =
           anchorRefs.current[finding.id] ?? fileRefs.current[finding.file]
         node?.scrollIntoView({ block: "center" })
-        requestAnimationFrame(() => {
-          const rect = anchorRefs.current[finding.id]?.getBoundingClientRect()
-          if (rect) {
-            setCardPos({
-              top: Math.min(
-                Math.max(rect.top, 64),
-                window.innerHeight - 360
-              ),
-              left: Math.min(rect.right + 12, window.innerWidth - 412 - 8),
-            })
-          } else {
-            setCardPos({ top: 96, left: null })
-          }
-        })
+        requestAnimationFrame(() => updateCardPos(finding))
       })
     },
-    [markRead]
+    [markRead, updateCardPos]
   )
+
+  useEffect(() => {
+    if (!focused || !isAnchored(focused)) return
+    const scroller = scrollRef.current
+    const onMove = () => updateCardPos(focused)
+    scroller?.addEventListener("scroll", onMove, { passive: true })
+    window.addEventListener("resize", onMove)
+    return () => {
+      scroller?.removeEventListener("scroll", onMove)
+      window.removeEventListener("resize", onMove)
+    }
+  }, [focused, updateCardPos])
 
   const closeFinding = useCallback(() => setFocused(null), [])
 
@@ -353,13 +365,23 @@ function ReviewBody({
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") setFocused(null)
     }
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target
+      if (target instanceof Element && target.closest("[data-finding-card]"))
+        return
+      setFocused(null)
+    }
     window.addEventListener("keydown", onKeyDown)
-    return () => window.removeEventListener("keydown", onKeyDown)
+    window.addEventListener("pointerdown", onPointerDown)
+    return () => {
+      window.removeEventListener("keydown", onKeyDown)
+      window.removeEventListener("pointerdown", onPointerDown)
+    }
   }, [focused])
 
   return (
     <div className="relative flex min-h-0 flex-1">
-      <main className="min-w-0 flex-1 overflow-y-auto">
+      <main ref={scrollRef} className="min-w-0 flex-1 overflow-y-auto">
         <div className="mx-auto max-w-6xl px-6 py-6">
           <PrHeader detail={detail} />
           <div className="mt-4 rounded-lg border border-border bg-card p-4">
@@ -398,18 +420,28 @@ function ReviewBody({
                     findings={findingsByFile.get(file.path) ?? []}
                     focused={focused}
                     viewed={viewed.has(file.path)}
-                    onToggleViewed={() => toggleViewed(file.path)}
+                    onToggleViewed={() => {
+                      const collapses =
+                        !viewed.has(file.path) &&
+                        expandedFiles[file.path] === undefined
+                      if (collapses && focused?.file === file.path)
+                        setFocused(null)
+                      toggleViewed(file.path)
+                    }}
                     expanded={
                       expandedFiles[file.path] ?? !viewed.has(file.path)
                     }
-                    onToggleExpanded={() =>
+                    onToggleExpanded={() => {
+                      const next = !(
+                        expandedFiles[file.path] ?? !viewed.has(file.path)
+                      )
+                      if (!next && focused?.file === file.path)
+                        setFocused(null)
                       setExpandedFiles((prev) => ({
                         ...prev,
-                        [file.path]: !(
-                          prev[file.path] ?? !viewed.has(file.path)
-                        ),
+                        [file.path]: next,
                       }))
-                    }
+                    }}
                     onFindingClick={openFinding}
                     sectionRef={(node) => {
                       fileRefs.current[file.path] = node
@@ -738,6 +770,7 @@ function FindingFloatingCard({
 
   return (
     <div
+      data-finding-card
       className={cn(
         "fixed z-50 flex max-h-[70vh] w-[412px] flex-col overflow-hidden rounded-lg border border-border bg-background shadow-2xl",
         left === null && "right-1"
@@ -1062,7 +1095,7 @@ function ChecksSection({ checks }: { checks: Array<ReviewCheckRun> }) {
       {checks.length === 0 ? (
         <p className="text-[11px] text-muted-foreground">No checks reported.</p>
       ) : (
-        <div className="space-y-1">
+        <div className="max-h-56 space-y-1 overflow-y-auto">
           {checks.map((check, index) =>
             check.url ? (
               <a

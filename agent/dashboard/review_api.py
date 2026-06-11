@@ -170,6 +170,7 @@ def _thread_review_summary(thread: dict[str, Any]) -> dict[str, Any] | None:
         "url": pr.get("url") or f"https://github.com/{owner}/{name}/pull/{number}",
         "head_ref": pr.get("head_ref") or "",
         "base_ref": pr.get("base_ref") or "",
+        "author": pr.get("author") if isinstance(pr.get("author"), str) else "",
         "head_sha": metadata.get("head_sha") or "",
         "watch": bool(metadata.get("watch")),
         "status": _run_status(thread, metadata),
@@ -179,27 +180,35 @@ def _thread_review_summary(thread: dict[str, Any]) -> dict[str, Any] | None:
 
 
 async def list_reviews(
-    limit: int = 100,
+    limit: int = 20,
     *,
+    offset: int = 0,
+    author: str | None = None,
     is_accessible: Callable[[dict[str, Any]], Awaitable[bool]] | None = None,
     page_size: int = 100,
     max_scan: int = 1000,
-) -> list[dict[str, Any]]:
+) -> tuple[list[dict[str, Any]], bool]:
     """List review summaries, newest first.
 
+    Returns ``(summaries, has_more)`` where the summaries are the page at
+    ``offset`` (counted in accessible, filter-matching records) and
+    ``has_more`` says whether at least one more record exists past it.
+
     When ``is_accessible`` is given, keeps paging through reviewer threads
-    until ``limit`` accessible summaries are collected (or ``max_scan``
-    threads have been examined), so inaccessible records don't crowd
-    accessible ones out of a single fixed-size page.
+    until enough accessible summaries are collected (or ``max_scan`` threads
+    have been examined), so inaccessible records don't crowd accessible ones
+    out of a single fixed-size page. ``author`` filters on the PR author's
+    GitHub login stored in thread metadata.
     """
     client = langgraph_client()
+    needed = offset + limit + 1
     summaries: list[dict[str, Any]] = []
-    offset = 0
-    while len(summaries) < limit and offset < max_scan:
+    scan_offset = 0
+    while len(summaries) < needed and scan_offset < max_scan:
         threads = await client.threads.search(
             metadata={"kind": REVIEWER_THREAD_KIND},
             limit=page_size,
-            offset=offset,
+            offset=scan_offset,
             sort_by="updated_at",
             sort_order="desc",
         )
@@ -211,15 +220,18 @@ async def list_reviews(
             summary = _thread_review_summary(thread)
             if not summary:
                 continue
+            if author is not None and summary["author"] != author:
+                continue
             if is_accessible is not None and not await is_accessible(summary):
                 continue
             summaries.append(summary)
-            if len(summaries) >= limit:
+            if len(summaries) >= needed:
                 break
         if len(threads) < page_size:
             break
-        offset += page_size
-    return summaries
+        scan_offset += page_size
+    page = summaries[offset : offset + limit]
+    return page, len(summaries) > offset + limit
 
 
 def _user_ref(value: Any) -> dict[str, Any] | None:

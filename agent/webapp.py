@@ -1865,6 +1865,7 @@ async def trigger_pr_review_from_ref(
         "title": pr_title,
         "head_ref": branch_name,
         "base_ref": base_ref,
+        "author": (pr_metadata.get("user") or {}).get("login", ""),
     }
     slack_thread_meta: ReviewerSlackThread | None = None
     if slack_channel_id and slack_thread_ts:
@@ -2020,6 +2021,7 @@ async def _dispatch_first_review_from_pr_payload(payload: dict[str, Any], *, sou
         "title": pr_title,
         "head_ref": branch_name,
         "base_ref": base_ref,
+        "author": (pull_request.get("user") or {}).get("login", ""),
     }
     last_reviewed_sha = ""
     if payload.get("action") == "ready_for_review":
@@ -2496,6 +2498,7 @@ async def process_github_push_event(payload: dict[str, Any]) -> None:
         "title": pr_title,
         "head_ref": head_ref,
         "base_ref": base_ref,
+        "author": (pr.get("user") or {}).get("login", ""),
     }
     await set_reviewer_thread_metadata(thread_id, pr=pr_meta, watch=True, head_sha=head_sha)
 
