@@ -73,6 +73,8 @@ function commonDirPrefix(paths: Array<string>): string {
 
 const PANEL_STORAGE_WIDTH = "open-swe.gitpanel.width"
 const PANEL_STORAGE_COLLAPSED = "open-swe.gitpanel.collapsed"
+const COLLAPSED_STATE_TRUE = "1"
+const COLLAPSED_STATE_FALSE = "0"
 const PANEL_DEFAULT_WIDTH = 420
 const PANEL_MIN_WIDTH = 320
 const PANEL_MAX_WIDTH = 720
@@ -88,7 +90,9 @@ function readStoredPanelWidth(): number {
 function readStoredPanelCollapsed(): boolean {
   if (typeof window === "undefined") return true
   // Default to collapsed until the user opens it once.
-  return window.localStorage.getItem(PANEL_STORAGE_COLLAPSED) !== "0"
+  return (
+    window.localStorage.getItem(PANEL_STORAGE_COLLAPSED) !== COLLAPSED_STATE_FALSE
+  )
 }
 
 function PanelResizeHandle({
@@ -176,12 +180,15 @@ export function AgentGitPanel({ thread, messages }: AgentGitPanelProps) {
   const [width, setWidthState] = useState(() => readStoredPanelWidth())
   const [fullScreen, setFullScreen] = useState(false)
 
-  const setCollapsed = useCallback((next: boolean) => {
+  const setCollapsed = (next: boolean) => {
     setCollapsedState(next)
     if (typeof window !== "undefined") {
-      window.localStorage.setItem(PANEL_STORAGE_COLLAPSED, next ? "1" : "0")
+      window.localStorage.setItem(
+        PANEL_STORAGE_COLLAPSED,
+        next ? COLLAPSED_STATE_TRUE : COLLAPSED_STATE_FALSE
+      )
     }
-  }, [])
+  }
 
   const setWidth = useCallback((next: number) => {
     const clamped = Math.min(PANEL_MAX_WIDTH, Math.max(PANEL_MIN_WIDTH, next))
