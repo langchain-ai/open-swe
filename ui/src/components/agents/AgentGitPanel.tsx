@@ -71,7 +71,6 @@ function commonDirPrefix(paths: Array<string>): string {
 }
 
 const PANEL_STORAGE_WIDTH = "open-swe.gitpanel.width"
-const PANEL_STORAGE_COLLAPSED = "open-swe.gitpanel.collapsed"
 const PANEL_DEFAULT_WIDTH = 420
 const PANEL_MIN_WIDTH = 320
 const PANEL_MAX_WIDTH = 720
@@ -82,11 +81,6 @@ function readStoredPanelWidth(): number {
   const parsed = raw ? Number(raw) : NaN
   if (!Number.isFinite(parsed)) return PANEL_DEFAULT_WIDTH
   return Math.min(PANEL_MAX_WIDTH, Math.max(PANEL_MIN_WIDTH, parsed))
-}
-
-function readStoredPanelCollapsed(): boolean {
-  if (typeof window === "undefined") return true
-  return window.localStorage.getItem(PANEL_STORAGE_COLLAPSED) !== "0"
 }
 
 function PanelResizeHandle({
@@ -168,14 +162,9 @@ function treeThemeStyle(): React.CSSProperties {
 export function AgentGitPanel({ thread, messages }: AgentGitPanelProps) {
   const [topTab, setTopTab] = useState<"git" | "desktop" | "terminal">("git")
   const [tab, setTab] = useState<"diff" | "review" | "commits">("diff")
-  const [collapsed, setCollapsedState] = useState(() => readStoredPanelCollapsed())
+  const [collapsed, setCollapsed] = useState(true)
   const [width, setWidthState] = useState(() => readStoredPanelWidth())
   const [fullScreen, setFullScreen] = useState(false)
-
-  const setCollapsed = useCallback((next: boolean) => {
-    setCollapsedState(next)
-    window.localStorage.setItem(PANEL_STORAGE_COLLAPSED, next ? "1" : "0")
-  }, [])
 
   const setWidth = useCallback((next: number) => {
     const clamped = Math.min(PANEL_MAX_WIDTH, Math.max(PANEL_MIN_WIDTH, next))
@@ -186,17 +175,17 @@ export function AgentGitPanel({ thread, messages }: AgentGitPanelProps) {
   const sectionRefs = useRef<Record<string, HTMLDivElement | null>>({})
   const pr = thread.pr
 
-  // Uncollapse when a PR lands mid-session (not when opening a thread that
-  // already has one), without persisting — manual toggles remain the stored
-  // preference for future threads.
+  // Always start collapsed; re-collapse when switching threads, and
+  // uncollapse when a PR lands mid-session.
   const [prSeen, setPrSeen] = useState<{ threadId: string; hadPr: boolean }>(
     () => ({ threadId: thread.id, hadPr: Boolean(pr) })
   )
   if (prSeen.threadId !== thread.id) {
     setPrSeen({ threadId: thread.id, hadPr: Boolean(pr) })
+    setCollapsed(true)
   } else if (pr && !prSeen.hadPr) {
     setPrSeen({ threadId: thread.id, hadPr: true })
-    setCollapsedState(false)
+    setCollapsed(false)
   }
 
   const prDiff = useAgentThreadPrDiff(thread.id, Boolean(pr))
