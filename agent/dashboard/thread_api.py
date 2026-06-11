@@ -53,6 +53,8 @@ _PROXY_REQUEST_TIMEOUT = httpx.Timeout(30.0, connect=5.0)
 _PROXY_STREAM_TIMEOUT = httpx.Timeout(None)
 # Sources whose threads should surface in the Agents UI (besides "dashboard").
 _SURFACED_SOURCES: tuple[str, ...] = ("dashboard", "github", "slack", "linear", "schedule")
+# PR lifecycle states surfaced to the UI for a thread's associated pull request.
+_PR_STATES: frozenset[str] = frozenset({"draft", "open", "merged", "closed"})
 
 
 def _agent_version_metadata() -> dict[str, str]:
@@ -333,10 +335,17 @@ def _thread_summary(
         summary["pr"] = {
             "number": pr_number,
             "title": pr_title if isinstance(pr_title, str) else title,
-            "state": pr_state if isinstance(pr_state, str) else "open",
+            "state": pr_state if pr_state in _PR_STATES else "open",
             "headRef": metadata.get("branch_name") or "",
             "baseRef": metadata.get("base_branch") or "main",
             "url": pr_url,
+        }
+    diff_stats = metadata.get("diff_stats")
+    if isinstance(diff_stats, dict):
+        summary["diffStats"] = {
+            "files": int(diff_stats.get("files") or 0),
+            "additions": int(diff_stats.get("additions") or 0),
+            "deletions": int(diff_stats.get("deletions") or 0),
         }
     # The transcript hydrates client-side from the SDK (`GET …/state` →
     # `stream.messages`); the summary only carries metadata.

@@ -189,7 +189,7 @@ export interface AgentThread {
   pr?: {
     number: number
     title: string
-    state: "draft" | "open" | "merged"
+    state: "draft" | "open" | "merged" | "closed"
     headRef: string
     baseRef: string
     url: string
