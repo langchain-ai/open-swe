@@ -3,9 +3,8 @@ import { useNavigate } from "@tanstack/react-router"
 import { useEffect } from "react"
 
 import { agentsApi } from "./api"
-import { addPendingPrompt } from "./pendingPrompts"
 import type { ScheduleUpdateRequest } from "./api"
-import type { AgentThread, ImageChunk } from "./types"
+import type { AgentThread, Chunk, ImageChunk, Message } from "./types"
 
 export const agentThreadKeys = {
   all: ["agent-threads"] as const,
@@ -95,26 +94,57 @@ export function useDeleteAgentSchedule() {
   })
 }
 
-export function useCreateAgentThread() {
-  const queryClient = useQueryClient()
-  const navigate = useNavigate()
+export interface CreateAgentThreadVariables {
+  prompt: string
+  images?: Array<ImageChunk>
+  repo?: string | null
+  repo_explicitly_none?: boolean
+  model_id?: string | null
+  effort?: string | null
+}
 
-  return useMutation({
-    mutationFn: agentsApi.createThread,
-    onSuccess: (thread, variables) => {
-      addPendingPrompt(thread.id, variables.prompt, thread.messages.length, {
-        images: variables.images,
-        modelId: variables.model_id,
-        effort: variables.effort,
-      })
-      queryClient.setQueryData(agentThreadKeys.detail(thread.id), {
-        ...thread,
-        status: thread.status === "idle" ? "running" : thread.status,
-      })
-      queryClient.invalidateQueries({ queryKey: agentThreadKeys.all, exact: true })
-      navigate({ to: "/agents/$threadId", params: { threadId: thread.id } })
-    },
-  })
+/**
+ * Build the placeholder thread shown the instant a run is started from the
+ * home page — before the server has stamped the thread record. Seeded into
+ * the detail + list caches by `AgentsHome` so the `$threadId` route renders
+ * immediately (the 30s `staleTime` keeps it from refetching into a 404), then
+ * reconciled to server truth by the list's running refetch + the stream's
+ * `onCreated` / `onCompleted` invalidations.
+ */
+export function optimisticThread(
+  threadId: string,
+  vars: CreateAgentThreadVariables
+): AgentThread {
+  const now = Date.now()
+  const text = vars.prompt.trim()
+  const repoFullName = vars.repo ?? ""
+  const chunks: Array<Chunk> = [
+    ...(vars.images ?? []),
+    ...(text ? [{ kind: "text", text } satisfies Chunk] : []),
+  ]
+  const message: Message = {
+    id: `optimistic-user-${threadId}`,
+    author: "user",
+    timestamp: new Date(now).toISOString(),
+    chunks,
+  }
+  return {
+    id: threadId,
+    title: text.slice(0, 80) || "New agent",
+    repo: repoFullName.split("/")[1] ?? "",
+    repoFullName,
+    branch: "main",
+    model: vars.model_id ?? "Default",
+    effort: vars.effort ?? null,
+    source: "dashboard",
+    status: "running",
+    viewed: true,
+    viewedAt: now,
+    createdAt: now,
+    updatedAt: now,
+    traceUrl: null,
+    messages: message.chunks.length > 0 ? [message] : [],
+  }
 }
 
 export interface SendAgentMessageVariables {

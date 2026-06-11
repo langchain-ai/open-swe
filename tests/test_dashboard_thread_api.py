@@ -79,26 +79,180 @@ async def test_resolve_agent_model_choice_applies_request_before_profile(monkeyp
     assert (model_id, effort) == ("anthropic:claude-opus-4-8", "high")
 
 
-async def test_create_dashboard_thread_rejects_images_for_resolved_text_only_model(
-    monkeypatch,
-) -> None:
-    async def fake_profile(login: str) -> dict[str, str]:
-        assert login == "octocat"
-        return {"default_model": _TEXT_ONLY_MODEL, "reasoning_effort": "high"}
+def _new_thread_client(created: dict[str, object]) -> object:
+    class FakeThreads:
+        async def create(
+            self, *, thread_id: str, metadata: dict[str, object], if_exists: str
+        ) -> None:
+            created["thread_id"] = thread_id
+            created["metadata"] = dict(metadata)
+
+        async def update(self, *, thread_id: str, metadata: dict[str, object]) -> None:
+            created.setdefault("metadata", {})
+            assert isinstance(created["metadata"], dict)
+            created["metadata"].update(metadata)
+
+        async def get(self, thread_id: str) -> dict[str, object]:
+            return {"thread_id": thread_id, "metadata": created.get("metadata", {})}
+
+    class FakeClient:
+        threads = FakeThreads()
+
+    return FakeClient()
+
+
+def _patch_new_thread_deps(monkeypatch, *, profile: dict[str, object]) -> None:
+    async def fake_profile(login: str) -> dict[str, object]:
+        return dict(profile)
 
     async def fake_team_default(role: str) -> tuple[str, str]:
         assert role == "agent"
         return _VISION_MODEL, "medium"
 
+    async def fake_ensure_token(login: str) -> None:
+        return None
+
+    async def fake_resolve_email(login: str, prof: dict[str, object]) -> str:
+        return f"{login}@example.com"
+
     monkeypatch.setattr(thread_api, "get_profile", fake_profile)
     monkeypatch.setattr(thread_api, "get_team_default_model", fake_team_default)
+    monkeypatch.setattr(thread_api, "_ensure_dashboard_github_token", fake_ensure_token)
+    monkeypatch.setattr(thread_api, "_resolve_run_email", fake_resolve_email)
 
-    body = thread_api.ThreadCreateBody(prompt="see attached", images=[_image()])
+
+async def test_enrich_run_start_command_creates_and_stamps_new_thread(monkeypatch) -> None:
+    created: dict[str, object] = {}
+    _patch_new_thread_deps(monkeypatch, profile={})
+    monkeypatch.setattr(thread_api, "langgraph_client", lambda: _new_thread_client(created))
+
+    command = {
+        "method": "run.start",
+        "params": {
+            "input": {"messages": [{"type": "human", "content": "Fix the flaky test"}]},
+            "config": {
+                "configurable": {
+                    "repo": "octo/repo",
+                    "agent_model_id": _VISION_MODEL,
+                    "agent_effort": "medium",
+                }
+            },
+        },
+    }
+
+    enriched = await thread_api._enrich_run_start_command(
+        "new-tid",
+        "octocat",
+        command,
+        metadata={},
+        creating=True,
+    )
+
+    stamped = created["metadata"]
+    assert isinstance(stamped, dict)
+    assert stamped["source"] == "dashboard"
+    assert stamped["github_login"] == "octocat"
+    assert stamped["title"] == "Fix the flaky test"
+    assert stamped["repo_owner"] == "octo"
+    assert stamped["repo_name"] == "repo"
+
+    configurable = enriched["params"]["config"]["configurable"]
+    assert configurable["github_login"] == "octocat"
+    assert configurable["source"] == "dashboard"
+    assert configurable["repo"] == {"owner": "octo", "name": "repo"}
+    assert configurable["agent_model_id"] == _VISION_MODEL
+    assert configurable["agent_effort"] == "medium"
+    # Dashboard-only creation hints must not leak into the run config.
+    assert "repo_explicitly_none" not in configurable
+    assert enriched["params"]["assistant_id"] == "agent"
+
+
+async def test_enrich_run_start_command_rejects_images_for_resolved_text_only_model(
+    monkeypatch,
+) -> None:
+    created: dict[str, object] = {}
+    _patch_new_thread_deps(
+        monkeypatch,
+        profile={"default_model": _TEXT_ONLY_MODEL, "reasoning_effort": "high"},
+    )
+    monkeypatch.setattr(thread_api, "langgraph_client", lambda: _new_thread_client(created))
+
+    image = _image()
+    command = {
+        "method": "run.start",
+        "params": {
+            "input": {
+                "messages": [
+                    {
+                        "type": "human",
+                        "content": [
+                            {
+                                "type": "image",
+                                "base64": image.base64,
+                                "mime_type": image.mime_type,
+                            },
+                            {"type": "text", "text": "see attached"},
+                        ],
+                    }
+                ]
+            },
+            "config": {"configurable": {}},
+        },
+    }
+
     with pytest.raises(HTTPException) as exc_info:
-        await thread_api.create_dashboard_thread("octocat", body)
+        await thread_api._enrich_run_start_command(
+            "new-tid",
+            "octocat",
+            command,
+            metadata={},
+            creating=True,
+        )
 
     assert exc_info.value.status_code == 422
     assert "does not support image input" in exc_info.value.detail
+
+
+async def test_proxy_commands_lazily_creates_missing_thread_only_for_run_start(
+    monkeypatch,
+) -> None:
+    class MissingThreads:
+        async def get(self, thread_id: str) -> dict[str, object]:
+            raise RuntimeError("thread not found")
+
+    class MissingClient:
+        threads = MissingThreads()
+
+    monkeypatch.setattr(thread_api, "langgraph_client", lambda: MissingClient())
+
+    # A non-run.start command against a thread that doesn't exist yet is a 404.
+    with pytest.raises(HTTPException) as exc_info:
+        await thread_api.proxy_dashboard_thread_commands(
+            "ghost", "octocat", b'{"method": "run.cancel"}'
+        )
+    assert exc_info.value.status_code == 404
+
+
+async def test_proxy_commands_run_start_by_non_owner_is_rejected(monkeypatch) -> None:
+    class OwnedThreads:
+        async def get(self, thread_id: str) -> dict[str, object]:
+            return {
+                "thread_id": thread_id,
+                "metadata": {"source": "dashboard", "github_login": "owner"},
+            }
+
+    class OwnedClient:
+        threads = OwnedThreads()
+
+    monkeypatch.setattr(thread_api, "langgraph_client", lambda: OwnedClient())
+
+    # An existing thread owned by someone else is never lazily re-created — a
+    # run.start from a non-owner is a 404, not a takeover.
+    with pytest.raises(HTTPException) as exc_info:
+        await thread_api.proxy_dashboard_thread_commands(
+            "tid", "intruder", b'{"method": "run.start"}'
+        )
+    assert exc_info.value.status_code == 404
 
 
 async def test_enrich_run_start_command_allowlists_client_configurable(monkeypatch) -> None:

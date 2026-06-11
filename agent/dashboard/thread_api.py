@@ -7,7 +7,6 @@ import binascii
 import json
 import logging
 import os
-import uuid
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from typing import Any
@@ -98,15 +97,6 @@ class DashboardImageBody(BaseModel):
     base64: str = Field(min_length=1)
     mime_type: str = Field(alias="mimeType", min_length=1)
     file_name: str | None = Field(default=None, alias="fileName")
-
-
-class ThreadCreateBody(BaseModel):
-    prompt: str = Field(default="", max_length=20_000)
-    images: list[DashboardImageBody] = Field(default_factory=list)
-    repo: str | None = None
-    repo_explicitly_none: bool = False
-    model_id: str | None = None
-    effort: str | None = None
 
 
 class ThreadMessageBody(BaseModel):
@@ -609,6 +599,66 @@ def _extract_run_id_from_command_response(payload: Any) -> str | None:
     return None
 
 
+def _command_message_content(params: dict[str, Any]) -> Any:
+    """The most recent user message content from a ``run.start`` command."""
+    run_input = params.get("input")
+    if not isinstance(run_input, dict):
+        return None
+    messages = run_input.get("messages")
+    if not isinstance(messages, list) or not messages:
+        return None
+    last = messages[-1]
+    return last.get("content") if isinstance(last, dict) else None
+
+
+def _command_prompt_text(content: Any) -> str:
+    if isinstance(content, str):
+        return content.strip()
+    if isinstance(content, list):
+        texts = [
+            block.get("text", "")
+            for block in content
+            if isinstance(block, dict) and block.get("type") == "text"
+        ]
+        return "\n".join(text for text in texts if isinstance(text, str)).strip()
+    return ""
+
+
+def _dashboard_images_from_content(content: Any) -> list[DashboardImageBody]:
+    """Reconstruct typed image bodies from a command's message content blocks.
+
+    The client sends image blocks as ``{"type": "image", "base64", "mime_type",
+    "file_name"}`` (see the prompt bar). Rebuilding them lets
+    the shared ``_create_dashboard_thread_record`` validate size/type/model.
+    """
+    if not isinstance(content, list):
+        return []
+    images: list[DashboardImageBody] = []
+    for block in content:
+        if not isinstance(block, dict) or block.get("type") != "image":
+            continue
+        data = block.get("base64")
+        mime = block.get("mime_type") or block.get("mimeType")
+        if not isinstance(data, str) or not isinstance(mime, str):
+            raise HTTPException(422, "invalid image data")
+        file_name = block.get("file_name") or block.get("fileName")
+        images.append(
+            DashboardImageBody(
+                base64=data,
+                mime_type=mime,
+                file_name=file_name if isinstance(file_name, str) else None,
+            )
+        )
+    return images
+
+
+def _validate_command_images(content: Any, *, model_id: str | None) -> None:
+    """Reject images for text-only models / oversize attachments (raises 422)."""
+    images = _dashboard_images_from_content(content)
+    if images:
+        _image_blocks(images, model_id=model_id)
+
+
 async def _enrich_run_start_command(
     thread_id: str,
     login: str,
@@ -616,6 +666,7 @@ async def _enrich_run_start_command(
     *,
     metadata: dict[str, Any],
     thread_busy: bool = False,
+    creating: bool = False,
 ) -> dict[str, Any]:
     if command.get("method") != "run.start":
         return command
@@ -635,24 +686,49 @@ async def _enrich_run_start_command(
     if not isinstance(client_config, dict):
         client_config = {}
     client_configurable = client_config.get("configurable")
+    if not isinstance(client_configurable, dict):
+        client_configurable = {}
+
+    chosen_model, chosen_effort = _normalize_model_choice(
+        client_configurable.get("agent_model_id"),
+        client_configurable.get("agent_effort"),
+    )
+    content = _command_message_content(params)
     overrides: dict[str, Any] = {}
-    if isinstance(client_configurable, dict):
-        chosen_model = client_configurable.get("agent_model_id")
-        chosen_effort = client_configurable.get("agent_effort")
-        if isinstance(chosen_model, str) and isinstance(chosen_effort, str):
-            normalized_model, normalized_effort = _normalize_model_choice(
-                chosen_model, chosen_effort
-            )
-            if normalized_model and normalized_effort:
-                overrides["agent_model_id"] = normalized_model
-                overrides["agent_effort"] = normalized_effort
-                metadata = {
-                    **metadata,
-                    "model": normalized_model,
-                    "effort": normalized_effort,
-                    "updated_at_ms": _now_ms(),
-                }
-                await client.threads.update(thread_id=thread_id, metadata=metadata)
+
+    if creating:
+        # First ``run.start`` for a client-minted thread id: stamp the full
+        # dashboard thread record (owner, title, repo, model) and validate any
+        # attached images against the resolved model before the run is
+        # forwarded to LangGraph. The repo hint rides in the client
+        # configurable; it never reaches the run config (which is rebuilt from
+        # the stamped metadata below).
+        thread = await _create_dashboard_thread_record(
+            thread_id,
+            login=login,
+            repo_config=_parse_repo(client_configurable.get("repo")) or {},
+            repo_explicitly_none=client_configurable.get("repo_explicitly_none") is True,
+            prompt=_command_prompt_text(content),
+            images=_dashboard_images_from_content(content),
+            model_id=client_configurable.get("agent_model_id"),
+            effort=client_configurable.get("agent_effort"),
+        )
+        metadata = thread.get("metadata") if isinstance(thread.get("metadata"), dict) else metadata
+        if chosen_model and chosen_effort:
+            overrides["agent_model_id"] = chosen_model
+            overrides["agent_effort"] = chosen_effort
+    else:
+        _validate_command_images(content, model_id=chosen_model or _metadata_model_id(metadata))
+        if chosen_model and chosen_effort:
+            overrides["agent_model_id"] = chosen_model
+            overrides["agent_effort"] = chosen_effort
+            metadata = {
+                **metadata,
+                "model": chosen_model,
+                "effort": chosen_effort,
+                "updated_at_ms": _now_ms(),
+            }
+            await client.threads.update(thread_id=thread_id, metadata=metadata)
 
     merged_configurable = await _build_dashboard_configurable(
         thread_id,
@@ -673,50 +749,6 @@ async def _enrich_run_start_command(
     params["metadata"] = run_metadata
     command["params"] = params
     return command
-
-
-async def _start_agent_run(
-    thread_id: str,
-    *,
-    login: str,
-    repo_config: dict[str, str],
-    repo_explicitly_none: bool = False,
-    prompt: str,
-    images: list[DashboardImageBody] | None = None,
-    title: str | None = None,
-    model_id: str | None = None,
-    effort: str | None = None,
-) -> dict[str, Any]:
-    await _create_dashboard_thread_record(
-        thread_id,
-        login=login,
-        repo_config=repo_config,
-        repo_explicitly_none=repo_explicitly_none,
-        prompt=prompt,
-        images=images,
-        title=title,
-        model_id=model_id,
-        effort=effort,
-    )
-    thread = await langgraph_client().threads.get(thread_id)
-    return _thread_summary(
-        thread if isinstance(thread, dict) else {"thread_id": thread_id, "metadata": {}}
-    )
-
-
-async def create_dashboard_thread(login: str, body: ThreadCreateBody) -> dict[str, Any]:
-    repo_config = _resolve_repo_config(body.repo)
-    thread_id = str(uuid.uuid4())
-    return await _start_agent_run(
-        thread_id,
-        login=login,
-        repo_config=repo_config,
-        repo_explicitly_none=body.repo_explicitly_none,
-        prompt=body.prompt,
-        images=body.images,
-        model_id=body.model_id,
-        effort=body.effort,
-    )
 
 
 async def send_dashboard_message(
@@ -890,11 +922,6 @@ async def proxy_dashboard_thread_commands(
     email: str | None = None,
     content_type: str = "application/json",
 ) -> tuple[int, bytes, str | None]:
-    thread = await _authorized_thread(thread_id, login, email=email)
-    metadata = thread.get("metadata") if isinstance(thread.get("metadata"), dict) else {}
-    url = f"{langgraph_url().rstrip('/')}/threads/{thread_id}/commands"
-    headers = _langgraph_proxy_headers(content_type=content_type)
-
     try:
         parsed = json.loads(body)
     except json.JSONDecodeError as exc:
@@ -902,13 +929,41 @@ async def proxy_dashboard_thread_commands(
     if not isinstance(parsed, dict):
         raise HTTPException(400, "command body must be a JSON object")
 
-    metadata_run_status = metadata.get("latest_run_status")
+    # The dashboard mints the thread id client-side and submits straight away,
+    # so the very first ``run.start`` may target a thread that doesn't exist
+    # yet. That command lazily creates + stamps + owns the thread (in
+    # ``_enrich_run_start_command``); any other command against a missing
+    # thread — or a command from a non-owner against an existing thread — is a
+    # 404.
+    method = parsed.get("method")
+    try:
+        thread = await langgraph_client().threads.get(thread_id)
+    except Exception:  # noqa: BLE001
+        thread = None
+
+    creating = False
+    if thread is None:
+        if method != "run.start":
+            raise HTTPException(404, "thread not found")
+        creating = True
+        metadata: dict[str, Any] = {}
+        thread_busy = False
+    else:
+        metadata = thread.get("metadata") if isinstance(thread.get("metadata"), dict) else {}
+        _assert_thread_owner(metadata, login, email)
+        metadata_run_status = metadata.get("latest_run_status")
+        thread_busy = _thread_is_busy(thread) or metadata_run_status in {"pending", "running"}
+
+    url = f"{langgraph_url().rstrip('/')}/threads/{thread_id}/commands"
+    headers = _langgraph_proxy_headers(content_type=content_type)
+
     enriched = await _enrich_run_start_command(
         thread_id,
         login,
         parsed,
         metadata=metadata,
-        thread_busy=_thread_is_busy(thread) or metadata_run_status in {"pending", "running"},
+        thread_busy=thread_busy,
+        creating=creating,
     )
     outgoing = json.dumps(enriched).encode()
 

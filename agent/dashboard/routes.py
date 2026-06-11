@@ -105,10 +105,8 @@ from .team_settings import (
     upsert_team_settings,
 )
 from .thread_api import (
-    ThreadCreateBody,
     ThreadMessageBody,
     cancel_dashboard_thread,
-    create_dashboard_thread,
     delete_dashboard_thread,
     get_dashboard_thread,
     get_dashboard_thread_state,
@@ -904,14 +902,6 @@ async def api_list_threads(
     session: dict[str, Any] = _SESSION_DEP,
 ) -> list[dict[str, Any]]:
     return await list_dashboard_threads(session["sub"], email=session.get("email"), include_all=all)
-
-
-@router.post("/threads")
-async def api_create_thread(
-    body: ThreadCreateBody,
-    session: dict[str, Any] = _SESSION_DEP,
-) -> dict[str, Any]:
-    return await create_dashboard_thread(session["sub"], body)
 
 
 @router.get("/threads/{thread_id}")

@@ -12,15 +12,6 @@ export class AgentsApiError extends Error {
   }
 }
 
-export interface ThreadCreateRequest {
-  prompt: string
-  images?: Array<ImageChunk>
-  repo?: string | null
-  repo_explicitly_none?: boolean
-  model_id?: string | null
-  effort?: string | null
-}
-
 export interface ThreadMessageRequest {
   content: string
   images?: Array<ImageChunk>
@@ -112,11 +103,6 @@ export const agentsApi = {
         options?.markViewed === false ? "?mark_viewed=false" : ""
       }`
     ),
-  createThread: (body: ThreadCreateRequest) =>
-    agentsRequest<AgentThread>("/threads", {
-      method: "POST",
-      body: JSON.stringify(body),
-    }),
   queueMessage: (threadId: string, body: ThreadMessageRequest) =>
     agentsRequest<AgentThread>(
       `/threads/${encodeURIComponent(threadId)}/messages`,

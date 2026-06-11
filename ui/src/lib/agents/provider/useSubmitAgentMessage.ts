@@ -1,42 +1,25 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useStreamContext as useAgentThreadStream, type UseStreamReturn } from "@langchain/react";
+import { useStreamContext as useAgentThreadStream } from "@langchain/react";
 
 import type { SendAgentMessageVariables } from "@/lib/agents/queries";
 import { AgentsApiError, agentsApi } from "@/lib/agents/api";
 import { agentThreadKeys } from "@/lib/agents/queries";
-import type { ImageChunk } from "@/lib/agents/types";
 
-function runConfig(vars: SendAgentMessageVariables) {
-  if (!vars.model_id || !vars.effort) return undefined;
-  return {
-    configurable: {
-      agent_model_id: vars.model_id,
-      agent_effort: vars.effort,
-    },
-  };
-}
-
-function imageContentBlocks(images: Array<ImageChunk> = []) {
-  return images.map((image) => ({
+/**
+ * Construct the message content for the LangGraph run.
+ *
+ * @param vars - The variables for the message.
+ * @returns The message content.
+ */
+function messageContent(vars: SendAgentMessageVariables) {
+  const text = vars.content.trim();
+  const imageBlocks = vars.images?.map((image) => ({
     type: "image",
     base64: image.base64,
     mime_type: image.mimeType,
     ...(image.fileName ? { file_name: image.fileName } : {}),
-  }));
-}
-
-function messageContent(vars: SendAgentMessageVariables) {
-  const text = vars.content.trim();
-  const imageBlocks = imageContentBlocks(vars.images);
-  if (imageBlocks.length === 0) return text;
+  })) ?? [];
   return [...imageBlocks, ...(text ? [{ type: "text", text }] : [])];
-}
-
-async function submitRun(stream: UseStreamReturn, vars: SendAgentMessageVariables) {
-  await stream.submit(
-    { messages: [{ type: "human", content: messageContent(vars) }] },
-    { config: runConfig(vars) },
-  );
 }
 
 /**
@@ -49,6 +32,9 @@ async function submitRun(stream: UseStreamReturn, vars: SendAgentMessageVariable
  * That endpoint writes to the thread store; `check_message_queue_before_model`
  * injects the message into the *current* run before the next model call — the
  * same mid-run follow-up path used by Slack, Linear, and GitHub webhooks.
+ * 
+ * @param threadId - The ID of the thread to submit the message to.
+ * @returns The mutation object.
  */
 export function useSubmitAgentMessage(threadId: string) {
   const queryClient = useQueryClient();
@@ -78,7 +64,19 @@ export function useSubmitAgentMessage(threadId: string) {
         }
       }
 
-      await submitRun(stream, vars);
+      const config = (!vars.model_id || !vars.effort)
+        ? undefined
+        : {
+          configurable: {
+            agent_model_id: vars.model_id,
+            agent_effort: vars.effort,
+          },
+        };
+
+      await stream.submit(
+        { messages: [{ type: "human", content: messageContent(vars) }] },
+        { config },
+      );
     },
     onSuccess: () => {
       queryClient.setQueryData(agentThreadKeys.detail(threadId), (prev) =>
@@ -87,17 +85,4 @@ export function useSubmitAgentMessage(threadId: string) {
       void queryClient.invalidateQueries({ queryKey: agentThreadKeys.all, exact: true });
     },
   });
-}
-
-/**
- * Imperative `stream.submit` for effects that already know the stream is idle
- * (e.g. flushing a pending prompt on mount in `AgentThreadView`). Does not
- * queue via `/messages` or touch React Query — use `useSubmitAgentMessage`
- * for interactive sends so busy-thread follow-ups and cache invalidation apply.
- */
-export async function submitAgentPrompt(
-  stream: UseStreamReturn,
-  vars: SendAgentMessageVariables,
-) {
-  await submitRun(stream, vars);
 }
