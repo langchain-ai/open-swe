@@ -64,7 +64,7 @@ export const ShellCommand = memo(function ShellCommand({
       </button>
 
       {expanded && (
-        <div className="rounded-xl bg-[var(--ui-accent-bubble)] mt-1 overflow-hidden max-h-[250px] flex flex-col">
+        <div className="rounded-xl border border-[var(--ui-border-subtle)] bg-[var(--ui-code-bubble)] mt-1 overflow-hidden max-h-[250px] flex flex-col">
           <div className="px-3 pt-2 pb-1 font-mono text-xs shrink-0">
             <div className="text-[color:var(--ui-text-dim)] mb-2">bash</div>
             <div className="text-[color:var(--ui-text)] font-semibold whitespace-pre overflow-x-auto">
