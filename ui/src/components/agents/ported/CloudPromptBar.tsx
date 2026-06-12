@@ -271,6 +271,24 @@ export const CloudPromptBar = memo(function CloudPromptBarComponent({
     [addFiles]
   )
 
+  const handlePaste = useCallback(
+    (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+      const items = e.clipboardData?.items
+      if (!items) return
+      const files: Array<File> = []
+      for (const item of Array.from(items)) {
+        if (item.kind === "file") {
+          const file = item.getAsFile()
+          if (file && SUPPORTED_IMAGE_TYPES.has(file.type)) files.push(file)
+        }
+      }
+      if (files.length === 0) return
+      e.preventDefault()
+      void addFiles(files)
+    },
+    [addFiles]
+  )
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey && canSubmit) {
       e.preventDefault()
@@ -359,6 +377,7 @@ export const CloudPromptBar = memo(function CloudPromptBarComponent({
           value={value}
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={handleKeyDown}
+          onPaste={handlePaste}
           placeholder={busy ? "Send a message to queue next..." : placeholder}
           disabled={disabled}
           className={cn(
