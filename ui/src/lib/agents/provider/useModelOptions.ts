@@ -58,6 +58,7 @@ export function useModelOptions(): ModelOptionsResult {
 
 const EFFORT_LABELS: Record<string, string> = {
   none: "None",
+  minimal: "Minimal",
   low: "Low",
   medium: "Medium",
   high: "High",

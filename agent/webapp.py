@@ -65,6 +65,7 @@ from .utils.github_comments import (
     OPEN_SWE_TAGS,
     GitHubAuthError,
     build_pr_prompt,
+    derive_pr_state,
     extract_pr_context,
     fetch_issue_comments,
     fetch_pr_comments_since_last_tag,
@@ -1601,6 +1602,10 @@ _SUPPORTED_GH_PULL_REQUEST_ACTIONS = frozenset(
 )
 _GH_PR_WATCH_TOGGLE_ACTIONS = frozenset(["closed", "reopened", "converted_to_draft"])
 _GH_PR_FIRST_REVIEW_ACTIONS = frozenset(["opened", "ready_for_review"])
+# PR lifecycle actions that should refresh the agent thread's tracked pr_state.
+_GH_PR_AGENT_STATE_ACTIONS = frozenset(
+    ["closed", "reopened", "converted_to_draft", "ready_for_review"]
+)
 _SUPPORTED_GH_COMMENT_ACTIONS = {
     "issue_comment": frozenset(["created", "edited"]),
     "pull_request_review_comment": frozenset(["created", "edited"]),
@@ -1860,6 +1865,7 @@ async def trigger_pr_review_from_ref(
         "title": pr_title,
         "head_ref": branch_name,
         "base_ref": base_ref,
+        "author": (pr_metadata.get("user") or {}).get("login", ""),
     }
     slack_thread_meta: ReviewerSlackThread | None = None
     if slack_channel_id and slack_thread_ts:
@@ -2015,6 +2021,7 @@ async def _dispatch_first_review_from_pr_payload(payload: dict[str, Any], *, sou
         "title": pr_title,
         "head_ref": branch_name,
         "base_ref": base_ref,
+        "author": (pull_request.get("user") or {}).get("login", ""),
     }
     last_reviewed_sha = ""
     if payload.get("action") == "ready_for_review":
@@ -2218,6 +2225,56 @@ async def _get_thread_metadata_safe(thread_id: str) -> dict[str, Any] | None:
         return None
     metadata = thread.get("metadata") if isinstance(thread, dict) else None
     return metadata if isinstance(metadata, dict) else {}
+
+
+def _pr_state_from_payload(payload: dict[str, Any]) -> str | None:
+    pull_request = payload.get("pull_request") if isinstance(payload, dict) else None
+    if not isinstance(pull_request, dict):
+        return None
+    state = pull_request.get("state")
+    return derive_pr_state(
+        state=state if isinstance(state, str) else None,
+        merged=bool(pull_request.get("merged")),
+        draft=bool(pull_request.get("draft")),
+    )
+
+
+async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
+    """Keep an agent thread's tracked PR state in sync with PR lifecycle events.
+
+    The agent thread is located by the PR's html_url persisted in metadata when
+    the PR was opened (``open_pull_request``). Reviewer threads are skipped.
+    """
+    pull_request = payload.get("pull_request") if isinstance(payload, dict) else None
+    if not isinstance(pull_request, dict):
+        return
+    pr_url = pull_request.get("html_url")
+    new_state = _pr_state_from_payload(payload)
+    if not isinstance(pr_url, str) or not pr_url or new_state is None:
+        return
+
+    langgraph_client = get_client(url=LANGGRAPH_URL)
+    try:
+        threads = await langgraph_client.threads.search(metadata={"pr_url": pr_url}, limit=10)
+    except Exception:  # noqa: BLE001
+        logger.debug("Could not search threads for PR %s state update", pr_url, exc_info=True)
+        return
+
+    for thread in threads or []:
+        metadata = thread.get("metadata") if isinstance(thread, dict) else None
+        if not isinstance(metadata, dict) or metadata.get("kind") == REVIEWER_THREAD_KIND:
+            continue
+        thread_id = thread.get("thread_id") or thread.get("id")
+        if not isinstance(thread_id, str) or not thread_id:
+            continue
+        if metadata.get("pr_state") == new_state:
+            continue
+        try:
+            await langgraph_client.threads.update(
+                thread_id=thread_id, metadata={"pr_state": new_state}
+            )
+        except Exception:  # noqa: BLE001
+            logger.debug("Failed to update pr_state for thread %s", thread_id, exc_info=True)
 
 
 async def process_github_pr_close(payload: dict[str, Any]) -> None:
@@ -2441,6 +2498,7 @@ async def process_github_push_event(payload: dict[str, Any]) -> None:
         "title": pr_title,
         "head_ref": head_ref,
         "base_ref": base_ref,
+        "author": (pr.get("user") or {}).get("login", ""),
     }
     await set_reviewer_thread_metadata(thread_id, pr=pr_meta, watch=True, head_sha=head_sha)
 
@@ -3028,6 +3086,8 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks) ->
                 "status": "ignored",
                 "reason": f"Unsupported GitHub pull_request action: {action}",
             }
+        if action in _GH_PR_AGENT_STATE_ACTIONS:
+            background_tasks.add_task(update_agent_thread_pr_state, payload)
         if action in _GH_PR_WATCH_TOGGLE_ACTIONS:
             if not await _is_repo_enabled_for_review(webhook_repo_config):
                 return {"status": "ignored", "reason": "Repository not enabled for review"}

@@ -47,7 +47,9 @@ def _prep_command(
     lines = [
         "set -e",
         f"if [ -d {q_repo_dir}/.git ]; then",
-        f"  cd {q_repo_dir} && GH_TOKEN=dummy git fetch --all --quiet",
+        # Tolerate fetch-all failures: the targeted head/base fetches below
+        # are what the checkout actually needs.
+        f"  cd {q_repo_dir} && {{ GH_TOKEN=dummy git fetch --all --quiet || true; }}",
         "else",
         f"  cd {q_work_dir} && GH_TOKEN=dummy gh repo clone {q_full_name} && cd {q_repo_name}",
         "fi",
@@ -62,9 +64,12 @@ def _prep_command(
         if pr_number is not None:
             pull_ref = shlex.quote(f"refs/pull/{pr_number}/head")
             lines.append(f"GH_TOKEN=dummy git fetch origin {pull_ref} --quiet 2>/dev/null || true")
-        # Strict on purpose: a failed checkout must fail the prep so callers
-        # know the tree is NOT at the PR head.
-        lines.append(f"git checkout {q_head} --quiet")
+        # --force: a reused sandbox can have a dirty worktree from a previous
+        # run, which would otherwise block the checkout and silently leave the
+        # tree at the old head. Strict on purpose: a failed checkout must fail
+        # the prep so callers know the tree is NOT at the PR head.
+        lines.append(f"git checkout --force {q_head} --quiet")
+        lines.append(f'[ "$(git rev-parse HEAD)" = {q_head} ]')
     return "\n".join(lines)
 
 

@@ -33,7 +33,12 @@ export function useSeedAgentThreadDetails(
   useEffect(() => {
     for (const thread of threads) {
       if (thread.id === activeThreadId) continue
-      queryClient.setQueryData(agentThreadKeys.detail(thread.id), thread)
+      // Seed as already-stale: the detail GET is what marks a thread viewed
+      // server-side, so opening a seeded entry must still refetch despite the
+      // detail query's `staleTime` (which exists for the optimistic seed).
+      queryClient.setQueryData(agentThreadKeys.detail(thread.id), thread, {
+        updatedAt: 0,
+      })
     }
   }, [activeThreadId, queryClient, threads])
 }
@@ -49,10 +54,51 @@ export function useAgentThreads() {
   })
 }
 
+// The sidebar fetches active (unresolved) and resolved threads separately so
+// resolving the most-recent threads can't hide older active ones behind a
+// shared cap — each list is filled server-side from its own filtered query.
+const SIDEBAR_ACTIVE_LIMIT = 50
+
+function sidebarRefetchInterval(query: {
+  state: { data?: { items: Array<AgentThread> } }
+}) {
+  return query.state.data?.items.some((thread) => thread.status === "running")
+    ? 2000
+    : false
+}
+
+export function useSidebarThreads(resolvedLimit: number) {
+  const active = useQuery({
+    queryKey: agentThreadKeys.page({
+      resolved: false,
+      limit: SIDEBAR_ACTIVE_LIMIT,
+    }),
+    queryFn: () =>
+      agentsApi.listThreadsPage({
+        resolved: false,
+        limit: SIDEBAR_ACTIVE_LIMIT,
+      }),
+    refetchInterval: sidebarRefetchInterval,
+    placeholderData: (prev) => prev,
+  })
+  const resolved = useQuery({
+    queryKey: agentThreadKeys.page({ resolved: true, limit: resolvedLimit }),
+    queryFn: () =>
+      agentsApi.listThreadsPage({ resolved: true, limit: resolvedLimit }),
+    refetchInterval: sidebarRefetchInterval,
+    placeholderData: (prev) => prev,
+  })
+  return { active, resolved }
+}
+
 export function useAgentThread(threadId: string) {
   return useQuery({
     queryKey: agentThreadKeys.detail(threadId),
     queryFn: () => agentsApi.getThread(threadId),
+    // Lets the optimistic detail seeded by `AgentsHome` survive until the
+    // proxied run.start stamps the server-side thread; an immediate refetch
+    // would 404 and bounce the route back to /agents.
+    staleTime: 30_000,
   })
 }
 

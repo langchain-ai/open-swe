@@ -3,9 +3,9 @@
   "python_version": "3.12",
   "api_version": "0.10.0rc3",
   "graphs": {
-    "agent": "agent.server:get_agent",
-    "reviewer": "agent.reviewer:get_reviewer_agent",
-    "analyzer": "agent.analyzer:get_analyzer",
+    "agent": "agent.server:traced_agent",
+    "reviewer": "agent.reviewer:traced_reviewer_agent",
+    "analyzer": "agent.analyzer:traced_analyzer",
     "scheduler": "agent.scheduler:get_scheduler"
   },
   "dependencies": [

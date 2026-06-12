@@ -46,6 +46,7 @@ from .utils.github_app import get_github_app_installation_token
 from .utils.model import DEFAULT_LLM_REASONING, make_model, provider_model_kwargs
 from .utils.sandbox_paths import aresolve_sandbox_work_dir
 from .utils.sandbox_state import unwrap_sandbox_backend
+from .utils.tracing import REVIEW_TRACING_PROJECT, traced_graph_factory
 
 logger = logging.getLogger(__name__)
 
@@ -148,3 +149,6 @@ async def get_analyzer(config: RunnableConfig) -> Pregel:
             ToolErrorMiddleware(),
         ],
     ).with_config(config)
+
+
+traced_analyzer = traced_graph_factory(get_analyzer, REVIEW_TRACING_PROJECT)

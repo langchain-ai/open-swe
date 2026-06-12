@@ -58,6 +58,12 @@ from .profiles import (
     upsert_profile,
 )
 from .repo_access import require_repo_access_for_user
+from .review_api import (
+    get_review,
+    get_review_diff,
+    list_reviews,
+    trigger_re_review,
+)
 from .review_style_jobs import (
     cancel_review_style_analysis,
     start_bootstrap_analysis,
@@ -706,6 +712,73 @@ async def api_list_review_styles(
     return out
 
 
+REVIEWS_PAGE_SIZE = 20
+
+
+@router.get("/reviews")
+async def api_list_reviews(
+    page: int = 0,
+    mine: bool = True,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    login = session["sub"]
+    access_cache: dict[str, bool] = {}
+
+    async def is_accessible(summary: dict[str, Any]) -> bool:
+        full_name = summary["full_name"]
+        if full_name not in access_cache:
+            try:
+                await require_repo_access_for_user(login, full_name)
+                access_cache[full_name] = True
+            except HTTPException as exc:
+                if exc.status_code not in {403, 404}:
+                    raise
+                access_cache[full_name] = False
+        return access_cache[full_name]
+
+    page = max(page, 0)
+    reviews, has_more = await list_reviews(
+        REVIEWS_PAGE_SIZE,
+        offset=page * REVIEWS_PAGE_SIZE,
+        author=login if mine else None,
+        is_accessible=is_accessible,
+    )
+    return {"reviews": reviews, "page": page, "has_more": has_more}
+
+
+@router.get("/reviews/{owner}/{repo}/{pr_number}")
+async def api_get_review(
+    owner: str,
+    repo: str,
+    pr_number: int,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
+    return await get_review(owner, repo, pr_number)
+
+
+@router.get("/reviews/{owner}/{repo}/{pr_number}/diff")
+async def api_get_review_diff(
+    owner: str,
+    repo: str,
+    pr_number: int,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
+    return await get_review_diff(owner, repo, pr_number)
+
+
+@router.post("/reviews/{owner}/{repo}/{pr_number}/re-review")
+async def api_re_review(
+    owner: str,
+    repo: str,
+    pr_number: int,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
+    return await trigger_re_review(owner, repo, pr_number, session["sub"])
+
+
 @router.post("/review-styles")
 async def api_create_review_style(
     body: ReviewStyleCreate,
@@ -910,6 +983,8 @@ async def api_list_threads(
     all: bool = False,
     session: dict[str, Any] = _SESSION_DEP,
 ) -> list[dict[str, Any]]:
+    if all and not is_admin(session.get("email")):
+        raise HTTPException(403, "admin only")
     return await list_dashboard_threads(session["sub"], email=session.get("email"), include_all=all)
 
 
@@ -925,6 +1000,8 @@ async def api_list_threads_page(
     q: str | None = None,
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
+    if all and not is_admin(session.get("email")):
+        raise HTTPException(403, "admin only")
     return await list_dashboard_threads_page(
         session["sub"],
         email=session.get("email"),
@@ -1039,19 +1116,15 @@ async def api_thread_stream_events(
     session: dict[str, Any] = _SESSION_DEP,
 ) -> StreamingResponse:
     body = await request.body()
-
-    async def event_generator():
-        async for chunk in proxy_dashboard_thread_stream_events(
-            thread_id,
-            session["sub"],
-            body,
-            email=session.get("email"),
-            content_type=request.headers.get("content-type", "application/json"),
-        ):
-            yield chunk
-
+    stream = await proxy_dashboard_thread_stream_events(
+        thread_id,
+        session["sub"],
+        body,
+        email=session.get("email"),
+        content_type=request.headers.get("content-type", "application/json"),
+    )
     return StreamingResponse(
-        event_generator(),
+        stream,
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
     )

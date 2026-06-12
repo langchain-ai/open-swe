@@ -632,9 +632,9 @@ The `langgraph.json` at the project root defines the three graphs and the HTTP a
 ```json
 {
   "graphs": {
-    "agent": "agent.server:get_agent",
-    "reviewer": "agent.reviewer:get_reviewer_agent",
-    "analyzer": "agent.analyzer:get_analyzer"
+    "agent": "agent.server:traced_agent",
+    "reviewer": "agent.reviewer:traced_reviewer_agent",
+    "analyzer": "agent.analyzer:traced_analyzer"
   },
   "http": {
     "app": "agent.webapp:app"

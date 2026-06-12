@@ -12,11 +12,14 @@ from langgraph_sdk import get_client
 
 from ..dashboard.agent_usage import record_agent_pr_usage
 from ..utils.github_app import get_github_app_installation_token
+from ..utils.github_comments import derive_pr_state
+from ..utils.slack import get_slack_permalink
 
 logger = logging.getLogger(__name__)
 
 GITHUB_API = "https://api.github.com"
 _USER_TOKEN_SOURCES = ("slack", "dashboard")
+_REFERENCES_HEADING = "## References"
 
 
 async def _resolve_pr_author_token() -> tuple[str | None, str]:
@@ -118,6 +121,7 @@ async def _record_pr_telemetry(
             )
         pr_url = details.get("html_url") or pr.get("html_url")
         merged = bool(details.get("merged"))
+        is_draft = bool(details.get("draft", pr.get("draft")))
         state = details.get("state") if isinstance(details.get("state"), str) else "open"
         additions = details.get("additions") if isinstance(details.get("additions"), int) else 0
         deletions = details.get("deletions") if isinstance(details.get("deletions"), int) else 0
@@ -147,7 +151,8 @@ async def _record_pr_telemetry(
                     "agent_kind": "agent",
                     "pr_url": pr_url if isinstance(pr_url, str) else "",
                     "pr_number": pr_number,
-                    "pr_state": "merged" if merged else state,
+                    "pr_state": derive_pr_state(state=state, merged=merged, draft=is_draft),
+                    "pr_title": details.get("title") or pr.get("title"),
                     "branch_name": head,
                     "base_branch": base,
                     "diff_stats": {
@@ -161,6 +166,65 @@ async def _record_pr_telemetry(
         logger.debug(
             "Failed to record PR usage for %s/%s#%s", owner, repo, pr_number, exc_info=True
         )
+
+
+async def _build_source_references() -> str:
+    """Build a `## References` section linking the run's source (Slack/Linear)."""
+    configurable = get_config().get("configurable", {})
+    source = configurable.get("source")
+    lines: list[str] = []
+
+    if source == "slack":
+        slack_thread = configurable.get("slack_thread") or {}
+        channel_id = slack_thread.get("channel_id")
+        thread_ts = slack_thread.get("thread_ts")
+        if channel_id and thread_ts:
+            permalink = await get_slack_permalink(channel_id, thread_ts)
+            if permalink:
+                lines.append(f"- Slack thread: {permalink}")
+    elif source == "linear":
+        linear_issue = configurable.get("linear_issue") or {}
+        url = linear_issue.get("url")
+        identifier = linear_issue.get("identifier")
+        if url:
+            lines.append(f"- Linear ticket: [{identifier or url}]({url})")
+        elif identifier:
+            lines.append(f"- Linear ticket: {identifier}")
+
+    if not lines:
+        return ""
+    return _REFERENCES_HEADING + "\n" + "\n".join(lines)
+
+
+async def _is_private_repo(client: httpx.AsyncClient, token: str, owner: str, repo: str) -> bool:
+    """Return True only when GitHub confirms the repo is private."""
+    resp = await client.get(f"{GITHUB_API}/repos/{owner}/{repo}", headers=_auth_headers(token))
+    if resp.status_code != 200:  # noqa: PLR2004
+        return False
+    data = resp.json()
+    return bool(data.get("private")) if isinstance(data, dict) else False
+
+
+async def _maybe_append_source_references(
+    client: httpx.AsyncClient, token: str, owner: str, repo: str, body: str
+) -> str:
+    """Append source references to the PR body for private repos only.
+
+    Gated to private repos so private Slack thread URLs / Linear identifiers are
+    never published to a public PR.
+    """
+    try:
+        if _REFERENCES_HEADING in body:
+            return body
+        references = await _build_source_references()
+        if not references:
+            return body
+        if not await _is_private_repo(client, token, owner, repo):
+            return body
+        return f"{body.rstrip()}\n\n{references}"
+    except Exception:
+        logger.debug("Failed to append source references to PR body", exc_info=True)
+        return body
 
 
 async def _open_pull_request(
@@ -180,8 +244,9 @@ async def _open_pull_request(
             "error": "No GitHub token available to open the pull request.",
         }
 
-    payload = {"title": title, "head": head, "base": base, "body": body, "draft": draft}
     async with httpx.AsyncClient(timeout=30.0) as client:
+        body = await _maybe_append_source_references(client, token, owner, repo, body)
+        payload = {"title": title, "head": head, "base": base, "body": body, "draft": draft}
         resp = await client.post(
             f"{GITHUB_API}/repos/{owner}/{repo}/pulls",
             headers=_auth_headers(token),

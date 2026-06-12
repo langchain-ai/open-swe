@@ -53,6 +53,8 @@ _PROXY_REQUEST_TIMEOUT = httpx.Timeout(30.0, connect=5.0)
 _PROXY_STREAM_TIMEOUT = httpx.Timeout(None)
 # Sources whose threads should surface in the Agents UI (besides "dashboard").
 _SURFACED_SOURCES: tuple[str, ...] = ("dashboard", "github", "slack", "linear", "schedule")
+# PR lifecycle states surfaced to the UI for a thread's associated pull request.
+_PR_STATES: frozenset[str] = frozenset({"draft", "open", "merged", "closed"})
 
 
 def _agent_version_metadata() -> dict[str, str]:
@@ -347,10 +349,17 @@ def _thread_summary(
         summary["pr"] = {
             "number": pr_number,
             "title": pr_title if isinstance(pr_title, str) else title,
-            "state": pr_state if isinstance(pr_state, str) else "open",
+            "state": pr_state if pr_state in _PR_STATES else "open",
             "headRef": metadata.get("branch_name") or "",
             "baseRef": metadata.get("base_branch") or "main",
             "url": pr_url,
+        }
+    diff_stats = metadata.get("diff_stats")
+    if isinstance(diff_stats, dict):
+        summary["diffStats"] = {
+            "files": int(diff_stats.get("files") or 0),
+            "additions": int(diff_stats.get("additions") or 0),
+            "deletions": int(diff_stats.get("deletions") or 0),
         }
     # The transcript hydrates client-side from the SDK (`GET …/state` →
     # `stream.messages`); the summary only carries metadata.
@@ -448,7 +457,36 @@ async def list_dashboard_threads(
     return summaries[:limit]
 
 
-_THREADS_PAGE_CANDIDATE_CAP = 500
+# Threads are paged out of `client.threads.search` in batches of this size,
+# scanning up to `_THREADS_PAGE_SCAN_CAP` so matches older than a single batch
+# are still found (the page is the "show all"/search surface).
+_THREADS_SEARCH_PAGE = 100
+_THREADS_PAGE_SCAN_CAP = 2000
+
+
+def _thread_updated_ms(metadata: dict[str, Any]) -> int:
+    value = metadata.get("updated_at_ms")
+    return int(value) if isinstance(value, (int, float)) else 0
+
+
+def _metadata_matches_filters(
+    metadata: dict[str, Any],
+    *,
+    resolved: bool | None,
+    source: str | None,
+    query: str | None,
+) -> bool:
+    """Metadata-only filters that don't require fetching the latest run."""
+    if resolved is not None and _is_thread_resolved(metadata) is not resolved:
+        return False
+    if source and _thread_source(metadata) != source:
+        return False
+    if query:
+        title = metadata.get("title")
+        title = title if isinstance(title, str) else "Untitled agent"
+        if query.lower() not in title.lower():
+            return False
+    return True
 
 
 def _summary_matches_filters(
@@ -475,6 +513,52 @@ def _summary_matches_filters(
     return True
 
 
+async def _gather_candidate_threads(
+    client: Any,
+    searches: list[dict[str, Any]],
+    *,
+    include_all: bool,
+    login: str,
+    email: str | None,
+) -> list[dict[str, Any]]:
+    """Page through `threads.search` (up to the scan cap) and dedupe by id."""
+    seen: dict[str, dict[str, Any]] = {}
+    for metadata_filter in searches:
+        offset = 0
+        while offset < _THREADS_PAGE_SCAN_CAP:
+            batch = await client.threads.search(
+                metadata=metadata_filter,
+                limit=_THREADS_SEARCH_PAGE,
+                offset=offset,
+                sort_by="updated_at",
+                sort_order="desc",
+            )
+            if not batch:
+                break
+            for thread in batch:
+                if not isinstance(thread, dict):
+                    continue
+                meta = thread.get("metadata") if isinstance(thread.get("metadata"), dict) else {}
+                if not include_all and not _user_owns_thread(meta, login, email):
+                    continue
+                thread_id = thread.get("thread_id") or thread.get("id")
+                if isinstance(thread_id, str) and thread_id not in seen:
+                    seen[thread_id] = thread
+            if len(batch) < _THREADS_SEARCH_PAGE:
+                break
+            offset += _THREADS_SEARCH_PAGE
+    return list(seen.values())
+
+
+async def _summarize_thread(client: Any, thread: dict[str, Any]) -> dict[str, Any]:
+    refreshed, latest_run_status, latest_run_id = await _refresh_latest_run_metadata(client, thread)
+    return _thread_summary(
+        refreshed,
+        latest_run_status=latest_run_status,
+        latest_run_id=latest_run_id,
+    )
+
+
 async def list_dashboard_threads_page(
     login: str,
     *,
@@ -494,34 +578,43 @@ async def list_dashboard_threads_page(
     if not include_all and email and email.strip():
         searches.append({"triggering_user_email": email.strip().lower()})
 
-    seen: dict[str, dict[str, Any]] = {}
-    for metadata_filter in searches:
-        threads = await client.threads.search(
-            metadata=metadata_filter,
-            limit=_THREADS_PAGE_CANDIDATE_CAP,
-            sort_by="updated_at",
-            sort_order="desc",
+    candidates = await _gather_candidate_threads(
+        client, searches, include_all=include_all, login=login, email=email
+    )
+
+    # Apply metadata-only filters first so the frequent sidebar polls only fetch
+    # the latest run for threads that can actually match.
+    matched = [
+        thread
+        for thread in candidates
+        if _metadata_matches_filters(
+            thread.get("metadata") if isinstance(thread.get("metadata"), dict) else {},
+            resolved=resolved,
+            source=source,
+            query=query,
         )
-        for thread in threads or []:
-            if not isinstance(thread, dict):
-                continue
-            meta = thread.get("metadata") if isinstance(thread.get("metadata"), dict) else {}
-            if not include_all and not _user_owns_thread(meta, login, email):
-                continue
-            thread_id = thread.get("thread_id") or thread.get("id")
-            if isinstance(thread_id, str) and thread_id not in seen:
-                seen[thread_id] = thread
+    ]
+    matched.sort(
+        key=lambda thread: _thread_updated_ms(
+            thread.get("metadata") if isinstance(thread.get("metadata"), dict) else {}
+        ),
+        reverse=True,
+    )
+
+    safe_offset = max(offset, 0)
+    safe_limit = max(limit, 1)
+
+    # `viewed`/`status` derive from the latest run, so they can only be applied
+    # after enrichment. When neither is requested we enrich just the page window.
+    if viewed is None and status is None:
+        total = len(matched)
+        window = matched[safe_offset : safe_offset + safe_limit]
+        items = [await _summarize_thread(client, thread) for thread in window]
+        return {"items": items, "total": total, "limit": safe_limit, "offset": safe_offset}
 
     summaries: list[dict[str, Any]] = []
-    for thread in seen.values():
-        refreshed, latest_run_status, latest_run_id = await _refresh_latest_run_metadata(
-            client, thread
-        )
-        summary = _thread_summary(
-            refreshed,
-            latest_run_status=latest_run_status,
-            latest_run_id=latest_run_id,
-        )
+    for thread in matched:
+        summary = await _summarize_thread(client, thread)
         if _summary_matches_filters(
             summary,
             resolved=resolved,
@@ -534,8 +627,6 @@ async def list_dashboard_threads_page(
 
     summaries.sort(key=lambda item: item.get("updatedAt", 0), reverse=True)
     total = len(summaries)
-    safe_offset = max(offset, 0)
-    safe_limit = max(limit, 1)
     items = summaries[safe_offset : safe_offset + safe_limit]
     return {"items": items, "total": total, "limit": safe_limit, "offset": safe_offset}
 
@@ -1155,8 +1246,18 @@ async def proxy_dashboard_thread_stream_events(
     email: str | None = None,
     content_type: str = "application/json",
 ) -> AsyncIterator[bytes]:
+    # Preflight here (not in the generator) so auth/content-type failures
+    # surface as real HTTP errors before the SSE response starts streaming.
     _require_json_content_type(content_type)
     await _authorized_thread_metadata(thread_id, login, email=email)
+    return _stream_thread_events(thread_id, body, content_type)
+
+
+async def _stream_thread_events(
+    thread_id: str,
+    body: bytes,
+    content_type: str,
+) -> AsyncIterator[bytes]:
     url = f"{langgraph_url().rstrip('/')}/threads/{thread_id}/stream/events"
     headers = _langgraph_proxy_headers(content_type=content_type, accept="text/event-stream")
 

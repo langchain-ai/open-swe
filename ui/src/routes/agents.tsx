@@ -28,7 +28,8 @@ function AgentsLayout() {
     section === "agents" &&
     threadId &&
     threadId !== "automations" &&
-    threadId !== "threads"
+    threadId !== "threads" &&
+    threadId !== "reviews"
       ? threadId
       : undefined
 

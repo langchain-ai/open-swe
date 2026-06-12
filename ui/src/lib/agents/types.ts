@@ -138,6 +138,8 @@ export interface Message {
   id: string
   author: Author
   timestamp: string
+  /** Timestamp of the first message in an agent turn; used to derive work duration. */
+  startedAt?: string
   chunks: Array<Chunk>
   hidden?: boolean
 }
@@ -191,7 +193,7 @@ export interface AgentThread {
   pr?: {
     number: number
     title: string
-    state: "draft" | "open" | "merged"
+    state: "draft" | "open" | "merged" | "closed"
     headRef: string
     baseRef: string
     url: string

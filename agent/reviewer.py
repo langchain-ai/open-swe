@@ -17,6 +17,7 @@ agent for code review only:
 
 import asyncio
 import logging
+import posixpath
 import re
 import warnings
 
@@ -73,6 +74,7 @@ from .utils.github_token import cache_github_token_for_thread
 from .utils.model import DEFAULT_LLM_REASONING, make_model, provider_model_kwargs
 from .utils.repo_prep import materialize_trusted_skills, prepare_review_repo
 from .utils.sandbox_paths import aresolve_sandbox_work_dir
+from .utils.tracing import REVIEW_TRACING_PROJECT, traced_graph_factory
 
 REVIEWER_PROMPT_TEMPLATE = """You are a specialized code reviewer agent. Your job is to review one GitHub PR and publish a single review.
 
@@ -90,13 +92,7 @@ Re-review (user message says "A new commit has been pushed"):
 GH_TOKEN=dummy gh api repos/{repo_owner}/{repo_name}/compare/<last_reviewed_sha>...<head_sha> -H "Accept: application/vnd.github.v3.diff"
 ```
 
-The repo is normally already cloned and checked out at the PR head in
-`{working_dir}` — `cd` there and grep for full file context. If that directory
-is missing (prep can occasionally fail), clone it yourself:
-
-```
-GH_TOKEN=dummy gh repo clone {repo_owner}/{repo_name} && cd {repo_name} && git checkout <head_sha>
-```
+{repo_checkout_note}
 
 If a skills section appears below, the repo ships reviewer-relevant skills. Read
 the `SKILL.md` that matches the area you're reviewing and apply it.
@@ -109,12 +105,10 @@ If `publish_review` returns `unresolvable_findings`, do NOT retry with the
 same args — call `update_finding(status="resolved", note="...")` on those ids, or fix
 their file/line via `update_finding`, then call `publish_review` again.
 
-If `add_finding` returns `in_diff: false`, the finding was accepted but anchored
-outside the PR diff (e.g. a caller broken by a changed signature, in a file the
-PR doesn't touch). It will be surfaced in a collapsed "out-of-diff findings"
-section of the review summary instead of as an inline comment. This is expected —
-do NOT re-anchor, retry, or drop it. Only file such findings when they clear the
-bar below (a proven regression, not speculation about pre-existing code).
+Out-of-diff findings are disabled. `add_finding` rejects any finding whose
+`start_line..end_line` is not part of the PR diff (returns `success: false` with
+`in_diff: false`). Do NOT re-anchor or retry — only file findings anchored to a
+line this PR actually changed.
 
 Re-review: for each open finding, `update_finding(id, status="resolved", note="...")`
 if fixed (include a brief explanation of the fix in `note`), `update_finding` with
@@ -139,11 +133,12 @@ question or a short clarification is needed after pushback.
 1. You can anchor it to a specific changed line and quote that line.
 2. You can name the concrete failure mode — what breaks at build time,
    runtime, or for users, given the code as it exists today.
-3. **Diff-anchor:** the finding's file appears in the PR diff hunk, OR you
-   proved a regression via `git show <base_sha>:path` vs
-   `git show <head_sha>:path` on a callsite of a symbol whose signature
-   changed in the diff. Do not file bugs in unrelated files or subsystems
-   based on inference alone.
+3. **Diff-anchor:** the finding anchors to a specific line inside the PR diff
+   hunk. `add_finding` rejects any finding whose lines are not part of the
+   diff. A signature change can still cause a regression at an unchanged
+   callsite, but you can only file it when the affected line is itself in the
+   diff — do not file bugs in files or lines absent from the diff, and do not
+   file based on inference about unrelated files or subsystems.
 
 # Do NOT file
 
@@ -176,9 +171,10 @@ question or a short clarification is needed after pushback.
 - **Scope-policing / architectural critique.** No "this PR doesn't achieve
   its stated goal", "the design should be different".
 - **Pre-existing issues** not introduced by this diff.
-- **Out-of-diff / wrong-subsystem speculation.** Do not file findings in
-  files absent from the PR diff unless you proved base-vs-head regression on
-  a changed symbol's callsite.
+- **Out-of-diff findings.** `add_finding` rejects any finding whose lines are
+  not part of the PR diff. Do not file findings in files or lines absent from
+  the diff — even a proven base-vs-head regression at an unchanged callsite
+  cannot be filed.
 - **Same-bug fan-out.** If the same defect appears in N files, file ONE
   finding that lists all sites in `description`. Not N findings.
 
@@ -294,12 +290,55 @@ The dataset expects 1-5 comments per PR (mean ~2).
 """
 
 
+_REPO_READY_NOTE = """The repo is already cloned and checked out at the PR head in
+`{working_dir}` — `cd` there and grep for full file context."""
+
+_REPO_NOT_READY_NOTE = """Repo prep FAILED: the checkout in `{working_dir}` may be missing or — worse —
+present but stale (at an old commit). Do NOT trust local files until you have
+re-prepped the tree yourself. Run:
+
+```
+cd {working_dir} || {{ cd {parent_dir} && GH_TOKEN=dummy gh repo clone {repo_owner}/{repo_name} && cd {repo_name}; }}
+GH_TOKEN=dummy git fetch origin {head_sha_or_placeholder} --quiet || GH_TOKEN=dummy git fetch origin refs/pull/{pr_number}/head --quiet
+git checkout --force {head_sha_or_placeholder} --quiet
+```
+
+and verify `git rev-parse HEAD` matches the PR head before reading local
+files. If you cannot get the tree onto the PR head, rely exclusively on the
+diff and `gh api` file contents (`GH_TOKEN=dummy gh api
+repos/{repo_owner}/{repo_name}/contents/<path>?ref=<head_sha>`) — never on
+the local checkout."""
+
+
+def _repo_checkout_note(
+    *,
+    repo_ready: bool,
+    working_dir: str,
+    repo_owner: str,
+    repo_name: str,
+    pr_number: int | str,
+    head_sha: str,
+) -> str:
+    if repo_ready:
+        return _REPO_READY_NOTE.format(working_dir=working_dir)
+    return _REPO_NOT_READY_NOTE.format(
+        working_dir=working_dir,
+        parent_dir=posixpath.dirname(working_dir) or working_dir,
+        repo_owner=repo_owner or "<owner>",
+        repo_name=repo_name or "<repo>",
+        pr_number=pr_number if pr_number != "" else "<pr_number>",
+        head_sha_or_placeholder=head_sha or "<head_sha>",
+    )
+
+
 def _reviewer_system_prompt(
     working_dir: str,
     *,
     repo_owner: str,
     repo_name: str,
     pr_number: int | str,
+    repo_ready: bool = True,
+    head_sha: str = "",
     reviewer_eval: bool = False,
     org_guidelines: str | None = None,
     repo_style_prompt: str | None = None,
@@ -311,6 +350,14 @@ def _reviewer_system_prompt(
         repo_owner=repo_owner or "<owner>",
         repo_name=repo_name or "<repo>",
         pr_number=pr_number if pr_number != "" else "<pr_number>",
+        repo_checkout_note=_repo_checkout_note(
+            repo_ready=repo_ready,
+            working_dir=working_dir,
+            repo_owner=repo_owner,
+            repo_name=repo_name,
+            pr_number=pr_number,
+            head_sha=head_sha,
+        ),
     )
     if reviewer_eval:
         prompt = f"{prompt}\n{REVIEWER_EVAL_PROMPT_SUFFIX}"
@@ -965,6 +1012,8 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
         repo_owner=repo_owner,
         repo_name=repo_name,
         pr_number=pr_number if isinstance(pr_number, int) else "",
+        repo_ready=repo_ready,
+        head_sha=head_sha,
         reviewer_eval=reviewer_eval,
         org_guidelines=org_guidelines,
         repo_style_prompt=repo_style_prompt,
@@ -1004,3 +1053,6 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
             settle_review_check_on_exit,
         ],
     ).with_config(config)
+
+
+traced_reviewer_agent = traced_graph_factory(get_reviewer_agent, REVIEW_TRACING_PROJECT)

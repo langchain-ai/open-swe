@@ -64,6 +64,17 @@ def verify_github_signature(body: bytes, signature: str, *, secret: str) -> bool
     return hmac.compare_digest(expected, signature)
 
 
+def derive_pr_state(*, state: str | None, merged: bool, draft: bool) -> str:
+    """Map GitHub PR fields to the dashboard's pr_state vocabulary."""
+    if merged:
+        return "merged"
+    if state == "closed":
+        return "closed"
+    if draft:
+        return "draft"
+    return "open"
+
+
 def get_thread_id_from_branch(branch_name: str) -> str | None:
     match = re.search(
         r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",

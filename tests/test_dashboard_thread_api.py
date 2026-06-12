@@ -213,6 +213,59 @@ async def test_enrich_run_start_command_rejects_images_for_resolved_text_only_mo
     assert "does not support image input" in exc_info.value.detail
 
 
+def _thread_with_metadata(metadata: dict) -> dict:
+    return {"thread_id": "t1", "status": "idle", "metadata": metadata}
+
+
+def test_thread_summary_includes_pr_and_diff_stats() -> None:
+    summary = thread_api._thread_summary(
+        _thread_with_metadata(
+            {
+                "repo_full_name": "langchain-ai/open-swe",
+                "title": "Add feature",
+                "pr_number": 42,
+                "pr_url": "https://github.com/langchain-ai/open-swe/pull/42",
+                "pr_state": "draft",
+                "pr_title": "feat: add feature",
+                "branch_name": "open-swe/feature",
+                "base_branch": "main",
+                "diff_stats": {"files": 3, "additions": 10, "deletions": 2},
+            }
+        )
+    )
+
+    assert summary["pr"] == {
+        "number": 42,
+        "title": "feat: add feature",
+        "state": "draft",
+        "headRef": "open-swe/feature",
+        "baseRef": "main",
+        "url": "https://github.com/langchain-ai/open-swe/pull/42",
+    }
+    assert summary["diffStats"] == {"files": 3, "additions": 10, "deletions": 2}
+
+
+def test_thread_summary_defaults_unknown_pr_state_to_open() -> None:
+    summary = thread_api._thread_summary(
+        _thread_with_metadata(
+            {
+                "pr_number": 7,
+                "pr_url": "https://example.com/pull/7",
+                "pr_state": "bogus",
+            }
+        )
+    )
+
+    assert summary["pr"]["state"] == "open"
+
+
+def test_thread_summary_omits_pr_when_no_pr_metadata() -> None:
+    summary = thread_api._thread_summary(_thread_with_metadata({"title": "No PR"}))
+
+    assert "pr" not in summary
+    assert "diffStats" not in summary
+
+
 async def test_proxy_commands_lazily_creates_missing_thread_only_for_run_start(
     monkeypatch,
 ) -> None:
@@ -371,7 +424,7 @@ async def test_proxy_endpoints_enforce_thread_ownership(monkeypatch) -> None:
     assert exc_info.value.status_code == 404
 
     with pytest.raises(HTTPException) as exc_info:
-        await anext(thread_api.proxy_dashboard_thread_stream_events("tid", "intruder", b"{}"))
+        await thread_api.proxy_dashboard_thread_stream_events("tid", "intruder", b"{}")
     assert exc_info.value.status_code == 404
 
 
@@ -567,3 +620,70 @@ def test_summary_matches_filters() -> None:
     assert not thread_api._summary_matches_filters(
         summary, resolved=None, viewed=None, source=None, status=None, query="missing"
     )
+
+
+def test_metadata_matches_filters() -> None:
+    metadata = {"source": "dashboard", "title": "Fix login bug", "resolved": True}
+
+    assert thread_api._metadata_matches_filters(metadata, resolved=True, source=None, query=None)
+    assert not thread_api._metadata_matches_filters(
+        metadata, resolved=False, source=None, query=None
+    )
+    assert thread_api._metadata_matches_filters(
+        metadata, resolved=None, source="dashboard", query="login"
+    )
+    assert not thread_api._metadata_matches_filters(
+        metadata, resolved=None, source="github", query=None
+    )
+
+
+def _make_threads(count: int, *, resolved_before: int) -> list[dict[str, object]]:
+    threads: list[dict[str, object]] = []
+    for index in range(count):
+        threads.append(
+            {
+                "thread_id": f"t{index}",
+                "metadata": {
+                    "source": "dashboard",
+                    "github_login": "octocat",
+                    "title": f"Thread {index}",
+                    "updated_at_ms": count - index,
+                    "resolved": index < resolved_before,
+                },
+            }
+        )
+    return threads
+
+
+async def test_list_dashboard_threads_page_pages_beyond_first_search_batch(monkeypatch) -> None:
+    # The 100 most-recent threads are resolved; the unresolved ones only appear
+    # in the second search batch (offset >= 100).
+    threads = _make_threads(150, resolved_before=100)
+    offsets: list[int] = []
+
+    class FakeThreads:
+        async def search(self, *, metadata, limit, offset, sort_by, sort_order):
+            offsets.append(offset)
+            return threads[offset : offset + limit]
+
+        async def update(self, *, thread_id, metadata):
+            return None
+
+    class FakeRuns:
+        async def list(self, thread_id, limit=1):
+            return []
+
+    class FakeClient:
+        threads = FakeThreads()
+        runs = FakeRuns()
+
+    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
+
+    result = await thread_api.list_dashboard_threads_page(
+        "octocat", email=None, limit=25, offset=0, resolved=False
+    )
+
+    assert result["total"] == 50
+    assert len(result["items"]) == 25
+    assert all(item["resolved"] is False for item in result["items"])
+    assert 100 in offsets

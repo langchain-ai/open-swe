@@ -79,7 +79,13 @@ function mergeTextChunks(chunks: Array<Chunk>): Array<Chunk> {
   return chunks.filter((c, i) => c.kind !== "text" || i === lastText);
 }
 
-type AgentTurn = { id: string; author: Message["author"]; timestamp: string; chunks: Array<Chunk> };
+type AgentTurn = {
+  id: string;
+  author: Message["author"];
+  timestamp: string;
+  startedAt: string;
+  chunks: Array<Chunk>;
+};
 
 function messageTimestamp(raw: BaseMessage): string {
   const msg = raw as unknown as Record<string, unknown>;
@@ -304,6 +310,7 @@ export function streamMessagesToUi(
         id: msgId,
         author: "agent",
         timestamp,
+        startedAt: timestamp,
         chunks: [...chunks],
       };
     } else {

@@ -669,10 +669,10 @@ async def test_publish_review_skips_post_on_re_review_with_no_new_findings() -> 
 
 
 @pytest.mark.asyncio
-async def test_publish_review_surfaces_out_of_diff_finding_on_re_review() -> None:
-    """A new out-of-diff finding has no inline comment, but the re-review
-    empty-summary suppression must not swallow it — it should post a summary
-    review carrying the collapsed out-of-diff dropdown."""
+async def test_publish_review_does_not_surface_out_of_diff_finding() -> None:
+    """Out-of-diff findings are disabled: a finding anchored outside the diff is
+    never surfaced on the PR. On a re-review with nothing else to post, it is
+    treated as an empty re-review."""
     from agent.tools.publish_review import _publish_review_async
 
     findings = [
@@ -692,10 +692,16 @@ async def test_publish_review_surfaces_out_of_diff_finding_on_re_review() -> Non
         patch("agent.tools.publish_review.list_findings_async", AsyncMock(return_value=findings)),
         patch("agent.tools.publish_review.post_pull_request_review", post_review),
         patch(
+            "agent.tools.publish_review._open_swe_already_reviewed",
+            AsyncMock(return_value=True),
+        ),
+        patch(
             "agent.tools.publish_review._resolve_threads_for_resolved_findings",
             AsyncMock(return_value=0),
         ),
         patch("agent.tools.publish_review.set_reviewer_thread_metadata", AsyncMock()),
+        patch("agent.tools.publish_review.clear_review_started_comment", AsyncMock()),
+        patch("agent.tools.publish_review.settle_review_check_run", AsyncMock()),
         patch("agent.tools.publish_review._maybe_post_slack_completion_reply", AsyncMock()),
         patch("agent.tools.publish_review._resolve_review_trace_url", AsyncMock(return_value=None)),
     ):
@@ -710,13 +716,12 @@ async def test_publish_review_surfaces_out_of_diff_finding_on_re_review() -> Non
             is_re_review=True,
         )
 
-    post_review.assert_awaited_once()
-    assert "out-of-diff" in post_review.await_args.kwargs["body"]
-    assert post_review.await_args.kwargs["inline_comments"] == []
+    post_review.assert_not_called()
     assert result["success"] is True
+    assert result["review_id"] is None
     assert result["surfaced_count"] == 0
-    assert result["out_of_diff_count"] == 1
-    assert "skipped_empty_re_review" not in result
+    assert "out_of_diff_count" not in result
+    assert result["skipped_empty_re_review"] is True
 
 
 @pytest.mark.asyncio

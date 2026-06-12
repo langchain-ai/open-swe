@@ -48,7 +48,38 @@ class _FakeClient:
         return self._get
 
 
-def _install_client(monkeypatch: pytest.MonkeyPatch, client: _FakeClient) -> None:
+class _RoutingClient:
+    """Fake httpx client that routes GETs by URL substring."""
+
+    def __init__(self, *, post: _FakeResponse, get_routes: dict[str, _FakeResponse]) -> None:
+        self._post = post
+        self._get_routes = get_routes
+        self.post_calls: list[dict[str, Any]] = []
+        self.get_calls: list[dict[str, Any]] = []
+
+    async def __aenter__(self) -> _RoutingClient:
+        return self
+
+    async def __aexit__(self, *_exc: object) -> None:
+        return None
+
+    async def post(
+        self, url: str, *, headers: dict[str, str], json: dict[str, Any]
+    ) -> _FakeResponse:
+        self.post_calls.append({"url": url, "headers": headers, "json": json})
+        return self._post
+
+    async def get(
+        self, url: str, *, headers: dict[str, str], params: dict[str, str] | None = None
+    ) -> _FakeResponse:
+        self.get_calls.append({"url": url, "headers": headers, "params": params})
+        for needle, resp in self._get_routes.items():
+            if needle in url:
+                return resp
+        raise AssertionError(f"unexpected GET {url}")
+
+
+def _install_client(monkeypatch: pytest.MonkeyPatch, client: _FakeClient | _RoutingClient) -> None:
     monkeypatch.setattr(opr.httpx, "AsyncClient", lambda **_kwargs: client)
 
 
@@ -206,3 +237,142 @@ def test_error_surfaced_on_failure(monkeypatch: pytest.MonkeyPatch) -> None:
 
 async def _coro(value: Any) -> Any:
     return value
+
+
+def _open_with_body(body: str) -> dict[str, Any]:
+    return asyncio.run(
+        opr._open_pull_request(
+            owner="langchain-ai",
+            repo="open-swe",
+            head="open-swe/feature",
+            base="main",
+            title="feat: x",
+            body=body,
+            draft=True,
+        )
+    )
+
+
+def _stub_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(opr, "_resolve_pr_author_token", lambda: _coro(("tok", "user")))
+
+
+def test_appends_slack_reference_for_private_repo(monkeypatch: pytest.MonkeyPatch) -> None:
+    _set_config(
+        monkeypatch,
+        {
+            "source": "slack",
+            "slack_thread": {"channel_id": "C123", "thread_ts": "1700000000.000100"},
+        },
+    )
+    _stub_token(monkeypatch)
+    monkeypatch.setattr(
+        opr, "get_slack_permalink", lambda *_a, **_k: _coro("https://slack.example/p1")
+    )
+
+    client = _RoutingClient(
+        post=_FakeResponse(201, {"html_url": "u", "number": 1, "user": {}}),
+        get_routes={"/repos/langchain-ai/open-swe": _FakeResponse(200, {"private": True})},
+    )
+    _install_client(monkeypatch, client)
+
+    _open_with_body("original body")
+
+    sent_body = client.post_calls[0]["json"]["body"]
+    assert sent_body.startswith("original body")
+    assert "## References" in sent_body
+    assert "- Slack thread: https://slack.example/p1" in sent_body
+
+
+def test_no_reference_for_public_repo(monkeypatch: pytest.MonkeyPatch) -> None:
+    _set_config(
+        monkeypatch,
+        {
+            "source": "slack",
+            "slack_thread": {"channel_id": "C123", "thread_ts": "1700000000.000100"},
+        },
+    )
+    _stub_token(monkeypatch)
+    monkeypatch.setattr(
+        opr, "get_slack_permalink", lambda *_a, **_k: _coro("https://slack.example/p1")
+    )
+
+    client = _RoutingClient(
+        post=_FakeResponse(201, {"html_url": "u", "number": 1, "user": {}}),
+        get_routes={"/repos/langchain-ai/open-swe": _FakeResponse(200, {"private": False})},
+    )
+    _install_client(monkeypatch, client)
+
+    _open_with_body("original body")
+
+    assert client.post_calls[0]["json"]["body"] == "original body"
+
+
+def test_appends_linear_reference_for_private_repo(monkeypatch: pytest.MonkeyPatch) -> None:
+    _set_config(
+        monkeypatch,
+        {
+            "source": "linear",
+            "linear_issue": {"url": "https://linear.app/x/AB-12", "identifier": "AB-12"},
+        },
+    )
+    _stub_token(monkeypatch)
+
+    client = _RoutingClient(
+        post=_FakeResponse(201, {"html_url": "u", "number": 1, "user": {}}),
+        get_routes={"/repos/langchain-ai/open-swe": _FakeResponse(200, {"private": True})},
+    )
+    _install_client(monkeypatch, client)
+
+    _open_with_body("body")
+
+    sent_body = client.post_calls[0]["json"]["body"]
+    assert "- Linear ticket: [AB-12](https://linear.app/x/AB-12)" in sent_body
+
+
+def test_skips_append_when_no_source_context(monkeypatch: pytest.MonkeyPatch) -> None:
+    _set_config(monkeypatch, {"source": "slack"})
+    _stub_token(monkeypatch)
+
+    client = _FakeClient(post=_FakeResponse(201, {"html_url": "u", "number": 1, "user": {}}))
+    _install_client(monkeypatch, client)
+
+    _open_with_body("body")
+
+    assert client.post_calls[0]["json"]["body"] == "body"
+    assert client.get_calls == []
+
+
+def test_does_not_duplicate_existing_references(monkeypatch: pytest.MonkeyPatch) -> None:
+    _set_config(
+        monkeypatch,
+        {
+            "source": "slack",
+            "slack_thread": {"channel_id": "C123", "thread_ts": "1700000000.000100"},
+        },
+    )
+    _stub_token(monkeypatch)
+
+    client = _FakeClient(post=_FakeResponse(201, {"html_url": "u", "number": 1, "user": {}}))
+    _install_client(monkeypatch, client)
+
+    _open_with_body("body\n\n## References\n- existing")
+
+    assert client.post_calls[0]["json"]["body"] == "body\n\n## References\n- existing"
+    assert client.get_calls == []
+
+
+def test_derive_pr_state_prefers_merged() -> None:
+    assert opr.derive_pr_state(state="closed", merged=True, draft=True) == "merged"
+
+
+def test_derive_pr_state_closed_over_draft() -> None:
+    assert opr.derive_pr_state(state="closed", merged=False, draft=True) == "closed"
+
+
+def test_derive_pr_state_draft() -> None:
+    assert opr.derive_pr_state(state="open", merged=False, draft=True) == "draft"
+
+
+def test_derive_pr_state_open() -> None:
+    assert opr.derive_pr_state(state="open", merged=False, draft=False) == "open"

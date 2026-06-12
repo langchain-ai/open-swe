@@ -10,6 +10,8 @@ import {
   ChatCircleIcon,
   CheckCircleIcon,
   CircleNotchIcon,
+  GitMergeIcon,
+  GitPullRequestIcon,
   LightningIcon,
   PlusIcon,
   TrashIcon,
@@ -24,6 +26,11 @@ import type { ComponentType, SVGProps } from "react"
 import type { SessionUser } from "@/lib/api"
 import type { AgentSource, AgentThread } from "@/lib/agents/types"
 import { SidebarUserMenu } from "@/components/SidebarUserMenu"
+import {
+  ReviewFileTree,
+  ReviewSidebarProvider,
+  useReviewSidebarData,
+} from "@/components/agents/ReviewSidebar"
 import { Button } from "@/components/ui/button"
 import {
   SidebarCollapseButton,
@@ -32,10 +39,10 @@ import {
 } from "@/components/sidebar-layout"
 import { groupThreads } from "@/lib/agents/api"
 import {
-  useAgentThreads,
   useDeleteAgentThread,
   useResolveAgentThread,
   useSeedAgentThreadDetails,
+  useSidebarThreads,
 } from "@/lib/agents/queries"
 import { cn } from "@/lib/utils"
 
@@ -51,6 +58,34 @@ const SOURCE_META: Record<AgentSource, { icon: SourceIcon; label: string }> = {
   schedule: { icon: CalendarBlankIcon, label: "Triggered from a schedule" },
 }
 
+type PrState = NonNullable<AgentThread["pr"]>["state"]
+
+const PR_STATE_META: Record<
+  PrState,
+  { icon: SourceIcon; label: string; className: string }
+> = {
+  draft: {
+    icon: GitPullRequestIcon,
+    label: "Draft pull request",
+    className: "text-[var(--ui-text-dim)]",
+  },
+  open: {
+    icon: GitPullRequestIcon,
+    label: "Open pull request",
+    className: "text-[var(--ui-success)]",
+  },
+  merged: {
+    icon: GitMergeIcon,
+    label: "Merged pull request",
+    className: "text-[var(--ui-accent)]",
+  },
+  closed: {
+    icon: GitPullRequestIcon,
+    label: "Closed pull request",
+    className: "text-[var(--ui-danger)]",
+  },
+}
+
 interface AgentsSidebarProps {
   user: SessionUser
   activeThreadId?: string
@@ -59,16 +94,21 @@ interface AgentsSidebarProps {
 const NAV = [
   { to: "/agents/automations", label: "Automations", icon: LightningIcon },
   { to: "/my-settings", label: "Dashboard", icon: ChartLineUpIcon },
+  { to: "/agents/reviews", label: "Reviews", icon: GitPullRequestIcon },
 ] as const
 
 export function AgentsSidebar({ user, activeThreadId }: AgentsSidebarProps) {
-  const threadsQuery = useAgentThreads()
-  const threads = threadsQuery.data ?? []
-  useSeedAgentThreadDetails(threads, activeThreadId)
-  const activeThreads = threads.filter((thread) => !thread.resolved)
-  const resolvedThreads = threads.filter((thread) => thread.resolved)
+  const { active, resolved } = useSidebarThreads(RESOLVED_SIDEBAR_LIMIT)
+  const activeThreads = active.data?.items ?? []
+  const resolvedThreads = resolved.data?.items ?? []
+  const resolvedTotal = resolved.data?.total ?? resolvedThreads.length
+  useSeedAgentThreadDetails(
+    [...activeThreads, ...resolvedThreads],
+    activeThreadId
+  )
   const groups = groupThreads(activeThreads)
   const layout = useSidebarLayout()
+  const reviewSidebar = useReviewSidebarData()
 
   return (
     <SidebarFrame
@@ -118,39 +158,44 @@ export function AgentsSidebar({ user, activeThreadId }: AgentsSidebarProps) {
         })}
       </nav>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
-        <ThreadGroup
-          label="Today"
-          threads={groups.today}
-          activeThreadId={activeThreadId}
-          onNavigate={layout.closeOnMobile}
-        />
-        <ThreadGroup
-          label="Last 7 days"
-          threads={groups.last7}
-          activeThreadId={activeThreadId}
-          onNavigate={layout.closeOnMobile}
-          defaultCollapsed
-        />
-        <ThreadGroup
-          label="Last 30 days"
-          threads={groups.last30}
-          activeThreadId={activeThreadId}
-          onNavigate={layout.closeOnMobile}
-          defaultCollapsed
-        />
-        <ThreadGroup
-          label="Older"
-          threads={groups.older}
-          activeThreadId={activeThreadId}
-          onNavigate={layout.closeOnMobile}
-        />
-        <ResolvedThreadGroup
-          threads={resolvedThreads}
-          activeThreadId={activeThreadId}
-          onNavigate={layout.closeOnMobile}
-        />
-      </div>
+      {reviewSidebar ? (
+        <ReviewFileTree data={reviewSidebar} />
+      ) : (
+        <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
+          <ThreadGroup
+            label="Today"
+            threads={groups.today}
+            activeThreadId={activeThreadId}
+            onNavigate={layout.closeOnMobile}
+          />
+          <ThreadGroup
+            label="Last 7 days"
+            threads={groups.last7}
+            activeThreadId={activeThreadId}
+            onNavigate={layout.closeOnMobile}
+            defaultCollapsed
+          />
+          <ThreadGroup
+            label="Last 30 days"
+            threads={groups.last30}
+            activeThreadId={activeThreadId}
+            onNavigate={layout.closeOnMobile}
+            defaultCollapsed
+          />
+          <ThreadGroup
+            label="Older"
+            threads={groups.older}
+            activeThreadId={activeThreadId}
+            onNavigate={layout.closeOnMobile}
+          />
+          <ResolvedThreadGroup
+            threads={resolvedThreads}
+            total={resolvedTotal}
+            activeThreadId={activeThreadId}
+            onNavigate={layout.closeOnMobile}
+          />
+        </div>
+      )}
 
       <div className="p-2">
         <SidebarUserMenu user={user} showSettingsLink />
@@ -204,10 +249,12 @@ function ThreadGroup({
 
 function ResolvedThreadGroup({
   threads,
+  total,
   activeThreadId,
   onNavigate,
 }: {
   threads: Array<AgentThread>
+  total: number
   activeThreadId?: string
   onNavigate?: () => void
 }) {
@@ -216,7 +263,7 @@ function ResolvedThreadGroup({
 
   const ToggleIcon = collapsed ? CaretRightIcon : CaretDownIcon
   const visible = threads.slice(0, RESOLVED_SIDEBAR_LIMIT)
-  const hasMore = threads.length > RESOLVED_SIDEBAR_LIMIT
+  const hasMore = total > visible.length
 
   return (
     <div className="mb-3">
@@ -228,7 +275,7 @@ function ResolvedThreadGroup({
       >
         <ToggleIcon className="size-3" />
         <span className="min-w-0 flex-1 truncate">Resolved</span>
-        <span>{threads.length}</span>
+        <span>{total}</span>
       </button>
       {!collapsed && (
         <>
@@ -302,6 +349,8 @@ function ThreadRow({
       ? SOURCE_META[thread.source]
       : null
   const SourceIcon = source?.icon
+  const prMeta = thread.pr ? PR_STATE_META[thread.pr.state] : null
+  const PrIcon = prMeta?.icon
   const showFinishedIndicator = thread.status === "finished" && !thread.viewed
 
   const openTrace = () => {
@@ -357,6 +406,17 @@ function ThreadRow({
           <span className="min-w-0 flex-1 truncate text-xs">
             {thread.title}
           </span>
+          {prMeta && PrIcon && (
+            <PrIcon
+              className={cn(
+                "size-3.5 shrink-0 group-hover:hidden",
+                prMeta.className
+              )}
+              aria-label={prMeta.label}
+            >
+              <title>{prMeta.label}</title>
+            </PrIcon>
+          )}
           {badge && (
             <span className="shrink-0 rounded bg-[var(--ui-panel-2)] px-1.5 py-0.5 text-[10px] text-[var(--ui-text-dim)] group-hover:hidden">
               {badge}
@@ -468,9 +528,11 @@ export function AgentsShell({
   children: React.ReactNode
 }) {
   return (
-    <div className="agents-ui flex h-svh overflow-hidden bg-[var(--ui-bg)]">
-      <AgentsSidebar user={user} activeThreadId={activeThreadId} />
-      <div className="flex min-w-0 flex-1">{children}</div>
-    </div>
+    <ReviewSidebarProvider>
+      <div className="agents-ui flex h-svh overflow-hidden bg-[var(--ui-bg)]">
+        <AgentsSidebar user={user} activeThreadId={activeThreadId} />
+        <div className="flex min-w-0 flex-1">{children}</div>
+      </div>
+    </ReviewSidebarProvider>
   )
 }
