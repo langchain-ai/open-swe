@@ -5,6 +5,7 @@ from __future__ import annotations
 import hmac
 import logging
 import os
+import time
 from typing import Any
 
 import httpx
@@ -620,17 +621,16 @@ async def _paginate(
     return out
 
 
-@router.get("/repos")
-async def list_repos(
-    session: dict[str, Any] = _SESSION_DEP,
-) -> dict[str, Any]:
-    """List repos where open-swe is installed and the user has access.
+async def _fetch_user_installations_and_repos(
+    login: str,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Resolve the installations and repos a user can access via the GitHub App.
 
     Paginates both ``/user/installations`` and per-installation
     ``/user/installations/{id}/repositories`` so users with multiple
-    installations or >30 accessible repos get the complete set.
+    installations or >30 accessible repos get the complete set. Shared by the
+    ``/repos`` endpoint and the reviews access filter.
     """
-    login = session["sub"]
     token = await get_valid_access_token(login)
     if not token:
         raise HTTPException(401, "github token unavailable, re-login required")
@@ -680,6 +680,36 @@ async def list_repos(
                     continue
                 raise
             repositories.extend(repos)
+    return installations, repositories
+
+
+# Repo access changes rarely; cache the accessible set briefly so the reviews
+# list (which re-fetches every 5s while a review runs) resolves access with a
+# single GitHub round-trip burst instead of one call per repo per request.
+_ACCESSIBLE_REPOS_TTL_SECONDS = 60.0
+_accessible_repos_cache: dict[str, tuple[float, frozenset[str]]] = {}
+
+
+async def accessible_repo_full_names(login: str) -> frozenset[str]:
+    """Lowercased ``owner/name`` of repos the user can access, cached per-login."""
+    now = time.monotonic()
+    cached = _accessible_repos_cache.get(login)
+    if cached is not None and now - cached[0] < _ACCESSIBLE_REPOS_TTL_SECONDS:
+        return cached[1]
+    _, repositories = await _fetch_user_installations_and_repos(login)
+    names = frozenset(
+        repo["full_name"].lower() for repo in repositories if isinstance(repo.get("full_name"), str)
+    )
+    _accessible_repos_cache[login] = (now, names)
+    return names
+
+
+@router.get("/repos")
+async def list_repos(
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    """List repos where open-swe is installed and the user has access."""
+    installations, repositories = await _fetch_user_installations_and_repos(session["sub"])
     return {
         "installations": [
             {
@@ -722,19 +752,10 @@ async def api_list_reviews(
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
     login = session["sub"]
-    access_cache: dict[str, bool] = {}
+    accessible = await accessible_repo_full_names(login)
 
     async def is_accessible(summary: dict[str, Any]) -> bool:
-        full_name = summary["full_name"]
-        if full_name not in access_cache:
-            try:
-                await require_repo_access_for_user(login, full_name)
-                access_cache[full_name] = True
-            except HTTPException as exc:
-                if exc.status_code not in {403, 404}:
-                    raise
-                access_cache[full_name] = False
-        return access_cache[full_name]
+        return summary["full_name"].lower() in accessible
 
     page = max(page, 0)
     reviews, has_more = await list_reviews(
