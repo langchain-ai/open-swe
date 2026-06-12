@@ -74,6 +74,7 @@ from .utils.github_token import cache_github_token_for_thread
 from .utils.model import DEFAULT_LLM_REASONING, make_model, provider_model_kwargs
 from .utils.repo_prep import materialize_trusted_skills, prepare_review_repo
 from .utils.sandbox_paths import aresolve_sandbox_work_dir
+from .utils.tracing import REVIEW_TRACING_PROJECT, traced_graph_factory
 
 REVIEWER_PROMPT_TEMPLATE = """You are a specialized code reviewer agent. Your job is to review one GitHub PR and publish a single review.
 
@@ -1052,3 +1053,6 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
             settle_review_check_on_exit,
         ],
     ).with_config(config)
+
+
+traced_reviewer_agent = traced_graph_factory(get_reviewer_agent, REVIEW_TRACING_PROJECT)
