@@ -9,7 +9,11 @@ import type { ModelSelection } from "@/lib/agents/provider/useModelOptions"
 import { AgentPromptBar } from "@/components/agents/AgentPromptBar"
 import { SlackConnectDialog } from "@/components/agents/SlackConnectDialog"
 import { Logo } from "@/components/agents/ported/Logo"
-import { agentThreadKeys, optimisticThread } from "@/lib/agents/queries"
+import {
+  agentThreadKeys,
+  invalidateAgentThreadLists,
+  optimisticThread,
+} from "@/lib/agents/queries"
 import { useModelOptions } from "@/lib/agents/provider/useModelOptions"
 import { useProfile, useRepos } from "@/lib/profile"
 
@@ -65,6 +69,7 @@ export function AgentsHome() {
       thread,
       ...(prev?.filter((existing) => existing.id !== id) ?? []),
     ])
+    invalidateAgentThreadLists(queryClient)
     void navigate({ to: "/agents/$threadId", params: { threadId: id } })
   }, [stream.threadId, queryClient, navigate])
 
