@@ -387,12 +387,14 @@ function ReviewBody({
                     focused={focused}
                     viewed={viewed.has(file.path)}
                     onToggleViewed={() => {
-                      const collapses =
-                        !viewed.has(file.path) &&
-                        expandedFiles[file.path] === undefined
-                      if (collapses && focused?.file === file.path)
+                      const becomingViewed = !viewed.has(file.path)
+                      if (becomingViewed && focused?.file === file.path)
                         setFocused(null)
                       toggleViewed(file.path)
+                      setExpandedFiles((prev) => ({
+                        ...prev,
+                        [file.path]: !becomingViewed,
+                      }))
                     }}
                     expanded={
                       expandedFiles[file.path] ?? !viewed.has(file.path)
