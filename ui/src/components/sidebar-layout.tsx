@@ -44,7 +44,7 @@ export function useSidebarLayout() {
 
   const toggle = useCallback(() => setCollapsed(!collapsed), [collapsed, setCollapsed]);
 
-  useHotkey("mod+b", toggle, { enableInFormFields: true });
+  useHotkey("mod+b", toggle, { enableInFormFields: true, ignoreRepeat: true });
 
   const closeOnMobile = useCallback(() => {
     if (typeof window === "undefined") return;

@@ -4,6 +4,7 @@ export interface HotkeyOptions {
   enabled?: boolean
   preventDefault?: boolean
   enableInFormFields?: boolean
+  ignoreRepeat?: boolean
 }
 
 interface ParsedCombo {
@@ -99,6 +100,7 @@ export function useHotkey(
     enabled = true,
     preventDefault = true,
     enableInFormFields = false,
+    ignoreRepeat = false,
   } = options
   const handlerRef = useRef(handler)
   handlerRef.current = handler
@@ -109,6 +111,7 @@ export function useHotkey(
     if (!enabled || typeof window === "undefined") return
     const combos = comboKey.split(",").map(parseCombo)
     const onKeyDown = (event: KeyboardEvent) => {
+      if (ignoreRepeat && event.repeat) return
       if (!enableInFormFields && isFormField(event.target)) return
       if (!combos.some((c) => eventMatchesCombo(event, c))) return
       if (preventDefault) event.preventDefault()
@@ -116,5 +119,5 @@ export function useHotkey(
     }
     window.addEventListener("keydown", onKeyDown)
     return () => window.removeEventListener("keydown", onKeyDown)
-  }, [enabled, preventDefault, enableInFormFields, comboKey])
+  }, [enabled, preventDefault, enableInFormFields, ignoreRepeat, comboKey])
 }
