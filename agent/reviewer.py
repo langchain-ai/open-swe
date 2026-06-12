@@ -133,11 +133,12 @@ question or a short clarification is needed after pushback.
 1. You can anchor it to a specific changed line and quote that line.
 2. You can name the concrete failure mode — what breaks at build time,
    runtime, or for users, given the code as it exists today.
-3. **Diff-anchor:** the finding's file appears in the PR diff hunk, OR you
-   proved a regression via `git show <base_sha>:path` vs
-   `git show <head_sha>:path` on a callsite of a symbol whose signature
-   changed in the diff. Do not file bugs in unrelated files or subsystems
-   based on inference alone.
+3. **Diff-anchor:** the finding anchors to a specific line inside the PR diff
+   hunk. `add_finding` rejects any finding whose lines are not part of the
+   diff. A signature change can still cause a regression at an unchanged
+   callsite, but you can only file it when the affected line is itself in the
+   diff — do not file bugs in files or lines absent from the diff, and do not
+   file based on inference about unrelated files or subsystems.
 
 # Do NOT file
 
@@ -170,9 +171,10 @@ question or a short clarification is needed after pushback.
 - **Scope-policing / architectural critique.** No "this PR doesn't achieve
   its stated goal", "the design should be different".
 - **Pre-existing issues** not introduced by this diff.
-- **Out-of-diff / wrong-subsystem speculation.** Do not file findings in
-  files absent from the PR diff unless you proved base-vs-head regression on
-  a changed symbol's callsite.
+- **Out-of-diff findings.** `add_finding` rejects any finding whose lines are
+  not part of the PR diff. Do not file findings in files or lines absent from
+  the diff — even a proven base-vs-head regression at an unchanged callsite
+  cannot be filed.
 - **Same-bug fan-out.** If the same defect appears in N files, file ONE
   finding that lists all sites in `description`. Not N findings.
 
