@@ -17,6 +17,7 @@ import {
   XIcon,
 } from "@phosphor-icons/react"
 import { IoLogoGithub } from "react-icons/io5"
+import { Popover } from "@base-ui/react/popover"
 
 import type {
   ReviewCheckRun,
@@ -207,16 +208,13 @@ function ReviewBody({
 }) {
   const [sideTab, setSideTab] = useState<SideTab>("info")
   const [selectedFile, setSelectedFile] = useState<string | null>(null)
-  const scrollRef = useRef<HTMLElement | null>(null)
   const fileRefs = useRef<Record<string, HTMLDivElement | null>>({})
   const anchorRefs = useRef<Record<string, HTMLDivElement | null>>({})
   const [expandedFiles, setExpandedFiles] = useState<Record<string, boolean>>(
     {}
   )
   const [focused, setFocused] = useState<ReviewFinding | null>(null)
-  const [cardPos, setCardPos] = useState<{ top: number; left: number | null }>(
-    { top: 96, left: null }
-  )
+  const [anchorEl, setAnchorEl] = useState<HTMLDivElement | null>(null)
 
   const viewedStorageKey = `open-swe.review.viewed.${detail.owner}/${detail.repo}/${detail.number}.${detail.head_sha}`
   const [viewed, setViewed] = useState<Set<string>>(() => {
@@ -303,26 +301,12 @@ function ReviewBody({
     })
   }, [])
 
-  const updateCardPos = useCallback((finding: ReviewFinding) => {
-    const rect = anchorRefs.current[finding.id]?.getBoundingClientRect()
-    if (rect) {
-      // No vertical clamp: the card must move 1:1 with its anchor while
-      // scrolling (and scroll out of view with it) to stay visually attached.
-      setCardPos({
-        top: rect.top,
-        left: Math.min(rect.right + 12, window.innerWidth - 412 - 8),
-      })
-    } else {
-      setCardPos({ top: 96, left: null })
-    }
-  }, [])
-
   const openFinding = useCallback(
     (finding: ReviewFinding) => {
       markRead(finding.id)
       setFocused(finding)
       if (!isAnchored(finding)) {
-        setCardPos({ top: 96, left: null })
+        setAnchorEl(null)
         return
       }
       setExpandedFiles((prev) => ({ ...prev, [finding.file]: true }))
@@ -330,23 +314,11 @@ function ReviewBody({
         const node =
           anchorRefs.current[finding.id] ?? fileRefs.current[finding.file]
         node?.scrollIntoView({ block: "center" })
-        requestAnimationFrame(() => updateCardPos(finding))
+        setAnchorEl(anchorRefs.current[finding.id] ?? null)
       })
     },
-    [markRead, updateCardPos]
+    [markRead]
   )
-
-  useEffect(() => {
-    if (!focused || !isAnchored(focused)) return
-    const scroller = scrollRef.current
-    const onMove = () => updateCardPos(focused)
-    scroller?.addEventListener("scroll", onMove, { passive: true })
-    window.addEventListener("resize", onMove)
-    return () => {
-      scroller?.removeEventListener("scroll", onMove)
-      window.removeEventListener("resize", onMove)
-    }
-  }, [focused, updateCardPos])
 
   const closeFinding = useCallback(() => setFocused(null), [])
 
@@ -383,7 +355,7 @@ function ReviewBody({
 
   return (
     <div className="relative flex min-h-0 flex-1">
-      <main ref={scrollRef} className="min-w-0 flex-1 overflow-y-auto">
+      <main className="min-w-0 flex-1 overflow-y-auto">
         <div className="mx-auto max-w-6xl px-6 py-6">
           <PrHeader detail={detail} />
           <div className="mt-4 rounded-lg border border-border bg-card p-4">
@@ -469,15 +441,55 @@ function ReviewBody({
         onFindingClick={openFinding}
       />
 
-      {focused && (
-        <FindingFloatingCard
-          detail={detail}
-          finding={focused}
-          top={cardPos.top}
-          left={cardPos.left}
-          onClose={closeFinding}
-        />
-      )}
+      {focused &&
+        (isAnchored(focused) && anchorEl ? (
+          <Popover.Root
+            open
+            onOpenChange={(open) => {
+              if (!open) setFocused(null)
+            }}
+          >
+            <Popover.Portal>
+              <Popover.Positioner
+                anchor={anchorEl}
+                side="right"
+                align="start"
+                sideOffset={12}
+                collisionAvoidance={{
+                  side: "shift",
+                  align: "none",
+                  fallbackAxisSide: "none",
+                }}
+                className="z-50"
+              >
+                <Popover.Popup
+                  data-finding-card
+                  aria-label={focused.title}
+                  className={FINDING_CARD_CLASS}
+                >
+                  <FindingCardContent
+                    detail={detail}
+                    finding={focused}
+                    onClose={closeFinding}
+                  />
+                </Popover.Popup>
+              </Popover.Positioner>
+            </Popover.Portal>
+          </Popover.Root>
+        ) : (
+          <div
+            data-finding-card
+            role="dialog"
+            aria-label={focused.title}
+            className={cn(FINDING_CARD_CLASS, "fixed top-24 right-1 z-50")}
+          >
+            <FindingCardContent
+              detail={detail}
+              finding={focused}
+              onClose={closeFinding}
+            />
+          </div>
+        ))}
     </div>
   )
 }
@@ -732,17 +744,16 @@ function DiffLineRow({
   )
 }
 
-function FindingFloatingCard({
+const FINDING_CARD_CLASS =
+  "flex max-h-[70vh] w-[412px] flex-col overflow-hidden rounded-lg border border-border bg-background shadow-2xl"
+
+function FindingCardContent({
   detail,
   finding,
-  top,
-  left,
   onClose,
 }: {
   detail: ReviewDetail
   finding: ReviewFinding
-  top: number
-  left: number | null
   onClose: () => void
 }) {
   const [copied, setCopied] = useState(false)
@@ -771,16 +782,7 @@ function FindingFloatingCard({
   }
 
   return (
-    <div
-      data-finding-card
-      className={cn(
-        "fixed z-50 flex max-h-[70vh] w-[412px] flex-col overflow-hidden rounded-lg border border-border bg-background shadow-2xl",
-        left === null && "right-1"
-      )}
-      style={left === null ? { top } : { top, left }}
-      role="dialog"
-      aria-label={finding.title}
-    >
+    <>
       <div className="flex items-center gap-2 border-b border-border px-4 py-2.5 text-xs">
         <Icon className={cn("size-3.5", style.className)} />
         <span className={cn("font-medium", style.className)}>
@@ -832,7 +834,7 @@ function FindingFloatingCard({
           </a>
         )}
       </div>
-    </div>
+    </>
   )
 }
 
