@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
+import { formatElapsed } from "@/lib/utils";
+
 const BUSY_TEXTS: { present: string; past: string }[] = [
   { present: "vibing...", past: "Vibed" },
   { present: "noodling...", past: "Noodled" },
@@ -13,11 +15,6 @@ const BUSY_TEXTS: { present: string; past: string }[] = [
   { present: "scheming...", past: "Schemed" },
   { present: "processing...", past: "Processed" },
 ];
-
-function formatElapsed(ms: number): string {
-  const secs = Math.max(1, Math.ceil(ms / 1000));
-  return secs < 60 ? `${secs}s` : `${Math.floor(secs / 60)}m ${secs % 60}s`;
-}
 
 const THINKING_SETTLE_MS = 300;
 

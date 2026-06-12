@@ -11,7 +11,31 @@ import { buildRenderItems, summarizeExploration, type RenderItem } from "./rende
 import { SubagentGroup } from "@/components/agents/subagents";
 import { summarizeChangedFiles } from "./summarizeChangedFiles";
 import { TurnChangedFilesCard } from "./TurnChangedFilesCard";
+import { WorkSummary } from "./WorkSummary";
 import type { ApprovalCallbacks, ChangedFileSummaryItem } from "./types";
+
+/**
+ * Render-item types kept visible (not collapsed) when a turn finishes — the
+ * agent's actual reply to the user. Everything else is "work".
+ */
+const REPLY_ITEM_TYPES = new Set<RenderItem["type"]>(["text-chunk", "reply-item"]);
+
+/**
+ * Split a finished turn's items into collapsible work and the trailing reply,
+ * where the reply is the maximal suffix made up solely of reply/text items.
+ */
+function splitWorkAndReply(items: RenderItem[]): {
+  workItems: RenderItem[];
+  replyItems: RenderItem[];
+} {
+  let splitIndex = items.length;
+  while (splitIndex > 0) {
+    const prev = items[splitIndex - 1];
+    if (!prev || !REPLY_ITEM_TYPES.has(prev.type)) break;
+    splitIndex -= 1;
+  }
+  return { workItems: items.slice(0, splitIndex), replyItems: items.slice(splitIndex) };
+}
 
 export function AgentMessage({
   message,
@@ -95,13 +119,41 @@ export function AgentMessage({
     wasExplorationLiveRef.current = false;
   }, [hasExploredGroups, isStreaming, exploredGroupIds, message.id]);
 
-  return (
-    <div className="my-2 min-w-0 space-y-2">
-      {renderItems.map((item, index) => {
-        switch (item.type) {
+  // Measure wall-clock work time for live runs (most accurate); fall back to
+  // the turn's first→last message timestamps for transcripts loaded from state.
+  const [measuredDurationMs, setMeasuredDurationMs] = useState<number | null>(null);
+  const workStartRef = useRef<number | null>(null);
+  const wasStreamingRef = useRef(false);
+  useEffect(() => {
+    if (isStreaming) {
+      if (workStartRef.current === null) workStartRef.current = Date.now();
+      wasStreamingRef.current = true;
+      return;
+    }
+    if (wasStreamingRef.current && workStartRef.current !== null) {
+      setMeasuredDurationMs(Date.now() - workStartRef.current);
+      wasStreamingRef.current = false;
+    }
+  }, [isStreaming]);
+
+  const workDurationMs = useMemo(() => {
+    if (measuredDurationMs !== null) return measuredDurationMs;
+    if (!message.startedAt) return null;
+    const start = Date.parse(message.startedAt);
+    const end = Date.parse(message.timestamp);
+    if (!Number.isFinite(start) || !Number.isFinite(end)) return null;
+    const delta = end - start;
+    return delta > 0 ? delta : null;
+  }, [measuredDurationMs, message.startedAt, message.timestamp]);
+
+  const { workItems, replyItems } = useMemo(() => splitWorkAndReply(renderItems), [renderItems]);
+  const collapseWork = !isStreaming && workItems.length > 0;
+
+  const renderItem = (item: RenderItem, index: number, total: number) => {
+    switch (item.type) {
           case "reasoning-item": {
             const reasoningChunk = item.chunk.kind === "reasoning" ? item.chunk : null;
-            const isLastItem = index === renderItems.length - 1;
+            const isLastItem = index === total - 1;
             return (
               <div key={item.key} className="flex-1 min-w-0">
                 <ReasoningBlock
@@ -216,7 +268,22 @@ export function AgentMessage({
               </div>
             );
         }
-      })}
+  };
+
+  return (
+    <div className="my-2 min-w-0 space-y-2">
+      {collapseWork ? (
+        <>
+          <WorkSummary durationMs={workDurationMs}>
+            {workItems.map((item, index) => renderItem(item, index, workItems.length))}
+          </WorkSummary>
+          {replyItems.map((item, index) =>
+            renderItem(item, workItems.length + index, renderItems.length),
+          )}
+        </>
+      ) : (
+        renderItems.map((item, index) => renderItem(item, index, renderItems.length))
+      )}
 
       {changedFiles.length > 0 && !isStreaming && (
         <TurnChangedFilesCard
