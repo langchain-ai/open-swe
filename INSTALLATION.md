@@ -500,7 +500,7 @@ REVIEWER_OUTCOMES_DATASET=""
 PUBLIC_REPO_ORG_GATE=""
 
 # === Sandbox (optional) ===
-# Provider: langsmith (default), modal, daytona, runloop, or local. See CUSTOMIZATION.md.
+# Provider: langsmith (default), modal, daytona, runloop, e2b, or local. See CUSTOMIZATION.md.
 SANDBOX_TYPE="langsmith"
 DEFAULT_SANDBOX_SNAPSHOT_ID=""         # Required when SANDBOX_TYPE=langsmith (see step 4c)
 DEFAULT_SANDBOX_SNAPSHOT_FS_CAPACITY_BYTES=""  # Root FS size in bytes (default: 32 GiB)
