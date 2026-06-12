@@ -1,6 +1,13 @@
 import { Link, Navigate, createFileRoute } from "@tanstack/react-router"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react"
 import {
   ArrowClockwiseIcon,
   ArrowLeftIcon,
@@ -17,7 +24,6 @@ import {
   XIcon,
 } from "@phosphor-icons/react"
 import { IoLogoGithub } from "react-icons/io5"
-import { Popover } from "@base-ui/react/popover"
 
 import type {
   ReviewCheckRun,
@@ -215,6 +221,7 @@ function ReviewBody({
   )
   const [focused, setFocused] = useState<ReviewFinding | null>(null)
   const [anchorEl, setAnchorEl] = useState<HTMLDivElement | null>(null)
+  const scrollRef = useRef<HTMLDivElement | null>(null)
 
   const viewedStorageKey = `open-swe.review.viewed.${detail.owner}/${detail.repo}/${detail.number}.${detail.head_sha}`
   const [viewed, setViewed] = useState<Set<string>>(() => {
@@ -354,8 +361,11 @@ function ReviewBody({
   }, [focused])
 
   return (
-    <div className="relative flex min-h-0 flex-1">
-      <main className="min-w-0 flex-1 overflow-y-auto">
+    <div
+      ref={scrollRef}
+      className="relative flex min-h-0 flex-1 overflow-y-auto"
+    >
+      <main className="min-w-0 flex-1">
         <div className="mx-auto max-w-6xl px-6 py-6">
           <PrHeader detail={detail} />
           <div className="mt-4 rounded-lg border border-border bg-card p-4">
@@ -409,8 +419,7 @@ function ReviewBody({
                       const next = !(
                         expandedFiles[file.path] ?? !viewed.has(file.path)
                       )
-                      if (!next && focused?.file === file.path)
-                        setFocused(null)
+                      if (!next && focused?.file === file.path) setFocused(null)
                       setExpandedFiles((prev) => ({
                         ...prev,
                         [file.path]: next,
@@ -443,39 +452,14 @@ function ReviewBody({
 
       {focused &&
         (isAnchored(focused) && anchorEl ? (
-          <Popover.Root
-            open
-            onOpenChange={(open) => {
-              if (!open) setFocused(null)
-            }}
-          >
-            <Popover.Portal>
-              <Popover.Positioner
-                anchor={anchorEl}
-                side="right"
-                align="start"
-                sideOffset={12}
-                collisionAvoidance={{
-                  side: "shift",
-                  align: "none",
-                  fallbackAxisSide: "none",
-                }}
-                className="z-50"
-              >
-                <Popover.Popup
-                  data-finding-card
-                  aria-label={focused.title}
-                  className={FINDING_CARD_CLASS}
-                >
-                  <FindingCardContent
-                    detail={detail}
-                    finding={focused}
-                    onClose={closeFinding}
-                  />
-                </Popover.Popup>
-              </Popover.Positioner>
-            </Popover.Portal>
-          </Popover.Root>
+          <AnchoredFindingCard
+            key={focused.id}
+            detail={detail}
+            finding={focused}
+            anchorEl={anchorEl}
+            scrollRef={scrollRef}
+            onClose={closeFinding}
+          />
         ) : (
           <div
             data-finding-card
@@ -744,8 +728,75 @@ function DiffLineRow({
   )
 }
 
+const FINDING_CARD_WIDTH = 412
+const FINDING_CARD_GAP = 12
+
 const FINDING_CARD_CLASS =
   "flex max-h-[70vh] w-[412px] flex-col overflow-hidden rounded-lg border border-border bg-background shadow-2xl"
+
+// Positioned absolutely inside the scroll container so it scrolls natively
+// with the diff — no per-scroll JS repositioning, hence no lag. Position is
+// recomputed only when layout shifts (files expand/collapse, resize).
+function AnchoredFindingCard({
+  detail,
+  finding,
+  anchorEl,
+  scrollRef,
+  onClose,
+}: {
+  detail: ReviewDetail
+  finding: ReviewFinding
+  anchorEl: HTMLDivElement
+  scrollRef: React.RefObject<HTMLDivElement | null>
+  onClose: () => void
+}) {
+  const cardRef = useRef<HTMLDivElement | null>(null)
+
+  useLayoutEffect(() => {
+    const card = cardRef.current
+    const scroller = scrollRef.current
+    if (!card || !scroller) return
+
+    const position = () => {
+      if (!anchorEl.isConnected) return
+      const scrollerRect = scroller.getBoundingClientRect()
+      const anchorRect = anchorEl.getBoundingClientRect()
+      const top = anchorRect.top - scrollerRect.top + scroller.scrollTop
+      const left = Math.max(
+        FINDING_CARD_GAP,
+        Math.min(
+          anchorRect.right -
+            scrollerRect.left +
+            scroller.scrollLeft +
+            FINDING_CARD_GAP,
+          scroller.clientWidth - FINDING_CARD_WIDTH - FINDING_CARD_GAP
+        )
+      )
+      card.style.top = `${top}px`
+      card.style.left = `${left}px`
+    }
+
+    position()
+    const observer = new ResizeObserver(position)
+    observer.observe(scroller)
+    for (const child of scroller.children) {
+      if (child !== card) observer.observe(child)
+    }
+    return () => observer.disconnect()
+  }, [anchorEl, scrollRef])
+
+  return (
+    <div
+      ref={cardRef}
+      data-finding-card
+      role="dialog"
+      aria-label={finding.title}
+      className={cn(FINDING_CARD_CLASS, "absolute z-50")}
+    >
+      <FindingCardContent detail={detail} finding={finding} onClose={onClose} />
+    </div>
+  )
+}
 
 function FindingCardContent({
   detail,
@@ -881,7 +932,7 @@ function SidePanel({
   return (
     <aside
       className={cn(
-        "hidden w-[420px] shrink-0 flex-col overflow-y-auto border-l border-border transition-opacity xl:flex",
+        "sticky top-0 hidden h-full w-[420px] shrink-0 flex-col overflow-y-auto border-l border-border transition-opacity xl:flex",
         dimmed && "pointer-events-none opacity-30"
       )}
     >
