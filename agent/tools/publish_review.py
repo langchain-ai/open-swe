@@ -43,7 +43,7 @@ from ..reviewer_publish import (
     settle_review_check_run,
 )
 from ..reviewer_reconcile import reconcile_findings_with_review_threads
-from ..utils.dashboard_links import dashboard_thread_url
+from ..utils.dashboard_links import dashboard_review_url
 from ..utils.github_checks import review_check_conclusion
 from ..utils.github_token import (
     GitHubAuthError,
@@ -238,7 +238,7 @@ async def _publish_review_async(
     # reviewed, not the stale one this run was created for.
     head_sha = await resolve_review_head_sha(thread_id, {"head_sha": head_sha})
     review_trace_url = await _resolve_review_trace_url(thread_id, trace_link_config_override)
-    review_ui_url = dashboard_thread_url(thread_id)
+    review_ui_url = dashboard_review_url(owner, repo, pr_number)
     findings = await _backfill_findings_from_pr_threads(
         thread_id=thread_id,
         owner=owner,
