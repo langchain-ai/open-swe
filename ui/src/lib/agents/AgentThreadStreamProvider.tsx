@@ -4,7 +4,7 @@ import { overrideFetchImplementation } from "@langchain/langgraph-sdk";
 import { useQueryClient } from "@tanstack/react-query";
 
 import { agentsApi } from "./api";
-import { agentThreadKeys } from "./queries";
+import { agentThreadKeys, invalidateAgentThreadLists } from "./queries";
 import type { ReactNode } from "react";
 
 const AGENT_ASSISTANT_ID = "agent";
@@ -73,7 +73,7 @@ export function AgentThreadStreamProvider({
   threadIdRef.current = threadId;
 
   const onCreated = useCallback(() => {
-    void queryClient.invalidateQueries({ queryKey: agentThreadKeys.all, exact: true });
+    invalidateAgentThreadLists(queryClient);
   }, [queryClient]);
 
   const onCompleted = useCallback(() => {
@@ -81,7 +81,7 @@ export function AgentThreadStreamProvider({
     if (id) {
       void queryClient.invalidateQueries({ queryKey: agentThreadKeys.detail(id) });
     }
-    void queryClient.invalidateQueries({ queryKey: agentThreadKeys.all, exact: true });
+    invalidateAgentThreadLists(queryClient);
   }, [queryClient]);
 
   return (

@@ -17,7 +17,7 @@ import type { ImageChunk } from "@/lib/agents/types"
 import type { ModelSelection } from "@/lib/agents/provider/useModelOptions"
 import { RepoSelector } from "@/components/agents/RepoSelector"
 import { useIsInAgentThreadStream } from "@/lib/agents/provider/useIsInAgentThreadStream"
-import { agentThreadKeys } from "@/lib/agents/queries"
+import { agentThreadKeys, invalidateAgentThreadLists } from "@/lib/agents/queries"
 import { formatModelSelection } from "@/lib/agents/provider/useModelOptions"
 import { IconButton } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
@@ -71,7 +71,7 @@ function StreamSubmitButton(props: SubmitButtonProps) {
         queryClient.setQueryData(agentThreadKeys.detail(threadId), (prev) =>
           prev ? { ...prev, status: "interrupted" as const } : prev
         )
-        void queryClient.invalidateQueries({ queryKey: agentThreadKeys.all, exact: true })
+        invalidateAgentThreadLists(queryClient)
       }
     } finally {
       setStopping(false)
@@ -273,8 +273,7 @@ export const CloudPromptBar = memo(function CloudPromptBarComponent({
 
   const handlePaste = useCallback(
     (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
-      const items = e.clipboardData?.items
-      if (!items) return
+      const items = e.clipboardData.items
       const files: Array<File> = []
       for (const item of Array.from(items)) {
         if (item.kind === "file") {

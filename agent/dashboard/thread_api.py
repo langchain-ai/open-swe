@@ -115,6 +115,10 @@ class ThreadMessageBody(BaseModel):
     effort: str | None = None
 
 
+class ThreadResolveBody(BaseModel):
+    resolved: bool = True
+
+
 def _normalize_model_choice(
     model_id: str | None, effort: str | None
 ) -> tuple[str | None, str | None]:
@@ -283,6 +287,10 @@ def _is_thread_viewed(metadata: dict[str, Any], latest_run_id: str | None) -> bo
     return isinstance(viewed_at, (int, float))
 
 
+def _is_thread_resolved(metadata: dict[str, Any]) -> bool:
+    return metadata.get("resolved") is True
+
+
 def _thread_summary(
     thread: dict[str, Any],
     *,
@@ -325,6 +333,12 @@ def _thread_summary(
         "viewedAt": (
             int(metadata["last_viewed_at_ms"])
             if isinstance(metadata.get("last_viewed_at_ms"), (int, float))
+            else None
+        ),
+        "resolved": _is_thread_resolved(metadata),
+        "resolvedAt": (
+            int(metadata["resolved_at_ms"])
+            if isinstance(metadata.get("resolved_at_ms"), (int, float))
             else None
         ),
         "createdAt": int(created_at) if isinstance(created_at, (int, float)) else _now_ms(),
@@ -441,6 +455,180 @@ async def list_dashboard_threads(
         )
     summaries.sort(key=lambda item: item.get("updatedAt", 0), reverse=True)
     return summaries[:limit]
+
+
+# Threads are paged out of `client.threads.search` in batches of this size,
+# scanning up to `_THREADS_PAGE_SCAN_CAP` so matches older than a single batch
+# are still found (the page is the "show all"/search surface).
+_THREADS_SEARCH_PAGE = 100
+_THREADS_PAGE_SCAN_CAP = 2000
+
+
+def _thread_updated_ms(metadata: dict[str, Any]) -> int:
+    value = metadata.get("updated_at_ms")
+    return int(value) if isinstance(value, (int, float)) else 0
+
+
+def _metadata_matches_filters(
+    metadata: dict[str, Any],
+    *,
+    resolved: bool | None,
+    source: str | None,
+    query: str | None,
+) -> bool:
+    """Metadata-only filters that don't require fetching the latest run."""
+    if resolved is not None and _is_thread_resolved(metadata) is not resolved:
+        return False
+    if source and _thread_source(metadata) != source:
+        return False
+    if query:
+        title = metadata.get("title")
+        title = title if isinstance(title, str) else "Untitled agent"
+        if query.lower() not in title.lower():
+            return False
+    return True
+
+
+def _summary_matches_filters(
+    summary: dict[str, Any],
+    *,
+    resolved: bool | None,
+    viewed: bool | None,
+    source: str | None,
+    status: str | None,
+    query: str | None,
+) -> bool:
+    if resolved is not None and bool(summary.get("resolved")) is not resolved:
+        return False
+    if viewed is not None and bool(summary.get("viewed")) is not viewed:
+        return False
+    if source and summary.get("source") != source:
+        return False
+    if status and summary.get("status") != status:
+        return False
+    if query:
+        title = summary.get("title")
+        if not isinstance(title, str) or query.lower() not in title.lower():
+            return False
+    return True
+
+
+async def _gather_candidate_threads(
+    client: Any,
+    searches: list[dict[str, Any]],
+    *,
+    include_all: bool,
+    login: str,
+    email: str | None,
+) -> list[dict[str, Any]]:
+    """Page through `threads.search` (up to the scan cap) and dedupe by id."""
+    seen: dict[str, dict[str, Any]] = {}
+    for metadata_filter in searches:
+        offset = 0
+        while offset < _THREADS_PAGE_SCAN_CAP:
+            batch = await client.threads.search(
+                metadata=metadata_filter,
+                limit=_THREADS_SEARCH_PAGE,
+                offset=offset,
+                sort_by="updated_at",
+                sort_order="desc",
+            )
+            if not batch:
+                break
+            for thread in batch:
+                if not isinstance(thread, dict):
+                    continue
+                meta = thread.get("metadata") if isinstance(thread.get("metadata"), dict) else {}
+                if not include_all and not _user_owns_thread(meta, login, email):
+                    continue
+                thread_id = thread.get("thread_id") or thread.get("id")
+                if isinstance(thread_id, str) and thread_id not in seen:
+                    seen[thread_id] = thread
+            if len(batch) < _THREADS_SEARCH_PAGE:
+                break
+            offset += _THREADS_SEARCH_PAGE
+    return list(seen.values())
+
+
+async def _summarize_thread(client: Any, thread: dict[str, Any]) -> dict[str, Any]:
+    refreshed, latest_run_status, latest_run_id = await _refresh_latest_run_metadata(client, thread)
+    return _thread_summary(
+        refreshed,
+        latest_run_status=latest_run_status,
+        latest_run_id=latest_run_id,
+    )
+
+
+async def list_dashboard_threads_page(
+    login: str,
+    *,
+    email: str | None = None,
+    limit: int = 25,
+    offset: int = 0,
+    include_all: bool = False,
+    resolved: bool | None = None,
+    viewed: bool | None = None,
+    source: str | None = None,
+    status: str | None = None,
+    query: str | None = None,
+) -> dict[str, Any]:
+    """Paginated + filterable thread list for the full threads page."""
+    client = langgraph_client()
+    searches: list[dict[str, Any]] = [{}] if include_all else [{"github_login": login}]
+    if not include_all and email and email.strip():
+        searches.append({"triggering_user_email": email.strip().lower()})
+
+    candidates = await _gather_candidate_threads(
+        client, searches, include_all=include_all, login=login, email=email
+    )
+
+    # Apply metadata-only filters first so the frequent sidebar polls only fetch
+    # the latest run for threads that can actually match.
+    matched = [
+        thread
+        for thread in candidates
+        if _metadata_matches_filters(
+            thread.get("metadata") if isinstance(thread.get("metadata"), dict) else {},
+            resolved=resolved,
+            source=source,
+            query=query,
+        )
+    ]
+    matched.sort(
+        key=lambda thread: _thread_updated_ms(
+            thread.get("metadata") if isinstance(thread.get("metadata"), dict) else {}
+        ),
+        reverse=True,
+    )
+
+    safe_offset = max(offset, 0)
+    safe_limit = max(limit, 1)
+
+    # `viewed`/`status` derive from the latest run, so they can only be applied
+    # after enrichment. When neither is requested we enrich just the page window.
+    if viewed is None and status is None:
+        total = len(matched)
+        window = matched[safe_offset : safe_offset + safe_limit]
+        items = [await _summarize_thread(client, thread) for thread in window]
+        return {"items": items, "total": total, "limit": safe_limit, "offset": safe_offset}
+
+    summaries: list[dict[str, Any]] = []
+    for thread in matched:
+        summary = await _summarize_thread(client, thread)
+        if _summary_matches_filters(
+            summary,
+            resolved=resolved,
+            viewed=viewed,
+            source=source,
+            status=status,
+            query=query,
+        ):
+            summaries.append(summary)
+
+    summaries.sort(key=lambda item: item.get("updatedAt", 0), reverse=True)
+    total = len(summaries)
+    items = summaries[safe_offset : safe_offset + safe_limit]
+    return {"items": items, "total": total, "limit": safe_limit, "offset": safe_offset}
 
 
 async def _mark_thread_viewed(
@@ -735,15 +923,18 @@ async def _enrich_run_start_command(
             overrides["agent_effort"] = chosen_effort
     else:
         _validate_command_images(content, model_id=chosen_model or _metadata_model_id(metadata))
+        metadata_update: dict[str, Any] = {}
         if chosen_model and chosen_effort:
             overrides["agent_model_id"] = chosen_model
             overrides["agent_effort"] = chosen_effort
-            metadata = {
-                **metadata,
-                "model": chosen_model,
-                "effort": chosen_effort,
-                "updated_at_ms": _now_ms(),
-            }
+            metadata_update["model"] = chosen_model
+            metadata_update["effort"] = chosen_effort
+        if _is_thread_resolved(metadata):
+            metadata_update["resolved"] = False
+            metadata_update["resolved_at_ms"] = None
+        if metadata_update:
+            metadata_update["updated_at_ms"] = _now_ms()
+            metadata = {**metadata, **metadata_update}
             await client.threads.update(thread_id=thread_id, metadata=metadata)
 
     merged_configurable = await _build_dashboard_configurable(
@@ -786,6 +977,9 @@ async def send_dashboard_message(
     if chosen_model and chosen_effort:
         metadata_update["model"] = chosen_model
         metadata_update["effort"] = chosen_effort
+    if _is_thread_resolved(metadata):
+        metadata_update["resolved"] = False
+        metadata_update["resolved_at_ms"] = None
 
     active = await get_thread_active_status(thread_id)
     if active is None:
@@ -860,6 +1054,26 @@ async def delete_dashboard_thread(thread_id: str, login: str, *, email: str | No
             logger.debug("Could not cancel run %s for thread %s", run_id, thread_id, exc_info=True)
 
     await client.threads.delete(thread_id)
+
+
+async def resolve_dashboard_thread(
+    thread_id: str, login: str, *, resolved: bool, email: str | None = None
+) -> dict[str, Any]:
+    """Mark a thread resolved/unresolved via thread metadata."""
+    client = langgraph_client()
+    thread = await _authorized_thread(thread_id, login, email=email)
+    metadata = thread.get("metadata") if isinstance(thread.get("metadata"), dict) else {}
+    metadata_update: dict[str, Any] = {
+        "resolved": resolved,
+        "resolved_at_ms": _now_ms() if resolved else None,
+    }
+    try:
+        await client.threads.update(thread_id=thread_id, metadata=metadata_update)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Could not update resolved state for thread %s", thread_id, exc_info=True)
+        raise HTTPException(502, "failed to update thread") from exc
+    thread = {**thread, "metadata": {**metadata, **metadata_update}}
+    return _thread_summary(thread)
 
 
 async def _authorized_thread_metadata(

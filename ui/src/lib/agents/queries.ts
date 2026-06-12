@@ -3,13 +3,21 @@ import { useNavigate } from "@tanstack/react-router"
 import { useEffect } from "react"
 
 import { agentsApi } from "./api"
-import type { ScheduleUpdateRequest } from "./api"
+import type { QueryClient } from "@tanstack/react-query"
+import type { ScheduleUpdateRequest, ThreadsPageParams } from "./api"
 import type { AgentThread, Chunk, ImageChunk, Message } from "./types"
 
 export const agentThreadKeys = {
-  all: ["agent-threads"] as const,
+  lists: ["agent-threads", "lists"] as const,
+  all: ["agent-threads", "lists", "all"] as const,
   detail: (threadId: string) => ["agent-threads", threadId] as const,
   prDiff: (threadId: string) => ["agent-threads", threadId, "pr-diff"] as const,
+  page: (params: ThreadsPageParams) =>
+    ["agent-threads", "lists", "page", params] as const,
+}
+
+export function invalidateAgentThreadLists(queryClient: QueryClient): void {
+  void queryClient.invalidateQueries({ queryKey: agentThreadKeys.lists })
 }
 
 export const agentScheduleKeys = {
@@ -50,6 +58,43 @@ export function useAgentThreads() {
         ? 2000
         : false,
   })
+}
+
+// The sidebar fetches active (unresolved) and resolved threads separately so
+// resolving the most-recent threads can't hide older active ones behind a
+// shared cap — each list is filled server-side from its own filtered query.
+const SIDEBAR_ACTIVE_LIMIT = 50
+
+function sidebarRefetchInterval(query: {
+  state: { data?: { items: Array<AgentThread> } }
+}) {
+  return query.state.data?.items.some((thread) => thread.status === "running")
+    ? 2000
+    : false
+}
+
+export function useSidebarThreads(resolvedLimit: number) {
+  const active = useQuery({
+    queryKey: agentThreadKeys.page({
+      resolved: false,
+      limit: SIDEBAR_ACTIVE_LIMIT,
+    }),
+    queryFn: () =>
+      agentsApi.listThreadsPage({
+        resolved: false,
+        limit: SIDEBAR_ACTIVE_LIMIT,
+      }),
+    refetchInterval: sidebarRefetchInterval,
+    placeholderData: (prev) => prev,
+  })
+  const resolved = useQuery({
+    queryKey: agentThreadKeys.page({ resolved: true, limit: resolvedLimit }),
+    queryFn: () =>
+      agentsApi.listThreadsPage({ resolved: true, limit: resolvedLimit }),
+    refetchInterval: sidebarRefetchInterval,
+    placeholderData: (prev) => prev,
+  })
+  return { active, resolved }
 }
 
 export function useAgentThread(threadId: string) {
@@ -181,7 +226,7 @@ export function useCancelAgentThread(threadId: string) {
     mutationFn: () => agentsApi.cancelThread(threadId),
     onSuccess: (thread) => {
       queryClient.setQueryData(agentThreadKeys.detail(threadId), thread)
-      queryClient.invalidateQueries({ queryKey: agentThreadKeys.all, exact: true })
+      invalidateAgentThreadLists(queryClient)
     },
   })
 }
@@ -194,11 +239,32 @@ export function useDeleteAgentThread() {
     mutationFn: (threadId: string) => agentsApi.deleteThread(threadId),
     onSuccess: (_, threadId) => {
       queryClient.removeQueries({ queryKey: agentThreadKeys.detail(threadId) })
-      queryClient.invalidateQueries({ queryKey: agentThreadKeys.all, exact: true })
+      invalidateAgentThreadLists(queryClient)
       const path = window.location.pathname
       if (path.includes(`/agents/${threadId}`)) {
         navigate({ to: "/agents" })
       }
     },
+  })
+}
+
+export function useResolveAgentThread() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (vars: { threadId: string; resolved: boolean }) =>
+      agentsApi.resolveThread(vars.threadId, vars.resolved),
+    onSuccess: (thread, vars) => {
+      queryClient.setQueryData(agentThreadKeys.detail(vars.threadId), thread)
+      invalidateAgentThreadLists(queryClient)
+    },
+  })
+}
+
+export function useThreadsPage(params: ThreadsPageParams) {
+  return useQuery({
+    queryKey: agentThreadKeys.page(params),
+    queryFn: () => agentsApi.listThreadsPage(params),
+    placeholderData: (prev) => prev,
   })
 }

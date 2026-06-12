@@ -57,6 +57,23 @@ export interface ThreadPrDiff {
   files: Array<ThreadPrDiffFile>
 }
 
+export interface ThreadsPageParams {
+  limit?: number
+  offset?: number
+  resolved?: boolean
+  viewed?: boolean
+  source?: string
+  status?: string
+  q?: string
+}
+
+export interface ThreadsPage {
+  items: Array<AgentThread>
+  total: number
+  limit: number
+  offset: number
+}
+
 const API_BASE = (import.meta.env.VITE_DASHBOARD_API_BASE_URL ?? "").replace(
   /\/$/,
   ""
@@ -95,9 +112,32 @@ async function agentsRequest<T>(
   return (await res.json()) as T
 }
 
+function buildThreadsPageQuery(params: ThreadsPageParams): string {
+  const search = new URLSearchParams()
+  if (params.limit != null) search.set("limit", String(params.limit))
+  if (params.offset != null) search.set("offset", String(params.offset))
+  if (params.resolved != null) search.set("resolved", String(params.resolved))
+  if (params.viewed != null) search.set("viewed", String(params.viewed))
+  if (params.source) search.set("source", params.source)
+  if (params.status) search.set("status", params.status)
+  if (params.q) search.set("q", params.q)
+  const query = search.toString()
+  return query ? `?${query}` : ""
+}
+
 export const agentsApi = {
   langGraphApiUrl: agentsLangGraphApiUrl,
   listThreads: () => agentsRequest<Array<AgentThread>>("/threads"),
+  listThreadsPage: (params: ThreadsPageParams = {}) =>
+    agentsRequest<ThreadsPage>(`/threads/page${buildThreadsPageQuery(params)}`),
+  resolveThread: (threadId: string, resolved: boolean) =>
+    agentsRequest<AgentThread>(
+      `/threads/${encodeURIComponent(threadId)}/resolve`,
+      {
+        method: "POST",
+        body: JSON.stringify({ resolved }),
+      }
+    ),
   listSchedules: () => agentsRequest<Array<AgentSchedule>>("/schedules"),
   createSchedule: (body: ScheduleCreateRequest) =>
     agentsRequest<AgentSchedule>("/schedules", {

@@ -2,11 +2,13 @@ import { ContextMenu } from "@base-ui/react/context-menu"
 import { Dialog } from "@base-ui/react/dialog"
 import { Link } from "@tanstack/react-router"
 import {
+  ArrowCounterClockwiseIcon,
   CalendarBlankIcon,
   CaretDownIcon,
   CaretRightIcon,
   ChartLineUpIcon,
   ChatCircleIcon,
+  CheckCircleIcon,
   CircleNotchIcon,
   GitMergeIcon,
   GitPullRequestIcon,
@@ -37,11 +39,14 @@ import {
 } from "@/components/sidebar-layout"
 import { groupThreads } from "@/lib/agents/api"
 import {
-  useAgentThreads,
   useDeleteAgentThread,
+  useResolveAgentThread,
   useSeedAgentThreadDetails,
+  useSidebarThreads,
 } from "@/lib/agents/queries"
 import { cn } from "@/lib/utils"
+
+const RESOLVED_SIDEBAR_LIMIT = 20
 
 type SourceIcon = ComponentType<SVGProps<SVGSVGElement>>
 
@@ -93,10 +98,15 @@ const NAV = [
 ] as const
 
 export function AgentsSidebar({ user, activeThreadId }: AgentsSidebarProps) {
-  const threadsQuery = useAgentThreads()
-  const threads = threadsQuery.data ?? []
-  useSeedAgentThreadDetails(threads, activeThreadId)
-  const groups = groupThreads(threads)
+  const { active, resolved } = useSidebarThreads(RESOLVED_SIDEBAR_LIMIT)
+  const activeThreads = active.data?.items ?? []
+  const resolvedThreads = resolved.data?.items ?? []
+  const resolvedTotal = resolved.data?.total ?? resolvedThreads.length
+  useSeedAgentThreadDetails(
+    [...activeThreads, ...resolvedThreads],
+    activeThreadId
+  )
+  const groups = groupThreads(activeThreads)
   const layout = useSidebarLayout()
   const reviewSidebar = useReviewSidebarData()
 
@@ -178,6 +188,12 @@ export function AgentsSidebar({ user, activeThreadId }: AgentsSidebarProps) {
             activeThreadId={activeThreadId}
             onNavigate={layout.closeOnMobile}
           />
+          <ResolvedThreadGroup
+            threads={resolvedThreads}
+            total={resolvedTotal}
+            activeThreadId={activeThreadId}
+            onNavigate={layout.closeOnMobile}
+          />
         </div>
       )}
 
@@ -231,6 +247,62 @@ function ThreadGroup({
   )
 }
 
+function ResolvedThreadGroup({
+  threads,
+  total,
+  activeThreadId,
+  onNavigate,
+}: {
+  threads: Array<AgentThread>
+  total: number
+  activeThreadId?: string
+  onNavigate?: () => void
+}) {
+  const [collapsed, setCollapsed] = useState(true)
+  if (threads.length === 0) return null
+
+  const ToggleIcon = collapsed ? CaretRightIcon : CaretDownIcon
+  const visible = threads.slice(0, RESOLVED_SIDEBAR_LIMIT)
+  const hasMore = total > visible.length
+
+  return (
+    <div className="mb-3">
+      <button
+        type="button"
+        onClick={() => setCollapsed((value) => !value)}
+        className="flex w-full items-center gap-1 px-2 py-1 text-left text-[10px] font-semibold tracking-wide text-[var(--ui-text-dim)] uppercase transition-colors hover:text-[var(--ui-text-muted)]"
+        aria-expanded={!collapsed}
+      >
+        <ToggleIcon className="size-3" />
+        <span className="min-w-0 flex-1 truncate">Resolved</span>
+        <span>{total}</span>
+      </button>
+      {!collapsed && (
+        <>
+          {visible.map((thread) => (
+            <ThreadRow
+              key={thread.id}
+              thread={thread}
+              isActive={thread.id === activeThreadId}
+              onNavigate={onNavigate}
+            />
+          ))}
+          {hasMore && (
+            <Link
+              to="/agents/threads"
+              search={{ resolved: true, page: 1 }}
+              onClick={onNavigate}
+              className="mt-0.5 flex items-center gap-1 rounded-md px-2.5 py-1.5 text-xs text-[var(--ui-text-muted)] transition-colors hover:bg-[var(--ui-sidebar-hover)] hover:text-[var(--ui-text)]"
+            >
+              Show all
+            </Link>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
 function ThreadRow({
   thread,
   isActive,
@@ -241,6 +313,7 @@ function ThreadRow({
   onNavigate?: () => void
 }) {
   const deleteThread = useDeleteAgentThread()
+  const resolveThread = useResolveAgentThread()
   const [deleteOpen, setDeleteOpen] = useState(false)
   const badge =
     thread.diffStats && thread.diffStats.additions > 0
@@ -261,6 +334,14 @@ function ThreadRow({
     deleteThread.mutate(thread.id, {
       onSuccess: () => setDeleteOpen(false),
     })
+  }
+
+  const isResolved = thread.resolved === true
+  const onToggleResolved = (e?: React.MouseEvent) => {
+    e?.preventDefault()
+    e?.stopPropagation()
+    if (resolveThread.isPending) return
+    resolveThread.mutate({ threadId: thread.id, resolved: !isResolved })
   }
 
   const source =
@@ -343,6 +424,20 @@ function ThreadRow({
           )}
           <button
             type="button"
+            aria-label={isResolved ? "Unresolve thread" : "Resolve thread"}
+            title={isResolved ? "Unresolve thread" : "Resolve thread"}
+            onClick={onToggleResolved}
+            disabled={resolveThread.isPending}
+            className="hidden size-4 shrink-0 items-center justify-center rounded text-[var(--ui-text-dim)] group-hover:flex hover:bg-[var(--ui-panel-2)] hover:text-[var(--ui-text)]"
+          >
+            {isResolved ? (
+              <ArrowCounterClockwiseIcon className="size-3" weight="bold" />
+            ) : (
+              <CheckCircleIcon className="size-3" weight="bold" />
+            )}
+          </button>
+          <button
+            type="button"
             aria-label="Delete thread"
             onClick={onDelete}
             disabled={isDeleting}
@@ -361,6 +456,18 @@ function ThreadRow({
               >
                 <TreeStructureIcon className="size-3.5" />
                 Open trace
+              </ContextMenu.Item>
+              <ContextMenu.Item
+                onClick={() => onToggleResolved()}
+                disabled={resolveThread.isPending}
+                className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-xs outline-none select-none data-highlighted:bg-[var(--ui-sidebar-hover)] data-disabled:pointer-events-none data-disabled:opacity-50"
+              >
+                {isResolved ? (
+                  <ArrowCounterClockwiseIcon className="size-3.5" />
+                ) : (
+                  <CheckCircleIcon className="size-3.5" />
+                )}
+                {isResolved ? "Unresolve thread" : "Resolve thread"}
               </ContextMenu.Item>
               <ContextMenu.Item
                 onClick={onDelete}

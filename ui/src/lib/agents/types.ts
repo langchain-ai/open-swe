@@ -184,6 +184,8 @@ export interface AgentThread {
   status: AgentStatus
   viewed: boolean
   viewedAt?: number | null
+  resolved?: boolean
+  resolvedAt?: number | null
   createdAt: number
   updatedAt: number
   traceUrl?: string | null
@@ -227,7 +229,7 @@ export type GitFileStatus =
   | "added-by-us"
   | "added-by-them"
   | "deleted-by-us"
-  | "deleted-by-them";
+  | "deleted-by-them"
 
 export interface GitStatusEntry {
   path: string

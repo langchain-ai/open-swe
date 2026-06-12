@@ -3,7 +3,7 @@ import { useStreamContext as useAgentThreadStream } from "@langchain/react";
 
 import type { SendAgentMessageVariables } from "@/lib/agents/queries";
 import { AgentsApiError, agentsApi } from "@/lib/agents/api";
-import { agentThreadKeys } from "@/lib/agents/queries";
+import { agentThreadKeys, invalidateAgentThreadLists } from "@/lib/agents/queries";
 
 /**
  * Construct the message content for the LangGraph run.
@@ -82,7 +82,7 @@ export function useSubmitAgentMessage(threadId: string) {
       queryClient.setQueryData(agentThreadKeys.detail(threadId), (prev) =>
         prev ? { ...prev, status: "running" as const } : prev,
       );
-      void queryClient.invalidateQueries({ queryKey: agentThreadKeys.all, exact: true });
+      invalidateAgentThreadLists(queryClient);
     },
   });
 }
