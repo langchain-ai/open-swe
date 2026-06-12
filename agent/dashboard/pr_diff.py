@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 from fastapi import HTTPException
@@ -30,7 +31,7 @@ async def _fetch_file_at_ref(
 ) -> str | None:
     async with semaphore:
         response = await client.get(
-            f"{_GITHUB_API}/repos/{full_name}/contents/{path}",
+            f"{_GITHUB_API}/repos/{full_name}/contents/{quote(path, safe='/')}",
             params={"ref": ref},
             headers={"Accept": "application/vnd.github.raw+json"},
         )
