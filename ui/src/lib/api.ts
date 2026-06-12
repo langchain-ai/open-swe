@@ -361,32 +361,22 @@ export interface ReviewDetail extends ReviewSummary {
   findings: Array<ReviewFinding>;
 }
 
-export interface ReviewDiffLine {
-  kind: "context" | "add" | "del";
-  old_line?: number;
-  new_line?: number;
-  text: string;
-}
-
-export interface ReviewDiffHunk {
-  header: string;
-  old_start: number;
-  new_start: number;
-  lines: Array<ReviewDiffLine>;
-}
-
 export interface ReviewDiffFile {
   path: string;
-  status: "added" | "deleted" | "modified" | "renamed";
+  previousPath: string | null;
+  status: "added" | "removed" | "modified" | "renamed";
   additions: number;
   deletions: number;
-  hunks: Array<ReviewDiffHunk>;
+  originalContent: string;
+  modifiedContent: string;
+  unrenderable?: boolean;
 }
 
 export interface ReviewDiffPayload {
   files: Array<ReviewDiffFile>;
   total_additions: number;
   total_deletions: number;
+  truncated: boolean;
 }
 
 export const api = {
