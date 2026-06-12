@@ -9,29 +9,22 @@ with the App installation token.
 from __future__ import annotations
 
 import logging
-import re
 from collections.abc import Awaitable, Callable
 from typing import Any, Literal
 
 import httpx
 from fastapi import HTTPException
 
-from ..reviewer_diff import parse_unified_diff
 from ..reviewer_findings import REVIEWER_THREAD_KIND
 from ..utils.github_app import get_github_app_installation_token
 from ..utils.github_checks import github_headers
 from ..utils.thread_ops import langgraph_client
+from .pr_diff import build_pr_diff_files
 
 logger = logging.getLogger(__name__)
 
 _GITHUB_API = "https://api.github.com"
 _GITHUB_TIMEOUT = httpx.Timeout(15.0, connect=5.0)
-
-DiffLineKind = Literal["context", "add", "del"]
-
-_DIFF_NEW_FILE_RE = re.compile(r"^new file mode", re.MULTILINE)
-_DIFF_DELETED_FILE_RE = re.compile(r"^deleted file mode", re.MULTILINE)
-_DIFF_RENAME_RE = re.compile(r"^rename from ", re.MULTILINE)
 
 
 async def _require_app_token() -> str:
@@ -342,105 +335,21 @@ async def get_review(owner: str, repo: str, pr_number: int) -> dict[str, Any]:
     return {**summary, "pr": details, "checks": checks, "findings": findings}
 
 
-def parse_diff_files(diff_text: str) -> list[dict[str, Any]]:
-    """Parse a unified diff into renderable per-file hunk/line records.
-
-    Iterates the raw ``diff --git`` sections so metadata-only changes
-    (pure renames, mode changes) still appear, with empty hunks.
-    """
-    raw_sections = _split_file_sections(diff_text)
-    parsed_by_file = {file_diff.file: file_diff for file_diff in parse_unified_diff(diff_text)}
-    files: list[dict[str, Any]] = []
-    for path, section in raw_sections.items():
-        status = "modified"
-        if _DIFF_NEW_FILE_RE.search(section):
-            status = "added"
-        elif _DIFF_DELETED_FILE_RE.search(section):
-            status = "deleted"
-        elif _DIFF_RENAME_RE.search(section):
-            status = "renamed"
-        file_diff = parsed_by_file.get(path)
-        hunks = []
-        additions = 0
-        deletions = 0
-        for hunk in file_diff.hunks if file_diff else ():
-            lines: list[dict[str, Any]] = []
-            old_line = hunk.old_start
-            new_line = hunk.new_start
-            body_lines = hunk.body.splitlines()
-            for raw in body_lines[1:]:
-                if raw.startswith("+"):
-                    lines.append({"kind": "add", "new_line": new_line, "text": raw[1:]})
-                    new_line += 1
-                    additions += 1
-                elif raw.startswith("-"):
-                    lines.append({"kind": "del", "old_line": old_line, "text": raw[1:]})
-                    old_line += 1
-                    deletions += 1
-                elif raw.startswith("\\"):
-                    continue
-                else:
-                    lines.append(
-                        {
-                            "kind": "context",
-                            "old_line": old_line,
-                            "new_line": new_line,
-                            "text": raw[1:] if raw.startswith(" ") else raw,
-                        }
-                    )
-                    old_line += 1
-                    new_line += 1
-            hunks.append(
-                {
-                    "header": body_lines[0] if body_lines else "",
-                    "old_start": hunk.old_start,
-                    "new_start": hunk.new_start,
-                    "lines": lines,
-                }
-            )
-        files.append(
-            {
-                "path": path,
-                "status": status,
-                "additions": additions,
-                "deletions": deletions,
-                "hunks": hunks,
-            }
-        )
-    return files
-
-
-def _split_file_sections(diff_text: str) -> dict[str, str]:
-    sections: dict[str, str] = {}
-    current_file: str | None = None
-    current_lines: list[str] = []
-    header_re = re.compile(r"^diff --git a/(?P<a>.+?) b/(?P<b>.+?)$")
-    for line in diff_text.splitlines():
-        match = header_re.match(line)
-        if match:
-            if current_file is not None:
-                sections[current_file] = "\n".join(current_lines)
-            current_file = match.group("b")
-            current_lines = [line]
-        elif current_file is not None:
-            current_lines.append(line)
-    if current_file is not None:
-        sections[current_file] = "\n".join(current_lines)
-    return sections
-
-
 async def get_review_diff(owner: str, repo: str, pr_number: int) -> dict[str, Any]:
+    """Return the PR's changed files with full original/modified contents.
+
+    Uses the App installation token so the diff is available regardless of who
+    is viewing the review. The client renders these with pierre's MultiFileDiff.
+    """
     token = await _require_app_token()
-    diff_text = await _github_get(
-        f"/repos/{owner}/{repo}/pulls/{pr_number}",
-        token,
-        accept="application/vnd.github.diff",
-    )
-    files = parse_diff_files(diff_text if isinstance(diff_text, str) else "")
+    async with httpx.AsyncClient(headers=github_headers(token), timeout=_GITHUB_TIMEOUT) as client:
+        diff = await build_pr_diff_files(client, f"{owner}/{repo}", pr_number)
+    files = diff["files"]
     return {
         "files": files,
         "total_additions": sum(f["additions"] for f in files),
         "total_deletions": sum(f["deletions"] for f in files),
+        "truncated": diff["truncated"],
     }
 
 

@@ -5,10 +5,17 @@ import {
   useFileTreeSelection,
 } from "@pierre/trees/react"
 
-import type { GitStatusEntry } from "@pierre/trees"
+import type { GitStatus, GitStatusEntry } from "@pierre/trees"
 import type { ReviewDiffFile } from "@/lib/api"
 import { Skeleton } from "@/components/ui/skeleton"
 import { treeThemeStyle } from "@/components/agents/AgentGitPanel"
+
+function reviewFileGitStatus(status: ReviewDiffFile["status"]): GitStatus {
+  if (status === "removed") return "deleted"
+  if (status === "added") return "added"
+  if (status === "renamed") return "renamed"
+  return "modified"
+}
 
 export interface ReviewSidebarData {
   title: string
@@ -82,7 +89,11 @@ function ReviewFileTreeExplorer({
 }) {
   const paths = useMemo(() => files.map((file) => file.path), [files])
   const gitStatus = useMemo<Array<GitStatusEntry>>(
-    () => files.map((file) => ({ path: file.path, status: file.status })),
+    () =>
+      files.map((file) => ({
+        path: file.path,
+        status: reviewFileGitStatus(file.status),
+      })),
     [files]
   )
 

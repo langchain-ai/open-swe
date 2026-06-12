@@ -24,17 +24,22 @@ import {
   XIcon,
 } from "@phosphor-icons/react"
 import { IoLogoGithub } from "react-icons/io5"
+import { MultiFileDiff } from "@pierre/diffs/react"
+import type { DiffLineAnnotation, SelectedLineRange } from "@pierre/diffs"
 
 import type {
   ReviewCheckRun,
   ReviewDetail,
   ReviewDiffFile,
-  ReviewDiffLine,
   ReviewFinding,
   ReviewUserRef,
 } from "@/lib/api"
 import { Markdown } from "@/components/agents/ported"
 import { useRegisterReviewSidebar } from "@/components/agents/ReviewSidebar"
+import {
+  useDiffOptions,
+  warmDiffHighlighter,
+} from "@/components/agents/utils/diffUtils"
 import { Skeleton } from "@/components/ui/skeleton"
 import { api } from "@/lib/api"
 import { useSession } from "@/lib/session"
@@ -72,46 +77,19 @@ function isAnchored(finding: ReviewFinding): boolean {
   return Boolean(finding.file) && finding.in_diff && finding.end_line !== null
 }
 
-type HighlightEdge = { top: boolean; bottom: boolean } | null
+function findingSide(finding: ReviewFinding): "deletions" | "additions" {
+  return finding.side === "LEFT" ? "deletions" : "additions"
+}
 
-function highlightRange(
-  lines: Array<ReviewDiffLine>,
-  finding: ReviewFinding
-): { start: number; end: number } | null {
-  let start = -1
-  let end = -1
-  for (let index = 0; index < lines.length; index++) {
-    const line = lines[index]
-    if (line && lineMatchesFinding(line, finding)) {
-      if (start === -1) start = index
-      end = index
-    }
+function findingSelectedRange(finding: ReviewFinding): SelectedLineRange | null {
+  if (finding.end_line === null) return null
+  const side = findingSide(finding)
+  return {
+    start: finding.start_line ?? finding.end_line,
+    end: finding.end_line,
+    side,
+    endSide: side,
   }
-  return start === -1 ? null : { start, end }
-}
-
-function lineMatchesFinding(
-  line: ReviewDiffLine,
-  finding: ReviewFinding
-): boolean {
-  if (finding.end_line === null) return false
-  const start = finding.start_line ?? finding.end_line
-  const lineNumber = finding.side === "LEFT" ? line.old_line : line.new_line
-  if (lineNumber === undefined) return false
-  if (finding.side === "LEFT" && line.kind !== "del") return false
-  if (finding.side === "RIGHT" && line.kind === "del") return false
-  return lineNumber >= start && lineNumber <= finding.end_line
-}
-
-function isFindingAnchorRow(
-  line: ReviewDiffLine,
-  finding: ReviewFinding
-): boolean {
-  if (finding.end_line === null) return false
-  const lineNumber = finding.side === "LEFT" ? line.old_line : line.new_line
-  if (finding.side === "LEFT" && line.kind !== "del") return false
-  if (finding.side === "RIGHT" && line.kind === "del") return false
-  return lineNumber === finding.end_line
 }
 
 function findingClipboardText(finding: ReviewFinding): string {
@@ -215,13 +193,17 @@ function ReviewBody({
   const [sideTab, setSideTab] = useState<SideTab>("info")
   const [selectedFile, setSelectedFile] = useState<string | null>(null)
   const fileRefs = useRef<Record<string, HTMLDivElement | null>>({})
-  const anchorRefs = useRef<Record<string, HTMLDivElement | null>>({})
+  const anchorRefs = useRef<Record<string, HTMLElement | null>>({})
   const [expandedFiles, setExpandedFiles] = useState<Record<string, boolean>>(
     {}
   )
   const [focused, setFocused] = useState<ReviewFinding | null>(null)
-  const [anchorEl, setAnchorEl] = useState<HTMLDivElement | null>(null)
+  const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null)
   const scrollRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    void warmDiffHighlighter()
+  }, [])
 
   const viewedStorageKey = `open-swe.review.viewed.${detail.owner}/${detail.repo}/${detail.number}.${detail.head_sha}`
   const [viewed, setViewed] = useState<Set<string>>(() => {
@@ -549,17 +531,33 @@ function FileDiffCard({
   onToggleExpanded: () => void
   onFindingClick: (finding: ReviewFinding) => void
   sectionRef: (node: HTMLDivElement | null) => void
-  anchorRef: (id: string, node: HTMLDivElement | null) => void
+  anchorRef: (id: string, node: HTMLElement | null) => void
 }) {
-  const fileFocused =
-    focused?.file === file.path && isAnchored(focused) ? focused : null
+  const diffOptions = useDiffOptions()
+
+  const lineAnnotations = useMemo<Array<DiffLineAnnotation<ReviewFinding>>>(
+    () =>
+      findings
+        .filter((finding) => finding.end_line !== null)
+        .map((finding) => ({
+          side: findingSide(finding),
+          lineNumber: finding.end_line as number,
+          metadata: finding,
+        })),
+    [findings]
+  )
+
+  const selectedLines =
+    focused?.file === file.path && isAnchored(focused)
+      ? findingSelectedRange(focused)
+      : null
 
   return (
     <div
       ref={sectionRef}
-      className="scroll-mt-4 overflow-hidden rounded-lg border border-border"
+      className="scroll-mt-4 overflow-hidden rounded-lg border border-[var(--ui-border)]"
     >
-      <div className="flex items-center gap-2 bg-muted/40 px-3 py-2 text-xs">
+      <div className="flex items-center gap-2 bg-[var(--ui-panel-2)] px-3 py-2 text-xs">
         <button
           type="button"
           onClick={onToggleExpanded}
@@ -599,131 +597,59 @@ function FileDiffCard({
           </button>
         </label>
       </div>
-      {expanded && (
-        <div className="overflow-x-auto bg-card font-mono text-[11px] leading-5">
-          {file.hunks.map((hunk, hunkIndex) => {
-            const range =
-              fileFocused !== null
-                ? highlightRange(hunk.lines, fileFocused)
-                : null
-            const anchorRows = new Map<number, Array<ReviewFinding>>()
-            for (const finding of findings) {
-              const index = hunk.lines.findIndex((hunkLine) =>
-                lineMatchesFinding(hunkLine, finding)
-              )
-              if (index !== -1) {
-                anchorRows.set(index, [
-                  ...(anchorRows.get(index) ?? []),
-                  finding,
-                ])
-              }
-            }
-            return (
-              <div key={hunkIndex}>
-                <div className="bg-muted/60 px-3 py-1 text-muted-foreground">
-                  {hunk.header}
-                </div>
-                {hunk.lines.map((line, lineIndex) => {
-                  const lineFindings = findings.filter((finding) =>
-                    isFindingAnchorRow(line, finding)
-                  )
-                  const anchorFindings = anchorRows.get(lineIndex) ?? []
-                  let highlight: HighlightEdge = null
-                  if (
-                    range &&
-                    lineIndex >= range.start &&
-                    lineIndex <= range.end
-                  ) {
-                    highlight = {
-                      top: lineIndex === range.start,
-                      bottom: lineIndex === range.end,
-                    }
-                  }
-                  return (
-                    <DiffLineRow
-                      key={lineIndex}
-                      line={line}
-                      findings={lineFindings}
-                      anchorFindings={anchorFindings}
-                      highlight={highlight}
-                      onFindingClick={onFindingClick}
-                      anchorRef={anchorRef}
-                    />
-                  )
-                })}
-              </div>
-            )
-          })}
-        </div>
-      )}
+      {expanded &&
+        (file.unrenderable ? (
+          <div className="bg-[var(--ui-panel)] p-4 text-center text-xs text-[var(--ui-text-dim)]">
+            Binary or large file — diff not shown.
+          </div>
+        ) : (
+          <div className="overflow-x-auto bg-[var(--ui-panel)] font-mono text-[11px] leading-5">
+            <MultiFileDiff<ReviewFinding>
+              oldFile={{ name: file.path, contents: file.originalContent }}
+              newFile={{ name: file.path, contents: file.modifiedContent }}
+              options={diffOptions}
+              lineAnnotations={lineAnnotations}
+              selectedLines={selectedLines}
+              renderAnnotation={(annotation) => (
+                <FindingRailMarker
+                  finding={annotation.metadata}
+                  onFindingClick={onFindingClick}
+                  anchorRef={anchorRef}
+                />
+              )}
+            />
+          </div>
+        ))}
     </div>
   )
 }
 
-function DiffLineRow({
-  line,
-  findings,
-  anchorFindings,
-  highlight,
+function FindingRailMarker({
+  finding,
   onFindingClick,
   anchorRef,
 }: {
-  line: ReviewDiffLine
-  findings: Array<ReviewFinding>
-  anchorFindings: Array<ReviewFinding>
-  highlight: HighlightEdge
+  finding: ReviewFinding
   onFindingClick: (finding: ReviewFinding) => void
-  anchorRef: (id: string, node: HTMLDivElement | null) => void
+  anchorRef: (id: string, node: HTMLElement | null) => void
 }) {
-  const first = findings[0]
+  const style = GROUP_STYLES[finding.group]
+  const Icon = style.Icon
   return (
-    <div
-      ref={
-        anchorFindings.length > 0
-          ? (node) => {
-              for (const finding of anchorFindings) anchorRef(finding.id, node)
-            }
-          : undefined
-      }
-      className={cn(
-        "flex",
-        line.kind === "add" && "bg-emerald-500/10",
-        line.kind === "del" && "bg-red-500/10",
-        highlight && "border-x border-sky-400/50 bg-sky-400/10",
-        highlight?.top && "rounded-t-sm border-t",
-        highlight?.bottom && "rounded-b-sm border-b"
-      )}
-    >
-      <span className="w-10 shrink-0 px-1 text-right text-muted-foreground/60 select-none">
-        {line.old_line ?? ""}
-      </span>
-      <span className="w-10 shrink-0 px-1 text-right text-muted-foreground/60 select-none">
-        {line.new_line ?? ""}
-      </span>
-      <span
+    <div className="flex justify-end px-2 py-0.5">
+      <button
+        ref={(node) => anchorRef(finding.id, node)}
+        type="button"
+        onClick={() => onFindingClick(finding)}
+        aria-label={`Open finding: ${finding.title}`}
         className={cn(
-          "w-4 shrink-0 text-center select-none",
-          line.kind === "add" && "text-emerald-500",
-          line.kind === "del" && "text-red-500"
+          "inline-flex items-center gap-1 rounded border border-[var(--ui-border)] bg-[var(--ui-surface)] px-1.5 py-0.5 text-[10px]",
+          style.className
         )}
       >
-        {line.kind === "add" ? "+" : line.kind === "del" ? "-" : ""}
-      </span>
-      <span className="pr-3 whitespace-pre">{line.text}</span>
-      {first && (
-        <button
-          type="button"
-          onClick={() => onFindingClick(first)}
-          aria-label={`Open finding: ${first.title}`}
-          className="mr-2 ml-auto shrink-0 self-center"
-        >
-          {(() => {
-            const style = GROUP_STYLES[first.group]
-            const Icon = style.Icon
-            return <Icon className={cn("size-3.5", style.className)} />
-          })()}
-        </button>
-      )}
+        <span className="font-sans">{finding.title}</span>
+        <Icon className="size-3 shrink-0" />
+      </button>
     </div>
   )
 }
@@ -746,7 +672,7 @@ function AnchoredFindingCard({
 }: {
   detail: ReviewDetail
   finding: ReviewFinding
-  anchorEl: HTMLDivElement
+  anchorEl: HTMLElement
   scrollRef: React.RefObject<HTMLDivElement | null>
   onClose: () => void
 }) {
