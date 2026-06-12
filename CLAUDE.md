@@ -27,9 +27,9 @@ make format             # ruff format + ruff check --fix
 
 | Graph | Entrypoint | Purpose |
 |---|---|---|
-| `agent` | `agent.server:get_agent` | Main coding agent (Slack/Linear/GitHub-triggered). |
-| `reviewer` | `agent.reviewer:get_reviewer_agent` | Read-only PR reviewer. Findings model + `publish_review`. |
-| `analyzer` | `agent.analyzer:get_analyzer` | Learns per-repo reviewer style from historical PRs and this reviewer's own finding outcomes. |
+| `agent` | `agent.server:traced_agent` (wraps `get_agent`) | Main coding agent (Slack/Linear/GitHub-triggered). |
+| `reviewer` | `agent.reviewer:traced_reviewer_agent` (wraps `get_reviewer_agent`) | Read-only PR reviewer. Findings model + `publish_review`. |
+| `analyzer` | `agent.analyzer:traced_analyzer` (wraps `get_analyzer`) | Learns per-repo reviewer style from historical PRs and this reviewer's own finding outcomes. |
 
 The FastAPI app is `agent.webapp:app`.
 

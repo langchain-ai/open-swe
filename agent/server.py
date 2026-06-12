@@ -95,6 +95,7 @@ from .utils.model import (
 )
 from .utils.sandbox import create_sandbox
 from .utils.sandbox_paths import aresolve_sandbox_work_dir
+from .utils.tracing import AGENT_TRACING_PROJECT, traced_graph_factory
 
 client = get_client()
 
@@ -726,3 +727,6 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             SanitizeThinkingBlocksMiddleware(),
         ],
     ).with_config(config)
+
+
+traced_agent = traced_graph_factory(get_agent, AGENT_TRACING_PROJECT)
