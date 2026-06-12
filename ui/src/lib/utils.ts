@@ -15,6 +15,14 @@ export function cn(...inputs: Array<ClassValue>) {
 }
 
 /**
+ * Format an elapsed duration in milliseconds as a compact string (e.g. "5s", "3m 20s").
+ */
+export function formatElapsed(ms: number): string {
+  const secs = Math.max(1, Math.ceil(ms / 1000));
+  return secs < 60 ? `${secs}s` : `${Math.floor(secs / 60)}m ${secs % 60}s`;
+}
+
+/**
  * Intl.RelativeTimeFormat instance for formatting relative times.
  */
 const rtf = new Intl.RelativeTimeFormat("en", { numeric: "auto" });

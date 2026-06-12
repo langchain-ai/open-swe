@@ -138,6 +138,8 @@ export interface Message {
   id: string
   author: Author
   timestamp: string
+  /** Timestamp of the first message in an agent turn; used to derive work duration. */
+  startedAt?: string
   chunks: Array<Chunk>
   hidden?: boolean
 }

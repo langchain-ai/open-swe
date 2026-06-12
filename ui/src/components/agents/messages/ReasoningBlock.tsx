@@ -1,10 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ChevronRight } from "lucide-react";
 
-function formatElapsed(ms: number): string {
-  const secs = Math.max(1, Math.ceil(ms / 1000));
-  return secs < 60 ? `${secs}s` : `${Math.floor(secs / 60)}m ${secs % 60}s`;
-}
+import { formatElapsed } from "@/lib/utils";
 
 function reasoningLabel(elapsedMs: number | null): string {
   if (elapsedMs === null) return "Thought";
