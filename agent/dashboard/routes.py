@@ -5,7 +5,6 @@ from __future__ import annotations
 import hmac
 import logging
 import os
-import time
 from typing import Any
 
 import httpx
@@ -683,25 +682,19 @@ async def _fetch_user_installations_and_repos(
     return installations, repositories
 
 
-# Repo access changes rarely; cache the accessible set briefly so the reviews
-# list (which re-fetches every 5s while a review runs) resolves access with a
-# single GitHub round-trip burst instead of one call per repo per request.
-_ACCESSIBLE_REPOS_TTL_SECONDS = 60.0
-_accessible_repos_cache: dict[str, tuple[float, frozenset[str]]] = {}
-
-
 async def accessible_repo_full_names(login: str) -> frozenset[str]:
-    """Lowercased ``owner/name`` of repos the user can access, cached per-login."""
-    now = time.monotonic()
-    cached = _accessible_repos_cache.get(login)
-    if cached is not None and now - cached[0] < _ACCESSIBLE_REPOS_TTL_SECONDS:
-        return cached[1]
+    """Lowercased ``owner/name`` of repos the user can currently access.
+
+    Resolved fresh on every call (a fixed, repo-count-independent burst of
+    GitHub calls) rather than cached. ``/reviews`` uses this set to decide
+    which private PR metadata a user may see, so it's an authorization
+    boundary: a stale set would leak repo/PR titles, branches, authors and
+    finding counts for repos the user just lost access to.
+    """
     _, repositories = await _fetch_user_installations_and_repos(login)
-    names = frozenset(
+    return frozenset(
         repo["full_name"].lower() for repo in repositories if isinstance(repo.get("full_name"), str)
     )
-    _accessible_repos_cache[login] = (now, names)
-    return names
 
 
 @router.get("/repos")

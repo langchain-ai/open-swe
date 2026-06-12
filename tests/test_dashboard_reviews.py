@@ -79,26 +79,30 @@ async def test_list_reviews_applies_accessibility_and_has_more(monkeypatch) -> N
 
 
 @pytest.mark.asyncio
-async def test_accessible_repo_full_names_lowercases_and_caches(monkeypatch) -> None:
-    routes._accessible_repos_cache.clear()
+async def test_accessible_repo_full_names_lowercases(monkeypatch) -> None:
     fetch = AsyncMock(return_value=([], [{"full_name": "Acme/Repo"}, {"full_name": "Acme/Other"}]))
+    monkeypatch.setattr(routes, "_fetch_user_installations_and_repos", fetch)
+
+    names = await routes.accessible_repo_full_names("octocat")
+
+    assert names == frozenset({"acme/repo", "acme/other"})
+
+
+@pytest.mark.asyncio
+async def test_accessible_repo_full_names_resolves_fresh_each_call(monkeypatch) -> None:
+    # Access is an authorization boundary, so it must not be cached across calls:
+    # a second call re-fetches and reflects revoked access.
+    fetch = AsyncMock(
+        side_effect=[
+            ([], [{"full_name": "acme/repo"}]),
+            ([], []),
+        ]
+    )
     monkeypatch.setattr(routes, "_fetch_user_installations_and_repos", fetch)
 
     first = await routes.accessible_repo_full_names("octocat")
     second = await routes.accessible_repo_full_names("octocat")
 
-    assert first == frozenset({"acme/repo", "acme/other"})
-    assert second == first
-    fetch.assert_awaited_once()
-
-
-@pytest.mark.asyncio
-async def test_accessible_repo_full_names_separate_per_login(monkeypatch) -> None:
-    routes._accessible_repos_cache.clear()
-    fetch = AsyncMock(return_value=([], [{"full_name": "acme/repo"}]))
-    monkeypatch.setattr(routes, "_fetch_user_installations_and_repos", fetch)
-
-    await routes.accessible_repo_full_names("alice")
-    await routes.accessible_repo_full_names("bob")
-
+    assert first == frozenset({"acme/repo"})
+    assert second == frozenset()
     assert fetch.await_count == 2
