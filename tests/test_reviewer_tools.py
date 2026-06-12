@@ -88,7 +88,7 @@ def test_add_finding_rejects_empty_title() -> None:
     assert "title" in result["error"].lower()
 
 
-def test_add_finding_accepts_out_of_diff_lines_marked_not_in_diff() -> None:
+def test_add_finding_rejects_out_of_diff_lines() -> None:
     captured: list[Any] = []
 
     async def fake_append(_thread_id: str, finding: Any) -> None:
@@ -109,10 +109,10 @@ def test_add_finding_accepts_out_of_diff_lines_marked_not_in_diff() -> None:
             start_line=99,
             end_line=99,
         )
-    assert result["success"] is True
+    assert result["success"] is False
     assert result["in_diff"] is False
-    assert "out-of-diff section" in result["note"]
-    assert captured[0]["in_diff"] is False
+    assert "disabled" in result["error"].lower()
+    assert captured == []
 
 
 def test_add_finding_accepts_left_side_anchor_on_old_line() -> None:
@@ -150,9 +150,9 @@ def test_add_finding_accepts_left_side_anchor_on_old_line() -> None:
     assert result["success"] is True
 
 
-def test_add_finding_left_anchor_outside_old_side_set_marked_not_in_diff() -> None:
-    """A LEFT anchor on a line that's not in the old-side hunk is accepted but
-    marked out-of-diff — same guard, just on the correct side."""
+def test_add_finding_left_anchor_outside_old_side_set_rejected() -> None:
+    """A LEFT anchor on a line that's not in the old-side hunk is rejected —
+    out-of-diff findings are disabled, validated on the correct side."""
     config = {
         "configurable": {
             "thread_id": "tid-1",
@@ -180,7 +180,7 @@ def test_add_finding_left_anchor_outside_old_side_set_marked_not_in_diff() -> No
             end_line=99,
             side="LEFT",
         )
-    assert result["success"] is True
+    assert result["success"] is False
     assert result["in_diff"] is False
 
 

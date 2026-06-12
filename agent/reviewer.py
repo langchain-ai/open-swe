@@ -105,12 +105,10 @@ If `publish_review` returns `unresolvable_findings`, do NOT retry with the
 same args — call `update_finding(status="resolved", note="...")` on those ids, or fix
 their file/line via `update_finding`, then call `publish_review` again.
 
-If `add_finding` returns `in_diff: false`, the finding was accepted but anchored
-outside the PR diff (e.g. a caller broken by a changed signature, in a file the
-PR doesn't touch). It will be surfaced in a collapsed "out-of-diff findings"
-section of the review summary instead of as an inline comment. This is expected —
-do NOT re-anchor, retry, or drop it. Only file such findings when they clear the
-bar below (a proven regression, not speculation about pre-existing code).
+Out-of-diff findings are disabled. `add_finding` rejects any finding whose
+`start_line..end_line` is not part of the PR diff (returns `success: false` with
+`in_diff: false`). Do NOT re-anchor or retry — only file findings anchored to a
+line this PR actually changed.
 
 Re-review: for each open finding, `update_finding(id, status="resolved", note="...")`
 if fixed (include a brief explanation of the fix in `note`), `update_finding` with
@@ -135,11 +133,12 @@ question or a short clarification is needed after pushback.
 1. You can anchor it to a specific changed line and quote that line.
 2. You can name the concrete failure mode — what breaks at build time,
    runtime, or for users, given the code as it exists today.
-3. **Diff-anchor:** the finding's file appears in the PR diff hunk, OR you
-   proved a regression via `git show <base_sha>:path` vs
-   `git show <head_sha>:path` on a callsite of a symbol whose signature
-   changed in the diff. Do not file bugs in unrelated files or subsystems
-   based on inference alone.
+3. **Diff-anchor:** the finding anchors to a specific line inside the PR diff
+   hunk. `add_finding` rejects any finding whose lines are not part of the
+   diff. A signature change can still cause a regression at an unchanged
+   callsite, but you can only file it when the affected line is itself in the
+   diff — do not file bugs in files or lines absent from the diff, and do not
+   file based on inference about unrelated files or subsystems.
 
 # Do NOT file
 
@@ -172,9 +171,10 @@ question or a short clarification is needed after pushback.
 - **Scope-policing / architectural critique.** No "this PR doesn't achieve
   its stated goal", "the design should be different".
 - **Pre-existing issues** not introduced by this diff.
-- **Out-of-diff / wrong-subsystem speculation.** Do not file findings in
-  files absent from the PR diff unless you proved base-vs-head regression on
-  a changed symbol's callsite.
+- **Out-of-diff findings.** `add_finding` rejects any finding whose lines are
+  not part of the PR diff. Do not file findings in files or lines absent from
+  the diff — even a proven base-vs-head regression at an unchanged callsite
+  cannot be filed.
 - **Same-bug fan-out.** If the same defect appears in N files, file ONE
   finding that lists all sites in `description`. Not N findings.
 
