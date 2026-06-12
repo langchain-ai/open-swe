@@ -620,17 +620,16 @@ async def _paginate(
     return out
 
 
-@router.get("/repos")
-async def list_repos(
-    session: dict[str, Any] = _SESSION_DEP,
-) -> dict[str, Any]:
-    """List repos where open-swe is installed and the user has access.
+async def _fetch_user_installations_and_repos(
+    login: str,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Resolve the installations and repos a user can access via the GitHub App.
 
     Paginates both ``/user/installations`` and per-installation
     ``/user/installations/{id}/repositories`` so users with multiple
-    installations or >30 accessible repos get the complete set.
+    installations or >30 accessible repos get the complete set. Shared by the
+    ``/repos`` endpoint and the reviews access filter.
     """
-    login = session["sub"]
     token = await get_valid_access_token(login)
     if not token:
         raise HTTPException(401, "github token unavailable, re-login required")
@@ -680,6 +679,30 @@ async def list_repos(
                     continue
                 raise
             repositories.extend(repos)
+    return installations, repositories
+
+
+async def accessible_repo_full_names(login: str) -> frozenset[str]:
+    """Lowercased ``owner/name`` of repos the user can currently access.
+
+    Resolved fresh on every call (a fixed, repo-count-independent burst of
+    GitHub calls) rather than cached. ``/reviews`` uses this set to decide
+    which private PR metadata a user may see, so it's an authorization
+    boundary: a stale set would leak repo/PR titles, branches, authors and
+    finding counts for repos the user just lost access to.
+    """
+    _, repositories = await _fetch_user_installations_and_repos(login)
+    return frozenset(
+        repo["full_name"].lower() for repo in repositories if isinstance(repo.get("full_name"), str)
+    )
+
+
+@router.get("/repos")
+async def list_repos(
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    """List repos where open-swe is installed and the user has access."""
+    installations, repositories = await _fetch_user_installations_and_repos(session["sub"])
     return {
         "installations": [
             {
@@ -722,19 +745,10 @@ async def api_list_reviews(
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
     login = session["sub"]
-    access_cache: dict[str, bool] = {}
+    accessible = await accessible_repo_full_names(login)
 
     async def is_accessible(summary: dict[str, Any]) -> bool:
-        full_name = summary["full_name"]
-        if full_name not in access_cache:
-            try:
-                await require_repo_access_for_user(login, full_name)
-                access_cache[full_name] = True
-            except HTTPException as exc:
-                if exc.status_code not in {403, 404}:
-                    raise
-                access_cache[full_name] = False
-        return access_cache[full_name]
+        return summary["full_name"].lower() in accessible
 
     page = max(page, 0)
     reviews, has_more = await list_reviews(

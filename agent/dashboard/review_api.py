@@ -187,19 +187,25 @@ async def list_reviews(
     ``offset`` (counted in accessible, filter-matching records) and
     ``has_more`` says whether at least one more record exists past it.
 
+    ``author`` is pushed into the ``threads.search`` metadata filter
+    (``pr.author`` containment), so the "My PRs" tab only fetches the user's
+    own reviewer threads instead of scanning the whole population in Python.
+
     When ``is_accessible`` is given, keeps paging through reviewer threads
     until enough accessible summaries are collected (or ``max_scan`` threads
     have been examined), so inaccessible records don't crowd accessible ones
-    out of a single fixed-size page. ``author`` filters on the PR author's
-    GitHub login stored in thread metadata.
+    out of a single fixed-size page.
     """
     client = langgraph_client()
+    search_metadata: dict[str, Any] = {"kind": REVIEWER_THREAD_KIND}
+    if author is not None:
+        search_metadata["pr"] = {"author": author}
     needed = offset + limit + 1
     summaries: list[dict[str, Any]] = []
     scan_offset = 0
     while len(summaries) < needed and scan_offset < max_scan:
         threads = await client.threads.search(
-            metadata={"kind": REVIEWER_THREAD_KIND},
+            metadata=search_metadata,
             limit=page_size,
             offset=scan_offset,
             sort_by="updated_at",
@@ -212,8 +218,6 @@ async def list_reviews(
                 continue
             summary = _thread_review_summary(thread)
             if not summary:
-                continue
-            if author is not None and summary["author"] != author:
                 continue
             if is_accessible is not None and not await is_accessible(summary):
                 continue

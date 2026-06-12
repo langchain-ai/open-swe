@@ -1,5 +1,9 @@
 import { Link, createFileRoute } from "@tanstack/react-router"
-import { keepPreviousData, useQuery } from "@tanstack/react-query"
+import {
+  keepPreviousData,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query"
 import { useState } from "react"
 import {
   BugBeetleIcon,
@@ -35,6 +39,7 @@ function statusBadge(review: ReviewSummary) {
 
 function ReviewsPage() {
   const session = useSession()
+  const queryClient = useQueryClient()
   const [mine, setMine] = useState(true)
   const [page, setPage] = useState(0)
   const reviews = useQuery({
@@ -47,6 +52,14 @@ function ReviewsPage() {
         ? 5000
         : false,
   })
+
+  const prefetch = (nextMine: boolean, nextPage: number) => {
+    if (nextPage < 0) return
+    void queryClient.prefetchQuery({
+      queryKey: ["reviews", nextMine, nextPage],
+      queryFn: () => api.listReviews(nextPage, nextMine),
+    })
+  }
 
   const items = reviews.data?.reviews ?? []
 
@@ -75,6 +88,8 @@ function ReviewsPage() {
                 setMine(value)
                 setPage(0)
               }}
+              onPointerEnter={() => prefetch(value, 0)}
+              onFocus={() => prefetch(value, 0)}
               className={cn(
                 "rounded-md px-2.5 py-1 text-xs transition-colors",
                 mine === value
@@ -167,6 +182,7 @@ function ReviewsPage() {
                   size="sm"
                   variant="outline"
                   disabled={page === 0}
+                  onPointerEnter={() => prefetch(mine, page - 1)}
                   onClick={() => setPage((p) => Math.max(0, p - 1))}
                 >
                   Prev
@@ -175,6 +191,7 @@ function ReviewsPage() {
                   size="sm"
                   variant="outline"
                   disabled={!reviews.data?.has_more}
+                  onPointerEnter={() => prefetch(mine, page + 1)}
                   onClick={() => setPage((p) => p + 1)}
                 >
                   Next
