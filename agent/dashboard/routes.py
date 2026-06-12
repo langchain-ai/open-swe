@@ -709,10 +709,15 @@ async def api_list_review_styles(
     return out
 
 
+REVIEWS_PAGE_SIZE = 20
+
+
 @router.get("/reviews")
 async def api_list_reviews(
+    page: int = 0,
+    mine: bool = True,
     session: dict[str, Any] = _SESSION_DEP,
-) -> list[dict[str, Any]]:
+) -> dict[str, Any]:
     login = session["sub"]
     access_cache: dict[str, bool] = {}
 
@@ -728,7 +733,14 @@ async def api_list_reviews(
                 access_cache[full_name] = False
         return access_cache[full_name]
 
-    return await list_reviews(is_accessible=is_accessible)
+    page = max(page, 0)
+    reviews, has_more = await list_reviews(
+        REVIEWS_PAGE_SIZE,
+        offset=page * REVIEWS_PAGE_SIZE,
+        author=login if mine else None,
+        is_accessible=is_accessible,
+    )
+    return {"reviews": reviews, "page": page, "has_more": has_more}
 
 
 @router.get("/reviews/{owner}/{repo}/{pr_number}")

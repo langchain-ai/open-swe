@@ -311,12 +311,19 @@ export interface ReviewSummary {
   url: string;
   head_ref: string;
   base_ref: string;
+  author: string;
   head_sha: string;
   watch: boolean;
   status: "running" | "error" | "idle";
   counts: ReviewCounts;
   updated_at: string | null;
   full_name?: string;
+}
+
+export interface ReviewListPayload {
+  reviews: Array<ReviewSummary>;
+  page: number;
+  has_more: boolean;
 }
 
 export interface ReviewUserRef {
@@ -470,7 +477,8 @@ export const api = {
       `/admin/user-mappings/${encodeURIComponent(github_login)}`,
       { method: "DELETE" },
     ),
-  listReviews: () => request<Array<ReviewSummary>>("/reviews"),
+  listReviews: (page: number, mine: boolean) =>
+    request<ReviewListPayload>(`/reviews?page=${page}&mine=${mine}`),
   getReview: (owner: string, repo: string, number: number) =>
     request<ReviewDetail>(
       `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}`,

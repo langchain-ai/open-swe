@@ -1,5 +1,6 @@
 import { Link, createFileRoute } from "@tanstack/react-router"
-import { useQuery } from "@tanstack/react-query"
+import { keepPreviousData, useQuery } from "@tanstack/react-query"
+import { useState } from "react"
 import {
   BugBeetleIcon,
   FlagIcon,
@@ -7,6 +8,7 @@ import {
 } from "@phosphor-icons/react"
 
 import type { ReviewSummary } from "@/lib/api"
+import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { api } from "@/lib/api"
 import { useSession } from "@/lib/session"
@@ -33,13 +35,20 @@ function statusBadge(review: ReviewSummary) {
 
 function ReviewsPage() {
   const session = useSession()
+  const [mine, setMine] = useState(true)
+  const [page, setPage] = useState(0)
   const reviews = useQuery({
-    queryKey: ["reviews"],
-    queryFn: api.listReviews,
+    queryKey: ["reviews", mine, page],
+    queryFn: () => api.listReviews(page, mine),
     enabled: !!session.data,
+    placeholderData: keepPreviousData,
     refetchInterval: (query) =>
-      query.state.data?.some((r) => r.status === "running") ? 5000 : false,
+      query.state.data?.reviews.some((r) => r.status === "running")
+        ? 5000
+        : false,
   })
+
+  const items = reviews.data?.reviews ?? []
 
   return (
     <main className="min-w-0 flex-1 overflow-y-auto">
@@ -52,7 +61,33 @@ function ReviewsPage() {
           analysis.
         </p>
 
-        <div className="mt-6 overflow-hidden rounded-lg border border-[var(--ui-border)] bg-[var(--ui-panel)]">
+        <div className="mt-6 flex items-center gap-1">
+          {(
+            [
+              [true, "My PRs"],
+              [false, "All"],
+            ] as const
+          ).map(([value, label]) => (
+            <button
+              key={label}
+              type="button"
+              onClick={() => {
+                setMine(value)
+                setPage(0)
+              }}
+              className={cn(
+                "rounded-md px-2.5 py-1 text-xs transition-colors",
+                mine === value
+                  ? "bg-[var(--ui-sidebar-hover)] font-medium text-[var(--ui-text)]"
+                  : "text-[var(--ui-text-muted)] hover:bg-[var(--ui-sidebar-hover)]"
+              )}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        <div className="mt-3 overflow-hidden rounded-lg border border-[var(--ui-border)] bg-[var(--ui-panel)]">
           {reviews.isLoading && (
             <div className="p-4">
               <Skeleton className="h-24 w-full" />
@@ -63,14 +98,15 @@ function ReviewsPage() {
               {reviews.error.message}
             </p>
           )}
-          {reviews.data && reviews.data.length === 0 && (
+          {reviews.data && items.length === 0 && (
             <p className="px-4 py-3 text-xs text-[var(--ui-text-muted)]">
-              No reviews yet. Enable repositories under Open SWE Review settings
-              and open a PR.
+              {mine
+                ? "No reviews on your PRs yet. Switch to All to see every review you have access to."
+                : "No reviews yet. Enable repositories under Open SWE Review settings and open a PR."}
             </p>
           )}
           <div className="divide-y divide-[var(--ui-border)]">
-            {(reviews.data ?? []).map((review) => (
+            {items.map((review) => (
               <Link
                 key={review.thread_id}
                 to="/agents/reviews/$owner/$repo/$number"
@@ -89,6 +125,9 @@ function ReviewsPage() {
                     </div>
                     <div className="mt-0.5 text-xs text-[var(--ui-text-muted)]">
                       {review.owner}/{review.repo}#{review.number}
+                      {review.author && !mine && (
+                        <span className="ml-2">by {review.author}</span>
+                      )}
                       {review.head_ref && (
                         <span className="ml-2 font-mono text-[11px]">
                           {review.head_ref}
@@ -118,6 +157,31 @@ function ReviewsPage() {
               </Link>
             ))}
           </div>
+          {(page > 0 || reviews.data?.has_more) && (
+            <div className="flex items-center justify-between gap-4 border-t border-[var(--ui-border)] px-4 py-2 text-xs">
+              <span className="text-[var(--ui-text-muted)]">
+                Page {page + 1}
+              </span>
+              <div className="flex items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={page === 0}
+                  onClick={() => setPage((p) => Math.max(0, p - 1))}
+                >
+                  Prev
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={!reviews.data?.has_more}
+                  onClick={() => setPage((p) => p + 1)}
+                >
+                  Next
+                </Button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </main>

@@ -122,7 +122,9 @@ function ReviewFileTreeExplorer({
           {
             height: "100%",
             ...treeThemeStyle(),
-            "--trees-theme-sidebar-bg": "transparent",
+            // Must stay opaque: the tree's truncation marker ("…") paints
+            // this color behind itself to hide the overflowing filename.
+            "--trees-theme-sidebar-bg": "var(--ui-sidebar)",
           } as React.CSSProperties
         }
       />
