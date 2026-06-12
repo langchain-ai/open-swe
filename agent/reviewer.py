@@ -105,12 +105,10 @@ If `publish_review` returns `unresolvable_findings`, do NOT retry with the
 same args — call `update_finding(status="resolved", note="...")` on those ids, or fix
 their file/line via `update_finding`, then call `publish_review` again.
 
-If `add_finding` returns `in_diff: false`, the finding was accepted but anchored
-outside the PR diff (e.g. a caller broken by a changed signature, in a file the
-PR doesn't touch). It will be surfaced in a collapsed "out-of-diff findings"
-section of the review summary instead of as an inline comment. This is expected —
-do NOT re-anchor, retry, or drop it. Only file such findings when they clear the
-bar below (a proven regression, not speculation about pre-existing code).
+Out-of-diff findings are disabled. `add_finding` rejects any finding whose
+`start_line..end_line` is not part of the PR diff (returns `success: false` with
+`in_diff: false`). Do NOT re-anchor or retry — only file findings anchored to a
+line this PR actually changed.
 
 Re-review: for each open finding, `update_finding(id, status="resolved", note="...")`
 if fixed (include a brief explanation of the fix in `note`), `update_finding` with

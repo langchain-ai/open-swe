@@ -51,9 +51,10 @@ def add_finding(
     ``start_line..end_line``.
 
     **In-diff only:** ``start_line..end_line`` must be inside the PR diff.
-    File-level findings (both ``start_line`` and ``end_line`` None) are
-    accepted but won't render as inline GitHub comments — only use when the
-    issue truly isn't anchored to a line.
+    Findings anchored to lines outside the diff are rejected (out-of-diff
+    findings are disabled). File-level findings (both ``start_line`` and
+    ``end_line`` None) are accepted but won't render as inline GitHub
+    comments — only use when the issue truly isn't anchored to a line.
 
     Args:
         severity: One of ``low``, ``medium``, ``high``, ``critical``.
@@ -120,6 +121,16 @@ def add_finding(
     in_diff = not isinstance(diff_line_set, dict) or is_range_in_diff(
         diff_line_set, file, start_line, end_line, side=_cast_side(side)
     )
+    if not in_diff:
+        return {
+            "success": False,
+            "in_diff": False,
+            "error": (
+                "Out-of-diff findings are disabled. This finding's lines are not "
+                "part of this PR's diff. Only file findings anchored to a line the "
+                "PR changed. Do not re-anchor or retry."
+            ),
+        }
 
     diff_hunk: str | None = None
     if isinstance(diff_text, str) and diff_text:
@@ -156,13 +167,6 @@ def add_finding(
     except ReviewerThreadMissingError as exc:
         return thread_missing_tool_result(exc)
     result: dict[str, Any] = {"success": True, "finding_id": finding["id"]}
-    if not in_diff:
-        result["in_diff"] = False
-        result["note"] = (
-            "Anchored outside the PR diff. This will be surfaced in the collapsed "
-            "out-of-diff section of the review summary, not as an inline comment. "
-            "Do not re-anchor or retry."
-        )
     if suggestion_dropped:
         result["suggestion_dropped"] = True
         result["warning"] = (

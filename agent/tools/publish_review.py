@@ -79,7 +79,7 @@ def publish_review(
     Returns:
         Dictionary with ``success``, ``review_id``, ``surfaced_count``,
         ``hidden_count``, ``resolved_thread_count``, and sometimes
-        ``out_of_diff_count``, ``unresolvable_findings``, plus the flags below.
+        ``unresolvable_findings``, plus the flags below.
 
         ``success: true`` alone does NOT mean a GitHub Review was posted —
         check the flags:
@@ -193,15 +193,10 @@ async def _publish_review_eval_dry_run_async(
     findings = await list_findings_async(thread_id)
     unpublished_findings = [f for f in findings if not _has_publication_identity(f)]
     open_unpublished = [f for f in unpublished_findings if f.get("status", "open") == "open"]
+    # Out-of-diff findings are disabled: only in-diff findings are surfaced.
     in_diff_unpublished = [f for f in unpublished_findings if f.get("in_diff", True)]
-    out_of_diff_unpublished = [f for f in unpublished_findings if not f.get("in_diff", True)]
     eligible = filter_findings_for_publish(
         in_diff_unpublished,
-        severity_threshold=severity_threshold,
-        cap=cap,
-    )
-    eligible_out_of_diff = filter_findings_for_publish(
-        out_of_diff_unpublished,
         severity_threshold=severity_threshold,
         cap=cap,
     )
@@ -218,10 +213,7 @@ async def _publish_review_eval_dry_run_async(
         "dry_run": True,
         "review_id": None,
         "surfaced_count": len(inline_comments),
-        "out_of_diff_count": len(eligible_out_of_diff),
-        "hidden_count": max(
-            len(open_unpublished) - len(inline_comments) - len(eligible_out_of_diff), 0
-        ),
+        "hidden_count": max(len(open_unpublished) - len(inline_comments), 0),
         "resolved_thread_count": 0,
     }
 
@@ -267,21 +259,12 @@ async def _publish_review_async(
             f for f in unpublished_findings if f.get("first_seen_sha") == head_sha
         ]
     open_unpublished = [f for f in unpublished_findings if f.get("status", "open") == "open"]
-    # In-diff findings become inline comments. Out-of-diff findings can't anchor
-    # to an inline comment (GitHub rejects off-diff lines), so they're surfaced
-    # in a collapsed dropdown in the review body. Already-surfaced out-of-diff
-    # findings carry a github_review_id, so they're not re-posted on re-review.
+    # In-diff findings become inline comments. Out-of-diff findings are disabled:
+    # they are never surfaced on the PR (any legacy in-state ones are treated as
+    # hidden).
     in_diff_unpublished = [f for f in unpublished_findings if f.get("in_diff", True)]
-    out_of_diff_unpublished = [
-        f
-        for f in unpublished_findings
-        if not f.get("in_diff", True) and not isinstance(f.get("github_review_id"), int)
-    ]
     eligible = filter_findings_for_publish(
         in_diff_unpublished, severity_threshold=severity_threshold, cap=cap
-    )
-    eligible_out_of_diff = filter_findings_for_publish(
-        out_of_diff_unpublished, severity_threshold=severity_threshold, cap=cap
     )
 
     inline_comments: list[dict[str, Any]] = []
@@ -303,17 +286,13 @@ async def _publish_review_async(
     # SWE review summary) instead. Still resolve threads for findings that just
     # moved to resolved, and advance last_reviewed_sha so subsequent pushes
     # don't redo the same diff.
-    if (
-        not inline_comments
-        and not eligible_out_of_diff
-        and await _open_swe_already_reviewed(
-            thread_id=thread_id,
-            owner=owner,
-            repo=repo,
-            pr_number=pr_number,
-            token=token,
-            is_re_review=is_re_review,
-        )
+    if not inline_comments and await _open_swe_already_reviewed(
+        thread_id=thread_id,
+        owner=owner,
+        repo=repo,
+        pr_number=pr_number,
+        token=token,
+        is_re_review=is_re_review,
     ):
         resolved_thread_count = await _resolve_threads_for_resolved_findings(
             owner=owner,
@@ -348,7 +327,6 @@ async def _publish_review_async(
         surfaced_count=len(inline_comments),
         trace_url=review_trace_url,
         ui_url=review_ui_url,
-        out_of_diff_findings=eligible_out_of_diff,
     )
 
     review_response = await post_pull_request_review(
@@ -383,7 +361,6 @@ async def _publish_review_async(
                 surfaced_count=len(retry_inline),
                 trace_url=review_trace_url,
                 ui_url=review_ui_url,
-                out_of_diff_findings=eligible_out_of_diff,
             )
             retry_response = await post_pull_request_review(
                 owner=owner,
@@ -442,7 +419,7 @@ async def _publish_review_async(
         }
     review_id = review_response.get("id") if isinstance(review_response, dict) else None
 
-    if review_id is not None and (eligible_out_of_diff or inline_comments):
+    if review_id is not None and inline_comments:
         # Record the GitHub review id AND inline comment ids in a single
         # findings write. Previously these were three separate read-replace
         # cycles (out-of-diff review id, inline review id, comment ids); each
@@ -466,7 +443,6 @@ async def _publish_review_async(
         await _record_review_publication(
             thread_id=thread_id,
             review_id=review_id,
-            out_of_diff_findings=eligible_out_of_diff,
             inline_with_payload=eligible_with_payload,
             comment_records=comment_records,
             langgraph_run_id=langgraph_run_id,
@@ -510,9 +486,7 @@ async def _publish_review_async(
 
     await set_reviewer_thread_metadata(thread_id, last_reviewed_sha=head_sha)
     await clear_review_started_comment(thread_id=thread_id, owner=owner, repo=repo, token=token)
-    conclusion, check_title, check_summary = review_check_conclusion(
-        len(inline_comments) + len(eligible_out_of_diff)
-    )
+    conclusion, check_title, check_summary = review_check_conclusion(len(inline_comments))
     await settle_review_check_run(
         thread_id=thread_id,
         owner=owner,
@@ -527,10 +501,7 @@ async def _publish_review_async(
         "success": True,
         "review_id": review_id,
         "surfaced_count": len(inline_comments),
-        "out_of_diff_count": len(eligible_out_of_diff),
-        "hidden_count": max(
-            len(open_unpublished) - len(inline_comments) - len(eligible_out_of_diff), 0
-        ),
+        "hidden_count": max(len(open_unpublished) - len(inline_comments), 0),
         "resolved_thread_count": resolved_thread_count,
     }
     if unresolvable_findings:
@@ -736,7 +707,6 @@ async def _record_review_publication(
     *,
     thread_id: str,
     review_id: int,
-    out_of_diff_findings: list[Finding],
     inline_with_payload: list[tuple[dict[str, Any], dict[str, Any]]],
     comment_records: list[dict[str, Any]],
     langgraph_run_id: str | None,
@@ -749,9 +719,6 @@ async def _record_review_publication(
     GitHub returned for it in the same record.
     """
     review_finding_ids = {
-        finding.get("id") for finding in out_of_diff_findings if isinstance(finding.get("id"), str)
-    }
-    review_finding_ids |= {
         finding.get("id")
         for finding, _payload in inline_with_payload
         if isinstance(finding.get("id"), str)
