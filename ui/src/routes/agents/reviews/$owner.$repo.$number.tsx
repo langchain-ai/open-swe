@@ -306,8 +306,10 @@ function ReviewBody({
   const updateCardPos = useCallback((finding: ReviewFinding) => {
     const rect = anchorRefs.current[finding.id]?.getBoundingClientRect()
     if (rect) {
+      // No vertical clamp: the card must move 1:1 with its anchor while
+      // scrolling (and scroll out of view with it) to stay visually attached.
       setCardPos({
-        top: Math.min(Math.max(rect.top, 64), window.innerHeight - 360),
+        top: rect.top,
         left: Math.min(rect.right + 12, window.innerWidth - 412 - 8),
       })
     } else {
