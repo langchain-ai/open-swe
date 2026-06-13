@@ -52,6 +52,7 @@ from ..utils.github_token import (
 )
 from ..utils.langsmith import get_langsmith_trace_url
 from ..utils.slack import post_slack_thread_reply
+from ..utils.tracing import REVIEW_TRACING_PROJECT
 
 
 def publish_review(
@@ -175,7 +176,7 @@ async def _resolve_review_trace_url(thread_id: str, config_override: object) -> 
         return None
     if not thread_id:
         return None
-    return get_langsmith_trace_url(thread_id)
+    return get_langsmith_trace_url(thread_id, project_name=REVIEW_TRACING_PROJECT)
 
 
 def _is_reviewer_eval_mode(configurable: dict[str, Any]) -> bool:

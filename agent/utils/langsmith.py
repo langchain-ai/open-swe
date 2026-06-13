@@ -10,25 +10,71 @@ from typing import Any
 from langsmith import Client as LangSmithClient
 from langsmith.utils import LangSmithNotFoundError
 
+from .tracing import AGENT_TRACING_PROJECT
+
 logger = logging.getLogger(__name__)
 
+_PROJECT_ID_CACHE: dict[str, str] = {}
 
-def _compose_langsmith_project_url() -> str:
-    """Build the LangSmith project URL base from environment variables."""
+
+def _build_prod_langsmith_client() -> LangSmithClient | None:
+    """Build a LangSmith client scoped to the prod tenant for project lookups."""
+    api_key = (
+        os.environ.get("LANGSMITH_API_KEY_PROD")
+        or os.environ.get("LANGSMITH_API_KEY")
+        or os.environ.get("LANGCHAIN_API_KEY")
+    )
+    if not api_key:
+        return None
+    api_url = os.environ.get("LANGSMITH_ENDPOINT_PROD") or os.environ.get(
+        "LANGSMITH_ENDPOINT", "https://api.smith.langchain.com"
+    )
+    return LangSmithClient(api_key=api_key, api_url=api_url)
+
+
+def _resolve_project_id_by_name(project_name: str) -> str | None:
+    """Resolve a LangSmith project id from its name, caching successful lookups."""
+    cached = _PROJECT_ID_CACHE.get(project_name)
+    if cached:
+        return cached
+    client = _build_prod_langsmith_client()
+    if client is None:
+        return None
+    try:
+        project = client.read_project(project_name=project_name)
+    except LangSmithNotFoundError:
+        return None
+    except Exception:  # noqa: BLE001
+        logger.warning("Failed to resolve LangSmith project id for %s", project_name, exc_info=True)
+        return None
+    project_id = getattr(project, "id", None)
+    if not project_id:
+        return None
+    resolved = str(project_id)
+    _PROJECT_ID_CACHE[project_name] = resolved
+    return resolved
+
+
+def _compose_langsmith_project_url(project_name: str = AGENT_TRACING_PROJECT) -> str:
+    """Build the LangSmith project URL base for a given tracing project name."""
     host_url = os.environ.get("LANGSMITH_URL_PROD", "https://smith.langchain.com")
     tenant_id = os.environ.get("LANGSMITH_TENANT_ID_PROD")
-    project_id = os.environ.get("LANGSMITH_TRACING_PROJECT_ID_PROD")
+    project_id = _resolve_project_id_by_name(project_name) or os.environ.get(
+        "LANGSMITH_TRACING_PROJECT_ID_PROD"
+    )
     if not tenant_id or not project_id:
         raise ValueError(
-            "LANGSMITH_TENANT_ID_PROD and LANGSMITH_TRACING_PROJECT_ID_PROD must be set"
+            "LANGSMITH_TENANT_ID_PROD must be set and the tracing project id must be resolvable"
         )
     return f"{host_url}/o/{tenant_id}/projects/p/{project_id}"
 
 
-def get_langsmith_trace_url(thread_id: str) -> str | None:
+def get_langsmith_trace_url(
+    thread_id: str, project_name: str = AGENT_TRACING_PROJECT
+) -> str | None:
     """Build the LangSmith thread URL for a given thread ID."""
     try:
-        project_url = _compose_langsmith_project_url()
+        project_url = _compose_langsmith_project_url(project_name)
         return f"{project_url}/t/{thread_id}"
     except Exception:  # noqa: BLE001
         logger.warning(
