@@ -17,6 +17,8 @@
   <a href="https://github.com/langchain-ai/open-swe/stargazers" target="_blank"><img src="https://img.shields.io/github/stars/langchain-ai/open-swe" alt="GitHub Stars"></a>
   <a href="https://github.com/langchain-ai/langgraph" target="_blank"><img src="https://img.shields.io/badge/Built%20on-LangGraph-blue" alt="Built on LangGraph"></a>
   <a href="https://github.com/langchain-ai/deepagents" target="_blank"><img src="https://img.shields.io/badge/Built%20on-Deep%20Agents-blue" alt="Built on Deep Agents"></a>
+  <a href="https://hvtracker.net/agents/open-swe/" target="_blank"><img src="https://hvtracker.net/badge/open-swe.svg" alt="HVTrust"></a>
+  <a href="https://hvtracker.net/agents/open-swe/" target="_blank"><img src="https://hvtracker.net/badge/open-swe-grade.svg" alt="Evidence Grade"></a>
   <a href="https://x.com/langchain" target="_blank"><img src="https://img.shields.io/twitter/url/https/twitter.com/langchain.svg?style=social&label=Follow%20%40LangChain" alt="Twitter / X"></a>
 </div>
 
