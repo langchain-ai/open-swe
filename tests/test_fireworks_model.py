@@ -31,7 +31,8 @@ def test_kimi_k2p7_is_supported() -> None:
         None,
     )
     assert kimi_k2p7 is not None
-    assert kimi_k2p7["efforts"] == ["none", "low", "medium", "high"]
+    assert kimi_k2p7["efforts"] == ["low", "medium", "high"]
+    assert "none" not in kimi_k2p7["efforts"]
     assert kimi_k2p7["default_effort"] == "high"
     kwargs = provider_model_kwargs(kimi_k2p7["id"], "high", max_tokens=16_000)
     assert kwargs["model_kwargs"] == {"reasoning_effort": "high"}
