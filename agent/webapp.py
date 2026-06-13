@@ -49,6 +49,7 @@ from .utils.linear import post_linear_trace_comment
 from .utils.linear_team_repo_map import LINEAR_TEAM_TO_REPO
 from .utils.multimodal import dedupe_urls, extract_image_urls, fetch_image_block
 from .utils.repo import extract_repo_from_text
+from .utils.llm_keys import validate_llm_api_keys
 from .utils.sandbox import validate_sandbox_startup_config
 from .utils.slack import (
     GitHubPrRef,
@@ -73,6 +74,9 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    # Fail fast on bad LLM config so the operator sees a clear, actionable
+    # error at boot rather than a confusing 500 on the first request.
+    validate_llm_api_keys()
     validate_sandbox_startup_config()
     yield
 
