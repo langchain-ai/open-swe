@@ -27,7 +27,7 @@ def test_provider_model_kwargs_for_fireworks() -> None:
 
 def test_kimi_k2p7_is_supported() -> None:
     kimi_k2p7 = next(
-        (m for m in SUPPORTED_MODELS if m["id"].endswith("kimi-k2p7")),
+        (m for m in SUPPORTED_MODELS if m["id"].endswith("kimi-k2p7-code")),
         None,
     )
     assert kimi_k2p7 is not None
