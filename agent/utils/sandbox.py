@@ -12,6 +12,7 @@ SANDBOX_FACTORIES: dict[str, tuple[str, str]] = {
     "modal": ("agent.integrations.modal", "create_modal_sandbox"),
     "runloop": ("agent.integrations.runloop", "create_runloop_sandbox"),
     "local": ("agent.integrations.local", "create_local_sandbox"),
+    "docker": ("agent.integrations.docker", "create_docker_sandbox"),
 }
 
 
@@ -31,7 +32,7 @@ def create_sandbox(sandbox_id: str | None = None) -> SandboxBackendProtocol:
     """Create or reconnect to a sandbox using the configured provider.
 
     The provider is selected via the SANDBOX_TYPE environment variable.
-    Supported values: langsmith (default), daytona, modal, runloop, local.
+    Supported values: langsmith (default), daytona, modal, runloop, local, docker.
 
     Args:
         sandbox_id: Optional existing sandbox ID to reconnect to.
