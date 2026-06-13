@@ -36,6 +36,13 @@ SUPPORTED_MODELS: list[ModelOption] = [
         "supports_images": True,
     },
     {
+        "id": "fireworks:accounts/fireworks/models/kimi-k2p7-code",
+        "label": "Kimi K2.7",
+        "efforts": ["low", "medium", "high"],
+        "default_effort": "high",
+        "supports_images": False,
+    },
+    {
         "id": "fireworks:accounts/fireworks/models/kimi-k2p6",
         "label": "Kimi K2.6",
         "efforts": ["none", "low", "medium", "high"],

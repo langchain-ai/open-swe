@@ -25,6 +25,19 @@ def test_provider_model_kwargs_for_fireworks() -> None:
     assert kwargs["model_kwargs"] == {"reasoning_effort": "high"}
 
 
+def test_kimi_k2p7_is_supported() -> None:
+    kimi_k2p7 = next(
+        (m for m in SUPPORTED_MODELS if m["id"].endswith("kimi-k2p7-code")),
+        None,
+    )
+    assert kimi_k2p7 is not None
+    assert kimi_k2p7["efforts"] == ["low", "medium", "high"]
+    assert "none" not in kimi_k2p7["efforts"]
+    assert kimi_k2p7["default_effort"] == "high"
+    kwargs = provider_model_kwargs(kimi_k2p7["id"], "high", max_tokens=16_000)
+    assert kwargs["model_kwargs"] == {"reasoning_effort": "high"}
+
+
 def test_provider_model_kwargs_for_fireworks_none_disables_reasoning() -> None:
     kwargs = provider_model_kwargs(
         "fireworks:accounts/fireworks/models/deepseek-v4-pro",
