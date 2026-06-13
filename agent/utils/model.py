@@ -1,8 +1,24 @@
+import os
 from typing import Literal, TypedDict, Unpack
 
 from langchain.chat_models import init_chat_model
 
 OPENAI_RESPONSES_WS_BASE_URL = "wss://api.openai.com/v1"
+
+# LangSmith LLM Gateway: opt-in proxy for provider calls so credentials, spend
+# policies, and PII/secrets redaction are centrally enforced. Clients authenticate
+# with a LangSmith API key; the gateway resolves the real provider key from
+# workspace secrets. Enable via LANGSMITH_GATEWAY_ENABLED=true. See
+# https://docs.langchain.com/langsmith/llm-gateway.
+DEFAULT_GATEWAY_BASE_URL = "https://gateway.smith.langchain.com"
+
+# Provider prefix (in the model id) -> gateway sub-path.
+GATEWAY_PROVIDER_PATHS: dict[str, str] = {
+    "openai": "/openai/v1",
+    "anthropic": "/anthropic",
+    "google_genai": "/gemini",
+    "fireworks": "/fireworks",
+}
 
 # Anthropic SDK default is 2; a 529 burst can outlive that. Bump to give the
 # primary provider a fair chance before the fallback middleware kicks in.
@@ -47,11 +63,41 @@ class ModelKwargs(TypedDict, total=False):
 _ANTHROPIC_EFFORTS: set[AnthropicEffort] = {"low", "medium", "high", "xhigh", "max"}
 
 
+def _gateway_base_url() -> str | None:
+    """Return the LangSmith LLM Gateway base URL when gateway routing is enabled.
+
+    Gateway routing is opt-in: the gateway is in private beta, so default installs
+    keep calling provider APIs directly with their own keys.
+    """
+    if os.environ.get("LANGSMITH_GATEWAY_ENABLED", "").lower() not in ("1", "true", "yes"):
+        return None
+    return os.environ.get("LANGSMITH_GATEWAY_BASE_URL", DEFAULT_GATEWAY_BASE_URL).rstrip("/")
+
+
+def _gateway_api_key() -> str | None:
+    """Return the LangSmith API key used to authenticate gateway calls."""
+    return (
+        os.environ.get("LANGSMITH_API_KEY")
+        or os.environ.get("LANGCHAIN_API_KEY")
+        or os.environ.get("LANGSMITH_API_KEY_PROD")
+    )
+
+
 def make_model(model_id: str, **kwargs: Unpack[ModelKwargs]):
     model_kwargs: dict[str, object] = kwargs.copy()
     model_kwargs.setdefault("max_retries", DEFAULT_MAX_RETRIES)
 
-    if model_id.startswith("openai:"):
+    provider = model_id.split(":", 1)[0] if ":" in model_id else ""
+    gateway_base = _gateway_base_url()
+    gateway_api_key = _gateway_api_key()
+    gateway_path = GATEWAY_PROVIDER_PATHS.get(provider)
+
+    if gateway_base and gateway_api_key and gateway_path:
+        model_kwargs["base_url"] = f"{gateway_base}{gateway_path}"
+        model_kwargs["api_key"] = gateway_api_key
+        if provider == "openai":
+            model_kwargs["use_responses_api"] = True
+    elif model_id.startswith("openai:"):
         model_kwargs["base_url"] = OPENAI_RESPONSES_WS_BASE_URL
         model_kwargs["use_responses_api"] = True
 

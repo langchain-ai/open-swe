@@ -403,10 +403,18 @@ LANGSMITH_TRACING_PROJECT_ID_PROD=""
 LANGSMITH_URL_PROD="https://smith.langchain.com"                 
 
 # === LLM ===
-ANTHROPIC_API_KEY=""                   # Anthropic API key
-OPENAI_API_KEY=""                      # OpenAI API key (when using openai: models)
-GOOGLE_API_KEY=""                      # Google AI API key (when using google_genai: models)
-FIREWORKS_API_KEY=""                   # Fireworks API key (when using fireworks: models)
+# By default, LLM calls go directly to provider APIs using the keys below.
+# Optionally route them through the LangSmith LLM Gateway (private beta), which
+# authenticates with your LangSmith API key and resolves the real provider key
+# from workspace secrets (see https://docs.langchain.com/langsmith/llm-gateway).
+# Enable the gateway only if your workspace has Gateway access and Provider
+# Secrets configured.
+LANGSMITH_GATEWAY_ENABLED=""           # Set to "true" to route LLM calls through the gateway
+LANGSMITH_GATEWAY_BASE_URL="https://gateway.smith.langchain.com"  # Override the gateway host
+ANTHROPIC_API_KEY=""                   # Anthropic API key (used for direct provider calls)
+OPENAI_API_KEY=""                      # OpenAI API key (used for direct provider calls)
+GOOGLE_API_KEY=""                      # Google AI API key (used for direct provider calls)
+FIREWORKS_API_KEY=""                   # Fireworks API key (used for direct provider calls)
 
 # === GitHub App (required) ===
 GITHUB_APP_ID=""                       # From step 3c
