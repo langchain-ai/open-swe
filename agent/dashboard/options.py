@@ -43,13 +43,6 @@ SUPPORTED_MODELS: list[ModelOption] = [
         "supports_images": False,
     },
     {
-        "id": "fireworks:accounts/fireworks/models/kimi-k2p6",
-        "label": "Kimi K2.6",
-        "efforts": ["none", "low", "medium", "high"],
-        "default_effort": "high",
-        "supports_images": False,
-    },
-    {
         "id": "fireworks:accounts/fireworks/models/deepseek-v4-pro",
         "label": "DeepSeek V4 Pro",
         "efforts": ["none", "low", "medium", "high", "xhigh", "max"],

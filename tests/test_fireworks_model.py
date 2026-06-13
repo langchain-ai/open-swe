@@ -17,7 +17,7 @@ def test_fireworks_reasoning_effort_maps_effort() -> None:
 
 def test_provider_model_kwargs_for_fireworks() -> None:
     kwargs = provider_model_kwargs(
-        "fireworks:accounts/fireworks/models/kimi-k2p6",
+        "fireworks:accounts/fireworks/models/kimi-k2p7-code",
         "high",
         max_tokens=16_000,
     )
