@@ -45,6 +45,10 @@ _WORKER_ID = uuid.uuid4().hex
 # them. The store record is the source of truth across workers/requests.
 _PROCS: dict[str, asyncio.subprocess.Process] = {}
 
+# Rolling tail of subprocess output, kept by the owning worker so the heartbeat
+# loop can persist a live log tail to the store while the eval runs.
+_LOG_BUFFERS: dict[str, str] = {}
+
 
 def _client():
     return get_client()
@@ -246,7 +250,7 @@ async def cancel_reviewer_eval() -> dict[str, Any]:
 
 
 async def _heartbeat_loop(proc: asyncio.subprocess.Process) -> None:
-    """Refresh the record heartbeat while the owned subprocess is alive."""
+    """Refresh heartbeat and live log tail while the owned subprocess is alive."""
     while proc.returncode is None:
         await asyncio.sleep(_HEARTBEAT_INTERVAL_SECONDS)
         if proc.returncode is not None:
@@ -254,7 +258,36 @@ async def _heartbeat_loop(proc: asyncio.subprocess.Process) -> None:
         record = await _get_record()
         if not record or record.get("status") != "running":
             return
-        await _put_record({**record, "heartbeat": _now_iso()})
+        await _put_record(
+            {
+                **record,
+                "heartbeat": _now_iso(),
+                "log_tail": _LOG_BUFFERS.get(REVIEWER_EVAL_KEY) or record.get("log_tail"),
+            }
+        )
+
+
+async def _stream_output(proc: asyncio.subprocess.Process) -> tuple[str, str | None]:
+    """Read stdout to EOF, keeping a rolling tail and the last experiment URL.
+
+    The tail is published to ``_LOG_BUFFERS`` as it grows so the heartbeat loop
+    can persist it mid-run. Reading in fixed chunks avoids the line-length cap
+    that ``StreamReader.readline`` would impose on long log lines.
+    """
+    tail = ""
+    experiment_url: str | None = None
+    if proc.stdout is None:
+        return tail, experiment_url
+    while True:
+        chunk = await proc.stdout.read(4096)
+        if not chunk:
+            break
+        tail = (tail + chunk.decode("utf-8", errors="replace"))[-_LOG_TAIL_CHARS:]
+        urls = _EXPERIMENT_URL_RE.findall(tail)
+        if urls:
+            experiment_url = urls[-1]
+        _LOG_BUFFERS[REVIEWER_EVAL_KEY] = tail
+    return tail, experiment_url
 
 
 async def _monitor(
@@ -265,10 +298,10 @@ async def _monitor(
     project: str,
 ) -> None:
     heartbeat = asyncio.create_task(_heartbeat_loop(proc))
-    output = b""
+    tail = ""
+    experiment_url: str | None = None
     try:
-        if proc.stdout is not None:
-            output = await proc.stdout.read()
+        tail, experiment_url = await _stream_output(proc)
         await proc.wait()
     except Exception:
         logger.exception("Error while monitoring reviewer eval subprocess")
@@ -277,11 +310,9 @@ async def _monitor(
         with contextlib.suppress(asyncio.CancelledError):
             await heartbeat
         _PROCS.pop(REVIEWER_EVAL_KEY, None)
+        _LOG_BUFFERS.pop(REVIEWER_EVAL_KEY, None)
 
-    text = output.decode("utf-8", errors="replace")
-    log_tail = text[-_LOG_TAIL_CHARS:] if text else None
-    urls = _EXPERIMENT_URL_RE.findall(text)
-    experiment_url = urls[-1] if urls else None
+    log_tail = tail or None
     exit_code = proc.returncode
     status: EvalStatus = "completed" if exit_code == 0 else "failed"
     error = None if status == "completed" else f"Eval exited with code {exit_code}."

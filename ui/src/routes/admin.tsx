@@ -1,12 +1,12 @@
 import { Link, Navigate, createFileRoute } from "@tanstack/react-router"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { CaretRightIcon } from "@phosphor-icons/react"
 import { useEffect, useMemo, useState } from "react"
 
 import type {
   DatadogConnectBody,
   LangSmithConnectBody,
   ModelOption,
-  ReviewerEvalStatus,
   TeamSettings,
   UserMapping,
 } from "@/lib/api"
@@ -55,7 +55,20 @@ function AdminPage() {
 
       <TriggerReviewSection />
 
-      <ReviewerEvalSection />
+      <SettingsSection title="Evals">
+        <Link
+          to="/admin/evals"
+          className="flex items-center justify-between gap-6 px-4 py-3 hover:bg-muted/40"
+        >
+          <div className="flex flex-col gap-0.5">
+            <span className="text-xs font-medium text-foreground">Reviewer eval</span>
+            <span className="text-xs text-muted-foreground">
+              Run the offline reviewer benchmark and watch its output stream live.
+            </span>
+          </div>
+          <CaretRightIcon className="size-3.5 shrink-0 text-muted-foreground" />
+        </Link>
+      </SettingsSection>
 
       <ObservabilityCredentialsSection />
 
@@ -144,121 +157,6 @@ function TriggerReviewSection() {
             </Link>
           </p>
         )}
-        {error && <p className="text-xs text-destructive">{error}</p>}
-      </div>
-    </SettingsSection>
-  )
-}
-
-function ReviewerEvalSection() {
-  const qc = useQueryClient()
-  const [limit, setLimit] = useState("")
-  const [error, setError] = useState<string | null>(null)
-
-  const status = useQuery({
-    queryKey: ["reviewerEval"],
-    queryFn: api.getReviewerEval,
-    refetchInterval: (query) =>
-      query.state.data?.status === "running" ? 5000 : false,
-  })
-
-  const data = status.data
-  const running = data?.status === "running"
-
-  const onSuccess = (next: ReviewerEvalStatus) => {
-    qc.setQueryData(["reviewerEval"], next)
-    setError(null)
-  }
-  const onError = (e: Error) => setError(e.message)
-
-  const start = useMutation({
-    mutationFn: () => {
-      const n = limit.trim() ? Number(limit.trim()) : null
-      if (n !== null && (!Number.isInteger(n) || n <= 0)) {
-        throw new Error("Limit must be a positive whole number")
-      }
-      return api.startReviewerEval(n)
-    },
-    onSuccess,
-    onError,
-  })
-  const cancel = useMutation({
-    mutationFn: () => api.cancelReviewerEval(),
-    onSuccess,
-    onError,
-  })
-
-  return (
-    <SettingsSection
-      title="Reviewer eval"
-      description="Run the offline reviewer benchmark against the LangSmith dataset. Traces are sent to the open-swe-evals project."
-    >
-      <div className="flex flex-col gap-3 p-4">
-        <div className="flex items-center gap-2">
-          <Input
-            className="w-48"
-            type="number"
-            min={1}
-            placeholder="Limit (optional)"
-            value={limit}
-            disabled={running}
-            onChange={(e) => setLimit(e.target.value)}
-          />
-          <Button
-            size="sm"
-            onClick={() => start.mutate()}
-            disabled={running || start.isPending}
-          >
-            {start.isPending ? "Starting…" : "Run eval"}
-          </Button>
-          {running && (
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => cancel.mutate()}
-              disabled={cancel.isPending}
-            >
-              Cancel
-            </Button>
-          )}
-        </div>
-
-        <p className="text-xs text-muted-foreground">
-          Leave the limit blank for the full dataset, or enter N to run only the
-          first N PRs (smoke test).
-        </p>
-
-        {data && (
-          <div className="flex flex-col gap-1 text-xs text-muted-foreground">
-            <span>
-              Status: <span className="font-medium">{data.status}</span>
-              {data.langsmith_project ? ` · ${data.langsmith_project}` : ""}
-              {data.limit ? ` · limit ${data.limit}` : ""}
-            </span>
-            {data.started_at && (
-              <span>Started: {new Date(data.started_at).toLocaleString()}</span>
-            )}
-            {data.finished_at && (
-              <span>
-                Finished: {new Date(data.finished_at).toLocaleString()}
-              </span>
-            )}
-            {data.experiment_url && (
-              <a
-                href={data.experiment_url}
-                target="_blank"
-                rel="noreferrer"
-                className="underline hover:text-foreground"
-              >
-                View experiment in LangSmith
-              </a>
-            )}
-            {data.error && (
-              <span className="text-destructive">{data.error}</span>
-            )}
-          </div>
-        )}
-
         {error && <p className="text-xs text-destructive">{error}</p>}
       </div>
     </SettingsSection>

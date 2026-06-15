@@ -23,6 +23,7 @@ import { Route as ReviewStylesRouteImport } from './routes/review_.styles'
 import { Route as AgentsInstructionsRouteImport } from './routes/agents_.instructions'
 import { Route as AgentsThreadsRouteImport } from './routes/agents/threads'
 import { Route as AgentsThreadIdRouteImport } from './routes/agents/$threadId'
+import { Route as AdminEvalsRouteImport } from './routes/admin_.evals'
 import { Route as AgentsReviewsIndexRouteImport } from './routes/agents/reviews/index'
 import { Route as AgentsAutomationsIndexRouteImport } from './routes/agents/automations/index'
 import { Route as ReviewRepositoriesOwnerRouteImport } from './routes/review_.repositories.$owner'
@@ -100,6 +101,11 @@ const AgentsThreadIdRoute = AgentsThreadIdRouteImport.update({
   path: '/$threadId',
   getParentRoute: () => AgentsRoute,
 } as any)
+const AdminEvalsRoute = AdminEvalsRouteImport.update({
+  id: '/admin_/evals',
+  path: '/admin/evals',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AgentsReviewsIndexRoute = AgentsReviewsIndexRouteImport.update({
   id: '/reviews/',
   path: '/reviews/',
@@ -143,6 +149,7 @@ export interface FileRoutesByFullPath {
   '/my-settings': typeof MySettingsRoute
   '/review': typeof ReviewRoute
   '/usage': typeof UsageRoute
+  '/admin/evals': typeof AdminEvalsRoute
   '/agents/$threadId': typeof AgentsThreadIdRoute
   '/agents/threads': typeof AgentsThreadsRoute
   '/agents/instructions': typeof AgentsInstructionsRoute
@@ -164,6 +171,7 @@ export interface FileRoutesByTo {
   '/my-settings': typeof MySettingsRoute
   '/review': typeof ReviewRoute
   '/usage': typeof UsageRoute
+  '/admin/evals': typeof AdminEvalsRoute
   '/agents/$threadId': typeof AgentsThreadIdRoute
   '/agents/threads': typeof AgentsThreadsRoute
   '/agents/instructions': typeof AgentsInstructionsRoute
@@ -187,6 +195,7 @@ export interface FileRoutesById {
   '/my-settings': typeof MySettingsRoute
   '/review': typeof ReviewRoute
   '/usage': typeof UsageRoute
+  '/admin_/evals': typeof AdminEvalsRoute
   '/agents/$threadId': typeof AgentsThreadIdRoute
   '/agents/threads': typeof AgentsThreadsRoute
   '/agents_/instructions': typeof AgentsInstructionsRoute
@@ -211,6 +220,7 @@ export interface FileRouteTypes {
     | '/my-settings'
     | '/review'
     | '/usage'
+    | '/admin/evals'
     | '/agents/$threadId'
     | '/agents/threads'
     | '/agents/instructions'
@@ -232,6 +242,7 @@ export interface FileRouteTypes {
     | '/my-settings'
     | '/review'
     | '/usage'
+    | '/admin/evals'
     | '/agents/$threadId'
     | '/agents/threads'
     | '/agents/instructions'
@@ -254,6 +265,7 @@ export interface FileRouteTypes {
     | '/my-settings'
     | '/review'
     | '/usage'
+    | '/admin_/evals'
     | '/agents/$threadId'
     | '/agents/threads'
     | '/agents_/instructions'
@@ -277,6 +289,7 @@ export interface RootRouteChildren {
   MySettingsRoute: typeof MySettingsRoute
   ReviewRoute: typeof ReviewRoute
   UsageRoute: typeof UsageRoute
+  AdminEvalsRoute: typeof AdminEvalsRoute
   AgentsInstructionsRoute: typeof AgentsInstructionsRoute
   ReviewStylesRoute: typeof ReviewStylesRoute
   ReviewRepositoriesOwnerRoute: typeof ReviewRepositoriesOwnerRoute
@@ -382,6 +395,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AgentsThreadIdRouteImport
       parentRoute: typeof AgentsRoute
     }
+    '/admin_/evals': {
+      id: '/admin_/evals'
+      path: '/admin/evals'
+      fullPath: '/admin/evals'
+      preLoaderRoute: typeof AdminEvalsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/agents/reviews/': {
       id: '/agents/reviews/'
       path: '/reviews'
@@ -462,6 +482,7 @@ const rootRouteChildren: RootRouteChildren = {
   MySettingsRoute: MySettingsRoute,
   ReviewRoute: ReviewRoute,
   UsageRoute: UsageRoute,
+  AdminEvalsRoute: AdminEvalsRoute,
   AgentsInstructionsRoute: AgentsInstructionsRoute,
   ReviewStylesRoute: ReviewStylesRoute,
   ReviewRepositoriesOwnerRoute: ReviewRepositoriesOwnerRoute,
@@ -469,3 +490,12 @@ const rootRouteChildren: RootRouteChildren = {
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
+
+import type { getRouter } from './router.tsx'
+import type { createStart } from '@tanstack/react-start'
+declare module '@tanstack/react-start' {
+  interface Register {
+    ssr: true
+    router: Awaited<ReturnType<typeof getRouter>>
+  }
+}
