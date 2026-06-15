@@ -24,12 +24,14 @@ export function UserMessage({ message }: { message: Message }) {
     updateScrollIndicators();
   }, [text, updateScrollIndicators]);
 
-  const textEdgeShadows = [
-    scrolledFromTop ? "inset 0 12px 10px -10px rgba(42, 63, 95, 0.95)" : "",
-    scrolledFromBottom ? "inset 0 -12px 10px -10px rgba(42, 63, 95, 0.95)" : "",
-  ]
-    .filter(Boolean)
-    .join(", ");
+  const topStop = scrolledFromTop ? "transparent 0, black 24px" : "black 0";
+  const bottomStop = scrolledFromBottom
+    ? "black calc(100% - 24px), transparent 100%"
+    : "black 100%";
+  const textEdgeMask =
+    scrolledFromTop || scrolledFromBottom
+      ? `linear-gradient(to bottom, ${topStop}, ${bottomStop})`
+      : undefined;
 
   return (
     <div className="flex justify-end my-4">
@@ -54,7 +56,10 @@ export function UserMessage({ message }: { message: Message }) {
               ref={textRef}
               onScroll={updateScrollIndicators}
               className="max-h-[250px] overflow-auto px-3 py-1.5 text-[color:var(--ui-text)] text-[13px] whitespace-pre-wrap break-words"
-              style={{ boxShadow: textEdgeShadows || "none" }}
+              style={{
+                maskImage: textEdgeMask,
+                WebkitMaskImage: textEdgeMask,
+              }}
             >
               {text}
             </div>
