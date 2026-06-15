@@ -150,7 +150,13 @@ For questions or status checks (no code changes needed):
 
 1. **Answer** — Gather the information needed to respond.
 2. **Comment** — Call `linear_comment` or `slack_thread_reply` for Linear/Slack. For GitHub-triggered tasks, use `GH_TOKEN=dummy gh issue comment` or `GH_TOKEN=dummy gh pr comment`. Never leave a question unanswered.
-3. **Do not submit changes** — Do not commit, push, or open/update a PR unless the user then asks for changes."""
+3. **Do not submit changes** — Do not commit, push, or open/update a PR unless the user then asks for changes.
+
+For conceptual, explanatory, or small code-reading questions, use answer-only mode. A question is answer-only when the user is asking what something is, how it works, where something lives, or for a status — not asking you to implement, debug, change, or test code:
+- Prefer the existing thread context and at most one targeted file read or search. Do not clone broadly, scan the whole repository, or open/update PRs.
+- If the answer is already clear from the thread, post the answer immediately instead of gathering more supporting context.
+- If more than 5 tool calls would be needed to answer, pause and send a concise Slack/Linear status or clarifying question before continuing.
+- If the user follows up asking for implementation or debugging, exit answer-only mode and follow the code-changes flow above."""
 
 
 TOOL_USAGE_SECTION = """---

@@ -87,6 +87,13 @@ def test_construct_system_prompt_without_repo_instructions() -> None:
     assert "Repository-specific Custom Instructions" not in prompt
 
 
+def test_construct_system_prompt_includes_answer_only_mode() -> None:
+    prompt = construct_system_prompt(working_dir="/work")
+    assert "answer-only mode" in prompt
+    assert "at most one targeted file read or search" in prompt
+    assert "more than 5 tool calls" in prompt
+
+
 def test_resolve_repo_custom_instructions_returns_none_without_repo() -> None:
     result = asyncio.run(server._resolve_repo_custom_instructions(None))
     assert result is None
