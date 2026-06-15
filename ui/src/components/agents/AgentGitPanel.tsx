@@ -78,16 +78,18 @@ const COLLAPSED_STATE_FALSE = "0"
 const PANEL_DEFAULT_WIDTH = 420
 const PANEL_MIN_WIDTH = 320
 // Keep at least this much room for the chat so the panel can grow to nearly the
-// full window (e.g. ~50/50 on ultrawide screens) without hiding the chat.
-const PANEL_MIN_CHAT_WIDTH = 360
+// full window (e.g. ~50/50 on ultrawide screens) without squishing the chat.
+// Exported so the chat column can enforce the same floor via min-width.
+export const PANEL_MIN_CHAT_WIDTH = 360
 
-function getPanelMaxWidth(): number {
+function getPanelMaxWidth(availableWidth?: number): number {
   if (typeof window === "undefined") return PANEL_DEFAULT_WIDTH
-  return Math.max(PANEL_MIN_WIDTH, window.innerWidth - PANEL_MIN_CHAT_WIDTH)
+  const available = availableWidth ?? window.innerWidth
+  return Math.max(PANEL_MIN_WIDTH, available - PANEL_MIN_CHAT_WIDTH)
 }
 
-function clampPanelWidth(width: number): number {
-  return Math.min(getPanelMaxWidth(), Math.max(PANEL_MIN_WIDTH, width))
+function clampPanelWidth(width: number, availableWidth?: number): number {
+  return Math.min(getPanelMaxWidth(availableWidth), Math.max(PANEL_MIN_WIDTH, width))
 }
 
 function readStoredPanelWidth(): number {
@@ -190,6 +192,7 @@ export function AgentGitPanel({ thread, messages }: AgentGitPanelProps) {
   )
   const [width, setWidthState] = useState(() => readStoredPanelWidth())
   const [fullScreen, setFullScreen] = useState(false)
+  const panelRef = useRef<HTMLDivElement>(null)
 
   const setCollapsed = (next: boolean) => {
     setCollapsedState(next)
@@ -202,18 +205,20 @@ export function AgentGitPanel({ thread, messages }: AgentGitPanelProps) {
   }
 
   const setWidth = useCallback((next: number) => {
-    const clamped = clampPanelWidth(next)
+    const available = panelRef.current?.parentElement?.clientWidth
+    const clamped = clampPanelWidth(next, available)
     setWidthState(clamped)
     window.localStorage.setItem(PANEL_STORAGE_WIDTH, String(clamped))
   }, [])
 
-  // Re-clamp the stored width when the window shrinks so the panel never
-  // exceeds the available space (which would squeeze out the chat).
+  // Re-clamp against the real container width on mount and whenever the window
+  // resizes, so the panel can never squeeze the chat below its minimum width.
   useEffect(() => {
     if (typeof window === "undefined") return
-    const onResize = () => setWidth(width)
-    window.addEventListener("resize", onResize)
-    return () => window.removeEventListener("resize", onResize)
+    const reclamp = () => setWidth(width)
+    reclamp()
+    window.addEventListener("resize", reclamp)
+    return () => window.removeEventListener("resize", reclamp)
   }, [setWidth, width])
   const [selectedTreePath, setSelectedTreePath] = useState<string | null>(null)
   const sectionRefs = useRef<Record<string, HTMLDivElement | null>>({})
@@ -305,6 +310,7 @@ export function AgentGitPanel({ thread, messages }: AgentGitPanelProps) {
 
   return (
     <aside
+      ref={panelRef}
       className={cn(
         "relative flex shrink-0 flex-col bg-[var(--ui-bg)]",
         fullScreen ? "fixed inset-0 !w-full" : "h-full"
