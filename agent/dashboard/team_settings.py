@@ -268,6 +268,31 @@ async def get_team_default_model_pair(
     return main, subagent
 
 
+async def get_autofix_settings() -> dict[str, Any]:
+    """Return the team-wide auto-fix config: mode, severity threshold, trigger mode."""
+    settings = await get_team_settings()
+    mode = settings.get("autofix_mode")
+    if mode not in {"off", "low", "medium", "high"}:
+        mode = "off"
+    threshold = settings.get("autofix_severity_threshold")
+    if threshold not in {"off", "low", "medium", "high"}:
+        threshold = "medium"
+    trigger = settings.get("trigger_mode")
+    if trigger not in {"every_push", "once_per_pr", "manual"}:
+        trigger = "every_push"
+    return {
+        "autofix_mode": mode,
+        "autofix_severity_threshold": threshold,
+        "trigger_mode": trigger,
+    }
+
+
+async def is_autofix_enabled() -> bool:
+    """Return whether team-wide auto-fix is turned on (mode != ``off``)."""
+    settings = await get_autofix_settings()
+    return settings["autofix_mode"] != "off"
+
+
 async def get_team_review_trace_links_enabled() -> bool:
     """Return whether GitHub review bodies should include a LangSmith trace link."""
     settings = await get_team_settings()

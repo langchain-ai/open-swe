@@ -368,7 +368,7 @@ function ThreadRow({
               params={{ threadId: thread.id }}
               onClick={onNavigate}
               className={cn(
-                "group mb-0.5 flex items-center gap-2 rounded-lg px-2.5 py-1.5 transition-colors",
+                "group mb-0.5 flex h-8 items-center gap-2 rounded-lg px-2.5 transition-colors",
                 isActive
                   ? "bg-[var(--ui-accent-bubble)] text-[var(--ui-text)]"
                   : "text-[var(--ui-text-muted)] hover:bg-[var(--ui-sidebar-hover)]",
