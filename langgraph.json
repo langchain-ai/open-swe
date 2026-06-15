@@ -6,7 +6,8 @@
     "agent": "agent.server:traced_agent",
     "reviewer": "agent.reviewer:traced_reviewer_agent",
     "analyzer": "agent.analyzer:traced_analyzer",
-    "scheduler": "agent.scheduler:get_scheduler"
+    "scheduler": "agent.scheduler:get_scheduler",
+    "ci_monitor": "agent.ci_monitor:get_ci_monitor"
   },
   "dependencies": [
     "."
