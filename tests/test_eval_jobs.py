@@ -94,6 +94,28 @@ async def test_start_reviewer_eval_rejects_when_running() -> None:
 
 
 @pytest.mark.asyncio
+async def test_stream_output_keeps_rolling_tail_and_experiment_url() -> None:
+    url = "https://smith.langchain.com/o/x/experiments/abc"
+    chunks = [
+        f"starting eval {url}\n".encode(),
+        *[f"row {i} done\n".encode() for i in range(2000)],
+        b"",
+    ]
+    stdout = MagicMock()
+    stdout.read = AsyncMock(side_effect=chunks)
+    proc = MagicMock()
+    proc.stdout = stdout
+
+    tail, experiment_url = await eval_jobs._stream_output(proc)
+
+    assert experiment_url == url
+    assert len(tail) <= eval_jobs._LOG_TAIL_CHARS
+    assert tail.endswith("row 1999 done\n")
+    assert url not in tail  # scrolled out of the window but still captured
+    assert eval_jobs.REVIEWER_EVAL_KEY not in tail
+
+
+@pytest.mark.asyncio
 async def test_start_reviewer_eval_rejects_fresh_run_on_other_worker() -> None:
     fresh = datetime.now(UTC).isoformat()
     record = {"name": "reviewer", "status": "running", "heartbeat": fresh}
