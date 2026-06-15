@@ -49,7 +49,7 @@ export const Route = createFileRoute("/agents/reviews/$owner/$repo/$number")({
   component: ReviewDetailPage,
 })
 
-type SideTab = "info" | "chat"
+type SideTab = "info" | "tldr" | "chat"
 
 const GROUP_STYLES = {
   bug: { label: "Bug", className: "text-destructive", Icon: BugBeetleIcon },
@@ -868,6 +868,7 @@ function SidePanel({
         {(
           [
             ["info", "Info"],
+            ["tldr", "TLDR"],
             ["chat", "Chat"],
           ] as const
         ).map(([id, label]) => (
@@ -890,6 +891,19 @@ function SidePanel({
       {tab === "chat" ? (
         <div className="flex flex-1 items-center justify-center p-6 text-xs text-muted-foreground">
           Coming Soon
+        </div>
+      ) : tab === "tldr" ? (
+        <div className="p-3">
+          {detail.tldr ? (
+            <div className="rounded-md border border-border bg-card p-3 text-xs">
+              <Markdown content={detail.tldr.markdown} />
+            </div>
+          ) : (
+            <p className="p-3 text-xs text-muted-foreground">
+              No TLDR yet. It's generated when PR TLDR is enabled and refreshes
+              on each push.
+            </p>
+          )}
         </div>
       ) : (
         <div className="divide-y divide-border">

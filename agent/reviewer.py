@@ -61,6 +61,7 @@ from .tools import (
     fetch_url,
     http_request,
     list_findings,
+    publish_pr_tldr,
     publish_review,
     reply_to_finding_thread,
     resolve_finding_thread,
@@ -290,6 +291,60 @@ The dataset expects 1-5 comments per PR (mean ~2).
 """
 
 
+_TLDR_BAR = """The TLDR is for a reviewer deciding whether the design is sound — not a
+changelog. Lead with a one-line headline, then a few bullets. Surface only the
+decisions worth a review:
+
+- data-model / schema changes; new or changed API contracts (routes,
+  request/response shape, status codes, breaking changes); new system
+  assumptions or invariants the rest of the system now relies on.
+- caching (is it hit? what's the TTL? how is it invalidated?), concurrency /
+  locking, auth / permission boundaries, new external dependencies, and
+  migration / rollback risk.
+- for frontend-only or backend-only PRs: the high-level structure of the code
+  and its tradeoffs / implications.
+
+Do NOT restate variable names, formatting, or walk through files. Be succinct
+and exercise judgment — name the handful of things a senior reviewer would
+actually scrutinize, and skip the rest. Add a short "Worth a closer look" line
+when something deserves extra scrutiny."""
+
+
+REVIEWER_TLDR_APPENDIX = f"""
+# PR TLDR (also required this run)
+
+In addition to the review above, produce a concise, reviewer-focused TLDR of
+this PR and post it by calling `publish_pr_tldr` exactly once (after
+`publish_review`).
+
+{_TLDR_BAR}
+"""
+
+
+PR_TLDR_ONLY_PROMPT_TEMPLATE = (
+    """You are a specialized PR summarizer. Your job is to read one GitHub PR and post a single concise, reviewer-focused TLDR.
+
+Sandbox: `{working_dir}`. Invoke `gh` as `GH_TOKEN=dummy gh <command>`.
+
+Fetch the diff:
+
+```
+GH_TOKEN=dummy gh pr diff {pr_number} --repo {repo_owner}/{repo_name}
+```
+
+{repo_checkout_note}
+
+"""
+    + _TLDR_BAR
+    + """
+
+Tools: `publish_pr_tldr` (call it once at the very end), plus `web_search`,
+`fetch_url`, `http_request` for extra context. Read-only: do not file findings,
+commit, push, or post a GitHub review.
+"""
+)
+
+
 _REPO_READY_NOTE = """The repo is already cloned and checked out at the PR head in
 `{working_dir}` — `cd` there and grep for full file context."""
 
@@ -412,6 +467,32 @@ def _reviewer_system_prompt(
             f"{api_standards_skill}"
         )
     return prompt
+
+
+def _pr_tldr_only_system_prompt(
+    working_dir: str,
+    *,
+    repo_owner: str,
+    repo_name: str,
+    pr_number: int | str,
+    repo_ready: bool = True,
+    head_sha: str = "",
+) -> str:
+    """System prompt for a TLDR-only run (code review disabled)."""
+    return PR_TLDR_ONLY_PROMPT_TEMPLATE.format(
+        working_dir=working_dir,
+        repo_owner=repo_owner or "<owner>",
+        repo_name=repo_name or "<repo>",
+        pr_number=pr_number if pr_number != "" else "<pr_number>",
+        repo_checkout_note=_repo_checkout_note(
+            repo_ready=repo_ready,
+            working_dir=working_dir,
+            repo_owner=repo_owner,
+            repo_name=repo_name,
+            pr_number=pr_number,
+            head_sha=head_sha,
+        ),
+    )
 
 
 def _format_pr_overview(pr_title: str, pr_body: str) -> str:
@@ -580,6 +661,40 @@ def _build_finding_reply_context(
         f"Use `reply_to_finding_thread` only when the user asked a direct "
         f"question or a concise clarification is necessary. Call `publish_review` "
         f"once at the end so pending GitHub thread state is reconciled."
+    )
+
+
+def _build_tldr_only_context(
+    *,
+    pr_url: str,
+    repo_owner: str,
+    repo_name: str,
+    pr_number: int,
+    base_sha: str,
+    head_sha: str,
+    is_update: bool,
+    pr_title: str = "",
+    pr_body: str = "",
+) -> str:
+    overview = _format_pr_overview(pr_title, pr_body)
+    overview_section = f"\n{overview}" if overview else ""
+    heading = (
+        "## A new commit has been pushed — refresh the TLDR"
+        if is_update
+        else "## Pull request to summarize"
+    )
+    return (
+        f"{heading}\n\n"
+        f"- repo: {repo_owner}/{repo_name}\n"
+        f"- pr_number: {pr_number}\n"
+        f"- url: {pr_url}\n"
+        f"- base_sha: {base_sha}\n"
+        f"- head_sha: {head_sha}\n"
+        f"{overview_section}\n"
+        f"Fetch the diff with "
+        f"`GH_TOKEN=dummy gh pr diff {pr_number} --repo {repo_owner}/{repo_name}`, "
+        f"then write a concise reviewer-focused TLDR and call `publish_pr_tldr` "
+        f"once. The comment is upserted in place, so just post the current TLDR."
     )
 
 
@@ -796,6 +911,16 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
     is_re_review = bool(config["configurable"].get("re_review"))
     reviewer_event = str(config["configurable"].get("reviewer_event", "") or "")
 
+    # The reviewer run is the shared vehicle for two independent features:
+    # code review (findings + publish_review) and the reviewer-focused PR TLDR.
+    # Either or both may run; default to code-review-only to preserve behavior
+    # for manual/eval runs that don't set these flags.
+    code_review_enabled = config["configurable"].get("code_review_enabled", True) is not False
+    pr_tldr_enabled = config["configurable"].get("pr_tldr_enabled", False) is True
+    if not code_review_enabled and not pr_tldr_enabled:
+        code_review_enabled = True
+    tldr_only = pr_tldr_enabled and not code_review_enabled
+
     can_fetch_pr = (
         pr_number is not None
         and isinstance(pr_number, int)
@@ -915,7 +1040,19 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
     config["configurable"]["diff_line_set"] = pr_diff_line_set
 
     review_context = ""
-    if pr_number is not None and isinstance(pr_number, int):
+    if pr_number is not None and isinstance(pr_number, int) and tldr_only:
+        review_context = _build_tldr_only_context(
+            pr_url=pr_url,
+            repo_owner=repo_owner,
+            repo_name=repo_name,
+            pr_number=pr_number,
+            base_sha=base_sha,
+            head_sha=head_sha,
+            is_update=is_re_review,
+            pr_title=pr_title,
+            pr_body=pr_body,
+        )
+    elif pr_number is not None and isinstance(pr_number, int):
         if reviewer_event == "finding_reply":
             existing_findings = await list_findings_async(thread_id)
             review_context = _build_finding_reply_context(
@@ -1007,28 +1144,32 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
     github_api_token = None
     github_token = None
 
-    system_prompt = _reviewer_system_prompt(
-        f"{work_dir}/{repo_name}" if repo_name else work_dir,
-        repo_owner=repo_owner,
-        repo_name=repo_name,
-        pr_number=pr_number if isinstance(pr_number, int) else "",
-        repo_ready=repo_ready,
-        head_sha=head_sha,
-        reviewer_eval=reviewer_eval,
-        org_guidelines=org_guidelines,
-        repo_style_prompt=repo_style_prompt,
-        agents_md_content=agents_md_content,
-        api_standards_skill=api_standards_skill,
-    )
-    if review_context:
-        system_prompt = f"{system_prompt}\n\n{review_context}"
-
-    reviewer_model = make_model(model_id, **model_kwargs)
-    reviewer_subagent_model = make_model(subagent_model_id, **subagent_model_kwargs)
-    return create_deep_agent(
-        model=reviewer_model,
-        system_prompt=system_prompt,
-        tools=[
+    agent_work_dir = f"{work_dir}/{repo_name}" if repo_name else work_dir
+    if tldr_only:
+        system_prompt = _pr_tldr_only_system_prompt(
+            agent_work_dir,
+            repo_owner=repo_owner,
+            repo_name=repo_name,
+            pr_number=pr_number if isinstance(pr_number, int) else "",
+            repo_ready=repo_ready,
+            head_sha=head_sha,
+        )
+        reviewer_tools = [publish_pr_tldr, web_search, fetch_url, http_request]
+    else:
+        system_prompt = _reviewer_system_prompt(
+            agent_work_dir,
+            repo_owner=repo_owner,
+            repo_name=repo_name,
+            pr_number=pr_number if isinstance(pr_number, int) else "",
+            repo_ready=repo_ready,
+            head_sha=head_sha,
+            reviewer_eval=reviewer_eval,
+            org_guidelines=org_guidelines,
+            repo_style_prompt=repo_style_prompt,
+            agents_md_content=agents_md_content,
+            api_standards_skill=api_standards_skill,
+        )
+        reviewer_tools = [
             add_finding,
             update_finding,
             list_findings,
@@ -1038,7 +1179,19 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
             web_search,
             fetch_url,
             http_request,
-        ],
+        ]
+        if pr_tldr_enabled:
+            system_prompt = f"{system_prompt}\n{REVIEWER_TLDR_APPENDIX}"
+            reviewer_tools.insert(4, publish_pr_tldr)
+    if review_context:
+        system_prompt = f"{system_prompt}\n\n{review_context}"
+
+    reviewer_model = make_model(model_id, **model_kwargs)
+    reviewer_subagent_model = make_model(subagent_model_id, **subagent_model_kwargs)
+    return create_deep_agent(
+        model=reviewer_model,
+        system_prompt=system_prompt,
+        tools=reviewer_tools,
         subagents=[_general_purpose_subagent(reviewer_subagent_model)],
         backend=sandbox_backend,
         skills=skill_sources or None,

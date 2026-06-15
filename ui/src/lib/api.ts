@@ -106,7 +106,8 @@ export type AutofixMode = "off" | "low" | "medium" | "high";
 export interface TeamSettings {
   trigger_mode: TriggerMode;
   review_draft_prs: boolean;
-  pr_summaries: boolean;
+  code_review: boolean;
+  pr_tldr: boolean;
   review_trace_links: boolean;
   autofix_mode: AutofixMode;
   autofix_severity_threshold: AutofixMode;
@@ -355,10 +356,17 @@ export interface ReviewPrDetails {
   labels: Array<{ name: string; color: string | null }>;
 }
 
+export interface ReviewTldr {
+  markdown: string;
+  head_sha: string;
+  updated_at: string | null;
+}
+
 export interface ReviewDetail extends ReviewSummary {
   pr: ReviewPrDetails;
   checks: Array<ReviewCheckRun>;
   findings: Array<ReviewFinding>;
+  tldr: ReviewTldr | null;
 }
 
 export interface ReviewDiffFile {

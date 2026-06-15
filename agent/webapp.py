@@ -31,6 +31,7 @@ from .dashboard.enabled_repos import is_review_repo_enabled
 from .dashboard.oauth import build_settings_url
 from .dashboard.profiles import get_profile, get_valid_access_token, has_access_token_record
 from .dashboard.team_settings import (
+    get_review_feature_flags,
     get_team_default_repo,
     get_team_settings,
     is_autofix_enabled,
@@ -1959,6 +1960,8 @@ def _build_reviewer_configurable(
     last_reviewed_sha: str = "",
     slack_channel_id: str = "",
     slack_thread_ts: str = "",
+    code_review_enabled: bool = True,
+    pr_tldr_enabled: bool = False,
 ) -> dict[str, Any]:
     """Assemble the runnable-config ``configurable`` dict for a reviewer run."""
     configurable: dict[str, Any] = {
@@ -1972,6 +1975,8 @@ def _build_reviewer_configurable(
         "head_sha": head_sha,
         "review_requested": True,
         "re_review": re_review,
+        "code_review_enabled": code_review_enabled,
+        "pr_tldr_enabled": pr_tldr_enabled,
     }
     if branch_name:
         configurable["branch_name"] = branch_name
@@ -2069,24 +2074,45 @@ async def _dispatch_first_review_from_pr_payload(payload: dict[str, Any], *, sou
         logger.warning("No GitHub App token available for reviewer dispatch")
         return
 
+    code_review_enabled, pr_tldr_enabled = await get_review_feature_flags()
+    if not code_review_enabled and not pr_tldr_enabled:
+        logger.info(
+            "Skipping reviewer dispatch for %s/%s#%s: both code review and PR TLDR are disabled",
+            repo_config.get("owner"),
+            repo_config.get("name"),
+            pr_number,
+        )
+        return
+
     langgraph_client = get_client(url=LANGGRAPH_URL)
     if not await _ensure_thread_exists_for_metadata(thread_id, langgraph_client):
         return
 
     await set_reviewer_thread_metadata(thread_id, pr=pr_meta, watch=True, head_sha=head_sha)
 
-    check_run_id = await create_review_check_run(
-        owner=repo_config.get("owner", ""),
-        repo=repo_config.get("name", ""),
-        head_sha=head_sha,
-        token=app_token,
-        details_url=dashboard_thread_url(thread_id),
-    )
-    if check_run_id is not None:
-        await set_reviewer_thread_metadata(thread_id, extra={"review_check_run_id": check_run_id})
+    # The review check run only represents the code review; a TLDR-only run
+    # posts a comment and shouldn't surface a "review" check on the PR.
+    if code_review_enabled:
+        check_run_id = await create_review_check_run(
+            owner=repo_config.get("owner", ""),
+            repo=repo_config.get("name", ""),
+            head_sha=head_sha,
+            token=app_token,
+            details_url=dashboard_thread_url(thread_id),
+        )
+        if check_run_id is not None:
+            await set_reviewer_thread_metadata(
+                thread_id, extra={"review_check_run_id": check_run_id}
+            )
 
     is_re_review = bool(last_reviewed_sha)
-    if is_re_review:
+    if not code_review_enabled:
+        prompt = (
+            f"{'A new commit has been pushed to' if is_re_review else 'Summarize'} "
+            f"PR #{pr_number} (HEAD {head_sha}). Write a concise reviewer-focused TLDR "
+            f"and call `publish_pr_tldr` once."
+        )
+    elif is_re_review:
         prompt = (
             f"PR #{pr_number} has been marked ready for review. The new HEAD is "
             f"{head_sha}. Reconcile existing findings against the new diff, add any "
@@ -2107,6 +2133,8 @@ async def _dispatch_first_review_from_pr_payload(payload: dict[str, Any], *, sou
         repo_private=repo_private,
         re_review=is_re_review,
         last_reviewed_sha=last_reviewed_sha,
+        code_review_enabled=code_review_enabled,
+        pr_tldr_enabled=pr_tldr_enabled,
     )
 
     thread_active = await is_thread_active(thread_id)
@@ -2382,6 +2410,16 @@ async def process_github_push_event(payload: dict[str, Any]) -> None:
         )
         return
 
+    code_review_enabled, pr_tldr_enabled = await get_review_feature_flags()
+    if not code_review_enabled and not pr_tldr_enabled:
+        logger.info(
+            "Push to %s/%s head=%s ignored: code review and PR TLDR both disabled",
+            repo_config["owner"],
+            repo_config["name"],
+            head_ref,
+        )
+        return
+
     app_token, app_token_expires_at = await _reviewer_token_for_repo(
         repo_config,
         repo_private=repo_private,
@@ -2524,22 +2562,31 @@ async def process_github_push_event(payload: dict[str, Any]) -> None:
     # GitHub only shows check runs on a PR's current head commit, so the check
     # created on the previous head disappears after a follow-up push. Create a
     # fresh in-progress check on the new head SHA so the review stays visible;
-    # publish (or the after-agent hook) settles this id.
-    check_run_id = await create_review_check_run(
-        owner=repo_config["owner"],
-        repo=repo_config["name"],
-        head_sha=head_sha,
-        token=app_token,
-        details_url=dashboard_thread_url(thread_id),
-    )
-    if check_run_id is not None:
-        await set_reviewer_thread_metadata(thread_id, extra={"review_check_run_id": check_run_id})
+    # publish (or the after-agent hook) settles this id. TLDR-only runs skip it.
+    if code_review_enabled:
+        check_run_id = await create_review_check_run(
+            owner=repo_config["owner"],
+            repo=repo_config["name"],
+            head_sha=head_sha,
+            token=app_token,
+            details_url=dashboard_thread_url(thread_id),
+        )
+        if check_run_id is not None:
+            await set_reviewer_thread_metadata(
+                thread_id, extra={"review_check_run_id": check_run_id}
+            )
 
-    re_review_prompt = (
-        f"A new commit has been pushed to PR #{pr_number}. The new HEAD is "
-        f"{head_sha}. Reconcile existing findings against the new diff, add any "
-        f"net-new findings, and call `publish_review` once you're done."
-    )
+    if not code_review_enabled:
+        re_review_prompt = (
+            f"A new commit has been pushed to PR #{pr_number} (HEAD {head_sha}). "
+            f"Refresh the reviewer-focused TLDR and call `publish_pr_tldr` once."
+        )
+    else:
+        re_review_prompt = (
+            f"A new commit has been pushed to PR #{pr_number}. The new HEAD is "
+            f"{head_sha}. Reconcile existing findings against the new diff, add any "
+            f"net-new findings, and call `publish_review` once you're done."
+        )
     configurable = _build_reviewer_configurable(
         source="github_push",
         github_login=payload.get("sender", {}).get("login", "") or "",
@@ -2553,6 +2600,8 @@ async def process_github_push_event(payload: dict[str, Any]) -> None:
         repo_private=repo_private,
         re_review=True,
         last_reviewed_sha=last_reviewed_sha if isinstance(last_reviewed_sha, str) else "",
+        code_review_enabled=code_review_enabled,
+        pr_tldr_enabled=pr_tldr_enabled,
     )
 
     if thread_active:

@@ -38,8 +38,17 @@ ORG_GUIDELINES_MAX_CHARS = 10_000
 class TeamSettingsUpdate(BaseModel):
     trigger_mode: TriggerMode = "every_push"
     review_draft_prs: bool = False
-    pr_summaries: bool = True
+    code_review: bool = True
+    pr_tldr: bool = True
     review_trace_links: bool = True
+
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_legacy_pr_summaries(cls, data: Any) -> Any:
+        if isinstance(data, dict) and "pr_tldr" not in data and "pr_summaries" in data:
+            data = {**data, "pr_tldr": data["pr_summaries"]}
+        return data
+
     autofix_mode: AutofixMode = "off"
     autofix_severity_threshold: AutofixMode = "medium"
     org_guidelines: str | None = None
@@ -125,7 +134,8 @@ def _default_settings() -> dict[str, Any]:
     return {
         "trigger_mode": "every_push",
         "review_draft_prs": False,
-        "pr_summaries": True,
+        "code_review": True,
+        "pr_tldr": True,
         "review_trace_links": True,
         "autofix_mode": "off",
         "autofix_severity_threshold": "medium",
@@ -158,6 +168,11 @@ async def get_team_settings() -> dict[str, Any]:
     # Skip None-valued model fields so legacy records (or PUTs that cleared the
     # selection) still surface the hardcoded default instead of a null.
     overlay = {k: v for k, v in value.items() if v is not None}
+    # Migrate the legacy ``pr_summaries`` key to ``pr_tldr`` for records written
+    # before the rename, so an existing toggle value is preserved.
+    if "pr_tldr" not in overlay and "pr_summaries" in overlay:
+        overlay["pr_tldr"] = overlay["pr_summaries"]
+    overlay.pop("pr_summaries", None)
     merged = {**defaults, **overlay}
     # Drop obsolete trigger mode values so a legacy record doesn't surface a
     # value the new TriggerMode literal would reject on the next PUT.
@@ -170,7 +185,8 @@ async def upsert_team_settings(update: TeamSettingsUpdate) -> dict[str, Any]:
     value: dict[str, Any] = {
         "trigger_mode": update.trigger_mode,
         "review_draft_prs": update.review_draft_prs,
-        "pr_summaries": update.pr_summaries,
+        "code_review": update.code_review,
+        "pr_tldr": update.pr_tldr,
         "review_trace_links": update.review_trace_links,
         "autofix_mode": update.autofix_mode,
         "autofix_severity_threshold": update.autofix_severity_threshold,
@@ -271,6 +287,17 @@ async def get_team_review_trace_links_enabled() -> bool:
     """Return whether GitHub review bodies should include a LangSmith trace link."""
     settings = await get_team_settings()
     return bool(settings.get("review_trace_links", True))
+
+
+async def get_review_feature_flags() -> tuple[bool, bool]:
+    """Return ``(code_review_enabled, pr_tldr_enabled)`` for the team.
+
+    The two features are independent: a PR run produces a code review when the
+    first is on and a reviewer-focused TLDR when the second is on. Both share
+    the same reviewer sandbox; either or both can run.
+    """
+    settings = await get_team_settings()
+    return bool(settings.get("code_review", True)), bool(settings.get("pr_tldr", True))
 
 
 async def get_org_review_guidelines() -> str | None:

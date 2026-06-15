@@ -336,7 +336,28 @@ async def get_review(owner: str, repo: str, pr_number: int) -> dict[str, Any]:
     for finding in findings:
         finding["group"] = classify_finding(finding)
 
-    return {**summary, "pr": details, "checks": checks, "findings": findings}
+    return {
+        **summary,
+        "pr": details,
+        "checks": checks,
+        "findings": findings,
+        "tldr": _tldr(metadata),
+    }
+
+
+def _tldr(metadata: dict[str, Any]) -> dict[str, Any] | None:
+    """Serialize the stored PR TLDR (markdown + provenance), if present."""
+    tldr = metadata.get("pr_tldr")
+    if not isinstance(tldr, dict):
+        return None
+    markdown = tldr.get("markdown")
+    if not isinstance(markdown, str) or not markdown.strip():
+        return None
+    return {
+        "markdown": markdown,
+        "head_sha": tldr.get("head_sha") if isinstance(tldr.get("head_sha"), str) else "",
+        "updated_at": tldr.get("updated_at") if isinstance(tldr.get("updated_at"), str) else None,
+    }
 
 
 async def get_review_diff(owner: str, repo: str, pr_number: int) -> dict[str, Any]:

@@ -50,7 +50,8 @@ const AUTOFIX_MODES: Array<{ value: AutofixMode; label: string }> = [
 const DEFAULT_SETTINGS: TeamSettings = {
   trigger_mode: "every_push",
   review_draft_prs: false,
-  pr_summaries: true,
+  code_review: true,
+  pr_tldr: true,
   review_trace_links: true,
   autofix_mode: "off",
   autofix_severity_threshold: "medium",
@@ -213,12 +214,23 @@ function ReviewPage() {
             }
           />
           <SettingsRow
-            label="PR Summaries"
-            description="Generate descriptions on pull requests"
+            label="Code Reviews"
+            description="File inline findings on pull requests for bugs and issues."
             control={
               <Switch
-                checked={current.pr_summaries}
-                onCheckedChange={(v) => persist({ pr_summaries: v })}
+                checked={current.code_review}
+                onCheckedChange={(v) => persist({ code_review: v })}
+                disabled={!canEdit}
+              />
+            }
+          />
+          <SettingsRow
+            label="PR TLDR"
+            description="Post a concise, reviewer-focused summary of each PR's key decisions, kept up to date on every push. Independent of code reviews."
+            control={
+              <Switch
+                checked={current.pr_tldr}
+                onCheckedChange={(v) => persist({ pr_tldr: v })}
                 disabled={!canEdit}
               />
             }

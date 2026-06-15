@@ -426,6 +426,66 @@ async def clear_review_started_comment(
     await set_reviewer_thread_metadata(thread_id, extra={"status_comment_id": None})
 
 
+def pr_tldr_marker(pr_number: int) -> str:
+    """Hidden marker stamped on the single upserted PR TLDR comment."""
+    return f"<!-- open-swe-pr-tldr pr={pr_number} -->"
+
+
+def render_pr_tldr_comment(
+    *,
+    markdown: str,
+    pr_number: int,
+    thread_id: str | None = None,
+) -> str:
+    """Compose the PR TLDR comment body, stamped with its upsert marker."""
+    parts = ["## Open SWE TLDR", markdown.strip()]
+    ui_url = dashboard_thread_url(thread_id) if thread_id else None
+    if ui_url:
+        parts.append(f"[Open in Web]({ui_url})")
+    parts.append(pr_tldr_marker(pr_number))
+    return "\n\n".join(parts)
+
+
+async def upsert_pr_tldr_comment(
+    *,
+    owner: str,
+    repo: str,
+    pr_number: int,
+    body: str,
+    token: str,
+    existing_comment_id: int | None,
+) -> int | None:
+    """Update the tracked TLDR comment in place, or post a fresh one.
+
+    Keeps a single always-current TLDR comment on the PR: edits the tracked
+    comment when one exists, recreating it only if it has been deleted (404).
+    Returns the live comment id (or ``None`` on failure).
+    """
+    headers = _github_headers(token)
+    if isinstance(existing_comment_id, int):
+        patch_url = f"{_GITHUB_API_BASE}/repos/{owner}/{repo}/issues/comments/{existing_comment_id}"
+        async with httpx.AsyncClient() as client:
+            try:
+                response = await client.patch(
+                    patch_url, headers=headers, json={"body": body}, timeout=30
+                )
+                if response.status_code != 404:  # noqa: PLR2004
+                    response.raise_for_status()
+                    return existing_comment_id
+            except httpx.HTTPError:
+                logger.exception(
+                    "Failed to update TLDR comment %s on %s/%s#%s",
+                    existing_comment_id,
+                    owner,
+                    repo,
+                    pr_number,
+                )
+                return None
+    return await post_status_comment(
+        owner=owner, repo=repo, pr_number=pr_number, body=body, token=token
+    )
+
+
 async def settle_review_check_run(
     *,
     thread_id: str,
