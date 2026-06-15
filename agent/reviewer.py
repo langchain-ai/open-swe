@@ -518,6 +518,14 @@ def _build_re_review_context(
         f"`GH_TOKEN=dummy gh api repos/{repo_owner}/{repo_name}/compare/"
         f'{last_reviewed_sha}...{head_sha} -H "Accept: application/vnd.github.v3.diff"`, '
         f"then review only what's in that diff.\n\n"
+        f"For each finding already listed in the Existing findings block, do NOT "
+        f"re-read the underlying file unless the new diff includes line ranges that "
+        f"overlap the finding's cited code. Presume existing findings remain "
+        f"unchanged unless the new diff touches the relevant lines. If the entire "
+        f"new diff is trivial (whitespace only, comments only, or fewer than 20 "
+        f"changed lines that don't intersect any existing finding), call "
+        f"`publish_review` immediately with no new findings rather than "
+        f"re-exploring.\n\n"
         f"For each open finding above, decide whether the new commits resolved "
         f'it (`update_finding(id, status="resolved", note="...")`), left it unchanged '
         f"(no action), or changed it materially (`update_finding` with new "
