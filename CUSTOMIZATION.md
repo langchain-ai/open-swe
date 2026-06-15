@@ -1,9 +1,9 @@
 # Customization Guide
 
-Open SWE is designed to be forked and customized for your org. The core agent is assembled in a single function — `get_agent()` in `agent/server.py` — where you can swap out the sandbox, model, tools, and triggers.
+Open SWE is designed to be forked and customized for your org. The core agent is assembled in a single function 鈥?`get_agent()` in `agent/server.py` 鈥?where you can swap out the sandbox, model, tools, and triggers.
 
 ```python
-# agent/server.py — the key lines
+# agent/server.py 鈥?the key lines
 model_id = os.environ.get("LLM_MODEL_ID", DEFAULT_LLM_MODEL_ID)
 model_kwargs = {"max_tokens": DEFAULT_LLM_MAX_TOKENS}
 if model_id == DEFAULT_LLM_MODEL_ID:
@@ -27,7 +27,7 @@ return create_deep_agent(
 
 ## 1. Sandbox
 
-By default, Open SWE runs each task in a [LangSmith cloud sandbox](https://docs.smith.langchain.com/) — an isolated Linux environment where the agent clones the repo and executes commands. Sandbox creation and connection is handled in `agent/integrations/langsmith.py`.
+By default, Open SWE runs each task in a [LangSmith cloud sandbox](https://docs.smith.langchain.com/) 鈥?an isolated Linux environment where the agent clones the repo and executes commands. Sandbox creation and connection is handled in `agent/integrations/langsmith.py`.
 
 ### Using a custom sandbox snapshot
 
@@ -42,7 +42,7 @@ DEFAULT_SANDBOX_IDLE_TTL_SECONDS="600"                             # Optional, d
 DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS="86400"                  # Optional, default 86400 (24 h); 0 disables
 ```
 
-This is useful for pre-installing languages, frameworks, or internal tools that your repos depend on — reducing setup time per agent run. The default snapshot includes the GitHub CLI; agents invoke it as `GH_TOKEN=dummy gh <command>` and rely on the LangSmith proxy for the real credentials.
+This is useful for pre-installing languages, frameworks, or internal tools that your repos depend on 鈥?reducing setup time per agent run. The default snapshot includes the GitHub CLI; agents invoke it as `GH_TOKEN=dummy gh <command>` and rely on the LangSmith proxy for the real credentials.
 
 For LangSmith sandboxes, Open SWE configures two GitHub proxy rules whenever a sandbox is created or reattached to a run:
 
@@ -62,8 +62,11 @@ Set the `SANDBOX_TYPE` environment variable to switch providers. Each provider h
 | `runloop` | `agent/integrations/runloop.py` | `RUNLOOP_API_KEY`, `SANDBOX_TYPE="runloop"` |
 | `modal` | `agent/integrations/modal.py` | Modal credentials, `SANDBOX_TYPE="modal"` |
 | `local` | `agent/integrations/local.py` | None (no isolation — development only), `SANDBOX_TYPE="local"` |
+| `docker` | `agent/integrations/docker.py` | Docker daemon on localhost, `SANDBOX_TYPE="docker"`, optional `DOCKER_SANDBOX_IMAGE` |
 
 > **Warning**: `local` runs commands directly on your host with no sandboxing. Only use for local development with human-in-the-loop enabled.
+
+> **Note**: `docker` runs commands inside an isolated Linux container on your local machine. Requires Docker Desktop (or Docker Engine) to be installed and the `docker` Python package (`pip install docker`). No API keys are needed. The optional `DOCKER_SANDBOX_IMAGE` env var sets the base image (default `ubuntu:22.04`); `DOCKER_SANDBOX_WORKSPACE` sets the in-container working directory (default `/workspace`). Containers are **not** removed automatically after a run — use `docker rm` or `docker container prune` to clean up.
 
 ### Adding a new sandbox provider
 
@@ -104,7 +107,7 @@ If none of the built-in providers fit, you can build your own. The agent accepts
 - **Shell execution**: `execute(command, timeout=None) -> ExecuteResponse`
 - **Identity**: `id` property returning a unique sandbox identifier
 
-The easiest approach is to extend `BaseSandbox` from `deepagents.backends.sandbox` — it implements all file operations by delegating to `execute()`, so you only need to implement the shell execution layer:
+The easiest approach is to extend `BaseSandbox` from `deepagents.backends.sandbox` 鈥?it implements all file operations by delegating to `execute()`, so you only need to implement the shell execution layer:
 
 ```python
 from deepagents.backends.sandbox import BaseSandbox
@@ -207,7 +210,7 @@ Open SWE ships with a small set of custom tools on top of the built-in Deep Agen
 
 Create a new file in `agent/tools/`, define a function, and add it to the tools list.
 
-**Example — adding a Datadog search tool:**
+**Example 鈥?adding a Datadog search tool:**
 
 ```python
 # agent/tools/datadog_search.py
@@ -245,7 +248,7 @@ return create_deep_agent(
 )
 ```
 
-The agent will automatically see the tool's name, docstring, and parameter types — the docstring serves as the tool description, so write it clearly.
+The agent will automatically see the tool's name, docstring, and parameter types 鈥?the docstring serves as the tool description, so write it clearly.
 
 ### Removing tools
 
@@ -296,16 +299,16 @@ DEFAULT_REPO_NAME="my-repo"      # Default GitHub repo (used everywhere)
 These are used as the fallback when:
 - A Slack message doesn't specify a repo (and no thread metadata exists)
 - A Linear issue's team/project isn't in the `LINEAR_TEAM_TO_REPO` mapping
-- A user writes `repo:name` without an org prefix — the org defaults to `DEFAULT_REPO_OWNER`
+- A user writes `repo:name` without an org prefix 鈥?the org defaults to `DEFAULT_REPO_OWNER`
 
 ### Repository extraction from messages
 
 Both Slack and Linear support specifying a target repo directly in the message or comment text. The shared utility `extract_repo_from_text()` in `agent/utils/repo.py` handles parsing these formats:
 
-- `repo:owner/name` — explicit org and repo
-- `repo owner/name` — space syntax (same result)
-- `repo:name` — repo name only; the org defaults to `DEFAULT_REPO_OWNER`
-- `https://github.com/owner/name` — GitHub URL
+- `repo:owner/name` 鈥?explicit org and repo
+- `repo owner/name` 鈥?space syntax (same result)
+- `repo:name` 鈥?repo name only; the org defaults to `DEFAULT_REPO_OWNER`
+- `https://github.com/owner/name` 鈥?GitHub URL
 
 ### Customizing Linear routing
 
@@ -323,7 +326,7 @@ LINEAR_TEAM_TO_REPO = {
 }
 ```
 
-Users can also override the team/project mapping on a per-comment basis by including `repo:owner/name` in their `@openswe` comment. This takes priority over the mapping — the mapping is used as a fallback when no repo is specified in the comment. If the team/project isn't found in the mapping either, `DEFAULT_REPO_OWNER`/`DEFAULT_REPO_NAME` is used.
+Users can also override the team/project mapping on a per-comment basis by including `repo:owner/name` in their `@openswe` comment. This takes priority over the mapping 鈥?the mapping is used as a fallback when no repo is specified in the comment. If the team/project isn't found in the mapping either, `DEFAULT_REPO_OWNER`/`DEFAULT_REPO_NAME` is used.
 
 ### Customizing Slack routing
 
@@ -335,7 +338,7 @@ Slack repo resolution (`get_slack_repo_config` in `agent/webapp.py`) checks, in 
 4. The team default repo.
 5. `SLACK_REPO_OWNER`/`SLACK_REPO_NAME`, falling back to `DEFAULT_REPO_OWNER`/`DEFAULT_REPO_NAME`.
 
-Users can still override per-message with `repo:owner/name` syntax in their Slack message (this is read from the message text by the agent). A shorthand `repo:name` (without the org) is also supported — the org defaults to `DEFAULT_REPO_OWNER`.
+Users can still override per-message with `repo:owner/name` syntax in their Slack message (this is read from the message text by the agent). A shorthand `repo:name` (without the org) is also supported 鈥?the org defaults to `DEFAULT_REPO_OWNER`.
 
 Reading the channel topic/purpose requires the bot's Slack token to have the `channels:read` (and `groups:read` for private channels) scope so `conversations.info` succeeds.
 
@@ -391,7 +394,7 @@ def my_trigger_reply(message: str) -> dict:
 ```
 
 The key fields in `config.configurable` are:
-- `repo`: `{"owner": "...", "name": "..."}` — which GitHub repo to work on
+- `repo`: `{"owner": "...", "name": "..."}` 鈥?which GitHub repo to work on
 - `source`: string identifying the trigger (used for auth routing and communication)
 - `user_email`: the triggering user's email (for GitHub OAuth resolution)
 
@@ -404,7 +407,7 @@ The system prompt is assembled in `agent/prompt.py` from modular sections. You c
 | Section | What it controls |
 |---|---|
 | `WORKING_ENV_SECTION` | Sandbox paths and execution constraints |
-| `TASK_EXECUTION_SECTION` | Workflow steps (understand → implement → verify → submit) |
+| `TASK_EXECUTION_SECTION` | Workflow steps (understand 鈫?implement 鈫?verify 鈫?submit) |
 | `CODING_STANDARDS_SECTION` | Code style, testing, and quality rules |
 | `COMMIT_PR_SECTION` | PR title/body format and commit conventions |
 | `CODE_REVIEW_GUIDELINES_SECTION` | How the agent reviews code changes |
@@ -439,7 +442,7 @@ When no repository is specified, work on the **my-app** repository under **my-or
 - Always tag the requesting user when work is complete
 ```
 
-**Loading order:** Default prompt → System prompt sections → AGENTS.md (per-repo). If the file is missing or empty, it is silently skipped — no error is raised.
+**Loading order:** Default prompt 鈫?System prompt sections 鈫?AGENTS.md (per-repo). If the file is missing or empty, it is silently skipped 鈥?no error is raised.
 
 **When to use `default_prompt.md` vs `AGENTS.md`:**
 
@@ -470,7 +473,7 @@ There is intentionally no after-agent middleware that opens a PR for the agent. 
 
 Add custom middleware by appending to the middleware list in `get_agent()`. See the [LangChain middleware docs](https://python.langchain.com/docs/concepts/agents/#middleware) for the `@before_model` and `@after_agent` decorators.
 
-**Example — adding a CI check after agent completion:**
+**Example 鈥?adding a CI check after agent completion:**
 
 ```python
 from langchain.agents.middleware import AgentState, after_agent
