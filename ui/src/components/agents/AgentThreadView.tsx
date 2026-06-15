@@ -81,9 +81,8 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
                   placeholder="Add a follow up"
                   compact
                   busy={isStreaming}
-                  disabled={sendMessage.isPending}
                   onSubmit={(content, images) =>
-                    sendMessage.mutate({
+                    sendMessage.mutateAsync({
                       content,
                       images,
                       model_id: activeSelection?.modelId ?? null,
@@ -111,9 +110,8 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
                 placeholder="Send the first message"
                 compact
                 busy={isStreaming}
-                disabled={sendMessage.isPending}
                 onSubmit={(content, images) =>
-                  sendMessage.mutate({
+                  sendMessage.mutateAsync({
                     content,
                     images,
                     model_id: activeSelection?.modelId ?? null,

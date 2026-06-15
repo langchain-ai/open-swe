@@ -26,11 +26,11 @@ const PROMPT_TEXTAREA_MAX_HEIGHT = 200
 
 interface SubmitButtonProps {
   canSubmit: boolean
-  disabled: boolean
+  submitting: boolean
   onSubmit: () => void
 }
 
-function PlainSubmitButton({ canSubmit, disabled, onSubmit }: SubmitButtonProps) {
+function PlainSubmitButton({ canSubmit, submitting, onSubmit }: SubmitButtonProps) {
   return (
     <IconButton
       type="button"
@@ -39,7 +39,7 @@ function PlainSubmitButton({ canSubmit, disabled, onSubmit }: SubmitButtonProps)
       aria-label="Send message"
       className="shrink-0 rounded-full bg-[var(--ui-accent)] text-white hover:bg-[var(--ui-accent)] hover:opacity-90 disabled:cursor-default disabled:opacity-40"
     >
-      {disabled ? (
+      {submitting ? (
         <LoaderCircle className="size-3.5 animate-spin" />
       ) : (
         <ArrowUp className="size-3.5" strokeWidth={2.5} />
@@ -111,7 +111,7 @@ export interface CloudPromptBarProps {
   compact?: boolean
   disabled?: boolean
   busy?: boolean
-  onSubmit?: (value: string, images: Array<ImageChunk>) => void
+  onSubmit?: (value: string, images: Array<ImageChunk>) => void | Promise<void>
   models?: Array<ModelOption>
   selection?: ModelSelection | null
   onSelectionChange?: (next: ModelSelection) => void
@@ -165,10 +165,15 @@ export const CloudPromptBar = memo(function CloudPromptBarComponent({
   const [pendingImages, setPendingImages] = useState<Array<ImageChunk>>([])
   const [isDragOver, setIsDragOver] = useState(false)
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false)
+  const [isSubmitting, setIsSubmitting] = useState(false)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const dragDepthRef = useRef(0)
   const modelDropdownRef = useRef<HTMLDivElement>(null)
+  // Synchronous double-submit guard: blocks a same-tick second send (Enter +
+  // click, or two rapid Enters) before React re-renders. Scoped to the send
+  // request only — never the run lifecycle.
+  const submittingRef = useRef(false)
 
   const combos = useMemo<Array<ModelSelection>>(() => {
     const list: Array<ModelSelection> = []
@@ -183,15 +188,29 @@ export const CloudPromptBar = memo(function CloudPromptBarComponent({
   const selectionLabel = formatModelSelection(models, selection)
 
   const canSubmit =
-    !disabled && (value.trim().length > 0 || pendingImages.length > 0)
+    !disabled &&
+    !isSubmitting &&
+    (value.trim().length > 0 || pendingImages.length > 0)
 
-  const handleSubmit = useCallback(() => {
+  const handleSubmit = useCallback(async () => {
+    if (submittingRef.current || disabled) return
     const trimmed = value.trim()
-    if (!canSubmit) return
-    onSubmit?.(trimmed, pendingImages)
+    if (trimmed.length === 0 && pendingImages.length === 0) return
+
+    const images = pendingImages
+    submittingRef.current = true
+    setIsSubmitting(true)
     setValue("")
     setPendingImages([])
-  }, [canSubmit, onSubmit, pendingImages, value])
+    try {
+      await onSubmit?.(trimmed, images)
+    } catch {
+      // Caller surfaces send errors (e.g. via react-query mutation state).
+    } finally {
+      submittingRef.current = false
+      setIsSubmitting(false)
+    }
+  }, [disabled, onSubmit, pendingImages, value])
 
   useLayoutEffect(() => {
     const el = inputRef.current
@@ -291,7 +310,7 @@ export const CloudPromptBar = memo(function CloudPromptBarComponent({
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey && canSubmit) {
       e.preventDefault()
-      handleSubmit()
+      void handleSubmit()
     }
   }
 
@@ -446,8 +465,8 @@ export const CloudPromptBar = memo(function CloudPromptBarComponent({
 
           <SubmitButton
             canSubmit={canSubmit}
-            disabled={disabled}
-            onSubmit={handleSubmit}
+            submitting={isSubmitting}
+            onSubmit={() => void handleSubmit()}
           />
         </div>
       </div>
