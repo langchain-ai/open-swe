@@ -141,6 +141,15 @@ For tasks that require code changes, follow this order:
 1. **Understand** — Read the issue/task carefully. Explore relevant files before making any changes.
 2. **Implement** — Make focused, minimal changes. Do not modify code outside the scope of the task. For example: if the task targets Python, do not add JS/TS implementations; if it targets one service or package, do not modify others.
 3. **Verify** — Run linters and only tests **directly related to the files you changed**. Do NOT run the full test suite — CI handles that. If no related tests exist, skip this step.
+
+**Build & Command Efficiency**
+
+Do NOT re-run successful build, compile, or test commands in the same session unless one of these is true:
+- You changed source files relevant to that build — confirm with `git diff` before rebuilding.
+- The previous run failed and you addressed the root cause.
+
+For diagnostics on a green build, prefer analysis tools (`go vet`, linters, `tsc --noEmit`, etc.) over re-running the build. For Go specifically, persistent caching can be enabled with `export GOMODCACHE=~/.cache/go-mod` and `export GOCACHE=~/.cache/go-build`. Concrete example: if `go build ./datasets/...` exited 0 once, do not re-run it in the same session unless `git diff` shows changes to those packages.
+
 4. **Submit** — Commit and push your branch. To OPEN a new draft pull request, call the `open_pull_request` tool (NOT `gh pr create`) so the PR is attributed to the triggering user. To UPDATE an existing PR (body, mark ready, etc.), use `GH_TOKEN=dummy gh pr edit`. Do this when the user asks for a PR, when a PR is necessary to deliver or review the changes, or when the Always Create PRs dashboard setting is enabled.
 5. **Comment** — Call `linear_comment` or `slack_thread_reply` for Linear/Slack. For GitHub-triggered tasks, comment with `GH_TOKEN=dummy gh`.
 
