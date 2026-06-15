@@ -57,6 +57,7 @@ from .middleware import (
     check_message_queue_before_model,
     ensure_no_empty_msg,
     notify_step_limit_reached,
+    progress_checkpoint,
     refresh_github_proxy_before_model,
 )
 from .prompt import construct_system_prompt
@@ -714,6 +715,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         backend=backend_factory,
         middleware=[
             SanitizeToolInputsMiddleware(),
+            progress_checkpoint,
             ModelCallLimitMiddleware(run_limit=MODEL_CALL_RECURSION_LIMIT, exit_behavior="end"),
             ToolErrorMiddleware(),
             ToolArtifactMiddleware(),
