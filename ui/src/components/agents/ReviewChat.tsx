@@ -5,10 +5,13 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   ArrowClockwiseIcon,
   ArrowUpIcon,
+  CheckIcon,
   PlusIcon,
   SparkleIcon,
+  TrashIcon,
   XIcon,
 } from "@phosphor-icons/react"
+import { Menu } from "@base-ui/react/menu"
 import type { BaseMessage } from "@langchain/core/messages"
 
 import type { ReviewChatThread } from "@/lib/api"
@@ -324,8 +327,10 @@ function ChatBody({
               >
                 <div
                   className={cn(
-                    "max-w-[85%] rounded-lg px-3 py-2 text-sm",
-                    isUser ? "bg-muted text-foreground" : "text-foreground",
+                    "text-sm text-foreground",
+                    isUser
+                      ? "max-w-[85%] rounded-lg bg-muted px-3 py-2"
+                      : "w-full",
                   )}
                 >
                   {isUser ? (
@@ -423,9 +428,11 @@ function ChatPanel({
     onSettled: invalidateThreads,
   })
 
-  // Tabs = the client's conversations (titles reconciled from the server),
-  // followed by any server-only conversations recovered on a fresh browser.
-  const tabs = useMemo<Array<Conversation>>(() => {
+  // Open tabs are the client's conversations (titles reconciled from the
+  // server). The history dropdown is the full set — open tabs plus every other
+  // conversation the server knows about (e.g. recovered on a fresh browser) —
+  // newest first, so past chats are reachable without cluttering the tab strip.
+  const { openTabs, historyItems } = useMemo(() => {
     const byId = new Map(conversations.map((c) => [c.id, { ...c }]))
     for (const thread of serverThreads) {
       const existing = byId.get(thread.thread_id)
@@ -441,12 +448,10 @@ function ChatPanel({
         })
       }
     }
-    const clientOrder = conversations.map((c) => byId.get(c.id) ?? c)
-    const knownIds = new Set(conversations.map((c) => c.id))
-    const recovered = [...byId.values()]
-      .filter((c) => !knownIds.has(c.id))
-      .sort((a, b) => b.createdAt - a.createdAt)
-    return [...clientOrder, ...recovered]
+    return {
+      openTabs: conversations.map((c) => byId.get(c.id) ?? c),
+      historyItems: [...byId.values()].sort((a, b) => b.createdAt - a.createdAt),
+    }
   }, [conversations, serverThreads])
 
   const handleClose = useCallback(
@@ -479,7 +484,7 @@ function ChatPanel({
     <div className="flex h-full flex-1 flex-col overflow-hidden">
       <div className="flex items-center gap-1 border-b border-border px-2 py-1.5">
         <div className="flex flex-1 items-center gap-1 overflow-x-auto">
-          {tabs.map((tab) => (
+          {openTabs.map((tab) => (
             <div
               key={tab.id}
               className={cn(
@@ -517,15 +522,66 @@ function ChatPanel({
         >
           <PlusIcon />
         </IconButton>
-        <IconButton
-          type="button"
-          variant="ghost"
-          size="icon-sm"
-          aria-label="Refresh chats"
-          onClick={() => void threadsQuery.refetch()}
+        <Menu.Root
+          onOpenChange={(open) => {
+            if (open) void threadsQuery.refetch()
+          }}
         >
-          <ArrowClockwiseIcon />
-        </IconButton>
+          <Menu.Trigger
+            render={
+              <IconButton
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                aria-label="Chat history"
+              >
+                <ArrowClockwiseIcon />
+              </IconButton>
+            }
+          />
+          <Menu.Portal>
+            <Menu.Positioner align="end" sideOffset={6} className="z-50">
+              <Menu.Popup className="origin-(--transform-origin) max-h-80 w-64 overflow-y-auto rounded-lg bg-popover p-1 text-popover-foreground shadow-md ring-1 ring-foreground/10 outline-none">
+                {historyItems.length === 0 ? (
+                  <div className="px-2 py-1.5 text-xs text-muted-foreground">
+                    No conversations yet
+                  </div>
+                ) : (
+                  historyItems.map((item) => (
+                    <div
+                      key={item.id}
+                      className="group/hist relative flex items-stretch"
+                    >
+                      <Menu.Item
+                        onClick={() => select(item)}
+                        className="flex flex-1 cursor-default items-center gap-2 rounded-md py-1.5 pl-2 pr-8 text-xs outline-none data-[highlighted]:bg-accent data-[highlighted]:text-accent-foreground"
+                      >
+                        {item.id === activeId ? (
+                          <CheckIcon className="size-3.5 shrink-0" />
+                        ) : (
+                          <span className="size-3.5 shrink-0" />
+                        )}
+                        <span className="flex-1 truncate text-left">
+                          {item.title}
+                        </span>
+                      </Menu.Item>
+                      <IconButton
+                        type="button"
+                        variant="ghost"
+                        size="icon-xs"
+                        aria-label="Delete chat"
+                        className="absolute right-1 top-1/2 -translate-y-1/2 opacity-0 group-hover/hist:opacity-100"
+                        onClick={() => handleClose(item.id)}
+                      >
+                        <TrashIcon />
+                      </IconButton>
+                    </div>
+                  ))
+                )}
+              </Menu.Popup>
+            </Menu.Positioner>
+          </Menu.Portal>
+        </Menu.Root>
       </div>
 
       <StreamProvider
