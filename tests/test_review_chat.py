@@ -16,23 +16,101 @@ read_repo_file = importlib.import_module("agent.tools.read_repo_file")
 search_repo_code = importlib.import_module("agent.tools.search_repo_code")
 
 
-# --- deterministic thread id -------------------------------------------------
+# --- chat thread list / delete / title ---------------------------------------
 
 
-def test_review_chat_thread_id_is_deterministic_and_per_user() -> None:
-    a1 = review_chat_api.review_chat_thread_id("acme", "repo", 7, "octocat")
-    a2 = review_chat_api.review_chat_thread_id("acme", "repo", 7, "octocat")
-    other = review_chat_api.review_chat_thread_id("acme", "repo", 7, "hubot")
-    other_pr = review_chat_api.review_chat_thread_id("acme", "repo", 8, "octocat")
-    assert a1 == a2
-    assert a1 != other
-    assert a1 != other_pr
+def test_derive_title_from_first_user_message() -> None:
+    params = {
+        "input": {"messages": [{"type": "human", "content": "  Why did we drop\nstructs?  "}]}
+    }
+    assert review_chat_api._derive_title(params) == "Why did we drop structs?"
 
 
-def test_review_chat_thread_id_login_case_insensitive() -> None:
-    assert review_chat_api.review_chat_thread_id(
-        "acme", "repo", 7, "OctoCat"
-    ) == review_chat_api.review_chat_thread_id("acme", "repo", 7, "octocat")
+def test_derive_title_defaults_when_no_message() -> None:
+    assert review_chat_api._derive_title({"input": {"messages": []}}) == "New chat"
+
+
+def test_derive_title_truncates() -> None:
+    params = {"input": {"messages": [{"type": "human", "content": "x" * 200}]}}
+    assert len(review_chat_api._derive_title(params)) == review_chat_api._TITLE_MAX_CHARS
+
+
+@pytest.mark.asyncio
+async def test_list_review_chat_threads_scopes_and_maps(monkeypatch) -> None:
+    captured: dict[str, Any] = {}
+
+    async def search(**kwargs: Any) -> list[dict[str, Any]]:
+        captured["metadata"] = kwargs.get("metadata")
+        return [
+            {
+                "thread_id": "c1",
+                "updated_at": "2026-06-15T00:00:00Z",
+                "metadata": {"title": "Why structs?"},
+            },
+            {"thread_id": "c2", "metadata": {}},  # untitled -> default label
+        ]
+
+    client = SimpleNamespace(threads=SimpleNamespace(search=search))
+    monkeypatch.setattr(review_chat_api, "langgraph_client", lambda: client)
+
+    threads = await review_chat_api.list_review_chat_threads("acme", "repo", 7, "octocat")
+    assert captured["metadata"] == {
+        "kind": "review_chat",
+        "github_login": "octocat",
+        "repo_owner": "acme",
+        "repo_name": "repo",
+        "pr_number": 7,
+    }
+    assert threads[0] == {
+        "thread_id": "c1",
+        "title": "Why structs?",
+        "updated_at": "2026-06-15T00:00:00Z",
+    }
+    assert threads[1]["title"] == "New chat"
+
+
+@pytest.mark.asyncio
+async def test_delete_review_chat_thread_checks_ownership(monkeypatch) -> None:
+    deleted: list[str] = []
+
+    async def get(thread_id: str) -> dict[str, Any]:
+        return {
+            "thread_id": thread_id,
+            "metadata": {
+                "kind": "review_chat",
+                "github_login": "octocat",
+                "repo_owner": "acme",
+                "repo_name": "repo",
+                "pr_number": 7,
+            },
+        }
+
+    async def delete(thread_id: str) -> None:
+        deleted.append(thread_id)
+
+    client = SimpleNamespace(threads=SimpleNamespace(get=get, delete=delete))
+    monkeypatch.setattr(review_chat_api, "langgraph_client", lambda: client)
+
+    await review_chat_api.delete_review_chat_thread("acme", "repo", 7, "octocat", "c1")
+    assert deleted == ["c1"]
+
+
+@pytest.mark.asyncio
+async def test_delete_review_chat_thread_rejects_other_user(monkeypatch) -> None:
+    async def get(thread_id: str) -> dict[str, Any]:
+        return {
+            "thread_id": thread_id,
+            "metadata": {"kind": "review_chat", "github_login": "hubot"},
+        }
+
+    async def delete(thread_id: str) -> None:
+        raise AssertionError("should not delete another user's chat")
+
+    client = SimpleNamespace(threads=SimpleNamespace(get=get, delete=delete))
+    monkeypatch.setattr(review_chat_api, "langgraph_client", lambda: client)
+
+    with pytest.raises(Exception):  # noqa: B017,PT011 - HTTPException(404)
+        await review_chat_api.delete_review_chat_thread("acme", "repo", 7, "octocat", "c1")
 
 
 # --- tools -------------------------------------------------------------------

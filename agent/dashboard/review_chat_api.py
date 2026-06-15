@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import json
 import logging
-import uuid
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from typing import Any
@@ -46,15 +45,7 @@ def _now_ms() -> int:
     return int(datetime.now(UTC).timestamp() * 1000)
 
 
-def review_chat_thread_id(owner: str, repo: str, pr_number: int, login: str) -> str:
-    """Deterministic per-user chat thread for a PR.
-
-    Per-user (not shared like the reviewer thread) so each viewer's chat history
-    stays private; the findings they discuss are shared and read live from the
-    reviewer thread.
-    """
-    key = f"{owner}/{repo}/pr/{pr_number}/chat/{login.lower()}"
-    return str(uuid.uuid5(uuid.NAMESPACE_URL, key))
+_TITLE_MAX_CHARS = 60
 
 
 async def _reviewer_thread_exists(owner: str, repo: str, pr_number: int) -> bool:
@@ -67,12 +58,108 @@ async def _reviewer_thread_exists(owner: str, repo: str, pr_number: int) -> bool
 
 
 async def get_review_chat(owner: str, repo: str, pr_number: int, login: str) -> dict[str, Any]:
-    """Chat availability + the deterministic thread id for this user/PR."""
+    """Chat availability for this PR. Threads are minted client-side per chat."""
     return {
-        "thread_id": review_chat_thread_id(owner, repo, pr_number, login),
         "available": await _reviewer_thread_exists(owner, repo, pr_number),
         "assistant_id": _CHAT_ASSISTANT_ID,
     }
+
+
+def _chat_thread_search_metadata(
+    owner: str, repo: str, pr_number: int, login: str
+) -> dict[str, Any]:
+    return {
+        "kind": _CHAT_SOURCE,
+        "github_login": login,
+        "repo_owner": owner,
+        "repo_name": repo,
+        "pr_number": pr_number,
+    }
+
+
+async def list_review_chat_threads(
+    owner: str, repo: str, pr_number: int, login: str, *, limit: int = 50
+) -> list[dict[str, Any]]:
+    """This user's chat conversations for the PR, newest first."""
+    client = langgraph_client()
+    try:
+        threads = await client.threads.search(
+            metadata=_chat_thread_search_metadata(owner, repo, pr_number, login),
+            limit=limit,
+            sort_by="updated_at",
+            sort_order="desc",
+        )
+    except Exception:  # noqa: BLE001
+        logger.debug(
+            "chat thread search failed for %s/%s#%s", owner, repo, pr_number, exc_info=True
+        )
+        return []
+    out: list[dict[str, Any]] = []
+    for thread in threads or []:
+        if not isinstance(thread, dict):
+            continue
+        metadata = thread.get("metadata") if isinstance(thread.get("metadata"), dict) else {}
+        thread_id = thread.get("thread_id") or thread.get("id")
+        if not isinstance(thread_id, str):
+            continue
+        out.append(
+            {
+                "thread_id": thread_id,
+                "title": metadata.get("title") or "New chat",
+                "updated_at": thread.get("updated_at")
+                if isinstance(thread.get("updated_at"), str)
+                else None,
+            }
+        )
+    return out
+
+
+async def delete_review_chat_thread(
+    owner: str, repo: str, pr_number: int, login: str, thread_id: str
+) -> None:
+    """Delete one of the user's chat threads (scoped + ownership-checked)."""
+    client = langgraph_client()
+    metadata = await _get_chat_thread_metadata(thread_id)
+    if metadata is None:
+        return  # already gone; treat as success
+    owns = (
+        metadata.get("kind") == _CHAT_SOURCE
+        and metadata.get("github_login") == login
+        and metadata.get("repo_owner") == owner
+        and metadata.get("repo_name") == repo
+        and metadata.get("pr_number") == pr_number
+    )
+    if not owns:
+        raise HTTPException(404, "chat not found")
+    await client.threads.delete(thread_id)
+
+
+def _first_user_text(params: dict[str, Any]) -> str:
+    run_input = params.get("input")
+    messages = run_input.get("messages") if isinstance(run_input, dict) else None
+    if not isinstance(messages, list):
+        return ""
+    for message in messages:
+        if not isinstance(message, dict) or message.get("type") != "human":
+            continue
+        content = message.get("content")
+        if isinstance(content, str):
+            return content.strip()
+        if isinstance(content, list):
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "text":
+                    text = block.get("text")
+                    if isinstance(text, str) and text.strip():
+                        return text.strip()
+    return ""
+
+
+def _derive_title(params: dict[str, Any]) -> str:
+    text = _first_user_text(params)
+    if not text:
+        return "New chat"
+    flattened = " ".join(text.split())
+    return flattened[:_TITLE_MAX_CHARS] if flattened else "New chat"
 
 
 def _render_overview(review: dict[str, Any]) -> str:
@@ -155,7 +242,7 @@ async def _get_chat_thread_metadata(thread_id: str) -> dict[str, Any] | None:
 
 
 async def _create_chat_thread(
-    thread_id: str, owner: str, repo: str, pr_number: int, login: str
+    thread_id: str, owner: str, repo: str, pr_number: int, login: str, *, title: str
 ) -> None:
     now_ms = _now_ms()
     metadata = {
@@ -165,6 +252,7 @@ async def _create_chat_thread(
         "repo_owner": owner,
         "repo_name": repo,
         "pr_number": pr_number,
+        "title": title,
         "created_at_ms": now_ms,
         "updated_at_ms": now_ms,
     }
@@ -206,7 +294,9 @@ async def _enrich_chat_command(
     metadata = await _get_chat_thread_metadata(thread_id)
     created = metadata is None
     if created:
-        await _create_chat_thread(thread_id, owner, repo, pr_number, login)
+        await _create_chat_thread(
+            thread_id, owner, repo, pr_number, login, title=_derive_title(params)
+        )
         metadata = {}
 
     client_config = params.get("config")

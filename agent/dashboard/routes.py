@@ -70,7 +70,9 @@ from .review_api import (
     trigger_re_review,
 )
 from .review_chat_api import (
+    delete_review_chat_thread,
     get_review_chat,
+    list_review_chat_threads,
     proxy_review_chat_commands,
     proxy_review_chat_history,
     proxy_review_chat_state,
@@ -852,6 +854,31 @@ async def api_get_review_chat(
 ) -> dict[str, Any]:
     await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
     return await get_review_chat(owner, repo, pr_number, session["sub"])
+
+
+@router.get("/reviews/{owner}/{repo}/{pr_number}/chat/threads")
+async def api_list_review_chat_threads(
+    owner: str,
+    repo: str,
+    pr_number: int,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
+    threads = await list_review_chat_threads(owner, repo, pr_number, session["sub"])
+    return {"threads": threads}
+
+
+@router.delete("/reviews/{owner}/{repo}/{pr_number}/chat/threads/{thread_id}")
+async def api_delete_review_chat_thread(
+    owner: str,
+    repo: str,
+    pr_number: int,
+    thread_id: str,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> Response:
+    await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
+    await delete_review_chat_thread(owner, repo, pr_number, session["sub"], thread_id)
+    return Response(status_code=204)
 
 
 @router.post("/reviews/{owner}/{repo}/{pr_number}/chat/threads/{thread_id}/commands")
