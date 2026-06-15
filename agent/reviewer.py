@@ -244,6 +244,16 @@ publishing.
 Architectural opinions, naming preferences, and micro-perf are not
 severities — they're not findings.
 
+# Exploration budget
+
+Per review event, cap yourself at ~30 `grep` calls and ~20 `read_file`
+calls. If you reach the cap without a defensible finding, call
+`publish_review` with what you have (or empty). Do not enumerate the
+wider codebase — list the diff once via `gh api .../compare/...diff`
+and then read only files that appear in that diff. Re-grepping the
+repo with different patterns to "find something" is the failure mode;
+commit to the diff.
+
 # Other rules
 
 - Read-only. Do not commit, push, or use `gh pr review` / `gh api .../reviews`.
@@ -278,10 +288,11 @@ REVIEWER_EVAL_PROMPT_SUFFIX = """
 This run is scored against a closed set of golden review comments per PR.
 The dataset expects 1-5 comments per PR (mean ~2).
 
-- **Hard minimum: at least 1 finding per review.** Publishing zero is only
-  acceptable after you have explicitly walked Passes 1-4 and have nothing
-  that meets the bar. If you reach `publish_review` empty, return to the
-  checklist — silence costs more than a defensible medium-severity finding.
+- **Prefer at least 1 finding per review when one is defensible**, but
+  publishing zero is acceptable if the diff genuinely has nothing that
+  meets the bar. Do not exceed the exploration budget above to
+  manufacture a finding — unsupported findings are penalized more
+  than silence.
 - **Hard cap: at most 3 findings per review.**
 - Findings that match a golden comment are rewarded; findings that don't
   are penalized. Missing a golden comment is also penalized. Optimize for
