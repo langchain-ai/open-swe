@@ -120,6 +120,8 @@ export interface TeamSettings {
   default_reviewer_reasoning_effort?: string | null;
   default_reviewer_subagent_model?: string | null;
   default_reviewer_subagent_reasoning_effort?: string | null;
+  default_chat_model?: string | null;
+  default_chat_reasoning_effort?: string | null;
   updated_at?: string | null;
 }
 

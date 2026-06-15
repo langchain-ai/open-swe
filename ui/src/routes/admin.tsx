@@ -559,6 +559,31 @@ function GlobalDefaultsSection({ models }: { models: Array<ModelOption> }) {
           }
           disabled={!settings.data || save.isPending}
         />
+        <RolePicker
+          label="Open SWE Review Chat"
+          description="Model used by the 'chat with this PR' assistant on the review page. Inherits the Agent default when unset."
+          models={models}
+          model={settings.data?.default_chat_model ?? null}
+          effort={settings.data?.default_chat_reasoning_effort ?? null}
+          inheritLabel="Agent default"
+          onInherit={() =>
+            settings.data &&
+            save.mutate({
+              ...settings.data,
+              default_chat_model: null,
+              default_chat_reasoning_effort: null,
+            })
+          }
+          onChange={(model, effort) =>
+            settings.data &&
+            save.mutate({
+              ...settings.data,
+              default_chat_model: model,
+              default_chat_reasoning_effort: effort,
+            })
+          }
+          disabled={!settings.data || save.isPending}
+        />
       </div>
       {error && <p className="px-4 pb-3 text-xs text-destructive">{error}</p>}
     </SettingsSection>
@@ -573,7 +598,16 @@ interface RolePickerProps {
   effort: string | null
   onChange: (model: string, effort: string) => void
   disabled: boolean
+  /**
+   * When set, the model dropdown gains a leading "inherit" option with this
+   * label. Selecting it calls {@link onInherit} (clearing the override); an
+   * unset `model` renders as this option.
+   */
+  inheritLabel?: string
+  onInherit?: () => void
 }
+
+const INHERIT_VALUE = "__inherit__"
 
 function RolePicker({
   label,
@@ -583,20 +617,30 @@ function RolePicker({
   effort,
   onChange,
   disabled,
+  inheritLabel,
+  onInherit,
 }: RolePickerProps) {
-  const [localModel, setLocalModel] = useState<string>(model ?? "")
+  const inheritFallback = inheritLabel ? INHERIT_VALUE : ""
+  const [localModel, setLocalModel] = useState<string>(model ?? inheritFallback)
   const [localEffort, setLocalEffort] = useState<string>(effort ?? "")
 
   useEffect(() => {
-    setLocalModel(model ?? "")
+    setLocalModel(model ?? inheritFallback)
     setLocalEffort(effort ?? "")
-  }, [model, effort])
+  }, [model, effort, inheritFallback])
 
+  const isInherit = localModel === INHERIT_VALUE
   const selectedModel = models.find((m) => m.id === localModel)
   const availableEfforts = selectedModel?.efforts ?? []
 
   const handleModelChange = (value: string | null) => {
     if (!value) return
+    if (value === INHERIT_VALUE) {
+      setLocalModel(INHERIT_VALUE)
+      setLocalEffort("")
+      onInherit?.()
+      return
+    }
     const nextModel = models.find((m) => m.id === value)
     if (!nextModel) return
     const nextEffort = nextModel.efforts.includes(localEffort)
@@ -608,7 +652,7 @@ function RolePicker({
   }
 
   const handleEffortChange = (value: string | null) => {
-    if (!value || !localModel) return
+    if (!value || !localModel || isInherit) return
     setLocalEffort(value)
     onChange(localModel, value)
   }
@@ -628,6 +672,9 @@ function RolePicker({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
+              {inheritLabel && (
+                <SelectItem value={INHERIT_VALUE}>{inheritLabel}</SelectItem>
+              )}
               {models.map((m) => (
                 <SelectItem key={m.id} value={m.id}>
                   {m.label}
@@ -638,7 +685,7 @@ function RolePicker({
           <Select
             value={localEffort}
             onValueChange={handleEffortChange}
-            disabled={disabled || !localModel}
+            disabled={disabled || !localModel || isInherit}
           >
             <SelectTrigger className="w-28">
               <SelectValue placeholder="effort" />

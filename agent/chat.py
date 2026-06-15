@@ -99,7 +99,8 @@ async def _resolve_chat_model(configurable: dict) -> tuple[str, str]:
         and model_supports_effort(model_id, effort)
     ):
         return model_id, effort
-    return await get_team_default_model("agent")
+    # Team review-chat default, which itself inherits the Agent default if unset.
+    return await get_team_default_model("chat")
 
 
 async def get_chat_agent(config: RunnableConfig) -> Pregel:

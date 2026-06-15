@@ -9,7 +9,11 @@ from agent.dashboard.team_settings import (
     ORG_GUIDELINES_MAX_CHARS,
     TeamSettingsUpdate,
     get_org_review_guidelines,
+    get_team_default_model,
 )
+
+_AGENT_PAIR = ("anthropic:claude-opus-4-8", "high")
+_CHAT_PAIR = ("google_genai:gemini-3.5-flash", "low")
 
 
 def test_org_guidelines_blank_normalizes_to_none() -> None:
@@ -45,3 +49,69 @@ async def test_get_org_review_guidelines_returns_none_when_unset() -> None:
         return_value={"org_guidelines": None},
     ):
         assert await get_org_review_guidelines() is None
+
+
+def _settings(**overrides: object) -> dict[str, object]:
+    base = {
+        "default_agent_model": _AGENT_PAIR[0],
+        "default_agent_reasoning_effort": _AGENT_PAIR[1],
+        "default_chat_model": None,
+        "default_chat_reasoning_effort": None,
+    }
+    base.update(overrides)
+    return base
+
+
+@pytest.mark.asyncio
+async def test_chat_default_inherits_agent_when_unset() -> None:
+    with patch(
+        "agent.dashboard.team_settings.get_team_settings",
+        new_callable=AsyncMock,
+        return_value=_settings(),
+    ):
+        assert await get_team_default_model("chat") == _AGENT_PAIR
+
+
+@pytest.mark.asyncio
+async def test_chat_default_uses_chat_model_when_set() -> None:
+    with patch(
+        "agent.dashboard.team_settings.get_team_settings",
+        new_callable=AsyncMock,
+        return_value=_settings(
+            default_chat_model=_CHAT_PAIR[0],
+            default_chat_reasoning_effort=_CHAT_PAIR[1],
+        ),
+    ):
+        assert await get_team_default_model("chat") == _CHAT_PAIR
+
+
+@pytest.mark.asyncio
+async def test_chat_default_inherits_agent_when_chat_model_invalid() -> None:
+    with patch(
+        "agent.dashboard.team_settings.get_team_settings",
+        new_callable=AsyncMock,
+        return_value=_settings(
+            default_chat_model="bogus:model",
+            default_chat_reasoning_effort="high",
+        ),
+    ):
+        assert await get_team_default_model("chat") == _AGENT_PAIR
+
+
+def test_team_settings_update_accepts_chat_pair() -> None:
+    update = TeamSettingsUpdate(
+        default_chat_model=_CHAT_PAIR[0],
+        default_chat_reasoning_effort=_CHAT_PAIR[1],
+    )
+    assert update.default_chat_model == _CHAT_PAIR[0]
+    assert update.default_chat_reasoning_effort == _CHAT_PAIR[1]
+
+
+def test_team_settings_update_rejects_chat_effort_without_model() -> None:
+    with pytest.raises(ValidationError):
+        TeamSettingsUpdate(default_chat_reasoning_effort="high")
+
+
+def test_team_settings_update_rejects_unsupported_chat_effort() -> None:
+    with pytest.raises(ValidationError):
+        TeamSettingsUpdate(default_chat_model=_CHAT_PAIR[0], default_chat_reasoning_effort="max")
