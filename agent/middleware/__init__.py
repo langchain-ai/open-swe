@@ -6,6 +6,7 @@ from .notify_step_limit import notify_step_limit_reached
 from .refresh_github_proxy import refresh_github_proxy_before_model
 from .refresh_slack_status import SlackAssistantStatusMiddleware
 from .sandbox_circuit_breaker import SandboxCircuitBreakerMiddleware
+from .sandbox_reset_detector import SandboxResetDetectorMiddleware
 from .sanitize_thinking_blocks import SanitizeThinkingBlocksMiddleware
 from .sanitize_tool_inputs import SanitizeToolInputsMiddleware
 from .settle_review_check import settle_review_check_on_exit
@@ -20,6 +21,7 @@ __all__ = [
     "ToolArtifactMiddleware",
     "ToolErrorMiddleware",
     "SandboxCircuitBreakerMiddleware",
+    "SandboxResetDetectorMiddleware",
     "SlackAssistantStatusMiddleware",
     "check_message_queue_before_model",
     "ensure_no_empty_msg",

@@ -26,12 +26,13 @@ SANDBOX_UNRECOVERABLE_MESSAGE = "Sandbox became unrecoverable mid-task. Please r
 
 _CIRCUIT_BREAKER_MARKER = "Sandbox circuit breaker triggered"
 _SANDBOX_RECREATED_AFTER_CLIENT_ERROR = "sandbox_recreated_after_client_error"
+_SANDBOX_RESET_DETECTED_MARKER = "sandbox_reset_detected"
 _SANDBOX_ID_RE = re.compile(r"\bsb-[A-Za-z0-9-]+\b")
 
 
 @dataclass(frozen=True)
 class SandboxErrorStreak:
-    reason: Literal["client_error", "recreated"]
+    reason: Literal["client_error", "recreated", "reset_detected"]
     sandbox_id: str | None
     count: int
 
@@ -72,6 +73,10 @@ def _sandbox_error_streak(messages: Sequence[BaseMessage]) -> SandboxErrorStreak
     for message in reversed(messages):
         if isinstance(message, ToolMessage):
             text = _content_to_text(message.content)
+            if _SANDBOX_RESET_DETECTED_MARKER in text:
+                # A single detected reset is enough to trip the breaker, so we
+                # report a count above any reasonable threshold immediately.
+                return SandboxErrorStreak(reason="reset_detected", sandbox_id=None, count=10**6)
             if _SANDBOX_RECREATED_AFTER_CLIENT_ERROR in text:
                 if reason is None:
                     reason = "recreated"
@@ -221,7 +226,9 @@ class SandboxCircuitBreakerMiddleware(AgentMiddleware[AgentState, Any]):
         if streak is None or streak.count <= self.threshold:
             return None
 
-        if streak.reason == "recreated":
+        if streak.reason == "reset_detected":
+            detail = "sandbox filesystem reset detected against a previously written path"
+        elif streak.reason == "recreated":
             detail = (
                 f"{streak.count} consecutive sandbox recreations did not recover tool execution"
             )

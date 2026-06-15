@@ -49,6 +49,7 @@ from .integrations.langsmith_tools import load_langsmith_tools
 from .middleware import (
     ModelFallbackMiddleware,
     SandboxCircuitBreakerMiddleware,
+    SandboxResetDetectorMiddleware,
     SanitizeThinkingBlocksMiddleware,
     SanitizeToolInputsMiddleware,
     SlackAssistantStatusMiddleware,
@@ -716,6 +717,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             SanitizeToolInputsMiddleware(),
             ModelCallLimitMiddleware(run_limit=MODEL_CALL_RECURSION_LIMIT, exit_behavior="end"),
             ToolErrorMiddleware(),
+            SandboxResetDetectorMiddleware(),
             ToolArtifactMiddleware(),
             refresh_github_proxy_before_model,
             check_message_queue_before_model,
