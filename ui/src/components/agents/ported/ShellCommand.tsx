@@ -38,12 +38,14 @@ export const ShellCommand = memo(function ShellCommand({
     handleOutputScroll();
   }, [handleOutputScroll, output, expanded]);
 
-  const outputEdgeShadows = [
-    scrolledFromTop ? "inset 0 12px 10px -10px rgba(42, 63, 95, 0.95)" : "",
-    scrolledFromBottom ? "inset 0 -12px 10px -10px rgba(42, 63, 95, 0.95)" : "",
-  ]
-    .filter(Boolean)
-    .join(", ");
+  const topStop = scrolledFromTop ? "transparent 0, black 24px" : "black 0";
+  const bottomStop = scrolledFromBottom
+    ? "black calc(100% - 24px), transparent 100%"
+    : "black 100%";
+  const outputEdgeMask =
+    scrolledFromTop || scrolledFromBottom
+      ? `linear-gradient(to bottom, ${topStop}, ${bottomStop})`
+      : undefined;
 
   return (
     <div className="my-1">
@@ -93,7 +95,10 @@ export const ShellCommand = memo(function ShellCommand({
               ref={outputRef}
               onScroll={handleOutputScroll}
               className="min-h-0 flex-1 overflow-auto px-3 pb-2"
-              style={{ boxShadow: outputEdgeShadows || "none" }}
+              style={{
+                maskImage: outputEdgeMask,
+                WebkitMaskImage: outputEdgeMask,
+              }}
             >
               <pre className="mt-1 text-[color:var(--ui-text-muted)] whitespace-pre font-mono text-xs w-max min-w-full">
                 {output}
