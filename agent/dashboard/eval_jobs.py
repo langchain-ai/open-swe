@@ -9,10 +9,12 @@ persisted in the LangGraph store so it survives across dashboard requests.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import os
 import re
 import sys
+import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
@@ -27,8 +29,17 @@ DEFAULT_EVAL_PROJECT = "open-swe-evals"
 _MODULE = "evals.reviewer.run_eval"
 _LOG_TAIL_CHARS = 4000
 _EXPERIMENT_URL_RE = re.compile(r"https://\S*smith\.langchain\.com/\S+")
+# The owning worker refreshes the heartbeat this often while the subprocess
+# runs; a record is only reconciled as failed once its heartbeat is older than
+# the stale threshold, so polls on other workers don't kill a live run.
+_HEARTBEAT_INTERVAL_SECONDS = 10
+_HEARTBEAT_STALE_SECONDS = 60
 
 EvalStatus = Literal["idle", "running", "completed", "failed"]
+
+# Identifies this process so heartbeat ownership can be reasoned about across
+# workers that share the persisted record.
+_WORKER_ID = uuid.uuid4().hex
 
 # Live subprocess handles keyed by eval name, owned by the worker that launched
 # them. The store record is the source of truth across workers/requests.
@@ -69,6 +80,8 @@ def _idle_record() -> dict[str, Any]:
         "experiment_url": None,
         "error": None,
         "log_tail": None,
+        "worker_id": None,
+        "heartbeat": None,
         "updated_at": _now_iso(),
     }
 
@@ -99,26 +112,48 @@ def _is_locally_running() -> bool:
     return proc is not None and proc.returncode is None
 
 
+def _heartbeat_age_seconds(record: dict[str, Any]) -> float | None:
+    """Seconds since the record's heartbeat, or ``None`` if absent/unparseable."""
+    hb = record.get("heartbeat")
+    if not isinstance(hb, str) or not hb:
+        return None
+    try:
+        ts = datetime.fromisoformat(hb)
+    except ValueError:
+        return None
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=UTC)
+    return (datetime.now(UTC) - ts).total_seconds()
+
+
+def _is_heartbeat_fresh(record: dict[str, Any]) -> bool:
+    age = _heartbeat_age_seconds(record)
+    return age is not None and age <= _HEARTBEAT_STALE_SECONDS
+
+
 async def get_reviewer_eval_status() -> dict[str, Any]:
     """Return the latest reviewer-eval status, reconciling stale ``running``.
 
-    If the store says ``running`` but this worker has no live process, the
-    launching worker is gone (e.g. after a restart), so the run is reported as
-    failed rather than stuck running forever.
+    The owning worker refreshes the record's heartbeat while its subprocess
+    runs. A poll from any worker only marks the run failed once the heartbeat
+    is stale, so a status check on a worker that doesn't own the process (no
+    local handle but a fresh heartbeat) leaves a live run untouched.
     """
     record = await _get_record()
     if record is None:
         return _idle_record()
-    if record.get("status") == "running" and not _is_locally_running():
-        record = await _put_record(
-            {
-                **record,
-                "status": "failed",
-                "finished_at": record.get("finished_at") or _now_iso(),
-                "error": "Eval process is no longer tracked (server restarted?).",
-            }
-        )
-    return record
+    if record.get("status") != "running":
+        return record
+    if _is_locally_running() or _is_heartbeat_fresh(record):
+        return record
+    return await _put_record(
+        {
+            **record,
+            "status": "failed",
+            "finished_at": record.get("finished_at") or _now_iso(),
+            "error": "Eval process is no longer tracked (server restarted?).",
+        }
+    )
 
 
 async def start_reviewer_eval(
@@ -128,9 +163,13 @@ async def start_reviewer_eval(
 ) -> dict[str, Any]:
     """Launch the reviewer eval subprocess and persist a ``running`` record.
 
-    Raises ``RuntimeError`` if an eval is already running on this worker.
+    Raises ``RuntimeError`` if an eval is already running on this or another
+    worker (detected via a fresh heartbeat on the shared record).
     """
     if _is_locally_running():
+        raise RuntimeError("a reviewer eval is already running")
+    existing = await _get_record()
+    if existing and existing.get("status") == "running" and _is_heartbeat_fresh(existing):
         raise RuntimeError("a reviewer eval is already running")
 
     project = _eval_project()
@@ -179,6 +218,8 @@ async def start_reviewer_eval(
             "finished_at": None,
             "created_by": created_by,
             "pid": proc.pid,
+            "worker_id": _WORKER_ID,
+            "heartbeat": _now_iso(),
         }
     )
     asyncio.create_task(_monitor(proc, created_by=created_by, limit=limit, project=project))
@@ -204,6 +245,18 @@ async def cancel_reviewer_eval() -> dict[str, Any]:
     )
 
 
+async def _heartbeat_loop(proc: asyncio.subprocess.Process) -> None:
+    """Refresh the record heartbeat while the owned subprocess is alive."""
+    while proc.returncode is None:
+        await asyncio.sleep(_HEARTBEAT_INTERVAL_SECONDS)
+        if proc.returncode is not None:
+            return
+        record = await _get_record()
+        if not record or record.get("status") != "running":
+            return
+        await _put_record({**record, "heartbeat": _now_iso()})
+
+
 async def _monitor(
     proc: asyncio.subprocess.Process,
     *,
@@ -211,6 +264,7 @@ async def _monitor(
     limit: int | None,
     project: str,
 ) -> None:
+    heartbeat = asyncio.create_task(_heartbeat_loop(proc))
     output = b""
     try:
         if proc.stdout is not None:
@@ -219,6 +273,9 @@ async def _monitor(
     except Exception:
         logger.exception("Error while monitoring reviewer eval subprocess")
     finally:
+        heartbeat.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await heartbeat
         _PROCS.pop(REVIEWER_EVAL_KEY, None)
 
     text = output.decode("utf-8", errors="replace")
