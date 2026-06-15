@@ -70,6 +70,7 @@ from .utils.github_app import (
 from .utils.github_checks import complete_review_check_run, create_review_check_run
 from .utils.github_ci import (
     branch_from_check_payload,
+    has_repo_write_permission,
     head_sha_from_check_payload,
     is_failing_ci_payload,
 )
@@ -2672,10 +2673,19 @@ async def process_github_autofix_command(
         logger.debug("Failed to react to auto-fix command comment", exc_info=True)
 
 
-def _is_actionable_review_payload(payload: dict[str, Any], event_type: str) -> bool:
-    """Return whether a review event is human feedback worth auto-responding to.
+# GitHub author_association values that imply at least repo-member trust. Used
+# as a cheap first gate before the no-mention auto-fix-on-review path; a real
+# write-permission check follows in process_github_autofix_review.
+_TRUSTED_REVIEW_ASSOCIATIONS = frozenset(["OWNER", "MEMBER", "COLLABORATOR"])
 
-    Approvals and the agent's own bot comments are not actionable.
+
+def _is_actionable_review_payload(payload: dict[str, Any], event_type: str) -> bool:
+    """Return whether a review event is trusted human feedback worth auto-responding to.
+
+    Approvals, the agent's own bot comments, and feedback from non-trusted
+    authors (read/triage/outside users) are not actionable — auto-fix-on-review
+    dispatches a write-capable run, so only repo collaborators/members/owners
+    may trigger it without an explicit ``@open-swe`` mention.
     """
     action = payload.get("action", "")
     if event_type == "pull_request_review_comment":
@@ -2690,10 +2700,14 @@ def _is_actionable_review_payload(payload: dict[str, Any], event_type: str) -> b
             return False
     else:
         return False
-    reviewer = (node.get("user") or {}).get("login", "") if isinstance(node, dict) else ""
+    if not isinstance(node, dict):
+        return False
+    reviewer = (node.get("user") or {}).get("login", "")
     if reviewer in INTERNAL_BOT_LOGINS:
         return False
-    body = (node.get("body") or "") if isinstance(node, dict) else ""
+    if node.get("author_association") not in _TRUSTED_REVIEW_ASSOCIATIONS:
+        return False
+    body = node.get("body") or ""
     return bool(body.strip())
 
 
@@ -2706,6 +2720,20 @@ async def process_github_autofix_review(payload: dict[str, Any], event_type: str
     reviewer = (comment.get("user") or {}).get("login", "") if isinstance(comment, dict) else ""
     body = (comment.get("body") or "") if isinstance(comment, dict) else ""
     if not body.strip() or reviewer in INTERNAL_BOT_LOGINS:
+        return
+    # Defense-in-depth beyond the author_association gate: confirm the reviewer
+    # actually has write access before dispatching a write-capable agent run.
+    token = await get_github_app_installation_token()
+    if not token or not await has_repo_write_permission(
+        owner=ref["owner"], repo=ref["name"], username=reviewer, token=token
+    ):
+        logger.info(
+            "Skipping auto-fix review feedback on %s/%s#%s: %s lacks write access",
+            ref["owner"],
+            ref["name"],
+            ref["number"],
+            reviewer or "<unknown>",
+        )
         return
     result = await handle_review_feedback(
         repo_config={"owner": ref["owner"], "name": ref["name"]},

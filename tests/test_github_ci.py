@@ -127,3 +127,30 @@ async def test_names_failing_on_base_empty_when_no_base() -> None:
     assert (
         await github_ci.names_failing_on_base(owner="o", repo="r", base_sha="", token="t") == set()
     )
+
+
+@pytest.mark.asyncio
+async def test_has_repo_write_permission_true(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch(monkeypatch, {"permission": "write"})
+    assert await github_ci.has_repo_write_permission(
+        owner="o", repo="r", username="alice", token="t"
+    )
+
+
+@pytest.mark.asyncio
+async def test_has_repo_write_permission_false_for_read(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch(monkeypatch, {"permission": "read"})
+    assert not await github_ci.has_repo_write_permission(
+        owner="o", repo="r", username="bob", token="t"
+    )
+
+
+@pytest.mark.asyncio
+async def test_has_repo_write_permission_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch(monkeypatch, {}, error=True)
+    assert not await github_ci.has_repo_write_permission(
+        owner="o", repo="r", username="bob", token="t"
+    )
+    assert not await github_ci.has_repo_write_permission(
+        owner="o", repo="r", username="", token="t"
+    )

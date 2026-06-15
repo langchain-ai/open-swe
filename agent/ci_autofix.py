@@ -181,9 +181,38 @@ async def _record_attempt(
         logger.debug("Failed to record auto-fix attempt for thread %s", thread_id, exc_info=True)
 
 
-async def _dispatch_or_queue(
-    thread_id: str, prompt: str, *, source: str, repo_config: dict[str, str], pr_number: int
-) -> str:
+# Run sources the agent's GitHub-token resolver knows how to authenticate.
+_AUTH_RESOLVABLE_SOURCES = frozenset(["github", "slack", "dashboard", "linear", "schedule"])
+
+
+def _run_configurable(
+    metadata: dict[str, Any], *, repo_config: dict[str, str], pr_number: int
+) -> dict[str, Any]:
+    """Build the run config for a fix run by reusing the PR thread's identity.
+
+    The agent's GitHub-token resolver only authenticates known sources, so a
+    bespoke ``github_ci`` source would fail in non-bot-token deployments. Reuse
+    the originating thread's ``source`` + login/email so auth resolves exactly
+    as it did for the run that opened the PR.
+    """
+    source = metadata.get("source")
+    if source not in _AUTH_RESOLVABLE_SOURCES:
+        source = "github"
+    configurable: dict[str, Any] = {
+        "source": source,
+        "repo": repo_config,
+        "pr_number": pr_number,
+    }
+    login = metadata.get("github_login")
+    if isinstance(login, str) and login:
+        configurable["github_login"] = login
+    email = metadata.get("triggering_user_email")
+    if isinstance(email, str) and email:
+        configurable["user_email"] = email
+    return configurable
+
+
+async def _dispatch_or_queue(thread_id: str, prompt: str, *, configurable: dict[str, Any]) -> str:
     if await is_thread_active(thread_id):
         logger.info("Agent thread %s busy; queuing auto-fix message", thread_id)
         await queue_message_for_thread(thread_id, prompt)
@@ -193,16 +222,12 @@ async def _dispatch_or_queue(
         thread_id,
         "agent",
         input={"messages": [{"role": "user", "content": prompt}]},
-        config={
-            "configurable": {
-                "source": source,
-                "repo": repo_config,
-                "pr_number": pr_number,
-            }
-        },
+        config={"configurable": configurable},
         if_not_exists="create",
     )
-    logger.info("Created auto-fix run for thread %s (source=%s)", thread_id, source)
+    logger.info(
+        "Created auto-fix run for thread %s (source=%s)", thread_id, configurable.get("source")
+    )
     return "dispatched"
 
 
@@ -329,9 +354,9 @@ async def handle_ci_failure(
     result = await _dispatch_or_queue(
         thread_id,
         prompt,
-        source=source,
-        repo_config={"owner": owner, "name": repo},
-        pr_number=pr_number,
+        configurable=_run_configurable(
+            metadata, repo_config={"owner": owner, "name": repo}, pr_number=pr_number
+        ),
     )
     await _record_attempt(
         thread_id, attempts=attempts, handled=handled, dedupe_key=dedupe_key, head_sha=head_sha
@@ -380,7 +405,7 @@ async def handle_review_feedback(
     found = await find_agent_thread_for_pr(pr_url)
     if found is None:
         return "no_agent_thread"
-    thread_id, _metadata = found
+    thread_id, metadata = found
 
     prompt = _build_review_feedback_prompt(
         owner=owner,
@@ -393,9 +418,9 @@ async def handle_review_feedback(
     return await _dispatch_or_queue(
         thread_id,
         prompt,
-        source=source,
-        repo_config={"owner": owner, "name": repo},
-        pr_number=pr_number,
+        configurable=_run_configurable(
+            metadata, repo_config={"owner": owner, "name": repo}, pr_number=pr_number
+        ),
     )
 
 
@@ -490,9 +515,9 @@ async def _flag_merge_conflict(
     await _dispatch_or_queue(
         thread_id,
         prompt,
-        source="ci_monitor",
-        repo_config={"owner": owner, "name": repo},
-        pr_number=pr_number,
+        configurable=_run_configurable(
+            metadata, repo_config={"owner": owner, "name": repo}, pr_number=pr_number
+        ),
     )
     try:
         await get_client().threads.update(

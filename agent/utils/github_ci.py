@@ -179,6 +179,27 @@ async def head_commit_author_login(*, owner: str, repo: str, sha: str, token: st
     return login if isinstance(login, str) and login else None
 
 
+async def has_repo_write_permission(*, owner: str, repo: str, username: str, token: str) -> bool:
+    """Return whether ``username`` has write/maintain/admin on ``owner/repo``.
+
+    Used to gate the no-mention auto-fix-on-review path so a triage/read-only
+    reviewer can't drive code changes. Fails closed on any error.
+    """
+    if not username:
+        return False
+    url = f"{_GITHUB_API_BASE}/repos/{owner}/{repo}/collaborators/{username}/permission"
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url, headers=github_headers(token), timeout=30)
+            response.raise_for_status()
+    except httpx.HTTPError:
+        logger.info("Could not verify %s's permission on %s/%s; denying", username, owner, repo)
+        return False
+    data = response.json()
+    permission = data.get("permission") if isinstance(data, dict) else None
+    return permission in {"admin", "maintain", "write"}
+
+
 def branch_from_check_payload(payload: dict[str, Any], event_type: str) -> str:
     """Extract the head branch name from a CI webhook payload."""
     if event_type == "check_run":

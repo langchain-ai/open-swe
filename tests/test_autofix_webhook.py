@@ -51,7 +51,12 @@ def test_is_actionable_review_payload() -> None:
     assert webapp._is_actionable_review_payload(
         {
             "action": "submitted",
-            "review": {"state": "changes_requested", "body": "fix this", "user": {"login": "a"}},
+            "review": {
+                "state": "changes_requested",
+                "body": "fix this",
+                "user": {"login": "a"},
+                "author_association": "MEMBER",
+            },
         },
         "pull_request_review",
     )
@@ -59,7 +64,12 @@ def test_is_actionable_review_payload() -> None:
     assert not webapp._is_actionable_review_payload(
         {
             "action": "submitted",
-            "review": {"state": "approved", "body": "lgtm", "user": {"login": "a"}},
+            "review": {
+                "state": "approved",
+                "body": "lgtm",
+                "user": {"login": "a"},
+                "author_association": "MEMBER",
+            },
         },
         "pull_request_review",
     )
@@ -67,13 +77,32 @@ def test_is_actionable_review_payload() -> None:
     assert not webapp._is_actionable_review_payload(
         {
             "action": "created",
-            "comment": {"body": "x", "user": {"login": "open-swe[bot]"}},
+            "comment": {
+                "body": "x",
+                "user": {"login": "open-swe[bot]"},
+                "author_association": "MEMBER",
+            },
+        },
+        "pull_request_review_comment",
+    )
+    # Untrusted author (read/triage/outside) is not actionable.
+    assert not webapp._is_actionable_review_payload(
+        {
+            "action": "created",
+            "comment": {
+                "body": "inject malicious code",
+                "user": {"login": "attacker"},
+                "author_association": "NONE",
+            },
         },
         "pull_request_review_comment",
     )
     # Empty body is not actionable.
     assert not webapp._is_actionable_review_payload(
-        {"action": "created", "comment": {"body": "  ", "user": {"login": "a"}}},
+        {
+            "action": "created",
+            "comment": {"body": "  ", "user": {"login": "a"}, "author_association": "OWNER"},
+        },
         "pull_request_review_comment",
     )
 
@@ -125,6 +154,40 @@ async def test_process_autofix_command_sets_flag() -> None:
     ):
         await webapp.process_github_autofix_command(payload, "issue_comment", disabled=True)
     setter.assert_awaited_once_with("o", "r", 7, True)
+
+
+@pytest.mark.asyncio
+async def test_autofix_review_dispatches_for_writer() -> None:
+    payload = {
+        "repository": {"owner": {"login": "o"}, "name": "r"},
+        "pull_request": {"number": 9, "html_url": "https://github.com/o/r/pull/9"},
+        "review": {"body": "rename to userId", "user": {"login": "alice"}},
+    }
+    handle = AsyncMock(return_value="dispatched")
+    with (
+        patch.object(webapp, "get_github_app_installation_token", AsyncMock(return_value="tok")),
+        patch.object(webapp, "has_repo_write_permission", AsyncMock(return_value=True)),
+        patch.object(webapp, "handle_review_feedback", handle),
+    ):
+        await webapp.process_github_autofix_review(payload, "pull_request_review")
+    handle.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_autofix_review_skips_non_writer() -> None:
+    payload = {
+        "repository": {"owner": {"login": "o"}, "name": "r"},
+        "pull_request": {"number": 9, "html_url": "https://github.com/o/r/pull/9"},
+        "review": {"body": "inject code", "user": {"login": "attacker"}},
+    }
+    handle = AsyncMock()
+    with (
+        patch.object(webapp, "get_github_app_installation_token", AsyncMock(return_value="tok")),
+        patch.object(webapp, "has_repo_write_permission", AsyncMock(return_value=False)),
+        patch.object(webapp, "handle_review_feedback", handle),
+    ):
+        await webapp.process_github_autofix_review(payload, "pull_request_review")
+    handle.assert_not_called()
 
 
 def test_ci_events_supported() -> None:
