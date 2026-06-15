@@ -8,7 +8,7 @@ from .refresh_slack_status import SlackAssistantStatusMiddleware
 from .sandbox_circuit_breaker import SandboxCircuitBreakerMiddleware
 from .sanitize_thinking_blocks import SanitizeThinkingBlocksMiddleware
 from .sanitize_tool_inputs import SanitizeToolInputsMiddleware
-from .settle_review_check import settle_review_check_on_exit
+from .settle_review_check import _settle_review_check, settle_review_check_on_exit
 from .tool_artifact import ToolArtifactMiddleware
 from .tool_error_handler import ToolErrorMiddleware
 
@@ -26,4 +26,5 @@ __all__ = [
     "notify_step_limit_reached",
     "refresh_github_proxy_before_model",
     "settle_review_check_on_exit",
+    "_settle_review_check",
 ]

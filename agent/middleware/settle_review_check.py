@@ -23,38 +23,43 @@ from ..utils.github_token import get_github_token
 logger = logging.getLogger(__name__)
 
 
-@after_agent
-async def settle_review_check_on_exit(
-    state: AgentState,
-    runtime: Runtime,
-) -> dict[str, Any] | None:
-    """Fail the tracked review check run if the run ended without publishing."""
+async def _settle_review_check(*, cancelled: bool) -> None:
+    """Settle the tracked review check run on a non-publishing exit."""
     config = get_config()
     configurable = config.get("configurable", {})
     if not isinstance(configurable, dict):
-        return None
+        return
     thread_id = configurable.get("thread_id")
     repo_config = configurable.get("repo")
     if not isinstance(thread_id, str) or not thread_id or not isinstance(repo_config, dict):
-        return None
+        return
     owner = repo_config.get("owner")
     repo = repo_config.get("name")
     if not isinstance(owner, str) or not owner or not isinstance(repo, str) or not repo:
-        return None
+        return
 
     try:
         metadata = await get_thread_metadata(thread_id)
         if not isinstance(metadata.get("review_check_run_id"), int):
-            return None
+            return
         token = get_github_token()
         if not token:
             logger.warning("No GitHub token to settle stale review check on thread %s", thread_id)
-            return None
+            return
         # A pending result means publish_review DID finish but its completion
         # PATCH failed transiently — retry with the real conclusion instead of
         # misreporting a published review as failed.
         pending = metadata.get("review_check_pending_result")
-        if isinstance(pending, dict) and pending.get("conclusion") in {
+        if cancelled:
+            conclusion = "cancelled"
+            title = "Review cancelled"
+            summary = (
+                "The Open SWE review was cancelled before it could publish, "
+                "likely because the reviewer thread exceeded its runtime or "
+                "context budget. Re-trigger the review by pushing a commit "
+                "or re-requesting it."
+            )
+        elif isinstance(pending, dict) and pending.get("conclusion") in {
             "success",
             "neutral",
             "failure",
@@ -83,4 +88,13 @@ async def settle_review_check_on_exit(
         logger.info("Settled stale review check run for thread %s", thread_id)
     except Exception:
         logger.exception("Failed to settle stale review check run for thread %s", thread_id)
+
+
+@after_agent
+async def settle_review_check_on_exit(
+    state: AgentState,
+    runtime: Runtime,
+) -> dict[str, Any] | None:
+    """Fail the tracked review check run if the run ended without publishing."""
+    await _settle_review_check(cancelled=False)
     return None

@@ -20,6 +20,7 @@ import logging
 import posixpath
 import re
 import warnings
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +39,7 @@ from .middleware import (
     SanitizeToolInputsMiddleware,
     SlackAssistantStatusMiddleware,
     ToolErrorMiddleware,
+    _settle_review_check,
     check_message_queue_before_model,
     refresh_github_proxy_before_model,
     settle_review_check_on_exit,
@@ -727,6 +729,47 @@ def _format_existing_findings(findings: list[dict]) -> str:
     return "\n".join(lines) if lines else "_(no open findings)_"
 
 
+class _CancellationSettleWrapper:
+    """Delegating wrapper that settles the review check-run on cancellation."""
+
+    def __init__(self, inner: Any) -> None:
+        self._inner = inner
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._inner, name)
+
+    async def _on_cancel(self) -> None:
+        try:
+            await _settle_review_check(cancelled=True)
+        except Exception:
+            logger.exception("Failed to settle review check on cancellation")
+
+    async def ainvoke(self, *args: Any, **kwargs: Any) -> Any:
+        try:
+            return await self._inner.ainvoke(*args, **kwargs)
+        except asyncio.CancelledError:
+            await self._on_cancel()
+            raise
+
+    async def astream(self, *args: Any, **kwargs: Any):
+        agen = self._inner.astream(*args, **kwargs)
+        try:
+            async for item in agen:
+                yield item
+        except asyncio.CancelledError:
+            await self._on_cancel()
+            raise
+
+    async def astream_events(self, *args: Any, **kwargs: Any):
+        agen = self._inner.astream_events(*args, **kwargs)
+        try:
+            async for item in agen:
+                yield item
+        except asyncio.CancelledError:
+            await self._on_cancel()
+            raise
+
+
 async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
     """Get or create a reviewer agent with a sandbox + prepped repo."""
     thread_id = config["configurable"].get("thread_id", None)
@@ -1025,7 +1068,7 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
 
     reviewer_model = make_model(model_id, **model_kwargs)
     reviewer_subagent_model = make_model(subagent_model_id, **subagent_model_kwargs)
-    return create_deep_agent(
+    agent = create_deep_agent(
         model=reviewer_model,
         system_prompt=system_prompt,
         tools=[
@@ -1053,6 +1096,11 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
             settle_review_check_on_exit,
         ],
     ).with_config(config)
+    # LangGraph's @after_agent hooks don't run when the runtime cancels the
+    # graph via asyncio.CancelledError, leaving the GitHub check-run stuck
+    # "in progress". Wrap invoke/stream paths so cancellation still settles
+    # the check-run before propagating.
+    return _CancellationSettleWrapper(agent)
 
 
 traced_reviewer_agent = traced_graph_factory(get_reviewer_agent, REVIEW_TRACING_PROJECT)
