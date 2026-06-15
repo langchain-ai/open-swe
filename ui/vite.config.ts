@@ -8,6 +8,7 @@ import { nitro } from "nitro/vite"
 import { VitePWA } from "vite-plugin-pwa"
 
 const config = defineConfig({
+  optimizeDeps: { include: ["workbox-window"] },
   plugins: [
     devtools(),
     nitro(),
