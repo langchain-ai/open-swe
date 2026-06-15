@@ -56,6 +56,7 @@ from .middleware import (
     ToolErrorMiddleware,
     check_message_queue_before_model,
     ensure_no_empty_msg,
+    notify_incomplete_exit,
     notify_step_limit_reached,
     refresh_github_proxy_before_model,
 )
@@ -722,6 +723,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             SlackAssistantStatusMiddleware(),
             ensure_no_empty_msg,
             notify_step_limit_reached,
+            notify_incomplete_exit,
             SandboxCircuitBreakerMiddleware(),
             *fallback_middleware,
             SanitizeThinkingBlocksMiddleware(),

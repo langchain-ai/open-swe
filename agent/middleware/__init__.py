@@ -2,6 +2,7 @@ from .check_message_queue import check_message_queue_before_model
 from .ensure_no_empty_msg import ensure_no_empty_msg
 from .exclude_tools import ExcludeToolsMiddleware
 from .model_fallback import ModelFallbackMiddleware
+from .notify_incomplete_exit import notify_incomplete_exit
 from .notify_step_limit import notify_step_limit_reached
 from .refresh_github_proxy import refresh_github_proxy_before_model
 from .refresh_slack_status import SlackAssistantStatusMiddleware
@@ -23,6 +24,7 @@ __all__ = [
     "SlackAssistantStatusMiddleware",
     "check_message_queue_before_model",
     "ensure_no_empty_msg",
+    "notify_incomplete_exit",
     "notify_step_limit_reached",
     "refresh_github_proxy_before_model",
     "settle_review_check_on_exit",
