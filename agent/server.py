@@ -47,6 +47,7 @@ from .integrations.datadog_mcp import load_datadog_tools
 from .integrations.langsmith import _configure_github_proxy
 from .integrations.langsmith_tools import load_langsmith_tools
 from .middleware import (
+    ContextBudgetMiddleware,
     ModelFallbackMiddleware,
     SandboxCircuitBreakerMiddleware,
     SanitizeThinkingBlocksMiddleware,
@@ -473,6 +474,7 @@ DEFAULT_LLM_MODEL_ID = DEFAULT_MODEL_ID
 DEFAULT_LLM_MAX_TOKENS = 64_000
 DEFAULT_RECURSION_LIMIT = 9_999
 MODEL_CALL_RECURSION_LIMIT = 5_000  # ~half the recursion limit to account for tool calls
+CONTEXT_BUDGET_INPUT_TOKENS = 1_000_000
 
 
 def _general_purpose_subagent(model: BaseChatModel) -> SubAgent:
@@ -714,6 +716,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         backend=backend_factory,
         middleware=[
             SanitizeToolInputsMiddleware(),
+            ContextBudgetMiddleware(max_input_tokens=CONTEXT_BUDGET_INPUT_TOKENS),
             ModelCallLimitMiddleware(run_limit=MODEL_CALL_RECURSION_LIMIT, exit_behavior="end"),
             ToolErrorMiddleware(),
             ToolArtifactMiddleware(),

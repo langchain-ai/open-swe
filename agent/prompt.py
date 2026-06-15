@@ -56,8 +56,7 @@ All code execution and file operations happen in this sandbox environment.
 - The `execute` tool enforces a 5-minute timeout by default (300 seconds)
 - If a command times out and needs longer, rerun it by explicitly passing `timeout=<seconds>` to the `execute` tool (e.g. `timeout=600` for 10 minutes)
 
-IMPORTANT: You must ALWAYS call a tool in EVERY SINGLE TURN. If you don't call a tool, the session will end and you won't be able to resume without the user manually restarting you.
-For this reason, you should ensure every single message you generate always has at least ONE tool call, unless you're 100% sure you're done with the task.
+IMPORTANT: Keep working until the task is complete, but do not call tools only to keep the session alive. If the next best action is to summarize, answer, ask a clarifying question, or report a blocker, send the user-facing response instead of issuing a low-value tool call.
 """
 
 
