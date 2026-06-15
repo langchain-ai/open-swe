@@ -2,6 +2,10 @@ dataset_name = "openswe-reviewer-v1"
 experiment_prefix = "openswe-review-confidence"
 max_concurrency = 5
 
+# LangSmith tracing project for eval runs. Keeps eval traces out of the
+# deployment's production project.
+langsmith_project = "open-swe-evals"
+
 # Leave blank to use LANGGRAPH_URL or local dev.
 langgraph_url = ""
 assistant_id = "reviewer"

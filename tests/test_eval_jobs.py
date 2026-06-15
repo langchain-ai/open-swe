@@ -1,0 +1,74 @@
+from __future__ import annotations
+
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
+from agent.dashboard import eval_jobs
+
+
+@pytest.fixture(autouse=True)
+def _clear_procs():
+    eval_jobs._PROCS.clear()
+    yield
+    eval_jobs._PROCS.clear()
+
+
+@pytest.mark.asyncio
+async def test_get_status_returns_idle_when_no_record() -> None:
+    with patch.object(eval_jobs, "_get_record", new=AsyncMock(return_value=None)):
+        status = await eval_jobs.get_reviewer_eval_status()
+    assert status["status"] == "idle"
+    assert status["name"] == eval_jobs.REVIEWER_EVAL_KEY
+
+
+@pytest.mark.asyncio
+async def test_get_status_reconciles_stale_running() -> None:
+    record = {"name": "reviewer", "status": "running", "started_at": "t0"}
+    with (
+        patch.object(eval_jobs, "_get_record", new=AsyncMock(return_value=record)),
+        patch.object(eval_jobs, "_put_record", new=AsyncMock(side_effect=lambda r: r)) as put,
+    ):
+        status = await eval_jobs.get_reviewer_eval_status()
+    assert status["status"] == "failed"
+    assert "no longer tracked" in status["error"]
+    put.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_start_reviewer_eval_launches_subprocess() -> None:
+    proc = MagicMock()
+    proc.pid = 4321
+    proc.returncode = None
+    create = AsyncMock(return_value=proc)
+
+    def _consume(coro):
+        coro.close()
+        return MagicMock()
+
+    with (
+        patch.object(eval_jobs.asyncio, "create_subprocess_exec", new=create),
+        patch.object(eval_jobs.asyncio, "create_task", new=_consume),
+        patch.object(eval_jobs, "_put_record", new=AsyncMock(side_effect=lambda r: r)),
+        patch.object(eval_jobs, "_resolve_langgraph_url", return_value="https://lg.test"),
+    ):
+        record = await eval_jobs.start_reviewer_eval(limit=3, created_by="octo")
+
+    assert record["status"] == "running"
+    assert record["limit"] == 3
+    assert record["pid"] == 4321
+    assert eval_jobs._PROCS[eval_jobs.REVIEWER_EVAL_KEY] is proc
+
+    args, kwargs = create.call_args
+    assert "--limit" in args and "3" in args
+    assert kwargs["env"]["LANGSMITH_PROJECT"] == eval_jobs.DEFAULT_EVAL_PROJECT
+    assert kwargs["env"]["LANGGRAPH_URL"] == "https://lg.test"
+
+
+@pytest.mark.asyncio
+async def test_start_reviewer_eval_rejects_when_running() -> None:
+    running = MagicMock()
+    running.returncode = None
+    eval_jobs._PROCS[eval_jobs.REVIEWER_EVAL_KEY] = running
+    with pytest.raises(RuntimeError):
+        await eval_jobs.start_reviewer_eval(limit=None, created_by="octo")
