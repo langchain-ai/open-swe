@@ -379,6 +379,22 @@ export interface ReviewDiffPayload {
   truncated: boolean;
 }
 
+export interface ReviewerEvalStatus {
+  name: string;
+  status: "idle" | "running" | "completed" | "failed";
+  langsmith_project: string;
+  limit: number | null;
+  started_at: string | null;
+  finished_at: string | null;
+  created_by: string | null;
+  pid: number | null;
+  exit_code: number | null;
+  experiment_url: string | null;
+  error: string | null;
+  log_tail: string | null;
+  updated_at: string;
+}
+
 export const api = {
   me: () => request<SessionUser>("/me"),
   options: () => request<OptionsPayload>("/options"),
@@ -487,6 +503,15 @@ export const api = {
       `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/re-review`,
       { method: "POST" },
     ),
+  getReviewerEval: () =>
+    request<ReviewerEvalStatus>("/admin/evals/reviewer"),
+  startReviewerEval: (limit: number | null) =>
+    request<ReviewerEvalStatus>("/admin/evals/reviewer", {
+      method: "POST",
+      body: JSON.stringify({ limit }),
+    }),
+  cancelReviewerEval: () =>
+    request<ReviewerEvalStatus>("/admin/evals/reviewer", { method: "DELETE" }),
   logout: () => request<void>("/auth/logout", { method: "POST" }),
 };
 

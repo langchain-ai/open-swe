@@ -3,7 +3,12 @@ from __future__ import annotations
 import os
 from unittest.mock import patch
 
-from evals.reviewer.run_eval import _apply_config_to_env, _coerce_config
+from evals.reviewer.run_eval import (
+    DEFAULT_LANGSMITH_PROJECT,
+    _apply_config_to_env,
+    _apply_langsmith_project,
+    _coerce_config,
+)
 
 
 def test_reviewer_eval_config_coerces_known_values() -> None:
@@ -58,3 +63,29 @@ def test_reviewer_eval_config_sets_target_env() -> None:
         assert os.environ["REVIEWER_EVAL_SCORE_MODE"] == "surfaced_findings"
         assert os.environ["REVIEWER_EVAL_SEVERITY_THRESHOLD"] == "high"
         assert os.environ["REVIEWER_EVAL_CAP"] == "3"
+
+
+def test_reviewer_eval_config_coerces_langsmith_project() -> None:
+    config = _coerce_config({"langsmith_project": "open-swe-evals"})
+    assert config == {"langsmith_project": "open-swe-evals"}
+
+
+def test_apply_langsmith_project_uses_config_default() -> None:
+    with patch.dict(os.environ, {}, clear=True):
+        _apply_langsmith_project("my-eval-project")
+        assert os.environ["LANGSMITH_PROJECT"] == "my-eval-project"
+        assert os.environ["LANGCHAIN_PROJECT"] == "my-eval-project"
+        assert os.environ["LANGSMITH_TRACING"] == "true"
+
+
+def test_apply_langsmith_project_falls_back_to_default() -> None:
+    with patch.dict(os.environ, {}, clear=True):
+        _apply_langsmith_project(None)
+        assert os.environ["LANGSMITH_PROJECT"] == DEFAULT_LANGSMITH_PROJECT
+
+
+def test_apply_langsmith_project_env_overrides_config() -> None:
+    with patch.dict(os.environ, {"LANGSMITH_PROJECT": "from-env"}, clear=True):
+        _apply_langsmith_project("from-config")
+        assert os.environ["LANGSMITH_PROJECT"] == "from-env"
+        assert os.environ["LANGCHAIN_PROJECT"] == "from-env"

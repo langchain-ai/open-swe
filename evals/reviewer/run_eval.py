@@ -25,6 +25,7 @@ from evals.reviewer.target import drain_thread_ids, get_langgraph_url, review_pr
 logger = logging.getLogger(__name__)
 
 CONFIG_PATH = Path(__file__).with_name("config.toml")
+DEFAULT_LANGSMITH_PROJECT = "open-swe-evals"
 ScoreMode = Literal["all_findings", "surfaced_findings"]
 Severity = Literal["low", "medium", "high", "critical"]
 
@@ -34,6 +35,7 @@ class ReviewerEvalConfig(TypedDict, total=False):
     experiment_prefix: str
     max_concurrency: int
     langgraph_url: str
+    langsmith_project: str
     assistant_id: str
     model_id: str
     reasoning_effort: str
@@ -63,6 +65,10 @@ def _coerce_config(raw: dict[str, Any]) -> ReviewerEvalConfig:
     langgraph_url = raw.get("langgraph_url")
     if isinstance(langgraph_url, str) and langgraph_url:
         config["langgraph_url"] = langgraph_url
+
+    langsmith_project = raw.get("langsmith_project")
+    if isinstance(langsmith_project, str) and langsmith_project:
+        config["langsmith_project"] = langsmith_project
 
     assistant_id = raw.get("assistant_id")
     if isinstance(assistant_id, str) and assistant_id:
@@ -108,6 +114,19 @@ def _apply_config_to_env(config: ReviewerEvalConfig) -> None:
         value = config.get(config_key)
         if value is not None:
             os.environ[env_key] = str(value)
+    _apply_langsmith_project(config.get("langsmith_project"))
+
+
+def _apply_langsmith_project(project: str | None) -> None:
+    """Route eval traces to a dedicated LangSmith project.
+
+    A project already set in the environment (e.g. by the admin-triggered job)
+    wins so callers can override the config default.
+    """
+    resolved = os.environ.get("LANGSMITH_PROJECT") or project or DEFAULT_LANGSMITH_PROJECT
+    os.environ["LANGSMITH_PROJECT"] = resolved
+    os.environ["LANGCHAIN_PROJECT"] = resolved
+    os.environ.setdefault("LANGSMITH_TRACING", "true")
 
 
 async def _cleanup_threads(thread_ids: Iterable[str]) -> None:

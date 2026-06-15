@@ -32,6 +32,11 @@ from .enabled_repos import (
     list_enabled_review_repos,
     set_review_repo_enabled,
 )
+from .eval_jobs import (
+    cancel_reviewer_eval,
+    get_reviewer_eval_status,
+    start_reviewer_eval,
+)
 from .oauth import (
     COOKIE_NAME,
     SESSION_TTL_SECONDS,
@@ -551,6 +556,38 @@ async def admin_delete_user_mapping(
 ) -> dict[str, bool]:
     deleted = await delete_mapping(github_login)
     return {"deleted": deleted}
+
+
+class ReviewerEvalStartBody(BaseModel):
+    limit: int | None = None
+
+
+@router.get("/admin/evals/reviewer")
+async def admin_get_reviewer_eval(
+    _admin: dict[str, Any] = _ADMIN_DEP,
+) -> dict[str, Any]:
+    return await get_reviewer_eval_status()
+
+
+@router.post("/admin/evals/reviewer")
+async def admin_start_reviewer_eval(
+    body: ReviewerEvalStartBody,
+    session: dict[str, Any] = _ADMIN_DEP,
+) -> dict[str, Any]:
+    status = await get_reviewer_eval_status()
+    if status.get("status") == "running":
+        raise HTTPException(409, "a reviewer eval is already running")
+    try:
+        return await start_reviewer_eval(limit=body.limit, created_by=session["sub"])
+    except RuntimeError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@router.delete("/admin/evals/reviewer")
+async def admin_cancel_reviewer_eval(
+    _admin: dict[str, Any] = _ADMIN_DEP,
+) -> dict[str, Any]:
+    return await cancel_reviewer_eval()
 
 
 def _next_link_url(link_header: str | None) -> str | None:

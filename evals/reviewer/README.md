@@ -54,6 +54,23 @@ Smoke-test with 3 PRs first:
 uv run python -m evals.reviewer.run_eval --limit 3
 ```
 
+### From the admin dashboard
+
+Admins can also kick off the eval from the **Reviewer eval** section on the
+dashboard Admin page (no local shell needed). It launches the same
+`run_eval` runner as a subprocess against the running deployment, with an
+optional limit for a smoke test, and surfaces live status plus the LangSmith
+experiment link. The deployment must have `LANGSMITH_API_KEY` / `ANTHROPIC_API_KEY`
+in its environment.
+
+### Tracing project
+
+Eval traces are routed to the **`open-swe-evals`** LangSmith project (set via
+`langsmith_project` in `config.toml`, default `open-swe-evals`) so they stay out
+of the deployment's production tracing project. The admin-triggered run forces
+the same project via the `LANGSMITH_PROJECT` env var; override the default with
+`EVAL_LANGSMITH_PROJECT`.
+
 The runner reads benchmark settings from `evals/reviewer/config.toml`. Set the
 deployment URL there (or leave it blank to use `LANGGRAPH_URL` / local dev).
 The target sets `reviewer_eval` for every run, so `publish_review` does not post
