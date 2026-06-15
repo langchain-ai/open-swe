@@ -113,6 +113,74 @@ async def test_delete_review_chat_thread_rejects_other_user(monkeypatch) -> None
         await review_chat_api.delete_review_chat_thread("acme", "repo", 7, "octocat", "c1")
 
 
+def _patch_thread_metadata(monkeypatch, metadata: dict[str, Any] | None) -> None:
+    async def get(thread_id: str) -> dict[str, Any]:
+        if metadata is None:
+            raise RuntimeError("not found")
+        return {"thread_id": thread_id, "metadata": metadata}
+
+    client = SimpleNamespace(threads=SimpleNamespace(get=get))
+    monkeypatch.setattr(review_chat_api, "langgraph_client", lambda: client)
+
+
+@pytest.mark.asyncio
+async def test_assert_chat_thread_access_allows_owner(monkeypatch) -> None:
+    _patch_thread_metadata(
+        monkeypatch,
+        {
+            "kind": "review_chat",
+            "github_login": "octocat",
+            "repo_owner": "acme",
+            "repo_name": "repo",
+            "pr_number": 7,
+        },
+    )
+    meta = await review_chat_api.assert_chat_thread_access("ct-1", "acme", "repo", 7, "octocat")
+    assert meta is not None
+
+
+@pytest.mark.asyncio
+async def test_assert_chat_thread_access_missing_thread_returns_none(monkeypatch) -> None:
+    _patch_thread_metadata(monkeypatch, None)
+    assert (
+        await review_chat_api.assert_chat_thread_access("ct-1", "acme", "repo", 7, "octocat")
+        is None
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "metadata",
+    [
+        {  # another user's chat thread
+            "kind": "review_chat",
+            "github_login": "hubot",
+            "repo_owner": "acme",
+            "repo_name": "repo",
+            "pr_number": 7,
+        },
+        {  # a reviewer (non-chat) thread with the same deterministic id space
+            "kind": "reviewer",
+            "github_login": "octocat",
+            "repo_owner": "acme",
+            "repo_name": "repo",
+            "pr_number": 7,
+        },
+        {  # right user, wrong PR scope
+            "kind": "review_chat",
+            "github_login": "octocat",
+            "repo_owner": "acme",
+            "repo_name": "repo",
+            "pr_number": 8,
+        },
+    ],
+)
+async def test_assert_chat_thread_access_rejects_unauthorized(monkeypatch, metadata) -> None:
+    _patch_thread_metadata(monkeypatch, metadata)
+    with pytest.raises(Exception):  # noqa: B017,PT011 - HTTPException(404)
+        await review_chat_api.assert_chat_thread_access("ct-1", "acme", "repo", 7, "octocat")
+
+
 # --- tools -------------------------------------------------------------------
 
 
@@ -351,9 +419,10 @@ async def test_enrich_chat_command_seeds_context_on_create(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_enrich_chat_command_reuses_context_when_existing(monkeypatch) -> None:
+async def test_enrich_chat_command_reuses_context_when_head_unchanged(monkeypatch) -> None:
+    # Stored head matches the current review head -> no reseed.
     captured = _patch_enrich_deps(
-        monkeypatch, metadata={"kind": "review_chat", "chat_head_sha": "cached-sha"}
+        monkeypatch, metadata={"kind": "review_chat", "chat_head_sha": "abc123def456"}
     )
     command = {"method": "run.start", "params": {"input": {"messages": []}}}
 
@@ -362,10 +431,30 @@ async def test_enrich_chat_command_reuses_context_when_existing(monkeypatch) -> 
     )
 
     params = enriched["params"]
-    # No re-seeding of files on an existing thread.
+    # No re-seeding of files when the head hasn't moved.
     assert "files" not in params["input"]
-    assert params["config"]["configurable"]["chat_head_sha"] == "cached-sha"
+    assert params["config"]["configurable"]["chat_head_sha"] == "abc123def456"
     assert captured["created"] is False
+    assert captured["updated"] == []
+
+
+@pytest.mark.asyncio
+async def test_enrich_chat_command_reseeds_on_head_change(monkeypatch) -> None:
+    # Stored head is stale relative to the current review head -> reseed.
+    captured = _patch_enrich_deps(
+        monkeypatch, metadata={"kind": "review_chat", "chat_head_sha": "old-stale-sha"}
+    )
+    command = {"method": "run.start", "params": {"input": {"messages": []}}}
+
+    enriched = await review_chat_api._enrich_chat_command(
+        command, owner="acme", repo="repo", pr_number=7, login="octocat", thread_id="ct-1"
+    )
+
+    params = enriched["params"]
+    files = params["input"]["files"]
+    assert set(files) == {"/pr/overview.md", "/pr/diff.patch", "/pr/findings.md"}
+    assert params["config"]["configurable"]["chat_head_sha"] == "abc123def456"
+    assert {"chat_head_sha": "abc123def456"} in captured["updated"]
 
 
 @pytest.mark.asyncio
@@ -384,8 +473,14 @@ async def test_proxy_state_normalizes_missing_thread(monkeypatch) -> None:
     async def fake_passthrough(method, thread_id, suffix, body, content_type):
         return 404, b"not found", "text/plain"
 
+    async def no_thread(thread_id: str) -> None:
+        return None
+
     monkeypatch.setattr(review_chat_api, "_proxy_passthrough", fake_passthrough)
-    status, content, media_type = await review_chat_api.proxy_review_chat_state("ct-1")
+    monkeypatch.setattr(review_chat_api, "_get_chat_thread_metadata", no_thread)
+    status, content, media_type = await review_chat_api.proxy_review_chat_state(
+        "acme", "repo", 7, "octocat", "ct-1"
+    )
     assert status == 200
     assert b'"next": []' in content
 
@@ -395,10 +490,36 @@ async def test_proxy_history_normalizes_missing_thread(monkeypatch) -> None:
     async def fake_passthrough(method, thread_id, suffix, body, content_type):
         return 404, b"not found", "text/plain"
 
+    async def no_thread(thread_id: str) -> None:
+        return None
+
     monkeypatch.setattr(review_chat_api, "_proxy_passthrough", fake_passthrough)
-    status, content, _ = await review_chat_api.proxy_review_chat_history("ct-1", b"{}")
+    monkeypatch.setattr(review_chat_api, "_get_chat_thread_metadata", no_thread)
+    status, content, _ = await review_chat_api.proxy_review_chat_history(
+        "acme", "repo", 7, "octocat", "ct-1", b"{}"
+    )
     assert status == 200
     assert content == b"[]"
+
+
+@pytest.mark.asyncio
+async def test_proxy_state_rejects_foreign_thread(monkeypatch) -> None:
+    async def other_owner(thread_id: str) -> dict[str, Any]:
+        return {
+            "kind": "review_chat",
+            "github_login": "hubot",
+            "repo_owner": "acme",
+            "repo_name": "repo",
+            "pr_number": 7,
+        }
+
+    async def fake_passthrough(*args, **kwargs):
+        raise AssertionError("must not proxy a thread the caller doesn't own")
+
+    monkeypatch.setattr(review_chat_api, "_get_chat_thread_metadata", other_owner)
+    monkeypatch.setattr(review_chat_api, "_proxy_passthrough", fake_passthrough)
+    with pytest.raises(Exception):  # noqa: B017,PT011 - HTTPException(404)
+        await review_chat_api.proxy_review_chat_state("acme", "repo", 7, "octocat", "ct-1")
 
 
 # --- graph factory guard -----------------------------------------------------

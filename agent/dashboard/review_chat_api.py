@@ -118,20 +118,10 @@ async def delete_review_chat_thread(
     owner: str, repo: str, pr_number: int, login: str, thread_id: str
 ) -> None:
     """Delete one of the user's chat threads (scoped + ownership-checked)."""
-    client = langgraph_client()
-    metadata = await _get_chat_thread_metadata(thread_id)
+    metadata = await assert_chat_thread_access(thread_id, owner, repo, pr_number, login)
     if metadata is None:
         return  # already gone; treat as success
-    owns = (
-        metadata.get("kind") == _CHAT_SOURCE
-        and metadata.get("github_login") == login
-        and metadata.get("repo_owner") == owner
-        and metadata.get("repo_name") == repo
-        and metadata.get("pr_number") == pr_number
-    )
-    if not owns:
-        raise HTTPException(404, "chat not found")
-    await client.threads.delete(thread_id)
+    await langgraph_client().threads.delete(thread_id)
 
 
 def _first_user_text(params: dict[str, Any]) -> str:
@@ -213,14 +203,28 @@ def _render_findings(findings: list[dict[str, Any]]) -> str:
     return "\n".join(out)
 
 
-async def _build_pr_context(
-    owner: str, repo: str, pr_number: int, token: str
-) -> tuple[dict[str, Any], str]:
-    """Fetch diff + findings + overview as seedable files; return ``(files, head_sha)``."""
-    review = await get_review(owner, repo, pr_number)
-    findings = review.get("findings") if isinstance(review.get("findings"), list) else []
+def _review_head_sha(review: dict[str, Any]) -> str:
     pr = review.get("pr") if isinstance(review.get("pr"), dict) else {}
-    head_sha = str(pr.get("head_sha") or review.get("head_sha") or "")
+    return str(pr.get("head_sha") or review.get("head_sha") or "")
+
+
+async def _build_pr_context(
+    owner: str,
+    repo: str,
+    pr_number: int,
+    token: str,
+    *,
+    review: dict[str, Any] | None = None,
+) -> tuple[dict[str, Any], str]:
+    """Fetch diff + findings + overview as seedable files; return ``(files, head_sha)``.
+
+    Accepts an already-fetched ``review`` to avoid re-fetching it when the caller
+    has just read it to decide whether a reseed is needed.
+    """
+    if review is None:
+        review = await get_review(owner, repo, pr_number)
+    findings = review.get("findings") if isinstance(review.get("findings"), list) else []
+    head_sha = _review_head_sha(review)
     diff = await fetch_pr_diff(owner=owner, repo=repo, pr_number=pr_number, token=token) or ""
     if len(diff) > _MAX_DIFF_CHARS:
         diff = diff[:_MAX_DIFF_CHARS] + "\n\n[diff truncated]\n"
@@ -239,6 +243,34 @@ async def _get_chat_thread_metadata(thread_id: str) -> dict[str, Any] | None:
     except Exception:  # noqa: BLE001
         return None
     return thread.get("metadata") if isinstance(thread, dict) else None
+
+
+async def assert_chat_thread_access(
+    thread_id: str, owner: str, repo: str, pr_number: int, login: str
+) -> dict[str, Any] | None:
+    """Authorize a client-supplied chat thread id before proxying to LangGraph.
+
+    Chat threads are private per viewer and their ids come from the client, so
+    every proxy route must confirm the caller owns the thread it names. Returns
+    the thread metadata when it exists and belongs to ``login`` for this PR, or
+    ``None`` when the thread doesn't exist yet (it's created lazily on the first
+    run, so there is nothing to leak). Raises 404 when a thread exists but is
+    owned by someone else or scoped to a different repo/PR — this also rejects
+    reviewer (or any non-chat) threads, whose ``kind`` is not ``_CHAT_SOURCE``.
+    """
+    metadata = await _get_chat_thread_metadata(thread_id)
+    if metadata is None:
+        return None
+    owns = (
+        metadata.get("kind") == _CHAT_SOURCE
+        and metadata.get("github_login") == login
+        and metadata.get("repo_owner") == owner
+        and metadata.get("repo_name") == repo
+        and metadata.get("pr_number") == pr_number
+    )
+    if not owns:
+        raise HTTPException(404, "chat not found")
+    return metadata
 
 
 async def _create_chat_thread(
@@ -320,14 +352,31 @@ async def _enrich_chat_command(
         configurable["chat_model_id"] = model_id
         configurable["chat_effort"] = effort
 
-    # Seed PR context only once, on the thread's first run. Subsequent runs reuse
-    # the files persisted in the checkpoint and the head SHA stored in metadata.
-    if created:
+    # Seed PR context on the thread's first run, and reseed whenever the PR head
+    # has moved since the last seed — otherwise the chat keeps answering from a
+    # stale diff/findings while the review page already shows the current head.
+    stored_head = metadata.get("chat_head_sha") if isinstance(metadata, dict) else None
+    stored_head = stored_head if isinstance(stored_head, str) else ""
+
+    review: dict[str, Any] | None = None
+    needs_seed = created
+    if not created:
+        try:
+            review = await get_review(owner, repo, pr_number)
+        except HTTPException:
+            review = None  # transient/missing review: keep the existing context
+        if review is not None:
+            current_head = _review_head_sha(review)
+            needs_seed = bool(current_head) and current_head != stored_head
+
+    if needs_seed:
         token = await get_github_app_installation_token(repositories=[repo])
         if not token:
             raise HTTPException(503, "GitHub App token unavailable")
         try:
-            pr_files, head_sha = await _build_pr_context(owner, repo, pr_number, token)
+            pr_files, head_sha = await _build_pr_context(
+                owner, repo, pr_number, token, review=review
+            )
         except HTTPException:
             raise
         except Exception as exc:  # noqa: BLE001
@@ -338,6 +387,8 @@ async def _enrich_chat_command(
             await langgraph_client().threads.update(
                 thread_id=thread_id, metadata={"chat_head_sha": head_sha}
             )
+        elif stored_head:
+            configurable["chat_head_sha"] = stored_head
         run_input = params.get("input")
         if not isinstance(run_input, dict):
             run_input = {}
@@ -347,10 +398,8 @@ async def _enrich_chat_command(
             **pr_files,
         }
         params["input"] = run_input
-    else:
-        stored_head = metadata.get("chat_head_sha") if isinstance(metadata, dict) else None
-        if isinstance(stored_head, str) and stored_head:
-            configurable["chat_head_sha"] = stored_head
+    elif stored_head:
+        configurable["chat_head_sha"] = stored_head
 
     params["assistant_id"] = _CHAT_ASSISTANT_ID
     params.setdefault("stream_mode", list(_DASHBOARD_STREAM_MODES))
@@ -370,6 +419,9 @@ async def proxy_review_chat_commands(
     *,
     content_type: str = "application/json",
 ) -> tuple[int, bytes, str | None]:
+    # Reject threads the caller doesn't own; a missing thread is created lazily
+    # below on the first `run.start` (with the caller as owner).
+    await assert_chat_thread_access(thread_id, owner, repo, pr_number, login)
     _require_json_content_type(content_type)
     try:
         parsed = json.loads(body)
@@ -389,11 +441,16 @@ async def proxy_review_chat_commands(
 
 
 async def proxy_review_chat_stream_events(
+    owner: str,
+    repo: str,
+    pr_number: int,
+    login: str,
     thread_id: str,
     body: bytes,
     *,
     content_type: str = "application/json",
 ) -> AsyncIterator[bytes]:
+    await assert_chat_thread_access(thread_id, owner, repo, pr_number, login)
     _require_json_content_type(content_type)
     return _stream_thread_events(thread_id, body, content_type)
 
@@ -411,7 +468,10 @@ async def _proxy_passthrough(
     return response.status_code, response.content, response.headers.get("content-type")
 
 
-async def proxy_review_chat_state(thread_id: str) -> tuple[int, bytes, str | None]:
+async def proxy_review_chat_state(
+    owner: str, repo: str, pr_number: int, login: str, thread_id: str
+) -> tuple[int, bytes, str | None]:
+    await assert_chat_thread_access(thread_id, owner, repo, pr_number, login)
     status_code, content, media_type = await _proxy_passthrough(
         "GET", thread_id, "state", None, "application/json"
     )
@@ -425,8 +485,16 @@ async def proxy_review_chat_state(thread_id: str) -> tuple[int, bytes, str | Non
 
 
 async def proxy_review_chat_history(
-    thread_id: str, body: bytes, *, content_type: str = "application/json"
+    owner: str,
+    repo: str,
+    pr_number: int,
+    login: str,
+    thread_id: str,
+    body: bytes,
+    *,
+    content_type: str = "application/json",
 ) -> tuple[int, bytes, str | None]:
+    await assert_chat_thread_access(thread_id, owner, repo, pr_number, login)
     _require_json_content_type(content_type)
     status_code, content, media_type = await _proxy_passthrough(
         "POST", thread_id, "history", body, content_type

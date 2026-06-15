@@ -916,6 +916,10 @@ async def api_review_chat_stream_events(
     await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
     body = await request.body()
     stream = await proxy_review_chat_stream_events(
+        owner,
+        repo,
+        pr_number,
+        session["sub"],
         thread_id,
         body,
         content_type=request.headers.get("content-type", "application/json"),
@@ -936,7 +940,9 @@ async def api_review_chat_state(
     session: dict[str, Any] = _SESSION_DEP,
 ) -> Response:
     await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
-    status_code, content, media_type = await proxy_review_chat_state(thread_id)
+    status_code, content, media_type = await proxy_review_chat_state(
+        owner, repo, pr_number, session["sub"], thread_id
+    )
     return Response(content=content, status_code=status_code, media_type=media_type)
 
 
@@ -952,6 +958,10 @@ async def api_review_chat_history(
     await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
     body = await request.body()
     status_code, content, media_type = await proxy_review_chat_history(
+        owner,
+        repo,
+        pr_number,
+        session["sub"],
         thread_id,
         body,
         content_type=request.headers.get("content-type", "application/json"),
