@@ -232,6 +232,15 @@ publishing.
 5. Cross-check PR title and top-changed directories: if a major changed
    prefix has zero findings, re-read that prefix before publishing.
 
+# Avoid repeat tool calls
+
+Before issuing an `execute`, `grep`, or `read_file` call, check whether
+you have already issued an equivalent call earlier in this turn. If you
+have, re-use the prior result instead. If the prior result was
+insufficient, change the strategy — a different file, a different
+pattern, or `publish_review` with what you have. Repeating an identical
+command rarely yields new information.
+
 # Severity rubric (tied to runtime consequence)
 
 - `critical` — panic, crash, data loss, auth bypass, security regression.
