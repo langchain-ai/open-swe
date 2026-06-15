@@ -77,14 +77,25 @@ const COLLAPSED_STATE_TRUE = "1"
 const COLLAPSED_STATE_FALSE = "0"
 const PANEL_DEFAULT_WIDTH = 420
 const PANEL_MIN_WIDTH = 320
-const PANEL_MAX_WIDTH = 720
+// Keep at least this much room for the chat so the panel can grow to nearly the
+// full window (e.g. ~50/50 on ultrawide screens) without hiding the chat.
+const PANEL_MIN_CHAT_WIDTH = 360
+
+function getPanelMaxWidth(): number {
+  if (typeof window === "undefined") return PANEL_DEFAULT_WIDTH
+  return Math.max(PANEL_MIN_WIDTH, window.innerWidth - PANEL_MIN_CHAT_WIDTH)
+}
+
+function clampPanelWidth(width: number): number {
+  return Math.min(getPanelMaxWidth(), Math.max(PANEL_MIN_WIDTH, width))
+}
 
 function readStoredPanelWidth(): number {
   if (typeof window === "undefined") return PANEL_DEFAULT_WIDTH
   const raw = window.localStorage.getItem(PANEL_STORAGE_WIDTH)
   const parsed = raw ? Number(raw) : NaN
   if (!Number.isFinite(parsed)) return PANEL_DEFAULT_WIDTH
-  return Math.min(PANEL_MAX_WIDTH, Math.max(PANEL_MIN_WIDTH, parsed))
+  return clampPanelWidth(parsed)
 }
 
 function readStoredPanelCollapsed(): boolean {
@@ -191,10 +202,19 @@ export function AgentGitPanel({ thread, messages }: AgentGitPanelProps) {
   }
 
   const setWidth = useCallback((next: number) => {
-    const clamped = Math.min(PANEL_MAX_WIDTH, Math.max(PANEL_MIN_WIDTH, next))
+    const clamped = clampPanelWidth(next)
     setWidthState(clamped)
     window.localStorage.setItem(PANEL_STORAGE_WIDTH, String(clamped))
   }, [])
+
+  // Re-clamp the stored width when the window shrinks so the panel never
+  // exceeds the available space (which would squeeze out the chat).
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    const onResize = () => setWidth(width)
+    window.addEventListener("resize", onResize)
+    return () => window.removeEventListener("resize", onResize)
+  }, [setWidth, width])
   const [selectedTreePath, setSelectedTreePath] = useState<string | null>(null)
   const sectionRefs = useRef<Record<string, HTMLDivElement | null>>({})
   const pr = thread.pr
