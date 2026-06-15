@@ -1,0 +1,349 @@
+"""Backend for the review page's "chat with this PR" feature.
+
+A dedicated, sandbox-less ``chat`` graph (``agent/chat.py``) answers questions
+about one PR. This module mints a per-user chat thread, seeds the PR diff,
+review findings, and an overview as virtual files on the first run, and proxies
+the LangGraph stream/commands/state/history protocol the frontend SDK speaks —
+the chat counterpart of ``thread_api``'s agent proxy, pinned to assistant
+``chat`` and scoped to the review's PR.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import uuid
+from collections.abc import AsyncIterator
+from datetime import UTC, datetime
+from typing import Any
+
+import httpx
+from deepagents.backends.utils import create_file_data
+from fastapi import HTTPException
+
+from ..reviewer_diff import fetch_pr_diff
+from ..reviewer_findings import REVIEWER_THREAD_KIND
+from ..utils.github_app import get_github_app_installation_token
+from ..utils.thread_ops import langgraph_client, langgraph_url
+from .options import SUPPORTED_MODEL_IDS, model_supports_effort
+from .review_api import classify_finding, get_review, reviewer_thread_id
+from .thread_api import (
+    _DASHBOARD_STREAM_MODES,
+    _langgraph_proxy_headers,
+    _require_json_content_type,
+    _stream_thread_events,
+)
+
+logger = logging.getLogger(__name__)
+
+_CHAT_ASSISTANT_ID = "chat"
+_CHAT_SOURCE = "review_chat"
+_PROXY_REQUEST_TIMEOUT = httpx.Timeout(30.0, connect=5.0)
+_MAX_DIFF_CHARS = 400_000
+
+
+def _now_ms() -> int:
+    return int(datetime.now(UTC).timestamp() * 1000)
+
+
+def review_chat_thread_id(owner: str, repo: str, pr_number: int, login: str) -> str:
+    """Deterministic per-user chat thread for a PR.
+
+    Per-user (not shared like the reviewer thread) so each viewer's chat history
+    stays private; the findings they discuss are shared and read live from the
+    reviewer thread.
+    """
+    key = f"{owner}/{repo}/pr/{pr_number}/chat/{login.lower()}"
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, key))
+
+
+async def _reviewer_thread_exists(owner: str, repo: str, pr_number: int) -> bool:
+    try:
+        thread = await langgraph_client().threads.get(reviewer_thread_id(owner, repo, pr_number))
+    except Exception:  # noqa: BLE001
+        return False
+    metadata = thread.get("metadata") if isinstance(thread, dict) else None
+    return isinstance(metadata, dict) and metadata.get("kind") == REVIEWER_THREAD_KIND
+
+
+async def get_review_chat(owner: str, repo: str, pr_number: int, login: str) -> dict[str, Any]:
+    """Chat availability + the deterministic thread id for this user/PR."""
+    return {
+        "thread_id": review_chat_thread_id(owner, repo, pr_number, login),
+        "available": await _reviewer_thread_exists(owner, repo, pr_number),
+        "assistant_id": _CHAT_ASSISTANT_ID,
+    }
+
+
+def _render_overview(review: dict[str, Any]) -> str:
+    pr = review.get("pr") if isinstance(review.get("pr"), dict) else {}
+    lines = [
+        f"# {review.get('title') or 'Pull request'} (#{review.get('number')})",
+        "",
+        f"- Repository: {review.get('full_name', '')}",
+        f"- Author: {review.get('author', '')}",
+        f"- Head: {review.get('head_ref', '')} @ {review.get('head_sha', '')[:12]}",
+        f"- Base: {review.get('base_ref', '')}",
+        f"- State: {pr.get('state', '')}",
+        f"- Changes: +{pr.get('additions', 0)} -{pr.get('deletions', 0)} "
+        f"across {pr.get('changed_files', 0)} file(s), {pr.get('commits', 0)} commit(s)",
+        "",
+        "## Description",
+        "",
+        str(pr.get("body") or "_No description provided._"),
+    ]
+    return "\n".join(lines)
+
+
+def _render_findings(findings: list[dict[str, Any]]) -> str:
+    if not findings:
+        return "# Review findings\n\n_No findings were published for this PR._"
+    out = ["# Review findings", ""]
+    for finding in findings:
+        group = classify_finding(finding)
+        location = finding.get("file") or ""
+        start = finding.get("start_line")
+        if location and start:
+            location = f"{location}:{start}"
+        out.append(
+            f"## [{group}] {finding.get('title') or 'Untitled'} "
+            f"({finding.get('severity', 'low')}/{finding.get('confidence', 'medium')}, "
+            f"{finding.get('status', 'open')})"
+        )
+        if location:
+            out.append(f"`{location}`")
+        out.append("")
+        out.append(str(finding.get("description") or ""))
+        suggestion = finding.get("suggestion")
+        if suggestion:
+            out.append("")
+            out.append(f"Suggested change:\n```\n{suggestion}\n```")
+        note = finding.get("resolution_note")
+        if note:
+            out.append("")
+            out.append(f"Resolution: {note}")
+        out.append("")
+    return "\n".join(out)
+
+
+async def _build_pr_context(
+    owner: str, repo: str, pr_number: int, token: str
+) -> tuple[dict[str, Any], str]:
+    """Fetch diff + findings + overview as seedable files; return ``(files, head_sha)``."""
+    review = await get_review(owner, repo, pr_number)
+    findings = review.get("findings") if isinstance(review.get("findings"), list) else []
+    pr = review.get("pr") if isinstance(review.get("pr"), dict) else {}
+    head_sha = str(pr.get("head_sha") or review.get("head_sha") or "")
+    diff = await fetch_pr_diff(owner=owner, repo=repo, pr_number=pr_number, token=token) or ""
+    if len(diff) > _MAX_DIFF_CHARS:
+        diff = diff[:_MAX_DIFF_CHARS] + "\n\n[diff truncated]\n"
+    files = {
+        "/pr/overview.md": create_file_data(_render_overview(review)),
+        "/pr/diff.patch": create_file_data(diff or "[diff unavailable]"),
+        "/pr/findings.md": create_file_data(_render_findings(findings)),
+    }
+    return files, head_sha
+
+
+async def _get_chat_thread_metadata(thread_id: str) -> dict[str, Any] | None:
+    client = langgraph_client()
+    try:
+        thread = await client.threads.get(thread_id)
+    except Exception:  # noqa: BLE001
+        return None
+    return thread.get("metadata") if isinstance(thread, dict) else None
+
+
+async def _create_chat_thread(
+    thread_id: str, owner: str, repo: str, pr_number: int, login: str
+) -> None:
+    now_ms = _now_ms()
+    metadata = {
+        "kind": _CHAT_SOURCE,
+        "source": _CHAT_SOURCE,
+        "github_login": login,
+        "repo_owner": owner,
+        "repo_name": repo,
+        "pr_number": pr_number,
+        "created_at_ms": now_ms,
+        "updated_at_ms": now_ms,
+    }
+    await langgraph_client().threads.create(
+        thread_id=thread_id, metadata=metadata, if_exists="do_nothing"
+    )
+
+
+def _normalize_chat_model(configurable: dict[str, Any]) -> tuple[str | None, str | None]:
+    model_id = configurable.get("chat_model_id")
+    effort = configurable.get("chat_effort")
+    if (
+        isinstance(model_id, str)
+        and model_id in SUPPORTED_MODEL_IDS
+        and isinstance(effort, str)
+        and model_supports_effort(model_id, effort)
+    ):
+        return model_id, effort
+    return None, None
+
+
+async def _enrich_chat_command(
+    command: dict[str, Any],
+    *,
+    owner: str,
+    repo: str,
+    pr_number: int,
+    login: str,
+    thread_id: str,
+) -> dict[str, Any]:
+    if command.get("method") != "run.start":
+        return command
+
+    params = command.get("params")
+    if not isinstance(params, dict):
+        params = {}
+        command["params"] = params
+
+    metadata = await _get_chat_thread_metadata(thread_id)
+    created = metadata is None
+    if created:
+        await _create_chat_thread(thread_id, owner, repo, pr_number, login)
+        metadata = {}
+
+    client_config = params.get("config")
+    if not isinstance(client_config, dict):
+        client_config = {}
+    client_configurable = client_config.get("configurable")
+    if not isinstance(client_configurable, dict):
+        client_configurable = {}
+
+    configurable: dict[str, Any] = {
+        "thread_id": thread_id,
+        "source": _CHAT_SOURCE,
+        "github_login": login,
+        "chat_repo_owner": owner,
+        "chat_repo_name": repo,
+        "chat_pr_number": pr_number,
+        "reviewer_thread_id": reviewer_thread_id(owner, repo, pr_number),
+    }
+    model_id, effort = _normalize_chat_model(client_configurable)
+    if model_id and effort:
+        configurable["chat_model_id"] = model_id
+        configurable["chat_effort"] = effort
+
+    # Seed PR context only once, on the thread's first run. Subsequent runs reuse
+    # the files persisted in the checkpoint and the head SHA stored in metadata.
+    if created:
+        token = await get_github_app_installation_token(repositories=[repo])
+        if not token:
+            raise HTTPException(503, "GitHub App token unavailable")
+        try:
+            pr_files, head_sha = await _build_pr_context(owner, repo, pr_number, token)
+        except HTTPException:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Failed to seed PR chat context for %s/%s#%s", owner, repo, pr_number)
+            raise HTTPException(502, "could not load PR context") from exc
+        if head_sha:
+            configurable["chat_head_sha"] = head_sha
+            await langgraph_client().threads.update(
+                thread_id=thread_id, metadata={"chat_head_sha": head_sha}
+            )
+        run_input = params.get("input")
+        if not isinstance(run_input, dict):
+            run_input = {}
+        existing_files = run_input.get("files")
+        run_input["files"] = {
+            **(existing_files if isinstance(existing_files, dict) else {}),
+            **pr_files,
+        }
+        params["input"] = run_input
+    else:
+        stored_head = metadata.get("chat_head_sha") if isinstance(metadata, dict) else None
+        if isinstance(stored_head, str) and stored_head:
+            configurable["chat_head_sha"] = stored_head
+
+    params["assistant_id"] = _CHAT_ASSISTANT_ID
+    params.setdefault("stream_mode", list(_DASHBOARD_STREAM_MODES))
+    params.setdefault("stream_resumable", True)
+    params["config"] = {**client_config, "configurable": configurable}
+    command["params"] = params
+    return command
+
+
+async def proxy_review_chat_commands(
+    owner: str,
+    repo: str,
+    pr_number: int,
+    login: str,
+    thread_id: str,
+    body: bytes,
+    *,
+    content_type: str = "application/json",
+) -> tuple[int, bytes, str | None]:
+    _require_json_content_type(content_type)
+    try:
+        parsed = json.loads(body)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(400, "command body must be a JSON object") from exc
+    if not isinstance(parsed, dict):
+        raise HTTPException(400, "command body must be a JSON object")
+
+    enriched = await _enrich_chat_command(
+        parsed, owner=owner, repo=repo, pr_number=pr_number, login=login, thread_id=thread_id
+    )
+    url = f"{langgraph_url().rstrip('/')}/threads/{thread_id}/commands"
+    headers = _langgraph_proxy_headers(content_type=content_type)
+    async with httpx.AsyncClient(timeout=_PROXY_REQUEST_TIMEOUT) as client:
+        response = await client.post(url, content=json.dumps(enriched).encode(), headers=headers)
+    return response.status_code, response.content, response.headers.get("content-type")
+
+
+async def proxy_review_chat_stream_events(
+    thread_id: str,
+    body: bytes,
+    *,
+    content_type: str = "application/json",
+) -> AsyncIterator[bytes]:
+    _require_json_content_type(content_type)
+    return _stream_thread_events(thread_id, body, content_type)
+
+
+async def _proxy_passthrough(
+    method: str, thread_id: str, suffix: str, body: bytes | None, content_type: str
+) -> tuple[int, bytes, str | None]:
+    url = f"{langgraph_url().rstrip('/')}/threads/{thread_id}/{suffix}"
+    headers = _langgraph_proxy_headers(content_type=content_type)
+    async with httpx.AsyncClient(timeout=_PROXY_REQUEST_TIMEOUT) as client:
+        if method == "GET":
+            response = await client.get(url, headers=headers)
+        else:
+            response = await client.post(url, content=body or b"{}", headers=headers)
+    return response.status_code, response.content, response.headers.get("content-type")
+
+
+async def proxy_review_chat_state(thread_id: str) -> tuple[int, bytes, str | None]:
+    status_code, content, media_type = await _proxy_passthrough(
+        "GET", thread_id, "state", None, "application/json"
+    )
+    # The chat thread is created lazily on the first run, so an initial getState
+    # hits a missing thread. Return an empty idle state so the SDK hydrates a
+    # fresh thread instead of surfacing the 404 as a hard error.
+    if status_code == 404:
+        empty = json.dumps({"values": {}, "next": []}).encode()
+        return 200, empty, "application/json"
+    return status_code, content, media_type
+
+
+async def proxy_review_chat_history(
+    thread_id: str, body: bytes, *, content_type: str = "application/json"
+) -> tuple[int, bytes, str | None]:
+    _require_json_content_type(content_type)
+    status_code, content, media_type = await _proxy_passthrough(
+        "POST", thread_id, "history", body, content_type
+    )
+    # The thread is created lazily on the first run; before then, hydration
+    # history reads hit a missing thread. Return an empty list so the SDK
+    # treats it as a fresh thread instead of erroring.
+    if status_code == 404:
+        return 200, b"[]", "application/json"
+    return status_code, content, media_type

@@ -35,6 +35,7 @@ import type {
   ReviewUserRef,
 } from "@/lib/api"
 import { Markdown } from "@/components/agents/ported"
+import { ReviewChat } from "@/components/agents/ReviewChat"
 import { useRegisterReviewSidebar } from "@/components/agents/ReviewSidebar"
 import {
   useDiffOptions,
@@ -888,9 +889,11 @@ function SidePanel({
       </div>
 
       {tab === "chat" ? (
-        <div className="flex flex-1 items-center justify-center p-6 text-xs text-muted-foreground">
-          Coming Soon
-        </div>
+        <ReviewChat
+          owner={detail.owner}
+          repo={detail.repo}
+          number={detail.number}
+        />
       ) : (
         <div className="divide-y divide-border">
           <section className="px-3 py-3">

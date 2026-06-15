@@ -6,6 +6,7 @@
     "agent": "agent.server:traced_agent",
     "reviewer": "agent.reviewer:traced_reviewer_agent",
     "analyzer": "agent.analyzer:traced_analyzer",
+    "chat": "agent.chat:traced_chat_agent",
     "scheduler": "agent.scheduler:get_scheduler"
   },
   "dependencies": [

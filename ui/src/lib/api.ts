@@ -379,6 +379,30 @@ export interface ReviewDiffPayload {
   truncated: boolean;
 }
 
+export interface ReviewChatMeta {
+  thread_id: string;
+  available: boolean;
+  assistant_id: string;
+}
+
+/**
+ * Absolute base URL for the PR chat's LangGraph StreamProvider. The SDK builds
+ * request URLs as `new URL(apiUrl + path)`, so this must be absolute — a
+ * same-origin base is promoted using the current origin.
+ */
+export function reviewChatApiBase(
+  owner: string,
+  repo: string,
+  number: number,
+): string {
+  const path = `${API_BASE}/dashboard/api/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/chat`;
+  if (/^https?:\/\//.test(path)) return path;
+  if (typeof window !== "undefined") {
+    return `${window.location.origin}${path.startsWith("/") ? "" : "/"}${path}`;
+  }
+  return path;
+}
+
 export interface ReviewerEvalStatus {
   name: string;
   status: "idle" | "running" | "completed" | "failed";
@@ -492,6 +516,10 @@ export const api = {
   getReviewDiff: (owner: string, repo: string, number: number) =>
     request<ReviewDiffPayload>(
       `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/diff`,
+    ),
+  getReviewChat: (owner: string, repo: string, number: number) =>
+    request<ReviewChatMeta>(
+      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/chat`,
     ),
   reReview: (owner: string, repo: string, number: number) =>
     request<{
