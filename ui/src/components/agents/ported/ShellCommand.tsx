@@ -65,7 +65,7 @@ export const ShellCommand = memo(function ShellCommand({
 
       {expanded && (
         <div className="rounded-xl border border-[var(--ui-border-subtle)] bg-[var(--ui-code-bubble)] mt-1 overflow-hidden max-h-[250px] flex flex-col">
-          <div className="px-3 pt-2 pb-1 font-mono text-xs shrink-0">
+          <div className={`px-3 pt-2 ${output ? "pb-1" : "pb-3"} font-mono text-xs shrink-0`}>
             <div className="flex items-center justify-between gap-2 mb-2">
               <span className="text-[color:var(--ui-accent-2)]">bash</span>
               {chunk.status === "in_progress" && (
