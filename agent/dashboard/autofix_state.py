@@ -1,0 +1,51 @@
+"""Per-PR auto-fix opt-out, stored in the LangGraph Store.
+
+Team-wide auto-fix is gated by :func:`agent.dashboard.team_settings.is_autofix_enabled`.
+On top of that, a single PR can be silenced with ``@open-swe autofix off`` (and
+re-enabled with ``@open-swe autofix on``), mirroring Cursor's
+``@cursor autofix off`` per-PR control. The toggle lives here rather than on the
+agent thread so a disable command is honored even before any fix run exists.
+"""
+
+from __future__ import annotations
+
+import logging
+from datetime import UTC, datetime
+
+from langgraph_sdk import get_client
+
+logger = logging.getLogger(__name__)
+
+AUTOFIX_PR_STATE_NAMESPACE: list[str] = ["autofix_pr_state"]
+
+
+def _client():
+    return get_client()
+
+
+def _key(owner: str, repo: str, pr_number: int) -> str:
+    return f"{owner.lower()}/{repo.lower()}#{pr_number}"
+
+
+async def is_pr_autofix_disabled(owner: str, repo: str, pr_number: int) -> bool:
+    """Return whether auto-fix has been turned off for a specific PR."""
+    try:
+        item = await _client().store.get_item(
+            AUTOFIX_PR_STATE_NAMESPACE, _key(owner, repo, pr_number)
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.debug("autofix PR state lookup failed: %s", e)
+        return False
+    if item is None:
+        return False
+    value = item.get("value") if isinstance(item, dict) else getattr(item, "value", None)
+    return bool(value.get("disabled")) if isinstance(value, dict) else False
+
+
+async def set_pr_autofix_disabled(owner: str, repo: str, pr_number: int, disabled: bool) -> None:
+    """Persist the per-PR auto-fix opt-out flag."""
+    await _client().store.put_item(
+        AUTOFIX_PR_STATE_NAMESPACE,
+        _key(owner, repo, pr_number),
+        {"disabled": disabled, "updated_at": datetime.now(UTC).isoformat()},
+    )

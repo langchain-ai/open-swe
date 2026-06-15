@@ -5,6 +5,7 @@ import hmac
 import json
 import logging
 import os
+import re
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -19,15 +20,21 @@ from langchain_core.messages.content import create_text_block
 from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
 
+from .ci_autofix import handle_ci_failure, handle_review_feedback
 from .dashboard import router as dashboard_router
 from .dashboard.agent_overrides import (
     get_profile_default_repo,
     resolve_login_from_email_async,
 )
+from .dashboard.autofix_state import set_pr_autofix_disabled
 from .dashboard.enabled_repos import is_review_repo_enabled
 from .dashboard.oauth import build_settings_url
 from .dashboard.profiles import get_profile, get_valid_access_token, has_access_token_record
-from .dashboard.team_settings import get_team_default_repo, get_team_settings
+from .dashboard.team_settings import (
+    get_team_default_repo,
+    get_team_settings,
+    is_autofix_enabled,
+)
 from .dashboard.user_mappings import (
     email_for_login,
     login_for_email,
@@ -61,6 +68,11 @@ from .utils.github_app import (
     get_github_app_installation_token_with_expiry,
 )
 from .utils.github_checks import complete_review_check_run, create_review_check_run
+from .utils.github_ci import (
+    branch_from_check_payload,
+    head_sha_from_check_payload,
+    is_failing_ci_payload,
+)
 from .utils.github_comments import (
     OPEN_SWE_TAGS,
     GitHubAuthError,
@@ -1588,8 +1600,14 @@ _SUPPORTED_GH_EVENTS = frozenset(
         "pull_request_review_comment",
         "pull_request_review",
         "push",
+        "check_run",
+        "check_suite",
+        "workflow_run",
+        "status",
     ]
 )
+# CI events the auto-fix flow listens to (subset of _SUPPORTED_GH_EVENTS).
+_GH_CI_EVENTS = frozenset(["check_run", "check_suite", "workflow_run", "status"])
 _SUPPORTED_GH_ISSUE_ACTIONS = frozenset(["edited", "opened", "reopened"])
 _SUPPORTED_GH_PULL_REQUEST_ACTIONS = frozenset(
     [
@@ -2552,6 +2570,160 @@ async def process_github_push_event(payload: dict[str, Any]) -> None:
     await _store_current_reviewer_run_id(thread_id, run)
 
 
+async def process_github_ci_event(payload: dict[str, Any], event_type: str) -> None:
+    """Auto-fix failing CI on an agent-authored PR from a CI webhook."""
+    if not is_failing_ci_payload(payload, event_type):
+        return
+    repo = payload.get("repository", {})
+    repo_config = {
+        "owner": repo.get("owner", {}).get("login", "") or repo.get("owner", {}).get("name", ""),
+        "name": repo.get("name", ""),
+    }
+    if not repo_config["owner"] or not repo_config["name"]:
+        return
+    branch = branch_from_check_payload(payload, event_type)
+    head_sha = head_sha_from_check_payload(payload, event_type)
+    if not head_sha:
+        return
+    result = await handle_ci_failure(
+        repo_config=repo_config,
+        branch=branch,
+        head_sha=head_sha,
+        source="github_ci",
+    )
+    logger.info(
+        "CI auto-fix for %s/%s@%s (%s): %s",
+        repo_config["owner"],
+        repo_config["name"],
+        head_sha,
+        event_type,
+        result,
+    )
+
+
+_AUTOFIX_COMMAND_RE = re.compile(r"autofix\s+(on|off)\b", re.IGNORECASE)
+
+
+def _parse_autofix_command(comment_body: str) -> bool | None:
+    """Return True (disable) / False (enable) for an ``@open-swe autofix on|off`` command.
+
+    Returns ``None`` when the comment isn't an auto-fix command. Requires an
+    Open SWE mention so a passing reference to "autofix off" doesn't toggle it.
+    """
+    if not any(tag in comment_body.lower() for tag in OPEN_SWE_TAGS):
+        return None
+    match = _AUTOFIX_COMMAND_RE.search(comment_body)
+    if not match:
+        return None
+    return match.group(1).lower() == "off"
+
+
+def _pr_ref_from_comment_payload(payload: dict[str, Any], event_type: str) -> dict[str, Any] | None:
+    """Extract ``{owner, name, number, url}`` for the PR a comment belongs to."""
+    repo = payload.get("repository", {})
+    owner = repo.get("owner", {}).get("login", "")
+    name = repo.get("name", "")
+    if event_type == "issue_comment":
+        issue = payload.get("issue", {})
+        number = issue.get("number")
+        pr = issue.get("pull_request") or {}
+        url = pr.get("html_url") or issue.get("html_url") or ""
+    else:
+        pr = payload.get("pull_request", {})
+        number = pr.get("number")
+        url = pr.get("html_url") or ""
+    if not owner or not name or not isinstance(number, int):
+        return None
+    return {"owner": owner, "name": name, "number": number, "url": url}
+
+
+async def process_github_autofix_command(
+    payload: dict[str, Any], event_type: str, *, disabled: bool
+) -> None:
+    """Persist an ``@open-swe autofix on|off`` per-PR toggle and acknowledge it."""
+    ref = _pr_ref_from_comment_payload(payload, event_type)
+    if ref is None:
+        return
+    await set_pr_autofix_disabled(ref["owner"], ref["name"], ref["number"], disabled)
+    logger.info(
+        "Auto-fix %s for %s/%s#%s via comment",
+        "disabled" if disabled else "enabled",
+        ref["owner"],
+        ref["name"],
+        ref["number"],
+    )
+    comment = payload.get("comment") or {}
+    comment_id = comment.get("id")
+    if not isinstance(comment_id, int):
+        return
+    token = await get_github_app_installation_token()
+    if not token:
+        return
+    try:
+        await react_to_github_comment(
+            {"owner": ref["owner"], "name": ref["name"]},
+            comment_id,
+            event_type=event_type,
+            token=token,
+            pull_number=ref["number"],
+            node_id=comment.get("node_id"),
+        )
+    except Exception:  # noqa: BLE001
+        logger.debug("Failed to react to auto-fix command comment", exc_info=True)
+
+
+def _is_actionable_review_payload(payload: dict[str, Any], event_type: str) -> bool:
+    """Return whether a review event is human feedback worth auto-responding to.
+
+    Approvals and the agent's own bot comments are not actionable.
+    """
+    action = payload.get("action", "")
+    if event_type == "pull_request_review_comment":
+        if action != "created":
+            return False
+        node = payload.get("comment") or {}
+    elif event_type == "pull_request_review":
+        if action != "submitted":
+            return False
+        node = payload.get("review") or {}
+        if node.get("state") not in {"changes_requested", "commented"}:
+            return False
+    else:
+        return False
+    reviewer = (node.get("user") or {}).get("login", "") if isinstance(node, dict) else ""
+    if reviewer in INTERNAL_BOT_LOGINS:
+        return False
+    body = (node.get("body") or "") if isinstance(node, dict) else ""
+    return bool(body.strip())
+
+
+async def process_github_autofix_review(payload: dict[str, Any], event_type: str) -> None:
+    """Auto-respond to a human review/review-comment on an agent-authored PR."""
+    ref = _pr_ref_from_comment_payload(payload, event_type)
+    if ref is None:
+        return
+    comment = payload.get("comment") or payload.get("review", {})
+    reviewer = (comment.get("user") or {}).get("login", "") if isinstance(comment, dict) else ""
+    body = (comment.get("body") or "") if isinstance(comment, dict) else ""
+    if not body.strip() or reviewer in INTERNAL_BOT_LOGINS:
+        return
+    result = await handle_review_feedback(
+        repo_config={"owner": ref["owner"], "name": ref["name"]},
+        pr_number=ref["number"],
+        pr_url=ref["url"],
+        reviewer=reviewer,
+        body=body,
+        source="github_review",
+    )
+    logger.info(
+        "Auto-fix review feedback for %s/%s#%s: %s",
+        ref["owner"],
+        ref["name"],
+        ref["number"],
+        result,
+    )
+
+
 async def _refresh_thread_github_token_after_401(thread_id: str, email: str) -> str | None:
     """Invalidate the cached token after a 401 and try to resolve a fresh one."""
     logger.warning(
@@ -3116,6 +3288,15 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks) ->
         background_tasks.add_task(process_github_push_event, payload)
         return {"status": "accepted", "message": "Processing GitHub push for reviewer watch"}
 
+    if event_type in _GH_CI_EVENTS:
+        if not await _is_repo_enabled_for_review(webhook_repo_config):
+            return {"status": "ignored", "reason": "Repository not enabled for review"}
+        if not await is_autofix_enabled():
+            return {"status": "ignored", "reason": "Auto-fix is disabled"}
+        logger.info("Accepted GitHub %s webhook, scheduling CI auto-fix evaluation", event_type)
+        background_tasks.add_task(process_github_ci_event, payload, event_type)
+        return {"status": "accepted", "message": f"Processing GitHub {event_type} for auto-fix"}
+
     if not _is_repo_allowed(webhook_repo_config):
         logger.debug(
             "Rejecting GitHub webhook: repo '%s/%s' not in allowlist",
@@ -3159,6 +3340,23 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks) ->
 
     comment = payload.get("comment") or payload.get("review", {})
     comment_body = (comment.get("body") or "") if comment else ""
+
+    is_pr_related_comment = is_pull_request_comment or event_type in {
+        "pull_request_review_comment",
+        "pull_request_review",
+    }
+    autofix_command = _parse_autofix_command(comment_body)
+    if autofix_command is not None and is_pr_related_comment:
+        if not await _is_repo_enabled_for_review(webhook_repo_config):
+            return {"status": "ignored", "reason": "Repository not enabled for review"}
+        gate_rejection = await _enforce_public_repo_org_gate(payload, event_type)
+        if gate_rejection is not None:
+            return gate_rejection
+        background_tasks.add_task(
+            process_github_autofix_command, payload, event_type, disabled=autofix_command
+        )
+        return {"status": "accepted", "message": "Processing auto-fix toggle"}
+
     if (
         event_type == "pull_request_review_comment"
         and _review_comment_reply_parent_id(payload) is not None
@@ -3172,6 +3370,15 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks) ->
         return {"status": "accepted", "message": "Processing review finding reply"}
 
     if not any(tag in comment_body.lower() for tag in OPEN_SWE_TAGS):
+        if _is_actionable_review_payload(payload, event_type) and await _is_repo_enabled_for_review(
+            webhook_repo_config
+        ):
+            if await is_autofix_enabled():
+                gate_rejection = await _enforce_public_repo_org_gate(payload, event_type)
+                if gate_rejection is not None:
+                    return gate_rejection
+                background_tasks.add_task(process_github_autofix_review, payload, event_type)
+                return {"status": "accepted", "message": "Processing auto-fix review feedback"}
         logger.debug(
             "Ignoring GitHub %s%s that does not mention @openswe or @open-swe",
             event_type,

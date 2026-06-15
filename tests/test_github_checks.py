@@ -111,6 +111,31 @@ async def test_complete_review_check_run_patches_completed(
     assert body["output"]["title"] == "Found 2 potential issues"
 
 
+async def test_post_autofix_status_check_completes_neutral(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(github_checks.httpx, "AsyncClient", _FakeAsyncClient)
+
+    ok = await github_checks.post_autofix_status_check(
+        owner="acme",
+        repo="widgets",
+        head_sha="abc123",
+        token="tok",
+        title="Auto-fixing 1 failing check(s)",
+        summary="working on it",
+        details_url="https://example.com/thread",
+    )
+
+    assert ok is True
+    assert _FakeAsyncClient.last_post is not None
+    assert _FakeAsyncClient.last_post["url"].endswith("/repos/acme/widgets/check-runs")
+    body = _FakeAsyncClient.last_post["json"]
+    assert body["name"] == github_checks.AUTOFIX_CHECK_RUN_NAME
+    assert body["status"] == "completed"
+    assert body["conclusion"] == "neutral"
+    assert body["details_url"] == "https://example.com/thread"
+
+
 def test_review_check_conclusion_mapping() -> None:
     conclusion, title, _ = github_checks.review_check_conclusion(0)
     assert conclusion == "success"
