@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from agent.reviewer_groups import (
+    _build_prompt,
     _DiffGroupingResult,
     _DiffGroupModel,
     diff_signature,
@@ -94,6 +95,19 @@ async def test_generate_diff_groups_empty_diff_returns_empty() -> None:
 async def test_generate_diff_groups_llm_failure_returns_none() -> None:
     groups = await generate_diff_groups(diff_text=_DIFF, model=_FakeModel(None, raises=True))
     assert groups is None
+
+
+def test_build_prompt_annotates_hunk_line_ranges() -> None:
+    prompt = _build_prompt(_DIFF, ["foo.py", "bar.py"])
+    assert "### foo.py" in prompt
+    assert "### bar.py" in prompt
+    # New-file line ranges from the @@ headers are surfaced so the model can
+    # cite accurate locations: foo.py @@ -1,2 +1,3 @@ and bar.py @@ -1 +1,2 @@.
+    assert "lines 1-3:" in prompt
+    assert "lines 1-2:" in prompt
+    # The verbatim file list is included so every file can be assigned.
+    assert "- foo.py" in prompt
+    assert "- bar.py" in prompt
 
 
 def test_diff_signature_is_stable_and_content_sensitive() -> None:

@@ -1,5 +1,6 @@
-import { memo } from "react";
+import { memo, useMemo } from "react";
 import { Streamdown } from "streamdown";
+import { parseLocationHref } from "./markdownLocation";
 import type { ReactNode } from "react";
 import "streamdown/styles.css";
 
@@ -7,6 +8,12 @@ interface MarkdownProps {
   content: string;
   /** When true, keep Streamdown in streaming mode for the duration of the run. */
   isLive?: boolean;
+  /**
+   * When set, `#loc=path:start-end` links render as in-page buttons that invoke
+   * this callback instead of navigating. Used by the review view to jump the
+   * diff to a referenced hunk.
+   */
+  onLocationClick?: (file: string, startLine: number, endLine: number) => void;
 }
 
 /**
@@ -44,16 +51,6 @@ const STREAMDOWN_COMPONENTS = {
       {children}
     </p>
   ),
-  a: ({ href, children }: { href?: string; children?: ReactNode }) => (
-    <a
-      className="text-[color:var(--ui-accent)] underline decoration-[color:var(--ui-accent)]/50 break-words [overflow-wrap:anywhere]"
-      href={href}
-      target="_blank"
-      rel="noreferrer"
-    >
-      {children}
-    </a>
-  ),
   ul: ({ children }: { children?: ReactNode }) => (
     <div className="my-1.5 ml-4 min-w-0">{children}</div>
   ),
@@ -86,7 +83,42 @@ const STREAMDOWN_COMPONENTS = {
 
 const SHIKI_THEME: ["github-light", "github-dark"] = ["github-light", "github-dark"];
 
-export const Markdown = memo(function Markdown({ content, isLive = false }: MarkdownProps) {
+export const Markdown = memo(function Markdown({
+  content,
+  isLive = false,
+  onLocationClick,
+}: MarkdownProps) {
+  const components = useMemo(
+    () => ({
+      ...STREAMDOWN_COMPONENTS,
+      a: ({ href, children }: { href?: string; children?: ReactNode }) => {
+        const loc = onLocationClick ? parseLocationHref(href) : null;
+        if (loc && onLocationClick) {
+          return (
+            <button
+              type="button"
+              onClick={() => onLocationClick(loc.file, loc.startLine, loc.endLine)}
+              className="font-mono text-[0.85em] text-[color:var(--ui-accent)] underline decoration-[color:var(--ui-accent)]/50 break-words [overflow-wrap:anywhere]"
+            >
+              {children}
+            </button>
+          );
+        }
+        return (
+          <a
+            className="text-[color:var(--ui-accent)] underline decoration-[color:var(--ui-accent)]/50 break-words [overflow-wrap:anywhere]"
+            href={href}
+            target="_blank"
+            rel="noreferrer"
+          >
+            {children}
+          </a>
+        );
+      },
+    }),
+    [onLocationClick]
+  );
+
   return (
     <div className="min-w-0 max-w-full text-[13px] leading-6 break-words [overflow-wrap:anywhere] [&_.streamdown]:text-[color:var(--ui-text)]">
       <Streamdown
@@ -96,7 +128,7 @@ export const Markdown = memo(function Markdown({ content, isLive = false }: Mark
         animated={isLive ? STREAMDOWN_ANIMATED : false}
         shikiTheme={SHIKI_THEME}
         className="streamdown-agent min-w-0 max-w-full"
-        components={STREAMDOWN_COMPONENTS}
+        components={components}
       >
         {content}
       </Streamdown>

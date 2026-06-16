@@ -45,10 +45,18 @@ class DiffGroup(TypedDict):
 
 class _DiffGroupModel(BaseModel):
     title: str = Field(
-        description="Short headline naming the logical change, roughly 4-10 words. No trailing punctuation."
+        description=(
+            "Short headline naming the logical change, roughly 4-10 words, no "
+            "trailing punctuation. Wrap code identifiers in `backticks`."
+        )
     )
     summary: str = Field(
-        description="1-3 short sentences explaining what the files in this group change and why."
+        description=(
+            "GitHub-flavored markdown walkthrough of this group: a few short "
+            "sentences or bullets, code identifiers in `backticks`, optionally one "
+            "short fenced code block of the key snippet, and concrete locations "
+            "linked as [path:start-end](#loc=path:start-end)."
+        )
     )
     files: list[str] = Field(
         description="Changed file paths in this group, copied verbatim, in reading order."
@@ -72,15 +80,26 @@ them top to bottom and build a mental model of the PR.
 Rules:
 - Assign every changed file to exactly one group.
 - Use at most {max_groups} groups. Prefer fewer, larger groups over many tiny ones.
-- title: a short headline naming the change, roughly 4-10 words, no trailing punctuation.
-- summary: 1-3 short, concrete sentences on what the files change and why.
+- title: a short headline naming the change, roughly 4-10 words, no trailing \
+punctuation. Wrap code identifiers (symbols, flags, file names) in `backticks`.
+- summary: GitHub-flavored markdown explaining what the group changes and why, \
+written as a short walkthrough a reviewer can skim:
+    - Keep it focused — a few short sentences or bullets. Do not restate the diff line by line.
+    - Wrap every code identifier, symbol, type, flag, and path in `backticks`.
+    - When one change is central, include at most ONE short fenced code block \
+(```lang, <= ~8 lines) of the key snippet — not the whole hunk.
+    - Reference concrete locations as markdown links of the EXACT form \
+[path:start-end](#loc=path:start-end), where path is the verbatim changed-file \
+path and start/end are line numbers from the "lines X-Y" annotations below \
+(use [path:line](#loc=path:line) when start == end). Prefer these links over \
+describing locations in prose — they let the reader jump straight to the hunk.
 - files: the exact file paths (copied verbatim from the list below) in this \
 group, in the order a reviewer should read them.
 
 Changed files:
 {file_list}
 
-Diffs:
+Diffs (each hunk is annotated with its line range in the new file):
 {diffs}
 """
 
@@ -98,10 +117,15 @@ def _build_prompt(diff_text: str, files: list[str]) -> str:
     parts: list[str] = []
     budget = MAX_PROMPT_CHARS
     for file_diff in parse_unified_diff(diff_text):
-        body = "\n".join(hunk.body for hunk in file_diff.hunks)
-        if len(body) > MAX_FILE_HUNK_CHARS:
-            body = body[:MAX_FILE_HUNK_CHARS] + "\n... (truncated)"
-        block = f"### {file_diff.file}\n```diff\n{body}\n```\n"
+        segments: list[str] = []
+        for hunk in file_diff.hunks:
+            body = hunk.body
+            if len(body) > MAX_FILE_HUNK_CHARS:
+                body = body[:MAX_FILE_HUNK_CHARS] + "\n... (truncated)"
+            # Surface the new-file line range so the model can cite accurate
+            # locations in its summary links.
+            segments.append(f"lines {hunk.new_start}-{hunk.new_end}:\n```diff\n{body}\n```")
+        block = f"### {file_diff.file}\n" + "\n".join(segments) + "\n"
         if budget - len(block) < 0:
             parts.append(f"### {file_diff.file}\n(diff omitted — prompt budget reached)\n")
             continue
