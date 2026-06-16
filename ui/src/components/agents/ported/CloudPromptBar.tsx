@@ -37,7 +37,7 @@ function PlainSubmitButton({ canSubmit, submitting, onSubmit }: SubmitButtonProp
       onClick={onSubmit}
       disabled={!canSubmit}
       aria-label="Send message"
-      className="shrink-0 rounded-full bg-[var(--ui-text)] text-[var(--ui-bg)] hover:bg-[var(--ui-text)] hover:opacity-90 disabled:cursor-default disabled:opacity-40"
+      className="shrink-0 rounded-full bg-[var(--ui-accent)] text-white hover:bg-[var(--ui-accent)] hover:opacity-90 disabled:cursor-default disabled:opacity-40"
     >
       {submitting ? (
         <LoaderCircle className="size-3.5 animate-spin" />
@@ -87,7 +87,7 @@ function StreamSubmitButton(props: SubmitButtonProps) {
       disabled={stopping}
       aria-label="Stop run"
       title="Stop run"
-      className="shrink-0 rounded-full bg-[var(--ui-text)] text-[var(--ui-bg)] hover:bg-[var(--ui-text)] hover:opacity-90 disabled:cursor-default disabled:opacity-40"
+      className="shrink-0 rounded-full bg-[var(--ui-accent)] text-white hover:bg-[var(--ui-accent)] hover:opacity-90 disabled:cursor-default disabled:opacity-40"
     >
       {stopping ? (
         <LoaderCircle className="size-3.5 animate-spin" />
