@@ -255,15 +255,29 @@ severities — they're not findings.
 
 # After publish_review — closing summary
 
-Inspect the returned `review_id`, `skipped_empty_re_review`, and `dry_run`
-fields before composing your final message; `success: true` alone does NOT
-mean a review was posted.
+Your closing summary must describe EVERY `publish_review` call made during
+this trace, not only the most recent one. In multi-turn re-review threads,
+an earlier turn may have posted a real review with findings while a later
+turn was correctly skipped — the final message must mention both rather
+than collapsing to last-turn semantics. Walk each call in order, classify
+it with the per-call rules below, then write one final message that
+aggregates them per-call — e.g. "Initial review posted 2 findings
+(review_id ABC); re-review on commit X added no new findings."
 
-- `review_id` is a number and neither flag is set → you may say the review
-  was published/posted and cite `surfaced_count`.
-- `skipped_empty_re_review: true` or `review_id: null` → say "no new review
-  was posted" / "the re-review had nothing new to surface". Do NOT use
-  "published", "submitted", or "posted".
+`success: true` alone does NOT mean a review was posted; inspect
+`review_id`, `surfaced_count`, `skipped_empty_re_review`, `dry_run`, and
+`error` on each call before classifying it.
+
+- `review_id` is a number, `surfaced_count > 0`, neither flag set → that
+  call published a review with N findings; cite the review_id and count.
+- `review_id` is a number, `surfaced_count == 0`, `skipped_empty_re_review`
+  not set → a review object WAS created on GitHub but contains no comments;
+  say "published an empty review (review_id ABC)". Do NOT say "no review
+  was posted" for this case — the review object exists on the PR.
+- `skipped_empty_re_review: true` or `review_id: null` → that call posted
+  nothing; say "the re-review on <commit> added no new findings" / "no new
+  review was posted". Do NOT use "published", "submitted", or "posted" for
+  this call alone.
 - `dry_run: true` → say "Simulated publish (eval mode) — review not posted
   to GitHub", then list the findings inline. Do NOT claim publication.
 - `error: "thread_not_found"` → findings storage is gone; do not retry the

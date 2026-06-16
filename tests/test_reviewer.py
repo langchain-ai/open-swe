@@ -1328,3 +1328,32 @@ def test_reviewer_system_prompt_includes_closing_summary_contract() -> None:
     assert "dry_run" in prompt
     assert "Simulated publish (eval mode)" in prompt
     assert "thread_not_found" in prompt
+
+
+def test_reviewer_closing_summary_requires_aggregating_every_publish_call() -> None:
+    """Multi-turn re-review traces must not collapse to last-turn semantics:
+    the closing summary has to describe EVERY publish_review call in order."""
+    prompt = reviewer._reviewer_system_prompt(
+        "/tmp/wd",
+        repo_owner="o",
+        repo_name="r",
+        pr_number=1,
+    )
+    assert "EVERY `publish_review` call" in prompt
+    assert "Initial review posted 2 findings" in prompt
+    assert "re-review on commit X added no new findings" in prompt
+
+
+def test_reviewer_closing_summary_handles_empty_review_object_branch() -> None:
+    """When publish_review returns review_id != null with surfaced_count == 0
+    and no skipped_empty_re_review flag, the prompt must direct the agent to
+    name the review_id rather than claim no review was posted."""
+    prompt = reviewer._reviewer_system_prompt(
+        "/tmp/wd",
+        repo_owner="o",
+        repo_name="r",
+        pr_number=1,
+    )
+    assert "published an empty review (review_id ABC)" in prompt
+    assert "surfaced_count == 0" in prompt
+    assert 'Do NOT say "no review\n  was posted" for this case' in prompt
