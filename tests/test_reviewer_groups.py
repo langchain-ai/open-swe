@@ -97,14 +97,13 @@ async def test_generate_diff_groups_llm_failure_returns_none() -> None:
     assert groups is None
 
 
-def test_build_prompt_annotates_hunk_line_ranges() -> None:
+def test_build_prompt_includes_files_and_diffs() -> None:
     prompt = _build_prompt(_DIFF, ["foo.py", "bar.py"])
     assert "### foo.py" in prompt
     assert "### bar.py" in prompt
-    # New-file line ranges from the @@ headers are surfaced so the model can
-    # cite accurate locations: foo.py @@ -1,2 +1,3 @@ and bar.py @@ -1 +1,2 @@.
-    assert "lines 1-3:" in prompt
-    assert "lines 1-2:" in prompt
+    # Hunks are rendered as plain diff fences (no line-range annotations).
+    assert "lines 1-3:" not in prompt
+    assert "```diff" in prompt
     # The verbatim file list is included so every file can be assigned.
     assert "- foo.py" in prompt
     assert "- bar.py" in prompt
