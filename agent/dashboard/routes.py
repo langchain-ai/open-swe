@@ -5,12 +5,12 @@ from __future__ import annotations
 import hmac
 import logging
 import os
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from fastapi.responses import RedirectResponse, Response, StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator, model_validator
 
 from .admin import is_admin
 from .agent_instructions import (
@@ -33,6 +33,8 @@ from .enabled_repos import (
     set_review_repo_enabled,
 )
 from .eval_jobs import (
+    DEFAULT_REVIEWER_EVAL_CONFIG,
+    ReviewerEvalConfig,
     cancel_reviewer_eval,
     get_reviewer_eval_status,
     start_reviewer_eval,
@@ -54,7 +56,7 @@ from .oauth import (
     require_session,
     sanitize_redirect_to,
 )
-from .options import SUPPORTED_MODELS
+from .options import SUPPORTED_MODEL_IDS, SUPPORTED_MODELS, model_supports_effort
 from .profiles import (
     ProfileUpdate,
     get_profile,
@@ -567,8 +569,96 @@ async def admin_delete_user_mapping(
     return {"deleted": deleted}
 
 
+ScoreMode = Literal["all_findings", "surfaced_findings"]
+Severity = Literal["low", "medium", "high", "critical"]
+
+
 class ReviewerEvalStartBody(BaseModel):
     limit: int | None = None
+    dataset_name: str = DEFAULT_REVIEWER_EVAL_CONFIG["dataset_name"]
+    experiment_prefix: str = DEFAULT_REVIEWER_EVAL_CONFIG["experiment_prefix"]
+    max_concurrency: int = DEFAULT_REVIEWER_EVAL_CONFIG["max_concurrency"]
+    langsmith_project: str = DEFAULT_REVIEWER_EVAL_CONFIG["langsmith_project"]
+    langgraph_url: str = DEFAULT_REVIEWER_EVAL_CONFIG["langgraph_url"]
+    assistant_id: str = DEFAULT_REVIEWER_EVAL_CONFIG["assistant_id"]
+    model_id: str = DEFAULT_REVIEWER_EVAL_CONFIG["model_id"]
+    reasoning_effort: str = DEFAULT_REVIEWER_EVAL_CONFIG["reasoning_effort"]
+    score_mode: ScoreMode = DEFAULT_REVIEWER_EVAL_CONFIG["score_mode"]
+    severity_threshold: Severity = DEFAULT_REVIEWER_EVAL_CONFIG["severity_threshold"]
+    cap: int = DEFAULT_REVIEWER_EVAL_CONFIG["cap"]
+
+    @field_validator(
+        "dataset_name",
+        "experiment_prefix",
+        "langsmith_project",
+        "assistant_id",
+        "model_id",
+        "reasoning_effort",
+        mode="before",
+    )
+    @classmethod
+    def _normalize_required_string(cls, value: object) -> str:
+        if not isinstance(value, str):
+            raise ValueError("must be a string")
+        text = value.strip()
+        if not text:
+            raise ValueError("must not be blank")
+        return text
+
+    @field_validator("langgraph_url", mode="before")
+    @classmethod
+    def _normalize_optional_string(cls, value: object) -> str:
+        if value is None:
+            return ""
+        if not isinstance(value, str):
+            raise ValueError("must be a string")
+        return value.strip()
+
+    @field_validator("limit")
+    @classmethod
+    def _validate_limit(cls, value: int | None) -> int | None:
+        if value is not None and value <= 0:
+            raise ValueError("limit must be positive")
+        return value
+
+    @field_validator("max_concurrency")
+    @classmethod
+    def _validate_max_concurrency(cls, value: int) -> int:
+        if value <= 0:
+            raise ValueError("max_concurrency must be positive")
+        return value
+
+    @field_validator("cap")
+    @classmethod
+    def _validate_cap(cls, value: int) -> int:
+        if value < 0:
+            raise ValueError("cap must be non-negative")
+        return value
+
+    @model_validator(mode="after")
+    def _validate_model_effort(self) -> ReviewerEvalStartBody:
+        if self.model_id not in SUPPORTED_MODEL_IDS:
+            raise ValueError(f"unsupported reviewer eval model: {self.model_id}")
+        if not model_supports_effort(self.model_id, self.reasoning_effort):
+            raise ValueError(
+                f"effort {self.reasoning_effort!r} not supported by model {self.model_id!r}"
+            )
+        return self
+
+    def eval_config(self) -> ReviewerEvalConfig:
+        return {
+            "dataset_name": self.dataset_name,
+            "experiment_prefix": self.experiment_prefix,
+            "max_concurrency": self.max_concurrency,
+            "langsmith_project": self.langsmith_project,
+            "langgraph_url": self.langgraph_url,
+            "assistant_id": self.assistant_id,
+            "model_id": self.model_id,
+            "reasoning_effort": self.reasoning_effort,
+            "score_mode": self.score_mode,
+            "severity_threshold": self.severity_threshold,
+            "cap": self.cap,
+        }
 
 
 @router.get("/admin/evals/reviewer")
@@ -587,7 +677,11 @@ async def admin_start_reviewer_eval(
     if status.get("status") == "running":
         raise HTTPException(409, "a reviewer eval is already running")
     try:
-        return await start_reviewer_eval(limit=body.limit, created_by=session["sub"])
+        return await start_reviewer_eval(
+            limit=body.limit,
+            config=body.eval_config(),
+            created_by=session["sub"],
+        )
     except RuntimeError as exc:
         raise HTTPException(409, str(exc)) from exc
 

@@ -410,11 +410,34 @@ export function reviewChatApiBase(
   return path;
 }
 
+export type ReviewerEvalScoreMode = "all_findings" | "surfaced_findings";
+export type ReviewerEvalSeverity = "low" | "medium" | "high" | "critical";
+
+export interface ReviewerEvalConfig {
+  dataset_name: string;
+  experiment_prefix: string;
+  max_concurrency: number;
+  langsmith_project: string;
+  langgraph_url: string;
+  assistant_id: string;
+  model_id: string;
+  reasoning_effort: string;
+  score_mode: ReviewerEvalScoreMode;
+  severity_threshold: ReviewerEvalSeverity;
+  cap: number;
+}
+
+export interface ReviewerEvalStartRequest extends ReviewerEvalConfig {
+  limit: number | null;
+}
+
 export interface ReviewerEvalStatus {
   name: string;
   status: "idle" | "running" | "completed" | "failed";
+  run_name?: string;
   langsmith_project: string;
   limit: number | null;
+  config_snapshot?: ReviewerEvalConfig;
   started_at: string | null;
   finished_at: string | null;
   created_by: string | null;
@@ -554,10 +577,10 @@ export const api = {
     ),
   getReviewerEval: () =>
     request<ReviewerEvalStatus>("/admin/evals/reviewer"),
-  startReviewerEval: (limit: number | null) =>
+  startReviewerEval: (body: ReviewerEvalStartRequest) =>
     request<ReviewerEvalStatus>("/admin/evals/reviewer", {
       method: "POST",
-      body: JSON.stringify({ limit }),
+      body: JSON.stringify(body),
     }),
   cancelReviewerEval: () =>
     request<ReviewerEvalStatus>("/admin/evals/reviewer", { method: "DELETE" }),
