@@ -74,6 +74,51 @@ ENV PATH=/usr/local/go/bin:/root/.local/bin:/usr/local/bin:/usr/local/sbin:/usr/
 ENV GOPATH=/root/go
 ENV PATH=/root/go/bin:/usr/local/go/bin:/root/.local/bin:/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
+ARG TERRAFORM_VERSION=1.9.8
+ARG HELM_VERSION=3.16.3
+ARG YQ_VERSION=4.44.3
+ARG RUST_VERSION=1.82.0
+
+RUN set -eux; \
+    arch="$(dpkg --print-architecture)"; \
+    case "${arch}" in \
+      amd64) tf_arch="amd64" ;; \
+      arm64) tf_arch="arm64" ;; \
+      *) echo "unsupported architecture: ${arch}" >&2; exit 1 ;; \
+    esac; \
+    curl -fsSL "https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_${tf_arch}.zip" -o /tmp/terraform.zip; \
+    unzip /tmp/terraform.zip -d /usr/local/bin; \
+    chmod +x /usr/local/bin/terraform; \
+    rm /tmp/terraform.zip
+
+RUN set -eux; \
+    arch="$(dpkg --print-architecture)"; \
+    case "${arch}" in \
+      amd64) helm_arch="amd64" ;; \
+      arm64) helm_arch="arm64" ;; \
+      *) echo "unsupported architecture: ${arch}" >&2; exit 1 ;; \
+    esac; \
+    curl -fsSL "https://get.helm.sh/helm-v${HELM_VERSION}-linux-${helm_arch}.tar.gz" -o /tmp/helm.tar.gz; \
+    tar -xzf /tmp/helm.tar.gz -C /tmp; \
+    install -m 0755 "/tmp/linux-${helm_arch}/helm" /usr/local/bin/helm; \
+    rm -rf /tmp/helm.tar.gz "/tmp/linux-${helm_arch}"
+
+RUN set -eux; \
+    arch="$(dpkg --print-architecture)"; \
+    case "${arch}" in \
+      amd64) yq_arch="amd64" ;; \
+      arm64) yq_arch="arm64" ;; \
+      *) echo "unsupported architecture: ${arch}" >&2; exit 1 ;; \
+    esac; \
+    curl -fsSL "https://github.com/mikefarah/yq/releases/download/v${YQ_VERSION}/yq_linux_${yq_arch}" -o /usr/local/bin/yq; \
+    chmod +x /usr/local/bin/yq
+
+ENV RUSTUP_HOME=/root/.rustup
+ENV CARGO_HOME=/root/.cargo
+RUN curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs \
+    | sh -s -- -y --default-toolchain "${RUST_VERSION}" --profile minimal --no-modify-path
+ENV PATH=/root/.cargo/bin:/root/go/bin:/usr/local/go/bin:/root/.local/bin:/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
 WORKDIR /workspace
 
 RUN echo "=== Installed versions ===" \
@@ -82,6 +127,10 @@ RUN echo "=== Installed versions ===" \
     && node --version \
     && yarn --version \
     && go version \
+    && terraform version \
+    && helm version --short \
+    && yq --version \
+    && cargo --version \
     && docker --version \
     && git --version \
     && gh --version

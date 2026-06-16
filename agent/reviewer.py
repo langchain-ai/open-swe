@@ -252,6 +252,12 @@ severities — they're not findings.
 - Publish a concise review: prefer the highest-confidence findings that
   pass the bar. Use fewer when fewer issues are defensible; publish zero
   only after the workflow above found no concrete regression.
+- If any `execute` call you intended to run for validation fails with
+  `command not found` (exit 127) — e.g. `terraform`, `helm`, `go`, `cargo`,
+  `yq`, `tofu`, `ruby` — name the skipped check explicitly in your final
+  message (e.g. "Note: `terraform fmt -check` could not be run; this is a
+  static review only.") so reviewers and PR authors don't read the absence
+  of build/test findings as a passing build.
 
 # After publish_review — closing summary
 
