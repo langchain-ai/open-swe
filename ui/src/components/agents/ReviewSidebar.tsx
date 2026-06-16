@@ -51,7 +51,6 @@ export interface ReviewSidebarData {
   view: ReviewSidebarView
   onViewChange: (view: ReviewSidebarView) => void
   onSelectGroup: (index: number) => void
-  onLocationClick?: (file: string, startLine: number, endLine: number) => void
 }
 
 const ReviewSidebarContext = createContext<{
@@ -105,7 +104,6 @@ export function ReviewSidebarPanel({ data }: { data: ReviewSidebarData }) {
           groups={data.groups ?? []}
           onSelectGroup={data.onSelectGroup}
           onSelectFile={data.onSelect}
-          onLocationClick={data.onLocationClick}
         />
       ) : !data.files ? (
         <div className="px-4 pt-1">
@@ -183,12 +181,10 @@ function ReviewGroupList({
   groups,
   onSelectGroup,
   onSelectFile,
-  onLocationClick,
 }: {
   groups: Array<ReviewSidebarGroup>
   onSelectGroup: (index: number) => void
   onSelectFile: (path: string) => void
-  onLocationClick?: (file: string, startLine: number, endLine: number) => void
 }) {
   return (
     <div className="min-h-0 flex-1 divide-y divide-[var(--ui-border-subtle)] overflow-y-auto">
@@ -198,7 +194,6 @@ function ReviewGroupList({
           group={group}
           onSelect={() => onSelectGroup(group.index)}
           onSelectFile={onSelectFile}
-          onLocationClick={onLocationClick}
         />
       ))}
     </div>
@@ -209,6 +204,12 @@ function splitPath(path: string): { dir: string; base: string } {
   const idx = path.lastIndexOf("/")
   if (idx === -1) return { dir: "", base: path }
   return { dir: path.slice(0, idx), base: path.slice(idx + 1) }
+}
+
+// Older stored summaries embed `[label](#loc=path:line)` diff links. Render the
+// label as inline code instead so no stale jump-links leak into the explanation.
+function stripLocationLinks(summary: string): string {
+  return summary.replace(/\[([^\]]+)\]\(#loc=[^)]*\)/g, "`$1`")
 }
 
 // Render a title with `backtick`-delimited spans as inline code chips, matching
@@ -234,12 +235,10 @@ function ReviewGroupRow({
   group,
   onSelect,
   onSelectFile,
-  onLocationClick,
 }: {
   group: ReviewSidebarGroup
   onSelect: () => void
   onSelectFile: (path: string) => void
-  onLocationClick?: (file: string, startLine: number, endLine: number) => void
 }) {
   const [expanded, setExpanded] = useState(false)
   return (
@@ -297,7 +296,7 @@ function ReviewGroupRow({
       )}
 
       {group.summary && (
-        <div className="mt-2 pl-7">
+        <div className="mt-2">
           <button
             type="button"
             onClick={() => setExpanded((value) => !value)}
@@ -313,10 +312,7 @@ function ReviewGroupRow({
           </button>
           {expanded && (
             <div className="mt-1.5">
-              <Markdown
-                content={group.summary}
-                onLocationClick={onLocationClick}
-              />
+              <Markdown content={stripLocationLinks(group.summary)} />
             </div>
           )}
         </div>
