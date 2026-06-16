@@ -12,7 +12,7 @@ import type {
 } from "@pierre/trees"
 import type { ReviewDiffFile } from "@/lib/api"
 import { Skeleton } from "@/components/ui/skeleton"
-import { treeThemeStyle } from "@/components/agents/AgentGitPanel"
+import { TREE_UNSAFE_CSS, treeThemeStyle } from "@/components/agents/AgentGitPanel"
 
 function reviewFileGitStatus(status: ReviewDiffFile["status"]): GitStatus {
   if (status === "removed") return "deleted"
@@ -105,8 +105,9 @@ function ReviewFileTreeExplorer({
     paths,
     gitStatus,
     flattenEmptyDirectories: true,
-    density: "compact",
-    icons: "standard",
+    density: "default",
+    icons: "complete",
+    unsafeCSS: TREE_UNSAFE_CSS,
   })
 
   useEffect(() => {
