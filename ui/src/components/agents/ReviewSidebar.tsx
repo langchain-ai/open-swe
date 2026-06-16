@@ -11,11 +11,15 @@ import {
 } from "@phosphor-icons/react"
 import type { ReactNode } from "react"
 
-import type { GitStatus, GitStatusEntry } from "@pierre/trees"
+import type {
+  FileTreeDirectoryHandle,
+  GitStatus,
+  GitStatusEntry,
+} from "@pierre/trees"
 import type { ReviewDiffFile } from "@/lib/api"
 import { Markdown } from "@/components/agents/ported"
 import { Skeleton } from "@/components/ui/skeleton"
-import { treeThemeStyle } from "@/components/agents/AgentGitPanel"
+import { TREE_UNSAFE_CSS, treeThemeStyle } from "@/components/agents/AgentGitPanel"
 import { cn } from "@/lib/utils"
 
 function reviewFileGitStatus(status: ReviewDiffFile["status"]): GitStatus {
@@ -343,9 +347,10 @@ function ReviewFileTreeExplorer({
   const { model } = useFileTree({
     paths,
     gitStatus,
-    initialExpansion: "open",
     flattenEmptyDirectories: true,
-    icons: "standard",
+    density: "default",
+    icons: "complete",
+    unsafeCSS: TREE_UNSAFE_CSS,
   })
 
   useEffect(() => {
@@ -363,9 +368,13 @@ function ReviewFileTreeExplorer({
   }, [selection, onSelect])
 
   useEffect(() => {
-    if (selected) {
-      model.scrollToPath(selected, { focus: false })
+    if (!selected) return
+    const segments = selected.split("/")
+    for (let depth = 1; depth < segments.length; depth += 1) {
+      const item = model.getItem(segments.slice(0, depth).join("/"))
+      if (item?.isDirectory()) (item as FileTreeDirectoryHandle).expand()
     }
+    model.scrollToPath(selected, { focus: false })
   }, [model, selected])
 
   return (
