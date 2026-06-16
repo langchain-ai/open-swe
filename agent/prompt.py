@@ -6,8 +6,8 @@ from pathlib import Path
 from .utils.authorship import (
     OPEN_SWE_BOT_EMAIL,
     OPEN_SWE_BOT_NAME,
-    PR_ATTRIBUTION_FOOTER,
     CollaboratorIdentity,
+    build_pr_attribution_footer,
 )
 from .utils.github_comments import UNTRUSTED_GITHUB_COMMENT_OPEN_TAG
 
@@ -375,7 +375,7 @@ This run was triggered by **{display_name}**. You author the work **as them** â€
   {bot_coauthor_trailer}
   ```
 
-- **PR body**: append this line to the bottom of the PR description (separated from the body by a blank line) when you open or update the draft PR. Do not duplicate it if it is already present. If the PR body already contains a legacy footer like `_Opened collaboratively by {display_name} and open-swe._`, replace that legacy footer with this line instead of appending a second footer:
+- **PR body**: append this line to the bottom of the PR description (separated from the body by a blank line) when you open or update the draft PR. Do not duplicate it if it is already present. If the PR body already contains a `Made by [Open SWE]` footer pointing at a different link, or a legacy footer like `_Opened collaboratively by {display_name} and open-swe._`, replace that existing footer with this line instead of appending a second footer:
 
   ```
   {pr_attribution_footer}
@@ -384,12 +384,15 @@ This run was triggered by **{display_name}**. You author the work **as them** â€
 If you forget the trailer on a local commit that has not been pushed, fix it with `git commit --amend` before pushing â€” do not push without it. If the commit has already been pushed, leave it as-is and add the trailer to your next commit; never rewrite remote history to fix it."""
 
 
-def _render_collaboration_section(identity: CollaboratorIdentity | None) -> str:
+def _render_collaboration_section(
+    identity: CollaboratorIdentity | None,
+    thread_url: str | None = None,
+) -> str:
     if identity is None:
         return ""
     return COLLABORATION_TEMPLATE.format(
         display_name=identity.display_name,
-        pr_attribution_footer=PR_ATTRIBUTION_FOOTER,
+        pr_attribution_footer=build_pr_attribution_footer(thread_url),
         bot_coauthor_trailer=f"Co-authored-by: {OPEN_SWE_BOT_NAME} <{OPEN_SWE_BOT_EMAIL}>",
     )
 
@@ -446,6 +449,7 @@ def construct_system_prompt(
     create_prs: bool = False,
     default_repo: dict[str, str] | None = None,
     repo_custom_instructions: str | None = None,
+    thread_url: str | None = None,
 ) -> str:
     default_prompt_section = _load_default_prompt()
     if default_repo and default_repo.get("owner") and default_repo.get("name"):
@@ -468,7 +472,7 @@ def construct_system_prompt(
         linear_issue_number=linear_issue_number or "<ISSUE_NUMBER>",
         default_prompt_section=default_prompt_section,
         pr_policy_override_section=ALWAYS_CREATE_PR_SECTION if create_prs else "",
-        collaboration_section=_render_collaboration_section(triggering_user_identity),
+        collaboration_section=_render_collaboration_section(triggering_user_identity, thread_url),
         repo_instructions_section=_render_repo_instructions_section(repo_custom_instructions),
         commit_identity_name=commit_identity_name,
         commit_identity_email=commit_identity_email,
