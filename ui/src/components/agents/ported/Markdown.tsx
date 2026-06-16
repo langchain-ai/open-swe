@@ -1,6 +1,5 @@
 import { memo, useMemo } from "react";
 import { Streamdown } from "streamdown";
-import { parseLocationHref } from "./markdownLocation";
 import type { ReactNode } from "react";
 import "streamdown/styles.css";
 
@@ -8,12 +7,6 @@ interface MarkdownProps {
   content: string;
   /** When true, keep Streamdown in streaming mode for the duration of the run. */
   isLive?: boolean;
-  /**
-   * When set, `#loc=path:start-end` links render as in-page buttons that invoke
-   * this callback instead of navigating. Used by the review view to jump the
-   * diff to a referenced hunk.
-   */
-  onLocationClick?: (file: string, startLine: number, endLine: number) => void;
 }
 
 /**
@@ -86,37 +79,22 @@ const SHIKI_THEME: ["github-light", "github-dark"] = ["github-light", "github-da
 export const Markdown = memo(function Markdown({
   content,
   isLive = false,
-  onLocationClick,
 }: MarkdownProps) {
   const components = useMemo(
     () => ({
       ...STREAMDOWN_COMPONENTS,
-      a: ({ href, children }: { href?: string; children?: ReactNode }) => {
-        const loc = onLocationClick ? parseLocationHref(href) : null;
-        if (loc && onLocationClick) {
-          return (
-            <button
-              type="button"
-              onClick={() => onLocationClick(loc.file, loc.startLine, loc.endLine)}
-              className="font-mono text-[0.85em] text-[color:var(--ui-accent)] underline decoration-[color:var(--ui-accent)]/50 break-words [overflow-wrap:anywhere]"
-            >
-              {children}
-            </button>
-          );
-        }
-        return (
-          <a
-            className="text-[color:var(--ui-accent)] underline decoration-[color:var(--ui-accent)]/50 break-words [overflow-wrap:anywhere]"
-            href={href}
-            target="_blank"
-            rel="noreferrer"
-          >
-            {children}
-          </a>
-        );
-      },
+      a: ({ href, children }: { href?: string; children?: ReactNode }) => (
+        <a
+          className="text-[color:var(--ui-accent)] underline decoration-[color:var(--ui-accent)]/50 break-words [overflow-wrap:anywhere]"
+          href={href}
+          target="_blank"
+          rel="noreferrer"
+        >
+          {children}
+        </a>
+      ),
     }),
-    [onLocationClick]
+    []
   );
 
   return (

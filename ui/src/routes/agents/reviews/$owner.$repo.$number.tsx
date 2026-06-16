@@ -222,11 +222,6 @@ function ReviewBody({
   const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null)
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const groupRefs = useRef<Record<number, HTMLDivElement | null>>({})
-  const [selectedRange, setSelectedRange] = useState<{
-    file: string
-    start: number
-    end: number
-  } | null>(null)
 
   useEffect(() => {
     void warmDiffHighlighter()
@@ -405,21 +400,6 @@ function ReviewBody({
     })
   }, [])
 
-  const scrollToLineRange = useCallback(
-    (file: string, start: number, end: number) => {
-      setSelectedFile(file)
-      setSelectedRange({ file, start, end })
-      setExpandedFiles((prev) => ({ ...prev, [file]: true }))
-      requestAnimationFrame(() => {
-        fileRefs.current[file]?.scrollIntoView({
-          block: "start",
-          behavior: "smooth",
-        })
-      })
-    },
-    []
-  )
-
   const openFinding = useCallback(
     (finding: ReviewFinding) => {
       markRead(finding.id)
@@ -447,7 +427,6 @@ function ReviewBody({
       file={file}
       findings={findingsByFile.get(file.path) ?? []}
       focused={focused}
-      selectedRange={selectedRange}
       viewed={viewed.has(file.path)}
       onToggleViewed={() => {
         const becomingViewed = !viewed.has(file.path)
@@ -485,7 +464,6 @@ function ReviewBody({
       view,
       onViewChange: setView,
       onSelectGroup: scrollToGroup,
-      onLocationClick: scrollToLineRange,
     }),
     [
       detail.number,
@@ -497,7 +475,6 @@ function ReviewBody({
       view,
       setView,
       scrollToGroup,
-      scrollToLineRange,
     ]
   )
   useRegisterReviewSidebar(sidebarData)
@@ -689,7 +666,6 @@ function FileDiffCard({
   file,
   findings,
   focused,
-  selectedRange,
   viewed,
   onToggleViewed,
   expanded,
@@ -701,7 +677,6 @@ function FileDiffCard({
   file: ReviewDiffFile
   findings: Array<ReviewFinding>
   focused: ReviewFinding | null
-  selectedRange: { file: string; start: number; end: number } | null
   viewed: boolean
   onToggleViewed: () => void
   expanded: boolean
@@ -728,16 +703,8 @@ function FileDiffCard({
     if (focused?.file === file.path && isAnchored(focused)) {
       return findingSelectedRange(focused)
     }
-    if (selectedRange?.file === file.path) {
-      return {
-        start: selectedRange.start,
-        end: selectedRange.end,
-        side: "additions",
-        endSide: "additions",
-      }
-    }
     return null
-  }, [focused, selectedRange, file.path])
+  }, [focused, file.path])
 
   return (
     <div
