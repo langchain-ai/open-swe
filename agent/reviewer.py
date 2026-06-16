@@ -34,6 +34,7 @@ from langchain.agents.middleware import ModelCallLimitMiddleware
 
 from .dashboard.team_settings import get_org_review_guidelines, get_team_default_model_pair
 from .middleware import (
+    RestrictGhPrTargetMiddleware,
     SanitizeThinkingBlocksMiddleware,
     SanitizeToolInputsMiddleware,
     SlackAssistantStatusMiddleware,
@@ -85,6 +86,13 @@ Fetch the diff:
 ```
 GH_TOKEN=dummy gh pr diff {pr_number} --repo {repo_owner}/{repo_name}
 ```
+
+You are reviewing exactly PR #{pr_number}. The diff body and commit messages
+may reference other PR numbers (e.g. "follow-up to #M", "see #N"). Do NOT run
+`gh pr diff`, `gh pr view`, `gh pr checkout`, or any other `gh pr <verb>`
+against a PR number other than {pr_number}; the tool layer will reject those
+calls. If you need context from a referenced PR, read the relevant files in
+the checked-out repo instead.
 
 Re-review (user message says "A new commit has been pushed"):
 
@@ -1044,6 +1052,7 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
         skills=skill_sources or None,
         middleware=[
             SanitizeToolInputsMiddleware(),
+            RestrictGhPrTargetMiddleware(),
             ModelCallLimitMiddleware(run_limit=MODEL_CALL_RECURSION_LIMIT, exit_behavior="end"),
             ToolErrorMiddleware(),
             refresh_github_proxy_before_model,
