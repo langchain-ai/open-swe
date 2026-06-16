@@ -73,10 +73,25 @@ export function useSubmitAgentMessage(threadId: string) {
           },
         };
 
-      await stream.submit(
-        { messages: [{ type: "human", content: messageContent(vars) }] },
-        { config },
-      );
+      // Don't await: `stream.submit` resolves only when the run *finishes*, so
+      // awaiting would keep the mutation `isPending` (and the prompt bar
+      // disabled) for the entire run, blocking the user from queueing a
+      // follow-up while it streams.
+      void stream
+        .submit(
+          { messages: [{ type: "human", content: messageContent(vars) }] },
+          { config },
+        )
+        .catch(() => {
+          // The run failed to start (e.g. expired OAuth token → 401, or a
+          // 409 active-run race), but `onSuccess` already optimistically set
+          // `status: "running"`. Surface the failure and clear the busy state
+          // instead of leaving the thread falsely running.
+          queryClient.setQueryData(agentThreadKeys.detail(threadId), (prev) =>
+            prev ? { ...prev, status: "error" as const } : prev,
+          );
+          invalidateAgentThreadLists(queryClient);
+        });
     },
     onSuccess: () => {
       queryClient.setQueryData(agentThreadKeys.detail(threadId), (prev) =>
