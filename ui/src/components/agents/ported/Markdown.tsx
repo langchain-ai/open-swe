@@ -1,5 +1,6 @@
-import { memo, type ReactNode } from "react";
+import { memo } from "react";
 import { Streamdown } from "streamdown";
+import type { ReactNode } from "react";
 import "streamdown/styles.css";
 
 interface MarkdownProps {

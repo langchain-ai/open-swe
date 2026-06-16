@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { formatElapsed } from "@/lib/utils";
 
-const BUSY_TEXTS: { present: string; past: string }[] = [
+const BUSY_TEXTS: Array<{ present: string; past: string }> = [
   { present: "vibing...", past: "Vibed" },
   { present: "noodling...", past: "Noodled" },
   { present: "pondering...", past: "Pondered" },

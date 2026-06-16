@@ -55,7 +55,7 @@ export function AgentInstructionsPanel() {
   });
 
   useEffect(() => {
-    if (detail.data) setDraft(detail.data.instructions ?? "");
+    if (detail.data) setDraft(detail.data.instructions);
   }, [detail.data?.instructions, detail.data?.full_name]);
 
   const create = useMutation({
@@ -104,7 +104,7 @@ export function AgentInstructionsPanel() {
   const canAdd = normalizedAddRepo !== null && !configured.has(normalizedAddRepo);
   const active =
     detail.data ?? instructions.data?.find((s) => s.full_name === selected) ?? null;
-  const dirty = active != null && draft !== (active.instructions ?? "");
+  const dirty = active != null && draft !== active.instructions;
 
   const handleAdd = () => {
     if (!normalizedAddRepo || !canAdd) return;

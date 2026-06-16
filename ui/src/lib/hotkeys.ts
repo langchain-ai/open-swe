@@ -92,7 +92,7 @@ function isFormField(target: EventTarget | null): boolean {
  * (Cmd on macOS, Ctrl elsewhere). Accepts one combo or several aliases.
  */
 export function useHotkey(
-  combo: string | string[],
+  combo: string | Array<string>,
   handler: (event: KeyboardEvent) => void,
   options: HotkeyOptions = {}
 ) {

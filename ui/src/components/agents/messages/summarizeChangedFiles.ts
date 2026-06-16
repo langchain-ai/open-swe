@@ -1,9 +1,9 @@
-import { countLineChanges } from "@/components/agents/utils/diffStats";
-import type { Chunk, DiffData } from "@/lib/agents/types";
+import type { Chunk } from "@/lib/agents/types";
 
 import type { ChangedFileSummaryItem } from "./types";
+import { countLineChanges } from "@/components/agents/utils/diffStats";
 
-export function summarizeChangedFiles(chunks: Chunk[]): ChangedFileSummaryItem[] {
+export function summarizeChangedFiles(chunks: Array<Chunk>): Array<ChangedFileSummaryItem> {
   const byFile = new Map<string, { filePath: string; originalContent: string | null; modifiedContent: string }>();
 
   for (const chunk of chunks) {
@@ -12,7 +12,7 @@ export function summarizeChangedFiles(chunks: Chunk[]): ChangedFileSummaryItem[]
     const diffEntries = chunk.diffs?.length ? chunk.diffs : (chunk.diffData ? [chunk.diffData] : []);
     if (diffEntries.length === 0) continue;
 
-    for (const diffData of diffEntries as DiffData[]) {
+    for (const diffData of diffEntries) {
       const existing = byFile.get(diffData.filePath);
 
       if (!existing) {

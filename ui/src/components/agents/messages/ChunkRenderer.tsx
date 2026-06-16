@@ -1,9 +1,8 @@
+import type { Chunk } from "@/lib/agents/types";
+import type { ApprovalCallbacks } from "./types";
 import { CodeBlock } from "@/components/agents/ported/CodeBlock";
 import { Markdown } from "@/components/agents/ported/Markdown";
 import { ToolExecution } from "@/components/agents/ported/ToolExecution";
-import type { Chunk } from "@/lib/agents/types";
-
-import type { ApprovalCallbacks } from "./types";
 
 export function ChunkRenderer({
   chunk,

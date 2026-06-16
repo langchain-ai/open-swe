@@ -5,7 +5,7 @@ import type { Message } from "@/lib/agents/types";
 export function UserMessage({ message }: { message: Message }) {
   const text = message.chunks
     .filter((c) => c.kind === "text")
-    .map((c) => (c as { kind: "text"; text: string }).text)
+    .map((c) => c.text)
     .join("");
 
   const images = message.chunks.filter((c) => c.kind === "image");
@@ -39,14 +39,12 @@ export function UserMessage({ message }: { message: Message }) {
         {images.length > 0 && (
           <div className="flex gap-2 mb-2 flex-wrap justify-end">
             {images.map((img, i) => (
-              img.kind === "image" && (
-                <img
-                  key={i}
-                  src={`data:${img.mimeType};base64,${img.base64}`}
-                  alt={img.fileName || "image"}
-                  className="max-w-48 max-h-48 rounded border border-gray-600"
-                />
-              )
+              <img
+                key={i}
+                src={`data:${img.mimeType};base64,${img.base64}`}
+                alt={img.fileName || "image"}
+                className="max-w-48 max-h-48 rounded border border-gray-600"
+              />
             ))}
           </div>
         )}

@@ -11,7 +11,7 @@ const LIVE_MARKDOWN_CLEAR_MS = 2000;
  * keeps markdown streaming until the run has been idle for a beat.
  */
 export function useLiveMarkdownMessageId(
-  visibleMessages: Message[],
+  visibleMessages: Array<Message>,
   streamIsLoading: boolean | undefined,
   isStreaming: boolean,
 ): string | null {

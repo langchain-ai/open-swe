@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   CheckCircle2,
   ChevronDown,
@@ -10,7 +10,7 @@ import {
 import type { TodoItem } from "@/lib/agents/types";
 
 interface TodoListProps {
-  todos: TodoItem[];
+  todos: Array<TodoItem>;
   className?: string;
   runActive?: boolean;
 }

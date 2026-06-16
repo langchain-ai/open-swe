@@ -3,12 +3,12 @@ import type { Chunk, ToolExecutionChunk } from "@/lib/agents/types";
 export type RenderItem =
   | { type: "text-chunk"; key: string; chunk: Chunk }
   | { type: "reasoning-item"; key: string; chunk: Chunk }
-  | { type: "explored-group"; key: string; id: string; chunks: ToolExecutionChunk[] }
+  | { type: "explored-group"; key: string; id: string; chunks: Array<ToolExecutionChunk> }
   /**
    * One or more `task` (subagent) tool calls collapsed into a single group so
    * they can be rendered side by side as a card grid (see subagents/SubagentGroup).
    */
-  | { type: "subagent-group"; key: string; id: string; chunks: ToolExecutionChunk[] }
+  | { type: "subagent-group"; key: string; id: string; chunks: Array<ToolExecutionChunk> }
   | { type: "edit-item"; key: string; chunk: ToolExecutionChunk }
   | { type: "shell-item"; key: string; chunk: ToolExecutionChunk }
   | { type: "reply-item"; key: string; chunk: ToolExecutionChunk }
@@ -68,11 +68,11 @@ function isSubagentTool(chunk: ToolExecutionChunk): boolean {
   return chunk.toolKind === "task";
 }
 
-export function buildRenderItems(chunks: Chunk[], messageId?: string): RenderItem[] {
-  const items: RenderItem[] = [];
-  let exploredBuffer: ToolExecutionChunk[] = [];
+export function buildRenderItems(chunks: Array<Chunk>, messageId?: string): Array<RenderItem> {
+  const items: Array<RenderItem> = [];
+  let exploredBuffer: Array<ToolExecutionChunk> = [];
   let exploredStartIndex = -1;
-  let subagentBuffer: ToolExecutionChunk[] = [];
+  let subagentBuffer: Array<ToolExecutionChunk> = [];
   let subagentStartIndex = -1;
 
   const flushExplored = () => {
@@ -165,7 +165,7 @@ export function buildRenderItems(chunks: Chunk[], messageId?: string): RenderIte
   return items;
 }
 
-export function summarizeExploration(chunks: ToolExecutionChunk[]): string {
+export function summarizeExploration(chunks: Array<ToolExecutionChunk>): string {
   const count = chunks.length;
   return `Explored ${count} file${count === 1 ? "" : "s"}`;
 }
