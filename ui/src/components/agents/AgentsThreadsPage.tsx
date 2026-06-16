@@ -98,7 +98,7 @@ export function AgentsThreadsPage({
     <main className="flex min-w-0 flex-1 flex-col overflow-y-auto px-6 py-8">
       <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-6">
         <div>
-          <h1 className="font-heading text-lg font-medium text-[var(--ui-text)]">
+          <h1 className="font-heading text-base font-medium text-[var(--ui-text)]">
             Threads
           </h1>
           <p className="text-xs text-[var(--ui-text-muted)]">

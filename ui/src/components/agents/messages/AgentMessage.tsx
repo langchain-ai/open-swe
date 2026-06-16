@@ -185,7 +185,7 @@ export function AgentMessage({
                 {isExpanded && (
                   <div className="pt-1 pb-1 space-y-0.5">
                     {item.chunks.map((chunk, chunkIndex) => (
-                      <div key={chunk.toolCallId || `explored-chunk-${item.id}-${chunkIndex}`} className="flex-1 min-w-0 text-gray-500">
+                      <div key={chunk.toolCallId || `explored-chunk-${item.id}-${chunkIndex}`} className="flex-1 min-w-0 text-[color:var(--ui-text-dim)]">
                         <ToolExecution
                           chunk={chunk}
                           projectPath={projectPath}

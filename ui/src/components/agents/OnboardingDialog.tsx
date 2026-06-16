@@ -100,16 +100,16 @@ export function OnboardingDialog() {
         <Dialog.Popup className="fixed top-1/2 left-1/2 z-50 w-[min(28rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-lg bg-popover p-6 text-popover-foreground shadow-md ring-1 ring-foreground/10 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95">
           {step === "model" ? (
             <div className="flex flex-col gap-4">
-              <Dialog.Title className="text-base font-semibold">
+              <Dialog.Title className="text-sm font-medium">
                 Choose your default model
               </Dialog.Title>
-              <Dialog.Description className="text-sm text-muted-foreground">
+              <Dialog.Description className="text-xs text-muted-foreground">
                 Pick the model Open SWE uses when you don't specify one. You can
                 change this anytime in your settings.
               </Dialog.Description>
               <div className="flex flex-col gap-3">
                 <div className="flex items-center justify-between gap-3">
-                  <span className="text-sm font-medium">Default model</span>
+                  <span className="text-xs font-medium">Default model</span>
                   <Select
                     value={modelId}
                     onValueChange={(v) => v && setModelId(v)}
@@ -127,7 +127,7 @@ export function OnboardingDialog() {
                   </Select>
                 </div>
                 <div className="flex items-center justify-between gap-3">
-                  <span className="text-sm font-medium">Reasoning effort</span>
+                  <span className="text-xs font-medium">Reasoning effort</span>
                   <Select
                     value={effort}
                     onValueChange={(v) => v && setEffort(v)}
@@ -171,11 +171,11 @@ export function OnboardingDialog() {
             <div className="flex flex-col gap-4">
               <div className="flex items-center gap-3">
                 <IoLogoSlack className="size-6 shrink-0 text-muted-foreground" />
-                <Dialog.Title className="text-base font-semibold">
+                <Dialog.Title className="text-sm font-medium">
                   Connect your Slack account
                 </Dialog.Title>
               </div>
-              <Dialog.Description className="text-sm text-muted-foreground">
+              <Dialog.Description className="text-xs text-muted-foreground">
                 Connect Slack so that when you tag Open SWE, it can resolve your
                 GitHub account. We use the email Slack verifies, which also lets
                 Linear mentions resolve to you.

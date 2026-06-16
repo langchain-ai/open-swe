@@ -41,7 +41,7 @@ export function ScheduleTriggerPicker({
       <button
         type="button"
         onClick={() => setOpen((value) => !value)}
-        className="flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-sm text-[var(--ui-text-muted)] transition-colors hover:bg-[var(--ui-panel-2)] hover:text-[var(--ui-text)]"
+        className="flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-xs text-[var(--ui-text-muted)] transition-colors hover:bg-[var(--ui-panel-2)] hover:text-[var(--ui-text)]"
       >
         <PlusIcon className="size-4" />
         {triggerLabel}
@@ -49,7 +49,7 @@ export function ScheduleTriggerPicker({
 
       {open && (
         <div className="absolute top-full left-0 z-50 mt-1 w-72 overflow-hidden rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface)] py-1 shadow-lg">
-          <div className="flex items-center gap-2 px-3 py-1.5 text-[11px] font-semibold tracking-wide text-[var(--ui-text-dim)] uppercase">
+          <div className="flex items-center gap-2 px-3 py-1.5 text-[11px] font-medium tracking-wide text-[var(--ui-text-dim)] uppercase">
             <ClockIcon className="size-3.5" />
             Scheduled
           </div>
@@ -62,7 +62,7 @@ export function ScheduleTriggerPicker({
                 setOpen(false)
               }}
               className={cn(
-                "flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-[var(--ui-text-muted)] transition-colors hover:bg-[var(--ui-panel-2)] hover:text-[var(--ui-text)]"
+                "flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-[var(--ui-text-muted)] transition-colors hover:bg-[var(--ui-panel-2)] hover:text-[var(--ui-text)]"
               )}
             >
               <span className="flex-1">{option.label}</span>

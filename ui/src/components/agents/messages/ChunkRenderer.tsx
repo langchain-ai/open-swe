@@ -23,7 +23,7 @@ export function ChunkRenderer({
       return <span className="text-red-400">{chunk.text}</span>;
     case "list":
       return (
-        <div className="text-gray-300 ml-2">
+        <div className="text-[color:var(--ui-text-muted)] ml-2">
           {chunk.lines.map((line, i) => (
             <div key={i}>- {line}</div>
           ))}

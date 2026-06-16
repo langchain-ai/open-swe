@@ -175,7 +175,10 @@ function ReviewDetailPage() {
         <span className="inline-flex min-w-0 items-center gap-1.5 truncate">
           <GitPullRequestIcon className="size-3.5 shrink-0 text-muted-foreground" />
           <span className="truncate font-medium">
-            {owner}/{repo}#{number}
+            {owner}/{repo}
+            <span className="ml-1.5 font-normal text-muted-foreground">
+              #{number}
+            </span>
             {detail.data ? ` ${detail.data.pr.title}` : ""}
           </span>
         </span>
@@ -632,7 +635,7 @@ function PrHeader({ detail }: { detail: ReviewDetail }) {
         <GitPullRequestIcon className="size-3" />
         {pr.state}
       </span>
-      <h1 className="mt-2 text-lg font-medium">
+      <h1 className="mt-2 text-base font-medium">
         <a
           href={detail.url}
           target="_blank"

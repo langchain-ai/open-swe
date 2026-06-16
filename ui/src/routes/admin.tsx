@@ -212,7 +212,7 @@ function UserMappingsSection({ enabled }: { enabled: boolean }) {
             items.map((m: UserMapping) => (
               <div
                 key={m.github_login}
-                className="flex items-center justify-between gap-2 border-b border-border py-1.5 text-sm last:border-b-0"
+                className="flex items-center justify-between gap-2 border-b border-border py-1.5 text-xs last:border-b-0"
               >
                 <div className="flex min-w-0 flex-col">
                   <span className="truncate font-medium">{m.github_login}</span>

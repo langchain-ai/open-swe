@@ -98,11 +98,11 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
           </div>
         ) : isHydrating ? (
           <div className="flex flex-1 flex-col items-center justify-center gap-4 px-6">
-            <p className="text-sm text-[var(--ui-text-dim)]">Loading conversation…</p>
+            <p className="text-xs text-[var(--ui-text-dim)]">Loading conversation…</p>
           </div>
         ) : (
           <div className="flex flex-1 flex-col items-center justify-center gap-4 px-6">
-            <p className="text-sm text-[var(--ui-text-dim)]">
+            <p className="text-xs text-[var(--ui-text-dim)]">
               This thread has no messages yet.
             </p>
             <div className="w-full max-w-3xl">

@@ -44,6 +44,9 @@
   background: var(--ui-bg);
   font-size: 13px;
   line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
 }
 
 .agents-ui * {
