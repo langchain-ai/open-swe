@@ -81,6 +81,7 @@ from .utils.authorship import (
     OPEN_SWE_BOT_NAME,
     resolve_triggering_user_identity,
 )
+from .utils.dashboard_links import dashboard_thread_url
 from .utils.github_app import (
     get_github_app_installation_token_with_expiry,
 )
@@ -691,6 +692,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             create_prs=always_create_prs,
             default_repo=prompt_default_repo,
             repo_custom_instructions=repo_custom_instructions,
+            thread_url=dashboard_thread_url(thread_id),
         ),
         tools=[
             http_request,

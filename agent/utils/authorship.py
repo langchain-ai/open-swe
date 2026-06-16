@@ -16,7 +16,15 @@ OPEN_SWE_BOT_NAME = "open-swe[bot]"
 # accepts, which broke preview deploys on commits carrying this co-author.
 OPEN_SWE_BOT_EMAIL = "open-swe@users.noreply.github.com"
 
-PR_ATTRIBUTION_FOOTER = "Made by [Open SWE](https://openswe.vercel.app)"
+PR_ATTRIBUTION_TEXT = "Made by [Open SWE]"
+PR_ATTRIBUTION_DEFAULT_URL = "https://openswe.vercel.app"
+PR_ATTRIBUTION_FOOTER = f"{PR_ATTRIBUTION_TEXT}({PR_ATTRIBUTION_DEFAULT_URL})"
+
+
+def build_pr_attribution_footer(thread_url: str | None = None) -> str:
+    """Build the Open SWE PR footer, linking the run's thread when available."""
+    url = thread_url.strip() if isinstance(thread_url, str) and thread_url.strip() else ""
+    return f"{PR_ATTRIBUTION_TEXT}({url or PR_ATTRIBUTION_DEFAULT_URL})"
 
 
 @dataclass(frozen=True)
@@ -159,16 +167,20 @@ def add_bot_coauthor_trailer(commit_message: str) -> str:
 def add_pr_collaboration_note(
     pr_body: str,
     identity: CollaboratorIdentity | None = None,
+    thread_url: str | None = None,
 ) -> str:
     """Append the Open SWE attribution footer to a PR body.
 
     The PR is opened as the triggering user, so the body only credits Open SWE
-    as the collaborator. Any legacy double-attribution footer is replaced.
+    as the collaborator. The footer links the run's thread when available. Any
+    legacy double-attribution footer is replaced.
     """
 
     normalized_body = pr_body.rstrip()
-    note = PR_ATTRIBUTION_FOOTER
+    note = build_pr_attribution_footer(thread_url)
     if note in normalized_body:
+        return normalized_body
+    if PR_ATTRIBUTION_TEXT in normalized_body:
         return normalized_body
 
     legacy_footers: list[str] = []
