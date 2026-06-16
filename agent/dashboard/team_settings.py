@@ -52,6 +52,8 @@ class TeamSettingsUpdate(BaseModel):
     default_reviewer_reasoning_effort: str | None = None
     default_reviewer_subagent_model: str | None = None
     default_reviewer_subagent_reasoning_effort: str | None = None
+    default_chat_model: str | None = None
+    default_chat_reasoning_effort: str | None = None
 
     @field_validator("org_guidelines", mode="before")
     @classmethod
@@ -86,6 +88,9 @@ class TeamSettingsUpdate(BaseModel):
             self.default_reviewer_subagent_model,
             self.default_reviewer_subagent_reasoning_effort,
             "reviewer subagent",
+        )
+        _validate_model_effort_pair(
+            self.default_chat_model, self.default_chat_reasoning_effort, "review chat"
         )
         return self
 
@@ -139,6 +144,9 @@ def _default_settings() -> dict[str, Any]:
         "default_reviewer_reasoning_effort": fallback_effort,
         "default_reviewer_subagent_model": fallback_model,
         "default_reviewer_subagent_reasoning_effort": fallback_effort,
+        # No hardcoded chat default: unset means "inherit the Agent default".
+        "default_chat_model": None,
+        "default_chat_reasoning_effort": None,
         "updated_at": None,
     }
 
@@ -184,6 +192,8 @@ async def upsert_team_settings(update: TeamSettingsUpdate) -> dict[str, Any]:
         "default_reviewer_reasoning_effort": update.default_reviewer_reasoning_effort,
         "default_reviewer_subagent_model": update.default_reviewer_subagent_model,
         "default_reviewer_subagent_reasoning_effort": update.default_reviewer_subagent_reasoning_effort,
+        "default_chat_model": update.default_chat_model,
+        "default_chat_reasoning_effort": update.default_chat_reasoning_effort,
         "updated_at": datetime.now(UTC).isoformat(),
     }
     await _client().store.put_item(TEAM_SETTINGS_NAMESPACE, TEAM_SETTINGS_KEY, value)
@@ -196,7 +206,7 @@ async def get_team_default_repo() -> dict[str, str] | None:
 
 
 async def get_team_default_model(
-    role: Literal["agent", "reviewer"],
+    role: Literal["agent", "reviewer", "chat"],
 ) -> tuple[str, str]:
     """Return the team-wide default ``(model_id, reasoning_effort)`` for ``role``.
 
@@ -205,9 +215,25 @@ async def get_team_default_model(
     (so a stale Anthropic/OpenAI selection stays on its provider rather than
     jumping cross-provider); otherwise the hardcoded global default from
     :func:`agent.dashboard.options.default_model_pair`.
+
+    ``"chat"`` (the review-page PR chat) has no hardcoded default: when its
+    admin setting is unset/invalid it inherits the team **agent** default.
     """
     settings = await get_team_settings()
-    if role == "agent":
+    if role == "chat":
+        model = settings.get("default_chat_model")
+        effort = settings.get("default_chat_reasoning_effort")
+        if (
+            isinstance(model, str)
+            and isinstance(effort, str)
+            and model in SUPPORTED_MODEL_IDS
+            and model_supports_effort(model, effort)
+        ):
+            return _resolve_default_pair(model, effort)
+        # Inherit the Agent default when no chat-specific model is configured.
+        model = settings.get("default_agent_model")
+        effort = settings.get("default_agent_reasoning_effort")
+    elif role == "agent":
         model = settings.get("default_agent_model")
         effort = settings.get("default_agent_reasoning_effort")
     else:

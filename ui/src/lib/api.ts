@@ -120,6 +120,8 @@ export interface TeamSettings {
   default_reviewer_reasoning_effort?: string | null;
   default_reviewer_subagent_model?: string | null;
   default_reviewer_subagent_reasoning_effort?: string | null;
+  default_chat_model?: string | null;
+  default_chat_reasoning_effort?: string | null;
   updated_at?: string | null;
 }
 
@@ -379,6 +381,35 @@ export interface ReviewDiffPayload {
   truncated: boolean;
 }
 
+export interface ReviewChatMeta {
+  available: boolean;
+  assistant_id: string;
+}
+
+export interface ReviewChatThread {
+  thread_id: string;
+  title: string;
+  updated_at?: string | null;
+}
+
+/**
+ * Absolute base URL for the PR chat's LangGraph StreamProvider. The SDK builds
+ * request URLs as `new URL(apiUrl + path)`, so this must be absolute — a
+ * same-origin base is promoted using the current origin.
+ */
+export function reviewChatApiBase(
+  owner: string,
+  repo: string,
+  number: number,
+): string {
+  const path = `${API_BASE}/dashboard/api/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/chat`;
+  if (/^https?:\/\//.test(path)) return path;
+  if (typeof window !== "undefined") {
+    return `${window.location.origin}${path.startsWith("/") ? "" : "/"}${path}`;
+  }
+  return path;
+}
+
 export interface ReviewerEvalStatus {
   name: string;
   status: "idle" | "running" | "completed" | "failed";
@@ -492,6 +523,24 @@ export const api = {
   getReviewDiff: (owner: string, repo: string, number: number) =>
     request<ReviewDiffPayload>(
       `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/diff`,
+    ),
+  getReviewChat: (owner: string, repo: string, number: number) =>
+    request<ReviewChatMeta>(
+      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/chat`,
+    ),
+  listReviewChatThreads: (owner: string, repo: string, number: number) =>
+    request<{ threads: Array<ReviewChatThread> }>(
+      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/chat/threads`,
+    ),
+  deleteReviewChatThread: (
+    owner: string,
+    repo: string,
+    number: number,
+    threadId: string,
+  ) =>
+    request<void>(
+      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/chat/threads/${encodeURIComponent(threadId)}`,
+      { method: "DELETE" },
     ),
   reReview: (owner: string, repo: string, number: number) =>
     request<{

@@ -35,6 +35,7 @@ import type {
   ReviewUserRef,
 } from "@/lib/api"
 import { Markdown } from "@/components/agents/ported"
+import { ReviewChat } from "@/components/agents/ReviewChat"
 import { useRegisterReviewSidebar } from "@/components/agents/ReviewSidebar"
 import {
   useDiffOptions,
@@ -81,7 +82,9 @@ function findingSide(finding: ReviewFinding): "deletions" | "additions" {
   return finding.side === "LEFT" ? "deletions" : "additions"
 }
 
-function findingSelectedRange(finding: ReviewFinding): SelectedLineRange | null {
+function findingSelectedRange(
+  finding: ReviewFinding
+): SelectedLineRange | null {
   if (finding.end_line === null) return null
   const side = findingSide(finding)
   return {
@@ -825,6 +828,94 @@ function Badgeish({ children }: { children: React.ReactNode }) {
   )
 }
 
+const REVIEW_PANEL_STORAGE_WIDTH = "open-swe.review-panel.width"
+const REVIEW_PANEL_DEFAULT_WIDTH = 420
+const REVIEW_PANEL_MIN_WIDTH = 360
+// Keep at least this much room for the PR content column so the panel can grow
+// wide without squeezing the diff/description below a usable width.
+const REVIEW_PANEL_MIN_MAIN_WIDTH = 480
+
+function reviewPanelMaxWidth(availableWidth?: number): number {
+  if (typeof window === "undefined") return REVIEW_PANEL_DEFAULT_WIDTH
+  const available = availableWidth ?? window.innerWidth
+  return Math.max(
+    REVIEW_PANEL_MIN_WIDTH,
+    available - REVIEW_PANEL_MIN_MAIN_WIDTH
+  )
+}
+
+function clampReviewPanelWidth(width: number, availableWidth?: number): number {
+  return Math.min(
+    reviewPanelMaxWidth(availableWidth),
+    Math.max(REVIEW_PANEL_MIN_WIDTH, width)
+  )
+}
+
+function readStoredReviewPanelWidth(): number {
+  if (typeof window === "undefined") return REVIEW_PANEL_DEFAULT_WIDTH
+  const raw = window.localStorage.getItem(REVIEW_PANEL_STORAGE_WIDTH)
+  const parsed = raw ? Number(raw) : NaN
+  if (!Number.isFinite(parsed)) return REVIEW_PANEL_DEFAULT_WIDTH
+  return clampReviewPanelWidth(parsed)
+}
+
+function ReviewPanelResizeHandle({
+  width,
+  onResize,
+}: {
+  width: number
+  onResize: (next: number) => void
+}) {
+  const startRef = useRef<{ x: number; width: number } | null>(null)
+  const [dragging, setDragging] = useState(false)
+
+  const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    startRef.current = { x: e.clientX, width }
+    setDragging(true)
+    e.currentTarget.setPointerCapture(e.pointerId)
+  }
+
+  const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!startRef.current) return
+    onResize(startRef.current.width - (e.clientX - startRef.current.x))
+  }
+
+  const onPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    startRef.current = null
+    setDragging(false)
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId)
+    }
+  }
+
+  useEffect(() => {
+    if (!dragging) return
+    const prev = document.body.style.cursor
+    document.body.style.cursor = "col-resize"
+    return () => {
+      document.body.style.cursor = prev
+    }
+  }, [dragging])
+
+  return (
+    <div
+      role="separator"
+      aria-orientation="vertical"
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onPointerCancel={onPointerUp}
+      className={cn(
+        "absolute inset-y-0 left-0 z-20 w-1 cursor-col-resize touch-none select-none",
+        "after:absolute after:inset-y-0 after:left-0 after:w-px after:bg-transparent after:transition-colors",
+        "hover:after:bg-border",
+        dragging && "after:bg-border"
+      )}
+    />
+  )
+}
+
 function SidePanel({
   detail,
   tab,
@@ -852,130 +943,162 @@ function SidePanel({
     },
   })
 
+  const panelRef = useRef<HTMLDivElement>(null)
+  const [width, setWidthState] = useState(() => readStoredReviewPanelWidth())
+  const setWidth = useCallback((next: number) => {
+    const available = panelRef.current?.parentElement?.clientWidth
+    const clamped = clampReviewPanelWidth(next, available)
+    setWidthState(clamped)
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(REVIEW_PANEL_STORAGE_WIDTH, String(clamped))
+    }
+  }, [])
+
+  // Re-clamp against the real container width on mount and on window resize so
+  // the panel can never squeeze the PR content below its minimum.
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    const reclamp = () => setWidth(width)
+    reclamp()
+    window.addEventListener("resize", reclamp)
+    return () => window.removeEventListener("resize", reclamp)
+  }, [setWidth, width])
+
   const bugs = detail.findings.filter((f) => f.group === "bug")
   const flags = detail.findings.filter((f) => f.group !== "bug")
   const openBugs = bugs.filter((f) => f.status === "open")
   const openFlags = flags.filter((f) => f.status === "open")
 
   return (
-    <aside
-      className={cn(
-        "sticky top-0 hidden h-full w-[420px] shrink-0 flex-col overflow-y-auto border-l border-border transition-opacity xl:flex",
-        dimmed && "pointer-events-none opacity-30"
-      )}
+    <div
+      ref={panelRef}
+      style={{ width }}
+      className="sticky top-0 hidden h-full shrink-0 xl:flex"
     >
-      <div className="flex items-center gap-1 border-b border-border px-3 py-2">
-        {(
-          [
-            ["info", "Info"],
-            ["chat", "Chat"],
-          ] as const
-        ).map(([id, label]) => (
-          <button
-            key={id}
-            type="button"
-            onClick={() => onTabChange(id)}
-            className={cn(
-              "rounded-md px-2.5 py-1 text-xs transition-colors",
-              tab === id
-                ? "bg-muted font-medium text-foreground"
-                : "text-muted-foreground hover:bg-muted/50"
-            )}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
-
-      {tab === "chat" ? (
-        <div className="flex flex-1 items-center justify-center p-6 text-xs text-muted-foreground">
-          Coming Soon
-        </div>
-      ) : (
-        <div className="divide-y divide-border">
-          <section className="px-3 py-3">
-            <div className="flex items-center justify-between text-xs">
-              <span className="font-medium">
-                {detail.status === "running"
-                  ? "PR analysis in progress"
-                  : detail.status === "error"
-                    ? "PR analysis failed"
-                    : "PR analysis complete"}
-              </span>
-              <button
-                type="button"
-                onClick={() => reReview.mutate()}
-                disabled={reReview.isPending || detail.status === "running"}
-                className="inline-flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-50"
-              >
-                <ArrowClockwiseIcon className="size-3" />
-                Re-review
-              </button>
-            </div>
-            <div className="mt-2 space-y-1 text-[11px] text-muted-foreground">
-              <div>Reviewing commit {detail.head_sha.slice(0, 7) || "—"}</div>
-              {detail.watch && <div>Watching for new pushes</div>}
-              {reReview.error && (
-                <div className="text-destructive">{reReview.error.message}</div>
+      <ReviewPanelResizeHandle width={width} onResize={setWidth} />
+      <aside
+        className={cn(
+          "flex h-full w-full flex-col overflow-y-auto border-l border-border transition-opacity",
+          dimmed && "pointer-events-none opacity-30"
+        )}
+      >
+        <div className="flex items-center gap-1 border-b border-border px-3 py-2">
+          {(
+            [
+              ["info", "Info"],
+              ["chat", "Chat"],
+            ] as const
+          ).map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => onTabChange(id)}
+              className={cn(
+                "rounded-md px-2.5 py-1 text-xs transition-colors",
+                tab === id
+                  ? "bg-muted font-medium text-foreground"
+                  : "text-muted-foreground hover:bg-muted/50"
               )}
-            </div>
-          </section>
+            >
+              {label}
+            </button>
+          ))}
+        </div>
 
-          <FindingSection
-            icon={BugBeetleIcon}
-            label={`${openBugs.length} Bug${openBugs.length === 1 ? "" : "s"}`}
-            emptyLabel="No bugs found."
-            findings={bugs}
-            read={read}
-            onFindingClick={onFindingClick}
+        {tab === "chat" ? (
+          <ReviewChat
+            owner={detail.owner}
+            repo={detail.repo}
+            number={detail.number}
           />
-
-          <FindingSection
-            icon={FlagIcon}
-            label={`${openFlags.length} Flag${openFlags.length === 1 ? "" : "s"}`}
-            emptyLabel="No issues found."
-            findings={flags}
-            read={read}
-            onFindingClick={onFindingClick}
-            action={
-              detail.findings.length > 0 ? (
+        ) : (
+          <div className="divide-y divide-border">
+            <section className="px-3 py-3">
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-medium">
+                  {detail.status === "running"
+                    ? "PR analysis in progress"
+                    : detail.status === "error"
+                      ? "PR analysis failed"
+                      : "PR analysis complete"}
+                </span>
                 <button
                   type="button"
-                  onClick={onMarkAllRead}
-                  className="rounded border border-border px-1.5 py-0.5 text-[11px] text-muted-foreground hover:text-foreground"
+                  onClick={() => reReview.mutate()}
+                  disabled={reReview.isPending || detail.status === "running"}
+                  className="inline-flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-50"
                 >
-                  Mark all as read
+                  <ArrowClockwiseIcon className="size-3" />
+                  Re-review
                 </button>
-              ) : null
-            }
-          />
-
-          <ChecksSection checks={detail.checks} />
-          <PeopleSection
-            title="Reviewers"
-            people={detail.pr.requested_reviewers}
-          />
-          <PeopleSection title="Assignees" people={detail.pr.assignees} />
-          <section className="px-3 py-3">
-            <h3 className="mb-2 text-xs font-medium">Labels</h3>
-            {detail.pr.labels.length === 0 ? (
-              <p className="text-[11px] text-muted-foreground">None</p>
-            ) : (
-              <div className="flex flex-wrap gap-1">
-                {detail.pr.labels.map((label) => (
-                  <span
-                    key={label.name}
-                    className="rounded-full border border-border px-2 py-0.5 text-[11px]"
-                  >
-                    {label.name}
-                  </span>
-                ))}
               </div>
-            )}
-          </section>
-        </div>
-      )}
-    </aside>
+              <div className="mt-2 space-y-1 text-[11px] text-muted-foreground">
+                <div>Reviewing commit {detail.head_sha.slice(0, 7) || "—"}</div>
+                {detail.watch && <div>Watching for new pushes</div>}
+                {reReview.error && (
+                  <div className="text-destructive">
+                    {reReview.error.message}
+                  </div>
+                )}
+              </div>
+            </section>
+
+            <FindingSection
+              icon={BugBeetleIcon}
+              label={`${openBugs.length} Bug${openBugs.length === 1 ? "" : "s"}`}
+              emptyLabel="No bugs found."
+              findings={bugs}
+              read={read}
+              onFindingClick={onFindingClick}
+            />
+
+            <FindingSection
+              icon={FlagIcon}
+              label={`${openFlags.length} Flag${openFlags.length === 1 ? "" : "s"}`}
+              emptyLabel="No issues found."
+              findings={flags}
+              read={read}
+              onFindingClick={onFindingClick}
+              action={
+                detail.findings.length > 0 ? (
+                  <button
+                    type="button"
+                    onClick={onMarkAllRead}
+                    className="rounded border border-border px-1.5 py-0.5 text-[11px] text-muted-foreground hover:text-foreground"
+                  >
+                    Mark all as read
+                  </button>
+                ) : null
+              }
+            />
+
+            <ChecksSection checks={detail.checks} />
+            <PeopleSection
+              title="Reviewers"
+              people={detail.pr.requested_reviewers}
+            />
+            <PeopleSection title="Assignees" people={detail.pr.assignees} />
+            <section className="px-3 py-3">
+              <h3 className="mb-2 text-xs font-medium">Labels</h3>
+              {detail.pr.labels.length === 0 ? (
+                <p className="text-[11px] text-muted-foreground">None</p>
+              ) : (
+                <div className="flex flex-wrap gap-1">
+                  {detail.pr.labels.map((label) => (
+                    <span
+                      key={label.name}
+                      className="rounded-full border border-border px-2 py-0.5 text-[11px]"
+                    >
+                      {label.name}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </section>
+          </div>
+        )}
+      </aside>
+    </div>
   )
 }
 
