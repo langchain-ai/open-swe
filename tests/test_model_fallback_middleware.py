@@ -27,6 +27,16 @@ def _anthropic_overloaded() -> anthropic.APIStatusError:
     return anthropic.APIStatusError("Overloaded", response=response, body=body)
 
 
+def _anthropic_streaming_error(error_type: str) -> anthropic.APIStatusError:
+    """APIStatusError as raised mid-stream: no response, no status_code, only body."""
+    exc = anthropic.APIStatusError.__new__(anthropic.APIStatusError)
+    BaseException.__init__(exc, error_type)
+    exc.message = error_type
+    exc.body = {"type": "error", "error": {"type": error_type, "message": error_type}}
+    exc.request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+    return exc
+
+
 def _openai_5xx() -> openai.APIStatusError:
     request = httpx.Request("POST", "https://api.openai.com/v1/chat/completions")
     response = httpx.Response(503, request=request, json={"error": {"message": "unavailable"}})
@@ -65,6 +75,16 @@ class TestShouldFallback:
         request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
         response = httpx.Response(429, request=request, json={"error": {}})
         exc = anthropic.RateLimitError("rate", response=response, body={})
+        assert _should_fallback(exc) is True
+
+    def test_anthropic_streaming_overloaded_without_status_code_falls_back(self) -> None:
+        exc = _anthropic_streaming_error("overloaded_error")
+        assert getattr(exc, "status_code", None) is None
+        assert _should_fallback(exc) is True
+
+    def test_anthropic_streaming_api_error_without_status_code_falls_back(self) -> None:
+        exc = _anthropic_streaming_error("api_error")
+        assert getattr(exc, "status_code", None) is None
         assert _should_fallback(exc) is True
 
     def test_anthropic_400_does_not_fall_back(self) -> None:

@@ -26,6 +26,8 @@ from langchain_core.messages import AIMessage
 logger = logging.getLogger(__name__)
 
 _RETRYABLE_STATUS_CODES = {408, 409, 425, 429, 500, 502, 503, 504, 529}
+_RETRYABLE_ANTHROPIC_ERROR_TYPES = {"overloaded_error", "api_error", "timeout_error"}
+_RETRYABLE_OPENAI_ERROR_TYPES = {"server_error"}
 
 _TRANSIENT_EXCEPTIONS: tuple[type[BaseException], ...] = (
     anthropic.APIConnectionError,
@@ -46,6 +48,17 @@ def _should_fallback(exc: BaseException) -> bool:
     if isinstance(exc, (anthropic.APIStatusError, openai.APIStatusError)):
         status = getattr(exc, "status_code", None)
         if isinstance(status, int) and status in _RETRYABLE_STATUS_CODES:
+            return True
+        # Streaming errors can arrive as a bare APIStatusError with status_code unset;
+        # fall back on the body's error.type discriminator instead.
+        body = _error_body(exc)
+        error_type = _nested_str(body, "error", "type")
+        if (
+            isinstance(exc, anthropic.APIStatusError)
+            and error_type in _RETRYABLE_ANTHROPIC_ERROR_TYPES
+        ):
+            return True
+        if isinstance(exc, openai.APIStatusError) and error_type in _RETRYABLE_OPENAI_ERROR_TYPES:
             return True
     return False
 
