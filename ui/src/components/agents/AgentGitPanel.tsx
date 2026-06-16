@@ -171,16 +171,22 @@ export function treeThemeStyle(): React.CSSProperties {
     "--trees-theme-sidebar-fg": "var(--ui-text)",
     "--trees-theme-sidebar-border": "var(--ui-border)",
     "--trees-theme-sidebar-header-fg": "var(--ui-text-dim)",
-    "--trees-theme-list-hover-bg": "var(--ui-panel-2)",
-    "--trees-theme-list-active-selection-bg": "var(--ui-accent-bubble)",
+    "--trees-theme-list-hover-bg":
+      "color-mix(in oklab, var(--ui-accent) 10%, transparent)",
+    "--trees-theme-list-active-selection-bg":
+      "color-mix(in oklab, var(--ui-accent) 22%, transparent)",
     "--trees-theme-list-active-selection-fg": "var(--ui-text)",
     "--trees-theme-input-bg": "var(--ui-panel)",
+    "--trees-theme-input-fg": "var(--ui-text)",
     "--trees-theme-input-border": "var(--ui-border)",
     "--trees-theme-focus-ring": "var(--ui-accent)",
     "--trees-theme-scrollbar-thumb": "var(--ui-border)",
     "--trees-theme-git-added-fg": "var(--ui-success)",
-    "--trees-theme-git-deleted-fg": "var(--ui-danger)",
     "--trees-theme-git-modified-fg": "var(--ui-accent)",
+    "--trees-theme-git-deleted-fg": "var(--ui-danger)",
+    "--trees-theme-git-renamed-fg": "var(--ui-accent-2)",
+    "--trees-theme-git-untracked-fg": "var(--ui-success)",
+    "--trees-theme-git-ignored-fg": "var(--ui-text-dim)",
   } as React.CSSProperties
 }
 

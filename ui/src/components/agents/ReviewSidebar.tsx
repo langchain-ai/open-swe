@@ -5,7 +5,11 @@ import {
   useFileTreeSelection,
 } from "@pierre/trees/react"
 
-import type { GitStatus, GitStatusEntry } from "@pierre/trees"
+import type {
+  FileTreeDirectoryHandle,
+  GitStatus,
+  GitStatusEntry,
+} from "@pierre/trees"
 import type { ReviewDiffFile } from "@/lib/api"
 import { Skeleton } from "@/components/ui/skeleton"
 import { treeThemeStyle } from "@/components/agents/AgentGitPanel"
@@ -100,8 +104,8 @@ function ReviewFileTreeExplorer({
   const { model } = useFileTree({
     paths,
     gitStatus,
-    initialExpansion: "open",
     flattenEmptyDirectories: true,
+    density: "compact",
     icons: "standard",
   })
 
@@ -120,9 +124,13 @@ function ReviewFileTreeExplorer({
   }, [selection, onSelect])
 
   useEffect(() => {
-    if (selected) {
-      model.scrollToPath(selected, { focus: false })
+    if (!selected) return
+    const segments = selected.split("/")
+    for (let depth = 1; depth < segments.length; depth += 1) {
+      const item = model.getItem(segments.slice(0, depth).join("/"))
+      if (item?.isDirectory()) (item as FileTreeDirectoryHandle).expand()
     }
+    model.scrollToPath(selected, { focus: false })
   }, [model, selected])
 
   return (
