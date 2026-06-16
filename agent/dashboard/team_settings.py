@@ -52,6 +52,8 @@ class TeamSettingsUpdate(BaseModel):
     default_reviewer_reasoning_effort: str | None = None
     default_reviewer_subagent_model: str | None = None
     default_reviewer_subagent_reasoning_effort: str | None = None
+    default_grouping_model: str | None = None
+    default_grouping_reasoning_effort: str | None = None
     default_chat_model: str | None = None
     default_chat_reasoning_effort: str | None = None
 
@@ -88,6 +90,11 @@ class TeamSettingsUpdate(BaseModel):
             self.default_reviewer_subagent_model,
             self.default_reviewer_subagent_reasoning_effort,
             "reviewer subagent",
+        )
+        _validate_model_effort_pair(
+            self.default_grouping_model,
+            self.default_grouping_reasoning_effort,
+            "review diff grouping",
         )
         _validate_model_effort_pair(
             self.default_chat_model, self.default_chat_reasoning_effort, "review chat"
@@ -144,6 +151,10 @@ def _default_settings() -> dict[str, Any]:
         "default_reviewer_reasoning_effort": fallback_effort,
         "default_reviewer_subagent_model": fallback_model,
         "default_reviewer_subagent_reasoning_effort": fallback_effort,
+        # No hardcoded grouping default: unset means "inherit the Reviewer
+        # subagent default".
+        "default_grouping_model": None,
+        "default_grouping_reasoning_effort": None,
         # No hardcoded chat default: unset means "inherit the Agent default".
         "default_chat_model": None,
         "default_chat_reasoning_effort": None,
@@ -192,6 +203,8 @@ async def upsert_team_settings(update: TeamSettingsUpdate) -> dict[str, Any]:
         "default_reviewer_reasoning_effort": update.default_reviewer_reasoning_effort,
         "default_reviewer_subagent_model": update.default_reviewer_subagent_model,
         "default_reviewer_subagent_reasoning_effort": update.default_reviewer_subagent_reasoning_effort,
+        "default_grouping_model": update.default_grouping_model,
+        "default_grouping_reasoning_effort": update.default_grouping_reasoning_effort,
         "default_chat_model": update.default_chat_model,
         "default_chat_reasoning_effort": update.default_chat_reasoning_effort,
         "updated_at": datetime.now(UTC).isoformat(),
@@ -266,6 +279,31 @@ async def get_team_default_model_pair(
             settings.get("default_reviewer_subagent_reasoning_effort"),
         )
     return main, subagent
+
+
+async def get_team_default_grouping_model() -> tuple[str, str]:
+    """Return the team-wide default ``(model_id, reasoning_effort)`` for the
+    review diff-grouping pass.
+
+    When no grouping-specific model is configured (or it's no longer
+    supported), inherit the team **reviewer subagent** default — the grouping
+    pass is a cheap, fast companion to the reviewer, so it should track that
+    cheaper tier rather than the primary reviewer model.
+    """
+    settings = await get_team_settings()
+    model = settings.get("default_grouping_model")
+    effort = settings.get("default_grouping_reasoning_effort")
+    if (
+        isinstance(model, str)
+        and isinstance(effort, str)
+        and model in SUPPORTED_MODEL_IDS
+        and model_supports_effort(model, effort)
+    ):
+        return _resolve_default_pair(model, effort)
+    return _resolve_default_pair(
+        settings.get("default_reviewer_subagent_model"),
+        settings.get("default_reviewer_subagent_reasoning_effort"),
+    )
 
 
 async def get_autofix_settings() -> dict[str, Any]:

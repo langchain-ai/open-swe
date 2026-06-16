@@ -5,23 +5,29 @@
  * cookie set by the OAuth callback rides along on cross-origin calls.
  */
 
-const API_BASE = (import.meta.env.VITE_DASHBOARD_API_BASE_URL ?? "").replace(/\/$/, "");
+const API_BASE = (import.meta.env.VITE_DASHBOARD_API_BASE_URL ?? "").replace(
+  /\/$/,
+  ""
+)
 
 if (!API_BASE && typeof window !== "undefined") {
-  console.warn("VITE_DASHBOARD_API_BASE_URL is not set");
+  console.warn("VITE_DASHBOARD_API_BASE_URL is not set")
 }
 
 export class ApiError extends Error {
-  constructor(public readonly status: number, message: string) {
-    super(message);
-    this.name = "ApiError";
+  constructor(
+    public readonly status: number,
+    message: string
+  ) {
+    super(message)
+    this.name = "ApiError"
   }
 }
 
 export function isGithubReauthError(error: unknown): boolean {
-  if (!(error instanceof ApiError)) return false;
-  if (error.status === 401) return true;
-  return /github token|re-login required/i.test(error.message);
+  if (!(error instanceof ApiError)) return false
+  if (error.status === 401) return true
+  return /github token|re-login required/i.test(error.message)
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -32,364 +38,379 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
       "Content-Type": "application/json",
       ...(init.headers ?? {}),
     },
-  });
+  })
   if (!res.ok) {
-    let message = res.statusText;
+    let message = res.statusText
     try {
-      const body = await res.json();
-      if (body?.detail) message = typeof body.detail === "string" ? body.detail : JSON.stringify(body.detail);
+      const body = await res.json()
+      if (body?.detail)
+        message =
+          typeof body.detail === "string"
+            ? body.detail
+            : JSON.stringify(body.detail)
     } catch {
       /* ignore */
     }
-    throw new ApiError(res.status, message);
+    throw new ApiError(res.status, message)
   }
-  if (res.status === 204) return undefined as T;
-  return (await res.json()) as T;
+  if (res.status === 204) return undefined as T
+  return (await res.json()) as T
 }
 
 export interface SessionUser {
-  login: string;
-  email: string | null;
-  avatar_url: string | null;
-  is_admin: boolean;
-  slack_oauth_enabled?: boolean;
+  login: string
+  email: string | null
+  avatar_url: string | null
+  is_admin: boolean
+  slack_oauth_enabled?: boolean
 }
 
 export interface ModelOption {
-  id: string;
-  label: string;
-  efforts: Array<string>;
-  default_effort: string;
-  supports_images: boolean;
+  id: string
+  label: string
+  efforts: Array<string>
+  default_effort: string
+  supports_images: boolean
 }
 
 export interface OptionsPayload {
-  models: Array<ModelOption>;
-  default_agent_model: string;
-  default_agent_reasoning_effort: string;
-  default_agent_subagent_model: string;
-  default_agent_subagent_reasoning_effort: string;
+  models: Array<ModelOption>
+  default_agent_model: string
+  default_agent_reasoning_effort: string
+  default_agent_subagent_model: string
+  default_agent_subagent_reasoning_effort: string
 }
 
 export interface Profile {
-  login?: string;
-  email?: string;
-  default_model?: string;
-  reasoning_effort?: string;
-  default_subagent_model?: string | null;
-  subagent_reasoning_effort?: string | null;
-  default_repo?: string | null;
-  base_branch?: string | null;
-  branch_prefix?: string | null;
-  auto_fix_ci?: boolean;
-  create_prs?: boolean;
-  review_draft_prs?: boolean | null;
-  updated_at?: string;
+  login?: string
+  email?: string
+  default_model?: string
+  reasoning_effort?: string
+  default_subagent_model?: string | null
+  subagent_reasoning_effort?: string | null
+  default_repo?: string | null
+  base_branch?: string | null
+  branch_prefix?: string | null
+  auto_fix_ci?: boolean
+  create_prs?: boolean
+  review_draft_prs?: boolean | null
+  updated_at?: string
 }
 
 export interface ProfileUpdate {
-  default_model: string;
-  reasoning_effort: string;
-  default_subagent_model?: string | null;
-  subagent_reasoning_effort?: string | null;
-  default_repo?: string | null;
-  base_branch?: string | null;
-  branch_prefix?: string | null;
-  auto_fix_ci?: boolean;
-  create_prs?: boolean;
-  review_draft_prs?: boolean | null;
+  default_model: string
+  reasoning_effort: string
+  default_subagent_model?: string | null
+  subagent_reasoning_effort?: string | null
+  default_repo?: string | null
+  base_branch?: string | null
+  branch_prefix?: string | null
+  auto_fix_ci?: boolean
+  create_prs?: boolean
+  review_draft_prs?: boolean | null
 }
 
-export type TriggerMode = "every_push" | "once_per_pr" | "manual";
-export type AutofixMode = "off" | "low" | "medium" | "high";
+export type TriggerMode = "every_push" | "once_per_pr" | "manual"
+export type AutofixMode = "off" | "low" | "medium" | "high"
 
 export interface TeamSettings {
-  trigger_mode: TriggerMode;
-  review_draft_prs: boolean;
-  pr_summaries: boolean;
-  review_trace_links: boolean;
-  autofix_mode: AutofixMode;
-  autofix_severity_threshold: AutofixMode;
-  org_guidelines?: string | null;
-  default_agent_model?: string | null;
-  default_agent_reasoning_effort?: string | null;
-  default_agent_subagent_model?: string | null;
-  default_agent_subagent_reasoning_effort?: string | null;
-  default_repo?: string | null;
-  default_reviewer_model?: string | null;
-  default_reviewer_reasoning_effort?: string | null;
-  default_reviewer_subagent_model?: string | null;
-  default_reviewer_subagent_reasoning_effort?: string | null;
-  default_chat_model?: string | null;
-  default_chat_reasoning_effort?: string | null;
-  updated_at?: string | null;
+  trigger_mode: TriggerMode
+  review_draft_prs: boolean
+  pr_summaries: boolean
+  review_trace_links: boolean
+  autofix_mode: AutofixMode
+  autofix_severity_threshold: AutofixMode
+  org_guidelines?: string | null
+  default_agent_model?: string | null
+  default_agent_reasoning_effort?: string | null
+  default_agent_subagent_model?: string | null
+  default_agent_subagent_reasoning_effort?: string | null
+  default_repo?: string | null
+  default_reviewer_model?: string | null
+  default_reviewer_reasoning_effort?: string | null
+  default_reviewer_subagent_model?: string | null
+  default_reviewer_subagent_reasoning_effort?: string | null
+  default_grouping_model?: string | null
+  default_grouping_reasoning_effort?: string | null
+  default_chat_model?: string | null
+  default_chat_reasoning_effort?: string | null
+  updated_at?: string | null
 }
 
 export interface ProviderCredentialStatus {
-  connected: boolean;
-  site?: string;
-  endpoint?: string;
-  api_key_last4?: string;
-  updated_at?: string | null;
+  connected: boolean
+  site?: string
+  endpoint?: string
+  api_key_last4?: string
+  updated_at?: string | null
 }
 
 export interface TeamCredentialsStatus {
-  datadog: ProviderCredentialStatus;
-  langsmith: ProviderCredentialStatus;
+  datadog: ProviderCredentialStatus
+  langsmith: ProviderCredentialStatus
 }
 
 export interface DatadogConnectBody {
-  site: string;
-  api_key: string;
-  app_key: string;
+  site: string
+  api_key: string
+  app_key: string
 }
 
 export interface LangSmithConnectBody {
-  api_key: string;
-  endpoint?: string | null;
+  api_key: string
+  endpoint?: string | null
 }
 
 export interface UserMapping {
-  github_login: string;
-  work_email: string;
-  slack_user_id?: string | null;
-  source?: string;
-  status?: string;
-  created_at?: string;
-  updated_at?: string;
+  github_login: string
+  work_email: string
+  slack_user_id?: string | null
+  source?: string
+  status?: string
+  created_at?: string
+  updated_at?: string
 }
 
 export interface UserMappingsPage {
-  items: Array<UserMapping>;
-  total: number;
-  page: number;
-  page_size: number;
+  items: Array<UserMapping>
+  total: number
+  page: number
+  page_size: number
 }
 
-export type UsageLeaderboardPeriod = "7d" | "30d" | "all";
+export type UsageLeaderboardPeriod = "7d" | "30d" | "all"
 
 export interface UsageLeaderboardRow {
-  rank: number;
+  rank: number
   user: {
-    name: string;
-    github_login: string | null;
-    email: string | null;
-  };
-  favorite_model: string;
-  agent_runs: number;
-  prs_opened: number;
-  merged_prs: number;
-  agent_loc: number;
-  additions: number;
-  deletions: number;
+    name: string
+    github_login: string | null
+    email: string | null
+  }
+  favorite_model: string
+  agent_runs: number
+  prs_opened: number
+  merged_prs: number
+  agent_loc: number
+  additions: number
+  deletions: number
 }
 
 export interface ReviewerStatsCounterRow {
-  name: string;
-  count: number;
+  name: string
+  count: number
 }
 
 export interface ReviewerStatsPayload {
-  period: UsageLeaderboardPeriod;
-  reviewed_prs: number;
-  prs_with_findings: number;
-  findings_recorded: number;
-  surfaced_findings: number;
-  addressed_findings: number;
-  resolved_after_update: number;
-  dismissed_findings: number;
-  unresolved_surfaced_findings: number;
-  resolution_rate: number;
-  human_replies: number;
-  severity_counts: Record<string, number>;
-  top_categories: Array<ReviewerStatsCounterRow>;
-  generated_at_ms: number | null;
+  period: UsageLeaderboardPeriod
+  reviewed_prs: number
+  prs_with_findings: number
+  findings_recorded: number
+  surfaced_findings: number
+  addressed_findings: number
+  resolved_after_update: number
+  dismissed_findings: number
+  unresolved_surfaced_findings: number
+  resolution_rate: number
+  human_replies: number
+  severity_counts: Record<string, number>
+  top_categories: Array<ReviewerStatsCounterRow>
+  generated_at_ms: number | null
 }
 
 export interface UsageLeaderboardPayload {
-  period: UsageLeaderboardPeriod;
-  rows: Array<UsageLeaderboardRow>;
-  total_members: number;
-  current_user_rank: number | null;
-  generated_at_ms: number | null;
-  reviewer_stats: ReviewerStatsPayload;
+  period: UsageLeaderboardPeriod
+  rows: Array<UsageLeaderboardRow>
+  total_members: number
+  current_user_rank: number | null
+  generated_at_ms: number | null
+  reviewer_stats: ReviewerStatsPayload
 }
 
 export interface Repository {
-  full_name: string;
-  private: boolean;
+  full_name: string
+  private: boolean
 }
 
 export interface Installation {
-  id: number;
-  account: string | null;
-  account_type: string | null;
+  id: number
+  account: string | null
+  account_type: string | null
 }
 
 export interface ReposPayload {
-  installations: Array<Installation>;
-  repositories: Array<Repository>;
+  installations: Array<Installation>
+  repositories: Array<Repository>
 }
 
-export type ReviewStyleStatus = "idle" | "running" | "completed" | "failed";
+export type ReviewStyleStatus = "idle" | "running" | "completed" | "failed"
 
 export interface ReviewStyle {
-  full_name: string;
-  owner?: string;
-  name?: string;
-  status: ReviewStyleStatus;
-  custom_prompt: string | null;
-  analysis_summary: string | null;
-  top_reviewers: Array<string>;
-  prs_sampled: number;
-  reviews_sampled: number;
-  analysis_thread_id: string | null;
-  analysis_run_id: string | null;
-  error: string | null;
-  created_by?: string;
-  created_at?: string;
-  updated_at?: string;
+  full_name: string
+  owner?: string
+  name?: string
+  status: ReviewStyleStatus
+  custom_prompt: string | null
+  analysis_summary: string | null
+  top_reviewers: Array<string>
+  prs_sampled: number
+  reviews_sampled: number
+  analysis_thread_id: string | null
+  analysis_run_id: string | null
+  error: string | null
+  created_by?: string
+  created_at?: string
+  updated_at?: string
 }
 
 export interface AgentInstructions {
-  full_name: string;
-  owner?: string;
-  name?: string;
-  instructions: string;
-  created_by?: string;
-  created_at?: string;
-  updated_at?: string;
+  full_name: string
+  owner?: string
+  name?: string
+  instructions: string
+  created_by?: string
+  created_at?: string
+  updated_at?: string
 }
 
-export type FindingSeverity = "low" | "medium" | "high" | "critical";
-export type FindingConfidence = "low" | "medium" | "high";
-export type FindingStatus = "open" | "resolved" | "dismissed";
-export type FindingGroup = "bug" | "investigate" | "informational";
+export type FindingSeverity = "low" | "medium" | "high" | "critical"
+export type FindingConfidence = "low" | "medium" | "high"
+export type FindingStatus = "open" | "resolved" | "dismissed"
+export type FindingGroup = "bug" | "investigate" | "informational"
 
 export interface FindingInteraction {
-  kind: "human_reply" | "bot_reply";
-  author?: string;
-  body?: string;
-  created_at?: string;
+  kind: "human_reply" | "bot_reply"
+  author?: string
+  body?: string
+  created_at?: string
 }
 
 export interface ReviewFinding {
-  id: string;
-  severity: FindingSeverity;
-  confidence: FindingConfidence;
-  category: string;
-  title: string;
-  description: string;
-  suggestion: string | null;
-  file: string;
-  start_line: number | null;
-  end_line: number | null;
-  side: "LEFT" | "RIGHT";
-  in_diff: boolean;
-  status: FindingStatus;
-  outdated: boolean;
-  resolution_note: string | null;
-  diff_hunk: string | null;
-  github_thread_resolved: boolean;
-  github_review_comment_id: number | null;
-  interactions: Array<FindingInteraction>;
-  group: FindingGroup;
+  id: string
+  severity: FindingSeverity
+  confidence: FindingConfidence
+  category: string
+  title: string
+  description: string
+  suggestion: string | null
+  file: string
+  start_line: number | null
+  end_line: number | null
+  side: "LEFT" | "RIGHT"
+  in_diff: boolean
+  status: FindingStatus
+  outdated: boolean
+  resolution_note: string | null
+  diff_hunk: string | null
+  github_thread_resolved: boolean
+  github_review_comment_id: number | null
+  interactions: Array<FindingInteraction>
+  group: FindingGroup
 }
 
 export interface ReviewCounts {
-  open: number;
-  resolved: number;
-  dismissed: number;
-  bugs: number;
-  flags: number;
+  open: number
+  resolved: number
+  dismissed: number
+  bugs: number
+  flags: number
 }
 
 export interface ReviewSummary {
-  thread_id: string;
-  owner: string;
-  repo: string;
-  number: number;
-  title: string;
-  url: string;
-  head_ref: string;
-  base_ref: string;
-  author: string;
-  head_sha: string;
-  watch: boolean;
-  status: "running" | "error" | "idle";
-  counts: ReviewCounts;
-  updated_at: string | null;
-  full_name?: string;
+  thread_id: string
+  owner: string
+  repo: string
+  number: number
+  title: string
+  url: string
+  head_ref: string
+  base_ref: string
+  author: string
+  head_sha: string
+  watch: boolean
+  status: "running" | "error" | "idle"
+  counts: ReviewCounts
+  updated_at: string | null
+  full_name?: string
 }
 
 export interface ReviewListPayload {
-  reviews: Array<ReviewSummary>;
-  page: number;
-  has_more: boolean;
+  reviews: Array<ReviewSummary>
+  page: number
+  has_more: boolean
 }
 
 export interface ReviewUserRef {
-  login: string;
-  avatar_url?: string | null;
+  login: string
+  avatar_url?: string | null
 }
 
 export interface ReviewCheckRun {
-  name: string;
-  status: string;
-  conclusion: string | null;
-  url: string | null;
+  name: string
+  status: string
+  conclusion: string | null
+  url: string | null
 }
 
 export interface ReviewPrDetails {
-  state: string;
-  title: string;
-  body: string;
-  additions: number;
-  deletions: number;
-  changed_files: number;
-  commits: number;
-  head_sha: string;
-  head_ref: string;
-  base_ref: string;
-  author: ReviewUserRef | null;
-  assignees: Array<ReviewUserRef>;
-  requested_reviewers: Array<ReviewUserRef>;
-  labels: Array<{ name: string; color: string | null }>;
+  state: string
+  title: string
+  body: string
+  additions: number
+  deletions: number
+  changed_files: number
+  commits: number
+  head_sha: string
+  head_ref: string
+  base_ref: string
+  author: ReviewUserRef | null
+  assignees: Array<ReviewUserRef>
+  requested_reviewers: Array<ReviewUserRef>
+  labels: Array<{ name: string; color: string | null }>
+}
+
+export interface ReviewDiffGroup {
+  index: number
+  title: string
+  summary: string
+  files: Array<string>
 }
 
 export interface ReviewDetail extends ReviewSummary {
-  pr: ReviewPrDetails;
-  checks: Array<ReviewCheckRun>;
-  findings: Array<ReviewFinding>;
+  pr: ReviewPrDetails
+  checks: Array<ReviewCheckRun>
+  findings: Array<ReviewFinding>
+  diff_groups: Array<ReviewDiffGroup>
+  diff_groups_stale: boolean
 }
 
 export interface ReviewDiffFile {
-  path: string;
-  previousPath: string | null;
-  status: "added" | "removed" | "modified" | "renamed";
-  additions: number;
-  deletions: number;
-  originalContent: string;
-  modifiedContent: string;
-  unrenderable?: boolean;
+  path: string
+  previousPath: string | null
+  status: "added" | "removed" | "modified" | "renamed"
+  additions: number
+  deletions: number
+  originalContent: string
+  modifiedContent: string
+  unrenderable?: boolean
 }
 
 export interface ReviewDiffPayload {
-  files: Array<ReviewDiffFile>;
-  total_additions: number;
-  total_deletions: number;
-  truncated: boolean;
+  files: Array<ReviewDiffFile>
+  total_additions: number
+  total_deletions: number
+  truncated: boolean
 }
 
 export interface ReviewChatMeta {
-  available: boolean;
-  assistant_id: string;
+  available: boolean
+  assistant_id: string
 }
 
 export interface ReviewChatThread {
-  thread_id: string;
-  title: string;
-  updated_at?: string | null;
+  thread_id: string
+  title: string
+  updated_at?: string | null
 }
 
 /**
@@ -400,53 +421,53 @@ export interface ReviewChatThread {
 export function reviewChatApiBase(
   owner: string,
   repo: string,
-  number: number,
+  number: number
 ): string {
-  const path = `${API_BASE}/dashboard/api/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/chat`;
-  if (/^https?:\/\//.test(path)) return path;
+  const path = `${API_BASE}/dashboard/api/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/chat`
+  if (/^https?:\/\//.test(path)) return path
   if (typeof window !== "undefined") {
-    return `${window.location.origin}${path.startsWith("/") ? "" : "/"}${path}`;
+    return `${window.location.origin}${path.startsWith("/") ? "" : "/"}${path}`
   }
-  return path;
+  return path
 }
 
-export type ReviewerEvalScoreMode = "all_findings" | "surfaced_findings";
-export type ReviewerEvalSeverity = "low" | "medium" | "high" | "critical";
+export type ReviewerEvalScoreMode = "all_findings" | "surfaced_findings"
+export type ReviewerEvalSeverity = "low" | "medium" | "high" | "critical"
 
 export interface ReviewerEvalConfig {
-  dataset_name: string;
-  experiment_prefix: string;
-  max_concurrency: number;
-  langsmith_project: string;
-  langgraph_url: string;
-  assistant_id: string;
-  model_id: string;
-  reasoning_effort: string;
-  score_mode: ReviewerEvalScoreMode;
-  severity_threshold: ReviewerEvalSeverity;
-  cap: number;
+  dataset_name: string
+  experiment_prefix: string
+  max_concurrency: number
+  langsmith_project: string
+  langgraph_url: string
+  assistant_id: string
+  model_id: string
+  reasoning_effort: string
+  score_mode: ReviewerEvalScoreMode
+  severity_threshold: ReviewerEvalSeverity
+  cap: number
 }
 
 export interface ReviewerEvalStartRequest extends ReviewerEvalConfig {
-  limit: number | null;
+  limit: number | null
 }
 
 export interface ReviewerEvalStatus {
-  name: string;
-  status: "idle" | "running" | "completed" | "failed";
-  run_name?: string;
-  langsmith_project: string;
-  limit: number | null;
-  config_snapshot?: ReviewerEvalConfig;
-  started_at: string | null;
-  finished_at: string | null;
-  created_by: string | null;
-  pid: number | null;
-  exit_code: number | null;
-  experiment_url: string | null;
-  error: string | null;
-  log_tail: string | null;
-  updated_at: string;
+  name: string
+  status: "idle" | "running" | "completed" | "failed"
+  run_name?: string
+  langsmith_project: string
+  limit: number | null
+  config_snapshot?: ReviewerEvalConfig
+  started_at: string | null
+  finished_at: string | null
+  created_by: string | null
+  pid: number | null
+  exit_code: number | null
+  experiment_url: string | null
+  error: string | null
+  log_tail: string | null
+  updated_at: string
 }
 
 export const api = {
@@ -470,37 +491,52 @@ export const api = {
       body: JSON.stringify({ custom_prompt }),
     }),
   analyzeReviewStyle: (full_name: string) =>
-    request<ReviewStyle>(`/review-styles/${encodeURIComponent(full_name)}/analyze`, {
-      method: "POST",
-    }),
+    request<ReviewStyle>(
+      `/review-styles/${encodeURIComponent(full_name)}/analyze`,
+      {
+        method: "POST",
+      }
+    ),
   cancelReviewStyle: (full_name: string) =>
-    request<ReviewStyle>(`/review-styles/${encodeURIComponent(full_name)}/cancel`, {
-      method: "POST",
-    }),
+    request<ReviewStyle>(
+      `/review-styles/${encodeURIComponent(full_name)}/cancel`,
+      {
+        method: "POST",
+      }
+    ),
   deleteReviewStyle: (full_name: string) =>
     request<void>(`/review-styles/${encodeURIComponent(full_name)}`, {
       method: "DELETE",
     }),
-  listAgentInstructions: () => request<Array<AgentInstructions>>("/agent-instructions"),
+  listAgentInstructions: () =>
+    request<Array<AgentInstructions>>("/agent-instructions"),
   createAgentInstructions: (full_name: string) =>
     request<AgentInstructions>("/agent-instructions", {
       method: "POST",
       body: JSON.stringify({ full_name }),
     }),
   getAgentInstructions: (full_name: string) =>
-    request<AgentInstructions>(`/agent-instructions/${encodeURIComponent(full_name)}`),
+    request<AgentInstructions>(
+      `/agent-instructions/${encodeURIComponent(full_name)}`
+    ),
   saveAgentInstructions: (full_name: string, instructions: string) =>
-    request<AgentInstructions>(`/agent-instructions/${encodeURIComponent(full_name)}`, {
-      method: "PUT",
-      body: JSON.stringify({ instructions }),
-    }),
+    request<AgentInstructions>(
+      `/agent-instructions/${encodeURIComponent(full_name)}`,
+      {
+        method: "PUT",
+        body: JSON.stringify({ instructions }),
+      }
+    ),
   deleteAgentInstructions: (full_name: string) =>
     request<void>(`/agent-instructions/${encodeURIComponent(full_name)}`, {
       method: "DELETE",
     }),
   getTeamSettings: () => request<TeamSettings>("/team-settings"),
   saveTeamSettings: (body: TeamSettings) =>
-    request<TeamSettings>("/team-settings", { method: "PUT", body: JSON.stringify(body) }),
+    request<TeamSettings>("/team-settings", {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
   getTeamCredentials: () => request<TeamCredentialsStatus>("/team-credentials"),
   connectDatadog: (body: DatadogConnectBody) =>
     request<TeamCredentialsStatus>("/team-credentials/datadog", {
@@ -508,14 +544,18 @@ export const api = {
       body: JSON.stringify(body),
     }),
   disconnectDatadog: () =>
-    request<TeamCredentialsStatus>("/team-credentials/datadog", { method: "DELETE" }),
+    request<TeamCredentialsStatus>("/team-credentials/datadog", {
+      method: "DELETE",
+    }),
   connectLangSmith: (body: LangSmithConnectBody) =>
     request<TeamCredentialsStatus>("/team-credentials/langsmith", {
       method: "PUT",
       body: JSON.stringify(body),
     }),
   disconnectLangSmith: () =>
-    request<TeamCredentialsStatus>("/team-credentials/langsmith", { method: "DELETE" }),
+    request<TeamCredentialsStatus>("/team-credentials/langsmith", {
+      method: "DELETE",
+    }),
   listEnabledReviewRepos: () =>
     request<{ repos: Array<string> }>("/enabled-review-repos"),
   setEnabledReviewRepo: (full_name: string, enabled: boolean) =>
@@ -525,58 +565,57 @@ export const api = {
     }),
   usageLeaderboard: (period: UsageLeaderboardPeriod = "30d", limit = 10) =>
     request<UsageLeaderboardPayload>(
-      `/agent-usage-leaderboard?period=${encodeURIComponent(period)}&limit=${limit}`,
+      `/agent-usage-leaderboard?period=${encodeURIComponent(period)}&limit=${limit}`
     ),
   myMapping: () => request<Partial<UserMapping>>("/my-mapping"),
   adminListUserMappings: (page = 1, pageSize = 20) =>
     request<UserMappingsPage>(
-      `/admin/user-mappings?page=${page}&page_size=${pageSize}`,
+      `/admin/user-mappings?page=${page}&page_size=${pageSize}`
     ),
   adminDeleteUserMapping: (github_login: string) =>
     request<{ deleted: boolean }>(
       `/admin/user-mappings/${encodeURIComponent(github_login)}`,
-      { method: "DELETE" },
+      { method: "DELETE" }
     ),
   listReviews: (page: number, mine: boolean) =>
     request<ReviewListPayload>(`/reviews?page=${page}&mine=${mine}`),
   getReview: (owner: string, repo: string, number: number) =>
     request<ReviewDetail>(
-      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}`,
+      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}`
     ),
   getReviewDiff: (owner: string, repo: string, number: number) =>
     request<ReviewDiffPayload>(
-      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/diff`,
+      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/diff`
     ),
   getReviewChat: (owner: string, repo: string, number: number) =>
     request<ReviewChatMeta>(
-      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/chat`,
+      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/chat`
     ),
   listReviewChatThreads: (owner: string, repo: string, number: number) =>
     request<{ threads: Array<ReviewChatThread> }>(
-      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/chat/threads`,
+      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/chat/threads`
     ),
   deleteReviewChatThread: (
     owner: string,
     repo: string,
     number: number,
-    threadId: string,
+    threadId: string
   ) =>
     request<void>(
       `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/chat/threads/${encodeURIComponent(threadId)}`,
-      { method: "DELETE" },
+      { method: "DELETE" }
     ),
   reReview: (owner: string, repo: string, number: number) =>
     request<{
-      success: boolean;
-      queued: boolean;
-      thread_id: string;
-      pr_url: string;
+      success: boolean
+      queued: boolean
+      thread_id: string
+      pr_url: string
     }>(
       `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/re-review`,
-      { method: "POST" },
+      { method: "POST" }
     ),
-  getReviewerEval: () =>
-    request<ReviewerEvalStatus>("/admin/evals/reviewer"),
+  getReviewerEval: () => request<ReviewerEvalStatus>("/admin/evals/reviewer"),
   startReviewerEval: (body: ReviewerEvalStartRequest) =>
     request<ReviewerEvalStatus>("/admin/evals/reviewer", {
       method: "POST",
@@ -585,14 +624,15 @@ export const api = {
   cancelReviewerEval: () =>
     request<ReviewerEvalStatus>("/admin/evals/reviewer", { method: "DELETE" }),
   logout: () => request<void>("/auth/logout", { method: "POST" }),
-};
+}
 
 export function loginUrl(redirectTo?: string): string {
-  const target = redirectTo ?? (typeof window !== "undefined" ? window.location.origin : "");
-  const qs = target ? `?redirect_to=${encodeURIComponent(target)}` : "";
-  return `${API_BASE}/dashboard/api/auth/login${qs}`;
+  const target =
+    redirectTo ?? (typeof window !== "undefined" ? window.location.origin : "")
+  const qs = target ? `?redirect_to=${encodeURIComponent(target)}` : ""
+  return `${API_BASE}/dashboard/api/auth/login${qs}`
 }
 
 export function slackConnectUrl(): string {
-  return `${API_BASE}/dashboard/api/slack/login`;
+  return `${API_BASE}/dashboard/api/slack/login`
 }

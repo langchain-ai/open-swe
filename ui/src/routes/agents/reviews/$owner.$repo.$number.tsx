@@ -34,6 +34,10 @@ import type {
   ReviewFinding,
   ReviewUserRef,
 } from "@/lib/api"
+import type {
+  ReviewSidebarGroup,
+  ReviewSidebarView,
+} from "@/components/agents/ReviewSidebar"
 import { Markdown } from "@/components/agents/ported"
 import { ReviewChat } from "@/components/agents/ReviewChat"
 import { useRegisterReviewSidebar } from "@/components/agents/ReviewSidebar"
@@ -51,6 +55,17 @@ export const Route = createFileRoute("/agents/reviews/$owner/$repo/$number")({
 })
 
 type SideTab = "info" | "chat"
+
+const REVIEW_VIEW_STORAGE_KEY = "open-swe.review.view"
+
+interface ResolvedGroup {
+  index: number
+  title: string
+  summary: string
+  files: Array<ReviewDiffFile>
+  additions: number
+  deletions: number
+}
 
 const GROUP_STYLES = {
   bug: { label: "Bug", className: "text-destructive", Icon: BugBeetleIcon },
@@ -203,6 +218,7 @@ function ReviewBody({
   const [focused, setFocused] = useState<ReviewFinding | null>(null)
   const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null)
   const scrollRef = useRef<HTMLDivElement | null>(null)
+  const groupRefs = useRef<Record<number, HTMLDivElement | null>>({})
 
   useEffect(() => {
     void warmDiffHighlighter()
@@ -282,11 +298,92 @@ function ReviewBody({
       .reduce((acc, file) => acc + file.additions + file.deletions, 0)
   }, [diffFiles, viewed])
 
+  // Resolve the AI-sorted groups against the actual diff: drop paths that are
+  // no longer in the diff, drop empty groups, and collect any unassigned files
+  // into a trailing "Other changes" group so nothing ever disappears.
+  const groupedView = useMemo<Array<ResolvedGroup> | null>(() => {
+    if (!diffFiles || detail.diff_groups.length === 0) return null
+    const byPath = new Map(diffFiles.map((file) => [file.path, file]))
+    const assigned = new Set<string>()
+    const resolved: Array<Omit<ResolvedGroup, "index">> = []
+    for (const group of detail.diff_groups) {
+      const files: Array<ReviewDiffFile> = []
+      for (const path of group.files) {
+        const file = byPath.get(path)
+        if (file && !assigned.has(path)) {
+          assigned.add(path)
+          files.push(file)
+        }
+      }
+      if (files.length === 0) continue
+      resolved.push({
+        title: group.title,
+        summary: group.summary,
+        files,
+        additions: files.reduce((acc, file) => acc + file.additions, 0),
+        deletions: files.reduce((acc, file) => acc + file.deletions, 0),
+      })
+    }
+    const leftover = diffFiles.filter((file) => !assigned.has(file.path))
+    if (leftover.length > 0) {
+      resolved.push({
+        title: "Other changes",
+        summary: "",
+        files: leftover,
+        additions: leftover.reduce((acc, file) => acc + file.additions, 0),
+        deletions: leftover.reduce((acc, file) => acc + file.deletions, 0),
+      })
+    }
+    if (resolved.length === 0) return null
+    return resolved.map((group, i) => ({ ...group, index: i + 1 }))
+  }, [diffFiles, detail.diff_groups])
+
+  const sidebarGroups = useMemo<Array<ReviewSidebarGroup> | null>(() => {
+    if (!groupedView) return null
+    return groupedView.map((group) => ({
+      index: group.index,
+      title: group.title,
+      summary: group.summary,
+      additions: group.additions,
+      deletions: group.deletions,
+      fileCount: group.files.length,
+    }))
+  }, [groupedView])
+
+  // The view follows fresh-group availability until the user explicitly picks
+  // one, after which the choice persists across PRs.
+  const hasFreshGroups =
+    detail.diff_groups.length > 0 && !detail.diff_groups_stale
+  const [explicitView, setExplicitView] = useState<ReviewSidebarView | null>(
+    () => {
+      if (typeof window === "undefined") return null
+      const stored = window.localStorage.getItem(REVIEW_VIEW_STORAGE_KEY)
+      return stored === "ai" || stored === "files" ? stored : null
+    }
+  )
+  const view: ReviewSidebarView =
+    explicitView ?? (hasFreshGroups ? "ai" : "files")
+  const setView = useCallback((next: ReviewSidebarView) => {
+    setExplicitView(next)
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(REVIEW_VIEW_STORAGE_KEY, next)
+    }
+  }, [])
+
   const scrollToFile = useCallback((path: string) => {
     setSelectedFile(path)
     setExpandedFiles((prev) => ({ ...prev, [path]: true }))
     requestAnimationFrame(() => {
       fileRefs.current[path]?.scrollIntoView({
+        block: "start",
+        behavior: "smooth",
+      })
+    })
+  }, [])
+
+  const scrollToGroup = useCallback((index: number) => {
+    requestAnimationFrame(() => {
+      groupRefs.current[index]?.scrollIntoView({
         block: "start",
         behavior: "smooth",
       })
@@ -314,6 +411,38 @@ function ReviewBody({
 
   const closeFinding = useCallback(() => setFocused(null), [])
 
+  const renderFileCard = (file: ReviewDiffFile) => (
+    <FileDiffCard
+      key={file.path}
+      file={file}
+      findings={findingsByFile.get(file.path) ?? []}
+      focused={focused}
+      viewed={viewed.has(file.path)}
+      onToggleViewed={() => {
+        const becomingViewed = !viewed.has(file.path)
+        if (becomingViewed && focused?.file === file.path) setFocused(null)
+        toggleViewed(file.path)
+        setExpandedFiles((prev) => ({
+          ...prev,
+          [file.path]: !becomingViewed,
+        }))
+      }}
+      expanded={expandedFiles[file.path] ?? !viewed.has(file.path)}
+      onToggleExpanded={() => {
+        const next = !(expandedFiles[file.path] ?? !viewed.has(file.path))
+        if (!next && focused?.file === file.path) setFocused(null)
+        setExpandedFiles((prev) => ({ ...prev, [file.path]: next }))
+      }}
+      onFindingClick={openFinding}
+      sectionRef={(node) => {
+        fileRefs.current[file.path] = node
+      }}
+      anchorRef={(id, node) => {
+        anchorRefs.current[id] = node
+      }}
+    />
+  )
+
   const sidebarData = useMemo(
     () => ({
       title: `PR #${detail.number}`,
@@ -321,8 +450,22 @@ function ReviewBody({
       selected: selectedFile,
       viewed,
       onSelect: scrollToFile,
+      groups: sidebarGroups,
+      view,
+      onViewChange: setView,
+      onSelectGroup: scrollToGroup,
     }),
-    [detail.number, diffFiles, selectedFile, viewed, scrollToFile]
+    [
+      detail.number,
+      diffFiles,
+      selectedFile,
+      viewed,
+      scrollToFile,
+      sidebarGroups,
+      view,
+      setView,
+      scrollToGroup,
+    ]
   )
   useRegisterReviewSidebar(sidebarData)
 
@@ -380,48 +523,23 @@ function ReviewBody({
               <p className="text-xs text-muted-foreground">
                 No diff available.
               </p>
-            ) : (
-              <div className="space-y-3">
-                {diffFiles.map((file) => (
-                  <FileDiffCard
-                    key={file.path}
-                    file={file}
-                    findings={findingsByFile.get(file.path) ?? []}
-                    focused={focused}
-                    viewed={viewed.has(file.path)}
-                    onToggleViewed={() => {
-                      const becomingViewed = !viewed.has(file.path)
-                      if (becomingViewed && focused?.file === file.path)
-                        setFocused(null)
-                      toggleViewed(file.path)
-                      setExpandedFiles((prev) => ({
-                        ...prev,
-                        [file.path]: !becomingViewed,
-                      }))
+            ) : view === "ai" && groupedView ? (
+              <div className="space-y-6">
+                {groupedView.map((group) => (
+                  <div
+                    key={group.index}
+                    ref={(node) => {
+                      groupRefs.current[group.index] = node
                     }}
-                    expanded={
-                      expandedFiles[file.path] ?? !viewed.has(file.path)
-                    }
-                    onToggleExpanded={() => {
-                      const next = !(
-                        expandedFiles[file.path] ?? !viewed.has(file.path)
-                      )
-                      if (!next && focused?.file === file.path) setFocused(null)
-                      setExpandedFiles((prev) => ({
-                        ...prev,
-                        [file.path]: next,
-                      }))
-                    }}
-                    onFindingClick={openFinding}
-                    sectionRef={(node) => {
-                      fileRefs.current[file.path] = node
-                    }}
-                    anchorRef={(id, node) => {
-                      anchorRefs.current[id] = node
-                    }}
-                  />
+                    className="scroll-mt-4 space-y-3"
+                  >
+                    <GroupHeader group={group} />
+                    {group.files.map(renderFileCard)}
+                  </div>
                 ))}
               </div>
+            ) : (
+              <div className="space-y-3">{diffFiles.map(renderFileCard)}</div>
             )}
           </div>
         </div>
@@ -511,6 +629,25 @@ function PrHeader({ detail }: { detail: ReviewDetail }) {
         <span className="text-emerald-500">+{pr.additions}</span>
         <span className="text-red-500">-{pr.deletions}</span>
       </div>
+    </div>
+  )
+}
+
+function GroupHeader({ group }: { group: ResolvedGroup }) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="flex size-5 shrink-0 items-center justify-center rounded bg-[var(--ui-panel-2)] text-[11px] font-medium text-muted-foreground">
+        {group.index}
+      </span>
+      <h3 className="min-w-0 truncate text-sm font-medium">{group.title}</h3>
+      <span className="flex shrink-0 items-center gap-1.5 font-mono text-[11px]">
+        {group.additions > 0 && (
+          <span className="text-emerald-500">+{group.additions}</span>
+        )}
+        {group.deletions > 0 && (
+          <span className="text-red-500">-{group.deletions}</span>
+        )}
+      </span>
     </div>
   )
 }

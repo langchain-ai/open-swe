@@ -116,6 +116,47 @@ def classify_finding(finding: dict[str, Any]) -> Literal["bug", "investigate", "
     return "informational"
 
 
+def _serialize_diff_groups(
+    metadata: dict[str, Any], head_sha: str
+) -> tuple[list[dict[str, Any]], bool]:
+    """Serialize the persisted ``diff_groups`` for the AI sorted view.
+
+    Returns ``(groups, stale)`` where each group carries a 1-based ``index``
+    and validated fields, and ``stale`` is True when the groups were generated
+    for a different head SHA than the one currently being rendered.
+    """
+    raw = metadata.get("diff_groups")
+    if not isinstance(raw, dict):
+        return [], False
+    raw_groups = raw.get("groups")
+    if not isinstance(raw_groups, list):
+        return [], False
+    groups: list[dict[str, Any]] = []
+    for group in raw_groups:
+        if not isinstance(group, dict):
+            continue
+        title = group.get("title")
+        if not isinstance(title, str) or not title.strip():
+            continue
+        files = [f for f in (group.get("files") or []) if isinstance(f, str) and f]
+        if not files:
+            continue
+        summary = group.get("summary")
+        groups.append(
+            {
+                "index": len(groups) + 1,
+                "title": title.strip(),
+                "summary": summary.strip() if isinstance(summary, str) else "",
+                "files": files,
+            }
+        )
+    groups_head = raw.get("head_sha")
+    stale = bool(
+        head_sha and isinstance(groups_head, str) and groups_head and groups_head != head_sha
+    )
+    return groups, stale
+
+
 def _finding_counts(findings: list[dict[str, Any]]) -> dict[str, int]:
     counts = {"open": 0, "resolved": 0, "dismissed": 0, "bugs": 0, "flags": 0}
     for finding in findings:
@@ -336,7 +377,16 @@ async def get_review(owner: str, repo: str, pr_number: int) -> dict[str, Any]:
     for finding in findings:
         finding["group"] = classify_finding(finding)
 
-    return {**summary, "pr": details, "checks": checks, "findings": findings}
+    diff_groups, diff_groups_stale = _serialize_diff_groups(metadata, head_sha)
+
+    return {
+        **summary,
+        "pr": details,
+        "checks": checks,
+        "findings": findings,
+        "diff_groups": diff_groups,
+        "diff_groups_stale": diff_groups_stale,
+    }
 
 
 async def get_review_diff(owner: str, repo: str, pr_number: int) -> dict[str, Any]:

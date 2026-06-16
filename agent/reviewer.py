@@ -31,8 +31,13 @@ warnings.filterwarnings("ignore", message=".*Pydantic V1.*", category=UserWarnin
 
 from deepagents import create_deep_agent
 from langchain.agents.middleware import ModelCallLimitMiddleware
+from langchain_core.language_models.chat_models import BaseChatModel
 
-from .dashboard.team_settings import get_org_review_guidelines, get_team_default_model_pair
+from .dashboard.team_settings import (
+    get_org_review_guidelines,
+    get_team_default_grouping_model,
+    get_team_default_model_pair,
+)
 from .middleware import (
     SanitizeThinkingBlocksMiddleware,
     SanitizeToolInputsMiddleware,
@@ -46,6 +51,7 @@ from .reviewer_diff import compute_diff_line_set, fetch_pr_diff, fetch_pr_metada
 from .reviewer_findings import (
     list_findings as list_findings_async,
 )
+from .reviewer_groups import maybe_generate_and_store_diff_groups
 from .reviewer_publish import fetch_pr_review_threads
 from .reviewer_reconcile import reconcile_findings_with_review_threads
 from .server import (
@@ -727,6 +733,43 @@ def _format_existing_findings(findings: list[dict]) -> str:
     return "\n".join(lines) if lines else "_(no open findings)_"
 
 
+# Strong references to fire-and-forget background tasks (e.g. the AI-sorted
+# diff grouping pass) so the event loop doesn't garbage-collect them mid-flight.
+_BACKGROUND_TASKS: set[asyncio.Task[None]] = set()
+
+
+def _on_background_task_done(task: asyncio.Task[None]) -> None:
+    _BACKGROUND_TASKS.discard(task)
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc is not None:
+        logger.warning("Background reviewer task failed: %s", exc)
+
+
+async def _resolve_grouping_model(configurable: dict[str, object]) -> BaseChatModel:
+    """Resolve the model for the diff-grouping pass.
+
+    Per-run override (``grouping_model_id``/``grouping_reasoning_effort``) wins;
+    otherwise the team default, which itself inherits the reviewer subagent
+    model when no grouping-specific model is configured.
+    """
+    configured_model_id = configurable.get("grouping_model_id")
+    configured_effort = configurable.get("grouping_reasoning_effort")
+    if isinstance(configured_model_id, str) and configured_model_id:
+        model_id = configured_model_id
+        effort = configured_effort if isinstance(configured_effort, str) else None
+    else:
+        model_id, effort = await get_team_default_grouping_model()
+    model_kwargs = provider_model_kwargs(
+        model_id,
+        effort,
+        max_tokens=DEFAULT_LLM_MAX_TOKENS,
+        openai_reasoning_default=DEFAULT_LLM_REASONING,
+    )
+    return make_model(model_id, **model_kwargs)
+
+
 async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
     """Get or create a reviewer agent with a sandbox + prepped repo."""
     thread_id = config["configurable"].get("thread_id", None)
@@ -1025,6 +1068,25 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
 
     reviewer_model = make_model(model_id, **model_kwargs)
     reviewer_subagent_model = make_model(subagent_model_id, **subagent_model_kwargs)
+
+    # Kick off the AI-sorted diff grouping pass at run start, concurrently with
+    # the review, so it adds ~0 latency. First-review and re-review only — a
+    # finding_reply run doesn't change the diff. Best-effort: the task swallows
+    # its own errors and the UI falls back to the folder view when groups are
+    # absent.
+    if reviewer_event != "finding_reply" and pr_diff_text and thread_id:
+        grouping_model = await _resolve_grouping_model(config["configurable"])
+        grouping_task = asyncio.create_task(
+            maybe_generate_and_store_diff_groups(
+                thread_id=thread_id,
+                head_sha=head_sha,
+                diff_text=pr_diff_text,
+                model=grouping_model,
+            )
+        )
+        _BACKGROUND_TASKS.add(grouping_task)
+        grouping_task.add_done_callback(_on_background_task_done)
+
     return create_deep_agent(
         model=reviewer_model,
         system_prompt=system_prompt,
