@@ -27,7 +27,7 @@ import type { SessionUser } from "@/lib/api"
 import type { AgentSource, AgentThread } from "@/lib/agents/types"
 import { SidebarUserMenu } from "@/components/SidebarUserMenu"
 import {
-  ReviewFileTree,
+  ReviewSidebarPanel,
   ReviewSidebarProvider,
   useReviewSidebarData,
 } from "@/components/agents/ReviewSidebar"
@@ -159,7 +159,7 @@ export function AgentsSidebar({ user, activeThreadId }: AgentsSidebarProps) {
       </nav>
 
       {reviewSidebar ? (
-        <ReviewFileTree data={reviewSidebar} />
+        <ReviewSidebarPanel data={reviewSidebar} />
       ) : (
         <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
           <ThreadGroup

@@ -61,9 +61,12 @@ function AdminPage() {
           className="flex items-center justify-between gap-6 px-4 py-3 hover:bg-muted/40"
         >
           <div className="flex flex-col gap-0.5">
-            <span className="text-xs font-medium text-foreground">Reviewer eval</span>
+            <span className="text-xs font-medium text-foreground">
+              Reviewer eval
+            </span>
             <span className="text-xs text-muted-foreground">
-              Run the offline reviewer benchmark and watch its output stream live.
+              Run the offline reviewer benchmark and watch its output stream
+              live.
             </span>
           </div>
           <CaretRightIcon className="size-3.5 shrink-0 text-muted-foreground" />
@@ -555,6 +558,31 @@ function GlobalDefaultsSection({ models }: { models: Array<ModelOption> }) {
               ...settings.data,
               default_reviewer_subagent_model: model,
               default_reviewer_subagent_reasoning_effort: effort,
+            })
+          }
+          disabled={!settings.data || save.isPending}
+        />
+        <RolePicker
+          label="Open SWE Review Diff Grouping"
+          description="Model used for the review's 'AI sorted' view that groups changed files into a logical walkthrough. Inherits the Reviewer subagent default when unset."
+          models={models}
+          model={settings.data?.default_grouping_model ?? null}
+          effort={settings.data?.default_grouping_reasoning_effort ?? null}
+          inheritLabel="Reviewer subagent default"
+          onInherit={() =>
+            settings.data &&
+            save.mutate({
+              ...settings.data,
+              default_grouping_model: null,
+              default_grouping_reasoning_effort: null,
+            })
+          }
+          onChange={(model, effort) =>
+            settings.data &&
+            save.mutate({
+              ...settings.data,
+              default_grouping_model: model,
+              default_grouping_reasoning_effort: effort,
             })
           }
           disabled={!settings.data || save.isPending}
