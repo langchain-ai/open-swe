@@ -56,13 +56,6 @@ SUPPORTED_MODELS: list[ModelOption] = [
         "default_effort": "high",
         "supports_images": False,
     },
-    {
-        "id": "fireworks:accounts/fireworks/models/glm-5p1",
-        "label": "GLM 5.1",
-        "efforts": ["none", "low", "medium", "high"],
-        "default_effort": "high",
-        "supports_images": False,
-    },
 ]
 
 SUPPORTED_MODEL_IDS: frozenset[str] = frozenset(m["id"] for m in SUPPORTED_MODELS)
