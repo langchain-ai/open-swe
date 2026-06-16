@@ -303,11 +303,17 @@ function ReviewBody({
       .reduce((acc, file) => acc + file.additions + file.deletions, 0)
   }, [diffFiles, viewed])
 
-  // Resolve the AI-sorted groups against the actual diff: drop paths that are
-  // no longer in the diff, drop empty groups, and collect any unassigned files
-  // into a trailing "Other changes" group so nothing ever disappears.
+  // Resolve the AI-sorted groups against the actual diff: drop stale groups
+  // (generated for a previous head) so the file-tree fallback is used, drop
+  // paths no longer in the diff and empty groups, and collect any unassigned
+  // files into a trailing "Other changes" group so nothing ever disappears.
   const groupedView = useMemo<Array<ResolvedGroup> | null>(() => {
-    if (!diffFiles || detail.diff_groups.length === 0) return null
+    if (
+      !diffFiles ||
+      detail.diff_groups_stale ||
+      detail.diff_groups.length === 0
+    )
+      return null
     const byPath = new Map(diffFiles.map((file) => [file.path, file]))
     const assigned = new Set<string>()
     const resolved: Array<Omit<ResolvedGroup, "index">> = []
@@ -341,7 +347,7 @@ function ReviewBody({
     }
     if (resolved.length === 0) return null
     return resolved.map((group, i) => ({ ...group, index: i + 1 }))
-  }, [diffFiles, detail.diff_groups])
+  }, [diffFiles, detail.diff_groups, detail.diff_groups_stale])
 
   const sidebarGroups = useMemo<Array<ReviewSidebarGroup> | null>(() => {
     if (!groupedView) return null
