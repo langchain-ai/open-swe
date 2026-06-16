@@ -1,4 +1,4 @@
-import { memo, useState, useRef, useCallback, useLayoutEffect } from "react";
+import { memo, useCallback, useLayoutEffect, useRef, useState } from "react";
 import type { ToolExecutionChunk } from "@/lib/agents/types";
 
 interface ShellCommandProps {

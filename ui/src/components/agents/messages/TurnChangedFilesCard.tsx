@@ -2,9 +2,8 @@ import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import { MultiFileDiff } from "@pierre/diffs/react";
 
-import { useDiffOptions, warmDiffHighlighter } from "@/components/agents/utils/diffUtils";
-
 import type { ChangedFileSummaryItem } from "./types";
+import { useDiffOptions, warmDiffHighlighter } from "@/components/agents/utils/diffUtils";
 
 function stripProjectPathForDisplay(path: string, projectPath?: string): string {
   if (!projectPath) return path;
@@ -84,7 +83,7 @@ export const TurnChangedFilesCard = memo(function TurnChangedFilesCard({
   totals,
   projectPath,
 }: {
-  files: ChangedFileSummaryItem[];
+  files: Array<ChangedFileSummaryItem>;
   totals: { additions: number; deletions: number };
   projectPath?: string;
 }) {

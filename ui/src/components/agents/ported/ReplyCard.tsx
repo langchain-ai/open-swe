@@ -36,7 +36,7 @@ function isSlackTextObject(value: unknown): value is SlackTextObject {
   )
 }
 
-function isSlackBlockArray(value: unknown): value is SlackBlock[] {
+function isSlackBlockArray(value: unknown): value is Array<SlackBlock> {
   return (
     Array.isArray(value) &&
     value.every((block) => !!block && typeof block === "object")
@@ -96,7 +96,7 @@ function renderSlackBody(text: string): Array<ReactNode> {
 function blocksFromOptions(
   message: string,
   options: unknown
-): SlackBlock[] | null {
+): Array<SlackBlock> | null {
   if (!Array.isArray(options)) return null
   const cleanOptions = options.filter(
     (option): option is string =>
@@ -115,7 +115,7 @@ function blocksFromOptions(
   ]
 }
 
-function renderSlackBlocks(blocks: SlackBlock[]): ReactNode {
+function renderSlackBlocks(blocks: Array<SlackBlock>): ReactNode {
   return (
     <div className="flex flex-col gap-2">
       {blocks.map((block, index) => {

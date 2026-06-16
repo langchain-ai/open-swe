@@ -1,18 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { ReplyCard } from "@/components/agents/ported/ReplyCard";
-import { ShellCommand } from "@/components/agents/ported/ShellCommand";
-import { ToolExecution } from "@/components/agents/ported/ToolExecution";
-import type { Message } from "@/lib/agents/types";
-
 import { ChunkRenderer } from "./ChunkRenderer";
 import { ReasoningBlock } from "./ReasoningBlock";
-import { buildRenderItems, summarizeExploration, type RenderItem } from "./renderItems";
-import { SubagentGroup } from "@/components/agents/subagents";
+import { buildRenderItems, summarizeExploration } from "./renderItems";
 import { summarizeChangedFiles } from "./summarizeChangedFiles";
 import { TurnChangedFilesCard } from "./TurnChangedFilesCard";
 import { WorkSummary } from "./WorkSummary";
+import type { RenderItem } from "./renderItems";
+import type { Message } from "@/lib/agents/types";
 import type { ApprovalCallbacks, ChangedFileSummaryItem } from "./types";
+import { SubagentGroup } from "@/components/agents/subagents";
+import { ToolExecution } from "@/components/agents/ported/ToolExecution";
+import { ShellCommand } from "@/components/agents/ported/ShellCommand";
+import { ReplyCard } from "@/components/agents/ported/ReplyCard";
 
 /**
  * Render-item types kept visible (not collapsed) when a turn finishes — the
@@ -24,9 +24,9 @@ const REPLY_ITEM_TYPES = new Set<RenderItem["type"]>(["text-chunk", "reply-item"
  * Split a finished turn's items into collapsible work and the trailing reply,
  * where the reply is the maximal suffix made up solely of reply/text items.
  */
-function splitWorkAndReply(items: RenderItem[]): {
-  workItems: RenderItem[];
-  replyItems: RenderItem[];
+function splitWorkAndReply(items: Array<RenderItem>): {
+  workItems: Array<RenderItem>;
+  replyItems: Array<RenderItem>;
 } {
   let splitIndex = items.length;
   while (splitIndex > 0) {

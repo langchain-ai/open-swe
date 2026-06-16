@@ -1,5 +1,7 @@
-// @ts-nocheck — ported from open-swe-app (Electron).
-import { Children, isValidElement, type ReactNode } from 'react';
+import { Children, isValidElement } from 'react';
+import type { ReactNode } from 'react';
+
+type ElementWithChildren = { children?: ReactNode };
 
 interface MarkdownTableProps {
   children: ReactNode;
@@ -9,17 +11,19 @@ function countCells(node: ReactNode): number {
   return Children.toArray(node).filter((child) => isValidElement(child) && (child.type === 'th' || child.type === 'td')).length;
 }
 
-function collectColumnCounts(node: ReactNode, counts: number[]) {
+function collectColumnCounts(node: ReactNode, counts: Array<number>) {
   Children.forEach(node, (child) => {
     if (!isValidElement(child)) return;
 
+    const childProps = child.props as ElementWithChildren;
+
     if (child.type === 'tr') {
-      const count = countCells(child.props.children);
+      const count = countCells(childProps.children);
       if (count > 0) counts.push(count);
       return;
     }
 
-    collectColumnCounts(child.props.children, counts);
+    collectColumnCounts(childProps.children, counts);
   });
 }
 
@@ -29,7 +33,7 @@ function getTableMinWidth(columnCount: number): string {
 }
 
 export function MarkdownTable({ children }: MarkdownTableProps) {
-  const columnCounts: number[] = [];
+  const columnCounts: Array<number> = [];
   collectColumnCounts(children, columnCounts);
   const columnCount = Math.max(0, ...columnCounts);
 

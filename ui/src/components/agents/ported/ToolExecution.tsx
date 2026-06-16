@@ -1,7 +1,7 @@
-import { memo, useState, useCallback, useMemo, useRef, useLayoutEffect } from "react";
+import { memo, useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { MultiFileDiff } from "@pierre/diffs/react";
-import type { ToolExecutionChunk, AcpToolKind } from "@/lib/agents/types";
 import { DiffView } from "./DiffView";
+import type { AcpToolKind, ToolExecutionChunk } from "@/lib/agents/types";
 import { useDiffOptions } from "@/components/agents/utils/diffUtils";
 import { countLineChanges } from "@/components/agents/utils/diffStats";
 
@@ -204,7 +204,7 @@ export const ToolExecution = memo(function ToolExecution({
   const editedFileName = editedFilePath ? getFileName(editedFilePath) : "";
   const diffStats = diffData ? countLineChanges(diffData.originalContent, diffData.newContent, diffData.filePath) : null;
 
-  if (isCompletedEditOp && diffStats && diffData) {
+  if (isCompletedEditOp && diffStats) {
     return (
       <InlineDiffCollapsible
         filePath={editedFilePath || diffData.filePath}

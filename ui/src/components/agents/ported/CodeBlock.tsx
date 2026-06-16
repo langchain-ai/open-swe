@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { getSingletonHighlighter, type ThemedToken } from "shiki";
+import { getSingletonHighlighter } from "shiki";
+import type { ThemedToken } from "shiki";
 import { useResolvedTheme } from "@/lib/theme";
 
 interface CodeBlockProps {
@@ -9,7 +10,7 @@ interface CodeBlockProps {
 
 const SHIKI_THEME = { light: "github-light", dark: "github-dark" } as const;
 
-const TOKEN_CACHE = new Map<string, ThemedToken[][]>();
+const TOKEN_CACHE = new Map<string, Array<Array<ThemedToken>>>();
 
 function normalizeLanguage(language?: string): string {
   const raw = (language || "").toLowerCase().trim();
@@ -45,7 +46,7 @@ function languageLabel(language: string): string {
 }
 
 export function CodeBlock({ text, language }: CodeBlockProps) {
-  const [tokens, setTokens] = useState<ThemedToken[][] | null>(null);
+  const [tokens, setTokens] = useState<Array<Array<ThemedToken>> | null>(null);
   const [copied, setCopied] = useState(false);
   const resolvedTheme = useResolvedTheme();
   const shikiTheme = SHIKI_THEME[resolvedTheme];
@@ -67,13 +68,11 @@ export function CodeBlock({ text, language }: CodeBlockProps) {
 
     getSingletonHighlighter({
       themes: [shikiTheme],
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       langs: [normalizedLanguage as any],
     })
       .then((highlighter) => {
         if (cancelled) return;
         const result = highlighter.codeToTokens(text, {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           lang: normalizedLanguage as any,
           theme: shikiTheme,
         });

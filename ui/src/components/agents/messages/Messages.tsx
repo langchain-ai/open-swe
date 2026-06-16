@@ -1,13 +1,11 @@
-// @ts-nocheck — ported from open-swe-app (Electron); strict checks applied when wiring cloud APIs.
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown } from "lucide-react";
-
-import { useLiveMarkdownMessageId } from "@/lib/agents/provider/useLiveMarkdownMessageId";
 
 import { AgentMessage } from "./AgentMessage";
 import { ThinkingSpinner } from "./ThinkingSpinner";
 import { UserMessage } from "./UserMessage";
 import type { MessagesProps } from "./types";
+import { useLiveMarkdownMessageId } from "@/lib/agents/provider/useLiveMarkdownMessageId";
 
 const BOTTOM_LOCK_THRESHOLD_PX = 24;
 

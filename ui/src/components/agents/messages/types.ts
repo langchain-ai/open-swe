@@ -20,7 +20,7 @@ export type MessagesScrollControl = {
 };
 
 export interface MessagesProps extends ApprovalCallbacks {
-  messages: Message[];
+  messages: Array<Message>;
   isStreaming: boolean;
   /** Live run signal from `useStream().isLoading` — drives Streamdown token animation. */
   streamIsLoading?: boolean;

@@ -228,7 +228,7 @@ function CloudAgentsPage() {
             label="Default Repository"
             description="Used when no repository is specified"
             control={
-              repos.data?.repositories?.length ? (
+              repos.data?.repositories.length ? (
                 <div className="w-56">
                   <RepoSelector
                     repos={repos.data.repositories}

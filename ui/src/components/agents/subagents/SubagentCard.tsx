@@ -1,10 +1,9 @@
 import { memo } from "react";
 import { Bot, Loader2 } from "lucide-react";
 
-import { useIsInAgentThreadStream } from "@/lib/agents/provider/useIsInAgentThreadStream";
-import type { ToolExecutionChunk } from "@/lib/agents/types";
-
 import { SubagentActivity } from "./SubagentActivity";
+import type { ToolExecutionChunk } from "@/lib/agents/types";
+import { useIsInAgentThreadStream } from "@/lib/agents/provider/useIsInAgentThreadStream";
 
 /** Coerce an unknown tool-argument value to a trimmed string, or `""`. */
 function asString(value: unknown): string {
