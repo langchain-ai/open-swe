@@ -541,8 +541,8 @@ const LoopManagerBlock = forwardRef<HTMLDivElement, LoopManagerBlockProps>(funct
       >
         <span className="flex items-center gap-3">
           <span className="relative flex h-2 w-2">
-            <span className={`${runActive ? "" : "animate-ping"} absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75`} />
-            <span className="relative inline-flex rounded-full h-2 w-2 bg-cyan-500" />
+            <span className={`${runActive ? "" : "animate-ping"} absolute inline-flex h-full w-full rounded-full bg-[var(--ui-text-dim)] opacity-75`} />
+            <span className="relative inline-flex rounded-full h-2 w-2 bg-[var(--ui-text-muted)]" />
           </span>
           <span className="text-[color:var(--ui-text-muted)]">
             {loopTaskCount} active loop{loopTaskCount === 1 ? "" : "s"}{runActive ? " — running" : " monitoring"}
