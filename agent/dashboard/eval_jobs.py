@@ -17,7 +17,7 @@ import sys
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, TypedDict
 
 from langgraph_sdk import get_client
 
@@ -27,7 +27,7 @@ EVALS_NAMESPACE: list[str] = ["evals"]
 REVIEWER_EVAL_KEY = "reviewer"
 DEFAULT_EVAL_PROJECT = "open-swe-evals"
 _MODULE = "evals.reviewer.run_eval"
-_LOG_TAIL_CHARS = 4000
+_LOG_TAIL_CHARS = 12000
 _EXPERIMENT_URL_RE = re.compile(r"https://\S*smith\.langchain\.com/\S+")
 # The owning worker refreshes the heartbeat this often while the subprocess
 # runs; a record is only reconciled as failed once its heartbeat is older than
@@ -36,6 +36,37 @@ _HEARTBEAT_INTERVAL_SECONDS = 10
 _HEARTBEAT_STALE_SECONDS = 60
 
 EvalStatus = Literal["idle", "running", "completed", "failed"]
+ScoreMode = Literal["all_findings", "surfaced_findings"]
+Severity = Literal["low", "medium", "high", "critical"]
+
+
+class ReviewerEvalConfig(TypedDict):
+    dataset_name: str
+    experiment_prefix: str
+    max_concurrency: int
+    langsmith_project: str
+    langgraph_url: str
+    assistant_id: str
+    model_id: str
+    reasoning_effort: str
+    score_mode: ScoreMode
+    severity_threshold: Severity
+    cap: int
+
+
+DEFAULT_REVIEWER_EVAL_CONFIG: ReviewerEvalConfig = {
+    "dataset_name": "openswe-reviewer-v1",
+    "experiment_prefix": "openswe-review-confidence",
+    "max_concurrency": 5,
+    "langsmith_project": DEFAULT_EVAL_PROJECT,
+    "langgraph_url": "",
+    "assistant_id": "reviewer",
+    "model_id": "google_genai:gemini-3.5-flash",
+    "reasoning_effort": "medium",
+    "score_mode": "all_findings",
+    "severity_threshold": "medium",
+    "cap": 4,
+}
 
 # Identifies this process so heartbeat ownership can be reasoned about across
 # workers that share the persisted record.
@@ -70,12 +101,47 @@ def _eval_project() -> str:
     return os.environ.get("EVAL_LANGSMITH_PROJECT") or DEFAULT_EVAL_PROJECT
 
 
+def _resolve_eval_config(config: ReviewerEvalConfig | None = None) -> ReviewerEvalConfig:
+    resolved: ReviewerEvalConfig = {
+        **DEFAULT_REVIEWER_EVAL_CONFIG,
+        "langsmith_project": _eval_project(),
+        "langgraph_url": _resolve_langgraph_url() or "",
+    }
+    if config is not None:
+        resolved.update(config)
+    return resolved
+
+
+def _config_cli_args(config: ReviewerEvalConfig) -> list[str]:
+    values: list[tuple[str, object]] = [
+        ("--dataset-name", config["dataset_name"]),
+        ("--experiment-prefix", config["experiment_prefix"]),
+        ("--max-concurrency", config["max_concurrency"]),
+        ("--langsmith-project", config["langsmith_project"]),
+        ("--assistant-id", config["assistant_id"]),
+        ("--model-id", config["model_id"]),
+        ("--reasoning-effort", config["reasoning_effort"]),
+        ("--score-mode", config["score_mode"]),
+        ("--severity-threshold", config["severity_threshold"]),
+        ("--cap", config["cap"]),
+    ]
+    if config["langgraph_url"]:
+        values.append(("--langgraph-url", config["langgraph_url"]))
+    args: list[str] = []
+    for flag, value in values:
+        args.extend([flag, str(value)])
+    return args
+
+
 def _idle_record() -> dict[str, Any]:
+    config = _resolve_eval_config()
     return {
         "name": REVIEWER_EVAL_KEY,
         "status": "idle",
-        "langsmith_project": _eval_project(),
+        "run_name": config["experiment_prefix"],
+        "langsmith_project": config["langsmith_project"],
         "limit": None,
+        "config_snapshot": config,
         "started_at": None,
         "finished_at": None,
         "created_by": None,
@@ -163,6 +229,7 @@ async def get_reviewer_eval_status() -> dict[str, Any]:
 async def start_reviewer_eval(
     *,
     limit: int | None,
+    config: ReviewerEvalConfig | None = None,
     created_by: str,
 ) -> dict[str, Any]:
     """Launch the reviewer eval subprocess and persist a ``running`` record.
@@ -176,10 +243,12 @@ async def start_reviewer_eval(
     if existing and existing.get("status") == "running" and _is_heartbeat_fresh(existing):
         raise RuntimeError("a reviewer eval is already running")
 
-    project = _eval_project()
+    config_snapshot = _resolve_eval_config(config)
+    project = config_snapshot["langsmith_project"]
     cmd = [sys.executable, "-m", _MODULE]
     if limit is not None and limit > 0:
         cmd += ["--limit", str(limit)]
+    cmd += _config_cli_args(config_snapshot)
 
     env = {
         **os.environ,
@@ -205,6 +274,10 @@ async def start_reviewer_eval(
             {
                 **_idle_record(),
                 "status": "failed",
+                "run_name": config_snapshot["experiment_prefix"],
+                "langsmith_project": project,
+                "limit": limit,
+                "config_snapshot": config_snapshot,
                 "finished_at": _now_iso(),
                 "created_by": created_by,
                 "error": f"Failed to launch eval: {exc}",
@@ -216,8 +289,10 @@ async def start_reviewer_eval(
         {
             **_idle_record(),
             "status": "running",
+            "run_name": config_snapshot["experiment_prefix"],
             "langsmith_project": project,
             "limit": limit,
+            "config_snapshot": config_snapshot,
             "started_at": _now_iso(),
             "finished_at": None,
             "created_by": created_by,
@@ -226,7 +301,14 @@ async def start_reviewer_eval(
             "heartbeat": _now_iso(),
         }
     )
-    asyncio.create_task(_monitor(proc, created_by=created_by, limit=limit, project=project))
+    asyncio.create_task(
+        _monitor(
+            proc,
+            created_by=created_by,
+            limit=limit,
+            config_snapshot=config_snapshot,
+        )
+    )
     return record
 
 
@@ -295,7 +377,7 @@ async def _monitor(
     *,
     created_by: str,
     limit: int | None,
-    project: str,
+    config_snapshot: ReviewerEvalConfig,
 ) -> None:
     heartbeat = asyncio.create_task(_heartbeat_loop(proc))
     tail = ""
@@ -322,8 +404,10 @@ async def _monitor(
         {
             **record,
             "status": status,
-            "langsmith_project": project,
+            "run_name": config_snapshot["experiment_prefix"],
+            "langsmith_project": config_snapshot["langsmith_project"],
             "limit": limit,
+            "config_snapshot": config_snapshot,
             "created_by": created_by,
             "finished_at": _now_iso(),
             "pid": proc.pid,

@@ -73,6 +73,8 @@ async def test_start_reviewer_eval_launches_subprocess() -> None:
 
     assert record["status"] == "running"
     assert record["limit"] == 3
+    assert record["run_name"] == "openswe-review-confidence"
+    assert record["config_snapshot"]["model_id"] == "google_genai:gemini-3.5-flash"
     assert record["pid"] == 4321
     assert record["heartbeat"] is not None
     assert record["worker_id"] == eval_jobs._WORKER_ID
@@ -80,8 +82,58 @@ async def test_start_reviewer_eval_launches_subprocess() -> None:
 
     args, kwargs = create.call_args
     assert "--limit" in args and "3" in args
+    assert "--experiment-prefix" in args and "openswe-review-confidence" in args
+    assert "--model-id" in args and "google_genai:gemini-3.5-flash" in args
+    assert "--reasoning-effort" in args and "medium" in args
     assert kwargs["env"]["LANGSMITH_PROJECT"] == eval_jobs.DEFAULT_EVAL_PROJECT
     assert kwargs["env"]["LANGGRAPH_URL"] == "https://lg.test"
+
+
+@pytest.mark.asyncio
+async def test_start_reviewer_eval_uses_config_snapshot() -> None:
+    proc = MagicMock()
+    proc.pid = 4321
+    proc.returncode = None
+    create = AsyncMock(return_value=proc)
+    config: eval_jobs.ReviewerEvalConfig = {
+        **eval_jobs.DEFAULT_REVIEWER_EVAL_CONFIG,
+        "experiment_prefix": "custom-run",
+        "langsmith_project": "custom-project",
+        "model_id": "anthropic:claude-opus-4-8",
+        "reasoning_effort": "high",
+        "score_mode": "surfaced_findings",
+        "severity_threshold": "high",
+        "cap": 2,
+    }
+
+    def _consume(coro):
+        coro.close()
+        return MagicMock()
+
+    with (
+        patch.object(eval_jobs.asyncio, "create_subprocess_exec", new=create),
+        patch.object(eval_jobs.asyncio, "create_task", new=_consume),
+        patch.object(eval_jobs, "_get_record", new=AsyncMock(return_value=None)),
+        patch.object(eval_jobs, "_put_record", new=AsyncMock(side_effect=lambda r: r)),
+    ):
+        record = await eval_jobs.start_reviewer_eval(
+            limit=None,
+            config=config,
+            created_by="octo",
+        )
+
+    assert record["run_name"] == "custom-run"
+    assert record["langsmith_project"] == "custom-project"
+    assert record["config_snapshot"] == config
+
+    args, kwargs = create.call_args
+    assert "--experiment-prefix" in args and "custom-run" in args
+    assert "--langsmith-project" in args and "custom-project" in args
+    assert "--model-id" in args and "anthropic:claude-opus-4-8" in args
+    assert "--score-mode" in args and "surfaced_findings" in args
+    assert "--severity-threshold" in args and "high" in args
+    assert "--cap" in args and "2" in args
+    assert kwargs["env"]["LANGSMITH_PROJECT"] == "custom-project"
 
 
 @pytest.mark.asyncio
