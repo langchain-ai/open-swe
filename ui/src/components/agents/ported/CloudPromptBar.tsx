@@ -345,7 +345,7 @@ export const CloudPromptBar = memo(function CloudPromptBarComponent({
       >
         {isDragOver && (
           <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center rounded-2xl bg-[var(--ui-surface)]/80 backdrop-blur-sm">
-            <span className="rounded-md bg-[var(--ui-panel-2)] px-3 py-1.5 text-sm font-medium text-[color:var(--ui-accent)]">
+            <span className="rounded-md bg-[var(--ui-panel-2)] px-3 py-1.5 text-xs font-medium text-[color:var(--ui-accent)]">
               Drop images here
             </span>
           </div>

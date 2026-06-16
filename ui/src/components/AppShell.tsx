@@ -38,7 +38,7 @@ export function AppShell({
             </Link>
           )}
           <header className="mb-8">
-            <h1 className="font-heading text-lg font-medium">{title}</h1>
+            <h1 className="font-heading text-base font-medium">{title}</h1>
             {description && (
               <p className="mt-1 text-xs text-muted-foreground">{description}</p>
             )}

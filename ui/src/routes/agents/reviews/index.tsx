@@ -66,7 +66,7 @@ function ReviewsPage() {
   return (
     <main className="min-w-0 flex-1 overflow-y-auto">
       <div className="mx-auto max-w-3xl px-6 py-8">
-        <h1 className="font-heading text-lg font-medium text-[var(--ui-text)]">
+        <h1 className="font-heading text-base font-medium text-[var(--ui-text)]">
           PR Reviews
         </h1>
         <p className="mt-1 text-xs text-[var(--ui-text-muted)]">

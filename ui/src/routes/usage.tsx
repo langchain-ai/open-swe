@@ -98,7 +98,7 @@ function UsagePage() {
             Failed to load usage data: {leaderboard.error.message}
           </p>
         ) : !leaderboard.data?.rows.length ? (
-          <div className="p-6 text-center text-sm text-muted-foreground">
+          <div className="p-6 text-center text-xs text-muted-foreground">
             No Open SWE Agent usage has been recorded for{" "}
             {PERIOD_LABELS[activePeriod].toLowerCase()} yet.
           </div>
@@ -128,7 +128,7 @@ function UsagePage() {
         ) : leaderboard.data?.reviewer_stats ? (
           <ReviewerStats stats={leaderboard.data.reviewer_stats} />
         ) : (
-          <div className="p-6 text-center text-sm text-muted-foreground">
+          <div className="p-6 text-center text-xs text-muted-foreground">
             No reviewer stats have been recorded for{" "}
             {PERIOD_LABELS[activePeriod].toLowerCase()} yet.
           </div>
@@ -147,7 +147,7 @@ function UsageTable({
 }) {
   return (
     <div className="overflow-x-auto">
-      <table className="w-full min-w-[760px] text-sm">
+      <table className="w-full min-w-[760px] text-xs">
         <thead className="border-b border-border text-xs text-muted-foreground">
           <tr>
             <th className="w-14 px-4 py-3 text-left font-normal">Rank</th>
@@ -238,7 +238,7 @@ function ReviewerStats({ stats }: { stats: ReviewerStatsPayload }) {
         {cards.map((card) => (
           <div key={card.label} className="rounded-md border border-border p-3">
             <div className="text-xs text-muted-foreground">{card.label}</div>
-            <div className="mt-1 text-xl font-medium tabular-nums">
+            <div className="mt-1 text-lg font-medium tabular-nums">
               {formatNumber(card.value)}
             </div>
             <div className="mt-1 text-xs text-muted-foreground">
@@ -277,7 +277,7 @@ function CounterList({
     <div>
       <h3 className="text-xs font-medium text-muted-foreground">{title}</h3>
       {rows.length ? (
-        <ul className="mt-2 space-y-2 text-sm">
+        <ul className="mt-2 space-y-2 text-xs">
           {rows.map((row) => (
             <li
               key={row.name}

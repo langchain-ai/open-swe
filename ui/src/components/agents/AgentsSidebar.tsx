@@ -227,7 +227,7 @@ function ThreadGroup({
       <button
         type="button"
         onClick={() => setCollapsed((value) => !value)}
-        className="flex w-full items-center gap-1 px-2 py-1 text-left text-[10px] font-semibold tracking-wide text-[var(--ui-text-dim)] uppercase transition-colors hover:text-[var(--ui-text-muted)]"
+        className="flex w-full items-center gap-1 px-2 py-1 text-left text-[10px] font-medium tracking-wide text-[var(--ui-text-dim)] uppercase transition-colors hover:text-[var(--ui-text-muted)]"
         aria-expanded={!collapsed}
       >
         <ToggleIcon className="size-3" />
@@ -270,7 +270,7 @@ function ResolvedThreadGroup({
       <button
         type="button"
         onClick={() => setCollapsed((value) => !value)}
-        className="flex w-full items-center gap-1 px-2 py-1 text-left text-[10px] font-semibold tracking-wide text-[var(--ui-text-dim)] uppercase transition-colors hover:text-[var(--ui-text-muted)]"
+        className="flex w-full items-center gap-1 px-2 py-1 text-left text-[10px] font-medium tracking-wide text-[var(--ui-text-dim)] uppercase transition-colors hover:text-[var(--ui-text-muted)]"
         aria-expanded={!collapsed}
       >
         <ToggleIcon className="size-3" />
@@ -486,10 +486,10 @@ function ThreadRow({
           <Dialog.Backdrop className="fixed inset-0 z-50 bg-black/50 data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0" />
           <Dialog.Popup className="fixed top-1/2 left-1/2 z-50 w-[min(28rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-lg bg-popover p-6 text-popover-foreground shadow-md ring-1 ring-foreground/10 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95">
             <div className="flex flex-col gap-4">
-              <Dialog.Title className="text-base font-semibold">
+              <Dialog.Title className="text-sm font-medium">
                 Delete thread
               </Dialog.Title>
-              <Dialog.Description className="text-sm text-muted-foreground">
+              <Dialog.Description className="text-xs text-muted-foreground">
                 Delete "{thread.title}"? This cannot be undone.
               </Dialog.Description>
               <div className="mt-2 flex justify-end gap-2">

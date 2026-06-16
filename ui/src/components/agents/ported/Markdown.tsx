@@ -32,17 +32,17 @@ const STREAMDOWN_ANIMATED = {
 
 const STREAMDOWN_COMPONENTS = {
   h1: ({ children }: { children?: ReactNode }) => (
-    <div className="text-[color:var(--ui-accent)] text-[20px] font-semibold mt-4 mb-2 tracking-tight">
+    <div className="text-[color:var(--ui-text)] text-[15px] font-medium mt-4 mb-1.5 tracking-tight">
       {children}
     </div>
   ),
   h2: ({ children }: { children?: ReactNode }) => (
-    <div className="text-[color:var(--ui-accent)] text-[17px] font-semibold mt-3 mb-2 tracking-tight">
+    <div className="text-[color:var(--ui-text)] text-[14px] font-medium mt-3 mb-1.5 tracking-tight">
       {children}
     </div>
   ),
   h3: ({ children }: { children?: ReactNode }) => (
-    <div className="text-[color:var(--ui-accent)] text-[15px] font-semibold mt-3 mb-1">
+    <div className="text-[color:var(--ui-text)] text-[13px] font-medium mt-3 mb-1">
       {children}
     </div>
   ),

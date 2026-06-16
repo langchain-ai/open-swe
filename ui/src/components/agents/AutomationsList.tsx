@@ -42,10 +42,10 @@ export function AutomationsList() {
   return (
     <div className="flex min-w-0 flex-1 flex-col overflow-y-auto">
       <div className="mx-auto w-full max-w-4xl px-6 py-8 max-md:pt-16">
-        <h1 className="text-2xl font-semibold text-[var(--ui-text)]">
+        <h1 className="text-base font-medium text-[var(--ui-text)]">
           Automations
         </h1>
-        <p className="mt-1 text-sm text-[var(--ui-text-muted)]">
+        <p className="mt-1 text-xs text-[var(--ui-text-muted)]">
           Run Open SWE on a recurring schedule. Each run starts a fresh agent
           thread.
         </p>
@@ -58,7 +58,7 @@ export function AutomationsList() {
         </div>
 
         <div className="mt-8 flex items-center justify-between">
-          <span className="text-sm font-medium text-[var(--ui-text-muted)]">
+          <span className="text-xs font-medium text-[var(--ui-text-muted)]">
             {total} {total === 1 ? "automation" : "automations"}
           </span>
           <Link to="/agents/automations/new" className={buttonVariants()}>
@@ -102,7 +102,7 @@ function StatCard({
       <div className="text-xs text-[var(--ui-text-dim)]">{label}</div>
       <div
         className={cn(
-          "mt-1 text-2xl font-semibold",
+          "mt-1 text-lg font-medium",
           highlight ? "text-[var(--ui-danger)]" : "text-[var(--ui-text)]"
         )}
       >
@@ -121,7 +121,7 @@ function EmptyState() {
       <h3 className="mt-4 text-sm font-medium text-[var(--ui-text)]">
         No automations yet
       </h3>
-      <p className="mt-1 max-w-sm text-sm text-[var(--ui-text-muted)]">
+      <p className="mt-1 max-w-sm text-xs text-[var(--ui-text-muted)]">
         Schedule Open SWE to run on a recurring cadence — review code, triage
         issues, or keep docs up to date.
       </p>

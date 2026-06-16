@@ -226,7 +226,7 @@ function useConversations(key: string) {
 function EmptyState({ onPick }: { onPick: (prompt: string) => void }) {
   return (
     <div className="flex flex-1 flex-col gap-4 p-4">
-      <p className="text-sm text-foreground">
+      <p className="text-[13px] text-foreground">
         I've reviewed this PR. Ask me about the diff, the findings, or the
         surrounding code — I have read-only access to the repository.
       </p>
@@ -239,7 +239,7 @@ function EmptyState({ onPick }: { onPick: (prompt: string) => void }) {
             key={prompt}
             type="button"
             onClick={() => onPick(prompt)}
-            className="flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-foreground hover:bg-muted/60"
+            className="flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] text-foreground hover:bg-muted/60"
           >
             <SparkleIcon className="size-4 shrink-0 text-muted-foreground" />
             {prompt}
@@ -327,7 +327,7 @@ function ChatBody({
               >
                 <div
                   className={cn(
-                    "text-sm text-foreground",
+                    "text-[13px] text-foreground",
                     isUser
                       ? "max-w-[85%] rounded-lg bg-muted px-3 py-2"
                       : "w-full",
@@ -346,7 +346,7 @@ function ChatBody({
           })}
           {busy && (
             <div className="flex justify-start">
-              <div className="px-3 py-2 text-sm text-muted-foreground">
+              <div className="px-3 py-2 text-xs text-muted-foreground">
                 Thinking…
               </div>
             </div>
