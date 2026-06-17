@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -18,12 +18,13 @@ class _QueuedItem:
 
 
 class _FakeStore:
-    def __init__(self, value: dict[str, Any]) -> None:
-        self.value = value
+    def __init__(self, items: dict[tuple[tuple[str, ...], str], dict[str, Any]]) -> None:
+        self.items = items
         self.deleted: list[tuple[tuple[str, ...], str]] = []
 
-    async def aget(self, namespace: tuple[str, ...], key: str) -> _QueuedItem:
-        return _QueuedItem(self.value)
+    async def aget(self, namespace: tuple[str, ...], key: str) -> _QueuedItem | None:
+        value = self.items.get((namespace, key))
+        return _QueuedItem(value) if value is not None else None
 
     async def adelete(self, namespace: tuple[str, ...], key: str) -> None:
         self.deleted.append((namespace, key))
@@ -33,9 +34,11 @@ class _FakeStore:
 async def test_check_message_queue_injects_dashboard_handoff_instruction() -> None:
     store = _FakeStore(
         {
-            "messages": [
-                {"content": {"text": "continue in web", "source": "dashboard"}},
-            ]
+            (("queue", "thread-1"), "pending_messages"): {
+                "messages": [
+                    {"content": {"text": "continue in web", "source": "dashboard"}},
+                ]
+            }
         }
     )
 
@@ -45,9 +48,6 @@ async def test_check_message_queue_injects_dashboard_handoff_instruction() -> No
             return_value={"configurable": {"thread_id": "thread-1"}},
         ),
         patch("agent.middleware.check_message_queue.get_store", return_value=store),
-        patch(
-            "agent.middleware.check_message_queue.get_client", side_effect=Exception("no client")
-        ),
     ):
         result = await check_message_queue_before_model.abefore_model({}, MagicMock())
 
@@ -61,30 +61,32 @@ async def test_check_message_queue_injects_dashboard_handoff_instruction() -> No
 
 @pytest.mark.asyncio
 async def test_check_message_queue_injects_pending_autofix_event() -> None:
-    client = MagicMock()
-    client.threads.get = AsyncMock(
-        return_value={"metadata": {"autofix_pending_event": "ci_failure"}}
+    store = _FakeStore(
+        {
+            (("autofix", "thread-1"), "pending_event"): {
+                "reason": "review_feedback",
+                "details": ["Reviewer alice commented: rename to userId"],
+            }
+        }
     )
-    client.threads.update = AsyncMock()
 
     with (
         patch(
             "agent.middleware.check_message_queue.get_config",
             return_value={"configurable": {"thread_id": "thread-1"}},
         ),
-        patch("agent.middleware.check_message_queue.get_store", return_value=None),
-        patch("agent.middleware.check_message_queue.get_client", return_value=client),
+        patch("agent.middleware.check_message_queue.get_store", return_value=store),
     ):
         result = await check_message_queue_before_model.abefore_model({}, MagicMock())
 
     assert result is not None
     message = result["messages"][0]
     assert message["role"] == "user"
-    assert "PR babysitting event arrived" in message["content"][0]["text"]
-    client.threads.update.assert_awaited_once_with(
-        thread_id="thread-1",
-        metadata={"autofix_pending_event": "", "autofix_pending_event_at_ms": None},
-    )
+    text = message["content"][0]["text"]
+    assert "PR babysitting event arrived" in text
+    # The reviewer's actual comment is carried through, not dropped for a generic nudge.
+    assert "rename to userId" in text
+    assert (("autofix", "thread-1"), "pending_event") in store.deleted
 
 
 @pytest.mark.asyncio

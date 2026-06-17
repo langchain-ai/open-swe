@@ -18,7 +18,6 @@ loop-capping live in one place. Skip-rules mirror Cursor/Claude Code:
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
 from typing import Any
 
 from langgraph_sdk import get_client
@@ -52,6 +51,9 @@ logger = logging.getLogger(__name__)
 MAX_AUTOFIX_ATTEMPTS = 10
 # Keep the dedupe list bounded on thread metadata.
 _MAX_HANDLED_KEYS = 30
+# Store location for batched auto-fix events, consumed by the message-queue middleware.
+_PENDING_AUTOFIX_NS = "autofix"
+_PENDING_AUTOFIX_KEY = "pending_event"
 
 
 def _dedupe_key(head_sha: str) -> str:
@@ -235,14 +237,30 @@ def _run_configurable(
     return configurable
 
 
-async def _mark_pending_autofix_event(thread_id: str, reason: str) -> None:
+async def _mark_pending_autofix_event(thread_id: str, reason: str, detail: str = "") -> None:
+    """Record a batched auto-fix event in the store the message-queue middleware reads.
+
+    Uses the same store namespace mechanism as ``queue_message_for_thread`` so the
+    in-flight run picks it up in-process at its next ``before_model`` step — no
+    per-step thread fetch. ``detail`` (e.g. a reviewer's comment) is accumulated so
+    specifics aren't lost when several events batch against one busy run.
+    """
+    client = langgraph_client()
+    namespace = (_PENDING_AUTOFIX_NS, thread_id)
     try:
-        await get_client().threads.update(
-            thread_id=thread_id,
-            metadata={
-                "autofix_pending_event": reason,
-                "autofix_pending_event_at_ms": int(datetime.now(UTC).timestamp() * 1000),
-            },
+        details: list[str] = []
+        try:
+            existing = await client.store.get_item(namespace, _PENDING_AUTOFIX_KEY)
+            if existing and existing.get("value"):
+                prior = existing["value"].get("details")
+                if isinstance(prior, list):
+                    details = [d for d in prior if isinstance(d, str)]
+        except Exception:  # noqa: BLE001
+            logger.debug("No existing pending auto-fix event for thread %s", thread_id)
+        if detail and detail not in details:
+            details.append(detail)
+        await client.store.put_item(
+            namespace, _PENDING_AUTOFIX_KEY, {"reason": reason, "details": details}
         )
     except Exception:  # noqa: BLE001
         logger.debug(
@@ -251,11 +269,11 @@ async def _mark_pending_autofix_event(thread_id: str, reason: str) -> None:
 
 
 async def _dispatch_or_batch(
-    thread_id: str, prompt: str, *, configurable: dict[str, Any], reason: str
+    thread_id: str, prompt: str, *, configurable: dict[str, Any], reason: str, detail: str = ""
 ) -> str:
     if await is_thread_active(thread_id):
         logger.info("Agent thread %s busy; batching auto-fix event %s", thread_id, reason)
-        await _mark_pending_autofix_event(thread_id, reason)
+        await _mark_pending_autofix_event(thread_id, reason, detail)
         return "batched"
     client = langgraph_client()
     await client.runs.create(
@@ -394,10 +412,14 @@ async def handle_ci_failure(
         ),
         reason="ci_failure",
     )
-    await _record_attempt(
-        thread_id, attempts=attempts, handled=handled, dedupe_key=dedupe_key, head_sha=head_sha
-    )
     if result == "dispatched":
+        # Only burn an attempt / mark the SHA handled on a real dispatch. A batched
+        # event is just a nudge to the in-flight run; if that run ends before
+        # consuming it, leaving the SHA un-handled lets a later webhook or the sweep
+        # re-dispatch instead of silently dropping the failure.
+        await _record_attempt(
+            thread_id, attempts=attempts, handled=handled, dedupe_key=dedupe_key, head_sha=head_sha
+        )
         await post_autofix_status_check(
             owner=owner,
             repo=repo,
@@ -472,6 +494,9 @@ async def handle_review_feedback(
             metadata, repo_config={"owner": owner, "name": repo}, pr_number=pr_number
         ),
         reason="review_feedback",
+        detail=f"Reviewer {reviewer or 'unknown'} commented: {body.strip()}"
+        if body.strip()
+        else "",
     )
 
 

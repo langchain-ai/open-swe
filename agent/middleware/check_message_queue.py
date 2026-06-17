@@ -14,6 +14,7 @@ import httpx
 from langchain.agents.middleware import AgentState, before_model
 from langgraph.config import get_config, get_store
 from langgraph.runtime import Runtime
+from langgraph.store.base import BaseStore
 from langgraph_sdk import get_client
 
 from ..dashboard.options import model_supports_images
@@ -102,30 +103,36 @@ def _message_update(content_blocks: list[dict[str, Any]], thread_id: str) -> dic
     return {"messages": [{"role": "user", "content": content_blocks}]}
 
 
-async def _consume_pending_autofix_event(thread_id: str) -> str | None:
+async def _consume_pending_autofix_event(store: BaseStore, thread_id: str) -> str | None:
+    """Pull and clear a batched PR-babysitting event from the store (no thread fetch)."""
+    namespace = ("autofix", thread_id)
     try:
-        thread = await get_client().threads.get(thread_id)
+        item = await store.aget(namespace, "pending_event")
     except Exception:  # noqa: BLE001
-        logger.debug("Could not read thread metadata for pending auto-fix events", exc_info=True)
+        logger.debug(
+            "Could not read pending auto-fix event for thread %s", thread_id, exc_info=True
+        )
         return None
-    metadata = thread.get("metadata") if isinstance(thread, dict) else None
-    if not isinstance(metadata, dict) or not metadata.get("autofix_pending_event"):
+    if item is None or not item.value.get("reason"):
         return None
     try:
-        await get_client().threads.update(
-            thread_id=thread_id,
-            metadata={"autofix_pending_event": "", "autofix_pending_event_at_ms": None},
-        )
+        await store.adelete(namespace, "pending_event")
     except Exception:  # noqa: BLE001
         logger.debug(
             "Could not clear pending auto-fix event for thread %s", thread_id, exc_info=True
         )
-    return (
+    message = (
         "A PR babysitting event arrived while you were already working on this PR. "
         "Do not start a separate run for that event. Before finishing, re-check the "
         "PR's latest CI status and review comments, then address any newly failed "
         "checks or actionable comments that are clear and deterministic."
     )
+    details = item.value.get("details")
+    if isinstance(details, list):
+        joined = "\n\n".join(d for d in details if isinstance(d, str) and d)
+        if joined:
+            message += "\n\nNewly arrived feedback to address:\n" + joined
+    return message
 
 
 @before_model(state_schema=LinearNotifyState)
@@ -150,19 +157,19 @@ async def check_message_queue_before_model(  # noqa: PLR0911
         if not thread_id:
             return None
 
-        content_blocks: list[dict[str, Any]] = []
-        pending_autofix = await _consume_pending_autofix_event(thread_id)
-        if pending_autofix:
-            content_blocks.append({"type": "text", "text": pending_autofix})
-
         try:
             store = get_store()
         except Exception as e:  # noqa: BLE001
             logger.debug("Could not get store from context: %s", e)
-            return _message_update(content_blocks, thread_id)
+            return None
 
         if store is None:
-            return _message_update(content_blocks, thread_id)
+            return None
+
+        content_blocks: list[dict[str, Any]] = []
+        pending_autofix = await _consume_pending_autofix_event(store, thread_id)
+        if pending_autofix:
+            content_blocks.append({"type": "text", "text": pending_autofix})
 
         namespace = ("queue", thread_id)
 

@@ -21,8 +21,11 @@ _PR = {
 def happy(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     """Patch every dependency of handle_ci_failure to a happy-path default."""
     runs_create = AsyncMock()
+    store_put = AsyncMock()
     lg_client = MagicMock()
     lg_client.runs.create = runs_create
+    lg_client.store.get_item = AsyncMock(return_value=None)
+    lg_client.store.put_item = store_put
     threads_update = AsyncMock()
     store_client = MagicMock()
     store_client.threads.update = threads_update
@@ -31,6 +34,7 @@ def happy(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         "runs_create": runs_create,
         "threads_update": threads_update,
         "status_check": AsyncMock(return_value=True),
+        "store_put": store_put,
     }
 
     monkeypatch.setattr(ci_autofix, "_user_autofix_enabled", AsyncMock(return_value=True))
@@ -86,8 +90,11 @@ async def test_batches_when_thread_busy(happy: dict[str, Any], monkeypatch) -> N
     monkeypatch.setattr(ci_autofix, "is_thread_active", AsyncMock(return_value=True))
     result = await _run()
     assert result == "batched"
-    happy["threads_update"].assert_awaited()
+    happy["store_put"].assert_awaited()
     happy["runs_create"].assert_not_called()
+    # A batched event must not burn an attempt or mark the SHA handled, so a later
+    # webhook/sweep can still dispatch if the in-flight run never consumes it.
+    happy["threads_update"].assert_not_awaited()
 
 
 @pytest.mark.asyncio
