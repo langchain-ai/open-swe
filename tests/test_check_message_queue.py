@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -45,6 +45,9 @@ async def test_check_message_queue_injects_dashboard_handoff_instruction() -> No
             return_value={"configurable": {"thread_id": "thread-1"}},
         ),
         patch("agent.middleware.check_message_queue.get_store", return_value=store),
+        patch(
+            "agent.middleware.check_message_queue.get_client", side_effect=Exception("no client")
+        ),
     ):
         result = await check_message_queue_before_model.abefore_model({}, MagicMock())
 
@@ -54,6 +57,34 @@ async def test_check_message_queue_injects_dashboard_handoff_instruction() -> No
     assert DASHBOARD_HANDOFF_MARKER in message["content"][0]["text"]
     assert message["content"][1] == {"type": "text", "text": "continue in web"}
     assert store.deleted == [(("queue", "thread-1"), "pending_messages")]
+
+
+@pytest.mark.asyncio
+async def test_check_message_queue_injects_pending_autofix_event() -> None:
+    client = MagicMock()
+    client.threads.get = AsyncMock(
+        return_value={"metadata": {"autofix_pending_event": "ci_failure"}}
+    )
+    client.threads.update = AsyncMock()
+
+    with (
+        patch(
+            "agent.middleware.check_message_queue.get_config",
+            return_value={"configurable": {"thread_id": "thread-1"}},
+        ),
+        patch("agent.middleware.check_message_queue.get_store", return_value=None),
+        patch("agent.middleware.check_message_queue.get_client", return_value=client),
+    ):
+        result = await check_message_queue_before_model.abefore_model({}, MagicMock())
+
+    assert result is not None
+    message = result["messages"][0]
+    assert message["role"] == "user"
+    assert "PR babysitting event arrived" in message["content"][0]["text"]
+    client.threads.update.assert_awaited_once_with(
+        thread_id="thread-1",
+        metadata={"autofix_pending_event": "", "autofix_pending_event_at_ms": None},
+    )
 
 
 @pytest.mark.asyncio
