@@ -59,22 +59,29 @@ class TestIsSecondaryRateLimit:
 
 
 class TestIsRetryableResponse:
-    @pytest.mark.parametrize("status", [429, 502, 503, 504])
-    def test_retryable_status_codes(self, status: int) -> None:
-        assert _is_retryable_response(_make_response(status))
+    @pytest.mark.parametrize("status", [429, 503])
+    def test_always_retryable_status_codes(self, status: int) -> None:
+        assert _is_retryable_response(_make_response(status), "POST")
+        assert _is_retryable_response(_make_response(status), "GET")
+
+    @pytest.mark.parametrize("status", [502, 504])
+    def test_idempotent_only_retryable_status_codes(self, status: int) -> None:
+        assert _is_retryable_response(_make_response(status), "GET")
+        assert not _is_retryable_response(_make_response(status), "POST")
 
     def test_secondary_rate_limit_is_retryable(self) -> None:
         resp = httpx.Response(403, text="secondary rate limit")
-        assert _is_retryable_response(resp)
+        assert _is_retryable_response(resp, "POST")
+        assert _is_retryable_response(resp, "GET")
 
     def test_200_not_retryable(self) -> None:
-        assert not _is_retryable_response(_make_response(200))
+        assert not _is_retryable_response(_make_response(200), "GET")
 
     def test_404_not_retryable(self) -> None:
-        assert not _is_retryable_response(_make_response(404))
+        assert not _is_retryable_response(_make_response(404), "GET")
 
     def test_422_not_retryable(self) -> None:
-        assert not _is_retryable_response(_make_response(422))
+        assert not _is_retryable_response(_make_response(422), "POST")
 
 
 class TestRetryAfterSeconds:
@@ -277,6 +284,51 @@ async def test_github_request_retries_on_503_even_for_post() -> None:
 
     assert response.status_code == 201
     assert client.post.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_github_request_does_not_retry_502_on_post() -> None:
+    """502 is ambiguous — the upstream may have processed the write before the
+    gateway returned an error.  Must not retry for non-idempotent methods."""
+    response_502 = _make_response(502)
+    client = AsyncMock()
+    client.post = AsyncMock(return_value=response_502)
+
+    response = await github_request(client, "POST", "https://api.github.com/test")
+
+    assert response.status_code == 502
+    assert client.post.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_github_request_does_not_retry_504_on_post() -> None:
+    """504 is ambiguous — the upstream may have processed the write before the
+    gateway timed out.  Must not retry for non-idempotent methods."""
+    response_504 = _make_response(504)
+    client = AsyncMock()
+    client.post = AsyncMock(return_value=response_504)
+
+    response = await github_request(client, "POST", "https://api.github.com/test")
+
+    assert response.status_code == 504
+    assert client.post.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_github_request_retries_502_on_get() -> None:
+    """502 is safe to retry for idempotent methods."""
+    responses = [
+        _make_response(502),
+        _make_response(200),
+    ]
+    client = AsyncMock()
+    client.get = AsyncMock(side_effect=responses)
+
+    with patch("agent.utils.github_http.asyncio.sleep", new_callable=AsyncMock):
+        response = await github_request(client, "GET", "https://api.github.com/test")
+
+    assert response.status_code == 200
+    assert client.get.await_count == 2
 
 
 @pytest.mark.asyncio

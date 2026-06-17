@@ -7,12 +7,8 @@ This centralises:
 - **Timeouts**: httpx defaults to 5 s which is too aggressive for paginated
   GitHub/GraphQL fetches.  The default here is 30 s read / 10 s connect.
 - **Retries**: exponential backoff with jitter for retryable HTTP status codes
-  (429, 502, 503, 504) and transport errors on idempotent methods only.
-  Non-idempotent methods (POST) are **not** retried on transport errors
-  (timeout / connection reset) because the server may have processed the
-  write before the response was lost — retrying would duplicate the resource.
-  Retries on 429 / 5xx are safe for all methods since the server explicitly
-  did not process the request.
+  and transport errors, gated by method idempotency to prevent duplicate writes.
+  See ``github_request`` for the full retry matrix.
 - **Rate-limit awareness**: respects ``Retry-After`` headers and detects
   GitHub secondary rate limits (403 with ``X-RateLimit-Remaining: 0`` or a
   "secondary rate limit" body message), backing off before retrying.
@@ -38,7 +34,8 @@ GITHUB_HEADERS_VERSION = "2022-11-28"
 DEFAULT_TIMEOUT = httpx.Timeout(30.0, connect=10.0, pool=5.0)
 DEFAULT_MAX_RETRIES = 3
 
-_RETRY_STATUS_CODES = frozenset({429, 502, 503, 504})
+_ALWAYS_RETRYABLE_STATUS = frozenset({429, 503})
+_IDEMPOTENT_RETRYABLE_STATUS = frozenset({502, 504})
 _SECONDARY_RATE_LIMIT_MARKERS = ("secondary rate limit", "rate limit")
 _RETRYABLE_TRANSPORT_METHODS = frozenset({"GET", "HEAD", "OPTIONS", "PUT", "DELETE"})
 
@@ -66,9 +63,11 @@ def _is_secondary_rate_limit(response: httpx.Response) -> bool:
     return any(marker in body for marker in _SECONDARY_RATE_LIMIT_MARKERS)
 
 
-def _is_retryable_response(response: httpx.Response) -> bool:
-    if response.status_code in _RETRY_STATUS_CODES:
+def _is_retryable_response(response: httpx.Response, method: str) -> bool:
+    if response.status_code in _ALWAYS_RETRYABLE_STATUS:
         return True
+    if response.status_code in _IDEMPOTENT_RETRYABLE_STATUS:
+        return method.upper() in _RETRYABLE_TRANSPORT_METHODS
     return _is_secondary_rate_limit(response)
 
 
@@ -131,17 +130,19 @@ async def github_request(
     retryable status codes that have exhausted retries (caller should call
     ``raise_for_status()``).
 
-    Retries on retryable HTTP status codes (429 / 502 / 503 / 504 / secondary
-    rate limit) for **all** methods — the server explicitly did not process
-    the request in these cases.
+    Retry matrix:
 
-    Retries on transport errors (``TimeoutException`` / ``TransportError``)
-    **only for idempotent methods** (GET, HEAD, OPTIONS, PUT, DELETE).  A
-    transport error on a POST does not tell us whether the server processed
-    the write, so the exception is re-raised immediately to avoid duplicates.
+    | Condition                         | Idempotent (GET, PUT, DELETE…) | Non-idempotent (POST, PATCH) |
+    |-----------------------------------|--------------------------------|------------------------------|
+    | Transport error (timeout/reset)   | Retry with backoff             | Raise immediately            |
+    | 429 / 503 / secondary rate limit  | Retry with backoff             | Retry with backoff           |
+    | 502 / 504 (ambiguous gateway)     | Retry with backoff             | Raise immediately            |
 
-    Re-raises the last ``httpx.TimeoutException`` / ``httpx.TransportError``
-    if all retries are exhausted on a transport-level failure.
+    429 and 503 are safe to retry for any method: the server explicitly did
+    not process the request.  502/504 are ambiguous — the upstream may have
+    processed the write before the gateway returned an error — so they are
+    only retried for idempotent methods.  Transport errors are only retried
+    for idempotent methods for the same reason.
     """
     method_upper = method.upper()
     retry_transport = method_upper in _RETRYABLE_TRANSPORT_METHODS
@@ -167,7 +168,7 @@ async def github_request(
                 continue
             raise
 
-        if _is_retryable_response(response):
+        if _is_retryable_response(response, method):
             if attempt < max_retries:
                 delay = _compute_backoff(response, attempt)
                 logger.warning(
