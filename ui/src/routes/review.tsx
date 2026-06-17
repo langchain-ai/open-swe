@@ -181,12 +181,11 @@ function ReviewPage() {
           <SettingsRow
             label="Trigger Mode"
             description={triggerDescription}
-            comingSoon
             control={
               <Select
                 value={current.trigger_mode}
                 onValueChange={(v) => persist({ trigger_mode: v as TriggerMode })}
-                disabled
+                disabled={!canEdit}
               >
                 <SelectTrigger className="w-40">
                   <SelectValue />
@@ -236,13 +235,12 @@ function ReviewPage() {
           />
           <SettingsRow
             label="Autofix Mode"
-            description="When enabled, the reviewer will propose fixes. Billed at plan rates."
-            comingSoon
+            description="When enabled, Open SWE will automatically fix failing CI checks and resolve reviewer comments on PRs it opens. Billed at plan rates."
             control={
               <Select
                 value={current.autofix_mode}
                 onValueChange={(v) => persist({ autofix_mode: v as AutofixMode })}
-                disabled
+                disabled={!canEdit}
               >
                 <SelectTrigger className="w-32">
                   <SelectValue />
@@ -260,14 +258,13 @@ function ReviewPage() {
           <SettingsRow
             label="Autofix Severity Threshold"
             description="Findings at this severity or higher are auto-fixed"
-            comingSoon
             control={
               <Select
                 value={current.autofix_severity_threshold}
                 onValueChange={(v) =>
                   persist({ autofix_severity_threshold: v as AutofixMode })
                 }
-                disabled
+                disabled={!canEdit}
               >
                 <SelectTrigger className="w-32">
                   <SelectValue />
