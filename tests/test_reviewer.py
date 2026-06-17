@@ -193,6 +193,19 @@ async def test_reviewer_resolves_app_installation_token_at_run_start() -> None:
     mock_cache_token.assert_called_once_with("reviewer-thread-id", "app-token", expires_at=None)
     middleware = create_agent.call_args.kwargs["middleware"]
     assert reviewer.check_message_queue_before_model in middleware
+    # Re-review sessions accumulate tens of turns of verbatim tool output (diff
+    # fetches, file reads, list_findings snapshots). Without a compaction edit
+    # in the middleware stack, input_tokens stays at a constant plateau and
+    # drives per-session cost into the tens of dollars. Assert the reviewer
+    # wires in a ContextEditingMiddleware so older tool results get cleared
+    # once the token budget is hit.
+    context_edits = [m for m in middleware if isinstance(m, reviewer.ContextEditingMiddleware)]
+    assert context_edits, "reviewer middleware stack must include ContextEditingMiddleware"
+    edits = list(context_edits[0].edits)
+    assert any(isinstance(e, reviewer.ClearToolUsesEdit) for e in edits)
+    clear_edit = next(e for e in edits if isinstance(e, reviewer.ClearToolUsesEdit))
+    assert "list_findings" in clear_edit.exclude_tools
+    assert "publish_review" in clear_edit.exclude_tools
 
 
 @pytest.mark.asyncio
