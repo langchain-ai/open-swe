@@ -862,9 +862,8 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
                 len(image_urls),
                 resolved_model_id,
             )
-            content_blocks[0] = create_text_block(
-                prompt + vision_not_supported_warning(resolved_model_id, len(image_urls))
-            )
+            prompt += vision_not_supported_warning(resolved_model_id, len(image_urls))
+            content_blocks[0] = create_text_block(prompt)
             image_urls = []
 
     linear_project_id = ""
@@ -1108,9 +1107,8 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
                 len(image_urls),
                 resolved_model_id,
             )
-            content_blocks[0] = create_text_block(
-                prompt + vision_not_supported_warning(resolved_model_id, len(image_urls))
-            )
+            prompt += vision_not_supported_warning(resolved_model_id, len(image_urls))
+            content_blocks[0] = create_text_block(prompt)
             image_urls = []
 
     # Open SWE opens PRs as the triggering user, so a run only proceeds when we
