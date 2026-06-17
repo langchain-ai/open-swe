@@ -16,6 +16,10 @@ import {
 } from "@/lib/agents/queries"
 import { useModelOptions } from "@/lib/agents/provider/useModelOptions"
 import { useProfile, useRepos } from "@/lib/profile"
+import {
+  requestNotificationPermission,
+  setNotificationsPref,
+} from "@/lib/notifications"
 
 function promptContent(text: string, images: Array<ImageChunk>) {
   const trimmed = text.trim()
@@ -74,6 +78,9 @@ export function AgentsHome() {
   }, [stream.threadId, queryClient, navigate])
 
   const handleSubmit = (prompt: string, images: Array<ImageChunk>) => {
+    void requestNotificationPermission().then((perm) => {
+      if (perm === "granted") setNotificationsPref(true)
+    })
     draftRef.current = {
       prompt,
       images,
