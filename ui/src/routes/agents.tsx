@@ -9,6 +9,8 @@ import { AgentsShell } from "@/components/agents/AgentsSidebar"
 import { Skeleton } from "@/components/ui/skeleton"
 import agentsCss from "@/styles/agents.css?url"
 import { AgentThreadStreamProvider } from "@/lib/agents/AgentThreadStreamProvider"
+import { useAgentThreads } from "@/lib/agents/queries"
+import { useRunCompletionNotifier } from "@/lib/agents/useRunCompletionNotifier"
 import { useSession } from "@/lib/session"
 
 export const Route = createFileRoute("/agents")({
@@ -32,6 +34,9 @@ function AgentsLayout() {
     threadId !== "reviews"
       ? threadId
       : undefined
+
+  const threadsQuery = useAgentThreads()
+  useRunCompletionNotifier(threadsQuery.data, activeThreadId)
 
   if (session.isLoading) {
     return (

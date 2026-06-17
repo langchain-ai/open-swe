@@ -14,6 +14,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Switch } from "@/components/ui/switch"
 import { api, slackConnectUrl } from "@/lib/api"
 import {
   buildProfileUpdate,
@@ -22,6 +23,12 @@ import {
   useSaveProfile,
 } from "@/lib/profile"
 import { useSession } from "@/lib/session"
+import {
+  notificationsEnabled,
+  notificationsSupported,
+  requestNotificationPermission,
+  setNotificationsPref,
+} from "@/lib/notifications"
 import { cn } from "@/lib/utils"
 
 export const Route = createFileRoute("/my-settings")({
@@ -114,6 +121,68 @@ function UserMappingSection({ session }: { session: SessionUser }) {
           }
         />
       </div>
+    </SettingsSection>
+  )
+}
+
+function NotificationsSection() {
+  const supported = notificationsSupported()
+  const [enabled, setEnabled] = useState(() => notificationsEnabled())
+  const [permissionDenied, setPermissionDenied] = useState(
+    () => supported && Notification.permission === "denied"
+  )
+
+  const handleToggle = async (checked: boolean) => {
+    if (checked) {
+      const perm = await requestNotificationPermission()
+      if (perm === "granted") {
+        setNotificationsPref(true)
+        setEnabled(true)
+      } else if (perm === "denied") {
+        setPermissionDenied(true)
+      }
+    } else {
+      setNotificationsPref(false)
+      setEnabled(false)
+    }
+  }
+
+  if (!supported) {
+    return (
+      <SettingsSection title="Notifications">
+        <SettingsRow
+          label="Desktop notifications"
+          description="Your browser does not support desktop notifications."
+          control={
+            <span className="text-[10px] text-muted-foreground">
+              Not supported
+            </span>
+          }
+        />
+      </SettingsSection>
+    )
+  }
+
+  return (
+    <SettingsSection
+      title="Notifications"
+      description="Get a desktop notification when an agent run finishes."
+    >
+      <SettingsRow
+        label="Desktop notifications"
+        description={
+          permissionDenied
+            ? "Permission was denied. Re-enable it in your browser's site settings."
+            : "Show a notification when a run completes."
+        }
+        control={
+          <Switch
+            checked={enabled}
+            onCheckedChange={handleToggle}
+            disabled={permissionDenied}
+          />
+        }
+      />
     </SettingsSection>
   )
 }
@@ -215,6 +284,8 @@ function MySettingsPage() {
           }
         />
       </SettingsSection>
+
+      <NotificationsSection />
 
       <SettingsSection title="Account">
         <SettingsRow
