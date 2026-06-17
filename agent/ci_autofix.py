@@ -12,7 +12,7 @@ loop-capping live in one place. Skip-rules mirror Cursor/Claude Code:
 * Skip failures inherited from the base branch.
 * Skip when the latest commit was authored by a human (don't fight pushes).
 * Dedupe per (head SHA + failing-check set); cap total attempts.
-* Honor team ``autofix_mode`` / ``trigger_mode`` and the per-PR opt-out.
+* Honor team ``autofix_enabled`` / ``trigger_mode`` and the per-PR opt-out.
 """
 
 from __future__ import annotations
@@ -248,7 +248,7 @@ async def handle_ci_failure(
         return "missing_repo"
 
     settings = await get_autofix_settings()
-    if settings["autofix_mode"] == "off":
+    if not settings["autofix_enabled"]:
         return "autofix_disabled_team"
     if not await is_review_repo_enabled(owner, repo):
         return "repo_not_enabled"
@@ -393,7 +393,7 @@ async def handle_review_feedback(
         return "missing_repo"
 
     settings = await get_autofix_settings()
-    if settings["autofix_mode"] == "off":
+    if not settings["autofix_enabled"]:
         return "autofix_disabled_team"
     if settings["trigger_mode"] == "manual":
         return "trigger_manual"

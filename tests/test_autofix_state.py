@@ -40,16 +40,14 @@ async def test_get_autofix_settings_normalizes() -> None:
         "get_team_settings",
         AsyncMock(
             return_value={
-                "autofix_mode": "bogus",
-                "autofix_severity_threshold": "high",
+                "autofix_enabled": True,
                 "trigger_mode": "weird",
             }
         ),
     ):
         settings = await team_settings.get_autofix_settings()
     assert settings == {
-        "autofix_mode": "off",
-        "autofix_severity_threshold": "high",
+        "autofix_enabled": True,
         "trigger_mode": "every_push",
     }
 
@@ -59,12 +57,12 @@ async def test_is_autofix_enabled() -> None:
     with patch.object(
         team_settings,
         "get_team_settings",
-        AsyncMock(return_value={"autofix_mode": "high"}),
+        AsyncMock(return_value={"autofix_enabled": True}),
     ):
         assert await team_settings.is_autofix_enabled() is True
     with patch.object(
         team_settings,
         "get_team_settings",
-        AsyncMock(return_value={"autofix_mode": "off"}),
+        AsyncMock(return_value={"autofix_enabled": False}),
     ):
         assert await team_settings.is_autofix_enabled() is False

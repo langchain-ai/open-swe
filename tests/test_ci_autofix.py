@@ -39,8 +39,7 @@ def happy(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         "get_autofix_settings",
         AsyncMock(
             return_value={
-                "autofix_mode": "high",
-                "autofix_severity_threshold": "medium",
+                "autofix_enabled": True,
                 "trigger_mode": "every_push",
             }
         ),
@@ -109,8 +108,7 @@ async def test_skip_team_disabled(happy: dict[str, Any], monkeypatch) -> None:
         "get_autofix_settings",
         AsyncMock(
             return_value={
-                "autofix_mode": "off",
-                "autofix_severity_threshold": "medium",
+                "autofix_enabled": False,
                 "trigger_mode": "every_push",
             }
         ),
@@ -143,8 +141,7 @@ async def test_skip_trigger_manual(happy: dict[str, Any], monkeypatch) -> None:
         "get_autofix_settings",
         AsyncMock(
             return_value={
-                "autofix_mode": "high",
-                "autofix_severity_threshold": "medium",
+                "autofix_enabled": True,
                 "trigger_mode": "manual",
             }
         ),
@@ -159,8 +156,7 @@ async def test_skip_once_per_pr_after_first(happy: dict[str, Any], monkeypatch) 
         "get_autofix_settings",
         AsyncMock(
             return_value={
-                "autofix_mode": "high",
-                "autofix_severity_threshold": "medium",
+                "autofix_enabled": True,
                 "trigger_mode": "once_per_pr",
             }
         ),

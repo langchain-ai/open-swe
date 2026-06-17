@@ -4,7 +4,7 @@ import { CaretRightIcon } from "@phosphor-icons/react";
 import { useEffect, useMemo, useState } from "react";
 import { IoLogoGithub } from "react-icons/io5";
 
-import type { AutofixMode, ReposPayload, TeamSettings, TriggerMode } from "@/lib/api";
+import type { ReposPayload, TeamSettings, TriggerMode } from "@/lib/api";
 import { AppShell, SettingsRow, SettingsSection } from "@/components/AppShell";
 import {
   Select,
@@ -40,20 +40,12 @@ const TRIGGER_MODES: Array<{ value: TriggerMode; label: string; description: str
   },
 ];
 
-const AUTOFIX_MODES: Array<{ value: AutofixMode; label: string }> = [
-  { value: "off", label: "Off" },
-  { value: "low", label: "Low" },
-  { value: "medium", label: "Medium" },
-  { value: "high", label: "High" },
-];
-
 const DEFAULT_SETTINGS: TeamSettings = {
   trigger_mode: "every_push",
   review_draft_prs: false,
   pr_summaries: true,
   review_trace_links: true,
-  autofix_mode: "off",
-  autofix_severity_threshold: "medium",
+  autofix_enabled: false,
   org_guidelines: null,
   default_agent_model: null,
   default_agent_reasoning_effort: null,
@@ -234,49 +226,14 @@ function ReviewPage() {
             }
           />
           <SettingsRow
-            label="Autofix Mode"
+            label="Autofix"
             description="When enabled, Open SWE will automatically fix failing CI checks and resolve reviewer comments on PRs it opens. Billed at plan rates."
             control={
-              <Select
-                value={current.autofix_mode}
-                onValueChange={(v) => persist({ autofix_mode: v as AutofixMode })}
+              <Switch
+                checked={current.autofix_enabled}
+                onCheckedChange={(v) => persist({ autofix_enabled: v })}
                 disabled={!canEdit}
-              >
-                <SelectTrigger className="w-32">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {AUTOFIX_MODES.map((m) => (
-                    <SelectItem key={m.value} value={m.value}>
-                      {m.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            }
-          />
-          <SettingsRow
-            label="Autofix Severity Threshold"
-            description="Findings at this severity or higher are auto-fixed"
-            control={
-              <Select
-                value={current.autofix_severity_threshold}
-                onValueChange={(v) =>
-                  persist({ autofix_severity_threshold: v as AutofixMode })
-                }
-                disabled={!canEdit}
-              >
-                <SelectTrigger className="w-32">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {AUTOFIX_MODES.map((m) => (
-                    <SelectItem key={m.value} value={m.value}>
-                      {m.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              />
             }
           />
         </div>
