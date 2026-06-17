@@ -293,6 +293,53 @@ def test_add_finding_allows_file_level_with_no_lines() -> None:
     assert result["success"] is True
 
 
+def test_add_finding_accepts_file_path_alias() -> None:
+    """LLMs trained on the deepagents stdlib (``read_file``/``write_file``/
+    ``edit_file``) often pass ``file_path`` instead of ``file``. Accept the
+    alias so legitimate findings aren't silently dropped."""
+    captured: list[Any] = []
+
+    async def fake_append(_thread_id: str, finding: Any) -> Any:
+        captured.append(finding)
+        return finding
+
+    with (
+        patch("agent.tools.add_finding.get_config", return_value=_config()),
+        patch("agent.tools.add_finding.get_thread_id_from_runtime", return_value="tid-1"),
+        patch("agent.tools.add_finding.append_finding", side_effect=fake_append),
+    ):
+        result = add_finding(
+            severity="medium",
+            confidence="high",
+            category="correctness",
+            file_path="foo.py",
+            title="Generated title",
+            description="d",
+            start_line=11,
+            end_line=11,
+        )
+    assert result["success"] is True
+    assert captured[0]["file"] == "foo.py"
+
+
+def test_add_finding_missing_file_returns_structured_error() -> None:
+    """When neither ``file`` nor ``file_path`` is provided, the tool must return
+    a non-empty structured error so the LLM can correct itself rather than
+    seeing an opaque empty result."""
+    with patch("agent.tools.add_finding.get_config", return_value=_config()):
+        result = add_finding(
+            severity="high",
+            confidence="high",
+            category="correctness",
+            title="Generated title",
+            description="d",
+            start_line=11,
+            end_line=11,
+        )
+    assert result["success"] is False
+    assert "file" in result["error"].lower()
+
+
 def test_update_finding_rejects_invalid_status() -> None:
     with patch("agent.tools.update_finding.get_config", return_value=_config()):
         result = update_finding(finding_id="f_x", status="archived")

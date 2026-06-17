@@ -30,13 +30,14 @@ def add_finding(
     severity: str,
     confidence: str,
     category: str,
-    file: str,
     title: str,
     description: str,
+    file: str | None = None,
     start_line: int | None = None,
     end_line: int | None = None,
     suggestion: str | None = None,
     side: str = "RIGHT",
+    file_path: str | None = None,
 ) -> dict[str, Any]:
     """Record a review finding on the reviewer thread.
 
@@ -61,7 +62,10 @@ def add_finding(
         confidence: One of ``low``, ``medium``, ``high``.
         category: Short category label (``correctness``, ``security``, ``perf``,
             ``style``, ``flag``, etc.). Free-form; used for grouping in the UI.
-        file: Repo-relative path of the file the finding refers to.
+        file: Repo-relative path of the file the finding refers to. ``file_path``
+            is accepted as an alias for compatibility with the deepagents
+            stdlib (``read_file``/``write_file``/``edit_file``) calling
+            convention.
         title: Concise generated headline for the finding. Name the failure mode
             in roughly 4-10 words; do not copy or truncate the description.
         description: Markdown body the user sees. Do not repeat ``title`` as the
@@ -95,6 +99,14 @@ def add_finding(
     Returns:
         Dictionary with ``success``, ``finding_id`` and (on rejection) ``error``.
     """
+    if file is None:
+        file = file_path
+    if file is None:
+        return {
+            "success": False,
+            "error": "Missing required arg `file` (or alias `file_path`).",
+        }
+
     if start_line is not None and end_line is None:
         end_line = start_line
     if start_line is None and end_line is not None:
