@@ -24,11 +24,13 @@ from .ci_autofix import handle_ci_failure, handle_review_feedback
 from .dashboard import router as dashboard_router
 from .dashboard.agent_overrides import (
     get_profile_default_repo,
+    resolve_agent_model_id,
     resolve_login_from_email_async,
 )
 from .dashboard.autofix_state import set_pr_autofix_disabled
 from .dashboard.enabled_repos import is_review_repo_enabled
 from .dashboard.oauth import build_settings_url
+from .dashboard.options import model_supports_images
 from .dashboard.profiles import get_profile, get_valid_access_token, has_access_token_record
 from .dashboard.team_settings import (
     get_team_default_repo,
@@ -96,7 +98,12 @@ from .utils.github_token import (
 )
 from .utils.linear import post_linear_trace_comment
 from .utils.linear_team_repo_map import LINEAR_TEAM_TO_REPO
-from .utils.multimodal import dedupe_urls, extract_image_urls, fetch_image_block
+from .utils.multimodal import (
+    dedupe_urls,
+    extract_image_urls,
+    fetch_image_block,
+    vision_not_supported_warning,
+)
 from .utils.repo import extract_repo_from_text
 from .utils.slack import (
     GitHubPrRef,
@@ -837,15 +844,28 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
     content_blocks: list[dict[str, Any]] = [create_text_block(prompt)]
     if image_urls:
         image_urls = dedupe_urls(image_urls)
-        logger.info("Preparing %d image(s) for multimodal content", len(image_urls))
-        logger.debug("Image URLs: %s", image_urls)
+        linear_login = await resolve_login_from_email_async(user_email) if user_email else None
+        resolved_model_id = await resolve_agent_model_id(linear_login)
+        if model_supports_images(resolved_model_id):
+            logger.info("Preparing %d image(s) for multimodal content", len(image_urls))
+            logger.debug("Image URLs: %s", image_urls)
 
-        async with httpx.AsyncClient() as client:
-            for image_url in image_urls:
-                image_block = await fetch_image_block(image_url, client)
-                if image_block:
-                    content_blocks.append(image_block)
-        logger.info("Built %d content block(s) for prompt", len(content_blocks))
+            async with httpx.AsyncClient() as client:
+                for image_url in image_urls:
+                    image_block = await fetch_image_block(image_url, client)
+                    if image_block:
+                        content_blocks.append(image_block)
+            logger.info("Built %d content block(s) for prompt", len(content_blocks))
+        else:
+            logger.warning(
+                "Skipping %d image(s) for Linear issue: model %s does not support images",
+                len(image_urls),
+                resolved_model_id,
+            )
+            content_blocks[0] = create_text_block(
+                prompt + vision_not_supported_warning(resolved_model_id, len(image_urls))
+            )
+            image_urls = []
 
     linear_project_id = ""
     linear_issue_number = ""
@@ -1068,17 +1088,30 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
         ]
         + image_urls_from_links
     )
-    if image_urls:
-        logger.info("Preparing %d image(s) for Slack mention", len(image_urls))
-        async with httpx.AsyncClient() as http_client:
-            for image_url in image_urls:
-                image_block = await fetch_image_block(image_url, http_client)
-                if image_block:
-                    content_blocks.append(image_block)
 
     mapped_login = await login_for_slack_id(user_id)
     if not mapped_login and user_email:
         mapped_login = await login_for_email(user_email)
+
+    if image_urls:
+        resolved_model_id = await resolve_agent_model_id(mapped_login)
+        if model_supports_images(resolved_model_id):
+            logger.info("Preparing %d image(s) for Slack mention", len(image_urls))
+            async with httpx.AsyncClient() as http_client:
+                for image_url in image_urls:
+                    image_block = await fetch_image_block(image_url, http_client)
+                    if image_block:
+                        content_blocks.append(image_block)
+        else:
+            logger.warning(
+                "Skipping %d image(s) for Slack mention: model %s does not support images",
+                len(image_urls),
+                resolved_model_id,
+            )
+            content_blocks[0] = create_text_block(
+                prompt + vision_not_supported_warning(resolved_model_id, len(image_urls))
+            )
+            image_urls = []
 
     # Open SWE opens PRs as the triggering user, so a run only proceeds when we
     # have a valid user GitHub token. Users who have never signed in with

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from agent.utils.multimodal import extract_image_urls
+from agent.utils.multimodal import extract_image_urls, vision_not_supported_warning
 
 
 def test_extract_image_urls_empty() -> None:
@@ -96,3 +96,15 @@ def test_extract_image_urls_mixed_markdown_and_direct() -> None:
         "https://example.com/another.gif",
     }
     assert len(result) == 3
+
+
+def test_vision_not_supported_warning_includes_model_and_count() -> None:
+    warning = vision_not_supported_warning("fireworks:.../glm-5p2", 2)
+    assert "glm-5p2" in warning
+    assert "2 image(s)" in warning
+    assert "does not support image input" in warning
+
+
+def test_vision_not_supported_warning_singular() -> None:
+    warning = vision_not_supported_warning("fireworks:.../glm-5p2", 1)
+    assert "1 image(s)" in warning

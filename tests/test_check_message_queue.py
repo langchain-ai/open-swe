@@ -7,6 +7,7 @@ import pytest
 
 from agent.middleware.check_message_queue import (
     DASHBOARD_HANDOFF_MARKER,
+    _build_blocks_from_payload,
     check_message_queue_before_model,
 )
 
@@ -53,3 +54,31 @@ async def test_check_message_queue_injects_dashboard_handoff_instruction() -> No
     assert DASHBOARD_HANDOFF_MARKER in message["content"][0]["text"]
     assert message["content"][1] == {"type": "text", "text": "continue in web"}
     assert store.deleted == [(("queue", "thread-1"), "pending_messages")]
+
+
+@pytest.mark.asyncio
+async def test_build_blocks_skips_images_for_text_only_model() -> None:
+    payload = {
+        "text": "see this screenshot",
+        "image_urls": ["https://files.slack.com/fake.png"],
+    }
+    blocks = await _build_blocks_from_payload(
+        payload, model_id="fireworks:accounts/fireworks/models/glm-5p2"
+    )
+    assert len(blocks) == 1
+    assert blocks[0]["type"] == "text"
+    assert "does not support image input" in blocks[0]["text"]
+
+
+@pytest.mark.asyncio
+async def test_build_blocks_includes_images_for_vision_model() -> None:
+    payload: dict[str, Any] = {"text": "see this", "image_urls": []}
+    blocks = await _build_blocks_from_payload(payload, model_id="openai:gpt-5.5")
+    assert blocks == [{"type": "text", "text": "see this"}]
+
+
+@pytest.mark.asyncio
+async def test_build_blocks_no_model_check_fetches_images() -> None:
+    payload: dict[str, Any] = {"text": "see this", "image_urls": []}
+    blocks = await _build_blocks_from_payload(payload)
+    assert blocks == [{"type": "text", "text": "see this"}]
