@@ -5,6 +5,8 @@ from markdownify import markdownify
 
 from .http_request import _request_with_safe_redirects
 
+FETCH_URL_MAX_CHARS = 100_000
+
 
 def fetch_url(url: str, timeout: int = 30) -> dict[str, Any]:
     """Fetch content from a URL and convert HTML to markdown format.
@@ -49,6 +51,12 @@ def fetch_url(url: str, timeout: int = 30) -> dict[str, Any]:
 
         # Convert HTML content to markdown
         markdown_content = markdownify(response.text)
+
+        if len(markdown_content) > FETCH_URL_MAX_CHARS:
+            markdown_content = (
+                markdown_content[:FETCH_URL_MAX_CHARS] + "\n... [content truncated: "
+                f"{FETCH_URL_MAX_CHARS}/{len(markdown_content)} chars]\n"
+            )
 
         return {
             "url": str(response.url),

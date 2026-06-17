@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 
 SLACK_API_BASE_URL = "https://slack.com/api"
 SLACK_BOT_TOKEN = os.environ.get("SLACK_BOT_TOKEN", "")
+SLACK_THREAD_MAX_MESSAGES = 500
 DEFAULT_ASSISTANT_STATUS = "is thinking…"
 
 # Curated rotating loading strings shown by Slack while the indicator is active.
@@ -504,12 +505,13 @@ async def get_slack_user_names(user_ids: list[str]) -> dict[str, str]:
 
 
 async def fetch_slack_thread_messages(channel_id: str, thread_ts: str) -> list[dict[str, Any]]:
-    """Fetch all messages for a Slack thread."""
+    """Fetch messages for a Slack thread, keeping the most recent window."""
     if not SLACK_BOT_TOKEN:
         return []
 
     messages: list[dict[str, Any]] = []
     cursor: str | None = None
+    truncated = False
 
     async with httpx.AsyncClient() as http_client:
         while True:
@@ -537,6 +539,16 @@ async def fetch_slack_thread_messages(channel_id: str, thread_ts: str) -> list[d
             if isinstance(batch, list):
                 messages.extend(item for item in batch if isinstance(item, dict))
 
+            if len(messages) >= SLACK_THREAD_MAX_MESSAGES:
+                truncated = True
+                logger.warning(
+                    "Slack thread %s/%s capped at %d messages",
+                    channel_id,
+                    thread_ts,
+                    SLACK_THREAD_MAX_MESSAGES,
+                )
+                break
+
             response_metadata = payload.get("response_metadata", {})
             cursor = (
                 response_metadata.get("next_cursor") if isinstance(response_metadata, dict) else ""
@@ -544,6 +556,8 @@ async def fetch_slack_thread_messages(channel_id: str, thread_ts: str) -> list[d
             if not cursor:
                 break
 
+    if truncated:
+        messages = messages[-SLACK_THREAD_MAX_MESSAGES:]
     messages.sort(key=lambda item: _parse_ts(item.get("ts")))
     return messages
 

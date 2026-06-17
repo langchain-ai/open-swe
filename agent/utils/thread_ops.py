@@ -10,6 +10,8 @@ from langgraph_sdk import get_client
 
 logger = logging.getLogger(__name__)
 
+MAX_QUEUED_MESSAGES = 100
+
 
 def langgraph_url() -> str:
     return os.environ.get("LANGGRAPH_URL") or os.environ.get(
@@ -57,6 +59,13 @@ async def queue_message_for_thread(
             logger.debug("No existing queued messages for thread %s", thread_id)
 
         existing_messages.append(new_message)
+        if len(existing_messages) > MAX_QUEUED_MESSAGES:
+            existing_messages = existing_messages[-MAX_QUEUED_MESSAGES:]
+            logger.warning(
+                "Thread %s queue capped at %d messages (dropped oldest)",
+                thread_id,
+                MAX_QUEUED_MESSAGES,
+            )
         await client.store.put_item(namespace, key, {"messages": existing_messages})
         logger.info(
             "Queued message for thread %s (total queued: %d)",
