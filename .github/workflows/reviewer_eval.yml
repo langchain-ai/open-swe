@@ -1,0 +1,104 @@
+# Runs the reviewer benchmark (evals/reviewer/run_eval.py) on a durable runner instead of as a
+# subprocess inside the serving deployment. Trigger it from the Actions UI / `gh workflow run`,
+# selecting the `prod` branch so the harness + judge match the deployed reviewer it scores.
+#
+# Progress is streamed to the LangGraph store record the dashboard reads, so the run shows up live
+# at /admin/evals. Required repository config:
+#   secrets: LANGSMITH_API_KEY, ANTHROPIC_API_KEY   (judge runs in-process; reviewer model keys
+#                                                     are NOT needed — the reviewer runs in the deployment)
+#   secret or var: LANGGRAPH_URL                     (the deployment URL the eval drives + reports to)
+name: Reviewer eval
+
+on:
+  workflow_dispatch:
+    inputs:
+      model_id:
+        description: Reviewer model id
+        type: string
+        default: google_genai:gemini-3.5-flash
+      reasoning_effort:
+        description: Reasoning effort
+        type: string
+        default: medium
+      dataset_name:
+        description: LangSmith dataset
+        type: string
+        default: openswe-reviewer-v1
+      experiment_prefix:
+        description: Run name (LangSmith experiment prefix)
+        type: string
+        default: openswe-review-confidence
+      max_concurrency:
+        description: Max concurrent PRs
+        type: string
+        default: "5"
+      score_mode:
+        description: all_findings | surfaced_findings
+        type: choice
+        default: all_findings
+        options:
+          - all_findings
+          - surfaced_findings
+      severity_threshold:
+        description: Severity threshold (surfaced_findings only)
+        type: choice
+        default: medium
+        options:
+          - low
+          - medium
+          - high
+          - critical
+      cap:
+        description: Max surfaced findings per PR (surfaced_findings only)
+        type: string
+        default: "4"
+      limit:
+        description: Run only the first N examples (blank = full dataset)
+        type: string
+        default: ""
+      langsmith_project:
+        description: LangSmith tracing project for eval traces
+        type: string
+        default: open-swe-evals
+      assistant_id:
+        description: Reviewer assistant id
+        type: string
+        default: reviewer
+
+concurrency:
+  group: reviewer-eval
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  reviewer-eval:
+    name: Reviewer eval
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+      - name: Install dependencies
+        run: uv sync --locked
+      - name: Run reviewer eval
+        env:
+          LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
+          LANGCHAIN_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          LANGGRAPH_URL: ${{ secrets.LANGGRAPH_URL || vars.LANGGRAPH_URL }}
+          REVIEWER_EVAL_REPORT_STORE: "1"
+        run: |
+          uv run python -m evals.reviewer.run_eval \
+            --model-id "${{ inputs.model_id }}" \
+            --reasoning-effort "${{ inputs.reasoning_effort }}" \
+            --dataset-name "${{ inputs.dataset_name }}" \
+            --experiment-prefix "${{ inputs.experiment_prefix }}" \
+            --max-concurrency "${{ inputs.max_concurrency }}" \
+            --score-mode "${{ inputs.score_mode }}" \
+            --severity-threshold "${{ inputs.severity_threshold }}" \
+            --cap "${{ inputs.cap }}" \
+            --langsmith-project "${{ inputs.langsmith_project }}" \
+            --assistant-id "${{ inputs.assistant_id }}" \
+            ${{ inputs.limit && format('--limit {0}', inputs.limit) || '' }}

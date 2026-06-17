@@ -12,6 +12,7 @@ evals/reviewer/
 ├── config.toml           # default benchmark run config
 ├── judge.py              # claude-opus-4-5 pairwise match evaluator + aggregate
 ├── target.py             # invokes the reviewer graph over langgraph_sdk
+├── store_reporter.py     # publishes live progress to the dashboard store record
 └── run_eval.py           # client.aevaluate entrypoint
 ```
 
@@ -54,14 +55,26 @@ Smoke-test with 3 PRs first:
 uv run python -m evals.reviewer.run_eval --limit 3
 ```
 
-### From the admin dashboard
+### From the GitHub Action (recommended for full runs)
 
-Admins can also kick off the eval from the **Reviewer eval** section on the
-dashboard Admin page (no local shell needed). It launches the same
-`run_eval` runner as a subprocess against the running deployment, with an
-optional limit for a smoke test, and surfaces live status plus the LangSmith
-experiment link. The deployment must have `LANGSMITH_API_KEY` / `ANTHROPIC_API_KEY`
-in its environment.
+Trigger the **Reviewer eval** workflow (`.github/workflows/reviewer_eval.yml`)
+from the Actions UI or `gh workflow run reviewer_eval.yml --ref prod -f limit=3`.
+Run it on the **prod** branch so the harness/judge match the deployed reviewer it
+scores. Running it on a durable runner (instead of inside the serving deployment)
+means a deploy or container recycle can't kill a long run.
+
+The Action sets `REVIEWER_EVAL_REPORT_STORE=1`, so `run_eval` publishes live
+status/progress/logs to the LangGraph store record the dashboard reads — watch it
+at **Admin → Reviewer eval** (`/admin/evals`), which is now a read-only progress
+view (status, `completed / total`, log tail, LangSmith experiment link, and a link
+back to the GitHub run). If the Action is cancelled/killed, the heartbeat goes
+stale and the dashboard flips the run to `failed` within ~60s.
+
+Required repository config:
+
+- secrets: `LANGSMITH_API_KEY`, `ANTHROPIC_API_KEY` (the judge runs in-process;
+  reviewer-model keys are **not** needed — the reviewer runs in the deployment).
+- secret or var: `LANGGRAPH_URL` — the deployment URL the eval drives and reports to.
 
 ### Tracing project
 

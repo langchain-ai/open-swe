@@ -123,3 +123,10 @@ async def test_extract_surfaced_comments_uses_publish_filter(
             "severity": "high",
         }
     ]
+
+
+def test_completed_counter_increments() -> None:
+    start = target.get_completed_count()
+    target._record_completed()
+    target._record_completed()
+    assert target.get_completed_count() == start + 2
