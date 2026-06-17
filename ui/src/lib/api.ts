@@ -448,8 +448,9 @@ export interface ReviewerEvalConfig {
   cap: number
 }
 
-export interface ReviewerEvalStartRequest extends ReviewerEvalConfig {
-  limit: number | null
+export interface ReviewerEvalProgress {
+  completed: number
+  total: number | null
 }
 
 export interface ReviewerEvalStatus {
@@ -467,6 +468,9 @@ export interface ReviewerEvalStatus {
   experiment_url: string | null
   error: string | null
   log_tail: string | null
+  progress?: ReviewerEvalProgress | null
+  github_run_url?: string | null
+  trigger?: string | null
   updated_at: string
 }
 
@@ -616,13 +620,6 @@ export const api = {
       { method: "POST" }
     ),
   getReviewerEval: () => request<ReviewerEvalStatus>("/admin/evals/reviewer"),
-  startReviewerEval: (body: ReviewerEvalStartRequest) =>
-    request<ReviewerEvalStatus>("/admin/evals/reviewer", {
-      method: "POST",
-      body: JSON.stringify(body),
-    }),
-  cancelReviewerEval: () =>
-    request<ReviewerEvalStatus>("/admin/evals/reviewer", { method: "DELETE" }),
   logout: () => request<void>("/auth/logout", { method: "POST" }),
 }
 
