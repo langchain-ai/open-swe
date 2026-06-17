@@ -398,6 +398,7 @@ async def _build_usage_leaderboard_snapshot(period: Period) -> dict[str, Any]:
     sorted_users = sorted(
         users.values(),
         key=lambda item: (
+            -item["merged_prs"],
             -item["agent_loc"],
             -item["prs_opened"],
             -item["agent_runs"],
