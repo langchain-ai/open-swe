@@ -1,11 +1,12 @@
 import { Navigate, createFileRoute, useNavigate } from "@tanstack/react-router"
-import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
 import { IoLogoSlack } from "react-icons/io5"
 
-import type { SessionUser } from "@/lib/api"
+import type { CurrentsConnectBody, SessionUser } from "@/lib/api"
 import { AppShell, SettingsRow, SettingsSection } from "@/components/AppShell"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import {
   Select,
   SelectContent,
@@ -187,6 +188,83 @@ function NotificationsSection() {
   )
 }
 
+function CurrentsCredentialsSection() {
+  const qc = useQueryClient()
+  const creds = useQuery({
+    queryKey: ["myCurrents"],
+    queryFn: api.getMyCurrentsStatus,
+  })
+  const [error, setError] = useState<string | null>(null)
+  const [apiKey, setApiKey] = useState("")
+
+  const onSuccess = () => {
+    qc.invalidateQueries({ queryKey: ["myCurrents"] })
+    setError(null)
+    setApiKey("")
+  }
+  const onError = (e: Error) => setError(e.message)
+
+  const connect = useMutation({
+    mutationFn: (body: CurrentsConnectBody) => api.connectCurrents(body),
+    onSuccess,
+    onError,
+  })
+  const disconnect = useMutation({
+    mutationFn: () => api.disconnectCurrents(),
+    onSuccess,
+    onError,
+  })
+
+  const connected = creds.data?.connected
+
+  return (
+    <SettingsSection
+      title="Currents.dev"
+      description="Connect your personal Currents API key to let agent runs inspect e2e test results — failed specs, error traces, screenshots, and DOM snapshots. The key is encrypted at rest and scoped to your account only."
+    >
+      <SettingsRow
+        label="API key"
+        description={
+          connected
+            ? `Connected · key ••••${creds.data?.api_key_last4 ?? ""}`
+            : "Find your API key in Currents under Organization → API & Record Keys."
+        }
+        control={
+          connected ? (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => disconnect.mutate()}
+              disabled={disconnect.isPending}
+            >
+              Disconnect
+            </Button>
+          ) : (
+            <div className="flex flex-col items-end gap-2">
+              <Input
+                className="w-56"
+                placeholder="Currents API key"
+                type="password"
+                value={apiKey}
+                onChange={(e) => setApiKey(e.target.value)}
+                disabled={creds.isLoading}
+              />
+              <Button
+                size="sm"
+                onClick={() => connect.mutate({ api_key: apiKey.trim() })}
+                disabled={connect.isPending || !apiKey.trim()}
+              >
+                Connect
+              </Button>
+            </div>
+          )
+        }
+      />
+      {error && <p className="px-4 pb-3 text-xs text-destructive">{error}</p>}
+    </SettingsSection>
+  )
+}
+
 function MySettingsPage() {
   const session = useSession()
   const qc = useQueryClient()
@@ -217,7 +295,8 @@ function MySettingsPage() {
   }
 
   const firstModel = options.data?.models[0]
-  const fallbackModel = options.data?.default_agent_model ?? firstModel?.id ?? ""
+  const fallbackModel =
+    options.data?.default_agent_model ?? firstModel?.id ?? ""
   const fallbackEffort =
     options.data?.default_agent_reasoning_effort ??
     firstModel?.default_effort ??
@@ -286,6 +365,8 @@ function MySettingsPage() {
       </SettingsSection>
 
       <NotificationsSection />
+
+      <CurrentsCredentialsSection />
 
       <SettingsSection title="Account">
         <SettingsRow

@@ -141,6 +141,12 @@ from .thread_api import (
     send_dashboard_message,
     stream_dashboard_thread,
 )
+from .user_credentials import (
+    CurrentsCredentialsUpdate,
+    connect_currents,
+    disconnect_currents,
+    get_currents_status,
+)
 from .user_mappings import (
     delete_mapping,
     get_mapping,
@@ -397,6 +403,31 @@ async def get_my_mapping(
     """Return the logged-in user's own GitHub↔Slack mapping (or empty)."""
     mapping = await get_mapping(session["sub"])
     return mapping or {}
+
+
+@router.get("/my-credentials/currents")
+async def get_my_currents_status(
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    status = await get_currents_status(session["sub"])
+    return status.get("currents", {"connected": False})
+
+
+@router.put("/my-credentials/currents")
+async def connect_my_currents(
+    update: CurrentsCredentialsUpdate,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    status = await connect_currents(session["sub"], update)
+    return status.get("currents", {"connected": False})
+
+
+@router.delete("/my-credentials/currents")
+async def disconnect_my_currents(
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    status = await disconnect_currents(session["sub"])
+    return status.get("currents", {"connected": False})
 
 
 @router.get("/slack/login")

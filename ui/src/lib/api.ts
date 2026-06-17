@@ -161,6 +161,16 @@ export interface LangSmithConnectBody {
   endpoint?: string | null
 }
 
+export interface CurrentsCredentialStatus {
+  connected: boolean
+  api_key_last4?: string
+  updated_at?: string | null
+}
+
+export interface CurrentsConnectBody {
+  api_key: string
+}
+
 export interface UserMapping {
   github_login: string
   work_email: string
@@ -558,6 +568,17 @@ export const api = {
     }),
   disconnectLangSmith: () =>
     request<TeamCredentialsStatus>("/team-credentials/langsmith", {
+      method: "DELETE",
+    }),
+  getMyCurrentsStatus: () =>
+    request<CurrentsCredentialStatus>("/my-credentials/currents"),
+  connectCurrents: (body: CurrentsConnectBody) =>
+    request<CurrentsCredentialStatus>("/my-credentials/currents", {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  disconnectCurrents: () =>
+    request<CurrentsCredentialStatus>("/my-credentials/currents", {
       method: "DELETE",
     }),
   listEnabledReviewRepos: () =>
