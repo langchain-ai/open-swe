@@ -47,7 +47,7 @@ from .middleware import (
     refresh_github_proxy_before_model,
     settle_review_check_on_exit,
 )
-from .reviewer_diff import compute_diff_line_set, fetch_pr_diff, fetch_pr_metadata
+from .reviewer_diff import compute_diff_line_set, fetch_pr_diff, fetch_pr_metadata, truncate_diff
 from .reviewer_findings import (
     list_findings as list_findings_async,
 )
@@ -847,9 +847,14 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
         and bool(github_api_token)
     )
 
-    async def _fetch_diff_context() -> tuple[str, dict[str, dict[str, set[int]]] | None]:
+    async def _fetch_diff_context() -> tuple[str, str, dict[str, dict[str, set[int]]] | None]:
+        """Return (full_diff, truncated_diff, line_set).
+
+        The line set is computed from the full diff so findings on any changed
+        line are accepted. Only the prompt-facing text is truncated.
+        """
         if not can_fetch_pr or github_api_token is None or not isinstance(pr_number, int):
-            return "", None
+            return "", "", None
         fetched_diff = await fetch_pr_diff(
             owner=repo_owner,
             repo=repo_name,
@@ -857,8 +862,8 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
             token=github_api_token,
         )
         if fetched_diff is None:
-            return "", None
-        return fetched_diff, compute_diff_line_set(fetched_diff)
+            return "", "", None
+        return fetched_diff, truncate_diff(fetched_diff), compute_diff_line_set(fetched_diff)
 
     async def _fetch_pr_overview() -> tuple[str, str]:
         if not can_fetch_pr or github_api_token is None or not isinstance(pr_number, int):
@@ -952,7 +957,7 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
         _fetch_org_guidelines(),
         fetch_api_standards_skill(),
     )
-    pr_diff_text, pr_diff_line_set = diff_context
+    _, pr_diff_text, pr_diff_line_set = diff_context
     pr_title, pr_body = pr_overview
     config["configurable"]["diff_text"] = pr_diff_text
     config["configurable"]["diff_line_set"] = pr_diff_line_set

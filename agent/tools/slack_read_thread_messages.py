@@ -2,6 +2,7 @@ import asyncio
 from typing import Any
 
 from ..utils.slack import (
+    SLACK_THREAD_MAX_MESSAGES,
     fetch_slack_thread_messages,
     format_slack_messages_for_prompt,
     get_slack_user_names,
@@ -19,8 +20,18 @@ async def _fetch_and_format(channel_id: str, message_ts: str) -> dict[str, Any]:
     ]
     user_names = await get_slack_user_names(user_ids) if user_ids else {}
 
+    truncated = len(messages) >= SLACK_THREAD_MAX_MESSAGES
     formatted = format_slack_messages_for_prompt(messages, user_names)
-    return {"success": True, "formatted": formatted, "count": len(messages)}
+    if truncated:
+        formatted = (
+            f"[thread truncated — showing most recent {len(messages)} messages]\n{formatted}"
+        )
+    return {
+        "success": True,
+        "formatted": formatted,
+        "count": len(messages),
+        "truncated": truncated,
+    }
 
 
 def slack_read_thread_messages(channel_id: str, message_ts: str) -> dict[str, Any]:

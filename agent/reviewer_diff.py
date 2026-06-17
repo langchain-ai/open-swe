@@ -216,9 +216,8 @@ async def fetch_pr_diff(
     source for ``add_finding``'s in-diff anchor validation and for
     ``publish_review``'s 422 retry filter.
 
-    The diff is capped at ``PR_DIFF_MAX_CHARS`` characters. When truncated,
-    the first half of the budget is kept from the beginning and the second
-    half from the end so file headers and recent changes are both visible.
+    The full diff is returned — callers must use ``truncate_diff`` if they
+    need to cap the text before feeding it to the LLM.
     """
     import httpx
 
@@ -238,11 +237,15 @@ async def fetch_pr_diff(
     except httpx.HTTPError:
         logger.exception("Failed to fetch PR diff for %s/%s#%s", owner, repo, pr_number)
         return None
-    return _truncate_diff(response.text)
+    return response.text
 
 
-def _truncate_diff(diff_text: str) -> str:
-    """Truncate diff text to ``PR_DIFF_MAX_CHARS`` with a visible marker."""
+def truncate_diff(diff_text: str) -> str:
+    """Truncate diff text to ``PR_DIFF_MAX_CHARS`` with a visible marker.
+
+    Keeps the first half from the beginning and the second half from the end
+    so file headers and recent changes are both visible.
+    """
     if len(diff_text) <= PR_DIFF_MAX_CHARS:
         return diff_text
     half = PR_DIFF_MAX_CHARS // 2

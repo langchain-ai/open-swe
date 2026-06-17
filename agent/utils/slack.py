@@ -505,12 +505,13 @@ async def get_slack_user_names(user_ids: list[str]) -> dict[str, str]:
 
 
 async def fetch_slack_thread_messages(channel_id: str, thread_ts: str) -> list[dict[str, Any]]:
-    """Fetch all messages for a Slack thread (capped)."""
+    """Fetch messages for a Slack thread, keeping the most recent window."""
     if not SLACK_BOT_TOKEN:
         return []
 
     messages: list[dict[str, Any]] = []
     cursor: str | None = None
+    truncated = False
 
     async with httpx.AsyncClient() as http_client:
         while True:
@@ -539,6 +540,7 @@ async def fetch_slack_thread_messages(channel_id: str, thread_ts: str) -> list[d
                 messages.extend(item for item in batch if isinstance(item, dict))
 
             if len(messages) >= SLACK_THREAD_MAX_MESSAGES:
+                truncated = True
                 logger.warning(
                     "Slack thread %s/%s capped at %d messages",
                     channel_id,
@@ -554,7 +556,8 @@ async def fetch_slack_thread_messages(channel_id: str, thread_ts: str) -> list[d
             if not cursor:
                 break
 
-    messages = messages[:SLACK_THREAD_MAX_MESSAGES]
+    if truncated:
+        messages = messages[-SLACK_THREAD_MAX_MESSAGES:]
     messages.sort(key=lambda item: _parse_ts(item.get("ts")))
     return messages
 
