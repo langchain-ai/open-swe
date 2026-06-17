@@ -52,7 +52,7 @@ SUPPORTED_MODELS: list[ModelOption] = [
     {
         "id": "fireworks:accounts/fireworks/models/glm-5p2",
         "label": "GLM 5.2",
-        "efforts": ["none", "low", "medium", "high"],
+        "efforts": ["none", "high", "max"],
         "default_effort": "high",
         "supports_images": False,
     },
