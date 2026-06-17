@@ -83,22 +83,45 @@ jobs:
       - name: Install dependencies
         run: uv sync --locked
       - name: Run reviewer eval
+        # Inputs are passed via env and referenced as quoted "$VARS" — never
+        # interpolated into the script — so dispatcher-supplied text is treated
+        # as data, not shell syntax.
         env:
           LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
           LANGCHAIN_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           LANGGRAPH_URL: ${{ secrets.LANGGRAPH_URL || vars.LANGGRAPH_URL }}
           REVIEWER_EVAL_REPORT_STORE: "1"
+          INPUT_MODEL_ID: ${{ inputs.model_id }}
+          INPUT_REASONING_EFFORT: ${{ inputs.reasoning_effort }}
+          INPUT_DATASET_NAME: ${{ inputs.dataset_name }}
+          INPUT_EXPERIMENT_PREFIX: ${{ inputs.experiment_prefix }}
+          INPUT_MAX_CONCURRENCY: ${{ inputs.max_concurrency }}
+          INPUT_SCORE_MODE: ${{ inputs.score_mode }}
+          INPUT_SEVERITY_THRESHOLD: ${{ inputs.severity_threshold }}
+          INPUT_CAP: ${{ inputs.cap }}
+          INPUT_LIMIT: ${{ inputs.limit }}
+          INPUT_LANGSMITH_PROJECT: ${{ inputs.langsmith_project }}
+          INPUT_ASSISTANT_ID: ${{ inputs.assistant_id }}
         run: |
+          set -euo pipefail
+          limit_args=()
+          if [ -n "${INPUT_LIMIT}" ]; then
+            if ! [[ "${INPUT_LIMIT}" =~ ^[0-9]+$ ]]; then
+              echo "limit must be a positive integer, got: ${INPUT_LIMIT}" >&2
+              exit 1
+            fi
+            limit_args=(--limit "${INPUT_LIMIT}")
+          fi
           uv run python -m evals.reviewer.run_eval \
-            --model-id "${{ inputs.model_id }}" \
-            --reasoning-effort "${{ inputs.reasoning_effort }}" \
-            --dataset-name "${{ inputs.dataset_name }}" \
-            --experiment-prefix "${{ inputs.experiment_prefix }}" \
-            --max-concurrency "${{ inputs.max_concurrency }}" \
-            --score-mode "${{ inputs.score_mode }}" \
-            --severity-threshold "${{ inputs.severity_threshold }}" \
-            --cap "${{ inputs.cap }}" \
-            --langsmith-project "${{ inputs.langsmith_project }}" \
-            --assistant-id "${{ inputs.assistant_id }}" \
-            ${{ inputs.limit && format('--limit {0}', inputs.limit) || '' }}
+            --model-id "${INPUT_MODEL_ID}" \
+            --reasoning-effort "${INPUT_REASONING_EFFORT}" \
+            --dataset-name "${INPUT_DATASET_NAME}" \
+            --experiment-prefix "${INPUT_EXPERIMENT_PREFIX}" \
+            --max-concurrency "${INPUT_MAX_CONCURRENCY}" \
+            --score-mode "${INPUT_SCORE_MODE}" \
+            --severity-threshold "${INPUT_SEVERITY_THRESHOLD}" \
+            --cap "${INPUT_CAP}" \
+            --langsmith-project "${INPUT_LANGSMITH_PROJECT}" \
+            --assistant-id "${INPUT_ASSISTANT_ID}" \
+            "${limit_args[@]}"
