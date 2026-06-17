@@ -39,11 +39,11 @@ def happy(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         "get_autofix_settings",
         AsyncMock(
             return_value={
-                "autofix_enabled": True,
                 "trigger_mode": "every_push",
             }
         ),
     )
+    monkeypatch.setattr(ci_autofix, "_user_autofix_enabled", AsyncMock(return_value=True))
     monkeypatch.setattr(ci_autofix, "is_review_repo_enabled", AsyncMock(return_value=True))
     monkeypatch.setattr(
         ci_autofix, "get_github_app_installation_token", AsyncMock(return_value="tok")
@@ -102,18 +102,9 @@ async def test_queues_when_thread_busy(happy: dict[str, Any], monkeypatch) -> No
 
 
 @pytest.mark.asyncio
-async def test_skip_team_disabled(happy: dict[str, Any], monkeypatch) -> None:
-    monkeypatch.setattr(
-        ci_autofix,
-        "get_autofix_settings",
-        AsyncMock(
-            return_value={
-                "autofix_enabled": False,
-                "trigger_mode": "every_push",
-            }
-        ),
-    )
-    assert await _run() == "autofix_disabled_team"
+async def test_skip_user_disabled(happy: dict[str, Any], monkeypatch) -> None:
+    monkeypatch.setattr(ci_autofix, "_user_autofix_enabled", AsyncMock(return_value=False))
+    assert await _run() == "autofix_disabled_user"
 
 
 @pytest.mark.asyncio
@@ -141,7 +132,6 @@ async def test_skip_trigger_manual(happy: dict[str, Any], monkeypatch) -> None:
         "get_autofix_settings",
         AsyncMock(
             return_value={
-                "autofix_enabled": True,
                 "trigger_mode": "manual",
             }
         ),
@@ -156,7 +146,6 @@ async def test_skip_once_per_pr_after_first(happy: dict[str, Any], monkeypatch) 
         "get_autofix_settings",
         AsyncMock(
             return_value={
-                "autofix_enabled": True,
                 "trigger_mode": "once_per_pr",
             }
         ),

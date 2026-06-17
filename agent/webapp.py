@@ -35,7 +35,6 @@ from .dashboard.profiles import get_profile, get_valid_access_token, has_access_
 from .dashboard.team_settings import (
     get_team_default_repo,
     get_team_settings,
-    is_autofix_enabled,
 )
 from .dashboard.user_mappings import (
     email_for_login,
@@ -3350,8 +3349,6 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks) ->
     if event_type in _GH_CI_EVENTS:
         if not await _is_repo_enabled_for_review(webhook_repo_config):
             return {"status": "ignored", "reason": "Repository not enabled for review"}
-        if not await is_autofix_enabled():
-            return {"status": "ignored", "reason": "Auto-fix is disabled"}
         logger.info("Accepted GitHub %s webhook, scheduling CI auto-fix evaluation", event_type)
         background_tasks.add_task(process_github_ci_event, payload, event_type)
         return {"status": "accepted", "message": f"Processing GitHub {event_type} for auto-fix"}
@@ -3432,12 +3429,11 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks) ->
         if _is_actionable_review_payload(payload, event_type) and await _is_repo_enabled_for_review(
             webhook_repo_config
         ):
-            if await is_autofix_enabled():
-                gate_rejection = await _enforce_public_repo_org_gate(payload, event_type)
-                if gate_rejection is not None:
-                    return gate_rejection
-                background_tasks.add_task(process_github_autofix_review, payload, event_type)
-                return {"status": "accepted", "message": "Processing auto-fix review feedback"}
+            gate_rejection = await _enforce_public_repo_org_gate(payload, event_type)
+            if gate_rejection is not None:
+                return gate_rejection
+            background_tasks.add_task(process_github_autofix_review, payload, event_type)
+            return {"status": "accepted", "message": "Processing auto-fix review feedback"}
         logger.debug(
             "Ignoring GitHub %s%s that does not mention @openswe or @open-swe",
             event_type,

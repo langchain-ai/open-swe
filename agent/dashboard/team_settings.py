@@ -39,7 +39,6 @@ class TeamSettingsUpdate(BaseModel):
     review_draft_prs: bool = False
     pr_summaries: bool = True
     review_trace_links: bool = True
-    autofix_enabled: bool = False
     org_guidelines: str | None = None
     default_agent_model: str | None = None
     default_agent_reasoning_effort: str | None = None
@@ -137,7 +136,6 @@ def _default_settings() -> dict[str, Any]:
         "review_draft_prs": False,
         "pr_summaries": True,
         "review_trace_links": True,
-        "autofix_enabled": False,
         "org_guidelines": None,
         "default_agent_model": fallback_model,
         "default_agent_reasoning_effort": fallback_effort,
@@ -188,7 +186,6 @@ async def upsert_team_settings(update: TeamSettingsUpdate) -> dict[str, Any]:
         "review_draft_prs": update.review_draft_prs,
         "pr_summaries": update.pr_summaries,
         "review_trace_links": update.review_trace_links,
-        "autofix_enabled": update.autofix_enabled,
         "org_guidelines": update.org_guidelines,
         "default_agent_model": update.default_agent_model,
         "default_agent_reasoning_effort": update.default_agent_reasoning_effort,
@@ -303,22 +300,12 @@ async def get_team_default_grouping_model() -> tuple[str, str]:
 
 
 async def get_autofix_settings() -> dict[str, Any]:
-    """Return the team-wide auto-fix config: enabled flag and trigger mode."""
+    """Return the team-wide trigger mode for auto-fix."""
     settings = await get_team_settings()
-    enabled = bool(settings.get("autofix_enabled", False))
     trigger = settings.get("trigger_mode")
     if trigger not in {"every_push", "once_per_pr", "manual"}:
         trigger = "every_push"
-    return {
-        "autofix_enabled": enabled,
-        "trigger_mode": trigger,
-    }
-
-
-async def is_autofix_enabled() -> bool:
-    """Return whether team-wide auto-fix is turned on."""
-    settings = await get_autofix_settings()
-    return settings["autofix_enabled"]
+    return {"trigger_mode": trigger}
 
 
 async def get_team_review_trace_links_enabled() -> bool:

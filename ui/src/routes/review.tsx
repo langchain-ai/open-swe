@@ -45,7 +45,6 @@ const DEFAULT_SETTINGS: TeamSettings = {
   review_draft_prs: false,
   pr_summaries: true,
   review_trace_links: true,
-  autofix_enabled: false,
   org_guidelines: null,
   default_agent_model: null,
   default_agent_reasoning_effort: null,
@@ -221,17 +220,6 @@ function ReviewPage() {
               <Switch
                 checked={current.review_trace_links}
                 onCheckedChange={(v) => persist({ review_trace_links: v })}
-                disabled={!canEdit}
-              />
-            }
-          />
-          <SettingsRow
-            label="Autofix"
-            description="When enabled, Open SWE will automatically fix failing CI checks and resolve reviewer comments on PRs it opens. Billed at plan rates."
-            control={
-              <Switch
-                checked={current.autofix_enabled}
-                onCheckedChange={(v) => persist({ autofix_enabled: v })}
                 disabled={!canEdit}
               />
             }

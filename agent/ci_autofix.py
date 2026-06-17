@@ -12,7 +12,7 @@ loop-capping live in one place. Skip-rules mirror Cursor/Claude Code:
 * Skip failures inherited from the base branch.
 * Skip when the latest commit was authored by a human (don't fight pushes).
 * Dedupe per (head SHA + failing-check set); cap total attempts.
-* Honor team ``autofix_enabled`` / ``trigger_mode`` and the per-PR opt-out.
+* Honor the per-user ``auto_fix_ci`` profile flag and the per-PR opt-out.
 """
 
 from __future__ import annotations
@@ -22,6 +22,7 @@ from typing import Any
 
 from langgraph_sdk import get_client
 
+from .dashboard.agent_overrides import load_profile
 from .dashboard.autofix_state import is_pr_autofix_disabled
 from .dashboard.enabled_repos import is_review_repo_enabled
 from .dashboard.team_settings import get_autofix_settings
@@ -55,6 +56,17 @@ _MAX_HANDLED_KEYS = 30
 
 def _dedupe_key(head_sha: str, failing_names: list[str]) -> str:
     return f"{head_sha}:" + ",".join(sorted(failing_names))
+
+
+async def _user_autofix_enabled(github_login: str) -> bool:
+    """Check the per-user ``auto_fix_ci`` profile flag (defaults to True)."""
+    if not github_login:
+        return True
+    profile = await load_profile(github_login)
+    if not isinstance(profile, dict):
+        return True
+    value = profile.get("auto_fix_ci")
+    return value if isinstance(value, bool) else True
 
 
 async def find_agent_thread_for_pr(pr_url: str) -> tuple[str, dict[str, Any]] | None:
@@ -248,8 +260,6 @@ async def handle_ci_failure(
         return "missing_repo"
 
     settings = await get_autofix_settings()
-    if not settings["autofix_enabled"]:
-        return "autofix_disabled_team"
     if not await is_review_repo_enabled(owner, repo):
         return "repo_not_enabled"
 
@@ -285,6 +295,9 @@ async def handle_ci_failure(
     thread_id, metadata = found
 
     attempts, handled, github_login = await _thread_autofix_state(metadata)
+
+    if not await _user_autofix_enabled(github_login):
+        return "autofix_disabled_user"
 
     if settings["trigger_mode"] == "manual":
         return "trigger_manual"
@@ -393,8 +406,6 @@ async def handle_review_feedback(
         return "missing_repo"
 
     settings = await get_autofix_settings()
-    if not settings["autofix_enabled"]:
-        return "autofix_disabled_team"
     if settings["trigger_mode"] == "manual":
         return "trigger_manual"
     if not await is_review_repo_enabled(owner, repo):
@@ -406,6 +417,10 @@ async def handle_review_feedback(
     if found is None:
         return "no_agent_thread"
     thread_id, metadata = found
+
+    attempts, _, github_login = await _thread_autofix_state(metadata)
+    if not await _user_autofix_enabled(github_login):
+        return "autofix_disabled_user"
 
     prompt = _build_review_feedback_prompt(
         owner=owner,
