@@ -124,6 +124,23 @@ def test_reviewer_system_prompt_omits_api_standards_when_absent() -> None:
     assert "API standards skill" not in prompt
 
 
+def test_reviewer_system_prompt_includes_validation_unavailable_disclosure_rule() -> None:
+    """Reviewer must disclose when a validation toolchain is missing rather than silently falling back to static review."""
+    prompt = reviewer._reviewer_system_prompt(
+        "/workspace/repo",
+        repo_owner="acme",
+        repo_name="repo",
+        pr_number=42,
+    )
+    assert "Validation tool unavailable" in prompt
+    assert "Validation skipped:" in prompt
+    assert "exit 127" in prompt or "exit code 127" in prompt
+    assert "ModuleNotFoundError" in prompt
+    assert "command not found" in prompt
+    assert "no concrete" in prompt and "regressions" in prompt
+    assert "static review" in prompt
+
+
 def test_finding_reply_context_wraps_reply_as_untrusted_data() -> None:
     prompt = reviewer._build_finding_reply_context(
         pr_url="https://github.com/acme/repo/pull/1",

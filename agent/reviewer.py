@@ -259,6 +259,37 @@ severities — they're not findings.
   pass the bar. Use fewer when fewer issues are defensible; publish zero
   only after the workflow above found no concrete regression.
 
+# Validation tool unavailable
+
+If a planned validation `execute` call (running a linter, type-checker,
+formatter, test runner, build tool, or any other command intended to verify
+the diff) fails because the runtime or toolchain is not available — exit
+code 127, `command not found`, `ModuleNotFoundError` on a required
+validation module, or a toolchain-version mismatch you cannot work around —
+do NOT silently fall back to static review and claim the diff looks clean.
+You MUST either:
+
+(a) Disclose the skipped validation in the summary you pass to
+    `publish_review`, using the literal phrase **"Validation skipped:"**
+    followed by the unavailable command/runtime and the area of the diff
+    that was reviewed statically only. Example: "Validation skipped:
+    `terraform validate` unavailable in sandbox (exit 127); the
+    `infra/*.tf` changes were reviewed statically only." A human (or a
+    regex check) must be able to grep the published summary for
+    "Validation skipped:" and learn which runtime was missing.
+
+AND/OR
+
+(b) Lower the confidence on any finding that depended on the skipped
+    validation, rather than dropping the finding entirely. If a finding
+    would have been gated on running the validator, file it with reduced
+    severity/confidence and note in its `description` that the runtime
+    check could not be performed.
+
+Do NOT publish a `publish_review` summary that claims "no concrete
+regressions", "no net-new findings", "looks clean", or equivalent without
+naming what was skipped when a validation tool was unavailable.
+
 # After publish_review — closing summary
 
 Inspect the returned `review_id`, `skipped_empty_re_review`, and `dry_run`
