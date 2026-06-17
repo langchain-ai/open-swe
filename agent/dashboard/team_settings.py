@@ -27,21 +27,15 @@ logger = logging.getLogger(__name__)
 TEAM_SETTINGS_NAMESPACE: list[str] = ["team_settings"]
 TEAM_SETTINGS_KEY = "default"
 
-TriggerMode = Literal["every_push", "once_per_pr", "manual"]
-AutofixMode = Literal["off", "low", "medium", "high"]
-
 # Cap the org-wide guidelines so a runaway value can't dominate the reviewer
 # prompt. Generous enough for a detailed policy, small enough to stay bounded.
 ORG_GUIDELINES_MAX_CHARS = 10_000
 
 
 class TeamSettingsUpdate(BaseModel):
-    trigger_mode: TriggerMode = "every_push"
     review_draft_prs: bool = False
     pr_summaries: bool = True
     review_trace_links: bool = True
-    autofix_mode: AutofixMode = "off"
-    autofix_severity_threshold: AutofixMode = "medium"
     org_guidelines: str | None = None
     default_agent_model: str | None = None
     default_agent_reasoning_effort: str | None = None
@@ -135,12 +129,9 @@ def _parse_repo(value: object) -> dict[str, str] | None:
 def _default_settings() -> dict[str, Any]:
     fallback_model, fallback_effort = default_model_pair()
     return {
-        "trigger_mode": "every_push",
         "review_draft_prs": False,
         "pr_summaries": True,
         "review_trace_links": True,
-        "autofix_mode": "off",
-        "autofix_severity_threshold": "medium",
         "org_guidelines": None,
         "default_agent_model": fallback_model,
         "default_agent_reasoning_effort": fallback_effort,
@@ -178,21 +169,21 @@ async def get_team_settings() -> dict[str, Any]:
     # selection) still surface the hardcoded default instead of a null.
     overlay = {k: v for k, v in value.items() if v is not None}
     merged = {**defaults, **overlay}
-    # Drop obsolete trigger mode values so a legacy record doesn't surface a
-    # value the new TriggerMode literal would reject on the next PUT.
-    if merged.get("trigger_mode") not in {"every_push", "once_per_pr", "manual"}:
-        merged["trigger_mode"] = defaults["trigger_mode"]
+    for stale_field in (
+        "trigger_mode",
+        "autofix_mode",
+        "autofix_severity_threshold",
+        "autofix_enabled",
+    ):
+        merged.pop(stale_field, None)
     return merged
 
 
 async def upsert_team_settings(update: TeamSettingsUpdate) -> dict[str, Any]:
     value: dict[str, Any] = {
-        "trigger_mode": update.trigger_mode,
         "review_draft_prs": update.review_draft_prs,
         "pr_summaries": update.pr_summaries,
         "review_trace_links": update.review_trace_links,
-        "autofix_mode": update.autofix_mode,
-        "autofix_severity_threshold": update.autofix_severity_threshold,
         "org_guidelines": update.org_guidelines,
         "default_agent_model": update.default_agent_model,
         "default_agent_reasoning_effort": update.default_agent_reasoning_effort,
@@ -304,31 +295,6 @@ async def get_team_default_grouping_model() -> tuple[str, str]:
         settings.get("default_reviewer_subagent_model"),
         settings.get("default_reviewer_subagent_reasoning_effort"),
     )
-
-
-async def get_autofix_settings() -> dict[str, Any]:
-    """Return the team-wide auto-fix config: mode, severity threshold, trigger mode."""
-    settings = await get_team_settings()
-    mode = settings.get("autofix_mode")
-    if mode not in {"off", "low", "medium", "high"}:
-        mode = "off"
-    threshold = settings.get("autofix_severity_threshold")
-    if threshold not in {"off", "low", "medium", "high"}:
-        threshold = "medium"
-    trigger = settings.get("trigger_mode")
-    if trigger not in {"every_push", "once_per_pr", "manual"}:
-        trigger = "every_push"
-    return {
-        "autofix_mode": mode,
-        "autofix_severity_threshold": threshold,
-        "trigger_mode": trigger,
-    }
-
-
-async def is_autofix_enabled() -> bool:
-    """Return whether team-wide auto-fix is turned on (mode != ``off``)."""
-    settings = await get_autofix_settings()
-    return settings["autofix_mode"] != "off"
 
 
 async def get_team_review_trace_links_enabled() -> bool:

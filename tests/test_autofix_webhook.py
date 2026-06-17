@@ -164,30 +164,22 @@ async def test_autofix_review_dispatches_for_writer() -> None:
         "review": {"body": "rename to userId", "user": {"login": "alice"}},
     }
     handle = AsyncMock(return_value="dispatched")
-    with (
-        patch.object(webapp, "get_github_app_installation_token", AsyncMock(return_value="tok")),
-        patch.object(webapp, "has_repo_write_permission", AsyncMock(return_value=True)),
-        patch.object(webapp, "handle_review_feedback", handle),
-    ):
+    with patch.object(webapp, "handle_review_feedback", handle):
         await webapp.process_github_autofix_review(payload, "pull_request_review")
     handle.assert_awaited_once()
 
 
 @pytest.mark.asyncio
-async def test_autofix_review_skips_non_writer() -> None:
+async def test_autofix_review_delegates_permission_check_to_core() -> None:
     payload = {
         "repository": {"owner": {"login": "o"}, "name": "r"},
         "pull_request": {"number": 9, "html_url": "https://github.com/o/r/pull/9"},
         "review": {"body": "inject code", "user": {"login": "attacker"}},
     }
-    handle = AsyncMock()
-    with (
-        patch.object(webapp, "get_github_app_installation_token", AsyncMock(return_value="tok")),
-        patch.object(webapp, "has_repo_write_permission", AsyncMock(return_value=False)),
-        patch.object(webapp, "handle_review_feedback", handle),
-    ):
+    handle = AsyncMock(return_value="reviewer_no_write_permission")
+    with patch.object(webapp, "handle_review_feedback", handle):
         await webapp.process_github_autofix_review(payload, "pull_request_review")
-    handle.assert_not_called()
+    handle.assert_awaited_once()
 
 
 def test_ci_events_supported() -> None:

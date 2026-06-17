@@ -110,16 +110,10 @@ export interface ProfileUpdate {
   review_draft_prs?: boolean | null
 }
 
-export type TriggerMode = "every_push" | "once_per_pr" | "manual"
-export type AutofixMode = "off" | "low" | "medium" | "high"
-
 export interface TeamSettings {
-  trigger_mode: TriggerMode
   review_draft_prs: boolean
   pr_summaries: boolean
   review_trace_links: boolean
-  autofix_mode: AutofixMode
-  autofix_severity_threshold: AutofixMode
   org_guidelines?: string | null
   default_agent_model?: string | null
   default_agent_reasoning_effort?: string | null

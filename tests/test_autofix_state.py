@@ -1,4 +1,4 @@
-"""Unit tests for per-PR auto-fix opt-out state and team settings accessor."""
+"""Unit tests for per-PR auto-fix opt-out state."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from agent.dashboard import autofix_state, team_settings
+from agent.dashboard import autofix_state
 
 
 @pytest.mark.asyncio
@@ -31,40 +31,3 @@ async def test_set_and_check_pr_disabled() -> None:
         assert await autofix_state.is_pr_autofix_disabled("o", "r", 5) is True
         await autofix_state.set_pr_autofix_disabled("o", "r", 5, False)
         assert await autofix_state.is_pr_autofix_disabled("o", "r", 5) is False
-
-
-@pytest.mark.asyncio
-async def test_get_autofix_settings_normalizes() -> None:
-    with patch.object(
-        team_settings,
-        "get_team_settings",
-        AsyncMock(
-            return_value={
-                "autofix_mode": "bogus",
-                "autofix_severity_threshold": "high",
-                "trigger_mode": "weird",
-            }
-        ),
-    ):
-        settings = await team_settings.get_autofix_settings()
-    assert settings == {
-        "autofix_mode": "off",
-        "autofix_severity_threshold": "high",
-        "trigger_mode": "every_push",
-    }
-
-
-@pytest.mark.asyncio
-async def test_is_autofix_enabled() -> None:
-    with patch.object(
-        team_settings,
-        "get_team_settings",
-        AsyncMock(return_value={"autofix_mode": "high"}),
-    ):
-        assert await team_settings.is_autofix_enabled() is True
-    with patch.object(
-        team_settings,
-        "get_team_settings",
-        AsyncMock(return_value={"autofix_mode": "off"}),
-    ):
-        assert await team_settings.is_autofix_enabled() is False

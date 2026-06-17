@@ -21,8 +21,11 @@ _PR = {
 def happy(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     """Patch every dependency of handle_ci_failure to a happy-path default."""
     runs_create = AsyncMock()
+    store_put = AsyncMock()
     lg_client = MagicMock()
     lg_client.runs.create = runs_create
+    lg_client.store.get_item = AsyncMock(return_value=None)
+    lg_client.store.put_item = store_put
     threads_update = AsyncMock()
     store_client = MagicMock()
     store_client.threads.update = threads_update
@@ -31,20 +34,10 @@ def happy(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         "runs_create": runs_create,
         "threads_update": threads_update,
         "status_check": AsyncMock(return_value=True),
-        "queue": AsyncMock(return_value=True),
+        "store_put": store_put,
     }
 
-    monkeypatch.setattr(
-        ci_autofix,
-        "get_autofix_settings",
-        AsyncMock(
-            return_value={
-                "autofix_mode": "high",
-                "autofix_severity_threshold": "medium",
-                "trigger_mode": "every_push",
-            }
-        ),
-    )
+    monkeypatch.setattr(ci_autofix, "_user_autofix_enabled", AsyncMock(return_value=True))
     monkeypatch.setattr(ci_autofix, "is_review_repo_enabled", AsyncMock(return_value=True))
     monkeypatch.setattr(
         ci_autofix, "get_github_app_installation_token", AsyncMock(return_value="tok")
@@ -66,7 +59,6 @@ def happy(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         ci_autofix, "head_commit_author_login", AsyncMock(return_value="open-swe[bot]")
     )
     monkeypatch.setattr(ci_autofix, "is_thread_active", AsyncMock(return_value=False))
-    monkeypatch.setattr(ci_autofix, "queue_message_for_thread", mocks["queue"])
     monkeypatch.setattr(ci_autofix, "post_autofix_status_check", mocks["status_check"])
     monkeypatch.setattr(ci_autofix, "langgraph_client", lambda: lg_client)
     monkeypatch.setattr(ci_autofix, "get_client", lambda: store_client)
@@ -94,28 +86,21 @@ async def test_dispatch_happy_path(happy: dict[str, Any]) -> None:
 
 
 @pytest.mark.asyncio
-async def test_queues_when_thread_busy(happy: dict[str, Any], monkeypatch) -> None:
+async def test_batches_when_thread_busy(happy: dict[str, Any], monkeypatch) -> None:
     monkeypatch.setattr(ci_autofix, "is_thread_active", AsyncMock(return_value=True))
     result = await _run()
-    assert result == "queued"
-    happy["queue"].assert_awaited_once()
+    assert result == "batched"
+    happy["store_put"].assert_awaited()
     happy["runs_create"].assert_not_called()
+    # A batched event must not burn an attempt or mark the SHA handled, so a later
+    # webhook/sweep can still dispatch if the in-flight run never consumes it.
+    happy["threads_update"].assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_skip_team_disabled(happy: dict[str, Any], monkeypatch) -> None:
-    monkeypatch.setattr(
-        ci_autofix,
-        "get_autofix_settings",
-        AsyncMock(
-            return_value={
-                "autofix_mode": "off",
-                "autofix_severity_threshold": "medium",
-                "trigger_mode": "every_push",
-            }
-        ),
-    )
-    assert await _run() == "autofix_disabled_team"
+async def test_skip_user_disabled(happy: dict[str, Any], monkeypatch) -> None:
+    monkeypatch.setattr(ci_autofix, "_user_autofix_enabled", AsyncMock(return_value=False))
+    assert await _run() == "autofix_disabled_user"
 
 
 @pytest.mark.asyncio
@@ -134,43 +119,6 @@ async def test_skip_pr_disabled(happy: dict[str, Any], monkeypatch) -> None:
 async def test_skip_no_agent_thread(happy: dict[str, Any], monkeypatch) -> None:
     monkeypatch.setattr(ci_autofix, "find_agent_thread_for_pr", AsyncMock(return_value=None))
     assert await _run() == "no_agent_thread"
-
-
-@pytest.mark.asyncio
-async def test_skip_trigger_manual(happy: dict[str, Any], monkeypatch) -> None:
-    monkeypatch.setattr(
-        ci_autofix,
-        "get_autofix_settings",
-        AsyncMock(
-            return_value={
-                "autofix_mode": "high",
-                "autofix_severity_threshold": "medium",
-                "trigger_mode": "manual",
-            }
-        ),
-    )
-    assert await _run() == "trigger_manual"
-
-
-@pytest.mark.asyncio
-async def test_skip_once_per_pr_after_first(happy: dict[str, Any], monkeypatch) -> None:
-    monkeypatch.setattr(
-        ci_autofix,
-        "get_autofix_settings",
-        AsyncMock(
-            return_value={
-                "autofix_mode": "high",
-                "autofix_severity_threshold": "medium",
-                "trigger_mode": "once_per_pr",
-            }
-        ),
-    )
-    monkeypatch.setattr(
-        ci_autofix,
-        "find_agent_thread_for_pr",
-        AsyncMock(return_value=("t1", {"github_login": "alice", "autofix_attempts": 1})),
-    )
-    assert await _run() == "once_per_pr_done"
 
 
 @pytest.mark.asyncio
@@ -198,7 +146,7 @@ async def test_skip_all_failing_on_base(happy: dict[str, Any], monkeypatch) -> N
 
 @pytest.mark.asyncio
 async def test_skip_already_handled(happy: dict[str, Any], monkeypatch) -> None:
-    key = ci_autofix._dedupe_key("head1", ["lint"])
+    key = ci_autofix._dedupe_key("head1")
     monkeypatch.setattr(
         ci_autofix,
         "find_agent_thread_for_pr",
@@ -225,6 +173,55 @@ async def test_ci_read_failed(happy: dict[str, Any], monkeypatch) -> None:
     monkeypatch.setattr(ci_autofix, "list_failing_check_runs", AsyncMock(return_value=None))
     monkeypatch.setattr(ci_autofix, "list_failing_statuses", AsyncMock(return_value=None))
     assert await _run(failing_checks=None) == "ci_read_failed"
+
+
+@pytest.mark.asyncio
+async def test_review_feedback_skips_user_disabled(happy: dict[str, Any], monkeypatch) -> None:
+    monkeypatch.setattr(ci_autofix, "_user_autofix_enabled", AsyncMock(return_value=False))
+    assert (
+        await ci_autofix.handle_review_feedback(
+            repo_config={"owner": "o", "name": "r"},
+            pr_number=5,
+            pr_url="https://github.com/o/r/pull/5",
+            reviewer="alice",
+            body="fix this",
+        )
+        == "autofix_disabled_user"
+    )
+    happy["runs_create"].assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_review_feedback_batches_when_thread_busy(happy: dict[str, Any], monkeypatch) -> None:
+    monkeypatch.setattr(ci_autofix, "has_repo_write_permission", AsyncMock(return_value=True))
+    monkeypatch.setattr(ci_autofix, "is_thread_active", AsyncMock(return_value=True))
+    result = await ci_autofix.handle_review_feedback(
+        repo_config={"owner": "o", "name": "r"},
+        pr_number=5,
+        pr_url="https://github.com/o/r/pull/5",
+        reviewer="alice",
+        body="fix this",
+    )
+    assert result == "batched"
+    happy["runs_create"].assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_review_feedback_checks_write_permission_after_user_gate(
+    happy: dict[str, Any], monkeypatch
+) -> None:
+    permission = AsyncMock(return_value=False)
+    monkeypatch.setattr(ci_autofix, "has_repo_write_permission", permission)
+    result = await ci_autofix.handle_review_feedback(
+        repo_config={"owner": "o", "name": "r"},
+        pr_number=5,
+        pr_url="https://github.com/o/r/pull/5",
+        reviewer="alice",
+        body="fix this",
+    )
+    assert result == "reviewer_no_write_permission"
+    permission.assert_awaited_once()
+    happy["runs_create"].assert_not_called()
 
 
 @pytest.mark.asyncio

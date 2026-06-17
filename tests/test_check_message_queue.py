@@ -18,12 +18,13 @@ class _QueuedItem:
 
 
 class _FakeStore:
-    def __init__(self, value: dict[str, Any]) -> None:
-        self.value = value
+    def __init__(self, items: dict[tuple[tuple[str, ...], str], dict[str, Any]]) -> None:
+        self.items = items
         self.deleted: list[tuple[tuple[str, ...], str]] = []
 
-    async def aget(self, namespace: tuple[str, ...], key: str) -> _QueuedItem:
-        return _QueuedItem(self.value)
+    async def aget(self, namespace: tuple[str, ...], key: str) -> _QueuedItem | None:
+        value = self.items.get((namespace, key))
+        return _QueuedItem(value) if value is not None else None
 
     async def adelete(self, namespace: tuple[str, ...], key: str) -> None:
         self.deleted.append((namespace, key))
@@ -33,9 +34,11 @@ class _FakeStore:
 async def test_check_message_queue_injects_dashboard_handoff_instruction() -> None:
     store = _FakeStore(
         {
-            "messages": [
-                {"content": {"text": "continue in web", "source": "dashboard"}},
-            ]
+            (("queue", "thread-1"), "pending_messages"): {
+                "messages": [
+                    {"content": {"text": "continue in web", "source": "dashboard"}},
+                ]
+            }
         }
     )
 
@@ -54,6 +57,36 @@ async def test_check_message_queue_injects_dashboard_handoff_instruction() -> No
     assert DASHBOARD_HANDOFF_MARKER in message["content"][0]["text"]
     assert message["content"][1] == {"type": "text", "text": "continue in web"}
     assert store.deleted == [(("queue", "thread-1"), "pending_messages")]
+
+
+@pytest.mark.asyncio
+async def test_check_message_queue_injects_pending_autofix_event() -> None:
+    store = _FakeStore(
+        {
+            (("autofix", "thread-1"), "pending_event"): {
+                "reason": "review_feedback",
+                "details": ["Reviewer alice commented: rename to userId"],
+            }
+        }
+    )
+
+    with (
+        patch(
+            "agent.middleware.check_message_queue.get_config",
+            return_value={"configurable": {"thread_id": "thread-1"}},
+        ),
+        patch("agent.middleware.check_message_queue.get_store", return_value=store),
+    ):
+        result = await check_message_queue_before_model.abefore_model({}, MagicMock())
+
+    assert result is not None
+    message = result["messages"][0]
+    assert message["role"] == "user"
+    text = message["content"][0]["text"]
+    assert "PR babysitting event arrived" in text
+    # The reviewer's actual comment is carried through, not dropped for a generic nudge.
+    assert "rename to userId" in text
+    assert (("autofix", "thread-1"), "pending_event") in store.deleted
 
 
 @pytest.mark.asyncio
