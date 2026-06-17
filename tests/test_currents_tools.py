@@ -99,12 +99,19 @@ async def test_currents_list_project_runs_caps_limit() -> None:
         tools = currents_tools._make_tools("k")
         list_runs = next(t for t in tools if t.name == "currents_list_project_runs")
         await list_runs.ainvoke(
-            {"project_id": "proj_1", "limit": 9999, "status": "FAILED", "branch": "main"}
+            {
+                "project_id": "proj_1",
+                "limit": 9999,
+                "status": "FAILED",
+                "branch": "main",
+                "starting_after": "cursor-abc",
+            }
         )
     assert captured["path"] == "/projects/proj_1/runs"
     assert captured["limit"] == 50
     assert captured["status"] == "FAILED"
     assert captured["branches[]"] == "main"
+    assert captured["starting_after"] == "cursor-abc"
 
 
 @pytest.mark.asyncio

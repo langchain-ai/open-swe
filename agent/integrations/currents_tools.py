@@ -112,6 +112,8 @@ def _make_tools(api_key: str) -> list[BaseTool]:
         limit: int = 10,
         status: str | None = None,
         branch: str | None = None,
+        starting_after: str | None = None,
+        ending_before: str | None = None,
     ) -> dict[str, Any]:
         """List runs for a Currents.dev project with optional filters.
 
@@ -120,6 +122,8 @@ def _make_tools(api_key: str) -> list[BaseTool]:
             limit: Maximum number of runs to return (default 10, max 50).
             status: Optional status filter: PASSED, FAILED, RUNNING, FAILING.
             branch: Optional branch filter (append * for prefix match).
+            starting_after: Cursor for pagination (next page).
+            ending_before: Cursor for pagination (previous page).
 
         Returns:
             Dictionary with a list of runs, or an error message.
@@ -130,6 +134,10 @@ def _make_tools(api_key: str) -> list[BaseTool]:
                 params["status"] = status
             if branch:
                 params["branches[]"] = branch
+            if starting_after:
+                params["starting_after"] = starting_after
+            if ending_before:
+                params["ending_before"] = ending_before
             return await _get(f"/projects/{project_id}/runs", api_key, **params)
         except Exception as e:  # noqa: BLE001
             logger.warning("currents_list_project_runs failed", exc_info=True)
