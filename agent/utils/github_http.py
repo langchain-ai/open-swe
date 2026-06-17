@@ -6,9 +6,13 @@ This centralises:
 
 - **Timeouts**: httpx defaults to 5 s which is too aggressive for paginated
   GitHub/GraphQL fetches.  The default here is 30 s read / 10 s connect.
-- **Retries**: exponential backoff with jitter for transient transport errors
-  (timeouts, connection resets) and retryable HTTP status codes (429, 502,
-  503, 504).
+- **Retries**: exponential backoff with jitter for retryable HTTP status codes
+  (429, 502, 503, 504) and transport errors on idempotent methods only.
+  Non-idempotent methods (POST) are **not** retried on transport errors
+  (timeout / connection reset) because the server may have processed the
+  write before the response was lost — retrying would duplicate the resource.
+  Retries on 429 / 5xx are safe for all methods since the server explicitly
+  did not process the request.
 - **Rate-limit awareness**: respects ``Retry-After`` headers and detects
   GitHub secondary rate limits (403 with ``X-RateLimit-Remaining: 0`` or a
   "secondary rate limit" body message), backing off before retrying.
@@ -36,6 +40,7 @@ DEFAULT_MAX_RETRIES = 3
 
 _RETRY_STATUS_CODES = frozenset({429, 502, 503, 504})
 _SECONDARY_RATE_LIMIT_MARKERS = ("secondary rate limit", "rate limit")
+_RETRYABLE_TRANSPORT_METHODS = frozenset({"GET", "HEAD", "OPTIONS", "PUT", "DELETE"})
 
 _BASE_BACKOFF = 1.0
 _BACKOFF_MULTIPLIER = 2.0
@@ -126,9 +131,20 @@ async def github_request(
     retryable status codes that have exhausted retries (caller should call
     ``raise_for_status()``).
 
+    Retries on retryable HTTP status codes (429 / 502 / 503 / 504 / secondary
+    rate limit) for **all** methods — the server explicitly did not process
+    the request in these cases.
+
+    Retries on transport errors (``TimeoutException`` / ``TransportError``)
+    **only for idempotent methods** (GET, HEAD, OPTIONS, PUT, DELETE).  A
+    transport error on a POST does not tell us whether the server processed
+    the write, so the exception is re-raised immediately to avoid duplicates.
+
     Re-raises the last ``httpx.TimeoutException`` / ``httpx.TransportError``
     if all retries are exhausted on a transport-level failure.
     """
+    method_upper = method.upper()
+    retry_transport = method_upper in _RETRYABLE_TRANSPORT_METHODS
     method_func = getattr(client, method.lower())
     last_exc: Exception | None = None
     for attempt in range(max_retries + 1):
@@ -136,7 +152,7 @@ async def github_request(
             response = await method_func(url, **kwargs)
         except (httpx.TimeoutException, httpx.TransportError) as exc:
             last_exc = exc
-            if attempt < max_retries:
+            if retry_transport and attempt < max_retries:
                 delay = _compute_backoff(None, attempt)
                 logger.warning(
                     "GitHub API %s %s raised %s, retrying in %.1fs (attempt %d/%d)",

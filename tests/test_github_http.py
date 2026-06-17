@@ -233,6 +233,53 @@ async def test_github_request_retries_on_timeout() -> None:
 
 
 @pytest.mark.asyncio
+async def test_github_request_does_not_retry_transport_error_on_post() -> None:
+    """Transport errors on POST must not retry — the server may have already
+    processed the write, and retrying would duplicate the resource."""
+    client = AsyncMock()
+    client.post = AsyncMock(side_effect=httpx.TimeoutException("timeout"))
+
+    with pytest.raises(httpx.TimeoutException):
+        await github_request(client, "POST", "https://api.github.com/test")
+
+    assert client.post.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_github_request_retries_on_429_even_for_post() -> None:
+    """429 is safe to retry for any method — the server explicitly did not
+    process the request."""
+    responses = [
+        _make_response(429, {"Retry-After": "0"}),
+        _make_response(201),
+    ]
+    client = AsyncMock()
+    client.post = AsyncMock(side_effect=responses)
+
+    with patch("agent.utils.github_http.asyncio.sleep", new_callable=AsyncMock):
+        response = await github_request(client, "POST", "https://api.github.com/test")
+
+    assert response.status_code == 201
+    assert client.post.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_github_request_retries_on_503_even_for_post() -> None:
+    responses = [
+        _make_response(503),
+        _make_response(201),
+    ]
+    client = AsyncMock()
+    client.post = AsyncMock(side_effect=responses)
+
+    with patch("agent.utils.github_http.asyncio.sleep", new_callable=AsyncMock):
+        response = await github_request(client, "POST", "https://api.github.com/test")
+
+    assert response.status_code == 201
+    assert client.post.await_count == 2
+
+
+@pytest.mark.asyncio
 async def test_github_request_raises_after_exhausting_transport_retries() -> None:
     client = AsyncMock()
     client.get = AsyncMock(side_effect=httpx.ConnectTimeout("timeout"))
