@@ -7,8 +7,9 @@ const TERMINAL_STATUSES = new Set(["finished", "error", "interrupted"])
 
 /**
  * Watches the thread list for transitions from `running` to a terminal status
- * and fires a browser notification for each run that completes. Skips the
- * thread the user is currently viewing (that tab is already in focus).
+ * and fires a browser notification for each run that completes. Suppresses
+ * notifications for the thread the user is currently viewing only when the
+ * page is visible — background tabs still notify even for the active thread.
  */
 export function useRunCompletionNotifier(
   threads: Array<AgentThread> | undefined,
@@ -18,6 +19,8 @@ export function useRunCompletionNotifier(
 
   useEffect(() => {
     if (!threads) return
+    const isViewingThread =
+      !!activeThreadId && document.visibilityState === "visible"
     const prev = prevStatusRef.current
     for (const thread of threads) {
       const prevStatus = prev.get(thread.id)
@@ -28,7 +31,7 @@ export function useRunCompletionNotifier(
       if (
         prevStatus === "running" &&
         TERMINAL_STATUSES.has(thread.status) &&
-        thread.id !== activeThreadId
+        !(isViewingThread && thread.id === activeThreadId)
       ) {
         showRunNotification(thread)
       }
