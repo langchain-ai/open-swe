@@ -418,7 +418,7 @@ function ThreadRow({
             </PrIcon>
           )}
           {badge && (
-            <span className="shrink-0 rounded bg-[var(--ui-panel-2)] px-1.5 py-0.5 text-[10px] text-[var(--ui-text-dim)] group-hover:hidden">
+            <span className="shrink-0 rounded bg-[var(--ui-panel-2)] px-1.5 py-0.5 text-[10px] text-[var(--ui-success)] group-hover:hidden">
               {badge}
             </span>
           )}

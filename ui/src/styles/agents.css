@@ -8,7 +8,7 @@
   --ui-text: oklch(0.148 0 0);
   --ui-text-muted: oklch(0.45 0 0);
   --ui-text-dim: oklch(0.56 0 0);
-  --ui-accent: oklch(0.44 0 0);
+  --ui-accent: oklch(0.52 0.12 250);
   --ui-accent-2: oklch(0.56 0 0);
   --ui-accent-bubble: oklch(0.962 0 0);
   --ui-code-bubble: oklch(0.962 0 0);
@@ -29,7 +29,7 @@
   --ui-text: oklch(0.985 0 0);
   --ui-text-muted: oklch(0.708 0 0);
   --ui-text-dim: oklch(0.556 0 0);
-  --ui-accent: oklch(0.78 0 0);
+  --ui-accent: oklch(0.72 0.13 250);
   --ui-accent-2: oklch(0.708 0 0);
   --ui-accent-bubble: oklch(0.274 0 0);
   --ui-code-bubble: oklch(0.248 0 0);
