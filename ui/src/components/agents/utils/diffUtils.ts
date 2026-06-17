@@ -1,6 +1,6 @@
-import { useMemo } from "react";
-import { preloadHighlighter } from "@pierre/diffs";
-import { useResolvedTheme } from "@/lib/theme";
+import { useMemo } from "react"
+import { preloadHighlighter } from "@pierre/diffs"
+import { useResolvedTheme } from "@/lib/theme"
 
 export const DIFF_UNSAFE_CSS = `
 [data-diffs-header],
@@ -55,7 +55,7 @@ export const DIFF_UNSAFE_CSS = `
   background-color: var(--ui-accent-bubble) !important;
   color: var(--ui-text-dim) !important;
 }
-`;
+`
 
 export const diffOptions = {
   theme: { light: "pierre-light", dark: "pierre-dark" } as const,
@@ -65,17 +65,21 @@ export const diffOptions = {
   disableFileHeader: true,
   unsafeCSS: DIFF_UNSAFE_CSS,
   collapsedContextThreshold: 4,
-};
+  lineDiffType: "word-alt" as const,
+  maxLineDiffLength: 800,
+  tokenizeMaxLineLength: 1200,
+  tokenizeMaxLength: 120_000,
+}
 
 export function useDiffOptions() {
-  const resolvedTheme = useResolvedTheme();
+  const resolvedTheme = useResolvedTheme()
   return useMemo(
     () => ({ ...diffOptions, themeType: resolvedTheme }),
     [resolvedTheme]
-  );
+  )
 }
 
-let highlighterWarmup: Promise<void> | null = null;
+let highlighterWarmup: Promise<void> | null = null
 
 /**
  * Pierre's <MultiFileDiff> renders an empty <diffs-container> on its first mount
@@ -88,15 +92,15 @@ let highlighterWarmup: Promise<void> | null = null;
  * Idempotent and client-only (preloadHighlighter creates a Shiki instance).
  */
 export function warmDiffHighlighter(): Promise<void> {
-  if (typeof window === "undefined") return Promise.resolve();
+  if (typeof window === "undefined") return Promise.resolve()
   if (highlighterWarmup == null) {
     highlighterWarmup = preloadHighlighter({
       themes: [diffOptions.theme.light, diffOptions.theme.dark],
       langs: ["text"],
     }).catch((error) => {
-      highlighterWarmup = null;
-      throw error;
-    });
+      highlighterWarmup = null
+      throw error
+    })
   }
-  return highlighterWarmup;
+  return highlighterWarmup
 }
