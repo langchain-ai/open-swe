@@ -110,10 +110,7 @@ export interface ProfileUpdate {
   review_draft_prs?: boolean | null
 }
 
-export type TriggerMode = "every_push" | "once_per_pr" | "manual"
-
 export interface TeamSettings {
-  trigger_mode: TriggerMode
   review_draft_prs: boolean
   pr_summaries: boolean
   review_trace_links: boolean

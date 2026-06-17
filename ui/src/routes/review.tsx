@@ -4,15 +4,8 @@ import { CaretRightIcon } from "@phosphor-icons/react";
 import { useEffect, useMemo, useState } from "react";
 import { IoLogoGithub } from "react-icons/io5";
 
-import type { ReposPayload, TeamSettings, TriggerMode } from "@/lib/api";
+import type { ReposPayload, TeamSettings } from "@/lib/api";
 import { AppShell, SettingsRow, SettingsSection } from "@/components/AppShell";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
@@ -22,26 +15,7 @@ import { useSession } from "@/lib/session";
 
 export const Route = createFileRoute("/review")({ component: ReviewPage });
 
-const TRIGGER_MODES: Array<{ value: TriggerMode; label: string; description: string }> = [
-  {
-    value: "every_push",
-    label: "Every Push",
-    description: "Review on every push to the PR",
-  },
-  {
-    value: "once_per_pr",
-    label: "Once Per PR",
-    description: "Review once when the PR is opened, skip subsequent pushes",
-  },
-  {
-    value: "manual",
-    label: "Manual Only",
-    description: "Only review when '@open-swe review' is commented",
-  },
-];
-
 const DEFAULT_SETTINGS: TeamSettings = {
-  trigger_mode: "every_push",
   review_draft_prs: false,
   pr_summaries: true,
   review_trace_links: true,
@@ -101,10 +75,6 @@ function ReviewPage() {
     setLocal(next);
     if (canEdit) save.mutate(next);
   };
-
-  const triggerDescription =
-    TRIGGER_MODES.find((m) => m.value === current.trigger_mode)?.description ??
-    "Open SWE Review will automatically review every push to a PR";
 
   const trimmedGuidelines = guidelinesDraft.trim();
   const savedGuidelines = current.org_guidelines ?? "";
@@ -169,28 +139,6 @@ function ReviewPage() {
 
       <SettingsSection title="Configuration">
         <div className="divide-y divide-border">
-          <SettingsRow
-            label="Trigger Mode"
-            description={triggerDescription}
-            control={
-              <Select
-                value={current.trigger_mode}
-                onValueChange={(v) => persist({ trigger_mode: v as TriggerMode })}
-                disabled={!canEdit}
-              >
-                <SelectTrigger className="w-40">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {TRIGGER_MODES.map((m) => (
-                    <SelectItem key={m.value} value={m.value}>
-                      {m.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            }
-          />
           <SettingsRow
             label="Review Draft PRs"
             description="Org-wide default for whether Open SWE Review runs on draft PRs. Each user can override this in Profile Settings."

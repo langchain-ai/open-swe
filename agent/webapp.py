@@ -71,7 +71,6 @@ from .utils.github_app import (
 from .utils.github_checks import complete_review_check_run, create_review_check_run
 from .utils.github_ci import (
     branch_from_check_payload,
-    has_repo_write_permission,
     head_sha_from_check_payload,
     is_failing_ci_payload,
 )
@@ -2751,20 +2750,6 @@ async def process_github_autofix_review(payload: dict[str, Any], event_type: str
     body = (comment.get("body") or "") if isinstance(comment, dict) else ""
     if not body.strip() or reviewer in INTERNAL_BOT_LOGINS:
         return
-    # Defense-in-depth beyond the author_association gate: confirm the reviewer
-    # actually has write access before dispatching a write-capable agent run.
-    token = await get_github_app_installation_token()
-    if not token or not await has_repo_write_permission(
-        owner=ref["owner"], repo=ref["name"], username=reviewer, token=token
-    ):
-        logger.info(
-            "Skipping auto-fix review feedback on %s/%s#%s: %s lacks write access",
-            ref["owner"],
-            ref["name"],
-            ref["number"],
-            reviewer or "<unknown>",
-        )
-        return
     result = await handle_review_feedback(
         repo_config={"owner": ref["owner"], "name": ref["name"]},
         pr_number=ref["number"],
@@ -3347,6 +3332,8 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks) ->
         return {"status": "accepted", "message": "Processing GitHub push for reviewer watch"}
 
     if event_type in _GH_CI_EVENTS:
+        if not is_failing_ci_payload(payload, event_type):
+            return {"status": "ignored", "reason": "CI event is not a completed failure"}
         if not await _is_repo_enabled_for_review(webhook_repo_config):
             return {"status": "ignored", "reason": "Repository not enabled for review"}
         logger.info("Accepted GitHub %s webhook, scheduling CI auto-fix evaluation", event_type)

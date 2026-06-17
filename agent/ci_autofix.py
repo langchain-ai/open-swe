@@ -11,21 +11,21 @@ loop-capping live in one place. Skip-rules mirror Cursor/Claude Code:
 * Only PRs Open SWE authored (an agent thread with this ``pr_url`` exists).
 * Skip failures inherited from the base branch.
 * Skip when the latest commit was authored by a human (don't fight pushes).
-* Dedupe per (head SHA + failing-check set); cap total attempts.
+* Dedupe per head SHA; cap total attempts.
 * Honor the per-user ``auto_fix_ci`` profile flag and the per-PR opt-out.
 """
 
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime
 from typing import Any
 
 from langgraph_sdk import get_client
 
-from .dashboard.agent_overrides import load_profile
+from .dashboard.agent_overrides import load_profile, resolve_login_from_email_async
 from .dashboard.autofix_state import is_pr_autofix_disabled
 from .dashboard.enabled_repos import is_review_repo_enabled
-from .dashboard.team_settings import get_autofix_settings
 from .reviewer_findings import REVIEWER_THREAD_KIND
 from .utils.dashboard_links import dashboard_thread_url
 from .utils.github_app import get_github_app_installation_token
@@ -33,6 +33,7 @@ from .utils.github_checks import post_autofix_status_check
 from .utils.github_ci import (
     fetch_open_pr_for_branch,
     fetch_pr,
+    has_repo_write_permission,
     head_commit_author_login,
     list_failing_check_runs,
     list_failing_statuses,
@@ -42,7 +43,6 @@ from .utils.github_org_membership import INTERNAL_BOT_LOGINS
 from .utils.thread_ops import (
     is_thread_active,
     langgraph_client,
-    queue_message_for_thread,
 )
 
 logger = logging.getLogger(__name__)
@@ -54,15 +54,18 @@ MAX_AUTOFIX_ATTEMPTS = 10
 _MAX_HANDLED_KEYS = 30
 
 
-def _dedupe_key(head_sha: str, failing_names: list[str]) -> str:
-    return f"{head_sha}:" + ",".join(sorted(failing_names))
+def _dedupe_key(head_sha: str) -> str:
+    return head_sha
 
 
-async def _user_autofix_enabled(github_login: str) -> bool:
+async def _user_autofix_enabled(github_login: str, user_email: str = "") -> bool:
     """Check the per-user ``auto_fix_ci`` profile flag (defaults to True)."""
-    if not github_login:
+    login = github_login.strip() if isinstance(github_login, str) else ""
+    if not login and user_email:
+        login = await resolve_login_from_email_async(user_email)
+    if not login:
         return True
-    profile = await load_profile(github_login)
+    profile = await load_profile(login)
     if not isinstance(profile, dict):
         return True
     value = profile.get("auto_fix_ci")
@@ -136,7 +139,10 @@ def _build_ci_fix_prompt(
         "need, then stop.\n"
         "4. Never force-push. Never weaken or delete test assertions just to go "
         "green unless the behavior change is intentional and correct.\n"
-        "5. After you push, CI re-runs automatically — you don't need to merge."
+        "5. Before finishing, re-check the PR's latest CI status and review "
+        "comments. Address any newly failed checks or unhandled actionable "
+        "comments that arrived while you were working.\n"
+        "6. After you push, CI re-runs automatically — you don't need to merge."
     )
 
 
@@ -161,19 +167,24 @@ def _build_review_feedback_prompt(
         "existing branch.\n"
         "2. If the comment is ambiguous, opinion-based, or needs a design "
         "decision, reply on the PR asking for clarification instead of guessing.\n"
-        "3. Never force-push. Reply to the reviewer on GitHub to explain what "
+        "3. Before finishing, re-check the PR's latest review comments and CI "
+        "status. Address any newly arrived actionable comments or failed checks "
+        "that are clear and deterministic.\n"
+        "4. Never force-push. Reply to the reviewer on GitHub to explain what "
         "you changed."
     )
 
 
-async def _thread_autofix_state(metadata: dict[str, Any]) -> tuple[int, list[str], str]:
+async def _thread_autofix_state(metadata: dict[str, Any]) -> tuple[int, list[str], str, str]:
     attempts = metadata.get("autofix_attempts")
     attempts = attempts if isinstance(attempts, int) and attempts >= 0 else 0
     handled = metadata.get("autofix_handled")
     handled = [h for h in handled if isinstance(h, str)] if isinstance(handled, list) else []
     github_login = metadata.get("github_login")
     github_login = github_login if isinstance(github_login, str) else ""
-    return attempts, handled, github_login
+    user_email = metadata.get("triggering_user_email")
+    user_email = user_email if isinstance(user_email, str) else ""
+    return attempts, handled, github_login, user_email
 
 
 async def _record_attempt(
@@ -224,11 +235,28 @@ def _run_configurable(
     return configurable
 
 
-async def _dispatch_or_queue(thread_id: str, prompt: str, *, configurable: dict[str, Any]) -> str:
+async def _mark_pending_autofix_event(thread_id: str, reason: str) -> None:
+    try:
+        await get_client().threads.update(
+            thread_id=thread_id,
+            metadata={
+                "autofix_pending_event": reason,
+                "autofix_pending_event_at_ms": int(datetime.now(UTC).timestamp() * 1000),
+            },
+        )
+    except Exception:  # noqa: BLE001
+        logger.debug(
+            "Failed to record pending auto-fix event for thread %s", thread_id, exc_info=True
+        )
+
+
+async def _dispatch_or_batch(
+    thread_id: str, prompt: str, *, configurable: dict[str, Any], reason: str
+) -> str:
     if await is_thread_active(thread_id):
-        logger.info("Agent thread %s busy; queuing auto-fix message", thread_id)
-        await queue_message_for_thread(thread_id, prompt)
-        return "queued"
+        logger.info("Agent thread %s busy; batching auto-fix event %s", thread_id, reason)
+        await _mark_pending_autofix_event(thread_id, reason)
+        return "batched"
     client = langgraph_client()
     await client.runs.create(
         thread_id,
@@ -259,7 +287,6 @@ async def handle_ci_failure(
     if not owner or not repo:
         return "missing_repo"
 
-    settings = await get_autofix_settings()
     if not await is_review_repo_enabled(owner, repo):
         return "repo_not_enabled"
 
@@ -294,15 +321,11 @@ async def handle_ci_failure(
         return "no_agent_thread"
     thread_id, metadata = found
 
-    attempts, handled, github_login = await _thread_autofix_state(metadata)
+    attempts, handled, github_login, user_email = await _thread_autofix_state(metadata)
 
-    if not await _user_autofix_enabled(github_login):
+    if not await _user_autofix_enabled(github_login, user_email):
         return "autofix_disabled_user"
 
-    if settings["trigger_mode"] == "manual":
-        return "trigger_manual"
-    if settings["trigger_mode"] == "once_per_pr" and attempts >= 1:
-        return "once_per_pr_done"
     if attempts >= MAX_AUTOFIX_ATTEMPTS:
         await post_autofix_status_check(
             owner=owner,
@@ -334,8 +357,7 @@ async def handle_ci_failure(
     if not actionable:
         return "all_failing_on_base"
 
-    failing_names = [c.get("name", "") for c in actionable]
-    dedupe_key = _dedupe_key(head_sha, failing_names)
+    dedupe_key = _dedupe_key(head_sha)
     if dedupe_key in handled:
         return "already_handled"
 
@@ -364,28 +386,30 @@ async def handle_ci_failure(
         head_sha=head_sha,
         failing_checks=actionable,
     )
-    result = await _dispatch_or_queue(
+    result = await _dispatch_or_batch(
         thread_id,
         prompt,
         configurable=_run_configurable(
             metadata, repo_config={"owner": owner, "name": repo}, pr_number=pr_number
         ),
+        reason="ci_failure",
     )
     await _record_attempt(
         thread_id, attempts=attempts, handled=handled, dedupe_key=dedupe_key, head_sha=head_sha
     )
-    await post_autofix_status_check(
-        owner=owner,
-        repo=repo,
-        head_sha=head_sha,
-        token=token,
-        title=f"Auto-fixing {len(actionable)} failing check(s)",
-        summary=(
-            "Open SWE is investigating the failing checks and will push a fix if "
-            "the cause is clear. Track progress in the linked run."
-        ),
-        details_url=dashboard_thread_url(thread_id),
-    )
+    if result == "dispatched":
+        await post_autofix_status_check(
+            owner=owner,
+            repo=repo,
+            head_sha=head_sha,
+            token=token,
+            title=f"Auto-fixing {len(actionable)} failing check(s)",
+            summary=(
+                "Open SWE is investigating the failing checks and will push a fix if "
+                "the cause is clear. Track progress in the linked run."
+            ),
+            details_url=dashboard_thread_url(thread_id),
+        )
     return result
 
 
@@ -405,9 +429,6 @@ async def handle_review_feedback(
     if not owner or not repo or not pr_url:
         return "missing_repo"
 
-    settings = await get_autofix_settings()
-    if settings["trigger_mode"] == "manual":
-        return "trigger_manual"
     if not await is_review_repo_enabled(owner, repo):
         return "repo_not_enabled"
     if await is_pr_autofix_disabled(owner, repo, pr_number):
@@ -418,9 +439,23 @@ async def handle_review_feedback(
         return "no_agent_thread"
     thread_id, metadata = found
 
-    attempts, _, github_login = await _thread_autofix_state(metadata)
-    if not await _user_autofix_enabled(github_login):
+    _, _, github_login, user_email = await _thread_autofix_state(metadata)
+    if not await _user_autofix_enabled(github_login, user_email):
         return "autofix_disabled_user"
+
+    if token is None:
+        token = await get_github_app_installation_token()
+    if not token:
+        return "no_token"
+    if not await has_repo_write_permission(owner=owner, repo=repo, username=reviewer, token=token):
+        logger.info(
+            "Skipping auto-fix review feedback on %s/%s#%s: %s lacks write access",
+            owner,
+            repo,
+            pr_number,
+            reviewer or "<unknown>",
+        )
+        return "reviewer_no_write_permission"
 
     prompt = _build_review_feedback_prompt(
         owner=owner,
@@ -430,12 +465,13 @@ async def handle_review_feedback(
         reviewer=reviewer,
         body=body,
     )
-    return await _dispatch_or_queue(
+    return await _dispatch_or_batch(
         thread_id,
         prompt,
         configurable=_run_configurable(
             metadata, repo_config={"owner": owner, "name": repo}, pr_number=pr_number
         ),
+        reason="review_feedback",
     )
 
 
@@ -446,7 +482,7 @@ async def sweep_open_prs() -> dict[str, int]:
     only path that can react to base-branch merge conflicts (GitHub emits no
     webhook for those).
     """
-    counts = {"scanned": 0, "dispatched": 0, "queued": 0, "conflicts": 0}
+    counts = {"scanned": 0, "dispatched": 0, "batched": 0, "conflicts": 0}
     token = await get_github_app_installation_token()
     if not token:
         logger.warning("CI monitor sweep: no GitHub App token")
@@ -502,8 +538,8 @@ async def sweep_open_prs() -> dict[str, int]:
         )
         if result == "dispatched":
             counts["dispatched"] += 1
-        elif result == "queued":
-            counts["queued"] += 1
+        elif result == "batched":
+            counts["batched"] += 1
     logger.info("CI monitor sweep complete: %s", counts)
     return counts
 
@@ -518,6 +554,9 @@ async def _flag_merge_conflict(
     if found is None:
         return
     thread_id, metadata = found
+    _, _, github_login, user_email = await _thread_autofix_state(metadata)
+    if not await _user_autofix_enabled(github_login, user_email):
+        return
     if metadata.get("autofix_conflict_head") == head_sha:
         return
     prompt = (
@@ -527,12 +566,13 @@ async def _flag_merge_conflict(
         "conflict resolution is ambiguous, comment on the PR and ask before "
         "guessing. Never force-push over commits already on the remote."
     )
-    await _dispatch_or_queue(
+    await _dispatch_or_batch(
         thread_id,
         prompt,
         configurable=_run_configurable(
             metadata, repo_config={"owner": owner, "name": repo}, pr_number=pr_number
         ),
+        reason="merge_conflict",
     )
     try:
         await get_client().threads.update(

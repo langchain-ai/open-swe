@@ -1,6 +1,6 @@
 """Per-PR auto-fix opt-out, stored in the LangGraph Store.
 
-Team-wide auto-fix is gated by the per-user ``auto_fix_ci`` profile flag.
+Auto-fix is gated by the per-user ``auto_fix_ci`` profile flag.
 On top of that, a single PR can be silenced with ``@open-swe autofix off`` (and
 re-enabled with ``@open-swe autofix on``), mirroring Cursor's
 ``@cursor autofix off`` per-PR control. The toggle lives here rather than on the
