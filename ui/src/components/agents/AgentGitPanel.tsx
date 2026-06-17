@@ -23,6 +23,7 @@ import { buttonVariants } from "@/components/ui/button"
 import { useDiffOptions } from "@/components/agents/utils/diffUtils"
 import { summarizeChangedFiles } from "@/components/agents/ported"
 import { Z } from "@/components/agents/z-index"
+import { useIsMobile } from "@/lib/useIsMobile"
 import { cn } from "@/lib/utils"
 
 interface AgentGitPanelProps {
@@ -220,6 +221,10 @@ export function AgentGitPanel({ thread, messages }: AgentGitPanelProps) {
   )
   const [width, setWidthState] = useState(() => readStoredPanelWidth())
   const [fullScreen, setFullScreen] = useState(false)
+  const isMobile = useIsMobile()
+  // On mobile the panel is never an inline resizable column — it's a full-screen
+  // overlay that the user navigates to (and back from), like the sidebar.
+  const overlay = fullScreen || isMobile
   const panelRef = useRef<HTMLDivElement>(null)
 
   const setCollapsed = (next: boolean) => {
@@ -341,9 +346,9 @@ export function AgentGitPanel({ thread, messages }: AgentGitPanelProps) {
       ref={panelRef}
       className={cn(
         "relative flex shrink-0 flex-col bg-[var(--ui-bg)]",
-        fullScreen ? "fixed inset-0 !w-full" : "h-full"
+        overlay ? "fixed inset-0 !w-full" : "h-full"
       )}
-      style={fullScreen ? { zIndex: Z.MODAL } : { width }}
+      style={overlay ? { zIndex: Z.MODAL } : { width }}
     >
       <div className="flex h-11 shrink-0 items-center gap-1 px-3">
         {(
@@ -379,24 +384,26 @@ export function AgentGitPanel({ thread, messages }: AgentGitPanelProps) {
         >
           <SidebarSimpleIcon className="size-4" />
         </button>
-        <button
-          type="button"
-          onClick={() => setFullScreen((v) => !v)}
-          aria-label={fullScreen ? "Exit full screen" : "Enter full screen"}
-          className="rounded-md p-1.5 text-[var(--ui-text-dim)] transition-colors hover:bg-[var(--ui-panel-2)] hover:text-[var(--ui-text)]"
-        >
-          {fullScreen ? (
-            <ArrowsInIcon className="size-4" />
-          ) : (
-            <ArrowsOutIcon className="size-4" />
-          )}
-        </button>
+        {!isMobile && (
+          <button
+            type="button"
+            onClick={() => setFullScreen((v) => !v)}
+            aria-label={fullScreen ? "Exit full screen" : "Enter full screen"}
+            className="rounded-md p-1.5 text-[var(--ui-text-dim)] transition-colors hover:bg-[var(--ui-panel-2)] hover:text-[var(--ui-text)]"
+          >
+            {fullScreen ? (
+              <ArrowsInIcon className="size-4" />
+            ) : (
+              <ArrowsOutIcon className="size-4" />
+            )}
+          </button>
+        )}
       </div>
 
       <div
         className={cn(
           "flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface)] shadow-sm",
-          fullScreen ? "mx-3 mb-3" : "mr-4 mb-4 ml-1"
+          overlay ? "mx-3 mb-3" : "mr-4 mb-4 ml-1"
         )}
       >
       {topTab !== "git" ? (
@@ -497,7 +504,7 @@ export function AgentGitPanel({ thread, messages }: AgentGitPanelProps) {
           )}
         </div>
 
-        {fullScreen && files.length > 0 && (
+        {fullScreen && !isMobile && files.length > 0 && (
           <div className="w-72 shrink-0 border-l border-[var(--ui-border)] bg-[var(--ui-surface)]">
             <FileTreeExplorer
               files={files}
@@ -510,7 +517,7 @@ export function AgentGitPanel({ thread, messages }: AgentGitPanelProps) {
         </>
       )}
       </div>
-      {!fullScreen && <PanelResizeHandle width={width} onResize={setWidth} />}
+      {!overlay && <PanelResizeHandle width={width} onResize={setWidth} />}
     </aside>
   )
 }

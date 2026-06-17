@@ -12,6 +12,7 @@ import { Messages } from "@/components/agents/messages"
 import { streamMessagesToUi } from "@/lib/agents/streamMessagesToUi"
 import { useSubmitAgentMessage } from "@/lib/agents/provider/useSubmitAgentMessage"
 import { useModelOptions } from "@/lib/agents/provider/useModelOptions"
+import { useIsMobile } from "@/lib/useIsMobile"
 
 interface AgentThreadViewProps {
   thread: AgentThread
@@ -22,6 +23,7 @@ interface AgentThreadViewProps {
 export function AgentThreadView({ thread }: AgentThreadViewProps) {
   const sendMessage = useSubmitAgentMessage(thread.id)
   const stream = useAgentThreadStream()
+  const isMobile = useIsMobile()
 
   const { models, defaultSelection } = useModelOptions()
   const threadSelection = useMemo<ModelSelection | null>(() => {
@@ -62,8 +64,8 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
   return (
     <div className="flex min-w-0 flex-1">
       <div
-        className="flex flex-1 flex-col"
-        style={{ minWidth: PANEL_MIN_CHAT_WIDTH }}
+        className="flex min-w-0 flex-1 flex-col"
+        style={isMobile ? undefined : { minWidth: PANEL_MIN_CHAT_WIDTH }}
       >
         {hasMessages ? (
           <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
