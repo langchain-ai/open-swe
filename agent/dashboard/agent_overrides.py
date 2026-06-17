@@ -10,6 +10,7 @@ from langgraph_sdk import get_client
 
 from .options import SUPPORTED_MODEL_IDS, model_supports_effort, provider_fallback_pair
 from .profiles import PROFILES_NAMESPACE
+from .team_settings import get_team_default_model
 from .user_mappings import cached_login_for_email, login_for_email
 
 logger = logging.getLogger(__name__)
@@ -135,3 +136,23 @@ def normalize_profile_subagent_overrides(
         model_key="default_subagent_model",
         effort_key="subagent_reasoning_effort",
     )
+
+
+async def resolve_agent_model_id(
+    github_login: str | None,
+    per_thread_model_id: str | None = None,
+) -> str:
+    """Resolve the agent model ID using the same precedence as ``get_agent``.
+
+    Order: per-thread override → profile override → team default.
+    """
+    model_id, _effort = await get_team_default_model("agent")
+    if github_login:
+        profile = await load_profile(github_login)
+        if profile:
+            overridden_model, _ = normalize_profile_overrides(profile)
+            if overridden_model:
+                model_id = overridden_model
+    if isinstance(per_thread_model_id, str) and per_thread_model_id in SUPPORTED_MODEL_IDS:
+        model_id = per_thread_model_id
+    return model_id

@@ -709,6 +709,11 @@ def test_process_slack_mention_queues_active_thread_message(
     monkeypatch.setattr(webapp, "refresh_user_mapping_cache", fake_refresh_cache)
     monkeypatch.setattr(webapp, "get_valid_access_token", fake_get_valid_access_token)
 
+    async def fake_resolve_agent_model_id(github_login, per_thread_model_id=None):
+        return "openai:gpt-5.5"
+
+    monkeypatch.setattr(webapp, "resolve_agent_model_id", fake_resolve_agent_model_id)
+
     thread_ts = "1700000000.000100"
     event_ts = "1700000000.000200"
     expected_thread_id = generate_thread_id_from_slack_thread("C123", thread_ts)

@@ -4,6 +4,7 @@ import pytest
 from fastapi import HTTPException
 
 from agent.dashboard import thread_api
+from agent.dashboard.agent_overrides import resolve_agent_model_id
 from agent.dashboard.options import model_supports_images
 
 _TEXT_ONLY_MODEL = "fireworks:accounts/fireworks/models/deepseek-v4-pro"
@@ -77,6 +78,43 @@ async def test_resolve_agent_model_choice_applies_request_before_profile(monkeyp
     )
 
     assert (model_id, effort) == ("anthropic:claude-opus-4-8", "high")
+
+
+async def test_resolve_agent_model_id_defaults_to_team_default(monkeypatch) -> None:
+    async def fake_team_default(role: str) -> tuple[str, str]:
+        return _TEXT_ONLY_MODEL, "high"
+
+    monkeypatch.setattr("agent.dashboard.agent_overrides.get_team_default_model", fake_team_default)
+    monkeypatch.setattr("agent.dashboard.agent_overrides.load_profile", lambda login: None)
+
+    model_id = await resolve_agent_model_id(None)
+    assert model_id == _TEXT_ONLY_MODEL
+
+
+async def test_resolve_agent_model_id_applies_profile_override(monkeypatch) -> None:
+    async def fake_team_default(role: str) -> tuple[str, str]:
+        return _TEXT_ONLY_MODEL, "high"
+
+    monkeypatch.setattr("agent.dashboard.agent_overrides.get_team_default_model", fake_team_default)
+
+    async def fake_load_profile(login: str) -> dict:
+        return {"default_model": _VISION_MODEL, "reasoning_effort": "medium"}
+
+    monkeypatch.setattr("agent.dashboard.agent_overrides.load_profile", fake_load_profile)
+
+    model_id = await resolve_agent_model_id("someuser")
+    assert model_id == _VISION_MODEL
+
+
+async def test_resolve_agent_model_id_applies_per_thread_override(monkeypatch) -> None:
+    async def fake_team_default(role: str) -> tuple[str, str]:
+        return _TEXT_ONLY_MODEL, "high"
+
+    monkeypatch.setattr("agent.dashboard.agent_overrides.get_team_default_model", fake_team_default)
+    monkeypatch.setattr("agent.dashboard.agent_overrides.load_profile", lambda login: None)
+
+    model_id = await resolve_agent_model_id(None, per_thread_model_id="anthropic:claude-opus-4-8")
+    assert model_id == "anthropic:claude-opus-4-8"
 
 
 def _new_thread_client(created: dict[str, object]) -> object:

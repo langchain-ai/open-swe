@@ -187,9 +187,17 @@ export const CloudPromptBar = memo(function CloudPromptBarComponent({
 
   const selectionLabel = formatModelSelection(models, selection)
 
+  const selectedModelSupportsImages = useMemo(() => {
+    if (!selection || pendingImages.length === 0) return true
+    return models.some(
+      (m) => m.id === selection.modelId && m.supports_images
+    )
+  }, [selection, pendingImages.length, models])
+
   const canSubmit =
     !disabled &&
     !isSubmitting &&
+    selectedModelSupportsImages &&
     (value.trim().length > 0 || pendingImages.length > 0)
 
   const handleSubmit = useCallback(async () => {
@@ -386,6 +394,14 @@ export const CloudPromptBar = memo(function CloudPromptBarComponent({
                 </button>
               </div>
             ))}
+          </div>
+        )}
+
+        {!selectedModelSupportsImages && (
+          <div className="mb-2 rounded-md border border-[var(--ui-border)] bg-[var(--ui-panel-2)] px-3 py-1.5 text-xs text-[color:var(--ui-text-muted)]">
+            The selected model does not support image input. Remove the
+            image{pendingImages.length > 1 ? "s" : ""} or switch to a
+            vision-enabled model to send.
           </div>
         )}
 

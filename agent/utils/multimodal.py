@@ -37,6 +37,15 @@ def extract_image_urls(text: str) -> list[str]:
     return deduped
 
 
+def vision_not_supported_warning(model_id: str, image_count: int) -> str:
+    """Build a prompt-visible warning when images are sent to a text-only model."""
+    return (
+        f"\n\n**Note:** {image_count} image(s) were attached but the current model "
+        f"({model_id}) does not support image input. The images were not included. "
+        "Please switch to a vision-enabled model to process images."
+    )
+
+
 async def fetch_image_block(
     image_url: str,
     client: httpx.AsyncClient,

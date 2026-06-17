@@ -14,8 +14,10 @@ import httpx
 from langchain.agents.middleware import AgentState, before_model
 from langgraph.config import get_config, get_store
 from langgraph.runtime import Runtime
+from langgraph_sdk import get_client
 
-from ..utils.multimodal import fetch_image_block
+from ..dashboard.options import model_supports_images
+from ..utils.multimodal import fetch_image_block, vision_not_supported_warning
 
 logger = logging.getLogger(__name__)
 
@@ -34,8 +36,25 @@ class LinearNotifyState(AgentState):
     linear_messages_sent_count: int
 
 
+async def _resolve_thread_model_id(thread_id: str) -> str | None:
+    """Read the resolved model from thread metadata (set by ``get_agent``)."""
+    try:
+        client = get_client()
+        thread = await client.threads.get(thread_id)
+        metadata = thread.get("metadata") if isinstance(thread, dict) else None
+        if not isinstance(metadata, dict):
+            return None
+        model = metadata.get("model")
+        return model if isinstance(model, str) and model else None
+    except Exception:
+        logger.debug("Could not read thread metadata for model resolution", exc_info=True)
+        return None
+
+
 async def _build_blocks_from_payload(
     payload: dict[str, Any],
+    *,
+    model_id: str | None = None,
 ) -> list[dict[str, Any]]:
     text = payload.get("text", "")
     image_urls = payload.get("image_urls", []) or []
@@ -47,6 +66,18 @@ async def _build_blocks_from_payload(
         blocks.extend(image for image in images if isinstance(image, dict))
 
     if not image_urls:
+        return blocks
+    if model_id and not model_supports_images(model_id):
+        logger.warning(
+            "Skipping %d queued image(s): model %s does not support images",
+            len(image_urls),
+            model_id,
+        )
+        if text:
+            blocks[0] = {
+                "type": "text",
+                "text": text + vision_not_supported_warning(model_id, len(image_urls)),
+            }
         return blocks
     async with httpx.AsyncClient() as client:
         for image_url in image_urls:
@@ -117,6 +148,15 @@ async def check_message_queue_before_model(  # noqa: PLR0911
             thread_id,
         )
 
+        has_images = any(
+            isinstance(msg.get("content"), dict)
+            and (msg["content"].get("image_urls") or msg["content"].get("images"))
+            for msg in queued_messages
+        )
+        resolved_model_id: str | None = None
+        if has_images:
+            resolved_model_id = await _resolve_thread_model_id(thread_id)
+
         content_blocks: list[dict[str, Any]] = []
         for msg in queued_messages:
             content = msg.get("content")
@@ -126,7 +166,7 @@ async def check_message_queue_before_model(  # noqa: PLR0911
                 "text" in content or "image_urls" in content or "images" in content
             ):
                 logger.debug("Queued message contains text + image URLs")
-                blocks = await _build_blocks_from_payload(content)
+                blocks = await _build_blocks_from_payload(content, model_id=resolved_model_id)
                 content_blocks.extend(blocks)
                 continue
             if isinstance(content, list):
