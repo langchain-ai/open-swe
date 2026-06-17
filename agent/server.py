@@ -43,6 +43,7 @@ from .dashboard.agent_usage import record_agent_thread_usage
 from .dashboard.options import DEFAULT_MODEL_ID, SUPPORTED_MODEL_IDS, model_supports_effort
 from .dashboard.team_settings import get_team_default_model_pair, get_team_default_repo
 from .dashboard.user_mappings import email_for_login
+from .integrations.currents_tools import load_currents_tools
 from .integrations.datadog_mcp import load_datadog_tools
 from .integrations.langsmith import _configure_github_proxy
 from .integrations.langsmith_tools import load_langsmith_tools
@@ -679,6 +680,14 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         await _observability_authorized(config, profile_login)
     )
 
+    currents_tools: list[Any] = []
+    if profile_login:
+        try:
+            currents_tools = await load_currents_tools(profile_login)
+        except Exception:
+            logger.warning("Failed to load Currents tools", exc_info=True)
+            currents_tools = []
+
     logger.info("Returning agent with sandbox for thread %s", thread_id)
     main_model = make_model(model_id, **model_kwargs)
     subagent_model = make_model(subagent_model_id, **subagent_model_kwargs)
@@ -710,6 +719,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             slack_read_thread_messages,
             slack_thread_reply,
             *observability_tools,
+            *currents_tools,
         ],
         subagents=[_general_purpose_subagent(subagent_model)],
         backend=backend_factory,
