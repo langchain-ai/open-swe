@@ -8,6 +8,7 @@ from agent.utils.slack import (
     TRACE_REPLY_TIPS,
     convert_mentions_to_slack_format,
     format_slack_messages_for_prompt,
+    get_slack_permalink,
     parse_github_pr_url,
     post_slack_trace_reply,
     replace_bot_mention_with_username,
@@ -323,12 +324,17 @@ def test_get_slack_repo_config_uses_existing_thread_repo(
     assert not posted
 
 
+async def _no_team_default_repo() -> dict[str, str] | None:
+    return None
+
+
 def test_get_slack_repo_config_new_thread_uses_default(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     threads_client = _FakeThreadsClient(raise_not_found=True)
     monkeypatch.setattr(webapp, "SLACK_REPO_OWNER", "default-owner")
     monkeypatch.setattr(webapp, "SLACK_REPO_NAME", "default-repo")
+    monkeypatch.setattr(webapp, "get_team_default_repo", _no_team_default_repo)
 
     monkeypatch.setattr(webapp, "get_client", lambda url: _FakeClient(threads_client))
 
@@ -343,6 +349,7 @@ def test_get_slack_repo_config_existing_thread_without_repo_uses_default(
     threads_client = _FakeThreadsClient(thread={"metadata": {}})
     monkeypatch.setattr(webapp, "SLACK_REPO_OWNER", "default-owner")
     monkeypatch.setattr(webapp, "SLACK_REPO_NAME", "default-repo")
+    monkeypatch.setattr(webapp, "get_team_default_repo", _no_team_default_repo)
 
     monkeypatch.setattr(webapp, "get_client", lambda url: _FakeClient(threads_client))
 
@@ -702,6 +709,11 @@ def test_process_slack_mention_queues_active_thread_message(
     monkeypatch.setattr(webapp, "refresh_user_mapping_cache", fake_refresh_cache)
     monkeypatch.setattr(webapp, "get_valid_access_token", fake_get_valid_access_token)
 
+    async def fake_resolve_agent_model_id(github_login, per_thread_model_id=None):
+        return "openai:gpt-5.5"
+
+    monkeypatch.setattr(webapp, "resolve_agent_model_id", fake_resolve_agent_model_id)
+
     thread_ts = "1700000000.000100"
     event_ts = "1700000000.000200"
     expected_thread_id = generate_thread_id_from_slack_thread("C123", thread_ts)
@@ -952,3 +964,63 @@ def test_process_slack_mention_bot_only_mode_runs_without_user_token(
 
     assert "run_create" in captured
     assert "prompt" not in captured
+
+
+class _FakeResponse:
+    def __init__(self, payload: dict) -> None:
+        self._payload = payload
+
+    def raise_for_status(self) -> None:
+        return None
+
+    def json(self) -> dict:
+        return self._payload
+
+
+class _FakeAsyncClient:
+    def __init__(self, payload: dict) -> None:
+        self._payload = payload
+
+    async def __aenter__(self) -> "_FakeAsyncClient":
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        return None
+
+    async def get(self, url: str, **kwargs: object) -> _FakeResponse:
+        return _FakeResponse(self._payload)
+
+
+def test_get_slack_permalink_returns_link(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
+    link = "https://workspace.slack.com/archives/C123/p1700000000000100"
+    monkeypatch.setattr(
+        slack_utils.httpx,
+        "AsyncClient",
+        lambda *a, **k: _FakeAsyncClient({"ok": True, "permalink": link}),
+    )
+
+    result = asyncio.run(get_slack_permalink("C123", "1700000000.000100"))
+
+    assert result == link
+
+
+def test_get_slack_permalink_returns_none_on_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
+    monkeypatch.setattr(
+        slack_utils.httpx,
+        "AsyncClient",
+        lambda *a, **k: _FakeAsyncClient({"ok": False, "error": "message_not_found"}),
+    )
+
+    result = asyncio.run(get_slack_permalink("C123", "1700000000.000100"))
+
+    assert result is None
+
+
+def test_get_slack_permalink_without_token_returns_none(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "")
+
+    result = asyncio.run(get_slack_permalink("C123", "1700000000.000100"))
+
+    assert result is None

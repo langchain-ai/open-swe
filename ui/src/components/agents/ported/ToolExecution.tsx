@@ -1,9 +1,9 @@
-import { memo, useState, useCallback, useRef, useLayoutEffect } from "react";
-import { diffLines } from "diff";
+import { memo, useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { MultiFileDiff } from "@pierre/diffs/react";
-import type { ToolExecutionChunk, AcpToolKind } from "@/lib/agents/types";
 import { DiffView } from "./DiffView";
-import { diffOptions } from "@/components/agents/utils/diffUtils";
+import type { AcpToolKind, ToolExecutionChunk } from "@/lib/agents/types";
+import { useDiffOptions } from "@/components/agents/utils/diffUtils";
+import { countLineChanges } from "@/components/agents/utils/diffStats";
 
 interface ToolExecutionProps {
   chunk: ToolExecutionChunk;
@@ -25,31 +25,6 @@ function getFileName(path: string): string {
   const normalized = path.replace(/\\/g, "/");
   const parts = normalized.split("/").filter(Boolean);
   return parts[parts.length - 1] || path;
-}
-
-function countLines(text: string): number {
-  if (text.length === 0) return 0;
-  const segments = text.split("\n");
-  return text.endsWith("\n") ? segments.length - 1 : segments.length;
-}
-
-function countLineChanges(originalContent: string | null | undefined, newContent: string): { additions: number; deletions: number } {
-  const before = originalContent ?? "";
-  const parts = diffLines(before, newContent, {
-    ignoreWhitespace: false,
-    newlineIsToken: false,
-  });
-
-  let additions = 0;
-  let deletions = 0;
-
-  for (const part of parts) {
-    const lineCount = countLines(part.value);
-    if (part.added) additions += lineCount;
-    else if (part.removed) deletions += lineCount;
-  }
-
-  return { additions, deletions };
 }
 
 function formatToolDisplay(
@@ -106,11 +81,6 @@ function formatToolDisplay(
   }
 }
 
-const inlineDiffOptions = {
-  ...diffOptions,
-  disableFileHeader: true,
-};
-
 const InlineDiffCollapsible = memo(function InlineDiffCollapsible({
   filePath,
   fileName,
@@ -130,6 +100,11 @@ const InlineDiffCollapsible = memo(function InlineDiffCollapsible({
 }) {
   const [expanded, setExpanded] = useState(false);
   const toggle = useCallback(() => setExpanded((prev) => !prev), []);
+  const diffOptions = useDiffOptions();
+  const inlineDiffOptions = useMemo(
+    () => ({ ...diffOptions, disableFileHeader: true }),
+    [diffOptions]
+  );
   const scrollRef = useRef<HTMLDivElement>(null);
   const [scrolledFromTop, setScrolledFromTop] = useState(false);
   const [scrolledFromBottom, setScrolledFromBottom] = useState(false);
@@ -186,7 +161,7 @@ const InlineDiffCollapsible = memo(function InlineDiffCollapsible({
         </button>
       </div>
 
-      <div className="rounded-lg bg-[var(--ui-accent-bubble)] overflow-hidden border border-[var(--ui-border-subtle)]">
+      <div className="rounded-lg bg-[var(--ui-code-bubble)] overflow-hidden border border-[var(--ui-border-subtle)]">
         <div className="px-3 py-2 flex items-center gap-2">
           <span className={`text-[13px] truncate flex-1 min-w-0 ${isError ? "text-red-400" : "text-[color:var(--ui-accent)]"}`}>
             {filePath}
@@ -227,9 +202,9 @@ export const ToolExecution = memo(function ToolExecution({
   const isCompletedEditOp = isEditOp && diffData && (status === "completed" || status === "error");
   const editedFilePath = diffData ? stripProjectPath(diffData.filePath, projectPath) : "";
   const editedFileName = editedFilePath ? getFileName(editedFilePath) : "";
-  const diffStats = diffData ? countLineChanges(diffData.originalContent, diffData.newContent) : null;
+  const diffStats = diffData ? countLineChanges(diffData.originalContent, diffData.newContent, diffData.filePath) : null;
 
-  if (isCompletedEditOp && diffStats && diffData) {
+  if (isCompletedEditOp && diffStats) {
     return (
       <InlineDiffCollapsible
         filePath={editedFilePath || diffData.filePath}

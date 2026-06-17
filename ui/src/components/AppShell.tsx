@@ -4,21 +4,30 @@ import type { ReactNode } from "react";
 
 import type { SessionUser } from "@/lib/api";
 import { AppSidebar } from "@/components/AppSidebar";
+import { cn } from "@/lib/utils";
 
 interface AppShellProps {
   user: SessionUser;
   title: string;
   description?: string;
   backTo?: { to: string; label: string };
+  className?: string;
   children: ReactNode;
 }
 
-export function AppShell({ user, title, description, backTo, children }: AppShellProps) {
+export function AppShell({
+  user,
+  title,
+  description,
+  backTo,
+  className,
+  children,
+}: AppShellProps) {
   return (
     <div className="flex h-svh overflow-hidden bg-background text-foreground">
       <AppSidebar user={user} />
       <main className="flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-3xl px-4 pt-14 pb-6 sm:px-8 sm:py-10">
+        <div className={cn("mx-auto max-w-3xl px-4 pt-14 pb-6 sm:px-8 sm:py-10", className)}>
           {backTo && (
             <Link
               to={backTo.to}
@@ -29,7 +38,7 @@ export function AppShell({ user, title, description, backTo, children }: AppShel
             </Link>
           )}
           <header className="mb-8">
-            <h1 className="font-heading text-lg font-medium">{title}</h1>
+            <h1 className="font-heading text-base font-medium">{title}</h1>
             {description && (
               <p className="mt-1 text-xs text-muted-foreground">{description}</p>
             )}

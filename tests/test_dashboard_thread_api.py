@@ -4,6 +4,7 @@ import pytest
 from fastapi import HTTPException
 
 from agent.dashboard import thread_api
+from agent.dashboard.agent_overrides import resolve_agent_model_id
 from agent.dashboard.options import model_supports_images
 
 _TEXT_ONLY_MODEL = "fireworks:accounts/fireworks/models/deepseek-v4-pro"
@@ -38,6 +39,15 @@ def test_user_message_content_allows_images_for_vision_model() -> None:
     assert any(block.get("type") != "text" for block in content)
 
 
+def test_langgraph_proxy_headers_include_api_key(monkeypatch) -> None:
+    monkeypatch.setenv("LANGSMITH_API_KEY", "ls-key")
+
+    headers = thread_api._langgraph_proxy_headers(accept="text/event-stream")
+
+    assert headers["X-API-Key"] == "ls-key"
+    assert headers["Accept"] == "text/event-stream"
+
+
 async def test_resolve_agent_model_choice_applies_profile_before_team_default(monkeypatch) -> None:
     async def fake_team_default(role: str) -> tuple[str, str]:
         assert role == "agent"
@@ -70,23 +80,648 @@ async def test_resolve_agent_model_choice_applies_request_before_profile(monkeyp
     assert (model_id, effort) == ("anthropic:claude-opus-4-8", "high")
 
 
-async def test_create_dashboard_thread_rejects_images_for_resolved_text_only_model(
-    monkeypatch,
-) -> None:
-    async def fake_profile(login: str) -> dict[str, str]:
-        assert login == "octocat"
-        return {"default_model": _TEXT_ONLY_MODEL, "reasoning_effort": "high"}
+async def test_resolve_agent_model_id_defaults_to_team_default(monkeypatch) -> None:
+    async def fake_team_default(role: str) -> tuple[str, str]:
+        return _TEXT_ONLY_MODEL, "high"
+
+    monkeypatch.setattr("agent.dashboard.agent_overrides.get_team_default_model", fake_team_default)
+    monkeypatch.setattr("agent.dashboard.agent_overrides.load_profile", lambda login: None)
+
+    model_id = await resolve_agent_model_id(None)
+    assert model_id == _TEXT_ONLY_MODEL
+
+
+async def test_resolve_agent_model_id_applies_profile_override(monkeypatch) -> None:
+    async def fake_team_default(role: str) -> tuple[str, str]:
+        return _TEXT_ONLY_MODEL, "high"
+
+    monkeypatch.setattr("agent.dashboard.agent_overrides.get_team_default_model", fake_team_default)
+
+    async def fake_load_profile(login: str) -> dict:
+        return {"default_model": _VISION_MODEL, "reasoning_effort": "medium"}
+
+    monkeypatch.setattr("agent.dashboard.agent_overrides.load_profile", fake_load_profile)
+
+    model_id = await resolve_agent_model_id("someuser")
+    assert model_id == _VISION_MODEL
+
+
+async def test_resolve_agent_model_id_applies_per_thread_override(monkeypatch) -> None:
+    async def fake_team_default(role: str) -> tuple[str, str]:
+        return _TEXT_ONLY_MODEL, "high"
+
+    monkeypatch.setattr("agent.dashboard.agent_overrides.get_team_default_model", fake_team_default)
+    monkeypatch.setattr("agent.dashboard.agent_overrides.load_profile", lambda login: None)
+
+    model_id = await resolve_agent_model_id(None, per_thread_model_id="anthropic:claude-opus-4-8")
+    assert model_id == "anthropic:claude-opus-4-8"
+
+
+def _new_thread_client(created: dict[str, object]) -> object:
+    class FakeThreads:
+        async def create(
+            self, *, thread_id: str, metadata: dict[str, object], if_exists: str
+        ) -> None:
+            created["thread_id"] = thread_id
+            created["metadata"] = dict(metadata)
+
+        async def update(self, *, thread_id: str, metadata: dict[str, object]) -> None:
+            created.setdefault("metadata", {})
+            assert isinstance(created["metadata"], dict)
+            created["metadata"].update(metadata)
+
+        async def get(self, thread_id: str) -> dict[str, object]:
+            return {"thread_id": thread_id, "metadata": created.get("metadata", {})}
+
+    class FakeClient:
+        threads = FakeThreads()
+
+    return FakeClient()
+
+
+def _patch_new_thread_deps(monkeypatch, *, profile: dict[str, object]) -> None:
+    async def fake_profile(login: str) -> dict[str, object]:
+        return dict(profile)
 
     async def fake_team_default(role: str) -> tuple[str, str]:
         assert role == "agent"
         return _VISION_MODEL, "medium"
 
+    async def fake_ensure_token(login: str) -> None:
+        return None
+
+    async def fake_resolve_email(login: str, prof: dict[str, object]) -> str:
+        return f"{login}@example.com"
+
     monkeypatch.setattr(thread_api, "get_profile", fake_profile)
     monkeypatch.setattr(thread_api, "get_team_default_model", fake_team_default)
+    monkeypatch.setattr(thread_api, "_ensure_dashboard_github_token", fake_ensure_token)
+    monkeypatch.setattr(thread_api, "_resolve_run_email", fake_resolve_email)
 
-    body = thread_api.ThreadCreateBody(prompt="see attached", images=[_image()])
+
+async def test_enrich_run_start_command_creates_and_stamps_new_thread(monkeypatch) -> None:
+    created: dict[str, object] = {}
+    _patch_new_thread_deps(monkeypatch, profile={})
+    monkeypatch.setattr(thread_api, "langgraph_client", lambda: _new_thread_client(created))
+
+    command = {
+        "method": "run.start",
+        "params": {
+            "input": {"messages": [{"type": "human", "content": "Fix the flaky test"}]},
+            "config": {
+                "configurable": {
+                    "repo": "octo/repo",
+                    "agent_model_id": _VISION_MODEL,
+                    "agent_effort": "medium",
+                }
+            },
+        },
+    }
+
+    enriched = await thread_api._enrich_run_start_command(
+        "new-tid",
+        "octocat",
+        command,
+        metadata={},
+        creating=True,
+    )
+
+    stamped = created["metadata"]
+    assert isinstance(stamped, dict)
+    assert stamped["source"] == "dashboard"
+    assert stamped["github_login"] == "octocat"
+    assert stamped["title"] == "Fix the flaky test"
+    assert stamped["repo_owner"] == "octo"
+    assert stamped["repo_name"] == "repo"
+
+    configurable = enriched["params"]["config"]["configurable"]
+    assert configurable["github_login"] == "octocat"
+    assert configurable["source"] == "dashboard"
+    assert configurable["repo"] == {"owner": "octo", "name": "repo"}
+    assert configurable["agent_model_id"] == _VISION_MODEL
+    assert configurable["agent_effort"] == "medium"
+    # Dashboard-only creation hints must not leak into the run config.
+    assert "repo_explicitly_none" not in configurable
+    assert enriched["params"]["assistant_id"] == "agent"
+
+
+async def test_enrich_run_start_command_rejects_images_for_resolved_text_only_model(
+    monkeypatch,
+) -> None:
+    created: dict[str, object] = {}
+    _patch_new_thread_deps(
+        monkeypatch,
+        profile={"default_model": _TEXT_ONLY_MODEL, "reasoning_effort": "high"},
+    )
+    monkeypatch.setattr(thread_api, "langgraph_client", lambda: _new_thread_client(created))
+
+    image = _image()
+    command = {
+        "method": "run.start",
+        "params": {
+            "input": {
+                "messages": [
+                    {
+                        "type": "human",
+                        "content": [
+                            {
+                                "type": "image",
+                                "base64": image.base64,
+                                "mime_type": image.mime_type,
+                            },
+                            {"type": "text", "text": "see attached"},
+                        ],
+                    }
+                ]
+            },
+            "config": {"configurable": {}},
+        },
+    }
+
     with pytest.raises(HTTPException) as exc_info:
-        await thread_api.create_dashboard_thread("octocat", body)
+        await thread_api._enrich_run_start_command(
+            "new-tid",
+            "octocat",
+            command,
+            metadata={},
+            creating=True,
+        )
 
     assert exc_info.value.status_code == 422
     assert "does not support image input" in exc_info.value.detail
+
+
+def _thread_with_metadata(metadata: dict) -> dict:
+    return {"thread_id": "t1", "status": "idle", "metadata": metadata}
+
+
+def test_thread_summary_includes_pr_and_diff_stats() -> None:
+    summary = thread_api._thread_summary(
+        _thread_with_metadata(
+            {
+                "repo_full_name": "langchain-ai/open-swe",
+                "title": "Add feature",
+                "pr_number": 42,
+                "pr_url": "https://github.com/langchain-ai/open-swe/pull/42",
+                "pr_state": "draft",
+                "pr_title": "feat: add feature",
+                "branch_name": "open-swe/feature",
+                "base_branch": "main",
+                "diff_stats": {"files": 3, "additions": 10, "deletions": 2},
+            }
+        )
+    )
+
+    assert summary["pr"] == {
+        "number": 42,
+        "title": "feat: add feature",
+        "state": "draft",
+        "headRef": "open-swe/feature",
+        "baseRef": "main",
+        "url": "https://github.com/langchain-ai/open-swe/pull/42",
+    }
+    assert summary["diffStats"] == {"files": 3, "additions": 10, "deletions": 2}
+
+
+def test_thread_summary_defaults_unknown_pr_state_to_open() -> None:
+    summary = thread_api._thread_summary(
+        _thread_with_metadata(
+            {
+                "pr_number": 7,
+                "pr_url": "https://example.com/pull/7",
+                "pr_state": "bogus",
+            }
+        )
+    )
+
+    assert summary["pr"]["state"] == "open"
+
+
+def test_thread_summary_omits_pr_when_no_pr_metadata() -> None:
+    summary = thread_api._thread_summary(_thread_with_metadata({"title": "No PR"}))
+
+    assert "pr" not in summary
+    assert "diffStats" not in summary
+
+
+async def test_proxy_commands_lazily_creates_missing_thread_only_for_run_start(
+    monkeypatch,
+) -> None:
+    class MissingThreads:
+        async def get(self, thread_id: str) -> dict[str, object]:
+            raise RuntimeError("thread not found")
+
+    class MissingClient:
+        threads = MissingThreads()
+
+    monkeypatch.setattr(thread_api, "langgraph_client", lambda: MissingClient())
+
+    # A non-run.start command against a thread that doesn't exist yet is a 404.
+    with pytest.raises(HTTPException) as exc_info:
+        await thread_api.proxy_dashboard_thread_commands(
+            "ghost", "octocat", b'{"method": "run.cancel"}'
+        )
+    assert exc_info.value.status_code == 404
+
+
+async def test_proxy_commands_run_start_by_non_owner_is_rejected(monkeypatch) -> None:
+    class OwnedThreads:
+        async def get(self, thread_id: str) -> dict[str, object]:
+            return {
+                "thread_id": thread_id,
+                "metadata": {"source": "dashboard", "github_login": "owner"},
+            }
+
+    class OwnedClient:
+        threads = OwnedThreads()
+
+    monkeypatch.setattr(thread_api, "langgraph_client", lambda: OwnedClient())
+
+    # An existing thread owned by someone else is never lazily re-created — a
+    # run.start from a non-owner is a 404, not a takeover.
+    with pytest.raises(HTTPException) as exc_info:
+        await thread_api.proxy_dashboard_thread_commands(
+            "tid", "intruder", b'{"method": "run.start"}'
+        )
+    assert exc_info.value.status_code == 404
+
+
+async def test_enrich_run_start_command_allowlists_client_configurable(monkeypatch) -> None:
+    updates: list[dict[str, object]] = []
+
+    class FakeThreads:
+        async def update(self, *, thread_id: str, metadata: dict[str, object]) -> None:
+            assert thread_id == "tid"
+            updates.append(metadata)
+
+    class FakeClient:
+        threads = FakeThreads()
+
+    async def fake_get_profile(login: str) -> dict[str, object]:
+        assert login == "octocat"
+        return {}
+
+    async def fake_ensure_token(login: str) -> None:
+        assert login == "octocat"
+
+    async def fake_resolve_email(login: str, profile: dict[str, object]) -> str:
+        assert login == "octocat"
+        return "octocat@example.com"
+
+    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
+    monkeypatch.setattr(thread_api, "get_profile", fake_get_profile)
+    monkeypatch.setattr(thread_api, "_ensure_dashboard_github_token", fake_ensure_token)
+    monkeypatch.setattr(thread_api, "_resolve_run_email", fake_resolve_email)
+
+    command = {
+        "method": "run.start",
+        "params": {
+            "config": {
+                "configurable": {
+                    "github_login": "attacker",
+                    "user_email": "attacker@example.com",
+                    "source": "github",
+                    "repo": {"owner": "evil", "name": "repo"},
+                    "agent_model_id": _VISION_MODEL,
+                    "agent_effort": "medium",
+                }
+            }
+        },
+    }
+
+    enriched = await thread_api._enrich_run_start_command(
+        "tid",
+        "octocat",
+        command,
+        metadata={
+            "source": "dashboard",
+            "github_login": "octocat",
+            "repo_owner": "octo",
+            "repo_name": "repo",
+        },
+    )
+
+    configurable = enriched["params"]["config"]["configurable"]
+    assert configurable["github_login"] == "octocat"
+    assert configurable["user_email"] == "octocat@example.com"
+    assert configurable["source"] == "dashboard"
+    assert configurable["repo"] == {"owner": "octo", "name": "repo"}
+    assert configurable["agent_model_id"] == _VISION_MODEL
+    assert configurable["agent_effort"] == "medium"
+    assert updates[-1]["model"] == _VISION_MODEL
+
+
+async def test_proxy_commands_rejects_non_object_body(monkeypatch) -> None:
+    class FakeThreads:
+        async def get(self, thread_id: str) -> dict[str, object]:
+            assert thread_id == "tid"
+            return {
+                "thread_id": "tid",
+                "metadata": {"source": "dashboard", "github_login": "octocat"},
+            }
+
+    class FakeClient:
+        threads = FakeThreads()
+
+    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
+
+    with pytest.raises(HTTPException) as exc_info:
+        await thread_api.proxy_dashboard_thread_commands("tid", "octocat", b"[]")
+
+    assert exc_info.value.status_code == 400
+
+
+async def test_proxy_endpoints_enforce_thread_ownership(monkeypatch) -> None:
+    class FakeThreads:
+        async def get(self, thread_id: str) -> dict[str, object]:
+            assert thread_id == "tid"
+            return {
+                "thread_id": "tid",
+                "metadata": {"source": "dashboard", "github_login": "owner"},
+            }
+
+    class FakeClient:
+        threads = FakeThreads()
+
+    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
+
+    with pytest.raises(HTTPException) as exc_info:
+        await thread_api.get_dashboard_thread_state("tid", "intruder")
+    assert exc_info.value.status_code == 404
+
+    with pytest.raises(HTTPException) as exc_info:
+        await thread_api.proxy_dashboard_thread_commands("tid", "intruder", b"{}")
+    assert exc_info.value.status_code == 404
+
+    with pytest.raises(HTTPException) as exc_info:
+        await thread_api.proxy_dashboard_thread_history("tid", "intruder", b"{}")
+    assert exc_info.value.status_code == 404
+
+    with pytest.raises(HTTPException) as exc_info:
+        await thread_api.proxy_dashboard_thread_run_cancel("tid", "run-1", "intruder")
+    assert exc_info.value.status_code == 404
+
+    with pytest.raises(HTTPException) as exc_info:
+        await thread_api.proxy_dashboard_thread_stream_events("tid", "intruder", b"{}")
+    assert exc_info.value.status_code == 404
+
+
+async def test_send_dashboard_message_returns_502_when_activity_unknown(monkeypatch) -> None:
+    class FakeThreads:
+        async def get(self, thread_id: str) -> dict[str, object]:
+            assert thread_id == "tid"
+            return {
+                "thread_id": "tid",
+                "metadata": {"source": "dashboard", "github_login": "octocat"},
+            }
+
+    class FakeClient:
+        threads = FakeThreads()
+
+    async def unknown_activity(thread_id: str) -> None:
+        assert thread_id == "tid"
+        return None
+
+    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
+    monkeypatch.setattr(thread_api, "get_thread_active_status", unknown_activity)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await thread_api.send_dashboard_message(
+            "tid",
+            "octocat",
+            thread_api.ThreadMessageBody(content="hello"),
+        )
+
+    assert exc_info.value.status_code == 502
+
+
+def test_thread_summary_exposes_resolved_state() -> None:
+    summary = thread_api._thread_summary(
+        {
+            "thread_id": "tid",
+            "metadata": {
+                "source": "dashboard",
+                "github_login": "octocat",
+                "resolved": True,
+                "resolved_at_ms": 1700,
+            },
+        }
+    )
+
+    assert summary["resolved"] is True
+    assert summary["resolvedAt"] == 1700
+
+
+def test_thread_summary_defaults_to_not_resolved() -> None:
+    summary = thread_api._thread_summary(
+        {"thread_id": "tid", "metadata": {"source": "dashboard", "github_login": "octocat"}}
+    )
+
+    assert summary["resolved"] is False
+    assert summary["resolvedAt"] is None
+
+
+async def test_resolve_dashboard_thread_marks_resolved(monkeypatch) -> None:
+    updates: list[dict[str, object]] = []
+
+    class FakeThreads:
+        async def get(self, thread_id: str) -> dict[str, object]:
+            return {
+                "thread_id": thread_id,
+                "metadata": {"source": "dashboard", "github_login": "octocat"},
+            }
+
+        async def update(self, *, thread_id: str, metadata: dict[str, object]) -> None:
+            updates.append(dict(metadata))
+
+    class FakeClient:
+        threads = FakeThreads()
+
+    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
+
+    summary = await thread_api.resolve_dashboard_thread("tid", "octocat", resolved=True)
+
+    assert updates[-1]["resolved"] is True
+    assert isinstance(updates[-1]["resolved_at_ms"], int)
+    assert summary["resolved"] is True
+
+
+async def test_resolve_dashboard_thread_clears_resolved(monkeypatch) -> None:
+    updates: list[dict[str, object]] = []
+
+    class FakeThreads:
+        async def get(self, thread_id: str) -> dict[str, object]:
+            return {
+                "thread_id": thread_id,
+                "metadata": {
+                    "source": "dashboard",
+                    "github_login": "octocat",
+                    "resolved": True,
+                    "resolved_at_ms": 1700,
+                },
+            }
+
+        async def update(self, *, thread_id: str, metadata: dict[str, object]) -> None:
+            updates.append(dict(metadata))
+
+    class FakeClient:
+        threads = FakeThreads()
+
+    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
+
+    summary = await thread_api.resolve_dashboard_thread("tid", "octocat", resolved=False)
+
+    assert updates[-1]["resolved"] is False
+    assert updates[-1]["resolved_at_ms"] is None
+    assert summary["resolved"] is False
+
+
+async def test_resolve_dashboard_thread_enforces_ownership(monkeypatch) -> None:
+    class FakeThreads:
+        async def get(self, thread_id: str) -> dict[str, object]:
+            return {
+                "thread_id": thread_id,
+                "metadata": {"source": "dashboard", "github_login": "owner"},
+            }
+
+    class FakeClient:
+        threads = FakeThreads()
+
+    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
+
+    with pytest.raises(HTTPException) as exc_info:
+        await thread_api.resolve_dashboard_thread("tid", "intruder", resolved=True)
+    assert exc_info.value.status_code == 404
+
+
+async def test_enrich_run_start_command_unresolves_thread(monkeypatch) -> None:
+    updates: list[dict[str, object]] = []
+
+    class FakeThreads:
+        async def update(self, *, thread_id: str, metadata: dict[str, object]) -> None:
+            updates.append(dict(metadata))
+
+    class FakeClient:
+        threads = FakeThreads()
+
+    _patch_new_thread_deps(monkeypatch, profile={})
+    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
+
+    async def fake_build(thread_id, login, metadata, *, overrides):
+        return {"github_login": login, "source": "dashboard"}
+
+    monkeypatch.setattr(thread_api, "_build_dashboard_configurable", fake_build)
+
+    command = {
+        "method": "run.start",
+        "params": {
+            "input": {"messages": [{"type": "human", "content": "follow up"}]},
+            "config": {"configurable": {}},
+        },
+    }
+
+    await thread_api._enrich_run_start_command(
+        "tid",
+        "octocat",
+        command,
+        metadata={
+            "source": "dashboard",
+            "github_login": "octocat",
+            "resolved": True,
+            "resolved_at_ms": 1700,
+        },
+    )
+
+    assert updates, "expected metadata update to clear resolved state"
+    assert updates[-1]["resolved"] is False
+    assert updates[-1]["resolved_at_ms"] is None
+
+
+def test_summary_matches_filters() -> None:
+    summary = {
+        "resolved": True,
+        "viewed": False,
+        "source": "github",
+        "status": "finished",
+        "title": "Fix the flaky test",
+    }
+
+    assert thread_api._summary_matches_filters(
+        summary, resolved=True, viewed=None, source=None, status=None, query=None
+    )
+    assert not thread_api._summary_matches_filters(
+        summary, resolved=False, viewed=None, source=None, status=None, query=None
+    )
+    assert thread_api._summary_matches_filters(
+        summary, resolved=None, viewed=None, source="github", status=None, query="flaky"
+    )
+    assert not thread_api._summary_matches_filters(
+        summary, resolved=None, viewed=None, source=None, status=None, query="missing"
+    )
+
+
+def test_metadata_matches_filters() -> None:
+    metadata = {"source": "dashboard", "title": "Fix login bug", "resolved": True}
+
+    assert thread_api._metadata_matches_filters(metadata, resolved=True, source=None, query=None)
+    assert not thread_api._metadata_matches_filters(
+        metadata, resolved=False, source=None, query=None
+    )
+    assert thread_api._metadata_matches_filters(
+        metadata, resolved=None, source="dashboard", query="login"
+    )
+    assert not thread_api._metadata_matches_filters(
+        metadata, resolved=None, source="github", query=None
+    )
+
+
+def _make_threads(count: int, *, resolved_before: int) -> list[dict[str, object]]:
+    threads: list[dict[str, object]] = []
+    for index in range(count):
+        threads.append(
+            {
+                "thread_id": f"t{index}",
+                "metadata": {
+                    "source": "dashboard",
+                    "github_login": "octocat",
+                    "title": f"Thread {index}",
+                    "updated_at_ms": count - index,
+                    "resolved": index < resolved_before,
+                },
+            }
+        )
+    return threads
+
+
+async def test_list_dashboard_threads_page_pages_beyond_first_search_batch(monkeypatch) -> None:
+    # The 100 most-recent threads are resolved; the unresolved ones only appear
+    # in the second search batch (offset >= 100).
+    threads = _make_threads(150, resolved_before=100)
+    offsets: list[int] = []
+
+    class FakeThreads:
+        async def search(self, *, metadata, limit, offset, sort_by, sort_order):
+            offsets.append(offset)
+            return threads[offset : offset + limit]
+
+        async def update(self, *, thread_id, metadata):
+            return None
+
+    class FakeRuns:
+        async def list(self, thread_id, limit=1):
+            return []
+
+    class FakeClient:
+        threads = FakeThreads()
+        runs = FakeRuns()
+
+    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
+
+    result = await thread_api.list_dashboard_threads_page(
+        "octocat", email=None, limit=25, offset=0, resolved=False
+    )
+
+    assert result["total"] == 50
+    assert len(result["items"]) == 25
+    assert all(item["resolved"] is False for item in result["items"])
+    assert 100 in offsets

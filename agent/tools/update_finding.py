@@ -11,11 +11,13 @@ from ..reviewer_findings import (
     DEFAULT_FINDING_TITLE,
     MAX_SUGGESTION_LINES,
     Finding,
+    ReviewerThreadMissingError,
     clip_suggestion,
     get_thread_id_from_runtime,
     list_findings,
     normalize_finding_title,
     resolve_review_head_sha,
+    thread_missing_tool_result,
     update_finding_fields,
 )
 from ..utils.reviewer_outcomes import emit_finding_status_outcome
@@ -129,7 +131,12 @@ def update_finding(
     config = get_config()
     configurable = config.get("configurable", {}) if isinstance(config, dict) else {}
     if status == "open":
-        head_sha = asyncio.run(resolve_review_head_sha(get_thread_id_from_runtime(), configurable))
+        try:
+            head_sha = asyncio.run(
+                resolve_review_head_sha(get_thread_id_from_runtime(), configurable)
+            )
+        except ReviewerThreadMissingError as exc:
+            return thread_missing_tool_result(exc)
         if head_sha:
             updates["last_confirmed_sha"] = head_sha
 
@@ -148,7 +155,10 @@ def update_finding(
         return {"success": False, "error": "No fields provided to update"}
 
     thread_id = get_thread_id_from_runtime()
-    findings = asyncio.run(list_findings(thread_id))
+    try:
+        findings = asyncio.run(list_findings(thread_id))
+    except ReviewerThreadMissingError as exc:
+        return thread_missing_tool_result(exc)
     finding = next((item for item in findings if item.get("id") == finding_id), None)
     if finding is None:
         return {"success": False, "error": f"No finding found with id {finding_id}"}
@@ -195,7 +205,10 @@ def update_finding(
                 )
             return result
 
-    updated = asyncio.run(update_finding_fields(thread_id, finding_id, updates))
+    try:
+        updated = asyncio.run(update_finding_fields(thread_id, finding_id, updates))
+    except ReviewerThreadMissingError as exc:
+        return thread_missing_tool_result(exc)
     if updated is None:
         return {"success": False, "error": f"No finding found with id {finding_id}"}
     if status in {"resolved", "dismissed"} and not delegated_resolution:

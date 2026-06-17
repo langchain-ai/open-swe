@@ -48,18 +48,7 @@ function UsagePage() {
     queryFn: () => api.usageLeaderboard(activePeriod, 10),
     enabled: !!session.data,
     staleTime: 5 * 60 * 1000,
-    refetchInterval: (query) => {
-      const data = query.state.data
-      return data &&
-        (!data.generated_at_ms || !data.reviewer_stats.generated_at_ms)
-        ? 2000
-        : false
-    },
   })
-  const usageIsPrecomputing =
-    !!leaderboard.data && !leaderboard.data.generated_at_ms
-  const reviewerIsPrecomputing =
-    !!leaderboard.data && !leaderboard.data.reviewer_stats.generated_at_ms
 
   if (session.isLoading) {
     return (
@@ -71,10 +60,10 @@ function UsagePage() {
   if (!session.data) return <Navigate to="/login" />
 
   return (
-    <AppShell user={session.data} title="Usage">
+    <AppShell user={session.data} title="Usage" className="max-w-5xl">
       <SettingsSection
         title="Agent leaderboard"
-        description="Ranked by agent lines of code, then PRs opened and agent runs."
+        description="Ranked by merged PRs, then agent lines of code, PRs opened, and agent runs."
         action={
           <Select
             value={activePeriod}
@@ -98,7 +87,7 @@ function UsagePage() {
           </Select>
         }
       >
-        {leaderboard.isLoading || usageIsPrecomputing ? (
+        {leaderboard.isLoading ? (
           <div className="space-y-2 p-4">
             <Skeleton className="h-12 w-full" />
             <Skeleton className="h-12 w-full" />
@@ -109,7 +98,7 @@ function UsagePage() {
             Failed to load usage data: {leaderboard.error.message}
           </p>
         ) : !leaderboard.data?.rows.length ? (
-          <div className="p-6 text-center text-sm text-muted-foreground">
+          <div className="p-6 text-center text-xs text-muted-foreground">
             No Open SWE Agent usage has been recorded for{" "}
             {PERIOD_LABELS[activePeriod].toLowerCase()} yet.
           </div>
@@ -125,7 +114,7 @@ function UsagePage() {
         title="Reviewer stats"
         description="Issues surfaced by Open SWE Review and how often users addressed them."
       >
-        {leaderboard.isLoading || reviewerIsPrecomputing ? (
+        {leaderboard.isLoading ? (
           <div className="grid gap-3 p-4 sm:grid-cols-2">
             <Skeleton className="h-24 w-full" />
             <Skeleton className="h-24 w-full" />
@@ -139,7 +128,7 @@ function UsagePage() {
         ) : leaderboard.data?.reviewer_stats ? (
           <ReviewerStats stats={leaderboard.data.reviewer_stats} />
         ) : (
-          <div className="p-6 text-center text-sm text-muted-foreground">
+          <div className="p-6 text-center text-xs text-muted-foreground">
             No reviewer stats have been recorded for{" "}
             {PERIOD_LABELS[activePeriod].toLowerCase()} yet.
           </div>
@@ -158,7 +147,7 @@ function UsageTable({
 }) {
   return (
     <div className="overflow-x-auto">
-      <table className="w-full min-w-[760px] text-sm">
+      <table className="w-full min-w-[760px] text-xs">
         <thead className="border-b border-border text-xs text-muted-foreground">
           <tr>
             <th className="w-14 px-4 py-3 text-left font-normal">Rank</th>
@@ -249,7 +238,7 @@ function ReviewerStats({ stats }: { stats: ReviewerStatsPayload }) {
         {cards.map((card) => (
           <div key={card.label} className="rounded-md border border-border p-3">
             <div className="text-xs text-muted-foreground">{card.label}</div>
-            <div className="mt-1 text-xl font-medium tabular-nums">
+            <div className="mt-1 text-lg font-medium tabular-nums">
               {formatNumber(card.value)}
             </div>
             <div className="mt-1 text-xs text-muted-foreground">
@@ -288,7 +277,7 @@ function CounterList({
     <div>
       <h3 className="text-xs font-medium text-muted-foreground">{title}</h3>
       {rows.length ? (
-        <ul className="mt-2 space-y-2 text-sm">
+        <ul className="mt-2 space-y-2 text-xs">
           {rows.map((row) => (
             <li
               key={row.name}

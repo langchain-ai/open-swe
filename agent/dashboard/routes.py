@@ -13,15 +13,27 @@ from fastapi.responses import RedirectResponse, Response, StreamingResponse
 from pydantic import BaseModel
 
 from .admin import is_admin
+from .agent_instructions import (
+    AgentInstructionsCreate,
+    AgentInstructionsUpdate,
+    create_agent_instructions,
+    delete_agent_instructions,
+    get_agent_instructions,
+    list_agent_instructions,
+    set_agent_instructions,
+)
 from .agent_usage import (
     list_agent_usage_leaderboard,
-    refresh_claimed_reviewer_stats_cache,
-    refresh_claimed_usage_leaderboard_cache,
+    refresh_reviewer_stats_cache,
+    refresh_usage_leaderboard_cache,
 )
 from .analyzer_cron import remove_continual_cron
 from .enabled_repos import (
     list_enabled_review_repos,
     set_review_repo_enabled,
+)
+from .eval_jobs import (
+    get_reviewer_eval_status,
 )
 from .oauth import (
     COOKIE_NAME,
@@ -36,6 +48,7 @@ from .oauth import (
     issue_session,
     issue_state,
     new_state_nonce,
+    require_same_origin_for_mutations,
     require_session,
     sanitize_redirect_to,
 )
@@ -48,6 +61,21 @@ from .profiles import (
     upsert_profile,
 )
 from .repo_access import require_repo_access_for_user
+from .review_api import (
+    get_review,
+    get_review_diff,
+    list_reviews,
+    trigger_re_review,
+)
+from .review_chat_api import (
+    delete_review_chat_thread,
+    get_review_chat,
+    list_review_chat_threads,
+    proxy_review_chat_commands,
+    proxy_review_chat_history,
+    proxy_review_chat_state,
+    proxy_review_chat_stream_events,
+)
 from .review_style_jobs import (
     cancel_review_style_analysis,
     start_bootstrap_analysis,
@@ -79,6 +107,15 @@ from .slack_oauth import (
     slack_oauth_configured,
     verify_team,
 )
+from .team_credentials import (
+    DatadogCredentialsUpdate,
+    LangSmithCredentialsUpdate,
+    connect_datadog,
+    connect_langsmith,
+    disconnect_datadog,
+    disconnect_langsmith,
+    get_team_credentials_status,
+)
 from .team_settings import (
     TeamSettingsUpdate,
     get_team_default_model,
@@ -87,15 +124,28 @@ from .team_settings import (
     upsert_team_settings,
 )
 from .thread_api import (
-    ThreadCreateBody,
     ThreadMessageBody,
+    ThreadResolveBody,
     cancel_dashboard_thread,
-    create_dashboard_thread,
     delete_dashboard_thread,
     get_dashboard_thread,
+    get_dashboard_thread_pr_diff,
+    get_dashboard_thread_state,
     list_dashboard_threads,
+    list_dashboard_threads_page,
+    proxy_dashboard_thread_commands,
+    proxy_dashboard_thread_history,
+    proxy_dashboard_thread_run_cancel,
+    proxy_dashboard_thread_stream_events,
+    resolve_dashboard_thread,
     send_dashboard_message,
     stream_dashboard_thread,
+)
+from .user_credentials import (
+    CurrentsCredentialsUpdate,
+    connect_currents,
+    disconnect_currents,
+    get_currents_status,
 )
 from .user_mappings import (
     delete_mapping,
@@ -106,7 +156,11 @@ from .user_mappings import (
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/dashboard/api", tags=["dashboard"])
+router = APIRouter(
+    prefix="/dashboard/api",
+    tags=["dashboard"],
+    dependencies=[Depends(require_same_origin_for_mutations)],
+)
 _GITHUB_API_TIMEOUT = httpx.Timeout(10.0, connect=3.0)
 _SKIPPABLE_INSTALLATION_REPO_STATUS_CODES = frozenset({403, 404})
 
@@ -125,6 +179,25 @@ def _admin_session(session: dict[str, Any] = _SESSION_DEP) -> dict[str, Any]:
 
 
 _ADMIN_DEP = Depends(_admin_session)
+
+
+async def _filter_repo_records_for_user(
+    login: str,
+    records: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for record in records:
+        full_name = record.get("full_name")
+        if not isinstance(full_name, str):
+            continue
+        try:
+            await require_repo_access_for_user(login, full_name)
+        except HTTPException as exc:
+            if exc.status_code in {403, 404}:
+                continue
+            raise
+        out.append(record)
+    return out
 
 
 def _api_base_url() -> str:
@@ -332,6 +405,31 @@ async def get_my_mapping(
     return mapping or {}
 
 
+@router.get("/my-credentials/currents")
+async def get_my_currents_status(
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    status = await get_currents_status(session["sub"])
+    return status.get("currents", {"connected": False})
+
+
+@router.put("/my-credentials/currents")
+async def connect_my_currents(
+    update: CurrentsCredentialsUpdate,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    status = await connect_currents(session["sub"], update)
+    return status.get("currents", {"connected": False})
+
+
+@router.delete("/my-credentials/currents")
+async def disconnect_my_currents(
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    status = await disconnect_currents(session["sub"])
+    return status.get("currents", {"connected": False})
+
+
 @router.get("/slack/login")
 async def slack_login(
     _session: dict[str, Any] = _SESSION_DEP,
@@ -411,6 +509,43 @@ async def api_put_team_settings(
     return await upsert_team_settings(update)
 
 
+@router.get("/team-credentials")
+async def api_get_team_credentials(
+    _admin: dict[str, Any] = _ADMIN_DEP,
+) -> dict[str, Any]:
+    return await get_team_credentials_status()
+
+
+@router.put("/team-credentials/datadog")
+async def api_connect_datadog(
+    update: DatadogCredentialsUpdate,
+    _admin: dict[str, Any] = _ADMIN_DEP,
+) -> dict[str, Any]:
+    return await connect_datadog(update)
+
+
+@router.delete("/team-credentials/datadog")
+async def api_disconnect_datadog(
+    _admin: dict[str, Any] = _ADMIN_DEP,
+) -> dict[str, Any]:
+    return await disconnect_datadog()
+
+
+@router.put("/team-credentials/langsmith")
+async def api_connect_langsmith(
+    update: LangSmithCredentialsUpdate,
+    _admin: dict[str, Any] = _ADMIN_DEP,
+) -> dict[str, Any]:
+    return await connect_langsmith(update)
+
+
+@router.delete("/team-credentials/langsmith")
+async def api_disconnect_langsmith(
+    _admin: dict[str, Any] = _ADMIN_DEP,
+) -> dict[str, Any]:
+    return await disconnect_langsmith()
+
+
 class EnabledReviewRepoUpdate(BaseModel):
     full_name: str
     enabled: bool
@@ -459,6 +594,14 @@ async def admin_delete_user_mapping(
 ) -> dict[str, bool]:
     deleted = await delete_mapping(github_login)
     return {"deleted": deleted}
+
+
+@router.get("/admin/evals/reviewer")
+async def admin_get_reviewer_eval(
+    _admin: dict[str, Any] = _ADMIN_DEP,
+) -> dict[str, Any]:
+    """Read-only status for the reviewer eval (triggered from the GitHub Action)."""
+    return await get_reviewer_eval_status()
 
 
 def _next_link_url(link_header: str | None) -> str | None:
@@ -528,17 +671,16 @@ async def _paginate(
     return out
 
 
-@router.get("/repos")
-async def list_repos(
-    session: dict[str, Any] = _SESSION_DEP,
-) -> dict[str, Any]:
-    """List repos where open-swe is installed and the user has access.
+async def _fetch_user_installations_and_repos(
+    login: str,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Resolve the installations and repos a user can access via the GitHub App.
 
     Paginates both ``/user/installations`` and per-installation
     ``/user/installations/{id}/repositories`` so users with multiple
-    installations or >30 accessible repos get the complete set.
+    installations or >30 accessible repos get the complete set. Shared by the
+    ``/repos`` endpoint and the reviews access filter.
     """
-    login = session["sub"]
     token = await get_valid_access_token(login)
     if not token:
         raise HTTPException(401, "github token unavailable, re-login required")
@@ -588,6 +730,30 @@ async def list_repos(
                     continue
                 raise
             repositories.extend(repos)
+    return installations, repositories
+
+
+async def accessible_repo_full_names(login: str) -> frozenset[str]:
+    """Lowercased ``owner/name`` of repos the user can currently access.
+
+    Resolved fresh on every call (a fixed, repo-count-independent burst of
+    GitHub calls) rather than cached. ``/reviews`` uses this set to decide
+    which private PR metadata a user may see, so it's an authorization
+    boundary: a stale set would leak repo/PR titles, branches, authors and
+    finding counts for repos the user just lost access to.
+    """
+    _, repositories = await _fetch_user_installations_and_repos(login)
+    return frozenset(
+        repo["full_name"].lower() for repo in repositories if isinstance(repo.get("full_name"), str)
+    )
+
+
+@router.get("/repos")
+async def list_repos(
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    """List repos where open-swe is installed and the user has access."""
+    installations, repositories = await _fetch_user_installations_and_repos(session["sub"])
     return {
         "installations": [
             {
@@ -609,7 +775,7 @@ async def list_repos(
 async def api_list_review_styles(
     session: dict[str, Any] = _SESSION_DEP,
 ) -> list[dict[str, Any]]:
-    records = await list_review_styles()
+    records = await _filter_repo_records_for_user(session["sub"], await list_review_styles())
     out: list[dict[str, Any]] = []
     for record in records:
         if record.get("status") == "running":
@@ -618,6 +784,194 @@ async def api_list_review_styles(
         else:
             out.append(record)
     return out
+
+
+REVIEWS_PAGE_SIZE = 20
+
+
+@router.get("/reviews")
+async def api_list_reviews(
+    page: int = 0,
+    mine: bool = True,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    login = session["sub"]
+    accessible = await accessible_repo_full_names(login)
+
+    async def is_accessible(summary: dict[str, Any]) -> bool:
+        return summary["full_name"].lower() in accessible
+
+    page = max(page, 0)
+    reviews, has_more = await list_reviews(
+        REVIEWS_PAGE_SIZE,
+        offset=page * REVIEWS_PAGE_SIZE,
+        author=login if mine else None,
+        is_accessible=is_accessible,
+    )
+    return {"reviews": reviews, "page": page, "has_more": has_more}
+
+
+@router.get("/reviews/{owner}/{repo}/{pr_number}")
+async def api_get_review(
+    owner: str,
+    repo: str,
+    pr_number: int,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
+    return await get_review(owner, repo, pr_number)
+
+
+@router.get("/reviews/{owner}/{repo}/{pr_number}/diff")
+async def api_get_review_diff(
+    owner: str,
+    repo: str,
+    pr_number: int,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
+    return await get_review_diff(owner, repo, pr_number)
+
+
+@router.post("/reviews/{owner}/{repo}/{pr_number}/re-review")
+async def api_re_review(
+    owner: str,
+    repo: str,
+    pr_number: int,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
+    return await trigger_re_review(owner, repo, pr_number, session["sub"])
+
+
+# --- PR chat (sandbox-less ``chat`` graph) -----------------------------------
+# The frontend points a LangGraph StreamProvider at the base
+# ``/reviews/{owner}/{repo}/{pr_number}/chat``; the SDK then issues the
+# ``/threads/{id}/{commands,stream/events,state,history}`` calls proxied below.
+
+
+@router.get("/reviews/{owner}/{repo}/{pr_number}/chat")
+async def api_get_review_chat(
+    owner: str,
+    repo: str,
+    pr_number: int,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
+    return await get_review_chat(owner, repo, pr_number, session["sub"])
+
+
+@router.get("/reviews/{owner}/{repo}/{pr_number}/chat/threads")
+async def api_list_review_chat_threads(
+    owner: str,
+    repo: str,
+    pr_number: int,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
+    threads = await list_review_chat_threads(owner, repo, pr_number, session["sub"])
+    return {"threads": threads}
+
+
+@router.delete("/reviews/{owner}/{repo}/{pr_number}/chat/threads/{thread_id}")
+async def api_delete_review_chat_thread(
+    owner: str,
+    repo: str,
+    pr_number: int,
+    thread_id: str,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> Response:
+    await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
+    await delete_review_chat_thread(owner, repo, pr_number, session["sub"], thread_id)
+    return Response(status_code=204)
+
+
+@router.post("/reviews/{owner}/{repo}/{pr_number}/chat/threads/{thread_id}/commands")
+async def api_review_chat_commands(
+    owner: str,
+    repo: str,
+    pr_number: int,
+    thread_id: str,
+    request: Request,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> Response:
+    await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
+    body = await request.body()
+    status_code, content, media_type = await proxy_review_chat_commands(
+        owner,
+        repo,
+        pr_number,
+        session["sub"],
+        thread_id,
+        body,
+        content_type=request.headers.get("content-type", "application/json"),
+    )
+    return Response(content=content, status_code=status_code, media_type=media_type)
+
+
+@router.post("/reviews/{owner}/{repo}/{pr_number}/chat/threads/{thread_id}/stream/events")
+async def api_review_chat_stream_events(
+    owner: str,
+    repo: str,
+    pr_number: int,
+    thread_id: str,
+    request: Request,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> StreamingResponse:
+    await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
+    body = await request.body()
+    stream = await proxy_review_chat_stream_events(
+        owner,
+        repo,
+        pr_number,
+        session["sub"],
+        thread_id,
+        body,
+        content_type=request.headers.get("content-type", "application/json"),
+    )
+    return StreamingResponse(
+        stream,
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
+    )
+
+
+@router.get("/reviews/{owner}/{repo}/{pr_number}/chat/threads/{thread_id}/state")
+async def api_review_chat_state(
+    owner: str,
+    repo: str,
+    pr_number: int,
+    thread_id: str,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> Response:
+    await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
+    status_code, content, media_type = await proxy_review_chat_state(
+        owner, repo, pr_number, session["sub"], thread_id
+    )
+    return Response(content=content, status_code=status_code, media_type=media_type)
+
+
+@router.post("/reviews/{owner}/{repo}/{pr_number}/chat/threads/{thread_id}/history")
+async def api_review_chat_history(
+    owner: str,
+    repo: str,
+    pr_number: int,
+    thread_id: str,
+    request: Request,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> Response:
+    await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
+    body = await request.body()
+    status_code, content, media_type = await proxy_review_chat_history(
+        owner,
+        repo,
+        pr_number,
+        session["sub"],
+        thread_id,
+        body,
+        content_type=request.headers.get("content-type", "application/json"),
+    )
+    return Response(content=content, status_code=status_code, media_type=media_type)
 
 
 @router.post("/review-styles")
@@ -635,6 +989,7 @@ async def api_get_review_style(
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
     full_name = normalize_repo_full_name(full_name)
+    await require_repo_access_for_user(session["sub"], full_name)
     record = await get_review_style(full_name)
     if not record:
         raise HTTPException(404, "review style not found")
@@ -650,10 +1005,10 @@ async def api_update_review_style_prompt(
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
     full_name = normalize_repo_full_name(full_name)
+    await require_repo_access_for_user(session["sub"], full_name)
     record = await get_review_style(full_name)
     if not record:
         raise HTTPException(404, "review style not found")
-    await require_repo_access_for_user(session["sub"], full_name)
     return await set_custom_prompt(full_name, body.custom_prompt)
 
 
@@ -683,8 +1038,8 @@ async def api_cancel_review_style(
     full_name: str,
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
-    del session
     full_name = normalize_repo_full_name(full_name)
+    await require_repo_access_for_user(session["sub"], full_name)
     record = await get_review_style(full_name)
     if not record:
         raise HTTPException(404, "review style not found")
@@ -696,8 +1051,8 @@ async def api_delete_review_style(
     full_name: str,
     session: dict[str, Any] = _SESSION_DEP,
 ) -> Response:
-    del session
     full_name = normalize_repo_full_name(full_name)
+    await require_repo_access_for_user(session["sub"], full_name)
     record = await get_review_style(full_name)
     if not record:
         raise HTTPException(404, "review style not found")
@@ -705,6 +1060,60 @@ async def api_delete_review_style(
         await cancel_review_style_analysis(full_name)
     await remove_continual_cron(full_name)
     await delete_review_style(full_name)
+    return Response(status_code=204)
+
+
+@router.get("/agent-instructions")
+async def api_list_agent_instructions(
+    session: dict[str, Any] = _SESSION_DEP,
+) -> list[dict[str, Any]]:
+    return await _filter_repo_records_for_user(session["sub"], await list_agent_instructions())
+
+
+@router.post("/agent-instructions")
+async def api_create_agent_instructions(
+    body: AgentInstructionsCreate,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    await require_repo_access_for_user(session["sub"], body.full_name)
+    return await create_agent_instructions(body.full_name, session["sub"])
+
+
+@router.get("/agent-instructions/{full_name:path}")
+async def api_get_agent_instructions(
+    full_name: str,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    full_name = normalize_repo_full_name(full_name)
+    await require_repo_access_for_user(session["sub"], full_name)
+    record = await get_agent_instructions(full_name)
+    if not record:
+        raise HTTPException(404, "agent instructions not found")
+    return record
+
+
+@router.put("/agent-instructions/{full_name:path}")
+async def api_update_agent_instructions(
+    full_name: str,
+    body: AgentInstructionsUpdate,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    full_name = normalize_repo_full_name(full_name)
+    await require_repo_access_for_user(session["sub"], full_name)
+    return await set_agent_instructions(full_name, body.instructions)
+
+
+@router.delete("/agent-instructions/{full_name:path}")
+async def api_delete_agent_instructions(
+    full_name: str,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> Response:
+    full_name = normalize_repo_full_name(full_name)
+    await require_repo_access_for_user(session["sub"], full_name)
+    record = await get_agent_instructions(full_name)
+    if not record:
+        raise HTTPException(404, "agent instructions not found")
+    await delete_agent_instructions(full_name)
     return Response(status_code=204)
 
 
@@ -721,10 +1130,10 @@ async def api_agent_usage_leaderboard(
         current_login=session["sub"],
         current_email=session.get("email"),
         schedule_usage_refresh=lambda cache_period: background_tasks.add_task(
-            refresh_claimed_usage_leaderboard_cache, cache_period
+            refresh_usage_leaderboard_cache, cache_period
         ),
         schedule_reviewer_refresh=lambda cache_period: background_tasks.add_task(
-            refresh_claimed_reviewer_stats_cache, cache_period
+            refresh_reviewer_stats_cache, cache_period
         ),
     )
 
@@ -769,15 +1178,37 @@ async def api_list_threads(
     all: bool = False,
     session: dict[str, Any] = _SESSION_DEP,
 ) -> list[dict[str, Any]]:
+    if all and not is_admin(session.get("email")):
+        raise HTTPException(403, "admin only")
     return await list_dashboard_threads(session["sub"], email=session.get("email"), include_all=all)
 
 
-@router.post("/threads")
-async def api_create_thread(
-    body: ThreadCreateBody,
+@router.get("/threads/page")
+async def api_list_threads_page(
+    limit: int = 25,
+    offset: int = 0,
+    all: bool = False,
+    resolved: bool | None = None,
+    viewed: bool | None = None,
+    source: str | None = None,
+    status: str | None = None,
+    q: str | None = None,
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
-    return await create_dashboard_thread(session["sub"], body)
+    if all and not is_admin(session.get("email")):
+        raise HTTPException(403, "admin only")
+    return await list_dashboard_threads_page(
+        session["sub"],
+        email=session.get("email"),
+        limit=limit,
+        offset=offset,
+        include_all=all,
+        resolved=resolved,
+        viewed=viewed,
+        source=source,
+        status=status,
+        query=q,
+    )
 
 
 @router.get("/threads/{thread_id}")
@@ -794,6 +1225,18 @@ async def api_get_thread(
     )
 
 
+@router.get("/threads/{thread_id}/pr-diff")
+async def api_get_thread_pr_diff(
+    thread_id: str,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    return await get_dashboard_thread_pr_diff(
+        thread_id,
+        session["sub"],
+        email=session.get("email"),
+    )
+
+
 @router.post("/threads/{thread_id}/messages")
 async def api_send_thread_message(
     thread_id: str,
@@ -801,6 +1244,39 @@ async def api_send_thread_message(
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
     return await send_dashboard_message(thread_id, session["sub"], body, email=session.get("email"))
+
+
+@router.post("/threads/{thread_id}/resolve")
+async def api_resolve_thread(
+    thread_id: str,
+    body: ThreadResolveBody,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    return await resolve_dashboard_thread(
+        thread_id,
+        session["sub"],
+        resolved=body.resolved,
+        email=session.get("email"),
+    )
+
+
+@router.post("/threads/{thread_id}/runs/{run_id}/cancel")
+async def api_cancel_thread_run(
+    thread_id: str,
+    run_id: str,
+    session: dict[str, Any] = _SESSION_DEP,
+    wait: str = "0",
+    action: str = "interrupt",
+) -> Response:
+    status_code, content, media_type = await proxy_dashboard_thread_run_cancel(
+        thread_id,
+        run_id,
+        session["sub"],
+        wait=wait,
+        action=action,
+        email=session.get("email"),
+    )
+    return Response(content=content, status_code=status_code, media_type=media_type)
 
 
 @router.post("/threads/{thread_id}/cancel")
@@ -818,6 +1294,69 @@ async def api_delete_thread(
 ) -> Response:
     await delete_dashboard_thread(thread_id, session["sub"], email=session.get("email"))
     return Response(status_code=204)
+
+
+@router.get("/threads/{thread_id}/state")
+async def api_get_thread_state(
+    thread_id: str,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    return await get_dashboard_thread_state(thread_id, session["sub"], email=session.get("email"))
+
+
+@router.post("/threads/{thread_id}/stream/events")
+async def api_thread_stream_events(
+    thread_id: str,
+    request: Request,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> StreamingResponse:
+    body = await request.body()
+    stream = await proxy_dashboard_thread_stream_events(
+        thread_id,
+        session["sub"],
+        body,
+        email=session.get("email"),
+        content_type=request.headers.get("content-type", "application/json"),
+    )
+    return StreamingResponse(
+        stream,
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
+    )
+
+
+@router.post("/threads/{thread_id}/commands")
+async def api_thread_commands(
+    thread_id: str,
+    request: Request,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> Response:
+    body = await request.body()
+    status_code, content, media_type = await proxy_dashboard_thread_commands(
+        thread_id,
+        session["sub"],
+        body,
+        email=session.get("email"),
+        content_type=request.headers.get("content-type", "application/json"),
+    )
+    return Response(content=content, status_code=status_code, media_type=media_type)
+
+
+@router.post("/threads/{thread_id}/history")
+async def api_thread_history(
+    thread_id: str,
+    request: Request,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> Response:
+    body = await request.body()
+    status_code, content, media_type = await proxy_dashboard_thread_history(
+        thread_id,
+        session["sub"],
+        body,
+        email=session.get("email"),
+        content_type=request.headers.get("content-type", "application/json"),
+    )
+    return Response(content=content, status_code=status_code, media_type=media_type)
 
 
 @router.get("/threads/{thread_id}/stream")

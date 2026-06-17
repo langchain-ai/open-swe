@@ -30,8 +30,11 @@ make format             # ruff format + ruff check --fix
 | `agent` | `agent.server:get_agent` | Main coding agent (Slack/Linear/GitHub-triggered). |
 | `reviewer` | `agent.reviewer:get_reviewer_agent` | Read-only PR reviewer. Findings model + `publish_review`. |
 | `analyzer` | `agent.analyzer:get_analyzer` | Learns per-repo reviewer style from historical PRs and this reviewer's own finding outcomes. |
+| `ci_monitor` | `agent.ci_monitor:get_ci_monitor` | Polling fallback for CI auto-fix: each tick sweeps open agent-authored PRs for failing checks / merge conflicts via `agent.ci_autofix.sweep_open_prs`. |
 
 The FastAPI app is `agent.webapp:app`.
+
+CI auto-fix ("PR babysitting") lives in `agent/ci_autofix.py`: when a CI check fails (webhook `check_run` / `check_suite` / `workflow_run` / `status`) or a reviewer leaves actionable feedback on a PR Open SWE opened, it locates the originating agent thread (by `pr_url` metadata) and dispatches a confidence-gated fix run on the `agent` graph. Gated by the per-user `auto_fix_ci` profile flag, the enabled-repos opt-in, and a per-PR `@open-swe autofix on|off` toggle (`agent/dashboard/autofix_state.py`). Skip-rules (base-branch failures, human commits, same-head dedupe, batching while runs are active, loop cap) all live in `ci_autofix.py`.
 
 ## Architecture
 
@@ -65,11 +68,12 @@ Configured in `agent/server.py:get_agent`, runs around every model call (in this
 3. `ToolErrorMiddleware` — catches tool exceptions and surfaces them as tool messages.
 4. `check_message_queue_before_model` — pulls Linear comments / Slack messages that arrived mid-run from the thread queue and injects them as user messages before the next LLM call. This is what makes "message the agent while it's working" work.
 5. `SlackAssistantStatusMiddleware` — keeps the Slack "assistant is typing"-style status up to date around model calls.
-6. `ensure_no_empty_msg` — guards against empty assistant messages that some providers reject.
-7. `notify_step_limit_reached` — after-agent hook that posts a Slack reply when the agent hits the step limit, so the user gets a clear signal instead of silence.
-8. `SandboxCircuitBreakerMiddleware` — trips the agent out of repeated sandbox failures instead of looping.
-9. `ModelFallbackMiddleware` (optional) — added only when `LLM_FALLBACK_MODEL_ID` or the per-model default fallback differs from the primary model.
-10. `SanitizeThinkingBlocksMiddleware` — strips malformed empty Anthropic thinking blocks immediately before provider calls.
+6. `notify_step_limit_reached` — after-agent hook that posts a Slack reply when the agent hits the step limit, so the user gets a clear signal instead of silence.
+7. `SandboxCircuitBreakerMiddleware` — trips the agent out of repeated sandbox failures instead of looping.
+8. `ModelFallbackMiddleware` (optional) — added only when `LLM_FALLBACK_MODEL_ID` or the per-model default fallback differs from the primary model.
+9. `SanitizeThinkingBlocksMiddleware` — strips malformed empty Anthropic thinking blocks immediately before provider calls.
+
+The agent ends its turn naturally when the model emits a final message with no tool call; there is intentionally no middleware that forces a tool call on every turn.
 
 Other middleware exists in `agent/middleware/` (`ExcludeToolsMiddleware`) but isn't wired into the default agent. The reviewer uses a leaner stack: `SanitizeToolInputsMiddleware`, `ModelCallLimitMiddleware`, `ToolErrorMiddleware`, `SlackAssistantStatusMiddleware`, `SanitizeThinkingBlocksMiddleware`.
 

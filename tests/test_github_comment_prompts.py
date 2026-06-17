@@ -126,10 +126,25 @@ def test_construct_system_prompt_includes_github_login_in_pr_footer() -> None:
     assert "git config user.email 1234+octocat@users.noreply.github.com" in prompt
     assert _BOT_TRAILER in prompt
     assert "Made by [Open SWE](https://openswe.vercel.app)" in prompt
-    assert (
-        "replace that legacy footer with this line instead of appending a second footer" in prompt
-    )
+    assert "replace that existing footer with this line" in prompt
     assert "`_Opened collaboratively by Mona Lisa and open-swe._`" in prompt
+
+
+def test_construct_system_prompt_footer_links_thread_when_provided() -> None:
+    identity = CollaboratorIdentity(
+        display_name="octocat",
+        commit_name="octocat",
+        commit_email="1234+octocat@users.noreply.github.com",
+    )
+
+    prompt = construct_system_prompt(
+        working_dir="/workspace",
+        triggering_user_identity=identity,
+        thread_url="https://openswe.vercel.app/agents/abc-123",
+    )
+
+    assert "Made by [Open SWE](https://openswe.vercel.app/agents/abc-123)" in prompt
+    assert "Made by [Open SWE](https://openswe.vercel.app)" not in prompt
 
 
 def test_construct_system_prompt_shell_escapes_user_name() -> None:
@@ -165,6 +180,23 @@ def test_add_pr_collaboration_note_replaces_legacy_footer() -> None:
 
     assert add_pr_collaboration_note(body, identity) == (
         "## Description\nDone.\n\nMade by [Open SWE](https://openswe.vercel.app)"
+    )
+
+
+def test_add_pr_collaboration_note_links_thread() -> None:
+    body = "## Description\nDone."
+
+    assert add_pr_collaboration_note(
+        body, thread_url="https://openswe.vercel.app/agents/abc-123"
+    ) == ("## Description\nDone.\n\nMade by [Open SWE](https://openswe.vercel.app/agents/abc-123)")
+
+
+def test_add_pr_collaboration_note_skips_when_footer_present_with_other_link() -> None:
+    body = "## Description\nDone.\n\nMade by [Open SWE](https://openswe.vercel.app)"
+
+    assert (
+        add_pr_collaboration_note(body, thread_url="https://openswe.vercel.app/agents/abc-123")
+        == body
     )
 
 

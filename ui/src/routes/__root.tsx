@@ -47,7 +47,7 @@ export const Route = createRootRoute({
 function RootDocument({ children }: { children: React.ReactNode }) {
   const [queryClient] = useState(() => makeQueryClient())
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
         <HeadContent />
@@ -55,16 +55,20 @@ function RootDocument({ children }: { children: React.ReactNode }) {
       <body>
         <QueryClientProvider client={queryClient}>
           {children ?? <Outlet />}
-          <TanStackDevtools
-            config={{ position: "bottom-right" }}
-            plugins={[
-              {
-                name: "Tanstack Router",
-                render: <TanStackRouterDevtoolsPanel />,
-              },
-            ]}
-          />
-          <ReactQueryDevtools initialIsOpen={false} />
+          {import.meta.env.VITE_DEVTOOLS !== "false" && (
+            <>
+              <TanStackDevtools
+                config={{ position: "bottom-right" }}
+                plugins={[
+                  {
+                    name: "Tanstack Router",
+                    render: <TanStackRouterDevtoolsPanel />,
+                  },
+                ]}
+              />
+              <ReactQueryDevtools initialIsOpen={false} />
+            </>
+          )}
         </QueryClientProvider>
         <Scripts />
       </body>

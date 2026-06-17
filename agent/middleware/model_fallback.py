@@ -21,6 +21,7 @@ import openai
 from langchain.agents.middleware import AgentMiddleware
 from langchain.agents.middleware.types import ModelCallResult, ModelRequest, ModelResponse
 from langchain_core.language_models import BaseChatModel
+from langchain_core.messages import AIMessage
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +50,46 @@ def _should_fallback(exc: BaseException) -> bool:
     return False
 
 
+def _error_body(exc: BaseException) -> dict[str, Any]:
+    body = getattr(exc, "body", None)
+    return body if isinstance(body, dict) else {}
+
+
+def _nested_str(data: dict[str, Any], *keys: str) -> str | None:
+    current: Any = data
+    for key in keys:
+        if not isinstance(current, dict):
+            return None
+        current = current.get(key)
+    return current if isinstance(current, str) and current else None
+
+
+def _provider_access_error_message(exc: BaseException) -> str | None:
+    if isinstance(exc, anthropic.BadRequestError):
+        body = _error_body(exc)
+        error_code = _nested_str(body, "error", "details", "error_code")
+        if error_code == "model_not_available":
+            provider_message = _nested_str(body, "error", "message") or str(exc)
+            return (
+                "The selected Anthropic model is not available to this workspace. "
+                f"Anthropic returned: {provider_message} "
+                "Choose a different model or update the workspace's Anthropic access and retry."
+            )
+
+    if isinstance(exc, (openai.BadRequestError, openai.NotFoundError)):
+        body = _error_body(exc)
+        error_code = _nested_str(body, "error", "code")
+        if error_code in {"model_not_found", "model_not_available"}:
+            provider_message = _nested_str(body, "error", "message") or str(exc)
+            return (
+                "The selected OpenAI model is not available to this workspace. "
+                f"OpenAI returned: {provider_message} "
+                "Choose a different model or update the workspace's OpenAI access and retry."
+            )
+
+    return None
+
+
 class ModelFallbackMiddleware(AgentMiddleware):
     """Retry the model call against a fallback provider on transient errors."""
 
@@ -64,6 +105,10 @@ class ModelFallbackMiddleware(AgentMiddleware):
         try:
             return handler(request)
         except Exception as exc:
+            access_error_message = _provider_access_error_message(exc)
+            if access_error_message is not None:
+                logger.warning("Model access error surfaced to user: %s", type(exc).__name__)
+                return AIMessage(content=access_error_message)
             if not _should_fallback(exc):
                 raise
             logger.warning(
@@ -82,6 +127,10 @@ class ModelFallbackMiddleware(AgentMiddleware):
         try:
             return await handler(request)
         except Exception as exc:
+            access_error_message = _provider_access_error_message(exc)
+            if access_error_message is not None:
+                logger.warning("Model access error surfaced to user: %s", type(exc).__name__)
+                return AIMessage(content=access_error_message)
             if not _should_fallback(exc):
                 raise
             logger.warning(

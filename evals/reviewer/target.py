@@ -9,16 +9,16 @@ verbatim form martian published.
 
 from __future__ import annotations
 
+import logging
 import os
 import threading
 from typing import Any, Literal, cast
 
-from dotenv import load_dotenv
 from langgraph_sdk import get_client
 
 from agent.reviewer_findings import Finding, Severity, filter_findings_for_publish
 
-load_dotenv()
+logger = logging.getLogger(__name__)
 
 DEFAULT_REVIEWER_ASSISTANT_ID = "reviewer"
 DEFAULT_LANGGRAPH_URL = "http://localhost:2024"
@@ -28,6 +28,24 @@ _VALID_SEVERITIES: set[Severity] = {"low", "medium", "high", "critical"}
 
 _THREAD_IDS: set[str] = set()
 _THREAD_IDS_LOCK = threading.Lock()
+
+_COMPLETED = 0
+_COMPLETED_LOCK = threading.Lock()
+
+
+def _record_completed() -> None:
+    global _COMPLETED
+    with _COMPLETED_LOCK:
+        _COMPLETED += 1
+
+
+def get_completed_count() -> int:
+    """Number of examples that have finished so far in this process.
+
+    Read by ``store_reporter`` to publish progress to the dashboard.
+    """
+    with _COMPLETED_LOCK:
+        return _COMPLETED
 
 
 def _record_thread_id(thread_id: str) -> None:
@@ -113,19 +131,42 @@ def _build_configurable(inputs: dict[str, Any]) -> dict[str, Any]:
 
 async def review_pr(inputs: dict[str, Any]) -> dict[str, Any]:
     """LangSmith target: run the reviewer agent on one PR."""
+    repo = inputs.get("repo", "")
+    pr_number = inputs.get("pr_number")
+    pr_url = inputs.get("pr_url", "")
+    logger.info(
+        "Starting reviewer eval example: repo=%s pr=%s url=%s",
+        repo,
+        pr_number,
+        pr_url,
+    )
     client = get_client(url=get_langgraph_url())
     thread = await client.threads.create()
     thread_id: str = thread["thread_id"]
     _record_thread_id(thread_id)
-    result = await client.runs.wait(
-        thread_id,
-        assistant_id=get_reviewer_assistant_id(),
-        input={"messages": [{"role": "user", "content": _build_user_message(inputs)}]},
-        config={"configurable": _build_configurable(inputs)},
-    )
-    if get_score_mode() == "surfaced_findings":
-        return {"comments": await _extract_surfaced_comments(client, thread_id)}
-    return {"comments": _extract_comments(result)}
+    try:
+        result = await client.runs.wait(
+            thread_id,
+            assistant_id=get_reviewer_assistant_id(),
+            input={"messages": [{"role": "user", "content": _build_user_message(inputs)}]},
+            config={"configurable": _build_configurable(inputs)},
+        )
+        if get_score_mode() == "surfaced_findings":
+            comments = await _extract_surfaced_comments(client, thread_id)
+        else:
+            comments = _extract_comments(result)
+        logger.info(
+            "Finished reviewer eval example: repo=%s pr=%s comments=%d thread_id=%s",
+            repo,
+            pr_number,
+            len(comments),
+            thread_id,
+        )
+        _record_completed()
+        return {"comments": comments}
+    except Exception:
+        logger.exception("Reviewer eval example failed: repo=%s pr=%s", repo, pr_number)
+        raise
 
 
 def _extract_comments(result: Any) -> list[dict[str, Any]]:

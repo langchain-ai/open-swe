@@ -17,11 +17,24 @@ def test_fireworks_reasoning_effort_maps_effort() -> None:
 
 def test_provider_model_kwargs_for_fireworks() -> None:
     kwargs = provider_model_kwargs(
-        "fireworks:accounts/fireworks/models/kimi-k2p6",
+        "fireworks:accounts/fireworks/models/kimi-k2p7-code",
         "high",
         max_tokens=16_000,
     )
     assert kwargs["max_tokens"] == 16_000
+    assert kwargs["model_kwargs"] == {"reasoning_effort": "high"}
+
+
+def test_kimi_k2p7_is_supported() -> None:
+    kimi_k2p7 = next(
+        (m for m in SUPPORTED_MODELS if m["id"].endswith("kimi-k2p7-code")),
+        None,
+    )
+    assert kimi_k2p7 is not None
+    assert kimi_k2p7["efforts"] == ["low", "medium", "high"]
+    assert "none" not in kimi_k2p7["efforts"]
+    assert kimi_k2p7["default_effort"] == "high"
+    kwargs = provider_model_kwargs(kimi_k2p7["id"], "high", max_tokens=16_000)
     assert kwargs["model_kwargs"] == {"reasoning_effort": "high"}
 
 

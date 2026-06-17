@@ -24,6 +24,45 @@ def test_reviewer_system_prompt_formats_without_keyerror() -> None:
     assert "at least 1 finding" not in prompt.lower()
 
 
+def test_reviewer_system_prompt_repo_ready_note() -> None:
+    prompt = reviewer._reviewer_system_prompt(
+        "/workspace/repo",
+        repo_owner="acme",
+        repo_name="repo",
+        pr_number=42,
+        repo_ready=True,
+    )
+    assert "already cloned and checked out at the PR head" in prompt
+    assert "Repo prep FAILED" not in prompt
+
+
+def test_reviewer_system_prompt_repo_not_ready_warns_stale() -> None:
+    prompt = reviewer._reviewer_system_prompt(
+        "/workspace/repo",
+        repo_owner="acme",
+        repo_name="repo",
+        pr_number=42,
+        repo_ready=False,
+        head_sha="abc123",
+    )
+    assert "Repo prep FAILED" in prompt
+    assert "stale" in prompt
+    assert "git checkout --force abc123" in prompt
+    assert "git rev-parse HEAD" in prompt
+    assert "already cloned and checked out at the PR head" not in prompt
+
+
+def test_reviewer_system_prompt_repo_not_ready_without_head_sha() -> None:
+    prompt = reviewer._reviewer_system_prompt(
+        "/workspace/repo",
+        repo_owner="acme",
+        repo_name="repo",
+        pr_number=42,
+        repo_ready=False,
+    )
+    assert "git checkout --force <head_sha>" in prompt
+
+
 def test_reviewer_system_prompt_includes_repo_style_section() -> None:
     prompt = reviewer._reviewer_system_prompt(
         "/workspace/repo",
@@ -202,6 +241,7 @@ async def test_reviewer_reuses_app_token_for_sandbox_proxy() -> None:
     mock_sandbox.assert_awaited_once_with(
         "reviewer-thread-id",
         github_proxy_token="app-token",
+        github_proxy_repositories=["repo"],
     )
 
 
@@ -279,11 +319,11 @@ async def test_reviewer_applies_eval_model_and_effort_overrides() -> None:
 
     main_model_call = make_model.call_args_list[0]
     assert main_model_call.args == ("anthropic:claude-opus-4-8",)
-    assert main_model_call.kwargs["thinking"] == {"type": "adaptive"}
+    assert main_model_call.kwargs["thinking"] == {"type": "adaptive", "display": "summarized"}
     assert main_model_call.kwargs["effort"] == "high"
     subagent_model_call = make_model.call_args_list[1]
     assert subagent_model_call.args == ("openai:gpt-5.5",)
-    assert subagent_model_call.kwargs["reasoning"] == {"effort": "low"}
+    assert subagent_model_call.kwargs["reasoning"] == {"effort": "low", "summary": "auto"}
 
 
 @pytest.mark.asyncio
@@ -327,11 +367,11 @@ async def test_reviewer_subagent_inherits_eval_model_without_explicit_override()
 
     main_model_call = make_model.call_args_list[0]
     assert main_model_call.args == ("anthropic:claude-opus-4-8",)
-    assert main_model_call.kwargs["thinking"] == {"type": "adaptive"}
+    assert main_model_call.kwargs["thinking"] == {"type": "adaptive", "display": "summarized"}
     assert main_model_call.kwargs["effort"] == "high"
     subagent_model_call = make_model.call_args_list[1]
     assert subagent_model_call.args == ("anthropic:claude-opus-4-8",)
-    assert subagent_model_call.kwargs["thinking"] == {"type": "adaptive"}
+    assert subagent_model_call.kwargs["thinking"] == {"type": "adaptive", "display": "summarized"}
     assert subagent_model_call.kwargs["effort"] == "high"
 
 
@@ -1273,3 +1313,18 @@ async def test_reviewer_injects_pr_title_and_body_into_context() -> None:
     assert "PR title and description" in captured["system_prompt"]
     assert "Add retry logic for uploads" in captured["system_prompt"]
     assert "Retries flaky uploads up to 3 times." in captured["system_prompt"]
+
+
+def test_reviewer_system_prompt_includes_closing_summary_contract() -> None:
+    """The prompt must tell the agent how to report publish_review outcomes:
+    dry_run / skipped_empty_re_review / thread_not_found are not publications."""
+    prompt = reviewer._reviewer_system_prompt(
+        "/tmp/wd",
+        repo_owner="o",
+        repo_name="r",
+        pr_number=1,
+    )
+    assert "skipped_empty_re_review" in prompt
+    assert "dry_run" in prompt
+    assert "Simulated publish (eval mode)" in prompt
+    assert "thread_not_found" in prompt

@@ -4,9 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 from collections import Counter
-from collections.abc import Awaitable, Callable, Iterable
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
@@ -22,19 +21,15 @@ USAGE_LEADERBOARD_CACHE_NAMESPACE: list[str] = ["agent_usage", "leaderboard_cach
 REVIEWER_STATS_CACHE_NAMESPACE: list[str] = ["agent_usage", "reviewer_stats_cache"]
 
 Period = Literal["7d", "30d", "all"]
-_PERIODS: tuple[Period, ...] = ("7d", "30d", "all")
 _AGENT_SOURCES = frozenset({"dashboard", "github", "slack", "linear"})
 _PR_REFRESH_INTERVAL_MS = 10 * 60 * 1000
 _MAX_PR_REFRESH_PER_REQUEST = 25
 _PR_REFRESH_CONCURRENCY = 5
 _CACHE_TTL_MS = 10 * 60 * 1000
-_CACHE_WARM_INTERVAL_SECONDS = 5 * 60
 _CACHE_SEARCH_LIMIT = 1000
 _GITHUB_API = "https://api.github.com"
 
 logger = logging.getLogger(__name__)
-_CACHE_REFRESH_IN_FLIGHT: set[tuple[tuple[str, ...], Period]] = set()
-_CACHE_REFRESH_IN_FLIGHT_LOCK = asyncio.Lock()
 
 
 def _client():
@@ -56,20 +51,6 @@ def _period_cutoff_ms(period: str) -> int | None:
 
 def _normalize_period(period: str | None) -> Period:
     return period if period in {"7d", "30d", "all"} else "30d"
-
-
-def usage_cache_warmer_enabled() -> bool:
-    value = os.environ.get("USAGE_CACHE_WARMER_ENABLED", "true").strip().lower()
-    return value not in {"0", "false", "no", "off"}
-
-
-def usage_cache_warm_interval_seconds() -> int:
-    raw = os.environ.get("USAGE_CACHE_WARM_INTERVAL_SECONDS", "")
-    try:
-        value = int(raw) if raw else _CACHE_WARM_INTERVAL_SECONDS
-    except ValueError:
-        return _CACHE_WARM_INTERVAL_SECONDS
-    return max(60, value)
 
 
 def _record_from_item(item: Any) -> dict[str, Any] | None:
@@ -417,6 +398,7 @@ async def _build_usage_leaderboard_snapshot(period: Period) -> dict[str, Any]:
     sorted_users = sorted(
         users.values(),
         key=lambda item: (
+            -item["merged_prs"],
             -item["agent_loc"],
             -item["prs_opened"],
             -item["agent_runs"],
@@ -624,97 +606,12 @@ async def refresh_reviewer_stats_cache(period: str | None = "30d") -> dict[str, 
     return snapshot
 
 
-def _empty_usage_snapshot(period: Period) -> dict[str, Any]:
-    return {"period": period, "users": [], "total_members": 0}
-
-
-def _empty_reviewer_stats_snapshot(period: Period) -> dict[str, Any]:
-    return {
-        "period": period,
-        "reviewed_prs": 0,
-        "prs_with_findings": 0,
-        "findings_recorded": 0,
-        "surfaced_findings": 0,
-        "addressed_findings": 0,
-        "resolved_after_update": 0,
-        "dismissed_findings": 0,
-        "unresolved_surfaced_findings": 0,
-        "resolution_rate": 0.0,
-        "human_replies": 0,
-        "severity_counts": {},
-        "top_categories": [],
-    }
-
-
-def _cache_refresh_key(namespace: list[str], period: Period) -> tuple[tuple[str, ...], Period]:
-    return tuple(namespace), period
-
-
-async def _claim_cache_refresh(namespace: list[str], period: Period) -> bool:
-    key = _cache_refresh_key(namespace, period)
-    async with _CACHE_REFRESH_IN_FLIGHT_LOCK:
-        if key in _CACHE_REFRESH_IN_FLIGHT:
-            return False
-        _CACHE_REFRESH_IN_FLIGHT.add(key)
-        return True
-
-
-async def _release_cache_refresh(namespace: list[str], period: Period) -> None:
-    key = _cache_refresh_key(namespace, period)
-    async with _CACHE_REFRESH_IN_FLIGHT_LOCK:
-        _CACHE_REFRESH_IN_FLIGHT.discard(key)
-
-
-async def _schedule_refresh_if_idle(
-    namespace: list[str],
-    period: Period,
-    schedule_refresh: Callable[[Period], None],
-) -> None:
-    if not await _claim_cache_refresh(namespace, period):
-        return
-    try:
-        schedule_refresh(period)
-    except Exception:
-        await _release_cache_refresh(namespace, period)
-        raise
-
-
-async def _run_claimed_cache_refresh(
-    namespace: list[str],
-    period: Period,
-    refresh: Callable[[str | None], Awaitable[dict[str, Any]]],
-) -> dict[str, Any]:
-    try:
-        return await refresh(period)
-    finally:
-        await _release_cache_refresh(namespace, period)
-
-
-async def refresh_claimed_usage_leaderboard_cache(period: str | None = "30d") -> dict[str, Any]:
-    normalized_period = _normalize_period(period)
-    return await _run_claimed_cache_refresh(
-        USAGE_LEADERBOARD_CACHE_NAMESPACE,
-        normalized_period,
-        refresh_usage_leaderboard_cache,
-    )
-
-
-async def refresh_claimed_reviewer_stats_cache(period: str | None = "30d") -> dict[str, Any]:
-    normalized_period = _normalize_period(period)
-    return await _run_claimed_cache_refresh(
-        REVIEWER_STATS_CACHE_NAMESPACE,
-        normalized_period,
-        refresh_reviewer_stats_cache,
-    )
-
-
 async def _cached_snapshot(
     namespace: list[str],
     period: Period,
     refresh: Callable[[str | None], Awaitable[dict[str, Any]]],
     *,
     schedule_refresh: Callable[[Period], None] | None = None,
-    empty_snapshot: Callable[[Period], dict[str, Any]] | None = None,
 ) -> tuple[dict[str, Any], int | None]:
     cached = await _get_value(namespace, period)
     if cached:
@@ -724,73 +621,9 @@ async def _cached_snapshot(
             if not generated_at_ms or _now_ms() - generated_at_ms <= _CACHE_TTL_MS:
                 return snapshot, generated_at_ms or None
             if schedule_refresh is not None:
-                await _schedule_refresh_if_idle(namespace, period, schedule_refresh)
+                schedule_refresh(period)
                 return snapshot, generated_at_ms
-    if schedule_refresh is not None and empty_snapshot is not None:
-        await _schedule_refresh_if_idle(namespace, period, schedule_refresh)
-        return empty_snapshot(period), None
-    snapshot = await refresh(period)
-    return snapshot, _now_ms()
-
-
-async def _refresh_cached_snapshot_if_stale(
-    namespace: list[str],
-    period: Period,
-    refresh: Callable[[str | None], Awaitable[dict[str, Any]]],
-) -> bool:
-    cached = await _get_value(namespace, period)
-    if cached:
-        snapshot = cached.get("snapshot")
-        generated_at_ms = _coerce_int(cached.get("generated_at_ms"))
-        if (
-            isinstance(snapshot, dict)
-            and generated_at_ms
-            and _now_ms() - generated_at_ms <= _CACHE_TTL_MS
-        ):
-            return False
-    if not await _claim_cache_refresh(namespace, period):
-        return False
-    try:
-        await refresh(period)
-        return True
-    finally:
-        await _release_cache_refresh(namespace, period)
-
-
-async def precompute_usage_caches(periods: Iterable[Period] = _PERIODS) -> dict[str, int]:
-    refreshed = {"usage": 0, "reviewer": 0}
-    for period in periods:
-        try:
-            if await _refresh_cached_snapshot_if_stale(
-                USAGE_LEADERBOARD_CACHE_NAMESPACE,
-                period,
-                refresh_usage_leaderboard_cache,
-            ):
-                refreshed["usage"] += 1
-        except Exception:
-            logger.debug(
-                "Failed to precompute usage leaderboard cache for %s", period, exc_info=True
-            )
-        try:
-            if await _refresh_cached_snapshot_if_stale(
-                REVIEWER_STATS_CACHE_NAMESPACE,
-                period,
-                refresh_reviewer_stats_cache,
-            ):
-                refreshed["reviewer"] += 1
-        except Exception:
-            logger.debug("Failed to precompute reviewer stats cache for %s", period, exc_info=True)
-    return refreshed
-
-
-async def run_usage_cache_warmer(interval_seconds: int | None = None) -> None:
-    interval = interval_seconds or usage_cache_warm_interval_seconds()
-    while True:
-        try:
-            await precompute_usage_caches()
-        except Exception:
-            logger.exception("Usage cache warmer failed")
-        await asyncio.sleep(interval)
+    return await refresh(period), _now_ms()
 
 
 def _usage_payload_from_snapshot(
@@ -864,14 +697,12 @@ async def list_agent_usage_leaderboard(
         normalized_period,
         refresh_usage_leaderboard_cache,
         schedule_refresh=schedule_usage_refresh,
-        empty_snapshot=_empty_usage_snapshot,
     )
     reviewer_stats, reviewer_generated_at_ms = await _cached_snapshot(
         REVIEWER_STATS_CACHE_NAMESPACE,
         normalized_period,
         refresh_reviewer_stats_cache,
         schedule_refresh=schedule_reviewer_refresh,
-        empty_snapshot=_empty_reviewer_stats_snapshot,
     )
     payload = _usage_payload_from_snapshot(
         usage_snapshot,

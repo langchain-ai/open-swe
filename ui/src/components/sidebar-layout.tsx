@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { SidebarSimpleIcon } from "@phosphor-icons/react";
 
+import { useHotkey } from "@/lib/hotkeys";
 import { cn } from "@/lib/utils";
 
 const STORAGE_WIDTH = "open-swe.sidebar.width";
@@ -43,6 +44,8 @@ export function useSidebarLayout() {
 
   const toggle = useCallback(() => setCollapsed(!collapsed), [collapsed, setCollapsed]);
 
+  useHotkey("mod+b", toggle, { enableInFormFields: true, ignoreRepeat: true });
+
   const closeOnMobile = useCallback(() => {
     if (typeof window === "undefined") return;
     // State-only: don't persist, so the desktop collapsed preference is preserved.
@@ -75,7 +78,7 @@ export function SidebarFrame({
         type="button"
         aria-label="Expand sidebar"
         onClick={toggle}
-        className="fixed top-3 left-3 z-30 flex size-7 items-center justify-center rounded-md border border-border bg-background text-muted-foreground shadow-sm hover:bg-accent hover:text-foreground"
+        className="fixed top-3 left-3 z-30 flex size-7 cursor-pointer items-center justify-center rounded-md border border-border bg-background text-muted-foreground shadow-sm hover:bg-accent hover:text-foreground"
       >
         <SidebarSimpleIcon className="size-4" />
       </button>
@@ -164,7 +167,7 @@ export function SidebarCollapseButton({ onToggle, className }: SidebarCollapseBu
       aria-label="Collapse sidebar"
       onClick={onToggle}
       className={cn(
-        "flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground",
+        "flex size-6 shrink-0 cursor-pointer items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground",
         className,
       )}
     >

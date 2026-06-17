@@ -14,7 +14,7 @@ Open SWE has two runnable pieces:
 
 - **Python 3.11 – 3.13** (3.14 is not yet supported due to dependency constraints)
 - [uv](https://docs.astral.sh/uv/) package manager
-- [LangGraph CLI](https://langchain-ai.github.io/langgraph/cloud/reference/cli/)
+- [LangGraph CLI](https://docs.langchain.com/langsmith/cli)
 - [ngrok](https://ngrok.com/) (for local development — exposes webhook endpoints to the internet)
 - [Bun](https://bun.sh/) (only if you want to run the dashboard UI locally — see step 8). Node 20+ also works, but `ui/bun.lock` is the canonical lockfile.
 
@@ -58,7 +58,7 @@ Write this down. You'll use it in the callback URL below and again in step 4 whe
 
 ### 3b. Create the app
 
-1. Go to **GitHub Settings → Developer settings → GitHub Apps → New GitHub App**
+1. Go to **GitHub Settings → Developer settings → [GitHub Apps](https://github.com/settings/apps) → [New GitHub App](https://github.com/settings/apps/new)**
 2. Fill in:
    - **App name**: `open-swe` (or your preferred name)
    - **Homepage URL**: This can be any valid URL — it's only shown on the GitHub Marketplace page (which you won't be using). Use something like `https://github.com/langchain-ai/open-swe`
@@ -76,6 +76,8 @@ Write this down. You'll use it in the callback URL below and again in step 4 whe
      - Contents: Read & write
      - Pull requests: Read & write
      - Issues: Read & write
+     - Checks: Read & write — reports an "Open SWE Review" check run on PRs while an auto-review runs, and reads third-party CI conclusions for the auto-fix flow (it watches failing checks on agent-authored PRs and pushes fixes). Without it, check-run creation fails (logged, best-effort) but reviews still work, and CI auto-fix is disabled.
+     - Commit statuses: Read-only — only needed if you enable the `Status` event below; the CI auto-fix flow reads the legacy combined commit-status API for integrations that report via statuses instead of check runs. Without it, status-based CI is silently ignored (logged as "Failed to read combined status").
      - Metadata: Read-only
    - **Organization permissions** (required only if you plan to set `ALLOWED_GITHUB_ORGS` — see step 5 / Security):
      - Members: Read-only — used to verify org membership for the dashboard-login gate via `GET /orgs/{org}/memberships/{username}`. Without this permission that call returns 403, the check fails closed, and **every** dashboard login is rejected.
@@ -83,6 +85,10 @@ Write this down. You'll use it in the callback URL below and again in step 4 whe
    - `Issue comment`
    - `Pull request review`
    - `Pull request review comment`
+   - `Check run` — required for CI auto-fix (watching failing GitHub Actions checks on agent PRs)
+   - `Check suite` — required for CI auto-fix
+   - `Workflow run` — required for CI auto-fix
+   - `Status` — optional; covers integrations that report via the legacy commit-status API
 5. Click **Create GitHub App**
 
 ### 3c. Collect credentials
@@ -127,6 +133,8 @@ Open SWE uses [LangSmith](https://smith.langchain.com/) for:
 3. Save it as `LANGSMITH_API_KEY_PROD`
 4. Get your **Tenant ID**: Visit LangSmith, login, then copy the UUID in the URL. Example: if your URL is `https://smith.langchain.com/o/72184268-01ea-4d29-98cc-6cfcf0f2abb0/agents/chat` -> the tenant ID would be `72184268-01ea-4d29-98cc-6cfcf0f2abb0`. Save it as `LANGSMITH_TENANT_ID_PROD`.
 5. Get your **Project ID**: open your tracing project in LangSmith, then click on the **ID** button in the top left, directly next to the project name. Save it as `LANGSMITH_TRACING_PROJECT_ID_PROD`
+
+> **Note on per-graph tracing projects.** The graphs trace into separate projects by name — `open-swe-agent` (main agent) and `open-swe-review` (reviewer/analyzer). "View trace" links resolve the correct project ID from these names automatically (via the `LANGSMITH_API_KEY_PROD` client), so make sure projects with these names exist in your tenant. If a name can't be resolved, links fall back to `LANGSMITH_TRACING_PROJECT_ID_PROD`, so set it to whichever project you want links to point at by default.
 
 ### 4b. Configure GitHub OAuth (optional but recommended)
 
@@ -398,7 +406,7 @@ LANGSMITH_API_KEY_PROD=""              # From step 4a
 LANGCHAIN_TRACING_V2="true"
 LANGCHAIN_PROJECT=""                   # LangSmith project name for traces
 LANGSMITH_TENANT_ID_PROD=""           
-LANGSMITH_TRACING_PROJECT_ID_PROD=""  
+LANGSMITH_TRACING_PROJECT_ID_PROD=""   # Fallback project ID for "View trace" links; graphs trace into the open-swe-agent / open-swe-review projects by name
 LANGSMITH_URL_PROD="https://smith.langchain.com"                 
 
 # === LLM ===
@@ -631,9 +639,9 @@ The `langgraph.json` at the project root defines the three graphs and the HTTP a
 ```json
 {
   "graphs": {
-    "agent": "agent.server:get_agent",
-    "reviewer": "agent.reviewer:get_reviewer_agent",
-    "analyzer": "agent.analyzer:get_analyzer"
+    "agent": "agent.server:traced_agent",
+    "reviewer": "agent.reviewer:traced_reviewer_agent",
+    "analyzer": "agent.analyzer:traced_analyzer"
   },
   "http": {
     "app": "agent.webapp:app"

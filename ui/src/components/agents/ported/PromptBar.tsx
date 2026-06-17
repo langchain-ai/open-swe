@@ -544,12 +544,12 @@ export const PromptBar = memo(function PromptBar({
       )}
 
       <div
-        className={`relative border border-[#2a3140] bg-[#172131]/95 px-4 py-3.5 min-h-[106px] flex flex-col shadow-[0_0_0_1px_rgba(255,255,255,0.02)_inset] rounded-2xl ${
+        className={`relative border border-[var(--ui-border)] bg-[var(--ui-surface)]/95 px-4 py-3.5 min-h-[106px] flex flex-col shadow-[0_0_0_1px_rgba(255,255,255,0.02)_inset] rounded-2xl ${
           connectedTop ? "-mt-px rounded-t-none border-t-0" : ""
         }`}
       >
         {isDragOver && (
-          <div className="pointer-events-none absolute inset-0 rounded-2xl border-2 border-[var(--ui-accent)] bg-[#172131]/70 backdrop-blur-sm z-30 flex items-center justify-center">
+          <div className="pointer-events-none absolute inset-0 rounded-2xl border-2 border-[var(--ui-accent)] bg-[var(--ui-surface)]/70 backdrop-blur-sm z-30 flex items-center justify-center">
             <span className="rounded-md bg-black/20 px-3 py-1.5 text-[color:var(--ui-accent)] text-sm font-medium">Drop images here</span>
           </div>
         )}

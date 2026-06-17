@@ -27,21 +27,15 @@ logger = logging.getLogger(__name__)
 TEAM_SETTINGS_NAMESPACE: list[str] = ["team_settings"]
 TEAM_SETTINGS_KEY = "default"
 
-TriggerMode = Literal["every_push", "once_per_pr", "manual"]
-AutofixMode = Literal["off", "low", "medium", "high"]
-
 # Cap the org-wide guidelines so a runaway value can't dominate the reviewer
 # prompt. Generous enough for a detailed policy, small enough to stay bounded.
 ORG_GUIDELINES_MAX_CHARS = 10_000
 
 
 class TeamSettingsUpdate(BaseModel):
-    trigger_mode: TriggerMode = "every_push"
     review_draft_prs: bool = False
     pr_summaries: bool = True
     review_trace_links: bool = True
-    autofix_mode: AutofixMode = "off"
-    autofix_severity_threshold: AutofixMode = "medium"
     org_guidelines: str | None = None
     default_agent_model: str | None = None
     default_agent_reasoning_effort: str | None = None
@@ -52,6 +46,10 @@ class TeamSettingsUpdate(BaseModel):
     default_reviewer_reasoning_effort: str | None = None
     default_reviewer_subagent_model: str | None = None
     default_reviewer_subagent_reasoning_effort: str | None = None
+    default_grouping_model: str | None = None
+    default_grouping_reasoning_effort: str | None = None
+    default_chat_model: str | None = None
+    default_chat_reasoning_effort: str | None = None
 
     @field_validator("org_guidelines", mode="before")
     @classmethod
@@ -86,6 +84,14 @@ class TeamSettingsUpdate(BaseModel):
             self.default_reviewer_subagent_model,
             self.default_reviewer_subagent_reasoning_effort,
             "reviewer subagent",
+        )
+        _validate_model_effort_pair(
+            self.default_grouping_model,
+            self.default_grouping_reasoning_effort,
+            "review diff grouping",
+        )
+        _validate_model_effort_pair(
+            self.default_chat_model, self.default_chat_reasoning_effort, "review chat"
         )
         return self
 
@@ -123,12 +129,9 @@ def _parse_repo(value: object) -> dict[str, str] | None:
 def _default_settings() -> dict[str, Any]:
     fallback_model, fallback_effort = default_model_pair()
     return {
-        "trigger_mode": "every_push",
         "review_draft_prs": False,
         "pr_summaries": True,
         "review_trace_links": True,
-        "autofix_mode": "off",
-        "autofix_severity_threshold": "medium",
         "org_guidelines": None,
         "default_agent_model": fallback_model,
         "default_agent_reasoning_effort": fallback_effort,
@@ -139,6 +142,13 @@ def _default_settings() -> dict[str, Any]:
         "default_reviewer_reasoning_effort": fallback_effort,
         "default_reviewer_subagent_model": fallback_model,
         "default_reviewer_subagent_reasoning_effort": fallback_effort,
+        # No hardcoded grouping default: unset means "inherit the Reviewer
+        # subagent default".
+        "default_grouping_model": None,
+        "default_grouping_reasoning_effort": None,
+        # No hardcoded chat default: unset means "inherit the Agent default".
+        "default_chat_model": None,
+        "default_chat_reasoning_effort": None,
         "updated_at": None,
     }
 
@@ -159,21 +169,21 @@ async def get_team_settings() -> dict[str, Any]:
     # selection) still surface the hardcoded default instead of a null.
     overlay = {k: v for k, v in value.items() if v is not None}
     merged = {**defaults, **overlay}
-    # Drop obsolete trigger mode values so a legacy record doesn't surface a
-    # value the new TriggerMode literal would reject on the next PUT.
-    if merged.get("trigger_mode") not in {"every_push", "once_per_pr", "manual"}:
-        merged["trigger_mode"] = defaults["trigger_mode"]
+    for stale_field in (
+        "trigger_mode",
+        "autofix_mode",
+        "autofix_severity_threshold",
+        "autofix_enabled",
+    ):
+        merged.pop(stale_field, None)
     return merged
 
 
 async def upsert_team_settings(update: TeamSettingsUpdate) -> dict[str, Any]:
     value: dict[str, Any] = {
-        "trigger_mode": update.trigger_mode,
         "review_draft_prs": update.review_draft_prs,
         "pr_summaries": update.pr_summaries,
         "review_trace_links": update.review_trace_links,
-        "autofix_mode": update.autofix_mode,
-        "autofix_severity_threshold": update.autofix_severity_threshold,
         "org_guidelines": update.org_guidelines,
         "default_agent_model": update.default_agent_model,
         "default_agent_reasoning_effort": update.default_agent_reasoning_effort,
@@ -184,6 +194,10 @@ async def upsert_team_settings(update: TeamSettingsUpdate) -> dict[str, Any]:
         "default_reviewer_reasoning_effort": update.default_reviewer_reasoning_effort,
         "default_reviewer_subagent_model": update.default_reviewer_subagent_model,
         "default_reviewer_subagent_reasoning_effort": update.default_reviewer_subagent_reasoning_effort,
+        "default_grouping_model": update.default_grouping_model,
+        "default_grouping_reasoning_effort": update.default_grouping_reasoning_effort,
+        "default_chat_model": update.default_chat_model,
+        "default_chat_reasoning_effort": update.default_chat_reasoning_effort,
         "updated_at": datetime.now(UTC).isoformat(),
     }
     await _client().store.put_item(TEAM_SETTINGS_NAMESPACE, TEAM_SETTINGS_KEY, value)
@@ -196,7 +210,7 @@ async def get_team_default_repo() -> dict[str, str] | None:
 
 
 async def get_team_default_model(
-    role: Literal["agent", "reviewer"],
+    role: Literal["agent", "reviewer", "chat"],
 ) -> tuple[str, str]:
     """Return the team-wide default ``(model_id, reasoning_effort)`` for ``role``.
 
@@ -205,9 +219,25 @@ async def get_team_default_model(
     (so a stale Anthropic/OpenAI selection stays on its provider rather than
     jumping cross-provider); otherwise the hardcoded global default from
     :func:`agent.dashboard.options.default_model_pair`.
+
+    ``"chat"`` (the review-page PR chat) has no hardcoded default: when its
+    admin setting is unset/invalid it inherits the team **agent** default.
     """
     settings = await get_team_settings()
-    if role == "agent":
+    if role == "chat":
+        model = settings.get("default_chat_model")
+        effort = settings.get("default_chat_reasoning_effort")
+        if (
+            isinstance(model, str)
+            and isinstance(effort, str)
+            and model in SUPPORTED_MODEL_IDS
+            and model_supports_effort(model, effort)
+        ):
+            return _resolve_default_pair(model, effort)
+        # Inherit the Agent default when no chat-specific model is configured.
+        model = settings.get("default_agent_model")
+        effort = settings.get("default_agent_reasoning_effort")
+    elif role == "agent":
         model = settings.get("default_agent_model")
         effort = settings.get("default_agent_reasoning_effort")
     else:
@@ -240,6 +270,31 @@ async def get_team_default_model_pair(
             settings.get("default_reviewer_subagent_reasoning_effort"),
         )
     return main, subagent
+
+
+async def get_team_default_grouping_model() -> tuple[str, str]:
+    """Return the team-wide default ``(model_id, reasoning_effort)`` for the
+    review diff-grouping pass.
+
+    When no grouping-specific model is configured (or it's no longer
+    supported), inherit the team **reviewer subagent** default — the grouping
+    pass is a cheap, fast companion to the reviewer, so it should track that
+    cheaper tier rather than the primary reviewer model.
+    """
+    settings = await get_team_settings()
+    model = settings.get("default_grouping_model")
+    effort = settings.get("default_grouping_reasoning_effort")
+    if (
+        isinstance(model, str)
+        and isinstance(effort, str)
+        and model in SUPPORTED_MODEL_IDS
+        and model_supports_effort(model, effort)
+    ):
+        return _resolve_default_pair(model, effort)
+    return _resolve_default_pair(
+        settings.get("default_reviewer_subagent_model"),
+        settings.get("default_reviewer_subagent_reasoning_effort"),
+    )
 
 
 async def get_team_review_trace_links_enabled() -> bool:

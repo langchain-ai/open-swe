@@ -1,12 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
-import { getSingletonHighlighter, type ThemedToken } from "shiki";
+import { getSingletonHighlighter } from "shiki";
+import type { ThemedToken } from "shiki";
+import { useResolvedTheme } from "@/lib/theme";
 
 interface CodeBlockProps {
   text: string;
   language?: string;
 }
 
-const TOKEN_CACHE = new Map<string, ThemedToken[][]>();
+const SHIKI_THEME = { light: "github-light", dark: "github-dark" } as const;
+
+const TOKEN_CACHE = new Map<string, Array<Array<ThemedToken>>>();
 
 function normalizeLanguage(language?: string): string {
   const raw = (language || "").toLowerCase().trim();
@@ -42,8 +46,10 @@ function languageLabel(language: string): string {
 }
 
 export function CodeBlock({ text, language }: CodeBlockProps) {
-  const [tokens, setTokens] = useState<ThemedToken[][] | null>(null);
+  const [tokens, setTokens] = useState<Array<Array<ThemedToken>> | null>(null);
   const [copied, setCopied] = useState(false);
+  const resolvedTheme = useResolvedTheme();
+  const shikiTheme = SHIKI_THEME[resolvedTheme];
   const normalizedLanguage = useMemo(() => normalizeLanguage(language), [language]);
   const displayLanguage = useMemo(() => languageLabel(normalizedLanguage), [normalizedLanguage]);
 
@@ -53,7 +59,7 @@ export function CodeBlock({ text, language }: CodeBlockProps) {
 
     if (normalizedLanguage === "text") return;
 
-    const cacheKey = `${normalizedLanguage}::${text}`;
+    const cacheKey = `${shikiTheme}::${normalizedLanguage}::${text}`;
     const cached = TOKEN_CACHE.get(cacheKey);
     if (cached) {
       setTokens(cached);
@@ -61,16 +67,14 @@ export function CodeBlock({ text, language }: CodeBlockProps) {
     }
 
     getSingletonHighlighter({
-      themes: ["github-dark"],
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      themes: [shikiTheme],
       langs: [normalizedLanguage as any],
     })
       .then((highlighter) => {
         if (cancelled) return;
         const result = highlighter.codeToTokens(text, {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           lang: normalizedLanguage as any,
-          theme: "github-dark",
+          theme: shikiTheme,
         });
         if (TOKEN_CACHE.size >= 500) TOKEN_CACHE.clear();
         TOKEN_CACHE.set(cacheKey, result.tokens);
@@ -86,7 +90,7 @@ export function CodeBlock({ text, language }: CodeBlockProps) {
     return () => {
       cancelled = true;
     };
-  }, [text, normalizedLanguage]);
+  }, [text, normalizedLanguage, shikiTheme]);
 
   const handleCopy = async () => {
     try {
@@ -99,9 +103,9 @@ export function CodeBlock({ text, language }: CodeBlockProps) {
   };
 
   return (
-    <div className="my-2 max-w-full overflow-hidden rounded-xl bg-[var(--ui-accent-bubble)]">
+    <div className="my-2 max-w-full overflow-hidden rounded-xl border border-[var(--ui-border-subtle)] bg-[var(--ui-code-bubble)]">
       <div className="flex items-center justify-between px-3 py-2 text-xs">
-        <span className="text-[color:var(--ui-text-muted)]">{displayLanguage}</span>
+        <span className="font-mono text-[color:var(--ui-accent-2)]">{displayLanguage}</span>
         <button
           type="button"
           onClick={handleCopy}

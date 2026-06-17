@@ -3,39 +3,49 @@ import { useNavigate } from "@tanstack/react-router"
 import { useEffect } from "react"
 
 import { agentsApi } from "./api"
-import { addPendingPrompt } from "./pendingPrompts"
-import type { ScheduleUpdateRequest } from "./api"
-import type { ImageChunk } from "./types"
+import type { QueryClient } from "@tanstack/react-query"
+import type { ScheduleUpdateRequest, ThreadsPageParams } from "./api"
+import type { AgentThread, Chunk, ImageChunk, Message } from "./types"
 
 export const agentThreadKeys = {
-  all: ["agent-threads"] as const,
+  lists: ["agent-threads", "lists"] as const,
+  all: ["agent-threads", "lists", "all"] as const,
   detail: (threadId: string) => ["agent-threads", threadId] as const,
+  prDiff: (threadId: string) => ["agent-threads", threadId, "pr-diff"] as const,
+  page: (params: ThreadsPageParams) =>
+    ["agent-threads", "lists", "page", params] as const,
+}
+
+export function invalidateAgentThreadLists(queryClient: QueryClient): void {
+  void queryClient.invalidateQueries({ queryKey: agentThreadKeys.lists })
 }
 
 export const agentScheduleKeys = {
   all: ["agent-schedules"] as const,
 }
 
-const PREFETCH_THREAD_DETAIL_LIMIT = 12
-
-export function usePrefetchAgentThreadDetails(
-  threads: Array<{ id: string }>,
+// The list endpoint (`GET /threads`) and the detail endpoint
+// (`GET /threads/{id}`) return the same per-thread summary, so warming the
+// detail cache from the already-fetched list avoids a fan-out of one request
+// per sidebar thread. Navigation stays instant; the real (mark-viewed) fetch
+// fires only when a thread is actually opened. The active thread is skipped so
+// its live detail query stays the source of truth.
+export function useSeedAgentThreadDetails(
+  threads: Array<AgentThread>,
   activeThreadId?: string
 ) {
   const queryClient = useQueryClient()
 
   useEffect(() => {
-    const threadIds = threads
-      .map((thread) => thread.id)
-      .filter((threadId) => threadId !== activeThreadId)
-      .slice(0, PREFETCH_THREAD_DETAIL_LIMIT)
-
-    threadIds.forEach((threadId) => {
-      void queryClient.prefetchQuery({
-        queryKey: agentThreadKeys.detail(threadId),
-        queryFn: () => agentsApi.getThread(threadId, { markViewed: false }),
+    for (const thread of threads) {
+      if (thread.id === activeThreadId) continue
+      // Seed as already-stale: the detail GET is what marks a thread viewed
+      // server-side, so opening a seeded entry must still refetch despite the
+      // detail query's `staleTime` (which exists for the optimistic seed).
+      queryClient.setQueryData(agentThreadKeys.detail(thread.id), thread, {
+        updatedAt: 0,
       })
-    })
+    }
   }, [activeThreadId, queryClient, threads])
 }
 
@@ -50,15 +60,61 @@ export function useAgentThreads() {
   })
 }
 
+// The sidebar fetches active (unresolved) and resolved threads separately so
+// resolving the most-recent threads can't hide older active ones behind a
+// shared cap — each list is filled server-side from its own filtered query.
+const SIDEBAR_ACTIVE_LIMIT = 50
+
+function sidebarRefetchInterval(query: {
+  state: { data?: { items: Array<AgentThread> } }
+}) {
+  return query.state.data?.items.some((thread) => thread.status === "running")
+    ? 2000
+    : false
+}
+
+export function useSidebarThreads(resolvedLimit: number) {
+  const active = useQuery({
+    queryKey: agentThreadKeys.page({
+      resolved: false,
+      limit: SIDEBAR_ACTIVE_LIMIT,
+    }),
+    queryFn: () =>
+      agentsApi.listThreadsPage({
+        resolved: false,
+        limit: SIDEBAR_ACTIVE_LIMIT,
+      }),
+    refetchInterval: sidebarRefetchInterval,
+    placeholderData: (prev) => prev,
+  })
+  const resolved = useQuery({
+    queryKey: agentThreadKeys.page({ resolved: true, limit: resolvedLimit }),
+    queryFn: () =>
+      agentsApi.listThreadsPage({ resolved: true, limit: resolvedLimit }),
+    refetchInterval: sidebarRefetchInterval,
+    placeholderData: (prev) => prev,
+  })
+  return { active, resolved }
+}
+
 export function useAgentThread(threadId: string) {
   return useQuery({
     queryKey: agentThreadKeys.detail(threadId),
     queryFn: () => agentsApi.getThread(threadId),
-    refetchOnMount: "always",
-    refetchInterval: (query) => {
-      const status = query.state.data?.status
-      return status === "running" ? 2000 : false
-    },
+    // Lets the optimistic detail seeded by `AgentsHome` survive until the
+    // proxied run.start stamps the server-side thread; an immediate refetch
+    // would 404 and bounce the route back to /agents.
+    staleTime: 30_000,
+  })
+}
+
+export function useAgentThreadPrDiff(threadId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: agentThreadKeys.prDiff(threadId),
+    queryFn: () => agentsApi.getThreadPrDiff(threadId),
+    enabled,
+    staleTime: 30_000,
+    retry: false,
   })
 }
 
@@ -103,27 +159,57 @@ export function useDeleteAgentSchedule() {
   })
 }
 
-export function useCreateAgentThread() {
-  const queryClient = useQueryClient()
-  const navigate = useNavigate()
+export interface CreateAgentThreadVariables {
+  prompt: string
+  images?: Array<ImageChunk>
+  repo?: string | null
+  repo_explicitly_none?: boolean
+  model_id?: string | null
+  effort?: string | null
+}
 
-  return useMutation({
-    mutationFn: agentsApi.createThread,
-    onSuccess: (thread, variables) => {
-      addPendingPrompt(
-        thread.id,
-        variables.prompt,
-        thread.messages.length,
-        variables.images
-      )
-      queryClient.setQueryData(agentThreadKeys.detail(thread.id), {
-        ...thread,
-        status: thread.status === "idle" ? "running" : thread.status,
-      })
-      queryClient.invalidateQueries({ queryKey: agentThreadKeys.all })
-      navigate({ to: "/agents/$threadId", params: { threadId: thread.id } })
-    },
-  })
+/**
+ * Build the placeholder thread shown the instant a run is started from the
+ * home page — before the server has stamped the thread record. Seeded into
+ * the detail + list caches by `AgentsHome` so the `$threadId` route renders
+ * immediately (the 30s `staleTime` keeps it from refetching into a 404), then
+ * reconciled to server truth by the list's running refetch + the stream's
+ * `onCreated` / `onCompleted` invalidations.
+ */
+export function optimisticThread(
+  threadId: string,
+  vars: CreateAgentThreadVariables
+): AgentThread {
+  const now = Date.now()
+  const text = vars.prompt.trim()
+  const repoFullName = vars.repo ?? ""
+  const chunks: Array<Chunk> = [
+    ...(vars.images ?? []),
+    ...(text ? [{ kind: "text", text } satisfies Chunk] : []),
+  ]
+  const message: Message = {
+    id: `optimistic-user-${threadId}`,
+    author: "user",
+    timestamp: new Date(now).toISOString(),
+    chunks,
+  }
+  return {
+    id: threadId,
+    title: text.slice(0, 80) || "New agent",
+    repo: repoFullName.split("/")[1] ?? "",
+    repoFullName,
+    branch: "main",
+    model: vars.model_id ?? "Default",
+    effort: vars.effort ?? null,
+    source: "dashboard",
+    status: "running",
+    viewed: true,
+    viewedAt: now,
+    createdAt: now,
+    updatedAt: now,
+    traceUrl: null,
+    messages: message.chunks.length > 0 ? [message] : [],
+  }
 }
 
 export interface SendAgentMessageVariables {
@@ -133,43 +219,6 @@ export interface SendAgentMessageVariables {
   effort?: string | null
 }
 
-export function useSendAgentMessage(threadId: string) {
-  const queryClient = useQueryClient()
-
-  return useMutation({
-    mutationFn: (vars: SendAgentMessageVariables) =>
-      agentsApi.sendMessage(threadId, {
-        content: vars.content,
-        images: vars.images,
-        model_id: vars.model_id,
-        effort: vars.effort,
-      }),
-    onMutate: (vars) => {
-      const cached = queryClient.getQueryData<{ messages?: Array<unknown> }>(
-        agentThreadKeys.detail(threadId)
-      )
-      const insertAt = Array.isArray(cached?.messages)
-        ? cached.messages.length
-        : 0
-      addPendingPrompt(threadId, vars.content, insertAt, vars.images)
-    },
-    onSuccess: (thread) => {
-      queryClient.setQueryData(
-        agentThreadKeys.detail(threadId),
-        (prev: typeof thread | undefined) => {
-          if (!prev) return thread
-          return {
-            ...thread,
-            messages:
-              thread.messages.length > 0 ? thread.messages : prev.messages,
-          }
-        }
-      )
-      queryClient.invalidateQueries({ queryKey: agentThreadKeys.all })
-    },
-  })
-}
-
 export function useCancelAgentThread(threadId: string) {
   const queryClient = useQueryClient()
 
@@ -177,7 +226,7 @@ export function useCancelAgentThread(threadId: string) {
     mutationFn: () => agentsApi.cancelThread(threadId),
     onSuccess: (thread) => {
       queryClient.setQueryData(agentThreadKeys.detail(threadId), thread)
-      queryClient.invalidateQueries({ queryKey: agentThreadKeys.all })
+      invalidateAgentThreadLists(queryClient)
     },
   })
 }
@@ -190,11 +239,32 @@ export function useDeleteAgentThread() {
     mutationFn: (threadId: string) => agentsApi.deleteThread(threadId),
     onSuccess: (_, threadId) => {
       queryClient.removeQueries({ queryKey: agentThreadKeys.detail(threadId) })
-      queryClient.invalidateQueries({ queryKey: agentThreadKeys.all })
+      invalidateAgentThreadLists(queryClient)
       const path = window.location.pathname
       if (path.includes(`/agents/${threadId}`)) {
         navigate({ to: "/agents" })
       }
     },
+  })
+}
+
+export function useResolveAgentThread() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (vars: { threadId: string; resolved: boolean }) =>
+      agentsApi.resolveThread(vars.threadId, vars.resolved),
+    onSuccess: (thread, vars) => {
+      queryClient.setQueryData(agentThreadKeys.detail(vars.threadId), thread)
+      invalidateAgentThreadLists(queryClient)
+    },
+  })
+}
+
+export function useThreadsPage(params: ThreadsPageParams) {
+  return useQuery({
+    queryKey: agentThreadKeys.page(params),
+    queryFn: () => agentsApi.listThreadsPage(params),
+    placeholderData: (prev) => prev,
   })
 }

@@ -28,12 +28,12 @@ function EditAutomationPage() {
 
   return (
     <div className="mx-auto w-full max-w-3xl px-6 py-16 text-center">
-      <p className="text-sm text-[var(--ui-text-muted)]">
+      <p className="text-xs text-[var(--ui-text-muted)]">
         This automation could not be found.
       </p>
       <Link
         to="/agents/automations"
-        className="mt-3 inline-block text-sm text-[var(--ui-accent)] hover:underline"
+        className="mt-3 inline-block text-xs text-[var(--ui-accent)] hover:underline"
       >
         Back to Automations
       </Link>
