@@ -10,6 +10,7 @@ from .sanitize_tool_inputs import SanitizeToolInputsMiddleware
 from .settle_review_check import settle_review_check_on_exit
 from .tool_artifact import ToolArtifactMiddleware
 from .tool_error_handler import ToolErrorMiddleware
+from .write_todos_dedupe import WriteTodosDedupeMiddleware
 
 __all__ = [
     "ExcludeToolsMiddleware",
@@ -20,6 +21,7 @@ __all__ = [
     "ToolErrorMiddleware",
     "SandboxCircuitBreakerMiddleware",
     "SlackAssistantStatusMiddleware",
+    "WriteTodosDedupeMiddleware",
     "check_message_queue_before_model",
     "notify_step_limit_reached",
     "refresh_github_proxy_before_model",

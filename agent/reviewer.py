@@ -43,6 +43,7 @@ from .middleware import (
     SanitizeToolInputsMiddleware,
     SlackAssistantStatusMiddleware,
     ToolErrorMiddleware,
+    WriteTodosDedupeMiddleware,
     check_message_queue_before_model,
     refresh_github_proxy_before_model,
     settle_review_check_on_exit,
@@ -106,6 +107,10 @@ the `SKILL.md` that matches the area you're reviewing and apply it.
 Tools: `add_finding`, `update_finding`, `list_findings`, `publish_review`,
 `resolve_finding_thread`, `reply_to_finding_thread`.
 Call `publish_review` once at the end.
+
+Use `write_todos` to plan and to mark items complete; do not re-emit the same
+todo list after every tool result — only call it when the plan or item status
+genuinely changes.
 
 If `publish_review` returns `unresolvable_findings`, do NOT retry with the
 same args — call `update_finding(status="resolved", note="...")` on those ids, or fix
@@ -1105,6 +1110,7 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
         backend=sandbox_backend,
         skills=skill_sources or None,
         middleware=[
+            WriteTodosDedupeMiddleware(),
             SanitizeToolInputsMiddleware(),
             ModelCallLimitMiddleware(run_limit=MODEL_CALL_RECURSION_LIMIT, exit_behavior="end"),
             ToolErrorMiddleware(),
