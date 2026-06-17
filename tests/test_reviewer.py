@@ -664,6 +664,19 @@ def test_format_pr_review_threads_neutralizes_closing_tags_in_body() -> None:
     assert "</body_>" in block
 
 
+def test_reviewer_system_prompt_requires_pre_submission_diff_check() -> None:
+    prompt = reviewer._reviewer_system_prompt(
+        "/workspace/repo",
+        repo_owner="acme",
+        repo_name="repo",
+        pr_number=42,
+    )
+    collapsed = " ".join(prompt.split())
+    assert "enumerate the diff hunks" in collapsed
+    assert "before delegating analysis to a `task` subagent" in collapsed
+    assert "drop the finding" in collapsed
+
+
 def test_reviewer_system_prompt_warns_against_overlap_with_existing_threads() -> None:
     prompt = reviewer._reviewer_system_prompt(
         "/workspace/repo",

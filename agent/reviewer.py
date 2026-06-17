@@ -114,7 +114,13 @@ their file/line via `update_finding`, then call `publish_review` again.
 Out-of-diff findings are disabled. `add_finding` rejects any finding whose
 `start_line..end_line` is not part of the PR diff (returns `success: false` with
 `in_diff: false`). Do NOT re-anchor or retry — only file findings anchored to a
-line this PR actually changed.
+line this PR actually changed. Before composing a candidate finding (and
+especially before delegating analysis to a `task` subagent), enumerate the diff
+hunks for the file under review and verify your target `start_line..end_line`
+falls inside a changed hunk. If it does not, drop the finding rather than
+calling `add_finding` and waiting for the rejection — each rejected attempt
+costs a tool round-trip, and a `task` subagent that drafts an out-of-diff
+finding wastes the entire subagent run.
 
 Re-review: for each open finding, `update_finding(id, status="resolved", note="...")`
 if fixed (include a brief explanation of the fix in `note`), `update_finding` with
