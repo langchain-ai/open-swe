@@ -1206,6 +1206,37 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
             logger.error("Failed to queue Slack message for thread %s", thread_id)
         return
 
+    # Followup mention on an idle thread that already has prior agent turns:
+    # the sandbox + LangGraph message history are reused, so tell the agent
+    # not to redo clone/AGENTS.md/grep setup it already did last run.
+    prior_work_hint = ""
+    try:
+        prior_state = await langgraph_client.threads.get_state(thread_id)
+        prior_messages = (
+            (prior_state or {}).get("values", {}).get("messages", [])
+            if isinstance(prior_state, dict)
+            else []
+        )
+        if prior_messages:
+            prior_work_hint = (
+                "## Prior Work on This Thread\n"
+                "This is a follow-up mention on a thread where you have already run. "
+                "The sandbox for this thread may still contain the cloned repo and any "
+                "edits from prior runs — run `ls` before re-cloning, and read the prior "
+                "AI messages in this conversation to recover PR numbers, branch names, "
+                "and findings before re-running setup (clone, AGENTS.md, repeat greps).\n\n"
+            )
+    except Exception:  # noqa: BLE001
+        logger.debug("Could not fetch prior thread state for hint on %s", thread_id, exc_info=True)
+
+    if prior_work_hint:
+        prompt = prompt.replace(
+            f"## Latest Mention Request\n{clean_text}\n\n",
+            f"## Latest Mention Request\n{clean_text}\n\n{prior_work_hint}",
+            1,
+        )
+        content_blocks[0] = create_text_block(prompt)
+
     logger.info("Creating Slack LangGraph run for thread %s", thread_id)
     run = await langgraph_client.runs.create(
         thread_id,

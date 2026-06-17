@@ -615,6 +615,112 @@ def test_process_slack_mention_skips_trace_reply_on_followup_mention(
     assert run_create["thread_id"] == expected_thread_id
 
 
+def _install_langgraph_client_with_prior_state(
+    monkeypatch: pytest.MonkeyPatch, captured: dict[str, object], prior_messages: list
+) -> None:
+    class _RunsClient:
+        async def create(self, thread_id: str, graph: str, **kwargs) -> dict[str, str]:
+            captured["run_create"] = {
+                "thread_id": thread_id,
+                "graph": graph,
+                "kwargs": kwargs,
+            }
+            return {"run_id": "run-456"}
+
+    class _ThreadsClient:
+        async def update(self, *, thread_id: str, metadata: dict) -> None:
+            captured["metadata_update"] = {"thread_id": thread_id, "metadata": metadata}
+
+        async def get_state(self, thread_id: str) -> dict:
+            captured["get_state_thread_id"] = thread_id
+            return {"values": {"messages": prior_messages}}
+
+    class _Client:
+        runs = _RunsClient()
+        threads = _ThreadsClient()
+
+    monkeypatch.setattr(webapp, "get_client", lambda url: _Client())
+
+
+def test_process_slack_mention_injects_prior_work_hint_on_followup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Idle thread with prior agent messages gets a 'Prior Work on This Thread' hint."""
+    captured: dict[str, object] = {}
+    _setup_slack_mention_fakes(monkeypatch, captured)
+    _install_langgraph_client_with_prior_state(
+        monkeypatch, captured, prior_messages=[{"type": "ai", "content": "prior turn"}]
+    )
+
+    async def fake_thread_exists(thread_id: str) -> bool:
+        return True
+
+    monkeypatch.setattr(webapp, "_thread_exists", fake_thread_exists)
+
+    thread_ts = "1700000000.000100"
+    event_ts = "1700000000.000400"
+
+    asyncio.run(
+        webapp.process_slack_mention(
+            {
+                "channel_id": "C123",
+                "thread_ts": thread_ts,
+                "event_ts": event_ts,
+                "user_id": "U123",
+                "text": "<@UBOT> mark the PR ready",
+                "bot_user_id": "UBOT",
+            },
+            {"owner": "langchain-ai", "name": "open-swe"},
+        )
+    )
+
+    run_create = captured["run_create"]
+    assert isinstance(run_create, dict)
+    prompt_text = run_create["kwargs"]["input"]["messages"][0]["content"][0]["text"]
+    assert "## Prior Work on This Thread" in prompt_text
+    assert "follow-up mention" in prompt_text
+    # Hint sits between the latest mention and the trailing tool instructions.
+    assert prompt_text.index("## Latest Mention Request") < prompt_text.index(
+        "## Prior Work on This Thread"
+    )
+    assert prompt_text.index("## Prior Work on This Thread") < prompt_text.index(
+        "slack_thread_reply"
+    )
+
+
+def test_process_slack_mention_omits_prior_work_hint_when_no_prior_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """First mention on a thread (empty prior state) gets no 'Prior Work' hint."""
+    captured: dict[str, object] = {}
+    _setup_slack_mention_fakes(monkeypatch, captured)
+    _install_langgraph_client_with_prior_state(monkeypatch, captured, prior_messages=[])
+
+    async def fake_thread_exists(thread_id: str) -> bool:
+        return False
+
+    monkeypatch.setattr(webapp, "_thread_exists", fake_thread_exists)
+
+    asyncio.run(
+        webapp.process_slack_mention(
+            {
+                "channel_id": "C123",
+                "thread_ts": "1700000000.000100",
+                "event_ts": "1700000000.000200",
+                "user_id": "U123",
+                "text": "<@UBOT> continue on the branch",
+                "bot_user_id": "UBOT",
+            },
+            {"owner": "langchain-ai", "name": "open-swe"},
+        )
+    )
+
+    run_create = captured["run_create"]
+    assert isinstance(run_create, dict)
+    prompt_text = run_create["kwargs"]["input"]["messages"][0]["content"][0]["text"]
+    assert "## Prior Work on This Thread" not in prompt_text
+
+
 def test_process_slack_mention_queues_active_thread_message(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
