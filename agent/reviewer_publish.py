@@ -34,14 +34,19 @@ from .reviewer_findings import (
 )
 from .utils.dashboard_links import dashboard_thread_url
 from .utils.github_checks import CheckConclusion, complete_review_check_run
+from .utils.github_http import (
+    GITHUB_API_BASE,
+    GITHUB_GRAPHQL,
+    github_client,
+    github_request,
+)
 from .utils.github_token import GitHubAuthError
 
 logger = logging.getLogger(__name__)
 
 
-_GITHUB_API_BASE = "https://api.github.com"
-_GITHUB_GRAPHQL = "https://api.github.com/graphql"
-_GITHUB_HEADERS_VERSION = "2022-11-28"
+_GITHUB_API_BASE = GITHUB_API_BASE
+_GITHUB_GRAPHQL = GITHUB_GRAPHQL
 _OPEN_SWE_REVIEW_COMMENT_MARKER_RE = re.compile(
     r"<!--\s*open-swe-review-comment\s+(\{.*?\})\s*-->",
     re.DOTALL,
@@ -347,11 +352,9 @@ async def post_status_comment(
 ) -> int | None:
     """POST the live status comment to a PR. Returns its comment id or None."""
     url = f"{_GITHUB_API_BASE}/repos/{owner}/{repo}/issues/{pr_number}/comments"
-    async with httpx.AsyncClient() as client:
+    async with github_client(token=token) as client:
         try:
-            response = await client.post(
-                url, headers=_github_headers(token), json={"body": body}, timeout=30
-            )
+            response = await github_request(client, "POST", url, json={"body": body})
             response.raise_for_status()
         except httpx.HTTPError:
             logger.exception("Failed to post status comment for %s/%s#%s", owner, repo, pr_number)
@@ -370,9 +373,9 @@ async def delete_status_comment(
 ) -> bool:
     """DELETE a status comment by id. Returns True on success (or if gone)."""
     url = f"{_GITHUB_API_BASE}/repos/{owner}/{repo}/issues/comments/{comment_id}"
-    async with httpx.AsyncClient() as client:
+    async with github_client(token=token) as client:
         try:
-            response = await client.delete(url, headers=_github_headers(token), timeout=30)
+            response = await github_request(client, "DELETE", url)
             if response.status_code == 404:  # noqa: PLR2004
                 return True
             response.raise_for_status()
@@ -505,12 +508,11 @@ async def open_swe_review_exists(
     """
     marker = review_summary_marker(pr_number)
     url = f"{_GITHUB_API_BASE}/repos/{owner}/{repo}/pulls/{pr_number}/reviews"
-    headers = _github_headers(token)
     params: dict[str, Any] = {"per_page": 100, "page": 1}
-    async with httpx.AsyncClient() as client:
+    async with github_client(token=token) as client:
         while True:
             try:
-                response = await client.get(url, headers=headers, params=params, timeout=30)
+                response = await github_request(client, "GET", url, params=params)
                 response.raise_for_status()
             except httpx.HTTPError:
                 logger.exception(
@@ -551,10 +553,9 @@ async def post_pull_request_review(
         "body": body,
         "comments": inline_comments,
     }
-    headers = _github_headers(token)
-    async with httpx.AsyncClient() as client:
+    async with github_client(token=token) as client:
         try:
-            response = await client.post(url, headers=headers, json=payload, timeout=30)
+            response = await github_request(client, "POST", url, json=payload)
             if response.status_code == 401:
                 raise GitHubAuthError(
                     f"GitHub returned 401 posting PR review for {owner}/{repo}#{pr_number}"
@@ -631,13 +632,12 @@ async def fetch_review_comments(
     per-comment IDs in all paths; this paginates the canonical list endpoint.
     """
     url = f"{_GITHUB_API_BASE}/repos/{owner}/{repo}/pulls/{pr_number}/reviews/{review_id}/comments"
-    headers = _github_headers(token)
     out: list[dict[str, Any]] = []
     params: dict[str, Any] = {"per_page": 100, "page": 1}
-    async with httpx.AsyncClient() as client:
+    async with github_client(token=token) as client:
         while True:
             try:
-                response = await client.get(url, headers=headers, params=params, timeout=30)
+                response = await github_request(client, "GET", url, params=params)
                 response.raise_for_status()
             except httpx.HTTPError:
                 logger.exception(
@@ -713,12 +713,13 @@ async def fetch_pr_review_threads(
     """
     out: list[dict[str, Any]] = []
     cursor: str | None = None
-    async with httpx.AsyncClient() as client:
+    async with github_client(token=token) as client:
         while len(out) < max_threads:
             try:
-                response = await client.post(
+                response = await github_request(
+                    client,
+                    "POST",
                     _GITHUB_GRAPHQL,
-                    headers={"Authorization": f"Bearer {token}"},
                     json={
                         "query": query,
                         "variables": {
@@ -729,7 +730,6 @@ async def fetch_pr_review_threads(
                             "perThread": max_comments_per_thread,
                         },
                     },
-                    timeout=30,
                 )
                 response.raise_for_status()
             except httpx.HTTPError:
@@ -836,12 +836,13 @@ async def fetch_review_thread_id_for_comment(
     }
     """
     cursor: str | None = None
-    async with httpx.AsyncClient() as client:
+    async with github_client(token=token) as client:
         while True:
             try:
-                response = await client.post(
+                response = await github_request(
+                    client,
+                    "POST",
                     _GITHUB_GRAPHQL,
-                    headers={"Authorization": f"Bearer {token}"},
                     json={
                         "query": query,
                         "variables": {
@@ -851,7 +852,6 @@ async def fetch_review_thread_id_for_comment(
                             "cursor": cursor,
                         },
                     },
-                    timeout=30,
                 )
                 response.raise_for_status()
             except httpx.HTTPError:
@@ -899,13 +899,13 @@ async def resolve_review_thread(*, thread_node_id: str, token: str) -> bool:
       }
     }
     """
-    async with httpx.AsyncClient() as client:
+    async with github_client(token=token) as client:
         try:
-            response = await client.post(
+            response = await github_request(
+                client,
+                "POST",
                 _GITHUB_GRAPHQL,
-                headers={"Authorization": f"Bearer {token}"},
                 json={"query": mutation, "variables": {"threadId": thread_node_id}},
-                timeout=30,
             )
             response.raise_for_status()
         except httpx.HTTPError:
@@ -935,14 +935,9 @@ async def reply_to_review_comment(
         f"{_GITHUB_API_BASE}/repos/{owner}/{repo}/pulls/"
         f"{pr_number}/comments/{review_comment_id}/replies"
     )
-    async with httpx.AsyncClient() as client:
+    async with github_client(token=token) as client:
         try:
-            response = await client.post(
-                url,
-                headers=_github_headers(token),
-                json={"body": body},
-                timeout=30,
-            )
+            response = await github_request(client, "POST", url, json={"body": body})
             if response.status_code == 401:
                 raise GitHubAuthError(
                     f"GitHub returned 401 replying to review comment {review_comment_id}"
@@ -961,11 +956,3 @@ async def reply_to_review_comment(
             return None
     data = response.json()
     return data if isinstance(data, dict) else None
-
-
-def _github_headers(token: str) -> dict[str, str]:
-    return {
-        "Authorization": f"Bearer {token}",
-        "Accept": "application/vnd.github+json",
-        "X-GitHub-Api-Version": _GITHUB_HEADERS_VERSION,
-    }

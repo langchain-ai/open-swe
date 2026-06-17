@@ -14,6 +14,8 @@ class _FakeResponse:
     def __init__(self, payload: Any = None, error: bool = False) -> None:
         self._payload = payload if payload is not None else {}
         self._error = error
+        self.status_code = 200
+        self.headers: dict[str, str] = {}
 
     def raise_for_status(self) -> None:
         if self._error:
@@ -25,6 +27,9 @@ class _FakeResponse:
 
 class _FakeClient:
     response: _FakeResponse = _FakeResponse({})
+
+    def __init__(self, **kwargs: Any) -> None:
+        pass
 
     async def __aenter__(self) -> _FakeClient:
         return self

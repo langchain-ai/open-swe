@@ -10,9 +10,16 @@ from agent.utils import github_checks
 
 
 class _FakeResponse:
-    def __init__(self, payload: dict[str, Any] | None = None, error: bool = False) -> None:
+    def __init__(
+        self,
+        payload: dict[str, Any] | None = None,
+        error: bool = False,
+        status_code: int = 200,
+    ) -> None:
         self._payload = payload or {}
         self._error = error
+        self.status_code = status_code
+        self.headers: dict[str, str] = {}
 
     def raise_for_status(self) -> None:
         if self._error:
@@ -27,6 +34,9 @@ class _FakeAsyncClient:
     last_patch: dict[str, Any] | None = None
     post_response: _FakeResponse = _FakeResponse({"id": 42})
     patch_response: _FakeResponse = _FakeResponse({})
+
+    def __init__(self, **kwargs: Any) -> None:
+        pass
 
     async def __aenter__(self) -> _FakeAsyncClient:
         return self

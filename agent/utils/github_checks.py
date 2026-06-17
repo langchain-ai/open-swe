@@ -17,22 +17,23 @@ from typing import Literal
 
 import httpx
 
+from .github_http import (
+    GITHUB_API_BASE,
+    github_client,
+    github_headers,  # re-exported for backward compatibility
+    github_request,
+)
+
+__all__ = ["github_headers"]
+
 logger = logging.getLogger(__name__)
 
 REVIEW_CHECK_RUN_NAME = "Open SWE Review"
 AUTOFIX_CHECK_RUN_NAME = "Open SWE Auto-fix"
 
-_GITHUB_API_BASE = "https://api.github.com"
+_GITHUB_API_BASE = GITHUB_API_BASE
 
 CheckConclusion = Literal["success", "neutral", "failure"]
-
-
-def github_headers(token: str) -> dict[str, str]:
-    return {
-        "Authorization": f"Bearer {token}",
-        "Accept": "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28",
-    }
 
 
 def _utc_now_iso() -> str:
@@ -66,10 +67,8 @@ async def create_review_check_run(
         payload["details_url"] = details_url
     url = f"{_GITHUB_API_BASE}/repos/{owner}/{repo}/check-runs"
     try:
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                url, headers=github_headers(token), json=payload, timeout=30
-            )
+        async with github_client(token=token) as client:
+            response = await github_request(client, "POST", url, json=payload)
             response.raise_for_status()
     except httpx.HTTPError:
         logger.exception(
@@ -104,10 +103,8 @@ async def complete_review_check_run(
         "output": {"title": title, "summary": summary},
     }
     try:
-        async with httpx.AsyncClient() as client:
-            response = await client.patch(
-                url, headers=github_headers(token), json=payload, timeout=30
-            )
+        async with github_client(token=token) as client:
+            response = await github_request(client, "PATCH", url, json=payload)
             response.raise_for_status()
     except httpx.HTTPError:
         logger.exception(
@@ -147,10 +144,8 @@ async def post_autofix_status_check(
         payload["details_url"] = details_url
     url = f"{_GITHUB_API_BASE}/repos/{owner}/{repo}/check-runs"
     try:
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                url, headers=github_headers(token), json=payload, timeout=30
-            )
+        async with github_client(token=token) as client:
+            response = await github_request(client, "POST", url, json=payload)
             response.raise_for_status()
     except httpx.HTTPError:
         logger.warning("Failed to post auto-fix status check for %s/%s@%s", owner, repo, head_sha)
