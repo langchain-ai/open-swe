@@ -480,7 +480,7 @@ async def test_resolve_review_thread_returns_true_on_success() -> None:
     client_cm.__aenter__.return_value = client_cm
     client_cm.post = AsyncMock(return_value=response)
 
-    with patch("agent.reviewer_publish.httpx.AsyncClient", return_value=client_cm):
+    with patch("agent.utils.github_http.httpx.AsyncClient", return_value=client_cm):
         ok = await resolve_review_thread(thread_node_id="T_1", token="t")
     assert ok is True
 
@@ -498,7 +498,7 @@ async def test_fetch_pr_review_threads_handles_null_repository() -> None:
     client_cm.__aenter__.return_value = client_cm
     client_cm.post = AsyncMock(return_value=response)
 
-    with patch("agent.reviewer_publish.httpx.AsyncClient", return_value=client_cm):
+    with patch("agent.utils.github_http.httpx.AsyncClient", return_value=client_cm):
         threads = await fetch_pr_review_threads(owner="o", repo="r", pr_number=1, token="t")
     assert threads == []
 
@@ -518,7 +518,7 @@ async def test_post_pull_request_review_non_dict_body_surfaces_status_and_excerp
     client_cm.__aenter__.return_value = client_cm
     client_cm.post = AsyncMock(return_value=response)
 
-    with patch("agent.reviewer_publish.httpx.AsyncClient", return_value=client_cm):
+    with patch("agent.utils.github_http.httpx.AsyncClient", return_value=client_cm):
         result = await post_pull_request_review(
             owner="o",
             repo="r",
@@ -549,7 +549,7 @@ async def test_resolve_review_thread_returns_false_on_graphql_errors() -> None:
     client_cm.__aenter__.return_value = client_cm
     client_cm.post = AsyncMock(return_value=response)
 
-    with patch("agent.reviewer_publish.httpx.AsyncClient", return_value=client_cm):
+    with patch("agent.utils.github_http.httpx.AsyncClient", return_value=client_cm):
         ok = await resolve_review_thread(thread_node_id="T_1", token="t")
     assert ok is False
 
@@ -958,7 +958,7 @@ async def test_open_swe_review_exists_detects_summary_marker() -> None:
     client_cm.__aenter__.return_value = client_cm
     client_cm.get = AsyncMock(return_value=response)
 
-    with patch("agent.reviewer_publish.httpx.AsyncClient", return_value=client_cm):
+    with patch("agent.utils.github_http.httpx.AsyncClient", return_value=client_cm):
         exists = await open_swe_review_exists(owner="o", repo="r", pr_number=7, token="t")
     assert exists is True
 
@@ -973,7 +973,7 @@ async def test_open_swe_review_exists_false_without_marker() -> None:
     client_cm.__aenter__.return_value = client_cm
     client_cm.get = AsyncMock(return_value=response)
 
-    with patch("agent.reviewer_publish.httpx.AsyncClient", return_value=client_cm):
+    with patch("agent.utils.github_http.httpx.AsyncClient", return_value=client_cm):
         exists = await open_swe_review_exists(owner="o", repo="r", pr_number=7, token="t")
     assert exists is False
 
@@ -989,7 +989,7 @@ async def test_open_swe_review_exists_returns_none_on_http_error() -> None:
     client_cm.__aenter__.return_value = client_cm
     client_cm.get = AsyncMock(side_effect=httpx.HTTPError("boom"))
 
-    with patch("agent.reviewer_publish.httpx.AsyncClient", return_value=client_cm):
+    with patch("agent.utils.github_http.httpx.AsyncClient", return_value=client_cm):
         exists = await open_swe_review_exists(owner="o", repo="r", pr_number=7, token="t")
     assert exists is None
 
@@ -1665,7 +1665,7 @@ async def test_fetch_pr_review_threads_parses_threads_and_comments() -> None:
     client_cm.__aenter__.return_value = client_cm
     client_cm.post = AsyncMock(return_value=response)
 
-    with patch("agent.reviewer_publish.httpx.AsyncClient", return_value=client_cm):
+    with patch("agent.utils.github_http.httpx.AsyncClient", return_value=client_cm):
         threads = await fetch_pr_review_threads(owner="o", repo="r", pr_number=1, token="t")
 
     assert len(threads) == 2
@@ -1688,7 +1688,7 @@ async def test_fetch_pr_review_threads_returns_empty_on_http_error() -> None:
     client_cm.__aenter__.return_value = client_cm
     client_cm.post = AsyncMock(side_effect=httpx.HTTPError("boom"))
 
-    with patch("agent.reviewer_publish.httpx.AsyncClient", return_value=client_cm):
+    with patch("agent.utils.github_http.httpx.AsyncClient", return_value=client_cm):
         threads = await fetch_pr_review_threads(owner="o", repo="r", pr_number=1, token="t")
     assert threads == []
 
@@ -1704,7 +1704,7 @@ async def test_reply_to_review_comment_posts_reply_payload() -> None:
     client_cm.__aenter__.return_value = client_cm
     client_cm.post = AsyncMock(return_value=response)
 
-    with patch("agent.reviewer_publish.httpx.AsyncClient", return_value=client_cm):
+    with patch("agent.utils.github_http.httpx.AsyncClient", return_value=client_cm):
         result = await reply_to_review_comment(
             owner="o",
             repo="r",
@@ -1742,7 +1742,7 @@ async def test_post_pull_request_review_tags_unresolved_anchor_on_422() -> None:
     client_cm.__aenter__.return_value = client_cm
     client_cm.post = AsyncMock(return_value=response)
 
-    with patch("agent.reviewer_publish.httpx.AsyncClient", return_value=client_cm):
+    with patch("agent.utils.github_http.httpx.AsyncClient", return_value=client_cm):
         result = await post_pull_request_review(
             owner="o",
             repo="r",
@@ -1781,7 +1781,7 @@ async def test_post_pull_request_review_tags_unresolved_anchor_on_line_error() -
     client_cm.__aenter__.return_value = client_cm
     client_cm.post = AsyncMock(return_value=response)
 
-    with patch("agent.reviewer_publish.httpx.AsyncClient", return_value=client_cm):
+    with patch("agent.utils.github_http.httpx.AsyncClient", return_value=client_cm):
         result = await post_pull_request_review(
             owner="o",
             repo="r",
@@ -1817,7 +1817,7 @@ async def test_post_pull_request_review_does_not_tag_unrelated_422() -> None:
     client_cm.__aenter__.return_value = client_cm
     client_cm.post = AsyncMock(return_value=response)
 
-    with patch("agent.reviewer_publish.httpx.AsyncClient", return_value=client_cm):
+    with patch("agent.utils.github_http.httpx.AsyncClient", return_value=client_cm):
         result = await post_pull_request_review(
             owner="o",
             repo="r",

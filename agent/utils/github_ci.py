@@ -16,11 +16,12 @@ from typing import Any
 
 import httpx
 
-from .github_checks import REVIEW_CHECK_RUN_NAME, github_headers
+from .github_checks import REVIEW_CHECK_RUN_NAME
+from .github_http import GITHUB_API_BASE, github_client, github_request
 
 logger = logging.getLogger(__name__)
 
-_GITHUB_API_BASE = "https://api.github.com"
+_GITHUB_API_BASE = GITHUB_API_BASE
 
 # Check-run conclusions that mean "this CI step did not pass" and are worth an
 # auto-fix attempt. ``cancelled`` / ``stale`` / ``skipped`` are intentionally
@@ -46,10 +47,8 @@ async def list_failing_check_runs(
     url = f"{_GITHUB_API_BASE}/repos/{owner}/{repo}/commits/{ref}/check-runs"
     params = {"per_page": "100", "filter": "latest"}
     try:
-        async with httpx.AsyncClient() as client:
-            response = await client.get(
-                url, headers=github_headers(token), params=params, timeout=30
-            )
+        async with github_client(token=token) as client:
+            response = await github_request(client, "GET", url, params=params)
             response.raise_for_status()
     except httpx.HTTPError:
         logger.warning(
@@ -86,8 +85,8 @@ async def list_failing_statuses(
     """Return failing legacy commit statuses on ``ref`` (the ``status`` API)."""
     url = f"{_GITHUB_API_BASE}/repos/{owner}/{repo}/commits/{ref}/status"
     try:
-        async with httpx.AsyncClient() as client:
-            response = await client.get(url, headers=github_headers(token), timeout=30)
+        async with github_client(token=token) as client:
+            response = await github_request(client, "GET", url)
             response.raise_for_status()
     except httpx.HTTPError:
         logger.warning("Failed to read combined status for %s/%s@%s", owner, repo, ref)
@@ -135,10 +134,8 @@ async def fetch_open_pr_for_branch(
     url = f"{_GITHUB_API_BASE}/repos/{owner}/{repo}/pulls"
     params = {"head": f"{owner}:{branch}", "state": "open", "per_page": "1"}
     try:
-        async with httpx.AsyncClient() as client:
-            response = await client.get(
-                url, headers=github_headers(token), params=params, timeout=30
-            )
+        async with github_client(token=token) as client:
+            response = await github_request(client, "GET", url, params=params)
             response.raise_for_status()
     except httpx.HTTPError:
         logger.warning("Failed to find open PR for %s/%s head=%s", owner, repo, branch)
@@ -153,8 +150,8 @@ async def fetch_pr(*, owner: str, repo: str, pr_number: int, token: str) -> dict
     """Fetch full PR metadata (includes ``mergeable_state``)."""
     url = f"{_GITHUB_API_BASE}/repos/{owner}/{repo}/pulls/{pr_number}"
     try:
-        async with httpx.AsyncClient() as client:
-            response = await client.get(url, headers=github_headers(token), timeout=30)
+        async with github_client(token=token) as client:
+            response = await github_request(client, "GET", url)
             response.raise_for_status()
     except httpx.HTTPError:
         logger.warning("Failed to fetch PR %s/%s#%s", owner, repo, pr_number)
@@ -167,8 +164,8 @@ async def head_commit_author_login(*, owner: str, repo: str, sha: str, token: st
     """Return the GitHub login that authored commit ``sha`` (or ``None``)."""
     url = f"{_GITHUB_API_BASE}/repos/{owner}/{repo}/commits/{sha}"
     try:
-        async with httpx.AsyncClient() as client:
-            response = await client.get(url, headers=github_headers(token), timeout=30)
+        async with github_client(token=token) as client:
+            response = await github_request(client, "GET", url)
             response.raise_for_status()
     except httpx.HTTPError:
         logger.debug("Failed to fetch commit %s/%s@%s for author check", owner, repo, sha)
@@ -189,8 +186,8 @@ async def has_repo_write_permission(*, owner: str, repo: str, username: str, tok
         return False
     url = f"{_GITHUB_API_BASE}/repos/{owner}/{repo}/collaborators/{username}/permission"
     try:
-        async with httpx.AsyncClient() as client:
-            response = await client.get(url, headers=github_headers(token), timeout=30)
+        async with github_client(token=token) as client:
+            response = await github_request(client, "GET", url)
             response.raise_for_status()
     except httpx.HTTPError:
         logger.info("Could not verify %s's permission on %s/%s; denying", username, owner, repo)
