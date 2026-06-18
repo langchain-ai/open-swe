@@ -72,6 +72,24 @@ async def test_fetch_agents_md_skips_oversized_file() -> None:
 
 
 @pytest.mark.asyncio
+async def test_fetch_agents_md_oversized_agents_md_does_not_fall_back_to_claude_md() -> None:
+    big = "x" * (agents_md._MAX_AGENTS_MD_BYTES + 1)
+    with patch("httpx.AsyncClient") as mock_client_cls:
+        client = MagicMock()
+        client.get = AsyncMock(
+            side_effect=[
+                _make_response(200, big),
+                _make_response(200, "# CLAUDE.md\nrules"),
+            ]
+        )
+        mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=client)
+        mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+        result = await agents_md.fetch_agents_md("acme", "repo", "main", token="tok")
+    assert result is None
+    assert client.get.await_count == 1
+
+
+@pytest.mark.asyncio
 async def test_fetch_agents_md_handles_http_error() -> None:
     with patch("httpx.AsyncClient") as mock_client_cls:
         client = MagicMock()

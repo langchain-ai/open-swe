@@ -33,7 +33,10 @@ async def fetch_agents_md(
     """Fetch ``AGENTS.md`` (or ``CLAUDE.md`` fallback) at ``ref`` from ``owner/repo``.
 
     Returns the raw file contents of the first matching file, or ``None`` if no
-    file is found, all requests fail, or the file exceeds the size cap.
+    file is found, a fetch fails, or the file exceeds the size cap. Only a 404
+    (file absent) triggers fallback to the next filename; any other condition
+    (oversize, HTTP error, unexpected status) returns ``None`` immediately so
+    the reviewer does not enforce stale rules from a secondary file.
     """
     if not owner or not repo or not ref:
         return None
@@ -52,7 +55,7 @@ async def fetch_agents_md(
                 response = await client.get(url, headers=headers, params={"ref": ref})
             except httpx.HTTPError:
                 logger.exception("Failed to fetch %s from %s/%s@%s", filename, owner, repo, ref)
-                continue
+                return None
 
             if response.status_code == 404:
                 continue
@@ -65,7 +68,7 @@ async def fetch_agents_md(
                     repo,
                     ref,
                 )
-                continue
+                return None
 
             content = response.text
             if len(content.encode("utf-8")) > _MAX_AGENTS_MD_BYTES:
@@ -77,7 +80,7 @@ async def fetch_agents_md(
                     ref,
                     _MAX_AGENTS_MD_BYTES,
                 )
-                continue
+                return None
 
             logger.info(
                 "Loaded %s (%d chars) from %s/%s@%s",
