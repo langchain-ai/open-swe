@@ -798,17 +798,6 @@ function ReviewBodyInner({
                 </div>
               )}
             </div>
-
-            {focused && isAnchoredCard && (
-              <AnchoredFindingCard
-                key={focused.id}
-                detail={detail}
-                finding={focused}
-                anchorEl={anchorEl}
-                scrollEl={diffScrollEl}
-                onClose={closeFinding}
-              />
-            )}
           </Virtualizer>
         </WorkerPoolContextProvider>
       </main>
@@ -822,6 +811,17 @@ function ReviewBodyInner({
         onMarkAllRead={markAllRead}
         onFindingClick={openFinding}
       />
+
+      {focused && isAnchoredCard && (
+        <AnchoredFindingCard
+          key={focused.id}
+          detail={detail}
+          finding={focused}
+          anchorEl={anchorEl}
+          scrollEl={diffScrollEl}
+          onClose={closeFinding}
+        />
+      )}
 
       {focused && !isAnchoredCard && (
         <div
@@ -1268,9 +1268,11 @@ const FINDING_CARD_GAP = 12
 const FINDING_CARD_CLASS =
   "flex max-h-[70vh] w-[412px] flex-col overflow-hidden rounded-lg border border-border bg-background shadow-2xl"
 
-// Positioned absolutely inside the scroll container so it scrolls natively
-// with the diff — no per-scroll JS repositioning, hence no lag. Position is
-// recomputed only when layout shifts (files expand/collapse, resize).
+// Pinned to the right of the diff column (toward the side panel), vertically
+// aligned with the finding's annotation. The diff scroller is only as wide as
+// <main>, so the card is viewport-fixed (clamped to the window width) to sit in
+// the right gutter rather than overlapping the diff, and tracks the anchor as
+// the diff scrolls (rAF-throttled). Hidden while the anchor is out of view.
 function AnchoredFindingCard({
   detail,
   finding,
@@ -1291,33 +1293,55 @@ function AnchoredFindingCard({
     const scroller = scrollEl
     if (!card || !scroller) return
 
+    let frame: number | null = null
     const position = () => {
-      if (!anchorEl.isConnected) return
+      frame = null
       const scrollerRect = scroller.getBoundingClientRect()
       const anchorRect = anchorEl.getBoundingClientRect()
-      const top = anchorRect.top - scrollerRect.top + scroller.scrollTop
+      // Hide while the finding's line is scrolled out of the diff viewport.
+      if (
+        !anchorEl.isConnected ||
+        anchorRect.bottom < scrollerRect.top ||
+        anchorRect.top > scrollerRect.bottom
+      ) {
+        card.style.visibility = "hidden"
+        return
+      }
       const left = Math.max(
         FINDING_CARD_GAP,
         Math.min(
-          anchorRect.right -
-            scrollerRect.left +
-            scroller.scrollLeft +
-            FINDING_CARD_GAP,
-          scroller.clientWidth - FINDING_CARD_WIDTH - FINDING_CARD_GAP
+          anchorRect.right + FINDING_CARD_GAP,
+          window.innerWidth - FINDING_CARD_WIDTH - FINDING_CARD_GAP
         )
       )
+      const top = Math.max(
+        scrollerRect.top + FINDING_CARD_GAP,
+        Math.min(
+          anchorRect.top,
+          scrollerRect.bottom - card.offsetHeight - FINDING_CARD_GAP
+        )
+      )
+      card.style.visibility = "visible"
       card.style.top = `${top}px`
       card.style.left = `${left}px`
     }
+    const schedule = () => {
+      if (frame == null) frame = window.requestAnimationFrame(position)
+    }
 
     position()
-    const observer = new ResizeObserver(position)
+    scroller.addEventListener("scroll", schedule, { passive: true })
+    window.addEventListener("resize", schedule)
+    const observer = new ResizeObserver(schedule)
     observer.observe(scroller)
-    // The Virtualizer renders a single content wrapper inside the scroller;
-    // observe it so the card repositions as files expand/collapse.
     const content = scroller.firstElementChild
     if (content) observer.observe(content)
-    return () => observer.disconnect()
+    return () => {
+      scroller.removeEventListener("scroll", schedule)
+      window.removeEventListener("resize", schedule)
+      observer.disconnect()
+      if (frame != null) window.cancelAnimationFrame(frame)
+    }
   }, [anchorEl, scrollEl])
 
   return (
@@ -1326,7 +1350,8 @@ function AnchoredFindingCard({
       data-finding-card
       role="dialog"
       aria-label={finding.title}
-      className={cn(FINDING_CARD_CLASS, "absolute z-50")}
+      style={{ visibility: "hidden" }}
+      className={cn(FINDING_CARD_CLASS, "fixed z-50")}
     >
       <FindingCardContent detail={detail} finding={finding} onClose={onClose} />
     </div>
