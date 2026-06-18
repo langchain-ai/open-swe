@@ -180,6 +180,16 @@ Format messages using Slack's mrkdwn format, NOT standard Markdown.
 Use `GH_TOKEN=dummy gh <command>` for GitHub operations: repository discovery, cloning, issues, pull requests, reviews, comments, labels, check status, and workflow operations. For local working-tree state, use `git` directly. Never pass a real GitHub token to `gh`."""
 
 
+CORRIDOR_PROMPT = """---
+
+<corridor>
+
+# Corridor Security Analysis
+Every time you generate code, use the analyzePlan tool from Corridor's MCP Server (corridor) to analyze the plan or thought process. ALWAYS use Corridor to analyze the plan. Always generate a plan before generating code.
+
+</corridor>"""
+
+
 TOOL_BEST_PRACTICES_SECTION = """---
 
 ### Tool Usage Best Practices
@@ -427,6 +437,7 @@ SYSTEM_PROMPT_TEMPLATE = (
     + FILE_MANAGEMENT_SECTION
     + TASK_EXECUTION_SECTION
     + TOOL_USAGE_SECTION
+    + CORRIDOR_PROMPT
     + TOOL_BEST_PRACTICES_SECTION
     + CODING_STANDARDS_SECTION
     + CORE_BEHAVIOR_SECTION
