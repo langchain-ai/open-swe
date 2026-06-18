@@ -550,7 +550,11 @@ def _should_refresh_latest_run(thread: dict[str, Any]) -> bool:
     metadata = _thread_metadata(thread)
     metadata_status = metadata.get("latest_run_status")
     thread_status = thread.get("status")
-    return thread_status == "busy" or metadata_status in _RUNNING_METADATA_STATUSES
+    return (
+        thread_status == "busy"
+        or metadata_status in _RUNNING_METADATA_STATUSES
+        or not isinstance(metadata_status, str)
+    )
 
 
 async def _summarize_thread(

@@ -803,6 +803,8 @@ def _make_threads(count: int, *, resolved_before: int) -> list[dict[str, object]
 async def test_list_dashboard_threads_page_pages_beyond_first_search_batch(monkeypatch) -> None:
     page_size = thread_api._THREADS_SEARCH_PAGE
     threads = _make_threads(page_size + 50, resolved_before=page_size)
+    for thread in threads:
+        thread["metadata"]["latest_run_status"] = "success"
     offsets: list[int] = []
     run_list_calls = 0
 
@@ -873,9 +875,11 @@ async def test_list_dashboard_threads_sidebar_fills_buckets_with_one_endpoint(mo
     assert {call["offset"] for call in searches} == {0, page_size}
 
 
-async def test_list_dashboard_threads_page_refreshes_only_running_threads(monkeypatch) -> None:
+async def test_list_dashboard_threads_page_refreshes_only_unsettled_threads(monkeypatch) -> None:
     threads = _make_threads(3, resolved_before=0)
+    threads[0]["metadata"]["latest_run_status"] = "success"
     threads[1]["metadata"]["latest_run_status"] = "pending"
+    threads[2]["metadata"]["latest_run_status"] = "error"
     run_list_thread_ids: list[str] = []
     updates: list[dict[str, object]] = []
 
@@ -906,4 +910,38 @@ async def test_list_dashboard_threads_page_refreshes_only_running_threads(monkey
             "metadata": {"latest_run_status": "success", "latest_run_id": "run-1"},
         }
     ]
-    assert [item["status"] for item in result["items"]] == ["idle", "finished", "idle"]
+    assert [item["status"] for item in result["items"]] == ["finished", "finished", "error"]
+
+
+async def test_status_filter_refreshes_threads_missing_run_status(monkeypatch) -> None:
+    threads = _make_threads(2, resolved_before=0)
+    for thread in threads:
+        thread["metadata"]["source"] = "slack"
+    run_statuses = {"t0": "success", "t1": "error"}
+    run_list_thread_ids: list[str] = []
+
+    class FakeThreads:
+        async def search(self, *, metadata, limit, offset, sort_by, sort_order, select):
+            return threads[offset : offset + limit]
+
+        async def update(self, *, thread_id, metadata):
+            return None
+
+    class FakeRuns:
+        async def list(self, thread_id, limit=1):
+            run_list_thread_ids.append(thread_id)
+            return [{"id": f"run-{thread_id}", "status": run_statuses[thread_id]}]
+
+    class FakeClient:
+        threads = FakeThreads()
+        runs = FakeRuns()
+
+    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
+
+    result = await thread_api.list_dashboard_threads_page(
+        "octocat", email=None, limit=25, offset=0, status="finished"
+    )
+
+    assert {item["id"] for item in result["items"]} == {"t0"}
+    assert result["items"][0]["status"] == "finished"
+    assert set(run_list_thread_ids) == {"t0", "t1"}
