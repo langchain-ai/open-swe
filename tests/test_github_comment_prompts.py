@@ -48,8 +48,15 @@ def test_construct_system_prompt_identifies_own_repo() -> None:
     assert "langchain-ai/open-swe" in prompt
 
 
-def test_construct_system_prompt_includes_corridor_prompt() -> None:
+def test_construct_system_prompt_omits_corridor_prompt_by_default() -> None:
     prompt = construct_system_prompt(working_dir="/workspace")
+
+    assert "<corridor>" not in prompt
+    assert "Corridor Security Analysis" not in prompt
+
+
+def test_construct_system_prompt_includes_corridor_prompt_when_enabled() -> None:
+    prompt = construct_system_prompt(working_dir="/workspace", corridor_enabled=True)
 
     assert "<corridor>" in prompt
     assert "Corridor Security Analysis" in prompt

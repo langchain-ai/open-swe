@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -107,3 +107,74 @@ async def test_server_load_corridor_mcp_tools_degrades_on_error() -> None:
         AsyncMock(side_effect=RuntimeError("boom")),
     ):
         assert await server._load_corridor_mcp_tools() == []
+
+
+@pytest.mark.asyncio
+async def test_get_agent_passes_corridor_prompt_state() -> None:
+    config = {
+        "configurable": {
+            "__is_for_execution__": True,
+            "thread_id": "thread-123",
+        },
+        "metadata": {},
+    }
+
+    def fake_create_deep_agent(**_kwargs):
+        class _DummyAgent:
+            def with_config(self, _config):
+                return self
+
+        return _DummyAgent()
+
+    async def run_with_corridor_tools(corridor_tools: list[object]) -> bool:
+        with (
+            patch.object(
+                server,
+                "resolve_github_token",
+                new_callable=AsyncMock,
+                return_value=("ghp", None),
+            ),
+            patch.object(server, "resolve_triggering_user_identity", return_value=None),
+            patch.object(
+                server,
+                "ensure_sandbox_for_thread",
+                new_callable=AsyncMock,
+                return_value=MagicMock(),
+            ),
+            patch.object(
+                server,
+                "aresolve_sandbox_work_dir",
+                new_callable=AsyncMock,
+                return_value="/workspace",
+            ),
+            patch.object(
+                server,
+                "get_team_default_model_pair",
+                new_callable=AsyncMock,
+                return_value=(("openai:gpt-5.5", "medium"), ("openai:gpt-5.5", "low")),
+            ),
+            patch.object(server, "fallback_model_id_for", return_value=None),
+            patch.object(server, "make_model", return_value=MagicMock()),
+            patch.object(
+                server, "_load_observability_tools", new_callable=AsyncMock, return_value=[]
+            ),
+            patch.object(
+                server,
+                "_observability_authorized",
+                new_callable=AsyncMock,
+                return_value=False,
+            ),
+            patch.object(
+                server,
+                "_load_corridor_mcp_tools",
+                new_callable=AsyncMock,
+                return_value=corridor_tools,
+            ),
+            patch.object(server, "construct_system_prompt", return_value="prompt") as prompt,
+            patch.object(server, "create_deep_agent", side_effect=fake_create_deep_agent),
+        ):
+            await server.get_agent(config)
+        return bool(prompt.call_args.kwargs["corridor_enabled"])
+
+    assert await run_with_corridor_tools([]) is False
+    assert await run_with_corridor_tools([_FakeTool("analyzePlan")]) is True
