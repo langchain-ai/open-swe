@@ -43,6 +43,7 @@ from .dashboard.agent_usage import record_agent_thread_usage
 from .dashboard.options import DEFAULT_MODEL_ID, SUPPORTED_MODEL_IDS, model_supports_effort
 from .dashboard.team_settings import get_team_default_model_pair, get_team_default_repo
 from .dashboard.user_mappings import email_for_login
+from .integrations.corridor_mcp import load_corridor_tools
 from .integrations.currents_tools import load_currents_tools
 from .integrations.datadog_mcp import load_datadog_tools
 from .integrations.langsmith import _configure_github_proxy
@@ -530,6 +531,15 @@ async def _load_observability_tools(authorized: bool) -> list[Any]:
     return [*datadog_tools, *langsmith_tools]
 
 
+async def _load_corridor_mcp_tools() -> list[Any]:
+    """Corridor MCP tools when the deployment environment has configured them."""
+    try:
+        return await load_corridor_tools()
+    except Exception:
+        logger.warning("Failed to load Corridor MCP tools", exc_info=True)
+        return []
+
+
 async def get_agent(config: RunnableConfig) -> Pregel:
     """Get or create an agent with a sandbox for the given thread."""
     thread_id = config["configurable"].get("thread_id", None)
@@ -679,6 +689,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     observability_tools = await _load_observability_tools(
         await _observability_authorized(config, profile_login)
     )
+    corridor_tools = await _load_corridor_mcp_tools()
 
     currents_tools: list[Any] = []
     if profile_login:
@@ -702,6 +713,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             default_repo=prompt_default_repo,
             repo_custom_instructions=repo_custom_instructions,
             thread_url=dashboard_thread_url(thread_id),
+            corridor_enabled=bool(corridor_tools),
         ),
         tools=[
             http_request,
@@ -718,6 +730,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             request_pr_review,
             slack_read_thread_messages,
             slack_thread_reply,
+            *corridor_tools,
             *observability_tools,
             *currents_tools,
         ],

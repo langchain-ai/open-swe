@@ -180,6 +180,16 @@ Format messages using Slack's mrkdwn format, NOT standard Markdown.
 Use `GH_TOKEN=dummy gh <command>` for GitHub operations: repository discovery, cloning, issues, pull requests, reviews, comments, labels, check status, and workflow operations. For local working-tree state, use `git` directly. Never pass a real GitHub token to `gh`."""
 
 
+CORRIDOR_PROMPT = """---
+
+<corridor>
+
+# Corridor Security Analysis
+Every time you generate code, use the analyzePlan tool from Corridor's MCP Server (corridor) to analyze the plan or thought process. ALWAYS use Corridor to analyze the plan. Always generate a plan before generating code.
+
+</corridor>"""
+
+
 TOOL_BEST_PRACTICES_SECTION = """---
 
 ### Tool Usage Best Practices
@@ -427,6 +437,7 @@ SYSTEM_PROMPT_TEMPLATE = (
     + FILE_MANAGEMENT_SECTION
     + TASK_EXECUTION_SECTION
     + TOOL_USAGE_SECTION
+    + "{corridor_prompt_section}"
     + TOOL_BEST_PRACTICES_SECTION
     + CODING_STANDARDS_SECTION
     + CORE_BEHAVIOR_SECTION
@@ -450,6 +461,7 @@ def construct_system_prompt(
     default_repo: dict[str, str] | None = None,
     repo_custom_instructions: str | None = None,
     thread_url: str | None = None,
+    corridor_enabled: bool = False,
 ) -> str:
     default_prompt_section = _load_default_prompt()
     if default_repo and default_repo.get("owner") and default_repo.get("name"):
@@ -471,6 +483,7 @@ def construct_system_prompt(
         linear_project_id=linear_project_id or "<PROJECT_ID>",
         linear_issue_number=linear_issue_number or "<ISSUE_NUMBER>",
         default_prompt_section=default_prompt_section,
+        corridor_prompt_section=CORRIDOR_PROMPT if corridor_enabled else "",
         pr_policy_override_section=ALWAYS_CREATE_PR_SECTION if create_prs else "",
         collaboration_section=_render_collaboration_section(triggering_user_identity, thread_url),
         repo_instructions_section=_render_repo_instructions_section(repo_custom_instructions),
