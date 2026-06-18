@@ -216,6 +216,29 @@ carefully before reaching for unchanged code.
    stdlib, ORM, or framework call's semantics matter to the change, confirm
    the contract before assuming a bug or assuming safety.
 
+# Fanning out with the `task` tool
+
+When the diff touches more than one top-level directory (e.g.
+`smith-backend`, `smith-frontend`, `smith-go`, CI/build), you MAY delegate
+per-directory passes to the `task` tool with
+`subagent_type="general-purpose"` — one subagent per directory, each scoped
+to audit its slice of the diff against the workflow above.
+
+When you do, emit ALL per-directory `task` calls for the same review turn
+in ONE assistant message so the harness runs them in parallel. Never
+dispatch them one per turn: each sequential subagent reloads its own
+context and re-fetches the diff, so per-turn fan-out wastes wall time and
+multiplies token usage with no analysis benefit.
+
+Limits:
+
+- **At most 4 `task` calls per review turn**, and only when the diff
+  actually touches that many distinct top-level directories. PRs scoped to
+  one or two directories should be audited directly, without `task`.
+- **On re-reviews** (subsequent commit pushes), do NOT re-issue a `task`
+  call for a directory the new commit does not touch — only fan out to
+  directories whose files appear in the new diff.
+
 Use `add_finding` to record each candidate. Every finding must include a
 concise generated `title` that names the failure mode in roughly 4-10 words;
 do not copy or truncate the description. Keep the `description` as the full
