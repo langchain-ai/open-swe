@@ -82,8 +82,9 @@ export function AgentsThreadsPage({
 
   const data = query.data
   const items = data?.items ?? []
-  const total = data?.total ?? 0
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
+  const hasMore = data?.hasMore ?? false
+  const exactTotal = data?.total
+  const end = offset + items.length
 
   const update = (patch: Partial<ThreadsPageFilters>) => {
     onFiltersChange({ ...filters, ...patch, page: patch.page ?? 1 })
@@ -167,10 +168,11 @@ export function AgentsThreadsPage({
           )}
         </div>
 
-        {total > 0 && (
+        {(items.length > 0 || filters.page > 1) && (
           <div className="mt-auto flex items-center justify-between pt-2 text-xs text-[var(--ui-text-muted)]">
             <span>
-              {offset + 1}–{Math.min(offset + PAGE_SIZE, total)} of {total}
+              {items.length > 0 ? `${offset + 1}–${end}` : "No results"}
+              {exactTotal != null ? ` of ${exactTotal}` : hasMore ? "+" : ""}
             </span>
             <div className="flex items-center gap-2">
               <Button
@@ -182,13 +184,11 @@ export function AgentsThreadsPage({
                 <CaretLeftIcon className="size-3" />
                 Prev
               </Button>
-              <span>
-                Page {filters.page} / {totalPages}
-              </span>
+              <span>Page {filters.page}</span>
               <Button
                 size="sm"
                 variant="outline"
-                disabled={filters.page >= totalPages}
+                disabled={!hasMore}
                 onClick={() => update({ page: filters.page + 1 })}
               >
                 Next

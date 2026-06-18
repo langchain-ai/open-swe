@@ -133,6 +133,7 @@ from .thread_api import (
     get_dashboard_thread_state,
     list_dashboard_threads,
     list_dashboard_threads_page,
+    list_dashboard_threads_sidebar,
     proxy_dashboard_thread_commands,
     proxy_dashboard_thread_history,
     proxy_dashboard_thread_run_cancel,
@@ -1181,6 +1182,24 @@ async def api_list_threads(
     if all and not is_admin(session.get("email")):
         raise HTTPException(403, "admin only")
     return await list_dashboard_threads(session["sub"], email=session.get("email"), include_all=all)
+
+
+@router.get("/threads/sidebar")
+async def api_list_threads_sidebar(
+    active_limit: int = 50,
+    resolved_limit: int = 20,
+    all: bool = False,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    if all and not is_admin(session.get("email")):
+        raise HTTPException(403, "admin only")
+    return await list_dashboard_threads_sidebar(
+        session["sub"],
+        email=session.get("email"),
+        active_limit=active_limit,
+        resolved_limit=resolved_limit,
+        include_all=all,
+    )
 
 
 @router.get("/threads/page")

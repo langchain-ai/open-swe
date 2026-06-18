@@ -69,9 +69,21 @@ export interface ThreadsPageParams {
 
 export interface ThreadsPage {
   items: Array<AgentThread>
-  total: number
+  total?: number
   limit: number
   offset: number
+  hasMore?: boolean
+}
+
+export interface SidebarThreadsGroup {
+  items: Array<AgentThread>
+  limit: number
+  hasMore: boolean
+}
+
+export interface SidebarThreads {
+  active: SidebarThreadsGroup
+  resolved: SidebarThreadsGroup
 }
 
 const API_BASE = (import.meta.env.VITE_DASHBOARD_API_BASE_URL ?? "").replace(
@@ -125,9 +137,30 @@ function buildThreadsPageQuery(params: ThreadsPageParams): string {
   return query ? `?${query}` : ""
 }
 
+function buildSidebarThreadsQuery(params: {
+  activeLimit?: number
+  resolvedLimit?: number
+}): string {
+  const search = new URLSearchParams()
+  if (params.activeLimit != null) {
+    search.set("active_limit", String(params.activeLimit))
+  }
+  if (params.resolvedLimit != null) {
+    search.set("resolved_limit", String(params.resolvedLimit))
+  }
+  const query = search.toString()
+  return query ? `?${query}` : ""
+}
+
 export const agentsApi = {
   langGraphApiUrl: agentsLangGraphApiUrl,
-  listThreads: () => agentsRequest<Array<AgentThread>>("/threads"),
+  listSidebarThreads: (params: {
+    activeLimit?: number
+    resolvedLimit?: number
+  }) =>
+    agentsRequest<SidebarThreads>(
+      `/threads/sidebar${buildSidebarThreadsQuery(params)}`
+    ),
   listThreadsPage: (params: ThreadsPageParams = {}) =>
     agentsRequest<ThreadsPage>(`/threads/page${buildThreadsPageQuery(params)}`),
   resolveThread: (threadId: string, resolved: boolean) =>
