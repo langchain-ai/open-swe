@@ -110,6 +110,14 @@ Supported model IDs and per-model effort/reasoning rules live in `agent/dashboar
 
 Webhooks compute deterministic thread ids so the same Linear issue / Slack thread / PR routes back to the same running agent. See `utils/github_comments.py:get_thread_id_from_branch` and the equivalents in `utils/linear.py` / `utils/slack.py`. Reviewer threads have their own deterministic ids and are tagged with `REVIEWER_THREAD_KIND` metadata so the FastAPI side can find them.
 
+## Constraints
+
+### GitHub App permission scopes
+
+The open-swe GitHub App installation token does **not** hold the `workflows` write scope. Any task that requires committing changes under `.github/workflows/` cannot be pushed by the agent — GitHub rejects the push with `refusing to allow a GitHub App to create or update workflow ... without workflows permission`. When a request implies such edits, the agent should declare this constraint in its first Slack/Linear reply before spending investigation/edit budget, and offer to either (a) paste the proposed diff inline for a human to apply, or (b) wait while the user grants the App `workflows: write` and re-runs. Only proceed with the deeper investigation + edits after the user picks a path. If `git push` ever surfaces the `refusing to allow a GitHub App to create or update workflow` string at runtime, treat it as the same constraint and stop — don't retry.
+
+This applies to every repo, including ones where the agent has previously pushed non-workflow changes successfully. Triggering-user OAuth tokens (Slack/dashboard runs with a mapped login) carry the user's own scopes and are not affected; GitHub-triggered runs and unmapped-user runs fall back to the App installation token and are.
+
 ## Conventions
 
 - Tests are unit-only by default (`tests/`). Integration tests would go under `tests/integration_tests/` (currently empty — `make integration_tests` no-ops if missing).

@@ -322,6 +322,12 @@ def open_pull_request(
     exists for the branch, this returns that PR's URL without creating a
     duplicate; switch to `gh pr edit` for updates.
 
+    Note: when the agent falls back to the GitHub App installation token (no
+    user OAuth token available), pushes that touch `.github/workflows/` are
+    rejected by GitHub with "refusing to allow a GitHub App to create or update
+    workflow ... without workflows permission". Surface that constraint to the
+    user before doing investigation work instead of attempting the push.
+
     Args:
         owner: Repository owner/org (e.g. "langchain-ai").
         repo: Repository name (e.g. "open-swe").
