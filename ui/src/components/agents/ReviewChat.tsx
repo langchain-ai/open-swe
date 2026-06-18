@@ -15,6 +15,7 @@ import {
   ArrowClockwiseIcon,
   ArrowUpIcon,
   CheckIcon,
+  CodeIcon,
   PlusIcon,
   SparkleIcon,
   TrashIcon,
@@ -33,13 +34,24 @@ import { cn } from "@/lib/utils"
 
 // --- Composer bridge ---------------------------------------------------------
 //
-// Lets the diff column (a separate subtree) push a code snippet into the active
-// chat composer. The chat tab may not be mounted when "add to chat" fires, so
-// requestAppend stashes the text until ChatBody registers its input setter.
+// Lets the diff column (a separate subtree) attach a code reference to the
+// active chat composer. The reference shows as a removable pill; the code is
+// only serialized into the message text on send. The chat tab may not be
+// mounted when "add to chat" fires, so attachments are stashed until ChatBody
+// registers its sink.
+
+export interface ChatAttachment {
+  id: string
+  path: string
+  // e.g. "R35-37" / "L12" — the side+line range shown after the filename.
+  lineLabel: string
+  language: string
+  snippet: string
+}
 
 interface ReviewChatComposer {
-  requestAppend: (text: string) => void
-  registerInput: (fn: ((text: string) => void) | null) => void
+  addAttachment: (attachment: ChatAttachment) => void
+  registerSink: (fn: ((attachment: ChatAttachment) => void) | null) => void
 }
 
 const ReviewChatComposerContext = createContext<ReviewChatComposer | null>(null)
@@ -49,22 +61,19 @@ export function ReviewChatComposerProvider({
 }: {
   children: React.ReactNode
 }) {
-  const inputRef = useRef<((text: string) => void) | null>(null)
-  const pendingRef = useRef<string | null>(null)
+  const sinkRef = useRef<((attachment: ChatAttachment) => void) | null>(null)
+  const pendingRef = useRef<Array<ChatAttachment>>([])
   const value = useMemo<ReviewChatComposer>(
     () => ({
-      requestAppend: (text) => {
-        if (inputRef.current) inputRef.current(text)
-        else
-          pendingRef.current = pendingRef.current
-            ? `${pendingRef.current}\n${text}`
-            : text
+      addAttachment: (attachment) => {
+        if (sinkRef.current) sinkRef.current(attachment)
+        else pendingRef.current.push(attachment)
       },
-      registerInput: (fn) => {
-        inputRef.current = fn
-        if (fn && pendingRef.current) {
-          fn(pendingRef.current)
-          pendingRef.current = null
+      registerSink: (fn) => {
+        sinkRef.current = fn
+        if (fn && pendingRef.current.length > 0) {
+          for (const attachment of pendingRef.current) fn(attachment)
+          pendingRef.current = []
         }
       },
     }),
@@ -79,6 +88,80 @@ export function ReviewChatComposerProvider({
 
 export function useReviewChatComposer(): ReviewChatComposer | null {
   return useContext(ReviewChatComposerContext)
+}
+
+function attachmentBasename(path: string): string {
+  const idx = path.lastIndexOf("/")
+  return idx === -1 ? path : path.slice(idx + 1)
+}
+
+function attachmentPillLabel(attachment: ChatAttachment): string {
+  return `${attachmentBasename(attachment.path)}:${attachment.lineLabel}`
+}
+
+// Serialize attachments as fenced code blocks ahead of the prose so the model
+// receives the code as context. The UI renders pills instead (see parse below).
+function serializeMessage(text: string, attachments: Array<ChatAttachment>): string {
+  const blocks = attachments.map(
+    (a) => `\`${a.path}:${a.lineLabel}\`\n\`\`\`${a.language}\n${a.snippet}\n\`\`\``
+  )
+  return [...blocks, text.trim()].filter(Boolean).join("\n\n")
+}
+
+interface ParsedAttachment {
+  label: string
+  language: string
+  code: string
+}
+
+// Pull the leading attachment blocks (which serializeMessage always writes
+// first) back out of a sent message so the bubble can render them as pills.
+function parseUserMessage(content: string): {
+  attachments: Array<ParsedAttachment>
+  text: string
+} {
+  const attachments: Array<ParsedAttachment> = []
+  let rest = content
+  const re = /^`([^`\n]+)`\n```([\w.-]*)\n([\s\S]*?)\n```\n*/
+  let match = re.exec(rest)
+  while (match && match.index === 0) {
+    const loc = match[1] ?? ""
+    const slash = loc.lastIndexOf("/")
+    attachments.push({
+      label: slash === -1 ? loc : loc.slice(slash + 1),
+      language: match[2] ?? "",
+      code: match[3] ?? "",
+    })
+    rest = rest.slice(match[0].length)
+    match = re.exec(rest)
+  }
+  return { attachments, text: rest.trim() }
+}
+
+function AttachmentPill({
+  label,
+  onRemove,
+}: {
+  label: string
+  onRemove?: () => void
+}) {
+  return (
+    <span className="inline-flex max-w-[200px] items-center gap-1 rounded-md border border-border bg-muted/60 py-0.5 pl-1.5 pr-1 text-[11px] text-foreground">
+      <CodeIcon className="size-3 shrink-0 text-muted-foreground" />
+      <span className="truncate font-mono">{label}</span>
+      {onRemove && (
+        <IconButton
+          type="button"
+          variant="ghost"
+          size="icon-xs"
+          aria-label="Remove attachment"
+          onClick={onRemove}
+        >
+          <XIcon />
+        </IconButton>
+      )}
+    </span>
+  )
 }
 
 const dashboardFetch: typeof fetch = (input, init) =>
@@ -333,6 +416,7 @@ function ChatBody({
   const composer = useReviewChatComposer()
   const stream = useStreamContext()
   const [value, setValue] = useState("")
+  const [attachments, setAttachments] = useState<Array<ChatAttachment>>([])
   const scrollRef = useRef<HTMLDivElement>(null)
   const autoScrollRef = useRef(true)
   const prevTopRef = useRef(0)
@@ -342,21 +426,29 @@ function ChatBody({
   // existing thread, before its messages have arrived.
   const hydrating = stream.isThreadLoading
 
-  // Bridge "add to chat" snippets from the diff column into this composer.
+  // Receive "add to chat" attachments from the diff column as composer pills.
   useEffect(() => {
     if (!composer) return
-    composer.registerInput((text) =>
-      setValue((v) => (v ? `${v}\n${text}` : text))
+    composer.registerSink((attachment) =>
+      setAttachments((prev) =>
+        prev.some((a) => a.id === attachment.id) ? prev : [...prev, attachment]
+      )
     )
-    return () => composer.registerInput(null)
+    return () => composer.registerSink(null)
   }, [composer])
 
+  const removeAttachment = useCallback((id: string) => {
+    setAttachments((prev) => prev.filter((a) => a.id !== id))
+  }, [])
+
   const send = useCallback(
-    (text: string) => {
+    (text: string, atts: Array<ChatAttachment>) => {
       const trimmed = text.trim()
-      if (!trimmed || busy) return
-      onUserSend(trimmed)
-      void stream.submit({ messages: [{ type: "human", content: trimmed }] })
+      const first = atts[0]
+      if ((!trimmed && !first) || busy) return
+      const content = serializeMessage(trimmed, atts)
+      onUserSend(trimmed || (first ? attachmentPillLabel(first) : ""))
+      void stream.submit({ messages: [{ type: "human", content }] })
     },
     [busy, stream, onUserSend],
   )
@@ -368,8 +460,9 @@ function ChatBody({
   })
 
   const submitComposer = () => {
-    send(value)
+    send(value, attachments)
     setValue("")
+    setAttachments([])
   }
 
   // Show the loading placeholder (not the empty/intro state) while an existing
@@ -409,7 +502,7 @@ function ChatBody({
       {showLoading ? (
         <LoadingState />
       ) : showEmpty ? (
-        <EmptyState onPick={send} />
+        <EmptyState onPick={(prompt) => send(prompt, attachments)} />
       ) : (
         <div
           ref={scrollRef}
@@ -417,25 +510,30 @@ function ChatBody({
         >
           {visible.map((message, index) => {
             const isUser = messageType(message) === "human"
-            return (
-              <div
-                key={message.id ?? index}
-                className={cn("flex", isUser ? "justify-end" : "justify-start")}
-              >
-                <div
-                  className={cn(
-                    "text-[13px] text-foreground",
-                    isUser
-                      ? "max-w-[85%] rounded-lg bg-muted px-3 py-2"
-                      : "w-full",
-                  )}
-                >
-                  {isUser ? (
-                    <span className="whitespace-pre-wrap">
-                      {messageText(message.content)}
-                    </span>
-                  ) : (
+            if (!isUser) {
+              return (
+                <div key={message.id ?? index} className="flex justify-start">
+                  <div className="w-full text-[13px] text-foreground">
                     <Markdown content={messageText(message.content)} />
+                  </div>
+                </div>
+              )
+            }
+            const parsed = parseUserMessage(messageText(message.content))
+            return (
+              <div key={message.id ?? index} className="flex justify-end">
+                <div className="flex max-w-[85%] flex-col items-end gap-1.5">
+                  {parsed.attachments.length > 0 && (
+                    <div className="flex flex-wrap justify-end gap-1">
+                      {parsed.attachments.map((attachment, i) => (
+                        <AttachmentPill key={i} label={attachment.label} />
+                      ))}
+                    </div>
+                  )}
+                  {parsed.text && (
+                    <span className="rounded-lg bg-muted px-3 py-2 text-[13px] whitespace-pre-wrap text-foreground">
+                      {parsed.text}
+                    </span>
                   )}
                 </div>
               </div>
@@ -452,29 +550,42 @@ function ChatBody({
       )}
 
       <div className="p-3">
-        <div className="flex items-end gap-2 rounded-2xl border border-border bg-background py-1.5 pl-3.5 pr-1.5 transition-colors focus-within:border-ring/60">
-          <Textarea
-            value={value}
-            onChange={(event) => setValue(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && !event.shiftKey) {
-                event.preventDefault()
-                submitComposer()
-              }
-            }}
-            placeholder="Ask anything about this PR…"
-            rows={1}
-            className="max-h-40 min-h-7 flex-1 resize-none rounded-none border-0 bg-transparent px-0 py-1 shadow-none focus-visible:border-transparent focus-visible:ring-0"
-          />
-          <IconButton
-            type="button"
-            onClick={submitComposer}
-            disabled={!value.trim() || busy}
-            aria-label="Send message"
-            className="rounded-full"
-          >
-            <ArrowUpIcon className="size-4" />
-          </IconButton>
+        <div className="flex flex-col gap-1.5 rounded-2xl border border-border bg-background px-1.5 py-1.5 transition-colors focus-within:border-ring/60">
+          {attachments.length > 0 && (
+            <div className="flex flex-wrap gap-1 pl-2 pt-0.5">
+              {attachments.map((attachment) => (
+                <AttachmentPill
+                  key={attachment.id}
+                  label={attachmentPillLabel(attachment)}
+                  onRemove={() => removeAttachment(attachment.id)}
+                />
+              ))}
+            </div>
+          )}
+          <div className="flex items-end gap-2 pl-2">
+            <Textarea
+              value={value}
+              onChange={(event) => setValue(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && !event.shiftKey) {
+                  event.preventDefault()
+                  submitComposer()
+                }
+              }}
+              placeholder="Ask anything about this PR…"
+              rows={1}
+              className="max-h-40 min-h-7 flex-1 resize-none rounded-none border-0 bg-transparent px-0 py-1 shadow-none focus-visible:border-transparent focus-visible:ring-0"
+            />
+            <IconButton
+              type="button"
+              onClick={submitComposer}
+              disabled={(!value.trim() && attachments.length === 0) || busy}
+              aria-label="Send message"
+              className="rounded-full"
+            >
+              <ArrowUpIcon className="size-4" />
+            </IconButton>
+          </div>
         </div>
       </div>
     </div>

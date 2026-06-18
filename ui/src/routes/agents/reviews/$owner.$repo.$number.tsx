@@ -46,6 +46,7 @@ import type {
   ReviewSidebarGroup,
   ReviewSidebarView,
 } from "@/components/agents/ReviewSidebar"
+import type { ChatAttachment } from "@/components/agents/ReviewChat"
 import type { DiffStyle } from "@/components/agents/utils/diffUtils"
 import { Markdown } from "@/components/agents/ported"
 import {
@@ -84,26 +85,27 @@ function readStoredDiffStyle(): DiffStyle {
     : "unified"
 }
 
-// Extract the selected line range as a quoted code snippet for the chat
-// composer. Deletions resolve against the original file, additions against the
-// modified file (matching the diff side the user selected on).
-function buildSelectionSnippet(
+// Build a chat attachment from the selected line range. Deletions resolve
+// against the original file, additions against the modified file (matching the
+// diff side the user selected on).
+function buildSelectionAttachment(
   file: ReviewDiffFile,
   range: SelectedLineRange
-): string {
+): ChatAttachment {
   const side = range.side ?? "additions"
-  const source = side === "deletions" ? file.originalContent : file.modifiedContent
+  const source =
+    side === "deletions" ? file.originalContent : file.modifiedContent
   const lines = source.split("\n")
   const start = Math.max(1, Math.min(range.start, range.end))
   const end = Math.max(range.start, range.end)
   const snippet = lines.slice(start - 1, end).join("\n")
   const sideLabel = side === "deletions" ? "L" : "R"
-  const location =
-    start === end
-      ? `${file.path}:${sideLabel}${start}`
-      : `${file.path}:${sideLabel}${start}-${end}`
-  const lang = file.path.includes(".") ? file.path.split(".").pop() : ""
-  return `\`${location}\`\n\`\`\`${lang}\n${snippet}\n\`\`\``
+  const lineLabel =
+    start === end ? `${sideLabel}${start}` : `${sideLabel}${start}-${end}`
+  const language = file.path.includes(".")
+    ? (file.path.split(".").pop() ?? "")
+    : ""
+  return { id: crypto.randomUUID(), path: file.path, lineLabel, language, snippet }
 }
 
 interface ResolvedGroup {
@@ -552,11 +554,29 @@ function ReviewBodyInner({
     (path: string, range: SelectedLineRange) => {
       const file = filesByPathRef.current.get(path)
       if (!file) return
-      composer?.requestAppend(buildSelectionSnippet(file, range))
+      composer?.addAttachment(buildSelectionAttachment(file, range))
       setSideTab("chat")
+      setUserSelection(null)
     },
     [composer]
   )
+
+  // ⌘L / Ctrl+L adds the current line selection to the chat (Cursor-style).
+  const userSelectionRef = useRef(userSelection)
+  userSelectionRef.current = userSelection
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "l") {
+        const sel = userSelectionRef.current
+        if (sel) {
+          event.preventDefault()
+          addToChat(sel.file, sel.range)
+        }
+      }
+    }
+    window.addEventListener("keydown", onKeyDown)
+    return () => window.removeEventListener("keydown", onKeyDown)
+  }, [addToChat])
 
   const openFinding = useCallback(
     (finding: ReviewFinding) => {
@@ -929,6 +949,12 @@ const FileDiffCard = memo(function FileDiffCard({
   diffStyle: DiffStyle
 }) {
   const diffOptions = useDiffOptions(diffStyle)
+  const lastPointerRef = useRef<{ x: number; y: number } | null>(null)
+  const [popup, setPopup] = useState<{
+    range: SelectedLineRange
+    x: number
+    y: number
+  } | null>(null)
 
   const lineAnnotations = useMemo<Array<DiffLineAnnotation<ReviewFinding>>>(
     () =>
@@ -942,20 +968,33 @@ const FileDiffCard = memo(function FileDiffCard({
     [findings]
   )
 
-  // Enable native line selection (click + shift-click + drag) and the gutter
-  // "+" utility; both feed the same controlled selection in ReviewBody.
+  // Native line selection (click + shift-click + drag). On commit we show a
+  // floating "Add to Chat" popup at the pointer-release position rather than
+  // adding immediately; ⌘L (handled in ReviewBody) adds without the popup.
   const cardOptions = useMemo(
     () => ({
       ...diffOptions,
       enableLineSelection: true,
-      enableGutterUtility: true,
-      onLineSelected: (range: SelectedLineRange | null) =>
-        onSelectLines(file.path, range),
-      onGutterUtilityClick: (range: SelectedLineRange) =>
-        onAddToChat(file.path, range),
+      onLineSelected: (range: SelectedLineRange | null) => {
+        onSelectLines(file.path, range)
+        const pointer = lastPointerRef.current
+        if (range && pointer) setPopup({ range, x: pointer.x, y: pointer.y })
+        else setPopup(null)
+      },
     }),
-    [diffOptions, file.path, onSelectLines, onAddToChat]
+    [diffOptions, file.path, onSelectLines]
   )
+
+  const addPopupToChat = useCallback(() => {
+    if (popup) onAddToChat(file.path, popup.range)
+    setPopup(null)
+  }, [popup, onAddToChat, file.path])
+
+  // Drop the popup once the selection clears (e.g. added via ⌘L, or a finding
+  // took focus) so it can't add the same range twice.
+  useEffect(() => {
+    if (!selectedLines) setPopup(null)
+  }, [selectedLines])
 
   const oldFile = useMemo<FileContents>(
     () => ({
@@ -1040,7 +1079,12 @@ const FileDiffCard = memo(function FileDiffCard({
             Binary or large file — diff not shown.
           </div>
         ) : (
-          <div className="overflow-x-auto bg-[var(--ui-panel)] font-mono text-[11px] leading-5">
+          <div
+            onPointerUpCapture={(event) => {
+              lastPointerRef.current = { x: event.clientX, y: event.clientY }
+            }}
+            className="overflow-x-auto bg-[var(--ui-panel)] font-mono text-[11px] leading-5"
+          >
             <MultiFileDiff<ReviewFinding>
               oldFile={oldFile}
               newFile={newFile}
@@ -1050,11 +1094,73 @@ const FileDiffCard = memo(function FileDiffCard({
               selectedLines={selectedLines}
               renderAnnotation={renderAnnotation}
             />
+            {popup && (
+              <AddToChatPopup
+                x={popup.x}
+                y={popup.y}
+                onAdd={addPopupToChat}
+                onDismiss={() => setPopup(null)}
+              />
+            )}
           </div>
         ))}
     </div>
   )
 })
+
+function AddToChatPopup({
+  x,
+  y,
+  onAdd,
+  onDismiss,
+}: {
+  x: number
+  y: number
+  onAdd: () => void
+  onDismiss: () => void
+}) {
+  // Positioned fixed at the pointer-release point so it escapes the diff's
+  // overflow clipping. Dismiss on Escape, scroll, or any outside pointer-down.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onDismiss()
+    }
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target
+      if (target instanceof Element && target.closest("[data-add-to-chat]"))
+        return
+      onDismiss()
+    }
+    window.addEventListener("keydown", onKeyDown)
+    window.addEventListener("pointerdown", onPointerDown)
+    // Capture so it also catches scrolls from the diff scroll container.
+    window.addEventListener("scroll", onDismiss, true)
+    return () => {
+      window.removeEventListener("keydown", onKeyDown)
+      window.removeEventListener("pointerdown", onPointerDown)
+      window.removeEventListener("scroll", onDismiss, true)
+    }
+  }, [onDismiss])
+
+  return (
+    <div
+      data-add-to-chat
+      style={{ position: "fixed", top: y, left: x }}
+      className="z-50 -translate-x-1/2 -translate-y-[calc(100%+6px)] font-sans"
+    >
+      <button
+        type="button"
+        onClick={onAdd}
+        className="inline-flex items-center gap-1.5 rounded-md border border-border bg-popover px-2 py-1 text-[11px] font-medium text-popover-foreground shadow-md hover:bg-muted"
+      >
+        Add to Chat
+        <kbd className="rounded border border-border px-1 text-[10px] text-muted-foreground">
+          ⌘L
+        </kbd>
+      </button>
+    </div>
+  )
+}
 
 function FindingRailMarker({
   finding,
