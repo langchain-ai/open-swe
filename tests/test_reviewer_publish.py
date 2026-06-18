@@ -212,6 +212,40 @@ def test_render_review_body_no_findings_message() -> None:
     body = render_review_body(pr_number=99, surfaced_count=0)
     assert "## ✅ Open SWE Review: No issues found" in body
     assert "Open SWE reviewed this PR and found no potential bugs to report." in body
+    assert "additional" not in body
+
+
+def test_render_review_body_with_additional_findings_and_ui_link() -> None:
+    body = render_review_body(
+        pr_number=99,
+        surfaced_count=0,
+        additional_findings_count=2,
+        ui_url="https://dash.example/agents/reviews/o/r/99",
+    )
+    assert "## ✅ Open SWE Review: No issues found" in body
+    assert "2 additional findings can be viewed in the web app." in body
+    assert "[Open in Web](https://dash.example/agents/reviews/o/r/99)" in body
+
+
+def test_render_review_body_with_single_additional_finding_uses_singular() -> None:
+    body = render_review_body(pr_number=99, surfaced_count=0, additional_findings_count=1)
+    assert "1 additional finding can be viewed in the web app." in body
+
+
+def test_render_review_body_with_surfaced_and_additional_findings() -> None:
+    body = render_review_body(
+        pr_number=99,
+        surfaced_count=3,
+        additional_findings_count=2,
+        ui_url="https://dash.example/agents/reviews/o/r/99",
+    )
+    assert "found 3 potential issues." in body
+    assert "2 additional findings can be viewed in the web app." in body
+
+
+def test_render_review_body_additional_findings_zero_omits_line() -> None:
+    body = render_review_body(pr_number=99, surfaced_count=0, additional_findings_count=0)
+    assert "additional" not in body
 
 
 def test_render_status_comment_reviewing_includes_ui_link(monkeypatch: Any) -> None:
@@ -385,6 +419,51 @@ def test_publish_review_eval_mode_does_not_call_github() -> None:
     get_token.assert_not_called()
     post_review.assert_not_called()
     set_meta.assert_awaited_once_with("tid", last_reviewed_sha="sha")
+
+
+@pytest.mark.asyncio
+async def test_publish_review_surfaces_additional_findings_count_in_body() -> None:
+    """When all surfaced findings are above threshold but sub-threshold findings
+    exist, the review body must mention how many additional findings are in the
+    web app."""
+    from agent.tools.publish_review import _publish_review_async
+
+    findings = [
+        _f(id="f_low_1", severity="low", file="a.py", start_line=1, end_line=1),
+        _f(id="f_low_2", severity="low", file="b.py", start_line=2, end_line=2),
+    ]
+    post_review = AsyncMock(return_value={"id": 555})
+    fetch_comments = AsyncMock(return_value=[])
+
+    with (
+        patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
+        patch("agent.tools.publish_review.list_findings_async", AsyncMock(return_value=findings)),
+        patch("agent.tools.publish_review.post_pull_request_review", post_review),
+        patch("agent.tools.publish_review.fetch_review_comments", fetch_comments),
+        patch(
+            "agent.tools.publish_review._resolve_threads_for_resolved_findings",
+            new_callable=AsyncMock,
+            return_value=0,
+        ),
+        patch("agent.tools.publish_review.set_reviewer_thread_metadata", AsyncMock()),
+        patch("agent.tools.publish_review._maybe_post_slack_completion_reply", AsyncMock()),
+    ):
+        result = await _publish_review_async(
+            owner="o",
+            repo="r",
+            pr_number=7,
+            head_sha="sha",
+            token="t",
+            severity_threshold="medium",
+            cap=15,
+            is_re_review=False,
+        )
+
+    assert result["success"] is True
+    assert result["surfaced_count"] == 0
+    posted_body = post_review.await_args.kwargs["body"]
+    assert "No issues found" in posted_body
+    assert "2 additional findings can be viewed in the web app." in posted_body
 
 
 def test_publish_review_forwards_trace_link_config_override() -> None:

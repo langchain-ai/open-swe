@@ -10,6 +10,7 @@ from langgraph.config import get_config
 from ..dashboard.team_settings import get_team_review_trace_links_enabled
 from ..reviewer_diff import compute_diff_line_set, fetch_pr_diff, is_range_in_diff
 from ..reviewer_findings import (
+    SEVERITY_ORDER,
     Finding,
     ReviewerThreadMissingError,
     Severity,
@@ -72,9 +73,10 @@ def publish_review(
     GitHub Review but still resolves fixed threads and updates reviewer state.
 
     Args:
-        severity_threshold: Lowest severity to surface to GitHub (default
-            ``medium``). Lower-severity findings stay in state and surface in
-            the future UI but not on the PR.
+        severity_threshold: Lowest severity to surface as inline GitHub comments
+            (default ``medium``). Lower-severity findings stay in state and are
+            mentioned in the review summary with a link to the web app, but are
+            not posted as inline PR comments.
         cap: Maximum number of inline comments to publish (default 4).
 
     Returns:
@@ -268,6 +270,16 @@ async def _publish_review_async(
         in_diff_unpublished, severity_threshold=severity_threshold, cap=cap
     )
 
+    severity_rank = SEVERITY_ORDER[severity_threshold]
+    eligible_ids = {f.get("id") for f in eligible}
+    additional_findings_count = sum(
+        1
+        for f in in_diff_unpublished
+        if f.get("id") not in eligible_ids
+        and f.get("status", "open") == "open"
+        and SEVERITY_ORDER.get(f.get("severity", "low"), 0) < severity_rank
+    )
+
     inline_comments: list[dict[str, Any]] = []
     eligible_with_payload: list[tuple[dict[str, Any], dict[str, Any]]] = []
     for finding in eligible:
@@ -328,6 +340,7 @@ async def _publish_review_async(
         surfaced_count=len(inline_comments),
         trace_url=review_trace_url,
         ui_url=review_ui_url,
+        additional_findings_count=additional_findings_count,
     )
 
     review_response = await post_pull_request_review(
@@ -362,6 +375,7 @@ async def _publish_review_async(
                 surfaced_count=len(retry_inline),
                 trace_url=review_trace_url,
                 ui_url=review_ui_url,
+                additional_findings_count=additional_findings_count,
             )
             retry_response = await post_pull_request_review(
                 owner=owner,
