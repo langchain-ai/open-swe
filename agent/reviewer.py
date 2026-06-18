@@ -215,6 +215,16 @@ carefully before reaching for unchanged code.
 6. **Verify library / framework usage you're not certain of.** If a
    stdlib, ORM, or framework call's semantics matter to the change, confirm
    the contract before assuming a bug or assuming safety.
+7. **Repository conventions compliance.** If a Repository conventions
+   (AGENTS.md / CLAUDE.md) section appears in this prompt, run a dedicated
+   pass that checks every changed hunk against each rule listed there. For
+   each rule, ask: *does this PR's diff violate it?* Common violations
+   include failing to update docs that describe changed behavior, using a
+   forbidden import or pattern, skipping a required test/changelog step, or
+   ignoring naming/architecture mandates. File a finding for each violation
+   that is anchored to a changed line — these are mandatory repo rules, not
+   style nits, so a violation is a legitimate finding even when it would
+   otherwise look like a convention nit.
 
 Use `add_finding` to record each candidate. Every finding must include a
 concise generated `title` that names the failure mode in roughly 4-10 words;
@@ -390,14 +400,28 @@ def _reviewer_system_prompt(
     if agents_md_content:
         prompt = (
             f"{prompt}\n\n"
-            "# Repository conventions (AGENTS.md)\n\n"
-            "The following is the `AGENTS.md` file from the target branch "
-            "(the PR's base), not from the PR head. It documents the "
-            "project's conventions, architecture, and rules. Treat "
-            "violations of these conventions as candidate findings when "
-            "they meet the global bar above (anchored to a changed line, "
-            "concrete failure mode, in-diff). Do not file findings for "
-            "pre-existing violations outside the diff.\n\n"
+            "# Repository conventions (AGENTS.md / CLAUDE.md)\n\n"
+            "The following is the `AGENTS.md` or `CLAUDE.md` file from the target "
+            "branch (the PR's base), not from the PR head. It documents the "
+            "project's conventions, architecture, and rules. These rules are "
+            "**mandatory** — the project enforces them on every contributor and "
+            "they are not optional style preferences. When a changed line "
+            "violates one of these rules, file a finding for it (still anchored "
+            "to the changed line, still a concrete failure mode, still in-diff). "
+            "Do not file findings for pre-existing violations outside the diff.\n\n"
+            "Common rule categories to check:\n"
+            "- **Documentation sync rules** — many repos require docs/ to be "
+            "updated when behavior changes. If the PR changes behavior a doc "
+            "describes and the doc is not updated, that is a finding.\n"
+            "- **Naming / convention rules** — if the repo mandates specific "
+            "naming, patterns, or helpers and the PR uses the wrong one, that "
+            "is a finding (not a style nit — it violates an explicit repo rule).\n"
+            "- **Architecture / layering rules** — if the repo forbids certain "
+            "imports, cross-layer calls, or patterns and the PR introduces one, "
+            "that is a finding.\n"
+            "- **Process / CI rules** — if the repo requires tests, changelog "
+            "entries, or specific CI steps for certain changes and the PR skips "
+            "them, that is a finding.\n\n"
             "```\n"
             f"{agents_md_content}\n"
             "```"
