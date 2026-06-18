@@ -578,6 +578,21 @@ function ReviewBodyInner({
     return () => window.removeEventListener("keydown", onKeyDown)
   }, [addToChat])
 
+  // Clicking away from the highlighted rows clears the selection. A pointer-down
+  // that begins a fresh selection clears here first, then the new drag repaints.
+  // Reads the ref so the listener is registered once (no churn during a drag).
+  useEffect(() => {
+    const onPointerDown = (event: PointerEvent) => {
+      if (!userSelectionRef.current) return
+      const target = event.target
+      if (target instanceof Element && target.closest("[data-add-to-chat]"))
+        return
+      setUserSelection(null)
+    }
+    window.addEventListener("pointerdown", onPointerDown)
+    return () => window.removeEventListener("pointerdown", onPointerDown)
+  }, [])
+
   const openFinding = useCallback(
     (finding: ReviewFinding) => {
       markRead(finding.id)
@@ -949,6 +964,7 @@ const FileDiffCard = memo(function FileDiffCard({
   diffStyle: DiffStyle
 }) {
   const diffOptions = useDiffOptions(diffStyle)
+  const diffWrapperRef = useRef<HTMLDivElement | null>(null)
   const lastPointerRef = useRef<{ x: number; y: number } | null>(null)
   const [popup, setPopup] = useState<{
     range: SelectedLineRange
@@ -985,8 +1001,22 @@ const FileDiffCard = memo(function FileDiffCard({
         onSelectLines(file.path, range),
       onLineSelectionEnd: (range: SelectedLineRange | null) => {
         onSelectLines(file.path, range)
+        if (!range) {
+          setPopup(null)
+          return
+        }
+        // Anchor to the gutter "+" handle Pierre places on the selection's
+        // bottom line (inside the diff's shadow DOM) — a stable position,
+        // unlike the pointer-release point. Fall back to the pointer.
+        const host = diffWrapperRef.current?.querySelector("diffs-container")
+        const handle = host?.shadowRoot?.querySelector(
+          "[data-gutter-utility-slot]"
+        )
+        const rect =
+          handle instanceof HTMLElement ? handle.getBoundingClientRect() : null
         const pointer = lastPointerRef.current
-        if (range && pointer) setPopup({ range, x: pointer.x, y: pointer.y })
+        if (rect) setPopup({ range, x: rect.left, y: rect.top })
+        else if (pointer) setPopup({ range, x: pointer.x, y: pointer.y })
         else setPopup(null)
       },
     }),
@@ -1088,6 +1118,7 @@ const FileDiffCard = memo(function FileDiffCard({
           </div>
         ) : (
           <div
+            ref={diffWrapperRef}
             onPointerUpCapture={(event) => {
               lastPointerRef.current = { x: event.clientX, y: event.clientY }
             }}
