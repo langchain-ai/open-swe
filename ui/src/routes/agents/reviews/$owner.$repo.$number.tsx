@@ -968,13 +968,19 @@ const FileDiffCard = memo(function FileDiffCard({
     [findings]
   )
 
-  // Native line selection (click + shift-click + drag). On commit we show a
-  // floating "Add to Chat" popup at the pointer-release position rather than
-  // adding immediately; ⌘L (handled in ReviewBody) adds without the popup.
+  // Native line selection plus the visible gutter "+" handle you can click and
+  // drag to select a range (with the highlight growing as you drag). On commit
+  // we show a floating "Add to Chat" popup at the pointer-release position
+  // rather than adding immediately; ⌘L (handled in ReviewBody) adds without it.
+  // onGutterUtilityClick must be non-null for Pierre to turn the "+" into a
+  // drag selector, but the commit is handled by onLineSelected (which fires for
+  // both the gutter handle and line-number selections).
   const cardOptions = useMemo(
     () => ({
       ...diffOptions,
       enableLineSelection: true,
+      enableGutterUtility: true,
+      onGutterUtilityClick: () => undefined,
       onLineSelected: (range: SelectedLineRange | null) => {
         onSelectLines(file.path, range)
         const pointer = lastPointerRef.current
