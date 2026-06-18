@@ -34,6 +34,11 @@ class _FakeStructured:
     def __init__(self, result: Any, *, raises: bool = False) -> None:
         self._result = result
         self._raises = raises
+        self.with_config_calls: list[dict[str, Any]] = []
+
+    def with_config(self, **kwargs: Any) -> _FakeStructured:
+        self.with_config_calls.append(kwargs)
+        return self
 
     async def ainvoke(self, _prompt: str) -> Any:
         if self._raises:
@@ -95,6 +100,27 @@ async def test_generate_diff_groups_empty_diff_returns_empty() -> None:
 async def test_generate_diff_groups_llm_failure_returns_none() -> None:
     groups = await generate_diff_groups(diff_text=_DIFF, model=_FakeModel(None, raises=True))
     assert groups is None
+
+
+@pytest.mark.asyncio
+async def test_generate_diff_groups_attaches_langsmith_metadata() -> None:
+    result = _DiffGroupingResult(
+        groups=[_DiffGroupModel(title="Foo", summary="", files=["foo.py"])]
+    )
+    model = _FakeModel(result)
+    await generate_diff_groups(
+        diff_text=_DIFF,
+        model=model,
+        model_id="fireworks:accounts/fireworks/models/glm-5p2",
+    )
+    assert len(model._structured.with_config_calls) == 1
+    call = model._structured.with_config_calls[0]
+    assert call["run_name"] == "reviewer.diff_grouping"
+    assert "reviewer" in call["tags"] and "diff_grouping" in call["tags"]
+    metadata = call["metadata"]
+    assert metadata["graph_id"]
+    assert metadata["ls_provider"] == "fireworks"
+    assert metadata["ls_model_name"] == "accounts/fireworks/models/glm-5p2"
 
 
 def test_build_prompt_includes_files_and_diffs() -> None:

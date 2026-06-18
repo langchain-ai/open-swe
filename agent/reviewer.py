@@ -747,13 +747,10 @@ def _on_background_task_done(task: asyncio.Task[None]) -> None:
         logger.warning("Background reviewer task failed: %s", exc)
 
 
-async def _resolve_grouping_model(configurable: dict[str, object]) -> BaseChatModel:
-    """Resolve the model for the diff-grouping pass.
-
-    Per-run override (``grouping_model_id``/``grouping_reasoning_effort``) wins;
-    otherwise the team default, which itself inherits the reviewer subagent
-    model when no grouping-specific model is configured.
-    """
+async def _resolve_grouping_model(
+    configurable: dict[str, object],
+) -> tuple[BaseChatModel, str]:
+    """Resolve the model and resolved model_id for the diff-grouping pass."""
     configured_model_id = configurable.get("grouping_model_id")
     configured_effort = configurable.get("grouping_reasoning_effort")
     if isinstance(configured_model_id, str) and configured_model_id:
@@ -767,7 +764,7 @@ async def _resolve_grouping_model(configurable: dict[str, object]) -> BaseChatMo
         max_tokens=DEFAULT_LLM_MAX_TOKENS,
         openai_reasoning_default=DEFAULT_LLM_REASONING,
     )
-    return make_model(model_id, **model_kwargs)
+    return make_model(model_id, **model_kwargs), model_id
 
 
 async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
@@ -1080,13 +1077,14 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
     # its own errors and the UI falls back to the folder view when groups are
     # absent.
     if reviewer_event != "finding_reply" and pr_diff_text and thread_id:
-        grouping_model = await _resolve_grouping_model(config["configurable"])
+        grouping_model, grouping_model_id = await _resolve_grouping_model(config["configurable"])
         grouping_task = asyncio.create_task(
             maybe_generate_and_store_diff_groups(
                 thread_id=thread_id,
                 head_sha=head_sha,
                 diff_text=pr_diff_text,
                 model=grouping_model,
+                model_id=grouping_model_id,
             )
         )
         _BACKGROUND_TASKS.add(grouping_task)

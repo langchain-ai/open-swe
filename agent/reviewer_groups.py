@@ -24,6 +24,7 @@ from pydantic import BaseModel, Field
 
 from .reviewer_diff import parse_unified_diff
 from .reviewer_findings import get_thread_metadata, set_reviewer_thread_metadata
+from .utils.model import _split_model_id
 
 logger = logging.getLogger(__name__)
 
@@ -162,6 +163,7 @@ async def generate_diff_groups(
     *,
     diff_text: str,
     model: BaseChatModel,
+    model_id: str = "",
 ) -> list[DiffGroup] | None:
     """Run the single structured-output grouping pass over a unified diff.
 
@@ -174,7 +176,17 @@ async def generate_diff_groups(
         return []
     prompt = _build_prompt(diff_text, files)
     try:
-        structured = model.with_structured_output(_DiffGroupingResult)
+        provider, ls_model = _split_model_id(model_id)
+        structured = model.with_structured_output(_DiffGroupingResult).with_config(
+            run_name="reviewer.diff_grouping",
+            tags=["reviewer", "diff_grouping"],
+            metadata={
+                "graph_id": "reviewer",
+                "ls_provider": provider,
+                "ls_model_name": ls_model,
+                "ls_message_format": "openai",
+            },
+        )
         result = await structured.ainvoke(prompt)
     except Exception:  # noqa: BLE001 — grouping is best-effort, never break the review
         logger.exception("Diff grouping LLM call failed")
@@ -191,6 +203,7 @@ async def maybe_generate_and_store_diff_groups(
     head_sha: str,
     diff_text: str,
     model: BaseChatModel,
+    model_id: str = "",
 ) -> None:
     """Generate diff groups and persist them on the reviewer thread metadata.
 
@@ -212,7 +225,7 @@ async def maybe_generate_and_store_diff_groups(
             and existing.get("groups")
         ):
             return
-        groups = await generate_diff_groups(diff_text=diff_text, model=model)
+        groups = await generate_diff_groups(diff_text=diff_text, model=model, model_id=model_id)
         if groups is None:
             return
         payload = {

@@ -58,6 +58,14 @@ def make_model(model_id: str, **kwargs: Unpack[ModelKwargs]):
     return init_chat_model(model=model_id, **model_kwargs)
 
 
+def _split_model_id(model_id: str) -> tuple[str, str]:
+    """Split a `<provider>:<model>` id on the first colon."""
+    if ":" in model_id:
+        provider, rest = model_id.split(":", 1)
+        return provider, rest
+    return "", model_id
+
+
 def fallback_model_id_for(primary_model_id: str) -> str | None:
     """Return the cross-provider fallback model id for a given primary, if any.
 
