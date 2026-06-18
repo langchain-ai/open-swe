@@ -205,6 +205,7 @@ export function optimisticThread(
     status: "running",
     viewed: true,
     viewedAt: now,
+    isOwner: true,
     createdAt: now,
     updatedAt: now,
     traceUrl: null,

@@ -315,6 +315,7 @@ function ThreadRow({
   const deleteThread = useDeleteAgentThread()
   const resolveThread = useResolveAgentThread()
   const [deleteOpen, setDeleteOpen] = useState(false)
+  const isReadOnly = thread.isOwner === false
   const badge =
     thread.diffStats && thread.diffStats.additions > 0
       ? `+${thread.diffStats.additions}`
@@ -422,29 +423,33 @@ function ThreadRow({
               {badge}
             </span>
           )}
-          <button
-            type="button"
-            aria-label={isResolved ? "Unresolve thread" : "Resolve thread"}
-            title={isResolved ? "Unresolve thread" : "Resolve thread"}
-            onClick={onToggleResolved}
-            disabled={resolveThread.isPending}
-            className="hidden size-4 shrink-0 items-center justify-center rounded text-[var(--ui-text-dim)] group-hover:flex hover:bg-[var(--ui-panel-2)] hover:text-[var(--ui-text)]"
-          >
-            {isResolved ? (
-              <ArrowCounterClockwiseIcon className="size-3" weight="bold" />
-            ) : (
-              <CheckCircleIcon className="size-3" weight="bold" />
-            )}
-          </button>
-          <button
-            type="button"
-            aria-label="Delete thread"
-            onClick={onDelete}
-            disabled={isDeleting}
-            className="hidden size-4 shrink-0 items-center justify-center rounded text-[var(--ui-text-dim)] group-hover:flex hover:bg-[var(--ui-panel-2)] hover:text-[var(--ui-text)]"
-          >
-            <XIcon className="size-3" weight="bold" />
-          </button>
+          {!isReadOnly && (
+            <button
+              type="button"
+              aria-label={isResolved ? "Unresolve thread" : "Resolve thread"}
+              title={isResolved ? "Unresolve thread" : "Resolve thread"}
+              onClick={onToggleResolved}
+              disabled={resolveThread.isPending}
+              className="hidden size-4 shrink-0 items-center justify-center rounded text-[var(--ui-text-dim)] group-hover:flex hover:bg-[var(--ui-panel-2)] hover:text-[var(--ui-text)]"
+            >
+              {isResolved ? (
+                <ArrowCounterClockwiseIcon className="size-3" weight="bold" />
+              ) : (
+                <CheckCircleIcon className="size-3" weight="bold" />
+              )}
+            </button>
+          )}
+          {!isReadOnly && (
+            <button
+              type="button"
+              aria-label="Delete thread"
+              onClick={onDelete}
+              disabled={isDeleting}
+              className="hidden size-4 shrink-0 items-center justify-center rounded text-[var(--ui-text-dim)] group-hover:flex hover:bg-[var(--ui-panel-2)] hover:text-[var(--ui-text)]"
+            >
+              <XIcon className="size-3" weight="bold" />
+            </button>
+          )}
         </ContextMenu.Trigger>
         <ContextMenu.Portal>
           <ContextMenu.Positioner className="z-50 outline-none">
@@ -457,26 +462,30 @@ function ThreadRow({
                 <TreeStructureIcon className="size-3.5" />
                 Open trace
               </ContextMenu.Item>
-              <ContextMenu.Item
-                onClick={() => onToggleResolved()}
-                disabled={resolveThread.isPending}
-                className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-xs outline-none select-none data-highlighted:bg-[var(--ui-sidebar-hover)] data-disabled:pointer-events-none data-disabled:opacity-50"
-              >
-                {isResolved ? (
-                  <ArrowCounterClockwiseIcon className="size-3.5" />
-                ) : (
-                  <CheckCircleIcon className="size-3.5" />
-                )}
-                {isResolved ? "Unresolve thread" : "Resolve thread"}
-              </ContextMenu.Item>
-              <ContextMenu.Item
-                onClick={onDelete}
-                disabled={isDeleting}
-                className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-xs text-[var(--ui-danger)] outline-none select-none data-highlighted:bg-[var(--ui-sidebar-hover)] data-disabled:pointer-events-none data-disabled:opacity-50"
-              >
-                <TrashIcon className="size-3.5" />
-                Delete thread
-              </ContextMenu.Item>
+              {!isReadOnly && (
+                <ContextMenu.Item
+                  onClick={() => onToggleResolved()}
+                  disabled={resolveThread.isPending}
+                  className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-xs outline-none select-none data-highlighted:bg-[var(--ui-sidebar-hover)] data-disabled:pointer-events-none data-disabled:opacity-50"
+                >
+                  {isResolved ? (
+                    <ArrowCounterClockwiseIcon className="size-3.5" />
+                  ) : (
+                    <CheckCircleIcon className="size-3.5" />
+                  )}
+                  {isResolved ? "Unresolve thread" : "Resolve thread"}
+                </ContextMenu.Item>
+              )}
+              {!isReadOnly && (
+                <ContextMenu.Item
+                  onClick={onDelete}
+                  disabled={isDeleting}
+                  className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-xs text-[var(--ui-danger)] outline-none select-none data-highlighted:bg-[var(--ui-sidebar-hover)] data-disabled:pointer-events-none data-disabled:opacity-50"
+                >
+                  <TrashIcon className="size-3.5" />
+                  Delete thread
+                </ContextMenu.Item>
+              )}
             </ContextMenu.Popup>
           </ContextMenu.Positioner>
         </ContextMenu.Portal>
