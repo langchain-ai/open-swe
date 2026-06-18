@@ -1,6 +1,9 @@
+import os
 from typing import Literal, TypedDict, Unpack
 
 from langchain.chat_models import init_chat_model
+
+from ..dashboard.options import DEFAULT_MODEL_ID
 
 OPENAI_RESPONSES_WS_BASE_URL = "wss://api.openai.com/v1"
 
@@ -185,3 +188,29 @@ def provider_model_kwargs(
         if effort is not None:
             kwargs["model_kwargs"] = {"reasoning_effort": effort}
     return kwargs
+
+
+def validate_local_dev_llm_config() -> None:
+    """Validate API keys for the locally configured default model.
+
+    This check only runs in localhost development environments and is
+    intended to catch missing credentials for the default model specified
+    via LLM_MODEL_ID/DEFAULT_MODEL_ID. Runtime model selection may come
+    from team, profile, or thread configuration and is not validated here.
+    """
+    dashboard_url = os.environ.get("DASHBOARD_BASE_URL", "")
+    if not dashboard_url.startswith("http://localhost"):
+        return
+
+    model_id = os.environ.get("LLM_MODEL_ID", DEFAULT_MODEL_ID)
+
+    if model_id.startswith("openai:") and not os.environ.get("OPENAI_API_KEY"):
+        raise ValueError(f"OPENAI_API_KEY is required for configured model {model_id}")
+    elif model_id.startswith("anthropic:") and not os.environ.get("ANTHROPIC_API_KEY"):
+        raise ValueError(f"ANTHROPIC_API_KEY is required for configured model {model_id}")
+    elif model_id.startswith("google_genai:") and not os.environ.get("GOOGLE_API_KEY"):
+        raise ValueError(f"GOOGLE_API_KEY is required for configured model {model_id}")
+    elif model_id.startswith("groq:") and not os.environ.get("GROQ_API_KEY"):
+        raise ValueError(f"GROQ_API_KEY is required for configured model {model_id}")
+    elif model_id.startswith("fireworks:") and not os.environ.get("FIREWORKS_API_KEY"):
+        raise ValueError(f"FIREWORKS_API_KEY is required for configured model {model_id}")

@@ -131,9 +131,11 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    from .utils.model import validate_local_dev_llm_config
     from .utils.sandbox import validate_sandbox_startup_config
 
     validate_sandbox_startup_config()
+    validate_local_dev_llm_config()
     yield
 
 
