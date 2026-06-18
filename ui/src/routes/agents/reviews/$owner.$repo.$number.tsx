@@ -969,19 +969,21 @@ const FileDiffCard = memo(function FileDiffCard({
   )
 
   // Native line selection plus the visible gutter "+" handle you can click and
-  // drag to select a range (with the highlight growing as you drag). On commit
-  // we show a floating "Add to Chat" popup at the pointer-release position
-  // rather than adding immediately; ⌘L (handled in ReviewBody) adds without it.
-  // onGutterUtilityClick must be non-null for Pierre to turn the "+" into a
-  // drag selector, but the commit is handled by onLineSelected (which fires for
-  // both the gutter handle and line-number selections).
+  // drag to select a range. onLineSelectionChange fires on every drag move; we
+  // push it into the controlled selection so the rows highlight live as you
+  // drag (in controlled mode Pierre only paints when the prop updates). The
+  // "Add to Chat" popup is shown on onLineSelectionEnd (release only); ⌘L
+  // (handled in ReviewBody) adds without it. onGutterUtilityClick must be
+  // non-null for Pierre to turn the "+" into a drag selector.
   const cardOptions = useMemo(
     () => ({
       ...diffOptions,
       enableLineSelection: true,
       enableGutterUtility: true,
       onGutterUtilityClick: () => undefined,
-      onLineSelected: (range: SelectedLineRange | null) => {
+      onLineSelectionChange: (range: SelectedLineRange | null) =>
+        onSelectLines(file.path, range),
+      onLineSelectionEnd: (range: SelectedLineRange | null) => {
         onSelectLines(file.path, range)
         const pointer = lastPointerRef.current
         if (range && pointer) setPopup({ range, x: pointer.x, y: pointer.y })
@@ -1152,7 +1154,7 @@ function AddToChatPopup({
     <div
       data-add-to-chat
       style={{ position: "fixed", top: y, left: x }}
-      className="z-50 -translate-x-1/2 -translate-y-[calc(100%+6px)] font-sans"
+      className="z-50 -translate-y-[calc(100%+4px)] font-sans"
     >
       <button
         type="button"
