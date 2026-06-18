@@ -1,4 +1,13 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react"
 import { StreamProvider, useStreamContext } from "@langchain/react"
 import { overrideFetchImplementation } from "@langchain/langgraph-sdk"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
@@ -21,6 +30,56 @@ import { Textarea } from "@/components/ui/textarea"
 import { Skeleton } from "@/components/ui/skeleton"
 import { api, reviewChatApiBase } from "@/lib/api"
 import { cn } from "@/lib/utils"
+
+// --- Composer bridge ---------------------------------------------------------
+//
+// Lets the diff column (a separate subtree) push a code snippet into the active
+// chat composer. The chat tab may not be mounted when "add to chat" fires, so
+// requestAppend stashes the text until ChatBody registers its input setter.
+
+interface ReviewChatComposer {
+  requestAppend: (text: string) => void
+  registerInput: (fn: ((text: string) => void) | null) => void
+}
+
+const ReviewChatComposerContext = createContext<ReviewChatComposer | null>(null)
+
+export function ReviewChatComposerProvider({
+  children,
+}: {
+  children: React.ReactNode
+}) {
+  const inputRef = useRef<((text: string) => void) | null>(null)
+  const pendingRef = useRef<string | null>(null)
+  const value = useMemo<ReviewChatComposer>(
+    () => ({
+      requestAppend: (text) => {
+        if (inputRef.current) inputRef.current(text)
+        else
+          pendingRef.current = pendingRef.current
+            ? `${pendingRef.current}\n${text}`
+            : text
+      },
+      registerInput: (fn) => {
+        inputRef.current = fn
+        if (fn && pendingRef.current) {
+          fn(pendingRef.current)
+          pendingRef.current = null
+        }
+      },
+    }),
+    []
+  )
+  return (
+    <ReviewChatComposerContext.Provider value={value}>
+      {children}
+    </ReviewChatComposerContext.Provider>
+  )
+}
+
+export function useReviewChatComposer(): ReviewChatComposer | null {
+  return useContext(ReviewChatComposerContext)
+}
 
 const dashboardFetch: typeof fetch = (input, init) =>
   fetch(input, { ...init, credentials: "include" })
@@ -271,18 +330,26 @@ function ChatBody({
   onUserSend: (text: string) => void
   expectsHistory: boolean
 }) {
+  const composer = useReviewChatComposer()
   const stream = useStreamContext()
   const [value, setValue] = useState("")
-  const endRef = useRef<HTMLDivElement>(null)
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const autoScrollRef = useRef(true)
+  const prevTopRef = useRef(0)
   const messages = stream.messages
   const busy = stream.isLoading
   // True during the one-time getState hydration when switching to / loading an
   // existing thread, before its messages have arrived.
   const hydrating = stream.isThreadLoading
 
+  // Bridge "add to chat" snippets from the diff column into this composer.
   useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: "smooth" })
-  }, [messages])
+    if (!composer) return
+    composer.registerInput((text) =>
+      setValue((v) => (v ? `${v}\n${text}` : text))
+    )
+    return () => composer.registerInput(null)
+  }, [composer])
 
   const send = useCallback(
     (text: string) => {
@@ -309,6 +376,33 @@ function ChatBody({
   // conversation hydrates, so a chat with messages never flashes its greeting.
   const showEmpty = visible.length === 0 && !busy
   const showLoading = showEmpty && hydrating && expectsHistory
+  const showMessages = !showEmpty && !showLoading
+
+  // Auto-scroll is fully contained to the messages list (scrollTop assignment,
+  // never scrollIntoView) so it can't bubble up and move the diff column. We
+  // pause auto-scroll when the user scrolls up and resume when near the bottom.
+  useLayoutEffect(() => {
+    if (!showMessages) return
+    const el = scrollRef.current
+    if (!el || !autoScrollRef.current) return
+    el.scrollTop = el.scrollHeight
+    prevTopRef.current = el.scrollTop
+  }, [showMessages, messages, busy])
+
+  useEffect(() => {
+    if (!showMessages) return
+    const el = scrollRef.current
+    if (!el) return
+    const onScroll = () => {
+      const top = el.scrollTop
+      const nearBottom = el.scrollHeight - top - el.clientHeight <= 24
+      if (top < prevTopRef.current - 1) autoScrollRef.current = false
+      else if (nearBottom) autoScrollRef.current = true
+      prevTopRef.current = top
+    }
+    el.addEventListener("scroll", onScroll, { passive: true })
+    return () => el.removeEventListener("scroll", onScroll)
+  }, [showMessages])
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
@@ -317,7 +411,10 @@ function ChatBody({
       ) : showEmpty ? (
         <EmptyState onPick={send} />
       ) : (
-        <div className="flex flex-1 flex-col gap-4 overflow-y-auto p-4">
+        <div
+          ref={scrollRef}
+          className="flex flex-1 flex-col gap-4 overflow-y-auto p-4"
+        >
           {visible.map((message, index) => {
             const isUser = messageType(message) === "human"
             return (
@@ -351,7 +448,6 @@ function ChatBody({
               </div>
             </div>
           )}
-          <div ref={endRef} />
         </div>
       )}
 

@@ -1,6 +1,13 @@
 import { useMemo } from "react"
 import { preloadHighlighter } from "@pierre/diffs"
+import type {
+  VirtualFileMetrics,
+  WorkerInitializationRenderOptions,
+  WorkerPoolOptions,
+} from "@pierre/diffs/react"
 import { useResolvedTheme } from "@/lib/theme"
+
+export type DiffStyle = "unified" | "split"
 
 export const DIFF_UNSAFE_CSS = `
 [data-diffs-header],
@@ -71,12 +78,64 @@ export const diffOptions = {
   tokenizeMaxLength: 120_000,
 }
 
-export function useDiffOptions() {
+export function useDiffOptions(diffStyle: DiffStyle = "unified") {
   const resolvedTheme = useResolvedTheme()
   return useMemo(
-    () => ({ ...diffOptions, themeType: resolvedTheme }),
-    [resolvedTheme]
+    () => ({ ...diffOptions, themeType: resolvedTheme, diffStyle }),
+    [resolvedTheme, diffStyle]
   )
+}
+
+// Shared virtualization + worker-pool config for <Virtualizer>/<MultiFileDiff>.
+// Tuned for the agent git panel and the PR reviews page; keep them aligned so
+// both viewers window rows and offload highlighting identically.
+export const DIFF_VIRTUALIZER_CONFIG = {
+  overscrollSize: 1200,
+  intersectionObserverMargin: 4800,
+}
+
+export const DIFF_VIRTUAL_METRICS = {
+  hunkLineCount: 80,
+  lineHeight: 18,
+  diffHeaderHeight: 0,
+  spacing: 8,
+} satisfies Partial<VirtualFileMetrics>
+
+export const DIFF_WORKER_POOL_OPTIONS = {
+  workerFactory: () =>
+    new Worker(
+      new URL("@pierre/diffs/worker/worker-portable.js", import.meta.url),
+      { type: "module" }
+    ),
+  poolSize: 2,
+  totalASTLRUCacheSize: 120,
+} satisfies WorkerPoolOptions
+
+export const DIFF_WORKER_HIGHLIGHTER_OPTIONS = {
+  theme: { light: "pierre-light", dark: "pierre-dark" },
+  lineDiffType: "word-alt",
+  maxLineDiffLength: 800,
+  tokenizeMaxLineLength: 1200,
+  langs: ["text"],
+} satisfies WorkerInitializationRenderOptions
+
+function hashFileContents(contents: string): string {
+  let hash = 0x811c9dc5
+  for (let i = 0; i < contents.length; i++) {
+    hash ^= contents.charCodeAt(i)
+    hash = Math.imul(hash, 0x01000193)
+  }
+  return (hash >>> 0).toString(36)
+}
+
+// Stable per-file content key so the worker pool dedupes highlight work across
+// re-renders instead of re-tokenizing identical content.
+export function fileContentsCacheKey(
+  path: string,
+  side: "old" | "new",
+  contents: string
+): string {
+  return `${path}:${side}:${contents.length}:${hashFileContents(contents)}`
 }
 
 let highlighterWarmup: Promise<void> | null = null
