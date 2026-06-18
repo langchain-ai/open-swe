@@ -25,6 +25,7 @@ import type { ComponentType, SVGProps } from "react"
 
 import type { SessionUser } from "@/lib/api"
 import type { AgentSource, AgentThread } from "@/lib/agents/types"
+import type { SidebarLayout } from "@/components/sidebar-layout"
 import { SidebarUserMenu } from "@/components/SidebarUserMenu"
 import {
   ReviewSidebarPanel,
@@ -35,6 +36,7 @@ import { Button } from "@/components/ui/button"
 import {
   SidebarCollapseButton,
   SidebarFrame,
+  SidebarLayoutProvider,
   useSidebarLayout,
 } from "@/components/sidebar-layout"
 import { groupThreads } from "@/lib/agents/api"
@@ -90,6 +92,7 @@ const PR_STATE_META: Record<
 interface AgentsSidebarProps {
   user: SessionUser
   activeThreadId?: string
+  layout: SidebarLayout
 }
 
 const NAV = [
@@ -98,7 +101,11 @@ const NAV = [
   { to: "/agents/reviews", label: "Reviews", icon: GitPullRequestIcon },
 ] as const
 
-export function AgentsSidebar({ user, activeThreadId }: AgentsSidebarProps) {
+export function AgentsSidebar({
+  user,
+  activeThreadId,
+  layout,
+}: AgentsSidebarProps) {
   const sidebar = useSidebarThreads(RESOLVED_SIDEBAR_LIMIT)
   const activeThreads = sidebar.data?.active.items ?? []
   const resolvedThreads = sidebar.data?.resolved.items ?? []
@@ -107,7 +114,6 @@ export function AgentsSidebar({ user, activeThreadId }: AgentsSidebarProps) {
   useSeedAgentThreadDetails(visibleThreads, activeThreadId)
   useRunCompletionNotifier(visibleThreads, activeThreadId)
   const groups = groupThreads(activeThreads)
-  const layout = useSidebarLayout()
   const reviewSidebar = useReviewSidebarData()
 
   return (
@@ -538,12 +544,19 @@ export function AgentsShell({
   activeThreadId?: string
   children: React.ReactNode
 }) {
+  const layout = useSidebarLayout()
   return (
     <ReviewSidebarProvider>
-      <div className="agents-ui flex h-svh overflow-hidden bg-[var(--ui-bg)]">
-        <AgentsSidebar user={user} activeThreadId={activeThreadId} />
-        <div className="flex min-w-0 flex-1">{children}</div>
-      </div>
+      <SidebarLayoutProvider value={layout}>
+        <div className="agents-ui flex h-svh overflow-hidden bg-[var(--ui-bg)]">
+          <AgentsSidebar
+            user={user}
+            activeThreadId={activeThreadId}
+            layout={layout}
+          />
+          <div className="flex min-w-0 flex-1">{children}</div>
+        </div>
+      </SidebarLayoutProvider>
     </ReviewSidebarProvider>
   )
 }

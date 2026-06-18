@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { SidebarSimpleIcon } from "@phosphor-icons/react";
 
 import { useHotkey } from "@/lib/hotkeys";
@@ -53,6 +60,30 @@ export function useSidebarLayout() {
   }, []);
 
   return { width, collapsed, setWidth, setCollapsed, toggle, closeOnMobile };
+}
+
+export type SidebarLayout = ReturnType<typeof useSidebarLayout>;
+
+// Shares the single sidebar-layout instance with page content so it can react
+// to the collapsed state (e.g. clear room for the fixed collapse toggle).
+const SidebarLayoutContext = createContext<SidebarLayout | null>(null);
+
+export function SidebarLayoutProvider({
+  value,
+  children,
+}: {
+  value: SidebarLayout;
+  children: React.ReactNode;
+}) {
+  return (
+    <SidebarLayoutContext.Provider value={value}>
+      {children}
+    </SidebarLayoutContext.Provider>
+  );
+}
+
+export function useSidebarCollapsed(): boolean {
+  return useContext(SidebarLayoutContext)?.collapsed ?? false;
 }
 
 interface SidebarFrameProps {

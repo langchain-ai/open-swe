@@ -55,6 +55,7 @@ import {
   useReviewChatComposer,
 } from "@/components/agents/ReviewChat"
 import { useRegisterReviewSidebar } from "@/components/agents/ReviewSidebar"
+import { useSidebarCollapsed } from "@/components/sidebar-layout"
 import {
   DIFF_VIRTUALIZER_CONFIG,
   DIFF_VIRTUAL_METRICS,
@@ -85,19 +86,19 @@ function readStoredDiffStyle(): DiffStyle {
     : "unified"
 }
 
-// Build a chat attachment from the selected line range. Deletions resolve
-// against the original file, additions against the modified file (matching the
-// diff side the user selected on).
-function buildSelectionAttachment(
+// One attachment for a single-side line range. Deletions resolve against the
+// original file, additions against the modified file.
+function makeSideAttachment(
   file: ReviewDiffFile,
-  range: SelectedLineRange
+  side: "deletions" | "additions",
+  fromLine: number,
+  toLine: number
 ): ChatAttachment {
-  const side = range.side ?? "additions"
   const source =
     side === "deletions" ? file.originalContent : file.modifiedContent
   const lines = source.split("\n")
-  const start = Math.max(1, Math.min(range.start, range.end))
-  const end = Math.max(range.start, range.end)
+  const start = Math.max(1, Math.min(fromLine, toLine))
+  const end = Math.max(fromLine, toLine)
   const snippet = lines.slice(start - 1, end).join("\n")
   const sideLabel = side === "deletions" ? "L" : "R"
   const lineLabel =
@@ -106,6 +107,27 @@ function buildSelectionAttachment(
     ? (file.path.split(".").pop() ?? "")
     : ""
   return { id: crypto.randomUUID(), path: file.path, lineLabel, language, snippet }
+}
+
+// Build chat attachments from the selected range. A range can span from a
+// deletion to an addition (side !== endSide) when dragging across a replaced
+// block; slicing one file by start..end would paste the wrong lines, so each
+// side is collected separately.
+function buildSelectionAttachments(
+  file: ReviewDiffFile,
+  range: SelectedLineRange
+): Array<ChatAttachment> {
+  const startSide = range.side ?? "additions"
+  const endSide = range.endSide ?? startSide
+  if (startSide === endSide) {
+    return [makeSideAttachment(file, startSide, range.start, range.end)]
+  }
+  const deletionLine = startSide === "deletions" ? range.start : range.end
+  const additionLine = startSide === "additions" ? range.start : range.end
+  return [
+    makeSideAttachment(file, "deletions", deletionLine, deletionLine),
+    makeSideAttachment(file, "additions", additionLine, additionLine),
+  ]
 }
 
 interface ResolvedGroup {
@@ -177,6 +199,7 @@ function ReviewDetailPage() {
   const { owner, repo, number } = Route.useParams()
   const prNumber = Number(number)
   const session = useSession()
+  const sidebarCollapsed = useSidebarCollapsed()
   const detail = useQuery({
     queryKey: ["review", owner, repo, prNumber],
     queryFn: () => api.getReview(owner, repo, prNumber),
@@ -213,7 +236,13 @@ function ReviewDetailPage() {
 
   return (
     <div className="flex min-w-0 flex-1 flex-col overflow-hidden bg-background text-foreground">
-      <header className="flex h-12 shrink-0 items-center gap-3 border-b border-border px-4 text-xs">
+      <header
+        className={cn(
+          "flex h-12 shrink-0 items-center gap-3 border-b border-border pr-4 text-xs",
+          // Clear room for the fixed collapse toggle when the sidebar is hidden.
+          sidebarCollapsed ? "pl-14" : "pl-4"
+        )}
+      >
         <Link
           to="/agents/reviews"
           className="inline-flex items-center gap-1.5 text-muted-foreground hover:text-foreground"
@@ -554,7 +583,9 @@ function ReviewBodyInner({
     (path: string, range: SelectedLineRange) => {
       const file = filesByPathRef.current.get(path)
       if (!file) return
-      composer?.addAttachment(buildSelectionAttachment(file, range))
+      for (const attachment of buildSelectionAttachments(file, range)) {
+        composer?.addAttachment(attachment)
+      }
       setSideTab("chat")
       setUserSelection(null)
     },

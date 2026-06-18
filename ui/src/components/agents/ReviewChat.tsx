@@ -502,7 +502,12 @@ function ChatBody({
       {showLoading ? (
         <LoadingState />
       ) : showEmpty ? (
-        <EmptyState onPick={(prompt) => send(prompt, attachments)} />
+        <EmptyState
+          onPick={(prompt) => {
+            send(prompt, attachments)
+            setAttachments([])
+          }}
+        />
       ) : (
         <div
           ref={scrollRef}
