@@ -432,6 +432,8 @@ async def test_proxy_commands_rejects_non_object_body(monkeypatch) -> None:
 
 
 async def test_proxy_endpoints_enforce_thread_ownership(monkeypatch) -> None:
+    """Write endpoints (commands, run_cancel) still require thread ownership."""
+
     class FakeThreads:
         async def get(self, thread_id: str) -> dict[str, object]:
             assert thread_id == "tid"
@@ -446,23 +448,85 @@ async def test_proxy_endpoints_enforce_thread_ownership(monkeypatch) -> None:
     monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
 
     with pytest.raises(HTTPException) as exc_info:
-        await thread_api.get_dashboard_thread_state("tid", "intruder")
-    assert exc_info.value.status_code == 404
-
-    with pytest.raises(HTTPException) as exc_info:
         await thread_api.proxy_dashboard_thread_commands("tid", "intruder", b"{}")
-    assert exc_info.value.status_code == 404
-
-    with pytest.raises(HTTPException) as exc_info:
-        await thread_api.proxy_dashboard_thread_history("tid", "intruder", b"{}")
     assert exc_info.value.status_code == 404
 
     with pytest.raises(HTTPException) as exc_info:
         await thread_api.proxy_dashboard_thread_run_cancel("tid", "run-1", "intruder")
     assert exc_info.value.status_code == 404
 
+
+async def test_read_endpoints_accessible_by_non_owner(monkeypatch) -> None:
+    """Read endpoints (state, stream, history) are accessible by any org member."""
+
+    class FakeThreads:
+        async def get(self, thread_id: str) -> dict[str, object]:
+            assert thread_id == "tid"
+            return {
+                "thread_id": "tid",
+                "metadata": {"source": "slack", "github_login": "owner"},
+            }
+
+        async def get_state(self, thread_id: str) -> dict[str, object]:
+            return {"values": {"messages": []}}
+
+    class FakeClient:
+        threads = FakeThreads()
+
+    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
+
+    # Read endpoints succeed for non-owners (org members).
+    state = await thread_api.get_dashboard_thread_state("tid", "teammate")
+    assert "values" in state
+
+    # stream/events preflight should not raise.
+    await thread_api.proxy_dashboard_thread_stream_events(
+        "tid", "teammate", b"{}", content_type="application/json"
+    )
+
+    # history preflight should not raise; mock the proxied HTTP call.
+    class FakeResponse:
+        status_code = 200
+        content = b"{}"
+        headers = {"content-type": "application/json"}
+
+    class FakeAsyncClient:
+        def __init__(self, *a: object, **kw: object) -> None:
+            pass
+
+        async def __aenter__(self) -> "FakeAsyncClient":
+            return self
+
+        async def __aexit__(self, *a: object) -> None:
+            pass
+
+        async def post(self, *a: object, **kw: object) -> FakeResponse:
+            return FakeResponse()
+
+    monkeypatch.setattr(thread_api.httpx, "AsyncClient", FakeAsyncClient)
+    await thread_api.proxy_dashboard_thread_history("tid", "teammate", b"{}")
+
+
+async def test_read_endpoints_reject_non_surfaced_source(monkeypatch) -> None:
+    """Threads with an unknown source are not readable by anyone."""
+
+    class FakeThreads:
+        async def get(self, thread_id: str) -> dict[str, object]:
+            return {
+                "thread_id": "tid",
+                "metadata": {"source": "unknown-source", "github_login": "owner"},
+            }
+
+        async def get_state(self, thread_id: str) -> dict[str, object]:
+            return {"values": {"messages": []}}
+
+    class FakeClient:
+        threads = FakeThreads()
+
+    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
+
     with pytest.raises(HTTPException) as exc_info:
-        await thread_api.proxy_dashboard_thread_stream_events("tid", "intruder", b"{}")
+        await thread_api.get_dashboard_thread_state("tid", "owner")
     assert exc_info.value.status_code == 404
 
 
@@ -519,6 +583,49 @@ def test_thread_summary_defaults_to_not_resolved() -> None:
 
     assert summary["resolved"] is False
     assert summary["resolvedAt"] is None
+
+
+def test_thread_summary_is_owner_true_for_matching_login() -> None:
+    summary = thread_api._thread_summary(
+        {"thread_id": "tid", "metadata": {"source": "slack", "github_login": "octocat"}},
+        owner_login="octocat",
+    )
+
+    assert summary["isOwner"] is True
+
+
+def test_thread_summary_is_owner_false_for_non_owner() -> None:
+    summary = thread_api._thread_summary(
+        {"thread_id": "tid", "metadata": {"source": "slack", "github_login": "octocat"}},
+        owner_login="teammate",
+    )
+
+    assert summary["isOwner"] is False
+
+
+def test_thread_summary_is_owner_true_for_matching_email() -> None:
+    summary = thread_api._thread_summary(
+        {
+            "thread_id": "tid",
+            "metadata": {
+                "source": "slack",
+                "github_login": "octocat",
+                "triggering_user_email": "octo@example.com",
+            },
+        },
+        owner_login="someone-else",
+        owner_email="OCTO@example.com",
+    )
+
+    assert summary["isOwner"] is True
+
+
+def test_thread_summary_is_owner_defaults_true_without_owner_login() -> None:
+    summary = thread_api._thread_summary(
+        {"thread_id": "tid", "metadata": {"source": "slack", "github_login": "octocat"}},
+    )
+
+    assert summary["isOwner"] is True
 
 
 async def test_resolve_dashboard_thread_marks_resolved(monkeypatch) -> None:

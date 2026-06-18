@@ -247,6 +247,22 @@ def _assert_thread_owner(metadata: dict[str, Any], login: str, email: str | None
         raise HTTPException(404, "thread not found")
 
 
+def _thread_is_readable(metadata: dict[str, Any]) -> bool:
+    """Any surfaced-source thread is readable by authenticated users.
+
+    Dashboard login is already gated by ``ALLOWED_GITHUB_ORGS`` (see
+    ``oauth.enforce_org_login_gate``), so any logged-in user is a trusted
+    org member. This lets teammates open "Open in Web" links shared in Slack
+    threads with read-only access.
+    """
+    return _thread_source(metadata) in _SURFACED_SOURCES
+
+
+def _assert_thread_readable(metadata: dict[str, Any]) -> None:
+    if not _thread_is_readable(metadata):
+        raise HTTPException(404, "thread not found")
+
+
 def _metadata_repo(metadata: dict[str, Any]) -> tuple[str, str, str]:
     owner = metadata.get("repo_owner")
     name = metadata.get("repo_name")
@@ -296,6 +312,8 @@ def _thread_summary(
     *,
     latest_run_status: str | None = None,
     latest_run_id: str | None = None,
+    owner_login: str | None = None,
+    owner_email: str | None = None,
 ) -> dict[str, Any]:
     metadata = thread.get("metadata") if isinstance(thread.get("metadata"), dict) else {}
     owner, name, full_name = _metadata_repo(metadata)
@@ -343,6 +361,7 @@ def _thread_summary(
         ),
         "createdAt": int(created_at) if isinstance(created_at, (int, float)) else _now_ms(),
         "updatedAt": int(updated_at) if isinstance(updated_at, (int, float)) else _now_ms(),
+        "isOwner": (_user_owns_thread(metadata, owner_login, owner_email) if owner_login else True),
         "traceUrl": trace_url,
     }
     if isinstance(pr_number, int) and isinstance(pr_url, str):
@@ -662,6 +681,7 @@ async def get_dashboard_thread(
         raise HTTPException(404, "thread not found") from exc
 
     metadata = thread.get("metadata") if isinstance(thread.get("metadata"), dict) else {}
+    _assert_thread_readable(metadata)
     is_owner = _user_owns_thread(metadata, login, email)
 
     # The transcript is hydrated client-side by the SDK (`StreamProvider` reads
@@ -691,6 +711,8 @@ async def get_dashboard_thread(
         thread,
         latest_run_status=latest_run_status,
         latest_run_id=latest_run_id,
+        owner_login=login,
+        owner_email=email,
     )
 
 
@@ -1096,10 +1118,35 @@ async def _authorized_thread(
     return thread
 
 
+async def _readable_thread(
+    thread_id: str, *, login: str | None = None, email: str | None = None
+) -> dict[str, Any]:
+    """Fetch a thread and assert it is readable by the requesting user.
+
+    Read access is granted to any authenticated org member for surfaced-source
+    threads; ``login``/``email`` are accepted for API parity but not required.
+    """
+    try:
+        thread = await langgraph_client().threads.get(thread_id)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(404, "thread not found") from exc
+    metadata = thread.get("metadata") if isinstance(thread.get("metadata"), dict) else {}
+    _assert_thread_readable(metadata)
+    return thread
+
+
+async def _readable_thread_metadata(
+    thread_id: str, *, login: str | None = None, email: str | None = None
+) -> dict[str, Any]:
+    thread = await _readable_thread(thread_id, login=login, email=email)
+    metadata = thread.get("metadata") if isinstance(thread.get("metadata"), dict) else {}
+    return metadata
+
+
 async def get_dashboard_thread_state(
     thread_id: str, login: str, *, email: str | None = None
 ) -> dict[str, Any]:
-    thread = await _authorized_thread(thread_id, login, email=email)
+    thread = await _readable_thread(thread_id, login=login, email=email)
     metadata = thread.get("metadata") if isinstance(thread.get("metadata"), dict) else {}
     state = await langgraph_client().threads.get_state(thread_id)
     result = state if isinstance(state, dict) else dict(state)
@@ -1127,7 +1174,7 @@ async def _github_token_for_login(login: str) -> str:
 async def get_dashboard_thread_pr_diff(
     thread_id: str, login: str, *, email: str | None = None
 ) -> dict[str, Any]:
-    metadata = await _authorized_thread_metadata(thread_id, login, email=email)
+    metadata = await _readable_thread_metadata(thread_id, login=login, email=email)
     pr_number = metadata.get("pr_number")
     _, _, full_name = _metadata_repo(metadata)
     if not isinstance(pr_number, int) or not full_name:
@@ -1162,7 +1209,7 @@ async def proxy_dashboard_thread_stream_events(
     # Preflight here (not in the generator) so auth/content-type failures
     # surface as real HTTP errors before the SSE response starts streaming.
     _require_json_content_type(content_type)
-    await _authorized_thread_metadata(thread_id, login, email=email)
+    await _readable_thread_metadata(thread_id, login=login, email=email)
     return _stream_thread_events(thread_id, body, content_type)
 
 
@@ -1281,7 +1328,7 @@ async def proxy_dashboard_thread_history(
     content_type: str = "application/json",
 ) -> tuple[int, bytes, str | None]:
     _require_json_content_type(content_type)
-    await _authorized_thread_metadata(thread_id, login, email=email)
+    await _readable_thread_metadata(thread_id, login=login, email=email)
     url = f"{langgraph_url().rstrip('/')}/threads/{thread_id}/history"
     headers = _langgraph_proxy_headers(content_type=content_type)
     async with httpx.AsyncClient(timeout=_PROXY_REQUEST_TIMEOUT) as client:
@@ -1331,9 +1378,11 @@ async def stream_dashboard_thread(
     thread_id: str, login: str, *, email: str | None = None, last_event_id: str | None = None
 ) -> AsyncIterator[str]:
     try:
-        await langgraph_client().threads.get(thread_id)
+        thread = await langgraph_client().threads.get(thread_id)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(404, "thread not found") from exc
+    metadata = thread.get("metadata") if isinstance(thread.get("metadata"), dict) else {}
+    _assert_thread_readable(metadata)
 
     stream = await langgraph_client().threads.join_stream(
         thread_id,
