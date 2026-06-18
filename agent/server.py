@@ -702,6 +702,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             default_repo=prompt_default_repo,
             repo_custom_instructions=repo_custom_instructions,
             thread_url=dashboard_thread_url(thread_id),
+            model_id=model_id,
         ),
         tools=[
             http_request,

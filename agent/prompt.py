@@ -404,6 +404,26 @@ ALWAYS_CREATE_PR_SECTION = """---
 The user's dashboard setting **Always Create PRs** is enabled. For code-change tasks, always open or update a draft pull request after committing and pushing the branch. This does not apply to questions, explanations, status checks, or other information-only requests where no files are changed."""
 
 
+WIDE_READ_SECTION = """---
+
+### Reading Files Efficiently
+
+When using `read_file`, prefer reading the entire file or large contiguous sections (`limit` >= 200 lines) rather than re-reading the same file with small overlapping windows. Before reading a file, check whether you have already read it in this session; if you have, refer back to the prior tool output instead of re-reading the same region. Re-opening the same file with many small offsets wastes turns and burns context — read wide once, then work from what you have."""
+
+
+# Models that benefit from explicit wide-read guidance. Anthropic Claude and
+# OpenAI gpt-5 series already exhibit this behavior by default; other providers
+# (Fireworks GLM/DeepSeek/Kimi, etc.) tend to issue many small overlapping reads
+# of the same file, which inflates trajectory length and token cost.
+_WIDE_READ_PROVIDERS = ("fireworks:", "google_genai:")
+
+
+def _needs_wide_read_guidance(model_id: str | None) -> bool:
+    if not model_id:
+        return False
+    return any(model_id.startswith(prefix) for prefix in _WIDE_READ_PROVIDERS)
+
+
 def _render_repo_instructions_section(instructions: str | None) -> str:
     if not instructions or not instructions.strip():
         return ""
@@ -427,6 +447,7 @@ SYSTEM_PROMPT_TEMPLATE = (
     + FILE_MANAGEMENT_SECTION
     + TASK_EXECUTION_SECTION
     + TOOL_USAGE_SECTION
+    + "{wide_read_section}"
     + TOOL_BEST_PRACTICES_SECTION
     + CODING_STANDARDS_SECTION
     + CORE_BEHAVIOR_SECTION
@@ -450,6 +471,7 @@ def construct_system_prompt(
     default_repo: dict[str, str] | None = None,
     repo_custom_instructions: str | None = None,
     thread_url: str | None = None,
+    model_id: str | None = None,
 ) -> str:
     default_prompt_section = _load_default_prompt()
     if default_repo and default_repo.get("owner") and default_repo.get("name"):
@@ -471,6 +493,7 @@ def construct_system_prompt(
         linear_project_id=linear_project_id or "<PROJECT_ID>",
         linear_issue_number=linear_issue_number or "<ISSUE_NUMBER>",
         default_prompt_section=default_prompt_section,
+        wide_read_section=WIDE_READ_SECTION if _needs_wide_read_guidance(model_id) else "",
         pr_policy_override_section=ALWAYS_CREATE_PR_SECTION if create_prs else "",
         collaboration_section=_render_collaboration_section(triggering_user_identity, thread_url),
         repo_instructions_section=_render_repo_instructions_section(repo_custom_instructions),

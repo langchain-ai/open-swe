@@ -87,6 +87,30 @@ def test_construct_system_prompt_without_repo_instructions() -> None:
     assert "Repository-specific Custom Instructions" not in prompt
 
 
+def test_construct_system_prompt_adds_wide_read_for_fireworks_model() -> None:
+    prompt = construct_system_prompt(
+        working_dir="/work",
+        model_id="fireworks:accounts/fireworks/models/glm-5p2",
+    )
+    assert "Reading Files Efficiently" in prompt
+    assert "limit` >= 200" in prompt
+
+
+def test_construct_system_prompt_omits_wide_read_for_default_model() -> None:
+    prompt = construct_system_prompt(working_dir="/work", model_id="openai:gpt-5.5")
+    assert "Reading Files Efficiently" not in prompt
+
+
+def test_construct_system_prompt_omits_wide_read_for_claude() -> None:
+    prompt = construct_system_prompt(working_dir="/work", model_id="anthropic:claude-opus-4-8")
+    assert "Reading Files Efficiently" not in prompt
+
+
+def test_construct_system_prompt_omits_wide_read_without_model_id() -> None:
+    prompt = construct_system_prompt(working_dir="/work")
+    assert "Reading Files Efficiently" not in prompt
+
+
 def test_resolve_repo_custom_instructions_returns_none_without_repo() -> None:
     result = asyncio.run(server._resolve_repo_custom_instructions(None))
     assert result is None
