@@ -1,6 +1,7 @@
 import { Link, Navigate, createFileRoute } from "@tanstack/react-router"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
+  memo,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -20,11 +21,18 @@ import {
   FlagIcon,
   GitPullRequestIcon,
   InfoIcon,
+  RowsIcon,
+  SquareSplitHorizontalIcon,
   XCircleIcon,
   XIcon,
 } from "@phosphor-icons/react"
 import { IoLogoGithub } from "react-icons/io5"
-import { MultiFileDiff } from "@pierre/diffs/react"
+import {
+  MultiFileDiff,
+  Virtualizer,
+  WorkerPoolContextProvider,
+} from "@pierre/diffs/react"
+import type { FileContents } from "@pierre/diffs/react"
 import type { DiffLineAnnotation, SelectedLineRange } from "@pierre/diffs"
 
 import type {
@@ -38,10 +46,22 @@ import type {
   ReviewSidebarGroup,
   ReviewSidebarView,
 } from "@/components/agents/ReviewSidebar"
+import type { ChatAttachment } from "@/components/agents/ReviewChat"
+import type { DiffStyle } from "@/components/agents/utils/diffUtils"
 import { Markdown } from "@/components/agents/ported"
-import { ReviewChat } from "@/components/agents/ReviewChat"
-import { useRegisterReviewSidebar } from "@/components/agents/ReviewSidebar"
 import {
+  ReviewChat,
+  ReviewChatComposerProvider,
+  useReviewChatComposer,
+} from "@/components/agents/ReviewChat"
+import { useRegisterReviewSidebar } from "@/components/agents/ReviewSidebar"
+import { useSidebarCollapsed } from "@/components/sidebar-layout"
+import {
+  DIFF_VIRTUALIZER_CONFIG,
+  DIFF_VIRTUAL_METRICS,
+  DIFF_WORKER_HIGHLIGHTER_OPTIONS,
+  DIFF_WORKER_POOL_OPTIONS,
+  fileContentsCacheKey,
   useDiffOptions,
   warmDiffHighlighter,
 } from "@/components/agents/utils/diffUtils"
@@ -57,6 +77,58 @@ export const Route = createFileRoute("/agents/reviews/$owner/$repo/$number")({
 type SideTab = "info" | "chat"
 
 const REVIEW_VIEW_STORAGE_KEY = "open-swe.review.view"
+const REVIEW_DIFF_STYLE_STORAGE_KEY = "open-swe.review.diffStyle"
+
+function readStoredDiffStyle(): DiffStyle {
+  if (typeof window === "undefined") return "unified"
+  return window.localStorage.getItem(REVIEW_DIFF_STYLE_STORAGE_KEY) === "split"
+    ? "split"
+    : "unified"
+}
+
+// One attachment for a single-side line range. Deletions resolve against the
+// original file, additions against the modified file.
+function makeSideAttachment(
+  file: ReviewDiffFile,
+  side: "deletions" | "additions",
+  fromLine: number,
+  toLine: number
+): ChatAttachment {
+  const source =
+    side === "deletions" ? file.originalContent : file.modifiedContent
+  const lines = source.split("\n")
+  const start = Math.max(1, Math.min(fromLine, toLine))
+  const end = Math.max(fromLine, toLine)
+  const snippet = lines.slice(start - 1, end).join("\n")
+  const sideLabel = side === "deletions" ? "L" : "R"
+  const lineLabel =
+    start === end ? `${sideLabel}${start}` : `${sideLabel}${start}-${end}`
+  const language = file.path.includes(".")
+    ? (file.path.split(".").pop() ?? "")
+    : ""
+  return { id: crypto.randomUUID(), path: file.path, lineLabel, language, snippet }
+}
+
+// Build chat attachments from the selected range. A range can span from a
+// deletion to an addition (side !== endSide) when dragging across a replaced
+// block; slicing one file by start..end would paste the wrong lines, so each
+// side is collected separately.
+function buildSelectionAttachments(
+  file: ReviewDiffFile,
+  range: SelectedLineRange
+): Array<ChatAttachment> {
+  const startSide = range.side ?? "additions"
+  const endSide = range.endSide ?? startSide
+  if (startSide === endSide) {
+    return [makeSideAttachment(file, startSide, range.start, range.end)]
+  }
+  const deletionLine = startSide === "deletions" ? range.start : range.end
+  const additionLine = startSide === "additions" ? range.start : range.end
+  return [
+    makeSideAttachment(file, "deletions", deletionLine, deletionLine),
+    makeSideAttachment(file, "additions", additionLine, additionLine),
+  ]
+}
 
 interface ResolvedGroup {
   index: number
@@ -127,6 +199,7 @@ function ReviewDetailPage() {
   const { owner, repo, number } = Route.useParams()
   const prNumber = Number(number)
   const session = useSession()
+  const sidebarCollapsed = useSidebarCollapsed()
   const detail = useQuery({
     queryKey: ["review", owner, repo, prNumber],
     queryFn: () => api.getReview(owner, repo, prNumber),
@@ -163,7 +236,13 @@ function ReviewDetailPage() {
 
   return (
     <div className="flex min-w-0 flex-1 flex-col overflow-hidden bg-background text-foreground">
-      <header className="flex h-12 shrink-0 items-center gap-3 border-b border-border px-4 text-xs">
+      <header
+        className={cn(
+          "flex h-12 shrink-0 items-center gap-3 border-b border-border pr-4 text-xs",
+          // Clear room for the fixed collapse toggle when the sidebar is hidden.
+          sidebarCollapsed ? "pl-14" : "pl-4"
+        )}
+      >
         <Link
           to="/agents/reviews"
           className="inline-flex items-center gap-1.5 text-muted-foreground hover:text-foreground"
@@ -204,6 +283,13 @@ function ReviewDetailPage() {
   )
 }
 
+const NO_FINDINGS: Array<ReviewFinding> = []
+
+interface UserSelection {
+  file: string
+  range: SelectedLineRange
+}
+
 function ReviewBody({
   detail,
   diffFiles,
@@ -211,6 +297,23 @@ function ReviewBody({
   detail: ReviewDetail
   diffFiles: Array<ReviewDiffFile> | null
 }) {
+  // The composer provider lives inside ReviewBody so it remounts in lockstep
+  // with the head_sha-keyed body (and the activeId-keyed chat thread).
+  return (
+    <ReviewChatComposerProvider>
+      <ReviewBodyInner detail={detail} diffFiles={diffFiles} />
+    </ReviewChatComposerProvider>
+  )
+}
+
+function ReviewBodyInner({
+  detail,
+  diffFiles,
+}: {
+  detail: ReviewDetail
+  diffFiles: Array<ReviewDiffFile> | null
+}) {
+  const composer = useReviewChatComposer()
   const [sideTab, setSideTab] = useState<SideTab>("info")
   const [selectedFile, setSelectedFile] = useState<string | null>(null)
   const fileRefs = useRef<Record<string, HTMLDivElement | null>>({})
@@ -220,12 +323,28 @@ function ReviewBody({
   )
   const [focused, setFocused] = useState<ReviewFinding | null>(null)
   const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null)
-  const scrollRef = useRef<HTMLDivElement | null>(null)
+  const [userSelection, setUserSelection] = useState<UserSelection | null>(null)
+  const [diffScrollEl, setDiffScrollEl] = useState<HTMLDivElement | null>(null)
   const groupRefs = useRef<Record<number, HTMLDivElement | null>>({})
+  const [diffStyle, setDiffStyleState] = useState<DiffStyle>(() =>
+    readStoredDiffStyle()
+  )
+  const setDiffStyle = useCallback((next: DiffStyle) => {
+    setDiffStyleState(next)
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(REVIEW_DIFF_STYLE_STORAGE_KEY, next)
+    }
+  }, [])
 
   useEffect(() => {
     void warmDiffHighlighter()
   }, [])
+
+  // Latest-value refs so the callbacks below can stay referentially stable
+  // (so memo(FileDiffCard) actually skips unrelated re-renders) while still
+  // reading current state.
+  const focusedRef = useRef(focused)
+  focusedRef.current = focused
 
   const viewedStorageKey = `open-swe.review.viewed.${detail.owner}/${detail.repo}/${detail.number}.${detail.head_sha}`
   const [viewed, setViewed] = useState<Set<string>>(() => {
@@ -237,18 +356,26 @@ function ReviewBody({
       return new Set()
     }
   })
+  const viewedRef = useRef(viewed)
+  viewedRef.current = viewed
+  const expandedRef = useRef(expandedFiles)
+  expandedRef.current = expandedFiles
+
   const toggleViewed = useCallback(
     (path: string) => {
+      const becomingViewed = !viewedRef.current.has(path)
       setViewed((prev) => {
         const next = new Set(prev)
-        if (next.has(path)) next.delete(path)
-        else next.add(path)
+        if (becomingViewed) next.add(path)
+        else next.delete(path)
         window.localStorage.setItem(
           viewedStorageKey,
           JSON.stringify(Array.from(next))
         )
         return next
       })
+      if (becomingViewed && focusedRef.current?.file === path) setFocused(null)
+      setExpandedFiles((prev) => ({ ...prev, [path]: !becomingViewed }))
     },
     [viewedStorageKey]
   )
@@ -265,7 +392,6 @@ function ReviewBody({
   })
   const persistRead = useCallback(
     (next: Set<string>) => {
-      setRead(next)
       window.localStorage.setItem(
         readStorageKey,
         JSON.stringify(Array.from(next))
@@ -275,12 +401,18 @@ function ReviewBody({
   )
   const markRead = useCallback(
     (id: string) => {
-      persistRead(new Set(read).add(id))
+      setRead((prev) => {
+        const next = new Set(prev).add(id)
+        persistRead(next)
+        return next
+      })
     },
-    [persistRead, read]
+    [persistRead]
   )
   const markAllRead = useCallback(() => {
-    persistRead(new Set(detail.findings.map((f) => f.id)))
+    const next = new Set(detail.findings.map((f) => f.id))
+    setRead(next)
+    persistRead(next)
   }, [detail.findings, persistRead])
 
   const findingsByFile = useMemo(() => {
@@ -400,20 +532,124 @@ function ReviewBody({
     })
   }, [])
 
+  const filesByPath = useMemo(
+    () => new Map((diffFiles ?? []).map((file) => [file.path, file])),
+    [diffFiles]
+  )
+  const filesByPathRef = useRef(filesByPath)
+  filesByPathRef.current = filesByPath
+
+  // The Virtualizer doesn't forward a ref; grab its scroll element (the
+  // grandparent of this hidden probe, which lives in its content div) so the
+  // anchored finding card can position against it.
+  const scrollerProbe = useCallback((node: HTMLDivElement | null) => {
+    const scroller = node?.parentElement?.parentElement
+    setDiffScrollEl(scroller instanceof HTMLDivElement ? scroller : null)
+  }, [])
+
+  const registerSection = useCallback(
+    (path: string, node: HTMLDivElement | null) => {
+      fileRefs.current[path] = node
+    },
+    []
+  )
+  const registerAnchor = useCallback(
+    (id: string, node: HTMLElement | null) => {
+      anchorRefs.current[id] = node
+    },
+    []
+  )
+
+  const toggleExpanded = useCallback((path: string) => {
+    const current = expandedRef.current[path] ?? !viewedRef.current.has(path)
+    const next = !current
+    if (!next && focusedRef.current?.file === path) setFocused(null)
+    setExpandedFiles((prev) => ({ ...prev, [path]: next }))
+  }, [])
+
+  const selectLines = useCallback(
+    (path: string, range: SelectedLineRange | null) => {
+      if (range) {
+        setUserSelection({ file: path, range })
+        if (focusedRef.current) setFocused(null)
+      } else {
+        setUserSelection((prev) => (prev?.file === path ? null : prev))
+      }
+    },
+    []
+  )
+
+  const addToChat = useCallback(
+    (path: string, range: SelectedLineRange) => {
+      const file = filesByPathRef.current.get(path)
+      if (!file) return
+      for (const attachment of buildSelectionAttachments(file, range)) {
+        composer?.addAttachment(attachment)
+      }
+      setSideTab("chat")
+      setUserSelection(null)
+    },
+    [composer]
+  )
+
+  // ⌘L / Ctrl+L adds the current line selection to the chat (Cursor-style).
+  const userSelectionRef = useRef(userSelection)
+  userSelectionRef.current = userSelection
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "l") {
+        const sel = userSelectionRef.current
+        if (sel) {
+          event.preventDefault()
+          addToChat(sel.file, sel.range)
+        }
+      }
+    }
+    window.addEventListener("keydown", onKeyDown)
+    return () => window.removeEventListener("keydown", onKeyDown)
+  }, [addToChat])
+
+  // Clicking away from the highlighted rows clears the selection. A pointer-down
+  // that begins a fresh selection clears here first, then the new drag repaints.
+  // Reads the ref so the listener is registered once (no churn during a drag).
+  useEffect(() => {
+    const onPointerDown = (event: PointerEvent) => {
+      if (!userSelectionRef.current) return
+      const target = event.target
+      if (target instanceof Element && target.closest("[data-add-to-chat]"))
+        return
+      setUserSelection(null)
+    }
+    window.addEventListener("pointerdown", onPointerDown)
+    return () => window.removeEventListener("pointerdown", onPointerDown)
+  }, [])
+
   const openFinding = useCallback(
     (finding: ReviewFinding) => {
       markRead(finding.id)
+      setUserSelection(null)
       setFocused(finding)
       if (!isAnchored(finding)) {
         setAnchorEl(null)
         return
       }
       setExpandedFiles((prev) => ({ ...prev, [finding.file]: true }))
+      // The file card header is always mounted, but its diff rows window in/out
+      // under virtualization — scroll the card into view, then poll a few frames
+      // for the finding's anchor element before positioning the card.
       requestAnimationFrame(() => {
-        const node =
-          anchorRefs.current[finding.id] ?? fileRefs.current[finding.file]
-        node?.scrollIntoView({ block: "center" })
-        setAnchorEl(anchorRefs.current[finding.id] ?? null)
+        fileRefs.current[finding.file]?.scrollIntoView({ block: "center" })
+        let tries = 0
+        const tryAnchor = () => {
+          const anchor = anchorRefs.current[finding.id]
+          if (anchor) {
+            setAnchorEl(anchor)
+            return
+          }
+          if (tries++ < 30) requestAnimationFrame(tryAnchor)
+          else setAnchorEl(null)
+        }
+        tryAnchor()
       })
     },
     [markRead]
@@ -421,37 +657,32 @@ function ReviewBody({
 
   const closeFinding = useCallback(() => setFocused(null), [])
 
-  const renderFileCard = (file: ReviewDiffFile) => (
-    <FileDiffCard
-      key={file.path}
-      file={file}
-      findings={findingsByFile.get(file.path) ?? []}
-      focused={focused}
-      viewed={viewed.has(file.path)}
-      onToggleViewed={() => {
-        const becomingViewed = !viewed.has(file.path)
-        if (becomingViewed && focused?.file === file.path) setFocused(null)
-        toggleViewed(file.path)
-        setExpandedFiles((prev) => ({
-          ...prev,
-          [file.path]: !becomingViewed,
-        }))
-      }}
-      expanded={expandedFiles[file.path] ?? !viewed.has(file.path)}
-      onToggleExpanded={() => {
-        const next = !(expandedFiles[file.path] ?? !viewed.has(file.path))
-        if (!next && focused?.file === file.path) setFocused(null)
-        setExpandedFiles((prev) => ({ ...prev, [file.path]: next }))
-      }}
-      onFindingClick={openFinding}
-      sectionRef={(node) => {
-        fileRefs.current[file.path] = node
-      }}
-      anchorRef={(id, node) => {
-        anchorRefs.current[id] = node
-      }}
-    />
-  )
+  const renderFileCard = (file: ReviewDiffFile) => {
+    const selectedLines =
+      focused?.file === file.path && isAnchored(focused)
+        ? findingSelectedRange(focused)
+        : userSelection?.file === file.path
+          ? userSelection.range
+          : null
+    return (
+      <FileDiffCard
+        key={file.path}
+        file={file}
+        findings={findingsByFile.get(file.path) ?? NO_FINDINGS}
+        selectedLines={selectedLines}
+        viewed={viewed.has(file.path)}
+        onToggleViewed={toggleViewed}
+        expanded={expandedFiles[file.path] ?? !viewed.has(file.path)}
+        onToggleExpanded={toggleExpanded}
+        onFindingClick={openFinding}
+        onSelectLines={selectLines}
+        onAddToChat={addToChat}
+        registerSection={registerSection}
+        registerAnchor={registerAnchor}
+        diffStyle={diffStyle}
+      />
+    )
+  }
 
   const sidebarData = useMemo(
     () => ({
@@ -498,61 +729,77 @@ function ReviewBody({
     }
   }, [focused])
 
-  return (
-    <div
-      ref={scrollRef}
-      className="relative flex min-h-0 flex-1 overflow-y-auto"
-    >
-      <main className="min-w-0 flex-1">
-        <div className="mx-auto max-w-6xl px-6 py-6">
-          <PrHeader detail={detail} />
-          <div className="mt-4 rounded-lg border border-border bg-card p-4">
-            {detail.pr.body ? (
-              <Markdown content={detail.pr.body} />
-            ) : (
-              <p className="text-xs text-muted-foreground">
-                This PR has no description.
-              </p>
-            )}
-          </div>
+  const isAnchoredCard = focused !== null && isAnchored(focused) && anchorEl
 
-          <div className="mt-6">
-            <div className="mb-2 flex items-center justify-between">
-              <h2 className="text-sm font-medium">Changes</h2>
-              {linesLeft !== null && (
-                <span className="text-xs text-muted-foreground">
-                  {linesLeft === 0
-                    ? "All lines reviewed"
-                    : `${linesLeft} lines left`}
-                </span>
+  return (
+    <div className="flex min-h-0 flex-1 overflow-hidden">
+      <main className="relative flex min-h-0 min-w-0 flex-1">
+        <WorkerPoolContextProvider
+          poolOptions={DIFF_WORKER_POOL_OPTIONS}
+          highlighterOptions={DIFF_WORKER_HIGHLIGHTER_OPTIONS}
+        >
+          <Virtualizer
+            className="relative min-h-0 flex-1 overflow-y-auto"
+            contentClassName="mx-auto w-full max-w-6xl px-6 py-6"
+            config={DIFF_VIRTUALIZER_CONFIG}
+          >
+            <div ref={scrollerProbe} aria-hidden className="hidden" />
+            <PrHeader detail={detail} />
+            <div className="mt-4 rounded-lg border border-border bg-card p-4">
+              {detail.pr.body ? (
+                <Markdown content={detail.pr.body} />
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  This PR has no description.
+                </p>
               )}
             </div>
-            {!diffFiles ? (
-              <Skeleton className="h-64 w-full" />
-            ) : diffFiles.length === 0 ? (
-              <p className="text-xs text-muted-foreground">
-                No diff available.
-              </p>
-            ) : view === "ai" && groupedView ? (
-              <div className="space-y-6">
-                {groupedView.map((group) => (
-                  <div
-                    key={group.index}
-                    ref={(node) => {
-                      groupRefs.current[group.index] = node
-                    }}
-                    className="scroll-mt-4 space-y-3"
-                  >
-                    <GroupHeader group={group} />
-                    {group.files.map(renderFileCard)}
-                  </div>
-                ))}
+
+            <div className="mt-6">
+              <div className="mb-2 flex items-center justify-between gap-3">
+                <h2 className="text-sm font-medium">Changes</h2>
+                <div className="flex items-center gap-3">
+                  {linesLeft !== null && (
+                    <span className="text-xs text-muted-foreground">
+                      {linesLeft === 0
+                        ? "All lines reviewed"
+                        : `${linesLeft} lines left`}
+                    </span>
+                  )}
+                  {diffFiles && diffFiles.length > 0 && (
+                    <DiffStyleToggle value={diffStyle} onChange={setDiffStyle} />
+                  )}
+                </div>
               </div>
-            ) : (
-              <div className="space-y-3">{diffFiles.map(renderFileCard)}</div>
-            )}
-          </div>
-        </div>
+              {!diffFiles ? (
+                <Skeleton className="h-64 w-full" />
+              ) : diffFiles.length === 0 ? (
+                <p className="text-xs text-muted-foreground">
+                  No diff available.
+                </p>
+              ) : view === "ai" && groupedView ? (
+                <div className="space-y-6">
+                  {groupedView.map((group) => (
+                    <div
+                      key={group.index}
+                      ref={(node) => {
+                        groupRefs.current[group.index] = node
+                      }}
+                      className="scroll-mt-4 space-y-3"
+                    >
+                      <GroupHeader group={group} />
+                      {group.files.map(renderFileCard)}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {diffFiles.map(renderFileCard)}
+                </div>
+              )}
+            </div>
+          </Virtualizer>
+        </WorkerPoolContextProvider>
       </main>
 
       <SidePanel
@@ -565,31 +812,87 @@ function ReviewBody({
         onFindingClick={openFinding}
       />
 
-      {focused &&
-        (isAnchored(focused) && anchorEl ? (
-          <AnchoredFindingCard
-            key={focused.id}
+      {focused && isAnchoredCard && (
+        <AnchoredFindingCard
+          key={focused.id}
+          detail={detail}
+          finding={focused}
+          anchorEl={anchorEl}
+          scrollEl={diffScrollEl}
+          onClose={closeFinding}
+        />
+      )}
+
+      {focused && !isAnchoredCard && (
+        <div
+          data-finding-card
+          role="dialog"
+          aria-label={focused.title}
+          className={cn(FINDING_CARD_CLASS, "fixed top-24 right-1 z-50")}
+        >
+          <FindingCardContent
             detail={detail}
             finding={focused}
-            anchorEl={anchorEl}
-            scrollRef={scrollRef}
             onClose={closeFinding}
           />
-        ) : (
-          <div
-            data-finding-card
-            role="dialog"
-            aria-label={focused.title}
-            className={cn(FINDING_CARD_CLASS, "fixed top-24 right-1 z-50")}
-          >
-            <FindingCardContent
-              detail={detail}
-              finding={focused}
-              onClose={closeFinding}
-            />
-          </div>
-        ))}
+        </div>
+      )}
     </div>
+  )
+}
+
+function DiffStyleToggle({
+  value,
+  onChange,
+}: {
+  value: DiffStyle
+  onChange: (value: DiffStyle) => void
+}) {
+  return (
+    <div className="flex items-center gap-0.5 rounded-md border border-border p-0.5">
+      <DiffStyleButton
+        active={value === "unified"}
+        label="Unified view"
+        onClick={() => onChange("unified")}
+      >
+        <RowsIcon className="size-3.5" />
+      </DiffStyleButton>
+      <DiffStyleButton
+        active={value === "split"}
+        label="Split view"
+        onClick={() => onChange("split")}
+      >
+        <SquareSplitHorizontalIcon className="size-3.5" />
+      </DiffStyleButton>
+    </div>
+  )
+}
+
+function DiffStyleButton({
+  active,
+  label,
+  onClick,
+  children,
+}: {
+  active: boolean
+  label: string
+  onClick: () => void
+  children: React.ReactNode
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={label}
+      aria-pressed={active}
+      title={label}
+      className={cn(
+        "flex size-5 items-center justify-center rounded text-muted-foreground transition-colors",
+        active ? "bg-muted text-foreground" : "hover:text-foreground"
+      )}
+    >
+      {children}
+    </button>
   )
 }
 
@@ -662,30 +965,43 @@ function GroupHeader({ group }: { group: ResolvedGroup }) {
   )
 }
 
-function FileDiffCard({
+const FileDiffCard = memo(function FileDiffCard({
   file,
   findings,
-  focused,
+  selectedLines,
   viewed,
   onToggleViewed,
   expanded,
   onToggleExpanded,
   onFindingClick,
-  sectionRef,
-  anchorRef,
+  onSelectLines,
+  onAddToChat,
+  registerSection,
+  registerAnchor,
+  diffStyle,
 }: {
   file: ReviewDiffFile
   findings: Array<ReviewFinding>
-  focused: ReviewFinding | null
+  selectedLines: SelectedLineRange | null
   viewed: boolean
-  onToggleViewed: () => void
+  onToggleViewed: (path: string) => void
   expanded: boolean
-  onToggleExpanded: () => void
+  onToggleExpanded: (path: string) => void
   onFindingClick: (finding: ReviewFinding) => void
-  sectionRef: (node: HTMLDivElement | null) => void
-  anchorRef: (id: string, node: HTMLElement | null) => void
+  onSelectLines: (path: string, range: SelectedLineRange | null) => void
+  onAddToChat: (path: string, range: SelectedLineRange) => void
+  registerSection: (path: string, node: HTMLDivElement | null) => void
+  registerAnchor: (id: string, node: HTMLElement | null) => void
+  diffStyle: DiffStyle
 }) {
-  const diffOptions = useDiffOptions()
+  const diffOptions = useDiffOptions(diffStyle)
+  const diffWrapperRef = useRef<HTMLDivElement | null>(null)
+  const lastPointerRef = useRef<{ x: number; y: number } | null>(null)
+  const [popup, setPopup] = useState<{
+    range: SelectedLineRange
+    x: number
+    y: number
+  } | null>(null)
 
   const lineAnnotations = useMemo<Array<DiffLineAnnotation<ReviewFinding>>>(
     () =>
@@ -699,12 +1015,87 @@ function FileDiffCard({
     [findings]
   )
 
-  const selectedLines = useMemo<SelectedLineRange | null>(() => {
-    if (focused?.file === file.path && isAnchored(focused)) {
-      return findingSelectedRange(focused)
-    }
-    return null
-  }, [focused, file.path])
+  // Native line selection plus the visible gutter "+" handle you can click and
+  // drag to select a range. onLineSelectionChange fires on every drag move; we
+  // push it into the controlled selection so the rows highlight live as you
+  // drag (in controlled mode Pierre only paints when the prop updates). The
+  // "Add to Chat" popup is shown on onLineSelectionEnd (release only); ⌘L
+  // (handled in ReviewBody) adds without it. onGutterUtilityClick must be
+  // non-null for Pierre to turn the "+" into a drag selector.
+  const cardOptions = useMemo(
+    () => ({
+      ...diffOptions,
+      enableLineSelection: true,
+      enableGutterUtility: true,
+      onGutterUtilityClick: () => undefined,
+      onLineSelectionChange: (range: SelectedLineRange | null) =>
+        onSelectLines(file.path, range),
+      onLineSelectionEnd: (range: SelectedLineRange | null) => {
+        onSelectLines(file.path, range)
+        if (!range) {
+          setPopup(null)
+          return
+        }
+        // Anchor to the gutter "+" handle Pierre places on the selection's
+        // bottom line (inside the diff's shadow DOM) — a stable position,
+        // unlike the pointer-release point. Fall back to the pointer.
+        const host = diffWrapperRef.current?.querySelector("diffs-container")
+        const handle = host?.shadowRoot?.querySelector(
+          "[data-gutter-utility-slot]"
+        )
+        const rect =
+          handle instanceof HTMLElement ? handle.getBoundingClientRect() : null
+        const pointer = lastPointerRef.current
+        if (rect) setPopup({ range, x: rect.left, y: rect.top })
+        else if (pointer) setPopup({ range, x: pointer.x, y: pointer.y })
+        else setPopup(null)
+      },
+    }),
+    [diffOptions, file.path, onSelectLines]
+  )
+
+  const addPopupToChat = useCallback(() => {
+    if (popup) onAddToChat(file.path, popup.range)
+    setPopup(null)
+  }, [popup, onAddToChat, file.path])
+
+  // Drop the popup once the selection clears (e.g. added via ⌘L, or a finding
+  // took focus) so it can't add the same range twice.
+  useEffect(() => {
+    if (!selectedLines) setPopup(null)
+  }, [selectedLines])
+
+  const oldFile = useMemo<FileContents>(
+    () => ({
+      name: file.path,
+      contents: file.originalContent,
+      cacheKey: fileContentsCacheKey(file.path, "old", file.originalContent),
+    }),
+    [file.path, file.originalContent]
+  )
+  const newFile = useMemo<FileContents>(
+    () => ({
+      name: file.path,
+      contents: file.modifiedContent,
+      cacheKey: fileContentsCacheKey(file.path, "new", file.modifiedContent),
+    }),
+    [file.path, file.modifiedContent]
+  )
+
+  const sectionRef = useCallback(
+    (node: HTMLDivElement | null) => registerSection(file.path, node),
+    [registerSection, file.path]
+  )
+  const renderAnnotation = useCallback(
+    (annotation: DiffLineAnnotation<ReviewFinding>) => (
+      <FindingRailMarker
+        finding={annotation.metadata}
+        onFindingClick={onFindingClick}
+        anchorRef={registerAnchor}
+      />
+    ),
+    [onFindingClick, registerAnchor]
+  )
 
   return (
     <div
@@ -714,7 +1105,7 @@ function FileDiffCard({
       <div className="flex items-center gap-2 bg-[var(--ui-panel-2)] px-3 py-2 text-xs">
         <button
           type="button"
-          onClick={onToggleExpanded}
+          onClick={() => onToggleExpanded(file.path)}
           className="inline-flex items-center gap-2 text-left"
         >
           <CaretDownIcon
@@ -741,7 +1132,7 @@ function FileDiffCard({
             type="button"
             role="checkbox"
             aria-checked={viewed}
-            onClick={onToggleViewed}
+            onClick={() => onToggleViewed(file.path)}
             className={cn(
               "flex size-4 items-center justify-center rounded border border-border",
               viewed && "bg-foreground text-background"
@@ -757,23 +1148,86 @@ function FileDiffCard({
             Binary or large file — diff not shown.
           </div>
         ) : (
-          <div className="overflow-x-auto bg-[var(--ui-panel)] font-mono text-[11px] leading-5">
+          <div
+            ref={diffWrapperRef}
+            onPointerUpCapture={(event) => {
+              lastPointerRef.current = { x: event.clientX, y: event.clientY }
+            }}
+            className="overflow-x-auto bg-[var(--ui-panel)] font-mono text-[11px] leading-5"
+          >
             <MultiFileDiff<ReviewFinding>
-              oldFile={{ name: file.path, contents: file.originalContent }}
-              newFile={{ name: file.path, contents: file.modifiedContent }}
-              options={diffOptions}
+              oldFile={oldFile}
+              newFile={newFile}
+              options={cardOptions}
+              metrics={DIFF_VIRTUAL_METRICS}
               lineAnnotations={lineAnnotations}
               selectedLines={selectedLines}
-              renderAnnotation={(annotation) => (
-                <FindingRailMarker
-                  finding={annotation.metadata}
-                  onFindingClick={onFindingClick}
-                  anchorRef={anchorRef}
-                />
-              )}
+              renderAnnotation={renderAnnotation}
             />
+            {popup && (
+              <AddToChatPopup
+                x={popup.x}
+                y={popup.y}
+                onAdd={addPopupToChat}
+                onDismiss={() => setPopup(null)}
+              />
+            )}
           </div>
         ))}
+    </div>
+  )
+})
+
+function AddToChatPopup({
+  x,
+  y,
+  onAdd,
+  onDismiss,
+}: {
+  x: number
+  y: number
+  onAdd: () => void
+  onDismiss: () => void
+}) {
+  // Positioned fixed at the pointer-release point so it escapes the diff's
+  // overflow clipping. Dismiss on Escape, scroll, or any outside pointer-down.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onDismiss()
+    }
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target
+      if (target instanceof Element && target.closest("[data-add-to-chat]"))
+        return
+      onDismiss()
+    }
+    window.addEventListener("keydown", onKeyDown)
+    window.addEventListener("pointerdown", onPointerDown)
+    // Capture so it also catches scrolls from the diff scroll container.
+    window.addEventListener("scroll", onDismiss, true)
+    return () => {
+      window.removeEventListener("keydown", onKeyDown)
+      window.removeEventListener("pointerdown", onPointerDown)
+      window.removeEventListener("scroll", onDismiss, true)
+    }
+  }, [onDismiss])
+
+  return (
+    <div
+      data-add-to-chat
+      style={{ position: "fixed", top: y, left: x }}
+      className="z-50 -translate-y-[calc(100%+4px)] font-sans"
+    >
+      <button
+        type="button"
+        onClick={onAdd}
+        className="inline-flex items-center gap-1.5 rounded-md border border-border bg-popover px-2 py-1 text-[11px] font-medium text-popover-foreground shadow-md hover:bg-muted"
+      >
+        Add to Chat
+        <kbd className="rounded border border-border px-1 text-[10px] text-muted-foreground">
+          ⌘L
+        </kbd>
+      </button>
     </div>
   )
 }
@@ -814,56 +1268,81 @@ const FINDING_CARD_GAP = 12
 const FINDING_CARD_CLASS =
   "flex max-h-[70vh] w-[412px] flex-col overflow-hidden rounded-lg border border-border bg-background shadow-2xl"
 
-// Positioned absolutely inside the scroll container so it scrolls natively
-// with the diff — no per-scroll JS repositioning, hence no lag. Position is
-// recomputed only when layout shifts (files expand/collapse, resize).
+// Pinned to the right of the diff column (toward the side panel), vertically
+// aligned with the finding's annotation. The diff scroller is only as wide as
+// <main>, so the card is viewport-fixed (clamped to the window width) to sit in
+// the right gutter rather than overlapping the diff, and tracks the anchor as
+// the diff scrolls (rAF-throttled). Hidden while the anchor is out of view.
 function AnchoredFindingCard({
   detail,
   finding,
   anchorEl,
-  scrollRef,
+  scrollEl,
   onClose,
 }: {
   detail: ReviewDetail
   finding: ReviewFinding
   anchorEl: HTMLElement
-  scrollRef: React.RefObject<HTMLDivElement | null>
+  scrollEl: HTMLDivElement | null
   onClose: () => void
 }) {
   const cardRef = useRef<HTMLDivElement | null>(null)
 
   useLayoutEffect(() => {
     const card = cardRef.current
-    const scroller = scrollRef.current
+    const scroller = scrollEl
     if (!card || !scroller) return
 
+    let frame: number | null = null
     const position = () => {
-      if (!anchorEl.isConnected) return
+      frame = null
       const scrollerRect = scroller.getBoundingClientRect()
       const anchorRect = anchorEl.getBoundingClientRect()
-      const top = anchorRect.top - scrollerRect.top + scroller.scrollTop
+      // Hide while the finding's line is scrolled out of the diff viewport.
+      if (
+        !anchorEl.isConnected ||
+        anchorRect.bottom < scrollerRect.top ||
+        anchorRect.top > scrollerRect.bottom
+      ) {
+        card.style.visibility = "hidden"
+        return
+      }
       const left = Math.max(
         FINDING_CARD_GAP,
         Math.min(
-          anchorRect.right -
-            scrollerRect.left +
-            scroller.scrollLeft +
-            FINDING_CARD_GAP,
-          scroller.clientWidth - FINDING_CARD_WIDTH - FINDING_CARD_GAP
+          anchorRect.right + FINDING_CARD_GAP,
+          window.innerWidth - FINDING_CARD_WIDTH - FINDING_CARD_GAP
         )
       )
+      const top = Math.max(
+        scrollerRect.top + FINDING_CARD_GAP,
+        Math.min(
+          anchorRect.top,
+          scrollerRect.bottom - card.offsetHeight - FINDING_CARD_GAP
+        )
+      )
+      card.style.visibility = "visible"
       card.style.top = `${top}px`
       card.style.left = `${left}px`
     }
+    const schedule = () => {
+      if (frame == null) frame = window.requestAnimationFrame(position)
+    }
 
     position()
-    const observer = new ResizeObserver(position)
+    scroller.addEventListener("scroll", schedule, { passive: true })
+    window.addEventListener("resize", schedule)
+    const observer = new ResizeObserver(schedule)
     observer.observe(scroller)
-    for (const child of scroller.children) {
-      if (child !== card) observer.observe(child)
+    const content = scroller.firstElementChild
+    if (content) observer.observe(content)
+    return () => {
+      scroller.removeEventListener("scroll", schedule)
+      window.removeEventListener("resize", schedule)
+      observer.disconnect()
+      if (frame != null) window.cancelAnimationFrame(frame)
     }
-    return () => observer.disconnect()
-  }, [anchorEl, scrollRef])
+  }, [anchorEl, scrollEl])
 
   return (
     <div
@@ -871,7 +1350,8 @@ function AnchoredFindingCard({
       data-finding-card
       role="dialog"
       aria-label={finding.title}
-      className={cn(FINDING_CARD_CLASS, "absolute z-50")}
+      style={{ visibility: "hidden" }}
+      className={cn(FINDING_CARD_CLASS, "fixed z-50")}
     >
       <FindingCardContent detail={detail} finding={finding} onClose={onClose} />
     </div>
@@ -1122,7 +1602,7 @@ function SidePanel({
     <div
       ref={panelRef}
       style={{ width }}
-      className="sticky top-0 hidden h-full shrink-0 xl:flex"
+      className="relative hidden h-full shrink-0 xl:flex"
     >
       <ReviewPanelResizeHandle width={width} onResize={setWidth} />
       <aside

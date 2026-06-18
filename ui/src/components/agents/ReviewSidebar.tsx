@@ -1,4 +1,12 @@
-import { createContext, useContext, useEffect, useMemo, useState } from "react"
+import {
+  createContext,
+  memo,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from "react"
 import {
   FileTree,
   useFileTree,
@@ -192,7 +200,7 @@ function ReviewGroupList({
         <ReviewGroupRow
           key={group.index}
           group={group}
-          onSelect={() => onSelectGroup(group.index)}
+          onSelectGroup={onSelectGroup}
           onSelectFile={onSelectFile}
         />
       ))}
@@ -231,29 +239,55 @@ function renderInlineCode(text: string): Array<ReactNode> {
   })
 }
 
-function ReviewGroupRow({
+// The whole card is the scroll-to-group target so clicks anywhere (including
+// the expanded explanation body) focus the diff. Nested controls — the file
+// links and the "Read explanation" toggle — stop propagation so they keep
+// their own behavior. memo'd + memoized string processing so re-renders from
+// sibling state don't re-run Markdown/inline-code work.
+const ReviewGroupRow = memo(function ReviewGroupRow({
   group,
-  onSelect,
+  onSelectGroup,
   onSelectFile,
 }: {
   group: ReviewSidebarGroup
-  onSelect: () => void
+  onSelectGroup: (index: number) => void
   onSelectFile: (path: string) => void
 }) {
   const [expanded, setExpanded] = useState(false)
+  const title = useMemo(() => renderInlineCode(group.title), [group.title])
+  const summary = useMemo(
+    () => stripLocationLinks(group.summary),
+    [group.summary]
+  )
+  const selectGroup = useCallback(
+    () => onSelectGroup(group.index),
+    [onSelectGroup, group.index]
+  )
+  const onKeyDown = useCallback(
+    (event: React.KeyboardEvent) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault()
+        onSelectGroup(group.index)
+      }
+    },
+    [onSelectGroup, group.index]
+  )
+
   return (
-    <div className="px-3 py-3 transition-colors hover:bg-[var(--ui-sidebar-hover)]">
-      <button
-        type="button"
-        onClick={onSelect}
-        className="flex w-full items-start gap-2 text-left"
-      >
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={selectGroup}
+      onKeyDown={onKeyDown}
+      className="cursor-pointer px-3 py-3 transition-colors hover:bg-[var(--ui-sidebar-hover)]"
+    >
+      <div className="flex w-full items-start gap-2 text-left">
         <span className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded bg-[var(--ui-panel-2)] text-[11px] font-medium text-[var(--ui-text-dim)]">
           {group.index}
         </span>
         <span className="min-w-0 flex-1">
           <span className="block text-xs leading-5 font-medium text-[var(--ui-text)]">
-            {renderInlineCode(group.title)}
+            {title}
           </span>
           <span className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-[var(--ui-text-dim)]">
             <span>
@@ -267,7 +301,7 @@ function ReviewGroupRow({
             )}
           </span>
         </span>
-      </button>
+      </div>
 
       {group.files.length > 0 && (
         <div className="mt-2 space-y-0.5 pl-7">
@@ -277,7 +311,10 @@ function ReviewGroupRow({
               <button
                 key={path}
                 type="button"
-                onClick={() => onSelectFile(path)}
+                onClick={(event) => {
+                  event.stopPropagation()
+                  onSelectFile(path)
+                }}
                 title={path}
                 className="flex w-full items-baseline gap-1.5 text-left text-[11px] hover:text-[var(--ui-accent)]"
               >
@@ -299,7 +336,10 @@ function ReviewGroupRow({
         <div className="mt-2">
           <button
             type="button"
-            onClick={() => setExpanded((value) => !value)}
+            onClick={(event) => {
+              event.stopPropagation()
+              setExpanded((value) => !value)
+            }}
             className="inline-flex items-center gap-1 text-[11px] font-medium text-[var(--ui-accent)]"
           >
             <CaretRightIcon
@@ -312,14 +352,14 @@ function ReviewGroupRow({
           </button>
           {expanded && (
             <div className="mt-1.5">
-              <Markdown content={stripLocationLinks(group.summary)} />
+              <Markdown content={summary} />
             </div>
           )}
         </div>
       )}
     </div>
   )
-}
+})
 
 function ReviewFileTreeExplorer({
   files,

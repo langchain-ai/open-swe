@@ -17,12 +17,7 @@ import {
   GitPullRequestIcon,
   SidebarSimpleIcon,
 } from "@phosphor-icons/react"
-import type {
-  FileContents,
-  VirtualFileMetrics,
-  WorkerInitializationRenderOptions,
-  WorkerPoolOptions,
-} from "@pierre/diffs/react"
+import type { FileContents } from "@pierre/diffs/react"
 import type { GitStatus, GitStatusEntry } from "@pierre/trees"
 
 import type { AgentThread, Message } from "@/lib/agents/types"
@@ -30,7 +25,14 @@ import type { ThreadPrDiffFile } from "@/lib/agents/api"
 import type { ChangedFileSummaryItem } from "@/components/agents/messages"
 import { useAgentThreadPrDiff } from "@/lib/agents/queries"
 import { buttonVariants } from "@/components/ui/button"
-import { useDiffOptions } from "@/components/agents/utils/diffUtils"
+import {
+  DIFF_VIRTUALIZER_CONFIG,
+  DIFF_VIRTUAL_METRICS,
+  DIFF_WORKER_HIGHLIGHTER_OPTIONS,
+  DIFF_WORKER_POOL_OPTIONS,
+  fileContentsCacheKey,
+  useDiffOptions,
+} from "@/components/agents/utils/diffUtils"
 import { summarizeChangedFiles } from "@/components/agents/ported"
 import { Z } from "@/components/agents/z-index"
 import { useIsMobile } from "@/lib/useIsMobile"
@@ -92,38 +94,6 @@ const PANEL_MIN_WIDTH = 320
 // full window (e.g. ~50/50 on ultrawide screens) without squishing the chat.
 // Exported so the chat column can enforce the same floor via min-width.
 export const PANEL_MIN_CHAT_WIDTH = 360
-
-const DIFF_VIRTUALIZER_CONFIG = {
-  overscrollSize: 1200,
-  intersectionObserverMargin: 4800,
-}
-
-const DIFF_VIRTUAL_METRICS = {
-  hunkLineCount: 80,
-  lineHeight: 18,
-  diffHeaderHeight: 0,
-  spacing: 8,
-} satisfies Partial<VirtualFileMetrics>
-
-const DIFF_WORKER_POOL_OPTIONS = {
-  workerFactory: () =>
-    new Worker(
-      new URL("@pierre/diffs/worker/worker-portable.js", import.meta.url),
-      {
-        type: "module",
-      }
-    ),
-  poolSize: 2,
-  totalASTLRUCacheSize: 120,
-} satisfies WorkerPoolOptions
-
-const DIFF_WORKER_HIGHLIGHTER_OPTIONS = {
-  theme: { light: "pierre-light", dark: "pierre-dark" },
-  lineDiffType: "word-alt",
-  maxLineDiffLength: 800,
-  tokenizeMaxLineLength: 1200,
-  langs: ["text"],
-} satisfies WorkerInitializationRenderOptions
 
 function getPanelMaxWidth(availableWidth?: number): number {
   if (typeof window === "undefined") return PANEL_DEFAULT_WIDTH
@@ -637,23 +607,6 @@ export function AgentGitPanel({ thread, messages }: AgentGitPanelProps) {
       )}
     </aside>
   )
-}
-
-function hashFileContents(contents: string): string {
-  let hash = 0x811c9dc5
-  for (let i = 0; i < contents.length; i++) {
-    hash ^= contents.charCodeAt(i)
-    hash = Math.imul(hash, 0x01000193)
-  }
-  return (hash >>> 0).toString(36)
-}
-
-function fileContentsCacheKey(
-  path: string,
-  side: "old" | "new",
-  contents: string
-): string {
-  return `${path}:${side}:${contents.length}:${hashFileContents(contents)}`
 }
 
 const FileDiffSection = memo(
