@@ -496,8 +496,10 @@ def test_reviewer_system_prompt_includes_agents_md_section() -> None:
         pr_number=42,
         agents_md_content="Use snake_case for all Python identifiers.",
     )
-    assert "Repository conventions (AGENTS.md)" in prompt
+    assert "Repository conventions (AGENTS.md / CLAUDE.md)" in prompt
     assert "Use snake_case for all Python identifiers." in prompt
+    assert "Repository conventions compliance" in prompt
+    assert "mandatory repo rules" in prompt
 
 
 @pytest.mark.asyncio
@@ -548,8 +550,61 @@ async def test_reviewer_inlines_agents_md_into_system_prompt() -> None:
         await reviewer.get_reviewer_agent(config)
 
     mock_fetch_agents_md.assert_awaited_once_with("acme", "repo", "base-sha-xyz", token="gh-token")
-    assert "Repository conventions (AGENTS.md)" in captured["system_prompt"]
+    assert "Repository conventions (AGENTS.md / CLAUDE.md)" in captured["system_prompt"]
     assert "Always use the design system IconButton." in captured["system_prompt"]
+
+
+@pytest.mark.asyncio
+async def test_reviewer_inlines_claude_md_when_agents_md_absent() -> None:
+    config: RunnableConfig = {
+        "configurable": {
+            "__is_for_execution__": True,
+            "thread_id": "reviewer-thread-id",
+            "source": "github",
+            "repo": {"owner": "acme", "name": "repo"},
+            "pr_number": 7,
+            "pr_url": "https://github.com/acme/repo/pull/7",
+            "base_sha": "base-sha-xyz",
+            "head_sha": "head-sha-abc",
+        },
+        "metadata": {},
+    }
+    captured: dict[str, str] = {}
+
+    def fake_create_deep_agent(*, system_prompt: str, **kwargs: object) -> _DummyAgent:
+        captured["system_prompt"] = system_prompt
+        return _DummyAgent()
+
+    with (
+        patch(
+            "agent.reviewer.get_github_app_installation_token_with_expiry",
+            new_callable=AsyncMock,
+            return_value=("gh-token", None),
+        ),
+        patch(
+            "agent.reviewer.ensure_sandbox_for_thread",
+            new_callable=AsyncMock,
+            return_value=MagicMock(),
+        ),
+        patch(
+            "agent.reviewer.aresolve_sandbox_work_dir",
+            new_callable=AsyncMock,
+            return_value="/workspace",
+        ),
+        patch(
+            "agent.reviewer.fetch_agents_md",
+            new_callable=AsyncMock,
+            return_value="# CLAUDE.md\nUse semantic tokens only.",
+        ) as mock_fetch_agents_md,
+        patch("agent.reviewer.make_model", return_value=MagicMock()),
+        patch("agent.reviewer.create_deep_agent", side_effect=fake_create_deep_agent),
+    ):
+        await reviewer.get_reviewer_agent(config)
+
+    mock_fetch_agents_md.assert_awaited_once_with("acme", "repo", "base-sha-xyz", token="gh-token")
+    assert "Repository conventions (AGENTS.md / CLAUDE.md)" in captured["system_prompt"]
+    assert "Use semantic tokens only." in captured["system_prompt"]
+    assert "Repository conventions compliance" in captured["system_prompt"]
 
 
 def test_format_pr_review_threads_renders_resolved_and_open_threads() -> None:
