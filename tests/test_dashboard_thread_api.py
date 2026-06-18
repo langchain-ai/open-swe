@@ -801,14 +801,52 @@ def _make_threads(count: int, *, resolved_before: int) -> list[dict[str, object]
 
 
 async def test_list_dashboard_threads_page_pages_beyond_first_search_batch(monkeypatch) -> None:
-    # The 100 most-recent threads are resolved; the unresolved ones only appear
-    # in the second search batch (offset >= 100).
-    threads = _make_threads(150, resolved_before=100)
+    page_size = thread_api._THREADS_SEARCH_PAGE
+    threads = _make_threads(page_size + 50, resolved_before=page_size)
     offsets: list[int] = []
+    run_list_calls = 0
 
     class FakeThreads:
-        async def search(self, *, metadata, limit, offset, sort_by, sort_order):
+        async def search(self, *, metadata, limit, offset, sort_by, sort_order, select):
             offsets.append(offset)
+            assert select == thread_api._THREAD_LIST_SELECT
+            return threads[offset : offset + limit]
+
+        async def update(self, *, thread_id, metadata):
+            return None
+
+    class FakeRuns:
+        async def list(self, thread_id, limit=1):
+            nonlocal run_list_calls
+            run_list_calls += 1
+            return []
+
+    class FakeClient:
+        threads = FakeThreads()
+        runs = FakeRuns()
+
+    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
+
+    result = await thread_api.list_dashboard_threads_page(
+        "octocat", email=None, limit=25, offset=0, resolved=False
+    )
+
+    assert result["hasMore"] is True
+    assert len(result["items"]) == 25
+    assert all(item["resolved"] is False for item in result["items"])
+    assert page_size in offsets
+    assert run_list_calls == 0
+
+
+async def test_list_dashboard_threads_sidebar_fills_buckets_with_one_endpoint(monkeypatch) -> None:
+    page_size = thread_api._THREADS_SEARCH_PAGE
+    threads = _make_threads(page_size + 10, resolved_before=page_size)
+    searches: list[dict[str, object]] = []
+
+    class FakeThreads:
+        async def search(self, *, metadata, limit, offset, sort_by, sort_order, select):
+            searches.append({"metadata": metadata, "offset": offset})
+            assert select == thread_api._THREAD_LIST_SELECT
             return threads[offset : offset + limit]
 
         async def update(self, *, thread_id, metadata):
@@ -824,11 +862,48 @@ async def test_list_dashboard_threads_page_pages_beyond_first_search_batch(monke
 
     monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
 
-    result = await thread_api.list_dashboard_threads_page(
-        "octocat", email=None, limit=25, offset=0, resolved=False
+    result = await thread_api.list_dashboard_threads_sidebar(
+        "octocat", email=None, active_limit=5, resolved_limit=5
     )
 
-    assert result["total"] == 50
-    assert len(result["items"]) == 25
-    assert all(item["resolved"] is False for item in result["items"])
-    assert 100 in offsets
+    assert len(result["active"]["items"]) == 5
+    assert len(result["resolved"]["items"]) == 5
+    assert result["active"]["hasMore"] is True
+    assert result["resolved"]["hasMore"] is True
+    assert {call["offset"] for call in searches} == {0, page_size}
+
+
+async def test_list_dashboard_threads_page_refreshes_only_running_threads(monkeypatch) -> None:
+    threads = _make_threads(3, resolved_before=0)
+    threads[1]["metadata"]["latest_run_status"] = "pending"
+    run_list_thread_ids: list[str] = []
+    updates: list[dict[str, object]] = []
+
+    class FakeThreads:
+        async def search(self, *, metadata, limit, offset, sort_by, sort_order, select):
+            return threads[offset : offset + limit]
+
+        async def update(self, *, thread_id, metadata):
+            updates.append({"thread_id": thread_id, "metadata": metadata})
+
+    class FakeRuns:
+        async def list(self, thread_id, limit=1):
+            run_list_thread_ids.append(thread_id)
+            return [{"id": "run-1", "status": "success"}]
+
+    class FakeClient:
+        threads = FakeThreads()
+        runs = FakeRuns()
+
+    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
+
+    result = await thread_api.list_dashboard_threads_page("octocat", email=None, limit=3, offset=0)
+
+    assert run_list_thread_ids == ["t1"]
+    assert updates == [
+        {
+            "thread_id": "t1",
+            "metadata": {"latest_run_status": "success", "latest_run_id": "run-1"},
+        }
+    ]
+    assert [item["status"] for item in result["items"]] == ["idle", "finished", "idle"]

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import binascii
 import json
@@ -434,58 +435,71 @@ async def _refresh_latest_run_metadata(
     return thread, latest_run_status, latest_run_id
 
 
-async def list_dashboard_threads(
-    login: str, *, email: str | None = None, limit: int = 50, include_all: bool = False
+_THREADS_SEARCH_PAGE = 500
+_THREADS_PAGE_SCAN_CAP = 5000
+_THREAD_LIST_SELECT = ["thread_id", "status", "metadata", "updated_at"]
+_RUN_REFRESH_CONCURRENCY = 8
+_RUNNING_METADATA_STATUSES = {"pending", "running"}
+
+
+def _thread_id(thread: dict[str, Any]) -> str | None:
+    thread_id = thread.get("thread_id") or thread.get("id")
+    return thread_id if isinstance(thread_id, str) and thread_id else None
+
+
+def _thread_metadata(thread: dict[str, Any]) -> dict[str, Any]:
+    return thread.get("metadata") if isinstance(thread.get("metadata"), dict) else {}
+
+
+def _owner_search_filters(
+    login: str, *, email: str | None = None, include_all: bool = False
 ) -> list[dict[str, Any]]:
-    client = langgraph_client()
-    searches: list[dict[str, Any]] = [{}] if include_all else [{"github_login": login}]
-    if not include_all and email and email.strip():
+    if include_all:
+        return [{}]
+    searches = [{"github_login": login}]
+    if email and email.strip():
         searches.append({"triggering_user_email": email.strip().lower()})
-
-    seen: dict[str, dict[str, Any]] = {}
-    for metadata_filter in searches:
-        threads = await client.threads.search(
-            metadata=metadata_filter,
-            limit=limit,
-            sort_by="updated_at",
-            sort_order="desc",
-        )
-        for thread in threads or []:
-            if not isinstance(thread, dict):
-                continue
-            meta = thread.get("metadata") if isinstance(thread.get("metadata"), dict) else {}
-            if not include_all and not _user_owns_thread(meta, login, email):
-                continue
-            thread_id = thread.get("thread_id") or thread.get("id")
-            if isinstance(thread_id, str) and thread_id not in seen:
-                seen[thread_id] = thread
-
-    summaries: list[dict[str, Any]] = []
-    for thread in seen.values():
-        refreshed, latest_run_status, latest_run_id = await _refresh_latest_run_metadata(
-            client, thread
-        )
-        summaries.append(
-            _thread_summary(
-                refreshed,
-                latest_run_status=latest_run_status,
-                latest_run_id=latest_run_id,
-            )
-        )
-    summaries.sort(key=lambda item: item.get("updatedAt", 0), reverse=True)
-    return summaries[:limit]
+    return searches
 
 
-# Threads are paged out of `client.threads.search` in batches of this size,
-# scanning up to `_THREADS_PAGE_SCAN_CAP` so matches older than a single batch
-# are still found (the page is the "show all"/search surface).
-_THREADS_SEARCH_PAGE = 100
-_THREADS_PAGE_SCAN_CAP = 2000
+def _search_metadata_filter(
+    owner_filter: dict[str, Any], *, resolved: bool | None = None, source: str | None = None
+) -> dict[str, Any]:
+    metadata = dict(owner_filter)
+    if resolved is True:
+        metadata["resolved"] = True
+    if source and source != _DASHBOARD_SOURCE:
+        metadata["source"] = source
+    return metadata
 
 
-def _thread_updated_ms(metadata: dict[str, Any]) -> int:
+async def _search_threads_batch(
+    client: Any, metadata: dict[str, Any], *, limit: int, offset: int
+) -> list[dict[str, Any]]:
+    batch = await client.threads.search(
+        metadata=metadata,
+        limit=limit,
+        offset=offset,
+        sort_by="updated_at",
+        sort_order="desc",
+        select=_THREAD_LIST_SELECT,
+    )
+    return [thread for thread in batch or [] if isinstance(thread, dict)]
+
+
+def _thread_updated_ms(thread: dict[str, Any]) -> int:
+    metadata = _thread_metadata(thread)
     value = metadata.get("updated_at_ms")
-    return int(value) if isinstance(value, (int, float)) else 0
+    if isinstance(value, (int, float)):
+        return int(value)
+    updated_at = thread.get("updated_at")
+    if isinstance(updated_at, str) and updated_at:
+        try:
+            parsed = datetime.fromisoformat(updated_at.replace("Z", "+00:00"))
+        except ValueError:
+            return 0
+        return int(parsed.timestamp() * 1000)
+    return 0
 
 
 def _metadata_matches_filters(
@@ -532,50 +546,206 @@ def _summary_matches_filters(
     return True
 
 
-async def _gather_candidate_threads(
+def _should_refresh_latest_run(thread: dict[str, Any]) -> bool:
+    metadata = _thread_metadata(thread)
+    metadata_status = metadata.get("latest_run_status")
+    thread_status = thread.get("status")
+    return thread_status == "busy" or metadata_status in _RUNNING_METADATA_STATUSES
+
+
+async def _summarize_thread(
+    client: Any,
+    thread: dict[str, Any],
+    *,
+    owner_login: str | None = None,
+    owner_email: str | None = None,
+    refresh_active_run: bool = True,
+) -> dict[str, Any]:
+    latest_run_status = latest_run_id = None
+    if refresh_active_run and _should_refresh_latest_run(thread):
+        thread, latest_run_status, latest_run_id = await _refresh_latest_run_metadata(
+            client, thread
+        )
+    return _thread_summary(
+        thread,
+        latest_run_status=latest_run_status,
+        latest_run_id=latest_run_id,
+        owner_login=owner_login,
+        owner_email=owner_email,
+    )
+
+
+async def _summarize_threads(
+    client: Any,
+    threads: list[dict[str, Any]],
+    *,
+    owner_login: str | None = None,
+    owner_email: str | None = None,
+) -> list[dict[str, Any]]:
+    semaphore = asyncio.Semaphore(_RUN_REFRESH_CONCURRENCY)
+
+    async def summarize(thread: dict[str, Any]) -> dict[str, Any]:
+        if not _should_refresh_latest_run(thread):
+            return await _summarize_thread(
+                client,
+                thread,
+                owner_login=owner_login,
+                owner_email=owner_email,
+                refresh_active_run=False,
+            )
+        async with semaphore:
+            return await _summarize_thread(
+                client,
+                thread,
+                owner_login=owner_login,
+                owner_email=owner_email,
+            )
+
+    return list(await asyncio.gather(*(summarize(thread) for thread in threads)))
+
+
+async def _collect_thread_candidates(
     client: Any,
     searches: list[dict[str, Any]],
     *,
     include_all: bool,
     login: str,
     email: str | None,
+    resolved: bool | None = None,
+    source: str | None = None,
+    query: str | None = None,
+    target_per_search: int | None = None,
 ) -> list[dict[str, Any]]:
-    """Page through `threads.search` (up to the scan cap) and dedupe by id."""
     seen: dict[str, dict[str, Any]] = {}
-    for metadata_filter in searches:
+    for owner_filter in searches:
+        matched_for_search = 0
         offset = 0
+        metadata_filter = _search_metadata_filter(owner_filter, resolved=resolved, source=source)
         while offset < _THREADS_PAGE_SCAN_CAP:
-            batch = await client.threads.search(
-                metadata=metadata_filter,
+            batch = await _search_threads_batch(
+                client,
+                metadata_filter,
                 limit=_THREADS_SEARCH_PAGE,
                 offset=offset,
-                sort_by="updated_at",
-                sort_order="desc",
             )
             if not batch:
                 break
             for thread in batch:
-                if not isinstance(thread, dict):
+                metadata = _thread_metadata(thread)
+                if not include_all and not _user_owns_thread(metadata, login, email):
                     continue
-                meta = thread.get("metadata") if isinstance(thread.get("metadata"), dict) else {}
-                if not include_all and not _user_owns_thread(meta, login, email):
+                if not _metadata_matches_filters(
+                    metadata,
+                    resolved=resolved,
+                    source=source,
+                    query=query,
+                ):
                     continue
-                thread_id = thread.get("thread_id") or thread.get("id")
-                if isinstance(thread_id, str) and thread_id not in seen:
-                    seen[thread_id] = thread
+                thread_id = _thread_id(thread)
+                if not thread_id:
+                    continue
+                matched_for_search += 1
+                seen.setdefault(thread_id, thread)
+            if len(batch) < _THREADS_SEARCH_PAGE:
+                break
+            if target_per_search is not None and matched_for_search >= target_per_search:
+                break
+            offset += _THREADS_SEARCH_PAGE
+    return sorted(seen.values(), key=_thread_updated_ms, reverse=True)
+
+
+async def list_dashboard_threads(
+    login: str, *, email: str | None = None, limit: int = 50, include_all: bool = False
+) -> list[dict[str, Any]]:
+    page = await list_dashboard_threads_page(
+        login,
+        email=email,
+        limit=limit,
+        offset=0,
+        include_all=include_all,
+    )
+    return page["items"]
+
+
+async def list_dashboard_threads_sidebar(
+    login: str,
+    *,
+    email: str | None = None,
+    active_limit: int = 50,
+    resolved_limit: int = 20,
+    include_all: bool = False,
+) -> dict[str, Any]:
+    client = langgraph_client()
+    searches = _owner_search_filters(login, email=email, include_all=include_all)
+    safe_active_limit = min(max(active_limit, 1), 100)
+    safe_resolved_limit = min(max(resolved_limit, 1), 100)
+    active_target = safe_active_limit + 1
+    resolved_target = safe_resolved_limit + 1
+    active: dict[str, dict[str, Any]] = {}
+    resolved_threads: dict[str, dict[str, Any]] = {}
+
+    for owner_filter in searches:
+        local_active = 0
+        local_resolved = 0
+        offset = 0
+        while offset < _THREADS_PAGE_SCAN_CAP and (
+            local_active < active_target or local_resolved < resolved_target
+        ):
+            batch = await _search_threads_batch(
+                client,
+                owner_filter,
+                limit=_THREADS_SEARCH_PAGE,
+                offset=offset,
+            )
+            if not batch:
+                break
+            for thread in batch:
+                metadata = _thread_metadata(thread)
+                if not include_all and not _user_owns_thread(metadata, login, email):
+                    continue
+                thread_id = _thread_id(thread)
+                if not thread_id or thread_id in active or thread_id in resolved_threads:
+                    continue
+                if _is_thread_resolved(metadata):
+                    local_resolved += 1
+                    resolved_threads[thread_id] = thread
+                else:
+                    local_active += 1
+                    active[thread_id] = thread
             if len(batch) < _THREADS_SEARCH_PAGE:
                 break
             offset += _THREADS_SEARCH_PAGE
-    return list(seen.values())
 
-
-async def _summarize_thread(client: Any, thread: dict[str, Any]) -> dict[str, Any]:
-    refreshed, latest_run_status, latest_run_id = await _refresh_latest_run_metadata(client, thread)
-    return _thread_summary(
-        refreshed,
-        latest_run_status=latest_run_status,
-        latest_run_id=latest_run_id,
+    active_candidates = sorted(active.values(), key=_thread_updated_ms, reverse=True)
+    resolved_candidates = sorted(resolved_threads.values(), key=_thread_updated_ms, reverse=True)
+    active_window = active_candidates[:safe_active_limit]
+    resolved_window = resolved_candidates[:safe_resolved_limit]
+    active_items, resolved_items = await asyncio.gather(
+        _summarize_threads(
+            client,
+            active_window,
+            owner_login=None if include_all else login,
+            owner_email=None if include_all else email,
+        ),
+        _summarize_threads(
+            client,
+            resolved_window,
+            owner_login=None if include_all else login,
+            owner_email=None if include_all else email,
+        ),
     )
+    return {
+        "active": {
+            "items": active_items,
+            "limit": safe_active_limit,
+            "hasMore": len(active_candidates) > safe_active_limit,
+        },
+        "resolved": {
+            "items": resolved_items,
+            "limit": safe_resolved_limit,
+            "hasMore": len(resolved_candidates) > safe_resolved_limit,
+        },
+    }
 
 
 async def list_dashboard_threads_page(
@@ -591,63 +761,58 @@ async def list_dashboard_threads_page(
     status: str | None = None,
     query: str | None = None,
 ) -> dict[str, Any]:
-    """Paginated + filterable thread list for the full threads page."""
     client = langgraph_client()
-    searches: list[dict[str, Any]] = [{}] if include_all else [{"github_login": login}]
-    if not include_all and email and email.strip():
-        searches.append({"triggering_user_email": email.strip().lower()})
-
-    candidates = await _gather_candidate_threads(
-        client, searches, include_all=include_all, login=login, email=email
-    )
-
-    # Apply metadata-only filters first so the frequent sidebar polls only fetch
-    # the latest run for threads that can actually match.
-    matched = [
-        thread
-        for thread in candidates
-        if _metadata_matches_filters(
-            thread.get("metadata") if isinstance(thread.get("metadata"), dict) else {},
-            resolved=resolved,
-            source=source,
-            query=query,
-        )
-    ]
-    matched.sort(
-        key=lambda thread: _thread_updated_ms(
-            thread.get("metadata") if isinstance(thread.get("metadata"), dict) else {}
-        ),
-        reverse=True,
-    )
-
+    searches = _owner_search_filters(login, email=email, include_all=include_all)
     safe_offset = max(offset, 0)
-    safe_limit = max(limit, 1)
+    safe_limit = min(max(limit, 1), 100)
+    summary_filters = viewed is not None or status is not None
+    target = None if summary_filters else safe_offset + safe_limit + 1
 
-    # `viewed`/`status` derive from the latest run, so they can only be applied
-    # after enrichment. When neither is requested we enrich just the page window.
-    if viewed is None and status is None:
-        total = len(matched)
-        window = matched[safe_offset : safe_offset + safe_limit]
-        items = [await _summarize_thread(client, thread) for thread in window]
-        return {"items": items, "total": total, "limit": safe_limit, "offset": safe_offset}
+    candidates = await _collect_thread_candidates(
+        client,
+        searches,
+        include_all=include_all,
+        login=login,
+        email=email,
+        resolved=resolved,
+        source=source,
+        query=query,
+        target_per_search=target,
+    )
 
-    summaries: list[dict[str, Any]] = []
-    for thread in matched:
-        summary = await _summarize_thread(client, thread)
-        if _summary_matches_filters(
-            summary,
-            resolved=resolved,
-            viewed=viewed,
-            source=source,
-            status=status,
-            query=query,
-        ):
-            summaries.append(summary)
+    if summary_filters:
+        summaries = await _summarize_threads(
+            client,
+            candidates,
+            owner_login=None if include_all else login,
+            owner_email=None if include_all else email,
+        )
+        filtered = [
+            summary
+            for summary in summaries
+            if _summary_matches_filters(
+                summary,
+                resolved=resolved,
+                viewed=viewed,
+                source=source,
+                status=status,
+                query=query,
+            )
+        ]
+        filtered.sort(key=lambda item: item.get("updatedAt", 0), reverse=True)
+        items = filtered[safe_offset : safe_offset + safe_limit]
+        has_more = len(filtered) > safe_offset + safe_limit
+    else:
+        window = candidates[safe_offset : safe_offset + safe_limit]
+        items = await _summarize_threads(
+            client,
+            window,
+            owner_login=None if include_all else login,
+            owner_email=None if include_all else email,
+        )
+        has_more = len(candidates) > safe_offset + safe_limit
 
-    summaries.sort(key=lambda item: item.get("updatedAt", 0), reverse=True)
-    total = len(summaries)
-    items = summaries[safe_offset : safe_offset + safe_limit]
-    return {"items": items, "total": total, "limit": safe_limit, "offset": safe_offset}
+    return {"items": items, "limit": safe_limit, "offset": safe_offset, "hasMore": has_more}
 
 
 async def _mark_thread_viewed(

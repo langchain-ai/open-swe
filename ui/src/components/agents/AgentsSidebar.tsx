@@ -44,6 +44,7 @@ import {
   useSeedAgentThreadDetails,
   useSidebarThreads,
 } from "@/lib/agents/queries"
+import { useRunCompletionNotifier } from "@/lib/agents/useRunCompletionNotifier"
 import { cn } from "@/lib/utils"
 
 const RESOLVED_SIDEBAR_LIMIT = 20
@@ -98,14 +99,13 @@ const NAV = [
 ] as const
 
 export function AgentsSidebar({ user, activeThreadId }: AgentsSidebarProps) {
-  const { active, resolved } = useSidebarThreads(RESOLVED_SIDEBAR_LIMIT)
-  const activeThreads = active.data?.items ?? []
-  const resolvedThreads = resolved.data?.items ?? []
-  const resolvedTotal = resolved.data?.total ?? resolvedThreads.length
-  useSeedAgentThreadDetails(
-    [...activeThreads, ...resolvedThreads],
-    activeThreadId
-  )
+  const sidebar = useSidebarThreads(RESOLVED_SIDEBAR_LIMIT)
+  const activeThreads = sidebar.data?.active.items ?? []
+  const resolvedThreads = sidebar.data?.resolved.items ?? []
+  const resolvedHasMore = sidebar.data?.resolved.hasMore ?? false
+  const visibleThreads = [...activeThreads, ...resolvedThreads]
+  useSeedAgentThreadDetails(visibleThreads, activeThreadId)
+  useRunCompletionNotifier(visibleThreads, activeThreadId)
   const groups = groupThreads(activeThreads)
   const layout = useSidebarLayout()
   const reviewSidebar = useReviewSidebarData()
@@ -190,7 +190,7 @@ export function AgentsSidebar({ user, activeThreadId }: AgentsSidebarProps) {
           />
           <ResolvedThreadGroup
             threads={resolvedThreads}
-            total={resolvedTotal}
+            hasMore={resolvedHasMore}
             activeThreadId={activeThreadId}
             onNavigate={layout.closeOnMobile}
           />
@@ -249,12 +249,12 @@ function ThreadGroup({
 
 function ResolvedThreadGroup({
   threads,
-  total,
+  hasMore,
   activeThreadId,
   onNavigate,
 }: {
   threads: Array<AgentThread>
-  total: number
+  hasMore: boolean
   activeThreadId?: string
   onNavigate?: () => void
 }) {
@@ -263,7 +263,6 @@ function ResolvedThreadGroup({
 
   const ToggleIcon = collapsed ? CaretRightIcon : CaretDownIcon
   const visible = threads.slice(0, RESOLVED_SIDEBAR_LIMIT)
-  const hasMore = total > visible.length
 
   return (
     <div className="mb-3">
@@ -275,7 +274,10 @@ function ResolvedThreadGroup({
       >
         <ToggleIcon className="size-3" />
         <span className="min-w-0 flex-1 truncate">Resolved</span>
-        <span>{total}</span>
+        <span>
+          {threads.length}
+          {hasMore ? "+" : ""}
+        </span>
       </button>
       {!collapsed && (
         <>
