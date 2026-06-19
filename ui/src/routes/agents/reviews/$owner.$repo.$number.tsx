@@ -130,6 +130,48 @@ function buildSelectionAttachments(
   ]
 }
 
+// Scroll a file card / group flush to the top of the diff scroller. Under
+// virtualization, scrollIntoView computes its target against estimated row
+// heights; scrolling past unmeasured files reconciles their real heights
+// mid-animation and the Virtualizer re-pins its scroll anchor, which leaves the
+// target off the top. Once the smooth scroll settles, re-assert alignment (now
+// against measured heights) until the target sits at the top or the budget runs
+// out. Respects the element's scroll-margin-top.
+function scrollCardToTop(el: HTMLElement, scroller: HTMLElement | null): void {
+  el.scrollIntoView({ block: "start", behavior: "smooth" })
+  if (!scroller) return
+  let frames = 0
+  let lastTop = Number.NaN
+  let stableFrames = 0
+  let corrections = 0
+  const align = () => {
+    if (frames++ > 240) return
+    const top = scroller.scrollTop
+    if (top === lastTop) stableFrames++
+    else {
+      stableFrames = 0
+      lastTop = top
+    }
+    // Wait for the smooth scroll + height reconciliation to settle.
+    if (stableFrames < 3) {
+      requestAnimationFrame(align)
+      return
+    }
+    const marginTop = parseFloat(getComputedStyle(el).scrollMarginTop) || 0
+    const delta =
+      el.getBoundingClientRect().top -
+      scroller.getBoundingClientRect().top -
+      marginTop
+    if (Math.abs(delta) > 1 && corrections++ < 5) {
+      el.scrollIntoView({ block: "start", behavior: "smooth" })
+      stableFrames = 0
+      lastTop = Number.NaN
+      requestAnimationFrame(align)
+    }
+  }
+  requestAnimationFrame(align)
+}
+
 interface ResolvedGroup {
   index: number
   title: string
@@ -325,6 +367,7 @@ function ReviewBodyInner({
   const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null)
   const [userSelection, setUserSelection] = useState<UserSelection | null>(null)
   const [diffScrollEl, setDiffScrollEl] = useState<HTMLDivElement | null>(null)
+  const diffScrollElRef = useRef<HTMLDivElement | null>(null)
   const groupRefs = useRef<Record<number, HTMLDivElement | null>>({})
   const [diffStyle, setDiffStyleState] = useState<DiffStyle>(() =>
     readStoredDiffStyle()
@@ -516,19 +559,15 @@ function ReviewBodyInner({
     setSelectedFile(path)
     setExpandedFiles((prev) => ({ ...prev, [path]: true }))
     requestAnimationFrame(() => {
-      fileRefs.current[path]?.scrollIntoView({
-        block: "start",
-        behavior: "smooth",
-      })
+      const el = fileRefs.current[path]
+      if (el) scrollCardToTop(el, diffScrollElRef.current)
     })
   }, [])
 
   const scrollToGroup = useCallback((index: number) => {
     requestAnimationFrame(() => {
-      groupRefs.current[index]?.scrollIntoView({
-        block: "start",
-        behavior: "smooth",
-      })
+      const el = groupRefs.current[index]
+      if (el) scrollCardToTop(el, diffScrollElRef.current)
     })
   }, [])
 
@@ -544,7 +583,9 @@ function ReviewBodyInner({
   // anchored finding card can position against it.
   const scrollerProbe = useCallback((node: HTMLDivElement | null) => {
     const scroller = node?.parentElement?.parentElement
-    setDiffScrollEl(scroller instanceof HTMLDivElement ? scroller : null)
+    const el = scroller instanceof HTMLDivElement ? scroller : null
+    diffScrollElRef.current = el
+    setDiffScrollEl(el)
   }, [])
 
   const registerSection = useCallback(
@@ -1264,15 +1305,20 @@ function FindingRailMarker({
 
 const FINDING_CARD_WIDTH = 412
 const FINDING_CARD_GAP = 12
+// If the room beside the annotation is tighter than this, hold this width and
+// overlay the diff rather than shrinking into an unreadable sliver (e.g. a very
+// narrow side panel, or no panel at all below `xl`).
+const FINDING_CARD_MIN_WIDTH = 320
 
 const FINDING_CARD_CLASS =
-  "flex max-h-[70vh] w-[412px] flex-col overflow-hidden rounded-lg border border-border bg-background shadow-2xl"
+  "flex max-h-[70vh] flex-col overflow-hidden rounded-lg border border-border bg-background shadow-2xl"
 
-// Pinned to the right of the diff column (toward the side panel), vertically
-// aligned with the finding's annotation. The diff scroller is only as wide as
-// <main>, so the card is viewport-fixed (clamped to the window width) to sit in
-// the right gutter rather than overlapping the diff, and tracks the anchor as
-// the diff scrolls (rAF-throttled). Hidden while the anchor is out of view.
+// Anchored just to the right of the finding's annotation, close to the hunk, and
+// extending right over the side panel. Its width fits the room available to the
+// right (capped at the preferred size), so it narrows as the side panel shrinks;
+// when that room gets too tight to read it holds a minimum width and overlays
+// the diff (e.g. below `xl`, with no side panel). Tracks the anchor as the diff
+// scrolls (rAF-throttled); hidden while the anchor is out of view.
 function AnchoredFindingCard({
   detail,
   finding,
@@ -1307,13 +1353,19 @@ function AnchoredFindingCard({
         card.style.visibility = "hidden"
         return
       }
-      const left = Math.max(
-        FINDING_CARD_GAP,
-        Math.min(
-          anchorRect.right + FINDING_CARD_GAP,
-          window.innerWidth - FINDING_CARD_WIDTH - FINDING_CARD_GAP
-        )
-      )
+      // Sit just right of the finding's annotation (close to the hunk). Width
+      // fits the room to its right so the card narrows as the side panel shrinks
+      // instead of overflowing. When that room is too tight to read, hold a
+      // minimum width and shift left over the diff.
+      const rightBound = window.innerWidth - FINDING_CARD_GAP
+      const minLeft = scrollerRect.left + FINDING_CARD_GAP
+      let left = anchorRect.right + FINDING_CARD_GAP
+      let width = Math.min(FINDING_CARD_WIDTH, rightBound - left)
+      if (width < FINDING_CARD_MIN_WIDTH) {
+        width = Math.min(FINDING_CARD_WIDTH, rightBound - minLeft)
+        left = Math.max(minLeft, rightBound - width)
+      }
+      card.style.width = `${width}px`
       const top = Math.max(
         scrollerRect.top + FINDING_CARD_GAP,
         Math.min(

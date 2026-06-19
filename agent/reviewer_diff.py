@@ -197,10 +197,6 @@ def is_range_in_diff(
     return all(line in side_lines for line in range(start_line, end_line + 1))
 
 
-PR_DIFF_MAX_CHARS = 200_000
-PR_DIFF_TRUNCATION_MARKER = "\n... [PR diff truncated: {kept}/{total} chars]\n"
-
-
 async def fetch_pr_diff(
     *,
     owner: str,
@@ -216,8 +212,8 @@ async def fetch_pr_diff(
     source for ``add_finding``'s in-diff anchor validation and for
     ``publish_review``'s 422 retry filter.
 
-    The full diff is returned — callers must use ``truncate_diff`` if they
-    need to cap the text before feeding it to the LLM.
+    The full diff is returned uncapped: the reviewer model has a large context
+    window and reviews the complete diff.
     """
     import httpx
 
@@ -238,19 +234,6 @@ async def fetch_pr_diff(
         logger.exception("Failed to fetch PR diff for %s/%s#%s", owner, repo, pr_number)
         return None
     return response.text
-
-
-def truncate_diff(diff_text: str) -> str:
-    """Truncate diff text to ``PR_DIFF_MAX_CHARS`` with a visible marker.
-
-    Keeps the first half from the beginning and the second half from the end
-    so file headers and recent changes are both visible.
-    """
-    if len(diff_text) <= PR_DIFF_MAX_CHARS:
-        return diff_text
-    half = PR_DIFF_MAX_CHARS // 2
-    marker = PR_DIFF_TRUNCATION_MARKER.format(kept=PR_DIFF_MAX_CHARS, total=len(diff_text))
-    return diff_text[:half] + marker + diff_text[-half:]
 
 
 async def fetch_pr_metadata(
