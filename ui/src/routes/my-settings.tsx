@@ -14,6 +14,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Switch } from "@/components/ui/switch"
 import { api, slackConnectUrl } from "@/lib/api"
 import {
   buildProfileUpdate,
@@ -212,6 +213,29 @@ function MySettingsPage() {
                 </SelectItem>
               </SelectContent>
             </Select>
+          }
+        />
+        <SettingsRow
+          label="Plan mode default"
+          description="When enabled, new agent runs start in plan mode (read-only research and planning before implementation)."
+          control={
+            <Switch
+              checked={profile.data?.plan_mode_default ?? false}
+              onCheckedChange={(checked) => {
+                setError(null)
+                save
+                  .mutateAsync(
+                    buildProfileUpdate(
+                      profile.data,
+                      { plan_mode_default: checked },
+                      fallbackModel,
+                      fallbackEffort
+                    )
+                  )
+                  .catch((e: Error) => setError(e.message))
+              }}
+              disabled={profile.isLoading || save.isPending}
+            />
           }
         />
       </SettingsSection>

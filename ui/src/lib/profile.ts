@@ -73,6 +73,7 @@ export function buildProfileUpdate(
     auto_fix_ci: current?.auto_fix_ci ?? true,
     create_prs: current?.create_prs ?? false,
     review_draft_prs: current?.review_draft_prs ?? null,
+    plan_mode_default: current?.plan_mode_default ?? false,
     ...patch,
   }
 }

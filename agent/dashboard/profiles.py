@@ -43,6 +43,7 @@ class ProfileUpdate(BaseModel):
     auto_fix_ci: bool = True
     create_prs: bool = False
     review_draft_prs: bool | None = None
+    plan_mode_default: bool = False
 
     @field_validator("default_model")
     @classmethod
@@ -115,6 +116,7 @@ async def upsert_profile(login: str, email: str, update: ProfileUpdate) -> dict[
         "auto_fix_ci": update.auto_fix_ci,
         "create_prs": update.create_prs,
         "review_draft_prs": update.review_draft_prs,
+        "plan_mode_default": update.plan_mode_default,
         "updated_at": datetime.now(UTC).isoformat(),
     }
     for stale_field in (

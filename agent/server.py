@@ -35,11 +35,12 @@ from .dashboard.agent_overrides import (
     normalize_profile_overrides,
     normalize_profile_subagent_overrides,
     profile_create_prs,
+    profile_plan_mode_default,
     resolve_github_login,
 )
 from .dashboard.agent_usage import record_agent_thread_usage
 from .dashboard.options import DEFAULT_MODEL_ID, SUPPORTED_MODEL_IDS, model_supports_effort
-from .dashboard.team_settings import get_team_default_model_pair, get_team_default_repo
+from .dashboard.team_settings import get_team_default_model_pair, get_team_default_repo, get_team_settings
 from .integrations.langsmith import _configure_github_proxy
 from .middleware import (
     ExcludeToolsMiddleware,
@@ -56,6 +57,7 @@ from .middleware import (
 )
 from .prompt import construct_system_prompt
 from .tools import (
+    enter_plan_mode,
     fetch_url,
     http_request,
     linear_comment,
@@ -555,6 +557,13 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         logger.info("Configured model fallback %s -> %s", model_id, fallback_model_id)
 
     plan_mode = configurable.get("plan_mode") is True
+    if not plan_mode:
+        if profile and profile_plan_mode_default(profile):
+            plan_mode = True
+        else:
+            team_settings = await get_team_settings()
+            if team_settings.get("plan_mode_default") is True:
+                plan_mode = True
     if plan_mode:
         logger.info("Plan mode enabled for thread %s", thread_id)
     plan_mode_middleware: list[Any] = (
@@ -613,6 +622,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             http_request,
             fetch_url,
             web_search,
+            enter_plan_mode,
             linear_comment,
             linear_create_issue,
             linear_delete_issue,

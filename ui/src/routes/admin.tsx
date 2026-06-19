@@ -14,6 +14,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Switch } from "@/components/ui/switch";
 import { api } from "@/lib/api";
 import { useSession } from "@/lib/session";
 
@@ -261,6 +262,23 @@ function GlobalDefaultsSection({ models }: { models: Array<ModelOption> }) {
             })
           }
           disabled={!settings.data || save.isPending}
+        />
+        <SettingsRow
+          label="Plan mode default"
+          description="When enabled, all new agent runs for the workspace start in plan mode (read-only research and planning before implementation). Users can override this in their profile settings."
+          control={
+            <Switch
+              checked={settings.data?.plan_mode_default ?? false}
+              onCheckedChange={(checked) =>
+                settings.data &&
+                save.mutate({
+                  ...settings.data,
+                  plan_mode_default: checked,
+                })
+              }
+              disabled={!settings.data || save.isPending}
+            />
+          }
         />
       </div>
       {error && <p className="px-4 pb-3 text-xs text-destructive">{error}</p>}

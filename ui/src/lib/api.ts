@@ -84,6 +84,7 @@ export interface Profile {
   auto_fix_ci?: boolean;
   create_prs?: boolean;
   review_draft_prs?: boolean | null;
+  plan_mode_default?: boolean;
   updated_at?: string;
 }
 
@@ -98,6 +99,7 @@ export interface ProfileUpdate {
   auto_fix_ci?: boolean;
   create_prs?: boolean;
   review_draft_prs?: boolean | null;
+  plan_mode_default?: boolean;
 }
 
 export type TriggerMode = "every_push" | "once_per_pr" | "manual";
@@ -120,6 +122,7 @@ export interface TeamSettings {
   default_reviewer_reasoning_effort?: string | null;
   default_reviewer_subagent_model?: string | null;
   default_reviewer_subagent_reasoning_effort?: string | null;
+  plan_mode_default?: boolean;
   updated_at?: string | null;
 }
 

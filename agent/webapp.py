@@ -6,6 +6,7 @@ import hmac
 import json
 import logging
 import os
+import re
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -1030,6 +1031,26 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
         strip_bot_mention(text, bot_user_id, bot_username=SLACK_BOT_USERNAME)
         or "(no text in mention)"
     )
+    plan_cmd = _parse_plan_command(clean_text)
+    if plan_cmd:
+        if plan_cmd == "status":
+            current = await _get_thread_plan_mode(thread_id)
+            status_text = (
+                f"Plan mode is currently *{'ON' if current else 'OFF'}* for this thread."
+                if current is not None
+                else "Plan mode has not been set for this thread (default: OFF)."
+            )
+        else:
+            new_val = plan_cmd == "on"
+            await _set_thread_plan_mode(thread_id, new_val)
+            status_text = f"Plan mode is now *{'ON' if new_val else 'OFF'}* for this thread."
+        await post_slack_thread_reply(
+            channel_id=channel_id,
+            thread_ts=thread_ts,
+            text=status_text,
+        )
+        await set_slack_assistant_status(channel_id, thread_ts, status="")
+        return
     trigger_user = user_name or (f"<@{user_id}>" if user_id else "Unknown user")
 
     # Auto-resolve cross-posted Slack message links in context
@@ -1139,6 +1160,10 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
     }
     if mapped_login:
         configurable["github_login"] = mapped_login
+
+    thread_plan_mode = await _get_thread_plan_mode(thread_id)
+    if thread_plan_mode is not None:
+        configurable["plan_mode"] = thread_plan_mode
 
     langgraph_client = get_client(url=LANGGRAPH_URL)
     is_first_mention = not await _thread_exists(thread_id)
@@ -1532,6 +1557,49 @@ async def slack_interactivity(
         action_value = json.loads(str(action.get("value") or "{}"))
     except json.JSONDecodeError:
         return {"status": "ignored", "reason": "Invalid action value"}
+    if action_value.get("type") == "plan_approval":
+        plan_action = str(action_value.get("action") or "").strip()
+        channel = payload.get("channel") if isinstance(payload.get("channel"), dict) else {}
+        message = payload.get("message") if isinstance(payload.get("message"), dict) else {}
+        container = payload.get("container") if isinstance(payload.get("container"), dict) else {}
+        user = payload.get("user") if isinstance(payload.get("user"), dict) else {}
+        channel_id = str(channel.get("id") or container.get("channel_id") or "")
+        thread_ts = str(
+            message.get("thread_ts") or message.get("ts") or container.get("thread_ts") or ""
+        )
+        user_id = str(user.get("id") or "")
+        if not channel_id or not thread_ts:
+            return {"status": "ignored", "reason": "Missing Slack action context"}
+
+        thread_id = generate_thread_id_from_slack_thread(channel_id, thread_ts)
+
+        if plan_action == "cancel":
+            await post_slack_thread_reply(
+                channel_id=channel_id,
+                thread_ts=thread_ts,
+                text="Plan cancelled. No changes will be made.",
+            )
+            return {"status": "accepted", "message": "Plan cancelled"}
+
+        if plan_action == "approve":
+            await _set_thread_plan_mode(thread_id, False)
+            repo_config = await get_slack_repo_config(channel_id, thread_ts, slack_user_id=user_id)
+            background_tasks.add_task(
+                process_slack_mention,
+                {
+                    "channel_id": channel_id,
+                    "thread_ts": thread_ts,
+                    "event_ts": str(message.get("ts") or ""),
+                    "user_id": user_id,
+                    "text": "Proceed with the approved plan. Implement the changes as described in the plan.",
+                    "bot_user_id": SLACK_BOT_USER_ID,
+                },
+                repo_config,
+            )
+            return {"status": "accepted", "message": "Plan approved, starting implementation"}
+
+        return {"status": "accepted", "message": "Reply to revise the plan"}
+
     if action_value.get("type") != "open_swe_option":
         return {"status": "ignored", "reason": "Unknown action type"}
 
@@ -3102,3 +3170,4 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks) ->
 
     logger.info("Ignoring unsupported GitHub payload shape for event=%s", event_type)
     return {"status": "ignored", "reason": f"Unsupported payload for event type: {event_type}"}
+

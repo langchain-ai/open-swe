@@ -72,6 +72,12 @@ You are currently executing a software engineering task. You have access to:
 - Project-specific rules and conventions from the repository's `AGENTS.md` file (read after cloning — see Repository Setup)"""
 
 
+PLAN_MODE_GUIDANCE_SECTION = """---
+
+### Plan Mode
+
+If you believe the task would benefit from a structured implementation plan before writing any code — e.g. when the request is complex, touches many files, or has multiple valid approaches — call the `enter_plan_mode` tool. This is NOT triggered by the word "plan" appearing in the request; use your judgment about whether planning is genuinely warranted. Once plan mode is active, you will be restricted to read-only tools and should present a plan as your final message."""
+
 PLAN_MODE_SECTION = """---
 
 ### Plan Mode (ACTIVE)
@@ -454,6 +460,7 @@ The user's dashboard setting **Always Create PRs** is enabled. For code-change t
 SYSTEM_PROMPT_TEMPLATE = (
     WORKING_ENV_SECTION
     + TASK_OVERVIEW_SECTION
+    + PLAN_MODE_GUIDANCE_SECTION
     + "{plan_mode_section}"
     + SELF_AWARENESS_SECTION
     + "{default_prompt_section}"

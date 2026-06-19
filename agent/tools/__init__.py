@@ -1,4 +1,5 @@
 from .add_finding import add_finding
+from .enter_plan_mode import enter_plan_mode
 from .fetch_url import fetch_url
 from .http_request import http_request
 from .linear_comment import linear_comment
@@ -21,6 +22,7 @@ from .web_search import web_search
 
 __all__ = [
     "add_finding",
+    "enter_plan_mode",
     "fetch_url",
     "http_request",
     "linear_comment",
