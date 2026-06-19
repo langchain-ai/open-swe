@@ -64,7 +64,8 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y "nodejs=${NODEJS_VERSION}" \
     && rm -rf /var/lib/apt/lists/* \
     && corepack enable \
-    && corepack prepare "yarn@${YARN_VERSION}" --activate
+    && corepack prepare "yarn@${YARN_VERSION}" --activate \
+    && npm i -g sfw
 
 ENV GO_VERSION=1.23.5
 
@@ -81,6 +82,7 @@ RUN echo "=== Installed versions ===" \
     && uv --version \
     && node --version \
     && yarn --version \
+    && sfw --version \
     && go version \
     && docker --version \
     && git --version \

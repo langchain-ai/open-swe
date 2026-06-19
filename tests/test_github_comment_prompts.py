@@ -49,7 +49,10 @@ def test_construct_system_prompt_includes_socket_firewall_dependency_guidance() 
     assert "npm i -g sfw" in prompt
     assert "sfw npm ci" in prompt
     assert "sfw uv pip install -e ." in prompt
-    assert "Do not run bare install commands" in prompt
+    assert "sfw cargo fetch" in prompt
+    assert "unsupported package managers such as Poetry" in prompt
+    assert "normal documented install command without `sfw`" in prompt
+    assert "sfw poetry" not in prompt
 
 
 def test_construct_system_prompt_identifies_own_repo() -> None:
