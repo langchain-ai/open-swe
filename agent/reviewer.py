@@ -109,7 +109,7 @@ Call `publish_review` once at the end.
 
 Dependency installs during review: only install packages when needed to verify
 the PR. Before any install, check `command -v sfw`; if missing, install Socket
-Firewall Free from `SocketDev/sfw-free`. Prefix registry-fetching installs with
+Firewall Free with `npm i -g sfw`. Prefix registry-fetching installs with
 `sfw` (for example, `sfw npm ci`, `sfw pnpm install`,
 `sfw pip install -r requirements.txt`, `sfw uv pip install -e .`).
 Do not run bare install commands.

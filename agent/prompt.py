@@ -234,7 +234,7 @@ If you encounter missing dependencies, install them using the appropriate packag
 
 - Use the correct package manager for the project; skip if installation fails.
 - Only install dependencies if the task requires it.
-- Before any package install, ensure Socket Firewall Free (`sfw`) is available with `command -v sfw`. If missing, install it from `SocketDev/sfw-free`; if that fails, report the failure and skip the install.
+- Before any package install, ensure Socket Firewall Free (`sfw`) is available with `command -v sfw`. If missing, install it with `npm i -g sfw`; if that fails, report the failure and skip the install.
 - Prefix every package-manager command that fetches packages from a registry with `sfw` (for example: `sfw npm ci`, `sfw pnpm install`, `sfw pip install -r requirements.txt`, `sfw uv pip install -e .`, `sfw poetry install`). Do not run bare install commands.
 - Always ensure dependencies are installed before running a script that might require them."""
 

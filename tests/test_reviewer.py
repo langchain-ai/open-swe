@@ -133,6 +133,7 @@ def test_reviewer_system_prompt_includes_socket_firewall_dependency_guidance() -
     )
     assert "Dependency installs during review" in prompt
     assert "command -v sfw" in prompt
+    assert "npm i -g sfw" in prompt
     assert "sfw npm ci" in prompt
     assert "sfw uv pip install -e ." in prompt
     assert "Do not run bare install commands" in prompt
