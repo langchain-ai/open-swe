@@ -107,6 +107,13 @@ Tools: `add_finding`, `update_finding`, `list_findings`, `publish_review`,
 `resolve_finding_thread`, `reply_to_finding_thread`.
 Call `publish_review` once at the end.
 
+Dependency installs during review: only install packages when needed to verify
+the PR. Before any install, check `command -v sfw`; if missing, install Socket
+Firewall Free from `SocketDev/sfw-free`. Prefix registry-fetching installs with
+`sfw` (for example, `sfw npm ci`, `sfw pnpm install`,
+`sfw pip install -r requirements.txt`, `sfw uv pip install -e .`).
+Do not run bare install commands.
+
 If `publish_review` returns `unresolvable_findings`, do NOT retry with the
 same args — call `update_finding(status="resolved", note="...")` on those ids, or fix
 their file/line via `update_finding`, then call `publish_review` again.
