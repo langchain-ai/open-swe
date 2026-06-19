@@ -1305,20 +1305,16 @@ function FindingRailMarker({
 
 const FINDING_CARD_WIDTH = 412
 const FINDING_CARD_GAP = 12
-// Below this much room beside the diff content, there's no usable gutter (e.g.
-// under `xl`, where the side panel is hidden and the diff fills the viewport),
-// so the card overlays the diff instead of collapsing to a sliver.
-const FINDING_CARD_MIN_WIDTH = 320
 
 const FINDING_CARD_CLASS =
   "flex max-h-[70vh] flex-col overflow-hidden rounded-lg border border-border bg-background shadow-2xl"
 
-// Positioned over the side panel, flush against the diff content's right edge
-// and vertically aligned with the finding's annotation, so it doesn't overlap
-// the diff. Width caps at the preferred size but shrinks to fit a narrow panel.
-// When there's no room beside the diff (no side panel, e.g. below `xl`), it
-// overlays the diff flush-right rather than collapsing. Tracks the anchor as the
-// diff scrolls (rAF-throttled); hidden while the anchor is out of view.
+// Anchored just to the right of the finding's annotation, close to the hunk, and
+// extending right over the side panel. Width caps at the preferred size,
+// shrinking only on a viewport narrower than that, and the position is clamped
+// so the whole card stays on-screen (below `xl` there's no side panel, so it
+// overlays the diff). Tracks the anchor as the diff scrolls (rAF-throttled);
+// hidden while the anchor is out of view.
 function AnchoredFindingCard({
   detail,
   finding,
@@ -1353,28 +1349,20 @@ function AnchoredFindingCard({
         card.style.visibility = "hidden"
         return
       }
-      // Prefer sitting flush against the diff content's right edge (the centered
-      // content box, not the wider scroller, so there's no centering-whitespace
-      // gap), extending right over the side panel. When there's no room beside
-      // the diff (e.g. under `xl`, side panel hidden, diff fills the viewport),
-      // overlay the diff flush-right instead of collapsing to a sliver.
-      const contentRect = (
-        scroller.firstElementChild ?? scroller
-      ).getBoundingClientRect()
+      // Sit just right of the finding's annotation (close to the hunk) and
+      // extend right over the side panel; clamp so the whole card stays
+      // on-screen. Width caps at the preferred size, shrinking only when the
+      // viewport itself is narrower.
       const rightBound = window.innerWidth - FINDING_CARD_GAP
-      const gutter = rightBound - contentRect.right
-      let left: number
-      let width: number
-      if (gutter >= FINDING_CARD_MIN_WIDTH) {
-        left = contentRect.right
-        width = Math.min(FINDING_CARD_WIDTH, gutter)
-      } else {
-        width = Math.min(
-          FINDING_CARD_WIDTH,
-          rightBound - scrollerRect.left - FINDING_CARD_GAP
-        )
-        left = rightBound - width
-      }
+      const minLeft = scrollerRect.left + FINDING_CARD_GAP
+      const width = Math.max(
+        0,
+        Math.min(FINDING_CARD_WIDTH, rightBound - minLeft)
+      )
+      const left = Math.max(
+        minLeft,
+        Math.min(anchorRect.right + FINDING_CARD_GAP, rightBound - width)
+      )
       card.style.width = `${width}px`
       const top = Math.max(
         scrollerRect.top + FINDING_CARD_GAP,
