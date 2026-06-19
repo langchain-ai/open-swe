@@ -130,6 +130,48 @@ function buildSelectionAttachments(
   ]
 }
 
+// Scroll a file card / group flush to the top of the diff scroller. Under
+// virtualization, scrollIntoView computes its target against estimated row
+// heights; scrolling past unmeasured files reconciles their real heights
+// mid-animation and the Virtualizer re-pins its scroll anchor, which leaves the
+// target off the top. Once the smooth scroll settles, re-assert alignment (now
+// against measured heights) until the target sits at the top or the budget runs
+// out. Respects the element's scroll-margin-top.
+function scrollCardToTop(el: HTMLElement, scroller: HTMLElement | null): void {
+  el.scrollIntoView({ block: "start", behavior: "smooth" })
+  if (!scroller) return
+  let frames = 0
+  let lastTop = Number.NaN
+  let stableFrames = 0
+  let corrections = 0
+  const align = () => {
+    if (frames++ > 240) return
+    const top = scroller.scrollTop
+    if (top === lastTop) stableFrames++
+    else {
+      stableFrames = 0
+      lastTop = top
+    }
+    // Wait for the smooth scroll + height reconciliation to settle.
+    if (stableFrames < 3) {
+      requestAnimationFrame(align)
+      return
+    }
+    const marginTop = parseFloat(getComputedStyle(el).scrollMarginTop) || 0
+    const delta =
+      el.getBoundingClientRect().top -
+      scroller.getBoundingClientRect().top -
+      marginTop
+    if (Math.abs(delta) > 1 && corrections++ < 5) {
+      el.scrollIntoView({ block: "start", behavior: "smooth" })
+      stableFrames = 0
+      lastTop = Number.NaN
+      requestAnimationFrame(align)
+    }
+  }
+  requestAnimationFrame(align)
+}
+
 interface ResolvedGroup {
   index: number
   title: string
@@ -325,6 +367,7 @@ function ReviewBodyInner({
   const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null)
   const [userSelection, setUserSelection] = useState<UserSelection | null>(null)
   const [diffScrollEl, setDiffScrollEl] = useState<HTMLDivElement | null>(null)
+  const diffScrollElRef = useRef<HTMLDivElement | null>(null)
   const groupRefs = useRef<Record<number, HTMLDivElement | null>>({})
   const [diffStyle, setDiffStyleState] = useState<DiffStyle>(() =>
     readStoredDiffStyle()
@@ -516,19 +559,15 @@ function ReviewBodyInner({
     setSelectedFile(path)
     setExpandedFiles((prev) => ({ ...prev, [path]: true }))
     requestAnimationFrame(() => {
-      fileRefs.current[path]?.scrollIntoView({
-        block: "start",
-        behavior: "smooth",
-      })
+      const el = fileRefs.current[path]
+      if (el) scrollCardToTop(el, diffScrollElRef.current)
     })
   }, [])
 
   const scrollToGroup = useCallback((index: number) => {
     requestAnimationFrame(() => {
-      groupRefs.current[index]?.scrollIntoView({
-        block: "start",
-        behavior: "smooth",
-      })
+      const el = groupRefs.current[index]
+      if (el) scrollCardToTop(el, diffScrollElRef.current)
     })
   }, [])
 
@@ -544,7 +583,9 @@ function ReviewBodyInner({
   // anchored finding card can position against it.
   const scrollerProbe = useCallback((node: HTMLDivElement | null) => {
     const scroller = node?.parentElement?.parentElement
-    setDiffScrollEl(scroller instanceof HTMLDivElement ? scroller : null)
+    const el = scroller instanceof HTMLDivElement ? scroller : null
+    diffScrollElRef.current = el
+    setDiffScrollEl(el)
   }, [])
 
   const registerSection = useCallback(

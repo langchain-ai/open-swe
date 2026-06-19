@@ -579,7 +579,7 @@ function ChatBody({
               }}
               placeholder="Ask anything about this PR…"
               rows={1}
-              className="max-h-40 min-h-7 flex-1 resize-none rounded-none border-0 bg-transparent px-0 py-1 shadow-none focus-visible:border-transparent focus-visible:ring-0"
+              className="max-h-40 min-h-7 flex-1 resize-none rounded-none border-0 bg-transparent px-0 py-1 shadow-none focus-visible:border-transparent focus-visible:ring-0 dark:bg-transparent"
             />
             <IconButton
               type="button"
