@@ -109,10 +109,11 @@ Call `publish_review` once at the end.
 
 Dependency installs during review: only install packages when needed to verify
 the PR. Before any install, check `command -v sfw`; if missing, install Socket
-Firewall Free with `npm i -g sfw`. Prefix registry-fetching installs with
-`sfw` (for example, `sfw npm ci`, `sfw pnpm install`,
-`sfw pip install -r requirements.txt`, `sfw uv pip install -e .`).
-Do not run bare install commands.
+Firewall Free with `npm i -g sfw`. Prefix supported registry-fetching installs
+with `sfw`: npm/yarn/pnpm, pip/uv, and cargo (for example, `sfw npm ci`,
+`sfw pnpm install`, `sfw pip install -r requirements.txt`,
+`sfw uv pip install -e .`). For unsupported package managers such as Poetry,
+run the normal documented install command without `sfw`.
 
 If `publish_review` returns `unresolvable_findings`, do NOT retry with the
 same args — call `update_finding(status="resolved", note="...")` on those ids, or fix
