@@ -136,7 +136,23 @@ def test_reviewer_system_prompt_includes_socket_firewall_dependency_guidance() -
     assert "npm i -g sfw" in prompt
     assert "sfw npm ci" in prompt
     assert "sfw uv pip install -e ." in prompt
-    assert "Do not run bare install commands" in prompt
+    assert "supported registry-fetching installs" in prompt
+    assert "unsupported package managers such as Poetry" in prompt
+    assert "normal documented install command without `sfw`" in prompt
+    assert "sfw poetry" not in prompt
+
+
+def test_reviewer_system_prompt_includes_dependency_vetting_guidance() -> None:
+    prompt = reviewer._reviewer_system_prompt(
+        "/workspace/repo",
+        repo_owner="acme",
+        repo_name="repo",
+        pr_number=42,
+    )
+    assert "New dependencies." in prompt
+    assert "unpinned/floating" in prompt
+    assert "missing/non-permissive license" in prompt
+    assert "not a style nit" in prompt
 
 
 def test_finding_reply_context_wraps_reply_as_untrusted_data() -> None:

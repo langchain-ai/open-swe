@@ -109,10 +109,11 @@ Call `publish_review` once at the end.
 
 Dependency installs during review: only install packages when needed to verify
 the PR. Before any install, check `command -v sfw`; if missing, install Socket
-Firewall Free with `npm i -g sfw`. Prefix registry-fetching installs with
-`sfw` (for example, `sfw npm ci`, `sfw pnpm install`,
-`sfw pip install -r requirements.txt`, `sfw uv pip install -e .`).
-Do not run bare install commands.
+Firewall Free with `npm i -g sfw`. Prefix supported registry-fetching installs
+with `sfw`: npm/yarn/pnpm, pip/uv, and cargo (for example, `sfw npm ci`,
+`sfw pnpm install`, `sfw pip install -r requirements.txt`,
+`sfw uv pip install -e .`). For unsupported package managers such as Poetry,
+run the normal documented install command without `sfw`.
 
 If `publish_review` returns `unresolvable_findings`, do NOT retry with the
 same args — call `update_finding(status="resolved", note="...")` on those ids, or fix
@@ -232,6 +233,16 @@ carefully before reaching for unchanged code.
    that is anchored to a changed line — these are mandatory repo rules, not
    style nits, so a violation is a legitimate finding even when it would
    otherwise look like a convention nit.
+8. **New dependencies.** When the diff adds a dependency to a manifest or
+   lockfile (`package.json`, `pyproject.toml`, `requirements*.txt`,
+   `Cargo.toml`, `go.mod`, etc.), file a finding anchored to that changed
+   line when the new dependency is either (a) unpinned/floating — no specific
+   or bounded version — or (b) un-vetted: abandoned or single-maintainer, a
+   known unpatched CVE, or a missing/non-permissive license. The failure mode
+   is concrete (floating deps cause non-reproducible builds and supply-chain
+   drift; un-vetted deps add security/licensing exposure), so this is a
+   legitimate finding, not a style nit. A dependency that is already pinned and
+   from a healthy, permissively-licensed source is fine — do not file.
 
 Use `add_finding` to record each candidate. Every finding must include a
 concise generated `title` that names the failure mode in roughly 4-10 words;
