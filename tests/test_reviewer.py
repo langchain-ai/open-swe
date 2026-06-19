@@ -124,6 +124,21 @@ def test_reviewer_system_prompt_omits_api_standards_when_absent() -> None:
     assert "API standards skill" not in prompt
 
 
+def test_reviewer_system_prompt_includes_socket_firewall_dependency_guidance() -> None:
+    prompt = reviewer._reviewer_system_prompt(
+        "/workspace/repo",
+        repo_owner="acme",
+        repo_name="repo",
+        pr_number=42,
+    )
+    assert "Dependency installs during review" in prompt
+    assert "command -v sfw" in prompt
+    assert "npm i -g sfw" in prompt
+    assert "sfw npm ci" in prompt
+    assert "sfw uv pip install -e ." in prompt
+    assert "Do not run bare install commands" in prompt
+
+
 def test_finding_reply_context_wraps_reply_as_untrusted_data() -> None:
     prompt = reviewer._build_finding_reply_context(
         pr_url="https://github.com/acme/repo/pull/1",
