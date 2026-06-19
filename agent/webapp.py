@@ -683,6 +683,60 @@ async def _ensure_thread_exists_for_metadata(
         return False
 
 
+_PLAN_COMMAND_RE = re.compile(r"\bplan\s+(on|off|status)\b", re.IGNORECASE)
+
+
+def _parse_plan_command(text: str) -> str | None:
+    """Detect a Slack ``plan on|off|status`` command in free-form text.
+
+    Returns ``"on"``, ``"off"`` or ``"status"`` when the command is present,
+    otherwise ``None``. The match is case-insensitive and allows surrounding
+    prose (e.g. ``@bot plan on please``).
+    """
+    match = _PLAN_COMMAND_RE.search(text)
+    if not match:
+        return None
+    return match.group(1).lower()
+
+
+async def _get_thread_plan_mode(thread_id: str) -> bool | None:
+    """Return the persisted plan-mode flag for a thread, or ``None`` if unset."""
+    langgraph_client = get_client(url=LANGGRAPH_URL)
+    try:
+        thread = await langgraph_client.threads.get(thread_id)
+    except Exception as exc:  # noqa: BLE001
+        if _is_not_found_error(exc):
+            return None
+        logger.warning("Failed to fetch plan-mode metadata for thread %s", thread_id)
+        return None
+    metadata = thread.get("metadata") if isinstance(thread, dict) else None
+    if not isinstance(metadata, dict):
+        return None
+    value = metadata.get("plan_mode")
+    return value if isinstance(value, bool) else None
+
+
+async def _set_thread_plan_mode(thread_id: str, enabled: bool) -> None:
+    """Persist the plan-mode flag onto thread metadata."""
+    langgraph_client = get_client(url=LANGGRAPH_URL)
+    try:
+        await langgraph_client.threads.update(
+            thread_id=thread_id, metadata={"plan_mode": bool(enabled)}
+        )
+    except Exception as exc:  # noqa: BLE001
+        if _is_not_found_error(exc):
+            try:
+                await langgraph_client.threads.create(
+                    thread_id=thread_id,
+                    if_exists="do_nothing",
+                    metadata={"plan_mode": bool(enabled)},
+                )
+            except Exception:  # noqa: BLE001
+                logger.exception("Failed to create thread %s while persisting plan_mode", thread_id)
+            return
+        logger.exception("Failed to persist plan_mode for thread %s", thread_id)
+
+
 async def process_linear_issue(  # noqa: PLR0912, PLR0915
     issue_data: dict[str, Any], repo_config: dict[str, str]
 ) -> None:
@@ -3170,4 +3224,3 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks) ->
 
     logger.info("Ignoring unsupported GitHub payload shape for event=%s", event_type)
     return {"status": "ignored", "reason": f"Unsupported payload for event type: {event_type}"}
-

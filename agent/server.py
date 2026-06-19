@@ -40,7 +40,11 @@ from .dashboard.agent_overrides import (
 )
 from .dashboard.agent_usage import record_agent_thread_usage
 from .dashboard.options import DEFAULT_MODEL_ID, SUPPORTED_MODEL_IDS, model_supports_effort
-from .dashboard.team_settings import get_team_default_model_pair, get_team_default_repo, get_team_settings
+from .dashboard.team_settings import (
+    get_team_default_model_pair,
+    get_team_default_repo,
+    get_team_settings,
+)
 from .integrations.langsmith import _configure_github_proxy
 from .middleware import (
     ExcludeToolsMiddleware,

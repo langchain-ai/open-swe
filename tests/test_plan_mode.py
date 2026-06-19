@@ -200,6 +200,128 @@ def test_shell_guard_blocks_mutations(command: str) -> None:
         assert_read_only(command)
 
 
+def test_plan_mode_guidance_section_always_present() -> None:
+    """The guidance section telling the agent about enter_plan_mode should be in every prompt."""
+    prompt = construct_system_prompt(working_dir="/work", plan_mode=False)
+    assert "enter_plan_mode" in prompt
+    assert "Plan Mode" in prompt
+
+
+def test_plan_mode_guidance_section_present_when_enabled() -> None:
+    prompt = construct_system_prompt(working_dir="/work", plan_mode=True)
+    assert "enter_plan_mode" in prompt
+    assert "Plan Mode (ACTIVE)" in prompt
+
+
+def test_enter_plan_mode_tool_returns_command() -> None:
+    from langgraph.types import Command
+
+    from agent.tools.enter_plan_mode import enter_plan_mode
+
+    result = enter_plan_mode()
+    assert isinstance(result, Command)
+    assert result.update == {"plan_mode": True}
+
+
+def test_enter_plan_mode_exported() -> None:
+    from agent.tools import enter_plan_mode
+
+    assert callable(enter_plan_mode)
+
+
+def test_profile_plan_mode_default_false_when_missing() -> None:
+    from agent.dashboard.agent_overrides import profile_plan_mode_default
+
+    assert profile_plan_mode_default(None) is False
+    assert profile_plan_mode_default({}) is False
+    assert profile_plan_mode_default({"plan_mode_default": False}) is False
+
+
+def test_profile_plan_mode_default_true_when_set() -> None:
+    from agent.dashboard.agent_overrides import profile_plan_mode_default
+
+    assert profile_plan_mode_default({"plan_mode_default": True}) is True
+
+
+def test_profile_update_has_plan_mode_default() -> None:
+    from agent.dashboard.profiles import ProfileUpdate
+
+    update = ProfileUpdate(default_model="anthropic:claude-opus-4-8", reasoning_effort="high")
+    assert update.plan_mode_default is False
+
+
+def test_team_settings_update_has_plan_mode_default() -> None:
+    from agent.dashboard.team_settings import TeamSettingsUpdate
+
+    update = TeamSettingsUpdate()
+    assert update.plan_mode_default is False
+
+
+def test_team_default_settings_includes_plan_mode_default() -> None:
+    from agent.dashboard.team_settings import _default_settings
+
+    defaults = _default_settings()
+    assert "plan_mode_default" in defaults
+    assert defaults["plan_mode_default"] is False
+
+
+def test_parse_plan_command_on() -> None:
+    from agent.webapp import _parse_plan_command
+
+    assert _parse_plan_command("plan on") == "on"
+    assert _parse_plan_command("@bot plan on please") == "on"
+    assert _parse_plan_command("PLAN ON") == "on"
+
+
+def test_parse_plan_command_off() -> None:
+    from agent.webapp import _parse_plan_command
+
+    assert _parse_plan_command("plan off") == "off"
+    assert _parse_plan_command("hey plan off now") == "off"
+
+
+def test_parse_plan_command_status() -> None:
+    from agent.webapp import _parse_plan_command
+
+    assert _parse_plan_command("plan status") == "status"
+
+
+def test_parse_plan_command_none_when_no_match() -> None:
+    from agent.webapp import _parse_plan_command
+
+    assert _parse_plan_command("build me a cli with a plan subcommand") is None
+    assert _parse_plan_command("hello world") is None
+    assert _parse_plan_command("") is None
+
+
+def test_build_plan_approval_blocks_has_three_buttons() -> None:
+    from agent.tools.slack_thread_reply import _build_plan_approval_blocks
+
+    blocks = _build_plan_approval_blocks("Here is my plan")
+    assert len(blocks) == 2
+    assert blocks[0]["type"] == "section"
+    actions = blocks[1]
+    assert actions["type"] == "actions"
+    elements = actions["elements"]
+    assert len(elements) == 3
+    texts = [e["text"]["text"] for e in elements]
+    assert "Approve & Implement" in texts
+    assert "Revise Plan" in texts
+    assert "Cancel" in texts
+
+
+def test_build_plan_approval_blocks_values_have_plan_approval_type() -> None:
+    import json
+
+    from agent.tools.slack_thread_reply import _build_plan_approval_blocks
+
+    blocks = _build_plan_approval_blocks("plan text")
+    for element in blocks[1]["elements"]:
+        value = json.loads(element["value"])
+        assert value["type"] == "plan_approval"
+        assert value["action"] in ("approve", "revise", "cancel")
+
+
 def _make_request(name: str, command: str | None) -> Any:
     args = {} if command is None else {"command": command}
     tool_call = {"name": name, "args": args, "id": "call-1"}
