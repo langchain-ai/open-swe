@@ -1309,12 +1309,11 @@ const FINDING_CARD_GAP = 12
 const FINDING_CARD_CLASS =
   "flex max-h-[70vh] flex-col overflow-hidden rounded-lg border border-border bg-background shadow-2xl"
 
-// Pinned flush to the right edge of the diff column (the gutter between the diff
-// and the side panel), vertically aligned with the finding's annotation. Width
-// is clamped to the diff column so the card never overlaps the side panel,
-// shrinking below its preferred width when the column is too narrow. Tracks the
-// anchor as the diff scrolls (rAF-throttled); hidden while the anchor is out of
-// view.
+// Positioned over the side panel, flush against the diff column's right edge and
+// vertically aligned with the finding's annotation, so it never overlaps the
+// diff. Width caps at the preferred size but shrinks to fit a narrow side panel.
+// Tracks the anchor as the diff scrolls (rAF-throttled); hidden while the anchor
+// is out of view.
 function AnchoredFindingCard({
   detail,
   finding,
@@ -1349,13 +1348,12 @@ function AnchoredFindingCard({
         card.style.visibility = "hidden"
         return
       }
-      // Pin flush to the diff column's right edge (not the viewport), so the
-      // card sits in the diff gutter and never overlaps the side panel; shrink
-      // below the preferred width when the column is narrower than the card.
-      const rightEdge = scrollerRect.right - FINDING_CARD_GAP
-      const minLeft = scrollerRect.left + FINDING_CARD_GAP
-      const width = Math.max(0, Math.min(FINDING_CARD_WIDTH, rightEdge - minLeft))
-      const left = rightEdge - width
+      // Sit over the side panel, flush against the diff column's right edge, so
+      // the card never overlaps the diff. Cap at the preferred width but shrink
+      // to fit when the side panel is narrower than the card.
+      const left = scrollerRect.right
+      const rightBound = window.innerWidth - FINDING_CARD_GAP
+      const width = Math.max(0, Math.min(FINDING_CARD_WIDTH, rightBound - left))
       card.style.width = `${width}px`
       const top = Math.max(
         scrollerRect.top + FINDING_CARD_GAP,
