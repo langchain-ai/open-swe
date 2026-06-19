@@ -55,6 +55,16 @@ def test_construct_system_prompt_includes_socket_firewall_dependency_guidance() 
     assert "sfw poetry" not in prompt
 
 
+def test_construct_system_prompt_includes_dependency_vetting_guidance() -> None:
+    prompt = construct_system_prompt(working_dir="/workspace")
+
+    assert "Vet any genuinely new package before adding it" in prompt
+    assert "standard library or a package already in the project's manifest/lockfile" in prompt
+    assert "permissive license" in prompt
+    assert "never add a floating or unpinned dependency" in prompt
+    assert "call out every dependency you add in the PR description" in prompt
+
+
 def test_construct_system_prompt_identifies_own_repo() -> None:
     prompt = construct_system_prompt(working_dir="/workspace")
 

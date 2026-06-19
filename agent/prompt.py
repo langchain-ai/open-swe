@@ -244,6 +244,10 @@ If you encounter missing dependencies, install them using the appropriate packag
 
 - Use the correct package manager for the project; skip if installation fails.
 - Only install dependencies if the task requires it.
+- Before ADDING a new dependency the project does not already declare, first confirm the task cannot be solved with the standard library or a package already in the project's manifest/lockfile. Prefer reusing what is already there.
+- Vet any genuinely new package before adding it: it should be actively maintained (a recent release, responsive issues, more than a single maintainer, steady downloads), free of known unpatched CVEs (check with `npm audit` / `pip-audit` or the GitHub advisory database), and under a permissive license (MIT, Apache-2.0, BSD). Do not add abandoned, single-source, or unlicensed packages.
+- Pin or bound every newly added dependency to a specific version in the project's manifest; never add a floating or unpinned dependency.
+- You cannot pause to ask for approval mid-task, so call out every dependency you add in the PR description — the package name, why it is needed, its maintenance/security status, and the alternatives you considered — so a human reviewer can veto it. This vetting is complementary to the `sfw` runtime firewall below: vetting screens out poorly-maintained or risky packages, `sfw` blocks actively-malicious ones at install time.
 - Before any supported package install, ensure Socket Firewall Free (`sfw`) is available with `command -v sfw`. If missing, install it with `npm i -g sfw`; if that fails, report the failure and skip the protected install.
 - Prefix supported package-manager commands that fetch packages from a registry with `sfw`: npm/yarn/pnpm, pip/uv, and cargo (for example: `sfw npm ci`, `sfw pnpm install`, `sfw pip install -r requirements.txt`, `sfw uv pip install -e .`, `sfw cargo fetch`). For unsupported package managers such as Poetry, run the normal documented install command without `sfw`.
 - Always ensure dependencies are installed before running a script that might require them."""
