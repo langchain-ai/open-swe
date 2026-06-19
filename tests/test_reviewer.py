@@ -142,6 +142,19 @@ def test_reviewer_system_prompt_includes_socket_firewall_dependency_guidance() -
     assert "sfw poetry" not in prompt
 
 
+def test_reviewer_system_prompt_includes_dependency_vetting_guidance() -> None:
+    prompt = reviewer._reviewer_system_prompt(
+        "/workspace/repo",
+        repo_owner="acme",
+        repo_name="repo",
+        pr_number=42,
+    )
+    assert "New dependencies." in prompt
+    assert "unpinned/floating" in prompt
+    assert "missing/non-permissive license" in prompt
+    assert "not a style nit" in prompt
+
+
 def test_finding_reply_context_wraps_reply_as_untrusted_data() -> None:
     prompt = reviewer._build_finding_reply_context(
         pr_url="https://github.com/acme/repo/pull/1",
