@@ -1305,16 +1305,20 @@ function FindingRailMarker({
 
 const FINDING_CARD_WIDTH = 412
 const FINDING_CARD_GAP = 12
+// If the room beside the annotation is tighter than this, hold this width and
+// overlay the diff rather than shrinking into an unreadable sliver (e.g. a very
+// narrow side panel, or no panel at all below `xl`).
+const FINDING_CARD_MIN_WIDTH = 320
 
 const FINDING_CARD_CLASS =
   "flex max-h-[70vh] flex-col overflow-hidden rounded-lg border border-border bg-background shadow-2xl"
 
 // Anchored just to the right of the finding's annotation, close to the hunk, and
-// extending right over the side panel. Width caps at the preferred size,
-// shrinking only on a viewport narrower than that, and the position is clamped
-// so the whole card stays on-screen (below `xl` there's no side panel, so it
-// overlays the diff). Tracks the anchor as the diff scrolls (rAF-throttled);
-// hidden while the anchor is out of view.
+// extending right over the side panel. Its width fits the room available to the
+// right (capped at the preferred size), so it narrows as the side panel shrinks;
+// when that room gets too tight to read it holds a minimum width and overlays
+// the diff (e.g. below `xl`, with no side panel). Tracks the anchor as the diff
+// scrolls (rAF-throttled); hidden while the anchor is out of view.
 function AnchoredFindingCard({
   detail,
   finding,
@@ -1349,20 +1353,18 @@ function AnchoredFindingCard({
         card.style.visibility = "hidden"
         return
       }
-      // Sit just right of the finding's annotation (close to the hunk) and
-      // extend right over the side panel; clamp so the whole card stays
-      // on-screen. Width caps at the preferred size, shrinking only when the
-      // viewport itself is narrower.
+      // Sit just right of the finding's annotation (close to the hunk). Width
+      // fits the room to its right so the card narrows as the side panel shrinks
+      // instead of overflowing. When that room is too tight to read, hold a
+      // minimum width and shift left over the diff.
       const rightBound = window.innerWidth - FINDING_CARD_GAP
       const minLeft = scrollerRect.left + FINDING_CARD_GAP
-      const width = Math.max(
-        0,
-        Math.min(FINDING_CARD_WIDTH, rightBound - minLeft)
-      )
-      const left = Math.max(
-        minLeft,
-        Math.min(anchorRect.right + FINDING_CARD_GAP, rightBound - width)
-      )
+      let left = anchorRect.right + FINDING_CARD_GAP
+      let width = Math.min(FINDING_CARD_WIDTH, rightBound - left)
+      if (width < FINDING_CARD_MIN_WIDTH) {
+        width = Math.min(FINDING_CARD_WIDTH, rightBound - minLeft)
+        left = Math.max(minLeft, rightBound - width)
+      }
       card.style.width = `${width}px`
       const top = Math.max(
         scrollerRect.top + FINDING_CARD_GAP,
