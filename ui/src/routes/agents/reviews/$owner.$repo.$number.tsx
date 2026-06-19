@@ -4,7 +4,6 @@ import {
   memo,
   useCallback,
   useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -172,6 +171,72 @@ function scrollCardToTop(el: HTMLElement, scroller: HTMLElement | null): void {
   requestAnimationFrame(align)
 }
 
+// Scroll a finding's line into the diff viewport and center it. The finding's
+// inline card only renders (slots into its row) while its line is inside the
+// virtualizer's window, so its element has a real box only then. A line that's
+// already on screen is detected within a couple of frames; otherwise jump to the
+// line's estimated offset and step through the file's scroll windows (wrapping to
+// the top, since heights reconcile as rows mount) until the card slots in. Gives
+// up after the frame budget.
+function scrollFindingIntoView(
+  section: HTMLElement,
+  scroller: HTMLElement,
+  lineFraction: number,
+  getCard: () => HTMLElement | null | undefined
+): void {
+  const sectionTop = () =>
+    scroller.scrollTop +
+    section.getBoundingClientRect().top -
+    scroller.getBoundingClientRect().top
+  let frames = 0
+  let started = false
+  let settle = 0
+  let lastTop = Number.NaN
+  const step = () => {
+    const top = scroller.scrollTop
+    if (top === lastTop) settle++
+    else {
+      settle = 0
+      lastTop = top
+    }
+    // Let the freshly scrolled window render before deciding to step on.
+    if (settle < 2) return
+    const sTop = sectionTop()
+    const maxTop = Math.max(sTop, sTop + section.offsetHeight - scroller.clientHeight)
+    let next = top + scroller.clientHeight
+    if (next >= maxTop) next = Math.max(0, sTop)
+    scroller.scrollTo({ top: next })
+    settle = 0
+    lastTop = Number.NaN
+  }
+  const tick = () => {
+    const card = getCard()
+    if (card && card.getBoundingClientRect().height > 0) {
+      card.scrollIntoView({ block: "center", behavior: "smooth" })
+      return
+    }
+    if (frames++ > 200) return
+    // Grace frames: a finding already on screen slots within a frame or two, so
+    // detect it before scrolling anywhere.
+    if (frames >= 3) {
+      if (!started) {
+        started = true
+        const target =
+          sectionTop() +
+          lineFraction * section.offsetHeight -
+          scroller.clientHeight / 2
+        scroller.scrollTo({ top: Math.max(0, target) })
+        settle = 0
+        lastTop = Number.NaN
+      } else {
+        step()
+      }
+    }
+    requestAnimationFrame(tick)
+  }
+  requestAnimationFrame(tick)
+}
+
 interface ResolvedGroup {
   index: number
   title: string
@@ -209,19 +274,6 @@ function isAnchored(finding: ReviewFinding): boolean {
 
 function findingSide(finding: ReviewFinding): "deletions" | "additions" {
   return finding.side === "LEFT" ? "deletions" : "additions"
-}
-
-function findingSelectedRange(
-  finding: ReviewFinding
-): SelectedLineRange | null {
-  if (finding.end_line === null) return null
-  const side = findingSide(finding)
-  return {
-    start: finding.start_line ?? finding.end_line,
-    end: finding.end_line,
-    side,
-    endSide: side,
-  }
 }
 
 function findingClipboardText(finding: ReviewFinding): string {
@@ -364,9 +416,7 @@ function ReviewBodyInner({
     {}
   )
   const [focused, setFocused] = useState<ReviewFinding | null>(null)
-  const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null)
   const [userSelection, setUserSelection] = useState<UserSelection | null>(null)
-  const [diffScrollEl, setDiffScrollEl] = useState<HTMLDivElement | null>(null)
   const diffScrollElRef = useRef<HTMLDivElement | null>(null)
   const groupRefs = useRef<Record<number, HTMLDivElement | null>>({})
   const [diffStyle, setDiffStyleState] = useState<DiffStyle>(() =>
@@ -580,12 +630,11 @@ function ReviewBodyInner({
 
   // The Virtualizer doesn't forward a ref; grab its scroll element (the
   // grandparent of this hidden probe, which lives in its content div) so the
-  // anchored finding card can position against it.
+  // file/group/finding scroll helpers can drive it.
   const scrollerProbe = useCallback((node: HTMLDivElement | null) => {
     const scroller = node?.parentElement?.parentElement
-    const el = scroller instanceof HTMLDivElement ? scroller : null
-    diffScrollElRef.current = el
-    setDiffScrollEl(el)
+    diffScrollElRef.current =
+      scroller instanceof HTMLDivElement ? scroller : null
   }, [])
 
   const registerSection = useCallback(
@@ -670,27 +719,29 @@ function ReviewBodyInner({
       markRead(finding.id)
       setUserSelection(null)
       setFocused(finding)
-      if (!isAnchored(finding)) {
-        setAnchorEl(null)
-        return
-      }
+      // Non-anchored findings have no diff line; they expand inline in the side
+      // panel list instead of in the diff.
+      if (!isAnchored(finding)) return
       setExpandedFiles((prev) => ({ ...prev, [finding.file]: true }))
-      // The file card header is always mounted, but its diff rows window in/out
-      // under virtualization — scroll the card into view, then poll a few frames
-      // for the finding's anchor element before positioning the card.
+      const scroller = diffScrollElRef.current
+      const file = filesByPathRef.current.get(finding.file)
+      const source =
+        finding.side === "LEFT" ? file?.originalContent : file?.modifiedContent
+      const lineCount = source ? source.split("\n").length : 0
+      const targetLine = finding.end_line ?? finding.start_line ?? 1
+      const fraction =
+        lineCount > 0 ? Math.min(1, Math.max(0, targetLine / lineCount)) : 0
+      // Defer a frame so the file is expanded and the focused finding's inline
+      // card has rendered into its slot before we scroll to it.
       requestAnimationFrame(() => {
-        fileRefs.current[finding.file]?.scrollIntoView({ block: "center" })
-        let tries = 0
-        const tryAnchor = () => {
-          const anchor = anchorRefs.current[finding.id]
-          if (anchor) {
-            setAnchorEl(anchor)
-            return
-          }
-          if (tries++ < 30) requestAnimationFrame(tryAnchor)
-          else setAnchorEl(null)
-        }
-        tryAnchor()
+        const section = fileRefs.current[finding.file]
+        if (section && scroller)
+          scrollFindingIntoView(
+            section,
+            scroller,
+            fraction,
+            () => anchorRefs.current[finding.id]
+          )
       })
     },
     [markRead]
@@ -699,23 +750,25 @@ function ReviewBodyInner({
   const closeFinding = useCallback(() => setFocused(null), [])
 
   const renderFileCard = (file: ReviewDiffFile) => {
+    // Only the user's manual drag highlights rows. The focused finding shows its
+    // span via the inline card (and its range label) rather than a selection
+    // band, which would otherwise sit blue behind/around the card.
     const selectedLines =
-      focused?.file === file.path && isAnchored(focused)
-        ? findingSelectedRange(focused)
-        : userSelection?.file === file.path
-          ? userSelection.range
-          : null
+      userSelection?.file === file.path ? userSelection.range : null
     return (
       <FileDiffCard
         key={file.path}
         file={file}
+        detail={detail}
         findings={findingsByFile.get(file.path) ?? NO_FINDINGS}
+        focusedFindingId={focused?.file === file.path ? focused.id : null}
         selectedLines={selectedLines}
         viewed={viewed.has(file.path)}
         onToggleViewed={toggleViewed}
         expanded={expandedFiles[file.path] ?? !viewed.has(file.path)}
         onToggleExpanded={toggleExpanded}
         onFindingClick={openFinding}
+        onCloseFinding={closeFinding}
         onSelectLines={selectLines}
         onAddToChat={addToChat}
         registerSection={registerSection}
@@ -751,26 +804,17 @@ function ReviewBodyInner({
   )
   useRegisterReviewSidebar(sidebarData)
 
+  // The finding card is closed via its X button (or Escape). It no longer
+  // closes on outside clicks — that was for the old floating popup and just made
+  // diff interactions (line selection, opening another finding) feel glitchy.
   useEffect(() => {
     if (!focused) return
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") setFocused(null)
     }
-    const onPointerDown = (event: PointerEvent) => {
-      const target = event.target
-      if (target instanceof Element && target.closest("[data-finding-card]"))
-        return
-      setFocused(null)
-    }
     window.addEventListener("keydown", onKeyDown)
-    window.addEventListener("pointerdown", onPointerDown)
-    return () => {
-      window.removeEventListener("keydown", onKeyDown)
-      window.removeEventListener("pointerdown", onPointerDown)
-    }
+    return () => window.removeEventListener("keydown", onKeyDown)
   }, [focused])
-
-  const isAnchoredCard = focused !== null && isAnchored(focused) && anchorEl
 
   return (
     <div className="flex min-h-0 flex-1 overflow-hidden">
@@ -848,36 +892,11 @@ function ReviewBodyInner({
         tab={sideTab}
         onTabChange={setSideTab}
         read={read}
-        dimmed={focused !== null}
+        focusedId={focused?.id ?? null}
         onMarkAllRead={markAllRead}
         onFindingClick={openFinding}
+        onCloseFinding={closeFinding}
       />
-
-      {focused && isAnchoredCard && (
-        <AnchoredFindingCard
-          key={focused.id}
-          detail={detail}
-          finding={focused}
-          anchorEl={anchorEl}
-          scrollEl={diffScrollEl}
-          onClose={closeFinding}
-        />
-      )}
-
-      {focused && !isAnchoredCard && (
-        <div
-          data-finding-card
-          role="dialog"
-          aria-label={focused.title}
-          className={cn(FINDING_CARD_CLASS, "fixed top-24 right-1 z-50")}
-        >
-          <FindingCardContent
-            detail={detail}
-            finding={focused}
-            onClose={closeFinding}
-          />
-        </div>
-      )}
     </div>
   )
 }
@@ -1008,13 +1027,16 @@ function GroupHeader({ group }: { group: ResolvedGroup }) {
 
 const FileDiffCard = memo(function FileDiffCard({
   file,
+  detail,
   findings,
+  focusedFindingId,
   selectedLines,
   viewed,
   onToggleViewed,
   expanded,
   onToggleExpanded,
   onFindingClick,
+  onCloseFinding,
   onSelectLines,
   onAddToChat,
   registerSection,
@@ -1022,13 +1044,16 @@ const FileDiffCard = memo(function FileDiffCard({
   diffStyle,
 }: {
   file: ReviewDiffFile
+  detail: ReviewDetail
   findings: Array<ReviewFinding>
+  focusedFindingId: string | null
   selectedLines: SelectedLineRange | null
   viewed: boolean
   onToggleViewed: (path: string) => void
   expanded: boolean
   onToggleExpanded: (path: string) => void
   onFindingClick: (finding: ReviewFinding) => void
+  onCloseFinding: () => void
   onSelectLines: (path: string, range: SelectedLineRange | null) => void
   onAddToChat: (path: string, range: SelectedLineRange) => void
   registerSection: (path: string, node: HTMLDivElement | null) => void
@@ -1129,13 +1154,16 @@ const FileDiffCard = memo(function FileDiffCard({
   )
   const renderAnnotation = useCallback(
     (annotation: DiffLineAnnotation<ReviewFinding>) => (
-      <FindingRailMarker
+      <FindingAnnotation
         finding={annotation.metadata}
-        onFindingClick={onFindingClick}
+        expanded={annotation.metadata.id === focusedFindingId}
+        detail={detail}
+        onOpen={onFindingClick}
+        onClose={onCloseFinding}
         anchorRef={registerAnchor}
       />
     ),
-    [onFindingClick, registerAnchor]
+    [focusedFindingId, detail, onFindingClick, onCloseFinding, registerAnchor]
   )
 
   return (
@@ -1303,110 +1331,44 @@ function FindingRailMarker({
   )
 }
 
-const FINDING_CARD_WIDTH = 412
-const FINDING_CARD_GAP = 12
-// If the room beside the annotation is tighter than this, hold this width and
-// overlay the diff rather than shrinking into an unreadable sliver (e.g. a very
-// narrow side panel, or no panel at all below `xl`).
-const FINDING_CARD_MIN_WIDTH = 320
-
-const FINDING_CARD_CLASS =
-  "flex max-h-[70vh] flex-col overflow-hidden rounded-lg border border-border bg-background shadow-2xl"
-
-// Anchored just to the right of the finding's annotation, close to the hunk, and
-// extending right over the side panel. Its width fits the room available to the
-// right (capped at the preferred size), so it narrows as the side panel shrinks;
-// when that room gets too tight to read it holds a minimum width and overlays
-// the diff (e.g. below `xl`, with no side panel). Tracks the anchor as the diff
-// scrolls (rAF-throttled); hidden while the anchor is out of view.
-function AnchoredFindingCard({
-  detail,
+// A finding rendered inline at its diff line via Pierre's annotation slot.
+// Collapsed it's a compact pill on the rail; the focused finding expands into the
+// full card below the line, scrolling naturally with the diff (no floating /
+// position tracking). `anchorRef` exposes whichever element is current so the
+// page can scroll the line into view.
+function FindingAnnotation({
   finding,
-  anchorEl,
-  scrollEl,
+  expanded,
+  detail,
+  onOpen,
   onClose,
+  anchorRef,
 }: {
-  detail: ReviewDetail
   finding: ReviewFinding
-  anchorEl: HTMLElement
-  scrollEl: HTMLDivElement | null
+  expanded: boolean
+  detail: ReviewDetail
+  onOpen: (finding: ReviewFinding) => void
   onClose: () => void
+  anchorRef: (id: string, node: HTMLElement | null) => void
 }) {
-  const cardRef = useRef<HTMLDivElement | null>(null)
-
-  useLayoutEffect(() => {
-    const card = cardRef.current
-    const scroller = scrollEl
-    if (!card || !scroller) return
-
-    let frame: number | null = null
-    const position = () => {
-      frame = null
-      const scrollerRect = scroller.getBoundingClientRect()
-      const anchorRect = anchorEl.getBoundingClientRect()
-      // Hide while the finding's line is scrolled out of the diff viewport.
-      if (
-        !anchorEl.isConnected ||
-        anchorRect.bottom < scrollerRect.top ||
-        anchorRect.top > scrollerRect.bottom
-      ) {
-        card.style.visibility = "hidden"
-        return
-      }
-      // Sit just right of the finding's annotation (close to the hunk). Width
-      // fits the room to its right so the card narrows as the side panel shrinks
-      // instead of overflowing. When that room is too tight to read, hold a
-      // minimum width and shift left over the diff.
-      const rightBound = window.innerWidth - FINDING_CARD_GAP
-      const minLeft = scrollerRect.left + FINDING_CARD_GAP
-      let left = anchorRect.right + FINDING_CARD_GAP
-      let width = Math.min(FINDING_CARD_WIDTH, rightBound - left)
-      if (width < FINDING_CARD_MIN_WIDTH) {
-        width = Math.min(FINDING_CARD_WIDTH, rightBound - minLeft)
-        left = Math.max(minLeft, rightBound - width)
-      }
-      card.style.width = `${width}px`
-      const top = Math.max(
-        scrollerRect.top + FINDING_CARD_GAP,
-        Math.min(
-          anchorRect.top,
-          scrollerRect.bottom - card.offsetHeight - FINDING_CARD_GAP
-        )
-      )
-      card.style.visibility = "visible"
-      card.style.top = `${top}px`
-      card.style.left = `${left}px`
-    }
-    const schedule = () => {
-      if (frame == null) frame = window.requestAnimationFrame(position)
-    }
-
-    position()
-    scroller.addEventListener("scroll", schedule, { passive: true })
-    window.addEventListener("resize", schedule)
-    const observer = new ResizeObserver(schedule)
-    observer.observe(scroller)
-    const content = scroller.firstElementChild
-    if (content) observer.observe(content)
-    return () => {
-      scroller.removeEventListener("scroll", schedule)
-      window.removeEventListener("resize", schedule)
-      observer.disconnect()
-      if (frame != null) window.cancelAnimationFrame(frame)
-    }
-  }, [anchorEl, scrollEl])
-
+  if (expanded) {
+    return (
+      <div
+        ref={(node) => anchorRef(finding.id, node)}
+        role="dialog"
+        aria-label={finding.title}
+        className="my-1.5 flex max-h-[60vh] w-full max-w-2xl flex-col overflow-hidden rounded-lg border border-border bg-background font-sans leading-normal shadow-sm"
+      >
+        <FindingCardContent detail={detail} finding={finding} onClose={onClose} />
+      </div>
+    )
+  }
   return (
-    <div
-      ref={cardRef}
-      data-finding-card
-      role="dialog"
-      aria-label={finding.title}
-      style={{ visibility: "hidden" }}
-      className={cn(FINDING_CARD_CLASS, "fixed z-50")}
-    >
-      <FindingCardContent detail={detail} finding={finding} onClose={onClose} />
-    </div>
+    <FindingRailMarker
+      finding={finding}
+      onFindingClick={onOpen}
+      anchorRef={anchorRef}
+    />
   )
 }
 
@@ -1602,17 +1564,19 @@ function SidePanel({
   tab,
   onTabChange,
   read,
-  dimmed,
+  focusedId,
   onMarkAllRead,
   onFindingClick,
+  onCloseFinding,
 }: {
   detail: ReviewDetail
   tab: SideTab
   onTabChange: (tab: SideTab) => void
   read: Set<string>
-  dimmed: boolean
+  focusedId: string | null
   onMarkAllRead: () => void
   onFindingClick: (finding: ReviewFinding) => void
+  onCloseFinding: () => void
 }) {
   const qc = useQueryClient()
   const reReview = useMutation({
@@ -1657,12 +1621,7 @@ function SidePanel({
       className="relative hidden h-full shrink-0 xl:flex"
     >
       <ReviewPanelResizeHandle width={width} onResize={setWidth} />
-      <aside
-        className={cn(
-          "flex h-full w-full flex-col overflow-y-auto border-l border-border transition-opacity",
-          dimmed && "pointer-events-none opacity-30"
-        )}
-      >
+      <aside className="flex h-full w-full flex-col overflow-y-auto border-l border-border">
         <div className="flex items-center gap-1 border-b border-border px-3 py-2">
           {(
             [
@@ -1730,7 +1689,10 @@ function SidePanel({
               emptyLabel="No bugs found."
               findings={bugs}
               read={read}
+              detail={detail}
+              focusedId={focusedId}
               onFindingClick={onFindingClick}
+              onCloseFinding={onCloseFinding}
             />
 
             <FindingSection
@@ -1739,7 +1701,10 @@ function SidePanel({
               emptyLabel="No issues found."
               findings={flags}
               read={read}
+              detail={detail}
+              focusedId={focusedId}
               onFindingClick={onFindingClick}
+              onCloseFinding={onCloseFinding}
               action={
                 detail.findings.length > 0 ? (
                   <button
@@ -1789,7 +1754,10 @@ function FindingSection({
   emptyLabel,
   findings,
   read,
+  detail,
+  focusedId,
   onFindingClick,
+  onCloseFinding,
   action,
 }: {
   icon: (typeof GROUP_STYLES)["bug"]["Icon"]
@@ -1797,7 +1765,10 @@ function FindingSection({
   emptyLabel: string
   findings: Array<ReviewFinding>
   read: Set<string>
+  detail: ReviewDetail
+  focusedId: string | null
   onFindingClick: (finding: ReviewFinding) => void
+  onCloseFinding: () => void
   action?: React.ReactNode
 }) {
   const [collapsed, setCollapsed] = useState(false)
@@ -1830,43 +1801,58 @@ function FindingSection({
               const Icon = style.Icon
               const isRead = read.has(finding.id)
               const muted = finding.status !== "open" || isRead
+              const isFocused = finding.id === focusedId
+              // Anchored findings expand inline in the diff; non-anchored ones
+              // have no line to attach to, so they expand inline here.
+              const showInlineCard = isFocused && !isAnchored(finding)
               return (
-                <button
-                  key={finding.id}
-                  type="button"
-                  onClick={() => onFindingClick(finding)}
-                  className={cn(
-                    "block w-full rounded-md border border-transparent px-2 py-1.5 text-left transition-colors hover:border-border hover:bg-muted/40",
-                    muted && "opacity-50"
-                  )}
-                >
-                  <span className="flex items-start gap-1.5 text-xs">
-                    <Icon
-                      className={cn(
-                        "mt-0.5 size-3.5 shrink-0",
-                        style.className
-                      )}
-                    />
-                    <span className="min-w-0">
-                      <span className="line-clamp-1 font-medium text-foreground">
-                        {finding.title || finding.description}
-                      </span>
-                      <span className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
-                        <span className={style.className}>{style.label}</span>
-                        <span className="truncate font-mono">
-                          {findingAnchorLabel(finding)}
+                <div key={finding.id}>
+                  <button
+                    type="button"
+                    onClick={() => onFindingClick(finding)}
+                    className={cn(
+                      "block w-full rounded-md border border-transparent px-2 py-1.5 text-left transition-colors hover:border-border hover:bg-muted/40",
+                      isFocused && "border-border bg-muted/40",
+                      muted && !isFocused && "opacity-50"
+                    )}
+                  >
+                    <span className="flex items-start gap-1.5 text-xs">
+                      <Icon
+                        className={cn(
+                          "mt-0.5 size-3.5 shrink-0",
+                          style.className
+                        )}
+                      />
+                      <span className="min-w-0">
+                        <span className="line-clamp-1 font-medium text-foreground">
+                          {finding.title || finding.description}
                         </span>
-                        {finding.outdated && <Badgeish>Outdated</Badgeish>}
-                        {finding.status !== "open" && (
-                          <Badgeish>{finding.status}</Badgeish>
-                        )}
-                        {isRead && finding.status === "open" && (
-                          <span>• Read</span>
-                        )}
+                        <span className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
+                          <span className={style.className}>{style.label}</span>
+                          <span className="truncate font-mono">
+                            {findingAnchorLabel(finding)}
+                          </span>
+                          {finding.outdated && <Badgeish>Outdated</Badgeish>}
+                          {finding.status !== "open" && (
+                            <Badgeish>{finding.status}</Badgeish>
+                          )}
+                          {isRead && finding.status === "open" && (
+                            <span>• Read</span>
+                          )}
+                        </span>
                       </span>
                     </span>
-                  </span>
-                </button>
+                  </button>
+                  {showInlineCard && (
+                    <div className="mt-1 mb-1 flex max-h-[60vh] flex-col overflow-hidden rounded-lg border border-border bg-background shadow-sm">
+                      <FindingCardContent
+                        detail={detail}
+                        finding={finding}
+                        onClose={onCloseFinding}
+                      />
+                    </div>
+                  )}
+                </div>
               )
             })}
           </div>
