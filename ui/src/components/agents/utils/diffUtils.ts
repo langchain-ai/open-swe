@@ -62,6 +62,14 @@ export const DIFF_UNSAFE_CSS = `
   background-color: var(--ui-accent-bubble) !important;
   color: var(--ui-text-dim) !important;
 }
+
+/* A selected line propagates [data-selected-line] onto its annotation row and
+   gutter, bleeding the selection background behind inline annotation content.
+   Keep the code line highlighted, but hold the annotation row at the panel bg. */
+[data-line-annotation][data-selected-line],
+[data-gutter-buffer="annotation"][data-selected-line] {
+  --diffs-line-bg: var(--ui-panel) !important;
+}
 `
 
 export const diffOptions = {

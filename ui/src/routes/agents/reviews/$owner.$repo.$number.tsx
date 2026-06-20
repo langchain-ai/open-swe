@@ -1,10 +1,11 @@
 import { Link, Navigate, createFileRoute } from "@tanstack/react-router"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
+  createContext,
   memo,
   useCallback,
+  useContext,
   useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -24,7 +25,6 @@ import {
   RowsIcon,
   SquareSplitHorizontalIcon,
   XCircleIcon,
-  XIcon,
 } from "@phosphor-icons/react"
 import { IoLogoGithub } from "react-icons/io5"
 import {
@@ -106,7 +106,13 @@ function makeSideAttachment(
   const language = file.path.includes(".")
     ? (file.path.split(".").pop() ?? "")
     : ""
-  return { id: crypto.randomUUID(), path: file.path, lineLabel, language, snippet }
+  return {
+    id: crypto.randomUUID(),
+    path: file.path,
+    lineLabel,
+    language,
+    snippet,
+  }
 }
 
 // Build chat attachments from the selected range. A range can span from a
@@ -237,6 +243,27 @@ function findingClipboardText(finding: ReviewFinding): string {
   return lines.join("\n")
 }
 
+// Inline findings live inside Pierre's diff via React portals, so their
+// expand/collapse state is lifted here and shared through context — surviving
+// the annotation's mount/unmount as rows window in and out under
+// virtualization, and letting the side panel drive the same expansion.
+interface ExpandedFindingContextValue {
+  expandedId: string | null
+  reviewUrl: string
+  toggle: (finding: ReviewFinding) => void
+  registerAnnotation: (id: string, node: HTMLElement | null) => void
+}
+
+const ExpandedFindingContext =
+  createContext<ExpandedFindingContextValue | null>(null)
+
+function useExpandedFinding(): ExpandedFindingContextValue {
+  const ctx = useContext(ExpandedFindingContext)
+  if (!ctx)
+    throw new Error("useExpandedFinding must be used within its provider")
+  return ctx
+}
+
 function ReviewDetailPage() {
   const { owner, repo, number } = Route.useParams()
   const prNumber = Number(number)
@@ -359,14 +386,12 @@ function ReviewBodyInner({
   const [sideTab, setSideTab] = useState<SideTab>("info")
   const [selectedFile, setSelectedFile] = useState<string | null>(null)
   const fileRefs = useRef<Record<string, HTMLDivElement | null>>({})
-  const anchorRefs = useRef<Record<string, HTMLElement | null>>({})
+  const annotationRefs = useRef<Record<string, HTMLElement | null>>({})
   const [expandedFiles, setExpandedFiles] = useState<Record<string, boolean>>(
     {}
   )
-  const [focused, setFocused] = useState<ReviewFinding | null>(null)
-  const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null)
+  const [expandedId, setExpandedId] = useState<string | null>(null)
   const [userSelection, setUserSelection] = useState<UserSelection | null>(null)
-  const [diffScrollEl, setDiffScrollEl] = useState<HTMLDivElement | null>(null)
   const diffScrollElRef = useRef<HTMLDivElement | null>(null)
   const groupRefs = useRef<Record<number, HTMLDivElement | null>>({})
   const [diffStyle, setDiffStyleState] = useState<DiffStyle>(() =>
@@ -386,8 +411,12 @@ function ReviewBodyInner({
   // Latest-value refs so the callbacks below can stay referentially stable
   // (so memo(FileDiffCard) actually skips unrelated re-renders) while still
   // reading current state.
-  const focusedRef = useRef(focused)
-  focusedRef.current = focused
+  const expandedFinding = useMemo(
+    () => detail.findings.find((f) => f.id === expandedId) ?? null,
+    [detail.findings, expandedId]
+  )
+  const expandedFindingRef = useRef(expandedFinding)
+  expandedFindingRef.current = expandedFinding
 
   const viewedStorageKey = `open-swe.review.viewed.${detail.owner}/${detail.repo}/${detail.number}.${detail.head_sha}`
   const [viewed, setViewed] = useState<Set<string>>(() => {
@@ -417,7 +446,8 @@ function ReviewBodyInner({
         )
         return next
       })
-      if (becomingViewed && focusedRef.current?.file === path) setFocused(null)
+      if (becomingViewed && expandedFindingRef.current?.file === path)
+        setExpandedId(null)
       setExpandedFiles((prev) => ({ ...prev, [path]: !becomingViewed }))
     },
     [viewedStorageKey]
@@ -579,13 +609,12 @@ function ReviewBodyInner({
   filesByPathRef.current = filesByPath
 
   // The Virtualizer doesn't forward a ref; grab its scroll element (the
-  // grandparent of this hidden probe, which lives in its content div) so the
-  // anchored finding card can position against it.
+  // grandparent of this hidden probe, which lives in its content div) so
+  // scroll-to-file/group can align against it.
   const scrollerProbe = useCallback((node: HTMLDivElement | null) => {
     const scroller = node?.parentElement?.parentElement
-    const el = scroller instanceof HTMLDivElement ? scroller : null
-    diffScrollElRef.current = el
-    setDiffScrollEl(el)
+    diffScrollElRef.current =
+      scroller instanceof HTMLDivElement ? scroller : null
   }, [])
 
   const registerSection = useCallback(
@@ -594,9 +623,9 @@ function ReviewBodyInner({
     },
     []
   )
-  const registerAnchor = useCallback(
+  const registerAnnotation = useCallback(
     (id: string, node: HTMLElement | null) => {
-      anchorRefs.current[id] = node
+      annotationRefs.current[id] = node
     },
     []
   )
@@ -604,7 +633,7 @@ function ReviewBodyInner({
   const toggleExpanded = useCallback((path: string) => {
     const current = expandedRef.current[path] ?? !viewedRef.current.has(path)
     const next = !current
-    if (!next && focusedRef.current?.file === path) setFocused(null)
+    if (!next && expandedFindingRef.current?.file === path) setExpandedId(null)
     setExpandedFiles((prev) => ({ ...prev, [path]: next }))
   }, [])
 
@@ -612,7 +641,7 @@ function ReviewBodyInner({
     (path: string, range: SelectedLineRange | null) => {
       if (range) {
         setUserSelection({ file: path, range })
-        if (focusedRef.current) setFocused(null)
+        if (expandedFindingRef.current) setExpandedId(null)
       } else {
         setUserSelection((prev) => (prev?.file === path ? null : prev))
       }
@@ -665,43 +694,49 @@ function ReviewBodyInner({
     return () => window.removeEventListener("pointerdown", onPointerDown)
   }, [])
 
-  const openFinding = useCallback(
+  // Toggle a finding from its in-diff header — it's already on-screen, so no
+  // scrolling is needed.
+  const toggleInline = useCallback(
     (finding: ReviewFinding) => {
       markRead(finding.id)
+      setExpandedId((prev) => (prev === finding.id ? null : finding.id))
+    },
+    [markRead]
+  )
+
+  // Open a finding from the side panel. Anchored findings expand inline in the
+  // diff: open the file, scroll it into view, then poll a few frames for the
+  // annotation node (its diff rows window in/out under virtualization) and
+  // scroll that into view. Non-anchored findings expand inline in the panel.
+  const openFromPanel = useCallback(
+    (finding: ReviewFinding) => {
+      markRead(finding.id)
+      const willExpand = expandedFindingRef.current?.id !== finding.id
       setUserSelection(null)
-      setFocused(finding)
-      if (!isAnchored(finding)) {
-        setAnchorEl(null)
-        return
-      }
+      setExpandedId(willExpand ? finding.id : null)
+      if (!willExpand || !isAnchored(finding)) return
       setExpandedFiles((prev) => ({ ...prev, [finding.file]: true }))
-      // The file card header is always mounted, but its diff rows window in/out
-      // under virtualization — scroll the card into view, then poll a few frames
-      // for the finding's anchor element before positioning the card.
       requestAnimationFrame(() => {
         fileRefs.current[finding.file]?.scrollIntoView({ block: "center" })
         let tries = 0
-        const tryAnchor = () => {
-          const anchor = anchorRefs.current[finding.id]
-          if (anchor) {
-            setAnchorEl(anchor)
+        const tryScroll = () => {
+          const node = annotationRefs.current[finding.id]
+          if (node) {
+            node.scrollIntoView({ block: "center" })
             return
           }
-          if (tries++ < 30) requestAnimationFrame(tryAnchor)
-          else setAnchorEl(null)
+          if (tries++ < 30) requestAnimationFrame(tryScroll)
         }
-        tryAnchor()
+        tryScroll()
       })
     },
     [markRead]
   )
 
-  const closeFinding = useCallback(() => setFocused(null), [])
-
   const renderFileCard = (file: ReviewDiffFile) => {
     const selectedLines =
-      focused?.file === file.path && isAnchored(focused)
-        ? findingSelectedRange(focused)
+      expandedFinding?.file === file.path && isAnchored(expandedFinding)
+        ? findingSelectedRange(expandedFinding)
         : userSelection?.file === file.path
           ? userSelection.range
           : null
@@ -715,11 +750,9 @@ function ReviewBodyInner({
         onToggleViewed={toggleViewed}
         expanded={expandedFiles[file.path] ?? !viewed.has(file.path)}
         onToggleExpanded={toggleExpanded}
-        onFindingClick={openFinding}
         onSelectLines={selectLines}
         onAddToChat={addToChat}
         registerSection={registerSection}
-        registerAnchor={registerAnchor}
         diffStyle={diffStyle}
       />
     )
@@ -752,133 +785,110 @@ function ReviewBodyInner({
   useRegisterReviewSidebar(sidebarData)
 
   useEffect(() => {
-    if (!focused) return
+    if (!expandedId) return
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setFocused(null)
-    }
-    const onPointerDown = (event: PointerEvent) => {
-      const target = event.target
-      if (target instanceof Element && target.closest("[data-finding-card]"))
-        return
-      setFocused(null)
+      if (event.key === "Escape") setExpandedId(null)
     }
     window.addEventListener("keydown", onKeyDown)
-    window.addEventListener("pointerdown", onPointerDown)
-    return () => {
-      window.removeEventListener("keydown", onKeyDown)
-      window.removeEventListener("pointerdown", onPointerDown)
-    }
-  }, [focused])
+    return () => window.removeEventListener("keydown", onKeyDown)
+  }, [expandedId])
 
-  const isAnchoredCard = focused !== null && isAnchored(focused) && anchorEl
+  const expandedFindingCtx = useMemo<ExpandedFindingContextValue>(
+    () => ({
+      expandedId,
+      reviewUrl: detail.url,
+      toggle: toggleInline,
+      registerAnnotation,
+    }),
+    [expandedId, detail.url, toggleInline, registerAnnotation]
+  )
 
   return (
-    <div className="flex min-h-0 flex-1 overflow-hidden">
-      <main className="relative flex min-h-0 min-w-0 flex-1">
-        <WorkerPoolContextProvider
-          poolOptions={DIFF_WORKER_POOL_OPTIONS}
-          highlighterOptions={DIFF_WORKER_HIGHLIGHTER_OPTIONS}
-        >
-          <Virtualizer
-            className="relative min-h-0 flex-1 overflow-y-auto"
-            contentClassName="mx-auto w-full max-w-6xl px-6 py-6"
-            config={DIFF_VIRTUALIZER_CONFIG}
+    <ExpandedFindingContext.Provider value={expandedFindingCtx}>
+      <div className="flex min-h-0 flex-1 overflow-hidden">
+        <main className="relative flex min-h-0 min-w-0 flex-1">
+          <WorkerPoolContextProvider
+            poolOptions={DIFF_WORKER_POOL_OPTIONS}
+            highlighterOptions={DIFF_WORKER_HIGHLIGHTER_OPTIONS}
           >
-            <div ref={scrollerProbe} aria-hidden className="hidden" />
-            <PrHeader detail={detail} />
-            <div className="mt-4 rounded-lg border border-border bg-card p-4">
-              {detail.pr.body ? (
-                <Markdown content={detail.pr.body} />
-              ) : (
-                <p className="text-xs text-muted-foreground">
-                  This PR has no description.
-                </p>
-              )}
-            </div>
-
-            <div className="mt-6">
-              <div className="mb-2 flex items-center justify-between gap-3">
-                <h2 className="text-sm font-medium">Changes</h2>
-                <div className="flex items-center gap-3">
-                  {linesLeft !== null && (
-                    <span className="text-xs text-muted-foreground">
-                      {linesLeft === 0
-                        ? "All lines reviewed"
-                        : `${linesLeft} lines left`}
-                    </span>
-                  )}
-                  {diffFiles && diffFiles.length > 0 && (
-                    <DiffStyleToggle value={diffStyle} onChange={setDiffStyle} />
-                  )}
-                </div>
+            <Virtualizer
+              className="relative min-h-0 flex-1 overflow-y-auto"
+              contentClassName="mx-auto w-full max-w-6xl px-6 py-6"
+              config={DIFF_VIRTUALIZER_CONFIG}
+            >
+              <div ref={scrollerProbe} aria-hidden className="hidden" />
+              <PrHeader detail={detail} />
+              <div className="mt-4 rounded-lg border border-border bg-card p-4">
+                {detail.pr.body ? (
+                  <Markdown content={detail.pr.body} />
+                ) : (
+                  <p className="text-xs text-muted-foreground">
+                    This PR has no description.
+                  </p>
+                )}
               </div>
-              {!diffFiles ? (
-                <Skeleton className="h-64 w-full" />
-              ) : diffFiles.length === 0 ? (
-                <p className="text-xs text-muted-foreground">
-                  No diff available.
-                </p>
-              ) : view === "ai" && groupedView ? (
-                <div className="space-y-6">
-                  {groupedView.map((group) => (
-                    <div
-                      key={group.index}
-                      ref={(node) => {
-                        groupRefs.current[group.index] = node
-                      }}
-                      className="scroll-mt-4 space-y-3"
-                    >
-                      <GroupHeader group={group} />
-                      {group.files.map(renderFileCard)}
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {diffFiles.map(renderFileCard)}
-                </div>
-              )}
-            </div>
-          </Virtualizer>
-        </WorkerPoolContextProvider>
-      </main>
 
-      <SidePanel
-        detail={detail}
-        tab={sideTab}
-        onTabChange={setSideTab}
-        read={read}
-        dimmed={focused !== null}
-        onMarkAllRead={markAllRead}
-        onFindingClick={openFinding}
-      />
+              <div className="mt-6">
+                <div className="mb-2 flex items-center justify-between gap-3">
+                  <h2 className="text-sm font-medium">Changes</h2>
+                  <div className="flex items-center gap-3">
+                    {linesLeft !== null && (
+                      <span className="text-xs text-muted-foreground">
+                        {linesLeft === 0
+                          ? "All lines reviewed"
+                          : `${linesLeft} lines left`}
+                      </span>
+                    )}
+                    {diffFiles && diffFiles.length > 0 && (
+                      <DiffStyleToggle
+                        value={diffStyle}
+                        onChange={setDiffStyle}
+                      />
+                    )}
+                  </div>
+                </div>
+                {!diffFiles ? (
+                  <Skeleton className="h-64 w-full" />
+                ) : diffFiles.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">
+                    No diff available.
+                  </p>
+                ) : view === "ai" && groupedView ? (
+                  <div className="space-y-6">
+                    {groupedView.map((group) => (
+                      <div
+                        key={group.index}
+                        ref={(node) => {
+                          groupRefs.current[group.index] = node
+                        }}
+                        className="scroll-mt-4 space-y-3"
+                      >
+                        <GroupHeader group={group} />
+                        {group.files.map(renderFileCard)}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {diffFiles.map(renderFileCard)}
+                  </div>
+                )}
+              </div>
+            </Virtualizer>
+          </WorkerPoolContextProvider>
+        </main>
 
-      {focused && isAnchoredCard && (
-        <AnchoredFindingCard
-          key={focused.id}
+        <SidePanel
           detail={detail}
-          finding={focused}
-          anchorEl={anchorEl}
-          scrollEl={diffScrollEl}
-          onClose={closeFinding}
+          tab={sideTab}
+          onTabChange={setSideTab}
+          read={read}
+          expandedId={expandedId}
+          onMarkAllRead={markAllRead}
+          onFindingClick={openFromPanel}
         />
-      )}
-
-      {focused && !isAnchoredCard && (
-        <div
-          data-finding-card
-          role="dialog"
-          aria-label={focused.title}
-          className={cn(FINDING_CARD_CLASS, "fixed top-24 right-1 z-50")}
-        >
-          <FindingCardContent
-            detail={detail}
-            finding={focused}
-            onClose={closeFinding}
-          />
-        </div>
-      )}
-    </div>
+      </div>
+    </ExpandedFindingContext.Provider>
   )
 }
 
@@ -1014,11 +1024,9 @@ const FileDiffCard = memo(function FileDiffCard({
   onToggleViewed,
   expanded,
   onToggleExpanded,
-  onFindingClick,
   onSelectLines,
   onAddToChat,
   registerSection,
-  registerAnchor,
   diffStyle,
 }: {
   file: ReviewDiffFile
@@ -1028,11 +1036,9 @@ const FileDiffCard = memo(function FileDiffCard({
   onToggleViewed: (path: string) => void
   expanded: boolean
   onToggleExpanded: (path: string) => void
-  onFindingClick: (finding: ReviewFinding) => void
   onSelectLines: (path: string, range: SelectedLineRange | null) => void
   onAddToChat: (path: string, range: SelectedLineRange) => void
   registerSection: (path: string, node: HTMLDivElement | null) => void
-  registerAnchor: (id: string, node: HTMLElement | null) => void
   diffStyle: DiffStyle
 }) {
   const diffOptions = useDiffOptions(diffStyle)
@@ -1129,13 +1135,9 @@ const FileDiffCard = memo(function FileDiffCard({
   )
   const renderAnnotation = useCallback(
     (annotation: DiffLineAnnotation<ReviewFinding>) => (
-      <FindingRailMarker
-        finding={annotation.metadata}
-        onFindingClick={onFindingClick}
-        anchorRef={registerAnchor}
-      />
+      <InlineFinding finding={annotation.metadata} />
     ),
-    [onFindingClick, registerAnchor]
+    []
   )
 
   return (
@@ -1273,167 +1275,65 @@ function AddToChatPopup({
   )
 }
 
-function FindingRailMarker({
-  finding,
-  onFindingClick,
-  anchorRef,
-}: {
-  finding: ReviewFinding
-  onFindingClick: (finding: ReviewFinding) => void
-  anchorRef: (id: string, node: HTMLElement | null) => void
-}) {
+// The finding rendered inline in the diff (via Pierre's annotation portal). A
+// collapsed header sits at the line; clicking it expands the full details in
+// place. Expand state is shared through context so it survives the annotation
+// remounting as rows window in/out, and so the side panel can drive it.
+function InlineFinding({ finding }: { finding: ReviewFinding }) {
+  const { expandedId, reviewUrl, toggle, registerAnnotation } =
+    useExpandedFinding()
+  const expanded = expandedId === finding.id
   const style = GROUP_STYLES[finding.group]
   const Icon = style.Icon
-  return (
-    <div className="flex justify-end px-2 py-0.5">
-      <button
-        ref={(node) => anchorRef(finding.id, node)}
-        type="button"
-        onClick={() => onFindingClick(finding)}
-        aria-label={`Open finding: ${finding.title}`}
-        className={cn(
-          "inline-flex items-center gap-1 rounded border border-[var(--ui-border)] bg-[var(--ui-surface)] px-1.5 py-0.5 text-[10px]",
-          style.className
-        )}
-      >
-        <span className="font-sans">{finding.title}</span>
-        <Icon className="size-3 shrink-0" />
-      </button>
-    </div>
-  )
-}
-
-const FINDING_CARD_WIDTH = 412
-const FINDING_CARD_GAP = 12
-// If the room beside the annotation is tighter than this, hold this width and
-// overlay the diff rather than shrinking into an unreadable sliver (e.g. a very
-// narrow side panel, or no panel at all below `xl`).
-const FINDING_CARD_MIN_WIDTH = 320
-
-const FINDING_CARD_CLASS =
-  "flex max-h-[70vh] flex-col overflow-hidden rounded-lg border border-border bg-background shadow-2xl"
-
-// Anchored just to the right of the finding's annotation, close to the hunk, and
-// extending right over the side panel. Its width fits the room available to the
-// right (capped at the preferred size), so it narrows as the side panel shrinks;
-// when that room gets too tight to read it holds a minimum width and overlays
-// the diff (e.g. below `xl`, with no side panel). Tracks the anchor as the diff
-// scrolls (rAF-throttled); hidden while the anchor is out of view.
-function AnchoredFindingCard({
-  detail,
-  finding,
-  anchorEl,
-  scrollEl,
-  onClose,
-}: {
-  detail: ReviewDetail
-  finding: ReviewFinding
-  anchorEl: HTMLElement
-  scrollEl: HTMLDivElement | null
-  onClose: () => void
-}) {
-  const cardRef = useRef<HTMLDivElement | null>(null)
-
-  useLayoutEffect(() => {
-    const card = cardRef.current
-    const scroller = scrollEl
-    if (!card || !scroller) return
-
-    let frame: number | null = null
-    const position = () => {
-      frame = null
-      const scrollerRect = scroller.getBoundingClientRect()
-      const anchorRect = anchorEl.getBoundingClientRect()
-      // Hide while the finding's line is scrolled out of the diff viewport.
-      if (
-        !anchorEl.isConnected ||
-        anchorRect.bottom < scrollerRect.top ||
-        anchorRect.top > scrollerRect.bottom
-      ) {
-        card.style.visibility = "hidden"
-        return
-      }
-      // Sit just right of the finding's annotation (close to the hunk). Width
-      // fits the room to its right so the card narrows as the side panel shrinks
-      // instead of overflowing. When that room is too tight to read, hold a
-      // minimum width and shift left over the diff.
-      const rightBound = window.innerWidth - FINDING_CARD_GAP
-      const minLeft = scrollerRect.left + FINDING_CARD_GAP
-      let left = anchorRect.right + FINDING_CARD_GAP
-      let width = Math.min(FINDING_CARD_WIDTH, rightBound - left)
-      if (width < FINDING_CARD_MIN_WIDTH) {
-        width = Math.min(FINDING_CARD_WIDTH, rightBound - minLeft)
-        left = Math.max(minLeft, rightBound - width)
-      }
-      card.style.width = `${width}px`
-      const top = Math.max(
-        scrollerRect.top + FINDING_CARD_GAP,
-        Math.min(
-          anchorRect.top,
-          scrollerRect.bottom - card.offsetHeight - FINDING_CARD_GAP
-        )
-      )
-      card.style.visibility = "visible"
-      card.style.top = `${top}px`
-      card.style.left = `${left}px`
-    }
-    const schedule = () => {
-      if (frame == null) frame = window.requestAnimationFrame(position)
-    }
-
-    position()
-    scroller.addEventListener("scroll", schedule, { passive: true })
-    window.addEventListener("resize", schedule)
-    const observer = new ResizeObserver(schedule)
-    observer.observe(scroller)
-    const content = scroller.firstElementChild
-    if (content) observer.observe(content)
-    return () => {
-      scroller.removeEventListener("scroll", schedule)
-      window.removeEventListener("resize", schedule)
-      observer.disconnect()
-      if (frame != null) window.cancelAnimationFrame(frame)
-    }
-  }, [anchorEl, scrollEl])
-
   return (
     <div
-      ref={cardRef}
-      data-finding-card
-      role="dialog"
-      aria-label={finding.title}
-      style={{ visibility: "hidden" }}
-      className={cn(FINDING_CARD_CLASS, "fixed z-50")}
+      ref={(node) => registerAnnotation(finding.id, node)}
+      className="px-2 py-1 font-sans"
     >
-      <FindingCardContent detail={detail} finding={finding} onClose={onClose} />
+      <div className="overflow-hidden rounded-md border border-[var(--ui-border)] bg-[var(--ui-surface)]">
+        <button
+          type="button"
+          onClick={() => toggle(finding)}
+          aria-expanded={expanded}
+          aria-label={`${expanded ? "Collapse" : "Expand"} finding: ${finding.title}`}
+          className="flex w-full items-center gap-1.5 px-2 py-1 text-left text-[11px]"
+        >
+          <Icon className={cn("size-3 shrink-0", style.className)} />
+          <span className={cn("font-medium", style.className)}>
+            {style.label}
+          </span>
+          <span className="min-w-0 flex-1 truncate text-foreground">
+            {finding.title}
+          </span>
+          {finding.outdated && <Badgeish>Outdated</Badgeish>}
+          {finding.status !== "open" && <Badgeish>{finding.status}</Badgeish>}
+          <CaretDownIcon
+            className={cn(
+              "size-3 shrink-0 text-muted-foreground transition-transform",
+              !expanded && "-rotate-90"
+            )}
+          />
+        </button>
+        {expanded && <FindingDetails finding={finding} reviewUrl={reviewUrl} />}
+      </div>
     </div>
   )
 }
 
-function FindingCardContent({
-  detail,
+// The expandable body + actions of a finding, shared by the inline diff
+// annotation and the side-panel row (non-anchored findings).
+function FindingDetails({
   finding,
-  onClose,
+  reviewUrl,
 }: {
-  detail: ReviewDetail
   finding: ReviewFinding
-  onClose: () => void
+  reviewUrl: string
 }) {
   const [copied, setCopied] = useState(false)
-  const style = GROUP_STYLES[finding.group]
-  const Icon = style.Icon
   const githubUrl =
     finding.github_review_comment_id !== null
-      ? `${detail.url}#discussion_r${finding.github_review_comment_id}`
+      ? `${reviewUrl}#discussion_r${finding.github_review_comment_id}`
       : null
-  const rangeLabel =
-    finding.end_line !== null
-      ? `${finding.side === "LEFT" ? "L" : "R"}${finding.start_line ?? finding.end_line}${
-          finding.start_line !== null && finding.start_line !== finding.end_line
-            ? `-${finding.end_line}`
-            : ""
-        }`
-      : finding.file
 
   const copy = () => {
     void navigator.clipboard
@@ -1445,38 +1345,16 @@ function FindingCardContent({
   }
 
   return (
-    <>
-      <div className="flex items-center gap-2 border-b border-border px-4 py-2.5 text-xs">
-        <Icon className={cn("size-3.5", style.className)} />
-        <span className={cn("font-medium", style.className)}>
-          {style.label}
-        </span>
-        <span className="rounded border border-border px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
-          {rangeLabel}
-        </span>
-        {finding.outdated && <Badgeish>Outdated</Badgeish>}
-        {finding.status !== "open" && <Badgeish>{finding.status}</Badgeish>}
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="Close finding"
-          className="ml-auto rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-        >
-          <XIcon className="size-3.5" />
-        </button>
+    <div className="border-t border-[var(--ui-border)] px-3 py-2.5 font-sans">
+      <div className="text-xs text-muted-foreground">
+        <Markdown content={finding.description} />
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
-        <div className="text-sm font-medium">{finding.title}</div>
-        <div className="mt-1.5 text-xs text-muted-foreground">
-          <Markdown content={finding.description} />
-        </div>
-        {finding.resolution_note && (
-          <p className="mt-2 text-[11px] text-muted-foreground">
-            Resolution: {finding.resolution_note}
-          </p>
-        )}
-      </div>
-      <div className="flex items-center gap-2 border-t border-border px-4 py-2.5">
+      {finding.resolution_note && (
+        <p className="mt-2 text-[11px] text-muted-foreground">
+          Resolution: {finding.resolution_note}
+        </p>
+      )}
+      <div className="mt-2.5 flex items-center gap-2">
         <button
           type="button"
           onClick={copy}
@@ -1497,7 +1375,7 @@ function FindingCardContent({
           </a>
         )}
       </div>
-    </>
+    </div>
   )
 }
 
@@ -1602,7 +1480,7 @@ function SidePanel({
   tab,
   onTabChange,
   read,
-  dimmed,
+  expandedId,
   onMarkAllRead,
   onFindingClick,
 }: {
@@ -1610,7 +1488,7 @@ function SidePanel({
   tab: SideTab
   onTabChange: (tab: SideTab) => void
   read: Set<string>
-  dimmed: boolean
+  expandedId: string | null
   onMarkAllRead: () => void
   onFindingClick: (finding: ReviewFinding) => void
 }) {
@@ -1657,12 +1535,7 @@ function SidePanel({
       className="relative hidden h-full shrink-0 xl:flex"
     >
       <ReviewPanelResizeHandle width={width} onResize={setWidth} />
-      <aside
-        className={cn(
-          "flex h-full w-full flex-col overflow-y-auto border-l border-border transition-opacity",
-          dimmed && "pointer-events-none opacity-30"
-        )}
-      >
+      <aside className="flex h-full w-full flex-col overflow-y-auto border-l border-border">
         <div className="flex items-center gap-1 border-b border-border px-3 py-2">
           {(
             [
@@ -1730,6 +1603,8 @@ function SidePanel({
               emptyLabel="No bugs found."
               findings={bugs}
               read={read}
+              expandedId={expandedId}
+              reviewUrl={detail.url}
               onFindingClick={onFindingClick}
             />
 
@@ -1739,6 +1614,8 @@ function SidePanel({
               emptyLabel="No issues found."
               findings={flags}
               read={read}
+              expandedId={expandedId}
+              reviewUrl={detail.url}
               onFindingClick={onFindingClick}
               action={
                 detail.findings.length > 0 ? (
@@ -1789,6 +1666,8 @@ function FindingSection({
   emptyLabel,
   findings,
   read,
+  expandedId,
+  reviewUrl,
   onFindingClick,
   action,
 }: {
@@ -1797,6 +1676,8 @@ function FindingSection({
   emptyLabel: string
   findings: Array<ReviewFinding>
   read: Set<string>
+  expandedId: string | null
+  reviewUrl: string
   onFindingClick: (finding: ReviewFinding) => void
   action?: React.ReactNode
 }) {
@@ -1830,43 +1711,62 @@ function FindingSection({
               const Icon = style.Icon
               const isRead = read.has(finding.id)
               const muted = finding.status !== "open" || isRead
+              const anchored = isAnchored(finding)
+              const expanded = expandedId === finding.id && !anchored
               return (
-                <button
+                <div
                   key={finding.id}
-                  type="button"
-                  onClick={() => onFindingClick(finding)}
                   className={cn(
-                    "block w-full rounded-md border border-transparent px-2 py-1.5 text-left transition-colors hover:border-border hover:bg-muted/40",
-                    muted && "opacity-50"
+                    "rounded-md border border-transparent transition-colors hover:border-border hover:bg-muted/40",
+                    expanded && "border-border bg-muted/40",
+                    muted && !expanded && "opacity-50"
                   )}
                 >
-                  <span className="flex items-start gap-1.5 text-xs">
-                    <Icon
-                      className={cn(
-                        "mt-0.5 size-3.5 shrink-0",
-                        style.className
-                      )}
-                    />
-                    <span className="min-w-0">
-                      <span className="line-clamp-1 font-medium text-foreground">
-                        {finding.title || finding.description}
-                      </span>
-                      <span className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
-                        <span className={style.className}>{style.label}</span>
-                        <span className="truncate font-mono">
-                          {findingAnchorLabel(finding)}
+                  <button
+                    type="button"
+                    onClick={() => onFindingClick(finding)}
+                    aria-expanded={anchored ? undefined : expanded}
+                    className="block w-full px-2 py-1.5 text-left"
+                  >
+                    <span className="flex items-start gap-1.5 text-xs">
+                      <Icon
+                        className={cn(
+                          "mt-0.5 size-3.5 shrink-0",
+                          style.className
+                        )}
+                      />
+                      <span className="min-w-0 flex-1">
+                        <span className="line-clamp-1 font-medium text-foreground">
+                          {finding.title || finding.description}
                         </span>
-                        {finding.outdated && <Badgeish>Outdated</Badgeish>}
-                        {finding.status !== "open" && (
-                          <Badgeish>{finding.status}</Badgeish>
-                        )}
-                        {isRead && finding.status === "open" && (
-                          <span>• Read</span>
-                        )}
+                        <span className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
+                          <span className={style.className}>{style.label}</span>
+                          <span className="truncate font-mono">
+                            {findingAnchorLabel(finding)}
+                          </span>
+                          {finding.outdated && <Badgeish>Outdated</Badgeish>}
+                          {finding.status !== "open" && (
+                            <Badgeish>{finding.status}</Badgeish>
+                          )}
+                          {isRead && finding.status === "open" && (
+                            <span>• Read</span>
+                          )}
+                        </span>
                       </span>
+                      {!anchored && (
+                        <CaretDownIcon
+                          className={cn(
+                            "mt-0.5 size-3 shrink-0 text-muted-foreground transition-transform",
+                            !expanded && "-rotate-90"
+                          )}
+                        />
+                      )}
                     </span>
-                  </span>
-                </button>
+                  </button>
+                  {expanded && (
+                    <FindingDetails finding={finding} reviewUrl={reviewUrl} />
+                  )}
+                </div>
               )
             })}
           </div>
