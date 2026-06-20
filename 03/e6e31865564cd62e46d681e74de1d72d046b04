@@ -1,0 +1,22 @@
+agent/prompt.py
+  s_e4f1e6cd6464dd::t_738ed49bb45e36 88
+agent/server.py
+  s_e4f1e6cd6464dd::t_ca39b3ca14c6d6 487-491
+  s_e4f1e6cd6464dd::t_42c9ff4cf18f75 701
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.9",
+  "base_commit_sha": "03e6e31865564cd62e46d681e74de1d72d046b04",
+  "prompts": {},
+  "sessions": {
+    "s_e4f1e6cd6464dd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4c5fdff8-80f6-4553-8336-aac3a1fb74b9",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ramon Nogueira <ramon.nogueira@langchain.dev>"
+    }
+  }
+}
