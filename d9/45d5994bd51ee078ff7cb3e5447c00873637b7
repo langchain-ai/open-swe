@@ -1,0 +1,36 @@
+tests/test_plan_mode.py
+  s_e4f1e6cd6464dd::t_094893a6d34da2 105-118,121-122,124-127,131,135,138-139,141-144,148
+ui/src/routes/admin.tsx
+  s_e4f1e6cd6464dd::t_cfa202bac7fca6 24
+agent/dashboard/thread_api.py
+  s_e4f1e6cd6464dd::t_0e1bc34b76bf90 1117
+  s_e4f1e6cd6464dd::t_b4c7cd19733334 1125
+  s_e4f1e6cd6464dd::t_2a639523133c72 1097
+  s_e4f1e6cd6464dd::t_d3b49d1e2c563c 980
+ui/src/components/agents/AgentsHome.tsx
+  s_e4f1e6cd6464dd::t_a26fe14eeb97e5 98
+ui/src/components/agents/AgentThreadView.tsx
+  s_e4f1e6cd6464dd::t_6295c1f203aab7 96-103
+ui/src/lib/api.ts
+  s_e4f1e6cd6464dd::t_56b3c8f8557e30 133
+  s_e4f1e6cd6464dd::t_a9fdd7aabd7a42 97-98,102-112
+ui/src/lib/agents/provider/useSubmitAgentMessage.ts
+  s_e4f1e6cd6464dd::t_95ed7ffb4e8524 51
+  s_e4f1e6cd6464dd::t_defff8a9a7970f 57,66,68-77
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.9",
+  "base_commit_sha": "d945d5994bd51ee078ff7cb3e5447c00873637b7",
+  "prompts": {},
+  "sessions": {
+    "s_e4f1e6cd6464dd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4c5fdff8-80f6-4553-8336-aac3a1fb74b9",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ramon Nogueira <ramon.nogueira@langchain.dev>"
+    }
+  }
+}
