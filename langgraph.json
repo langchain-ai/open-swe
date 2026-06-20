@@ -1,14 +1,18 @@
 {
   "$schema": "https://langgra.ph/schema.json",
   "python_version": "3.12",
+  "api_version": "0.10.0rc3",
   "graphs": {
-    "agent": "agent.server:get_agent",
-    "reviewer": "agent.reviewer:get_reviewer_agent",
-    "analyzer": "agent.analyzer:get_analyzer",
+    "agent": "agent.server:traced_agent",
+    "reviewer": "agent.reviewer:traced_reviewer_agent",
+    "analyzer": "agent.analyzer:traced_analyzer",
+    "chat": "agent.chat:traced_chat_agent",
     "scheduler": "agent.scheduler:get_scheduler",
-    "usage_snapshot": "agent.usage_snapshot:get_usage_snapshot"
+    "ci_monitor": "agent.ci_monitor:get_ci_monitor"
   },
-  "dependencies": ["."],
+  "dependencies": [
+    "."
+  ],
   "http": {
     "app": "agent.webapp:app"
   },

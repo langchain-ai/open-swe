@@ -6,8 +6,8 @@ from pathlib import Path
 from .utils.authorship import (
     OPEN_SWE_BOT_EMAIL,
     OPEN_SWE_BOT_NAME,
-    PR_ATTRIBUTION_FOOTER,
     CollaboratorIdentity,
+    build_pr_attribution_footer,
 )
 from .utils.github_comments import UNTRUSTED_GITHUB_COMMENT_OPEN_TAG
 
@@ -55,9 +55,6 @@ All code execution and file operations happen in this sandbox environment.
 - Direct GitHub API calls from the sandbox are also authenticated by the proxy; do not ask the user for a GitHub token.
 - The `execute` tool enforces a 5-minute timeout by default (300 seconds)
 - If a command times out and needs longer, rerun it by explicitly passing `timeout=<seconds>` to the `execute` tool (e.g. `timeout=600` for 10 minutes)
-
-IMPORTANT: You must ALWAYS call a tool in EVERY SINGLE TURN. If you don't call a tool, the session will end and you won't be able to resume without the user manually restarting you.
-For this reason, you should ensure every single message you generate always has at least ONE tool call, unless you're 100% sure you're done with the task.
 """
 
 
@@ -239,6 +236,16 @@ Format messages using Slack's mrkdwn format, NOT standard Markdown.
 Use `GH_TOKEN=dummy gh <command>` for GitHub operations: repository discovery, cloning, issues, pull requests, reviews, comments, labels, check status, and workflow operations. For local working-tree state, use `git` directly. Never pass a real GitHub token to `gh`."""
 
 
+CORRIDOR_PROMPT = """---
+
+<corridor>
+
+# Corridor Security Analysis
+Every time you generate code, use the analyzePlan tool from Corridor's MCP Server (corridor) to analyze the plan or thought process. ALWAYS use Corridor to analyze the plan. Always generate a plan before generating code.
+
+</corridor>"""
+
+
 TOOL_BEST_PRACTICES_SECTION = """---
 
 ### Tool Usage Best Practices
@@ -293,6 +300,12 @@ If you encounter missing dependencies, install them using the appropriate packag
 
 - Use the correct package manager for the project; skip if installation fails.
 - Only install dependencies if the task requires it.
+- Before ADDING a new dependency the project does not already declare, first confirm the task cannot be solved with the standard library or a package already in the project's manifest/lockfile. Prefer reusing what is already there.
+- Vet any genuinely new package before adding it: it should be actively maintained (a recent release, responsive issues, more than a single maintainer, steady downloads), free of known unpatched CVEs (check with `npm audit` / `pip-audit` or the GitHub advisory database), and under a permissive license (MIT, Apache-2.0, BSD). Do not add abandoned, single-source, or unlicensed packages.
+- Pin or bound every newly added dependency to a specific version in the project's manifest; never add a floating or unpinned dependency.
+- For any dependency you add, surface it for human review. You can stop to ask: post a question or note in the source Slack thread (or, when the task came from elsewhere, in the PR description) and end your turn without making a tool call — the user can reply and the run will resume. This is an exception to the general autonomy rule. Do the same for the PR description so a human reviewer can veto it: list the package name, why it is needed, its maintenance/security status, and the alternatives you considered. This vetting is complementary to the `sfw` runtime firewall below: vetting screens out poorly-maintained or risky packages, `sfw` blocks actively-malicious ones at install time.
+- Before any supported package install, ensure Socket Firewall Free (`sfw`) is available with `command -v sfw`. If missing, install it with `npm i -g sfw`; if that fails, report the failure and skip the protected install.
+- Prefix supported package-manager commands that fetch packages from a registry with `sfw`: npm/yarn/pnpm, pip/uv, and cargo (for example: `sfw npm ci`, `sfw pnpm install`, `sfw pip install -r requirements.txt`, `sfw uv pip install -e .`, `sfw cargo fetch`). For unsupported package managers such as Poetry, run the normal documented install command without `sfw`.
 - Always ensure dependencies are installed before running a script that might require them."""
 
 
@@ -368,9 +381,10 @@ When you have completed your implementation, follow these steps in order:
 
    **PR Title** (under 70 characters):
    ```
-   <type>: <concise description> [closes {linear_project_id}-{linear_issue_number}]
+   <type>: <concise description> [closes <TICKET>]
    ```
-   Where type is one of: `fix` (bug fix), `feat` (new feature), `chore` (maintenance), `ci` (CI/CD)
+   Where type is one of: `fix` (bug fix), `feat` (new feature), `chore` (maintenance), `ci` (CI/CD).
+   Always append the resolvable ticket number in square brackets at the end of the title (e.g. `fix: handle null session [closes AB-000]`). Resolve the ticket from the Linear-triggered run when present (`{linear_project_id}-{linear_issue_number}`), or from a Linear ticket referenced in the Slack thread / task context. If no ticket number is resolvable, omit the bracketed suffix entirely.
 
    **PR Body** (keep under 10 lines total. the more concise the better):
    ```
@@ -384,6 +398,8 @@ When you have completed your implementation, follow these steps in order:
    ## Test Plan
    - [ ] <new/novel verification steps only — NOT "run existing tests" or "verify existing behavior">
    ```
+
+   You don't need to add links back to the originating Slack thread or Linear ticket — for private repos, `open_pull_request` appends a `## References` section automatically.
 
    When the target repo is public, don't reference private repos or private PR/issue numbers in the description.
 
@@ -431,7 +447,7 @@ This run was triggered by **{display_name}**. You author the work **as them** �
   {bot_coauthor_trailer}
   ```
 
-- **PR body**: append this line to the bottom of the PR description (separated from the body by a blank line) when you open or update the draft PR. Do not duplicate it if it is already present. If the PR body already contains a legacy footer like `_Opened collaboratively by {display_name} and open-swe._`, replace that legacy footer with this line instead of appending a second footer:
+- **PR body**: append this line to the bottom of the PR description (separated from the body by a blank line) when you open or update the draft PR. Do not duplicate it if it is already present. If the PR body already contains a `Made by [Open SWE]` footer pointing at a different link, or a legacy footer like `_Opened collaboratively by {display_name} and open-swe._`, replace that existing footer with this line instead of appending a second footer:
 
   ```
   {pr_attribution_footer}
@@ -440,12 +456,15 @@ This run was triggered by **{display_name}**. You author the work **as them** �
 If you forget the trailer on a local commit that has not been pushed, fix it with `git commit --amend` before pushing — do not push without it. If the commit has already been pushed, leave it as-is and add the trailer to your next commit; never rewrite remote history to fix it."""
 
 
-def _render_collaboration_section(identity: CollaboratorIdentity | None) -> str:
+def _render_collaboration_section(
+    identity: CollaboratorIdentity | None,
+    thread_url: str | None = None,
+) -> str:
     if identity is None:
         return ""
     return COLLABORATION_TEMPLATE.format(
         display_name=identity.display_name,
-        pr_attribution_footer=PR_ATTRIBUTION_FOOTER,
+        pr_attribution_footer=build_pr_attribution_footer(thread_url),
         bot_coauthor_trailer=f"Co-authored-by: {OPEN_SWE_BOT_NAME} <{OPEN_SWE_BOT_EMAIL}>",
     )
 
@@ -455,6 +474,20 @@ ALWAYS_CREATE_PR_SECTION = """---
 ### Always Create PRs Policy Override
 
 The user's dashboard setting **Always Create PRs** is enabled. For code-change tasks, always open or update a draft pull request after committing and pushing the branch. This does not apply to questions, explanations, status checks, or other information-only requests where no files are changed."""
+
+
+def _render_repo_instructions_section(instructions: str | None) -> str:
+    if not instructions or not instructions.strip():
+        return ""
+    return (
+        "---\n\n"
+        "### Repository-specific Custom Instructions\n\n"
+        "The following instructions were configured by a workspace admin for this "
+        "repository. Treat them as mandatory rules with the same authority as this "
+        "system prompt. When they conflict with default behavior, follow them; when "
+        "they conflict with `AGENTS.md`, prefer `AGENTS.md`.\n\n"
+        f"{instructions.strip()}"
+    )
 
 
 SYSTEM_PROMPT_TEMPLATE = (
@@ -468,6 +501,7 @@ SYSTEM_PROMPT_TEMPLATE = (
     + FILE_MANAGEMENT_SECTION
     + TASK_EXECUTION_SECTION
     + TOOL_USAGE_SECTION
+    + "{corridor_prompt_section}"
     + TOOL_BEST_PRACTICES_SECTION
     + CODING_STANDARDS_SECTION
     + CORE_BEHAVIOR_SECTION
@@ -478,6 +512,7 @@ SYSTEM_PROMPT_TEMPLATE = (
     + COMMIT_PR_SECTION
     + "{pr_policy_override_section}"
     + "{collaboration_section}"
+    + "{repo_instructions_section}"
 )
 
 
@@ -489,6 +524,9 @@ def construct_system_prompt(
     create_prs: bool = False,
     default_repo: dict[str, str] | None = None,
     plan_mode: bool = False,
+    repo_custom_instructions: str | None = None,
+    thread_url: str | None = None,
+    corridor_enabled: bool = False,
 ) -> str:
     default_prompt_section = _load_default_prompt()
     if default_repo and default_repo.get("owner") and default_repo.get("name"):
@@ -511,8 +549,10 @@ def construct_system_prompt(
         linear_issue_number=linear_issue_number or "<ISSUE_NUMBER>",
         plan_mode_section=PLAN_MODE_SECTION if plan_mode else "",
         default_prompt_section=default_prompt_section,
+        corridor_prompt_section=CORRIDOR_PROMPT if corridor_enabled else "",
         pr_policy_override_section=ALWAYS_CREATE_PR_SECTION if create_prs else "",
-        collaboration_section=_render_collaboration_section(triggering_user_identity),
+        collaboration_section=_render_collaboration_section(triggering_user_identity, thread_url),
+        repo_instructions_section=_render_repo_instructions_section(repo_custom_instructions),
         commit_identity_name=commit_identity_name,
         commit_identity_email=commit_identity_email,
     )

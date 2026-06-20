@@ -2,6 +2,7 @@ export type Author = "user" | "agent" | "system" | "tool"
 
 export type ChunkKind =
   | "text"
+  | "reasoning"
   | "code"
   | "error"
   | "list"
@@ -41,6 +42,8 @@ export type AcpToolKind =
   | "fetch"
   | "slack"
   | "linear"
+  /** deepagents `task` tool — spawns a subagent; rendered as a subagent card. */
+  | "task"
   | "other"
 
 export type AcpToolStatus = "pending" | "in_progress" | "completed" | "error"
@@ -73,10 +76,23 @@ export interface ToolExecutionChunk {
   diffData?: DiffData
   diffs?: Array<DiffData>
   locations?: Array<AcpToolLocation>
+  /**
+   * Namespace of the subagent this `task` call spawned, from the SDK's
+   * `stream.subagents` discovery map (correlated by tool-call id). Present only
+   * for `toolKind: "task"` chunks whose subagent the SDK has discovered; lets
+   * the UI open a scoped `useToolCalls(stream, { namespace })` subscription to
+   * show the subagent's nested activity.
+   */
+  subagentNamespace?: Array<string>
 }
 
 export interface TextChunk {
   kind: "text"
+  text: string
+}
+
+export interface ReasoningChunk {
+  kind: "reasoning"
   text: string
 }
 
@@ -110,6 +126,7 @@ export interface ImageChunk {
 
 export type Chunk =
   | TextChunk
+  | ReasoningChunk
   | CodeChunk
   | ErrorChunk
   | ListChunk
@@ -121,6 +138,8 @@ export interface Message {
   id: string
   author: Author
   timestamp: string
+  /** Timestamp of the first message in an agent turn; used to derive work duration. */
+  startedAt?: string
   chunks: Array<Chunk>
   hidden?: boolean
 }
@@ -166,13 +185,17 @@ export interface AgentThread {
   status: AgentStatus
   viewed: boolean
   viewedAt?: number | null
+  resolved?: boolean
+  resolvedAt?: number | null
+  isOwner?: boolean
   createdAt: number
   updatedAt: number
+  traceUrl?: string | null
   messages: Array<Message>
   pr?: {
     number: number
     title: string
-    state: "draft" | "open" | "merged"
+    state: "draft" | "open" | "merged" | "closed"
     headRef: string
     baseRef: string
     url: string
@@ -194,9 +217,21 @@ export type GitFileStatus =
   | "index-modified"
   | "index-added"
   | "index-deleted"
+  | "index-renamed"
+  | "index-copied"
   | "modified"
   | "deleted"
   | "untracked"
+  | "ignored"
+  | "type-changed"
+  | "intent-to-add"
+  | "both-modified"
+  | "both-added"
+  | "both-deleted"
+  | "added-by-us"
+  | "added-by-them"
+  | "deleted-by-us"
+  | "deleted-by-them"
 
 export interface GitStatusEntry {
   path: string

@@ -13,3 +13,6 @@ count.txt
 dev-dist
 __unconfig*
 todos.json
+.yarn
+.yarnrc.yml
+.pnp.*

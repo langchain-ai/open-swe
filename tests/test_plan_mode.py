@@ -102,38 +102,50 @@ def dashboard_run_client(monkeypatch: pytest.MonkeyPatch) -> _FakeLangGraphClien
     return client
 
 
-def test_start_agent_run_passes_plan_mode_when_enabled(
+def _run_start_command(plan_mode: bool | None) -> dict[str, Any]:
+    configurable: dict[str, Any] = {}
+    if plan_mode is not None:
+        configurable["plan_mode"] = plan_mode
+    return {
+        "method": "run.start",
+        "params": {
+            "input": {"messages": [{"role": "user", "content": "do work"}]},
+            "config": {"configurable": configurable},
+        },
+    }
+
+
+def test_run_start_passes_plan_mode_when_enabled(
     dashboard_run_client: _FakeLangGraphClient,
 ) -> None:
-    asyncio.run(
-        thread_api._start_agent_run(
+    enriched = asyncio.run(
+        thread_api._enrich_run_start_command(
             "thread-id",
-            login="octo",
-            repo_config={"owner": "octo", "name": "repo"},
-            prompt="do work",
-            plan_mode=True,
+            "octo",
+            _run_start_command(True),
+            metadata={"source": "dashboard", "github_login": "octo"},
+            creating=False,
         )
     )
 
-    configurable = dashboard_run_client.runs.configurable
-    assert configurable is not None
+    configurable = enriched["params"]["config"]["configurable"]
     assert configurable["plan_mode"] is True
 
 
-def test_start_agent_run_omits_plan_mode_when_disabled(
+def test_run_start_omits_plan_mode_when_disabled(
     dashboard_run_client: _FakeLangGraphClient,
 ) -> None:
-    asyncio.run(
-        thread_api._start_agent_run(
+    enriched = asyncio.run(
+        thread_api._enrich_run_start_command(
             "thread-id",
-            login="octo",
-            repo_config={"owner": "octo", "name": "repo"},
-            prompt="do work",
+            "octo",
+            _run_start_command(None),
+            metadata={"source": "dashboard", "github_login": "octo"},
+            creating=False,
         )
     )
 
-    configurable = dashboard_run_client.runs.configurable
-    assert configurable is not None
+    configurable = enriched["params"]["config"]["configurable"]
     assert "plan_mode" not in configurable
 
 

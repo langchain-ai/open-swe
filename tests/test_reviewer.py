@@ -24,6 +24,45 @@ def test_reviewer_system_prompt_formats_without_keyerror() -> None:
     assert "at least 1 finding" not in prompt.lower()
 
 
+def test_reviewer_system_prompt_repo_ready_note() -> None:
+    prompt = reviewer._reviewer_system_prompt(
+        "/workspace/repo",
+        repo_owner="acme",
+        repo_name="repo",
+        pr_number=42,
+        repo_ready=True,
+    )
+    assert "already cloned and checked out at the PR head" in prompt
+    assert "Repo prep FAILED" not in prompt
+
+
+def test_reviewer_system_prompt_repo_not_ready_warns_stale() -> None:
+    prompt = reviewer._reviewer_system_prompt(
+        "/workspace/repo",
+        repo_owner="acme",
+        repo_name="repo",
+        pr_number=42,
+        repo_ready=False,
+        head_sha="abc123",
+    )
+    assert "Repo prep FAILED" in prompt
+    assert "stale" in prompt
+    assert "git checkout --force abc123" in prompt
+    assert "git rev-parse HEAD" in prompt
+    assert "already cloned and checked out at the PR head" not in prompt
+
+
+def test_reviewer_system_prompt_repo_not_ready_without_head_sha() -> None:
+    prompt = reviewer._reviewer_system_prompt(
+        "/workspace/repo",
+        repo_owner="acme",
+        repo_name="repo",
+        pr_number=42,
+        repo_ready=False,
+    )
+    assert "git checkout --force <head_sha>" in prompt
+
+
 def test_reviewer_system_prompt_includes_repo_style_section() -> None:
     prompt = reviewer._reviewer_system_prompt(
         "/workspace/repo",
@@ -83,6 +122,37 @@ def test_reviewer_system_prompt_omits_api_standards_when_absent() -> None:
         pr_number=42,
     )
     assert "API standards skill" not in prompt
+
+
+def test_reviewer_system_prompt_includes_socket_firewall_dependency_guidance() -> None:
+    prompt = reviewer._reviewer_system_prompt(
+        "/workspace/repo",
+        repo_owner="acme",
+        repo_name="repo",
+        pr_number=42,
+    )
+    assert "Dependency installs during review" in prompt
+    assert "command -v sfw" in prompt
+    assert "npm i -g sfw" in prompt
+    assert "sfw npm ci" in prompt
+    assert "sfw uv pip install -e ." in prompt
+    assert "supported registry-fetching installs" in prompt
+    assert "unsupported package managers such as Poetry" in prompt
+    assert "normal documented install command without `sfw`" in prompt
+    assert "sfw poetry" not in prompt
+
+
+def test_reviewer_system_prompt_includes_dependency_vetting_guidance() -> None:
+    prompt = reviewer._reviewer_system_prompt(
+        "/workspace/repo",
+        repo_owner="acme",
+        repo_name="repo",
+        pr_number=42,
+    )
+    assert "New dependencies." in prompt
+    assert "unpinned/floating" in prompt
+    assert "missing/non-permissive license" in prompt
+    assert "not a style nit" in prompt
 
 
 def test_finding_reply_context_wraps_reply_as_untrusted_data() -> None:
@@ -202,6 +272,7 @@ async def test_reviewer_reuses_app_token_for_sandbox_proxy() -> None:
     mock_sandbox.assert_awaited_once_with(
         "reviewer-thread-id",
         github_proxy_token="app-token",
+        github_proxy_repositories=["repo"],
     )
 
 
@@ -279,11 +350,11 @@ async def test_reviewer_applies_eval_model_and_effort_overrides() -> None:
 
     main_model_call = make_model.call_args_list[0]
     assert main_model_call.args == ("anthropic:claude-opus-4-8",)
-    assert main_model_call.kwargs["thinking"] == {"type": "adaptive"}
+    assert main_model_call.kwargs["thinking"] == {"type": "adaptive", "display": "summarized"}
     assert main_model_call.kwargs["effort"] == "high"
     subagent_model_call = make_model.call_args_list[1]
     assert subagent_model_call.args == ("openai:gpt-5.5",)
-    assert subagent_model_call.kwargs["reasoning"] == {"effort": "low"}
+    assert subagent_model_call.kwargs["reasoning"] == {"effort": "low", "summary": "auto"}
 
 
 @pytest.mark.asyncio
@@ -327,11 +398,11 @@ async def test_reviewer_subagent_inherits_eval_model_without_explicit_override()
 
     main_model_call = make_model.call_args_list[0]
     assert main_model_call.args == ("anthropic:claude-opus-4-8",)
-    assert main_model_call.kwargs["thinking"] == {"type": "adaptive"}
+    assert main_model_call.kwargs["thinking"] == {"type": "adaptive", "display": "summarized"}
     assert main_model_call.kwargs["effort"] == "high"
     subagent_model_call = make_model.call_args_list[1]
     assert subagent_model_call.args == ("anthropic:claude-opus-4-8",)
-    assert subagent_model_call.kwargs["thinking"] == {"type": "adaptive"}
+    assert subagent_model_call.kwargs["thinking"] == {"type": "adaptive", "display": "summarized"}
     assert subagent_model_call.kwargs["effort"] == "high"
 
 
@@ -456,8 +527,10 @@ def test_reviewer_system_prompt_includes_agents_md_section() -> None:
         pr_number=42,
         agents_md_content="Use snake_case for all Python identifiers.",
     )
-    assert "Repository conventions (AGENTS.md)" in prompt
+    assert "Repository conventions (AGENTS.md / CLAUDE.md)" in prompt
     assert "Use snake_case for all Python identifiers." in prompt
+    assert "Repository conventions compliance" in prompt
+    assert "mandatory repo rules" in prompt
 
 
 @pytest.mark.asyncio
@@ -508,8 +581,61 @@ async def test_reviewer_inlines_agents_md_into_system_prompt() -> None:
         await reviewer.get_reviewer_agent(config)
 
     mock_fetch_agents_md.assert_awaited_once_with("acme", "repo", "base-sha-xyz", token="gh-token")
-    assert "Repository conventions (AGENTS.md)" in captured["system_prompt"]
+    assert "Repository conventions (AGENTS.md / CLAUDE.md)" in captured["system_prompt"]
     assert "Always use the design system IconButton." in captured["system_prompt"]
+
+
+@pytest.mark.asyncio
+async def test_reviewer_inlines_claude_md_when_agents_md_absent() -> None:
+    config: RunnableConfig = {
+        "configurable": {
+            "__is_for_execution__": True,
+            "thread_id": "reviewer-thread-id",
+            "source": "github",
+            "repo": {"owner": "acme", "name": "repo"},
+            "pr_number": 7,
+            "pr_url": "https://github.com/acme/repo/pull/7",
+            "base_sha": "base-sha-xyz",
+            "head_sha": "head-sha-abc",
+        },
+        "metadata": {},
+    }
+    captured: dict[str, str] = {}
+
+    def fake_create_deep_agent(*, system_prompt: str, **kwargs: object) -> _DummyAgent:
+        captured["system_prompt"] = system_prompt
+        return _DummyAgent()
+
+    with (
+        patch(
+            "agent.reviewer.get_github_app_installation_token_with_expiry",
+            new_callable=AsyncMock,
+            return_value=("gh-token", None),
+        ),
+        patch(
+            "agent.reviewer.ensure_sandbox_for_thread",
+            new_callable=AsyncMock,
+            return_value=MagicMock(),
+        ),
+        patch(
+            "agent.reviewer.aresolve_sandbox_work_dir",
+            new_callable=AsyncMock,
+            return_value="/workspace",
+        ),
+        patch(
+            "agent.reviewer.fetch_agents_md",
+            new_callable=AsyncMock,
+            return_value="# CLAUDE.md\nUse semantic tokens only.",
+        ) as mock_fetch_agents_md,
+        patch("agent.reviewer.make_model", return_value=MagicMock()),
+        patch("agent.reviewer.create_deep_agent", side_effect=fake_create_deep_agent),
+    ):
+        await reviewer.get_reviewer_agent(config)
+
+    mock_fetch_agents_md.assert_awaited_once_with("acme", "repo", "base-sha-xyz", token="gh-token")
+    assert "Repository conventions (AGENTS.md / CLAUDE.md)" in captured["system_prompt"]
+    assert "Use semantic tokens only." in captured["system_prompt"]
+    assert "Repository conventions compliance" in captured["system_prompt"]
 
 
 def test_format_pr_review_threads_renders_resolved_and_open_threads() -> None:
@@ -1273,3 +1399,18 @@ async def test_reviewer_injects_pr_title_and_body_into_context() -> None:
     assert "PR title and description" in captured["system_prompt"]
     assert "Add retry logic for uploads" in captured["system_prompt"]
     assert "Retries flaky uploads up to 3 times." in captured["system_prompt"]
+
+
+def test_reviewer_system_prompt_includes_closing_summary_contract() -> None:
+    """The prompt must tell the agent how to report publish_review outcomes:
+    dry_run / skipped_empty_re_review / thread_not_found are not publications."""
+    prompt = reviewer._reviewer_system_prompt(
+        "/tmp/wd",
+        repo_owner="o",
+        repo_name="r",
+        pr_number=1,
+    )
+    assert "skipped_empty_re_review" in prompt
+    assert "dry_run" in prompt
+    assert "Simulated publish (eval mode)" in prompt
+    assert "thread_not_found" in prompt

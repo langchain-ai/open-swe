@@ -1,5 +1,5 @@
 import { LoaderCircle } from 'lucide-react';
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 
 export function CompactingIndicator() {
   const [dots, setDots] = useState(1);

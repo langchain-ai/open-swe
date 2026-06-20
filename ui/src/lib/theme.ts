@@ -73,3 +73,27 @@ export function useTheme() {
 
   return { theme, resolvedTheme, setTheme, toggleTheme }
 }
+
+function readDomResolvedTheme(): ResolvedTheme {
+  if (typeof document === "undefined") return "light"
+  return document.documentElement.classList.contains("dark") ? "dark" : "light"
+}
+
+/** Reactive resolved theme that tracks the root `.dark` class set by `useTheme`. */
+export function useResolvedTheme(): ResolvedTheme {
+  const [resolved, setResolved] = useState<ResolvedTheme>(readDomResolvedTheme)
+
+  useEffect(() => {
+    setResolved(readDomResolvedTheme())
+    const observer = new MutationObserver(() =>
+      setResolved(readDomResolvedTheme())
+    )
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["class"],
+    })
+    return () => observer.disconnect()
+  }, [])
+
+  return resolved
+}

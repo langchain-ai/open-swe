@@ -212,6 +212,40 @@ def test_render_review_body_no_findings_message() -> None:
     body = render_review_body(pr_number=99, surfaced_count=0)
     assert "## ✅ Open SWE Review: No issues found" in body
     assert "Open SWE reviewed this PR and found no potential bugs to report." in body
+    assert "additional" not in body
+
+
+def test_render_review_body_with_additional_findings_and_ui_link() -> None:
+    body = render_review_body(
+        pr_number=99,
+        surfaced_count=0,
+        additional_findings_count=2,
+        ui_url="https://dash.example/agents/reviews/o/r/99",
+    )
+    assert "## ✅ Open SWE Review: No issues found" in body
+    assert "2 additional findings can be viewed in the web app." in body
+    assert "[Open in Web](https://dash.example/agents/reviews/o/r/99)" in body
+
+
+def test_render_review_body_with_single_additional_finding_uses_singular() -> None:
+    body = render_review_body(pr_number=99, surfaced_count=0, additional_findings_count=1)
+    assert "1 additional finding can be viewed in the web app." in body
+
+
+def test_render_review_body_with_surfaced_and_additional_findings() -> None:
+    body = render_review_body(
+        pr_number=99,
+        surfaced_count=3,
+        additional_findings_count=2,
+        ui_url="https://dash.example/agents/reviews/o/r/99",
+    )
+    assert "found 3 potential issues." in body
+    assert "2 additional findings can be viewed in the web app." in body
+
+
+def test_render_review_body_additional_findings_zero_omits_line() -> None:
+    body = render_review_body(pr_number=99, surfaced_count=0, additional_findings_count=0)
+    assert "additional" not in body
 
 
 def test_render_status_comment_reviewing_includes_ui_link(monkeypatch: Any) -> None:
@@ -387,6 +421,51 @@ def test_publish_review_eval_mode_does_not_call_github() -> None:
     set_meta.assert_awaited_once_with("tid", last_reviewed_sha="sha")
 
 
+@pytest.mark.asyncio
+async def test_publish_review_surfaces_additional_findings_count_in_body() -> None:
+    """When all surfaced findings are above threshold but sub-threshold findings
+    exist, the review body must mention how many additional findings are in the
+    web app."""
+    from agent.tools.publish_review import _publish_review_async
+
+    findings = [
+        _f(id="f_low_1", severity="low", file="a.py", start_line=1, end_line=1),
+        _f(id="f_low_2", severity="low", file="b.py", start_line=2, end_line=2),
+    ]
+    post_review = AsyncMock(return_value={"id": 555})
+    fetch_comments = AsyncMock(return_value=[])
+
+    with (
+        patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
+        patch("agent.tools.publish_review.list_findings_async", AsyncMock(return_value=findings)),
+        patch("agent.tools.publish_review.post_pull_request_review", post_review),
+        patch("agent.tools.publish_review.fetch_review_comments", fetch_comments),
+        patch(
+            "agent.tools.publish_review._resolve_threads_for_resolved_findings",
+            new_callable=AsyncMock,
+            return_value=0,
+        ),
+        patch("agent.tools.publish_review.set_reviewer_thread_metadata", AsyncMock()),
+        patch("agent.tools.publish_review._maybe_post_slack_completion_reply", AsyncMock()),
+    ):
+        result = await _publish_review_async(
+            owner="o",
+            repo="r",
+            pr_number=7,
+            head_sha="sha",
+            token="t",
+            severity_threshold="medium",
+            cap=15,
+            is_re_review=False,
+        )
+
+    assert result["success"] is True
+    assert result["surfaced_count"] == 0
+    posted_body = post_review.await_args.kwargs["body"]
+    assert "No issues found" in posted_body
+    assert "2 additional findings can be viewed in the web app." in posted_body
+
+
 def test_publish_review_forwards_trace_link_config_override() -> None:
     from agent.tools.publish_review import publish_review
 
@@ -480,7 +559,7 @@ async def test_resolve_review_thread_returns_true_on_success() -> None:
     client_cm.__aenter__.return_value = client_cm
     client_cm.post = AsyncMock(return_value=response)
 
-    with patch("agent.reviewer_publish.httpx.AsyncClient", return_value=client_cm):
+    with patch("agent.utils.github_http.httpx.AsyncClient", return_value=client_cm):
         ok = await resolve_review_thread(thread_node_id="T_1", token="t")
     assert ok is True
 
@@ -498,7 +577,7 @@ async def test_fetch_pr_review_threads_handles_null_repository() -> None:
     client_cm.__aenter__.return_value = client_cm
     client_cm.post = AsyncMock(return_value=response)
 
-    with patch("agent.reviewer_publish.httpx.AsyncClient", return_value=client_cm):
+    with patch("agent.utils.github_http.httpx.AsyncClient", return_value=client_cm):
         threads = await fetch_pr_review_threads(owner="o", repo="r", pr_number=1, token="t")
     assert threads == []
 
@@ -518,7 +597,7 @@ async def test_post_pull_request_review_non_dict_body_surfaces_status_and_excerp
     client_cm.__aenter__.return_value = client_cm
     client_cm.post = AsyncMock(return_value=response)
 
-    with patch("agent.reviewer_publish.httpx.AsyncClient", return_value=client_cm):
+    with patch("agent.utils.github_http.httpx.AsyncClient", return_value=client_cm):
         result = await post_pull_request_review(
             owner="o",
             repo="r",
@@ -549,7 +628,7 @@ async def test_resolve_review_thread_returns_false_on_graphql_errors() -> None:
     client_cm.__aenter__.return_value = client_cm
     client_cm.post = AsyncMock(return_value=response)
 
-    with patch("agent.reviewer_publish.httpx.AsyncClient", return_value=client_cm):
+    with patch("agent.utils.github_http.httpx.AsyncClient", return_value=client_cm):
         ok = await resolve_review_thread(thread_node_id="T_1", token="t")
     assert ok is False
 
@@ -669,10 +748,10 @@ async def test_publish_review_skips_post_on_re_review_with_no_new_findings() -> 
 
 
 @pytest.mark.asyncio
-async def test_publish_review_surfaces_out_of_diff_finding_on_re_review() -> None:
-    """A new out-of-diff finding has no inline comment, but the re-review
-    empty-summary suppression must not swallow it — it should post a summary
-    review carrying the collapsed out-of-diff dropdown."""
+async def test_publish_review_does_not_surface_out_of_diff_finding() -> None:
+    """Out-of-diff findings are disabled: a finding anchored outside the diff is
+    never surfaced on the PR. On a re-review with nothing else to post, it is
+    treated as an empty re-review."""
     from agent.tools.publish_review import _publish_review_async
 
     findings = [
@@ -692,10 +771,16 @@ async def test_publish_review_surfaces_out_of_diff_finding_on_re_review() -> Non
         patch("agent.tools.publish_review.list_findings_async", AsyncMock(return_value=findings)),
         patch("agent.tools.publish_review.post_pull_request_review", post_review),
         patch(
+            "agent.tools.publish_review._open_swe_already_reviewed",
+            AsyncMock(return_value=True),
+        ),
+        patch(
             "agent.tools.publish_review._resolve_threads_for_resolved_findings",
             AsyncMock(return_value=0),
         ),
         patch("agent.tools.publish_review.set_reviewer_thread_metadata", AsyncMock()),
+        patch("agent.tools.publish_review.clear_review_started_comment", AsyncMock()),
+        patch("agent.tools.publish_review.settle_review_check_run", AsyncMock()),
         patch("agent.tools.publish_review._maybe_post_slack_completion_reply", AsyncMock()),
         patch("agent.tools.publish_review._resolve_review_trace_url", AsyncMock(return_value=None)),
     ):
@@ -710,13 +795,12 @@ async def test_publish_review_surfaces_out_of_diff_finding_on_re_review() -> Non
             is_re_review=True,
         )
 
-    post_review.assert_awaited_once()
-    assert "out-of-diff" in post_review.await_args.kwargs["body"]
-    assert post_review.await_args.kwargs["inline_comments"] == []
+    post_review.assert_not_called()
     assert result["success"] is True
+    assert result["review_id"] is None
     assert result["surfaced_count"] == 0
-    assert result["out_of_diff_count"] == 1
-    assert "skipped_empty_re_review" not in result
+    assert "out_of_diff_count" not in result
+    assert result["skipped_empty_re_review"] is True
 
 
 @pytest.mark.asyncio
@@ -853,6 +937,94 @@ async def test_publish_review_skips_review_existence_check_on_re_review() -> Non
 
 
 @pytest.mark.asyncio
+async def test_publish_review_dedup_keys_off_durable_last_reviewed_sha() -> None:
+    """A non-empty ``last_reviewed_sha`` on thread metadata means this thread
+    already published once. The empty-summary guard must trust that durable
+    signal and suppress without ever hitting the reviews API."""
+    from agent.tools.publish_review import _publish_review_async
+
+    review_exists = AsyncMock(return_value=False)
+    post_review = AsyncMock()
+
+    with (
+        patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
+        patch("agent.tools.publish_review.list_findings_async", AsyncMock(return_value=[])),
+        patch(
+            "agent.tools.publish_review.get_thread_metadata",
+            AsyncMock(return_value={"last_reviewed_sha": "oldsha"}),
+        ),
+        patch("agent.tools.publish_review.open_swe_review_exists", review_exists),
+        patch("agent.tools.publish_review.post_pull_request_review", post_review),
+        patch(
+            "agent.tools.publish_review._resolve_threads_for_resolved_findings",
+            new_callable=AsyncMock,
+            return_value=0,
+        ),
+        patch("agent.tools.publish_review.set_reviewer_thread_metadata", new_callable=AsyncMock),
+    ):
+        result = await _publish_review_async(
+            owner="o",
+            repo="r",
+            pr_number=7,
+            head_sha="newsha",
+            token="t",
+            severity_threshold="medium",
+            cap=15,
+            is_re_review=False,
+        )
+
+    review_exists.assert_not_called()
+    post_review.assert_not_called()
+    assert result["skipped_empty_re_review"] is True
+
+
+@pytest.mark.asyncio
+async def test_publish_review_posts_summary_when_review_existence_unknown() -> None:
+    """When the reviews API can't answer (``open_swe_review_exists`` returns
+    ``None``) and there is no durable prior-review signal, the guard must NOT
+    suppress — re-posting the summary is the safe failure mode, never silently
+    swallowing the only review the user sees."""
+    from agent.tools.publish_review import _publish_review_async
+
+    review_exists = AsyncMock(return_value=None)
+    post_review = AsyncMock(return_value={"id": 321})
+
+    with (
+        patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
+        patch("agent.tools.publish_review.list_findings_async", AsyncMock(return_value=[])),
+        patch(
+            "agent.tools.publish_review.get_thread_metadata",
+            AsyncMock(return_value={}),
+        ),
+        patch("agent.tools.publish_review.open_swe_review_exists", review_exists),
+        patch("agent.tools.publish_review.post_pull_request_review", post_review),
+        patch("agent.tools.publish_review.fetch_review_comments", AsyncMock(return_value=[])),
+        patch(
+            "agent.tools.publish_review._resolve_threads_for_resolved_findings",
+            new_callable=AsyncMock,
+            return_value=0,
+        ),
+        patch("agent.tools.publish_review.set_reviewer_thread_metadata", new_callable=AsyncMock),
+        patch("agent.tools.publish_review._maybe_post_slack_completion_reply", AsyncMock()),
+    ):
+        result = await _publish_review_async(
+            owner="o",
+            repo="r",
+            pr_number=7,
+            head_sha="newsha",
+            token="t",
+            severity_threshold="medium",
+            cap=15,
+            is_re_review=False,
+        )
+
+    review_exists.assert_awaited_once()
+    post_review.assert_awaited_once()
+    assert "skipped_empty_re_review" not in result
+    assert result["review_id"] == 321
+
+
+@pytest.mark.asyncio
 async def test_open_swe_review_exists_detects_summary_marker() -> None:
     response = MagicMock()
     response.json.return_value = [
@@ -865,7 +1037,7 @@ async def test_open_swe_review_exists_detects_summary_marker() -> None:
     client_cm.__aenter__.return_value = client_cm
     client_cm.get = AsyncMock(return_value=response)
 
-    with patch("agent.reviewer_publish.httpx.AsyncClient", return_value=client_cm):
+    with patch("agent.utils.github_http.httpx.AsyncClient", return_value=client_cm):
         exists = await open_swe_review_exists(owner="o", repo="r", pr_number=7, token="t")
     assert exists is True
 
@@ -880,22 +1052,25 @@ async def test_open_swe_review_exists_false_without_marker() -> None:
     client_cm.__aenter__.return_value = client_cm
     client_cm.get = AsyncMock(return_value=response)
 
-    with patch("agent.reviewer_publish.httpx.AsyncClient", return_value=client_cm):
+    with patch("agent.utils.github_http.httpx.AsyncClient", return_value=client_cm):
         exists = await open_swe_review_exists(owner="o", repo="r", pr_number=7, token="t")
     assert exists is False
 
 
 @pytest.mark.asyncio
-async def test_open_swe_review_exists_fails_open_on_http_error() -> None:
+async def test_open_swe_review_exists_returns_none_on_http_error() -> None:
+    """A failed reviews API call is reported as ``None`` (unknown), never
+    ``False`` — the empty-summary dedup must not treat a transient failure as
+    "no prior review exists" and double-post."""
     import httpx
 
     client_cm = AsyncMock()
     client_cm.__aenter__.return_value = client_cm
     client_cm.get = AsyncMock(side_effect=httpx.HTTPError("boom"))
 
-    with patch("agent.reviewer_publish.httpx.AsyncClient", return_value=client_cm):
+    with patch("agent.utils.github_http.httpx.AsyncClient", return_value=client_cm):
         exists = await open_swe_review_exists(owner="o", repo="r", pr_number=7, token="t")
-    assert exists is False
+    assert exists is None
 
 
 @pytest.mark.asyncio
@@ -1150,6 +1325,118 @@ async def test_re_review_only_posts_current_head_unpublished_findings() -> None:
     assert old["github_review_id"] is None
     assert new["github_review_id"] == 888
     assert new["github_review_comment_id"] == 303
+
+
+@pytest.mark.asyncio
+async def test_publish_review_matches_comment_ids_by_marker_not_path_line_body() -> None:
+    """Two findings on the same path/line with identical rendered bodies must
+    each get their OWN comment id, matched via the embedded marker. The old
+    ``(path, line, body)`` fallback collided here and cached one comment id on
+    both findings, breaking resolve-on-fix."""
+    from agent.tools.publish_review import _publish_review_async
+
+    f1 = _f(id="f_one", file="dup.py", start_line=5, end_line=5, description="same text")
+    f2 = _f(id="f_two", file="dup.py", start_line=5, end_line=5, description="same text")
+    findings = [f1, f2]
+    post_review = AsyncMock(return_value={"id": 700})
+    # GitHub returns one comment per finding; the only thing that distinguishes
+    # them is the marker embedded in each body.
+    fetch_comments = AsyncMock(
+        return_value=[
+            {"id": 901, "path": "dup.py", "line": 5, "body": render_inline_comment_body(f1)},
+            {"id": 902, "path": "dup.py", "line": 5, "body": render_inline_comment_body(f2)},
+        ]
+    )
+
+    with (
+        patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
+        patch("agent.tools.publish_review.list_findings_async", AsyncMock(return_value=findings)),
+        patch("agent.tools.publish_review.post_pull_request_review", post_review),
+        patch("agent.tools.publish_review.fetch_review_comments", fetch_comments),
+        patch(
+            "agent.tools.publish_review._resolve_threads_for_resolved_findings",
+            new_callable=AsyncMock,
+            return_value=0,
+        ),
+        patch("agent.tools.publish_review._store_thread_ids_on_findings", new_callable=AsyncMock),
+        patch("agent.tools.publish_review.set_reviewer_thread_metadata", new_callable=AsyncMock),
+        patch("agent.tools.publish_review._maybe_post_slack_completion_reply", AsyncMock()),
+    ):
+        result = await _publish_review_async(
+            owner="o",
+            repo="r",
+            pr_number=7,
+            head_sha="sha",
+            token="t",
+            severity_threshold="medium",
+            cap=15,
+            is_re_review=False,
+        )
+
+    assert result["success"] is True
+    by_id = {f["id"]: f for f in findings}
+    assert by_id["f_one"]["github_review_comment_id"] == 901
+    assert by_id["f_two"]["github_review_comment_id"] == 902
+
+
+@pytest.mark.asyncio
+async def test_publish_review_records_review_id_and_comment_id_in_single_write() -> None:
+    """The post-publish bookkeeping stamps review id + comment id onto findings
+    in one ``replace_findings`` call, so a finding is never persisted with a
+    review id but no comment id."""
+    from agent.tools.publish_review import _publish_review_async
+
+    finding = _f(id="f_new", file="x.py", start_line=3, end_line=3)
+    findings = [finding]
+    post_review = AsyncMock(return_value={"id": 555})
+    fetch_comments = AsyncMock(
+        return_value=[
+            {"id": 808, "path": "x.py", "line": 3, "body": render_inline_comment_body(finding)},
+        ]
+    )
+    replace = AsyncMock()
+
+    with (
+        patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
+        patch("agent.tools.publish_review.list_findings_async", AsyncMock(return_value=findings)),
+        patch("agent.tools.publish_review.replace_findings", replace),
+        patch("agent.tools.publish_review.post_pull_request_review", post_review),
+        patch("agent.tools.publish_review.fetch_review_comments", fetch_comments),
+        patch("agent.tools.publish_review._store_thread_ids_on_findings", new_callable=AsyncMock),
+        patch(
+            "agent.tools.publish_review._resolve_threads_for_resolved_findings",
+            new_callable=AsyncMock,
+            return_value=0,
+        ),
+        patch("agent.tools.publish_review.set_reviewer_thread_metadata", new_callable=AsyncMock),
+        patch("agent.tools.publish_review._maybe_post_slack_completion_reply", AsyncMock()),
+    ):
+        result = await _publish_review_async(
+            owner="o",
+            repo="r",
+            pr_number=7,
+            head_sha="sha",
+            token="t",
+            severity_threshold="medium",
+            cap=15,
+            is_re_review=False,
+        )
+
+    assert result["success"] is True
+    # Exactly one persisted snapshot carries both ids together — never a
+    # half-stamped intermediate state.
+    persisted_snapshots = [call.args[1] for call in replace.await_args_list]
+    assert any(
+        snap[0].get("github_review_id") == 555 and snap[0].get("github_review_comment_id") == 808
+        for snap in persisted_snapshots
+    )
+    assert all(
+        not (
+            snap[0].get("github_review_id") == 555
+            and snap[0].get("github_review_comment_id") is None
+        )
+        for snap in persisted_snapshots
+    )
 
 
 @pytest.mark.asyncio
@@ -1457,7 +1744,7 @@ async def test_fetch_pr_review_threads_parses_threads_and_comments() -> None:
     client_cm.__aenter__.return_value = client_cm
     client_cm.post = AsyncMock(return_value=response)
 
-    with patch("agent.reviewer_publish.httpx.AsyncClient", return_value=client_cm):
+    with patch("agent.utils.github_http.httpx.AsyncClient", return_value=client_cm):
         threads = await fetch_pr_review_threads(owner="o", repo="r", pr_number=1, token="t")
 
     assert len(threads) == 2
@@ -1480,7 +1767,7 @@ async def test_fetch_pr_review_threads_returns_empty_on_http_error() -> None:
     client_cm.__aenter__.return_value = client_cm
     client_cm.post = AsyncMock(side_effect=httpx.HTTPError("boom"))
 
-    with patch("agent.reviewer_publish.httpx.AsyncClient", return_value=client_cm):
+    with patch("agent.utils.github_http.httpx.AsyncClient", return_value=client_cm):
         threads = await fetch_pr_review_threads(owner="o", repo="r", pr_number=1, token="t")
     assert threads == []
 
@@ -1496,7 +1783,7 @@ async def test_reply_to_review_comment_posts_reply_payload() -> None:
     client_cm.__aenter__.return_value = client_cm
     client_cm.post = AsyncMock(return_value=response)
 
-    with patch("agent.reviewer_publish.httpx.AsyncClient", return_value=client_cm):
+    with patch("agent.utils.github_http.httpx.AsyncClient", return_value=client_cm):
         result = await reply_to_review_comment(
             owner="o",
             repo="r",
@@ -1534,7 +1821,7 @@ async def test_post_pull_request_review_tags_unresolved_anchor_on_422() -> None:
     client_cm.__aenter__.return_value = client_cm
     client_cm.post = AsyncMock(return_value=response)
 
-    with patch("agent.reviewer_publish.httpx.AsyncClient", return_value=client_cm):
+    with patch("agent.utils.github_http.httpx.AsyncClient", return_value=client_cm):
         result = await post_pull_request_review(
             owner="o",
             repo="r",
@@ -1573,7 +1860,7 @@ async def test_post_pull_request_review_tags_unresolved_anchor_on_line_error() -
     client_cm.__aenter__.return_value = client_cm
     client_cm.post = AsyncMock(return_value=response)
 
-    with patch("agent.reviewer_publish.httpx.AsyncClient", return_value=client_cm):
+    with patch("agent.utils.github_http.httpx.AsyncClient", return_value=client_cm):
         result = await post_pull_request_review(
             owner="o",
             repo="r",
@@ -1609,7 +1896,7 @@ async def test_post_pull_request_review_does_not_tag_unrelated_422() -> None:
     client_cm.__aenter__.return_value = client_cm
     client_cm.post = AsyncMock(return_value=response)
 
-    with patch("agent.reviewer_publish.httpx.AsyncClient", return_value=client_cm):
+    with patch("agent.utils.github_http.httpx.AsyncClient", return_value=client_cm):
         result = await post_pull_request_review(
             owner="o",
             repo="r",
@@ -1905,3 +2192,36 @@ async def test_publish_review_fetches_pr_diff_when_diff_line_set_missing() -> No
     assert {c["path"] for c in retry_inline} == {"in_diff.py"}
     assert result["success"] is True
     assert result["unresolvable_findings"] == ["f_bad"]
+
+
+def test_publish_review_tool_returns_structured_error_when_thread_missing() -> None:
+    """A missing reviewer thread surfaces as a do-not-retry tool result instead
+    of an exception the middleware swallows into an empty tool message."""
+    from agent.reviewer_findings import ReviewerThreadMissingError
+    from agent.tools.publish_review import publish_review
+
+    publish_async = AsyncMock(
+        side_effect=ReviewerThreadMissingError("tid", RuntimeError("thread tid not found"))
+    )
+    with (
+        patch(
+            "agent.tools.publish_review.get_config",
+            return_value={
+                "configurable": {
+                    "thread_id": "tid",
+                    "repo": {"owner": "o", "name": "r"},
+                    "pr_number": 7,
+                    "head_sha": "sha",
+                },
+                "metadata": {},
+            },
+        ),
+        patch("agent.tools.publish_review.get_github_token", return_value="token"),
+        patch("agent.tools.publish_review._publish_review_async", publish_async),
+    ):
+        result = publish_review()
+
+    assert result["success"] is False
+    assert result["error"] == "thread_not_found"
+    assert result["thread_id"] == "tid"
+    assert "Do not retry" in result["note"]

@@ -4,7 +4,7 @@ from agent.utils.model import anthropic_effort_for, anthropic_thinking_for
 
 
 def test_anthropic_uses_adaptive_thinking_and_effort() -> None:
-    assert anthropic_thinking_for("high") == {"type": "adaptive"}
+    assert anthropic_thinking_for("high") == {"type": "adaptive", "display": "summarized"}
     assert anthropic_effort_for("high") == "high"
 
 

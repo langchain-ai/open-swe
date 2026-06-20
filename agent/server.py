@@ -7,6 +7,7 @@ import logging
 import os
 import time
 import warnings
+from collections.abc import Sequence
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -30,6 +31,7 @@ from langchain.agents.middleware import ModelCallLimitMiddleware
 from langchain_core.language_models import BaseChatModel
 from langsmith.sandbox import SandboxClientError
 
+from .dashboard.admin import is_observability_authorized
 from .dashboard.agent_overrides import (
     load_profile,
     normalize_profile_overrides,
@@ -45,7 +47,12 @@ from .dashboard.team_settings import (
     get_team_default_repo,
     get_team_settings,
 )
+from .dashboard.user_mappings import email_for_login
+from .integrations.corridor_mcp import load_corridor_tools
+from .integrations.currents_tools import load_currents_tools
+from .integrations.datadog_mcp import load_datadog_tools
 from .integrations.langsmith import _configure_github_proxy
+from .integrations.langsmith_tools import load_langsmith_tools
 from .middleware import (
     ExcludeToolsMiddleware,
     ModelFallbackMiddleware,
@@ -54,10 +61,11 @@ from .middleware import (
     SanitizeThinkingBlocksMiddleware,
     SanitizeToolInputsMiddleware,
     SlackAssistantStatusMiddleware,
+    ToolArtifactMiddleware,
     ToolErrorMiddleware,
     check_message_queue_before_model,
-    ensure_no_empty_msg,
     notify_step_limit_reached,
+    refresh_github_proxy_before_model,
 )
 from .prompt import construct_system_prompt
 from .tools import (
@@ -83,7 +91,11 @@ from .utils.authorship import (
     OPEN_SWE_BOT_NAME,
     resolve_triggering_user_identity,
 )
-from .utils.github_app import get_github_app_installation_token
+from .utils.dashboard_links import dashboard_thread_url
+from .utils.github_app import (
+    get_github_app_installation_token_with_expiry,
+)
+from .utils.github_proxy import record_proxy_token_expiry
 from .utils.model import (
     DEFAULT_LLM_REASONING,
     ModelKwargs,
@@ -93,6 +105,7 @@ from .utils.model import (
 )
 from .utils.sandbox import create_sandbox
 from .utils.sandbox_paths import aresolve_sandbox_work_dir
+from .utils.tracing import AGENT_TRACING_PROJECT, traced_graph_factory
 
 client = get_client()
 
@@ -126,6 +139,21 @@ async def _resolve_prompt_default_repo(configurable: dict[str, Any]) -> dict[str
         return None
 
 
+async def _resolve_repo_custom_instructions(
+    default_repo: dict[str, str] | None,
+) -> str | None:
+    """Load per-repo custom agent instructions for the resolved default repo."""
+    if not default_repo or not default_repo.get("owner") or not default_repo.get("name"):
+        return None
+    try:
+        from .dashboard.agent_instructions import get_repo_agent_instructions
+
+        return await get_repo_agent_instructions(default_repo["owner"], default_repo["name"])
+    except Exception:
+        logger.debug("Failed to load repo custom agent instructions", exc_info=True)
+        return None
+
+
 async def _start_langsmith_sandbox_if_needed(sandbox_backend: SandboxBackendProtocol) -> None:
     """Start a LangSmith sandbox before operations that require it to be running."""
     if os.getenv("SANDBOX_TYPE", "langsmith") != "langsmith":
@@ -150,21 +178,37 @@ async def _start_langsmith_sandbox_if_needed(sandbox_backend: SandboxBackendProt
     await asyncio.to_thread(sandbox.start)
 
 
+async def _resolve_proxy_token(github_proxy_token: str | None) -> tuple[str | None, str | None]:
+    """Resolve the proxy token and its expiry.
+
+    An explicitly supplied token has no known expiry; otherwise we mint a fresh
+    GitHub App installation token and keep its ``expires_at`` so the proxy can
+    be refreshed before the (hard 1h) expiry.
+    """
+    if github_proxy_token:
+        return github_proxy_token, None
+    return await get_github_app_installation_token_with_expiry()
+
+
 async def _create_sandbox_with_proxy(
     github_proxy_token: str | None = None,
+    *,
+    thread_id: str | None = None,
+    github_proxy_repositories: Sequence[str] | None = None,
 ) -> SandboxBackendProtocol:
     """Create a new sandbox with GitHub proxy auth configured."""
     sandbox_backend = await asyncio.to_thread(create_sandbox)
 
     sandbox_type = os.getenv("SANDBOX_TYPE", "langsmith")
     if sandbox_type == "langsmith":
-        token = github_proxy_token or await get_github_app_installation_token()
+        token, expires_at = await _resolve_proxy_token(github_proxy_token)
         if not token:
             msg = "Cannot configure proxy: GitHub App installation token is unavailable"
             logger.error(msg)
             raise ValueError(msg)
         await _start_langsmith_sandbox_if_needed(sandbox_backend)
         await asyncio.to_thread(_configure_github_proxy, sandbox_backend.id, token)
+        record_proxy_token_expiry(thread_id, expires_at, repositories=github_proxy_repositories)
 
     return sandbox_backend
 
@@ -172,12 +216,15 @@ async def _create_sandbox_with_proxy(
 async def _refresh_github_proxy(
     sandbox_backend: SandboxBackendProtocol,
     github_proxy_token: str | None = None,
+    *,
+    thread_id: str | None = None,
+    github_proxy_repositories: Sequence[str] | None = None,
 ) -> None:
     """Refresh GitHub proxy credentials for reused LangSmith sandboxes."""
     if os.getenv("SANDBOX_TYPE", "langsmith") != "langsmith":
         return
 
-    token = github_proxy_token or await get_github_app_installation_token()
+    token, expires_at = await _resolve_proxy_token(github_proxy_token)
     if not token:
         logger.warning(
             "Skipping GitHub proxy refresh for sandbox %s: installation token unavailable",
@@ -188,16 +235,23 @@ async def _refresh_github_proxy(
     current_backend = unwrap_sandbox_backend(sandbox_backend)
     await _start_langsmith_sandbox_if_needed(current_backend)
     await asyncio.to_thread(_configure_github_proxy, current_backend.id, token)
+    record_proxy_token_expiry(thread_id, expires_at, repositories=github_proxy_repositories)
 
 
 async def _refresh_github_proxy_or_recreate(
     sandbox_backend: SandboxBackendProtocol,
     thread_id: str,
     github_proxy_token: str | None = None,
+    github_proxy_repositories: Sequence[str] | None = None,
 ) -> SandboxBackendProtocol:
     """Refresh proxy credentials, recreating stale LangSmith sandboxes on failure."""
     try:
-        await _refresh_github_proxy(sandbox_backend, github_proxy_token)
+        await _refresh_github_proxy(
+            sandbox_backend,
+            github_proxy_token,
+            thread_id=thread_id,
+            github_proxy_repositories=github_proxy_repositories,
+        )
     except Exception:  # noqa: BLE001
         logger.warning(
             "Failed to refresh GitHub proxy for sandbox %s on thread %s, recreating sandbox",
@@ -205,7 +259,11 @@ async def _refresh_github_proxy_or_recreate(
             thread_id,
             exc_info=True,
         )
-        return await _recreate_sandbox(thread_id, github_proxy_token=github_proxy_token)
+        return await _recreate_sandbox(
+            thread_id,
+            github_proxy_token=github_proxy_token,
+            github_proxy_repositories=github_proxy_repositories,
+        )
     return sandbox_backend
 
 
@@ -221,6 +279,7 @@ async def _recreate_sandbox(
     thread_id: str,
     *,
     github_proxy_token: str | None = None,
+    github_proxy_repositories: Sequence[str] | None = None,
 ) -> SandboxBackendProtocol:
     """Recreate a sandbox after a connection failure.
 
@@ -232,7 +291,11 @@ async def _recreate_sandbox(
     try:
         sandbox_backend = set_sandbox_backend(
             thread_id,
-            await _create_sandbox_with_proxy(github_proxy_token),
+            await _create_sandbox_with_proxy(
+                github_proxy_token,
+                thread_id=thread_id,
+                github_proxy_repositories=github_proxy_repositories,
+            ),
         )
     except Exception:
         logger.exception("Failed to recreate sandbox after connection failure")
@@ -245,6 +308,7 @@ async def check_or_recreate_sandbox(
     sandbox_backend: SandboxBackendProtocol,
     thread_id: str,
     github_proxy_token: str | None = None,
+    github_proxy_repositories: Sequence[str] | None = None,
 ) -> SandboxBackendProtocol:
     """Check if a cached sandbox is reachable; recreate it if not.
 
@@ -261,7 +325,11 @@ async def check_or_recreate_sandbox(
             "Cached sandbox is no longer reachable for thread %s, recreating",
             thread_id,
         )
-        sandbox_backend = await _recreate_sandbox(thread_id, github_proxy_token=github_proxy_token)
+        sandbox_backend = await _recreate_sandbox(
+            thread_id,
+            github_proxy_token=github_proxy_token,
+            github_proxy_repositories=github_proxy_repositories,
+        )
     return sandbox_backend
 
 
@@ -316,6 +384,7 @@ async def ensure_sandbox_for_thread(
     thread_id: str,
     *,
     github_proxy_token: str | None = None,
+    github_proxy_repositories: Sequence[str] | None = None,
 ) -> SandboxBackendProtocol:
     """Get-or-create a healthy sandbox bound to ``thread_id``.
 
@@ -342,17 +411,21 @@ async def ensure_sandbox_for_thread(
         logger.info("Using cached sandbox backend for thread %s", thread_id)
         original_sandbox_id = sandbox_backend.id
         sandbox_backend = await check_or_recreate_sandbox(
-            sandbox_backend, thread_id, github_proxy_token
+            sandbox_backend, thread_id, github_proxy_token, github_proxy_repositories
         )
         if sandbox_backend.id == original_sandbox_id:
             sandbox_backend = await _refresh_github_proxy_or_recreate(
-                sandbox_backend, thread_id, github_proxy_token
+                sandbox_backend, thread_id, github_proxy_token, github_proxy_repositories
             )
     elif sandbox_id is None:
         logger.info("Creating new sandbox for thread %s", thread_id)
         await client.threads.update(thread_id=thread_id, metadata=_creating_metadata())
         try:
-            sandbox_backend = await _create_sandbox_with_proxy(github_proxy_token)
+            sandbox_backend = await _create_sandbox_with_proxy(
+                github_proxy_token,
+                thread_id=thread_id,
+                github_proxy_repositories=github_proxy_repositories,
+            )
             logger.info("Sandbox created: %s", sandbox_backend.id)
         except Exception:
             logger.exception("Failed to create sandbox")
@@ -370,7 +443,11 @@ async def ensure_sandbox_for_thread(
             logger.warning("Failed to connect to existing sandbox %s, creating new one", sandbox_id)
             await client.threads.update(thread_id=thread_id, metadata=_creating_metadata())
             try:
-                sandbox_backend = await _create_sandbox_with_proxy(github_proxy_token)
+                sandbox_backend = await _create_sandbox_with_proxy(
+                    github_proxy_token,
+                    thread_id=thread_id,
+                    github_proxy_repositories=github_proxy_repositories,
+                )
                 created_replacement_sandbox = True
             except Exception:
                 logger.exception("Failed to create replacement sandbox")
@@ -379,11 +456,11 @@ async def ensure_sandbox_for_thread(
         if not created_replacement_sandbox:
             original_sandbox_id = sandbox_backend.id
             sandbox_backend = await check_or_recreate_sandbox(
-                sandbox_backend, thread_id, github_proxy_token
+                sandbox_backend, thread_id, github_proxy_token, github_proxy_repositories
             )
             if sandbox_backend.id == original_sandbox_id:
                 sandbox_backend = await _refresh_github_proxy_or_recreate(
-                    sandbox_backend, thread_id, github_proxy_token
+                    sandbox_backend, thread_id, github_proxy_token, github_proxy_repositories
                 )
 
     sandbox_backend = set_sandbox_backend(thread_id, sandbox_backend)
@@ -441,6 +518,57 @@ def _get_cached_sandbox_backend(thread_id: str) -> SandboxBackendProtocol:
     if sandbox_backend is None:
         raise RuntimeError(f"No sandbox backend cached for thread {thread_id}")
     return sandbox_backend
+
+
+async def _observability_authorized(config: RunnableConfig, profile_login: str | None) -> bool:
+    """Whether the triggering user may use the team observability tools.
+
+    Gates on admin / explicitly-authorized emails so prompt-injected runs from
+    untrusted contributors cannot reach the team's Datadog/LangSmith data.
+    """
+    configurable = (config or {}).get("configurable") or {}
+    slack_thread = configurable.get("slack_thread") or {}
+    config_login = configurable.get("github_login")
+    candidate_login = profile_login or (config_login if isinstance(config_login, str) else None)
+    candidate_emails = [
+        configurable.get("user_email"),
+        slack_thread.get("triggering_user_email"),
+    ]
+    if any(is_observability_authorized(email, login=candidate_login) for email in candidate_emails):
+        return True
+    return is_observability_authorized(
+        await email_for_login(candidate_login), login=candidate_login
+    )
+
+
+async def _load_observability_tools(authorized: bool) -> list[Any]:
+    """Datadog (MCP) + LangSmith read tools when the team has connected them.
+
+    Credentials live server-side in team settings; the sandbox never holds them.
+    Only loaded for authorized (admin / allow-listed) triggering users so an
+    untrusted run cannot exfiltrate team observability data. Failures degrade to
+    no tools so the agent still starts.
+    """
+    if not authorized:
+        return []
+    try:
+        datadog_tools, langsmith_tools = await asyncio.gather(
+            load_datadog_tools(),
+            load_langsmith_tools(),
+        )
+    except Exception:
+        logger.warning("Failed to load observability tools", exc_info=True)
+        return []
+    return [*datadog_tools, *langsmith_tools]
+
+
+async def _load_corridor_mcp_tools() -> list[Any]:
+    """Corridor MCP tools when the deployment environment has configured them."""
+    try:
+        return await load_corridor_tools()
+    except Exception:
+        logger.warning("Failed to load Corridor MCP tools", exc_info=True)
+        return []
 
 
 async def get_agent(config: RunnableConfig) -> Pregel:
@@ -607,6 +735,20 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         logger.debug("Failed to record agent usage for thread %s", thread_id, exc_info=True)
 
     prompt_default_repo = await _resolve_prompt_default_repo(configurable)
+    repo_custom_instructions = await _resolve_repo_custom_instructions(prompt_default_repo)
+
+    observability_tools = await _load_observability_tools(
+        await _observability_authorized(config, profile_login)
+    )
+    corridor_tools = await _load_corridor_mcp_tools()
+
+    currents_tools: list[Any] = []
+    if profile_login:
+        try:
+            currents_tools = await load_currents_tools(profile_login)
+        except Exception:
+            logger.warning("Failed to load Currents tools", exc_info=True)
+            currents_tools = []
 
     logger.info("Returning agent with sandbox for thread %s", thread_id)
     main_model = make_model(model_id, **model_kwargs)
@@ -621,6 +763,9 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             create_prs=always_create_prs,
             default_repo=prompt_default_repo,
             plan_mode=plan_mode,
+            repo_custom_instructions=repo_custom_instructions,
+            thread_url=dashboard_thread_url(thread_id),
+            corridor_enabled=bool(corridor_tools),
         ),
         tools=[
             http_request,
@@ -638,6 +783,9 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             request_pr_review,
             slack_read_thread_messages,
             slack_thread_reply,
+            *corridor_tools,
+            *observability_tools,
+            *currents_tools,
         ],
         subagents=[_general_purpose_subagent(subagent_model)],
         backend=backend_factory,
@@ -645,9 +793,10 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             SanitizeToolInputsMiddleware(),
             ModelCallLimitMiddleware(run_limit=MODEL_CALL_RECURSION_LIMIT, exit_behavior="end"),
             ToolErrorMiddleware(),
+            ToolArtifactMiddleware(),
+            refresh_github_proxy_before_model,
             check_message_queue_before_model,
             SlackAssistantStatusMiddleware(),
-            ensure_no_empty_msg,
             notify_step_limit_reached,
             SandboxCircuitBreakerMiddleware(),
             *fallback_middleware,
@@ -655,3 +804,6 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             SanitizeThinkingBlocksMiddleware(),
         ],
     ).with_config(config)
+
+
+traced_agent = traced_graph_factory(get_agent, AGENT_TRACING_PROJECT)

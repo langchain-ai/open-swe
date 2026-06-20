@@ -35,7 +35,7 @@ export function ContextIndicator({ sessionId }: ContextIndicatorProps) {
 
   let strokeColor = '#6b7280'; // gray-500
   if (fraction > 0) strokeColor = '#9ca3af'; // gray-400
-  if (fraction >= 0.5) strokeColor = '#93c5fd'; // blue-300
+  if (fraction >= 0.5) strokeColor = '#9ca3af'; // gray-400
   if (fraction >= 0.75) strokeColor = '#fbbf24'; // amber-400
   if (fraction >= COMPACT_THRESHOLD) strokeColor = '#f87171'; // red-400
 

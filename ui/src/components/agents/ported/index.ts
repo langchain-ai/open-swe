@@ -7,7 +7,11 @@ export { HeaderBar } from "./HeaderBar";
 export { Logo } from "./Logo";
 export { Markdown } from "./Markdown";
 export { MarkdownTable } from "./MarkdownTable";
-export { MessageView, summarizeChangedFiles, type MessageViewScrollControl } from "./MessageView";
+export {
+  Messages,
+  summarizeChangedFiles,
+  type MessagesScrollControl,
+} from "@/components/agents/messages";
 export { PanelResizeHandle } from "./PanelResizeHandle";
 export { ShellCommand } from "./ShellCommand";
 export { TodoList } from "./TodoList";

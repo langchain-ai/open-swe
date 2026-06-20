@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   CheckCircle2,
   ChevronDown,
@@ -10,7 +10,7 @@ import {
 import type { TodoItem } from "@/lib/agents/types";
 
 interface TodoListProps {
-  todos: TodoItem[];
+  todos: Array<TodoItem>;
   className?: string;
   runActive?: boolean;
 }
@@ -54,7 +54,7 @@ export function TodoList({ todos, className = "", runActive = false }: TodoListP
   const completed = todos.filter((t) => t.status === "completed").length;
 
   return (
-    <div className={`font-sans text-xs rounded-xl border border-[var(--ui-border)] bg-[var(--ui-accent-bubble)] overflow-hidden ${className}`}>
+    <div className={`font-sans text-xs rounded-xl border border-[var(--ui-border)] bg-[var(--ui-code-bubble)] overflow-hidden ${className}`}>
       <button
         type="button"
         className="w-full px-3 py-2 flex items-center gap-2 text-left hover:bg-white/5 transition-colors"

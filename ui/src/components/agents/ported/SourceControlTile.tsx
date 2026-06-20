@@ -1,8 +1,10 @@
+// Ported desktop git panel — calls host `window.git`, not used by the web dashboard
+// (see AgentGitPanel). Excluded from tsconfig until integrated; see ui/tsconfig.json.
 import { useState, useCallback, useRef, memo, useMemo, useEffect } from "react";
-import { diffLines } from "diff";
 import { MultiFileDiff } from "@pierre/diffs/react";
 import type { FileContents } from "@pierre/diffs/react";
 import type { GitStatusEntry, GitFileStatus } from "@/lib/agents/types";
+import { countLineChanges } from "@/components/agents/utils/diffStats";
 import {
   ChevronDown,
   ChevronRight,
@@ -21,7 +23,7 @@ import {
   X,
   Undo2,
 } from "lucide-react";
-import { diffOptions } from "@/components/agents/utils/diffUtils";
+import { useDiffOptions } from "@/components/agents/utils/diffUtils";
 
 const STATUS_LABELS: Partial<Record<GitFileStatus, string>> = {
   "index-modified": "M",
@@ -111,16 +113,10 @@ function isConflict(status: GitFileStatus): boolean {
 
 function countChanges(
   oldContent: string,
-  newContent: string
+  newContent: string,
+  filePath: string,
 ): { additions: number; deletions: number } {
-  const parts = diffLines(oldContent || "", newContent || "");
-  let additions = 0;
-  let deletions = 0;
-  for (const part of parts) {
-    if (part.added) additions += part.count ?? 0;
-    else if (part.removed) deletions += part.count ?? 0;
-  }
-  return { additions, deletions };
+  return countLineChanges(oldContent, newContent, filePath);
 }
 
 function stripProjectPath(path: string, projectPath?: string): string {
@@ -131,38 +127,6 @@ function stripProjectPath(path: string, projectPath?: string): string {
     .replace(/\/+$/, "");
   if (!normalizedPath.startsWith(`${normalizedProjectPath}/`)) return path;
   return normalizedPath.slice(normalizedProjectPath.length + 1);
-}
-
-function useInterval(callback: () => void, delayMs: number) {
-  const savedCallback = useRef(callback);
-  savedCallback.current = callback;
-
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  const start = useCallback(() => {
-    if (intervalRef.current) return;
-    intervalRef.current = setInterval(() => savedCallback.current(), delayMs);
-  }, [delayMs]);
-
-  const stop = useCallback(() => {
-    if (intervalRef.current) {
-      clearInterval(intervalRef.current);
-      intervalRef.current = null;
-    }
-  }, []);
-
-  // Auto-start/cleanup
-  useState(() => {
-    intervalRef.current = setInterval(() => savedCallback.current(), delayMs);
-  });
-  // cleanup on unmount (using ref trick to avoid useEffect)
-  const cleanupRef = useRef(false);
-  if (!cleanupRef.current) {
-    cleanupRef.current = true;
-    // We still need useEffect for cleanup unfortunately
-  }
-
-  return { start, stop };
 }
 
 export const SourceControlPanel = memo(function SourceControlPanel({
@@ -223,7 +187,8 @@ export const SourceControlPanel = memo(function SourceControlPanel({
             if (diff) {
               const { additions, deletions } = countChanges(
                 diff.original,
-                diff.modified
+                diff.modified,
+                entry.path,
               );
               diffs.push({
                 path: entry.path,
@@ -508,12 +473,12 @@ export const SourceControlPanel = memo(function SourceControlPanel({
   const branchName = syncStatus?.branchName ?? "";
   const aheadBehind = syncStatus
     ? (() => {
-        const { ahead, behind } = syncStatus;
-        if (ahead > 0 && behind > 0) return `${ahead}↑ ${behind}↓`;
-        if (ahead > 0) return `${ahead}↑`;
-        if (behind > 0) return `${behind}↓`;
-        return null;
-      })()
+      const { ahead, behind } = syncStatus;
+      if (ahead > 0 && behind > 0) return `${ahead}↑ ${behind}↓`;
+      if (ahead > 0) return `${ahead}↑`;
+      if (behind > 0) return `${behind}↓`;
+      return null;
+    })()
     : null;
 
   return (
@@ -783,11 +748,10 @@ export const SourceControlPanel = memo(function SourceControlPanel({
       {/* Status toast */}
       {statusMsg && (
         <div
-          className={`absolute bottom-14 left-1/2 -translate-x-1/2 px-3 py-1.5 rounded-md text-xs z-30 shadow-lg ${
-            statusMsg.error
-              ? "bg-red-500/20 text-red-300 border border-red-500/30"
-              : "bg-green-500/20 text-green-300 border border-green-500/30"
-          }`}
+          className={`absolute bottom-14 left-1/2 -translate-x-1/2 px-3 py-1.5 rounded-md text-xs z-30 shadow-lg ${statusMsg.error
+            ? "bg-red-500/20 text-red-300 border border-red-500/30"
+            : "bg-green-500/20 text-green-300 border border-green-500/30"
+            }`}
         >
           {statusMsg.text}
         </div>
@@ -961,15 +925,15 @@ const DiffCard = memo(function DiffCard({
   defaultExpanded: boolean;
 }) {
   const [expanded, setExpanded] = useState(defaultExpanded);
+  const diffOptions = useDiffOptions();
 
   return (
     <div
       ref={cardRef}
-      className={`rounded-lg bg-[var(--ui-accent-bubble)] overflow-hidden border ${
-        selected
-          ? "border-[color:var(--ui-accent)]"
-          : "border-[var(--ui-border-subtle)]"
-      }`}
+      className={`rounded-lg bg-[var(--ui-accent-bubble)] overflow-hidden border ${selected
+        ? "border-[color:var(--ui-accent)]"
+        : "border-[var(--ui-border-subtle)]"
+        }`}
     >
       <button
         type="button"
@@ -1136,11 +1100,10 @@ const TreeNode = memo(function TreeNode({
           }
           onSelect(node.path);
         }}
-        className={`flex w-full items-center gap-2 pr-3 py-1.5 text-xs text-left transition-colors ${
-          isSelected
-            ? "bg-[var(--ui-panel-2)] text-[color:var(--ui-text)]"
-            : "text-[color:var(--ui-text-dim)] hover:bg-[var(--ui-panel-2)] hover:text-[color:var(--ui-text)]"
-        }`}
+        className={`flex w-full items-center gap-2 pr-3 py-1.5 text-xs text-left transition-colors ${isSelected
+          ? "bg-[var(--ui-panel-2)] text-[color:var(--ui-text)]"
+          : "text-[color:var(--ui-text-dim)] hover:bg-[var(--ui-panel-2)] hover:text-[color:var(--ui-text)]"
+          }`}
         style={{ paddingLeft: `${12 + depth * 16}px` }}
         title={node.path}
       >

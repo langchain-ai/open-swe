@@ -6,6 +6,9 @@ import {
   Map as MapIcon,
   X,
 } from "lucide-react"
+import { StopIcon } from "@phosphor-icons/react"
+import { useQueryClient } from "@tanstack/react-query"
+import { useStreamContext as useAgentThreadStream } from "@langchain/react"
 import {
   memo,
   useCallback,
@@ -18,12 +21,89 @@ import {
 
 import type { ModelOption } from "@/lib/api"
 import type { ImageChunk } from "@/lib/agents/types"
-import type { ModelSelection } from "@/lib/agents/useModelOptions"
+import type { ModelSelection } from "@/lib/agents/provider/useModelOptions"
 import { RepoSelector } from "@/components/agents/RepoSelector"
-import { formatModelSelection } from "@/lib/agents/useModelOptions"
+import { useIsInAgentThreadStream } from "@/lib/agents/provider/useIsInAgentThreadStream"
+import { agentThreadKeys, invalidateAgentThreadLists } from "@/lib/agents/queries"
+import { formatModelSelection } from "@/lib/agents/provider/useModelOptions"
+import { IconButton } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 
 const PROMPT_TEXTAREA_MAX_HEIGHT = 200
+
+interface SubmitButtonProps {
+  canSubmit: boolean
+  submitting: boolean
+  onSubmit: () => void
+}
+
+function PlainSubmitButton({ canSubmit, submitting, onSubmit }: SubmitButtonProps) {
+  return (
+    <IconButton
+      type="button"
+      onClick={onSubmit}
+      disabled={!canSubmit}
+      aria-label="Send message"
+      className="shrink-0 rounded-full bg-[var(--ui-accent)] text-white hover:bg-[var(--ui-accent)] hover:opacity-90 disabled:cursor-default disabled:opacity-40"
+    >
+      {submitting ? (
+        <LoaderCircle className="size-3.5 animate-spin" />
+      ) : (
+        <ArrowUp className="size-3.5" strokeWidth={2.5} />
+      )}
+    </IconButton>
+  )
+}
+
+function SubmitButton(props: SubmitButtonProps) {
+  const inAgentThreadStream = useIsInAgentThreadStream()
+
+  if (inAgentThreadStream) return <StreamSubmitButton {...props} />
+
+  return <PlainSubmitButton {...props} />
+}
+
+function StreamSubmitButton(props: SubmitButtonProps) {
+  const stream = useAgentThreadStream()
+  const queryClient = useQueryClient()
+  const [stopping, setStopping] = useState(false)
+
+  const handleStop = async () => {
+    if (stopping) return
+    setStopping(true)
+    try {
+      await stream.stop()
+      const threadId = stream.threadId
+      if (threadId) {
+        queryClient.setQueryData(agentThreadKeys.detail(threadId), (prev) =>
+          prev ? { ...prev, status: "interrupted" as const } : prev
+        )
+        invalidateAgentThreadLists(queryClient)
+      }
+    } finally {
+      setStopping(false)
+    }
+  }
+
+  if (!stream.isLoading) return <PlainSubmitButton {...props} />
+
+  return (
+    <IconButton
+      type="button"
+      onClick={() => void handleStop()}
+      disabled={stopping}
+      aria-label="Stop run"
+      title="Stop run"
+      className="shrink-0 rounded-full bg-[var(--ui-accent)] text-white hover:bg-[var(--ui-accent)] hover:opacity-90 disabled:cursor-default disabled:opacity-40"
+    >
+      {stopping ? (
+        <LoaderCircle className="size-3.5 animate-spin" />
+      ) : (
+        <StopIcon className="size-3.5" weight="fill" />
+      )}
+    </IconButton>
+  )
+}
 const MAX_IMAGE_COUNT = 5
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024
 const SUPPORTED_IMAGE_TYPES = new Set([
@@ -38,7 +118,7 @@ export interface CloudPromptBarProps {
   compact?: boolean
   disabled?: boolean
   busy?: boolean
-  onSubmit?: (value: string, images: Array<ImageChunk>) => void
+  onSubmit?: (value: string, images: Array<ImageChunk>) => void | Promise<void>
   models?: Array<ModelOption>
   selection?: ModelSelection | null
   onSelectionChange?: (next: ModelSelection) => void
@@ -64,11 +144,11 @@ function fileToImageChunk(file: File): Promise<ImageChunk | null> {
       resolve(
         base64
           ? {
-              kind: "image",
-              base64,
-              mimeType: file.type,
-              fileName: file.name,
-            }
+            kind: "image",
+            base64,
+            mimeType: file.type,
+            fileName: file.name,
+          }
           : null
       )
     }
@@ -97,10 +177,15 @@ export const CloudPromptBar = memo(function CloudPromptBarComponent({
   const [pendingImages, setPendingImages] = useState<Array<ImageChunk>>([])
   const [isDragOver, setIsDragOver] = useState(false)
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false)
+  const [isSubmitting, setIsSubmitting] = useState(false)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const dragDepthRef = useRef(0)
   const modelDropdownRef = useRef<HTMLDivElement>(null)
+  // Synchronous double-submit guard: blocks a same-tick second send (Enter +
+  // click, or two rapid Enters) before React re-renders. Scoped to the send
+  // request only — never the run lifecycle.
+  const submittingRef = useRef(false)
 
   const combos = useMemo<Array<ModelSelection>>(() => {
     const list: Array<ModelSelection> = []
@@ -114,16 +199,38 @@ export const CloudPromptBar = memo(function CloudPromptBarComponent({
 
   const selectionLabel = formatModelSelection(models, selection)
 
-  const canSubmit =
-    !disabled && (value.trim().length > 0 || pendingImages.length > 0)
+  const selectedModelSupportsImages = useMemo(() => {
+    if (!selection || pendingImages.length === 0) return true
+    return models.some(
+      (m) => m.id === selection.modelId && m.supports_images
+    )
+  }, [selection, pendingImages.length, models])
 
-  const handleSubmit = useCallback(() => {
+  const canSubmit =
+    !disabled &&
+    !isSubmitting &&
+    selectedModelSupportsImages &&
+    (value.trim().length > 0 || pendingImages.length > 0)
+
+  const handleSubmit = useCallback(async () => {
+    if (submittingRef.current || disabled) return
     const trimmed = value.trim()
-    if (!canSubmit) return
-    onSubmit?.(trimmed, pendingImages)
+    if (trimmed.length === 0 && pendingImages.length === 0) return
+
+    const images = pendingImages
+    submittingRef.current = true
+    setIsSubmitting(true)
     setValue("")
     setPendingImages([])
-  }, [canSubmit, onSubmit, pendingImages, value])
+    try {
+      await onSubmit?.(trimmed, images)
+    } catch {
+      // Caller surfaces send errors (e.g. via react-query mutation state).
+    } finally {
+      submittingRef.current = false
+      setIsSubmitting(false)
+    }
+  }, [disabled, onSubmit, pendingImages, value])
 
   useLayoutEffect(() => {
     const el = inputRef.current
@@ -203,10 +310,27 @@ export const CloudPromptBar = memo(function CloudPromptBarComponent({
     [addFiles]
   )
 
+  const handlePaste = useCallback(
+    (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+      const items = e.clipboardData.items
+      const files: Array<File> = []
+      for (const item of Array.from(items)) {
+        if (item.kind === "file") {
+          const file = item.getAsFile()
+          if (file && SUPPORTED_IMAGE_TYPES.has(file.type)) files.push(file)
+        }
+      }
+      if (files.length === 0) return
+      e.preventDefault()
+      void addFiles(files)
+    },
+    [addFiles]
+  )
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey && canSubmit) {
       e.preventDefault()
-      handleSubmit()
+      void handleSubmit()
     }
     if (e.key === "Tab" && e.shiftKey && onPlanModeChange) {
       e.preventDefault()
@@ -245,7 +369,7 @@ export const CloudPromptBar = memo(function CloudPromptBarComponent({
       >
         {isDragOver && (
           <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center rounded-2xl bg-[var(--ui-surface)]/80 backdrop-blur-sm">
-            <span className="rounded-md bg-[var(--ui-panel-2)] px-3 py-1.5 text-sm font-medium text-[color:var(--ui-accent)]">
+            <span className="rounded-md bg-[var(--ui-panel-2)] px-3 py-1.5 text-xs font-medium text-[color:var(--ui-accent)]">
               Drop images here
             </span>
           </div>
@@ -289,12 +413,21 @@ export const CloudPromptBar = memo(function CloudPromptBarComponent({
           </div>
         )}
 
+        {!selectedModelSupportsImages && (
+          <div className="mb-2 rounded-md border border-[var(--ui-border)] bg-[var(--ui-panel-2)] px-3 py-1.5 text-xs text-[color:var(--ui-text-muted)]">
+            The selected model does not support image input. Remove the
+            image{pendingImages.length > 1 ? "s" : ""} or switch to a
+            vision-enabled model to send.
+          </div>
+        )}
+
         <textarea
           ref={inputRef}
           rows={1}
           value={value}
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={handleKeyDown}
+          onPaste={handlePaste}
           placeholder={busy ? "Send a message to queue next..." : placeholder}
           disabled={disabled}
           className={cn(
@@ -380,19 +513,11 @@ export const CloudPromptBar = memo(function CloudPromptBarComponent({
             <ImagePlus className="size-4" />
           </button>
 
-          <button
-            type="button"
-            onClick={handleSubmit}
-            disabled={!canSubmit}
-            aria-label="Send message"
-            className="flex size-7 shrink-0 items-center justify-center rounded-full bg-[var(--ui-accent)] text-white transition-opacity hover:opacity-90 disabled:cursor-default disabled:opacity-40"
-          >
-            {disabled ? (
-              <LoaderCircle className="size-3.5 animate-spin" />
-            ) : (
-              <ArrowUp className="size-3.5" strokeWidth={2.5} />
-            )}
-          </button>
+          <SubmitButton
+            canSubmit={canSubmit}
+            submitting={isSubmitting}
+            onSubmit={() => void handleSubmit()}
+          />
         </div>
       </div>
     </div>

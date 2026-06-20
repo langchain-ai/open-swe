@@ -44,6 +44,8 @@ _REACTION_ENDPOINTS: dict[str, str] = {
     "pull_request_review": "https://api.github.com/repos/{owner}/{repo}/pulls/{pull_number}/reviews/{comment_id}/reactions",
 }
 
+PAGINATED_MAX_PAGES = 50
+
 
 def verify_github_signature(body: bytes, signature: str, *, secret: str) -> bool:
     """Verify the GitHub webhook signature (X-Hub-Signature-256).
@@ -62,6 +64,17 @@ def verify_github_signature(body: bytes, signature: str, *, secret: str) -> bool
 
     expected = "sha256=" + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
     return hmac.compare_digest(expected, signature)
+
+
+def derive_pr_state(*, state: str | None, merged: bool, draft: bool) -> str:
+    """Map GitHub PR fields to the dashboard's pr_state vocabulary."""
+    if merged:
+        return "merged"
+    if state == "closed":
+        return "closed"
+    if draft:
+        return "draft"
+    return "open"
 
 
 def get_thread_id_from_branch(branch_name: str) -> str | None:
@@ -453,6 +466,9 @@ async def _fetch_paginated(
 ) -> list[dict[str, Any]]:
     """Fetch all pages from a GitHub paginated endpoint.
 
+    Caps at ``PAGINATED_MAX_PAGES`` pages to avoid unbounded fetching on
+    pathological PRs with thousands of comments.
+
     Args:
         client: An active httpx async client.
         url: The GitHub API endpoint URL.
@@ -464,7 +480,7 @@ async def _fetch_paginated(
     results: list[dict[str, Any]] = []
     params: dict[str, Any] = {"per_page": 100, "page": 1}
 
-    while True:
+    while params["page"] <= PAGINATED_MAX_PAGES:
         try:
             response = await client.get(url, headers=headers, params=params)
             if response.status_code == 401:

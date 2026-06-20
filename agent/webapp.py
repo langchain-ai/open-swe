@@ -1,6 +1,5 @@
 """Custom FastAPI routes for LangGraph server."""
 
-import asyncio
 import hashlib
 import hmac
 import json
@@ -21,15 +20,22 @@ from langchain_core.messages.content import create_text_block
 from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
 
+from .ci_autofix import handle_ci_failure, handle_review_feedback
 from .dashboard import router as dashboard_router
 from .dashboard.agent_overrides import (
     get_profile_default_repo,
+    resolve_agent_model_id,
     resolve_login_from_email_async,
 )
+from .dashboard.autofix_state import set_pr_autofix_disabled
 from .dashboard.enabled_repos import is_review_repo_enabled
 from .dashboard.oauth import build_settings_url
+from .dashboard.options import model_supports_images
 from .dashboard.profiles import get_profile, get_valid_access_token, has_access_token_record
-from .dashboard.team_settings import get_team_default_repo, get_team_settings
+from .dashboard.team_settings import (
+    get_team_default_repo,
+    get_team_settings,
+)
 from .dashboard.user_mappings import (
     email_for_login,
     login_for_email,
@@ -57,14 +63,22 @@ from .utils.auth import (
     resolve_github_token_from_email,
 )
 from .utils.comments import get_recent_comments
+from .utils.dashboard_links import dashboard_thread_url
 from .utils.github_app import (
     get_github_app_installation_token,
     get_github_app_installation_token_with_expiry,
+)
+from .utils.github_checks import complete_review_check_run, create_review_check_run
+from .utils.github_ci import (
+    branch_from_check_payload,
+    head_sha_from_check_payload,
+    is_failing_ci_payload,
 )
 from .utils.github_comments import (
     OPEN_SWE_TAGS,
     GitHubAuthError,
     build_pr_prompt,
+    derive_pr_state,
     extract_pr_context,
     fetch_issue_comments,
     fetch_pr_comments_since_last_tag,
@@ -82,7 +96,12 @@ from .utils.github_token import (
 )
 from .utils.linear import post_linear_trace_comment
 from .utils.linear_team_repo_map import LINEAR_TEAM_TO_REPO
-from .utils.multimodal import dedupe_urls, extract_image_urls, fetch_image_block
+from .utils.multimodal import (
+    dedupe_urls,
+    extract_image_urls,
+    fetch_image_block,
+    vision_not_supported_warning,
+)
 from .utils.repo import extract_repo_from_text
 from .utils.slack import (
     GitHubPrRef,
@@ -112,26 +131,11 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-    from .dashboard.usage_snapshot_cron import (
-        ensure_usage_snapshot_cron,
-        trigger_usage_snapshot_build,
-    )
+    from .utils.model import validate_local_dev_llm_config
     from .utils.sandbox import validate_sandbox_startup_config
 
     validate_sandbox_startup_config()
-
-    # One bounded scheduling call — never a retained/looping task (the exact
-    # #1434 bug class). These are loopback HTTP calls into a server that is
-    # still starting, so cap them hard: a hang must not block startup. Any
-    # failure/timeout is fine — the cron and lazy per-request registration both
-    # catch up within the cadence.
-    try:
-        async with asyncio.timeout(5):
-            await ensure_usage_snapshot_cron()
-            await trigger_usage_snapshot_build()
-    except Exception:
-        logger.debug("Usage snapshot bootstrap on startup skipped", exc_info=True)
-
+    validate_local_dev_llm_config()
     yield
 
 
@@ -141,11 +145,15 @@ DASHBOARD_ALLOWED_ORIGINS: list[str] = [
     o.strip() for o in os.environ.get("DASHBOARD_ALLOWED_ORIGINS", "").split(",") if o.strip()
 ]
 if DASHBOARD_ALLOWED_ORIGINS:
+    if "*" in DASHBOARD_ALLOWED_ORIGINS:
+        raise RuntimeError(
+            "DASHBOARD_ALLOWED_ORIGINS must not include '*' when allow_credentials=True"
+        )
     app.add_middleware(
         CORSMiddleware,
         allow_origins=DASHBOARD_ALLOWED_ORIGINS,
         allow_credentials=True,
-        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
         allow_headers=["*"],
     )
 
@@ -890,15 +898,27 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
     content_blocks: list[dict[str, Any]] = [create_text_block(prompt)]
     if image_urls:
         image_urls = dedupe_urls(image_urls)
-        logger.info("Preparing %d image(s) for multimodal content", len(image_urls))
-        logger.debug("Image URLs: %s", image_urls)
+        linear_login = await resolve_login_from_email_async(user_email) if user_email else None
+        resolved_model_id = await resolve_agent_model_id(linear_login)
+        if model_supports_images(resolved_model_id):
+            logger.info("Preparing %d image(s) for multimodal content", len(image_urls))
+            logger.debug("Image URLs: %s", image_urls)
 
-        async with httpx.AsyncClient() as client:
-            for image_url in image_urls:
-                image_block = await fetch_image_block(image_url, client)
-                if image_block:
-                    content_blocks.append(image_block)
-        logger.info("Built %d content block(s) for prompt", len(content_blocks))
+            async with httpx.AsyncClient() as client:
+                for image_url in image_urls:
+                    image_block = await fetch_image_block(image_url, client)
+                    if image_block:
+                        content_blocks.append(image_block)
+            logger.info("Built %d content block(s) for prompt", len(content_blocks))
+        else:
+            logger.warning(
+                "Skipping %d image(s) for Linear issue: model %s does not support images",
+                len(image_urls),
+                resolved_model_id,
+            )
+            prompt += vision_not_supported_warning(resolved_model_id, len(image_urls))
+            content_blocks[0] = create_text_block(prompt)
+            image_urls = []
 
     linear_project_id = ""
     linear_issue_number = ""
@@ -1141,17 +1161,29 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
         ]
         + image_urls_from_links
     )
-    if image_urls:
-        logger.info("Preparing %d image(s) for Slack mention", len(image_urls))
-        async with httpx.AsyncClient() as http_client:
-            for image_url in image_urls:
-                image_block = await fetch_image_block(image_url, http_client)
-                if image_block:
-                    content_blocks.append(image_block)
 
     mapped_login = await login_for_slack_id(user_id)
     if not mapped_login and user_email:
         mapped_login = await login_for_email(user_email)
+
+    if image_urls:
+        resolved_model_id = await resolve_agent_model_id(mapped_login)
+        if model_supports_images(resolved_model_id):
+            logger.info("Preparing %d image(s) for Slack mention", len(image_urls))
+            async with httpx.AsyncClient() as http_client:
+                for image_url in image_urls:
+                    image_block = await fetch_image_block(image_url, http_client)
+                    if image_block:
+                        content_blocks.append(image_block)
+        else:
+            logger.warning(
+                "Skipping %d image(s) for Slack mention: model %s does not support images",
+                len(image_urls),
+                resolved_model_id,
+            )
+            prompt += vision_not_supported_warning(resolved_model_id, len(image_urls))
+            content_blocks[0] = create_text_block(prompt)
+            image_urls = []
 
     # Open SWE opens PRs as the triggering user, so a run only proceeds when we
     # have a valid user GitHub token. Users who have never signed in with
@@ -1721,8 +1753,14 @@ _SUPPORTED_GH_EVENTS = frozenset(
         "pull_request_review_comment",
         "pull_request_review",
         "push",
+        "check_run",
+        "check_suite",
+        "workflow_run",
+        "status",
     ]
 )
+# CI events the auto-fix flow listens to (subset of _SUPPORTED_GH_EVENTS).
+_GH_CI_EVENTS = frozenset(["check_run", "check_suite", "workflow_run", "status"])
 _SUPPORTED_GH_ISSUE_ACTIONS = frozenset(["edited", "opened", "reopened"])
 _SUPPORTED_GH_PULL_REQUEST_ACTIONS = frozenset(
     [
@@ -1735,6 +1773,10 @@ _SUPPORTED_GH_PULL_REQUEST_ACTIONS = frozenset(
 )
 _GH_PR_WATCH_TOGGLE_ACTIONS = frozenset(["closed", "reopened", "converted_to_draft"])
 _GH_PR_FIRST_REVIEW_ACTIONS = frozenset(["opened", "ready_for_review"])
+# PR lifecycle actions that should refresh the agent thread's tracked pr_state.
+_GH_PR_AGENT_STATE_ACTIONS = frozenset(
+    ["closed", "reopened", "converted_to_draft", "ready_for_review"]
+)
 _SUPPORTED_GH_COMMENT_ACTIONS = {
     "issue_comment": frozenset(["created", "edited"]),
     "pull_request_review_comment": frozenset(["created", "edited"]),
@@ -1994,6 +2036,7 @@ async def trigger_pr_review_from_ref(
         "title": pr_title,
         "head_ref": branch_name,
         "base_ref": base_ref,
+        "author": (pr_metadata.get("user") or {}).get("login", ""),
     }
     slack_thread_meta: ReviewerSlackThread | None = None
     if slack_channel_id and slack_thread_ts:
@@ -2149,6 +2192,7 @@ async def _dispatch_first_review_from_pr_payload(payload: dict[str, Any], *, sou
         "title": pr_title,
         "head_ref": branch_name,
         "base_ref": base_ref,
+        "author": (pull_request.get("user") or {}).get("login", ""),
     }
     last_reviewed_sha = ""
     if payload.get("action") == "ready_for_review":
@@ -2182,6 +2226,16 @@ async def _dispatch_first_review_from_pr_payload(payload: dict[str, Any], *, sou
         return
 
     await set_reviewer_thread_metadata(thread_id, pr=pr_meta, watch=True, head_sha=head_sha)
+
+    check_run_id = await create_review_check_run(
+        owner=repo_config.get("owner", ""),
+        repo=repo_config.get("name", ""),
+        head_sha=head_sha,
+        token=app_token,
+        details_url=dashboard_thread_url(thread_id),
+    )
+    if check_run_id is not None:
+        await set_reviewer_thread_metadata(thread_id, extra={"review_check_run_id": check_run_id})
 
     is_re_review = bool(last_reviewed_sha)
     if is_re_review:
@@ -2342,6 +2396,56 @@ async def _get_thread_metadata_safe(thread_id: str) -> dict[str, Any] | None:
         return None
     metadata = thread.get("metadata") if isinstance(thread, dict) else None
     return metadata if isinstance(metadata, dict) else {}
+
+
+def _pr_state_from_payload(payload: dict[str, Any]) -> str | None:
+    pull_request = payload.get("pull_request") if isinstance(payload, dict) else None
+    if not isinstance(pull_request, dict):
+        return None
+    state = pull_request.get("state")
+    return derive_pr_state(
+        state=state if isinstance(state, str) else None,
+        merged=bool(pull_request.get("merged")),
+        draft=bool(pull_request.get("draft")),
+    )
+
+
+async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
+    """Keep an agent thread's tracked PR state in sync with PR lifecycle events.
+
+    The agent thread is located by the PR's html_url persisted in metadata when
+    the PR was opened (``open_pull_request``). Reviewer threads are skipped.
+    """
+    pull_request = payload.get("pull_request") if isinstance(payload, dict) else None
+    if not isinstance(pull_request, dict):
+        return
+    pr_url = pull_request.get("html_url")
+    new_state = _pr_state_from_payload(payload)
+    if not isinstance(pr_url, str) or not pr_url or new_state is None:
+        return
+
+    langgraph_client = get_client(url=LANGGRAPH_URL)
+    try:
+        threads = await langgraph_client.threads.search(metadata={"pr_url": pr_url}, limit=10)
+    except Exception:  # noqa: BLE001
+        logger.debug("Could not search threads for PR %s state update", pr_url, exc_info=True)
+        return
+
+    for thread in threads or []:
+        metadata = thread.get("metadata") if isinstance(thread, dict) else None
+        if not isinstance(metadata, dict) or metadata.get("kind") == REVIEWER_THREAD_KIND:
+            continue
+        thread_id = thread.get("thread_id") or thread.get("id")
+        if not isinstance(thread_id, str) or not thread_id:
+            continue
+        if metadata.get("pr_state") == new_state:
+            continue
+        try:
+            await langgraph_client.threads.update(
+                thread_id=thread_id, metadata={"pr_state": new_state}
+            )
+        except Exception:  # noqa: BLE001
+            logger.debug("Failed to update pr_state for thread %s", thread_id, exc_info=True)
 
 
 async def process_github_pr_close(payload: dict[str, Any]) -> None:
@@ -2513,6 +2617,29 @@ async def process_github_push_event(payload: dict[str, Any]) -> None:
         )
     ):
         await set_reviewer_thread_metadata(thread_id, last_reviewed_sha=head_sha)
+        # The old head's check disappears once the head moves (GitHub only
+        # shows checks on the current head), so even though no re-review runs,
+        # surface a settled check on the new head.
+        unchanged_check_id = await create_review_check_run(
+            owner=repo_config["owner"],
+            repo=repo_config["name"],
+            head_sha=head_sha,
+            token=app_token,
+            details_url=dashboard_thread_url(thread_id),
+        )
+        if unchanged_check_id is not None:
+            await complete_review_check_run(
+                owner=repo_config["owner"],
+                repo=repo_config["name"],
+                check_run_id=unchanged_check_id,
+                token=app_token,
+                conclusion="success",
+                title="No new changes to review",
+                summary=(
+                    "The pull request diff is unchanged since the last reviewed "
+                    f"commit {last_reviewed_sha}."
+                ),
+            )
         logger.info(
             "Push to %s ignored: PR diff unchanged since last reviewed SHA %s",
             head_ref,
@@ -2542,8 +2669,23 @@ async def process_github_push_event(payload: dict[str, Any]) -> None:
         "title": pr_title,
         "head_ref": head_ref,
         "base_ref": base_ref,
+        "author": (pr.get("user") or {}).get("login", ""),
     }
     await set_reviewer_thread_metadata(thread_id, pr=pr_meta, watch=True, head_sha=head_sha)
+
+    # GitHub only shows check runs on a PR's current head commit, so the check
+    # created on the previous head disappears after a follow-up push. Create a
+    # fresh in-progress check on the new head SHA so the review stays visible;
+    # publish (or the after-agent hook) settles this id.
+    check_run_id = await create_review_check_run(
+        owner=repo_config["owner"],
+        repo=repo_config["name"],
+        head_sha=head_sha,
+        token=app_token,
+        details_url=dashboard_thread_url(thread_id),
+    )
+    if check_run_id is not None:
+        await set_reviewer_thread_metadata(thread_id, extra={"review_check_run_id": check_run_id})
 
     re_review_prompt = (
         f"A new commit has been pushed to PR #{pr_number}. The new HEAD is "
@@ -2579,6 +2721,173 @@ async def process_github_push_event(payload: dict[str, Any]) -> None:
         if_not_exists="create",
     )
     await _store_current_reviewer_run_id(thread_id, run)
+
+
+async def process_github_ci_event(payload: dict[str, Any], event_type: str) -> None:
+    """Auto-fix failing CI on an agent-authored PR from a CI webhook."""
+    if not is_failing_ci_payload(payload, event_type):
+        return
+    repo = payload.get("repository", {})
+    repo_config = {
+        "owner": repo.get("owner", {}).get("login", "") or repo.get("owner", {}).get("name", ""),
+        "name": repo.get("name", ""),
+    }
+    if not repo_config["owner"] or not repo_config["name"]:
+        return
+    branch = branch_from_check_payload(payload, event_type)
+    head_sha = head_sha_from_check_payload(payload, event_type)
+    if not head_sha:
+        return
+    result = await handle_ci_failure(
+        repo_config=repo_config,
+        branch=branch,
+        head_sha=head_sha,
+        source="github_ci",
+    )
+    logger.info(
+        "CI auto-fix for %s/%s@%s (%s): %s",
+        repo_config["owner"],
+        repo_config["name"],
+        head_sha,
+        event_type,
+        result,
+    )
+
+
+_AUTOFIX_COMMAND_RE = re.compile(r"autofix\s+(on|off)\b", re.IGNORECASE)
+
+
+def _parse_autofix_command(comment_body: str) -> bool | None:
+    """Return True (disable) / False (enable) for an ``@open-swe autofix on|off`` command.
+
+    Returns ``None`` when the comment isn't an auto-fix command. Requires an
+    Open SWE mention so a passing reference to "autofix off" doesn't toggle it.
+    """
+    if not any(tag in comment_body.lower() for tag in OPEN_SWE_TAGS):
+        return None
+    match = _AUTOFIX_COMMAND_RE.search(comment_body)
+    if not match:
+        return None
+    return match.group(1).lower() == "off"
+
+
+def _pr_ref_from_comment_payload(payload: dict[str, Any], event_type: str) -> dict[str, Any] | None:
+    """Extract ``{owner, name, number, url}`` for the PR a comment belongs to."""
+    repo = payload.get("repository", {})
+    owner = repo.get("owner", {}).get("login", "")
+    name = repo.get("name", "")
+    if event_type == "issue_comment":
+        issue = payload.get("issue", {})
+        number = issue.get("number")
+        pr = issue.get("pull_request") or {}
+        url = pr.get("html_url") or issue.get("html_url") or ""
+    else:
+        pr = payload.get("pull_request", {})
+        number = pr.get("number")
+        url = pr.get("html_url") or ""
+    if not owner or not name or not isinstance(number, int):
+        return None
+    return {"owner": owner, "name": name, "number": number, "url": url}
+
+
+async def process_github_autofix_command(
+    payload: dict[str, Any], event_type: str, *, disabled: bool
+) -> None:
+    """Persist an ``@open-swe autofix on|off`` per-PR toggle and acknowledge it."""
+    ref = _pr_ref_from_comment_payload(payload, event_type)
+    if ref is None:
+        return
+    await set_pr_autofix_disabled(ref["owner"], ref["name"], ref["number"], disabled)
+    logger.info(
+        "Auto-fix %s for %s/%s#%s via comment",
+        "disabled" if disabled else "enabled",
+        ref["owner"],
+        ref["name"],
+        ref["number"],
+    )
+    comment = payload.get("comment") or {}
+    comment_id = comment.get("id")
+    if not isinstance(comment_id, int):
+        return
+    token = await get_github_app_installation_token()
+    if not token:
+        return
+    try:
+        await react_to_github_comment(
+            {"owner": ref["owner"], "name": ref["name"]},
+            comment_id,
+            event_type=event_type,
+            token=token,
+            pull_number=ref["number"],
+            node_id=comment.get("node_id"),
+        )
+    except Exception:  # noqa: BLE001
+        logger.debug("Failed to react to auto-fix command comment", exc_info=True)
+
+
+# GitHub author_association values that imply at least repo-member trust. Used
+# as a cheap first gate before the no-mention auto-fix-on-review path; a real
+# write-permission check follows in process_github_autofix_review.
+_TRUSTED_REVIEW_ASSOCIATIONS = frozenset(["OWNER", "MEMBER", "COLLABORATOR"])
+
+
+def _is_actionable_review_payload(payload: dict[str, Any], event_type: str) -> bool:
+    """Return whether a review event is trusted human feedback worth auto-responding to.
+
+    Approvals, the agent's own bot comments, and feedback from non-trusted
+    authors (read/triage/outside users) are not actionable — auto-fix-on-review
+    dispatches a write-capable run, so only repo collaborators/members/owners
+    may trigger it without an explicit ``@open-swe`` mention.
+    """
+    action = payload.get("action", "")
+    if event_type == "pull_request_review_comment":
+        if action != "created":
+            return False
+        node = payload.get("comment") or {}
+    elif event_type == "pull_request_review":
+        if action != "submitted":
+            return False
+        node = payload.get("review") or {}
+        if node.get("state") not in {"changes_requested", "commented"}:
+            return False
+    else:
+        return False
+    if not isinstance(node, dict):
+        return False
+    reviewer = (node.get("user") or {}).get("login", "")
+    if reviewer in INTERNAL_BOT_LOGINS:
+        return False
+    if node.get("author_association") not in _TRUSTED_REVIEW_ASSOCIATIONS:
+        return False
+    body = node.get("body") or ""
+    return bool(body.strip())
+
+
+async def process_github_autofix_review(payload: dict[str, Any], event_type: str) -> None:
+    """Auto-respond to a human review/review-comment on an agent-authored PR."""
+    ref = _pr_ref_from_comment_payload(payload, event_type)
+    if ref is None:
+        return
+    comment = payload.get("comment") or payload.get("review", {})
+    reviewer = (comment.get("user") or {}).get("login", "") if isinstance(comment, dict) else ""
+    body = (comment.get("body") or "") if isinstance(comment, dict) else ""
+    if not body.strip() or reviewer in INTERNAL_BOT_LOGINS:
+        return
+    result = await handle_review_feedback(
+        repo_config={"owner": ref["owner"], "name": ref["name"]},
+        pr_number=ref["number"],
+        pr_url=ref["url"],
+        reviewer=reviewer,
+        body=body,
+        source="github_review",
+    )
+    logger.info(
+        "Auto-fix review feedback for %s/%s#%s: %s",
+        ref["owner"],
+        ref["name"],
+        ref["number"],
+        result,
+    )
 
 
 async def _refresh_thread_github_token_after_401(thread_id: str, email: str) -> str | None:
@@ -3115,6 +3424,8 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks) ->
                 "status": "ignored",
                 "reason": f"Unsupported GitHub pull_request action: {action}",
             }
+        if action in _GH_PR_AGENT_STATE_ACTIONS:
+            background_tasks.add_task(update_agent_thread_pr_state, payload)
         if action in _GH_PR_WATCH_TOGGLE_ACTIONS:
             if not await _is_repo_enabled_for_review(webhook_repo_config):
                 return {"status": "ignored", "reason": "Repository not enabled for review"}
@@ -3142,6 +3453,15 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks) ->
         logger.info("Accepted GitHub push webhook, scheduling reviewer watch evaluation")
         background_tasks.add_task(process_github_push_event, payload)
         return {"status": "accepted", "message": "Processing GitHub push for reviewer watch"}
+
+    if event_type in _GH_CI_EVENTS:
+        if not is_failing_ci_payload(payload, event_type):
+            return {"status": "ignored", "reason": "CI event is not a completed failure"}
+        if not await _is_repo_enabled_for_review(webhook_repo_config):
+            return {"status": "ignored", "reason": "Repository not enabled for review"}
+        logger.info("Accepted GitHub %s webhook, scheduling CI auto-fix evaluation", event_type)
+        background_tasks.add_task(process_github_ci_event, payload, event_type)
+        return {"status": "accepted", "message": f"Processing GitHub {event_type} for auto-fix"}
 
     if not _is_repo_allowed(webhook_repo_config):
         logger.debug(
@@ -3186,6 +3506,23 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks) ->
 
     comment = payload.get("comment") or payload.get("review", {})
     comment_body = (comment.get("body") or "") if comment else ""
+
+    is_pr_related_comment = is_pull_request_comment or event_type in {
+        "pull_request_review_comment",
+        "pull_request_review",
+    }
+    autofix_command = _parse_autofix_command(comment_body)
+    if autofix_command is not None and is_pr_related_comment:
+        if not await _is_repo_enabled_for_review(webhook_repo_config):
+            return {"status": "ignored", "reason": "Repository not enabled for review"}
+        gate_rejection = await _enforce_public_repo_org_gate(payload, event_type)
+        if gate_rejection is not None:
+            return gate_rejection
+        background_tasks.add_task(
+            process_github_autofix_command, payload, event_type, disabled=autofix_command
+        )
+        return {"status": "accepted", "message": "Processing auto-fix toggle"}
+
     if (
         event_type == "pull_request_review_comment"
         and _review_comment_reply_parent_id(payload) is not None
@@ -3199,6 +3536,14 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks) ->
         return {"status": "accepted", "message": "Processing review finding reply"}
 
     if not any(tag in comment_body.lower() for tag in OPEN_SWE_TAGS):
+        if _is_actionable_review_payload(payload, event_type) and await _is_repo_enabled_for_review(
+            webhook_repo_config
+        ):
+            gate_rejection = await _enforce_public_repo_org_gate(payload, event_type)
+            if gate_rejection is not None:
+                return gate_rejection
+            background_tasks.add_task(process_github_autofix_review, payload, event_type)
+            return {"status": "accepted", "message": "Processing auto-fix review feedback"}
         logger.debug(
             "Ignoring GitHub %s%s that does not mention @openswe or @open-swe",
             event_type,

@@ -1,36 +1,40 @@
 .agents-ui {
-  --ui-bg: oklch(0.99 0.002 197.1);
+  --ui-bg: oklch(0.99 0 0);
   --ui-surface: oklch(1 0 0);
-  --ui-panel: oklch(0.985 0.002 197.1);
-  --ui-panel-2: oklch(0.967 0.001 286.375);
-  --ui-border: oklch(0.925 0.005 214.3);
-  --ui-border-subtle: oklch(0.945 0.004 214.3);
-  --ui-text: oklch(0.148 0.004 228.8);
-  --ui-text-muted: oklch(0.45 0.017 213.2);
-  --ui-text-dim: oklch(0.56 0.021 213.5);
-  --ui-accent: oklch(0.52 0.105 223.128);
-  --ui-accent-bubble: oklch(0.955 0.015 223);
-  --ui-sidebar: oklch(0.987 0.002 197.1);
-  --ui-sidebar-hover: oklch(0.963 0.002 197.1);
+  --ui-panel: oklch(0.985 0 0);
+  --ui-panel-2: oklch(0.967 0 0);
+  --ui-border: oklch(0.922 0 0);
+  --ui-border-subtle: oklch(0.945 0 0);
+  --ui-text: oklch(0.148 0 0);
+  --ui-text-muted: oklch(0.45 0 0);
+  --ui-text-dim: oklch(0.56 0 0);
+  --ui-accent: oklch(0.52 0.12 250);
+  --ui-accent-2: oklch(0.56 0 0);
+  --ui-accent-bubble: oklch(0.962 0 0);
+  --ui-code-bubble: oklch(0.962 0 0);
+  --ui-sidebar: oklch(0.987 0 0);
+  --ui-sidebar-hover: oklch(0.963 0 0);
   --ui-success: oklch(0.62 0.17 145);
   --ui-danger: oklch(0.577 0.245 27.325);
 }
 
 .dark .agents-ui,
 .dark.agents-ui {
-  --ui-bg: oklch(0.148 0.004 228.8);
-  --ui-surface: oklch(0.218 0.008 223.9);
-  --ui-panel: oklch(0.218 0.008 223.9);
-  --ui-panel-2: oklch(0.274 0.006 286.033);
+  --ui-bg: oklch(0.148 0 0);
+  --ui-surface: oklch(0.218 0 0);
+  --ui-panel: oklch(0.218 0 0);
+  --ui-panel-2: oklch(0.274 0 0);
   --ui-border: oklch(1 0 0 / 10%);
   --ui-border-subtle: oklch(1 0 0 / 6%);
-  --ui-text: oklch(0.987 0.002 197.1);
-  --ui-text-muted: oklch(0.723 0.014 214.4);
-  --ui-text-dim: oklch(0.56 0.021 213.5);
-  --ui-accent: oklch(0.715 0.143 215.221);
-  --ui-accent-bubble: oklch(0.274 0.04 223);
-  --ui-sidebar: oklch(0.218 0.008 223.9);
-  --ui-sidebar-hover: oklch(0.275 0.011 216.9);
+  --ui-text: oklch(0.985 0 0);
+  --ui-text-muted: oklch(0.708 0 0);
+  --ui-text-dim: oklch(0.556 0 0);
+  --ui-accent: oklch(0.72 0.13 250);
+  --ui-accent-2: oklch(0.708 0 0);
+  --ui-accent-bubble: oklch(0.274 0 0);
+  --ui-code-bubble: oklch(0.248 0 0);
+  --ui-sidebar: oklch(0.218 0 0);
+  --ui-sidebar-hover: oklch(0.275 0 0);
   --ui-success: oklch(0.62 0.17 145);
   --ui-danger: oklch(0.704 0.191 22.216);
 }
@@ -40,15 +44,18 @@
   background: var(--ui-bg);
   font-size: 13px;
   line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
 }
 
 .agents-ui * {
   scrollbar-width: thin;
-  scrollbar-color: oklch(0.85 0.01 214) transparent;
+  scrollbar-color: oklch(0.85 0 0) transparent;
 }
 
 .dark .agents-ui * {
-  scrollbar-color: oklch(0.4 0.01 214) transparent;
+  scrollbar-color: oklch(0.4 0 0) transparent;
 }
 
 .agents-ui .shimmer-text {

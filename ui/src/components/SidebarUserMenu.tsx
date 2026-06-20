@@ -9,9 +9,11 @@ import {
   IoSunnyOutline,
 } from "react-icons/io5";
 
+import type { SessionUser } from "@/lib/api";
+import type { Theme } from "@/lib/theme";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { api, type SessionUser } from "@/lib/api";
-import { useTheme, type Theme } from "@/lib/theme";
+import { api } from "@/lib/api";
+import { useTheme } from "@/lib/theme";
 import { cn } from "@/lib/utils";
 
 const THEME_OPTIONS: Array<{ value: Theme; label: string; icon: typeof IoSunnyOutline }> = [

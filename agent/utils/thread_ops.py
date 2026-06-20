@@ -10,6 +10,8 @@ from langgraph_sdk import get_client
 
 logger = logging.getLogger(__name__)
 
+MAX_QUEUED_MESSAGES = 100
+
 
 def langgraph_url() -> str:
     return os.environ.get("LANGGRAPH_URL") or os.environ.get(
@@ -21,20 +23,21 @@ def langgraph_client():
     return get_client(url=langgraph_url())
 
 
-async def is_thread_active(thread_id: str) -> bool:
-    """Return whether the thread currently has a running run."""
+async def get_thread_active_status(thread_id: str) -> bool | None:
+    """Return whether the thread is active, or None when status cannot be determined."""
     try:
         thread = await langgraph_client().threads.get(thread_id)
         status = thread.get("status", "idle") if isinstance(thread, dict) else "idle"
         logger.info("Thread %s status check: status=%s", thread_id, status)
         return status == "busy"
     except Exception as exc:  # noqa: BLE001
-        logger.warning(
-            "Failed to get thread status for %s: %s — assuming not active",
-            thread_id,
-            exc,
-        )
-        return False
+        logger.warning("Failed to get thread status for %s: %s", thread_id, exc)
+        return None
+
+
+async def is_thread_active(thread_id: str) -> bool:
+    """Return whether the thread currently has a running run."""
+    return await get_thread_active_status(thread_id) is True
 
 
 async def queue_message_for_thread(
@@ -56,6 +59,13 @@ async def queue_message_for_thread(
             logger.debug("No existing queued messages for thread %s", thread_id)
 
         existing_messages.append(new_message)
+        if len(existing_messages) > MAX_QUEUED_MESSAGES:
+            existing_messages = existing_messages[-MAX_QUEUED_MESSAGES:]
+            logger.warning(
+                "Thread %s queue capped at %d messages (dropped oldest)",
+                thread_id,
+                MAX_QUEUED_MESSAGES,
+            )
         await client.store.put_item(namespace, key, {"messages": existing_messages})
         logger.info(
             "Queued message for thread %s (total queued: %d)",

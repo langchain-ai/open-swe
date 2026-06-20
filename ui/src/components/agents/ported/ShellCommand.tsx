@@ -1,4 +1,4 @@
-import { memo, useState, useRef, useCallback, useLayoutEffect } from "react";
+import { memo, useCallback, useLayoutEffect, useRef, useState } from "react";
 import type { ToolExecutionChunk } from "@/lib/agents/types";
 
 interface ShellCommandProps {
@@ -38,12 +38,14 @@ export const ShellCommand = memo(function ShellCommand({
     handleOutputScroll();
   }, [handleOutputScroll, output, expanded]);
 
-  const outputEdgeShadows = [
-    scrolledFromTop ? "inset 0 12px 10px -10px rgba(42, 63, 95, 0.95)" : "",
-    scrolledFromBottom ? "inset 0 -12px 10px -10px rgba(42, 63, 95, 0.95)" : "",
-  ]
-    .filter(Boolean)
-    .join(", ");
+  const topStop = scrolledFromTop ? "transparent 0, black 24px" : "black 0";
+  const bottomStop = scrolledFromBottom
+    ? "black calc(100% - 24px), transparent 100%"
+    : "black 100%";
+  const outputEdgeMask =
+    scrolledFromTop || scrolledFromBottom
+      ? `linear-gradient(to bottom, ${topStop}, ${bottomStop})`
+      : undefined;
 
   return (
     <div className="my-1">
@@ -64,40 +66,45 @@ export const ShellCommand = memo(function ShellCommand({
       </button>
 
       {expanded && (
-        <div className="rounded-xl bg-[var(--ui-accent-bubble)] mt-1 overflow-hidden max-h-[250px] flex flex-col">
-          <div className="px-3 pt-2 pb-1 font-mono text-xs shrink-0">
-            <div className="text-[color:var(--ui-text-dim)] mb-2">bash</div>
-            <div className="text-[color:var(--ui-text)] font-semibold whitespace-pre overflow-x-auto">
-              <span className="text-[color:var(--ui-text-dim)]">$ </span>
-              {command}
+        <div className="rounded-xl border border-[var(--ui-border-subtle)] bg-[var(--ui-code-bubble)] mt-1 overflow-hidden max-h-[250px] flex flex-col">
+          <div className={`px-3 pt-2 ${output ? "pb-1" : "pb-3"} font-mono text-xs shrink-0`}>
+            <div className="flex items-center justify-between gap-2 mb-2">
+              <span className="text-[color:var(--ui-accent-2)]">bash</span>
+              {chunk.status === "in_progress" && (
+                <span className="text-yellow-400 shrink-0">Running...</span>
+              )}
+              {chunk.status === "completed" && (
+                <span className="text-[color:var(--ui-text-muted)] shrink-0">✓ Success</span>
+              )}
+              {chunk.status === "error" && (
+                <span className="text-red-400 shrink-0">✗ Failed</span>
+              )}
+              {chunk.status === "pending" && (
+                <span className="text-yellow-400 shrink-0">Waiting for approval...</span>
+              )}
+            </div>
+            <div className="max-h-[120px] overflow-y-auto">
+              <div className="text-[color:var(--ui-text)] font-semibold whitespace-pre overflow-x-auto">
+                <span className="text-[color:var(--ui-text-dim)]">$ </span>
+                {command}
+              </div>
             </div>
           </div>
           {output && (
             <div
               ref={outputRef}
               onScroll={handleOutputScroll}
-              className="min-h-0 flex-1 overflow-auto px-3 pb-1"
-              style={{ boxShadow: outputEdgeShadows || "none" }}
+              className="min-h-0 flex-1 overflow-auto px-3 pb-2"
+              style={{
+                maskImage: outputEdgeMask,
+                WebkitMaskImage: outputEdgeMask,
+              }}
             >
               <pre className="mt-1 text-[color:var(--ui-text-muted)] whitespace-pre font-mono text-xs w-max min-w-full">
                 {output}
               </pre>
             </div>
           )}
-          <div className="px-3 py-1.5 flex justify-end shrink-0">
-            {chunk.status === "in_progress" && (
-              <span className="text-yellow-400 text-xs">Running...</span>
-            )}
-            {chunk.status === "completed" && (
-              <span className="text-[color:var(--ui-text-muted)] text-xs">✓ Success</span>
-            )}
-            {chunk.status === "error" && (
-              <span className="text-red-400 text-xs">✗ Failed</span>
-            )}
-            {chunk.status === "pending" && (
-              <span className="text-yellow-400 text-xs">Waiting for approval...</span>
-            )}
-          </div>
         </div>
       )}
     </div>

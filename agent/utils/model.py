@@ -1,6 +1,9 @@
+import os
 from typing import Literal, TypedDict, Unpack
 
 from langchain.chat_models import init_chat_model
+
+from ..dashboard.options import DEFAULT_MODEL_ID
 
 OPENAI_RESPONSES_WS_BASE_URL = "wss://api.openai.com/v1"
 
@@ -8,10 +11,13 @@ OPENAI_RESPONSES_WS_BASE_URL = "wss://api.openai.com/v1"
 # primary provider a fair chance before the fallback middleware kicks in.
 DEFAULT_MAX_RETRIES = 6
 
-DEFAULT_LLM_REASONING: "OpenAIReasoning" = {"effort": "medium"}
-
 OpenAIReasoningEffort = Literal["none", "low", "medium", "high", "xhigh"]
+# OpenAI's Responses API only returns human-readable reasoning text when a
+# summary is requested; without it, reasoning happens silently (billed in
+# output tokens) and the reasoning content block arrives empty.
+OpenAIReasoningSummary = Literal["auto", "concise", "detailed"]
 AnthropicThinkingType = Literal["adaptive"]
+AnthropicThinkingDisplay = Literal["summarized", "omitted"]
 AnthropicEffort = Literal["low", "medium", "high", "xhigh", "max"]
 GoogleThinkingLevel = Literal["minimal", "low", "medium", "high"]
 FireworksReasoningEffort = Literal["none", "low", "medium", "high", "xhigh", "max"]
@@ -19,10 +25,15 @@ FireworksReasoningEffort = Literal["none", "low", "medium", "high", "xhigh", "ma
 
 class OpenAIReasoning(TypedDict, total=False):
     effort: OpenAIReasoningEffort
+    summary: OpenAIReasoningSummary
+
+
+DEFAULT_LLM_REASONING: "OpenAIReasoning" = {"effort": "medium", "summary": "auto"}
 
 
 class AnthropicThinking(TypedDict, total=False):
     type: AnthropicThinkingType
+    display: AnthropicThinkingDisplay
 
 
 class ModelKwargs(TypedDict, total=False):
@@ -74,24 +85,33 @@ def openai_reasoning_for(
     *,
     default_effort: OpenAIReasoningEffort | None = None,
 ) -> OpenAIReasoning | None:
-    """Return an OpenAI reasoning kwarg from a profile effort string."""
+    """Return an OpenAI reasoning kwarg from a profile effort string.
+
+    Requests ``summary: "auto"`` for every reasoning effort so the Responses
+    API emits visible reasoning text. ``effort: "none"`` disables reasoning
+    entirely, so no summary is attached.
+    """
     effort = profile_effort or default_effort or DEFAULT_LLM_REASONING.get("effort")
     if effort == "none":
         return {"effort": "none"}
     if effort == "low":
-        return {"effort": "low"}
+        return {"effort": "low", "summary": "auto"}
     if effort == "medium":
-        return {"effort": "medium"}
+        return {"effort": "medium", "summary": "auto"}
     if effort == "high":
-        return {"effort": "high"}
+        return {"effort": "high", "summary": "auto"}
     if effort == "xhigh":
-        return {"effort": "xhigh"}
+        return {"effort": "xhigh", "summary": "auto"}
     return None
 
 
 def anthropic_thinking_for(profile_effort: str | None) -> AnthropicThinking | None:
     if profile_effort in _ANTHROPIC_EFFORTS:
-        return {"type": "adaptive"}
+        # `display: "summarized"` makes Opus 4.7+ return the (summarized) reasoning
+        # text in the response. The adaptive default is "omitted", which streams a
+        # reasoning block carrying only a signature and no visible thinking — so the
+        # dashboard never has any text to render.
+        return {"type": "adaptive", "display": "summarized"}
     return None
 
 
@@ -168,3 +188,29 @@ def provider_model_kwargs(
         if effort is not None:
             kwargs["model_kwargs"] = {"reasoning_effort": effort}
     return kwargs
+
+
+def validate_local_dev_llm_config() -> None:
+    """Validate API keys for the locally configured default model.
+
+    This check only runs in localhost development environments and is
+    intended to catch missing credentials for the default model specified
+    via LLM_MODEL_ID/DEFAULT_MODEL_ID. Runtime model selection may come
+    from team, profile, or thread configuration and is not validated here.
+    """
+    dashboard_url = os.environ.get("DASHBOARD_BASE_URL", "")
+    if not dashboard_url.startswith("http://localhost"):
+        return
+
+    model_id = os.environ.get("LLM_MODEL_ID", DEFAULT_MODEL_ID)
+
+    if model_id.startswith("openai:") and not os.environ.get("OPENAI_API_KEY"):
+        raise ValueError(f"OPENAI_API_KEY is required for configured model {model_id}")
+    elif model_id.startswith("anthropic:") and not os.environ.get("ANTHROPIC_API_KEY"):
+        raise ValueError(f"ANTHROPIC_API_KEY is required for configured model {model_id}")
+    elif model_id.startswith("google_genai:") and not os.environ.get("GOOGLE_API_KEY"):
+        raise ValueError(f"GOOGLE_API_KEY is required for configured model {model_id}")
+    elif model_id.startswith("groq:") and not os.environ.get("GROQ_API_KEY"):
+        raise ValueError(f"GROQ_API_KEY is required for configured model {model_id}")
+    elif model_id.startswith("fireworks:") and not os.environ.get("FIREWORKS_API_KEY"):
+        raise ValueError(f"FIREWORKS_API_KEY is required for configured model {model_id}")

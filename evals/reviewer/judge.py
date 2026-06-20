@@ -13,6 +13,7 @@ directly comparable to martian's published numbers.
 from __future__ import annotations
 
 import json
+import os
 import threading
 from typing import Any
 from uuid import UUID
@@ -21,6 +22,11 @@ from langchain_anthropic import ChatAnthropic
 from langsmith.schemas import Example, Run
 
 JUDGE_MODEL = "claude-opus-4-5"
+
+# Call Anthropic directly. Without an explicit base_url the Anthropic SDK falls
+# back to ANTHROPIC_BASE_URL, which in dev shells points at the LangSmith
+# gateway and 403s for this model — silently nulling every judge score.
+JUDGE_BASE_URL = os.environ.get("JUDGE_ANTHROPIC_BASE_URL", "https://api.anthropic.com")
 
 JUDGE_SYSTEM = "You are a precise code review evaluator. Always respond with valid JSON."
 
@@ -48,7 +54,20 @@ _judge: ChatAnthropic | None = None
 def _get_judge() -> ChatAnthropic:
     global _judge
     if _judge is None:
-        _judge = ChatAnthropic(model=JUDGE_MODEL, temperature=0.0, max_tokens=512)
+        api_key = os.environ.get("JUDGE_ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_API_KEY")
+        if not api_key:
+            raise RuntimeError(
+                "No Anthropic API key for the judge. Set JUDGE_ANTHROPIC_API_KEY or "
+                "ANTHROPIC_API_KEY (the judge calls Anthropic directly, not via a gateway)."
+            )
+        _judge = ChatAnthropic(
+            model=JUDGE_MODEL,
+            temperature=0.0,
+            max_tokens=512,
+            base_url=JUDGE_BASE_URL,
+            api_key=api_key,
+            max_retries=3,
+        )
     return _judge
 
 

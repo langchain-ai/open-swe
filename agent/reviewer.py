@@ -17,6 +17,7 @@ agent for code review only:
 
 import asyncio
 import logging
+import posixpath
 import re
 import warnings
 
@@ -30,19 +31,27 @@ warnings.filterwarnings("ignore", message=".*Pydantic V1.*", category=UserWarnin
 
 from deepagents import create_deep_agent
 from langchain.agents.middleware import ModelCallLimitMiddleware
+from langchain_core.language_models.chat_models import BaseChatModel
 
-from .dashboard.team_settings import get_org_review_guidelines, get_team_default_model_pair
+from .dashboard.team_settings import (
+    get_org_review_guidelines,
+    get_team_default_grouping_model,
+    get_team_default_model_pair,
+)
 from .middleware import (
     SanitizeThinkingBlocksMiddleware,
     SanitizeToolInputsMiddleware,
     SlackAssistantStatusMiddleware,
     ToolErrorMiddleware,
     check_message_queue_before_model,
+    refresh_github_proxy_before_model,
+    settle_review_check_on_exit,
 )
 from .reviewer_diff import compute_diff_line_set, fetch_pr_diff, fetch_pr_metadata
 from .reviewer_findings import (
     list_findings as list_findings_async,
 )
+from .reviewer_groups import maybe_generate_and_store_diff_groups
 from .reviewer_publish import fetch_pr_review_threads
 from .reviewer_reconcile import reconcile_findings_with_review_threads
 from .server import (
@@ -69,7 +78,9 @@ from .utils.api_standards_skill import fetch_api_standards_skill
 from .utils.github_app import get_github_app_installation_token_with_expiry
 from .utils.github_token import cache_github_token_for_thread
 from .utils.model import DEFAULT_LLM_REASONING, make_model, provider_model_kwargs
+from .utils.repo_prep import materialize_trusted_skills, prepare_review_repo
 from .utils.sandbox_paths import aresolve_sandbox_work_dir
+from .utils.tracing import REVIEW_TRACING_PROJECT, traced_graph_factory
 
 REVIEWER_PROMPT_TEMPLATE = """You are a specialized code reviewer agent. Your job is to review one GitHub PR and publish a single review.
 
@@ -87,26 +98,31 @@ Re-review (user message says "A new commit has been pushed"):
 GH_TOKEN=dummy gh api repos/{repo_owner}/{repo_name}/compare/<last_reviewed_sha>...<head_sha> -H "Accept: application/vnd.github.v3.diff"
 ```
 
-Clone the repo so you can grep for full file context:
+{repo_checkout_note}
 
-```
-GH_TOKEN=dummy gh repo clone {repo_owner}/{repo_name} && cd {repo_name} && git checkout <head_sha>
-```
+If a skills section appears below, the repo ships reviewer-relevant skills. Read
+the `SKILL.md` that matches the area you're reviewing and apply it.
 
 Tools: `add_finding`, `update_finding`, `list_findings`, `publish_review`,
 `resolve_finding_thread`, `reply_to_finding_thread`.
 Call `publish_review` once at the end.
 
+Dependency installs during review: only install packages when needed to verify
+the PR. Before any install, check `command -v sfw`; if missing, install Socket
+Firewall Free with `npm i -g sfw`. Prefix supported registry-fetching installs
+with `sfw`: npm/yarn/pnpm, pip/uv, and cargo (for example, `sfw npm ci`,
+`sfw pnpm install`, `sfw pip install -r requirements.txt`,
+`sfw uv pip install -e .`). For unsupported package managers such as Poetry,
+run the normal documented install command without `sfw`.
+
 If `publish_review` returns `unresolvable_findings`, do NOT retry with the
 same args — call `update_finding(status="resolved", note="...")` on those ids, or fix
 their file/line via `update_finding`, then call `publish_review` again.
 
-If `add_finding` returns `in_diff: false`, the finding was accepted but anchored
-outside the PR diff (e.g. a caller broken by a changed signature, in a file the
-PR doesn't touch). It will be surfaced in a collapsed "out-of-diff findings"
-section of the review summary instead of as an inline comment. This is expected —
-do NOT re-anchor, retry, or drop it. Only file such findings when they clear the
-bar below (a proven regression, not speculation about pre-existing code).
+Out-of-diff findings are disabled. `add_finding` rejects any finding whose
+`start_line..end_line` is not part of the PR diff (returns `success: false` with
+`in_diff: false`). Do NOT re-anchor or retry — only file findings anchored to a
+line this PR actually changed.
 
 Re-review: for each open finding, `update_finding(id, status="resolved", note="...")`
 if fixed (include a brief explanation of the fix in `note`), `update_finding` with
@@ -131,11 +147,12 @@ question or a short clarification is needed after pushback.
 1. You can anchor it to a specific changed line and quote that line.
 2. You can name the concrete failure mode — what breaks at build time,
    runtime, or for users, given the code as it exists today.
-3. **Diff-anchor:** the finding's file appears in the PR diff hunk, OR you
-   proved a regression via `git show <base_sha>:path` vs
-   `git show <head_sha>:path` on a callsite of a symbol whose signature
-   changed in the diff. Do not file bugs in unrelated files or subsystems
-   based on inference alone.
+3. **Diff-anchor:** the finding anchors to a specific line inside the PR diff
+   hunk. `add_finding` rejects any finding whose lines are not part of the
+   diff. A signature change can still cause a regression at an unchanged
+   callsite, but you can only file it when the affected line is itself in the
+   diff — do not file bugs in files or lines absent from the diff, and do not
+   file based on inference about unrelated files or subsystems.
 
 # Do NOT file
 
@@ -168,9 +185,10 @@ question or a short clarification is needed after pushback.
 - **Scope-policing / architectural critique.** No "this PR doesn't achieve
   its stated goal", "the design should be different".
 - **Pre-existing issues** not introduced by this diff.
-- **Out-of-diff / wrong-subsystem speculation.** Do not file findings in
-  files absent from the PR diff unless you proved base-vs-head regression on
-  a changed symbol's callsite.
+- **Out-of-diff findings.** `add_finding` rejects any finding whose lines are
+  not part of the PR diff. Do not file findings in files or lines absent from
+  the diff — even a proven base-vs-head regression at an unchanged callsite
+  cannot be filed.
 - **Same-bug fan-out.** If the same defect appears in N files, file ONE
   finding that lists all sites in `description`. Not N findings.
 
@@ -205,6 +223,26 @@ carefully before reaching for unchanged code.
 6. **Verify library / framework usage you're not certain of.** If a
    stdlib, ORM, or framework call's semantics matter to the change, confirm
    the contract before assuming a bug or assuming safety.
+7. **Repository conventions compliance.** If a Repository conventions
+   (AGENTS.md / CLAUDE.md) section appears in this prompt, run a dedicated
+   pass that checks every changed hunk against each rule listed there. For
+   each rule, ask: *does this PR's diff violate it?* Common violations
+   include failing to update docs that describe changed behavior, using a
+   forbidden import or pattern, skipping a required test/changelog step, or
+   ignoring naming/architecture mandates. File a finding for each violation
+   that is anchored to a changed line — these are mandatory repo rules, not
+   style nits, so a violation is a legitimate finding even when it would
+   otherwise look like a convention nit.
+8. **New dependencies.** When the diff adds a dependency to a manifest or
+   lockfile (`package.json`, `pyproject.toml`, `requirements*.txt`,
+   `Cargo.toml`, `go.mod`, etc.), file a finding anchored to that changed
+   line when the new dependency is either (a) unpinned/floating — no specific
+   or bounded version — or (b) un-vetted: abandoned or single-maintainer, a
+   known unpatched CVE, or a missing/non-permissive license. The failure mode
+   is concrete (floating deps cause non-reproducible builds and supply-chain
+   drift; un-vetted deps add security/licensing exposure), so this is a
+   legitimate finding, not a style nit. A dependency that is already pinned and
+   from a healthy, permissively-licensed source is fine — do not file.
 
 Use `add_finding` to record each candidate. Every finding must include a
 concise generated `title` that names the failure mode in roughly 4-10 words;
@@ -248,6 +286,23 @@ severities — they're not findings.
 - Publish a concise review: prefer the highest-confidence findings that
   pass the bar. Use fewer when fewer issues are defensible; publish zero
   only after the workflow above found no concrete regression.
+
+# After publish_review — closing summary
+
+Inspect the returned `review_id`, `skipped_empty_re_review`, and `dry_run`
+fields before composing your final message; `success: true` alone does NOT
+mean a review was posted.
+
+- `review_id` is a number and neither flag is set → you may say the review
+  was published/posted and cite `surfaced_count`.
+- `skipped_empty_re_review: true` or `review_id: null` → say "no new review
+  was posted" / "the re-review had nothing new to surface". Do NOT use
+  "published", "submitted", or "posted".
+- `dry_run: true` → say "Simulated publish (eval mode) — review not posted
+  to GitHub", then list the findings inline. Do NOT claim publication.
+- `error: "thread_not_found"` → findings storage is gone; do not retry the
+  tool. Report the blocker and include your intended findings inline in the
+  final message.
 """
 
 
@@ -269,12 +324,55 @@ The dataset expects 1-5 comments per PR (mean ~2).
 """
 
 
+_REPO_READY_NOTE = """The repo is already cloned and checked out at the PR head in
+`{working_dir}` — `cd` there and grep for full file context."""
+
+_REPO_NOT_READY_NOTE = """Repo prep FAILED: the checkout in `{working_dir}` may be missing or — worse —
+present but stale (at an old commit). Do NOT trust local files until you have
+re-prepped the tree yourself. Run:
+
+```
+cd {working_dir} || {{ cd {parent_dir} && GH_TOKEN=dummy gh repo clone {repo_owner}/{repo_name} && cd {repo_name}; }}
+GH_TOKEN=dummy git fetch origin {head_sha_or_placeholder} --quiet || GH_TOKEN=dummy git fetch origin refs/pull/{pr_number}/head --quiet
+git checkout --force {head_sha_or_placeholder} --quiet
+```
+
+and verify `git rev-parse HEAD` matches the PR head before reading local
+files. If you cannot get the tree onto the PR head, rely exclusively on the
+diff and `gh api` file contents (`GH_TOKEN=dummy gh api
+repos/{repo_owner}/{repo_name}/contents/<path>?ref=<head_sha>`) — never on
+the local checkout."""
+
+
+def _repo_checkout_note(
+    *,
+    repo_ready: bool,
+    working_dir: str,
+    repo_owner: str,
+    repo_name: str,
+    pr_number: int | str,
+    head_sha: str,
+) -> str:
+    if repo_ready:
+        return _REPO_READY_NOTE.format(working_dir=working_dir)
+    return _REPO_NOT_READY_NOTE.format(
+        working_dir=working_dir,
+        parent_dir=posixpath.dirname(working_dir) or working_dir,
+        repo_owner=repo_owner or "<owner>",
+        repo_name=repo_name or "<repo>",
+        pr_number=pr_number if pr_number != "" else "<pr_number>",
+        head_sha_or_placeholder=head_sha or "<head_sha>",
+    )
+
+
 def _reviewer_system_prompt(
     working_dir: str,
     *,
     repo_owner: str,
     repo_name: str,
     pr_number: int | str,
+    repo_ready: bool = True,
+    head_sha: str = "",
     reviewer_eval: bool = False,
     org_guidelines: str | None = None,
     repo_style_prompt: str | None = None,
@@ -286,6 +384,14 @@ def _reviewer_system_prompt(
         repo_owner=repo_owner or "<owner>",
         repo_name=repo_name or "<repo>",
         pr_number=pr_number if pr_number != "" else "<pr_number>",
+        repo_checkout_note=_repo_checkout_note(
+            repo_ready=repo_ready,
+            working_dir=working_dir,
+            repo_owner=repo_owner,
+            repo_name=repo_name,
+            pr_number=pr_number,
+            head_sha=head_sha,
+        ),
     )
     if reviewer_eval:
         prompt = f"{prompt}\n{REVIEWER_EVAL_PROMPT_SUFFIX}"
@@ -312,14 +418,28 @@ def _reviewer_system_prompt(
     if agents_md_content:
         prompt = (
             f"{prompt}\n\n"
-            "# Repository conventions (AGENTS.md)\n\n"
-            "The following is the `AGENTS.md` file from the target branch "
-            "(the PR's base), not from the PR head. It documents the "
-            "project's conventions, architecture, and rules. Treat "
-            "violations of these conventions as candidate findings when "
-            "they meet the global bar above (anchored to a changed line, "
-            "concrete failure mode, in-diff). Do not file findings for "
-            "pre-existing violations outside the diff.\n\n"
+            "# Repository conventions (AGENTS.md / CLAUDE.md)\n\n"
+            "The following is the `AGENTS.md` or `CLAUDE.md` file from the target "
+            "branch (the PR's base), not from the PR head. It documents the "
+            "project's conventions, architecture, and rules. These rules are "
+            "**mandatory** — the project enforces them on every contributor and "
+            "they are not optional style preferences. When a changed line "
+            "violates one of these rules, file a finding for it (still anchored "
+            "to the changed line, still a concrete failure mode, still in-diff). "
+            "Do not file findings for pre-existing violations outside the diff.\n\n"
+            "Common rule categories to check:\n"
+            "- **Documentation sync rules** — many repos require docs/ to be "
+            "updated when behavior changes. If the PR changes behavior a doc "
+            "describes and the doc is not updated, that is a finding.\n"
+            "- **Naming / convention rules** — if the repo mandates specific "
+            "naming, patterns, or helpers and the PR uses the wrong one, that "
+            "is a finding (not a style nit — it violates an explicit repo rule).\n"
+            "- **Architecture / layering rules** — if the repo forbids certain "
+            "imports, cross-layer calls, or patterns and the PR introduces one, "
+            "that is a finding.\n"
+            "- **Process / CI rules** — if the repo requires tests, changelog "
+            "entries, or specific CI steps for certain changes and the PR skips "
+            "them, that is a finding.\n\n"
             "```\n"
             f"{agents_md_content}\n"
             "```"
@@ -655,6 +775,43 @@ def _format_existing_findings(findings: list[dict]) -> str:
     return "\n".join(lines) if lines else "_(no open findings)_"
 
 
+# Strong references to fire-and-forget background tasks (e.g. the AI-sorted
+# diff grouping pass) so the event loop doesn't garbage-collect them mid-flight.
+_BACKGROUND_TASKS: set[asyncio.Task[None]] = set()
+
+
+def _on_background_task_done(task: asyncio.Task[None]) -> None:
+    _BACKGROUND_TASKS.discard(task)
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc is not None:
+        logger.warning("Background reviewer task failed: %s", exc)
+
+
+async def _resolve_grouping_model(configurable: dict[str, object]) -> BaseChatModel:
+    """Resolve the model for the diff-grouping pass.
+
+    Per-run override (``grouping_model_id``/``grouping_reasoning_effort``) wins;
+    otherwise the team default, which itself inherits the reviewer subagent
+    model when no grouping-specific model is configured.
+    """
+    configured_model_id = configurable.get("grouping_model_id")
+    configured_effort = configurable.get("grouping_reasoning_effort")
+    if isinstance(configured_model_id, str) and configured_model_id:
+        model_id = configured_model_id
+        effort = configured_effort if isinstance(configured_effort, str) else None
+    else:
+        model_id, effort = await get_team_default_grouping_model()
+    model_kwargs = provider_model_kwargs(
+        model_id,
+        effort,
+        max_tokens=DEFAULT_LLM_MAX_TOKENS,
+        openai_reasoning_default=DEFAULT_LLM_REASONING,
+    )
+    return make_model(model_id, **model_kwargs)
+
+
 async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
     """Get or create a reviewer agent with a sandbox + prepped repo."""
     thread_id = config["configurable"].get("thread_id", None)
@@ -685,9 +842,11 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
 
     github_proxy_token = github_token
     github_api_token = github_token
+    repo_name_for_scope = str(repo_config.get("name") or "")
     sandbox_backend = await ensure_sandbox_for_thread(
         thread_id,
         github_proxy_token=github_proxy_token,
+        github_proxy_repositories=[repo_name_for_scope] if repo_name_for_scope else None,
     )
 
     work_dir = await aresolve_sandbox_work_dir(sandbox_backend)
@@ -697,6 +856,26 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
     base_sha = str(config["configurable"].get("base_sha", "") or "")
     head_sha = str(config["configurable"].get("head_sha", "") or "")
     pr_number = config["configurable"].get("pr_number")
+
+    # Prep the repo on the sandbox before the first model call so the LLM does
+    # not narrate `gh repo clone`, and so SkillsMiddleware can discover the
+    # repo's skills at its one-shot scan. Skills are materialized from the PR
+    # base sha (trusted), never the PR head (author-controlled).
+    repo_ready = await prepare_review_repo(
+        sandbox_backend,
+        work_dir=work_dir,
+        repo_owner=repo_owner,
+        repo_name=repo_name,
+        head_sha=head_sha,
+        pr_number=pr_number if isinstance(pr_number, int) else None,
+        base_sha=base_sha,
+    )
+    skill_sources: list[str] = []
+    if repo_ready and repo_name:
+        skill_sources = await materialize_trusted_skills(
+            sandbox_backend, repo_dir=f"{work_dir}/{repo_name}", trusted_ref=base_sha
+        )
+
     pr_url = str(config["configurable"].get("pr_url", "") or "")
     last_reviewed_sha = str(config["configurable"].get("last_reviewed_sha", "") or "")
     is_re_review = bool(config["configurable"].get("re_review"))
@@ -711,6 +890,12 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
     )
 
     async def _fetch_diff_context() -> tuple[str, dict[str, dict[str, set[int]]] | None]:
+        """Return (diff, line_set).
+
+        The reviewer model has a large context window and reviews the full diff;
+        it is not truncated. The line set is computed from the same diff so
+        findings on any changed line are accepted.
+        """
         if not can_fetch_pr or github_api_token is None or not isinstance(pr_number, int):
             return "", None
         fetched_diff = await fetch_pr_diff(
@@ -918,6 +1103,8 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
         repo_owner=repo_owner,
         repo_name=repo_name,
         pr_number=pr_number if isinstance(pr_number, int) else "",
+        repo_ready=repo_ready,
+        head_sha=head_sha,
         reviewer_eval=reviewer_eval,
         org_guidelines=org_guidelines,
         repo_style_prompt=repo_style_prompt,
@@ -929,6 +1116,25 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
 
     reviewer_model = make_model(model_id, **model_kwargs)
     reviewer_subagent_model = make_model(subagent_model_id, **subagent_model_kwargs)
+
+    # Kick off the AI-sorted diff grouping pass at run start, concurrently with
+    # the review, so it adds ~0 latency. First-review and re-review only — a
+    # finding_reply run doesn't change the diff. Best-effort: the task swallows
+    # its own errors and the UI falls back to the folder view when groups are
+    # absent.
+    if reviewer_event != "finding_reply" and pr_diff_text and thread_id:
+        grouping_model = await _resolve_grouping_model(config["configurable"])
+        grouping_task = asyncio.create_task(
+            maybe_generate_and_store_diff_groups(
+                thread_id=thread_id,
+                head_sha=head_sha,
+                diff_text=pr_diff_text,
+                model=grouping_model,
+            )
+        )
+        _BACKGROUND_TASKS.add(grouping_task)
+        grouping_task.add_done_callback(_on_background_task_done)
+
     return create_deep_agent(
         model=reviewer_model,
         system_prompt=system_prompt,
@@ -945,12 +1151,18 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
         ],
         subagents=[_general_purpose_subagent(reviewer_subagent_model)],
         backend=sandbox_backend,
+        skills=skill_sources or None,
         middleware=[
             SanitizeToolInputsMiddleware(),
             ModelCallLimitMiddleware(run_limit=MODEL_CALL_RECURSION_LIMIT, exit_behavior="end"),
             ToolErrorMiddleware(),
+            refresh_github_proxy_before_model,
             check_message_queue_before_model,
             SlackAssistantStatusMiddleware(),
             SanitizeThinkingBlocksMiddleware(),
+            settle_review_check_on_exit,
         ],
     ).with_config(config)
+
+
+traced_reviewer_agent = traced_graph_factory(get_reviewer_agent, REVIEW_TRACING_PROJECT)
