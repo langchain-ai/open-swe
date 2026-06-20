@@ -1,7 +1,7 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from agent.middleware.notify_step_limit import notify_step_limit_reached
 
@@ -62,6 +62,34 @@ class TestNotifyStepLimitReached:
 
         assert result is None
         mock_post.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_posts_slack_reply_when_marker_in_earlier_ai_message(self) -> None:
+        state = {
+            "messages": [
+                HumanMessage(content="start"),
+                AIMessage(content="Model call limits exceeded: run limit reached"),
+                ToolMessage(content="edit_file output", tool_call_id="tc1"),
+            ]
+        }
+
+        with (
+            patch(
+                "agent.middleware.notify_step_limit.get_config",
+                return_value={
+                    "configurable": {"slack_thread": {"channel_id": "C123", "thread_ts": "171.123"}}
+                },
+            ),
+            patch(
+                "agent.middleware.notify_step_limit.post_slack_thread_reply",
+                new_callable=AsyncMock,
+            ) as mock_post,
+        ):
+            result = await notify_step_limit_reached.aafter_agent(state, self._make_runtime())
+
+        assert result is None
+        mock_post.assert_awaited_once()
+        assert mock_post.await_args.args[0:2] == ("C123", "171.123")
 
     @pytest.mark.asyncio
     async def test_skips_when_limit_marker_absent(self) -> None:

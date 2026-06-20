@@ -15,6 +15,7 @@ from ..utils.slack import post_slack_thread_reply
 logger = logging.getLogger(__name__)
 
 _LIMIT_MARKER = "Model call limits exceeded"
+_RECENT_MESSAGE_SCAN = 5
 
 
 def _content_to_text(content: object) -> str:
@@ -38,20 +39,21 @@ async def notify_step_limit_reached(
     state: AgentState,
     runtime: Runtime,
 ) -> dict[str, Any] | None:
-    """Notify the user via Slack when the agent hits its step limit.
-
-    Runs after the agent exits. Checks whether the last AI message contains
-    the ``ModelCallLimitMiddleware`` marker text; if so, posts a Slack thread
-    reply so the user is not left wondering what happened.
-    """
+    """Notify the user via Slack when the agent hits its step limit."""
     messages = state.get("messages", [])
     if not messages:
         return None
 
-    last_msg = messages[-1]
-    content = _content_to_text(getattr(last_msg, "content", "") or "")
-
-    if _LIMIT_MARKER not in content:
+    # ModelCallLimitMiddleware(exit_behavior="end") cuts the loop after a
+    # ToolMessage when the run_limit is hit, so the marker may live a few
+    # messages back rather than on messages[-1]. Scan a short tail.
+    hit_marker = False
+    for msg in messages[-_RECENT_MESSAGE_SCAN:]:
+        content = _content_to_text(getattr(msg, "content", "") or "")
+        if _LIMIT_MARKER in content:
+            hit_marker = True
+            break
+    if not hit_marker:
         return None
 
     config = get_config()
