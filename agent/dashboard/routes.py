@@ -166,8 +166,12 @@ _GITHUB_API_TIMEOUT = httpx.Timeout(10.0, connect=3.0)
 _SKIPPABLE_INSTALLATION_REPO_STATUS_CODES = frozenset({403, 404})
 
 
+def _session_is_admin(session: dict[str, Any]) -> bool:
+    return is_admin(session.get("email"), login=session.get("sub"))
+
+
 def _require_admin(session: dict[str, Any]) -> dict[str, Any]:
-    if not is_admin(session.get("email")):
+    if not _session_is_admin(session):
         raise HTTPException(403, "admin only")
     return session
 
@@ -362,7 +366,7 @@ async def me(session: dict[str, Any] = _SESSION_DEP) -> dict[str, Any]:
         "login": session["sub"],
         "email": session.get("email"),
         "avatar_url": session.get("avatar_url"),
-        "is_admin": is_admin(session.get("email")),
+        "is_admin": _session_is_admin(session),
         "slack_oauth_enabled": slack_oauth_configured(),
     }
 
@@ -1179,7 +1183,7 @@ async def api_list_threads(
     all: bool = False,
     session: dict[str, Any] = _SESSION_DEP,
 ) -> list[dict[str, Any]]:
-    if all and not is_admin(session.get("email")):
+    if all and not _session_is_admin(session):
         raise HTTPException(403, "admin only")
     return await list_dashboard_threads(session["sub"], email=session.get("email"), include_all=all)
 
@@ -1191,7 +1195,7 @@ async def api_list_threads_sidebar(
     all: bool = False,
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
-    if all and not is_admin(session.get("email")):
+    if all and not _session_is_admin(session):
         raise HTTPException(403, "admin only")
     return await list_dashboard_threads_sidebar(
         session["sub"],
@@ -1214,7 +1218,7 @@ async def api_list_threads_page(
     q: str | None = None,
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
-    if all and not is_admin(session.get("email")):
+    if all and not _session_is_admin(session):
         raise HTTPException(403, "admin only")
     return await list_dashboard_threads_page(
         session["sub"],

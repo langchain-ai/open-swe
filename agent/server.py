@@ -501,13 +501,17 @@ async def _observability_authorized(config: RunnableConfig, profile_login: str |
     """
     configurable = (config or {}).get("configurable") or {}
     slack_thread = configurable.get("slack_thread") or {}
+    config_login = configurable.get("github_login")
+    candidate_login = profile_login or (config_login if isinstance(config_login, str) else None)
     candidate_emails = [
         configurable.get("user_email"),
         slack_thread.get("triggering_user_email"),
     ]
-    if any(is_observability_authorized(email) for email in candidate_emails):
+    if any(is_observability_authorized(email, login=candidate_login) for email in candidate_emails):
         return True
-    return is_observability_authorized(await email_for_login(profile_login))
+    return is_observability_authorized(
+        await email_for_login(candidate_login), login=candidate_login
+    )
 
 
 async def _load_observability_tools(authorized: bool) -> list[Any]:

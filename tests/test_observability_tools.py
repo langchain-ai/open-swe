@@ -154,3 +154,15 @@ async def test_observability_authorized_resolves_login_email(
 
     config = {"configurable": {"github_login": "dev"}}
     assert await server._observability_authorized(config, "dev") is True
+
+
+@pytest.mark.asyncio
+async def test_observability_authorized_accepts_admin_login(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("CONFIGURED_ADMINS", "dev")
+    monkeypatch.delenv("OBSERVABILITY_AUTHORIZED_EMAILS", raising=False)
+    monkeypatch.setattr(server, "email_for_login", AsyncMock(return_value=None))
+
+    config = {"configurable": {"github_login": "dev"}}
+    assert await server._observability_authorized(config, "dev") is True

@@ -471,9 +471,9 @@ DASHBOARD_JWT_SECRET=""                # Generate with: openssl rand -hex 32
 # Required whenever the frontend and API are on different origins — including local
 # dev (UI :3000 -> API :2024 is cross-origin). CORS is only enabled when this is set.
 DASHBOARD_ALLOWED_ORIGINS="http://localhost:3000"  # prod: your frontend origin(s)
-# Comma-separated email allowlist for admin dashboard endpoints (matched against the
-# logged-in user's GitHub email). Empty => nobody is an admin.
-CONFIGURED_ADMINS=""                   # e.g. "alice@my-org.com,bob@my-org.com"
+# Comma-separated GitHub login or email allowlist for admin dashboard endpoints.
+# Empty => nobody is an admin.
+CONFIGURED_ADMINS=""                   # e.g. "alice,bob@my-org.com"
 # URL of the LangGraph server the FastAPI side calls to trigger/stream runs.
 # Defaults to http://localhost:2024 locally; set to your deployment URL in prod.
 LANGGRAPH_URL="http://localhost:2024"
@@ -587,7 +587,7 @@ The dashboard needs `VITE_DASHBOARD_API_BASE_URL` in `ui/.env` pointing at the b
 
 The client calls `${VITE_DASHBOARD_API_BASE_URL}/dashboard/api/*` with `credentials: "include"`, so the backend's `osw_session` cookie rides along. Because the UI (`:3000`) and API (`:2024`) are different origins, the backend needs **CORS** enabled for the UI origin — set `DASHBOARD_ALLOWED_ORIGINS="http://localhost:3000"` (CORS is off unless this is set). Keep `DASHBOARD_API_BASE_URL` on an `http://` URL locally so the cookie uses `SameSite=Lax` rather than `Secure`.
 
-For the dashboard login to succeed, you need (from steps 3c / 6): `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET`, `DASHBOARD_JWT_SECRET`, `DASHBOARD_API_BASE_URL`, `DASHBOARD_BASE_URL`, and `DASHBOARD_ALLOWED_ORIGINS`. To reach the admin pages (user mappings, etc.), add your GitHub email to `CONFIGURED_ADMINS`.
+For the dashboard login to succeed, you need (from steps 3c / 6): `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET`, `DASHBOARD_JWT_SECRET`, `DASHBOARD_API_BASE_URL`, `DASHBOARD_BASE_URL`, and `DASHBOARD_ALLOWED_ORIGINS`. To reach the admin pages (user mappings, etc.), add your GitHub login or email to `CONFIGURED_ADMINS`.
 
 Other UI scripts: `bun run build`, `bun run typecheck`, `bun run lint`, `bun run test`.
 
@@ -621,7 +621,7 @@ Other UI scripts: `bun run build`, `bun run typecheck`, `bun run lint`, `bun run
 
 1. With the backend (step 7) and UI (step 8) both running, open `http://localhost:3000`
 2. Click **Sign in with GitHub** — you'll be sent through the GitHub OAuth flow and back to the dashboard
-3. You should land logged-in and be able to see your profile/settings. If your email is in `CONFIGURED_ADMINS`, the **Admin** pages (e.g. User mappings) are available.
+3. You should land logged-in and be able to see your profile/settings. If your GitHub login or email is in `CONFIGURED_ADMINS`, the **Admin** pages (e.g. User mappings) are available.
 
 ## 10. Production deployment
 
@@ -674,7 +674,7 @@ Alternatively, you can run the dashboard as a direct cross-origin client: set `V
 - OAuth `redirect_uri` mismatch: the GitHub App must list `<DASHBOARD_API_BASE_URL>/dashboard/api/auth/callback` as a callback URL (step 3b). Locally that's `http://localhost:2024/dashboard/api/auth/callback`.
 - Login redirects but the session doesn't stick: this is almost always a cookie problem. Locally, keep `DASHBOARD_API_BASE_URL` on `http://` (so cookies are `SameSite=Lax`); in prod use `https://` for both API and frontend and add the frontend origin to `DASHBOARD_ALLOWED_ORIGINS`.
 - Login rejected with an org error: `ALLOWED_GITHUB_ORGS` gates dashboard login (and requires the App's Organization → Members: Read-only permission). See step 5.
-- Admin pages 403: add your GitHub email to `CONFIGURED_ADMINS`.
+- Admin pages 403: add your GitHub login or email to `CONFIGURED_ADMINS`.
 
 ### Dashboard UI can't reach the backend
 
