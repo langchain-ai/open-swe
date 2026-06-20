@@ -62,7 +62,17 @@ def test_construct_system_prompt_includes_dependency_vetting_guidance() -> None:
     assert "standard library or a package already in the project's manifest/lockfile" in prompt
     assert "permissive license" in prompt
     assert "never add a floating or unpinned dependency" in prompt
-    assert "call out every dependency you add in the PR description" in prompt
+    assert "list the package name, why it is needed" in prompt
+
+
+def test_construct_system_prompt_explains_pause_to_ask_for_dependency_review() -> None:
+    prompt = construct_system_prompt(working_dir="/workspace")
+
+    assert "You can stop to ask" in prompt
+    assert "post a question or note in the source Slack thread" in prompt
+    assert "end your turn without making a tool call" in prompt
+    assert "the user can reply and the run will resume" in prompt
+    assert "You cannot pause to ask for approval mid-task" not in prompt
 
 
 def test_construct_system_prompt_identifies_own_repo() -> None:
