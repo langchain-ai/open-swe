@@ -56,7 +56,6 @@ from .integrations.langsmith_tools import load_langsmith_tools
 from .middleware import (
     ExcludeToolsMiddleware,
     ModelFallbackMiddleware,
-    PlanModeShellGuardMiddleware,
     SandboxCircuitBreakerMiddleware,
     SanitizeThinkingBlocksMiddleware,
     SanitizeToolInputsMiddleware,
@@ -485,11 +484,11 @@ DEFAULT_RECURSION_LIMIT = 9_999
 MODEL_CALL_RECURSION_LIMIT = 5_000  # ~half the recursion limit to account for tool calls
 
 # Mutating tools hidden from the model while plan mode is active so it can only
-# research and propose a plan. `execute` stays available for read-only commands
-# (git clone/status/diff, grep) but is constrained at the tool layer by
-# PlanModeShellGuardMiddleware. `task` is excluded because the general-purpose
-# subagent is built with its own filesystem/PR/Linear tools and does not inherit
-# this exclusion, so delegating to it would bypass the read-only guarantee.
+# research and propose a plan. `execute` stays available; plan-mode shell
+# discipline (no mutating commands) is instructed via the system prompt rather
+# than enforced. `task` is excluded because the general-purpose subagent is built
+# with its own filesystem/PR/Linear tools and does not inherit this exclusion, so
+# delegating to it would bypass the read-only intent.
 PLAN_MODE_EXCLUDED_TOOLS: frozenset[str] = frozenset(
     {
         "write_file",
@@ -699,12 +698,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     if plan_mode:
         logger.info("Plan mode enabled for thread %s", thread_id)
     plan_mode_middleware: list[Any] = (
-        [
-            ExcludeToolsMiddleware(excluded=PLAN_MODE_EXCLUDED_TOOLS),
-            PlanModeShellGuardMiddleware(),
-        ]
-        if plan_mode
-        else []
+        [ExcludeToolsMiddleware(excluded=PLAN_MODE_EXCLUDED_TOOLS)] if plan_mode else []
     )
 
     source = (

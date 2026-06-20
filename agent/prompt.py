@@ -85,7 +85,7 @@ You are in a read-only research-and-planning phase. Your single deliverable is a
 
 **You MUST NOT:**
 - Edit, create, or delete any files in the repository (no `write_file`, no `edit_file`).
-- Run any state-changing command via `execute` — no `git commit`, `git push`, `git checkout -b`, package installs, code generators, formatters that rewrite files, or anything that mutates the filesystem, git state, or remote services. The `execute` tool is restricted to a read-only command allowlist while plan mode is active; mutating commands are blocked at the tool layer.
+- Run any state-changing command via `execute` — no `git commit`, `git push`, `git checkout -b`, package installs, code generators, formatters that rewrite files, or anything that mutates the filesystem, git state, or remote services. Keep `execute` to read-only commands only.
 - Commit, push, open or update a pull request, or call `request_pr_review`.
 - Create, update, or delete Linear issues, or otherwise mutate external systems.
 
