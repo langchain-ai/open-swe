@@ -605,6 +605,7 @@ def test_update_finding_resolves_github_thread_when_pr_context_available() -> No
     assert result["success"] is True
     assert result["github_resolution"]["success"] is True
     assert result["finding"]["github_thread_resolved"] is True
+    assert result["thread_resolved"] is True
     resolve_async.assert_awaited_once()
     update.assert_not_awaited()
 
@@ -674,7 +675,72 @@ def test_update_finding_resolves_hidden_finding_locally() -> None:
     _thread_id, _finding_id, updates = captured[0]
     assert updates["status"] == "resolved"
     assert updates["resolution_note"] == "The latest commit adds the missing guard."
+    assert result["thread_resolved"] is False
     resolve_async.assert_not_awaited()
+
+
+def test_update_finding_thread_resolved_false_when_no_github_surface() -> None:
+    """Regression: `thread_resolved` is False when the finding has no published surface."""
+
+    async def fake_update(thread_id: str, finding_id: str, updates: Any) -> Any:
+        return {"id": finding_id, **updates}
+
+    cfg = _config(repo={"owner": "o", "name": "r"}, pr_number=7)
+    with (
+        patch("agent.tools.update_finding.get_config", return_value=cfg),
+        patch("agent.tools.update_finding.get_thread_id_from_runtime", return_value="tid-1"),
+        patch(
+            "agent.tools.update_finding.list_findings",
+            AsyncMock(return_value=[_existing_finding()]),
+        ),
+        patch("agent.tools.update_finding.update_finding_fields", side_effect=fake_update),
+        patch(
+            "agent.tools.resolve_finding_thread._resolve_finding_thread_async",
+            new_callable=AsyncMock,
+        ) as resolve_async,
+    ):
+        result = update_finding(
+            finding_id="f_a",
+            status="resolved",
+            note="The latest commit adds the missing guard.",
+        )
+
+    assert result["success"] is True
+    assert result["thread_resolved"] is False
+    resolve_async.assert_not_awaited()
+
+
+def test_update_finding_thread_resolved_true_when_github_thread_closed() -> None:
+    """Regression: `thread_resolved` is True only when GitHub thread closure succeeded."""
+    cfg = _config(repo={"owner": "o", "name": "r"}, pr_number=7)
+    with (
+        patch("agent.tools.update_finding.get_config", return_value=cfg),
+        patch("agent.tools.update_finding.get_thread_id_from_runtime", return_value="tid-1"),
+        patch(
+            "agent.tools.update_finding.list_findings",
+            AsyncMock(return_value=[_existing_finding(github_review_thread_id="THREAD_1")]),
+        ),
+        patch("agent.tools.resolve_finding_thread.get_config", return_value=cfg),
+        patch("agent.tools.resolve_finding_thread.get_github_token", return_value="token"),
+        patch("agent.tools.update_finding.update_finding_fields", AsyncMock()),
+        patch(
+            "agent.tools.resolve_finding_thread._resolve_finding_thread_async",
+            new_callable=AsyncMock,
+            return_value={
+                "success": True,
+                "finding": {"id": "f_a", "status": "resolved", "github_thread_resolved": True},
+                "resolved_thread_count": 1,
+            },
+        ),
+    ):
+        result = update_finding(
+            finding_id="f_a",
+            status="resolved",
+            note="The latest commit adds the missing guard.",
+        )
+
+    assert result["success"] is True
+    assert result["thread_resolved"] is True
 
 
 def test_list_findings_filters_by_status() -> None:

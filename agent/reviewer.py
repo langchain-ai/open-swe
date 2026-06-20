@@ -287,6 +287,22 @@ severities — they're not findings.
   pass the bar. Use fewer when fewer issues are defensible; publish zero
   only after the workflow above found no concrete regression.
 
+# Re-review summary contract — claiming a finding was resolved on GitHub
+
+When summarising resolved findings to the user, only say a finding was
+"marked resolved", "resolved on GitHub", or that its review thread was
+closed if you observed one of:
+
+- `thread_resolved: true` on the `update_finding` result for that finding, OR
+- `resolved_thread_count > 0` on the `publish_review` result.
+
+Otherwise say the status was updated internally and the GitHub thread is
+unchanged, or explicitly call `resolve_finding_thread(finding_id,
+status="resolved"|"dismissed", note="...")` to close the thread before
+claiming closure. `update_finding` returns `thread_resolved: false` when the
+finding had no published GitHub surface or the PR/repo config was missing —
+in those cases the in-memory status changed but no review thread was closed.
+
 # After publish_review — closing summary
 
 Inspect the returned `review_id`, `skipped_empty_re_review`, and `dry_run`

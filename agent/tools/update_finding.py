@@ -87,6 +87,11 @@ def update_finding(
 
     Returns:
         Dictionary with ``success`` and (on success) the updated ``finding``.
+        When ``status`` is ``resolved`` or ``dismissed``, the result also
+        carries ``thread_resolved``: ``True`` only when the GitHub review
+        thread was actually closed via ``resolve_finding_thread``; ``False``
+        when the in-memory status changed but no GitHub thread closure
+        happened (no published surface, or PR/repo config missing).
     """
     if status is not None and status not in {"open", "resolved", "dismissed"}:
         return {"success": False, "error": f"Invalid status: {status}"}
@@ -195,6 +200,7 @@ def update_finding(
                 "success": True,
                 "finding": resolve_result.get("finding"),
                 "github_resolution": resolve_result,
+                "thread_resolved": True,
             }
             if suggestion_dropped:
                 result["suggestion_dropped"] = True
@@ -214,6 +220,8 @@ def update_finding(
     if status in {"resolved", "dismissed"} and not delegated_resolution:
         emit_finding_status_outcome(updated, status, configurable=configurable, thread_id=thread_id)
     result = {"success": True, "finding": updated}
+    if status in {"resolved", "dismissed"}:
+        result["thread_resolved"] = delegated_resolution
     if suggestion_dropped:
         result["suggestion_dropped"] = True
         result["warning"] = (
