@@ -78,7 +78,9 @@ async def _can_read_thread(thread_id: str) -> bool:
         thread = await get_client().threads.get(thread_id)
     except Exception:
         return False
-    metadata = thread.get("metadata") if isinstance(thread, dict) else getattr(thread, "metadata", None)
+    metadata = (
+        thread.get("metadata") if isinstance(thread, dict) else getattr(thread, "metadata", None)
+    )
     return _thread_is_readable(metadata if isinstance(metadata, dict) else {})
 
 
