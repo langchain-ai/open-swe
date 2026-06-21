@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Mock GitHub — pull requests</title>
+    <style>
+      body { font-family: system-ui, sans-serif; max-width: 680px; margin: 1.5rem auto; padding: 0 1rem; }
+      h1 { font-size: 1.1rem; }
+      .pr { border: 1px solid #e5e7eb; border-radius: 8px; padding: 0.6rem 0.8rem; margin: 0.6rem 0; }
+      .pr-title { font-weight: 700; }
+      .meta { color: #666; font-size: 0.85rem; }
+      code { background: #f4f4f5; padding: 0 0.25rem; border-radius: 4px; }
+      a { color: #1264a3; }
+    </style>
+  </head>
+  <body>
+    <h1>fakeorg/demo — Pull requests (mock)</h1>
+    <div id="list"></div>
+
+    <script>
+      async function load() {
+        const res = await fetch("/mock/github/data");
+        const prs = await res.json();
+        const list = document.getElementById("list");
+        if (!prs.length) {
+          list.innerHTML = "<p style='color:#888'>No pull requests yet.</p>";
+          return;
+        }
+        list.innerHTML = prs
+          .map(
+            (p) => `
+            <div class="pr" data-pr="${p.number}">
+              <div class="pr-title"><a href="${p.url}">#${p.number} ${p.title}</a>${p.draft ? " (draft)" : ""}</div>
+              <div class="meta"><code>${p.head}</code> → <code>${p.base}</code> · ${p.state} · by ${p.author}</div>
+              <div class="files">${p.files.map((f) => `<code>${f.filename}</code>`).join(" ")}</div>
+            </div>`,
+          )
+          .join("");
+      }
+      load();
+      setInterval(load, 1000);
+    </script>
+  </body>
+</html>
