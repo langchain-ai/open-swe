@@ -70,6 +70,7 @@ from .tools import (
     publish_review,
     reply_to_finding_thread,
     resolve_finding_thread,
+    slack_thread_reply,
     update_finding,
     web_search,
 )
@@ -378,6 +379,7 @@ def _reviewer_system_prompt(
     repo_style_prompt: str | None = None,
     agents_md_content: str | None = None,
     api_standards_skill: str | None = None,
+    slack_triggered: bool = False,
 ) -> str:
     prompt = REVIEWER_PROMPT_TEMPLATE.format(
         working_dir=working_dir,
@@ -393,6 +395,22 @@ def _reviewer_system_prompt(
             head_sha=head_sha,
         ),
     )
+    if slack_triggered:
+        prompt = (
+            f"{prompt}\n\n"
+            "# Slack progress signaling\n\n"
+            "This run was triggered from Slack and you have the `slack_thread_reply` "
+            "tool. The Slack thread is a progress channel only — not a place to chat "
+            "or narrate every tool call. The read-only-review discipline above still "
+            "applies: do not commit, push, or `gh pr review` from Slack updates.\n\n"
+            "Post exactly one short status line via `slack_thread_reply` when you:\n"
+            "- spawn the `general-purpose` subagent (say what you asked it to do),\n"
+            "- begin a verification cycle expected to take longer than ~30s (build, "
+            "test, install, or other long-running command),\n"
+            "- enter a multi-step edit/test/recompile loop driven by the subagent.\n\n"
+            "One line per phase, not per tool call. Silent runs look like hangs and "
+            "users give up."
+        )
     if reviewer_eval:
         prompt = f"{prompt}\n{REVIEWER_EVAL_PROMPT_SUFFIX}"
     if org_guidelines:
@@ -1098,6 +1116,8 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
     github_api_token = None
     github_token = None
 
+    slack_triggered = bool((config["configurable"].get("slack_thread") or {}).get("thread_ts"))
+
     system_prompt = _reviewer_system_prompt(
         f"{work_dir}/{repo_name}" if repo_name else work_dir,
         repo_owner=repo_owner,
@@ -1110,6 +1130,7 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
         repo_style_prompt=repo_style_prompt,
         agents_md_content=agents_md_content,
         api_standards_skill=api_standards_skill,
+        slack_triggered=slack_triggered,
     )
     if review_context:
         system_prompt = f"{system_prompt}\n\n{review_context}"
@@ -1148,6 +1169,10 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
             web_search,
             fetch_url,
             http_request,
+            # Slack heartbeat — only when reviewer was triggered from Slack.
+            # Without this the reviewer has no in-band progress channel and a
+            # long subagent-driven run looks indistinguishable from a hang.
+            *([slack_thread_reply] if slack_triggered else []),
         ],
         subagents=[_general_purpose_subagent(reviewer_subagent_model)],
         backend=sandbox_backend,
