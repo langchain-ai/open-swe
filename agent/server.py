@@ -54,8 +54,8 @@ from .integrations.datadog_mcp import load_datadog_tools
 from .integrations.langsmith import _configure_github_proxy
 from .integrations.langsmith_tools import load_langsmith_tools
 from .middleware import (
-    ExcludeToolsMiddleware,
     ModelFallbackMiddleware,
+    PlanModeMiddleware,
     SandboxCircuitBreakerMiddleware,
     SanitizeThinkingBlocksMiddleware,
     SanitizeToolInputsMiddleware,
@@ -487,7 +487,9 @@ MODEL_CALL_RECURSION_LIMIT = 5_000  # ~half the recursion limit to account for t
 # Mutating tools hidden from the model while plan mode is active so it can only
 # research and propose a plan. `execute` stays available; plan-mode shell
 # discipline (no mutating commands) is instructed via the system prompt rather
-# than enforced. `task` is excluded because the general-purpose subagent is built
+# than enforced. `http_request` is excluded because it can POST/PUT/PATCH/DELETE
+# to external services — read-only web research goes through `web_search` /
+# `fetch_url`. `task` is excluded because the general-purpose subagent is built
 # with its own filesystem/PR/Linear tools and does not inherit this exclusion, so
 # delegating to it would bypass the read-only intent.
 PLAN_MODE_EXCLUDED_TOOLS: frozenset[str] = frozenset(
@@ -495,6 +497,7 @@ PLAN_MODE_EXCLUDED_TOOLS: frozenset[str] = frozenset(
         "write_file",
         "edit_file",
         "task",
+        "http_request",
         "open_pull_request",
         "request_pr_review",
         "linear_create_issue",
@@ -688,19 +691,23 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         )
         logger.info("Configured model fallback %s -> %s", model_id, fallback_model_id)
 
-    plan_mode = configurable.get("plan_mode") is True
-    if not plan_mode:
-        if profile and profile_plan_mode_default(profile):
-            plan_mode = True
-        else:
-            team_settings = await get_team_settings()
-            if team_settings.get("plan_mode_default") is True:
-                plan_mode = True
+    # An explicit per-thread/configurable value (e.g. Slack `plan off`, an
+    # approved plan, or the dashboard Plan toggle) wins over profile/team
+    # defaults; only fall through to defaults when plan mode is unset.
+    if "plan_mode" in configurable:
+        plan_mode = configurable.get("plan_mode") is True
+    elif profile and profile_plan_mode_default(profile):
+        plan_mode = True
+    else:
+        team_settings = await get_team_settings()
+        plan_mode = team_settings.get("plan_mode_default") is True
     if plan_mode:
         logger.info("Plan mode enabled for thread %s", thread_id)
-    plan_mode_middleware: list[Any] = (
-        [ExcludeToolsMiddleware(excluded=PLAN_MODE_EXCLUDED_TOOLS)] if plan_mode else []
-    )
+    # Installed unconditionally and state-aware: it also restricts tools after a
+    # mid-run `enter_plan_mode` call, not just when plan mode is set up front.
+    plan_mode_middleware: list[Any] = [
+        PlanModeMiddleware(excluded=PLAN_MODE_EXCLUDED_TOOLS, initial=plan_mode)
+    ]
 
     source = (
         configurable.get("source") if isinstance(configurable.get("source"), str) else "dashboard"

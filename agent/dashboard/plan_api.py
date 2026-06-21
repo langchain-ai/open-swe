@@ -157,6 +157,7 @@ async def _dispatch_followup(
     push, open a PR, and reply in the original channel.
     """
     configurable: dict[str, Any] = {
+        "thread_id": thread_id,
         "source": _thread_source(metadata) or "slack",
     }
     email = metadata.get("triggering_user_email")
@@ -173,8 +174,9 @@ async def _dispatch_followup(
         slack_thread = source_context.get("slack_thread")
         if isinstance(slack_thread, dict):
             configurable["slack_thread"] = slack_thread
-    if plan_mode:
-        configurable["plan_mode"] = True
+    # Set explicitly (not only when True) so an approval forces plan mode OFF
+    # even if a profile/team default would otherwise re-enable it.
+    configurable["plan_mode"] = plan_mode
 
     client = get_client()
     await client.runs.create(

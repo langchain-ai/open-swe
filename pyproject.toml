@@ -29,8 +29,8 @@ dependencies = [
     "exa-py>=2.13.0",
     "langchain-google-genai>=4.2.4",
     "langchain-mcp-adapters>=0.2.2",
-    "pycrdt>=0.10.5",
-    "pycrdt-websocket>=0.15.4",
+    "pycrdt>=0.14.1,<0.15",
+    "pycrdt-websocket>=0.16.3,<0.17",
 ]
 
 [project.optional-dependencies]

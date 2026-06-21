@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
 
@@ -88,3 +90,42 @@ def test_plan_status_constants() -> None:
     assert plan_store.PLAN_STATUS_PLANNING == "planning"
     assert plan_store.PLAN_STATUS_APPROVED == "approved"
     assert plan_store.PLAN_STATUS_REVISING == "revising"
+
+
+def test_http_request_excluded_in_plan_mode() -> None:
+    from agent.server import PLAN_MODE_EXCLUDED_TOOLS
+
+    assert "http_request" in PLAN_MODE_EXCLUDED_TOOLS
+
+
+class _FakeReq:
+    def __init__(self, tools: list[Any], state: dict[str, Any]) -> None:
+        self.tools = tools
+        self.state = state
+
+    def override(self, **kw: Any) -> _FakeReq:
+        return _FakeReq(kw.get("tools", self.tools), self.state)
+
+
+def _names(req: _FakeReq) -> set[str]:
+    return {t["name"] for t in req.tools}
+
+
+def test_plan_mode_middleware_initial_always_filters() -> None:
+    from agent.middleware import PlanModeMiddleware
+
+    mw = PlanModeMiddleware(excluded=frozenset({"write_file"}), initial=True)
+    req = _FakeReq([{"name": "read_file"}, {"name": "write_file"}], {})
+    assert _names(mw._filter(req)) == {"read_file"}
+
+
+def test_plan_mode_middleware_self_activation_via_state() -> None:
+    from agent.middleware import PlanModeMiddleware
+
+    mw = PlanModeMiddleware(excluded=frozenset({"write_file"}), initial=False)
+    # Plan mode not yet active: nothing filtered.
+    off = _FakeReq([{"name": "read_file"}, {"name": "write_file"}], {})
+    assert _names(mw._filter(off)) == {"read_file", "write_file"}
+    # After enter_plan_mode sets state: the next request is filtered.
+    on = _FakeReq([{"name": "read_file"}, {"name": "write_file"}], {"plan_mode": True})
+    assert _names(mw._filter(on)) == {"read_file"}

@@ -17,13 +17,16 @@ import contextlib
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import Any
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from langgraph_sdk import get_client
 from pycrdt.websocket import WebsocketServer, YRoom
 from pycrdt.websocket.websocket import HttpxWebsocket
 
 from .oauth import COOKIE_NAME, decode_session
 from .plan_store import load_yjs_snapshot, save_yjs_snapshot
+from .thread_api import _thread_is_readable
 
 logger = logging.getLogger(__name__)
 
@@ -32,9 +35,11 @@ collab_router = APIRouter(prefix="/dashboard/api/plan", tags=["plan-collab"])
 _SNAPSHOT_DEBOUNCE_SECONDS = 1.5
 
 _server: WebsocketServer | None = None
-_loaded_rooms: set[str] = set()
 _dirty: set[str] = set()
+# Per-room state, alive only while at least one reviewer is connected.
+_connections: dict[str, int] = {}
 _flushers: dict[str, asyncio.Task[None]] = {}
+_subscriptions: dict[str, Any] = {}
 
 
 @asynccontextmanager
@@ -50,26 +55,38 @@ async def collab_lifespan() -> AsyncIterator[None]:
             for task in _flushers.values():
                 task.cancel()
             _flushers.clear()
-            _loaded_rooms.clear()
+            _subscriptions.clear()
+            _connections.clear()
             _dirty.clear()
 
 
-def _authorized(websocket: WebSocket) -> bool:
+def _session_login(websocket: WebSocket) -> str | None:
     token = websocket.cookies.get(COOKIE_NAME)
     if not token:
-        return False
+        return None
     try:
-        decode_session(token)
+        session = decode_session(token)
+    except Exception:
+        return None
+    sub = session.get("sub") if isinstance(session, dict) else None
+    return sub if isinstance(sub, str) and sub else None
+
+
+async def _can_read_thread(thread_id: str) -> bool:
+    """Same read gate as the plan REST API: only surfaced threads are joinable."""
+    try:
+        thread = await get_client().threads.get(thread_id)
     except Exception:
         return False
-    return True
+    metadata = thread.get("metadata") if isinstance(thread, dict) else getattr(thread, "metadata", None)
+    return _thread_is_readable(metadata if isinstance(metadata, dict) else {})
 
 
-async def _ensure_room_loaded(server: WebsocketServer, thread_id: str) -> None:
-    """Seed a room's document from the store and start its snapshot flusher once."""
-    if thread_id in _loaded_rooms:
+async def _open_room(server: WebsocketServer, thread_id: str) -> None:
+    """Seed the room from the store and start its snapshot flusher (idempotent
+    while connected)."""
+    if thread_id in _flushers:
         return
-    _loaded_rooms.add(thread_id)
     room = await server.get_room(thread_id)
     snapshot = await load_yjs_snapshot(thread_id)
     if snapshot:
@@ -81,21 +98,29 @@ async def _ensure_room_loaded(server: WebsocketServer, thread_id: str) -> None:
     def _on_change(_event: object) -> None:
         _dirty.add(thread_id)
 
-    room.ydoc.observe(_on_change)
+    _subscriptions[thread_id] = room.ydoc.observe(_on_change)
     _flushers[thread_id] = asyncio.create_task(_flush_loop(thread_id, room))
 
 
+async def _close_room(thread_id: str) -> None:
+    """Tear down a room's flusher + observer once the last reviewer leaves."""
+    task = _flushers.pop(thread_id, None)
+    _subscriptions.pop(thread_id, None)
+    if task is not None:
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+    if _server is not None and thread_id in _server.rooms:
+        await _persist(thread_id, _server.rooms[thread_id])
+    _dirty.discard(thread_id)
+
+
 async def _flush_loop(thread_id: str, room: YRoom) -> None:
-    try:
-        while True:
-            await asyncio.sleep(_SNAPSHOT_DEBOUNCE_SECONDS)
-            if thread_id in _dirty:
-                _dirty.discard(thread_id)
-                await _persist(thread_id, room)
-    except asyncio.CancelledError:
+    while True:
+        await asyncio.sleep(_SNAPSHOT_DEBOUNCE_SECONDS)
         if thread_id in _dirty:
+            _dirty.discard(thread_id)
             await _persist(thread_id, room)
-        raise
 
 
 async def _persist(thread_id: str, room: YRoom) -> None:
@@ -107,15 +132,25 @@ async def _persist(thread_id: str, room: YRoom) -> None:
 
 @collab_router.websocket("/yjs/{thread_id}")
 async def plan_yjs_socket(websocket: WebSocket, thread_id: str) -> None:
-    if not _authorized(websocket):
+    if _session_login(websocket) is None:
         await websocket.close(code=4401)
+        return
+    if not await _can_read_thread(thread_id):
+        await websocket.close(code=4403)
         return
     if _server is None:
         await websocket.close(code=1013)  # try again later
         return
 
     await websocket.accept()
-    await _ensure_room_loaded(_server, thread_id)
+    await _open_room(_server, thread_id)
+    _connections[thread_id] = _connections.get(thread_id, 0) + 1
     channel = HttpxWebsocket(websocket, thread_id)
-    with contextlib.suppress(WebSocketDisconnect):
-        await _server.serve(channel)
+    try:
+        with contextlib.suppress(WebSocketDisconnect):
+            await _server.serve(channel)
+    finally:
+        _connections[thread_id] = _connections.get(thread_id, 1) - 1
+        if _connections.get(thread_id, 0) <= 0:
+            _connections.pop(thread_id, None)
+            await _close_room(thread_id)
