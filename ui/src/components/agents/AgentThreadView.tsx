@@ -1,5 +1,7 @@
 import { useMemo, useState } from "react"
+import { Link } from "@tanstack/react-router"
 import { useStreamContext as useAgentThreadStream } from "@langchain/react"
+import { Map as MapIcon } from "lucide-react"
 
 import type { AgentThread, Message } from "@/lib/agents/types"
 import type { ModelSelection } from "@/lib/agents/provider/useModelOptions"
@@ -41,7 +43,11 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
   const activePlanMode = planMode ?? thread.planMode ?? false
 
   const baseMessages = useMemo<Array<Message>>(() => {
-    const live = streamMessagesToUi(stream.messages, stream.toolCalls, stream.subagents)
+    const live = streamMessagesToUi(
+      stream.messages,
+      stream.toolCalls,
+      stream.subagents
+    )
     if (live.length > 0) return live
     // Optimistic transcript seeded by `AgentsHome` on thread creation (the
     // only case where a fetched thread carries messages — `getThread` returns
@@ -49,12 +55,7 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
     // lands in `stream.messages`.
     if (thread.messages.length > 0) return thread.messages
     return live
-  }, [
-    stream.messages,
-    stream.toolCalls,
-    stream.subagents,
-    thread.messages,
-  ])
+  }, [stream.messages, stream.toolCalls, stream.subagents, thread.messages])
 
   const hasMessages = baseMessages.length > 0
   const isStreaming = thread.status === "running" || stream.isLoading
@@ -70,6 +71,26 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
         className="flex min-w-0 flex-1 flex-col"
         style={isMobile ? undefined : { minWidth: PANEL_MIN_CHAT_WIDTH }}
       >
+        {thread.planStatus &&
+          thread.planStatus !== "approved" &&
+          thread.planStatus !== "cancelled" && (
+            <Link
+              to="/agents/$threadId/plan"
+              params={{ threadId: thread.id }}
+              data-testid="review-plan-link"
+              className="flex items-center justify-between gap-2 border-b border-[var(--ui-border)] bg-[var(--ui-panel)] px-4 py-2 text-xs text-[var(--ui-text)] hover:bg-[var(--ui-panel-2)]"
+            >
+              <span className="flex items-center gap-2">
+                <MapIcon className="size-3.5 text-[var(--ui-accent)]" />
+                {thread.planStatus === "revising"
+                  ? "The agent is revising the plan."
+                  : "A plan is ready for your review."}
+              </span>
+              <span className="font-medium text-[var(--ui-accent)]">
+                Review plan →
+              </span>
+            </Link>
+          )}
         {hasMessages ? (
           <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
             <Messages
@@ -82,7 +103,7 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
             />
             {!isReadOnly && (
               <div className="shrink-0 px-4 pb-4">
-                <div className="mx-auto w-full min-w-0 max-w-3xl">
+                <div className="mx-auto w-full max-w-3xl min-w-0">
                   <AgentPromptBar
                     placeholder="Add a follow up"
                     compact
@@ -108,7 +129,9 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
           </div>
         ) : isHydrating ? (
           <div className="flex flex-1 flex-col items-center justify-center gap-4 px-6">
-            <p className="text-xs text-[var(--ui-text-dim)]">Loading conversation…</p>
+            <p className="text-xs text-[var(--ui-text-dim)]">
+              Loading conversation…
+            </p>
           </div>
         ) : (
           <div className="flex flex-1 flex-col items-center justify-center gap-4 px-6">

@@ -73,7 +73,9 @@ PLAN_MODE_GUIDANCE_SECTION = """---
 
 ### Plan Mode
 
-If you believe the task would benefit from a structured implementation plan before writing any code — e.g. when the request is complex, touches many files, or has multiple valid approaches — call the `enter_plan_mode` tool. This is NOT triggered by the word "plan" appearing in the request; use your judgment about whether planning is genuinely warranted. Once plan mode is active, you will be restricted to read-only tools and should present a plan as your final message."""
+If you believe the task would benefit from a structured implementation plan before writing any code — e.g. when the request is complex, touches many files, or has multiple valid approaches — call the `enter_plan_mode` tool. This is NOT triggered by the word "plan" appearing in the request; use your judgment about whether planning is genuinely warranted. Once plan mode is active, stay read-only: research the code, then record your plan with the `save_plan` tool (it writes `plan.md` and publishes the plan to a review page) and share the plan-review link with the user. The user reviews and approves the plan before you implement.
+
+Plan-review link for this conversation (share it with the user when you enter plan mode): {plan_review_url}"""
 
 PLAN_MODE_SECTION = """---
 
@@ -81,7 +83,10 @@ PLAN_MODE_SECTION = """---
 
 **Plan mode is enabled for this run. This section supersedes any other instruction that tells you to edit code, commit, push, or open a pull request.**
 
-You are in a read-only research-and-planning phase. Your single deliverable is a clear, reviewable implementation plan — NOT code changes. The user will review the plan, then re-run you with plan mode OFF to execute it.
+You are in a read-only research-and-planning phase. Your single deliverable is a clear, reviewable implementation plan saved with the `save_plan` tool — NOT code changes. The user (and any collaborators) review the plan on the plan-review page, leave inline comments, and approve it (or request changes); only then do you implement.
+
+**Plan-review link:** {plan_url}
+Share this exact link with the user (via `slack_thread_reply` or `linear_comment`) right after you enter plan mode, so they know where to follow along, and again when the plan is ready for review.
 
 **You MUST NOT:**
 - Edit, create, or delete any files in the repository (no `write_file`, no `edit_file`).
@@ -99,7 +104,7 @@ You are in a read-only research-and-planning phase. Your single deliverable is a
 **Workflow:**
 1. **Explore** — Clone (if needed) and read the relevant code to understand existing patterns, the files involved, and constraints. Read aggressively; a good plan is grounded in the actual codebase, not assumptions.
 2. **Clarify** — If the request is ambiguous or has multiple valid approaches, ask focused questions before finalizing the plan.
-3. **Plan** — Present ONE recommended implementation plan as your final message, using this structure:
+3. **Plan** — Write ONE recommended implementation plan and save it with the `save_plan` tool (pass the full Markdown as `plan_markdown`). Use this structure:
 
    ```
    ## Plan: <short title>
@@ -122,7 +127,7 @@ You are in a read-only research-and-planning phase. Your single deliverable is a
    - <how the change will be tested/validated: specific test files, lint, manual checks>
    ```
 
-**Ending your turn:** When the plan is ready, present it as a normal assistant message (Markdown) and stop — do not call any tool on that final turn. Explicitly invite the user to review and tell you to proceed. Presenting the plan is the terminal action of a plan-mode run; the "always call a tool every turn" rule does not apply once the plan is delivered. Do not begin implementing — wait for the user to re-run with plan mode disabled."""
+**Ending your turn:** After saving the plan with `save_plan`, post a brief completion message with the plan-review link via `slack_thread_reply` (Slack) or `linear_comment` (Linear), then stop. Explicitly invite the user to review the plan, comment, and approve it. Do not begin implementing — wait until the plan is approved (you will be re-invoked with the approval and any reviewer feedback)."""
 
 
 SELF_AWARENESS_SECTION = """---
@@ -524,6 +529,7 @@ def construct_system_prompt(
     create_prs: bool = False,
     default_repo: dict[str, str] | None = None,
     plan_mode: bool = False,
+    plan_url: str | None = None,
     repo_custom_instructions: str | None = None,
     thread_url: str | None = None,
     corridor_enabled: bool = False,
@@ -547,7 +553,12 @@ def construct_system_prompt(
         working_dir=working_dir,
         linear_project_id=linear_project_id or "<PROJECT_ID>",
         linear_issue_number=linear_issue_number or "<ISSUE_NUMBER>",
-        plan_mode_section=PLAN_MODE_SECTION if plan_mode else "",
+        plan_review_url=plan_url or "(the dashboard plan-review page)",
+        plan_mode_section=(
+            PLAN_MODE_SECTION.format(plan_url=plan_url or "(plan-review link unavailable)")
+            if plan_mode
+            else ""
+        ),
         default_prompt_section=default_prompt_section,
         corridor_prompt_section=CORRIDOR_PROMPT if corridor_enabled else "",
         pr_policy_override_section=ALWAYS_CREATE_PR_SECTION if create_prs else "",

@@ -348,6 +348,7 @@ def _thread_summary(
         "model": model,
         "effort": effort,
         "planMode": metadata.get("plan_mode") is True,
+        "planStatus": metadata.get("plan_status"),
         "source": _thread_source(metadata),
         "status": status,
         "viewed": _is_thread_viewed(metadata, latest_run_id),

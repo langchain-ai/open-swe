@@ -46,6 +46,19 @@ echo PUSHED_OK
 """.strip()
 
 
+_PLAN_URL_RE = re.compile(r"https?://[^\s\"'<>)\]|]+/plan\b")
+
+
+def _text(content: Any) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return " ".join(
+            part.get("text", "") if isinstance(part, dict) else str(part) for part in content
+        )
+    return str(content)
+
+
 def _pr_url_from_messages(messages: list[BaseMessage]) -> str | None:
     for msg in reversed(messages):
         if isinstance(msg, ToolMessage):
@@ -53,6 +66,28 @@ def _pr_url_from_messages(messages: list[BaseMessage]) -> str | None:
             match = re.search(r"https?://[^\s\"']+/pull/\d+", text)
             if match:
                 return match.group(0)
+    return None
+
+
+def _plan_url_from_messages(messages: list[BaseMessage]) -> str | None:
+    """The plan-review URL is injected into the system prompt; a real model would
+    read it the same way."""
+    for msg in messages:
+        match = _PLAN_URL_RE.search(_text(msg.content))
+        if match:
+            return match.group(0).rstrip(".,")
+    return None
+
+
+def _reviewer_feedback(messages: list[BaseMessage]) -> str | None:
+    """The harvested reviewer comments the backend hands the agent on approval."""
+    humans = [m for m in messages if isinstance(m, HumanMessage)]
+    if not humans:
+        return None
+    text = _text(humans[-1].content)
+    idx = text.lower().find("feedback")
+    if "approved" in text.lower() and idx != -1:
+        return text[idx:].strip()
     return None
 
 
@@ -86,15 +121,108 @@ def _step_open_pr(_messages: list[BaseMessage]) -> AIMessage:
 
 def _step_reply(messages: list[BaseMessage]) -> AIMessage:
     url = _pr_url_from_messages(messages) or "(PR url unavailable)"
+    feedback = _reviewer_feedback(messages)
+    extra = f"\n\nReviewer feedback I addressed:\n{feedback}" if feedback else ""
     text = (
         f"✅ Done! I implemented the change and opened a PR: <{url}|{PR_TITLE}>\n\n"
-        f"• Added `{FEATURE_FILE}` with a `greet()` helper.\n"
+        f"• Added `{FEATURE_FILE}` with a `greet()` helper.{extra}\n"
         "Let me know if you'd like any changes."
     )
     return AIMessage(
         content="Replying in the Slack thread with the PR link.",
         tool_calls=[{"name": "slack_thread_reply", "args": {"message": text}, "id": "call-reply"}],
     )
+
+
+# --- plan-mode flow --------------------------------------------------------
+PLAN_MARKDOWN = """## Plan: Add greet() helper
+
+### Overview
+Add a tiny greeting helper to the demo repo.
+
+### Files to change
+- `greet.py` — new module exposing a `greet(name)` function.
+
+### Steps
+1. Create `greet.py` with a `greet(name)` function.
+2. Open a draft PR with the change.
+
+### Verification
+- Import `greet` and confirm it returns the expected string.
+"""
+
+
+def _step_enter_plan(_messages: list[BaseMessage]) -> AIMessage:
+    return AIMessage(
+        content="This is worth planning first — entering plan mode.",
+        tool_calls=[{"name": "enter_plan_mode", "args": {}, "id": "call-enter-plan"}],
+    )
+
+
+def _step_plan_link(messages: list[BaseMessage]) -> AIMessage:
+    url = _plan_url_from_messages(messages) or "(plan link unavailable)"
+    return AIMessage(
+        content="Sharing the plan-review link.",
+        tool_calls=[
+            {
+                "name": "slack_thread_reply",
+                "args": {
+                    "message": f"I'm putting together a plan. Follow along and review it here: <{url}|plan review>"
+                },
+                "id": "call-plan-link",
+            }
+        ],
+    )
+
+
+def _step_plan_research(_messages: list[BaseMessage]) -> AIMessage:
+    return AIMessage(
+        content="Reading the repo to ground the plan.",
+        tool_calls=[
+            {"name": "execute", "args": {"command": "echo planning && ls"}, "id": "call-plan-read"}
+        ],
+    )
+
+
+def _step_save_plan(_messages: list[BaseMessage]) -> AIMessage:
+    return AIMessage(
+        content="Saving the plan for review.",
+        tool_calls=[
+            {"name": "save_plan", "args": {"plan_markdown": PLAN_MARKDOWN}, "id": "call-save-plan"}
+        ],
+    )
+
+
+def _step_plan_complete(messages: list[BaseMessage]) -> AIMessage:
+    url = _plan_url_from_messages(messages) or "(plan link unavailable)"
+    return AIMessage(
+        content="Announcing the plan is ready.",
+        tool_calls=[
+            {
+                "name": "slack_thread_reply",
+                "args": {
+                    "message": f"✅ The plan is ready for review: <{url}|open the plan>. "
+                    "Take a look, leave comments, and approve it when you're happy."
+                },
+                "id": "call-plan-done",
+            }
+        ],
+    )
+
+
+def _step_plan_end(_messages: list[BaseMessage]) -> AIMessage:
+    return AIMessage(content="I'll wait for your review and approval before implementing.")
+
+
+def build_plan_script() -> list[Any]:
+    return [
+        _step_enter_plan,
+        _step_plan_link,
+        _step_plan_research,
+        _step_save_plan,
+        _step_plan_complete,
+        _step_plan_end,
+    ]
 
 
 FOLLOW_UP_REPLY = "Thanks! The PR is ready for review — anything else you'd like changed?"
@@ -133,13 +261,23 @@ class FakeScriptedChatModel(BaseChatModel):
         run_manager: CallbackManagerForLLMRun | None = None,  # noqa: ARG002
         **kwargs: Any,
     ) -> ChatResult:
-        # First human turn implements + opens the PR; later turns (a web/Slack
-        # follow-up on the same thread) just reply.
-        human_turns = sum(1 for m in messages if isinstance(m, HumanMessage))
-        script = build_script() if human_turns <= 1 else build_followup_script()
+        humans = [m for m in messages if isinstance(m, HumanMessage)]
+        first_text = _text(humans[0].content) if humans else ""
+        last_text = _text(humans[-1].content) if humans else ""
+
+        # Pick the script for the current turn by what the latest human asked.
+        if _is_approval(last_text):
+            script = build_script()  # implement + open PR + reply
+        elif _is_revision(last_text):
+            script = build_plan_script()  # re-plan after requested changes
+        elif _is_plan_request(first_text) and len(humans) <= 1:
+            script = build_plan_script()  # first ask was to plan
+        elif len(humans) <= 1:
+            script = build_script()
+        else:
+            script = build_followup_script()
 
         # Step within the *current* turn: AIMessages since the last human turn.
-        # (Counting the whole thread would short-circuit reused/multi-turn threads.)
         last_human = max(
             (i for i, m in enumerate(messages) if isinstance(m, HumanMessage)), default=-1
         )
@@ -147,5 +285,19 @@ class FakeScriptedChatModel(BaseChatModel):
         if step < len(script):
             message = script[step](messages)
         else:
-            message = AIMessage(content="All set — the PR is open and linked in the thread.")
+            message = AIMessage(content="All set — let me know if you'd like anything else.")
         return ChatResult(generations=[ChatGeneration(message=message)])
+
+
+def _is_plan_request(text: str) -> bool:
+    return "plan" in text.lower()
+
+
+def _is_approval(text: str) -> bool:
+    t = text.lower()
+    return "approved" in t and "implement" in t
+
+
+def _is_revision(text: str) -> bool:
+    t = text.lower()
+    return "needs changes" in t or "publish an updated plan" in t

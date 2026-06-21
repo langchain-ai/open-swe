@@ -80,6 +80,7 @@ from .tools import (
     linear_update_issue,
     open_pull_request,
     request_pr_review,
+    save_plan,
     slack_read_thread_messages,
     slack_thread_reply,
     web_search,
@@ -90,7 +91,7 @@ from .utils.authorship import (
     OPEN_SWE_BOT_NAME,
     resolve_triggering_user_identity,
 )
-from .utils.dashboard_links import dashboard_thread_url
+from .utils.dashboard_links import dashboard_plan_url, dashboard_thread_url
 from .utils.github_app import (
     get_github_app_installation_token_with_expiry,
 )
@@ -757,6 +758,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             create_prs=always_create_prs,
             default_repo=prompt_default_repo,
             plan_mode=plan_mode,
+            plan_url=dashboard_plan_url(thread_id),
             repo_custom_instructions=repo_custom_instructions,
             thread_url=dashboard_thread_url(thread_id),
             corridor_enabled=bool(corridor_tools),
@@ -766,6 +768,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             fetch_url,
             web_search,
             enter_plan_mode,
+            save_plan,
             linear_comment,
             linear_create_issue,
             linear_delete_issue,

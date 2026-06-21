@@ -187,6 +187,11 @@ async def ui_agents_thread(thread_id: str) -> FileResponse:  # noqa: ARG001
     return _ui_file("_shell.html")
 
 
+@app.get("/agents/{thread_id}/plan", response_class=HTMLResponse)
+async def ui_agents_plan(thread_id: str) -> FileResponse:  # noqa: ARG001
+    return _ui_file("_shell.html")
+
+
 @app.get("/login", response_class=HTMLResponse)
 async def ui_login() -> FileResponse:
     return _ui_file("_shell.html")
