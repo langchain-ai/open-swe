@@ -1,0 +1,38 @@
+agent/middleware/plan_mode.py
+  s_e4f1e6cd6464dd::t_875604e96c0f59 1-46,54-82
+  s_e4f1e6cd6464dd::t_e385c38af04d4d 47-53
+agent/dashboard/plan_api.py
+  s_e4f1e6cd6464dd::t_a520911cbc2d8a 160
+  s_e4f1e6cd6464dd::t_a5a2830fe14c31 177-179
+tests/test_plan_review.py
+  s_e4f1e6cd6464dd::t_2f5e29bc943f17 93-105,107-109,111-131
+  s_e4f1e6cd6464dd::t_17cc4b06c9ac45 3-4
+  s_e4f1e6cd6464dd::t_caba0483cd4dc5 106,110
+agent/server.py
+  s_e4f1e6cd6464dd::t_afa1f9252dbab3 58
+  s_e4f1e6cd6464dd::t_2cfe5d9c25ce29 490-492,500
+  s_e4f1e6cd6464dd::t_74b1a9f7d23546 694-703,706-710
+agent/dashboard/plan_collab.py
+  s_e4f1e6cd6464dd::t_c295414bb7918f 20,23,29,39-40,42,58-59,63,66-76,78,81-82,85-88,101,105-117,119-120,122,135,138-140,146-147,149-156
+agent/middleware/__init__.py
+  s_e4f1e6cd6464dd::t_98417dc41ab731 18
+  s_e4f1e6cd6464dd::t_f66539ff32cdf6 5
+pyproject.toml
+  s_e4f1e6cd6464dd::t_cf6301686a50f5 32-33
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.9",
+  "base_commit_sha": "3d49297f34a1ff4bd4ef363648147c7b6f1d8a2f",
+  "prompts": {},
+  "sessions": {
+    "s_e4f1e6cd6464dd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4c5fdff8-80f6-4553-8336-aac3a1fb74b9",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ramon Nogueira <ramon.nogueira@langchain.dev>"
+    }
+  }
+}
