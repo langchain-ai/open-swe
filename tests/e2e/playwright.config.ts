@@ -17,7 +17,12 @@ export default defineConfig({
   reporter: [["list"], ["html", { open: "never" }]],
   use: {
     baseURL,
-    trace: "on-first-retry",
+    // Always capture the replayable artifacts: a trace (DOM snapshots, network,
+    // console, source — open with `npx playwright show-trace`) and a screen
+    // recording, plus a screenshot on failure. The CI job uploads them.
+    trace: "on",
+    video: "on",
+    screenshot: "only-on-failure",
     // The built UI ships a PWA service worker; block it so tests never hit a
     // stale cache and always see live API responses.
     serviceWorkers: "block",
