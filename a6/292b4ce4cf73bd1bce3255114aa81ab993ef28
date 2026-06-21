@@ -1,0 +1,21 @@
+tests/e2e/playwright.config.ts
+  s_6a687da1b3cdc6::t_667aca4eaa6a36 20-25
+tests/e2e/README.md
+  s_6a687da1b3cdc6::t_db89adad771188 88-103
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.9",
+  "base_commit_sha": "a6292b4ce4cf73bd1bce3255114aa81ab993ef28",
+  "prompts": {},
+  "sessions": {
+    "s_6a687da1b3cdc6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a9a27368-cb2c-46bd-b629-1129b6879a5f",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ramon Nogueira <ramon.nogueira@langchain.dev>"
+    }
+  }
+}
