@@ -98,6 +98,31 @@ def test_http_request_excluded_in_plan_mode() -> None:
     assert "http_request" in PLAN_MODE_EXCLUDED_TOOLS
 
 
+class _FakeWS:
+    def __init__(self, origin: str | None) -> None:
+        self.headers = {"origin": origin} if origin is not None else {}
+
+
+def test_collab_origin_allowed_noop_without_allowlist(monkeypatch: pytest.MonkeyPatch) -> None:
+    from agent.dashboard.plan_collab import _origin_allowed
+
+    monkeypatch.delenv("DASHBOARD_BASE_URL", raising=False)
+    monkeypatch.delenv("DASHBOARD_ALLOWED_ORIGINS", raising=False)
+    # No configured origins (local/dev): the gate is a no-op.
+    assert _origin_allowed(_FakeWS(None)) is True
+    assert _origin_allowed(_FakeWS("https://evil.test")) is True
+
+
+def test_collab_origin_allowed_enforced_with_allowlist(monkeypatch: pytest.MonkeyPatch) -> None:
+    from agent.dashboard.plan_collab import _origin_allowed
+
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://app.example")
+    monkeypatch.delenv("DASHBOARD_ALLOWED_ORIGINS", raising=False)
+    assert _origin_allowed(_FakeWS("https://app.example")) is True
+    assert _origin_allowed(_FakeWS("https://evil.test")) is False
+    assert _origin_allowed(_FakeWS(None)) is False
+
+
 class _FakeReq:
     def __init__(self, tools: list[Any], state: dict[str, Any]) -> None:
         self.tools = tools

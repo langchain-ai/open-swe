@@ -24,7 +24,7 @@ from langgraph_sdk import get_client
 from pycrdt.websocket import WebsocketServer, YRoom
 from pycrdt.websocket.websocket import HttpxWebsocket
 
-from .oauth import COOKIE_NAME, decode_session
+from .oauth import COOKIE_NAME, _origin_of, allowed_dashboard_origins, decode_session
 from .plan_store import load_yjs_snapshot, save_yjs_snapshot
 from .thread_api import _thread_is_readable
 
@@ -70,6 +70,19 @@ def _session_login(websocket: WebSocket) -> str | None:
         return None
     sub = session.get("sub") if isinstance(session, dict) else None
     return sub if isinstance(sub, str) and sub else None
+
+
+def _origin_allowed(websocket: WebSocket) -> bool:
+    """Same-origin (CSRF) gate for the WS handshake, mirroring the REST
+    ``require_same_origin`` check: a no-op when no dashboard origins are
+    configured (local/dev), otherwise the handshake ``Origin`` must be in the
+    allowlist so a malicious site can't open a cross-site socket on the
+    victim's cookie."""
+    allowed = allowed_dashboard_origins()
+    if not allowed:
+        return True
+    origin = _origin_of(websocket.headers.get("origin", "") or "")
+    return bool(origin) and origin in allowed
 
 
 async def _can_read_thread(thread_id: str) -> bool:
@@ -136,6 +149,9 @@ async def _persist(thread_id: str, room: YRoom) -> None:
 async def plan_yjs_socket(websocket: WebSocket, thread_id: str) -> None:
     if _session_login(websocket) is None:
         await websocket.close(code=4401)
+        return
+    if not _origin_allowed(websocket):
+        await websocket.close(code=4403)
         return
     if not await _can_read_thread(thread_id):
         await websocket.close(code=4403)

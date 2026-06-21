@@ -715,6 +715,30 @@ def _parse_plan_command(text: str) -> str | None:
     return match.group(1).lower()
 
 
+async def _slack_user_is_thread_owner(thread_id: str, slack_user_id: str) -> bool:
+    """Whether the clicking Slack user is the user who requested the plan.
+
+    Plan approval is owner-only (mirrors the dashboard plan API's
+    ``_user_owns_thread`` gate). The original requester's Slack id is stored in
+    ``source_context.slack_thread.triggering_user_id`` when the run is created.
+    Fails closed when ownership can't be determined.
+    """
+    if not slack_user_id:
+        return False
+    langgraph_client = get_client(url=LANGGRAPH_URL)
+    try:
+        thread = await langgraph_client.threads.get(thread_id)
+    except Exception:  # noqa: BLE001
+        return False
+    metadata = thread.get("metadata") if isinstance(thread, dict) else None
+    if not isinstance(metadata, dict):
+        return False
+    source_context = metadata.get("source_context")
+    slack_thread = source_context.get("slack_thread") if isinstance(source_context, dict) else None
+    owner_id = slack_thread.get("triggering_user_id") if isinstance(slack_thread, dict) else None
+    return isinstance(owner_id, str) and bool(owner_id) and owner_id == slack_user_id
+
+
 async def _get_thread_plan_mode(thread_id: str) -> bool | None:
     """Return the persisted plan-mode flag for a thread, or ``None`` if unset."""
     langgraph_client = get_client(url=LANGGRAPH_URL)
@@ -1676,6 +1700,13 @@ async def slack_interactivity(
             return {"status": "accepted", "message": "Plan cancelled"}
 
         if plan_action == "approve":
+            if not await _slack_user_is_thread_owner(thread_id, user_id):
+                await post_slack_thread_reply(
+                    channel_id=channel_id,
+                    thread_ts=thread_ts,
+                    text="Only the person who requested this plan can approve it. Anyone can reply with feedback or use *Revise Plan*.",
+                )
+                return {"status": "ignored", "reason": "approver is not the thread owner"}
             await _set_thread_plan_mode(thread_id, False)
             repo_config = await get_slack_repo_config(channel_id, thread_ts, slack_user_id=user_id)
             background_tasks.add_task(
