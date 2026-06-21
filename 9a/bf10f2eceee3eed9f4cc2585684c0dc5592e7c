@@ -1,0 +1,105 @@
+pyproject.toml
+  s_e4f1e6cd6464dd::t_918ae923b9b234 32-33
+agent/dashboard/plan_api.py
+  s_e4f1e6cd6464dd::t_0283f701b0eb5f 1-21,23-37,43-62,66-186
+  s_e4f1e6cd6464dd::t_68e0f9e73c9356 22
+  s_e4f1e6cd6464dd::t_82ac43b70638fa 38-42
+  s_e4f1e6cd6464dd::t_4371d3ab0cea9c 63-65
+agent/utils/dashboard_links.py
+  s_e4f1e6cd6464dd::t_64bdd9441495fd 26
+  s_e4f1e6cd6464dd::t_6e6eee746fd812 21-25,27-28
+agent/server.py
+  s_e4f1e6cd6464dd::t_f83d5f3fb495fb 761,771
+  s_e4f1e6cd6464dd::t_7c6033bc1a51b5 83
+  s_e4f1e6cd6464dd::t_ab48612bb106be 94
+ui/package.json
+  s_e4f1e6cd6464dd::t_7a2ed3c52ba617 50-52
+  s_e4f1e6cd6464dd::t_6030544f15c9db 16-18
+agent/dashboard/plan_collab.py
+  s_e4f1e6cd6464dd::t_ff105c8eee5ee5 1-121
+agent/tools/save_plan.py
+  s_e4f1e6cd6464dd::t_5ac3b95f6ece18 1-46,51-81
+  s_e4f1e6cd6464dd::t_8d798bb3b84f86 47-50
+agent/webapp.py
+  s_e4f1e6cd6464dd::t_67526e9c97a47c 134,140-141
+  s_e4f1e6cd6464dd::t_dae9e8e8f989a3 164-169
+ui/src/routeTree.gen.ts
+  s_e4f1e6cd6464dd::t_b87901085776f6 32,136-140,164,187,212,238,261,285,452-458,473,485
+tests/e2e/fake_llm.py
+  s_e4f1e6cd6464dd::t_eb7e01446064d6 50-61,72-91
+  s_e4f1e6cd6464dd::t_a4d992747b4d54 264-278,288,290-303
+  s_e4f1e6cd6464dd::t_6b2f04cf70dea9 49
+  s_e4f1e6cd6464dd::t_850f69b2e982fd 124-125,128,137-225
+tests/test_plan_review.py
+  s_e4f1e6cd6464dd::t_b3f473260eb55c 1-9,11-90
+  s_e4f1e6cd6464dd::t_dfa3986fbc6325 10
+agent/tools/enter_plan_mode.py
+  s_e4f1e6cd6464dd::t_e1eec964d44a99 1-8,11-14,25-29,32-33,35-36
+  s_e4f1e6cd6464dd::t_9f9a820aa4703c 31,34,38-47
+agent/dashboard/thread_api.py
+  s_e4f1e6cd6464dd::t_b7d2423ed077fd 351
+ui/src/lib/agents/types.ts
+  s_e4f1e6cd6464dd::t_26f94f5734a69f 184
+ui/src/components/agents/PlanReview.tsx
+  s_e4f1e6cd6464dd::t_93e1c1d9d5f44c 18
+  s_e4f1e6cd6464dd::t_5975777f4ba01c 33
+  s_e4f1e6cd6464dd::t_836bd99a566f22 52
+  s_e4f1e6cd6464dd::t_a6f9a159f20075 72
+  s_e4f1e6cd6464dd::t_463fe21b9961fc 41
+  s_e4f1e6cd6464dd::t_44acf33eabaa7a 1-6,12-17,19-30,34-40,42-43,47-51,54-55,62-65,70-71,73-80,86-97,110-113,115-117,119,121-122,126,128-130,132-133,137-138,141-150,152-179,181-185,187-189,199-202,204-205,211,216,218,220,222-223,232,245-247
+  s_e4f1e6cd6464dd::t_e357591e3ecbe5 8,53,60,81-82,98-109,114,118,120,123-125,127,151,192,194-195,203,206-210,212-215,217,219,221,224-231,233-244
+  s_e4f1e6cd6464dd::t_c342c3bab04ae7 7,9-11,31-32,44-46,56-59,61,66-69,83-85,134-136,180,186
+  s_e4f1e6cd6464dd::t_53b188d81a33ab 131
+  s_e4f1e6cd6464dd::t_0472f3e8c4085f 139-140
+  s_e4f1e6cd6464dd::t_1b07c11047ac02 190-191,193,196-198
+agent/dashboard/plan_store.py
+  s_e4f1e6cd6464dd::t_4371d3ab0cea9c 43-45
+  s_e4f1e6cd6464dd::t_af71c3bb2365e0 1-42,46-114
+ui/src/lib/plan.ts
+  s_e4f1e6cd6464dd::t_c342c3bab04ae7 9-12,51,69-72,86-89,96-99
+  s_e4f1e6cd6464dd::t_3df07d20ad630e 1-8,13-50,52-68,73-85,90-95,100-111
+tests/e2e/tests/plan_review.spec.ts
+  s_e4f1e6cd6464dd::t_59ab3b1a756ff7 5,12-15,25-34,37-38,62,79,81,85,96-101,103,109-111,115
+  s_e4f1e6cd6464dd::t_675dbd29e1f220 1-4,6-11,16-24,35-36,39-48,50-53,55-58,61,63,69,72-76,84,86-91,93-95,106-108,112-114,116-123
+  s_e4f1e6cd6464dd::t_1b431f5b9a952c 49
+  s_e4f1e6cd6464dd::t_794cd26ab3cb80 59-60,64-68,70-71
+  s_e4f1e6cd6464dd::t_73eda2ad5d482e 77-78,80,82-83,92,102,104-105
+  s_e4f1e6cd6464dd::t_dd90b1252c58cc 54
+tests/e2e/harness.py
+  s_e4f1e6cd6464dd::t_72bb9d99415d64 190-191
+  s_e4f1e6cd6464dd::t_523e3623b8f062 192-194
+ui/src/routes/agents/$threadId_.plan.tsx
+  s_e4f1e6cd6464dd::t_31697170cc60c4 1-109
+ui/src/components/agents/AgentThreadView.tsx
+  s_e4f1e6cd6464dd::t_d7f49956cf652f 2,4
+  s_e4f1e6cd6464dd::t_ece4f12716385c 46-50,58,106,132-134
+  s_e4f1e6cd6464dd::t_31d1000bdb31d6 74-77,79-93
+  s_e4f1e6cd6464dd::t_b0f32bc8620b1d 78
+agent/tools/__init__.py
+  s_e4f1e6cd6464dd::t_01317686975418 47
+  s_e4f1e6cd6464dd::t_4b91f8d427a00e 20
+agent/prompt.py
+  s_e4f1e6cd6464dd::t_870755b127f17d 107
+  s_e4f1e6cd6464dd::t_9572b53e39a1b8 130
+  s_e4f1e6cd6464dd::t_15ded13726dce1 532
+  s_e4f1e6cd6464dd::t_497bc82efc0331 557-561
+  s_e4f1e6cd6464dd::t_7c7b49281e9193 556
+  s_e4f1e6cd6464dd::t_4f848e82a75d73 86-89
+  s_e4f1e6cd6464dd::t_c27d2dd3feeb12 76-78
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.9",
+  "base_commit_sha": "9abf10f2eceee3eed9f4cc2585684c0dc5592e7c",
+  "prompts": {},
+  "sessions": {
+    "s_e4f1e6cd6464dd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4c5fdff8-80f6-4553-8336-aac3a1fb74b9",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ramon Nogueira <ramon.nogueira@langchain.dev>"
+    }
+  }
+}
