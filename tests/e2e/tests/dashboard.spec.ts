@@ -42,8 +42,9 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     await loginAs(page, SAME_USER);
     await openThreadViaSlackLink(page);
 
-    // The owner sees the composer.
-    const composer = page.getByPlaceholder("Add a follow up");
+    // The owner sees the composer (either the follow-up bar once the transcript
+    // hydrates, or the empty-state bar before it — both mean they can type).
+    const composer = page.getByPlaceholder(/Add a follow up|Send the first message/);
     await expect(composer).toBeVisible();
 
     // Continue from the web — a new agent reply streams into the same thread.
