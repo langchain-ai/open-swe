@@ -39,7 +39,6 @@ from e2e_env import (  # noqa: E402
 )
 from fastapi import HTTPException, Request  # noqa: E402
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse  # noqa: E402
-from fastapi.staticfiles import StaticFiles  # noqa: E402
 
 from agent.dashboard.oauth import COOKIE_NAME, issue_session  # noqa: E402
 from agent.webapp import app, generate_thread_id_from_slack_thread  # noqa: E402
@@ -143,8 +142,7 @@ async def control_logout() -> JSONResponse:
 # The "Open in Web" link (DASHBOARD_BASE_URL/agents/{id}) lands on the real app;
 # it calls /dashboard/api/* (same origin) and streams via the dashboard proxy.
 UI_PUBLIC = REPO_ROOT / "ui" / ".output" / "public"
-if (UI_PUBLIC / "assets").is_dir():
-    app.mount("/assets", StaticFiles(directory=str(UI_PUBLIC / "assets")), name="ui-assets")
+_ASSETS_ROOT = (UI_PUBLIC / "assets").resolve()
 
 
 def _ui_file(name: str) -> FileResponse:
@@ -152,6 +150,16 @@ def _ui_file(name: str) -> FileResponse:
     if not path.is_file():
         raise HTTPException(404, f"{name} not built — run `bun run build` in ui/")
     return FileResponse(path)
+
+
+@app.get("/assets/{asset_path:path}")
+async def ui_asset(asset_path: str) -> FileResponse:
+    # Explicit route, not app.mount(StaticFiles): LangGraph's custom-app loader
+    # serves APIRoutes but drops sub-app Mounts, so a mount 404s under it.
+    target = (_ASSETS_ROOT / asset_path).resolve()
+    if not str(target).startswith(str(_ASSETS_ROOT)) or not target.is_file():
+        raise HTTPException(404, "asset not found")
+    return FileResponse(target)
 
 
 @app.get("/_shell.html", response_class=HTMLResponse)

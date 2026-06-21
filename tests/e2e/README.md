@@ -85,6 +85,22 @@ Watch it in human time:
 SLOW_MO=700 npx playwright test --headed
 ```
 
+## Artifacts (replay a run)
+
+Every test records a **trace** (DOM-snapshot timeline + network + console + source)
+and a **video**; failures also get a screenshot. Locally they land in
+`test-results/<test>/` and are embedded in `playwright-report/`:
+
+```bash
+npx playwright show-report                       # browse runs; each has a Trace tab
+npx playwright show-trace test-results/<test>/trace.zip   # open one trace directly
+```
+
+In CI the `Playwright E2E` job uploads both `playwright-report/` and
+`test-results/` as the **playwright-report** artifact on the run. Download it,
+then `npx playwright show-report <unzipped-dir>` (or drag a `trace.zip` onto
+<https://trace.playwright.dev>) to replay.
+
 Poke at it by hand (from the repo root):
 
 ```bash
