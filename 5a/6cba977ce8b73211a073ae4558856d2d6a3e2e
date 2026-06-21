@@ -1,0 +1,23 @@
+tests/e2e/package.json
+  s_6a687da1b3cdc6::t_74dc35ef44b488 11
+tests/e2e/harness.py
+  s_6a687da1b3cdc6::t_af4e360b925660 145,155-162
+tests/e2e/tests/dashboard.spec.ts
+  s_6a687da1b3cdc6::t_41c81c0d7678be 45-47
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.9",
+  "base_commit_sha": "5a6cba977ce8b73211a073ae4558856d2d6a3e2e",
+  "prompts": {},
+  "sessions": {
+    "s_6a687da1b3cdc6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a9a27368-cb2c-46bd-b629-1129b6879a5f",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ramon Nogueira <ramon.nogueira@langchain.dev>"
+    }
+  }
+}
