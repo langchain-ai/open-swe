@@ -848,7 +848,7 @@ async def api_get_review_image(
     session: dict[str, Any] = _SESSION_DEP,
 ) -> Response:
     await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
-    return await proxy_pr_image(url)
+    return await proxy_pr_image(owner, repo, pr_number, url)
 
 
 @router.post("/reviews/{owner}/{repo}/{pr_number}/re-review")

@@ -420,6 +420,11 @@ async def get_review_diff(owner: str, repo: str, pr_number: int) -> dict[str, An
 _ALLOWED_IMAGE_HOST_SUFFIXES = (".githubusercontent.com",)
 _MAX_IMAGE_REDIRECTS = 5
 _MAX_IMAGE_BYTES = 25 * 1024 * 1024
+# Only safe raster formats — SVG (image/svg+xml) can execute script in our
+# origin, so it is never served.
+_ALLOWED_IMAGE_CONTENT_TYPES = frozenset(
+    {"image/png", "image/jpeg", "image/gif", "image/webp", "image/avif"}
+)
 
 
 def _is_allowed_image_url(url: str) -> bool:
@@ -460,48 +465,72 @@ def _validate_image_url(url: str) -> None:
         raise HTTPException(400, "image host not allowed")
 
 
-async def proxy_pr_image(url: str) -> Response:
+async def _require_image_in_pr(owner: str, repo: str, pr_number: int, url: str, token: str) -> None:
+    """Bind the requested image to the authorized PR.
+
+    The proxy fetches with the App installation token, which can read every repo
+    the App is installed on. Without this check a caller authorized for one repo
+    could proxy an image URL from another private repo (IDOR). Only URLs that
+    actually appear in this PR's body are allowed.
+    """
+    pr_payload = await _github_get(f"/repos/{owner}/{repo}/pulls/{pr_number}", token)
+    body = pr_payload.get("body") or ""
+    if url not in body:
+        raise HTTPException(403, "image not referenced by this PR")
+
+
+async def proxy_pr_image(owner: str, repo: str, pr_number: int, url: str) -> Response:
     """Stream a GitHub-hosted PR image through the App token.
 
-    Every URL (including redirect targets) is validated against the GitHub host
-    allowlist and a public-IP check before it is contacted.
+    The URL must appear in the target PR's body (bound to the authorized
+    resource), and every URL (including redirect targets) is validated against
+    the GitHub host allowlist and a public-IP check before it is contacted.
     """
     _validate_image_url(url)
     token = await _require_app_token()
+    await _require_image_in_pr(owner, repo, pr_number, url, token)
     headers = {"Authorization": f"Bearer {token}", "Accept": "image/*"}
 
     current_url = url
-    response: httpx.Response | None = None
     async with httpx.AsyncClient(timeout=_GITHUB_TIMEOUT, follow_redirects=False) as client:
         for _ in range(_MAX_IMAGE_REDIRECTS + 1):
-            response = await client.get(current_url, headers=headers)
-            if not response.is_redirect:
-                break
-            location = response.headers.get("Location")
-            if not location:
-                break
-            current_url = urljoin(str(response.url), location)
-            _validate_image_url(current_url)
-        else:
-            raise HTTPException(502, "too many redirects fetching image")
+            async with client.stream("GET", current_url, headers=headers) as response:
+                if response.is_redirect:
+                    location = response.headers.get("Location")
+                    if not location:
+                        raise HTTPException(502, "image fetch failed (redirect without target)")
+                    current_url = urljoin(str(response.url), location)
+                    _validate_image_url(current_url)
+                    continue
 
-    if response is None or response.status_code >= 400:
-        status = response.status_code if response is not None else 502
-        raise HTTPException(502, f"image fetch failed ({status})")
+                if response.status_code >= 400:
+                    raise HTTPException(502, f"image fetch failed ({response.status_code})")
 
-    content_type = response.headers.get("Content-Type", "")
-    if not content_type.lower().startswith("image/"):
-        raise HTTPException(415, "not an image")
+                content_type = (
+                    response.headers.get("Content-Type", "").lower().split(";", 1)[0].strip()
+                )
+                if content_type not in _ALLOWED_IMAGE_CONTENT_TYPES:
+                    raise HTTPException(415, "unsupported image type")
 
-    content = response.content
-    if len(content) > _MAX_IMAGE_BYTES:
-        raise HTTPException(413, "image too large")
+                # Stream and abort once over the cap so a large (or lying) upstream
+                # can't make the worker buffer the whole file.
+                content = bytearray()
+                async for chunk in response.aiter_bytes():
+                    content.extend(chunk)
+                    if len(content) > _MAX_IMAGE_BYTES:
+                        raise HTTPException(413, "image too large")
 
-    return Response(
-        content=content,
-        media_type=content_type,
-        headers={"Cache-Control": "private, max-age=300"},
-    )
+                return Response(
+                    content=bytes(content),
+                    media_type=content_type,
+                    headers={
+                        "Cache-Control": "private, max-age=300",
+                        "X-Content-Type-Options": "nosniff",
+                        "Content-Security-Policy": "default-src 'none'; sandbox",
+                    },
+                )
+
+    raise HTTPException(502, "too many redirects fetching image")
 
 
 async def trigger_re_review(owner: str, repo: str, pr_number: int, login: str) -> dict[str, Any]:
