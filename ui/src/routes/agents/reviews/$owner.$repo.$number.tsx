@@ -33,7 +33,12 @@ import {
   WorkerPoolContextProvider,
 } from "@pierre/diffs/react"
 import type { FileContents } from "@pierre/diffs/react"
-import type { DiffLineAnnotation, SelectedLineRange } from "@pierre/diffs"
+import type {
+  FileDiff as CoreFileDiff,
+  DiffLineAnnotation,
+  SelectedLineRange,
+  SelectionSide,
+} from "@pierre/diffs"
 
 import type {
   ReviewCheckRun,
@@ -78,6 +83,7 @@ type SideTab = "info" | "chat"
 
 const REVIEW_VIEW_STORAGE_KEY = "open-swe.review.view"
 const REVIEW_DIFF_STYLE_STORAGE_KEY = "open-swe.review.diffStyle"
+const FINDING_SCROLL_MAX_FRAMES = 120
 
 function readStoredDiffStyle(): DiffStyle {
   if (typeof window === "undefined") return "unified"
@@ -176,6 +182,77 @@ function scrollCardToTop(el: HTMLElement, scroller: HTMLElement | null): void {
     }
   }
   requestAnimationFrame(align)
+}
+
+interface PositionedDiffInstance {
+  getLinePosition: (
+    lineNumber: number,
+    side?: SelectionSide
+  ) => { top: number; height: number } | undefined
+}
+
+interface RegisteredDiffInstance {
+  host: HTMLElement
+  instance: CoreFileDiff<ReviewFinding>
+}
+
+function hasLinePosition(
+  instance: CoreFileDiff<ReviewFinding>
+): instance is CoreFileDiff<ReviewFinding> & PositionedDiffInstance {
+  return (
+    typeof (instance as { getLinePosition?: unknown }).getLinePosition ===
+    "function"
+  )
+}
+
+function clampScrollTop(scroller: HTMLElement, top: number): number {
+  return Math.max(
+    0,
+    Math.min(top, scroller.scrollHeight - scroller.clientHeight)
+  )
+}
+
+function scrollElementToCenter(
+  el: HTMLElement,
+  scroller: HTMLElement
+): number {
+  const elementRect = el.getBoundingClientRect()
+  const scrollerRect = scroller.getBoundingClientRect()
+  const delta =
+    elementRect.top -
+    scrollerRect.top -
+    (scroller.clientHeight - elementRect.height) / 2
+  const targetTop = clampScrollTop(scroller, scroller.scrollTop + delta)
+  scroller.scrollTo({ top: targetTop, behavior: "auto" })
+  return Math.abs(delta)
+}
+
+function scrollFindingLineToCenter({
+  target,
+  finding,
+  scroller,
+}: {
+  target: RegisteredDiffInstance
+  finding: ReviewFinding
+  scroller: HTMLElement
+}): boolean {
+  if (finding.end_line === null || !hasLinePosition(target.instance))
+    return false
+  const line = target.instance.getLinePosition(
+    finding.end_line,
+    findingSide(finding)
+  )
+  if (!line) return false
+  const hostTop =
+    target.host.getBoundingClientRect().top -
+    scroller.getBoundingClientRect().top +
+    scroller.scrollTop
+  const targetTop = clampScrollTop(
+    scroller,
+    hostTop + line.top - (scroller.clientHeight - line.height) / 2
+  )
+  scroller.scrollTo({ top: targetTop, behavior: "auto" })
+  return true
 }
 
 interface ResolvedGroup {
@@ -386,6 +463,9 @@ function ReviewBodyInner({
   const [sideTab, setSideTab] = useState<SideTab>("info")
   const [selectedFile, setSelectedFile] = useState<string | null>(null)
   const fileRefs = useRef<Record<string, HTMLDivElement | null>>({})
+  const diffInstanceRefs = useRef<
+    Record<string, RegisteredDiffInstance | undefined>
+  >({})
   const annotationRefs = useRef<Record<string, HTMLElement | null>>({})
   const [expandedFiles, setExpandedFiles] = useState<Record<string, boolean>>(
     {}
@@ -393,6 +473,7 @@ function ReviewBodyInner({
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [userSelection, setUserSelection] = useState<UserSelection | null>(null)
   const diffScrollElRef = useRef<HTMLDivElement | null>(null)
+  const findingScrollRequestRef = useRef(0)
   const groupRefs = useRef<Record<number, HTMLDivElement | null>>({})
   const [diffStyle, setDiffStyleState] = useState<DiffStyle>(() =>
     readStoredDiffStyle()
@@ -629,6 +710,13 @@ function ReviewBodyInner({
     },
     []
   )
+  const registerDiffInstance = useCallback(
+    (path: string, target: RegisteredDiffInstance | null) => {
+      if (target) diffInstanceRefs.current[path] = target
+      else delete diffInstanceRefs.current[path]
+    },
+    []
+  )
 
   const toggleExpanded = useCallback((path: string) => {
     const current = expandedRef.current[path] ?? !viewedRef.current.has(path)
@@ -712,23 +800,46 @@ function ReviewBodyInner({
     (finding: ReviewFinding) => {
       markRead(finding.id)
       const willExpand = expandedFindingRef.current?.id !== finding.id
+      const requestId = ++findingScrollRequestRef.current
       setUserSelection(null)
       setExpandedId(willExpand ? finding.id : null)
       if (!willExpand || !isAnchored(finding)) return
+      setSelectedFile(finding.file)
       setExpandedFiles((prev) => ({ ...prev, [finding.file]: true }))
-      requestAnimationFrame(() => {
-        fileRefs.current[finding.file]?.scrollIntoView({ block: "center" })
-        let tries = 0
-        const tryScroll = () => {
-          const node = annotationRefs.current[finding.id]
-          if (node) {
-            node.scrollIntoView({ block: "center" })
-            return
-          }
-          if (tries++ < 30) requestAnimationFrame(tryScroll)
+      let frames = 0
+      let lineScrollDone = false
+      const snap = () => {
+        if (requestId !== findingScrollRequestRef.current) return
+        const scroller = diffScrollElRef.current
+        if (!scroller) return
+
+        const annotation = annotationRefs.current[finding.id]
+        if (
+          annotation?.isConnected &&
+          annotation.getClientRects().length > 0
+        ) {
+          const delta = scrollElementToCenter(annotation, scroller)
+          if (delta <= 1 || frames >= FINDING_SCROLL_MAX_FRAMES) return
+          frames += 1
+          requestAnimationFrame(snap)
+          return
         }
-        tryScroll()
-      })
+
+        const diffTarget = diffInstanceRefs.current[finding.file]
+        if (diffTarget) {
+          lineScrollDone = scrollFindingLineToCenter({
+            target: diffTarget,
+            finding,
+            scroller,
+          })
+        } else if (!lineScrollDone) {
+          const fileNode = fileRefs.current[finding.file]
+          if (fileNode) scrollElementToCenter(fileNode, scroller)
+        }
+
+        if (frames++ < FINDING_SCROLL_MAX_FRAMES) requestAnimationFrame(snap)
+      }
+      requestAnimationFrame(snap)
     },
     [markRead]
   )
@@ -753,6 +864,7 @@ function ReviewBodyInner({
         onSelectLines={selectLines}
         onAddToChat={addToChat}
         registerSection={registerSection}
+        registerDiffInstance={registerDiffInstance}
         diffStyle={diffStyle}
       />
     )
@@ -1027,6 +1139,7 @@ const FileDiffCard = memo(function FileDiffCard({
   onSelectLines,
   onAddToChat,
   registerSection,
+  registerDiffInstance,
   diffStyle,
 }: {
   file: ReviewDiffFile
@@ -1039,6 +1152,10 @@ const FileDiffCard = memo(function FileDiffCard({
   onSelectLines: (path: string, range: SelectedLineRange | null) => void
   onAddToChat: (path: string, range: SelectedLineRange) => void
   registerSection: (path: string, node: HTMLDivElement | null) => void
+  registerDiffInstance: (
+    path: string,
+    target: RegisteredDiffInstance | null
+  ) => void
   diffStyle: DiffStyle
 }) {
   const diffOptions = useDiffOptions(diffStyle)
@@ -1097,8 +1214,12 @@ const FileDiffCard = memo(function FileDiffCard({
         else if (pointer) setPopup({ range, x: pointer.x, y: pointer.y })
         else setPopup(null)
       },
+      onPostRender: (
+        node: HTMLElement,
+        instance: CoreFileDiff<ReviewFinding>
+      ) => registerDiffInstance(file.path, { host: node, instance }),
     }),
-    [diffOptions, file.path, onSelectLines]
+    [diffOptions, file.path, onSelectLines, registerDiffInstance]
   )
 
   const addPopupToChat = useCallback(() => {
@@ -1132,6 +1253,10 @@ const FileDiffCard = memo(function FileDiffCard({
   const sectionRef = useCallback(
     (node: HTMLDivElement | null) => registerSection(file.path, node),
     [registerSection, file.path]
+  )
+  useEffect(
+    () => () => registerDiffInstance(file.path, null),
+    [file.path, registerDiffInstance]
   )
   const renderAnnotation = useCallback(
     (annotation: DiffLineAnnotation<ReviewFinding>) => (
