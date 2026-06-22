@@ -8,12 +8,15 @@ with the App installation token.
 
 from __future__ import annotations
 
+import ipaddress
 import logging
+import socket
 from collections.abc import Awaitable, Callable
 from typing import Any, Literal
+from urllib.parse import urljoin, urlparse
 
 import httpx
-from fastapi import HTTPException
+from fastapi import HTTPException, Response
 
 from ..reviewer_findings import REVIEWER_THREAD_KIND
 from ..utils.github_app import get_github_app_installation_token
@@ -405,6 +408,100 @@ async def get_review_diff(owner: str, repo: str, pr_number: int) -> dict[str, An
         "total_deletions": sum(f["deletions"] for f in files),
         "truncated": diff["truncated"],
     }
+
+
+# --- PR description image proxy ----------------------------------------------
+# PR bodies can embed images hosted on GitHub (user-attachment uploads,
+# *.githubusercontent.com). For private repos those URLs require GitHub auth the
+# browser doesn't have, so they render broken. We proxy them through the App
+# installation token. The host allowlist + per-redirect public-IP check guard
+# against SSRF (only GitHub-owned hosts are ever contacted).
+
+_ALLOWED_IMAGE_HOST_SUFFIXES = (".githubusercontent.com",)
+_MAX_IMAGE_REDIRECTS = 5
+_MAX_IMAGE_BYTES = 25 * 1024 * 1024
+
+
+def _is_allowed_image_url(url: str) -> bool:
+    parsed = urlparse(url)
+    if parsed.scheme != "https":
+        return False
+    host = (parsed.hostname or "").lower()
+    if not host:
+        return False
+    if host == "github.com" or host == "www.github.com":
+        # On github.com only user-attachment assets are images worth proxying.
+        return parsed.path.startswith("/user-attachments/")
+    return any(host.endswith(suffix) for suffix in _ALLOWED_IMAGE_HOST_SUFFIXES)
+
+
+def _host_resolves_public(hostname: str) -> bool:
+    try:
+        addr_infos = socket.getaddrinfo(hostname, None)
+    except socket.gaierror:
+        return False
+    if not addr_infos:
+        return False
+    for addr_info in addr_infos:
+        try:
+            ip = ipaddress.ip_address(addr_info[4][0])
+        except ValueError:
+            return False
+        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
+            return False
+    return True
+
+
+def _validate_image_url(url: str) -> None:
+    if not _is_allowed_image_url(url):
+        raise HTTPException(400, "image host not allowed")
+    hostname = urlparse(url).hostname or ""
+    if not _host_resolves_public(hostname):
+        raise HTTPException(400, "image host not allowed")
+
+
+async def proxy_pr_image(url: str) -> Response:
+    """Stream a GitHub-hosted PR image through the App token.
+
+    Every URL (including redirect targets) is validated against the GitHub host
+    allowlist and a public-IP check before it is contacted.
+    """
+    _validate_image_url(url)
+    token = await _require_app_token()
+    headers = {"Authorization": f"Bearer {token}", "Accept": "image/*"}
+
+    current_url = url
+    response: httpx.Response | None = None
+    async with httpx.AsyncClient(timeout=_GITHUB_TIMEOUT, follow_redirects=False) as client:
+        for _ in range(_MAX_IMAGE_REDIRECTS + 1):
+            response = await client.get(current_url, headers=headers)
+            if not response.is_redirect:
+                break
+            location = response.headers.get("Location")
+            if not location:
+                break
+            current_url = urljoin(str(response.url), location)
+            _validate_image_url(current_url)
+        else:
+            raise HTTPException(502, "too many redirects fetching image")
+
+    if response is None or response.status_code >= 400:
+        status = response.status_code if response is not None else 502
+        raise HTTPException(502, f"image fetch failed ({status})")
+
+    content_type = response.headers.get("Content-Type", "")
+    if not content_type.lower().startswith("image/"):
+        raise HTTPException(415, "not an image")
+
+    content = response.content
+    if len(content) > _MAX_IMAGE_BYTES:
+        raise HTTPException(413, "image too large")
+
+    return Response(
+        content=content,
+        media_type=content_type,
+        headers={"Cache-Control": "private, max-age=300"},
+    )
 
 
 async def trigger_re_review(owner: str, repo: str, pr_number: int, login: str) -> dict[str, Any]:

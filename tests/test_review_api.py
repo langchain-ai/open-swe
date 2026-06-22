@@ -1,5 +1,6 @@
 from agent.dashboard.review_api import (
     _finding_counts,
+    _is_allowed_image_url,
     _serialize_diff_groups,
     _serialize_finding,
     _thread_review_summary,
@@ -68,6 +69,25 @@ def test_thread_review_summary():
 
 def test_thread_review_summary_requires_pr_meta():
     assert _thread_review_summary({"metadata": {"kind": "reviewer"}}) is None
+
+
+def test_is_allowed_image_url_accepts_github_hosts():
+    assert _is_allowed_image_url("https://github.com/user-attachments/assets/abc-123")
+    assert _is_allowed_image_url("https://private-user-images.githubusercontent.com/1/x.png?jwt=y")
+    assert _is_allowed_image_url("https://user-images.githubusercontent.com/1/x.png")
+
+
+def test_is_allowed_image_url_rejects_unsafe_urls():
+    # Non-https scheme.
+    assert not _is_allowed_image_url("http://github.com/user-attachments/assets/x")
+    # github.com but not a user-attachment path.
+    assert not _is_allowed_image_url("https://github.com/langchain-ai/open-swe")
+    # Arbitrary external host (SSRF guard).
+    assert not _is_allowed_image_url("https://evil.example.com/x.png")
+    # Lookalike host that merely contains the suffix substring.
+    assert not _is_allowed_image_url("https://githubusercontent.com.evil.com/x.png")
+    # Internal address.
+    assert not _is_allowed_image_url("https://169.254.169.254/latest/meta-data")
 
 
 def test_reviewer_thread_id_matches_webapp():

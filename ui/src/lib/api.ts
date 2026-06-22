@@ -14,6 +14,43 @@ if (!API_BASE && typeof window !== "undefined") {
   console.warn("VITE_DASHBOARD_API_BASE_URL is not set")
 }
 
+const GITHUB_IMAGE_HOST_RE =
+  /^(?:www\.)?github\.com$|\.githubusercontent\.com$/i
+
+/**
+ * Build an authenticated proxy URL for GitHub-hosted PR images. Private-repo
+ * attachments can't be loaded directly by the browser, so they're routed
+ * through the dashboard backend which holds the App token. Non-GitHub image
+ * URLs are returned unchanged.
+ */
+export function reviewImageProxyUrl(
+  owner: string,
+  repo: string,
+  number: number,
+  src: string
+): string {
+  let parsed: URL
+  try {
+    parsed = new URL(src)
+  } catch {
+    return src
+  }
+  if (
+    parsed.protocol !== "https:" ||
+    !GITHUB_IMAGE_HOST_RE.test(parsed.hostname)
+  ) {
+    return src
+  }
+  if (
+    /^(?:www\.)?github\.com$/i.test(parsed.hostname) &&
+    !parsed.pathname.startsWith("/user-attachments/")
+  ) {
+    return src
+  }
+  const path = `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/image`
+  return `${API_BASE}/dashboard/api${path}?url=${encodeURIComponent(src)}`
+}
+
 export class ApiError extends Error {
   constructor(
     public readonly status: number,
