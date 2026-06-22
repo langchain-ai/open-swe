@@ -1,0 +1,21 @@
+ui/src/components/agents/ported/Markdown.tsx
+  s_e4f1e6cd6464dd::t_5b0e4f4f5d9bd0 1,79-118,142-154
+ui/src/routes/agents/reviews/$owner.$repo.$number.tsx
+  s_e4f1e6cd6464dd::t_5b0e4f4f5d9bd0 36-41,86,187-257,466-468,476,713-719,803,807,809-825,827-842,867,1142,1155-1158,1217-1220,1222,1257-1260
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.9",
+  "base_commit_sha": "31256856464dc61933022016b93e1f96894f3957",
+  "prompts": {},
+  "sessions": {
+    "s_e4f1e6cd6464dd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4c5fdff8-80f6-4553-8336-aac3a1fb74b9",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ramon Nogueira <ramon.nogueira@langchain.dev>"
+    }
+  }
+}
