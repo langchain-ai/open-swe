@@ -20,10 +20,15 @@ import {
 import type { FileContents } from "@pierre/diffs/react"
 import type { GitStatus, GitStatusEntry } from "@pierre/trees"
 
+import { useNavigate } from "@tanstack/react-router"
+import { useQuery } from "@tanstack/react-query"
+
 import type { AgentThread, Message } from "@/lib/agents/types"
 import type { ThreadPrDiffFile } from "@/lib/agents/api"
 import type { ChangedFileSummaryItem } from "@/components/agents/messages"
 import { useAgentThreadPrDiff } from "@/lib/agents/queries"
+import { ReviewMainBody } from "@/components/agents/ReviewMainBody"
+import { api } from "@/lib/api"
 import { buttonVariants } from "@/components/ui/button"
 import {
   DIFF_VIRTUALIZER_CONFIG,
@@ -554,7 +559,9 @@ export function AgentGitPanel({ thread, messages }: AgentGitPanelProps) {
             </div>
 
             <div className="flex min-h-0 flex-1">
-              {tab === "diff" && files.length > 0 ? (
+              {tab === "review" ? (
+                <ReviewTab thread={thread} />
+              ) : tab === "diff" && files.length > 0 ? (
                 <WorkerPoolContextProvider
                   poolOptions={DIFF_WORKER_POOL_OPTIONS}
                   highlighterOptions={DIFF_WORKER_HIGHLIGHTER_OPTIONS}
@@ -585,15 +592,18 @@ export function AgentGitPanel({ thread, messages }: AgentGitPanelProps) {
                 </div>
               )}
 
-              {fullScreen && !isMobile && files.length > 0 && (
-                <div className="w-72 shrink-0 border-l border-[var(--ui-border)] bg-[var(--ui-surface)]">
-                  <FileTreeExplorer
-                    files={files}
-                    selectedTreePath={selectedTreePath}
-                    onSelect={setSelectedTreePath}
-                  />
-                </div>
-              )}
+              {tab === "diff" &&
+                fullScreen &&
+                !isMobile &&
+                files.length > 0 && (
+                  <div className="w-72 shrink-0 border-l border-[var(--ui-border)] bg-[var(--ui-surface)]">
+                    <FileTreeExplorer
+                      files={files}
+                      selectedTreePath={selectedTreePath}
+                      onSelect={setSelectedTreePath}
+                    />
+                  </div>
+                )}
             </div>
           </>
         )}
@@ -606,6 +616,72 @@ export function AgentGitPanel({ thread, messages }: AgentGitPanelProps) {
         />
       )}
     </aside>
+  )
+}
+
+// The "Review" sub-tab: the PR's Open SWE review rendered inline (no side panel
+// / chat), with an expand affordance that opens the full review page.
+function ReviewTab({ thread }: { thread: AgentThread }) {
+  const navigate = useNavigate()
+  const pr = thread.pr
+  const [owner, repo] = thread.repoFullName.split("/")
+  const number = pr?.number ?? null
+  const enabled = Boolean(owner && repo && number !== null)
+
+  const detail = useQuery({
+    queryKey: ["review", owner, repo, number],
+    queryFn: () =>
+      api.getReview(owner as string, repo as string, number as number),
+    enabled,
+    refetchInterval: (query) =>
+      query.state.data?.status === "running" ? 5000 : false,
+  })
+  const diff = useQuery({
+    queryKey: ["reviewDiff", owner, repo, number],
+    queryFn: () =>
+      api.getReviewDiff(owner as string, repo as string, number as number),
+    enabled,
+  })
+
+  if (!enabled) {
+    return (
+      <div className="min-h-0 flex-1 overflow-y-auto p-6 text-center text-xs text-[var(--ui-text-dim)]">
+        Open a pull request to see its review here.
+      </div>
+    )
+  }
+  if (detail.isLoading) {
+    return (
+      <div className="min-h-0 flex-1 overflow-y-auto p-6 text-center text-xs text-[var(--ui-text-dim)]">
+        Loading review…
+      </div>
+    )
+  }
+  if (detail.error || !detail.data) {
+    return (
+      <div className="min-h-0 flex-1 overflow-y-auto p-6 text-center text-xs text-[var(--ui-text-dim)]">
+        No review for this pull request yet.
+      </div>
+    )
+  }
+
+  return (
+    <ReviewMainBody
+      key={detail.data.head_sha}
+      detail={detail.data}
+      diffFiles={diff.data?.files ?? null}
+      variant="embedded"
+      onExpand={() =>
+        navigate({
+          to: "/agents/reviews/$owner/$repo/$number",
+          params: {
+            owner: owner as string,
+            repo: repo as string,
+            number: String(number),
+          },
+        })
+      }
+    />
   )
 }
 
