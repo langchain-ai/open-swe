@@ -1,0 +1,8 @@
+node_modules/
+test-results/
+playwright-report/
+.playwright/
+blob-report/
+.e2e-tmp/
+.langgraph_api/
+__pycache__/
