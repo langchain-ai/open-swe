@@ -1,11 +1,13 @@
 """Custom FastAPI routes for LangGraph server."""
 
+import asyncio
 import hashlib
 import hmac
 import json
 import logging
 import os
 import re
+import time
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -977,6 +979,47 @@ async def _post_account_link_prompt(
         logger.debug("Failed to post account-link prompt to Slack", exc_info=True)
 
 
+_SLACK_THREAD_LOCK_TTL_SECONDS = 120.0
+_SLACK_EVENT_DEDUP_TTL_SECONDS = 600.0
+
+_slack_thread_locks: dict[tuple[str, str], tuple[asyncio.Lock, float]] = {}
+_slack_thread_locks_guard = asyncio.Lock()
+_slack_processed_events: dict[tuple[str, str, str], float] = {}
+
+
+async def _acquire_slack_thread_lock(channel_id: str, thread_ts: str) -> asyncio.Lock:
+    """Return a per-(channel, thread) lock, GCing stale entries by TTL."""
+    key = (channel_id, thread_ts)
+    now = time.monotonic()
+    async with _slack_thread_locks_guard:
+        for stale_key, (lock, expires_at) in list(_slack_thread_locks.items()):
+            if expires_at <= now and not lock.locked():
+                _slack_thread_locks.pop(stale_key, None)
+        entry = _slack_thread_locks.get(key)
+        if entry is None:
+            lock = asyncio.Lock()
+        else:
+            lock, _ = entry
+        _slack_thread_locks[key] = (lock, now + _SLACK_THREAD_LOCK_TTL_SECONDS)
+        return lock
+
+
+def _is_slack_event_processed(channel_id: str, thread_ts: str, event_ts: str) -> bool:
+    """Return True if this Slack event has already been handled within the TTL."""
+    key = (channel_id, thread_ts, event_ts)
+    now = time.monotonic()
+    for stale_key, expires_at in list(_slack_processed_events.items()):
+        if expires_at <= now:
+            _slack_processed_events.pop(stale_key, None)
+    return key in _slack_processed_events
+
+
+def _mark_slack_event_processed(channel_id: str, thread_ts: str, event_ts: str) -> None:
+    """Record this Slack event so retried deliveries are dropped within the TTL."""
+    key = (channel_id, thread_ts, event_ts)
+    _slack_processed_events[key] = time.monotonic() + _SLACK_EVENT_DEDUP_TTL_SECONDS
+
+
 async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[str, str]) -> None:
     """Process a Slack app mention by creating a run or queuing a mid-run message."""
     channel_id = event_data.get("channel_id", "")
@@ -995,6 +1038,34 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
         )
         return
 
+    # Serialize handling per (channel_id, thread_ts) so two near-simultaneous
+    # webhook deliveries can't both pass `is_thread_active` and both create runs.
+    thread_lock = await _acquire_slack_thread_lock(channel_id, thread_ts)
+    async with thread_lock:
+        if _is_slack_event_processed(channel_id, thread_ts, event_ts):
+            logger.info(
+                "slack.mention.dropped_duplicate channel_id=%s thread_ts=%s event_ts=%s",
+                channel_id,
+                thread_ts,
+                event_ts,
+            )
+            return
+        _mark_slack_event_processed(channel_id, thread_ts, event_ts)
+        await _process_slack_mention_locked(
+            repo_config, channel_id, thread_ts, event_ts, user_id, text, bot_user_id
+        )
+
+
+async def _process_slack_mention_locked(  # noqa: PLR0913
+    repo_config: dict[str, str],
+    channel_id: str,
+    thread_ts: str,
+    event_ts: str,
+    user_id: str,
+    text: str,
+    bot_user_id: str,
+) -> None:
+    """Run the original Slack mention handling under the per-thread lock."""
     await set_slack_assistant_status(channel_id, thread_ts)
 
     thread_id = generate_thread_id_from_slack_thread(channel_id, thread_ts)
