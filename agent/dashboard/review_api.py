@@ -8,12 +8,15 @@ with the App installation token.
 
 from __future__ import annotations
 
+import ipaddress
 import logging
+import socket
 from collections.abc import Awaitable, Callable
 from typing import Any, Literal
+from urllib.parse import urljoin, urlparse
 
 import httpx
-from fastapi import HTTPException
+from fastapi import HTTPException, Response
 
 from ..reviewer_findings import REVIEWER_THREAD_KIND
 from ..utils.github_app import get_github_app_installation_token
@@ -405,6 +408,129 @@ async def get_review_diff(owner: str, repo: str, pr_number: int) -> dict[str, An
         "total_deletions": sum(f["deletions"] for f in files),
         "truncated": diff["truncated"],
     }
+
+
+# --- PR description image proxy ----------------------------------------------
+# PR bodies can embed images hosted on GitHub (user-attachment uploads,
+# *.githubusercontent.com). For private repos those URLs require GitHub auth the
+# browser doesn't have, so they render broken. We proxy them through the App
+# installation token. The host allowlist + per-redirect public-IP check guard
+# against SSRF (only GitHub-owned hosts are ever contacted).
+
+_ALLOWED_IMAGE_HOST_SUFFIXES = (".githubusercontent.com",)
+_MAX_IMAGE_REDIRECTS = 5
+_MAX_IMAGE_BYTES = 25 * 1024 * 1024
+# Only safe raster formats — SVG (image/svg+xml) can execute script in our
+# origin, so it is never served.
+_ALLOWED_IMAGE_CONTENT_TYPES = frozenset(
+    {"image/png", "image/jpeg", "image/gif", "image/webp", "image/avif"}
+)
+
+
+def _is_allowed_image_url(url: str) -> bool:
+    parsed = urlparse(url)
+    if parsed.scheme != "https":
+        return False
+    host = (parsed.hostname or "").lower()
+    if not host:
+        return False
+    if host == "github.com" or host == "www.github.com":
+        # On github.com only user-attachment assets are images worth proxying.
+        return parsed.path.startswith("/user-attachments/")
+    return any(host.endswith(suffix) for suffix in _ALLOWED_IMAGE_HOST_SUFFIXES)
+
+
+def _host_resolves_public(hostname: str) -> bool:
+    try:
+        addr_infos = socket.getaddrinfo(hostname, None)
+    except socket.gaierror:
+        return False
+    if not addr_infos:
+        return False
+    for addr_info in addr_infos:
+        try:
+            ip = ipaddress.ip_address(addr_info[4][0])
+        except ValueError:
+            return False
+        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
+            return False
+    return True
+
+
+def _validate_image_url(url: str) -> None:
+    if not _is_allowed_image_url(url):
+        raise HTTPException(400, "image host not allowed")
+    hostname = urlparse(url).hostname or ""
+    if not _host_resolves_public(hostname):
+        raise HTTPException(400, "image host not allowed")
+
+
+async def _require_image_in_pr(owner: str, repo: str, pr_number: int, url: str, token: str) -> None:
+    """Bind the requested image to the authorized PR.
+
+    The proxy fetches with the App installation token, which can read every repo
+    the App is installed on. Without this check a caller authorized for one repo
+    could proxy an image URL from another private repo (IDOR). Only URLs that
+    actually appear in this PR's body are allowed.
+    """
+    pr_payload = await _github_get(f"/repos/{owner}/{repo}/pulls/{pr_number}", token)
+    body = pr_payload.get("body") or ""
+    if url not in body:
+        raise HTTPException(403, "image not referenced by this PR")
+
+
+async def proxy_pr_image(owner: str, repo: str, pr_number: int, url: str) -> Response:
+    """Stream a GitHub-hosted PR image through the App token.
+
+    The URL must appear in the target PR's body (bound to the authorized
+    resource), and every URL (including redirect targets) is validated against
+    the GitHub host allowlist and a public-IP check before it is contacted.
+    """
+    _validate_image_url(url)
+    token = await _require_app_token()
+    await _require_image_in_pr(owner, repo, pr_number, url, token)
+    headers = {"Authorization": f"Bearer {token}", "Accept": "image/*"}
+
+    current_url = url
+    async with httpx.AsyncClient(timeout=_GITHUB_TIMEOUT, follow_redirects=False) as client:
+        for _ in range(_MAX_IMAGE_REDIRECTS + 1):
+            async with client.stream("GET", current_url, headers=headers) as response:
+                if response.is_redirect:
+                    location = response.headers.get("Location")
+                    if not location:
+                        raise HTTPException(502, "image fetch failed (redirect without target)")
+                    current_url = urljoin(str(response.url), location)
+                    _validate_image_url(current_url)
+                    continue
+
+                if response.status_code >= 400:
+                    raise HTTPException(502, f"image fetch failed ({response.status_code})")
+
+                content_type = (
+                    response.headers.get("Content-Type", "").lower().split(";", 1)[0].strip()
+                )
+                if content_type not in _ALLOWED_IMAGE_CONTENT_TYPES:
+                    raise HTTPException(415, "unsupported image type")
+
+                # Stream and abort once over the cap so a large (or lying) upstream
+                # can't make the worker buffer the whole file.
+                content = bytearray()
+                async for chunk in response.aiter_bytes():
+                    content.extend(chunk)
+                    if len(content) > _MAX_IMAGE_BYTES:
+                        raise HTTPException(413, "image too large")
+
+                return Response(
+                    content=bytes(content),
+                    media_type=content_type,
+                    headers={
+                        "Cache-Control": "private, max-age=300",
+                        "X-Content-Type-Options": "nosniff",
+                        "Content-Security-Policy": "default-src 'none'; sandbox",
+                    },
+                )
+
+    raise HTTPException(502, "too many redirects fetching image")
 
 
 async def trigger_re_review(owner: str, repo: str, pr_number: int, login: str) -> dict[str, Any]:
