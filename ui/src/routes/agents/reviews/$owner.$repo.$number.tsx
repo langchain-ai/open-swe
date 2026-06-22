@@ -227,7 +227,21 @@ function scrollElementToCenter(
   return Math.abs(delta)
 }
 
-function scrollFindingLineToCenter({
+function scrollElementToTop(
+  el: HTMLElement,
+  scroller: HTMLElement,
+  offset = 16
+): number {
+  const delta =
+    el.getBoundingClientRect().top -
+    scroller.getBoundingClientRect().top -
+    offset
+  const targetTop = clampScrollTop(scroller, scroller.scrollTop + delta)
+  scroller.scrollTo({ top: targetTop, behavior: "auto" })
+  return Math.abs(delta)
+}
+
+function scrollFindingLineToTop({
   target,
   finding,
   scroller,
@@ -249,7 +263,7 @@ function scrollFindingLineToCenter({
     scroller.scrollTop
   const targetTop = clampScrollTop(
     scroller,
-    hostTop + line.top - (scroller.clientHeight - line.height) / 2
+    hostTop + line.top - 16
   )
   scroller.scrollTo({ top: targetTop, behavior: "auto" })
   return true
@@ -793,9 +807,9 @@ function ReviewBodyInner({
   )
 
   // Open a finding from the side panel. Anchored findings expand inline in the
-  // diff: open the file, scroll it into view, then poll a few frames for the
-  // annotation node (its diff rows window in/out under virtualization) and
-  // scroll that into view. Non-anchored findings expand inline in the panel.
+  // diff: snap the target line near the top so per-file virtual buffers stay
+  // above the viewport, then align the real annotation after it mounts.
+  // Non-anchored findings expand inline in the panel.
   const openFromPanel = useCallback(
     (finding: ReviewFinding) => {
       markRead(finding.id)
@@ -818,7 +832,7 @@ function ReviewBodyInner({
           annotation?.isConnected &&
           annotation.getClientRects().length > 0
         ) {
-          const delta = scrollElementToCenter(annotation, scroller)
+          const delta = scrollElementToTop(annotation, scroller)
           if (delta <= 1 || frames >= FINDING_SCROLL_MAX_FRAMES) return
           frames += 1
           requestAnimationFrame(snap)
@@ -827,7 +841,7 @@ function ReviewBodyInner({
 
         const diffTarget = diffInstanceRefs.current[finding.file]
         if (diffTarget) {
-          lineScrollDone = scrollFindingLineToCenter({
+          lineScrollDone = scrollFindingLineToTop({
             target: diffTarget,
             finding,
             scroller,
