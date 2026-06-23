@@ -31,6 +31,11 @@ REPO_SNAPSHOTS_NAMESPACE: list[str] = ["repo_snapshots"]
 
 BuildStatus = Literal["none", "building", "ready", "failed"]
 
+
+class RepoSnapshotConfigError(RuntimeError):
+    pass
+
+
 DOCKERFILE_MAX_CHARS = 100_000
 BUILD_LOG_MAX_CHARS = 20_000
 
@@ -54,7 +59,7 @@ def _default_base_image() -> str:
     """Base image used to seed generated Dockerfile templates."""
     image = os.environ.get("REPO_SNAPSHOT_BASE_IMAGE", "").strip()
     if not image:
-        raise RuntimeError(
+        raise RepoSnapshotConfigError(
             "REPO_SNAPSHOT_BASE_IMAGE must be set to the published Open SWE sandbox image"
         )
     return image

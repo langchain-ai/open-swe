@@ -8,6 +8,7 @@ from fastapi import BackgroundTasks, HTTPException
 
 from agent.dashboard import routes
 from agent.dashboard.repo_snapshots import (
+    RepoSnapshotConfigError,
     RepoSnapshotUpdate,
     create_repo_snapshot,
     generate_dockerfile_template,
@@ -28,8 +29,36 @@ def test_generate_dockerfile_template_uses_base_image() -> None:
 
 def test_generate_dockerfile_template_requires_base_image() -> None:
     with patch.dict("os.environ", {}, clear=True):
-        with pytest.raises(RuntimeError, match="REPO_SNAPSHOT_BASE_IMAGE"):
+        with pytest.raises(RepoSnapshotConfigError, match="REPO_SNAPSHOT_BASE_IMAGE"):
             generate_dockerfile_template("acme/repo")
+
+
+@pytest.mark.asyncio
+async def test_template_endpoint_returns_configuration_error() -> None:
+    with patch.object(
+        routes,
+        "generate_dockerfile_template",
+        side_effect=RepoSnapshotConfigError("base image missing"),
+    ):
+        with pytest.raises(HTTPException) as exc:
+            await routes.api_repo_snapshot_template("acme/repo", _admin={"sub": "octo"})
+    assert exc.value.status_code == 500
+    assert "base image missing" in exc.value.detail
+
+
+@pytest.mark.asyncio
+async def test_create_endpoint_returns_configuration_error() -> None:
+    body = routes.RepoSnapshotCreate(full_name="acme/repo")
+    with patch.object(
+        routes,
+        "create_repo_snapshot",
+        new_callable=AsyncMock,
+        side_effect=RepoSnapshotConfigError("base image missing"),
+    ):
+        with pytest.raises(HTTPException) as exc:
+            await routes.api_create_repo_snapshot(body, _admin={"sub": "octo"})
+    assert exc.value.status_code == 500
+    assert "base image missing" in exc.value.detail
 
 
 @pytest.mark.asyncio

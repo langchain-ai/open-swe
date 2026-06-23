@@ -62,6 +62,7 @@ from .profiles import (
 )
 from .repo_access import require_repo_access_for_user
 from .repo_snapshots import (
+    RepoSnapshotConfigError,
     RepoSnapshotCreate,
     RepoSnapshotUpdate,
     create_repo_snapshot,
@@ -598,7 +599,10 @@ async def api_repo_snapshot_template(
     full_name: str,
     _admin: dict[str, Any] = _ADMIN_DEP,
 ) -> dict[str, str]:
-    return {"dockerfile": generate_dockerfile_template(normalize_repo_full_name(full_name))}
+    try:
+        return {"dockerfile": generate_dockerfile_template(normalize_repo_full_name(full_name))}
+    except RepoSnapshotConfigError as e:
+        raise HTTPException(500, str(e)) from e
 
 
 @router.post("/repo-snapshots")
@@ -606,7 +610,10 @@ async def api_create_repo_snapshot(
     body: RepoSnapshotCreate,
     _admin: dict[str, Any] = _ADMIN_DEP,
 ) -> dict[str, Any]:
-    return await create_repo_snapshot(body.full_name, _admin["sub"])
+    try:
+        return await create_repo_snapshot(body.full_name, _admin["sub"])
+    except RepoSnapshotConfigError as e:
+        raise HTTPException(500, str(e)) from e
 
 
 @router.get("/repo-snapshots/{full_name:path}")
