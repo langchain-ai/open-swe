@@ -115,3 +115,9 @@ Webhooks compute deterministic thread ids so the same Linear issue / Slack threa
 - New dashboard endpoints: add to `agent/dashboard/routes.py`. The router is auto-mounted on the FastAPI app.
 - New graphs: register the entrypoint in `langgraph.json` under `graphs`.
 - Minimal-to-no code comments — only when the *why* isn't obvious from the code.
+
+## Validation reporting
+
+Your final Slack/PR message must explicitly state the status of every validation step you attempted (tests, lint, format, type-check, build) using one of: `PASSED`, `FAILED <reason>`, `DEFERRED <reason>` (e.g. sandbox install failed, command unavailable), or `SKIPPED <reason>`. Do not summarize only the code changes when a validation command errored or was unavailable — silent omission produces false-confidence reviews.
+
+In JS/TS projects, before invoking `pnpm exec vitest` / `npm test` / `pnpm lint`, verify `node_modules` exists or run the project's install command first (`pnpm install`, `npm ci`, `yarn install`). `ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL Command "<bin>" not found` from `pnpm exec` is the canonical "deps not installed" signal in pnpm workspaces — install first, then re-run. If the install itself fails (e.g. `sfw` firewall-sandboxed install errors with "Failed to prepare firewall binary"), report the validation step as `DEFERRED` with that reason rather than describing the code change as if it had been validated.
