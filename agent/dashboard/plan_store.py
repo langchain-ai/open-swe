@@ -1,25 +1,25 @@
-"""Persistence for the collaborative plan-review feature.
+"""Persistence for the plan-review feature.
 
 The plan lives in two places:
   - the agent's sandbox, as a real ``plan.md`` file (written by the ``save_plan``
     tool — the source artifact the agent produces and can re-read), and
-  - the LangGraph store, as the published snapshot the dashboard renders and the
-    seed for the collaborative Yjs document.
+  - the LangGraph store, as the published snapshot the dashboard renders.
 
-Comment threads live in the Yjs document (BlockNote's ``YjsThreadStore``); the
-binary Yjs state is snapshotted here so a plan + its comments survive a sandbox
-teardown or a server restart.
+Reviewers leave whole-document comments, stored one item per comment under
+``["plan", "comments", thread_id]`` so listing and deletion are simple plain
+store operations (no CRDT/WebSocket).
 """
 
 from __future__ import annotations
 
-import base64
+import uuid
+from datetime import UTC, datetime
 from typing import Any
 
 from langgraph_sdk import get_client
 
 PLAN_CONTENT_NAMESPACE = ["plan", "content"]
-PLAN_YJS_NAMESPACE = ["plan", "yjs"]
+PLAN_COMMENTS_NAMESPACE = ["plan", "comments"]
 
 # Plan lifecycle, stored on both the content record and the thread metadata.
 PLAN_STATUS_PLANNING = "planning"
@@ -43,13 +43,22 @@ def _item_value(item: Any) -> dict[str, Any] | None:
 async def save_plan_content(
     thread_id: str, *, markdown: str, status: str = PLAN_STATUS_READY
 ) -> None:
-    """Publish the plan markdown + status for the dashboard to render."""
+    """Publish the plan markdown + status for the dashboard to render.
+
+    A republished (revised) plan supersedes the prior revision, so comments left
+    on it are cleared — otherwise stale feedback would resurface on the new plan
+    and be fed back to the agent on the next approve/reject."""
     client = _client()
     await client.store.put_item(
         PLAN_CONTENT_NAMESPACE,
         thread_id,
         {"markdown": markdown, "status": status},
     )
+    try:
+        await clear_plan_comments(thread_id)
+    except Exception:
+        # Best-effort: a failed cleanup must not block publishing the new plan.
+        pass
     await _merge_thread_metadata(thread_id, {"plan_status": status, "plan_mode": True})
 
 
@@ -77,31 +86,57 @@ async def set_plan_status(thread_id: str, status: str, *, plan_mode: bool | None
     await _merge_thread_metadata(thread_id, metadata)
 
 
-async def load_yjs_snapshot(thread_id: str) -> bytes | None:
+def _comments_namespace(thread_id: str) -> list[str]:
+    return [*PLAN_COMMENTS_NAMESPACE, thread_id]
+
+
+async def list_plan_comments(
+    thread_id: str, *, raise_on_error: bool = False
+) -> list[dict[str, Any]]:
+    """All comments on a plan, oldest first.
+
+    With ``raise_on_error=True`` a store/search failure propagates instead of
+    resolving to ``[]``. Approve/reject use this so a transient failure surfaces
+    (the decision endpoint errors) rather than silently feeding the agent an
+    empty comment set and dropping the reviewer's feedback."""
     client = _client()
     try:
-        item = await client.store.get_item(PLAN_YJS_NAMESPACE, thread_id)
+        items = await client.store.search_items(_comments_namespace(thread_id), limit=1000)
     except Exception:
-        return None
-    value = _item_value(item)
-    if not value:
-        return None
-    encoded = value.get("b64")
-    if not isinstance(encoded, str) or not encoded:
-        return None
-    try:
-        return base64.b64decode(encoded)
-    except (ValueError, TypeError):
-        return None
+        if raise_on_error:
+            raise
+        return []
+    raw = items.get("items", []) if isinstance(items, dict) else getattr(items, "items", [])
+    comments = [v for v in (_item_value(item) for item in raw) if v]
+    comments.sort(key=lambda c: str(c.get("created_at", "")))
+    return comments
 
 
-async def save_yjs_snapshot(thread_id: str, data: bytes) -> None:
-    client = _client()
-    await client.store.put_item(
-        PLAN_YJS_NAMESPACE,
-        thread_id,
-        {"b64": base64.b64encode(data).decode("ascii")},
-    )
+async def clear_plan_comments(thread_id: str) -> None:
+    """Delete every comment on a thread (called when a revised plan is published)."""
+    for comment in await list_plan_comments(thread_id):
+        comment_id = comment.get("id")
+        if isinstance(comment_id, str) and comment_id:
+            await delete_plan_comment(thread_id, comment_id)
+
+
+async def add_plan_comment(
+    thread_id: str, *, author: str, author_login: str, body: str
+) -> dict[str, Any]:
+    """Append a whole-document comment; returns the stored comment."""
+    comment = {
+        "id": uuid.uuid4().hex,
+        "author": author,
+        "author_login": author_login,
+        "body": body,
+        "created_at": datetime.now(UTC).isoformat(),
+    }
+    await _client().store.put_item(_comments_namespace(thread_id), comment["id"], comment)
+    return comment
+
+
+async def delete_plan_comment(thread_id: str, comment_id: str) -> None:
+    await _client().store.delete_item(_comments_namespace(thread_id), comment_id)
 
 
 async def _merge_thread_metadata(thread_id: str, metadata: dict[str, Any]) -> None:

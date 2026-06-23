@@ -1,9 +1,9 @@
 /**
- * Client for the plan-review API + the Yjs collaboration endpoint.
+ * Client for the plan-review API — plain HTTP, no realtime transport.
  *
- * The plan document and its comment threads sync over a y-websocket connection;
- * approve/reject post the client-harvested comments so the agent receives them
- * as the instruction for the follow-up run.
+ * The agent publishes the plan markdown; reviewers read it and leave
+ * whole-document comments. On approve/reject the server reads those comments and
+ * hands them to the agent as the instruction for the follow-up run.
  */
 
 const API_BASE = (import.meta.env.VITE_DASHBOARD_API_BASE_URL ?? "").replace(
@@ -38,11 +38,12 @@ export interface PlanData {
   user: PlanUser
 }
 
-export interface HarvestedComment {
+export interface PlanComment {
+  id: string
   author: string
+  author_login: string
   body: string
-  quote?: string
-  resolved: boolean
+  created_at: string
 }
 
 export class PlanApiError extends Error {
@@ -83,29 +84,43 @@ export function getPlan(threadId: string): Promise<PlanData> {
   return req<PlanData>(`/plan/${encodeURIComponent(threadId)}`)
 }
 
-export function approvePlan(
+export async function getPlanComments(
+  threadId: string
+): Promise<Array<PlanComment>> {
+  const { comments } = await req<{ comments: Array<PlanComment> }>(
+    `/plan/${encodeURIComponent(threadId)}/comments`
+  )
+  return comments
+}
+
+export function addPlanComment(
   threadId: string,
-  comments: Array<HarvestedComment>
-): Promise<{ status: string }> {
+  body: string
+): Promise<PlanComment> {
+  return req(`/plan/${encodeURIComponent(threadId)}/comments`, {
+    method: "POST",
+    body: JSON.stringify({ body }),
+  })
+}
+
+export function deletePlanComment(
+  threadId: string,
+  commentId: string
+): Promise<{ ok: boolean }> {
+  return req(
+    `/plan/${encodeURIComponent(threadId)}/comments/${encodeURIComponent(commentId)}`,
+    { method: "DELETE" }
+  )
+}
+
+export function approvePlan(threadId: string): Promise<{ status: string }> {
   return req(`/plan/${encodeURIComponent(threadId)}/approve`, {
     method: "POST",
-    body: JSON.stringify({ comments }),
   })
 }
 
-export function rejectPlan(
-  threadId: string,
-  comments: Array<HarvestedComment>
-): Promise<{ status: string }> {
+export function rejectPlan(threadId: string): Promise<{ status: string }> {
   return req(`/plan/${encodeURIComponent(threadId)}/reject`, {
     method: "POST",
-    body: JSON.stringify({ comments }),
   })
-}
-
-/** Base URL the y-websocket provider connects to; it appends `/<threadId>`. */
-export function planCollabUrl(): string {
-  const base = apiBase()
-  const wsBase = base.replace(/^http/, "ws")
-  return `${wsBase}/dashboard/api/plan/yjs`
 }

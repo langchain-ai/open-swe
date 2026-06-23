@@ -1,13 +1,15 @@
-"""REST API for the plan-review page: read the plan, approve, or request changes.
+"""REST API for the plan-review page: read the plan, comment, approve, or request
+changes — all plain HTTP, no CRDT/WebSocket.
 
-Comment threads themselves live in the collaborative Yjs document (BlockNote's
-``YjsThreadStore``) and are harvested client-side; on approve/reject the client
-sends the harvested feedback here, where it is formatted and handed to the agent
-as the instruction for the follow-up run. The agent never sees comments during
-review — only this aggregated feedback at the decision point.
+Reviewers leave whole-document comments via this API; they're stored server-side
+and listed for everyone who can read the thread. On approve/reject the comments
+are read back here, formatted, and handed to the agent as the instruction for the
+follow-up run. The agent never sees comments during review — only this aggregated
+feedback at the decision point.
 
-Permissions: any authenticated org member can read a surfaced thread and request
-changes (reject); only the thread owner can approve.
+Permissions: any authenticated org member can read a surfaced thread, comment, and
+request changes (reject); only the thread owner can approve. A comment can be
+deleted by its author or the thread owner.
 """
 
 from __future__ import annotations
@@ -17,13 +19,16 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from langgraph_sdk import get_client
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from .oauth import require_same_origin_for_mutations, require_session
 from .plan_store import (
     PLAN_STATUS_APPROVED,
     PLAN_STATUS_REVISING,
+    add_plan_comment,
+    delete_plan_comment,
     get_plan_content,
+    list_plan_comments,
     set_plan_status,
 )
 from .thread_api import (
@@ -43,15 +48,8 @@ plan_router = APIRouter(
 _SESSION_DEP = Depends(require_session)
 
 
-class PlanComment(BaseModel):
-    author: str | None = None
-    body: str = ""
-    quote: str | None = None
-    resolved: bool = False
-
-
-class PlanDecisionBody(BaseModel):
-    comments: list[PlanComment] = Field(default_factory=list)
+class CommentBody(BaseModel):
+    body: str
 
 
 async def _thread_metadata(thread_id: str) -> dict[str, Any]:
@@ -88,17 +86,60 @@ async def get_plan(thread_id: str, session: dict[str, Any] = _SESSION_DEP) -> di
     }
 
 
-@plan_router.post("/{thread_id}/approve")
-async def approve_plan(
-    thread_id: str,
-    body: PlanDecisionBody,
-    session: dict[str, Any] = _SESSION_DEP,
+@plan_router.get("/{thread_id}/comments")
+async def get_plan_comments(
+    thread_id: str, session: dict[str, Any] = _SESSION_DEP
 ) -> dict[str, Any]:
+    metadata = await _thread_metadata(thread_id)
+    if not _thread_is_readable(metadata):
+        raise HTTPException(404, "thread not found")
+    return {"comments": await list_plan_comments(thread_id)}
+
+
+@plan_router.post("/{thread_id}/comments")
+async def post_plan_comment(
+    thread_id: str, body: CommentBody, session: dict[str, Any] = _SESSION_DEP
+) -> dict[str, Any]:
+    metadata = await _thread_metadata(thread_id)
+    if not _thread_is_readable(metadata):
+        raise HTTPException(404, "thread not found")
+    text = body.body.strip()
+    if not text:
+        raise HTTPException(422, "comment body cannot be empty")
+    login = session["sub"]
+    return await add_plan_comment(
+        thread_id, author=session.get("name") or login, author_login=login, body=text
+    )
+
+
+@plan_router.delete("/{thread_id}/comments/{comment_id}")
+async def remove_plan_comment(
+    thread_id: str, comment_id: str, session: dict[str, Any] = _SESSION_DEP
+) -> dict[str, Any]:
+    metadata = await _thread_metadata(thread_id)
+    if not _thread_is_readable(metadata):
+        raise HTTPException(404, "thread not found")
+    comments = await list_plan_comments(thread_id)
+    target = next((c for c in comments if c.get("id") == comment_id), None)
+    if target is None:
+        raise HTTPException(404, "comment not found")
+    login = session["sub"]
+    is_owner = _user_owns_thread(metadata, login, session.get("email"))
+    if target.get("author_login") != login and not is_owner:
+        raise HTTPException(403, "only the author or the plan owner can delete a comment")
+    await delete_plan_comment(thread_id, comment_id)
+    return {"ok": True}
+
+
+@plan_router.post("/{thread_id}/approve")
+async def approve_plan(thread_id: str, session: dict[str, Any] = _SESSION_DEP) -> dict[str, Any]:
     metadata = await _thread_metadata(thread_id)
     if not _user_owns_thread(metadata, session["sub"], session.get("email")):
         raise HTTPException(403, "only the plan owner can approve")
+    # Read comments BEFORE mutating state: a store failure here aborts the
+    # decision (500) rather than dispatching the run without the feedback.
+    feedback = _format_comments(await list_plan_comments(thread_id, raise_on_error=True))
     await set_plan_status(thread_id, PLAN_STATUS_APPROVED, plan_mode=False)
-    feedback = _format_comments(body.comments)
     if feedback:
         text = (
             "The plan has been approved. Implement it now, taking this reviewer "
@@ -111,16 +152,12 @@ async def approve_plan(
 
 
 @plan_router.post("/{thread_id}/reject")
-async def reject_plan(
-    thread_id: str,
-    body: PlanDecisionBody,
-    session: dict[str, Any] = _SESSION_DEP,
-) -> dict[str, Any]:
+async def reject_plan(thread_id: str, session: dict[str, Any] = _SESSION_DEP) -> dict[str, Any]:
     metadata = await _thread_metadata(thread_id)
     if not _thread_is_readable(metadata):
         raise HTTPException(404, "thread not found")
+    feedback = _format_comments(await list_plan_comments(thread_id, raise_on_error=True))
     await set_plan_status(thread_id, PLAN_STATUS_REVISING, plan_mode=True)
-    feedback = _format_comments(body.comments)
     text = (
         "The plan needs changes before implementation. Address this reviewer "
         "feedback and publish an updated plan with the save_plan tool:\n\n"
@@ -130,19 +167,16 @@ async def reject_plan(
     return {"status": PLAN_STATUS_REVISING}
 
 
-def _format_comments(comments: list[PlanComment]) -> str:
+def _format_comments(comments: list[dict[str, Any]]) -> str:
     lines: list[str] = []
-    for index, comment in enumerate(comments, start=1):
-        body = comment.body.strip()
+    index = 1
+    for comment in comments:
+        body = str(comment.get("body", "")).strip()
         if not body:
             continue
-        author = (comment.author or "reviewer").strip()
-        quote = (comment.quote or "").strip()
-        status = " (resolved)" if comment.resolved else ""
-        if quote:
-            lines.append(f'{index}. On "{quote}"{status}:\n   - {author}: {body}')
-        else:
-            lines.append(f"{index}. {author}{status}: {body}")
+        author = str(comment.get("author") or "reviewer").strip()
+        lines.append(f"{index}. {author}: {body}")
+        index += 1
     return "\n".join(lines)
 
 
