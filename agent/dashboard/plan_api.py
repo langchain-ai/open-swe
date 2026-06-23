@@ -136,8 +136,10 @@ async def approve_plan(thread_id: str, session: dict[str, Any] = _SESSION_DEP) -
     metadata = await _thread_metadata(thread_id)
     if not _user_owns_thread(metadata, session["sub"], session.get("email")):
         raise HTTPException(403, "only the plan owner can approve")
+    # Read comments BEFORE mutating state: a store failure here aborts the
+    # decision (500) rather than dispatching the run without the feedback.
+    feedback = _format_comments(await list_plan_comments(thread_id, raise_on_error=True))
     await set_plan_status(thread_id, PLAN_STATUS_APPROVED, plan_mode=False)
-    feedback = _format_comments(await list_plan_comments(thread_id))
     if feedback:
         text = (
             "The plan has been approved. Implement it now, taking this reviewer "
@@ -154,8 +156,8 @@ async def reject_plan(thread_id: str, session: dict[str, Any] = _SESSION_DEP) ->
     metadata = await _thread_metadata(thread_id)
     if not _thread_is_readable(metadata):
         raise HTTPException(404, "thread not found")
+    feedback = _format_comments(await list_plan_comments(thread_id, raise_on_error=True))
     await set_plan_status(thread_id, PLAN_STATUS_REVISING, plan_mode=True)
-    feedback = _format_comments(await list_plan_comments(thread_id))
     text = (
         "The plan needs changes before implementation. Address this reviewer "
         "feedback and publish an updated plan with the save_plan tool:\n\n"

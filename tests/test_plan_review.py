@@ -46,6 +46,53 @@ def test_plan_comment_helpers_exported() -> None:
     assert callable(plan_store.add_plan_comment)
     assert callable(plan_store.list_plan_comments)
     assert callable(plan_store.delete_plan_comment)
+    assert callable(plan_store.clear_plan_comments)
+
+
+def _fake_client(store: Any) -> Any:
+    return type("C", (), {"store": store})()
+
+
+async def test_list_plan_comments_swallows_errors_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent.dashboard import plan_store
+
+    class _Store:
+        async def search_items(self, *a: Any, **k: Any) -> Any:
+            raise RuntimeError("boom")
+
+    monkeypatch.setattr(plan_store, "_client", lambda: _fake_client(_Store()))
+    assert await plan_store.list_plan_comments("t") == []
+
+
+async def test_list_plan_comments_raises_with_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    from agent.dashboard import plan_store
+
+    class _Store:
+        async def search_items(self, *a: Any, **k: Any) -> Any:
+            raise RuntimeError("boom")
+
+    monkeypatch.setattr(plan_store, "_client", lambda: _fake_client(_Store()))
+    with pytest.raises(RuntimeError):
+        await plan_store.list_plan_comments("t", raise_on_error=True)
+
+
+async def test_clear_plan_comments_deletes_each(monkeypatch: pytest.MonkeyPatch) -> None:
+    from agent.dashboard import plan_store
+
+    deleted: list[str] = []
+
+    class _Store:
+        async def search_items(self, *a: Any, **k: Any) -> Any:
+            return {"items": [{"value": {"id": "a"}}, {"value": {"id": "b"}}]}
+
+        async def delete_item(self, _ns: Any, key: str) -> None:
+            deleted.append(key)
+
+    monkeypatch.setattr(plan_store, "_client", lambda: _fake_client(_Store()))
+    await plan_store.clear_plan_comments("t")
+    assert deleted == ["a", "b"]
 
 
 def test_save_plan_requires_run_context() -> None:

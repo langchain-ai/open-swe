@@ -43,13 +43,22 @@ def _item_value(item: Any) -> dict[str, Any] | None:
 async def save_plan_content(
     thread_id: str, *, markdown: str, status: str = PLAN_STATUS_READY
 ) -> None:
-    """Publish the plan markdown + status for the dashboard to render."""
+    """Publish the plan markdown + status for the dashboard to render.
+
+    A republished (revised) plan supersedes the prior revision, so comments left
+    on it are cleared — otherwise stale feedback would resurface on the new plan
+    and be fed back to the agent on the next approve/reject."""
     client = _client()
     await client.store.put_item(
         PLAN_CONTENT_NAMESPACE,
         thread_id,
         {"markdown": markdown, "status": status},
     )
+    try:
+        await clear_plan_comments(thread_id)
+    except Exception:
+        # Best-effort: a failed cleanup must not block publishing the new plan.
+        pass
     await _merge_thread_metadata(thread_id, {"plan_status": status, "plan_mode": True})
 
 
@@ -81,17 +90,34 @@ def _comments_namespace(thread_id: str) -> list[str]:
     return [*PLAN_COMMENTS_NAMESPACE, thread_id]
 
 
-async def list_plan_comments(thread_id: str) -> list[dict[str, Any]]:
-    """All comments on a plan, oldest first."""
+async def list_plan_comments(
+    thread_id: str, *, raise_on_error: bool = False
+) -> list[dict[str, Any]]:
+    """All comments on a plan, oldest first.
+
+    With ``raise_on_error=True`` a store/search failure propagates instead of
+    resolving to ``[]``. Approve/reject use this so a transient failure surfaces
+    (the decision endpoint errors) rather than silently feeding the agent an
+    empty comment set and dropping the reviewer's feedback."""
     client = _client()
     try:
         items = await client.store.search_items(_comments_namespace(thread_id), limit=1000)
     except Exception:
+        if raise_on_error:
+            raise
         return []
     raw = items.get("items", []) if isinstance(items, dict) else getattr(items, "items", [])
     comments = [v for v in (_item_value(item) for item in raw) if v]
     comments.sort(key=lambda c: str(c.get("created_at", "")))
     return comments
+
+
+async def clear_plan_comments(thread_id: str) -> None:
+    """Delete every comment on a thread (called when a revised plan is published)."""
+    for comment in await list_plan_comments(thread_id):
+        comment_id = comment.get("id")
+        if isinstance(comment_id, str) and comment_id:
+            await delete_plan_comment(thread_id, comment_id)
 
 
 async def add_plan_comment(
