@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from fastapi import BackgroundTasks, HTTPException
 
+from agent.dashboard import routes
 from agent.dashboard.repo_snapshots import (
     RepoSnapshotUpdate,
     create_repo_snapshot,
     generate_dockerfile_template,
+    is_repo_snapshot_build_stale,
     mark_repo_snapshot_building,
     resolve_repo_snapshot_id,
     run_snapshot_build,
@@ -20,6 +24,12 @@ def test_generate_dockerfile_template_uses_base_image() -> None:
         template = generate_dockerfile_template("acme/repo")
     assert "FROM ghcr.io/acme/base:1" in template
     assert "acme/repo" in template
+
+
+def test_generate_dockerfile_template_requires_base_image() -> None:
+    with patch.dict("os.environ", {}, clear=True):
+        with pytest.raises(RuntimeError, match="REPO_SNAPSHOT_BASE_IMAGE"):
+            generate_dockerfile_template("acme/repo")
 
 
 @pytest.mark.asyncio
@@ -75,6 +85,7 @@ async def test_resolve_swallows_errors() -> None:
 async def test_create_repo_snapshot_puts_new_record() -> None:
     mock_put = AsyncMock()
     with (
+        patch.dict("os.environ", {"REPO_SNAPSHOT_BASE_IMAGE": "ghcr.io/acme/base:1"}),
         patch(
             "agent.dashboard.repo_snapshots.get_repo_snapshot",
             new_callable=AsyncMock,
@@ -125,7 +136,65 @@ async def test_mark_building_sets_status() -> None:
         mock_client.return_value.store.put_item = mock_put
         record = await mark_repo_snapshot_building("acme/repo")
     assert record["status"] == "building"
+    assert record["build_started_at"]
     mock_put.assert_awaited_once()
+
+
+def test_building_record_without_started_at_is_stale() -> None:
+    assert is_repo_snapshot_build_stale({"status": "building"}) is True
+
+
+def test_recent_building_record_is_not_stale() -> None:
+    record = {"status": "building", "build_started_at": datetime.now(UTC).isoformat()}
+    assert is_repo_snapshot_build_stale(record) is False
+
+
+def test_old_building_record_is_stale() -> None:
+    started = datetime.now(UTC) - timedelta(hours=7)
+    record = {"status": "building", "build_started_at": started.isoformat()}
+    assert is_repo_snapshot_build_stale(record) is True
+
+
+@pytest.mark.asyncio
+async def test_build_endpoint_blocks_non_stale_build() -> None:
+    record = {
+        "full_name": "acme/repo",
+        "status": "building",
+        "dockerfile": "FROM x",
+        "build_started_at": datetime.now(UTC).isoformat(),
+    }
+    with patch.object(routes, "get_repo_snapshot", new_callable=AsyncMock, return_value=record):
+        with pytest.raises(HTTPException) as exc:
+            await routes.api_build_repo_snapshot(
+                "acme/repo", BackgroundTasks(), _admin={"sub": "octo"}
+            )
+    assert exc.value.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_build_endpoint_allows_stale_build_retry() -> None:
+    stale_started = (datetime.now(UTC) - timedelta(hours=7)).isoformat()
+    stale = {
+        "full_name": "acme/repo",
+        "status": "building",
+        "dockerfile": "FROM x",
+        "build_started_at": stale_started,
+    }
+    building = {**stale, "build_started_at": datetime.now(UTC).isoformat()}
+    with (
+        patch.object(routes, "get_repo_snapshot", new_callable=AsyncMock, return_value=stale),
+        patch.object(
+            routes,
+            "mark_repo_snapshot_building",
+            new_callable=AsyncMock,
+            return_value=building,
+        ) as mark_building,
+    ):
+        result = await routes.api_build_repo_snapshot(
+            "acme/repo", BackgroundTasks(), _admin={"sub": "octo"}
+        )
+    assert result is building
+    mark_building.assert_awaited_once_with("acme/repo")
 
 
 @pytest.mark.asyncio

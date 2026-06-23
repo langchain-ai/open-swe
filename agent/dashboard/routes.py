@@ -68,6 +68,7 @@ from .repo_snapshots import (
     delete_repo_snapshot,
     generate_dockerfile_template,
     get_repo_snapshot,
+    is_repo_snapshot_build_stale,
     list_repo_snapshots,
     mark_repo_snapshot_building,
     run_snapshot_build,
@@ -640,7 +641,7 @@ async def api_build_repo_snapshot(
         raise HTTPException(404, "repo snapshot not found")
     if not (record.get("dockerfile") or "").strip():
         raise HTTPException(400, "dockerfile is empty")
-    if record.get("status") == "building":
+    if record.get("status") == "building" and not is_repo_snapshot_build_stale(record):
         raise HTTPException(409, "a build is already in progress")
     record = await mark_repo_snapshot_building(full_name)
     background_tasks.add_task(run_snapshot_build, full_name)

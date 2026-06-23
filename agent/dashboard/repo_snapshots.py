@@ -40,6 +40,7 @@ DEFAULT_BUILD_FS_CAPACITY_BYTES = 32 * 1024**3
 DEFAULT_BUILD_VCPUS = 2
 DEFAULT_BUILD_MEM_BYTES = 8 * 1024**3
 DEFAULT_BUILD_TIMEOUT_SECONDS = 30 * 60
+DEFAULT_STALE_BUILD_SECONDS = 6 * 60 * 60
 
 _MIN_FS_CAPACITY_BYTES = 1 * 1024**3
 _MAX_FS_CAPACITY_BYTES = 128 * 1024**3
@@ -50,13 +51,13 @@ _MAX_VCPUS = 16
 
 
 def _default_base_image() -> str:
-    """Base image used to seed generated Dockerfile templates.
-
-    Set ``REPO_SNAPSHOT_BASE_IMAGE`` to the deployment's published Open SWE
-    sandbox image so generated Dockerfiles extend a base that already has git,
-    gh, and the language toolchain the agent relies on.
-    """
-    return os.environ.get("REPO_SNAPSHOT_BASE_IMAGE", "").strip() or "python:3.12-slim"
+    """Base image used to seed generated Dockerfile templates."""
+    image = os.environ.get("REPO_SNAPSHOT_BASE_IMAGE", "").strip()
+    if not image:
+        raise RuntimeError(
+            "REPO_SNAPSHOT_BASE_IMAGE must be set to the published Open SWE sandbox image"
+        )
+    return image
 
 
 def generate_dockerfile_template(full_name: str) -> str:
@@ -141,6 +142,38 @@ def _now_iso() -> str:
     return datetime.now(UTC).isoformat()
 
 
+def _parse_iso(value: object) -> datetime | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
+
+
+def _stale_build_seconds() -> int:
+    raw = os.environ.get("REPO_SNAPSHOT_STALE_BUILD_SECONDS")
+    if not raw:
+        return DEFAULT_STALE_BUILD_SECONDS
+    try:
+        value = int(raw)
+    except ValueError:
+        return DEFAULT_STALE_BUILD_SECONDS
+    return max(value, 0)
+
+
+def is_repo_snapshot_build_stale(record: dict[str, Any]) -> bool:
+    if record.get("status") != "building":
+        return False
+    started_at = _parse_iso(record.get("build_started_at"))
+    if started_at is None:
+        return True
+    return (datetime.now(UTC) - started_at).total_seconds() > _stale_build_seconds()
+
+
 async def _get_value(key: str) -> dict[str, Any] | None:
     try:
         item = await _client().store.get_item(REPO_SNAPSHOTS_NAMESPACE, key)
@@ -170,6 +203,7 @@ def _default_record(full_name: str, created_by: str) -> dict[str, Any]:
         "mem_bytes": DEFAULT_BUILD_MEM_BYTES,
         "target": None,
         "build_args": None,
+        "build_started_at": None,
         "last_built_at": None,
         "created_by": created_by,
         "created_at": _now_iso(),
@@ -247,6 +281,7 @@ async def mark_repo_snapshot_building(full_name: str) -> dict[str, Any]:
         "status": "building",
         "status_message": None,
         "build_log": None,
+        "build_started_at": _now_iso(),
         "updated_at": _now_iso(),
     }
     await _client().store.put_item(REPO_SNAPSHOTS_NAMESPACE, full_name, value)
@@ -288,6 +323,8 @@ async def _set_status(
         "status_message": status_message,
         "updated_at": _now_iso(),
     }
+    if status != "building":
+        value["build_started_at"] = None
     if extra:
         value.update(extra)
     await _client().store.put_item(REPO_SNAPSHOTS_NAMESPACE, full_name, value)

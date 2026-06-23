@@ -331,6 +331,7 @@ export interface RepoSnapshot {
   mem_bytes?: number
   target?: string | null
   build_args?: Record<string, string> | null
+  build_started_at?: string | null
   last_built_at?: string | null
   created_by?: string
   created_at?: string
