@@ -24,6 +24,7 @@ import type { AgentThread, Message } from "@/lib/agents/types"
 import type { ThreadPrDiffFile } from "@/lib/agents/api"
 import type { ChangedFileSummaryItem } from "@/components/agents/messages"
 import { useAgentThreadPrDiff } from "@/lib/agents/queries"
+import { ReviewTab } from "@/components/agents/ReviewTab"
 import { buttonVariants } from "@/components/ui/button"
 import {
   DIFF_VIRTUALIZER_CONFIG,
@@ -554,7 +555,9 @@ export function AgentGitPanel({ thread, messages }: AgentGitPanelProps) {
             </div>
 
             <div className="flex min-h-0 flex-1">
-              {tab === "diff" && files.length > 0 ? (
+              {tab === "review" ? (
+                <ReviewTab thread={thread} />
+              ) : tab === "diff" && files.length > 0 ? (
                 <WorkerPoolContextProvider
                   poolOptions={DIFF_WORKER_POOL_OPTIONS}
                   highlighterOptions={DIFF_WORKER_HIGHLIGHTER_OPTIONS}
@@ -585,15 +588,18 @@ export function AgentGitPanel({ thread, messages }: AgentGitPanelProps) {
                 </div>
               )}
 
-              {fullScreen && !isMobile && files.length > 0 && (
-                <div className="w-72 shrink-0 border-l border-[var(--ui-border)] bg-[var(--ui-surface)]">
-                  <FileTreeExplorer
-                    files={files}
-                    selectedTreePath={selectedTreePath}
-                    onSelect={setSelectedTreePath}
-                  />
-                </div>
-              )}
+              {tab === "diff" &&
+                fullScreen &&
+                !isMobile &&
+                files.length > 0 && (
+                  <div className="w-72 shrink-0 border-l border-[var(--ui-border)] bg-[var(--ui-surface)]">
+                    <FileTreeExplorer
+                      files={files}
+                      selectedTreePath={selectedTreePath}
+                      onSelect={setSelectedTreePath}
+                    />
+                  </div>
+                )}
             </div>
           </>
         )}

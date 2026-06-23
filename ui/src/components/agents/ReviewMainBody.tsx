@@ -1,0 +1,1944 @@
+import { useMutation, useQueryClient } from "@tanstack/react-query"
+import {
+  createContext,
+  memo,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react"
+import {
+  ArrowClockwiseIcon,
+  ArrowSquareOutIcon,
+  BugBeetleIcon,
+  CaretDownIcon,
+  CheckCircleIcon,
+  CheckIcon,
+  CircleIcon,
+  CopyIcon,
+  FlagIcon,
+  GitPullRequestIcon,
+  InfoIcon,
+  RowsIcon,
+  SquareSplitHorizontalIcon,
+  XCircleIcon,
+} from "@phosphor-icons/react"
+import { IoLogoGithub } from "react-icons/io5"
+import {
+  MultiFileDiff,
+  Virtualizer,
+  WorkerPoolContextProvider,
+} from "@pierre/diffs/react"
+import type { FileContents } from "@pierre/diffs/react"
+import type {
+  FileDiff as CoreFileDiff,
+  DiffLineAnnotation,
+  SelectedLineRange,
+  SelectionSide,
+} from "@pierre/diffs"
+
+import type {
+  ReviewCheckRun,
+  ReviewDetail,
+  ReviewDiffFile,
+  ReviewFinding,
+  ReviewUserRef,
+} from "@/lib/api"
+import type {
+  ReviewSidebarGroup,
+  ReviewSidebarView,
+} from "@/components/agents/ReviewSidebar"
+import type { ChatAttachment } from "@/components/agents/ReviewChat"
+import type { DiffStyle } from "@/components/agents/utils/diffUtils"
+import { Markdown } from "@/components/agents/ported"
+import {
+  ReviewChat,
+  ReviewChatComposerProvider,
+  useReviewChatComposer,
+} from "@/components/agents/ReviewChat"
+import { ReviewSidebarPanel } from "@/components/agents/ReviewSidebar"
+import {
+  DIFF_VIRTUALIZER_CONFIG,
+  DIFF_VIRTUAL_METRICS,
+  DIFF_WORKER_HIGHLIGHTER_OPTIONS,
+  DIFF_WORKER_POOL_OPTIONS,
+  fileContentsCacheKey,
+  useDiffOptions,
+  warmDiffHighlighter,
+} from "@/components/agents/utils/diffUtils"
+import { Skeleton } from "@/components/ui/skeleton"
+import { api, reviewImageProxyUrl } from "@/lib/api"
+import { cn } from "@/lib/utils"
+
+type SideTab = "info" | "chat"
+
+const REVIEW_VIEW_STORAGE_KEY = "open-swe.review.view"
+const REVIEW_DIFF_STYLE_STORAGE_KEY = "open-swe.review.diffStyle"
+const FINDING_SCROLL_MAX_FRAMES = 120
+
+function readStoredDiffStyle(): DiffStyle {
+  if (typeof window === "undefined") return "unified"
+  return window.localStorage.getItem(REVIEW_DIFF_STYLE_STORAGE_KEY) === "split"
+    ? "split"
+    : "unified"
+}
+
+// One attachment for a single-side line range. Deletions resolve against the
+// original file, additions against the modified file.
+function makeSideAttachment(
+  file: ReviewDiffFile,
+  side: "deletions" | "additions",
+  fromLine: number,
+  toLine: number
+): ChatAttachment {
+  const source =
+    side === "deletions" ? file.originalContent : file.modifiedContent
+  const lines = source.split("\n")
+  const start = Math.max(1, Math.min(fromLine, toLine))
+  const end = Math.max(fromLine, toLine)
+  const snippet = lines.slice(start - 1, end).join("\n")
+  const sideLabel = side === "deletions" ? "L" : "R"
+  const lineLabel =
+    start === end ? `${sideLabel}${start}` : `${sideLabel}${start}-${end}`
+  const language = file.path.includes(".")
+    ? (file.path.split(".").pop() ?? "")
+    : ""
+  return {
+    id: crypto.randomUUID(),
+    path: file.path,
+    lineLabel,
+    language,
+    snippet,
+  }
+}
+
+// Build chat attachments from the selected range. A range can span from a
+// deletion to an addition (side !== endSide) when dragging across a replaced
+// block; slicing one file by start..end would paste the wrong lines, so each
+// side is collected separately.
+function buildSelectionAttachments(
+  file: ReviewDiffFile,
+  range: SelectedLineRange
+): Array<ChatAttachment> {
+  const startSide = range.side ?? "additions"
+  const endSide = range.endSide ?? startSide
+  if (startSide === endSide) {
+    return [makeSideAttachment(file, startSide, range.start, range.end)]
+  }
+  const deletionLine = startSide === "deletions" ? range.start : range.end
+  const additionLine = startSide === "additions" ? range.start : range.end
+  return [
+    makeSideAttachment(file, "deletions", deletionLine, deletionLine),
+    makeSideAttachment(file, "additions", additionLine, additionLine),
+  ]
+}
+
+// Scroll a file card / group flush to the top of the diff scroller. Under
+// virtualization, scrollIntoView computes its target against estimated row
+// heights; scrolling past unmeasured files reconciles their real heights
+// mid-animation and the Virtualizer re-pins its scroll anchor, which leaves the
+// target off the top. Once the smooth scroll settles, re-assert alignment (now
+// against measured heights) until the target sits at the top or the budget runs
+// out. Respects the element's scroll-margin-top.
+function scrollCardToTop(el: HTMLElement, scroller: HTMLElement | null): void {
+  el.scrollIntoView({ block: "start", behavior: "smooth" })
+  if (!scroller) return
+  let frames = 0
+  let lastTop = Number.NaN
+  let stableFrames = 0
+  let corrections = 0
+  const align = () => {
+    if (frames++ > 240) return
+    const top = scroller.scrollTop
+    if (top === lastTop) stableFrames++
+    else {
+      stableFrames = 0
+      lastTop = top
+    }
+    // Wait for the smooth scroll + height reconciliation to settle.
+    if (stableFrames < 3) {
+      requestAnimationFrame(align)
+      return
+    }
+    const marginTop = parseFloat(getComputedStyle(el).scrollMarginTop) || 0
+    const delta =
+      el.getBoundingClientRect().top -
+      scroller.getBoundingClientRect().top -
+      marginTop
+    if (Math.abs(delta) > 1 && corrections++ < 5) {
+      el.scrollIntoView({ block: "start", behavior: "smooth" })
+      stableFrames = 0
+      lastTop = Number.NaN
+      requestAnimationFrame(align)
+    }
+  }
+  requestAnimationFrame(align)
+}
+
+interface PositionedDiffInstance {
+  getLinePosition: (
+    lineNumber: number,
+    side?: SelectionSide
+  ) => { top: number; height: number } | undefined
+}
+
+interface RegisteredDiffInstance {
+  host: HTMLElement
+  instance: CoreFileDiff<ReviewFinding>
+}
+
+function hasLinePosition(
+  instance: CoreFileDiff<ReviewFinding>
+): instance is CoreFileDiff<ReviewFinding> & PositionedDiffInstance {
+  return (
+    typeof (instance as { getLinePosition?: unknown }).getLinePosition ===
+    "function"
+  )
+}
+
+function clampScrollTop(scroller: HTMLElement, top: number): number {
+  return Math.max(
+    0,
+    Math.min(top, scroller.scrollHeight - scroller.clientHeight)
+  )
+}
+
+function scrollElementToCenter(el: HTMLElement, scroller: HTMLElement): number {
+  const elementRect = el.getBoundingClientRect()
+  const scrollerRect = scroller.getBoundingClientRect()
+  const delta =
+    elementRect.top -
+    scrollerRect.top -
+    (scroller.clientHeight - elementRect.height) / 2
+  const targetTop = clampScrollTop(scroller, scroller.scrollTop + delta)
+  scroller.scrollTo({ top: targetTop, behavior: "auto" })
+  return Math.abs(delta)
+}
+
+function scrollFindingLineToCenter({
+  target,
+  finding,
+  scroller,
+}: {
+  target: RegisteredDiffInstance
+  finding: ReviewFinding
+  scroller: HTMLElement
+}): boolean {
+  if (finding.end_line === null || !hasLinePosition(target.instance))
+    return false
+  const line = target.instance.getLinePosition(
+    finding.end_line,
+    findingSide(finding)
+  )
+  if (!line) return false
+  const hostTop =
+    target.host.getBoundingClientRect().top -
+    scroller.getBoundingClientRect().top +
+    scroller.scrollTop
+  const targetTop = clampScrollTop(
+    scroller,
+    hostTop + line.top - (scroller.clientHeight - line.height) / 2
+  )
+  scroller.scrollTo({ top: targetTop, behavior: "auto" })
+  return true
+}
+
+interface ResolvedGroup {
+  index: number
+  title: string
+  summary: string
+  files: Array<ReviewDiffFile>
+  additions: number
+  deletions: number
+}
+
+const GROUP_STYLES = {
+  bug: { label: "Bug", className: "text-destructive", Icon: BugBeetleIcon },
+  investigate: {
+    label: "Investigate",
+    className: "text-amber-500",
+    Icon: FlagIcon,
+  },
+  informational: {
+    label: "Informational",
+    className: "text-muted-foreground",
+    Icon: InfoIcon,
+  },
+} as const
+
+function findingAnchorLabel(finding: ReviewFinding): string {
+  if (finding.start_line === null || finding.end_line === null)
+    return finding.file
+  if (finding.start_line === finding.end_line)
+    return `${finding.file}:${finding.end_line}`
+  return `${finding.file}:${finding.start_line}-${finding.end_line}`
+}
+
+function isAnchored(finding: ReviewFinding): boolean {
+  return Boolean(finding.file) && finding.in_diff && finding.end_line !== null
+}
+
+function findingSide(finding: ReviewFinding): "deletions" | "additions" {
+  return finding.side === "LEFT" ? "deletions" : "additions"
+}
+
+function findingSelectedRange(
+  finding: ReviewFinding
+): SelectedLineRange | null {
+  if (finding.end_line === null) return null
+  const side = findingSide(finding)
+  return {
+    start: finding.start_line ?? finding.end_line,
+    end: finding.end_line,
+    side,
+    endSide: side,
+  }
+}
+
+function findingClipboardText(finding: ReviewFinding): string {
+  const style = GROUP_STYLES[finding.group]
+  const lines = [
+    `**${style.label}: ${finding.title}**`,
+    `${findingAnchorLabel(finding)}`,
+    "",
+    finding.description,
+  ]
+  if (finding.suggestion)
+    lines.push("", "```suggestion", finding.suggestion, "```")
+  return lines.join("\n")
+}
+
+// Inline findings live inside Pierre's diff via React portals, so their
+// expand/collapse state is lifted here and shared through context — surviving
+// the annotation's mount/unmount as rows window in and out under
+// virtualization, and letting the side panel drive the same expansion.
+interface ExpandedFindingContextValue {
+  expandedId: string | null
+  reviewUrl: string
+  toggle: (finding: ReviewFinding) => void
+  registerAnnotation: (id: string, node: HTMLElement | null) => void
+}
+
+const ExpandedFindingContext =
+  createContext<ExpandedFindingContextValue | null>(null)
+
+function useExpandedFinding(): ExpandedFindingContextValue {
+  const ctx = useContext(ExpandedFindingContext)
+  if (!ctx)
+    throw new Error("useExpandedFinding must be used within its provider")
+  return ctx
+}
+
+const NO_FINDINGS: Array<ReviewFinding> = []
+
+interface UserSelection {
+  file: string
+  range: SelectedLineRange
+}
+
+export type ReviewMainBodyVariant = "full" | "embedded"
+
+export interface ReviewMainBodyProps {
+  detail: ReviewDetail
+  diffFiles: Array<ReviewDiffFile> | null
+  // "full" renders the side panel + chat alongside the diffs; "embedded" renders
+  // just the main body with an expand affordance (used inside the git panel).
+  variant?: ReviewMainBodyVariant
+  onExpand?: () => void
+}
+
+export function ReviewMainBody({
+  detail,
+  diffFiles,
+  variant = "full",
+  onExpand,
+}: ReviewMainBodyProps) {
+  // The composer provider lives here so it remounts in lockstep with the
+  // head_sha-keyed body (and the activeId-keyed chat thread). The embedded
+  // variant has no chat, so it skips the provider.
+  if (variant === "embedded") {
+    return (
+      <ReviewBodyInner
+        detail={detail}
+        diffFiles={diffFiles}
+        variant="embedded"
+        onExpand={onExpand}
+      />
+    )
+  }
+  return (
+    <ReviewChatComposerProvider>
+      <ReviewBodyInner detail={detail} diffFiles={diffFiles} variant="full" />
+    </ReviewChatComposerProvider>
+  )
+}
+
+function ReviewBodyInner({
+  detail,
+  diffFiles,
+  variant,
+  onExpand,
+}: {
+  detail: ReviewDetail
+  diffFiles: Array<ReviewDiffFile> | null
+  variant: ReviewMainBodyVariant
+  onExpand?: () => void
+}) {
+  const embedded = variant === "embedded"
+  const composer = useReviewChatComposer()
+  const transformPrImage = useCallback(
+    (src: string) =>
+      reviewImageProxyUrl(detail.owner, detail.repo, detail.number, src),
+    [detail.owner, detail.repo, detail.number]
+  )
+  const [sideTab, setSideTab] = useState<SideTab>("info")
+  const [selectedFile, setSelectedFile] = useState<string | null>(null)
+  const fileRefs = useRef<Record<string, HTMLDivElement | null>>({})
+  const diffInstanceRefs = useRef<
+    Record<string, RegisteredDiffInstance | undefined>
+  >({})
+  const annotationRefs = useRef<Record<string, HTMLElement | null>>({})
+  const [expandedFiles, setExpandedFiles] = useState<Record<string, boolean>>(
+    {}
+  )
+  const [expandedId, setExpandedId] = useState<string | null>(null)
+  const [userSelection, setUserSelection] = useState<UserSelection | null>(null)
+  const diffScrollElRef = useRef<HTMLDivElement | null>(null)
+  const findingScrollRequestRef = useRef(0)
+  const groupRefs = useRef<Record<number, HTMLDivElement | null>>({})
+  const [diffStyle, setDiffStyleState] = useState<DiffStyle>(() =>
+    readStoredDiffStyle()
+  )
+  const setDiffStyle = useCallback((next: DiffStyle) => {
+    setDiffStyleState(next)
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(REVIEW_DIFF_STYLE_STORAGE_KEY, next)
+    }
+  }, [])
+
+  useEffect(() => {
+    void warmDiffHighlighter()
+  }, [])
+
+  // Latest-value refs so the callbacks below can stay referentially stable
+  // (so memo(FileDiffCard) actually skips unrelated re-renders) while still
+  // reading current state.
+  const expandedFinding = useMemo(
+    () => detail.findings.find((f) => f.id === expandedId) ?? null,
+    [detail.findings, expandedId]
+  )
+  const expandedFindingRef = useRef(expandedFinding)
+  expandedFindingRef.current = expandedFinding
+
+  const viewedStorageKey = `open-swe.review.viewed.${detail.owner}/${detail.repo}/${detail.number}.${detail.head_sha}`
+  const [viewed, setViewed] = useState<Set<string>>(() => {
+    if (typeof window === "undefined") return new Set()
+    try {
+      const raw = window.localStorage.getItem(viewedStorageKey)
+      return new Set(raw ? (JSON.parse(raw) as Array<string>) : [])
+    } catch {
+      return new Set()
+    }
+  })
+  const viewedRef = useRef(viewed)
+  viewedRef.current = viewed
+  const expandedRef = useRef(expandedFiles)
+  expandedRef.current = expandedFiles
+
+  const toggleViewed = useCallback(
+    (path: string) => {
+      const becomingViewed = !viewedRef.current.has(path)
+      setViewed((prev) => {
+        const next = new Set(prev)
+        if (becomingViewed) next.add(path)
+        else next.delete(path)
+        window.localStorage.setItem(
+          viewedStorageKey,
+          JSON.stringify(Array.from(next))
+        )
+        return next
+      })
+      if (becomingViewed && expandedFindingRef.current?.file === path)
+        setExpandedId(null)
+      setExpandedFiles((prev) => ({ ...prev, [path]: !becomingViewed }))
+    },
+    [viewedStorageKey]
+  )
+
+  const readStorageKey = `open-swe.review.read.${detail.thread_id}`
+  const [read, setRead] = useState<Set<string>>(() => {
+    if (typeof window === "undefined") return new Set()
+    try {
+      const raw = window.localStorage.getItem(readStorageKey)
+      return new Set(raw ? (JSON.parse(raw) as Array<string>) : [])
+    } catch {
+      return new Set()
+    }
+  })
+  const persistRead = useCallback(
+    (next: Set<string>) => {
+      window.localStorage.setItem(
+        readStorageKey,
+        JSON.stringify(Array.from(next))
+      )
+    },
+    [readStorageKey]
+  )
+  const markRead = useCallback(
+    (id: string) => {
+      setRead((prev) => {
+        const next = new Set(prev).add(id)
+        persistRead(next)
+        return next
+      })
+    },
+    [persistRead]
+  )
+  const markAllRead = useCallback(() => {
+    const next = new Set(detail.findings.map((f) => f.id))
+    setRead(next)
+    persistRead(next)
+  }, [detail.findings, persistRead])
+
+  const findingsByFile = useMemo(() => {
+    const byFile = new Map<string, Array<ReviewFinding>>()
+    for (const finding of detail.findings) {
+      if (!isAnchored(finding)) continue
+      const list = byFile.get(finding.file) ?? []
+      list.push(finding)
+      byFile.set(finding.file, list)
+    }
+    return byFile
+  }, [detail.findings])
+
+  const linesLeft = useMemo(() => {
+    if (!diffFiles) return null
+    return diffFiles
+      .filter((file) => !viewed.has(file.path))
+      .reduce((acc, file) => acc + file.additions + file.deletions, 0)
+  }, [diffFiles, viewed])
+
+  // Resolve the AI-sorted groups against the actual diff: drop stale groups
+  // (generated for a previous head) so the file-tree fallback is used, drop
+  // paths no longer in the diff and empty groups, and collect any unassigned
+  // files into a trailing "Other changes" group so nothing ever disappears.
+  const groupedView = useMemo<Array<ResolvedGroup> | null>(() => {
+    if (
+      !diffFiles ||
+      detail.diff_groups_stale ||
+      detail.diff_groups.length === 0
+    )
+      return null
+    const byPath = new Map(diffFiles.map((file) => [file.path, file]))
+    const assigned = new Set<string>()
+    const resolved: Array<Omit<ResolvedGroup, "index">> = []
+    for (const group of detail.diff_groups) {
+      const files: Array<ReviewDiffFile> = []
+      for (const path of group.files) {
+        const file = byPath.get(path)
+        if (file && !assigned.has(path)) {
+          assigned.add(path)
+          files.push(file)
+        }
+      }
+      if (files.length === 0) continue
+      resolved.push({
+        title: group.title,
+        summary: group.summary,
+        files,
+        additions: files.reduce((acc, file) => acc + file.additions, 0),
+        deletions: files.reduce((acc, file) => acc + file.deletions, 0),
+      })
+    }
+    const leftover = diffFiles.filter((file) => !assigned.has(file.path))
+    if (leftover.length > 0) {
+      resolved.push({
+        title: "Other changes",
+        summary: "",
+        files: leftover,
+        additions: leftover.reduce((acc, file) => acc + file.additions, 0),
+        deletions: leftover.reduce((acc, file) => acc + file.deletions, 0),
+      })
+    }
+    if (resolved.length === 0) return null
+    return resolved.map((group, i) => ({ ...group, index: i + 1 }))
+  }, [diffFiles, detail.diff_groups, detail.diff_groups_stale])
+
+  const sidebarGroups = useMemo<Array<ReviewSidebarGroup> | null>(() => {
+    if (!groupedView) return null
+    return groupedView.map((group) => ({
+      index: group.index,
+      title: group.title,
+      summary: group.summary,
+      additions: group.additions,
+      deletions: group.deletions,
+      fileCount: group.files.length,
+      files: group.files.map((file) => file.path),
+    }))
+  }, [groupedView])
+
+  // The view follows fresh-group availability until the user explicitly picks
+  // one, after which the choice persists across PRs.
+  const hasFreshGroups =
+    detail.diff_groups.length > 0 && !detail.diff_groups_stale
+  const [explicitView, setExplicitView] = useState<ReviewSidebarView | null>(
+    () => {
+      if (typeof window === "undefined") return null
+      const stored = window.localStorage.getItem(REVIEW_VIEW_STORAGE_KEY)
+      return stored === "ai" || stored === "files" ? stored : null
+    }
+  )
+  const view: ReviewSidebarView =
+    explicitView ?? (hasFreshGroups ? "ai" : "files")
+  const setView = useCallback((next: ReviewSidebarView) => {
+    setExplicitView(next)
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(REVIEW_VIEW_STORAGE_KEY, next)
+    }
+  }, [])
+
+  const scrollToFile = useCallback((path: string) => {
+    setSelectedFile(path)
+    setExpandedFiles((prev) => ({ ...prev, [path]: true }))
+    requestAnimationFrame(() => {
+      const el = fileRefs.current[path]
+      if (el) scrollCardToTop(el, diffScrollElRef.current)
+    })
+  }, [])
+
+  const scrollToGroup = useCallback((index: number) => {
+    requestAnimationFrame(() => {
+      const el = groupRefs.current[index]
+      if (el) scrollCardToTop(el, diffScrollElRef.current)
+    })
+  }, [])
+
+  const filesByPath = useMemo(
+    () => new Map((diffFiles ?? []).map((file) => [file.path, file])),
+    [diffFiles]
+  )
+  const filesByPathRef = useRef(filesByPath)
+  filesByPathRef.current = filesByPath
+
+  // The Virtualizer doesn't forward a ref; grab its scroll element (the
+  // grandparent of this hidden probe, which lives in its content div) so
+  // scroll-to-file/group can align against it.
+  const scrollerProbe = useCallback((node: HTMLDivElement | null) => {
+    const scroller = node?.parentElement?.parentElement
+    diffScrollElRef.current =
+      scroller instanceof HTMLDivElement ? scroller : null
+  }, [])
+
+  const registerSection = useCallback(
+    (path: string, node: HTMLDivElement | null) => {
+      fileRefs.current[path] = node
+    },
+    []
+  )
+  const registerAnnotation = useCallback(
+    (id: string, node: HTMLElement | null) => {
+      annotationRefs.current[id] = node
+    },
+    []
+  )
+  const registerDiffInstance = useCallback(
+    (path: string, target: RegisteredDiffInstance | null) => {
+      if (target) diffInstanceRefs.current[path] = target
+      else delete diffInstanceRefs.current[path]
+    },
+    []
+  )
+
+  const toggleExpanded = useCallback((path: string) => {
+    const current = expandedRef.current[path] ?? !viewedRef.current.has(path)
+    const next = !current
+    if (!next && expandedFindingRef.current?.file === path) setExpandedId(null)
+    setExpandedFiles((prev) => ({ ...prev, [path]: next }))
+  }, [])
+
+  const selectLines = useCallback(
+    (path: string, range: SelectedLineRange | null) => {
+      if (range) {
+        setUserSelection({ file: path, range })
+        if (expandedFindingRef.current) setExpandedId(null)
+      } else {
+        setUserSelection((prev) => (prev?.file === path ? null : prev))
+      }
+    },
+    []
+  )
+
+  const addToChat = useCallback(
+    (path: string, range: SelectedLineRange) => {
+      const file = filesByPathRef.current.get(path)
+      if (!file) return
+      for (const attachment of buildSelectionAttachments(file, range)) {
+        composer?.addAttachment(attachment)
+      }
+      setSideTab("chat")
+      setUserSelection(null)
+    },
+    [composer]
+  )
+
+  // ⌘L / Ctrl+L adds the current line selection to the chat (Cursor-style).
+  const userSelectionRef = useRef(userSelection)
+  userSelectionRef.current = userSelection
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "l") {
+        const sel = userSelectionRef.current
+        if (sel) {
+          event.preventDefault()
+          addToChat(sel.file, sel.range)
+        }
+      }
+    }
+    window.addEventListener("keydown", onKeyDown)
+    return () => window.removeEventListener("keydown", onKeyDown)
+  }, [addToChat])
+
+  // Clicking away from the highlighted rows clears the selection. A pointer-down
+  // that begins a fresh selection clears here first, then the new drag repaints.
+  // Reads the ref so the listener is registered once (no churn during a drag).
+  useEffect(() => {
+    const onPointerDown = (event: PointerEvent) => {
+      if (!userSelectionRef.current) return
+      const target = event.target
+      if (target instanceof Element && target.closest("[data-add-to-chat]"))
+        return
+      setUserSelection(null)
+    }
+    window.addEventListener("pointerdown", onPointerDown)
+    return () => window.removeEventListener("pointerdown", onPointerDown)
+  }, [])
+
+  // Toggle a finding from its in-diff header — it's already on-screen, so no
+  // scrolling is needed.
+  const toggleInline = useCallback(
+    (finding: ReviewFinding) => {
+      markRead(finding.id)
+      setExpandedId((prev) => (prev === finding.id ? null : finding.id))
+    },
+    [markRead]
+  )
+
+  // Open a finding from the side panel. Anchored findings expand inline in the
+  // diff: open the file, scroll it into view, then poll a few frames for the
+  // annotation node (its diff rows window in/out under virtualization) and
+  // scroll that into view. Non-anchored findings expand inline in the panel.
+  const openFromPanel = useCallback(
+    (finding: ReviewFinding) => {
+      markRead(finding.id)
+      const willExpand = expandedFindingRef.current?.id !== finding.id
+      const requestId = ++findingScrollRequestRef.current
+      setUserSelection(null)
+      setExpandedId(willExpand ? finding.id : null)
+      if (!willExpand || !isAnchored(finding)) return
+      setSelectedFile(finding.file)
+      setExpandedFiles((prev) => ({ ...prev, [finding.file]: true }))
+      let frames = 0
+      let lineScrollDone = false
+      const snap = () => {
+        if (requestId !== findingScrollRequestRef.current) return
+        const scroller = diffScrollElRef.current
+        if (!scroller) return
+
+        const annotation = annotationRefs.current[finding.id]
+        if (annotation?.isConnected && annotation.getClientRects().length > 0) {
+          const delta = scrollElementToCenter(annotation, scroller)
+          if (delta <= 1 || frames >= FINDING_SCROLL_MAX_FRAMES) return
+          frames += 1
+          requestAnimationFrame(snap)
+          return
+        }
+
+        const diffTarget = diffInstanceRefs.current[finding.file]
+        if (diffTarget) {
+          lineScrollDone = scrollFindingLineToCenter({
+            target: diffTarget,
+            finding,
+            scroller,
+          })
+        } else if (!lineScrollDone) {
+          const fileNode = fileRefs.current[finding.file]
+          if (fileNode) scrollElementToCenter(fileNode, scroller)
+        }
+
+        if (frames++ < FINDING_SCROLL_MAX_FRAMES) requestAnimationFrame(snap)
+      }
+      requestAnimationFrame(snap)
+    },
+    [markRead]
+  )
+
+  const renderFileCard = (file: ReviewDiffFile) => {
+    const selectedLines =
+      expandedFinding?.file === file.path && isAnchored(expandedFinding)
+        ? findingSelectedRange(expandedFinding)
+        : userSelection?.file === file.path
+          ? userSelection.range
+          : null
+    return (
+      <FileDiffCard
+        key={file.path}
+        file={file}
+        findings={findingsByFile.get(file.path) ?? NO_FINDINGS}
+        selectedLines={selectedLines}
+        viewed={viewed.has(file.path)}
+        onToggleViewed={toggleViewed}
+        expanded={expandedFiles[file.path] ?? !viewed.has(file.path)}
+        onToggleExpanded={toggleExpanded}
+        onSelectLines={selectLines}
+        onAddToChat={embedded ? undefined : addToChat}
+        registerSection={registerSection}
+        registerDiffInstance={registerDiffInstance}
+        diffStyle={diffStyle}
+      />
+    )
+  }
+
+  const sidebarData = useMemo(
+    () => ({
+      title: `PR #${detail.number}`,
+      files: diffFiles,
+      selected: selectedFile,
+      viewed,
+      onSelect: scrollToFile,
+      groups: sidebarGroups,
+      view,
+      onViewChange: setView,
+      onSelectGroup: scrollToGroup,
+    }),
+    [
+      detail.number,
+      diffFiles,
+      selectedFile,
+      viewed,
+      scrollToFile,
+      sidebarGroups,
+      view,
+      setView,
+      scrollToGroup,
+    ]
+  )
+
+  useEffect(() => {
+    if (!expandedId) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setExpandedId(null)
+    }
+    window.addEventListener("keydown", onKeyDown)
+    return () => window.removeEventListener("keydown", onKeyDown)
+  }, [expandedId])
+
+  const expandedFindingCtx = useMemo<ExpandedFindingContextValue>(
+    () => ({
+      expandedId,
+      reviewUrl: detail.url,
+      toggle: toggleInline,
+      registerAnnotation,
+    }),
+    [expandedId, detail.url, toggleInline, registerAnnotation]
+  )
+
+  return (
+    <ExpandedFindingContext.Provider value={expandedFindingCtx}>
+      <div className="flex min-h-0 flex-1 overflow-hidden">
+        <main className="relative flex min-h-0 min-w-0 flex-1">
+          {!embedded && (
+            <div className="hidden w-72 shrink-0 flex-col border-r border-border bg-[var(--ui-sidebar)] lg:flex">
+              <ReviewSidebarPanel data={sidebarData} />
+            </div>
+          )}
+          <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+            {embedded && (
+              <div className="flex h-9 shrink-0 items-center justify-end border-b border-border px-3">
+                <button
+                  type="button"
+                  onClick={onExpand}
+                  className="inline-flex items-center gap-1.5 rounded-md border border-border px-2 py-1 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
+                >
+                  <ArrowSquareOutIcon className="size-3" />
+                  Open full review
+                </button>
+              </div>
+            )}
+            <WorkerPoolContextProvider
+              poolOptions={DIFF_WORKER_POOL_OPTIONS}
+              highlighterOptions={DIFF_WORKER_HIGHLIGHTER_OPTIONS}
+            >
+              <Virtualizer
+                className="relative min-h-0 flex-1 overflow-y-auto"
+                contentClassName="mx-auto w-full max-w-6xl px-6 py-6"
+                config={DIFF_VIRTUALIZER_CONFIG}
+              >
+                <div ref={scrollerProbe} aria-hidden className="hidden" />
+                <PrHeader detail={detail} />
+                <div className="mt-4 rounded-lg border border-border bg-card p-4">
+                  {detail.pr.body ? (
+                    <Markdown
+                      content={detail.pr.body}
+                      transformImageUrl={transformPrImage}
+                    />
+                  ) : (
+                    <p className="text-xs text-muted-foreground">
+                      This PR has no description.
+                    </p>
+                  )}
+                </div>
+
+                <div className="mt-6">
+                  <div className="mb-2 flex items-center justify-between gap-3">
+                    <h2 className="text-sm font-medium">Changes</h2>
+                    <div className="flex items-center gap-3">
+                      {linesLeft !== null && (
+                        <span className="text-xs text-muted-foreground">
+                          {linesLeft === 0
+                            ? "All lines reviewed"
+                            : `${linesLeft} lines left`}
+                        </span>
+                      )}
+                      {diffFiles && diffFiles.length > 0 && (
+                        <DiffStyleToggle
+                          value={diffStyle}
+                          onChange={setDiffStyle}
+                        />
+                      )}
+                    </div>
+                  </div>
+                  {!diffFiles ? (
+                    <Skeleton className="h-64 w-full" />
+                  ) : diffFiles.length === 0 ? (
+                    <p className="text-xs text-muted-foreground">
+                      No diff available.
+                    </p>
+                  ) : view === "ai" && groupedView ? (
+                    <div className="space-y-6">
+                      {groupedView.map((group) => (
+                        <div
+                          key={group.index}
+                          ref={(node) => {
+                            groupRefs.current[group.index] = node
+                          }}
+                          className="scroll-mt-4 space-y-3"
+                        >
+                          <GroupHeader group={group} />
+                          {group.files.map(renderFileCard)}
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {diffFiles.map(renderFileCard)}
+                    </div>
+                  )}
+                </div>
+              </Virtualizer>
+            </WorkerPoolContextProvider>
+          </div>
+        </main>
+
+        {!embedded && (
+          <SidePanel
+            detail={detail}
+            tab={sideTab}
+            onTabChange={setSideTab}
+            read={read}
+            expandedId={expandedId}
+            onMarkAllRead={markAllRead}
+            onFindingClick={openFromPanel}
+          />
+        )}
+      </div>
+    </ExpandedFindingContext.Provider>
+  )
+}
+
+function DiffStyleToggle({
+  value,
+  onChange,
+}: {
+  value: DiffStyle
+  onChange: (value: DiffStyle) => void
+}) {
+  return (
+    <div className="flex items-center gap-0.5 rounded-md border border-border p-0.5">
+      <DiffStyleButton
+        active={value === "unified"}
+        label="Unified view"
+        onClick={() => onChange("unified")}
+      >
+        <RowsIcon className="size-3.5" />
+      </DiffStyleButton>
+      <DiffStyleButton
+        active={value === "split"}
+        label="Split view"
+        onClick={() => onChange("split")}
+      >
+        <SquareSplitHorizontalIcon className="size-3.5" />
+      </DiffStyleButton>
+    </div>
+  )
+}
+
+function DiffStyleButton({
+  active,
+  label,
+  onClick,
+  children,
+}: {
+  active: boolean
+  label: string
+  onClick: () => void
+  children: React.ReactNode
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={label}
+      aria-pressed={active}
+      title={label}
+      className={cn(
+        "flex size-5 items-center justify-center rounded text-muted-foreground transition-colors",
+        active ? "bg-muted text-foreground" : "hover:text-foreground"
+      )}
+    >
+      {children}
+    </button>
+  )
+}
+
+function PrHeader({ detail }: { detail: ReviewDetail }) {
+  const { pr } = detail
+  const stateStyles: Record<string, string> = {
+    open: "border-emerald-600/40 text-emerald-500",
+    draft: "border-border text-muted-foreground",
+    merged: "border-purple-600/40 text-purple-500",
+    closed: "border-red-600/40 text-red-500",
+  }
+  return (
+    <div>
+      <span
+        className={cn(
+          "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] capitalize",
+          stateStyles[pr.state] ?? stateStyles.open
+        )}
+      >
+        <GitPullRequestIcon className="size-3" />
+        {pr.state}
+      </span>
+      <h1 className="mt-2 text-base font-medium">
+        <a
+          href={detail.url}
+          target="_blank"
+          rel="noreferrer"
+          className="hover:underline"
+        >
+          {pr.title}
+        </a>
+      </h1>
+      <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+        {pr.author && (
+          <span className="font-medium text-foreground">{pr.author.login}</span>
+        )}
+        <span className="rounded border border-border px-1.5 py-0.5 font-mono text-[11px]">
+          {pr.base_ref}
+        </span>
+        <span>←</span>
+        <span className="rounded border border-border px-1.5 py-0.5 font-mono text-[11px]">
+          {pr.head_ref}
+        </span>
+        <span>
+          {pr.changed_files} file{pr.changed_files === 1 ? "" : "s"}
+        </span>
+        <span className="text-emerald-500">+{pr.additions}</span>
+        <span className="text-red-500">-{pr.deletions}</span>
+      </div>
+    </div>
+  )
+}
+
+function GroupHeader({ group }: { group: ResolvedGroup }) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="flex size-5 shrink-0 items-center justify-center rounded bg-[var(--ui-panel-2)] text-[11px] font-medium text-muted-foreground">
+        {group.index}
+      </span>
+      <h3 className="min-w-0 truncate text-sm font-medium">{group.title}</h3>
+      <span className="flex shrink-0 items-center gap-1.5 font-mono text-[11px]">
+        {group.additions > 0 && (
+          <span className="text-emerald-500">+{group.additions}</span>
+        )}
+        {group.deletions > 0 && (
+          <span className="text-red-500">-{group.deletions}</span>
+        )}
+      </span>
+    </div>
+  )
+}
+
+const FileDiffCard = memo(function FileDiffCard({
+  file,
+  findings,
+  selectedLines,
+  viewed,
+  onToggleViewed,
+  expanded,
+  onToggleExpanded,
+  onSelectLines,
+  onAddToChat,
+  registerSection,
+  registerDiffInstance,
+  diffStyle,
+}: {
+  file: ReviewDiffFile
+  findings: Array<ReviewFinding>
+  selectedLines: SelectedLineRange | null
+  viewed: boolean
+  onToggleViewed: (path: string) => void
+  expanded: boolean
+  onToggleExpanded: (path: string) => void
+  onSelectLines: (path: string, range: SelectedLineRange | null) => void
+  onAddToChat?: (path: string, range: SelectedLineRange) => void
+  registerSection: (path: string, node: HTMLDivElement | null) => void
+  registerDiffInstance: (
+    path: string,
+    target: RegisteredDiffInstance | null
+  ) => void
+  diffStyle: DiffStyle
+}) {
+  // No chat means no line-selection → "Add to Chat" affordance (embedded view).
+  const selectable = Boolean(onAddToChat)
+  const diffOptions = useDiffOptions(diffStyle)
+  const diffWrapperRef = useRef<HTMLDivElement | null>(null)
+  const lastPointerRef = useRef<{ x: number; y: number } | null>(null)
+  const [popup, setPopup] = useState<{
+    range: SelectedLineRange
+    x: number
+    y: number
+  } | null>(null)
+
+  const lineAnnotations = useMemo<Array<DiffLineAnnotation<ReviewFinding>>>(
+    () =>
+      findings
+        .filter((finding) => finding.end_line !== null)
+        .map((finding) => ({
+          side: findingSide(finding),
+          lineNumber: finding.end_line as number,
+          metadata: finding,
+        })),
+    [findings]
+  )
+
+  // Native line selection plus the visible gutter "+" handle you can click and
+  // drag to select a range. onLineSelectionChange fires on every drag move; we
+  // push it into the controlled selection so the rows highlight live as you
+  // drag (in controlled mode Pierre only paints when the prop updates). The
+  // "Add to Chat" popup is shown on onLineSelectionEnd (release only); ⌘L
+  // (handled in ReviewBody) adds without it. onGutterUtilityClick must be
+  // non-null for Pierre to turn the "+" into a drag selector.
+  const cardOptions = useMemo(
+    () => ({
+      ...diffOptions,
+      enableLineSelection: selectable,
+      enableGutterUtility: selectable,
+      onGutterUtilityClick: selectable ? () => undefined : undefined,
+      onLineSelectionChange: (range: SelectedLineRange | null) =>
+        onSelectLines(file.path, range),
+      onLineSelectionEnd: (range: SelectedLineRange | null) => {
+        onSelectLines(file.path, range)
+        if (!range) {
+          setPopup(null)
+          return
+        }
+        // Anchor to the gutter "+" handle Pierre places on the selection's
+        // bottom line (inside the diff's shadow DOM) — a stable position,
+        // unlike the pointer-release point. Fall back to the pointer.
+        const host = diffWrapperRef.current?.querySelector("diffs-container")
+        const handle = host?.shadowRoot?.querySelector(
+          "[data-gutter-utility-slot]"
+        )
+        const rect =
+          handle instanceof HTMLElement ? handle.getBoundingClientRect() : null
+        const pointer = lastPointerRef.current
+        if (rect) setPopup({ range, x: rect.left, y: rect.top })
+        else if (pointer) setPopup({ range, x: pointer.x, y: pointer.y })
+        else setPopup(null)
+      },
+      onPostRender: (
+        node: HTMLElement,
+        instance: CoreFileDiff<ReviewFinding>
+      ) => registerDiffInstance(file.path, { host: node, instance }),
+    }),
+    [diffOptions, selectable, file.path, onSelectLines, registerDiffInstance]
+  )
+
+  const addPopupToChat = useCallback(() => {
+    if (popup) onAddToChat?.(file.path, popup.range)
+    setPopup(null)
+  }, [popup, onAddToChat, file.path])
+
+  // Drop the popup once the selection clears (e.g. added via ⌘L, or a finding
+  // took focus) so it can't add the same range twice.
+  useEffect(() => {
+    if (!selectedLines) setPopup(null)
+  }, [selectedLines])
+
+  const oldFile = useMemo<FileContents>(
+    () => ({
+      name: file.path,
+      contents: file.originalContent,
+      cacheKey: fileContentsCacheKey(file.path, "old", file.originalContent),
+    }),
+    [file.path, file.originalContent]
+  )
+  const newFile = useMemo<FileContents>(
+    () => ({
+      name: file.path,
+      contents: file.modifiedContent,
+      cacheKey: fileContentsCacheKey(file.path, "new", file.modifiedContent),
+    }),
+    [file.path, file.modifiedContent]
+  )
+
+  const sectionRef = useCallback(
+    (node: HTMLDivElement | null) => registerSection(file.path, node),
+    [registerSection, file.path]
+  )
+  useEffect(
+    () => () => registerDiffInstance(file.path, null),
+    [file.path, registerDiffInstance]
+  )
+  const renderAnnotation = useCallback(
+    (annotation: DiffLineAnnotation<ReviewFinding>) => (
+      <InlineFinding finding={annotation.metadata} />
+    ),
+    []
+  )
+
+  return (
+    <div
+      ref={sectionRef}
+      className="scroll-mt-4 overflow-hidden rounded-lg border border-[var(--ui-border)]"
+    >
+      <div className="flex items-center gap-2 bg-[var(--ui-panel-2)] px-3 py-2 text-xs">
+        <button
+          type="button"
+          onClick={() => onToggleExpanded(file.path)}
+          className="inline-flex items-center gap-2 text-left"
+        >
+          <CaretDownIcon
+            className={cn(
+              "size-3 transition-transform",
+              !expanded && "-rotate-90"
+            )}
+          />
+          <span className="font-mono font-medium">{file.path}</span>
+        </button>
+        <span className="flex items-center gap-1.5 font-mono text-[11px]">
+          <span className="text-emerald-500">+{file.additions}</span>
+          <span className="text-red-500">-{file.deletions}</span>
+        </span>
+        {findings.length > 0 && (
+          <span className="inline-flex items-center gap-1 text-[11px] text-amber-500">
+            <FlagIcon className="size-3" />
+            {findings.length}
+          </span>
+        )}
+        <label className="ml-auto inline-flex cursor-pointer items-center gap-1.5 text-[11px] text-muted-foreground">
+          Mark as viewed
+          <button
+            type="button"
+            role="checkbox"
+            aria-checked={viewed}
+            onClick={() => onToggleViewed(file.path)}
+            className={cn(
+              "flex size-4 items-center justify-center rounded border border-border",
+              viewed && "bg-foreground text-background"
+            )}
+          >
+            {viewed && <CheckIcon className="size-3" />}
+          </button>
+        </label>
+      </div>
+      {expanded &&
+        (file.unrenderable ? (
+          <div className="bg-[var(--ui-panel)] p-4 text-center text-xs text-[var(--ui-text-dim)]">
+            Binary or large file — diff not shown.
+          </div>
+        ) : (
+          <div
+            ref={diffWrapperRef}
+            onPointerUpCapture={(event) => {
+              lastPointerRef.current = { x: event.clientX, y: event.clientY }
+            }}
+            className="overflow-x-auto bg-[var(--ui-panel)] font-mono text-[11px] leading-5"
+          >
+            <MultiFileDiff<ReviewFinding>
+              oldFile={oldFile}
+              newFile={newFile}
+              options={cardOptions}
+              metrics={DIFF_VIRTUAL_METRICS}
+              lineAnnotations={lineAnnotations}
+              selectedLines={selectedLines}
+              renderAnnotation={renderAnnotation}
+            />
+            {popup && (
+              <AddToChatPopup
+                x={popup.x}
+                y={popup.y}
+                onAdd={addPopupToChat}
+                onDismiss={() => setPopup(null)}
+              />
+            )}
+          </div>
+        ))}
+    </div>
+  )
+})
+
+function AddToChatPopup({
+  x,
+  y,
+  onAdd,
+  onDismiss,
+}: {
+  x: number
+  y: number
+  onAdd: () => void
+  onDismiss: () => void
+}) {
+  // Positioned fixed at the pointer-release point so it escapes the diff's
+  // overflow clipping. Dismiss on Escape, scroll, or any outside pointer-down.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onDismiss()
+    }
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target
+      if (target instanceof Element && target.closest("[data-add-to-chat]"))
+        return
+      onDismiss()
+    }
+    window.addEventListener("keydown", onKeyDown)
+    window.addEventListener("pointerdown", onPointerDown)
+    // Capture so it also catches scrolls from the diff scroll container.
+    window.addEventListener("scroll", onDismiss, true)
+    return () => {
+      window.removeEventListener("keydown", onKeyDown)
+      window.removeEventListener("pointerdown", onPointerDown)
+      window.removeEventListener("scroll", onDismiss, true)
+    }
+  }, [onDismiss])
+
+  return (
+    <div
+      data-add-to-chat
+      style={{ position: "fixed", top: y, left: x }}
+      className="z-50 -translate-y-[calc(100%+4px)] font-sans"
+    >
+      <button
+        type="button"
+        onClick={onAdd}
+        className="inline-flex items-center gap-1.5 rounded-md border border-border bg-popover px-2 py-1 text-[11px] font-medium text-popover-foreground shadow-md hover:bg-muted"
+      >
+        Add to Chat
+        <kbd className="rounded border border-border px-1 text-[10px] text-muted-foreground">
+          ⌘L
+        </kbd>
+      </button>
+    </div>
+  )
+}
+
+// The finding rendered inline in the diff (via Pierre's annotation portal). A
+// collapsed header sits at the line; clicking it expands the full details in
+// place. Expand state is shared through context so it survives the annotation
+// remounting as rows window in/out, and so the side panel can drive it.
+function InlineFinding({ finding }: { finding: ReviewFinding }) {
+  const { expandedId, reviewUrl, toggle, registerAnnotation } =
+    useExpandedFinding()
+  const expanded = expandedId === finding.id
+  const style = GROUP_STYLES[finding.group]
+  const Icon = style.Icon
+  return (
+    <div
+      ref={(node) => registerAnnotation(finding.id, node)}
+      className="px-2 py-1 font-sans"
+    >
+      <div className="overflow-hidden rounded-md border border-[var(--ui-border)] bg-[var(--ui-surface)]">
+        <button
+          type="button"
+          onClick={() => toggle(finding)}
+          aria-expanded={expanded}
+          aria-label={`${expanded ? "Collapse" : "Expand"} finding: ${finding.title}`}
+          className="flex w-full items-center gap-1.5 px-2 py-1 text-left text-[11px]"
+        >
+          <Icon className={cn("size-3 shrink-0", style.className)} />
+          <span className={cn("font-medium", style.className)}>
+            {style.label}
+          </span>
+          <span className="min-w-0 flex-1 truncate text-foreground">
+            {finding.title}
+          </span>
+          {finding.outdated && <Badgeish>Outdated</Badgeish>}
+          {finding.status !== "open" && <Badgeish>{finding.status}</Badgeish>}
+          <CaretDownIcon
+            className={cn(
+              "size-3 shrink-0 text-muted-foreground transition-transform",
+              !expanded && "-rotate-90"
+            )}
+          />
+        </button>
+        {expanded && <FindingDetails finding={finding} reviewUrl={reviewUrl} />}
+      </div>
+    </div>
+  )
+}
+
+// The expandable body + actions of a finding, shared by the inline diff
+// annotation and the side-panel row (non-anchored findings).
+function FindingDetails({
+  finding,
+  reviewUrl,
+}: {
+  finding: ReviewFinding
+  reviewUrl: string
+}) {
+  const [copied, setCopied] = useState(false)
+  const githubUrl =
+    finding.github_review_comment_id !== null
+      ? `${reviewUrl}#discussion_r${finding.github_review_comment_id}`
+      : null
+
+  const copy = () => {
+    void navigator.clipboard
+      .writeText(findingClipboardText(finding))
+      .then(() => {
+        setCopied(true)
+        window.setTimeout(() => setCopied(false), 1500)
+      })
+  }
+
+  return (
+    <div className="border-t border-[var(--ui-border)] px-3 py-2.5 font-sans">
+      <div className="text-xs text-muted-foreground">
+        <Markdown content={finding.description} />
+      </div>
+      {finding.resolution_note && (
+        <p className="mt-2 text-[11px] text-muted-foreground">
+          Resolution: {finding.resolution_note}
+        </p>
+      )}
+      <div className="mt-2.5 flex items-center gap-2">
+        <button
+          type="button"
+          onClick={copy}
+          className="inline-flex items-center gap-1.5 rounded border border-border px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground"
+        >
+          <CopyIcon className="size-3" />
+          {copied ? "Copied" : "Copy"}
+        </button>
+        {githubUrl && (
+          <a
+            href={githubUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-1.5 rounded border border-border px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground"
+          >
+            <IoLogoGithub className="size-3" />
+            View on GitHub
+          </a>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function Badgeish({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="rounded border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground capitalize">
+      {children}
+    </span>
+  )
+}
+
+const REVIEW_PANEL_STORAGE_WIDTH = "open-swe.review-panel.width"
+const REVIEW_PANEL_DEFAULT_WIDTH = 420
+const REVIEW_PANEL_MIN_WIDTH = 360
+// Keep at least this much room for the PR content column so the panel can grow
+// wide without squeezing the diff/description below a usable width.
+const REVIEW_PANEL_MIN_MAIN_WIDTH = 480
+
+function reviewPanelMaxWidth(availableWidth?: number): number {
+  if (typeof window === "undefined") return REVIEW_PANEL_DEFAULT_WIDTH
+  const available = availableWidth ?? window.innerWidth
+  return Math.max(
+    REVIEW_PANEL_MIN_WIDTH,
+    available - REVIEW_PANEL_MIN_MAIN_WIDTH
+  )
+}
+
+function clampReviewPanelWidth(width: number, availableWidth?: number): number {
+  return Math.min(
+    reviewPanelMaxWidth(availableWidth),
+    Math.max(REVIEW_PANEL_MIN_WIDTH, width)
+  )
+}
+
+function readStoredReviewPanelWidth(): number {
+  if (typeof window === "undefined") return REVIEW_PANEL_DEFAULT_WIDTH
+  const raw = window.localStorage.getItem(REVIEW_PANEL_STORAGE_WIDTH)
+  const parsed = raw ? Number(raw) : NaN
+  if (!Number.isFinite(parsed)) return REVIEW_PANEL_DEFAULT_WIDTH
+  return clampReviewPanelWidth(parsed)
+}
+
+function ReviewPanelResizeHandle({
+  width,
+  onResize,
+}: {
+  width: number
+  onResize: (next: number) => void
+}) {
+  const startRef = useRef<{ x: number; width: number } | null>(null)
+  const [dragging, setDragging] = useState(false)
+
+  const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    startRef.current = { x: e.clientX, width }
+    setDragging(true)
+    e.currentTarget.setPointerCapture(e.pointerId)
+  }
+
+  const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!startRef.current) return
+    onResize(startRef.current.width - (e.clientX - startRef.current.x))
+  }
+
+  const onPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    startRef.current = null
+    setDragging(false)
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId)
+    }
+  }
+
+  useEffect(() => {
+    if (!dragging) return
+    const prev = document.body.style.cursor
+    document.body.style.cursor = "col-resize"
+    return () => {
+      document.body.style.cursor = prev
+    }
+  }, [dragging])
+
+  return (
+    <div
+      role="separator"
+      aria-orientation="vertical"
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onPointerCancel={onPointerUp}
+      className={cn(
+        "absolute inset-y-0 left-0 z-20 w-1 cursor-col-resize touch-none select-none",
+        "after:absolute after:inset-y-0 after:left-0 after:w-px after:bg-transparent after:transition-colors",
+        "hover:after:bg-border",
+        dragging && "after:bg-border"
+      )}
+    />
+  )
+}
+
+function SidePanel({
+  detail,
+  tab,
+  onTabChange,
+  read,
+  expandedId,
+  onMarkAllRead,
+  onFindingClick,
+}: {
+  detail: ReviewDetail
+  tab: SideTab
+  onTabChange: (tab: SideTab) => void
+  read: Set<string>
+  expandedId: string | null
+  onMarkAllRead: () => void
+  onFindingClick: (finding: ReviewFinding) => void
+}) {
+  const qc = useQueryClient()
+  const reReview = useMutation({
+    mutationFn: () => api.reReview(detail.owner, detail.repo, detail.number),
+    onSuccess: () => {
+      void qc.invalidateQueries({
+        queryKey: ["review", detail.owner, detail.repo, detail.number],
+      })
+    },
+  })
+
+  const panelRef = useRef<HTMLDivElement>(null)
+  const [width, setWidthState] = useState(() => readStoredReviewPanelWidth())
+  const setWidth = useCallback((next: number) => {
+    const available = panelRef.current?.parentElement?.clientWidth
+    const clamped = clampReviewPanelWidth(next, available)
+    setWidthState(clamped)
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(REVIEW_PANEL_STORAGE_WIDTH, String(clamped))
+    }
+  }, [])
+
+  // Re-clamp against the real container width on mount and on window resize so
+  // the panel can never squeeze the PR content below its minimum.
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    const reclamp = () => setWidth(width)
+    reclamp()
+    window.addEventListener("resize", reclamp)
+    return () => window.removeEventListener("resize", reclamp)
+  }, [setWidth, width])
+
+  const bugs = detail.findings.filter((f) => f.group === "bug")
+  const flags = detail.findings.filter((f) => f.group !== "bug")
+  const openBugs = bugs.filter((f) => f.status === "open")
+  const openFlags = flags.filter((f) => f.status === "open")
+
+  return (
+    <div
+      ref={panelRef}
+      style={{ width }}
+      className="relative hidden h-full shrink-0 xl:flex"
+    >
+      <ReviewPanelResizeHandle width={width} onResize={setWidth} />
+      <aside className="flex h-full w-full flex-col overflow-y-auto border-l border-border">
+        <div className="flex items-center gap-1 border-b border-border px-3 py-2">
+          {(
+            [
+              ["info", "Info"],
+              ["chat", "Chat"],
+            ] as const
+          ).map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => onTabChange(id)}
+              className={cn(
+                "rounded-md px-2.5 py-1 text-xs transition-colors",
+                tab === id
+                  ? "bg-muted font-medium text-foreground"
+                  : "text-muted-foreground hover:bg-muted/50"
+              )}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {tab === "chat" ? (
+          <ReviewChat
+            owner={detail.owner}
+            repo={detail.repo}
+            number={detail.number}
+          />
+        ) : (
+          <div className="divide-y divide-border">
+            <section className="px-3 py-3">
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-medium">
+                  {detail.status === "running"
+                    ? "PR analysis in progress"
+                    : detail.status === "error"
+                      ? "PR analysis failed"
+                      : "PR analysis complete"}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => reReview.mutate()}
+                  disabled={reReview.isPending || detail.status === "running"}
+                  className="inline-flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-50"
+                >
+                  <ArrowClockwiseIcon className="size-3" />
+                  Re-review
+                </button>
+              </div>
+              <div className="mt-2 space-y-1 text-[11px] text-muted-foreground">
+                <div>Reviewing commit {detail.head_sha.slice(0, 7) || "—"}</div>
+                {detail.watch && <div>Watching for new pushes</div>}
+                {reReview.error && (
+                  <div className="text-destructive">
+                    {reReview.error.message}
+                  </div>
+                )}
+              </div>
+            </section>
+
+            <FindingSection
+              icon={BugBeetleIcon}
+              label={`${openBugs.length} Bug${openBugs.length === 1 ? "" : "s"}`}
+              emptyLabel="No bugs found."
+              findings={bugs}
+              read={read}
+              expandedId={expandedId}
+              reviewUrl={detail.url}
+              onFindingClick={onFindingClick}
+            />
+
+            <FindingSection
+              icon={FlagIcon}
+              label={`${openFlags.length} Flag${openFlags.length === 1 ? "" : "s"}`}
+              emptyLabel="No issues found."
+              findings={flags}
+              read={read}
+              expandedId={expandedId}
+              reviewUrl={detail.url}
+              onFindingClick={onFindingClick}
+              action={
+                detail.findings.length > 0 ? (
+                  <button
+                    type="button"
+                    onClick={onMarkAllRead}
+                    className="rounded border border-border px-1.5 py-0.5 text-[11px] text-muted-foreground hover:text-foreground"
+                  >
+                    Mark all as read
+                  </button>
+                ) : null
+              }
+            />
+
+            <ChecksSection checks={detail.checks} />
+            <PeopleSection
+              title="Reviewers"
+              people={detail.pr.requested_reviewers}
+            />
+            <PeopleSection title="Assignees" people={detail.pr.assignees} />
+            <section className="px-3 py-3">
+              <h3 className="mb-2 text-xs font-medium">Labels</h3>
+              {detail.pr.labels.length === 0 ? (
+                <p className="text-[11px] text-muted-foreground">None</p>
+              ) : (
+                <div className="flex flex-wrap gap-1">
+                  {detail.pr.labels.map((label) => (
+                    <span
+                      key={label.name}
+                      className="rounded-full border border-border px-2 py-0.5 text-[11px]"
+                    >
+                      {label.name}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </section>
+          </div>
+        )}
+      </aside>
+    </div>
+  )
+}
+
+function FindingSection({
+  icon: HeaderIcon,
+  label,
+  emptyLabel,
+  findings,
+  read,
+  expandedId,
+  reviewUrl,
+  onFindingClick,
+  action,
+}: {
+  icon: (typeof GROUP_STYLES)["bug"]["Icon"]
+  label: string
+  emptyLabel: string
+  findings: Array<ReviewFinding>
+  read: Set<string>
+  expandedId: string | null
+  reviewUrl: string
+  onFindingClick: (finding: ReviewFinding) => void
+  action?: React.ReactNode
+}) {
+  const [collapsed, setCollapsed] = useState(false)
+  return (
+    <section className="px-3 py-3">
+      <div className="mb-2 flex items-center justify-between text-xs">
+        <button
+          type="button"
+          onClick={() => setCollapsed((v) => !v)}
+          className="inline-flex items-center gap-1.5 font-medium"
+        >
+          <HeaderIcon className="size-3.5" />
+          {label}
+          <CaretDownIcon
+            className={cn(
+              "size-3 text-muted-foreground transition-transform",
+              collapsed && "-rotate-90"
+            )}
+          />
+        </button>
+        {action}
+      </div>
+      {!collapsed &&
+        (findings.length === 0 ? (
+          <p className="text-[11px] text-muted-foreground">{emptyLabel}</p>
+        ) : (
+          <div className="space-y-0.5">
+            {findings.map((finding) => {
+              const style = GROUP_STYLES[finding.group]
+              const Icon = style.Icon
+              const isRead = read.has(finding.id)
+              const muted = finding.status !== "open" || isRead
+              const anchored = isAnchored(finding)
+              const expanded = expandedId === finding.id && !anchored
+              return (
+                <div
+                  key={finding.id}
+                  className={cn(
+                    "rounded-md border border-transparent transition-colors hover:border-border hover:bg-muted/40",
+                    expanded && "border-border bg-muted/40",
+                    muted && !expanded && "opacity-50"
+                  )}
+                >
+                  <button
+                    type="button"
+                    onClick={() => onFindingClick(finding)}
+                    aria-expanded={anchored ? undefined : expanded}
+                    className="block w-full px-2 py-1.5 text-left"
+                  >
+                    <span className="flex items-start gap-1.5 text-xs">
+                      <Icon
+                        className={cn(
+                          "mt-0.5 size-3.5 shrink-0",
+                          style.className
+                        )}
+                      />
+                      <span className="min-w-0 flex-1">
+                        <span className="line-clamp-1 font-medium text-foreground">
+                          {finding.title || finding.description}
+                        </span>
+                        <span className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
+                          <span className={style.className}>{style.label}</span>
+                          <span className="truncate font-mono">
+                            {findingAnchorLabel(finding)}
+                          </span>
+                          {finding.outdated && <Badgeish>Outdated</Badgeish>}
+                          {finding.status !== "open" && (
+                            <Badgeish>{finding.status}</Badgeish>
+                          )}
+                          {isRead && finding.status === "open" && (
+                            <span>• Read</span>
+                          )}
+                        </span>
+                      </span>
+                      {!anchored && (
+                        <CaretDownIcon
+                          className={cn(
+                            "mt-0.5 size-3 shrink-0 text-muted-foreground transition-transform",
+                            !expanded && "-rotate-90"
+                          )}
+                        />
+                      )}
+                    </span>
+                  </button>
+                  {expanded && (
+                    <FindingDetails finding={finding} reviewUrl={reviewUrl} />
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        ))}
+    </section>
+  )
+}
+
+function ChecksSection({ checks }: { checks: Array<ReviewCheckRun> }) {
+  return (
+    <section className="px-3 py-3">
+      <h3 className="mb-2 text-xs font-medium">Checks</h3>
+      {checks.length === 0 ? (
+        <p className="text-[11px] text-muted-foreground">No checks reported.</p>
+      ) : (
+        <div className="max-h-56 space-y-1 overflow-y-auto">
+          {checks.map((check, index) =>
+            check.url ? (
+              <a
+                key={`${check.name}-${index}`}
+                href={check.url}
+                target="_blank"
+                rel="noreferrer"
+                className="flex items-center gap-1.5 text-[11px] text-muted-foreground hover:text-foreground"
+              >
+                <CheckStatusIcon check={check} />
+                <span className="truncate">{check.name}</span>
+              </a>
+            ) : (
+              <span
+                key={`${check.name}-${index}`}
+                className="flex items-center gap-1.5 text-[11px] text-muted-foreground"
+              >
+                <CheckStatusIcon check={check} />
+                <span className="truncate">{check.name}</span>
+              </span>
+            )
+          )}
+        </div>
+      )}
+    </section>
+  )
+}
+
+function CheckStatusIcon({ check }: { check: ReviewCheckRun }) {
+  if (check.status !== "completed") {
+    return (
+      <CircleIcon className="size-3.5 shrink-0 animate-pulse text-amber-500" />
+    )
+  }
+  if (check.conclusion === "success" || check.conclusion === "neutral") {
+    return <CheckCircleIcon className="size-3.5 shrink-0 text-emerald-500" />
+  }
+  if (check.conclusion === "skipped") {
+    return <CircleIcon className="size-3.5 shrink-0 text-muted-foreground" />
+  }
+  return <XCircleIcon className="size-3.5 shrink-0 text-red-500" />
+}
+
+function PeopleSection({
+  title,
+  people,
+}: {
+  title: string
+  people: Array<ReviewUserRef>
+}) {
+  return (
+    <section className="px-3 py-3">
+      <h3 className="mb-2 text-xs font-medium">{title}</h3>
+      {people.length === 0 ? (
+        <p className="text-[11px] text-muted-foreground">None</p>
+      ) : (
+        <div className="space-y-1">
+          {people.map((person) => (
+            <div
+              key={person.login}
+              className="flex items-center gap-2 text-[11px]"
+            >
+              {person.avatar_url ? (
+                <img
+                  src={person.avatar_url}
+                  alt=""
+                  className="size-4 rounded-full"
+                />
+              ) : (
+                <span className="size-4 rounded-full bg-muted" />
+              )}
+              {person.login}
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  )
+}

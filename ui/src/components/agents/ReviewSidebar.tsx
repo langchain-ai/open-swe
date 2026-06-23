@@ -1,12 +1,4 @@
-import {
-  createContext,
-  memo,
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-  useState,
-} from "react"
+import { memo, useCallback, useEffect, useMemo, useState } from "react"
 import {
   FileTree,
   useFileTree,
@@ -27,7 +19,10 @@ import type {
 import type { ReviewDiffFile } from "@/lib/api"
 import { Markdown } from "@/components/agents/ported"
 import { Skeleton } from "@/components/ui/skeleton"
-import { TREE_UNSAFE_CSS, treeThemeStyle } from "@/components/agents/AgentGitPanel"
+import {
+  TREE_UNSAFE_CSS,
+  treeThemeStyle,
+} from "@/components/agents/AgentGitPanel"
 import { cn } from "@/lib/utils"
 
 function reviewFileGitStatus(status: ReviewDiffFile["status"]): GitStatus {
@@ -59,38 +54,6 @@ export interface ReviewSidebarData {
   view: ReviewSidebarView
   onViewChange: (view: ReviewSidebarView) => void
   onSelectGroup: (index: number) => void
-}
-
-const ReviewSidebarContext = createContext<{
-  data: ReviewSidebarData | null
-  setData: (data: ReviewSidebarData | null) => void
-} | null>(null)
-
-export function ReviewSidebarProvider({
-  children,
-}: {
-  children: React.ReactNode
-}) {
-  const [data, setData] = useState<ReviewSidebarData | null>(null)
-  const value = useMemo(() => ({ data, setData }), [data])
-  return (
-    <ReviewSidebarContext.Provider value={value}>
-      {children}
-    </ReviewSidebarContext.Provider>
-  )
-}
-
-export function useReviewSidebarData(): ReviewSidebarData | null {
-  return useContext(ReviewSidebarContext)?.data ?? null
-}
-
-export function useRegisterReviewSidebar(data: ReviewSidebarData) {
-  const setData = useContext(ReviewSidebarContext)?.setData
-  useEffect(() => {
-    if (!setData) return
-    setData(data)
-    return () => setData(null)
-  }, [setData, data])
 }
 
 export function ReviewSidebarPanel({ data }: { data: ReviewSidebarData }) {
