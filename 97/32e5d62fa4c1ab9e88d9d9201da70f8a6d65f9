@@ -1,0 +1,38 @@
+agent/webapp.py
+  s_e4f1e6cd6464dd::t_998a41de3be6a2 139
+tests/test_plan_review.py
+  s_e4f1e6cd6464dd::t_b51cba02e00f69 21-22,26-28,31-32,42-43,45-48
+  s_e4f1e6cd6464dd::t_1a98b13ffd898b 75-77
+ui/package.json
+  s_e4f1e6cd6464dd::t_be8dc11db32d77 47
+agent/dashboard/plan_api.py
+  s_e4f1e6cd6464dd::t_7e45294e5782f4 89-101,103-135,140,153,158,168,170-172,175-177
+  s_e4f1e6cd6464dd::t_0462eec1dee936 1-12,22,28-29,31,51-52
+agent/dashboard/plan_store.py
+  s_e4f1e6cd6464dd::t_1aba40384a0823 1,6,8-10,15-16,22
+  s_e4f1e6cd6464dd::t_98e770c757f50e 80-81,84-85,87-113
+ui/src/components/agents/PlanReview.tsx
+  s_e4f1e6cd6464dd::t_dd8f8f9277d121 173
+  s_e4f1e6cd6464dd::t_bc0a031aef526a 197
+  s_e4f1e6cd6464dd::t_2ae073104eeac7 1,3,5-10,12,15,19-24,26,28-35,37-38,40-41,43,45-57,59,61-68,70,76,78-79,85-86,91,138-172,174-196,198-220
+tests/e2e/tests/plan_review.spec.ts
+  s_e4f1e6cd6464dd::t_95401179b87ada 12-13,15-16,28-30,33-34,50,76-77,93-95,98,107-108,112-114,116-117,122-123
+ui/src/lib/plan.ts
+  s_e4f1e6cd6464dd::t_af6d34c4e95f70 2,4-6,41-42,44,46,87-96,98-100,102,106,108-117,122-125
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.10",
+  "base_commit_sha": "9732e5d62fa4c1ab9e88d9d9201da70f8a6d65f9",
+  "prompts": {},
+  "sessions": {
+    "s_e4f1e6cd6464dd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4c5fdff8-80f6-4553-8336-aac3a1fb74b9",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ramon Nogueira <ramon.nogueira@langchain.dev>"
+    }
+  }
+}
