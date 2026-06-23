@@ -97,7 +97,11 @@ def test_schedule_thread_wakeup_creates_cron(monkeypatch: pytest.MonkeyPatch) ->
     assert captured["configurable"]["github_login"] == "johannes117"
 
     now = datetime.now(UTC)
-    assert abs((captured["fire_time"] - now).total_seconds() - 600) < 5
+    delay = (captured["fire_time"] - now).total_seconds()
+    assert delay >= 600
+    assert delay < 660
+    assert captured["fire_time"].second == 0
+    assert captured["fire_time"].microsecond == 0
 
 
 def test_schedule_thread_wakeup_uses_default_prompt_when_none(
@@ -190,6 +194,25 @@ def test_schedule_thread_wakeup_does_not_pass_none_configurable_keys(
     assert "linear_issue" not in cfg
     assert "schedule_id" not in cfg
     assert cfg["thread_id"] == "test-thread-123"
+
+
+def test_ceil_to_next_minute_keeps_exact_minute() -> None:
+    value = datetime(2025, 1, 15, 14, 30, tzinfo=UTC)
+    assert wakeup_tool._ceil_to_next_minute(value) == value
+
+
+def test_ceil_to_next_minute_rounds_up_with_seconds() -> None:
+    value = datetime(2025, 1, 15, 14, 30, 59, 123, tzinfo=UTC)
+    assert wakeup_tool._ceil_to_next_minute(value) == value.replace(
+        minute=31, second=0, microsecond=0
+    )
+
+
+def test_ceil_to_next_minute_handles_day_boundary() -> None:
+    value = datetime(2025, 1, 31, 23, 59, 59, tzinfo=UTC)
+    assert wakeup_tool._ceil_to_next_minute(value) == value.replace(
+        year=2025, month=2, day=1, hour=0, minute=0, second=0
+    )
 
 
 def test_build_one_shot_cron_format() -> None:

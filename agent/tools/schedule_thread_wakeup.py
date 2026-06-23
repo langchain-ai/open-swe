@@ -16,14 +16,22 @@ logger = logging.getLogger(__name__)
 
 _AGENT_ASSISTANT_ID = "agent"
 _MIN_DELAY_SECONDS = 60
-_MAX_DELAY_SECONDS = 86_400  # 24 hours
-_END_TIME_PADDING_SECONDS = 90  # window after fire time so the cron fires once
+_MAX_DELAY_SECONDS = 86_400
+_END_TIME_PADDING_SECONDS = 90
 
 _DEFAULT_WAKEUP_PROMPT = (
     "This is an automated re-trigger of this thread. The agent scheduled this "
     "wakeup to poll for updates. Check the current state of whatever you were "
     "waiting on and continue from there."
 )
+
+
+def _ceil_to_next_minute(value: datetime) -> datetime:
+    """Round a datetime up to the next whole minute."""
+    rounded = value.replace(second=0, microsecond=0)
+    if rounded == value:
+        return rounded
+    return rounded + timedelta(minutes=1)
 
 
 def _build_one_shot_cron(fire_time: datetime) -> str:
@@ -103,7 +111,7 @@ def schedule_thread_wakeup(delay_minutes: int, prompt: str | None = None) -> dic
     if not isinstance(thread_id, str) or not thread_id:
         return {"success": False, "error": "No thread_id in current run config"}
 
-    fire_time = datetime.now(UTC) + timedelta(seconds=delay_seconds)
+    fire_time = _ceil_to_next_minute(datetime.now(UTC) + timedelta(seconds=delay_seconds))
     wakeup_prompt = (
         prompt.strip() if isinstance(prompt, str) and prompt.strip() else _DEFAULT_WAKEUP_PROMPT
     )
