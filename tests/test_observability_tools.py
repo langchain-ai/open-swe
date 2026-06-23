@@ -6,7 +6,7 @@ import pytest
 
 from agent import server
 from agent.dashboard.team_credentials import DatadogCredentials, LangSmithCredentials
-from agent.integrations import datadog_mcp, langsmith_tools
+from agent.integrations import datadog_mcp, langsmith_tools, notion_mcp
 
 
 @pytest.mark.asyncio
@@ -34,6 +34,31 @@ async def test_load_datadog_tools_returns_tools() -> None:
         patch.object(datadog_mcp, "_build_mcp_tools", AsyncMock(return_value=sentinel)),
     ):
         assert await datadog_mcp.load_datadog_tools() == sentinel
+
+
+@pytest.mark.asyncio
+async def test_load_notion_tools_empty_when_not_connected() -> None:
+    with patch.object(notion_mcp, "get_notion_access_token", AsyncMock(return_value=None)):
+        assert await notion_mcp.load_notion_tools("alice") == []
+
+
+@pytest.mark.asyncio
+async def test_load_notion_tools_degrades_on_error() -> None:
+    with (
+        patch.object(notion_mcp, "get_notion_access_token", AsyncMock(return_value="tok")),
+        patch.object(notion_mcp, "_build_mcp_tools", AsyncMock(side_effect=RuntimeError("boom"))),
+    ):
+        assert await notion_mcp.load_notion_tools("alice") == []
+
+
+@pytest.mark.asyncio
+async def test_load_notion_tools_returns_tools() -> None:
+    sentinel = ["notion-tool"]
+    with (
+        patch.object(notion_mcp, "get_notion_access_token", AsyncMock(return_value="tok")),
+        patch.object(notion_mcp, "_build_mcp_tools", AsyncMock(return_value=sentinel)),
+    ):
+        assert await notion_mcp.load_notion_tools("alice") == sentinel
 
 
 @pytest.mark.asyncio

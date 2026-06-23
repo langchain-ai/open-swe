@@ -48,6 +48,7 @@ from .integrations.currents_tools import load_currents_tools
 from .integrations.datadog_mcp import load_datadog_tools
 from .integrations.langsmith import _configure_github_proxy
 from .integrations.langsmith_tools import load_langsmith_tools
+from .integrations.notion_mcp import load_notion_tools
 from .middleware import (
     ModelFallbackMiddleware,
     SandboxCircuitBreakerMiddleware,
@@ -696,12 +697,18 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     corridor_tools = await _load_corridor_mcp_tools()
 
     currents_tools: list[Any] = []
+    notion_tools: list[Any] = []
     if profile_login:
         try:
             currents_tools = await load_currents_tools(profile_login)
         except Exception:
             logger.warning("Failed to load Currents tools", exc_info=True)
             currents_tools = []
+        try:
+            notion_tools = await load_notion_tools(profile_login)
+        except Exception:
+            logger.warning("Failed to load Notion tools", exc_info=True)
+            notion_tools = []
 
     logger.info("Returning agent with sandbox for thread %s", thread_id)
     main_model = make_model(model_id, **model_kwargs)
@@ -737,6 +744,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             *corridor_tools,
             *observability_tools,
             *currents_tools,
+            *notion_tools,
         ],
         subagents=[_general_purpose_subagent(subagent_model)],
         backend=backend_factory,
