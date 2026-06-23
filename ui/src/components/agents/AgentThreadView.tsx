@@ -24,7 +24,6 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
   const sendMessage = useSubmitAgentMessage(thread.id)
   const stream = useAgentThreadStream()
   const isMobile = useIsMobile()
-  const isReadOnly = thread.isOwner === false
 
   const { models, defaultSelection } = useModelOptions()
   const threadSelection = useMemo<ModelSelection | null>(() => {
@@ -78,42 +77,10 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
               settingUpSandbox={settingUpSandbox}
               contentWidthClass="max-w-3xl"
             />
-            {!isReadOnly && (
-              <div className="shrink-0 px-4 pb-4">
-                <div className="mx-auto w-full min-w-0 max-w-3xl">
-                  <AgentPromptBar
-                    placeholder="Add a follow up"
-                    compact
-                    busy={isStreaming}
-                    onSubmit={(content, images) =>
-                      sendMessage.mutateAsync({
-                        content,
-                        images,
-                        model_id: activeSelection?.modelId ?? null,
-                        effort: activeSelection?.effort ?? null,
-                      })
-                    }
-                    models={models}
-                    selection={activeSelection}
-                    onSelectionChange={setSelection}
-                  />
-                </div>
-              </div>
-            )}
-          </div>
-        ) : isHydrating ? (
-          <div className="flex flex-1 flex-col items-center justify-center gap-4 px-6">
-            <p className="text-xs text-[var(--ui-text-dim)]">Loading conversation…</p>
-          </div>
-        ) : (
-          <div className="flex flex-1 flex-col items-center justify-center gap-4 px-6">
-            <p className="text-xs text-[var(--ui-text-dim)]">
-              This thread has no messages yet.
-            </p>
-            {!isReadOnly && (
-              <div className="w-full max-w-3xl">
+            <div className="shrink-0 px-4 pb-4">
+              <div className="mx-auto w-full min-w-0 max-w-3xl">
                 <AgentPromptBar
-                  placeholder="Send the first message"
+                  placeholder="Add a follow up"
                   compact
                   busy={isStreaming}
                   onSubmit={(content, images) =>
@@ -129,7 +96,35 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
                   onSelectionChange={setSelection}
                 />
               </div>
-            )}
+            </div>
+          </div>
+        ) : isHydrating ? (
+          <div className="flex flex-1 flex-col items-center justify-center gap-4 px-6">
+            <p className="text-xs text-[var(--ui-text-dim)]">Loading conversation…</p>
+          </div>
+        ) : (
+          <div className="flex flex-1 flex-col items-center justify-center gap-4 px-6">
+            <p className="text-xs text-[var(--ui-text-dim)]">
+              This thread has no messages yet.
+            </p>
+            <div className="w-full max-w-3xl">
+              <AgentPromptBar
+                placeholder="Send the first message"
+                compact
+                busy={isStreaming}
+                onSubmit={(content, images) =>
+                  sendMessage.mutateAsync({
+                    content,
+                    images,
+                    model_id: activeSelection?.modelId ?? null,
+                    effort: activeSelection?.effort ?? null,
+                  })
+                }
+                models={models}
+                selection={activeSelection}
+                onSelectionChange={setSelection}
+              />
+            </div>
           </div>
         )}
       </div>

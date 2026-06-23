@@ -248,6 +248,18 @@ def _assert_thread_owner(metadata: dict[str, Any], login: str, email: str | None
         raise HTTPException(404, "thread not found")
 
 
+def _attribution_prefix(metadata: dict[str, Any], login: str, email: str | None) -> str:
+    """Attribution prefix for a message; empty when the poster owns the thread.
+
+    Teammates can post into any surfaced-source thread (read access is already
+    org-gated). Their messages are tagged with the verified session login so the
+    agent and the thread owner can tell who sent them.
+    """
+    if _user_owns_thread(metadata, login, email):
+        return ""
+    return f"@{login}: "
+
+
 def _thread_is_readable(metadata: dict[str, Any]) -> bool:
     """Any surfaced-source thread is readable by authenticated users.
 
@@ -1006,6 +1018,28 @@ def _command_message_content(params: dict[str, Any]) -> Any:
     return last.get("content") if isinstance(last, dict) else None
 
 
+def _set_command_last_message_content(params: dict[str, Any], content: Any) -> None:
+    run_input = params.get("input")
+    if not isinstance(run_input, dict):
+        return
+    messages = run_input.get("messages")
+    if not isinstance(messages, list) or not messages:
+        return
+    last = messages[-1]
+    if isinstance(last, dict):
+        last["content"] = content
+
+
+def _prefix_message_content(content: Any, prefix: str) -> Any:
+    if not prefix:
+        return content
+    if isinstance(content, str):
+        return f"{prefix}{content}"
+    if isinstance(content, list):
+        return [{"type": "text", "text": prefix.rstrip()}, *content]
+    return content
+
+
 def _command_prompt_text(content: Any) -> str:
     if isinstance(content, str):
         return content.strip()
@@ -1062,6 +1096,7 @@ async def _enrich_run_start_command(
     metadata: dict[str, Any],
     thread_busy: bool = False,
     creating: bool = False,
+    email: str | None = None,
 ) -> dict[str, Any]:
     if command.get("method") != "run.start":
         return command
@@ -1114,6 +1149,9 @@ async def _enrich_run_start_command(
             overrides["agent_effort"] = chosen_effort
     else:
         _validate_command_images(content, model_id=chosen_model or _metadata_model_id(metadata))
+        prefix = _attribution_prefix(metadata, login, email)
+        if prefix:
+            _set_command_last_message_content(params, _prefix_message_content(content, prefix))
         metadata_update: dict[str, Any] = {}
         if chosen_model and chosen_effort:
             overrides["agent_model_id"] = chosen_model
@@ -1159,9 +1197,9 @@ async def send_dashboard_message(
         raise HTTPException(404, "thread not found") from exc
 
     metadata = thread.get("metadata") if isinstance(thread.get("metadata"), dict) else {}
-    _assert_thread_owner(metadata, login, email)
+    _assert_thread_readable(metadata)
 
-    prompt = body.content.strip()
+    prompt = f"{_attribution_prefix(metadata, login, email)}{body.content.strip()}"
     now_ms = _now_ms()
     chosen_model, chosen_effort = _normalize_model_choice(body.model_id, body.effort)
     metadata_update: dict[str, Any] = {"source": _DASHBOARD_SOURCE, "updated_at_ms": now_ms}
@@ -1426,9 +1464,9 @@ async def proxy_dashboard_thread_commands(
     # The dashboard mints the thread id client-side and submits straight away,
     # so the very first ``run.start`` may target a thread that doesn't exist
     # yet. That command lazily creates + stamps + owns the thread (in
-    # ``_enrich_run_start_command``); any other command against a missing
-    # thread — or a command from a non-owner against an existing thread — is a
-    # 404.
+    # ``_enrich_run_start_command``); any other command against a missing thread
+    # is a 404. Existing threads are writable by any org member (read-gated);
+    # non-owner messages are attributed in ``_enrich_run_start_command``.
     method = parsed.get("method")
     try:
         thread = await langgraph_client().threads.get(thread_id)
@@ -1444,7 +1482,7 @@ async def proxy_dashboard_thread_commands(
         thread_busy = False
     else:
         metadata = thread.get("metadata") if isinstance(thread.get("metadata"), dict) else {}
-        _assert_thread_owner(metadata, login, email)
+        _assert_thread_readable(metadata)
         metadata_run_status = metadata.get("latest_run_status")
         thread_busy = _thread_is_busy(thread) or metadata_run_status in {"pending", "running"}
 
@@ -1458,6 +1496,7 @@ async def proxy_dashboard_thread_commands(
         metadata=metadata,
         thread_busy=thread_busy,
         creating=creating,
+        email=email,
     )
     outgoing = json.dumps(enriched).encode()
 

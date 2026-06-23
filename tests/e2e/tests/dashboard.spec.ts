@@ -56,15 +56,29 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     await expect(page.getByRole("link", { name: "Add greet() helper" }).first()).toBeVisible();
   });
 
-  test("a DIFFERENT user sees the thread read-only (no composer)", async ({ page }) => {
+  test("a DIFFERENT user can post, and their message is attributed", async ({ page }) => {
     await loginAs(page, OTHER_USER);
     await openThreadViaSlackLink(page);
 
     // The same thread + transcript is visible…
     await expectTranscriptVisible(page);
-    // …but a non-owner gets no composer.
-    await expect(page.getByPlaceholder("Add a follow up")).toHaveCount(0);
-    await expect(page.getByPlaceholder("Send the first message")).toHaveCount(0);
-    await expect(page.getByLabel("Send message")).toHaveCount(0);
+
+    // …and a non-owner now gets a composer too (owner-only restriction removed).
+    const composer = page.getByPlaceholder(/Add a follow up|Send the first message/);
+    await expect(composer).toBeVisible();
+
+    // Posting starts a new run — the agent's follow-up reply streams in.
+    await composer.fill("Can you also add a docstring?");
+    await composer.press("Enter");
+    await expect(page.getByText(/anything else you'd like changed/)).toBeVisible();
+
+    // The non-owner's message is tagged server-side with their GitHub login, so
+    // the owner can tell who sent it. Visible once the transcript re-hydrates.
+    await expect(async () => {
+      await page.reload();
+      await expect(
+        page.getByText(new RegExp(`@${OTHER_USER.login}`)).first(),
+      ).toBeVisible({ timeout: 8000 });
+    }).toPass({ timeout: 60000 });
   });
 });

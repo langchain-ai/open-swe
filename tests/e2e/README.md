@@ -58,13 +58,17 @@ authorization is genuine:
   `AgentThreadView` shows the transcript (incl. the PR link), the `AgentPromptBar`
   composer is present, and submitting a follow-up streams a new agent reply into
   the same thread.
-- **Different user** (any other org login): the same transcript renders, but the
-  real UI shows **no composer** (`AgentThreadView` gates it on `thread.isOwner`).
+- **Different user** (any other org login): the same transcript renders and the
+  composer is present too — any org member can post. Their message is tagged
+  server-side with their GitHub login (`@<login>: …`) so the owner can tell who
+  sent it; the test asserts the prefix appears in the re-hydrated transcript.
 
-Ownership is by `github_login` / `triggering_user_email` on the thread metadata;
-`GET /dashboard/api/threads/{id}` returns `isOwner`, which the real UI uses to
-gate the composer. The only extra fake here is the OAuth-token store (an external
-credential); the authorization logic itself is real.
+Posting is open to any authenticated org member (login is already org-gated by
+OAuth); attribution uses the verified session login, not user input. Thread
+management (resolve / delete / cancel) stays owner-only — ownership is by
+`github_login` / `triggering_user_email` on the thread metadata, surfaced as
+`isOwner` from `GET /dashboard/api/threads/{id}`. The only extra fake here is the
+OAuth-token store (an external credential); the authorization logic itself is real.
 
 The UI is built by `global-setup.ts` with `VITE_DASHBOARD_API_BASE_URL` pointed at
 the harness. It builds once; set `E2E_FORCE_UI_BUILD=1` to rebuild (e.g. after a

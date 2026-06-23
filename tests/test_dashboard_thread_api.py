@@ -324,26 +324,83 @@ async def test_proxy_commands_lazily_creates_missing_thread_only_for_run_start(
     assert exc_info.value.status_code == 404
 
 
-async def test_proxy_commands_run_start_by_non_owner_is_rejected(monkeypatch) -> None:
-    class OwnedThreads:
-        async def get(self, thread_id: str) -> dict[str, object]:
-            return {
-                "thread_id": thread_id,
-                "metadata": {"source": "dashboard", "github_login": "owner"},
-            }
+async def test_enrich_run_start_command_attributes_non_owner_message(monkeypatch) -> None:
+    class FakeThreads:
+        async def update(self, *, thread_id: str, metadata: dict[str, object]) -> None:
+            pass
 
-    class OwnedClient:
-        threads = OwnedThreads()
+    class FakeClient:
+        threads = FakeThreads()
 
-    monkeypatch.setattr(thread_api, "langgraph_client", lambda: OwnedClient())
+    async def fake_get_profile(login: str) -> dict[str, object]:
+        return {}
 
-    # An existing thread owned by someone else is never lazily re-created — a
-    # run.start from a non-owner is a 404, not a takeover.
-    with pytest.raises(HTTPException) as exc_info:
-        await thread_api.proxy_dashboard_thread_commands(
-            "tid", "intruder", b'{"method": "run.start"}'
-        )
-    assert exc_info.value.status_code == 404
+    async def fake_ensure_token(login: str) -> None:
+        pass
+
+    async def fake_resolve_email(login: str, profile: dict[str, object]) -> str:
+        return f"{login}@example.com"
+
+    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
+    monkeypatch.setattr(thread_api, "get_profile", fake_get_profile)
+    monkeypatch.setattr(thread_api, "_ensure_dashboard_github_token", fake_ensure_token)
+    monkeypatch.setattr(thread_api, "_resolve_run_email", fake_resolve_email)
+
+    command = {
+        "method": "run.start",
+        "params": {"input": {"messages": [{"role": "user", "content": "fix the bug"}]}},
+    }
+
+    enriched = await thread_api._enrich_run_start_command(
+        "tid",
+        "teammate",
+        command,
+        metadata={"source": "dashboard", "github_login": "owner"},
+        email="teammate@example.com",
+    )
+
+    # A non-owner's message is forwarded but tagged with their login.
+    last = enriched["params"]["input"]["messages"][-1]
+    assert last["content"] == "@teammate: fix the bug"
+
+
+async def test_enrich_run_start_command_does_not_attribute_owner_message(monkeypatch) -> None:
+    class FakeThreads:
+        async def update(self, *, thread_id: str, metadata: dict[str, object]) -> None:
+            pass
+
+    class FakeClient:
+        threads = FakeThreads()
+
+    async def fake_get_profile(login: str) -> dict[str, object]:
+        return {}
+
+    async def fake_ensure_token(login: str) -> None:
+        pass
+
+    async def fake_resolve_email(login: str, profile: dict[str, object]) -> str:
+        return f"{login}@example.com"
+
+    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
+    monkeypatch.setattr(thread_api, "get_profile", fake_get_profile)
+    monkeypatch.setattr(thread_api, "_ensure_dashboard_github_token", fake_ensure_token)
+    monkeypatch.setattr(thread_api, "_resolve_run_email", fake_resolve_email)
+
+    command = {
+        "method": "run.start",
+        "params": {"input": {"messages": [{"role": "user", "content": "fix the bug"}]}},
+    }
+
+    enriched = await thread_api._enrich_run_start_command(
+        "tid",
+        "owner",
+        command,
+        metadata={"source": "dashboard", "github_login": "owner"},
+        email="owner@example.com",
+    )
+
+    last = enriched["params"]["input"]["messages"][-1]
+    assert last["content"] == "fix the bug"
 
 
 async def test_enrich_run_start_command_allowlists_client_configurable(monkeypatch) -> None:
@@ -431,8 +488,8 @@ async def test_proxy_commands_rejects_non_object_body(monkeypatch) -> None:
     assert exc_info.value.status_code == 400
 
 
-async def test_proxy_endpoints_enforce_thread_ownership(monkeypatch) -> None:
-    """Write endpoints (commands, run_cancel) still require thread ownership."""
+async def test_run_cancel_enforces_thread_ownership(monkeypatch) -> None:
+    """Cancelling a run still requires thread ownership (it is not "posting")."""
 
     class FakeThreads:
         async def get(self, thread_id: str) -> dict[str, object]:
@@ -446,10 +503,6 @@ async def test_proxy_endpoints_enforce_thread_ownership(monkeypatch) -> None:
         threads = FakeThreads()
 
     monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
-
-    with pytest.raises(HTTPException) as exc_info:
-        await thread_api.proxy_dashboard_thread_commands("tid", "intruder", b"{}")
-    assert exc_info.value.status_code == 404
 
     with pytest.raises(HTTPException) as exc_info:
         await thread_api.proxy_dashboard_thread_run_cancel("tid", "run-1", "intruder")
@@ -557,6 +610,78 @@ async def test_send_dashboard_message_returns_502_when_activity_unknown(monkeypa
         )
 
     assert exc_info.value.status_code == 502
+
+
+async def test_send_dashboard_message_attributes_non_owner(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeThreads:
+        async def get(self, thread_id: str) -> dict[str, object]:
+            return {
+                "thread_id": "tid",
+                "metadata": {"source": "dashboard", "github_login": "owner"},
+            }
+
+        async def update(self, *, thread_id: str, metadata: dict[str, object]) -> None:
+            pass
+
+    class FakeClient:
+        threads = FakeThreads()
+
+    async def active(thread_id: str) -> bool:
+        return True
+
+    async def fake_queue(thread_id: str, payload: dict[str, object]) -> bool:
+        captured["payload"] = payload
+        return True
+
+    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
+    monkeypatch.setattr(thread_api, "get_thread_active_status", active)
+    monkeypatch.setattr(thread_api, "queue_message_for_thread", fake_queue)
+
+    await thread_api.send_dashboard_message(
+        "tid",
+        "teammate",
+        thread_api.ThreadMessageBody(content="ship it"),
+    )
+
+    assert captured["payload"]["text"] == "@teammate: ship it"
+
+
+async def test_send_dashboard_message_does_not_attribute_owner(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeThreads:
+        async def get(self, thread_id: str) -> dict[str, object]:
+            return {
+                "thread_id": "tid",
+                "metadata": {"source": "dashboard", "github_login": "owner"},
+            }
+
+        async def update(self, *, thread_id: str, metadata: dict[str, object]) -> None:
+            pass
+
+    class FakeClient:
+        threads = FakeThreads()
+
+    async def active(thread_id: str) -> bool:
+        return True
+
+    async def fake_queue(thread_id: str, payload: dict[str, object]) -> bool:
+        captured["payload"] = payload
+        return True
+
+    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
+    monkeypatch.setattr(thread_api, "get_thread_active_status", active)
+    monkeypatch.setattr(thread_api, "queue_message_for_thread", fake_queue)
+
+    await thread_api.send_dashboard_message(
+        "tid",
+        "owner",
+        thread_api.ThreadMessageBody(content="ship it"),
+    )
+
+    assert captured["payload"]["text"] == "ship it"
 
 
 def test_thread_summary_exposes_resolved_state() -> None:
