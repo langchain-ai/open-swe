@@ -18,6 +18,7 @@ from .reply_to_finding_thread import reply_to_finding_thread
 from .request_pr_review import request_pr_review
 from .resolve_finding_thread import resolve_finding_thread
 from .save_plan import save_plan
+from .schedule_thread_wakeup import schedule_thread_wakeup
 from .search_repo_code import search_repo_code
 from .slack_read_thread_messages import slack_read_thread_messages
 from .slack_thread_reply import slack_thread_reply
@@ -45,6 +46,7 @@ __all__ = [
     "reply_to_finding_thread",
     "resolve_finding_thread",
     "save_plan",
+    "schedule_thread_wakeup",
     "search_repo_code",
     "slack_read_thread_messages",
     "slack_thread_reply",

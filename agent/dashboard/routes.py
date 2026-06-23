@@ -65,6 +65,7 @@ from .review_api import (
     get_review,
     get_review_diff,
     list_reviews,
+    proxy_pr_image,
     trigger_re_review,
 )
 from .review_chat_api import (
@@ -836,6 +837,18 @@ async def api_get_review_diff(
 ) -> dict[str, Any]:
     await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
     return await get_review_diff(owner, repo, pr_number)
+
+
+@router.get("/reviews/{owner}/{repo}/{pr_number}/image")
+async def api_get_review_image(
+    owner: str,
+    repo: str,
+    pr_number: int,
+    url: str,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> Response:
+    await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
+    return await proxy_pr_image(owner, repo, pr_number, url)
 
 
 @router.post("/reviews/{owner}/{repo}/{pr_number}/re-review")

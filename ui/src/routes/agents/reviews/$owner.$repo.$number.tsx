@@ -71,7 +71,7 @@ import {
   warmDiffHighlighter,
 } from "@/components/agents/utils/diffUtils"
 import { Skeleton } from "@/components/ui/skeleton"
-import { api } from "@/lib/api"
+import { api, reviewImageProxyUrl } from "@/lib/api"
 import { useSession } from "@/lib/session"
 import { cn } from "@/lib/utils"
 
@@ -460,6 +460,11 @@ function ReviewBodyInner({
   diffFiles: Array<ReviewDiffFile> | null
 }) {
   const composer = useReviewChatComposer()
+  const transformPrImage = useCallback(
+    (src: string) =>
+      reviewImageProxyUrl(detail.owner, detail.repo, detail.number, src),
+    [detail.owner, detail.repo, detail.number]
+  )
   const [sideTab, setSideTab] = useState<SideTab>("info")
   const [selectedFile, setSelectedFile] = useState<string | null>(null)
   const fileRefs = useRef<Record<string, HTMLDivElement | null>>({})
@@ -932,7 +937,10 @@ function ReviewBodyInner({
               <PrHeader detail={detail} />
               <div className="mt-4 rounded-lg border border-border bg-card p-4">
                 {detail.pr.body ? (
-                  <Markdown content={detail.pr.body} />
+                  <Markdown
+                    content={detail.pr.body}
+                    transformImageUrl={transformPrImage}
+                  />
                 ) : (
                   <p className="text-xs text-muted-foreground">
                     This PR has no description.
