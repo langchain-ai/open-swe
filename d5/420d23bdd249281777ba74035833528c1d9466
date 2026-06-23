@@ -1,0 +1,25 @@
+agent/dashboard/plan_api.py
+  s_e4f1e6cd6464dd::t_87140386986005 159
+  s_e4f1e6cd6464dd::t_a15125702be6f4 139-141
+tests/test_plan_review.py
+  s_e4f1e6cd6464dd::t_3eee9eb3cd3fe7 49-95
+agent/dashboard/plan_store.py
+  s_e4f1e6cd6464dd::t_1b446b26427437 46-50,57-61
+  s_e4f1e6cd6464dd::t_5be7c9ad35b5f7 93-101,106-107,115-120
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.10",
+  "base_commit_sha": "d5420d23bdd249281777ba74035833528c1d9466",
+  "prompts": {},
+  "sessions": {
+    "s_e4f1e6cd6464dd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4c5fdff8-80f6-4553-8336-aac3a1fb74b9",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ramon Nogueira <ramon.nogueira@langchain.dev>"
+    }
+  }
+}
