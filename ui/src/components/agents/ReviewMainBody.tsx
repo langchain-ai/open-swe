@@ -160,6 +160,59 @@ function buildSelectionAttachments(
   ]
 }
 
+interface ShadowRootWithSelection {
+  getSelection?: () => Selection | null
+}
+
+// Read the active selection inside a <diffs-container>'s open shadow root.
+// Chromium exposes ShadowRoot.getSelection(); elsewhere fall back to the document
+// selection (events from open shadow DOM are composed/retargeted).
+function readDiffSelection(
+  container: Element | null | undefined
+): Selection | null {
+  const root = container?.shadowRoot
+  if (root) {
+    const scoped = (root as ShadowRoot & ShadowRootWithSelection).getSelection
+    if (typeof scoped === "function") return scoped.call(root)
+  }
+  return typeof document !== "undefined" ? document.getSelection() : null
+}
+
+// Map a selection boundary node to its file line number + side via the
+// data-line / data-line-type attributes Pierre stamps on every line div.
+function lineMetaFromNode(
+  node: Node | null
+): { line: number; side: SelectionSide } | null {
+  const el = node instanceof Element ? node : (node?.parentElement ?? null)
+  const lineEl = el?.closest("[data-line]")
+  if (!lineEl) return null
+  const line = Number(lineEl.getAttribute("data-line"))
+  if (!Number.isInteger(line)) return null
+  const type = lineEl.getAttribute("data-line-type") ?? ""
+  return { line, side: type.includes("deletion") ? "deletions" : "additions" }
+}
+
+// Resolve the current native text selection inside a diff to a line range, so a
+// plain text highlight can drive "Add to Chat" (Devin-style) instead of a
+// gutter drag.
+function selectedRangeFromDiff(
+  container: Element | null | undefined
+): SelectedLineRange | null {
+  const selection = readDiffSelection(container)
+  if (!selection || selection.isCollapsed || selection.rangeCount === 0)
+    return null
+  const range = selection.getRangeAt(0)
+  const start = lineMetaFromNode(range.startContainer)
+  const end = lineMetaFromNode(range.endContainer)
+  if (!start || !end) return null
+  return {
+    start: start.line,
+    side: start.side,
+    end: end.line,
+    endSide: end.side,
+  }
+}
+
 // Scroll a file card / group flush to the top of the diff scroller. Under
 // virtualization, scrollIntoView computes its target against estimated row
 // heights; scrolling past unmeasured files reconciles their real heights
@@ -1359,66 +1412,46 @@ const FileDiffCard = memo(function FileDiffCard({
       : findingAnnotations
   }, [findingAnnotations, commentDraftRange, openComment, file.path])
 
-  // Native line selection plus the visible gutter "+" handle. Pierre disambiguates
-  // a plain click on the "+" (onGutterUtilityClick → open the comment composer)
-  // from a press-and-drag on it (starts a line selection → "Add to Chat"). So the
-  // two affordances coexist on one handle. onLineSelectionChange fires on every
-  // drag move; we push it into the controlled selection so the rows highlight live
-  // as you drag (in controlled mode Pierre only paints when the prop updates). The
-  // "Add to Chat" popup is shown on onLineSelectionEnd (release only); ⌘L (handled
-  // in ReviewBody) adds without it. onGutterUtilityClick must be non-null for Pierre
-  // to turn the "+" into a drag selector, so the no-chat path keeps a no-op.
+  // The gutter "+" is comment-only now: a click opens the composer. "Add to Chat"
+  // is driven by native text selection (handleTextSelection below) rather than a
+  // gutter drag, so Pierre's own line selection is disabled to let the browser
+  // handle highlighting — this is what Devin does and it frees the "+" for comments.
   const cardOptions = useMemo(
     () => ({
       ...diffOptions,
-      enableLineSelection: selectable,
-      enableGutterUtility: selectable,
+      enableLineSelection: false,
+      enableGutterUtility: commentable,
       onGutterUtilityClick: commentable
         ? (range: SelectedLineRange) => onStartComment?.(file.path, range)
-        : selectable
-          ? () => undefined
-          : undefined,
-      onLineSelectionChange: (range: SelectedLineRange | null) =>
-        onSelectLines(file.path, range),
-      onLineSelectionEnd: (range: SelectedLineRange | null) => {
-        onSelectLines(file.path, range)
-        if (!range) {
-          setPopup(null)
-          return
-        }
-        // Anchor to the gutter "+" handle Pierre places on the selection's
-        // bottom line (inside the diff's shadow DOM) — a stable position,
-        // unlike the pointer-release point. Fall back to the pointer.
-        const host = diffWrapperRef.current?.querySelector("diffs-container")
-        const handle = host?.shadowRoot?.querySelector(
-          "[data-gutter-utility-slot]"
-        )
-        const rect =
-          handle instanceof HTMLElement ? handle.getBoundingClientRect() : null
-        const pointer = lastPointerRef.current
-        if (rect) setPopup({ range, x: rect.left, y: rect.top })
-        else if (pointer) setPopup({ range, x: pointer.x, y: pointer.y })
-        else setPopup(null)
-      },
+        : undefined,
       onPostRender: (
         node: HTMLElement,
         instance: CoreFileDiff<ReviewAnnotation>
       ) => registerDiffInstance(file.path, { host: node, instance }),
     }),
-    [
-      diffOptions,
-      selectable,
-      commentable,
-      onStartComment,
-      file.path,
-      onSelectLines,
-      registerDiffInstance,
-    ]
+    [diffOptions, commentable, onStartComment, file.path, registerDiffInstance]
   )
+
+  // On mouse release, turn any native text highlight inside the diff into a line
+  // range: highlight rows (controlled selection) + show the "Add to Chat" popup
+  // at the cursor. A collapsed selection (plain click) is ignored.
+  const handleTextSelection = useCallback(() => {
+    if (!selectable) return
+    const container = diffWrapperRef.current?.querySelector("diffs-container")
+    const range = selectedRangeFromDiff(container)
+    if (!range) return
+    onSelectLines(file.path, range)
+    const pointer = lastPointerRef.current
+    if (pointer) setPopup({ range, x: pointer.x, y: pointer.y })
+  }, [selectable, file.path, onSelectLines])
 
   const addPopupToChat = useCallback(() => {
     if (popup) onAddToChat?.(file.path, popup.range)
     setPopup(null)
+    // Clear the lingering native highlight once added.
+    readDiffSelection(
+      diffWrapperRef.current?.querySelector("diffs-container")
+    )?.removeAllRanges()
   }, [popup, onAddToChat, file.path])
 
   // Drop the popup once the selection clears (e.g. added via ⌘L, or a finding
@@ -1540,6 +1573,7 @@ const FileDiffCard = memo(function FileDiffCard({
             onPointerUpCapture={(event) => {
               lastPointerRef.current = { x: event.clientX, y: event.clientY }
             }}
+            onMouseUp={handleTextSelection}
             className="overflow-x-auto bg-[var(--ui-panel)] font-mono text-[11px] leading-5"
           >
             <MultiFileDiff<ReviewAnnotation>
