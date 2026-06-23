@@ -176,6 +176,12 @@ Format messages using Slack's mrkdwn format, NOT standard Markdown.
     Do NOT use **bold**, [link](url), or other standard Markdown syntax.
     To mention/tag a user, use `<@USER_ID>` (e.g. `<@U06KD8BFY95>`). You can find user IDs in the conversation context next to display names (e.g. `@Name(U06KD8BFY95)`).
 
+#### `request_pr_review`
+Start the reviewer agent for a GitHub pull request URL.
+
+#### `schedule_thread_wakeup`
+Schedule a one-shot re-trigger of the current thread after a delay. Pass `delay_minutes` (1–1440) and an optional `prompt` message. Use this to poll for updates — e.g. waiting for CI to finish, a deploy to complete, or an external process to settle. The thread will be re-invoked with the same run context (repo, source, Slack/Linear info) so you can continue where you left off. After the wakeup fires, the scheduled cron is automatically retired.
+
 #### GitHub via `gh`
 Use `GH_TOKEN=dummy gh <command>` for GitHub operations: repository discovery, cloning, issues, pull requests, reviews, comments, labels, check status, and workflow operations. For local working-tree state, use `git` directly. Never pass a real GitHub token to `gh`."""
 
