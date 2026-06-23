@@ -1,0 +1,55 @@
+agent/prompt.py
+  s_e4f1e6cd6464dd::t_191ed5c1a6a049 240-245
+tests/e2e/README.md
+  s_e4f1e6cd6464dd::t_191ed5c1a6a049 46,48-53
+AGENTS.md
+  s_e4f1e6cd6464dd::t_191ed5c1a6a049 87
+agent/dashboard/thread_api.py
+  s_e4f1e6cd6464dd::t_191ed5c1a6a049 252-263,1028-1049,1106,1161-1163,1209,1211,1480-1484,1500-1503,1517
+agent/server.py
+  s_e4f1e6cd6464dd::t_191ed5c1a6a049 82,782
+tests/test_schedule_thread_wakeup.py
+  s_e4f1e6cd6464dd::t_191ed5c1a6a049 1-237
+agent/tools/schedule_thread_wakeup.py
+  s_e4f1e6cd6464dd::t_191ed5c1a6a049 1-145
+tests/test_dashboard_thread_api.py
+  s_e4f1e6cd6464dd::t_191ed5c1a6a049 327-330,332-333,335-336,338-403,491-515,638-707
+CLAUDE.md
+  s_e4f1e6cd6464dd::t_191ed5c1a6a049 83
+agent/dashboard/review_api.py
+  s_e4f1e6cd6464dd::t_191ed5c1a6a049 11,13,16,19,413-533
+tests/test_review_api.py
+  s_e4f1e6cd6464dd::t_191ed5c1a6a049 1-3,5,7-8,79-118
+ui/src/components/agents/ported/Markdown.tsx
+  s_e4f1e6cd6464dd::t_191ed5c1a6a049 2-3,10-15,70-77,136,155-164,176
+ui/src/lib/reviewImage.test.ts
+  s_e4f1e6cd6464dd::t_191ed5c1a6a049 1-44
+ui/src/components/agents/AgentThreadView.tsx
+  s_e4f1e6cd6464dd::t_191ed5c1a6a049 103-104,106,125-153
+ui/src/lib/api.ts
+  s_e4f1e6cd6464dd::t_191ed5c1a6a049 17-53
+agent/tools/__init__.py
+  s_e4f1e6cd6464dd::t_191ed5c1a6a049 21,49
+ui/src/routes/agents/reviews/$owner.$repo.$number.tsx
+  s_e4f1e6cd6464dd::t_191ed5c1a6a049 74,463-467,940-943
+tests/e2e/tests/dashboard.spec.ts
+  s_e4f1e6cd6464dd::t_191ed5c1a6a049 59,65-82
+agent/dashboard/routes.py
+  s_e4f1e6cd6464dd::t_191ed5c1a6a049 68,842-851
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.10",
+  "base_commit_sha": "3905b1ee81e0a28d052f066516f8a0bdee707bc8",
+  "prompts": {},
+  "sessions": {
+    "s_e4f1e6cd6464dd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4c5fdff8-80f6-4553-8336-aac3a1fb74b9",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ramon Nogueira <ramon.nogueira@langchain.dev>"
+    }
+  }
+}
