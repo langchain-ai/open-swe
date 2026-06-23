@@ -3,6 +3,7 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from langchain_core.tools import StructuredTool
 
 from agent import server
 from agent.dashboard.team_credentials import DatadogCredentials, LangSmithCredentials
@@ -51,14 +52,62 @@ async def test_load_notion_tools_degrades_on_error() -> None:
         assert await notion_mcp.load_notion_tools("alice") == []
 
 
+def _notion_tool_for_token(token: str) -> StructuredTool:
+    async def notion_search(query: str) -> dict[str, str]:
+        """Search Notion."""
+        return {"query": query, "token": token}
+
+    return StructuredTool.from_function(
+        coroutine=notion_search,
+        name="notion_search",
+        description="Search Notion",
+    )
+
+
 @pytest.mark.asyncio
-async def test_load_notion_tools_returns_tools() -> None:
-    sentinel = ["notion-tool"]
+async def test_load_notion_tools_returns_wrappers() -> None:
+    discovered = _notion_tool_for_token("initial-token")
     with (
         patch.object(notion_mcp, "get_notion_access_token", AsyncMock(return_value="tok")),
-        patch.object(notion_mcp, "_build_mcp_tools", AsyncMock(return_value=sentinel)),
+        patch.object(notion_mcp, "_build_mcp_tools", AsyncMock(return_value=[discovered])),
     ):
-        assert await notion_mcp.load_notion_tools("alice") == sentinel
+        tools = await notion_mcp.load_notion_tools("alice")
+    assert len(tools) == 1
+    assert tools[0].name == "notion_search"
+    assert tools[0].description == discovered.description
+    assert tools[0].args_schema == discovered.args_schema
+
+
+@pytest.mark.asyncio
+async def test_notion_wrapper_refreshes_token_at_call_time() -> None:
+    get_token = AsyncMock(side_effect=["initial-token", "fresh-token"])
+    build_tools = AsyncMock(side_effect=lambda token: [_notion_tool_for_token(token)])
+    with (
+        patch.object(notion_mcp, "get_notion_access_token", get_token),
+        patch.object(notion_mcp, "_build_mcp_tools", build_tools),
+    ):
+        tools = await notion_mcp.load_notion_tools("alice")
+        result = await tools[0].ainvoke({"query": "roadmap"})
+    assert result == {"query": "roadmap", "token": "fresh-token"}
+    assert get_token.await_count == 2
+    assert [call.args[0] for call in build_tools.await_args_list] == [
+        "initial-token",
+        "fresh-token",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_notion_wrapper_fails_when_token_missing_at_call_time() -> None:
+    get_token = AsyncMock(side_effect=["initial-token", None])
+    build_tools = AsyncMock(return_value=[_notion_tool_for_token("initial-token")])
+    with (
+        patch.object(notion_mcp, "get_notion_access_token", get_token),
+        patch.object(notion_mcp, "_build_mcp_tools", build_tools),
+    ):
+        tools = await notion_mcp.load_notion_tools("alice")
+        with pytest.raises(RuntimeError, match="Notion MCP authorization unavailable"):
+            await tools[0].ainvoke({"query": "roadmap"})
+    assert build_tools.await_count == 1
 
 
 @pytest.mark.asyncio
