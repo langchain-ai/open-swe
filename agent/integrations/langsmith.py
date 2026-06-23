@@ -191,6 +191,8 @@ def _configure_github_proxy(sandbox_name: str, github_token: str) -> None:
 def create_langsmith_sandbox(
     sandbox_id: str | None = None,
     github_token: str | None = None,
+    *,
+    snapshot_id: str | None = None,
 ) -> SandboxBackendProtocol:
     """Create or connect to a LangSmith sandbox without automatic cleanup.
 
@@ -203,13 +205,15 @@ def create_langsmith_sandbox(
                    If None, creates a new sandbox.
         github_token: Optional GitHub token. Used to configure proxy auth on
                       new sandboxes. Ignored when connecting to an existing sandbox.
+        snapshot_id: Optional repo-scoped snapshot to boot from. When omitted,
+                      falls back to DEFAULT_SANDBOX_SNAPSHOT_ID.
 
     Returns:
         SandboxBackendProtocol instance
     """
     api_key = _get_langsmith_api_key()
     (
-        snapshot_id,
+        default_snapshot_id,
         fs_capacity_bytes,
         vcpus,
         mem_bytes,
@@ -217,10 +221,12 @@ def create_langsmith_sandbox(
         delete_after_stop_seconds,
     ) = _get_sandbox_snapshot_config()
 
+    effective_snapshot_id = snapshot_id or default_snapshot_id
+
     provider = LangSmithProvider(api_key=api_key)
     backend = provider.get_or_create(
         sandbox_id=sandbox_id,
-        snapshot_id=snapshot_id,
+        snapshot_id=effective_snapshot_id,
         fs_capacity_bytes=fs_capacity_bytes,
         vcpus=vcpus,
         mem_bytes=mem_bytes,

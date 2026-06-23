@@ -1,27 +1,29 @@
-import Editor from "@monaco-editor/react";
-import { useEffect, useState } from "react";
+import Editor from "@monaco-editor/react"
+import { useEffect, useState } from "react"
 
-import { Textarea } from "@/components/ui/textarea";
+import { Textarea } from "@/components/ui/textarea"
 
 interface InstructionsEditorProps {
-  value: string;
-  onChange: (value: string) => void;
-  disabled?: boolean;
-  placeholder?: string;
+  value: string
+  onChange: (value: string) => void
+  disabled?: boolean
+  placeholder?: string
+  language?: string
 }
 
-/** Monaco-backed markdown editor that falls back to a textarea before mount (SSR-safe). */
+/** Monaco-backed code editor that falls back to a textarea before mount (SSR-safe). */
 export function InstructionsEditor({
   value,
   onChange,
   disabled,
   placeholder,
+  language = "markdown",
 }: InstructionsEditorProps) {
-  const [mounted, setMounted] = useState(false);
+  const [mounted, setMounted] = useState(false)
 
   useEffect(() => {
-    setMounted(true);
-  }, []);
+    setMounted(true)
+  }, [])
 
   if (!mounted) {
     return (
@@ -32,14 +34,14 @@ export function InstructionsEditor({
         placeholder={placeholder}
         disabled={disabled}
       />
-    );
+    )
   }
 
   return (
     <div className="overflow-hidden rounded-md border border-border">
       <Editor
         height="360px"
-        defaultLanguage="markdown"
+        language={language}
         value={value}
         onChange={(v) => onChange(v ?? "")}
         options={{
@@ -55,5 +57,5 @@ export function InstructionsEditor({
         theme="vs-dark"
       />
     </div>
-  );
+  )
 }

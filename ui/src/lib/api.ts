@@ -320,6 +320,39 @@ export interface AgentInstructions {
   updated_at?: string
 }
 
+export type RepoSnapshotStatus = "none" | "building" | "ready" | "failed"
+
+export interface RepoSnapshot {
+  full_name: string
+  owner?: string
+  name?: string
+  dockerfile: string
+  snapshot_id: string | null
+  snapshot_name: string | null
+  status: RepoSnapshotStatus
+  status_message: string | null
+  build_log: string | null
+  fs_capacity_bytes?: number
+  vcpus?: number
+  mem_bytes?: number
+  target?: string | null
+  build_args?: Record<string, string> | null
+  build_started_at?: string | null
+  last_built_at?: string | null
+  created_by?: string
+  created_at?: string
+  updated_at?: string
+}
+
+export interface RepoSnapshotUpdateBody {
+  dockerfile: string
+  fs_capacity_bytes?: number | null
+  vcpus?: number | null
+  mem_bytes?: number | null
+  target?: string | null
+  build_args?: Record<string, string> | null
+}
+
 export type FindingSeverity = "low" | "medium" | "high" | "critical"
 export type FindingConfidence = "low" | "medium" | "high"
 export type FindingStatus = "open" | "resolved" | "dismissed"
@@ -580,6 +613,32 @@ export const api = {
     ),
   deleteAgentInstructions: (full_name: string) =>
     request<void>(`/agent-instructions/${encodeURIComponent(full_name)}`, {
+      method: "DELETE",
+    }),
+  listRepoSnapshots: () => request<Array<RepoSnapshot>>("/repo-snapshots"),
+  createRepoSnapshot: (full_name: string) =>
+    request<RepoSnapshot>("/repo-snapshots", {
+      method: "POST",
+      body: JSON.stringify({ full_name }),
+    }),
+  getRepoSnapshot: (full_name: string) =>
+    request<RepoSnapshot>(`/repo-snapshots/${encodeURIComponent(full_name)}`),
+  getRepoSnapshotTemplate: (full_name: string) =>
+    request<{ dockerfile: string }>(
+      `/repo-snapshots/template?full_name=${encodeURIComponent(full_name)}`
+    ),
+  saveRepoSnapshot: (full_name: string, body: RepoSnapshotUpdateBody) =>
+    request<RepoSnapshot>(`/repo-snapshots/${encodeURIComponent(full_name)}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  buildRepoSnapshot: (full_name: string) =>
+    request<RepoSnapshot>(
+      `/repo-snapshots/${encodeURIComponent(full_name)}/build`,
+      { method: "POST" }
+    ),
+  deleteRepoSnapshot: (full_name: string) =>
+    request<void>(`/repo-snapshots/${encodeURIComponent(full_name)}`, {
       method: "DELETE",
     }),
   getTeamSettings: () => request<TeamSettings>("/team-settings"),
