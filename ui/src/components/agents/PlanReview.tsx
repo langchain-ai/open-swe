@@ -14,6 +14,38 @@ import { useResolvedTheme } from "@/lib/theme"
 
 const POLL_MS = 4000
 
+// Copy text to the clipboard across browsers: prefer the async Clipboard API
+// (needs a secure context), and fall back to a hidden-textarea + execCommand
+// for older Safari/Firefox and non-HTTPS origins. Returns whether it copied.
+async function copyToClipboard(text: string): Promise<boolean> {
+  // The DOM types mark navigator.clipboard required, but it's absent in older
+  // browsers and non-secure origins — treat it as optional.
+  const nav = navigator as { clipboard?: Clipboard }
+  try {
+    if (window.isSecureContext && nav.clipboard) {
+      await nav.clipboard.writeText(text)
+      return true
+    }
+  } catch {
+    /* fall through to the legacy path */
+  }
+  try {
+    const textarea = document.createElement("textarea")
+    textarea.value = text
+    textarea.setAttribute("readonly", "")
+    textarea.style.position = "fixed"
+    textarea.style.top = "-9999px"
+    document.body.appendChild(textarea)
+    textarea.select()
+    textarea.setSelectionRange(0, text.length)
+    const ok = document.execCommand("copy")
+    document.body.removeChild(textarea)
+    return ok
+  } catch {
+    return false
+  }
+}
+
 export function PlanReview({ plan }: { plan: PlanData }) {
   const resolvedTheme = useResolvedTheme()
   const [comments, setComments] = useState<Array<PlanComment>>([])
@@ -22,6 +54,7 @@ export function PlanReview({ plan }: { plan: PlanData }) {
   const [decision, setDecision] = useState<string | null>(null)
   const [busy, setBusy] = useState<"approve" | "reject" | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [copied, setCopied] = useState(false)
 
   // Poll so reviewers see each other's comments without a realtime transport.
   useEffect(() => {
@@ -91,6 +124,16 @@ export function PlanReview({ plan }: { plan: PlanData }) {
     [plan.threadId]
   )
 
+  const copyPlan = useCallback(async () => {
+    setError(null)
+    if (await copyToClipboard(plan.markdown)) {
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 1500)
+    } else {
+      setError("Couldn't copy the plan to the clipboard.")
+    }
+  }, [plan.markdown])
+
   return (
     <div
       data-testid="plan-review"
@@ -116,6 +159,14 @@ export function PlanReview({ plan }: { plan: PlanData }) {
               {decision}
             </span>
           )}
+          <Button
+            data-testid="copy-plan"
+            variant="secondary"
+            disabled={!plan.markdown.trim()}
+            onClick={() => void copyPlan()}
+          >
+            {copied ? "Copied!" : "Copy markdown"}
+          </Button>
           {plan.isOwner && (
             <Button
               data-testid="approve-plan"
