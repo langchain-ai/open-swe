@@ -388,6 +388,39 @@ export interface ReviewFinding {
   group: FindingGroup
 }
 
+export interface ReviewCommentCreate {
+  path: string
+  line: number
+  side: "LEFT" | "RIGHT"
+  body: string
+  start_line?: number | null
+  start_side?: "LEFT" | "RIGHT" | null
+}
+
+export interface ReviewCommentResult {
+  id: number
+  html_url: string
+}
+
+export interface PrReviewComment {
+  id: number
+  author: string
+  author_avatar_url: string
+  path: string
+  line: number | null
+  side: "LEFT" | "RIGHT"
+  body: string
+  html_url: string
+  created_at: string
+  is_open_swe: boolean
+  // Outdated: the line no longer appears in the current diff, so it can't render inline.
+  is_outdated: boolean
+}
+
+export interface ReviewCommentsPayload {
+  comments: Array<PrReviewComment>
+}
+
 export interface ReviewCounts {
   open: number
   resolved: number
@@ -741,6 +774,20 @@ export const api = {
     }>(
       `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/re-review`,
       { method: "POST" }
+    ),
+  createReviewComment: (
+    owner: string,
+    repo: string,
+    number: number,
+    body: ReviewCommentCreate
+  ) =>
+    request<ReviewCommentResult>(
+      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/comments`,
+      { method: "POST", body: JSON.stringify(body) }
+    ),
+  listReviewComments: (owner: string, repo: string, number: number) =>
+    request<ReviewCommentsPayload>(
+      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/comments`
     ),
   getReviewerEval: () => request<ReviewerEvalStatus>("/admin/evals/reviewer"),
   logout: () => request<void>("/auth/logout", { method: "POST" }),

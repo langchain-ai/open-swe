@@ -86,6 +86,12 @@ export function useSidebarCollapsed(): boolean {
   return useContext(SidebarLayoutContext)?.collapsed ?? false;
 }
 
+// Full sidebar controls (collapse/expand) for pages that want to drive the nav,
+// e.g. the review detail page collapsing it by default. Null outside the provider.
+export function useSidebarControls(): SidebarLayout | null {
+  return useContext(SidebarLayoutContext);
+}
+
 interface SidebarFrameProps {
   width: number;
   setWidth: (next: number) => void;
