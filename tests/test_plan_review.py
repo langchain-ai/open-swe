@@ -18,19 +18,18 @@ def test_dashboard_plan_url_none_without_thread() -> None:
     assert dashboard_plan_url("") is None
 
 
-def test_format_comments_with_quote_and_author() -> None:
-    from agent.dashboard.plan_api import PlanComment, _format_comments
+def test_format_comments_numbers_and_skips_blank() -> None:
+    from agent.dashboard.plan_api import _format_comments
 
     text = _format_comments(
         [
-            PlanComment(author="alice", body="add a docstring", quote="def greet"),
-            PlanComment(author="bob", body="looks good", resolved=True),
-            PlanComment(author="carol", body="   "),  # blank → skipped
+            {"author": "alice", "body": "add a docstring"},
+            {"author": "bob", "body": "looks good"},
+            {"author": "carol", "body": "   "},  # blank → skipped
         ]
     )
-    assert 'On "def greet"' in text
-    assert "alice: add a docstring" in text
-    assert "bob (resolved): looks good" in text
+    assert "1. alice: add a docstring" in text
+    assert "2. bob: looks good" in text
     assert "carol" not in text
 
 
@@ -40,14 +39,13 @@ def test_format_comments_empty() -> None:
     assert _format_comments([]) == ""
 
 
-def test_plan_decision_body_defaults() -> None:
-    from agent.dashboard.plan_api import PlanComment, PlanDecisionBody
+def test_plan_comment_helpers_exported() -> None:
+    from agent.dashboard import plan_store
 
-    body = PlanDecisionBody()
-    assert body.comments == []
-    comment = PlanComment(body="hi")
-    assert comment.author is None
-    assert comment.resolved is False
+    assert plan_store.PLAN_COMMENTS_NAMESPACE == ["plan", "comments"]
+    assert callable(plan_store.add_plan_comment)
+    assert callable(plan_store.list_plan_comments)
+    assert callable(plan_store.delete_plan_comment)
 
 
 def test_save_plan_requires_run_context() -> None:
@@ -74,7 +72,9 @@ def test_plan_routes_registered() -> None:
     assert "/dashboard/api/plan/{thread_id}" in paths
     assert "/dashboard/api/plan/{thread_id}/approve" in paths
     assert "/dashboard/api/plan/{thread_id}/reject" in paths
-    assert "/dashboard/api/plan/yjs/{thread_id}" in paths
+    assert "/dashboard/api/plan/{thread_id}/comments" in paths
+    assert "/dashboard/api/plan/{thread_id}/comments/{comment_id}" in paths
+    assert "/dashboard/api/plan/yjs/{thread_id}" not in paths
 
 
 def test_save_plan_exported_and_wired() -> None:
@@ -96,31 +96,6 @@ def test_http_request_excluded_in_plan_mode() -> None:
     from agent.server import PLAN_MODE_EXCLUDED_TOOLS
 
     assert "http_request" in PLAN_MODE_EXCLUDED_TOOLS
-
-
-class _FakeWS:
-    def __init__(self, origin: str | None) -> None:
-        self.headers = {"origin": origin} if origin is not None else {}
-
-
-def test_collab_origin_allowed_noop_without_allowlist(monkeypatch: pytest.MonkeyPatch) -> None:
-    from agent.dashboard.plan_collab import _origin_allowed
-
-    monkeypatch.delenv("DASHBOARD_BASE_URL", raising=False)
-    monkeypatch.delenv("DASHBOARD_ALLOWED_ORIGINS", raising=False)
-    # No configured origins (local/dev): the gate is a no-op.
-    assert _origin_allowed(_FakeWS(None)) is True
-    assert _origin_allowed(_FakeWS("https://evil.test")) is True
-
-
-def test_collab_origin_allowed_enforced_with_allowlist(monkeypatch: pytest.MonkeyPatch) -> None:
-    from agent.dashboard.plan_collab import _origin_allowed
-
-    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://app.example")
-    monkeypatch.delenv("DASHBOARD_ALLOWED_ORIGINS", raising=False)
-    assert _origin_allowed(_FakeWS("https://app.example")) is True
-    assert _origin_allowed(_FakeWS("https://evil.test")) is False
-    assert _origin_allowed(_FakeWS(None)) is False
 
 
 class _FakeReq:

@@ -131,14 +131,12 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-    from .dashboard.plan_collab import collab_lifespan
     from .utils.model import validate_local_dev_llm_config
     from .utils.sandbox import validate_sandbox_startup_config
 
     validate_sandbox_startup_config()
     validate_local_dev_llm_config()
-    async with collab_lifespan():
-        yield
+    yield
 
 
 app = FastAPI(lifespan=lifespan)
@@ -162,10 +160,8 @@ if DASHBOARD_ALLOWED_ORIGINS:
 app.include_router(dashboard_router)
 
 from .dashboard.plan_api import plan_router  # noqa: E402
-from .dashboard.plan_collab import collab_router  # noqa: E402
 
 app.include_router(plan_router)
-app.include_router(collab_router)
 
 LINEAR_WEBHOOK_SECRET = os.environ.get("LINEAR_WEBHOOK_SECRET", "")
 GITHUB_WEBHOOK_SECRET = os.environ.get("GITHUB_WEBHOOK_SECRET", "")
