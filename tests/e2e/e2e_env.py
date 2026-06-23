@@ -67,11 +67,20 @@ _DEFAULTS = {
     "DASHBOARD_JWT_SECRET": "test-dashboard-jwt-secret",
 }
 
-# The Slack run's triggering user (fake users.info returns this email) — the
-# thread owner. A session with this email may continue the thread on the web.
-SAME_USER = {"login": "dev-user", "email": "dev@example.com"}
-# Any other logged-in user: can view the thread read-only, cannot post.
-OTHER_USER = {"login": "someone-else", "email": "someone@example.com"}
+# Named test users (the Slack sender dropdown + the dashboard login picker, and
+# the identities the automated tests log in as). Each maps a Slack sender id to
+# a dashboard login with a matching email, so the Slack thread's owner (resolved
+# by email) is the same person when they sign in. The first (Alice) is the
+# default Slack sender, hence the default thread owner.
+TEST_USERS = [
+    {"name": "Alice", "slack_id": "U_ALICE", "login": "alice", "email": "alice@example.com"},
+    {"name": "Bob", "slack_id": "U_BOB", "login": "bob", "email": "bob@example.com"},
+]
+
+# The default Slack sender / thread owner; a session with this email may continue
+# the thread on the web. Any other logged-in user is read-only.
+SAME_USER = {"login": TEST_USERS[0]["login"], "email": TEST_USERS[0]["email"]}
+OTHER_USER = {"login": TEST_USERS[1]["login"], "email": TEST_USERS[1]["email"]}
 
 for _k, _v in _DEFAULTS.items():
     os.environ.setdefault(_k, _v)

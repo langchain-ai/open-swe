@@ -202,6 +202,12 @@ export interface CurrentsConnectBody {
   api_key: string
 }
 
+export interface NotionCredentialStatus {
+  connected: boolean
+  token_expires_at?: string | null
+  updated_at?: string | null
+}
+
 export interface UserMapping {
   github_login: string
   work_email: string
@@ -671,6 +677,12 @@ export const api = {
     request<CurrentsCredentialStatus>("/my-credentials/currents", {
       method: "DELETE",
     }),
+  getMyNotionStatus: () =>
+    request<NotionCredentialStatus>("/my-credentials/notion"),
+  disconnectNotion: () =>
+    request<NotionCredentialStatus>("/my-credentials/notion", {
+      method: "DELETE",
+    }),
   listEnabledReviewRepos: () =>
     request<{ repos: Array<string> }>("/enabled-review-repos"),
   setEnabledReviewRepo: (full_name: string, enabled: boolean) =>
@@ -743,4 +755,8 @@ export function loginUrl(redirectTo?: string): string {
 
 export function slackConnectUrl(): string {
   return `${API_BASE}/dashboard/api/slack/login`
+}
+
+export function notionConnectUrl(): string {
+  return `${API_BASE}/dashboard/api/notion/login`
 }

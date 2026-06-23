@@ -12,7 +12,12 @@ process), so it runs before the first run regardless of import order. Idempotent
 
 from __future__ import annotations
 
+import logging
+import os
+
 import e2e_env  # noqa: F401  (sets env before any agent import)
+
+logger = logging.getLogger(__name__)
 
 _applied = False
 
@@ -34,12 +39,20 @@ def apply() -> None:
     opr = importlib.import_module("agent.tools.open_pull_request")
 
     from e2e_env import FAKE_GITHUB_API, FAKE_SLACK_API
-    from fake_llm import FakeScriptedChatModel, build_script
 
-    def _fake_make_model(model_id: str, **kwargs: object):  # noqa: ARG001
-        return FakeScriptedChatModel(script=build_script())
+    # The LLM is the only agent-internal piece we fake, and only by default.
+    # Set E2E_REAL_LLM=1 to drive the harness (mock Slack/GitHub, real agent)
+    # with a real model — useful for manually exercising plan review etc. The
+    # provider key (e.g. ANTHROPIC_API_KEY) must be in the environment.
+    if os.environ.get("E2E_REAL_LLM"):
+        logger.warning("E2E_REAL_LLM set — using the real model factory, not the scripted fake")
+    else:
+        from fake_llm import FakeScriptedChatModel, build_script
 
-    server.make_model = _fake_make_model
+        def _fake_make_model(model_id: str, **kwargs: object):  # noqa: ARG001
+            return FakeScriptedChatModel(script=build_script())
+
+        server.make_model = _fake_make_model
 
     async def _dummy_install_token_with_expiry() -> tuple[str, str | None]:
         return "dummy-installation-token", None

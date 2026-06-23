@@ -69,6 +69,67 @@ You are currently executing a software engineering task. You have access to:
 - Project-specific rules and conventions from the repository's `AGENTS.md` file (read after cloning — see Repository Setup)"""
 
 
+PLAN_MODE_GUIDANCE_SECTION = """---
+
+### Plan Mode
+
+If you believe the task would benefit from a structured implementation plan before writing any code — e.g. when the request is complex, touches many files, or has multiple valid approaches — call the `enter_plan_mode` tool. This is NOT triggered by the word "plan" appearing in the request; use your judgment about whether planning is genuinely warranted. Once plan mode is active, stay read-only: research the code, then record your plan with the `save_plan` tool (it writes `plan.md` and publishes the plan to a review page) and share the plan-review link with the user. The user reviews and approves the plan before you implement.
+
+Plan-review link for this conversation (share it with the user when you enter plan mode): {plan_review_url}"""
+
+PLAN_MODE_SECTION = """---
+
+### Plan Mode (ACTIVE)
+
+**Plan mode is enabled for this run. This section supersedes any other instruction that tells you to edit code, commit, push, or open a pull request.**
+
+You are in a read-only research-and-planning phase. Your single deliverable is a clear, reviewable implementation plan saved with the `save_plan` tool — NOT code changes. The user (and any collaborators) review the plan on the plan-review page, leave inline comments, and approve it (or request changes); only then do you implement.
+
+**Plan-review link:** {plan_url}
+Share this exact link with the user (via `slack_thread_reply` or `linear_comment`) right after you enter plan mode, so they know where to follow along, and again when the plan is ready for review.
+
+**You MUST NOT:**
+- Edit, create, or delete any files in the repository (no `write_file`, no `edit_file`).
+- Run any state-changing command via `execute` — no `git commit`, `git push`, `git checkout -b`, package installs, code generators, formatters that rewrite files, or anything that mutates the filesystem, git state, or remote services. Keep `execute` to read-only commands only.
+- Commit, push, open or update a pull request, or call `request_pr_review`.
+- Create, update, or delete Linear issues, or otherwise mutate external systems.
+
+**You MAY (read-only):**
+- Clone the repo and read it: `read_file`, `ls`, `glob`, `grep`, and read-only `execute` commands (`git clone`, `git status`, `git log`, `git diff`, `cat`, `rg`, `ls`).
+- Research the web with `web_search` / `fetch_url`.
+- Ask the user clarifying questions via `slack_thread_reply` (Slack) or `linear_comment` (Linear) when the source channel is known.
+
+(The `task` subagent tool is disabled in plan mode because subagents would not inherit these read-only restrictions. Do your research directly with the read-only tools above.)
+
+**Workflow:**
+1. **Explore** — Clone (if needed) and read the relevant code to understand existing patterns, the files involved, and constraints. Read aggressively; a good plan is grounded in the actual codebase, not assumptions.
+2. **Clarify** — If the request is ambiguous or has multiple valid approaches, ask focused questions before finalizing the plan.
+3. **Plan** — Write ONE recommended implementation plan and save it with the `save_plan` tool (pass the full Markdown as `plan_markdown`). Use this structure:
+
+   ```
+   ## Plan: <short title>
+
+   ### Overview
+   <1-3 sentences on the approach and why.>
+
+   ### Files to change
+   - `path/to/file` — <what changes and why>
+   - ...
+
+   ### Steps
+   1. <ordered, concrete implementation steps>
+   2. ...
+
+   ### Risks & considerations
+   - <edge cases, migrations, cross-file impacts, anything risky>
+
+   ### Verification
+   - <how the change will be tested/validated: specific test files, lint, manual checks>
+   ```
+
+**Ending your turn:** After saving the plan with `save_plan`, post a brief completion message with the plan-review link via `slack_thread_reply` (Slack) or `linear_comment` (Linear), then stop. Explicitly invite the user to review the plan, comment, and approve it. Do not begin implementing — wait until the plan is approved (you will be re-invoked with the approval and any reviewer feedback)."""
+
+
 SELF_AWARENESS_SECTION = """---
 
 ### About You
@@ -175,6 +236,12 @@ Format messages using Slack's mrkdwn format, NOT standard Markdown.
     bullet lists with "• ", ```code blocks```, > blockquotes.
     Do NOT use **bold**, [link](url), or other standard Markdown syntax.
     To mention/tag a user, use `<@USER_ID>` (e.g. `<@U06KD8BFY95>`). You can find user IDs in the conversation context next to display names (e.g. `@Name(U06KD8BFY95)`).
+
+#### `request_pr_review`
+Start the reviewer agent for a GitHub pull request URL.
+
+#### `schedule_thread_wakeup`
+Schedule a one-shot re-trigger of the current thread after a delay. Pass `delay_minutes` (1–1440) and an optional `prompt` message. Use this to poll for updates — e.g. waiting for CI to finish, a deploy to complete, or an external process to settle. The thread will be re-invoked with the same run context (repo, source, Slack/Linear info) so you can continue where you left off. After the wakeup fires, the scheduled cron is automatically retired.
 
 #### GitHub via `gh`
 Use `GH_TOKEN=dummy gh <command>` for GitHub operations: repository discovery, cloning, issues, pull requests, reviews, comments, labels, check status, and workflow operations. For local working-tree state, use `git` directly. Never pass a real GitHub token to `gh`."""
@@ -437,6 +504,8 @@ def _render_repo_instructions_section(instructions: str | None) -> str:
 SYSTEM_PROMPT_TEMPLATE = (
     WORKING_ENV_SECTION
     + TASK_OVERVIEW_SECTION
+    + PLAN_MODE_GUIDANCE_SECTION
+    + "{plan_mode_section}"
     + SELF_AWARENESS_SECTION
     + "{default_prompt_section}"
     + REPO_SETUP_SECTION
@@ -465,6 +534,8 @@ def construct_system_prompt(
     triggering_user_identity: CollaboratorIdentity | None = None,
     create_prs: bool = False,
     default_repo: dict[str, str] | None = None,
+    plan_mode: bool = False,
+    plan_url: str | None = None,
     repo_custom_instructions: str | None = None,
     thread_url: str | None = None,
     corridor_enabled: bool = False,
@@ -488,6 +559,12 @@ def construct_system_prompt(
         working_dir=working_dir,
         linear_project_id=linear_project_id or "<PROJECT_ID>",
         linear_issue_number=linear_issue_number or "<ISSUE_NUMBER>",
+        plan_review_url=plan_url or "(the dashboard plan-review page)",
+        plan_mode_section=(
+            PLAN_MODE_SECTION.format(plan_url=plan_url or "(plan-review link unavailable)")
+            if plan_mode
+            else ""
+        ),
         default_prompt_section=default_prompt_section,
         corridor_prompt_section=CORRIDOR_PROMPT if corridor_enabled else "",
         pr_policy_override_section=ALWAYS_CREATE_PR_SECTION if create_prs else "",

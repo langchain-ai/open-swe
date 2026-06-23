@@ -18,6 +18,14 @@ def dashboard_thread_url(thread_id: str) -> str | None:
     return f"{base_url}/agents/{quote(thread_id, safe='')}"
 
 
+def dashboard_plan_url(thread_id: str) -> str | None:
+    """Build the dashboard plan-review URL for a given thread id."""
+    base_url = _dashboard_base_url()
+    if not base_url or not thread_id:
+        return None
+    return f"{base_url}/agents/{quote(thread_id, safe='')}/plan"
+
+
 def dashboard_review_url(owner: str, repo: str, pr_number: int) -> str | None:
     """Build the dashboard review-detail URL for a PR."""
     base_url = _dashboard_base_url()

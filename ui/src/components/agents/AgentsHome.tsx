@@ -44,6 +44,7 @@ export function AgentsHome() {
   const { models, defaultSelection } = useModelOptions()
   const [selection, setSelection] = useState<ModelSelection | null>(null)
   const activeSelection = selection ?? defaultSelection
+  const [planMode, setPlanMode] = useState(false)
   const [submitting, setSubmitting] = useState(false)
 
   const reposQuery = useRepos()
@@ -94,6 +95,7 @@ export function AgentsHome() {
     }
     if (repo) configurable.repo = repo
     if (repoOverride === null) configurable.repo_explicitly_none = true
+    if (planMode) configurable.plan_mode = true
 
     stream
       .submit(
@@ -125,6 +127,8 @@ export function AgentsHome() {
             repos={reposQuery.data?.repositories}
             selectedRepo={repo}
             onRepoChange={setRepoOverride}
+            planMode={planMode}
+            onPlanModeChange={setPlanMode}
           />
         </div>
       </div>

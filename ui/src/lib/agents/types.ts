@@ -180,6 +180,8 @@ export interface AgentThread {
   branch: string
   model: string
   effort?: string | null
+  planMode?: boolean
+  planStatus?: string | null
   source?: AgentSource
   status: AgentStatus
   viewed: boolean

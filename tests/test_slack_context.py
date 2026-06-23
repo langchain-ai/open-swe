@@ -739,6 +739,93 @@ def test_process_slack_mention_queues_active_thread_message(
     assert "## Latest Mention Request\ninclude this screenshot" in queued_payload["text"]
 
 
+def test_process_slack_mention_serializes_concurrent_run_dispatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+    _setup_slack_mention_fakes(monkeypatch, captured)
+
+    thread_ts = "1700000001.000100"
+    expected_thread_id = generate_thread_id_from_slack_thread("C123", thread_ts)
+    first_active_started = asyncio.Event()
+    finish_first_active = asyncio.Event()
+    active_calls: list[str] = []
+    run_creates: list[dict[str, object]] = []
+    queued_messages: list[dict[str, object]] = []
+
+    async def fake_thread_exists(thread_id: str) -> bool:
+        return False
+
+    async def fake_is_thread_active(thread_id: str) -> bool:
+        active_calls.append(thread_id)
+        if len(active_calls) == 1:
+            first_active_started.set()
+            await finish_first_active.wait()
+        return bool(run_creates)
+
+    async def fake_queue_message_for_thread(thread_id: str, message_content: object) -> bool:
+        queued_messages.append({"thread_id": thread_id, "message_content": message_content})
+        return True
+
+    class _FakeRunsClient:
+        async def create(self, thread_id: str, graph: str, **kwargs) -> dict[str, str]:
+            run_creates.append({"thread_id": thread_id, "graph": graph, "kwargs": kwargs})
+            return {"run_id": f"run-{len(run_creates)}"}
+
+    class _FakeThreadsClientForProcess:
+        async def update(self, *, thread_id: str, metadata: dict) -> None:
+            captured["metadata_update"] = {"thread_id": thread_id, "metadata": metadata}
+
+    class _FakeLangGraphClientForProcess:
+        runs = _FakeRunsClient()
+        threads = _FakeThreadsClientForProcess()
+
+    monkeypatch.setattr(webapp, "_thread_exists", fake_thread_exists)
+    monkeypatch.setattr(webapp, "is_thread_active", fake_is_thread_active)
+    monkeypatch.setattr(webapp, "queue_message_for_thread", fake_queue_message_for_thread)
+    monkeypatch.setattr(webapp, "get_client", lambda url: _FakeLangGraphClientForProcess())
+
+    async def run_concurrent_mentions() -> None:
+        first = asyncio.create_task(
+            webapp.process_slack_mention(
+                {
+                    "channel_id": "C123",
+                    "thread_ts": thread_ts,
+                    "event_ts": "1700000000.000200",
+                    "user_id": "U123",
+                    "text": "<@UBOT> first request",
+                    "bot_user_id": "UBOT",
+                },
+                {"owner": "langchain-ai", "name": "open-swe"},
+            )
+        )
+        await first_active_started.wait()
+        second = asyncio.create_task(
+            webapp.process_slack_mention(
+                {
+                    "channel_id": "C123",
+                    "thread_ts": thread_ts,
+                    "event_ts": "1700000000.000300",
+                    "user_id": "U123",
+                    "text": "<@UBOT> second request",
+                    "bot_user_id": "UBOT",
+                },
+                {"owner": "langchain-ai", "name": "open-swe"},
+            )
+        )
+        await asyncio.sleep(0.05)
+        assert active_calls == [expected_thread_id]
+        finish_first_active.set()
+        await asyncio.gather(first, second)
+
+    asyncio.run(run_concurrent_mentions())
+
+    assert active_calls == [expected_thread_id, expected_thread_id]
+    assert len(run_creates) == 1
+    assert run_creates[0]["thread_id"] == expected_thread_id
+    assert queued_messages[0]["thread_id"] == expected_thread_id
+
+
 def test_process_slack_mention_unmapped_user_blocked_and_prompted(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

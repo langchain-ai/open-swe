@@ -124,19 +124,21 @@ from .utils.slack_feedback import (
     process_slack_reaction_added,
     process_slack_reaction_removed,
 )
-from .utils.thread_ops import is_thread_active, queue_message_for_thread
+from .utils.thread_ops import is_thread_active, queue_message_for_thread, thread_run_lock
 
 logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    from .dashboard.plan_collab import collab_lifespan
     from .utils.model import validate_local_dev_llm_config
     from .utils.sandbox import validate_sandbox_startup_config
 
     validate_sandbox_startup_config()
     validate_local_dev_llm_config()
-    yield
+    async with collab_lifespan():
+        yield
 
 
 app = FastAPI(lifespan=lifespan)
@@ -158,6 +160,12 @@ if DASHBOARD_ALLOWED_ORIGINS:
     )
 
 app.include_router(dashboard_router)
+
+from .dashboard.plan_api import plan_router  # noqa: E402
+from .dashboard.plan_collab import collab_router  # noqa: E402
+
+app.include_router(plan_router)
+app.include_router(collab_router)
 
 LINEAR_WEBHOOK_SECRET = os.environ.get("LINEAR_WEBHOOK_SECRET", "")
 GITHUB_WEBHOOK_SECRET = os.environ.get("GITHUB_WEBHOOK_SECRET", "")
@@ -691,6 +699,68 @@ async def _ensure_thread_exists_for_metadata(
         return False
 
 
+async def _slack_user_is_thread_owner(thread_id: str, slack_user_id: str) -> bool:
+    """Whether the clicking Slack user is the user who requested the plan.
+
+    Plan approval is owner-only (mirrors the dashboard plan API's
+    ``_user_owns_thread`` gate). The original requester's Slack id is stored in
+    ``source_context.slack_thread.triggering_user_id`` when the run is created.
+    Fails closed when ownership can't be determined.
+    """
+    if not slack_user_id:
+        return False
+    langgraph_client = get_client(url=LANGGRAPH_URL)
+    try:
+        thread = await langgraph_client.threads.get(thread_id)
+    except Exception:  # noqa: BLE001
+        return False
+    metadata = thread.get("metadata") if isinstance(thread, dict) else None
+    if not isinstance(metadata, dict):
+        return False
+    source_context = metadata.get("source_context")
+    slack_thread = source_context.get("slack_thread") if isinstance(source_context, dict) else None
+    owner_id = slack_thread.get("triggering_user_id") if isinstance(slack_thread, dict) else None
+    return isinstance(owner_id, str) and bool(owner_id) and owner_id == slack_user_id
+
+
+async def _get_thread_plan_mode(thread_id: str) -> bool | None:
+    """Return the persisted plan-mode flag for a thread, or ``None`` if unset."""
+    langgraph_client = get_client(url=LANGGRAPH_URL)
+    try:
+        thread = await langgraph_client.threads.get(thread_id)
+    except Exception as exc:  # noqa: BLE001
+        if _is_not_found_error(exc):
+            return None
+        logger.warning("Failed to fetch plan-mode metadata for thread %s", thread_id)
+        return None
+    metadata = thread.get("metadata") if isinstance(thread, dict) else None
+    if not isinstance(metadata, dict):
+        return None
+    value = metadata.get("plan_mode")
+    return value if isinstance(value, bool) else None
+
+
+async def _set_thread_plan_mode(thread_id: str, enabled: bool) -> None:
+    """Persist the plan-mode flag onto thread metadata."""
+    langgraph_client = get_client(url=LANGGRAPH_URL)
+    try:
+        await langgraph_client.threads.update(
+            thread_id=thread_id, metadata={"plan_mode": bool(enabled)}
+        )
+    except Exception as exc:  # noqa: BLE001
+        if _is_not_found_error(exc):
+            try:
+                await langgraph_client.threads.create(
+                    thread_id=thread_id,
+                    if_exists="do_nothing",
+                    metadata={"plan_mode": bool(enabled)},
+                )
+            except Exception:  # noqa: BLE001
+                logger.exception("Failed to create thread %s while persisting plan_mode", thread_id)
+            return
+        logger.exception("Failed to persist plan_mode for thread %s", thread_id)
+
+
 async def process_linear_issue(  # noqa: PLR0912, PLR0915
     issue_data: dict[str, Any], repo_config: dict[str, str]
 ) -> None:
@@ -1173,6 +1243,10 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
     if mapped_login:
         configurable["github_login"] = mapped_login
 
+    thread_plan_mode = await _get_thread_plan_mode(thread_id)
+    if thread_plan_mode is not None:
+        configurable["plan_mode"] = thread_plan_mode
+
     langgraph_client = get_client(url=LANGGRAPH_URL)
     is_first_mention = not await _thread_exists(thread_id)
     await _upsert_slack_thread_repo_metadata(thread_id, repo_config, langgraph_client)
@@ -1189,36 +1263,37 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
         source_context={"slack_thread": configurable["slack_thread"]},
     )
 
-    thread_active = await is_thread_active(thread_id)
-    if thread_active:
+    async with thread_run_lock(thread_id):
+        thread_active = await is_thread_active(thread_id)
+        if thread_active:
+            logger.info(
+                "Thread %s is active, queuing Slack message for middleware pickup",
+                thread_id,
+            )
+            queued_payload = {"text": prompt, "image_urls": image_urls}
+            queued = await queue_message_for_thread(
+                thread_id=thread_id,
+                message_content=queued_payload,
+            )
+            if queued:
+                logger.info("Slack message queued for thread %s", thread_id)
+            else:
+                logger.error("Failed to queue Slack message for thread %s", thread_id)
+            return
+
+        logger.info("Creating Slack LangGraph run for thread %s", thread_id)
+        run = await langgraph_client.runs.create(
+            thread_id,
+            "agent",
+            input={"messages": [{"role": "user", "content": content_blocks}]},
+            config={"configurable": configurable, "metadata": _AGENT_VERSION_METADATA},
+            if_not_exists="create",
+        )
         logger.info(
-            "Thread %s is active, queuing Slack message for middleware pickup",
+            "Slack LangGraph run %s created for thread %s",
+            _run_id_for_logging(run),
             thread_id,
         )
-        queued_payload = {"text": prompt, "image_urls": image_urls}
-        queued = await queue_message_for_thread(
-            thread_id=thread_id,
-            message_content=queued_payload,
-        )
-        if queued:
-            logger.info("Slack message queued for thread %s", thread_id)
-        else:
-            logger.error("Failed to queue Slack message for thread %s", thread_id)
-        return
-
-    logger.info("Creating Slack LangGraph run for thread %s", thread_id)
-    run = await langgraph_client.runs.create(
-        thread_id,
-        "agent",
-        input={"messages": [{"role": "user", "content": content_blocks}]},
-        config={"configurable": configurable, "metadata": _AGENT_VERSION_METADATA},
-        if_not_exists="create",
-    )
-    logger.info(
-        "Slack LangGraph run %s created for thread %s",
-        _run_id_for_logging(run),
-        thread_id,
-    )
     run_id = run.get("run_id")
     if is_first_mention:
         trace_message_ts = await post_slack_trace_reply(channel_id, thread_ts, thread_id)
@@ -1565,6 +1640,56 @@ async def slack_interactivity(
         action_value = json.loads(str(action.get("value") or "{}"))
     except json.JSONDecodeError:
         return {"status": "ignored", "reason": "Invalid action value"}
+    if action_value.get("type") == "plan_approval":
+        plan_action = str(action_value.get("action") or "").strip()
+        channel = payload.get("channel") if isinstance(payload.get("channel"), dict) else {}
+        message = payload.get("message") if isinstance(payload.get("message"), dict) else {}
+        container = payload.get("container") if isinstance(payload.get("container"), dict) else {}
+        user = payload.get("user") if isinstance(payload.get("user"), dict) else {}
+        channel_id = str(channel.get("id") or container.get("channel_id") or "")
+        thread_ts = str(
+            message.get("thread_ts") or message.get("ts") or container.get("thread_ts") or ""
+        )
+        user_id = str(user.get("id") or "")
+        if not channel_id or not thread_ts:
+            return {"status": "ignored", "reason": "Missing Slack action context"}
+
+        thread_id = generate_thread_id_from_slack_thread(channel_id, thread_ts)
+
+        if plan_action == "cancel":
+            await post_slack_thread_reply(
+                channel_id=channel_id,
+                thread_ts=thread_ts,
+                text="Plan cancelled. No changes will be made.",
+            )
+            return {"status": "accepted", "message": "Plan cancelled"}
+
+        if plan_action == "approve":
+            if not await _slack_user_is_thread_owner(thread_id, user_id):
+                await post_slack_thread_reply(
+                    channel_id=channel_id,
+                    thread_ts=thread_ts,
+                    text="Only the person who requested this plan can approve it. Anyone can reply with feedback or use *Revise Plan*.",
+                )
+                return {"status": "ignored", "reason": "approver is not the thread owner"}
+            await _set_thread_plan_mode(thread_id, False)
+            repo_config = await get_slack_repo_config(channel_id, thread_ts, slack_user_id=user_id)
+            background_tasks.add_task(
+                process_slack_mention,
+                {
+                    "channel_id": channel_id,
+                    "thread_ts": thread_ts,
+                    "event_ts": str(message.get("ts") or ""),
+                    "user_id": user_id,
+                    "text": "Proceed with the approved plan. Implement the changes as described in the plan.",
+                    "bot_user_id": SLACK_BOT_USER_ID,
+                },
+                repo_config,
+            )
+            return {"status": "accepted", "message": "Plan approved, starting implementation"}
+
+        return {"status": "accepted", "message": "Reply to revise the plan"}
+
     if action_value.get("type") != "open_swe_option":
         return {"status": "ignored", "reason": "Unknown action type"}
 

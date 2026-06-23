@@ -20,6 +20,7 @@
   <body>
     <h1>#demo — Slack (mock)</h1>
     <div class="compose">
+      <select id="user" title="sender"></select>
       <input id="text" value="<@U0BOT> please add a greet() helper and open a PR" />
       <button id="send">Send</button>
       <button id="reset">Reset</button>
@@ -29,11 +30,22 @@
 
     <script>
       const $ = (id) => document.getElementById(id);
+      const userNames = {}; // slack_id -> display name
+
+      async function loadUsers() {
+        try {
+          const users = await (await fetch("/mock/users")).json();
+          $("user").innerHTML = users
+            .map((u) => `<option value="${u.slack_id}">${u.name}</option>`)
+            .join("");
+          for (const u of users) userNames[u.slack_id] = u.name;
+        } catch (_) {}
+      }
 
       function render(messages) {
         const html = messages
           .map((m) => {
-            const who = m.is_bot ? "open-swe (bot)" : "you";
+            const who = m.is_bot ? "open-swe (bot)" : userNames[m.user] || m.user;
             const linked = m.text.replace(/<(https?:\/\/[^|>]+)\|([^>]+)>/g, '<a href="$1">$2</a>');
             return `<div class="msg ${m.is_bot ? "bot" : ""}" data-bot="${m.is_bot}"><div class="who">${who}</div><div class="text">${linked}</div></div>`;
           })
@@ -52,7 +64,11 @@
         await fetch("/mock/slack/send", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text: $("text").value, mention_bot: $("mention").checked }),
+          body: JSON.stringify({
+            text: $("text").value,
+            mention_bot: $("mention").checked,
+            user: $("user").value,
+          }),
         });
         poll();
       });
@@ -62,6 +78,7 @@
         render([]);
       });
 
+      loadUsers();
       poll();
       setInterval(poll, 1000);
     </script>

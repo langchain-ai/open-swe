@@ -35,6 +35,13 @@ from .enabled_repos import (
 from .eval_jobs import (
     get_reviewer_eval_status,
 )
+from .notion_oauth import (
+    NOTION_STATE_COOKIE_NAME,
+    NotionOAuthError,
+    exchange_notion_code,
+    pop_notion_oauth_flow,
+    store_notion_oauth_flow,
+)
 from .oauth import (
     COOKIE_NAME,
     SESSION_TTL_SECONDS,
@@ -160,8 +167,11 @@ from .thread_api import (
 from .user_credentials import (
     CurrentsCredentialsUpdate,
     connect_currents,
+    connect_notion,
     disconnect_currents,
+    disconnect_notion,
     get_currents_status,
+    get_notion_status,
 )
 from .user_mappings import (
     delete_mapping,
@@ -301,6 +311,26 @@ def _clear_slack_state_cookie(response: Response) -> None:
     secure, _ = _cookie_security()
     response.delete_cookie(
         SLACK_STATE_COOKIE_NAME, path="/dashboard/api/slack", samesite="lax", secure=secure
+    )
+
+
+def _set_notion_state_cookie(response: Response, nonce: str) -> None:
+    secure, _ = _cookie_security()
+    response.set_cookie(
+        key=NOTION_STATE_COOKIE_NAME,
+        value=nonce,
+        max_age=STATE_TTL_SECONDS,
+        httponly=True,
+        secure=secure,
+        samesite="lax",
+        path="/dashboard/api/notion",
+    )
+
+
+def _clear_notion_state_cookie(response: Response) -> None:
+    secure, _ = _cookie_security()
+    response.delete_cookie(
+        NOTION_STATE_COOKIE_NAME, path="/dashboard/api/notion", samesite="lax", secure=secure
     )
 
 
@@ -448,6 +478,89 @@ async def disconnect_my_currents(
 ) -> dict[str, Any]:
     status = await disconnect_currents(session["sub"])
     return status.get("currents", {"connected": False})
+
+
+@router.get("/my-credentials/notion")
+async def get_my_notion_status(
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    status = await get_notion_status(session["sub"])
+    return status.get("notion", {"connected": False})
+
+
+@router.delete("/my-credentials/notion")
+async def disconnect_my_notion(
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    status = await disconnect_notion(session["sub"])
+    return status.get("notion", {"connected": False})
+
+
+@router.get("/notion/login")
+async def notion_login(
+    session: dict[str, Any] = _SESSION_DEP,
+) -> RedirectResponse:
+    redirect_uri = f"{_api_base_url()}/dashboard/api/notion/callback"
+    nonce = new_state_nonce()
+    nonce_hash = hash_state_nonce(nonce)
+    state = issue_state(
+        redirect_to=f"{_frontend_base_url()}/my-settings",
+        nonce_hash=nonce_hash,
+    )
+    try:
+        url = await store_notion_oauth_flow(
+            session["sub"],
+            nonce_hash,
+            redirect_uri=redirect_uri,
+            state=state,
+        )
+    except NotionOAuthError as exc:
+        raise HTTPException(exc.status_code, exc.detail) from exc
+    response = RedirectResponse(url, status_code=302)
+    _set_notion_state_cookie(response, nonce)
+    return response
+
+
+@router.get("/notion/callback")
+async def notion_callback(
+    request: Request,
+    state: str,
+    code: str | None = None,
+    error: str | None = None,
+    error_description: str | None = None,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> RedirectResponse:
+    state_payload = decode_state(state)
+    nonce_hash = state_payload.get("nonce_hash")
+    cookie_nonce = request.cookies.get(NOTION_STATE_COOKIE_NAME)
+    if (
+        not isinstance(nonce_hash, str)
+        or not cookie_nonce
+        or not hmac.compare_digest(hash_state_nonce(cookie_nonce), nonce_hash)
+    ):
+        raise HTTPException(400, "oauth state mismatch — please retry")
+
+    flow = await pop_notion_oauth_flow(session["sub"], nonce_hash)
+    if flow is None:
+        raise HTTPException(400, "oauth flow expired — please retry")
+    if error:
+        detail = error_description or error
+        raise HTTPException(400, f"Notion OAuth failed: {detail}")
+    if not code:
+        raise HTTPException(400, "Notion OAuth callback missing code")
+
+    try:
+        token_data = await exchange_notion_code(code, flow)
+        await connect_notion(session["sub"], token_data, flow)
+    except NotionOAuthError as exc:
+        raise HTTPException(exc.status_code, exc.detail) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+    redirect_to = sanitize_redirect_to(state_payload.get("redirect_to")) or _frontend_base_url()
+    response = RedirectResponse(redirect_to, status_code=302)
+    _clear_notion_state_cookie(response)
+    return response
 
 
 @router.get("/slack/login")

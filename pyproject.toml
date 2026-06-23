@@ -18,7 +18,7 @@ dependencies = [
     "markdownify>=1.2.2",
     "langchain-anthropic>=1.4.6",
     "langgraph-cli[inmem]>=0.4.27",
-    "langsmith==0.8.11",
+    "langsmith==0.8.18",
     "langchain-openai>=1.2.2",
     "langchain-fireworks>=1.4.2",
     # langchain-fireworks 1.4.2 pins a pre-release fireworks-ai; opt in explicitly so uv resolves it.
@@ -29,6 +29,8 @@ dependencies = [
     "exa-py>=2.13.0",
     "langchain-google-genai>=4.2.4",
     "langchain-mcp-adapters>=0.2.2",
+    "pycrdt>=0.14.1,<0.15",
+    "pycrdt-websocket>=0.16.3,<0.17",
 ]
 
 [project.optional-dependencies]

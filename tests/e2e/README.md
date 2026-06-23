@@ -42,29 +42,15 @@ so what Playwright asserts on is exactly what the real agent produced.
 - `static/{slack,github}.html` — the mock Slack/GitHub UIs (external SaaS we can't
   run locally). The dashboard is **not** mocked — it's the real `ui/` app.
 - `global-setup.ts` — builds the real `ui/` SPA (once) so the harness can serve it.
-- `tests/full_flow.spec.ts` — Slack → implement → PR → reply.
-- `tests/dashboard.spec.ts` — the Slack → web handoff (below).
 
-## Slack → web handoff (dashboard.spec.ts) — the REAL ui/ app
+## The dashboard — the real `ui/` app
 
-After the Slack run, the bot posts an "Open in Web" link
-(`DASHBOARD_BASE_URL/agents/{thread_id}`). The test clicks that real link, which
-loads the **actual built `ui/` React app** — served same-origin from the harness
-so the session cookie and `/dashboard/api/*` calls work without CORS. The signed
-session cookie is real (minted via `/control/login`), so the per-user
-authorization is genuine:
-
-- **Same user** (session email = the Slack triggerer = thread owner): the real
-  `AgentThreadView` shows the transcript (incl. the PR link), the `AgentPromptBar`
-  composer is present, and submitting a follow-up streams a new agent reply into
-  the same thread.
-- **Different user** (any other org login): the same transcript renders, but the
-  real UI shows **no composer** (`AgentThreadView` gates it on `thread.isOwner`).
-
-Ownership is by `github_login` / `triggering_user_email` on the thread metadata;
-`GET /dashboard/api/threads/{id}` returns `isOwner`, which the real UI uses to
-gate the composer. The only extra fake here is the OAuth-token store (an external
-credential); the authorization logic itself is real.
+The dashboard is **not** mocked. The bot's "Open in Web" link
+(`DASHBOARD_BASE_URL/agents/{thread_id}`) loads the **actual built `ui/` React
+app** — served same-origin from the harness so the session cookie and
+`/dashboard/api/*` calls work without CORS. The signed session cookie is real
+(minted via `/control/login`), so per-user authorization is genuine; the only
+extra fake is the OAuth-token store (an external credential).
 
 The UI is built by `global-setup.ts` with `VITE_DASHBOARD_API_BASE_URL` pointed at
 the harness. It builds once; set `E2E_FORCE_UI_BUILD=1` to rebuild (e.g. after a

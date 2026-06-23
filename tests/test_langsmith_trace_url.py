@@ -66,3 +66,29 @@ def test_resolve_project_id_caches_success(monkeypatch: pytest.MonkeyPatch) -> N
     assert first == "pid-123"
     assert second == "pid-123"
     assert calls == [AGENT_TRACING_PROJECT]
+
+
+def test_resolve_project_id_caches_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[str] = []
+
+    class _FakeClient:
+        def read_project(self, *, project_name: str) -> None:
+            calls.append(project_name)
+            raise RuntimeError("403 Forbidden")
+
+    monkeypatch.setattr(ls_utils, "_build_prod_langsmith_client", lambda: _FakeClient())
+
+    assert ls_utils._resolve_project_id_by_name(AGENT_TRACING_PROJECT) is None
+    assert ls_utils._resolve_project_id_by_name(AGENT_TRACING_PROJECT) is None
+    assert calls == [AGENT_TRACING_PROJECT]
+
+
+def test_trace_url_none_when_tenant_unset(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("LANGSMITH_TENANT_ID_PROD", raising=False)
+
+    def _boom() -> None:
+        raise AssertionError("must not build a client when the tenant id is unset")
+
+    monkeypatch.setattr(ls_utils, "_build_prod_langsmith_client", _boom)
+
+    assert ls_utils.get_langsmith_trace_url("t5") is None

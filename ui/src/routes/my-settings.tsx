@@ -2,6 +2,7 @@ import { Navigate, createFileRoute, useNavigate } from "@tanstack/react-router"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
 import { IoLogoSlack } from "react-icons/io5"
+import { SiNotion } from "react-icons/si"
 
 import type { CurrentsConnectBody, SessionUser } from "@/lib/api"
 import { AppShell, SettingsRow, SettingsSection } from "@/components/AppShell"
@@ -16,7 +17,7 @@ import {
 } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
-import { api, slackConnectUrl } from "@/lib/api"
+import { api, notionConnectUrl, slackConnectUrl } from "@/lib/api"
 import {
   buildProfileUpdate,
   useOptions,
@@ -265,6 +266,85 @@ function CurrentsCredentialsSection() {
   )
 }
 
+function NotionCredentialsSection() {
+  const qc = useQueryClient()
+  const creds = useQuery({
+    queryKey: ["myNotion"],
+    queryFn: api.getMyNotionStatus,
+  })
+  const [connecting, setConnecting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const onSuccess = () => {
+    qc.invalidateQueries({ queryKey: ["myNotion"] })
+    setError(null)
+  }
+  const onError = (e: Error) => setError(e.message)
+
+  const disconnect = useMutation({
+    mutationFn: () => api.disconnectNotion(),
+    onSuccess,
+    onError,
+  })
+
+  const connected = creds.data?.connected
+  const connect = () => {
+    setConnecting(true)
+    void qc.invalidateQueries({ queryKey: ["myNotion"] })
+    window.location.assign(notionConnectUrl())
+  }
+
+  return (
+    <SettingsSection
+      title="Notion"
+      description="Connect your Notion account through Notion MCP so agent runs can use Notion tools with your workspace permissions. OAuth tokens are encrypted at rest and scoped to your account only."
+    >
+      <SettingsRow
+        label="Notion MCP"
+        description={
+          connected
+            ? "Connected. Reconnect if your Notion authorization expires or workspace access changes."
+            : "Not connected. Sign in with Notion to authorize the hosted Notion MCP server."
+        }
+        control={
+          <div className="flex items-center gap-2">
+            <span
+              className={cn(
+                "rounded-full px-2 py-0.5 text-[10px] font-medium",
+                connected
+                  ? "bg-primary/10 text-primary"
+                  : "bg-muted text-muted-foreground"
+              )}
+            >
+              {connected ? "Connected" : "Not connected"}
+            </span>
+            {connected ? (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => disconnect.mutate()}
+                disabled={disconnect.isPending}
+              >
+                Disconnect
+              </Button>
+            ) : (
+              <Button
+                size="sm"
+                onClick={connect}
+                disabled={connecting || creds.isLoading}
+              >
+                <SiNotion className="size-4" />
+                {connecting ? "Redirecting…" : "Connect Notion"}
+              </Button>
+            )}
+          </div>
+        }
+      />
+      {error && <p className="px-4 pb-3 text-xs text-destructive">{error}</p>}
+    </SettingsSection>
+  )
+}
+
 function MySettingsPage() {
   const session = useSession()
   const qc = useQueryClient()
@@ -367,6 +447,8 @@ function MySettingsPage() {
       <NotificationsSection />
 
       <CurrentsCredentialsSection />
+
+      <NotionCredentialsSection />
 
       <SettingsSection title="Account">
         <SettingsRow

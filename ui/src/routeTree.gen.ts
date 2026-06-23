@@ -30,6 +30,7 @@ import { Route as AgentsAutomationsIndexRouteImport } from './routes/agents/auto
 import { Route as ReviewRepositoriesOwnerRouteImport } from './routes/review_.repositories.$owner'
 import { Route as AgentsAutomationsNewRouteImport } from './routes/agents/automations/new'
 import { Route as AgentsAutomationsScheduleIdRouteImport } from './routes/agents/automations/$scheduleId'
+import { Route as AgentsThreadIdPlanRouteImport } from './routes/agents/$threadId_.plan'
 import { Route as AgentsReviewsOwnerRepoNumberRouteImport } from './routes/agents/reviews/$owner.$repo.$number'
 
 const UsageRoute = UsageRouteImport.update({
@@ -138,6 +139,11 @@ const AgentsAutomationsScheduleIdRoute =
     path: '/automations/$scheduleId',
     getParentRoute: () => AgentsRoute,
   } as any)
+const AgentsThreadIdPlanRoute = AgentsThreadIdPlanRouteImport.update({
+  id: '/$threadId_/plan',
+  path: '/$threadId/plan',
+  getParentRoute: () => AgentsRoute,
+} as any)
 const AgentsReviewsOwnerRepoNumberRoute =
   AgentsReviewsOwnerRepoNumberRouteImport.update({
     id: '/reviews/$owner/$repo/$number',
@@ -162,6 +168,7 @@ export interface FileRoutesByFullPath {
   '/agents/snapshots': typeof AgentsSnapshotsRoute
   '/review/styles': typeof ReviewStylesRoute
   '/agents/': typeof AgentsIndexRoute
+  '/agents/$threadId/plan': typeof AgentsThreadIdPlanRoute
   '/agents/automations/$scheduleId': typeof AgentsAutomationsScheduleIdRoute
   '/agents/automations/new': typeof AgentsAutomationsNewRoute
   '/review/repositories/$owner': typeof ReviewRepositoriesOwnerRoute
@@ -185,6 +192,7 @@ export interface FileRoutesByTo {
   '/agents/snapshots': typeof AgentsSnapshotsRoute
   '/review/styles': typeof ReviewStylesRoute
   '/agents': typeof AgentsIndexRoute
+  '/agents/$threadId/plan': typeof AgentsThreadIdPlanRoute
   '/agents/automations/$scheduleId': typeof AgentsAutomationsScheduleIdRoute
   '/agents/automations/new': typeof AgentsAutomationsNewRoute
   '/review/repositories/$owner': typeof ReviewRepositoriesOwnerRoute
@@ -210,6 +218,7 @@ export interface FileRoutesById {
   '/agents_/snapshots': typeof AgentsSnapshotsRoute
   '/review_/styles': typeof ReviewStylesRoute
   '/agents/': typeof AgentsIndexRoute
+  '/agents/$threadId_/plan': typeof AgentsThreadIdPlanRoute
   '/agents/automations/$scheduleId': typeof AgentsAutomationsScheduleIdRoute
   '/agents/automations/new': typeof AgentsAutomationsNewRoute
   '/review_/repositories/$owner': typeof ReviewRepositoriesOwnerRoute
@@ -236,6 +245,7 @@ export interface FileRouteTypes {
     | '/agents/snapshots'
     | '/review/styles'
     | '/agents/'
+    | '/agents/$threadId/plan'
     | '/agents/automations/$scheduleId'
     | '/agents/automations/new'
     | '/review/repositories/$owner'
@@ -259,6 +269,7 @@ export interface FileRouteTypes {
     | '/agents/snapshots'
     | '/review/styles'
     | '/agents'
+    | '/agents/$threadId/plan'
     | '/agents/automations/$scheduleId'
     | '/agents/automations/new'
     | '/review/repositories/$owner'
@@ -283,6 +294,7 @@ export interface FileRouteTypes {
     | '/agents_/snapshots'
     | '/review_/styles'
     | '/agents/'
+    | '/agents/$threadId_/plan'
     | '/agents/automations/$scheduleId'
     | '/agents/automations/new'
     | '/review_/repositories/$owner'
@@ -457,6 +469,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AgentsAutomationsScheduleIdRouteImport
       parentRoute: typeof AgentsRoute
     }
+    '/agents/$threadId_/plan': {
+      id: '/agents/$threadId_/plan'
+      path: '/$threadId/plan'
+      fullPath: '/agents/$threadId/plan'
+      preLoaderRoute: typeof AgentsThreadIdPlanRouteImport
+      parentRoute: typeof AgentsRoute
+    }
     '/agents/reviews/$owner/$repo/$number': {
       id: '/agents/reviews/$owner/$repo/$number'
       path: '/reviews/$owner/$repo/$number'
@@ -471,6 +490,7 @@ interface AgentsRouteChildren {
   AgentsThreadIdRoute: typeof AgentsThreadIdRoute
   AgentsThreadsRoute: typeof AgentsThreadsRoute
   AgentsIndexRoute: typeof AgentsIndexRoute
+  AgentsThreadIdPlanRoute: typeof AgentsThreadIdPlanRoute
   AgentsAutomationsScheduleIdRoute: typeof AgentsAutomationsScheduleIdRoute
   AgentsAutomationsNewRoute: typeof AgentsAutomationsNewRoute
   AgentsAutomationsIndexRoute: typeof AgentsAutomationsIndexRoute
@@ -482,6 +502,7 @@ const AgentsRouteChildren: AgentsRouteChildren = {
   AgentsThreadIdRoute: AgentsThreadIdRoute,
   AgentsThreadsRoute: AgentsThreadsRoute,
   AgentsIndexRoute: AgentsIndexRoute,
+  AgentsThreadIdPlanRoute: AgentsThreadIdPlanRoute,
   AgentsAutomationsScheduleIdRoute: AgentsAutomationsScheduleIdRoute,
   AgentsAutomationsNewRoute: AgentsAutomationsNewRoute,
   AgentsAutomationsIndexRoute: AgentsAutomationsIndexRoute,
