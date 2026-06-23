@@ -41,7 +41,10 @@ from .dashboard.agent_overrides import (
 )
 from .dashboard.agent_usage import record_agent_thread_usage
 from .dashboard.options import DEFAULT_MODEL_ID, SUPPORTED_MODEL_IDS, model_supports_effort
-from .dashboard.team_settings import get_team_default_model_pair, get_team_default_repo
+from .dashboard.team_settings import (
+    get_team_default_model_pair,
+    get_team_default_repo,
+)
 from .dashboard.user_mappings import email_for_login
 from .integrations.corridor_mcp import load_corridor_tools
 from .integrations.currents_tools import load_currents_tools
@@ -50,6 +53,7 @@ from .integrations.langsmith import _configure_github_proxy
 from .integrations.langsmith_tools import load_langsmith_tools
 from .middleware import (
     ModelFallbackMiddleware,
+    PlanModeMiddleware,
     SandboxCircuitBreakerMiddleware,
     SanitizeThinkingBlocksMiddleware,
     SanitizeToolInputsMiddleware,
@@ -62,6 +66,7 @@ from .middleware import (
 )
 from .prompt import construct_system_prompt
 from .tools import (
+    enter_plan_mode,
     fetch_url,
     http_request,
     linear_comment,
@@ -73,6 +78,7 @@ from .tools import (
     linear_update_issue,
     open_pull_request,
     request_pr_review,
+    save_plan,
     schedule_thread_wakeup,
     slack_read_thread_messages,
     slack_thread_reply,
@@ -84,7 +90,7 @@ from .utils.authorship import (
     OPEN_SWE_BOT_NAME,
     resolve_triggering_user_identity,
 )
-from .utils.dashboard_links import dashboard_thread_url
+from .utils.dashboard_links import dashboard_plan_url, dashboard_thread_url
 from .utils.github_app import (
     get_github_app_installation_token_with_expiry,
 )
@@ -477,6 +483,28 @@ DEFAULT_LLM_MAX_TOKENS = 64_000
 DEFAULT_RECURSION_LIMIT = 9_999
 MODEL_CALL_RECURSION_LIMIT = 5_000  # ~half the recursion limit to account for tool calls
 
+# Mutating tools hidden from the model while plan mode is active so it can only
+# research and propose a plan. `execute` stays available; plan-mode shell
+# discipline (no mutating commands) is instructed via the system prompt rather
+# than enforced. `http_request` is excluded because it can POST/PUT/PATCH/DELETE
+# to external services — read-only web research goes through `web_search` /
+# `fetch_url`. `task` is excluded because the general-purpose subagent is built
+# with its own filesystem/PR/Linear tools and does not inherit this exclusion, so
+# delegating to it would bypass the read-only intent.
+PLAN_MODE_EXCLUDED_TOOLS: frozenset[str] = frozenset(
+    {
+        "write_file",
+        "edit_file",
+        "task",
+        "http_request",
+        "open_pull_request",
+        "request_pr_review",
+        "linear_create_issue",
+        "linear_update_issue",
+        "linear_delete_issue",
+    }
+)
+
 
 def _general_purpose_subagent(model: BaseChatModel) -> SubAgent:
     return {
@@ -662,6 +690,19 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         )
         logger.info("Configured model fallback %s -> %s", model_id, fallback_model_id)
 
+    # Plan mode is entered only when the model decides to (the `enter_plan_mode`
+    # tool sets it in run state). The configurable value just carries that
+    # decision across a thread's messages and the approve/reject follow-ups; a
+    # fresh run with nothing set starts out of plan mode.
+    plan_mode = configurable.get("plan_mode") is True
+    if plan_mode:
+        logger.info("Plan mode enabled for thread %s", thread_id)
+    # Installed unconditionally and state-aware: it also restricts tools after a
+    # mid-run `enter_plan_mode` call, not just when plan mode is set up front.
+    plan_mode_middleware: list[Any] = [
+        PlanModeMiddleware(excluded=PLAN_MODE_EXCLUDED_TOOLS, initial=plan_mode)
+    ]
+
     source = (
         configurable.get("source") if isinstance(configurable.get("source"), str) else "dashboard"
     )
@@ -675,6 +716,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 "model": model_id,
                 "effort": profile_effort,
                 "source": source,
+                "plan_mode": plan_mode,
             },
         )
         await record_agent_thread_usage(
@@ -716,6 +758,8 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             triggering_user_identity=triggering_user_identity,
             create_prs=always_create_prs,
             default_repo=prompt_default_repo,
+            plan_mode=plan_mode,
+            plan_url=dashboard_plan_url(thread_id),
             repo_custom_instructions=repo_custom_instructions,
             thread_url=dashboard_thread_url(thread_id),
             corridor_enabled=bool(corridor_tools),
@@ -724,6 +768,8 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             http_request,
             fetch_url,
             web_search,
+            enter_plan_mode,
+            save_plan,
             linear_comment,
             linear_create_issue,
             linear_delete_issue,
@@ -753,6 +799,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             notify_step_limit_reached,
             SandboxCircuitBreakerMiddleware(),
             *fallback_middleware,
+            *plan_mode_middleware,
             SanitizeThinkingBlocksMiddleware(),
         ],
     ).with_config(config)

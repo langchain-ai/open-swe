@@ -48,6 +48,7 @@ export function useSubmitAgentMessage(threadId: string) {
           images: vars.images,
           model_id: vars.model_id,
           effort: vars.effort,
+          plan_mode: vars.plan_mode,
         });
 
       if (stream.isLoading) {
@@ -64,14 +65,16 @@ export function useSubmitAgentMessage(threadId: string) {
         }
       }
 
-      const config = (!vars.model_id || !vars.effort)
-        ? undefined
-        : {
-          configurable: {
-            agent_model_id: vars.model_id,
-            agent_effort: vars.effort,
-          },
-        };
+      const configurable: Record<string, unknown> = {};
+      if (vars.model_id && vars.effort) {
+        configurable.agent_model_id = vars.model_id;
+        configurable.agent_effort = vars.effort;
+      }
+      if (vars.plan_mode) {
+        configurable.plan_mode = true;
+      }
+      const config =
+        Object.keys(configurable).length > 0 ? { configurable } : undefined;
 
       // Don't await: `stream.submit` resolves only when the run *finishes*, so
       // awaiting would keep the mutation `isPending` (and the prompt bar

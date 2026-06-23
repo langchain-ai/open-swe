@@ -114,6 +114,7 @@ class ThreadMessageBody(BaseModel):
     images: list[DashboardImageBody] = Field(default_factory=list)
     model_id: str | None = None
     effort: str | None = None
+    plan_mode: bool = False
 
 
 class ThreadResolveBody(BaseModel):
@@ -358,6 +359,8 @@ def _thread_summary(
         "branch": metadata.get("branch_name") or metadata.get("base_branch") or "main",
         "model": model,
         "effort": effort,
+        "planMode": metadata.get("plan_mode") is True,
+        "planStatus": metadata.get("plan_status"),
         "source": _thread_source(metadata),
         "status": status,
         "viewed": _is_thread_viewed(metadata, latest_run_id),
@@ -913,6 +916,7 @@ async def _create_dashboard_thread_record(
     title: str | None = None,
     model_id: str | None = None,
     effort: str | None = None,
+    plan_mode: bool = False,
 ) -> dict[str, Any]:
     """Create or update dashboard thread metadata without starting a run."""
     profile = await get_profile(login) or {}
@@ -937,6 +941,7 @@ async def _create_dashboard_thread_record(
         "effort": metadata_effort,
         "resolved_model": resolved_model,
         "resolved_effort": resolved_effort,
+        "plan_mode": plan_mode,
         "created_at_ms": now_ms,
         "updated_at_ms": now_ms,
     }
@@ -985,6 +990,8 @@ async def _build_dashboard_configurable(
     if isinstance(source_context, dict):
         for key, value in source_context.items():
             configurable.setdefault(key, value)
+    if metadata.get("plan_mode") is True:
+        configurable["plan_mode"] = True
     if overrides:
         for key, value in overrides.items():
             if value is not None:
@@ -1123,6 +1130,7 @@ async def _enrich_run_start_command(
         client_configurable.get("agent_model_id"),
         client_configurable.get("agent_effort"),
     )
+    plan_mode_requested = client_configurable.get("plan_mode") is True
     content = _command_message_content(params)
     overrides: dict[str, Any] = {}
 
@@ -1142,6 +1150,7 @@ async def _enrich_run_start_command(
             images=_dashboard_images_from_content(content),
             model_id=client_configurable.get("agent_model_id"),
             effort=client_configurable.get("agent_effort"),
+            plan_mode=plan_mode_requested,
         )
         metadata = thread.get("metadata") if isinstance(thread.get("metadata"), dict) else metadata
         if chosen_model and chosen_effort:
@@ -1152,7 +1161,7 @@ async def _enrich_run_start_command(
         prefix = _attribution_prefix(metadata, login, email)
         if prefix:
             _set_command_last_message_content(params, _prefix_message_content(content, prefix))
-        metadata_update: dict[str, Any] = {}
+        metadata_update: dict[str, Any] = {"plan_mode": plan_mode_requested}
         if chosen_model and chosen_effort:
             overrides["agent_model_id"] = chosen_model
             overrides["agent_effort"] = chosen_effort
@@ -1202,7 +1211,11 @@ async def send_dashboard_message(
     prompt = f"{_attribution_prefix(metadata, login, email)}{body.content.strip()}"
     now_ms = _now_ms()
     chosen_model, chosen_effort = _normalize_model_choice(body.model_id, body.effort)
-    metadata_update: dict[str, Any] = {"source": _DASHBOARD_SOURCE, "updated_at_ms": now_ms}
+    metadata_update: dict[str, Any] = {
+        "source": _DASHBOARD_SOURCE,
+        "updated_at_ms": now_ms,
+        "plan_mode": body.plan_mode,
+    }
     if chosen_model and chosen_effort:
         metadata_update["model"] = chosen_model
         metadata_update["effort"] = chosen_effort

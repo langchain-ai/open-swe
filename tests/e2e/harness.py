@@ -36,9 +36,26 @@ from e2e_env import (  # noqa: E402
     DEMO_CHANNEL,
     HUMAN_USER,
     REPO_ROOT,
+    TEST_USERS,
 )
 from fastapi import HTTPException, Request  # noqa: E402
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse  # noqa: E402
+from fastapi.responses import (  # noqa: E402
+    FileResponse,
+    HTMLResponse,
+    JSONResponse,
+    RedirectResponse,
+    Response,
+)
+
+# Slack-user directory the fake ``users.info`` resolves: the default sender used
+# by the automated tests plus the named manual-test users.
+_SLACK_USERS: dict[str, dict[str, str]] = {
+    HUMAN_USER: {"name": "devuser", "real_name": "Dev User", "email": "dev@example.com"},
+    **{
+        u["slack_id"]: {"name": u["login"], "real_name": u["name"], "email": u["email"]}
+        for u in TEST_USERS
+    },
+}
 
 from agent.dashboard.oauth import COOKIE_NAME, issue_session  # noqa: E402
 from agent.webapp import app, generate_thread_id_from_slack_thread  # noqa: E402
@@ -74,11 +91,14 @@ async def slack_send(request: Request) -> JSONResponse:
     form = await request.json()
     text = str(form.get("text", ""))
     mention_bot = bool(form.get("mention_bot", True))
+    # Sender defaults to the first test user (Alice) — the canonical owner the
+    # automated tests log in as; the mock UI passes the chosen test user.
+    user_id = str(form.get("user") or TEST_USERS[0]["slack_id"])
     channel = DEMO_CHANNEL
 
     ts = fakes.new_thread_ts()
     CURRENT_THREAD["thread_ts"] = ts
-    fakes.add_slack_message(channel, ts, user=HUMAN_USER, text=text, is_bot=False)
+    fakes.add_slack_message(channel, ts, user=user_id, text=text, is_bot=False)
 
     payload = {
         "type": "event_callback",
@@ -87,7 +107,7 @@ async def slack_send(request: Request) -> JSONResponse:
         "event": {
             "type": "app_mention" if mention_bot else "message",
             "channel": channel,
-            "user": HUMAN_USER,
+            "user": user_id,
             "text": text,
             "ts": ts,
             "thread_ts": ts,
@@ -129,6 +149,82 @@ async def control_login(request: Request) -> JSONResponse:
     resp = JSONResponse({"ok": True, "login": login, "email": email})
     resp.set_cookie(COOKIE_NAME, token, httponly=True, samesite="lax", secure=False, path="/")
     return resp
+
+
+@app.get("/control/login")
+async def control_login_get(login: str = "", email: str = "", next_url: str = "") -> Response:
+    """Browser login. With no ``login``, render a dropdown of the test users;
+    with ``?login=<u>`` (email resolved from the registry, or pass ``&email=``),
+    mint the session cookie and redirect into the dashboard. Use a separate
+    browser/profile per user — each has its own cookie jar."""
+    # Land on the dashboard origin (DASHBOARD_BASE_URL — the Vite HMR server in
+    # dev:mock), not this harness, so the cookie + the hot-reloading UI line up.
+    ui = os.environ.get("DASHBOARD_BASE_URL", "").rstrip("/")
+    dest = next_url or (f"{ui}/agents" if ui else "/agents")
+    if not login:
+        options = "".join(f'<option value="{u["login"]}">{u["name"]}</option>' for u in TEST_USERS)
+        return HTMLResponse(
+            f"""<!doctype html><meta charset=utf-8><title>Mock login</title>
+            <body style="font-family:system-ui;max-width:420px;margin:3rem auto;padding:0 1rem">
+            <h1 style="font-size:1.1rem">Sign in (mock)</h1>
+            <form method=get action=/control/login>
+              <select name=login style="font:inherit;padding:0.4rem">{options}</select>
+              <button style="font:inherit;padding:0.45rem 0.9rem;cursor:pointer">Sign in</button>
+            </form>
+            <p style="color:#888;font-size:0.85rem">Tip: use a separate browser or profile per
+            user so their sessions don't overwrite each other.</p>
+            </body>"""
+        )
+    if not email:
+        match = next((u for u in TEST_USERS if u["login"] == login), None)
+        email = match["email"] if match else f"{login}@example.com"
+    token = issue_session(login=login, email=email, avatar_url=None)
+    resp = RedirectResponse(url=dest, status_code=303)
+    resp.set_cookie(COOKIE_NAME, token, httponly=True, samesite="lax", secure=False, path="/")
+    return resp
+
+
+@app.get("/dashboard/api/auth/login")
+async def mock_github_login(redirect_to: str = "", login: str = "") -> Response:
+    """Mock stand-in for GitHub OAuth: the dashboard's "Continue with GitHub"
+    button lands here. With no ``login``, render a picker of the fake GitHub
+    test users; once one is chosen, mint the real session cookie and redirect
+    back into the dashboard (``redirect_to``)."""
+    ui = os.environ.get("DASHBOARD_BASE_URL", "").rstrip("/")
+    dest = redirect_to or (f"{ui}/agents" if ui else "/agents")
+    if not login:
+        options = "".join(
+            f'<option value="{u["login"]}">{u["name"]} (@{u["login"]})</option>' for u in TEST_USERS
+        )
+        return HTMLResponse(
+            f"""<!doctype html><meta charset=utf-8><title>Continue with GitHub (mock)</title>
+            <body style="font-family:system-ui;max-width:420px;margin:3rem auto;padding:0 1rem">
+            <h1 style="font-size:1.1rem">Continue with GitHub (mock)</h1>
+            <p style="color:#888;font-size:0.9rem">Pick a fake GitHub account to sign in as.</p>
+            <form method=get action=/dashboard/api/auth/login>
+              <input type=hidden name=redirect_to value="{dest}">
+              <select name=login style="font:inherit;padding:0.4rem">{options}</select>
+              <button style="font:inherit;padding:0.45rem 0.9rem;cursor:pointer">Continue</button>
+            </form>
+            <p style="color:#888;font-size:0.85rem">Tip: use a separate browser or profile per
+            user so their sessions don't overwrite each other.</p>
+            </body>"""
+        )
+    match = next((u for u in TEST_USERS if u["login"] == login), None)
+    email = match["email"] if match else f"{login}@example.com"
+    token = issue_session(login=login, email=email, avatar_url=None)
+    resp = RedirectResponse(url=dest, status_code=303)
+    resp.set_cookie(COOKIE_NAME, token, httponly=True, samesite="lax", secure=False, path="/")
+    return resp
+
+
+# The real dashboard registered /dashboard/api/auth/login first (via
+# include_router), so Starlette would match it before ours. Move ours to the
+# front of the table so the mock picker shadows the real OAuth redirect.
+for _i, _route in enumerate(app.router.routes):
+    if getattr(_route, "endpoint", None) is mock_github_login:
+        app.router.routes.insert(0, app.router.routes.pop(_i))
+        break
 
 
 @app.post("/control/logout")
@@ -195,9 +291,20 @@ async def ui_agents_thread(thread_id: str) -> FileResponse:  # noqa: ARG001
     return _ui_file("_shell.html")
 
 
+@app.get("/agents/{thread_id}/plan", response_class=HTMLResponse)
+async def ui_agents_plan(thread_id: str) -> FileResponse:  # noqa: ARG001
+    return _ui_file("_shell.html")
+
+
 @app.get("/login", response_class=HTMLResponse)
 async def ui_login() -> FileResponse:
     return _ui_file("_shell.html")
+
+
+@app.get("/mock/users")
+async def mock_users() -> JSONResponse:
+    """The named test users that drive the Slack sender + login dropdowns."""
+    return JSONResponse(TEST_USERS)
 
 
 @app.get("/mock/slack/messages")
@@ -363,16 +470,19 @@ async def slack_reactions_add(request: Request) -> JSONResponse:
 
 @app.get("/fake-slack/users.info")
 async def slack_users_info(user: str = "") -> JSONResponse:
+    info = _SLACK_USERS.get(
+        user, {"name": "devuser", "real_name": "Dev User", "email": "dev@example.com"}
+    )
     return _ok(
         {
             "user": {
                 "id": user,
-                "name": "devuser",
-                "real_name": "Dev User",
+                "name": info["name"],
+                "real_name": info["real_name"],
                 "profile": {
-                    "email": "dev@example.com",
-                    "display_name": "Dev User",
-                    "real_name": "Dev User",
+                    "email": info["email"],
+                    "display_name": info["real_name"],
+                    "real_name": info["real_name"],
                 },
             }
         }

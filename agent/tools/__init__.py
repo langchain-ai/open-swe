@@ -1,4 +1,5 @@
 from .add_finding import add_finding
+from .enter_plan_mode import enter_plan_mode
 from .fetch_url import fetch_url
 from .http_request import http_request
 from .linear_comment import linear_comment
@@ -16,6 +17,7 @@ from .read_repo_file import read_repo_file
 from .reply_to_finding_thread import reply_to_finding_thread
 from .request_pr_review import request_pr_review
 from .resolve_finding_thread import resolve_finding_thread
+from .save_plan import save_plan
 from .schedule_thread_wakeup import schedule_thread_wakeup
 from .search_repo_code import search_repo_code
 from .slack_read_thread_messages import slack_read_thread_messages
@@ -25,6 +27,7 @@ from .web_search import web_search
 
 __all__ = [
     "add_finding",
+    "enter_plan_mode",
     "fetch_url",
     "http_request",
     "linear_comment",
@@ -42,6 +45,7 @@ __all__ = [
     "request_pr_review",
     "reply_to_finding_thread",
     "resolve_finding_thread",
+    "save_plan",
     "schedule_thread_wakeup",
     "search_repo_code",
     "slack_read_thread_messages",

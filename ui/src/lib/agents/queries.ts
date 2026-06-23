@@ -225,6 +225,7 @@ export interface SendAgentMessageVariables {
   images?: Array<ImageChunk>
   model_id?: string | null
   effort?: string | null
+  plan_mode?: boolean
 }
 
 export function useCancelAgentThread(threadId: string) {

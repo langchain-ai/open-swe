@@ -2,8 +2,8 @@ import { test, expect, type Page } from "@playwright/test";
 
 // Drives the REAL built ui/ app (served same-origin from the harness) for the
 // Slack → web handoff. Only the LLM/GitHub/Slack/token boundaries are faked.
-const SAME_USER = { login: "dev-user", email: "dev@example.com" };
-const OTHER_USER = { login: "someone-else", email: "someone@example.com" };
+const SAME_USER = { login: "alice", email: "alice@example.com" };
+const OTHER_USER = { login: "bob", email: "bob@example.com" };
 
 async function loginAs(page: Page, user: { login: string; email: string }) {
   const res = await page.request.post("/control/login", { data: user });

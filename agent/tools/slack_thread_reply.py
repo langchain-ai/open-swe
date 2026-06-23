@@ -21,6 +21,7 @@ def slack_thread_reply(
     message: str,
     options: list[str] | None = None,
     blocks: list[dict[str, Any]] | None = None,
+    plan_approval: bool = False,
 ) -> dict[str, Any]:
     """Post a message to the current Slack thread.
 
@@ -38,6 +39,8 @@ def slack_thread_reply(
     To ask a user to choose from predefined options, pass `options`. Slack will
     render interactive buttons and the web UI will render the same choices.
     The user can still reply manually in the Slack thread.
+
+    To present a plan for approval with action buttons, pass plan_approval=True. This renders "Approve & Implement", "Revise Plan", and "Cancel" buttons. The plan itself should be posted to the dashboard thread; use this to post a summary with a link to the dashboard thread view where the full plan can be reviewed.
 
     To mention/tag a user, use Slack's mention format: <@USER_ID>.
     You can find user IDs in the conversation context (e.g. @Name(U06KD8BFY95)).
@@ -58,7 +61,10 @@ def slack_thread_reply(
         return {"success": False, "error": "Message cannot be empty"}
 
     message = convert_mentions_to_slack_format(message)
-    slack_blocks = blocks or _build_option_blocks(message, options)
+    if plan_approval:
+        slack_blocks = _build_plan_approval_blocks(message)
+    else:
+        slack_blocks = blocks or _build_option_blocks(message, options)
     message_ts, slack_error = asyncio.run(
         _post_and_store_mapping(channel_id, thread_ts, message, blocks=slack_blocks)
     )
@@ -91,6 +97,37 @@ def _build_option_blocks(message: str, options: list[str] | None) -> list[dict[s
                     "action_id": "open_swe_option_select",
                 }
                 for option in clean_options[:5]
+            ],
+        },
+    ]
+
+
+def _build_plan_approval_blocks(message: str) -> list[dict[str, Any]]:
+    return [
+        {"type": "section", "text": {"type": "mrkdwn", "text": message}},
+        {
+            "type": "actions",
+            "elements": [
+                {
+                    "type": "button",
+                    "text": {"type": "plain_text", "text": "Approve & Implement", "emoji": True},
+                    "style": "primary",
+                    "value": json.dumps({"type": "plan_approval", "action": "approve"}),
+                    "action_id": "open_swe_option_select",
+                },
+                {
+                    "type": "button",
+                    "text": {"type": "plain_text", "text": "Revise Plan", "emoji": True},
+                    "value": json.dumps({"type": "plan_approval", "action": "revise"}),
+                    "action_id": "open_swe_option_select",
+                },
+                {
+                    "type": "button",
+                    "text": {"type": "plain_text", "text": "Cancel", "emoji": True},
+                    "style": "danger",
+                    "value": json.dumps({"type": "plan_approval", "action": "cancel"}),
+                    "action_id": "open_swe_option_select",
+                },
             ],
         },
     ]
