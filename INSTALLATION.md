@@ -212,9 +212,13 @@ DEFAULT_SANDBOX_MEM_BYTES="16106127360"
 DEFAULT_SANDBOX_IDLE_TTL_SECONDS="7200"
 # Optional; delete a stopped sandbox after this many seconds. Default is 86400 (24 hours). 0 disables.
 DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS="86400"
+# Optional; required only for the admin Repository Snapshots page/template generator.
+REPO_SNAPSHOT_BASE_IMAGE="<your-docker-hub>/<name-of-your-image>"
 ```
 
 `DEFAULT_SANDBOX_SNAPSHOT_ID` is required when `SANDBOX_TYPE=langsmith`. The server validates this at startup and refuses to boot if it's missing. The snapshot should include the GitHub CLI from the project Dockerfile; Open SWE authenticates `git` and `gh` through the LangSmith sandbox proxy using runtime-minted GitHub App installation tokens, not deployment-stored GitHub access tokens.
+
+`REPO_SNAPSHOT_BASE_IMAGE` should point at the same published Open SWE sandbox image you used to create the default snapshot (for example, the image built from `./Dockerfile`). The admin **Repository Snapshots** page uses it as the `FROM` line when generating per-repo Dockerfile templates. If it is not set, template generation is intentionally disabled so admins do not accidentally build repo-scoped snapshots from a bare image that lacks Open SWE's required tools (`git`, `gh`, `sfw`, language runtimes, and proxy assumptions).
 
 ## 5. Set up triggers
 

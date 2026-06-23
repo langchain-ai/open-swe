@@ -137,13 +137,16 @@ function hashFileContents(contents: string): string {
 }
 
 // Stable per-file content key so the worker pool dedupes highlight work across
-// re-renders instead of re-tokenizing identical content.
+// re-renders instead of re-tokenizing identical content. Added/removed/binary/
+// oversized blobs arrive as null (see pr_diff.py); coerce to "" so the key never
+// dereferences null — these files don't render a diff, so the exact key is moot.
 export function fileContentsCacheKey(
   path: string,
   side: "old" | "new",
-  contents: string
+  contents: string | null | undefined
 ): string {
-  return `${path}:${side}:${contents.length}:${hashFileContents(contents)}`
+  const text = contents ?? ""
+  return `${path}:${side}:${text.length}:${hashFileContents(text)}`
 }
 
 let highlighterWarmup: Promise<void> | null = null

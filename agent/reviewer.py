@@ -843,10 +843,16 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
     github_proxy_token = github_token
     github_api_token = github_token
     repo_name_for_scope = str(repo_config.get("name") or "")
+    repo_for_snapshot = (
+        {"owner": str(repo_config["owner"]), "name": str(repo_config["name"])}
+        if repo_config.get("owner") and repo_config.get("name")
+        else None
+    )
     sandbox_backend = await ensure_sandbox_for_thread(
         thread_id,
         github_proxy_token=github_proxy_token,
         github_proxy_repositories=[repo_name_for_scope] if repo_name_for_scope else None,
+        repo=repo_for_snapshot,
     )
 
     work_dir = await aresolve_sandbox_work_dir(sandbox_backend)
