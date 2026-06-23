@@ -1412,24 +1412,47 @@ const FileDiffCard = memo(function FileDiffCard({
       : findingAnnotations
   }, [findingAnnotations, commentDraftRange, openComment, file.path])
 
-  // The gutter "+" is comment-only now: a click opens the composer. "Add to Chat"
-  // is driven by native text selection (handleTextSelection below) rather than a
-  // gutter drag, so Pierre's own line selection is disabled to let the browser
-  // handle highlighting — this is what Devin does and it frees the "+" for comments.
+  // The gutter "+" drives comments: a click comments on one line, and a drag down
+  // the gutter comments across a range (Pierre's gutter selection, which needs
+  // enableLineSelection). "Add to Chat" instead comes from a native text highlight
+  // on the code (handleTextSelection) — Pierre leaves code content user-selectable
+  // and only line-selects from the gutter, so the two don't collide. onLineSelectionEnd
+  // bails if a native text selection is present, so a code highlight never opens the
+  // composer (belt-and-suspenders in case Pierre ever reports a content drag).
   const cardOptions = useMemo(
     () => ({
       ...diffOptions,
-      enableLineSelection: false,
+      enableLineSelection: commentable,
       enableGutterUtility: commentable,
       onGutterUtilityClick: commentable
         ? (range: SelectedLineRange) => onStartComment?.(file.path, range)
+        : undefined,
+      onLineSelectionChange: commentable
+        ? (range: SelectedLineRange | null) => onSelectLines(file.path, range)
+        : undefined,
+      onLineSelectionEnd: commentable
+        ? (range: SelectedLineRange | null) => {
+            if (!range) return
+            const host =
+              diffWrapperRef.current?.querySelector("diffs-container")
+            const native = readDiffSelection(host)
+            if (native && !native.isCollapsed && native.rangeCount > 0) return
+            onStartComment?.(file.path, range)
+          }
         : undefined,
       onPostRender: (
         node: HTMLElement,
         instance: CoreFileDiff<ReviewAnnotation>
       ) => registerDiffInstance(file.path, { host: node, instance }),
     }),
-    [diffOptions, commentable, onStartComment, file.path, registerDiffInstance]
+    [
+      diffOptions,
+      commentable,
+      onStartComment,
+      onSelectLines,
+      file.path,
+      registerDiffInstance,
+    ]
   )
 
   // On mouse release, turn any native text highlight inside the diff into a line
