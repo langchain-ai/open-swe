@@ -37,7 +37,6 @@ from .dashboard.agent_overrides import (
     normalize_profile_overrides,
     normalize_profile_subagent_overrides,
     profile_create_prs,
-    profile_plan_mode_default,
     resolve_github_login,
 )
 from .dashboard.agent_usage import record_agent_thread_usage
@@ -45,7 +44,6 @@ from .dashboard.options import DEFAULT_MODEL_ID, SUPPORTED_MODEL_IDS, model_supp
 from .dashboard.team_settings import (
     get_team_default_model_pair,
     get_team_default_repo,
-    get_team_settings,
 )
 from .dashboard.user_mappings import email_for_login
 from .integrations.corridor_mcp import load_corridor_tools
@@ -691,16 +689,11 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         )
         logger.info("Configured model fallback %s -> %s", model_id, fallback_model_id)
 
-    # An explicit per-thread/configurable value (e.g. Slack `plan off`, an
-    # approved plan, or the dashboard Plan toggle) wins over profile/team
-    # defaults; only fall through to defaults when plan mode is unset.
-    if "plan_mode" in configurable:
-        plan_mode = configurable.get("plan_mode") is True
-    elif profile and profile_plan_mode_default(profile):
-        plan_mode = True
-    else:
-        team_settings = await get_team_settings()
-        plan_mode = team_settings.get("plan_mode_default") is True
+    # Plan mode is entered only when the model decides to (the `enter_plan_mode`
+    # tool sets it in run state). The configurable value just carries that
+    # decision across a thread's messages and the approve/reject follow-ups; a
+    # fresh run with nothing set starts out of plan mode.
+    plan_mode = configurable.get("plan_mode") is True
     if plan_mode:
         logger.info("Plan mode enabled for thread %s", thread_id)
     # Installed unconditionally and state-aware: it also restricts tools after a

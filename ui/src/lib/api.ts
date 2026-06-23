@@ -94,7 +94,6 @@ export interface Profile {
   auto_fix_ci?: boolean
   create_prs?: boolean
   review_draft_prs?: boolean | null
-  plan_mode_default?: boolean
   updated_at?: string
 }
 
@@ -109,7 +108,6 @@ export interface ProfileUpdate {
   auto_fix_ci?: boolean
   create_prs?: boolean
   review_draft_prs?: boolean | null
-  plan_mode_default?: boolean
 }
 
 export interface TeamSettings {
@@ -130,7 +128,6 @@ export interface TeamSettings {
   default_grouping_reasoning_effort?: string | null
   default_chat_model?: string | null
   default_chat_reasoning_effort?: string | null
-  plan_mode_default?: boolean
   updated_at?: string | null
 }
 

@@ -46,7 +46,6 @@ class TeamSettingsUpdate(BaseModel):
     default_reviewer_reasoning_effort: str | None = None
     default_reviewer_subagent_model: str | None = None
     default_reviewer_subagent_reasoning_effort: str | None = None
-    plan_mode_default: bool = False
     default_grouping_model: str | None = None
     default_grouping_reasoning_effort: str | None = None
     default_chat_model: str | None = None
@@ -143,7 +142,6 @@ def _default_settings() -> dict[str, Any]:
         "default_reviewer_reasoning_effort": fallback_effort,
         "default_reviewer_subagent_model": fallback_model,
         "default_reviewer_subagent_reasoning_effort": fallback_effort,
-        "plan_mode_default": False,
         # No hardcoded grouping default: unset means "inherit the Reviewer
         # subagent default".
         "default_grouping_model": None,

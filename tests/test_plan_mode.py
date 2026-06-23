@@ -170,84 +170,29 @@ def test_plan_mode_guidance_section_present_when_enabled() -> None:
 
 
 def test_enter_plan_mode_tool_returns_command() -> None:
+    from langchain_core.messages import ToolMessage
+    from langchain_core.tools import tool as as_tool
     from langgraph.types import Command
 
     from agent.tools.enter_plan_mode import enter_plan_mode
 
-    result = enter_plan_mode()
+    # Wrap as the agent does so the InjectedToolCallId is supplied from the call.
+    wrapped = as_tool(enter_plan_mode)
+    result = wrapped.invoke(
+        {"name": "enter_plan_mode", "args": {}, "id": "call-1", "type": "tool_call"}
+    )
     assert isinstance(result, Command)
-    assert result.update == {"plan_mode": True}
+    assert result.update["plan_mode"] is True
+    messages = result.update["messages"]
+    assert len(messages) == 1
+    assert isinstance(messages[0], ToolMessage)
+    assert messages[0].tool_call_id == "call-1"
 
 
 def test_enter_plan_mode_exported() -> None:
     from agent.tools import enter_plan_mode
 
     assert callable(enter_plan_mode)
-
-
-def test_profile_plan_mode_default_false_when_missing() -> None:
-    from agent.dashboard.agent_overrides import profile_plan_mode_default
-
-    assert profile_plan_mode_default(None) is False
-    assert profile_plan_mode_default({}) is False
-    assert profile_plan_mode_default({"plan_mode_default": False}) is False
-
-
-def test_profile_plan_mode_default_true_when_set() -> None:
-    from agent.dashboard.agent_overrides import profile_plan_mode_default
-
-    assert profile_plan_mode_default({"plan_mode_default": True}) is True
-
-
-def test_profile_update_has_plan_mode_default() -> None:
-    from agent.dashboard.profiles import ProfileUpdate
-
-    update = ProfileUpdate(default_model="anthropic:claude-opus-4-8", reasoning_effort="high")
-    assert update.plan_mode_default is False
-
-
-def test_team_settings_update_has_plan_mode_default() -> None:
-    from agent.dashboard.team_settings import TeamSettingsUpdate
-
-    update = TeamSettingsUpdate()
-    assert update.plan_mode_default is False
-
-
-def test_team_default_settings_includes_plan_mode_default() -> None:
-    from agent.dashboard.team_settings import _default_settings
-
-    defaults = _default_settings()
-    assert "plan_mode_default" in defaults
-    assert defaults["plan_mode_default"] is False
-
-
-def test_parse_plan_command_on() -> None:
-    from agent.webapp import _parse_plan_command
-
-    assert _parse_plan_command("plan on") == "on"
-    assert _parse_plan_command("@bot plan on please") == "on"
-    assert _parse_plan_command("PLAN ON") == "on"
-
-
-def test_parse_plan_command_off() -> None:
-    from agent.webapp import _parse_plan_command
-
-    assert _parse_plan_command("plan off") == "off"
-    assert _parse_plan_command("hey plan off now") == "off"
-
-
-def test_parse_plan_command_status() -> None:
-    from agent.webapp import _parse_plan_command
-
-    assert _parse_plan_command("plan status") == "status"
-
-
-def test_parse_plan_command_none_when_no_match() -> None:
-    from agent.webapp import _parse_plan_command
-
-    assert _parse_plan_command("build me a cli with a plan subcommand") is None
-    assert _parse_plan_command("hello world") is None
-    assert _parse_plan_command("") is None
 
 
 def test_build_plan_approval_blocks_has_three_buttons() -> None:

@@ -71,10 +71,20 @@ export function PlanReview({ plan }: { plan: PlanData }) {
     return { doc: ydoc, provider: wsProvider, threadStore: store }
   }, [plan.threadId, plan.user.id, plan.user.name, plan.isOwner])
 
+  // Defer teardown so React StrictMode's dev-only unmount→remount of the same
+  // memoized provider doesn't destroy instances the remount reuses: the remount
+  // cancels the pending destroy before it runs. A real unmount still tears down.
+  const pendingDestroy = useRef<ReturnType<typeof setTimeout> | null>(null)
   useEffect(() => {
+    if (pendingDestroy.current) {
+      clearTimeout(pendingDestroy.current)
+      pendingDestroy.current = null
+    }
     return () => {
-      provider.destroy()
-      doc.destroy()
+      pendingDestroy.current = setTimeout(() => {
+        provider.destroy()
+        doc.destroy()
+      }, 0)
     }
   }, [provider, doc])
 

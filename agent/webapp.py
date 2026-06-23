@@ -699,22 +699,6 @@ async def _ensure_thread_exists_for_metadata(
         return False
 
 
-_PLAN_COMMAND_RE = re.compile(r"\bplan\s+(on|off|status)\b", re.IGNORECASE)
-
-
-def _parse_plan_command(text: str) -> str | None:
-    """Detect a Slack ``plan on|off|status`` command in free-form text.
-
-    Returns ``"on"``, ``"off"`` or ``"status"`` when the command is present,
-    otherwise ``None``. The match is case-insensitive and allows surrounding
-    prose (e.g. ``@bot plan on please``).
-    """
-    match = _PLAN_COMMAND_RE.search(text)
-    if not match:
-        return None
-    return match.group(1).lower()
-
-
 async def _slack_user_is_thread_owner(thread_id: str, slack_user_id: str) -> bool:
     """Whether the clicking Slack user is the user who requested the plan.
 
@@ -1137,26 +1121,6 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
         strip_bot_mention(text, bot_user_id, bot_username=SLACK_BOT_USERNAME)
         or "(no text in mention)"
     )
-    plan_cmd = _parse_plan_command(clean_text)
-    if plan_cmd:
-        if plan_cmd == "status":
-            current = await _get_thread_plan_mode(thread_id)
-            status_text = (
-                f"Plan mode is currently *{'ON' if current else 'OFF'}* for this thread."
-                if current is not None
-                else "Plan mode has not been set for this thread (default: OFF)."
-            )
-        else:
-            new_val = plan_cmd == "on"
-            await _set_thread_plan_mode(thread_id, new_val)
-            status_text = f"Plan mode is now *{'ON' if new_val else 'OFF'}* for this thread."
-        await post_slack_thread_reply(
-            channel_id=channel_id,
-            thread_ts=thread_ts,
-            text=status_text,
-        )
-        await set_slack_assistant_status(channel_id, thread_ts, status="")
-        return
     trigger_user = user_name or (f"<@{user_id}>" if user_id else "Unknown user")
 
     # Auto-resolve cross-posted Slack message links in context

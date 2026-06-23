@@ -15,8 +15,8 @@ import {
 //   and replies in Slack with the link, having received the reviewers' comments.
 // Only the LLM is faked; all agent + dashboard code runs for real.
 
-const OWNER = { login: "dev-user", email: "dev@example.com" };
-const COLLABORATOR = { login: "someone-else", email: "someone@example.com" };
+const OWNER = { login: "alice", email: "alice@example.com" };
+const COLLABORATOR = { login: "bob", email: "bob@example.com" };
 
 async function botMessages(request: APIRequestContext): Promise<Array<string>> {
   const res = await request.get("/mock/slack/messages");
@@ -47,6 +47,21 @@ test.describe("Plan review (BlockNote native comments)", () => {
     const { thread_id: threadId } = (await send.json()) as { thread_id: string };
     expect(threadId).toBeTruthy();
     const planPath = `/agents/${threadId}/plan`;
+
+    // 1a. enter_plan_mode must actually engage: plan_mode is only set when the
+    //     tool's Command.update applies cleanly, so this fails if the tool
+    //     errors (e.g. a missing terminating ToolMessage) instead of silently
+    //     degrading into a normal implementation run.
+    await expect
+      .poll(
+        async () => {
+          const res = await request.get(`/threads/${threadId}/state`);
+          const state = (await res.json()) as { values?: { plan_mode?: boolean } };
+          return state.values?.plan_mode ?? false;
+        },
+        { timeout: 60_000 },
+      )
+      .toBe(true);
 
     // 2. The agent shares the plan-review link, then announces the plan is ready.
     await expect

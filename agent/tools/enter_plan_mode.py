@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from typing import Annotated
 
+from langchain_core.messages import ToolMessage
+from langchain_core.tools import InjectedToolCallId
 from langgraph.config import get_config
 from langgraph.types import Command
 
@@ -12,8 +15,15 @@ from ..dashboard.plan_store import PLAN_STATUS_PLANNING, set_plan_status
 
 logger = logging.getLogger(__name__)
 
+_ENTERED_MESSAGE = (
+    "Plan mode is active. Stay read-only: research the codebase, then record your "
+    "implementation plan with the `save_plan` tool (it publishes the plan to the "
+    "review page) and share the plan-review link in the source channel. Do not edit "
+    "files, commit, push, or open a PR — wait for the user to approve the plan."
+)
 
-def enter_plan_mode() -> Command:
+
+def enter_plan_mode(tool_call_id: Annotated[str, InjectedToolCallId]) -> Command:
     """Activate plan mode mid-run.
 
     Call this when you believe the task would benefit from a structured
@@ -34,7 +44,12 @@ def enter_plan_mode() -> Command:
             asyncio.run(set_plan_status(thread_id, PLAN_STATUS_PLANNING, plan_mode=True))
         except Exception:
             logger.warning("Failed to persist plan-mode entry for %s", thread_id, exc_info=True)
-    return Command(update={"plan_mode": True})
+    return Command(
+        update={
+            "plan_mode": True,
+            "messages": [ToolMessage(content=_ENTERED_MESSAGE, tool_call_id=tool_call_id)],
+        }
+    )
 
 
 def _thread_id_from_config() -> str | None:

@@ -92,16 +92,6 @@ def profile_create_prs(profile: dict[str, Any] | None) -> bool:
     return False
 
 
-def profile_plan_mode_default(profile: dict[str, Any] | None) -> bool:
-    """Return the user's plan_mode_default preference. Defaults to False."""
-    if not isinstance(profile, dict):
-        return False
-    value = profile.get("plan_mode_default")
-    if isinstance(value, bool):
-        return value
-    return False
-
-
 def _normalize_profile_model_pair(
     profile: dict[str, Any],
     *,
