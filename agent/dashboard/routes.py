@@ -86,6 +86,7 @@ from .review_api import (
     create_review_comment,
     get_review,
     get_review_diff,
+    list_review_comments,
     list_reviews,
     proxy_pr_image,
     trigger_re_review,
@@ -1078,6 +1079,17 @@ class ReviewCommentCreate(BaseModel):
     body: str
     start_line: int | None = None
     start_side: Literal["LEFT", "RIGHT"] | None = None
+
+
+@router.get("/reviews/{owner}/{repo}/{pr_number}/comments")
+async def api_list_review_comments(
+    owner: str,
+    repo: str,
+    pr_number: int,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
+    return await list_review_comments(owner, repo, pr_number)
 
 
 @router.post("/reviews/{owner}/{repo}/{pr_number}/comments")

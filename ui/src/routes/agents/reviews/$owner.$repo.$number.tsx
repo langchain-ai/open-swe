@@ -3,8 +3,9 @@ import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useRef } from "react"
 import { ArrowLeftIcon, GitPullRequestIcon } from "@phosphor-icons/react"
 
+import { ReviewCommentsMenu } from "@/components/agents/ReviewCommentsMenu"
 import { ReviewMainBody } from "@/components/agents/ReviewMainBody"
-import { useSidebarCollapsed } from "@/components/sidebar-layout"
+import { useSidebarControls } from "@/components/sidebar-layout"
 import { Skeleton } from "@/components/ui/skeleton"
 import { api } from "@/lib/api"
 import { useSession } from "@/lib/session"
@@ -18,7 +19,19 @@ function ReviewDetailPage() {
   const { owner, repo, number } = Route.useParams()
   const prNumber = Number(number)
   const session = useSession()
-  const sidebarCollapsed = useSidebarCollapsed()
+  const sidebar = useSidebarControls()
+  const sidebarCollapsed = sidebar?.collapsed ?? false
+
+  // Collapse the global nav by default while viewing a review (roomy diff),
+  // restoring the prior preference on leave. Runs once for the page's lifetime.
+  const sidebarRef = useRef(sidebar)
+  sidebarRef.current = sidebar
+  useEffect(() => {
+    const controls = sidebarRef.current
+    if (!controls || controls.collapsed) return
+    controls.setCollapsed(true)
+    return () => controls.setCollapsed(false)
+  }, [])
   const detail = useQuery({
     queryKey: ["review", owner, repo, prNumber],
     queryFn: () => api.getReview(owner, repo, prNumber),
@@ -80,6 +93,11 @@ function ReviewDetailPage() {
             {detail.data ? ` ${detail.data.pr.title}` : ""}
           </span>
         </span>
+        {Number.isFinite(prNumber) && (
+          <div className="ml-auto shrink-0">
+            <ReviewCommentsMenu owner={owner} repo={repo} number={prNumber} />
+          </div>
+        )}
       </header>
 
       {detail.error ? (

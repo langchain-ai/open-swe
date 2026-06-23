@@ -1,5 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import {
+  Fragment,
   createContext,
   memo,
   useCallback,
@@ -18,12 +19,21 @@ import {
   CheckCircleIcon,
   CheckIcon,
   CircleIcon,
+  CodeIcon,
   CopyIcon,
   FlagIcon,
   GitPullRequestIcon,
   InfoIcon,
+  LinkIcon,
+  ListBulletsIcon,
+  ListChecksIcon,
+  ListNumbersIcon,
+  QuotesIcon,
   RowsIcon,
   SquareSplitHorizontalIcon,
+  TextBIcon,
+  TextHIcon,
+  TextItalicIcon,
   XCircleIcon,
   XIcon,
 } from "@phosphor-icons/react"
@@ -33,6 +43,7 @@ import {
   Virtualizer,
   WorkerPoolContextProvider,
 } from "@pierre/diffs/react"
+import type { Icon } from "@phosphor-icons/react"
 import type { FileContents } from "@pierre/diffs/react"
 import type {
   FileDiff as CoreFileDiff,
@@ -73,6 +84,7 @@ import {
 } from "@/components/agents/utils/diffUtils"
 import { IconButton } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Textarea } from "@/components/ui/textarea"
 import { api, reviewImageProxyUrl } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
@@ -1494,9 +1506,101 @@ function AddToChatPopup({
   )
 }
 
+type MarkdownAction =
+  | "heading"
+  | "bold"
+  | "italic"
+  | "quote"
+  | "code"
+  | "link"
+  | "ul"
+  | "ol"
+  | "task"
+
+interface EditState {
+  value: string
+  start: number
+  end: number
+}
+
+// Wrap the current selection (or a placeholder when empty) with a marker, e.g.
+// **bold**. Returns the new value and the selection to restore.
+function wrapSelection(state: EditState, marker: string, placeholder: string): EditState {
+  const selected = state.value.slice(state.start, state.end) || placeholder
+  const value =
+    state.value.slice(0, state.start) + marker + selected + marker + state.value.slice(state.end)
+  const start = state.start + marker.length
+  return { value, start, end: start + selected.length }
+}
+
+// Prefix each line touched by the selection, e.g. "> " for quotes or "1. " for
+// ordered lists (prefix is computed per line so numbering increments).
+function prefixLines(state: EditState, prefix: (index: number) => string): EditState {
+  const lineStart = state.value.lastIndexOf("\n", state.start - 1) + 1
+  const block = state.value.slice(lineStart, state.end)
+  const prefixed = block
+    .split("\n")
+    .map((line, index) => prefix(index) + line)
+    .join("\n")
+  const value = state.value.slice(0, lineStart) + prefixed + state.value.slice(state.end)
+  return { value, start: lineStart, end: lineStart + prefixed.length }
+}
+
+function applyMarkdownAction(state: EditState, action: MarkdownAction): EditState {
+  switch (action) {
+    case "bold":
+      return wrapSelection(state, "**", "bold text")
+    case "italic":
+      return wrapSelection(state, "_", "italic text")
+    case "code":
+      return wrapSelection(state, "`", "code")
+    case "heading":
+      return prefixLines(state, () => "### ")
+    case "quote":
+      return prefixLines(state, () => "> ")
+    case "ul":
+      return prefixLines(state, () => "- ")
+    case "ol":
+      return prefixLines(state, (index) => `${index + 1}. `)
+    case "task":
+      return prefixLines(state, () => "- [ ] ")
+    case "link": {
+      const text = state.value.slice(state.start, state.end) || "text"
+      const inserted = `[${text}](url)`
+      const value = state.value.slice(0, state.start) + inserted + state.value.slice(state.end)
+      const urlStart = state.start + text.length + 3
+      return { value, start: urlStart, end: urlStart + 3 }
+    }
+  }
+}
+
+interface ToolbarItem {
+  action: MarkdownAction
+  label: string
+  Icon: Icon
+}
+
+// Grouped to match GitHub's comment toolbar (format group, then list group).
+const MARKDOWN_TOOLBAR: ReadonlyArray<ReadonlyArray<ToolbarItem>> = [
+  [
+    { action: "heading", label: "Heading", Icon: TextHIcon },
+    { action: "bold", label: "Bold", Icon: TextBIcon },
+    { action: "italic", label: "Italic", Icon: TextItalicIcon },
+    { action: "quote", label: "Quote", Icon: QuotesIcon },
+    { action: "code", label: "Code", Icon: CodeIcon },
+    { action: "link", label: "Link", Icon: LinkIcon },
+  ],
+  [
+    { action: "ul", label: "Bulleted list", Icon: ListBulletsIcon },
+    { action: "ol", label: "Numbered list", Icon: ListNumbersIcon },
+    { action: "task", label: "Task list", Icon: ListChecksIcon },
+  ],
+]
+
 // The inline comment composer, opened by clicking the gutter "+" on a line.
 // Rendered through the same Pierre annotation portal as InlineFinding, so it sits
-// in place at the line. Submitting posts a real PR review comment as the user.
+// in place at the line. Mirrors GitHub's stock comment box (Write/Preview tabs +
+// markdown toolbar); submitting posts a real PR review comment as the user.
 function CommentComposer({
   owner,
   repo,
@@ -1513,6 +1617,7 @@ function CommentComposer({
   onClose: () => void
 }) {
   const [value, setValue] = useState("")
+  const [mode, setMode] = useState<"write" | "preview">("write")
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   useEffect(() => {
     textareaRef.current?.focus()
@@ -1526,14 +1631,35 @@ function CommentComposer({
     if (!body || mutation.isPending) return
     mutation.mutate(body)
   }
+  // Apply a toolbar action to the live textarea selection, then restore the
+  // caret/selection on the next frame (after the controlled value re-renders).
+  const applyAction = (action: MarkdownAction) => {
+    const textarea = textareaRef.current
+    if (!textarea) return
+    const next = applyMarkdownAction(
+      { value, start: textarea.selectionStart, end: textarea.selectionEnd },
+      action
+    )
+    setValue(next.value)
+    requestAnimationFrame(() => {
+      textarea.focus()
+      textarea.setSelectionRange(next.start, next.end)
+    })
+  }
   const posted = mutation.data
+  const tabClass = (active: boolean) =>
+    cn(
+      "rounded px-2 py-0.5 text-[11px]",
+      active
+        ? "bg-[var(--ui-panel-2)] font-medium text-foreground"
+        : "text-muted-foreground hover:text-foreground"
+    )
   return (
     <div className="px-2 py-1 font-sans">
       <div className="overflow-hidden rounded-md border border-[var(--ui-border)] bg-[var(--ui-surface)]">
         <div className="flex items-center gap-1.5 border-b border-[var(--ui-border)] px-2 py-1 text-[11px]">
           <ChatCircleIcon className="size-3 text-muted-foreground" />
-          <span className="font-medium">Comment</span>
-          <span className="font-mono text-muted-foreground">{commentRangeLabel(range)}</span>
+          <span className="font-medium">Add a comment on line {commentRangeLabel(range)}</span>
           <IconButton
             type="button"
             variant="ghost"
@@ -1560,49 +1686,104 @@ function CommentComposer({
             </a>
           </div>
         ) : (
-          <div className="p-2">
-            <textarea
-              ref={textareaRef}
-              value={value}
-              onChange={(event) => setValue(event.target.value)}
-              onKeyDown={(event) => {
-                if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
-                  event.preventDefault()
-                  submit()
-                } else if (event.key === "Escape") {
-                  event.preventDefault()
-                  onClose()
-                }
-              }}
-              placeholder="Leave a comment…"
-              rows={3}
-              className="w-full resize-y rounded border border-border bg-background px-2 py-1.5 text-xs outline-none focus:border-ring"
-            />
-            {mutation.isError && (
-              <p className="mt-1.5 text-[11px] text-destructive">
-                {mutation.error instanceof Error
-                  ? mutation.error.message
-                  : "Failed to post comment"}
-              </p>
-            )}
-            <div className="mt-2 flex items-center justify-end gap-2">
+          <>
+            <div className="flex items-center gap-1 border-b border-[var(--ui-border)] px-1.5 py-1">
               <button
                 type="button"
-                onClick={onClose}
-                className="rounded border border-border px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground"
+                onClick={() => setMode("write")}
+                aria-selected={mode === "write"}
+                className={tabClass(mode === "write")}
               >
-                Cancel
+                Write
               </button>
               <button
                 type="button"
-                onClick={submit}
-                disabled={!value.trim() || mutation.isPending}
-                className="rounded bg-foreground px-2 py-1 text-[11px] font-medium text-background disabled:opacity-50"
+                onClick={() => setMode("preview")}
+                aria-selected={mode === "preview"}
+                className={tabClass(mode === "preview")}
               >
-                {mutation.isPending ? "Posting…" : "Comment"}
+                Preview
               </button>
+              {mode === "write" && (
+                <div className="ml-auto flex items-center gap-0.5">
+                  {MARKDOWN_TOOLBAR.map((group, groupIndex) => (
+                    <Fragment key={group[0]?.action ?? groupIndex}>
+                      {groupIndex > 0 && (
+                        <span className="mx-0.5 h-4 w-px bg-[var(--ui-border)]" />
+                      )}
+                      {group.map(({ action, label, Icon }) => (
+                        <IconButton
+                          key={action}
+                          type="button"
+                          variant="ghost"
+                          size="icon-xs"
+                          aria-label={label}
+                          title={label}
+                          onMouseDown={(event) => event.preventDefault()}
+                          onClick={() => applyAction(action)}
+                        >
+                          <Icon />
+                        </IconButton>
+                      ))}
+                    </Fragment>
+                  ))}
+                </div>
+              )}
             </div>
-          </div>
+            <div className="p-2">
+              {mode === "write" ? (
+                <Textarea
+                  ref={textareaRef}
+                  value={value}
+                  onChange={(event) => setValue(event.target.value)}
+                  onKeyDown={(event) => {
+                    if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+                      event.preventDefault()
+                      submit()
+                    } else if (event.key === "Escape") {
+                      event.preventDefault()
+                      onClose()
+                    }
+                  }}
+                  placeholder="Leave a comment…"
+                  rows={3}
+                  className="resize-y text-xs"
+                />
+              ) : (
+                <div className="min-h-16 rounded-md border border-input bg-input/20 px-2 py-2 text-xs">
+                  {value.trim() ? (
+                    <Markdown content={value} />
+                  ) : (
+                    <span className="text-muted-foreground">Nothing to preview</span>
+                  )}
+                </div>
+              )}
+              {mutation.isError && (
+                <p className="mt-1.5 text-[11px] text-destructive">
+                  {mutation.error instanceof Error
+                    ? mutation.error.message
+                    : "Failed to post comment"}
+                </p>
+              )}
+              <div className="mt-2 flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="rounded border border-border px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={submit}
+                  disabled={!value.trim() || mutation.isPending}
+                  className="rounded bg-foreground px-2 py-1 text-[11px] font-medium text-background disabled:opacity-50"
+                >
+                  {mutation.isPending ? "Posting…" : "Comment"}
+                </button>
+              </div>
+            </div>
+          </>
         )}
       </div>
     </div>

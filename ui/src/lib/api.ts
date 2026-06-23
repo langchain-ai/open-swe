@@ -402,6 +402,23 @@ export interface ReviewCommentResult {
   html_url: string
 }
 
+export interface PrReviewComment {
+  id: number
+  author: string
+  author_avatar_url: string
+  path: string
+  line: number | null
+  side: "LEFT" | "RIGHT"
+  body: string
+  html_url: string
+  created_at: string
+  is_open_swe: boolean
+}
+
+export interface ReviewCommentsPayload {
+  comments: Array<PrReviewComment>
+}
+
 export interface ReviewCounts {
   open: number
   resolved: number
@@ -765,6 +782,10 @@ export const api = {
     request<ReviewCommentResult>(
       `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/comments`,
       { method: "POST", body: JSON.stringify(body) }
+    ),
+  listReviewComments: (owner: string, repo: string, number: number) =>
+    request<ReviewCommentsPayload>(
+      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/comments`
     ),
   getReviewerEval: () => request<ReviewerEvalStatus>("/admin/evals/reviewer"),
   logout: () => request<void>("/auth/logout", { method: "POST" }),

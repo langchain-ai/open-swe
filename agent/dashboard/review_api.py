@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import ipaddress
 import logging
+import re
 import socket
 from collections.abc import Awaitable, Callable
 from typing import Any, Literal
@@ -439,6 +440,63 @@ async def create_review_comment(
     return await _github_post(
         f"/repos/{owner}/{repo}/pulls/{pr_number}/comments", token, json=payload
     )
+
+
+_HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
+# Inline comments the reviewer posts carry this hidden marker (see reviewer_publish).
+_OPEN_SWE_COMMENT_RE = re.compile(r"<!--\s*open-swe-review-comment\b")
+
+
+def _clean_comment_body(body: str) -> str:
+    return _HTML_COMMENT_RE.sub("", body).strip()
+
+
+async def list_review_comments(owner: str, repo: str, pr_number: int) -> dict[str, Any]:
+    """List inline review comments on a PR (newest first), normalized for the UI.
+
+    Surfaces every inline comment on the PR — including humans' — not just the
+    reviewer's findings. ``is_open_swe`` flags the reviewer's own (marker-bearing)
+    comments so the UI can separate them from other people's. Capped at the 100
+    most recent comments.
+    """
+    token = await _require_app_token()
+    raw = await _github_get(
+        f"/repos/{owner}/{repo}/pulls/{pr_number}/comments",
+        token,
+        params={"per_page": 100, "sort": "created", "direction": "desc"},
+    )
+    comments: list[dict[str, Any]] = []
+    if isinstance(raw, list):
+        for item in raw:
+            if not isinstance(item, dict):
+                continue
+            body = item.get("body") if isinstance(item.get("body"), str) else ""
+            user = item.get("user") if isinstance(item.get("user"), dict) else {}
+            line = item.get("line")
+            if not isinstance(line, int):
+                original = item.get("original_line")
+                line = original if isinstance(original, int) else None
+            comments.append(
+                {
+                    "id": item.get("id"),
+                    "author": user.get("login") if isinstance(user.get("login"), str) else "",
+                    "author_avatar_url": (
+                        user.get("avatar_url") if isinstance(user.get("avatar_url"), str) else ""
+                    ),
+                    "path": item.get("path") if isinstance(item.get("path"), str) else "",
+                    "line": line,
+                    "side": item.get("side") if item.get("side") in ("LEFT", "RIGHT") else "RIGHT",
+                    "body": _clean_comment_body(body),
+                    "html_url": (
+                        item.get("html_url") if isinstance(item.get("html_url"), str) else ""
+                    ),
+                    "created_at": (
+                        item.get("created_at") if isinstance(item.get("created_at"), str) else ""
+                    ),
+                    "is_open_swe": bool(_OPEN_SWE_COMMENT_RE.search(body)),
+                }
+            )
+    return {"comments": comments}
 
 
 async def get_review(owner: str, repo: str, pr_number: int) -> dict[str, Any]:
