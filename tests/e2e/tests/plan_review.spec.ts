@@ -89,10 +89,14 @@ test.describe("Plan review (HTTP comments)", () => {
       timeout: 30_000,
     });
     await expect(owner.getByTestId("approve-plan")).toBeVisible();
+    // "Request changes" is meaningless with no feedback → disabled until a
+    // comment exists.
+    await expect(owner.getByTestId("reject-plan")).toBeDisabled();
 
     // Owner leaves a comment.
     await addComment(owner, "Owner: looks solid, ship it.");
     await expect(owner.getByTestId("plan-comment")).toHaveCount(1);
+    await expect(owner.getByTestId("reject-plan")).toBeEnabled();
 
     // 4. A COLLABORATOR opens the same plan: sees it AND the owner's comment
     //    (fetched over HTTP), but has NO approve button.

@@ -128,7 +128,14 @@ export function PlanReview({ plan }: { plan: PlanData }) {
           <Button
             data-testid="reject-plan"
             variant="secondary"
-            disabled={busy !== null || decision !== null}
+            // Requesting changes feeds the comments to the agent, so it's
+            // meaningless with none — disable until at least one is left.
+            disabled={busy !== null || decision !== null || comments.length === 0}
+            title={
+              comments.length === 0
+                ? "Leave a comment first to request changes"
+                : undefined
+            }
             onClick={() => void decide("reject")}
           >
             Request changes
