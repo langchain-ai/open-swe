@@ -124,7 +124,7 @@ from .utils.slack_feedback import (
     process_slack_reaction_added,
     process_slack_reaction_removed,
 )
-from .utils.thread_ops import is_thread_active, queue_message_for_thread
+from .utils.thread_ops import is_thread_active, queue_message_for_thread, thread_run_lock
 
 logger = logging.getLogger(__name__)
 
@@ -1189,36 +1189,37 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
         source_context={"slack_thread": configurable["slack_thread"]},
     )
 
-    thread_active = await is_thread_active(thread_id)
-    if thread_active:
+    async with thread_run_lock(thread_id):
+        thread_active = await is_thread_active(thread_id)
+        if thread_active:
+            logger.info(
+                "Thread %s is active, queuing Slack message for middleware pickup",
+                thread_id,
+            )
+            queued_payload = {"text": prompt, "image_urls": image_urls}
+            queued = await queue_message_for_thread(
+                thread_id=thread_id,
+                message_content=queued_payload,
+            )
+            if queued:
+                logger.info("Slack message queued for thread %s", thread_id)
+            else:
+                logger.error("Failed to queue Slack message for thread %s", thread_id)
+            return
+
+        logger.info("Creating Slack LangGraph run for thread %s", thread_id)
+        run = await langgraph_client.runs.create(
+            thread_id,
+            "agent",
+            input={"messages": [{"role": "user", "content": content_blocks}]},
+            config={"configurable": configurable, "metadata": _AGENT_VERSION_METADATA},
+            if_not_exists="create",
+        )
         logger.info(
-            "Thread %s is active, queuing Slack message for middleware pickup",
+            "Slack LangGraph run %s created for thread %s",
+            _run_id_for_logging(run),
             thread_id,
         )
-        queued_payload = {"text": prompt, "image_urls": image_urls}
-        queued = await queue_message_for_thread(
-            thread_id=thread_id,
-            message_content=queued_payload,
-        )
-        if queued:
-            logger.info("Slack message queued for thread %s", thread_id)
-        else:
-            logger.error("Failed to queue Slack message for thread %s", thread_id)
-        return
-
-    logger.info("Creating Slack LangGraph run for thread %s", thread_id)
-    run = await langgraph_client.runs.create(
-        thread_id,
-        "agent",
-        input={"messages": [{"role": "user", "content": content_blocks}]},
-        config={"configurable": configurable, "metadata": _AGENT_VERSION_METADATA},
-        if_not_exists="create",
-    )
-    logger.info(
-        "Slack LangGraph run %s created for thread %s",
-        _run_id_for_logging(run),
-        thread_id,
-    )
     run_id = run.get("run_id")
     if is_first_mention:
         trace_message_ts = await post_slack_trace_reply(channel_id, thread_ts, thread_id)
