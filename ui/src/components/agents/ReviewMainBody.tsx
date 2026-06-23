@@ -992,12 +992,16 @@ function ReviewBodyInner({
   }, [openComment])
 
   const renderFileCard = (file: ReviewDiffFile) => {
+    // Keep the range highlighted while its comment composer is open, so the
+    // user can see exactly which lines they're commenting on.
     const selectedLines =
       expandedFinding?.file === file.path && isAnchored(expandedFinding)
         ? findingSelectedRange(expandedFinding)
-        : userSelection?.file === file.path
-          ? userSelection.range
-          : null
+        : commentDraft?.file === file.path
+          ? commentDraft.range
+          : userSelection?.file === file.path
+            ? userSelection.range
+            : null
     return (
       <FileDiffCard
         key={file.path}
