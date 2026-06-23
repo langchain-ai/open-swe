@@ -48,16 +48,23 @@ test.describe("Plan review (BlockNote native comments)", () => {
     expect(threadId).toBeTruthy();
     const planPath = `/agents/${threadId}/plan`;
 
-    // 1a. enter_plan_mode must actually engage: plan_mode is only set when the
-    //     tool's Command.update applies cleanly, so this fails if the tool
-    //     errors (e.g. a missing terminating ToolMessage) instead of silently
-    //     degrading into a normal implementation run.
+    // 1a. enter_plan_mode must actually engage, not error out. Its Command must
+    //     carry a terminating ToolMessage; without it the tool call fails and is
+    //     swallowed into an error tool message while the agent silently proceeds
+    //     as a normal run. Assert the tool's success message landed in the
+    //     thread (it wouldn't if the call had errored).
     await expect
       .poll(
         async () => {
           const res = await request.get(`/threads/${threadId}/state`);
-          const state = (await res.json()) as { values?: { plan_mode?: boolean } };
-          return state.values?.plan_mode ?? false;
+          const state = (await res.json()) as {
+            values?: { messages?: Array<{ content?: unknown }> };
+          };
+          return (state.values?.messages ?? [])
+            .map((m) =>
+              typeof m.content === "string" ? m.content : JSON.stringify(m.content),
+            )
+            .some((c) => c.includes("Plan mode is active"));
         },
         { timeout: 60_000 },
       )
