@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import Any
 
 from langgraph_sdk import get_client
@@ -11,6 +14,25 @@ from langgraph_sdk import get_client
 logger = logging.getLogger(__name__)
 
 MAX_QUEUED_MESSAGES = 100
+
+_THREAD_RUN_LOCKS: dict[str, asyncio.Lock] = {}
+
+
+def get_thread_run_lock(thread_id: str) -> asyncio.Lock:
+    """Return a per-thread-id asyncio.Lock, creating one lazily if needed."""
+    lock = _THREAD_RUN_LOCKS.get(thread_id)
+    if lock is None:
+        lock = asyncio.Lock()
+        _THREAD_RUN_LOCKS[thread_id] = lock
+    return lock
+
+
+@asynccontextmanager
+async def thread_run_lock(thread_id: str) -> AsyncIterator[None]:
+    """Serialize run dispatch for a thread."""
+    lock = get_thread_run_lock(thread_id)
+    async with lock:
+        yield
 
 
 def langgraph_url() -> str:
