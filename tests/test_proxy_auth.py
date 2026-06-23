@@ -198,7 +198,7 @@ class TestCreateSandboxWithProxy:
 
             await _create_sandbox_with_proxy()
 
-            mock_create.assert_called_once_with()
+            mock_create.assert_called_once_with(snapshot_id=None)
             mock_proxy.assert_called_once_with("sandbox-123", "ghs_install")
 
     @pytest.mark.asyncio
@@ -215,7 +215,7 @@ class TestCreateSandboxWithProxy:
 
             await _create_sandbox_with_proxy()
 
-            mock_create.assert_called_once_with()
+            mock_create.assert_called_once_with(snapshot_id=None)
             mock_proxy.assert_not_called()
 
     @pytest.mark.asyncio
@@ -386,7 +386,10 @@ class TestRefreshProxyOnSandboxReuse:
             assert sandbox is replacement_sandbox
             mock_proxy.assert_called_once_with("sandbox-stale", "ghs_fresh")
             mock_recreate.assert_awaited_once_with(
-                "thread-123", github_proxy_token=None, github_proxy_repositories=None
+                "thread-123",
+                github_proxy_token=None,
+                github_proxy_repositories=None,
+                repo=None,
             )
 
     @pytest.mark.asyncio

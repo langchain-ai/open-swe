@@ -27,7 +27,11 @@ def _load_sandbox_factory(sandbox_type: str) -> SandboxFactory:
     return factory
 
 
-def create_sandbox(sandbox_id: str | None = None) -> SandboxBackendProtocol:
+def create_sandbox(
+    sandbox_id: str | None = None,
+    *,
+    snapshot_id: str | None = None,
+) -> SandboxBackendProtocol:
     """Create or reconnect to a sandbox using the configured provider.
 
     The provider is selected via the SANDBOX_TYPE environment variable.
@@ -35,12 +39,17 @@ def create_sandbox(sandbox_id: str | None = None) -> SandboxBackendProtocol:
 
     Args:
         sandbox_id: Optional existing sandbox ID to reconnect to.
+        snapshot_id: Optional snapshot to boot a new sandbox from. Only the
+            langsmith provider honors this; others ignore it. When omitted the
+            langsmith provider falls back to DEFAULT_SANDBOX_SNAPSHOT_ID.
 
     Returns:
         A sandbox backend implementing SandboxBackendProtocol.
     """
     sandbox_type = os.getenv("SANDBOX_TYPE", "langsmith")
     factory = _load_sandbox_factory(sandbox_type)
+    if sandbox_type == "langsmith" and snapshot_id is not None:
+        return factory(sandbox_id, snapshot_id=snapshot_id)
     return factory(sandbox_id)
 
 

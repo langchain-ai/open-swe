@@ -61,6 +61,18 @@ from .profiles import (
     upsert_profile,
 )
 from .repo_access import require_repo_access_for_user
+from .repo_snapshots import (
+    RepoSnapshotCreate,
+    RepoSnapshotUpdate,
+    create_repo_snapshot,
+    delete_repo_snapshot,
+    generate_dockerfile_template,
+    get_repo_snapshot,
+    list_repo_snapshots,
+    mark_repo_snapshot_building,
+    run_snapshot_build,
+    update_repo_snapshot,
+)
 from .review_api import (
     get_review,
     get_review_diff,
@@ -571,6 +583,81 @@ async def api_set_enabled_review_repo(
 ) -> dict[str, list[str]]:
     repos = await set_review_repo_enabled(update.full_name, update.enabled)
     return {"repos": repos}
+
+
+@router.get("/repo-snapshots")
+async def api_list_repo_snapshots(
+    _admin: dict[str, Any] = _ADMIN_DEP,
+) -> list[dict[str, Any]]:
+    return await list_repo_snapshots()
+
+
+@router.get("/repo-snapshots/template")
+async def api_repo_snapshot_template(
+    full_name: str,
+    _admin: dict[str, Any] = _ADMIN_DEP,
+) -> dict[str, str]:
+    return {"dockerfile": generate_dockerfile_template(normalize_repo_full_name(full_name))}
+
+
+@router.post("/repo-snapshots")
+async def api_create_repo_snapshot(
+    body: RepoSnapshotCreate,
+    _admin: dict[str, Any] = _ADMIN_DEP,
+) -> dict[str, Any]:
+    return await create_repo_snapshot(body.full_name, _admin["sub"])
+
+
+@router.get("/repo-snapshots/{full_name:path}")
+async def api_get_repo_snapshot(
+    full_name: str,
+    _admin: dict[str, Any] = _ADMIN_DEP,
+) -> dict[str, Any]:
+    record = await get_repo_snapshot(normalize_repo_full_name(full_name))
+    if not record:
+        raise HTTPException(404, "repo snapshot not found")
+    return record
+
+
+@router.put("/repo-snapshots/{full_name:path}")
+async def api_update_repo_snapshot(
+    full_name: str,
+    body: RepoSnapshotUpdate,
+    _admin: dict[str, Any] = _ADMIN_DEP,
+) -> dict[str, Any]:
+    return await update_repo_snapshot(normalize_repo_full_name(full_name), body)
+
+
+@router.post("/repo-snapshots/{full_name:path}/build")
+async def api_build_repo_snapshot(
+    full_name: str,
+    background_tasks: BackgroundTasks,
+    _admin: dict[str, Any] = _ADMIN_DEP,
+) -> dict[str, Any]:
+    full_name = normalize_repo_full_name(full_name)
+    record = await get_repo_snapshot(full_name)
+    if not record:
+        raise HTTPException(404, "repo snapshot not found")
+    if not (record.get("dockerfile") or "").strip():
+        raise HTTPException(400, "dockerfile is empty")
+    if record.get("status") == "building":
+        raise HTTPException(409, "a build is already in progress")
+    record = await mark_repo_snapshot_building(full_name)
+    background_tasks.add_task(run_snapshot_build, full_name)
+    return record
+
+
+@router.delete("/repo-snapshots/{full_name:path}")
+async def api_delete_repo_snapshot(
+    full_name: str,
+    _admin: dict[str, Any] = _ADMIN_DEP,
+) -> Response:
+    full_name = normalize_repo_full_name(full_name)
+    record = await get_repo_snapshot(full_name)
+    if not record:
+        raise HTTPException(404, "repo snapshot not found")
+    await delete_repo_snapshot(full_name)
+    return Response(status_code=204)
 
 
 @router.get("/admin/user-mappings")
