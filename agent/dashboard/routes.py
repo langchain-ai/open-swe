@@ -5,7 +5,7 @@ from __future__ import annotations
 import hmac
 import logging
 import os
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
@@ -83,6 +83,7 @@ from .repo_snapshots import (
     update_repo_snapshot,
 )
 from .review_api import (
+    create_review_comment,
     get_review,
     get_review_diff,
     list_reviews,
@@ -1068,6 +1069,46 @@ async def api_re_review(
 ) -> dict[str, Any]:
     await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
     return await trigger_re_review(owner, repo, pr_number, session["sub"])
+
+
+class ReviewCommentCreate(BaseModel):
+    path: str
+    line: int
+    side: Literal["LEFT", "RIGHT"]
+    body: str
+    start_line: int | None = None
+    start_side: Literal["LEFT", "RIGHT"] | None = None
+
+
+@router.post("/reviews/{owner}/{repo}/{pr_number}/comments")
+async def api_create_review_comment(
+    owner: str,
+    repo: str,
+    pr_number: int,
+    comment: ReviewCommentCreate,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
+    body = comment.body.strip()
+    if not body:
+        raise HTTPException(422, "comment body is required")
+    # Post as the signed-in user (their user-to-server token), so the comment is
+    # attributed to them rather than the Open SWE app.
+    token = await get_valid_access_token(session["sub"])
+    if not token:
+        raise HTTPException(401, "GitHub re-auth required")
+    return await create_review_comment(
+        owner,
+        repo,
+        pr_number,
+        token=token,
+        path=comment.path,
+        line=comment.line,
+        side=comment.side,
+        body=body,
+        start_line=comment.start_line,
+        start_side=comment.start_side,
+    )
 
 
 # --- PR chat (sandbox-less ``chat`` graph) -----------------------------------

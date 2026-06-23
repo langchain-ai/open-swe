@@ -14,6 +14,7 @@ import {
   ArrowSquareOutIcon,
   BugBeetleIcon,
   CaretDownIcon,
+  ChatCircleIcon,
   CheckCircleIcon,
   CheckIcon,
   CircleIcon,
@@ -24,6 +25,7 @@ import {
   RowsIcon,
   SquareSplitHorizontalIcon,
   XCircleIcon,
+  XIcon,
 } from "@phosphor-icons/react"
 import { IoLogoGithub } from "react-icons/io5"
 import {
@@ -41,6 +43,7 @@ import type {
 
 import type {
   ReviewCheckRun,
+  ReviewCommentCreate,
   ReviewDetail,
   ReviewDiffFile,
   ReviewFinding,
@@ -68,11 +71,18 @@ import {
   useDiffOptions,
   warmDiffHighlighter,
 } from "@/components/agents/utils/diffUtils"
+import { IconButton } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { api, reviewImageProxyUrl } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
 type SideTab = "info" | "chat"
+
+// Metadata carried by a Pierre diff line annotation. Findings render as the
+// read-only InlineFinding card; a draftComment renders the inline composer.
+type ReviewAnnotation =
+  | { kind: "finding"; finding: ReviewFinding }
+  | { kind: "draftComment"; path: string; range: SelectedLineRange }
 
 const REVIEW_VIEW_STORAGE_KEY = "open-swe.review.view"
 const REVIEW_DIFF_STYLE_STORAGE_KEY = "open-swe.review.diffStyle"
@@ -186,12 +196,12 @@ interface PositionedDiffInstance {
 
 interface RegisteredDiffInstance {
   host: HTMLElement
-  instance: CoreFileDiff<ReviewFinding>
+  instance: CoreFileDiff<ReviewAnnotation>
 }
 
 function hasLinePosition(
-  instance: CoreFileDiff<ReviewFinding>
-): instance is CoreFileDiff<ReviewFinding> & PositionedDiffInstance {
+  instance: CoreFileDiff<ReviewAnnotation>
+): instance is CoreFileDiff<ReviewAnnotation> & PositionedDiffInstance {
   return (
     typeof (instance as { getLinePosition?: unknown }).getLinePosition ===
     "function"
@@ -295,6 +305,50 @@ function findingSelectedRange(
     side,
     endSide: side,
   }
+}
+
+function selectionSideToGithub(side: SelectionSide | undefined): "LEFT" | "RIGHT" {
+  return side === "deletions" ? "LEFT" : "RIGHT"
+}
+
+// Map a Pierre selection range to a GitHub inline-comment payload. GitHub
+// forbids multi-line ranges that span sides, so a cross-side selection collapses
+// to a single line on the end side; same-side ranges keep their start_line.
+function buildCommentPayload(
+  path: string,
+  range: SelectedLineRange,
+  body: string
+): ReviewCommentCreate {
+  const startSide = range.side ?? "additions"
+  const endSide = range.endSide ?? startSide
+  if (startSide !== endSide) {
+    return {
+      path,
+      line: range.end,
+      side: selectionSideToGithub(endSide),
+      body,
+      start_line: null,
+      start_side: null,
+    }
+  }
+  const side = selectionSideToGithub(endSide)
+  const lo = Math.min(range.start, range.end)
+  const hi = Math.max(range.start, range.end)
+  return {
+    path,
+    line: hi,
+    side,
+    body,
+    start_line: lo < hi ? lo : null,
+    start_side: lo < hi ? side : null,
+  }
+}
+
+function commentRangeLabel(range: SelectedLineRange): string {
+  const side = (range.endSide ?? range.side) === "deletions" ? "L" : "R"
+  const lo = Math.min(range.start, range.end)
+  const hi = Math.max(range.start, range.end)
+  return lo === hi ? `${side}${hi}` : `${side}${lo}-${hi}`
 }
 
 function findingClipboardText(finding: ReviewFinding): string {
@@ -405,6 +459,11 @@ function ReviewBodyInner({
   )
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [userSelection, setUserSelection] = useState<UserSelection | null>(null)
+  // The single open inline comment composer (at most one across all files).
+  const [commentDraft, setCommentDraft] = useState<{
+    file: string
+    range: SelectedLineRange
+  } | null>(null)
   const diffScrollElRef = useRef<HTMLDivElement | null>(null)
   const findingScrollRequestRef = useRef(0)
   const groupRefs = useRef<Record<number, HTMLDivElement | null>>({})
@@ -683,6 +742,18 @@ function ReviewBodyInner({
     [composer]
   )
 
+  // Open the inline comment composer for a line (gutter "+" click). Clearing the
+  // chat selection + expanded finding keeps the "+" owned by the composer alone.
+  const startComment = useCallback(
+    (path: string, range: SelectedLineRange) => {
+      setUserSelection(null)
+      setExpandedId(null)
+      setCommentDraft({ file: path, range })
+    },
+    []
+  )
+  const closeComment = useCallback(() => setCommentDraft(null), [])
+
   // ⌘L / Ctrl+L adds the current line selection to the chat (Cursor-style).
   const userSelectionRef = useRef(userSelection)
   userSelectionRef.current = userSelection
@@ -796,6 +867,14 @@ function ReviewBodyInner({
         registerSection={registerSection}
         registerDiffInstance={registerDiffInstance}
         diffStyle={diffStyle}
+        owner={detail.owner}
+        repo={detail.repo}
+        prNumber={detail.number}
+        commentDraftRange={
+          commentDraft?.file === file.path ? commentDraft.range : null
+        }
+        onStartComment={embedded ? undefined : startComment}
+        onCloseComment={closeComment}
       />
     )
   }
@@ -1094,6 +1173,12 @@ const FileDiffCard = memo(function FileDiffCard({
   registerSection,
   registerDiffInstance,
   diffStyle,
+  owner,
+  repo,
+  prNumber,
+  commentDraftRange,
+  onStartComment,
+  onCloseComment,
 }: {
   file: ReviewDiffFile
   findings: Array<ReviewFinding>
@@ -1110,9 +1195,18 @@ const FileDiffCard = memo(function FileDiffCard({
     target: RegisteredDiffInstance | null
   ) => void
   diffStyle: DiffStyle
+  owner: string
+  repo: string
+  prNumber: number
+  commentDraftRange: SelectedLineRange | null
+  onStartComment?: (path: string, range: SelectedLineRange) => void
+  onCloseComment: () => void
 }) {
   // No chat means no line-selection → "Add to Chat" affordance (embedded view).
   const selectable = Boolean(onAddToChat)
+  // Commenting rides the same gutter "+" as selection, so it's available only
+  // where the gutter utility is enabled (the full reviews page).
+  const commentable = selectable && Boolean(onStartComment)
   const diffOptions = useDiffOptions(diffStyle)
   const diffWrapperRef = useRef<HTMLDivElement | null>(null)
   const lastPointerRef = useRef<{ x: number; y: number } | null>(null)
@@ -1122,31 +1216,51 @@ const FileDiffCard = memo(function FileDiffCard({
     y: number
   } | null>(null)
 
-  const lineAnnotations = useMemo<Array<DiffLineAnnotation<ReviewFinding>>>(
+  const findingAnnotations = useMemo<Array<DiffLineAnnotation<ReviewAnnotation>>>(
     () =>
       findings
         .filter((finding) => finding.end_line !== null)
         .map((finding) => ({
           side: findingSide(finding),
           lineNumber: finding.end_line as number,
-          metadata: finding,
+          metadata: { kind: "finding", finding },
         })),
     [findings]
   )
 
-  // Native line selection plus the visible gutter "+" handle you can click and
-  // drag to select a range. onLineSelectionChange fires on every drag move; we
-  // push it into the controlled selection so the rows highlight live as you
-  // drag (in controlled mode Pierre only paints when the prop updates). The
-  // "Add to Chat" popup is shown on onLineSelectionEnd (release only); ⌘L
-  // (handled in ReviewBody) adds without it. onGutterUtilityClick must be
-  // non-null for Pierre to turn the "+" into a drag selector.
+  // The open draft comment renders inline as one more annotation, anchored to
+  // the end of the selected range on its side.
+  const lineAnnotations = useMemo<Array<DiffLineAnnotation<ReviewAnnotation>>>(() => {
+    if (!commentDraftRange) return findingAnnotations
+    return [
+      ...findingAnnotations,
+      {
+        side: commentDraftRange.endSide ?? commentDraftRange.side ?? "additions",
+        lineNumber: commentDraftRange.end,
+        metadata: { kind: "draftComment", path: file.path, range: commentDraftRange },
+      },
+    ]
+  }, [findingAnnotations, commentDraftRange, file.path])
+
+  // Native line selection plus the visible gutter "+" handle. Pierre disambiguates
+  // a plain click on the "+" (onGutterUtilityClick → open the comment composer)
+  // from a press-and-drag on it (starts a line selection → "Add to Chat"). So the
+  // two affordances coexist on one handle. onLineSelectionChange fires on every
+  // drag move; we push it into the controlled selection so the rows highlight live
+  // as you drag (in controlled mode Pierre only paints when the prop updates). The
+  // "Add to Chat" popup is shown on onLineSelectionEnd (release only); ⌘L (handled
+  // in ReviewBody) adds without it. onGutterUtilityClick must be non-null for Pierre
+  // to turn the "+" into a drag selector, so the no-chat path keeps a no-op.
   const cardOptions = useMemo(
     () => ({
       ...diffOptions,
       enableLineSelection: selectable,
       enableGutterUtility: selectable,
-      onGutterUtilityClick: selectable ? () => undefined : undefined,
+      onGutterUtilityClick: commentable
+        ? (range: SelectedLineRange) => onStartComment?.(file.path, range)
+        : selectable
+          ? () => undefined
+          : undefined,
       onLineSelectionChange: (range: SelectedLineRange | null) =>
         onSelectLines(file.path, range),
       onLineSelectionEnd: (range: SelectedLineRange | null) => {
@@ -1171,10 +1285,18 @@ const FileDiffCard = memo(function FileDiffCard({
       },
       onPostRender: (
         node: HTMLElement,
-        instance: CoreFileDiff<ReviewFinding>
+        instance: CoreFileDiff<ReviewAnnotation>
       ) => registerDiffInstance(file.path, { host: node, instance }),
     }),
-    [diffOptions, selectable, file.path, onSelectLines, registerDiffInstance]
+    [
+      diffOptions,
+      selectable,
+      commentable,
+      onStartComment,
+      file.path,
+      onSelectLines,
+      registerDiffInstance,
+    ]
   )
 
   const addPopupToChat = useCallback(() => {
@@ -1187,6 +1309,12 @@ const FileDiffCard = memo(function FileDiffCard({
   useEffect(() => {
     if (!selectedLines) setPopup(null)
   }, [selectedLines])
+
+  // Opening a comment draft owns the "+"; never show "Add to Chat" alongside it
+  // (a single "+" click can otherwise both open the composer and arm the popup).
+  useEffect(() => {
+    if (commentDraftRange) setPopup(null)
+  }, [commentDraftRange])
 
   const oldFile = useMemo<FileContents>(
     () => ({
@@ -1214,10 +1342,21 @@ const FileDiffCard = memo(function FileDiffCard({
     [file.path, registerDiffInstance]
   )
   const renderAnnotation = useCallback(
-    (annotation: DiffLineAnnotation<ReviewFinding>) => (
-      <InlineFinding finding={annotation.metadata} />
-    ),
-    []
+    (annotation: DiffLineAnnotation<ReviewAnnotation>) => {
+      const meta = annotation.metadata
+      if (meta.kind === "finding") return <InlineFinding finding={meta.finding} />
+      return (
+        <CommentComposer
+          owner={owner}
+          repo={repo}
+          prNumber={prNumber}
+          path={meta.path}
+          range={meta.range}
+          onClose={onCloseComment}
+        />
+      )
+    },
+    [owner, repo, prNumber, onCloseComment]
   )
 
   return (
@@ -1278,7 +1417,7 @@ const FileDiffCard = memo(function FileDiffCard({
             }}
             className="overflow-x-auto bg-[var(--ui-panel)] font-mono text-[11px] leading-5"
           >
-            <MultiFileDiff<ReviewFinding>
+            <MultiFileDiff<ReviewAnnotation>
               oldFile={oldFile}
               newFile={newFile}
               options={cardOptions}
@@ -1287,7 +1426,7 @@ const FileDiffCard = memo(function FileDiffCard({
               selectedLines={selectedLines}
               renderAnnotation={renderAnnotation}
             />
-            {popup && (
+            {popup && !commentDraftRange && (
               <AddToChatPopup
                 x={popup.x}
                 y={popup.y}
@@ -1351,6 +1490,121 @@ function AddToChatPopup({
           ⌘L
         </kbd>
       </button>
+    </div>
+  )
+}
+
+// The inline comment composer, opened by clicking the gutter "+" on a line.
+// Rendered through the same Pierre annotation portal as InlineFinding, so it sits
+// in place at the line. Submitting posts a real PR review comment as the user.
+function CommentComposer({
+  owner,
+  repo,
+  prNumber,
+  path,
+  range,
+  onClose,
+}: {
+  owner: string
+  repo: string
+  prNumber: number
+  path: string
+  range: SelectedLineRange
+  onClose: () => void
+}) {
+  const [value, setValue] = useState("")
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null)
+  useEffect(() => {
+    textareaRef.current?.focus()
+  }, [])
+  const mutation = useMutation({
+    mutationFn: (body: string) =>
+      api.createReviewComment(owner, repo, prNumber, buildCommentPayload(path, range, body)),
+  })
+  const submit = () => {
+    const body = value.trim()
+    if (!body || mutation.isPending) return
+    mutation.mutate(body)
+  }
+  const posted = mutation.data
+  return (
+    <div className="px-2 py-1 font-sans">
+      <div className="overflow-hidden rounded-md border border-[var(--ui-border)] bg-[var(--ui-surface)]">
+        <div className="flex items-center gap-1.5 border-b border-[var(--ui-border)] px-2 py-1 text-[11px]">
+          <ChatCircleIcon className="size-3 text-muted-foreground" />
+          <span className="font-medium">Comment</span>
+          <span className="font-mono text-muted-foreground">{commentRangeLabel(range)}</span>
+          <IconButton
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            aria-label="Close comment"
+            className="ml-auto"
+            onClick={onClose}
+          >
+            <XIcon />
+          </IconButton>
+        </div>
+        {posted ? (
+          <div className="flex items-center gap-2 px-3 py-2.5 text-[11px] text-muted-foreground">
+            <CheckCircleIcon className="size-3.5 text-emerald-500" />
+            Comment posted
+            <a
+              href={posted.html_url}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1 text-foreground hover:underline"
+            >
+              <IoLogoGithub className="size-3" />
+              View on GitHub
+            </a>
+          </div>
+        ) : (
+          <div className="p-2">
+            <textarea
+              ref={textareaRef}
+              value={value}
+              onChange={(event) => setValue(event.target.value)}
+              onKeyDown={(event) => {
+                if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+                  event.preventDefault()
+                  submit()
+                } else if (event.key === "Escape") {
+                  event.preventDefault()
+                  onClose()
+                }
+              }}
+              placeholder="Leave a comment…"
+              rows={3}
+              className="w-full resize-y rounded border border-border bg-background px-2 py-1.5 text-xs outline-none focus:border-ring"
+            />
+            {mutation.isError && (
+              <p className="mt-1.5 text-[11px] text-destructive">
+                {mutation.error instanceof Error
+                  ? mutation.error.message
+                  : "Failed to post comment"}
+              </p>
+            )}
+            <div className="mt-2 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={onClose}
+                className="rounded border border-border px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={submit}
+                disabled={!value.trim() || mutation.isPending}
+                className="rounded bg-foreground px-2 py-1 text-[11px] font-medium text-background disabled:opacity-50"
+              >
+                {mutation.isPending ? "Posting…" : "Comment"}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   )
 }

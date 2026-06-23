@@ -388,6 +388,20 @@ export interface ReviewFinding {
   group: FindingGroup
 }
 
+export interface ReviewCommentCreate {
+  path: string
+  line: number
+  side: "LEFT" | "RIGHT"
+  body: string
+  start_line?: number | null
+  start_side?: "LEFT" | "RIGHT" | null
+}
+
+export interface ReviewCommentResult {
+  id: number
+  html_url: string
+}
+
 export interface ReviewCounts {
   open: number
   resolved: number
@@ -741,6 +755,16 @@ export const api = {
     }>(
       `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/re-review`,
       { method: "POST" }
+    ),
+  createReviewComment: (
+    owner: string,
+    repo: string,
+    number: number,
+    body: ReviewCommentCreate
+  ) =>
+    request<ReviewCommentResult>(
+      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/comments`,
+      { method: "POST", body: JSON.stringify(body) }
     ),
   getReviewerEval: () => request<ReviewerEvalStatus>("/admin/evals/reviewer"),
   logout: () => request<void>("/auth/logout", { method: "POST" }),

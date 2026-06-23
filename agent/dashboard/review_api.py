@@ -55,6 +55,43 @@ async def _github_get(
     return response.json()
 
 
+def _github_error_message(response: httpx.Response) -> str:
+    """Best-effort extraction of GitHub's error message for surfacing to the UI."""
+    fallback = f"GitHub request failed ({response.status_code})"
+    try:
+        data = response.json()
+    except ValueError:
+        return fallback
+    if not isinstance(data, dict):
+        return fallback
+    message = data.get("message")
+    message_str = message if isinstance(message, str) else ""
+    errors = data.get("errors")
+    detail_parts: list[str] = []
+    if isinstance(errors, list):
+        for err in errors:
+            if isinstance(err, dict) and isinstance(err.get("message"), str):
+                detail_parts.append(err["message"])
+    detail = "; ".join(detail_parts)
+    if message_str and detail:
+        return f"{message_str}: {detail}"
+    return message_str or detail or fallback
+
+
+async def _github_post(path: str, token: str, *, json: dict[str, Any]) -> Any:
+    async with httpx.AsyncClient(timeout=_GITHUB_TIMEOUT) as client:
+        response = await client.post(
+            f"{_GITHUB_API}{path}", headers=github_headers(token), json=json
+        )
+    if response.status_code >= 400:
+        message = _github_error_message(response)
+        logger.warning("GitHub POST %s failed: %s %s", path, response.status_code, message)
+        # Pass 4xx through verbatim (422 = line not in diff, 403 = perms); collapse
+        # 5xx to a 502 so a GitHub outage doesn't masquerade as a client error.
+        raise HTTPException(response.status_code if response.status_code < 500 else 502, message)
+    return response.json()
+
+
 def reviewer_thread_id(owner: str, repo: str, pr_number: int) -> str:
     import uuid
 
@@ -362,6 +399,46 @@ async def get_pr_head_sha(owner: str, repo: str, pr_number: int) -> str:
     head = payload.get("head") if isinstance(payload, dict) else None
     sha = head.get("sha") if isinstance(head, dict) else None
     return sha if isinstance(sha, str) else ""
+
+
+async def create_review_comment(
+    owner: str,
+    repo: str,
+    pr_number: int,
+    *,
+    token: str,
+    path: str,
+    line: int,
+    side: Literal["LEFT", "RIGHT"],
+    body: str,
+    start_line: int | None = None,
+    start_side: Literal["LEFT", "RIGHT"] | None = None,
+) -> dict[str, Any]:
+    """Post a single inline review comment to a PR using the caller's token.
+
+    Unlike the reviewer agent (which batches comments into one review via the App
+    token), this posts a standalone comment immediately, authored by the signed-in
+    user. ``commit_id`` is the PR's live head SHA. GitHub errors surface verbatim so
+    the UI can explain a 422 (line not part of the diff) or 403 (missing permission).
+    """
+    head_sha = await get_pr_head_sha(owner, repo, pr_number)
+    if not head_sha:
+        raise HTTPException(502, "could not resolve PR head commit")
+    payload: dict[str, Any] = {
+        "body": body,
+        "commit_id": head_sha,
+        "path": path,
+        "line": line,
+        "side": side,
+    }
+    # GitHub forbids multi-line ranges that span sides; only add the range start
+    # when it is a distinct earlier line on the same side.
+    if start_line is not None and start_line != line:
+        payload["start_line"] = start_line
+        payload["start_side"] = start_side or side
+    return await _github_post(
+        f"/repos/{owner}/{repo}/pulls/{pr_number}/comments", token, json=payload
+    )
 
 
 async def get_review(owner: str, repo: str, pr_number: int) -> dict[str, Any]:
