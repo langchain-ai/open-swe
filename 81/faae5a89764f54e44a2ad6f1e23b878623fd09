@@ -1,0 +1,29 @@
+tests/e2e/tests/plan_review.spec.ts
+  s_e4f1e6cd6464dd::t_b85b95f189cbb9 98-101,104
+  s_e4f1e6cd6464dd::t_aa7ce314f05755 102-103
+  s_e4f1e6cd6464dd::t_70ba30ba203cb0 78-80
+ui/src/components/agents/AgentThreadView.tsx
+  s_e4f1e6cd6464dd::t_e28e844b302ecf 84-88
+ui/src/components/agents/PlanReview.tsx
+  s_e4f1e6cd6464dd::t_c23549bdd9fb15 21-23,25-26
+  s_e4f1e6cd6464dd::t_2c9790c3611802 57
+  s_e4f1e6cd6464dd::t_c1bd94204f1cdc 127-136
+  s_e4f1e6cd6464dd::t_cbf9aebcbcc866 162-169
+  s_e4f1e6cd6464dd::t_c6c7e954af1279 17-20,24,27-48
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.10",
+  "base_commit_sha": "81faae5a89764f54e44a2ad6f1e23b878623fd09",
+  "prompts": {},
+  "sessions": {
+    "s_e4f1e6cd6464dd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4c5fdff8-80f6-4553-8336-aac3a1fb74b9",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ramon Nogueira <ramon.nogueira@langchain.dev>"
+    }
+  }
+}
