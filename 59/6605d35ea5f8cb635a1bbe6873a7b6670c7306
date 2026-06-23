@@ -1,0 +1,19 @@
+tests/e2e/README.md
+  s_58f4679bd38200::t_e4bfb04b50867e 46,48-53
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.10",
+  "base_commit_sha": "596605d35ea5f8cb635a1bbe6873a7b6670c7306",
+  "prompts": {},
+  "sessions": {
+    "s_58f4679bd38200": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "66b95166-79c2-4687-b201-3fd6dcb5e02f",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ramon Nogueira <ramon.nogueira@langchain.dev>"
+    }
+  }
+}
