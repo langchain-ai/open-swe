@@ -1,0 +1,19 @@
+tests/e2e/tests/plan_review.spec.ts
+  s_e4f1e6cd6464dd::t_b63743ec2798e9 51-55,60-67
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.10",
+  "base_commit_sha": "b22c34649fd590968eedddbe4a4902db1cef8f68",
+  "prompts": {},
+  "sessions": {
+    "s_e4f1e6cd6464dd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4c5fdff8-80f6-4553-8336-aac3a1fb74b9",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ramon Nogueira <ramon.nogueira@langchain.dev>"
+    }
+  }
+}
