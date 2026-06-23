@@ -1,0 +1,70 @@
+tests/test_langsmith_trace_url.py
+  s_e4f1e6cd6464dd::t_6ffeeac0d9841a 69-94
+agent/utils/langsmith.py
+  s_e4f1e6cd6464dd::t_d23c921e35facb 36-39,46,49-50,53,55,58-60,62-64,68-69,76-79
+package.json
+  s_e4f1e6cd6464dd::t_9a67b4cb600fc3 1-4,6-7
+  s_e4f1e6cd6464dd::t_bbc16397dead81 5
+ui/src/components/agents/PlanReview.tsx
+  s_e4f1e6cd6464dd::t_3f9216f3b311f9 74-77,79-82,84-87
+tests/e2e/tests/dashboard.spec.ts
+  s_e4f1e6cd6464dd::t_62a6e72f6574b7 5-6
+tests/test_plan_mode.py
+  s_e4f1e6cd6464dd::t_d62ee78fc8aa74 174,179-181
+  s_e4f1e6cd6464dd::t_cc0a59249eeb53 173,182-183,185-189
+ui/vite.config.ts
+  s_e4f1e6cd6464dd::t_93a63a35e9907c 1-2,11-76,81
+tests/e2e/harness.py
+  s_e4f1e6cd6464dd::t_29b570b9ab0e2d 94-96
+  s_e4f1e6cd6464dd::t_06125d4faf9361 42-46,48
+  s_e4f1e6cd6464dd::t_ced8573f860854 101,110
+  s_e4f1e6cd6464dd::t_a9365b3ba6776e 156-159,164-180
+  s_e4f1e6cd6464dd::t_1d5631740e99b2 187-229
+  s_e4f1e6cd6464dd::t_4ef1af4736177e 182
+  s_e4f1e6cd6464dd::t_12939ed5a5744a 304-309
+  s_e4f1e6cd6464dd::t_15b80feb7e520b 473-475,480-481,483-485
+  s_e4f1e6cd6464dd::t_0d189ec3f5b69f 154,181,183-186
+  s_e4f1e6cd6464dd::t_a2a921169ecb01 155,160-163
+  s_e4f1e6cd6464dd::t_5fd6178a1e27e9 39,47,49-58
+tests/e2e/patches.py
+  s_e4f1e6cd6464dd::t_ef0636c0f0bbf9 15-17,20
+  s_e4f1e6cd6464dd::t_8c48c707074f40 43-53,55
+agent/server.py
+  s_e4f1e6cd6464dd::t_9a49922e2f713e 692-696
+agent/tools/enter_plan_mode.py
+  s_e4f1e6cd6464dd::t_b4bbf21a543496 7,9-10,18-23,25-26,47-52
+tests/e2e/e2e_env.py
+  s_e4f1e6cd6464dd::t_d1dd3c444e5ea4 75-78
+  s_e4f1e6cd6464dd::t_f5a4a5c81ce07f 70-74,79-83
+tests/e2e/tests/plan_review.spec.ts
+  s_e4f1e6cd6464dd::t_2d9cf066291830 51-65
+  s_e4f1e6cd6464dd::t_307a16bcaa3103 18-19
+tests/e2e/static/slack.html
+  s_e4f1e6cd6464dd::t_633aec8da246f5 81
+  s_e4f1e6cd6464dd::t_b2c93a3643e165 23,33-43,48,67-71
+tests/e2e/dev-mock.sh
+  s_e4f1e6cd6464dd::t_df022f96344f60 7
+  s_e4f1e6cd6464dd::t_9cd94a30a65b7a 12,14,41-42,53
+  s_e4f1e6cd6464dd::t_bad1f75d9e6ee9 18-33
+  s_e4f1e6cd6464dd::t_44ed245687764c 17,50-51
+  s_e4f1e6cd6464dd::t_5ce7e20cbad3ec 43,52
+  s_e4f1e6cd6464dd::t_33649ed84d7a2e 46
+  s_e4f1e6cd6464dd::t_83301a553fd9cd 44,47
+  s_e4f1e6cd6464dd::t_850edede9ab1d4 2-6,13,15,35-39,45,48-49,54-63
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.10",
+  "base_commit_sha": "fdc961a91bd87a247e94e8baab09f439a5be8b1b",
+  "prompts": {},
+  "sessions": {
+    "s_e4f1e6cd6464dd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4c5fdff8-80f6-4553-8336-aac3a1fb74b9",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ramon Nogueira <ramon.nogueira@langchain.dev>"
+    }
+  }
+}
