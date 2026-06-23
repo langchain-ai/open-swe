@@ -1,10 +1,11 @@
 """Plan-mode tool gating.
 
-Hides the mutating tools whenever plan mode is active — at run start (resolved
-from configurable/profile/team) OR after the model calls ``enter_plan_mode``
-mid-run, which sets ``plan_mode`` in the run state. Installed unconditionally so
-self-activation actually restricts the *next* model turn (the tool list is
-recomputed on every model call), rather than only affecting a future run.
+Hides the mutating tools whenever plan mode is active — either when the run
+starts in plan mode (the per-thread ``plan_mode`` carried in configurable, e.g.
+a reject re-dispatch) OR after the model calls ``enter_plan_mode`` mid-run, which
+sets ``plan_mode`` in the run state. Installed unconditionally so self-activation
+actually restricts the *next* model turn (the tool list is recomputed on every
+model call), rather than only affecting a future run.
 """
 
 from __future__ import annotations

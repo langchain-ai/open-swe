@@ -174,8 +174,8 @@ async def _dispatch_followup(
         slack_thread = source_context.get("slack_thread")
         if isinstance(slack_thread, dict):
             configurable["slack_thread"] = slack_thread
-    # Set explicitly (not only when True) so an approval forces plan mode OFF
-    # even if a profile/team default would otherwise re-enable it.
+    # Carry the decision to the follow-up run: approve continues out of plan
+    # mode (implement), reject stays in plan mode (revise the plan).
     configurable["plan_mode"] = plan_mode
 
     client = get_client()
