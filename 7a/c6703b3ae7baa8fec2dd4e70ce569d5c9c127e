@@ -1,0 +1,21 @@
+agent/webapp.py
+  s_e4f1e6cd6464dd::t_437763e32a3571 127,1262-1281,1283-1286,1288-1291
+agent/server.py
+  s_e4f1e6cd6464dd::t_437763e32a3571 44,55,194-208,214,217-218,264,285,303,319,334,355,412,424-426,441,445,455,478,488,492,621-622,626-628,774,781-785,826
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.10",
+  "base_commit_sha": "7ac6703b3ae7baa8fec2dd4e70ce569d5c9c127e",
+  "prompts": {},
+  "sessions": {
+    "s_e4f1e6cd6464dd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4c5fdff8-80f6-4553-8336-aac3a1fb74b9",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ramon Nogueira <ramon.nogueira@langchain.dev>"
+    }
+  }
+}
