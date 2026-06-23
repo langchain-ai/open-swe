@@ -413,6 +413,8 @@ export interface PrReviewComment {
   html_url: string
   created_at: string
   is_open_swe: boolean
+  // Outdated: the line no longer appears in the current diff, so it can't render inline.
+  is_outdated: boolean
 }
 
 export interface ReviewCommentsPayload {

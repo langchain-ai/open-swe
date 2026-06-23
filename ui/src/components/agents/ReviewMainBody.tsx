@@ -946,12 +946,17 @@ function ReviewBodyInner({
   useEffect(() => {
     if (!openComment) return
     const { path, line } = openComment
-    const file = filesByPathRef.current.get(path)
-    if (!file || line === null) {
+    const fallbackToGitHub = () => {
       if (openComment.html_url) {
         window.open(openComment.html_url, "_blank", "noopener,noreferrer")
       }
       closeOpenCommentRef.current?.()
+    }
+    const file = filesByPathRef.current.get(path)
+    // No inline anchor: the file isn't in the diff, the comment has no line, or
+    // it's outdated (its line no longer appears in the current diff).
+    if (!file || line === null || openComment.is_outdated) {
+      fallbackToGitHub()
       return
     }
     setSelectedFile(path)
@@ -962,12 +967,14 @@ function ReviewBodyInner({
     const key = `comment:${openComment.id}`
     let frames = 0
     let lineScrollDone = false
+    let mounted = false
     const snap = () => {
       if (requestId !== findingScrollRequestRef.current) return
       const scroller = diffScrollElRef.current
       if (!scroller) return
       const annotation = annotationRefs.current[key]
       if (annotation?.isConnected && annotation.getClientRects().length > 0) {
+        mounted = true
         const delta = scrollElementToCenter(annotation, scroller)
         if (delta <= 1 || frames >= FINDING_SCROLL_MAX_FRAMES) return
         frames += 1
@@ -986,7 +993,13 @@ function ReviewBodyInner({
         const fileNode = fileRefs.current[path]
         if (fileNode) scrollElementToCenter(fileNode, scroller)
       }
-      if (frames++ < FINDING_SCROLL_MAX_FRAMES) requestAnimationFrame(snap)
+      if (frames++ < FINDING_SCROLL_MAX_FRAMES) {
+        requestAnimationFrame(snap)
+      } else if (!mounted) {
+        // The line never rendered (e.g. collapsed context) — fall back to GitHub
+        // rather than leaving the menu closed with nothing shown.
+        fallbackToGitHub()
+      }
     }
     requestAnimationFrame(snap)
   }, [openComment])

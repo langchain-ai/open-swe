@@ -445,10 +445,39 @@ async def create_review_comment(
 _HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
 # Inline comments the reviewer posts carry this hidden marker (see reviewer_publish).
 _OPEN_SWE_COMMENT_RE = re.compile(r"<!--\s*open-swe-review-comment\b")
+_REVIEW_COMMENTS_PER_PAGE = 100
+# Bound the fetch so a pathological PR can't trigger unbounded paging (~2000 comments).
+_MAX_REVIEW_COMMENT_PAGES = 20
 
 
 def _clean_comment_body(body: str) -> str:
     return _HTML_COMMENT_RE.sub("", body).strip()
+
+
+def _normalize_review_comment(item: dict[str, Any]) -> dict[str, Any]:
+    body = item.get("body") if isinstance(item.get("body"), str) else ""
+    user = item.get("user") if isinstance(item.get("user"), dict) else {}
+    line = item.get("line")
+    if not isinstance(line, int):
+        original = item.get("original_line")
+        line = original if isinstance(original, int) else None
+    return {
+        "id": item.get("id"),
+        "author": user.get("login") if isinstance(user.get("login"), str) else "",
+        "author_avatar_url": (
+            user.get("avatar_url") if isinstance(user.get("avatar_url"), str) else ""
+        ),
+        "path": item.get("path") if isinstance(item.get("path"), str) else "",
+        "line": line,
+        "side": item.get("side") if item.get("side") in ("LEFT", "RIGHT") else "RIGHT",
+        "body": _clean_comment_body(body),
+        "html_url": item.get("html_url") if isinstance(item.get("html_url"), str) else "",
+        "created_at": item.get("created_at") if isinstance(item.get("created_at"), str) else "",
+        "is_open_swe": bool(_OPEN_SWE_COMMENT_RE.search(body)),
+        # GitHub nulls `position` when the line no longer appears in the current
+        # diff — i.e. the comment is outdated and can't be rendered inline.
+        "is_outdated": not isinstance(item.get("position"), int),
+    }
 
 
 async def list_review_comments(owner: str, repo: str, pr_number: int) -> dict[str, Any]:
@@ -456,46 +485,28 @@ async def list_review_comments(owner: str, repo: str, pr_number: int) -> dict[st
 
     Surfaces every inline comment on the PR — including humans' — not just the
     reviewer's findings. ``is_open_swe`` flags the reviewer's own (marker-bearing)
-    comments so the UI can separate them from other people's. Capped at the 100
-    most recent comments.
+    comments so the UI can separate them from other people's. Pages through the
+    full list (bounded by ``_MAX_REVIEW_COMMENT_PAGES``) so older comments aren't
+    silently dropped.
     """
     token = await _require_app_token()
-    raw = await _github_get(
-        f"/repos/{owner}/{repo}/pulls/{pr_number}/comments",
-        token,
-        params={"per_page": 100, "sort": "created", "direction": "desc"},
-    )
     comments: list[dict[str, Any]] = []
-    if isinstance(raw, list):
-        for item in raw:
-            if not isinstance(item, dict):
-                continue
-            body = item.get("body") if isinstance(item.get("body"), str) else ""
-            user = item.get("user") if isinstance(item.get("user"), dict) else {}
-            line = item.get("line")
-            if not isinstance(line, int):
-                original = item.get("original_line")
-                line = original if isinstance(original, int) else None
-            comments.append(
-                {
-                    "id": item.get("id"),
-                    "author": user.get("login") if isinstance(user.get("login"), str) else "",
-                    "author_avatar_url": (
-                        user.get("avatar_url") if isinstance(user.get("avatar_url"), str) else ""
-                    ),
-                    "path": item.get("path") if isinstance(item.get("path"), str) else "",
-                    "line": line,
-                    "side": item.get("side") if item.get("side") in ("LEFT", "RIGHT") else "RIGHT",
-                    "body": _clean_comment_body(body),
-                    "html_url": (
-                        item.get("html_url") if isinstance(item.get("html_url"), str) else ""
-                    ),
-                    "created_at": (
-                        item.get("created_at") if isinstance(item.get("created_at"), str) else ""
-                    ),
-                    "is_open_swe": bool(_OPEN_SWE_COMMENT_RE.search(body)),
-                }
-            )
+    for page in range(1, _MAX_REVIEW_COMMENT_PAGES + 1):
+        raw = await _github_get(
+            f"/repos/{owner}/{repo}/pulls/{pr_number}/comments",
+            token,
+            params={
+                "per_page": _REVIEW_COMMENTS_PER_PAGE,
+                "page": page,
+                "sort": "created",
+                "direction": "desc",
+            },
+        )
+        if not isinstance(raw, list) or not raw:
+            break
+        comments.extend(_normalize_review_comment(item) for item in raw if isinstance(item, dict))
+        if len(raw) < _REVIEW_COMMENTS_PER_PAGE:
+            break
     return {"comments": comments}
 
 
