@@ -63,13 +63,13 @@ export function PlanReview({ plan }: { plan: PlanData }) {
       name: plan.user.name,
       color: colorFor(plan.user.id),
     })
-    const auth = new DefaultThreadStoreAuth(
-      plan.user.id,
-      plan.isOwner ? "editor" : "comment"
-    )
+    // Everyone with read access edits the plan and comments alike — there's no
+    // owner/commenter split for the document (only approval is owner-gated). The
+    // collab WS already relays to any readable user, so this matches the server.
+    const auth = new DefaultThreadStoreAuth(plan.user.id, "editor")
     const store = new YjsThreadStore(plan.user.id, ydoc.getMap("threads"), auth)
     return { doc: ydoc, provider: wsProvider, threadStore: store }
-  }, [plan.threadId, plan.user.id, plan.user.name, plan.isOwner])
+  }, [plan.threadId, plan.user.id, plan.user.name])
 
   // Defer teardown so React StrictMode's dev-only unmount→remount of the same
   // memoized provider doesn't destroy instances the remount reuses: the remount
@@ -130,11 +130,10 @@ export function PlanReview({ plan }: { plan: PlanData }) {
     [provider, threadStore, resolveUsers]
   )
 
-  // Seed the shared document from the agent's plan markdown the first time the
-  // owner opens an empty plan. The `seeded` flag + sync barrier prevent a second
-  // reviewer from double-seeding.
+  // Seed the shared document from the agent's plan markdown the first time
+  // anyone opens an empty plan. The `seeded` flag + sync barrier prevent a
+  // second reviewer from double-seeding.
   useEffect(() => {
-    if (!plan.isOwner) return
     let cancelled = false
     const seed = async (isSynced: boolean) => {
       if (!isSynced || cancelled) return
@@ -158,7 +157,7 @@ export function PlanReview({ plan }: { plan: PlanData }) {
       cancelled = true
       provider.off("sync", seed)
     }
-  }, [editor, provider, doc, plan.markdown, plan.isOwner])
+  }, [editor, provider, doc, plan.markdown])
 
   const harvest = useCallback((): Array<HarvestedComment> => {
     const out: Array<HarvestedComment> = []
@@ -210,7 +209,7 @@ export function PlanReview({ plan }: { plan: PlanData }) {
             Reviewing as {plan.user.name}
             {plan.isOwner ? " (owner)" : ""} · status:{" "}
             <span data-testid="plan-status">{plan.status}</span>
-            {" · select text in the plan to comment"}
+            {" · edit the plan, or select text to comment"}
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
@@ -248,7 +247,7 @@ export function PlanReview({ plan }: { plan: PlanData }) {
       >
         <BlockNoteView
           editor={editor}
-          editable={plan.isOwner && !decision}
+          editable={!decision}
           theme={resolvedTheme}
         />
       </div>

@@ -8,6 +8,10 @@ comment threads survive a restart.
 
 The browser connects with the standard ``y-websocket`` client, which appends the
 room name to the provider URL — hence the ``/yjs/{thread_id}`` route shape.
+
+Any user who can read the thread can both edit the plan and comment — there is
+no document-level owner/commenter split (only plan *approval* is owner-gated, in
+the REST API). So relaying frames to every readable connection is intentional.
 """
 
 from __future__ import annotations
