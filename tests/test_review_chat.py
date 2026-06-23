@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from fastapi import HTTPException
 
 from agent.dashboard import review_chat_api
 
@@ -376,7 +377,9 @@ def _client_for_enrich(existing_metadata: dict[str, Any] | None) -> tuple[Any, d
     return client, captured
 
 
-def _patch_enrich_deps(monkeypatch, *, metadata: dict[str, Any] | None) -> dict[str, Any]:
+def _patch_enrich_deps(
+    monkeypatch, *, metadata: dict[str, Any] | None, current_head: str = "abc123def456"
+) -> dict[str, Any]:
     client, captured = _client_for_enrich(metadata)
     monkeypatch.setattr(review_chat_api, "langgraph_client", lambda: client)
 
@@ -389,9 +392,14 @@ def _patch_enrich_deps(monkeypatch, *, metadata: dict[str, Any] | None) -> dict[
     async def fake_token(repositories=None):
         return "app-token"
 
+    async def fake_head(owner, repo, pr_number):
+        captured["head_calls"] = captured.get("head_calls", 0) + 1
+        return current_head
+
     monkeypatch.setattr(review_chat_api, "get_review", fake_get_review)
     monkeypatch.setattr(review_chat_api, "fetch_pr_diff", fake_diff)
     monkeypatch.setattr(review_chat_api, "get_github_app_installation_token", fake_token)
+    monkeypatch.setattr(review_chat_api, "get_pr_head_sha", fake_head)
     return captured
 
 
@@ -455,6 +463,86 @@ async def test_enrich_chat_command_reseeds_on_head_change(monkeypatch) -> None:
     assert set(files) == {"/pr/overview.md", "/pr/diff.patch", "/pr/findings.md"}
     assert params["config"]["configurable"]["chat_head_sha"] == "abc123def456"
     assert {"chat_head_sha": "abc123def456"} in captured["updated"]
+
+
+@pytest.mark.asyncio
+async def test_enrich_chat_command_keeps_context_when_reseed_fails(monkeypatch) -> None:
+    # Existing chat whose head moved, but loading the fresh context fails: the
+    # command must keep answering from the last seeded context instead of erroring.
+    captured = _patch_enrich_deps(
+        monkeypatch,
+        metadata={"kind": "review_chat", "chat_head_sha": "old-stale-sha"},
+        current_head="new-head-sha",
+    )
+
+    async def failing_build(*args, **kwargs):
+        raise HTTPException(404, "review not found")
+
+    monkeypatch.setattr(review_chat_api, "_build_pr_context", failing_build)
+    command = {"method": "run.start", "params": {"input": {"messages": []}}}
+
+    enriched = await review_chat_api._enrich_chat_command(
+        command,
+        owner="acme",
+        repo="repo",
+        pr_number=7,
+        login="octocat",
+        thread_id="ct-1",
+        thread_metadata={"kind": "review_chat", "chat_head_sha": "old-stale-sha"},
+    )
+
+    params = enriched["params"]
+    assert "files" not in params["input"]  # no reseed
+    assert params["config"]["configurable"]["chat_head_sha"] == "old-stale-sha"
+    assert params["assistant_id"] == "chat"
+    assert captured["updated"] == []  # head metadata not advanced on failure
+
+
+@pytest.mark.asyncio
+async def test_enrich_chat_command_surfaces_reseed_failure_on_create(monkeypatch) -> None:
+    # A brand-new chat has no prior context to fall back to, so a seeding failure
+    # must surface rather than silently produce an empty conversation.
+    _patch_enrich_deps(monkeypatch, metadata=None)
+
+    async def failing_build(*args, **kwargs):
+        raise HTTPException(404, "review not found")
+
+    monkeypatch.setattr(review_chat_api, "_build_pr_context", failing_build)
+    command = {"method": "run.start", "params": {"input": {"messages": []}}}
+
+    with pytest.raises(HTTPException):
+        await review_chat_api._enrich_chat_command(
+            command, owner="acme", repo="repo", pr_number=7, login="octocat", thread_id="ct-1"
+        )
+
+
+@pytest.mark.asyncio
+async def test_enrich_chat_command_uses_passed_metadata_without_refetch(monkeypatch) -> None:
+    # When the caller supplies the already-fetched metadata, enrichment must not
+    # issue a second thread read on the hot path.
+    captured = _patch_enrich_deps(
+        monkeypatch, metadata={"kind": "review_chat", "chat_head_sha": "abc123def456"}
+    )
+
+    async def boom(thread_id: str) -> None:
+        raise AssertionError("metadata was supplied; must not refetch the thread")
+
+    monkeypatch.setattr(review_chat_api, "_get_chat_thread_metadata", boom)
+    command = {"method": "run.start", "params": {"input": {"messages": []}}}
+
+    enriched = await review_chat_api._enrich_chat_command(
+        command,
+        owner="acme",
+        repo="repo",
+        pr_number=7,
+        login="octocat",
+        thread_id="ct-1",
+        thread_metadata={"kind": "review_chat", "chat_head_sha": "abc123def456"},
+    )
+
+    assert enriched["params"]["config"]["configurable"]["chat_head_sha"] == "abc123def456"
+    assert "files" not in enriched["params"]["input"]
+    assert captured.get("head_calls") == 1  # lightweight head lookup, no full get_review
 
 
 @pytest.mark.asyncio

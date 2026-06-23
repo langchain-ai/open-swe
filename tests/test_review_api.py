@@ -1,6 +1,7 @@
 import pytest
 from fastapi import HTTPException
 
+from agent.dashboard import review_api
 from agent.dashboard.review_api import (
     _ALLOWED_IMAGE_CONTENT_TYPES,
     _finding_counts,
@@ -10,6 +11,7 @@ from agent.dashboard.review_api import (
     _serialize_finding,
     _thread_review_summary,
     classify_finding,
+    get_pr_head_sha,
     reviewer_thread_id,
 )
 from agent.webapp import generate_reviewer_thread_id
@@ -99,6 +101,33 @@ def test_image_content_type_allowlist_excludes_svg():
     # SVG can execute script in our origin, so it must never be served.
     assert "image/svg+xml" not in _ALLOWED_IMAGE_CONTENT_TYPES
     assert "image/png" in _ALLOWED_IMAGE_CONTENT_TYPES
+
+
+@pytest.mark.asyncio
+async def test_get_pr_head_sha_returns_head(monkeypatch):
+    async def fake_token():
+        return "tok"
+
+    async def fake_get(path, token, **kwargs):
+        assert path == "/repos/acme/repo/pulls/7"
+        return {"head": {"sha": "abc123"}}
+
+    monkeypatch.setattr(review_api, "_require_app_token", fake_token)
+    monkeypatch.setattr(review_api, "_github_get", fake_get)
+    assert await get_pr_head_sha("acme", "repo", 7) == "abc123"
+
+
+@pytest.mark.asyncio
+async def test_get_pr_head_sha_empty_on_failure(monkeypatch):
+    async def fake_token():
+        return "tok"
+
+    async def fake_get(path, token, **kwargs):
+        raise HTTPException(404, "not found")
+
+    monkeypatch.setattr(review_api, "_require_app_token", fake_token)
+    monkeypatch.setattr(review_api, "_github_get", fake_get)
+    assert await get_pr_head_sha("acme", "repo", 7) == ""
 
 
 async def test_require_image_in_pr_rejects_unreferenced_url(monkeypatch):
