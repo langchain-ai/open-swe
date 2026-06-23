@@ -1,11 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
-import {
-  ArrowSquareOutIcon,
-  ChatCircleIcon,
-  MagnifyingGlassIcon,
-} from "@phosphor-icons/react"
+import { ChatCircleIcon, MagnifyingGlassIcon } from "@phosphor-icons/react"
 
+import type { PrReviewComment } from "@/lib/api"
 import { api } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
@@ -21,10 +18,12 @@ export function ReviewCommentsMenu({
   owner,
   repo,
   number,
+  onSelect,
 }: {
   owner: string
   repo: string
   number: number
+  onSelect: (comment: PrReviewComment) => void
 }) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState("")
@@ -93,7 +92,7 @@ export function ReviewCommentsMenu({
         )}
       </button>
       {open && (
-        <div className="absolute right-0 top-full z-50 mt-1 w-96 overflow-hidden rounded-md border border-border bg-popover text-popover-foreground shadow-md">
+        <div className="absolute top-full right-0 z-50 mt-1 w-96 overflow-hidden rounded-md border border-border bg-popover text-popover-foreground shadow-md">
           <div className="flex items-center gap-1.5 border-b border-border px-2 py-1.5">
             <MagnifyingGlassIcon className="size-3.5 shrink-0 text-muted-foreground" />
             <input
@@ -122,11 +121,13 @@ export function ReviewCommentsMenu({
               <ul className="divide-y divide-border">
                 {filtered.map((comment) => (
                   <li key={comment.id}>
-                    <a
-                      href={comment.html_url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="flex gap-2 px-3 py-2 hover:bg-muted/50"
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onSelect(comment)
+                        setOpen(false)
+                      }}
+                      className="flex w-full gap-2 px-3 py-2 text-left hover:bg-muted/50"
                     >
                       {comment.author_avatar_url ? (
                         <img
@@ -148,13 +149,12 @@ export function ReviewCommentsMenu({
                               {comment.line !== null ? `:${comment.line}` : ""}
                             </span>
                           )}
-                          <ArrowSquareOutIcon className="ml-auto size-3 shrink-0 text-muted-foreground" />
                         </div>
                         <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">
                           {comment.body}
                         </p>
                       </div>
-                    </a>
+                    </button>
                   </li>
                 ))}
               </ul>

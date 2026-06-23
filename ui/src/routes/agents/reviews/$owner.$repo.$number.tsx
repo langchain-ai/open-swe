@@ -1,8 +1,9 @@
 import { Link, Navigate, createFileRoute } from "@tanstack/react-router"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { useEffect, useRef } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { ArrowLeftIcon, GitPullRequestIcon } from "@phosphor-icons/react"
 
+import type { PrReviewComment } from "@/lib/api"
 import { ReviewCommentsMenu } from "@/components/agents/ReviewCommentsMenu"
 import { ReviewMainBody } from "@/components/agents/ReviewMainBody"
 import { useSidebarControls } from "@/components/sidebar-layout"
@@ -21,6 +22,11 @@ function ReviewDetailPage() {
   const session = useSession()
   const sidebar = useSidebarControls()
   const sidebarCollapsed = sidebar?.collapsed ?? false
+  // A comment picked from the dropdown, shown inline in the diff (not GitHub).
+  const [activeComment, setActiveComment] = useState<PrReviewComment | null>(
+    null
+  )
+  const closeActiveComment = useCallback(() => setActiveComment(null), [])
 
   // Collapse the global nav by default while viewing a review (roomy diff),
   // restoring the prior preference on leave. Runs once for the page's lifetime.
@@ -95,7 +101,12 @@ function ReviewDetailPage() {
         </span>
         {Number.isFinite(prNumber) && (
           <div className="ml-auto shrink-0">
-            <ReviewCommentsMenu owner={owner} repo={repo} number={prNumber} />
+            <ReviewCommentsMenu
+              owner={owner}
+              repo={repo}
+              number={prNumber}
+              onSelect={setActiveComment}
+            />
           </div>
         )}
       </header>
@@ -114,6 +125,8 @@ function ReviewDetailPage() {
           key={detail.data.head_sha}
           detail={detail.data}
           diffFiles={diff.data?.files ?? null}
+          openComment={activeComment}
+          onCloseOpenComment={closeActiveComment}
         />
       )}
     </div>

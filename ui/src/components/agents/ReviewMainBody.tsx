@@ -53,6 +53,7 @@ import type {
 } from "@pierre/diffs"
 
 import type {
+  PrReviewComment,
   ReviewCheckRun,
   ReviewCommentCreate,
   ReviewDetail,
@@ -91,10 +92,12 @@ import { cn } from "@/lib/utils"
 type SideTab = "info" | "chat"
 
 // Metadata carried by a Pierre diff line annotation. Findings render as the
-// read-only InlineFinding card; a draftComment renders the inline composer.
+// read-only InlineFinding card; a draftComment renders the inline composer; a
+// comment renders an existing PR comment opened from the comments dropdown.
 type ReviewAnnotation =
   | { kind: "finding"; finding: ReviewFinding }
   | { kind: "draftComment"; path: string; range: SelectedLineRange }
+  | { kind: "comment"; comment: PrReviewComment }
 
 const REVIEW_VIEW_STORAGE_KEY = "open-swe.review.view"
 const REVIEW_DIFF_STYLE_STORAGE_KEY = "open-swe.review.diffStyle"
@@ -239,21 +242,14 @@ function scrollElementToCenter(el: HTMLElement, scroller: HTMLElement): number {
   return Math.abs(delta)
 }
 
-function scrollFindingLineToCenter({
-  target,
-  finding,
-  scroller,
-}: {
-  target: RegisteredDiffInstance
-  finding: ReviewFinding
+function scrollDiffLineToCenter(
+  target: RegisteredDiffInstance,
+  lineNumber: number,
+  side: SelectionSide,
   scroller: HTMLElement
-}): boolean {
-  if (finding.end_line === null || !hasLinePosition(target.instance))
-    return false
-  const line = target.instance.getLinePosition(
-    finding.end_line,
-    findingSide(finding)
-  )
+): boolean {
+  if (!hasLinePosition(target.instance)) return false
+  const line = target.instance.getLinePosition(lineNumber, side)
   if (!line) return false
   const hostTop =
     target.host.getBoundingClientRect().top -
@@ -265,6 +261,24 @@ function scrollFindingLineToCenter({
   )
   scroller.scrollTo({ top: targetTop, behavior: "auto" })
   return true
+}
+
+function scrollFindingLineToCenter({
+  target,
+  finding,
+  scroller,
+}: {
+  target: RegisteredDiffInstance
+  finding: ReviewFinding
+  scroller: HTMLElement
+}): boolean {
+  if (finding.end_line === null) return false
+  return scrollDiffLineToCenter(
+    target,
+    finding.end_line,
+    findingSide(finding),
+    scroller
+  )
 }
 
 interface ResolvedGroup {
@@ -319,7 +333,9 @@ function findingSelectedRange(
   }
 }
 
-function selectionSideToGithub(side: SelectionSide | undefined): "LEFT" | "RIGHT" {
+function selectionSideToGithub(
+  side: SelectionSide | undefined
+): "LEFT" | "RIGHT" {
   return side === "deletions" ? "LEFT" : "RIGHT"
 }
 
@@ -413,6 +429,9 @@ export interface ReviewMainBodyProps {
   // just the main body with an expand affordance (used inside the git panel).
   variant?: ReviewMainBodyVariant
   onExpand?: () => void
+  // A PR comment opened from the comments dropdown: shown inline at its line.
+  openComment?: PrReviewComment | null
+  onCloseOpenComment?: () => void
 }
 
 export function ReviewMainBody({
@@ -420,6 +439,8 @@ export function ReviewMainBody({
   diffFiles,
   variant = "full",
   onExpand,
+  openComment,
+  onCloseOpenComment,
 }: ReviewMainBodyProps) {
   // The composer provider lives here so it remounts in lockstep with the
   // head_sha-keyed body (and the activeId-keyed chat thread). The embedded
@@ -436,7 +457,13 @@ export function ReviewMainBody({
   }
   return (
     <ReviewChatComposerProvider>
-      <ReviewBodyInner detail={detail} diffFiles={diffFiles} variant="full" />
+      <ReviewBodyInner
+        detail={detail}
+        diffFiles={diffFiles}
+        variant="full"
+        openComment={openComment ?? null}
+        onCloseOpenComment={onCloseOpenComment}
+      />
     </ReviewChatComposerProvider>
   )
 }
@@ -446,11 +473,15 @@ function ReviewBodyInner({
   diffFiles,
   variant,
   onExpand,
+  openComment = null,
+  onCloseOpenComment,
 }: {
   detail: ReviewDetail
   diffFiles: Array<ReviewDiffFile> | null
   variant: ReviewMainBodyVariant
   onExpand?: () => void
+  openComment?: PrReviewComment | null
+  onCloseOpenComment?: () => void
 }) {
   const embedded = variant === "embedded"
   const composer = useReviewChatComposer()
@@ -756,14 +787,11 @@ function ReviewBodyInner({
 
   // Open the inline comment composer for a line (gutter "+" click). Clearing the
   // chat selection + expanded finding keeps the "+" owned by the composer alone.
-  const startComment = useCallback(
-    (path: string, range: SelectedLineRange) => {
-      setUserSelection(null)
-      setExpandedId(null)
-      setCommentDraft({ file: path, range })
-    },
-    []
-  )
+  const startComment = useCallback((path: string, range: SelectedLineRange) => {
+    setUserSelection(null)
+    setExpandedId(null)
+    setCommentDraft({ file: path, range })
+  }, [])
   const closeComment = useCallback(() => setCommentDraft(null), [])
 
   // ⌘L / Ctrl+L adds the current line selection to the chat (Cursor-style).
@@ -857,6 +885,59 @@ function ReviewBodyInner({
     [markRead]
   )
 
+  // Open an existing PR comment inline: expand its file and scroll its line to
+  // center (mirrors openFromPanel). Comments whose file/line aren't in the
+  // current diff (e.g. outdated) have no inline anchor, so fall back to GitHub.
+  const closeOpenCommentRef = useRef(onCloseOpenComment)
+  closeOpenCommentRef.current = onCloseOpenComment
+  useEffect(() => {
+    if (!openComment) return
+    const { path, line } = openComment
+    const file = filesByPathRef.current.get(path)
+    if (!file || line === null) {
+      if (openComment.html_url) {
+        window.open(openComment.html_url, "_blank", "noopener,noreferrer")
+      }
+      closeOpenCommentRef.current?.()
+      return
+    }
+    setSelectedFile(path)
+    setExpandedFiles((prev) => ({ ...prev, [path]: true }))
+    const requestId = ++findingScrollRequestRef.current
+    const side: SelectionSide =
+      openComment.side === "LEFT" ? "deletions" : "additions"
+    const key = `comment:${openComment.id}`
+    let frames = 0
+    let lineScrollDone = false
+    const snap = () => {
+      if (requestId !== findingScrollRequestRef.current) return
+      const scroller = diffScrollElRef.current
+      if (!scroller) return
+      const annotation = annotationRefs.current[key]
+      if (annotation?.isConnected && annotation.getClientRects().length > 0) {
+        const delta = scrollElementToCenter(annotation, scroller)
+        if (delta <= 1 || frames >= FINDING_SCROLL_MAX_FRAMES) return
+        frames += 1
+        requestAnimationFrame(snap)
+        return
+      }
+      const diffTarget = diffInstanceRefs.current[path]
+      if (diffTarget) {
+        lineScrollDone = scrollDiffLineToCenter(
+          diffTarget,
+          line,
+          side,
+          scroller
+        )
+      } else if (!lineScrollDone) {
+        const fileNode = fileRefs.current[path]
+        if (fileNode) scrollElementToCenter(fileNode, scroller)
+      }
+      if (frames++ < FINDING_SCROLL_MAX_FRAMES) requestAnimationFrame(snap)
+    }
+    requestAnimationFrame(snap)
+  }, [openComment])
+
   const renderFileCard = (file: ReviewDiffFile) => {
     const selectedLines =
       expandedFinding?.file === file.path && isAnchored(expandedFinding)
@@ -887,6 +968,8 @@ function ReviewBodyInner({
         }
         onStartComment={embedded ? undefined : startComment}
         onCloseComment={closeComment}
+        openComment={openComment?.path === file.path ? openComment : null}
+        onCloseOpenComment={onCloseOpenComment}
       />
     )
   }
@@ -1191,6 +1274,8 @@ const FileDiffCard = memo(function FileDiffCard({
   commentDraftRange,
   onStartComment,
   onCloseComment,
+  openComment,
+  onCloseOpenComment,
 }: {
   file: ReviewDiffFile
   findings: Array<ReviewFinding>
@@ -1213,6 +1298,8 @@ const FileDiffCard = memo(function FileDiffCard({
   commentDraftRange: SelectedLineRange | null
   onStartComment?: (path: string, range: SelectedLineRange) => void
   onCloseComment: () => void
+  openComment: PrReviewComment | null
+  onCloseOpenComment?: () => void
 }) {
   // No chat means no line-selection → "Add to Chat" affordance (embedded view).
   const selectable = Boolean(onAddToChat)
@@ -1228,7 +1315,9 @@ const FileDiffCard = memo(function FileDiffCard({
     y: number
   } | null>(null)
 
-  const findingAnnotations = useMemo<Array<DiffLineAnnotation<ReviewAnnotation>>>(
+  const findingAnnotations = useMemo<
+    Array<DiffLineAnnotation<ReviewAnnotation>>
+  >(
     () =>
       findings
         .filter((finding) => finding.end_line !== null)
@@ -1240,19 +1329,35 @@ const FileDiffCard = memo(function FileDiffCard({
     [findings]
   )
 
-  // The open draft comment renders inline as one more annotation, anchored to
-  // the end of the selected range on its side.
-  const lineAnnotations = useMemo<Array<DiffLineAnnotation<ReviewAnnotation>>>(() => {
-    if (!commentDraftRange) return findingAnnotations
-    return [
-      ...findingAnnotations,
-      {
-        side: commentDraftRange.endSide ?? commentDraftRange.side ?? "additions",
+  // The open draft composer and an opened existing comment each render inline as
+  // one more annotation, anchored to their line on the appropriate side.
+  const lineAnnotations = useMemo<
+    Array<DiffLineAnnotation<ReviewAnnotation>>
+  >(() => {
+    const extra: Array<DiffLineAnnotation<ReviewAnnotation>> = []
+    if (commentDraftRange) {
+      extra.push({
+        side:
+          commentDraftRange.endSide ?? commentDraftRange.side ?? "additions",
         lineNumber: commentDraftRange.end,
-        metadata: { kind: "draftComment", path: file.path, range: commentDraftRange },
-      },
-    ]
-  }, [findingAnnotations, commentDraftRange, file.path])
+        metadata: {
+          kind: "draftComment",
+          path: file.path,
+          range: commentDraftRange,
+        },
+      })
+    }
+    if (openComment && openComment.line !== null) {
+      extra.push({
+        side: openComment.side === "LEFT" ? "deletions" : "additions",
+        lineNumber: openComment.line,
+        metadata: { kind: "comment", comment: openComment },
+      })
+    }
+    return extra.length > 0
+      ? [...findingAnnotations, ...extra]
+      : findingAnnotations
+  }, [findingAnnotations, commentDraftRange, openComment, file.path])
 
   // Native line selection plus the visible gutter "+" handle. Pierre disambiguates
   // a plain click on the "+" (onGutterUtilityClick → open the comment composer)
@@ -1356,7 +1461,15 @@ const FileDiffCard = memo(function FileDiffCard({
   const renderAnnotation = useCallback(
     (annotation: DiffLineAnnotation<ReviewAnnotation>) => {
       const meta = annotation.metadata
-      if (meta.kind === "finding") return <InlineFinding finding={meta.finding} />
+      if (meta.kind === "finding")
+        return <InlineFinding finding={meta.finding} />
+      if (meta.kind === "comment")
+        return (
+          <InlineComment
+            comment={meta.comment}
+            onClose={onCloseOpenComment ?? (() => undefined)}
+          />
+        )
       return (
         <CommentComposer
           owner={owner}
@@ -1368,7 +1481,7 @@ const FileDiffCard = memo(function FileDiffCard({
         />
       )
     },
-    [owner, repo, prNumber, onCloseComment]
+    [owner, repo, prNumber, onCloseComment, onCloseOpenComment]
   )
 
   return (
@@ -1525,28 +1638,43 @@ interface EditState {
 
 // Wrap the current selection (or a placeholder when empty) with a marker, e.g.
 // **bold**. Returns the new value and the selection to restore.
-function wrapSelection(state: EditState, marker: string, placeholder: string): EditState {
+function wrapSelection(
+  state: EditState,
+  marker: string,
+  placeholder: string
+): EditState {
   const selected = state.value.slice(state.start, state.end) || placeholder
   const value =
-    state.value.slice(0, state.start) + marker + selected + marker + state.value.slice(state.end)
+    state.value.slice(0, state.start) +
+    marker +
+    selected +
+    marker +
+    state.value.slice(state.end)
   const start = state.start + marker.length
   return { value, start, end: start + selected.length }
 }
 
 // Prefix each line touched by the selection, e.g. "> " for quotes or "1. " for
 // ordered lists (prefix is computed per line so numbering increments).
-function prefixLines(state: EditState, prefix: (index: number) => string): EditState {
+function prefixLines(
+  state: EditState,
+  prefix: (index: number) => string
+): EditState {
   const lineStart = state.value.lastIndexOf("\n", state.start - 1) + 1
   const block = state.value.slice(lineStart, state.end)
   const prefixed = block
     .split("\n")
     .map((line, index) => prefix(index) + line)
     .join("\n")
-  const value = state.value.slice(0, lineStart) + prefixed + state.value.slice(state.end)
+  const value =
+    state.value.slice(0, lineStart) + prefixed + state.value.slice(state.end)
   return { value, start: lineStart, end: lineStart + prefixed.length }
 }
 
-function applyMarkdownAction(state: EditState, action: MarkdownAction): EditState {
+function applyMarkdownAction(
+  state: EditState,
+  action: MarkdownAction
+): EditState {
   switch (action) {
     case "bold":
       return wrapSelection(state, "**", "bold text")
@@ -1567,7 +1695,10 @@ function applyMarkdownAction(state: EditState, action: MarkdownAction): EditStat
     case "link": {
       const text = state.value.slice(state.start, state.end) || "text"
       const inserted = `[${text}](url)`
-      const value = state.value.slice(0, state.start) + inserted + state.value.slice(state.end)
+      const value =
+        state.value.slice(0, state.start) +
+        inserted +
+        state.value.slice(state.end)
       const urlStart = state.start + text.length + 3
       return { value, start: urlStart, end: urlStart + 3 }
     }
@@ -1624,7 +1755,12 @@ function CommentComposer({
   }, [])
   const mutation = useMutation({
     mutationFn: (body: string) =>
-      api.createReviewComment(owner, repo, prNumber, buildCommentPayload(path, range, body)),
+      api.createReviewComment(
+        owner,
+        repo,
+        prNumber,
+        buildCommentPayload(path, range, body)
+      ),
   })
   const submit = () => {
     const body = value.trim()
@@ -1659,7 +1795,9 @@ function CommentComposer({
       <div className="overflow-hidden rounded-md border border-[var(--ui-border)] bg-[var(--ui-surface)]">
         <div className="flex items-center gap-1.5 border-b border-[var(--ui-border)] px-2 py-1 text-[11px]">
           <ChatCircleIcon className="size-3 text-muted-foreground" />
-          <span className="font-medium">Add a comment on line {commentRangeLabel(range)}</span>
+          <span className="font-medium">
+            Add a comment on line {commentRangeLabel(range)}
+          </span>
           <IconButton
             type="button"
             variant="ghost"
@@ -1716,13 +1854,13 @@ function CommentComposer({
                           key={action}
                           type="button"
                           variant="ghost"
-                          size="icon-xs"
+                          size="icon-sm"
                           aria-label={label}
                           title={label}
                           onMouseDown={(event) => event.preventDefault()}
                           onClick={() => applyAction(action)}
                         >
-                          <Icon />
+                          <Icon className="size-4" />
                         </IconButton>
                       ))}
                     </Fragment>
@@ -1737,7 +1875,10 @@ function CommentComposer({
                   value={value}
                   onChange={(event) => setValue(event.target.value)}
                   onKeyDown={(event) => {
-                    if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+                    if (
+                      (event.metaKey || event.ctrlKey) &&
+                      event.key === "Enter"
+                    ) {
                       event.preventDefault()
                       submit()
                     } else if (event.key === "Escape") {
@@ -1754,7 +1895,9 @@ function CommentComposer({
                   {value.trim() ? (
                     <Markdown content={value} />
                   ) : (
-                    <span className="text-muted-foreground">Nothing to preview</span>
+                    <span className="text-muted-foreground">
+                      Nothing to preview
+                    </span>
                   )}
                 </div>
               )}
@@ -1785,6 +1928,72 @@ function CommentComposer({
             </div>
           </>
         )}
+      </div>
+    </div>
+  )
+}
+
+// An existing PR comment opened from the comments dropdown, rendered inline at
+// its line through the same annotation portal as InlineFinding. Read-only; the
+// node is registered so the dropdown can scroll it into view. Links to the
+// full thread on GitHub.
+function InlineComment({
+  comment,
+  onClose,
+}: {
+  comment: PrReviewComment
+  onClose: () => void
+}) {
+  const { registerAnnotation } = useExpandedFinding()
+  const sideLabel = comment.side === "LEFT" ? "L" : "R"
+  return (
+    <div
+      ref={(node) => registerAnnotation(`comment:${comment.id}`, node)}
+      className="px-2 py-1 font-sans"
+    >
+      <div className="overflow-hidden rounded-md border border-[var(--ui-border)] bg-[var(--ui-surface)]">
+        <div className="flex items-center gap-1.5 border-b border-[var(--ui-border)] px-2 py-1 text-[11px]">
+          {comment.author_avatar_url ? (
+            <img
+              src={comment.author_avatar_url}
+              alt=""
+              className="size-4 shrink-0 rounded-full"
+            />
+          ) : (
+            <span className="size-4 shrink-0 rounded-full bg-muted" />
+          )}
+          <span className="font-medium">{comment.author}</span>
+          {comment.line !== null && (
+            <span className="font-mono text-muted-foreground">
+              {sideLabel}
+              {comment.line}
+            </span>
+          )}
+          <div className="ml-auto flex items-center gap-0.5">
+            <a
+              href={comment.html_url}
+              target="_blank"
+              rel="noreferrer"
+              aria-label="View on GitHub"
+              title="View on GitHub"
+              className="inline-flex size-5 items-center justify-center rounded-sm text-muted-foreground hover:text-foreground"
+            >
+              <IoLogoGithub className="size-3" />
+            </a>
+            <IconButton
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              aria-label="Close comment"
+              onClick={onClose}
+            >
+              <XIcon />
+            </IconButton>
+          </div>
+        </div>
+        <div className="px-3 py-2.5 text-xs text-muted-foreground">
+          <Markdown content={comment.body} />
+        </div>
       </div>
     </div>
   )
