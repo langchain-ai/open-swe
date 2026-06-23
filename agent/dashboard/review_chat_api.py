@@ -376,34 +376,48 @@ async def _enrich_chat_command(
         needs_seed = bool(current_head) and current_head != stored_head
 
     if needs_seed:
-        token = await get_github_app_installation_token(repositories=[repo])
-        if not token:
-            raise HTTPException(503, "GitHub App token unavailable")
         try:
+            token = await get_github_app_installation_token(repositories=[repo])
+            if not token:
+                raise HTTPException(503, "GitHub App token unavailable")
             pr_files, head_sha = await _build_pr_context(
                 owner, repo, pr_number, token, review=review
             )
-        except HTTPException:
-            raise
         except Exception as exc:  # noqa: BLE001
-            logger.warning("Failed to seed PR chat context for %s/%s#%s", owner, repo, pr_number)
-            raise HTTPException(502, "could not load PR context") from exc
-        if head_sha:
-            configurable["chat_head_sha"] = head_sha
-            await langgraph_client().threads.update(
-                thread_id=thread_id, metadata={"chat_head_sha": head_sha}
+            # An existing chat can keep answering from its last seeded context, so
+            # a transient reseed failure shouldn't break the conversation. A fresh
+            # chat (or one never seeded) has nothing to fall back to, so surface it.
+            if created or not stored_head:
+                if isinstance(exc, HTTPException):
+                    raise
+                logger.warning(
+                    "Failed to seed PR chat context for %s/%s#%s", owner, repo, pr_number
+                )
+                raise HTTPException(502, "could not load PR context") from exc
+            logger.warning(
+                "Failed to reseed PR chat context for %s/%s#%s; keeping last seeded context",
+                owner,
+                repo,
+                pr_number,
             )
-        elif stored_head:
             configurable["chat_head_sha"] = stored_head
-        run_input = params.get("input")
-        if not isinstance(run_input, dict):
-            run_input = {}
-        existing_files = run_input.get("files")
-        run_input["files"] = {
-            **(existing_files if isinstance(existing_files, dict) else {}),
-            **pr_files,
-        }
-        params["input"] = run_input
+        else:
+            if head_sha:
+                configurable["chat_head_sha"] = head_sha
+                await langgraph_client().threads.update(
+                    thread_id=thread_id, metadata={"chat_head_sha": head_sha}
+                )
+            elif stored_head:
+                configurable["chat_head_sha"] = stored_head
+            run_input = params.get("input")
+            if not isinstance(run_input, dict):
+                run_input = {}
+            existing_files = run_input.get("files")
+            run_input["files"] = {
+                **(existing_files if isinstance(existing_files, dict) else {}),
+                **pr_files,
+            }
+            params["input"] = run_input
     elif stored_head:
         configurable["chat_head_sha"] = stored_head
 

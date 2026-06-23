@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from fastapi import HTTPException
 
 from agent.dashboard import review_chat_api
 
@@ -462,6 +463,57 @@ async def test_enrich_chat_command_reseeds_on_head_change(monkeypatch) -> None:
     assert set(files) == {"/pr/overview.md", "/pr/diff.patch", "/pr/findings.md"}
     assert params["config"]["configurable"]["chat_head_sha"] == "abc123def456"
     assert {"chat_head_sha": "abc123def456"} in captured["updated"]
+
+
+@pytest.mark.asyncio
+async def test_enrich_chat_command_keeps_context_when_reseed_fails(monkeypatch) -> None:
+    # Existing chat whose head moved, but loading the fresh context fails: the
+    # command must keep answering from the last seeded context instead of erroring.
+    captured = _patch_enrich_deps(
+        monkeypatch,
+        metadata={"kind": "review_chat", "chat_head_sha": "old-stale-sha"},
+        current_head="new-head-sha",
+    )
+
+    async def failing_build(*args, **kwargs):
+        raise HTTPException(404, "review not found")
+
+    monkeypatch.setattr(review_chat_api, "_build_pr_context", failing_build)
+    command = {"method": "run.start", "params": {"input": {"messages": []}}}
+
+    enriched = await review_chat_api._enrich_chat_command(
+        command,
+        owner="acme",
+        repo="repo",
+        pr_number=7,
+        login="octocat",
+        thread_id="ct-1",
+        thread_metadata={"kind": "review_chat", "chat_head_sha": "old-stale-sha"},
+    )
+
+    params = enriched["params"]
+    assert "files" not in params["input"]  # no reseed
+    assert params["config"]["configurable"]["chat_head_sha"] == "old-stale-sha"
+    assert params["assistant_id"] == "chat"
+    assert captured["updated"] == []  # head metadata not advanced on failure
+
+
+@pytest.mark.asyncio
+async def test_enrich_chat_command_surfaces_reseed_failure_on_create(monkeypatch) -> None:
+    # A brand-new chat has no prior context to fall back to, so a seeding failure
+    # must surface rather than silently produce an empty conversation.
+    _patch_enrich_deps(monkeypatch, metadata=None)
+
+    async def failing_build(*args, **kwargs):
+        raise HTTPException(404, "review not found")
+
+    monkeypatch.setattr(review_chat_api, "_build_pr_context", failing_build)
+    command = {"method": "run.start", "params": {"input": {"messages": []}}}
+
+    with pytest.raises(HTTPException):
+        await review_chat_api._enrich_chat_command(
+            command, owner="acme", repo="repo", pr_number=7, login="octocat", thread_id="ct-1"
+        )
 
 
 @pytest.mark.asyncio
