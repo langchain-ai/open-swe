@@ -1,0 +1,21 @@
+agent/dashboard/thread_api.py
+  s_58f4679bd38200::t_e968407de1f5b9 1468-1471,1487-1490
+tests/test_dashboard_thread_api.py
+  s_58f4679bd38200::t_439e17d5214af5 491-513
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.10",
+  "base_commit_sha": "b08e1951be31800b021467b163a94cb478c240cc",
+  "prompts": {},
+  "sessions": {
+    "s_58f4679bd38200": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "66b95166-79c2-4687-b201-3fd6dcb5e02f",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ramon Nogueira <ramon.nogueira@langchain.dev>"
+    }
+  }
+}
