@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from typing import Literal
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -52,15 +53,22 @@ async def test_load_notion_tools_degrades_on_error() -> None:
         assert await notion_mcp.load_notion_tools("alice") == []
 
 
-def _notion_tool_for_token(token: str) -> StructuredTool:
-    async def notion_search(query: str) -> dict[str, str]:
+def _notion_tool_for_token(
+    token: str,
+    response_format: Literal["content", "content_and_artifact"] = "content",
+) -> StructuredTool:
+    async def notion_search(query: str):
         """Search Notion."""
-        return {"query": query, "token": token}
+        content = {"query": query, "token": token}
+        if response_format == "content_and_artifact":
+            return content, {"artifact_token": token}
+        return content
 
     return StructuredTool.from_function(
         coroutine=notion_search,
         name="notion_search",
         description="Search Notion",
+        response_format=response_format,
     )
 
 
@@ -76,6 +84,23 @@ async def test_load_notion_tools_returns_wrappers() -> None:
     assert tools[0].name == "notion_search"
     assert tools[0].description == discovered.description
     assert tools[0].args_schema == discovered.args_schema
+    assert tools[0].response_format == "content"
+
+
+@pytest.mark.asyncio
+async def test_notion_wrapper_normalizes_content_and_artifact_tools() -> None:
+    get_token = AsyncMock(side_effect=["initial-token", "fresh-token"])
+    build_tools = AsyncMock(
+        side_effect=lambda token: [_notion_tool_for_token(token, "content_and_artifact")]
+    )
+    with (
+        patch.object(notion_mcp, "get_notion_access_token", get_token),
+        patch.object(notion_mcp, "_build_mcp_tools", build_tools),
+    ):
+        tools = await notion_mcp.load_notion_tools("alice")
+        assert tools[0].response_format == "content"
+        result = await tools[0].ainvoke({"query": "roadmap"})
+    assert result == {"query": "roadmap", "token": "fresh-token"}
 
 
 @pytest.mark.asyncio

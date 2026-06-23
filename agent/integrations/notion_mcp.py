@@ -81,7 +81,7 @@ def _refreshing_tool(login: str, tool: BaseTool) -> BaseTool:
         name=tool.name,
         description=tool.description,
         args_schema=tool.args_schema,
-        response_format=tool.response_format,
+        response_format="content",
         login=login,
         mcp_tool_name=tool.name,
     )
