@@ -1,0 +1,36 @@
+tests/e2e/README.md
+  s_58f4679bd38200::t_c7f31e916fa405 61-64,66-71
+agent/dashboard/thread_api.py
+  s_58f4679bd38200::t_fc5833597973a8 1499
+  s_58f4679bd38200::t_c4aac78be83d4c 1152-1154
+  s_58f4679bd38200::t_bb0515bdbefca4 1099
+  s_58f4679bd38200::t_4895771244afba 1200,1202
+  s_58f4679bd38200::t_a26ec115d46b9a 1021-1042
+  s_58f4679bd38200::t_a5715ccfd4ea8d 1467-1469
+  s_58f4679bd38200::t_86111d602be650 1485
+  s_58f4679bd38200::t_361dbe11b192f8 251-262
+ui/src/components/agents/AgentThreadView.tsx
+  s_58f4679bd38200::t_f60bc56fff0d7d 110-127
+  s_58f4679bd38200::t_19bda06c74c5f3 80-81,83,99
+tests/test_dashboard_thread_api.py
+  s_58f4679bd38200::t_60b22037fffa03 491-492
+  s_58f4679bd38200::t_de6281caa79cb7 327-330,332-333,335-336,338-403,626,635,645,654,671,679
+tests/e2e/tests/dashboard.spec.ts
+  s_58f4679bd38200::t_49b5e9a9468f7f 59,65-82
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.10",
+  "base_commit_sha": "e5aecc2979ae0e664c274c2d515ab0f79ca149b9",
+  "prompts": {},
+  "sessions": {
+    "s_58f4679bd38200": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "66b95166-79c2-4687-b201-3fd6dcb5e02f",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ramon Nogueira <ramon.nogueira@langchain.dev>"
+    }
+  }
+}
