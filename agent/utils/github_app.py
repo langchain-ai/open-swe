@@ -6,6 +6,7 @@ import logging
 import os
 import time
 from collections.abc import Sequence
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import httpx
@@ -16,6 +17,58 @@ logger = logging.getLogger(__name__)
 GITHUB_APP_ID = os.environ.get("GITHUB_APP_ID", "")
 GITHUB_APP_PRIVATE_KEY = os.environ.get("GITHUB_APP_PRIVATE_KEY", "")
 GITHUB_APP_INSTALLATION_ID = os.environ.get("GITHUB_APP_INSTALLATION_ID", "")
+
+# Installation tokens are valid for 1 hour. Reuse a minted token until it is
+# within this window of expiring so chat/review requests don't pay a fresh
+# JWT-sign + GitHub round-trip every message. The margin stays above the proxy's
+# 5-minute refresh window (``github_proxy.PROXY_TOKEN_REFRESH_WINDOW``) so a
+# near-expiry proxy refresh still mints a genuinely fresh token.
+_TOKEN_CACHE_MARGIN = timedelta(minutes=10)
+# scope key -> (token, expires_at, good_until). In-process only; never persisted.
+_TOKEN_CACHE: dict[tuple[tuple[int, ...], tuple[str, ...]], tuple[str, str | None, datetime]] = {}
+
+
+def _scope_key(
+    repository_ids: Sequence[int] | None, repositories: Sequence[str] | None
+) -> tuple[tuple[int, ...], tuple[str, ...]]:
+    """Cache key segregating repo-scoped tokens from installation-wide ones."""
+    ids = tuple(sorted(int(i) for i in repository_ids)) if repository_ids else ()
+    names = tuple(sorted(str(r) for r in repositories)) if repositories else ()
+    return ids, names
+
+
+def _parse_expiry(expires_at: Any) -> datetime | None:
+    """Best-effort parse of a GitHub ``expires_at`` ISO timestamp to a UTC datetime."""
+    if not isinstance(expires_at, str):
+        return None
+    raw = expires_at.strip()
+    if not raw:
+        return None
+    if raw.endswith("Z"):
+        raw = raw[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+
+
+def _cached_token(
+    key: tuple[tuple[int, ...], tuple[str, ...]], *, now: datetime
+) -> tuple[str, str | None] | None:
+    cached = _TOKEN_CACHE.get(key)
+    if cached is None:
+        return None
+    token, expires_at, good_until = cached
+    if now < good_until:
+        return token, expires_at
+    _TOKEN_CACHE.pop(key, None)
+    return None
+
+
+def clear_app_token_cache() -> None:
+    """Drop all cached installation tokens (test/maintenance hook)."""
+    _TOKEN_CACHE.clear()
 
 
 def _generate_app_jwt() -> str:
@@ -53,6 +106,12 @@ async def get_github_app_installation_token_with_expiry(
         logger.debug("GitHub App env vars not fully configured, skipping app token")
         return None, None
 
+    key = _scope_key(repository_ids, repositories)
+    now = datetime.now(UTC)
+    cached = _cached_token(key, now=now)
+    if cached is not None:
+        return cached
+
     body: dict[str, Any] = {}
     if repository_ids:
         body["repository_ids"] = list(repository_ids)
@@ -73,7 +132,11 @@ async def get_github_app_installation_token_with_expiry(
             )
             response.raise_for_status()
             data = response.json()
-            return data.get("token"), data.get("expires_at")
+            token, expires_at = data.get("token"), data.get("expires_at")
+            parsed = _parse_expiry(expires_at)
+            if isinstance(token, str) and token and parsed is not None:
+                _TOKEN_CACHE[key] = (token, expires_at, parsed - _TOKEN_CACHE_MARGIN)
+            return token, expires_at
     except Exception:
         logger.exception("Failed to get GitHub App installation token")
         return None, None

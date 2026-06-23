@@ -348,6 +348,22 @@ async def _fetch_check_runs(owner: str, repo: str, sha: str, token: str) -> list
     return out
 
 
+async def get_pr_head_sha(owner: str, repo: str, pr_number: int) -> str:
+    """Return the PR's current head SHA from GitHub, or "" if unavailable.
+
+    A lightweight alternative to :func:`get_review` for callers that only need to
+    detect whether the PR head has moved (e.g. the chat staleness check).
+    """
+    try:
+        token = await _require_app_token()
+        payload = await _github_get(f"/repos/{owner}/{repo}/pulls/{pr_number}", token)
+    except HTTPException:
+        return ""
+    head = payload.get("head") if isinstance(payload, dict) else None
+    sha = head.get("sha") if isinstance(head, dict) else None
+    return sha if isinstance(sha, str) else ""
+
+
 async def get_review(owner: str, repo: str, pr_number: int) -> dict[str, Any]:
     thread_id = reviewer_thread_id(owner, repo, pr_number)
     client = langgraph_client()
