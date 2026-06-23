@@ -1465,8 +1465,10 @@ async def proxy_dashboard_thread_commands(
     # so the very first ``run.start`` may target a thread that doesn't exist
     # yet. That command lazily creates + stamps + owns the thread (in
     # ``_enrich_run_start_command``); any other command against a missing thread
-    # is a 404. Existing threads are writable by any org member (read-gated);
-    # non-owner messages are attributed in ``_enrich_run_start_command``.
+    # is a 404. On an existing thread, ``run.start`` (the posting path) is open
+    # to any org member and attributed in ``_enrich_run_start_command``; every
+    # other write command carries unattributed input (e.g. ``input.respond``),
+    # so it stays owner-only.
     method = parsed.get("method")
     try:
         thread = await langgraph_client().threads.get(thread_id)
@@ -1482,7 +1484,10 @@ async def proxy_dashboard_thread_commands(
         thread_busy = False
     else:
         metadata = thread.get("metadata") if isinstance(thread.get("metadata"), dict) else {}
-        _assert_thread_readable(metadata)
+        if method == "run.start":
+            _assert_thread_readable(metadata)
+        else:
+            _assert_thread_owner(metadata, login, email)
         metadata_run_status = metadata.get("latest_run_status")
         thread_busy = _thread_is_busy(thread) or metadata_run_status in {"pending", "running"}
 

@@ -488,6 +488,29 @@ async def test_proxy_commands_rejects_non_object_body(monkeypatch) -> None:
     assert exc_info.value.status_code == 400
 
 
+async def test_proxy_commands_non_run_start_by_non_owner_is_rejected(monkeypatch) -> None:
+    """Non-owners may only post via the attributed run.start path; other write
+    commands (e.g. input.respond) carry unattributed input and stay owner-only."""
+
+    class OwnedThreads:
+        async def get(self, thread_id: str) -> dict[str, object]:
+            return {
+                "thread_id": thread_id,
+                "metadata": {"source": "dashboard", "github_login": "owner"},
+            }
+
+    class OwnedClient:
+        threads = OwnedThreads()
+
+    monkeypatch.setattr(thread_api, "langgraph_client", lambda: OwnedClient())
+
+    with pytest.raises(HTTPException) as exc_info:
+        await thread_api.proxy_dashboard_thread_commands(
+            "tid", "intruder", b'{"method": "input.respond"}'
+        )
+    assert exc_info.value.status_code == 404
+
+
 async def test_run_cancel_enforces_thread_ownership(monkeypatch) -> None:
     """Cancelling a run still requires thread ownership (it is not "posting")."""
 
