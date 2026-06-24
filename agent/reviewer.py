@@ -39,6 +39,7 @@ from .dashboard.team_settings import (
     get_team_default_model_pair,
 )
 from .middleware import (
+    RepairOrphanedToolCallsMiddleware,
     SanitizeThinkingBlocksMiddleware,
     SanitizeToolInputsMiddleware,
     SlackAssistantStatusMiddleware,
@@ -1166,6 +1167,7 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
             check_message_queue_before_model,
             SlackAssistantStatusMiddleware(),
             SanitizeThinkingBlocksMiddleware(),
+            RepairOrphanedToolCallsMiddleware(),
             settle_review_check_on_exit,
         ],
     ).with_config(config)
