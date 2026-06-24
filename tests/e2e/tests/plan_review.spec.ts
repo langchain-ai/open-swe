@@ -75,7 +75,9 @@ test.describe("Plan review (HTTP comments)", () => {
 
     // 3. The OWNER opens the conversation, follows the "Review plan" banner, and
     //    sees the rendered plan.
-    const ownerCtx = await browser.newContext();
+    const ownerCtx = await browser.newContext({
+      permissions: ["clipboard-read", "clipboard-write"],
+    });
     await ownerCtx.request.post("/control/login", { data: OWNER });
     const owner = await ownerCtx.newPage();
     await owner.goto(`/agents/${threadId}`);
@@ -92,6 +94,13 @@ test.describe("Plan review (HTTP comments)", () => {
     // "Request changes" is meaningless with no feedback → disabled until a
     // comment exists.
     await expect(owner.getByTestId("reject-plan")).toBeDisabled();
+
+    // Copy the whole plan as markdown.
+    await owner.getByTestId("copy-plan").click();
+    await expect(owner.getByTestId("copy-plan")).toContainText("Copied!");
+    const clipboard = await owner.evaluate(() => navigator.clipboard.readText());
+    expect(clipboard).toContain("## Plan: Add greet() helper");
+    expect(clipboard).toContain("### Verification");
 
     // Owner leaves a comment.
     await addComment(owner, "Owner: looks solid, ship it.");
