@@ -108,6 +108,7 @@ from .utils.slack import (
     fetch_slack_thread_messages,
     format_slack_messages_for_prompt,
     get_slack_channel_description,
+    get_slack_channel_info,
     get_slack_user_info,
     get_slack_user_names,
     post_slack_thread_reply,
@@ -172,6 +173,10 @@ DEFAULT_REPO_OWNER = os.environ.get("DEFAULT_REPO_OWNER", "langchain-ai")
 DEFAULT_REPO_NAME = os.environ.get("DEFAULT_REPO_NAME", "")
 SLACK_REPO_OWNER = os.environ.get("SLACK_REPO_OWNER", "") or DEFAULT_REPO_OWNER
 SLACK_REPO_NAME = os.environ.get("SLACK_REPO_NAME", "") or DEFAULT_REPO_NAME
+DOCS_PLZ_SLACK_CHANNEL_NAME = "docs-plz"
+DOCS_PLZ_SLACK_GATE_REPLY = (
+    "Please don't use Open SWE here, instead ask the Fleet docs-plz agent to implement the docs"
+)
 
 LANGGRAPH_URL = os.environ.get("LANGGRAPH_URL") or os.environ.get(
     "LANGGRAPH_URL_PROD", "http://localhost:2024"
@@ -417,6 +422,22 @@ def _run_id_for_logging(run: Any) -> str:
     else:
         run_id = getattr(run, "run_id", None)
     return run_id if isinstance(run_id, str) and run_id else "<unknown>"
+
+
+async def _is_docs_plz_slack_channel(channel_id: str) -> bool:
+    """Check whether a Slack channel is the docs-plz handoff channel."""
+    try:
+        channel = await get_slack_channel_info(channel_id)
+    except Exception:  # noqa: BLE001
+        logger.exception("Failed to resolve Slack channel info for docs-plz gate")
+        return False
+    if not isinstance(channel, dict):
+        return False
+    candidate_names = (channel.get("name"), channel.get("name_normalized"))
+    return any(
+        isinstance(name, str) and name.strip().lower() == DOCS_PLZ_SLACK_CHANNEL_NAME
+        for name in candidate_names
+    )
 
 
 def _is_repo_allowed(repo_config: dict[str, str]) -> bool:
@@ -1587,6 +1608,15 @@ async def slack_webhook(request: Request, background_tasks: BackgroundTasks) -> 
 
     if bot_user_id and user_id == bot_user_id:
         return {"status": "ignored", "reason": "Event from this bot user"}
+
+    if await _is_docs_plz_slack_channel(channel_id):
+        background_tasks.add_task(
+            post_slack_thread_reply,
+            channel_id,
+            thread_ts,
+            DOCS_PLZ_SLACK_GATE_REPLY,
+        )
+        return {"status": "accepted", "message": "Slack mention gated for docs-plz"}
 
     event_data = {
         "channel_id": channel_id,
