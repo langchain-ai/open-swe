@@ -5,6 +5,7 @@ from .notify_step_limit import notify_step_limit_reached
 from .plan_mode import PlanModeMiddleware
 from .refresh_github_proxy import refresh_github_proxy_before_model
 from .refresh_slack_status import SlackAssistantStatusMiddleware
+from .repair_orphaned_tool_calls import RepairOrphanedToolCallsMiddleware
 from .sandbox_circuit_breaker import SandboxCircuitBreakerMiddleware
 from .sanitize_thinking_blocks import SanitizeThinkingBlocksMiddleware
 from .sanitize_tool_inputs import SanitizeToolInputsMiddleware
@@ -16,6 +17,7 @@ __all__ = [
     "ExcludeToolsMiddleware",
     "ModelFallbackMiddleware",
     "PlanModeMiddleware",
+    "RepairOrphanedToolCallsMiddleware",
     "SanitizeThinkingBlocksMiddleware",
     "SanitizeToolInputsMiddleware",
     "ToolArtifactMiddleware",

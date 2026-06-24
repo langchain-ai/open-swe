@@ -56,6 +56,7 @@ from .integrations.notion_mcp import load_notion_tools
 from .middleware import (
     ModelFallbackMiddleware,
     PlanModeMiddleware,
+    RepairOrphanedToolCallsMiddleware,
     SandboxCircuitBreakerMiddleware,
     SanitizeThinkingBlocksMiddleware,
     SanitizeToolInputsMiddleware,
@@ -840,6 +841,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             *fallback_middleware,
             *plan_mode_middleware,
             SanitizeThinkingBlocksMiddleware(),
+            RepairOrphanedToolCallsMiddleware(),
         ],
     ).with_config(config)
 
