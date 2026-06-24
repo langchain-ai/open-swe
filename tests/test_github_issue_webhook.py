@@ -521,6 +521,81 @@ def test_github_webhook_ignores_review_requested(monkeypatch) -> None:
     }
 
 
+def test_is_docs_plz_slack_channel_matches_name(monkeypatch) -> None:
+    async def fake_get_slack_channel_info(channel_id: str) -> dict[str, object]:
+        assert channel_id == "C_DOCS"
+        return {"name": "docs-plz"}
+
+    monkeypatch.setattr(webapp, "get_slack_channel_info", fake_get_slack_channel_info)
+
+    assert asyncio.run(webapp._is_docs_plz_slack_channel("C_DOCS")) is True
+
+
+def test_is_docs_plz_slack_channel_matches_normalized_name(monkeypatch) -> None:
+    async def fake_get_slack_channel_info(channel_id: str) -> dict[str, object]:
+        assert channel_id == "C_DOCS"
+        return {"name": "Docs Plz", "name_normalized": "docs-plz"}
+
+    monkeypatch.setattr(webapp, "get_slack_channel_info", fake_get_slack_channel_info)
+
+    assert asyncio.run(webapp._is_docs_plz_slack_channel("C_DOCS")) is True
+
+
+def test_slack_webhook_gates_docs_plz_channel(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    async def fake_is_docs_plz_slack_channel(channel_id: str) -> bool:
+        captured["checked_channel_id"] = channel_id
+        return True
+
+    async def fake_post_slack_thread_reply(channel_id: str, thread_ts: str, text: str) -> bool:
+        captured["reply"] = {"channel_id": channel_id, "thread_ts": thread_ts, "text": text}
+        return True
+
+    async def fail_get_slack_repo_config(
+        channel_id: str, thread_ts: str, slack_user_id: str | None = None
+    ) -> dict[str, str]:
+        raise AssertionError("docs-plz gate should skip repo resolution")
+
+    async def fail_process_slack_mention(
+        event_data: dict[str, object], repo_config: dict[str, str]
+    ) -> None:
+        raise AssertionError("docs-plz gate should not start the agent")
+
+    monkeypatch.setattr(webapp, "SLACK_SIGNING_SECRET", _TEST_SLACK_SECRET)
+    monkeypatch.setattr(webapp, "SLACK_BOT_USER_ID", "UBOT")
+    monkeypatch.setattr(webapp, "SLACK_BOT_USERNAME", "open-swe")
+    monkeypatch.setattr(slack_utils.time, "time", lambda: 1700000000)
+    monkeypatch.setattr(webapp, "_is_docs_plz_slack_channel", fake_is_docs_plz_slack_channel)
+    monkeypatch.setattr(webapp, "post_slack_thread_reply", fake_post_slack_thread_reply)
+    monkeypatch.setattr(webapp, "get_slack_repo_config", fail_get_slack_repo_config)
+    monkeypatch.setattr(webapp, "process_slack_mention", fail_process_slack_mention)
+
+    client = TestClient(webapp.app)
+    response = _post_slack_webhook(
+        client,
+        {
+            "type": "event_callback",
+            "event": {
+                "type": "app_mention",
+                "channel": "C_DOCS",
+                "ts": "1700000000.000100",
+                "user": "U123",
+                "text": "<@UBOT> please update docs",
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "accepted", "message": "Slack mention gated for docs-plz"}
+    assert captured["checked_channel_id"] == "C_DOCS"
+    assert captured["reply"] == {
+        "channel_id": "C_DOCS",
+        "thread_ts": "1700000000.000100",
+        "text": webapp.DOCS_PLZ_SLACK_GATE_REPLY,
+    }
+
+
 def test_slack_webhook_routes_review_command_to_agent(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
