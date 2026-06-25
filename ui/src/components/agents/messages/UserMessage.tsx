@@ -1,5 +1,6 @@
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
 
+import { MessageTimestamp } from "./MessageTimestamp";
 import type { Message } from "@/lib/agents/types";
 
 export function UserMessage({ message }: { message: Message }) {
@@ -63,6 +64,7 @@ export function UserMessage({ message }: { message: Message }) {
             </div>
           </div>
         )}
+        <MessageTimestamp timestamp={message.timestamp} align="right" className="mt-1 pr-1" />
       </div>
     </div>
   );

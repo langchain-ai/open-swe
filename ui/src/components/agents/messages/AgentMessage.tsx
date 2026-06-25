@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { ChunkRenderer } from "./ChunkRenderer";
+import { MessageTimestamp } from "./MessageTimestamp";
 import { ReasoningBlock } from "./ReasoningBlock";
 import { buildRenderItems, summarizeExploration } from "./renderItems";
 import { summarizeChangedFiles } from "./summarizeChangedFiles";
@@ -292,6 +293,12 @@ export function AgentMessage({
           projectPath={projectPath}
         />
       )}
+
+      <MessageTimestamp
+        timestamp={message.timestamp}
+        startedAt={message.startedAt}
+        className="mt-1"
+      />
     </div>
   );
 }
