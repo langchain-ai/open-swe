@@ -35,6 +35,7 @@ PROXY_TOKEN_FALLBACK_TTL = timedelta(minutes=50)
 _PROXY_TOKEN_EXPIRY: dict[
     str, tuple[datetime | None, datetime, tuple[str, ...] | None, PermissionKey]
 ] = {}
+ProxyTokenRecord = tuple[datetime | None, datetime, tuple[str, ...] | None, PermissionKey]
 
 
 def _parse_expiry(expires_at: Any) -> datetime | None:
@@ -90,6 +91,13 @@ def clear_proxy_token_expiry(thread_id: str | None) -> None:
         _PROXY_TOKEN_EXPIRY.pop(thread_id, None)
 
 
+def _unpack_proxy_token_record(record: tuple[Any, ...]) -> ProxyTokenRecord:
+    expires_at, recorded_at, repositories, *rest = record
+    permissions = rest[0] if rest else ()
+    permission_key = permissions if isinstance(permissions, tuple) else normalize_permissions(None)
+    return expires_at, recorded_at, repositories, permission_key
+
+
 def proxy_token_needs_refresh(thread_id: str | None, *, now: datetime | None = None) -> bool:
     """Whether the recorded proxy token is at/near expiry and should be refreshed."""
     if not thread_id:
@@ -97,7 +105,7 @@ def proxy_token_needs_refresh(thread_id: str | None, *, now: datetime | None = N
     record = _PROXY_TOKEN_EXPIRY.get(thread_id)
     if record is None:
         return False
-    expires_at, recorded_at, _scope, _permissions = record
+    expires_at, recorded_at, _scope, _permissions = _unpack_proxy_token_record(record)
     current = (now or datetime.now(UTC)).astimezone(UTC)
     if expires_at is not None:
         return (expires_at - current) <= PROXY_TOKEN_REFRESH_WINDOW
@@ -118,15 +126,17 @@ async def refresh_proxy_token(
     if sandbox_backend is None:
         return False
 
-    _expires, _recorded, recorded_repositories, recorded_permissions = _PROXY_TOKEN_EXPIRY.get(
-        thread_id, (None, None, None, ())
+    _expires, _recorded, recorded_repositories, recorded_permissions = _unpack_proxy_token_record(
+        _PROXY_TOKEN_EXPIRY.get(thread_id, (None, None, None, ()))
     )
     effective_repositories = tuple(repositories) if repositories else recorded_repositories
     permission_key = normalize_permissions(permissions) or recorded_permissions
-    token, expires_at = await get_github_app_installation_token_with_expiry(
-        repositories=list(effective_repositories) if effective_repositories else None,
-        permissions=dict(permission_key) if permission_key else None,
-    )
+    token_kwargs: dict[str, Any] = {}
+    if effective_repositories:
+        token_kwargs["repositories"] = list(effective_repositories)
+    if permission_key:
+        token_kwargs["permissions"] = dict(permission_key)
+    token, expires_at = await get_github_app_installation_token_with_expiry(**token_kwargs)
     if not token:
         logger.warning("Proxy token refresh for thread %s failed: no installation token", thread_id)
         return False
