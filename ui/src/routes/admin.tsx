@@ -7,6 +7,7 @@ import type {
   DatadogConnectBody,
   LangSmithConnectBody,
   ModelOption,
+  PRTraceResolutionResult,
   TeamSettings,
   UserMapping,
 } from "@/lib/api"
@@ -75,6 +76,8 @@ function AdminPage() {
 
       <ObservabilityCredentialsSection />
 
+      <PRTraceResolutionSection />
+
       <UserMappingsSection enabled={!!session.data.is_admin} />
     </AppShell>
   )
@@ -86,6 +89,7 @@ function TriggerReviewSection() {
   const [url, setUrl] = useState("")
   const [error, setError] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
+  const [trace, setTrace] = useState<PRTraceResolutionResult | null>(null)
 
   const parsed = useMemo(() => {
     const match = PR_URL_RE.exec(url.trim())
@@ -114,10 +118,26 @@ function TriggerReviewSection() {
     },
   })
 
+  const resolveTrace = useMutation({
+    mutationFn: () => {
+      if (!parsed) throw new Error("invalid PR URL")
+      return api.resolveTrace(parsed.owner, parsed.repo, parsed.number)
+    },
+    onSuccess: (result) => {
+      setError(null)
+      setMessage(null)
+      setTrace(result)
+    },
+    onError: (e: Error) => {
+      setTrace(null)
+      setError(e.message)
+    },
+  })
+
   return (
     <SettingsSection
       title="Trigger a review"
-      description="Manually start an Open SWE Review run on a pull request. The repository must be enabled for review."
+      description="Manually start an Open SWE Review run on a pull request, or dry-run author trace resolution for it. The repository must be enabled for review."
     >
       <div className="flex flex-col gap-2 p-4">
         <div className="flex items-center gap-2">
@@ -129,8 +149,17 @@ function TriggerReviewSection() {
               setUrl(e.target.value)
               setMessage(null)
               setError(null)
+              setTrace(null)
             }}
           />
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => resolveTrace.mutate()}
+            disabled={!parsed || resolveTrace.isPending}
+          >
+            {resolveTrace.isPending ? "Resolving…" : "Resolve trace"}
+          </Button>
           <Button
             size="sm"
             onClick={() => trigger.mutate()}
@@ -160,6 +189,33 @@ function TriggerReviewSection() {
             </Link>
           </p>
         )}
+        {trace &&
+          (trace.resolved ? (
+            <p className="text-xs text-muted-foreground">
+              Resolved thread{" "}
+              <code className="font-mono">{trace.thread_id}</code> · confidence{" "}
+              {trace.confidence?.toFixed(2)} · {trace.evidence.join(", ")} ·{" "}
+              {trace.run_count} run{trace.run_count === 1 ? "" : "s"}
+              {trace.trace_url && (
+                <>
+                  {" · "}
+                  <a
+                    href={trace.trace_url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="underline hover:text-foreground"
+                  >
+                    open trace
+                  </a>
+                </>
+              )}
+            </p>
+          ) : (
+            <p className="text-xs text-muted-foreground">
+              No trace resolved — {trace.detail}
+              {trace.project ? ` (project: ${trace.project})` : ""}
+            </p>
+          ))}
         {error && <p className="text-xs text-destructive">{error}</p>}
       </div>
     </SettingsSection>
@@ -438,6 +494,75 @@ function ObservabilityCredentialsSection() {
                 </Button>
               </div>
             )
+          }
+        />
+      </div>
+      {error && <p className="px-4 pb-3 text-xs text-destructive">{error}</p>}
+    </SettingsSection>
+  )
+}
+
+function PRTraceResolutionSection() {
+  const qc = useQueryClient()
+  const settings = useQuery({
+    queryKey: ["teamSettings"],
+    queryFn: api.getTeamSettings,
+  })
+  const [projectDraft, setProjectDraft] = useState("")
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    setProjectDraft(settings.data?.review_tracing_project ?? "")
+  }, [settings.data?.review_tracing_project])
+
+  const save = useMutation({
+    mutationFn: (body: TeamSettings) => api.saveTeamSettings(body),
+    onSuccess: (saved) => {
+      qc.setQueryData(["teamSettings"], saved)
+      setError(null)
+    },
+    onError: (e: Error) => setError(e.message),
+  })
+
+  const savedProject = settings.data?.review_tracing_project ?? ""
+  const projectDirty = projectDraft.trim() !== savedProject
+
+  const saveProject = () => {
+    if (!settings.data || !projectDirty) return
+    save.mutate({
+      ...settings.data,
+      review_tracing_project: projectDraft.trim() || null,
+    })
+  }
+
+  return (
+    <SettingsSection
+      title="PR Trace Resolution"
+      description="Allow Open SWE Review to resolve PRs to author coding-agent traces in a configured LangSmith project. Requires connected LangSmith credentials."
+    >
+      <div className="divide-y divide-border">
+        <SettingsRow
+          label="Tracing project"
+          description="LangSmith project name or ID to search for author traces. Leave blank to disable trace resolution."
+          control={
+            <div className="flex items-center gap-2">
+              <Input
+                className="w-64"
+                placeholder="Project name or ID"
+                value={projectDraft}
+                onChange={(e) => setProjectDraft(e.target.value)}
+                onBlur={saveProject}
+                disabled={!settings.data || save.isPending}
+              />
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={saveProject}
+                disabled={!settings.data || !projectDirty || save.isPending}
+              >
+                Save
+              </Button>
+            </div>
           }
         />
       </div>

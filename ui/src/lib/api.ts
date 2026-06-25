@@ -94,6 +94,19 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   return (await res.json()) as T
 }
 
+export interface PRTraceResolutionResult {
+  resolved: boolean
+  detail: string
+  project: string | null
+  thread_id: string | null
+  confidence: number | null
+  evidence: Array<string>
+  trace_url: string | null
+  run_count: number
+  first_turn: string | null
+  last_turn: string | null
+}
+
 export interface SessionUser {
   login: string
   email: string | null
@@ -151,6 +164,7 @@ export interface TeamSettings {
   review_draft_prs: boolean
   pr_summaries: boolean
   review_trace_links: boolean
+  review_tracing_project?: string | null
   org_guidelines?: string | null
   default_agent_model?: string | null
   default_agent_reasoning_effort?: string | null
@@ -773,6 +787,11 @@ export const api = {
       pr_url: string
     }>(
       `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/re-review`,
+      { method: "POST" }
+    ),
+  resolveTrace: (owner: string, repo: string, number: number) =>
+    request<PRTraceResolutionResult>(
+      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/resolve-trace`,
       { method: "POST" }
     ),
   createReviewComment: (
