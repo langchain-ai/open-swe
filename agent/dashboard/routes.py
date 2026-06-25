@@ -84,6 +84,7 @@ from .repo_snapshots import (
 )
 from .review_api import (
     create_review_comment,
+    dry_run_trace_resolution,
     get_review,
     get_review_diff,
     list_review_comments,
@@ -1070,6 +1071,17 @@ async def api_re_review(
 ) -> dict[str, Any]:
     await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
     return await trigger_re_review(owner, repo, pr_number, session["sub"])
+
+
+@router.post("/reviews/{owner}/{repo}/{pr_number}/resolve-trace")
+async def api_resolve_trace(
+    owner: str,
+    repo: str,
+    pr_number: int,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
+    return await dry_run_trace_resolution(owner, repo, pr_number)
 
 
 class ReviewCommentCreate(BaseModel):

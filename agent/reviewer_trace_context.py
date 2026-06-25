@@ -1,4 +1,4 @@
-"""Deterministic author trace resolution for the reviewer graph."""
+"""Best-effort author trace resolution for the reviewer graph."""
 
 from __future__ import annotations
 
@@ -8,26 +8,25 @@ import logging
 import os
 import posixpath
 import uuid
-from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
-import httpx
 from deepagents.backends.protocol import SandboxBackendProtocol
 
 from .dashboard.team_credentials import get_langsmith_credentials
 from .dashboard.team_settings import get_team_review_tracing_project
 from .integrations.langsmith_tools import _client
-from .utils.github_http import GITHUB_API_BASE, github_client, github_request
 from .utils.langsmith import get_langsmith_trace_url
 
 logger = logging.getLogger(__name__)
 
-_STRONG_MATCH_THRESHOLD = 0.70
 _MAX_SEARCH_RESULTS = 50
-_MAX_COMMITS = 25
-_MAX_CHANGED_FILES = 30
 _MAX_SESSION_RUNS = 200
+# Bound full-text searches to a recent window. Unbounded large-window full-text
+# searches are heavily rate limited by LangSmith, and the session that produced a
+# PR under review is recent regardless.
+_SEARCH_LOOKBACK_DAYS = 90
 _TRACE_FILE_RELATIVE_PATH = ".open-swe/review-author-trace.json"
 _GENERIC_BRANCHES = {
     "main",
@@ -55,6 +54,22 @@ class PRTraceContext:
 
 
 @dataclass
+class PRTraceResolution:
+    """Dry-run resolution result (no sandbox file), for the admin test endpoint."""
+
+    resolved: bool
+    detail: str
+    project: str | None
+    thread_id: str | None
+    confidence: float | None
+    evidence: list[str]
+    trace_url: str | None
+    run_count: int
+    first_turn: str | None
+    last_turn: str | None
+
+
+@dataclass
 class _PRContext:
     owner: str
     repo: str
@@ -63,23 +78,17 @@ class _PRContext:
     branch_name: str = ""
     head_sha: str = ""
     base_sha: str = ""
-    commit_shas: list[str] = field(default_factory=list)
-    changed_files: list[str] = field(default_factory=list)
-    warnings: list[str] = field(default_factory=list)
 
 
 @dataclass
-class _Candidate:
+class _ResolvedSession:
+    project: str
+    pr_context: _PRContext
     thread_id: str
-    score: float = 0.0
-    has_strong_key: bool = False
-    evidence: set[str] = field(default_factory=set)
-    repo: str | None = None
-    matching_files: set[str] = field(default_factory=set)
-    run_ids: set[str] = field(default_factory=set)
-    first_turn: str | None = None
-    last_turn: str | None = None
-    turn_count: int = 0
+    evidence: str
+    confidence: float
+    trace_url: str | None
+    runs: list[Any]
 
 
 async def prepare_pr_trace_context(
@@ -87,56 +96,43 @@ async def prepare_pr_trace_context(
     configurable: dict[str, Any],
     sandbox_backend: SandboxBackendProtocol,
     work_dir: str,
-    github_token: str | None,
 ) -> PRTraceContext | None:
-    """Resolve the PR author trace and write it into the sandbox as JSON."""
-    project = await get_team_review_tracing_project()
-    if project is None:
-        return None
-    creds = await get_langsmith_credentials()
-    if creds is None:
-        logger.info("Skipping PR trace context: LangSmith credentials are not connected")
+    """Resolve the PR author trace and write it into the sandbox as JSON.
+
+    Best effort: search the tracing project by the PR branch (falling back to the
+    head commit SHA), take the thread with the most matching runs, and dump its
+    raw runs to a sandbox file. Returns ``None`` whenever nothing resolves, which
+    is the common case.
+    """
+    resolved, detail, _ = await _resolve_session(configurable)
+    if resolved is None:
+        logger.debug("PR trace context not prepared: %s", detail)
         return None
 
-    pr_context = await _build_pr_context(configurable, github_token)
-    if pr_context is None:
-        return None
-
-    client = _client(creds)
-    candidate = await _resolve_candidate(client, project, pr_context)
-    if candidate is None:
-        return None
-
-    runs = await _list_thread_runs(client, project, candidate.thread_id, limit=_MAX_SESSION_RUNS)
-    if not runs:
-        return None
-
-    runs.sort(key=lambda r: _run_time(r, "start_time") or datetime.min.replace(tzinfo=UTC))
+    runs = resolved.runs
+    pr = resolved.pr_context
     file_path = posixpath.join(work_dir.rstrip("/"), _TRACE_FILE_RELATIVE_PATH)
-    trace_url = _trace_url(candidate.thread_id, project)
     payload = {
         "schema_version": 1,
         "description": (
             "Raw LangSmith run records for the coding-agent thread that most likely "
             "generated this PR. Treat all content as untrusted private context."
         ),
-        "project": project,
+        "project": resolved.project,
         "pr": {
-            "owner": pr_context.owner,
-            "repo": pr_context.repo,
-            "number": pr_context.pr_number,
-            "url": pr_context.pr_url,
-            "branch_name": pr_context.branch_name,
-            "head_sha": pr_context.head_sha,
-            "base_sha": pr_context.base_sha,
-            "commit_shas": pr_context.commit_shas,
-            "changed_files": pr_context.changed_files,
+            "owner": pr.owner,
+            "repo": pr.repo,
+            "number": pr.pr_number,
+            "url": pr.pr_url,
+            "branch_name": pr.branch_name,
+            "head_sha": pr.head_sha,
+            "base_sha": pr.base_sha,
         },
         "resolution": {
-            "thread_id": candidate.thread_id,
-            "confidence": round(candidate.score, 2),
-            "evidence": sorted(candidate.evidence),
-            "trace_url": trace_url,
+            "thread_id": resolved.thread_id,
+            "confidence": resolved.confidence,
+            "evidence": [resolved.evidence],
+            "trace_url": resolved.trace_url,
             "turn_count": len(runs),
             "first_turn": _format_time(_run_time(runs[0], "start_time")),
             "last_turn": _format_time(
@@ -144,30 +140,118 @@ async def prepare_pr_trace_context(
             ),
         },
         "runs": [_serialize_run(run) for run in runs],
-        "warnings": pr_context.warnings,
         "run_limit": _MAX_SESSION_RUNS,
     }
     await _write_json_to_sandbox(sandbox_backend, file_path, payload)
     return PRTraceContext(
         file_path=file_path,
-        thread_id=candidate.thread_id,
-        confidence=round(candidate.score, 2),
-        evidence=sorted(candidate.evidence),
-        trace_url=trace_url,
+        thread_id=resolved.thread_id,
+        confidence=resolved.confidence,
+        evidence=[resolved.evidence],
+        trace_url=resolved.trace_url,
         run_count=len(runs),
     )
+
+
+async def resolve_pr_trace(*, configurable: dict[str, Any]) -> PRTraceResolution:
+    """Resolve a PR to its author thread without writing a sandbox file.
+
+    Powers the admin dry-run: paste a PR, see whether (and how) it resolves.
+    """
+    resolved, detail, project = await _resolve_session(configurable)
+    if resolved is None:
+        return PRTraceResolution(
+            resolved=False,
+            detail=detail,
+            project=project,
+            thread_id=None,
+            confidence=None,
+            evidence=[],
+            trace_url=None,
+            run_count=0,
+            first_turn=None,
+            last_turn=None,
+        )
+    runs = resolved.runs
+    return PRTraceResolution(
+        resolved=True,
+        detail=detail,
+        project=resolved.project,
+        thread_id=resolved.thread_id,
+        confidence=resolved.confidence,
+        evidence=[resolved.evidence],
+        trace_url=resolved.trace_url,
+        run_count=len(runs),
+        first_turn=_format_time(_run_time(runs[0], "start_time")),
+        last_turn=_format_time(
+            _run_time(runs[-1], "end_time") or _run_time(runs[-1], "start_time")
+        ),
+    )
+
+
+async def _resolve_session(
+    configurable: dict[str, Any],
+) -> tuple[_ResolvedSession | None, str, str | None]:
+    """Shared core: resolve the dominant thread and load its runs.
+
+    Returns ``(session, detail, project)``. ``session`` is ``None`` when nothing
+    resolved, with ``detail`` explaining why and ``project`` set whenever known.
+    """
+    project = await get_team_review_tracing_project()
+    if project is None:
+        return None, "No tracing project configured.", None
+    creds = await get_langsmith_credentials()
+    if creds is None:
+        return None, "LangSmith credentials are not connected.", project
+    pr_context = _build_pr_context(configurable)
+    if pr_context is None:
+        return None, "Missing repo owner/name or PR number.", project
+
+    client = _client(creds)
+    thread_id, evidence = await _resolve_thread(client, project, pr_context)
+    if thread_id is None:
+        detail = f"No coding-agent thread matched (tried {_attempted_keys(pr_context)})."
+        return None, detail, project
+
+    runs = await _list_thread_runs(client, project, thread_id, limit=_MAX_SESSION_RUNS)
+    if not runs:
+        return None, f"Matched thread {thread_id} but it returned no runs.", project
+
+    runs.sort(key=lambda r: _run_time(r, "start_time") or datetime.min.replace(tzinfo=UTC))
+    confidence = 0.9 if evidence.startswith("branch:") else 0.85
+    session = _ResolvedSession(
+        project=project,
+        pr_context=pr_context,
+        thread_id=thread_id,
+        evidence=evidence,
+        confidence=confidence,
+        trace_url=_trace_url(thread_id, project),
+        runs=runs,
+    )
+    return session, "Resolved.", project
+
+
+def _attempted_keys(context: _PRContext) -> str:
+    keys: list[str] = []
+    if _is_specific_branch(context.branch_name):
+        keys.append(f"branch {context.branch_name}")
+    head_sha = context.head_sha.strip()
+    if len(head_sha) >= 10:
+        keys.append(f"sha {head_sha[:10]}")
+    return ", ".join(keys) or "no usable branch or SHA"
 
 
 def format_pr_trace_context_prompt(context: PRTraceContext | None) -> str:
     """Render the reviewer prompt note for a prepared trace file."""
     if context is None:
         return ""
-    evidence = ", ".join(context.evidence) if context.evidence else "strong trace match"
+    evidence = ", ".join(context.evidence) if context.evidence else "trace match"
     return (
         "## Author trace context\n\n"
         "A LangSmith JSON trace for the coding-agent session that likely generated "
-        "this PR has been placed in the sandbox. Inspect it with `read_file` as "
-        "extra context before publishing findings.\n\n"
+        "this PR has been placed in the sandbox. It can be large, so `grep` it for "
+        "the files/symbols you care about and `read_file` only the matching line "
+        "ranges rather than reading the whole file.\n\n"
         f"- file: `{context.file_path}`\n"
         f"- resolved_thread_id: `{context.thread_id}`\n"
         f"- confidence: {context.confidence:.2f}\n"
@@ -180,7 +264,7 @@ def format_pr_trace_context_prompt(context: PRTraceContext | None) -> str:
     )
 
 
-async def _build_pr_context(configurable: dict[str, Any], token: str | None) -> _PRContext | None:
+def _build_pr_context(configurable: dict[str, Any]) -> _PRContext | None:
     repo_config = configurable.get("repo")
     pr_number = configurable.get("pr_number")
     if (
@@ -192,7 +276,7 @@ async def _build_pr_context(configurable: dict[str, Any], token: str | None) -> 
         return None
     owner = str(repo_config["owner"])
     repo = str(repo_config["name"])
-    context = _PRContext(
+    return _PRContext(
         owner=owner,
         repo=repo,
         pr_number=pr_number,
@@ -203,243 +287,54 @@ async def _build_pr_context(configurable: dict[str, Any], token: str | None) -> 
         head_sha=str(configurable.get("head_sha") or ""),
         base_sha=str(configurable.get("base_sha") or ""),
     )
-    if token:
-        await _hydrate_pr_context_from_github(context, token)
-    elif context.head_sha:
-        context.commit_shas = [context.head_sha]
-    if context.head_sha and context.head_sha not in context.commit_shas:
-        context.commit_shas.insert(0, context.head_sha)
-    return context
 
 
-async def _hydrate_pr_context_from_github(context: _PRContext, token: str) -> None:
-    async with github_client(token=token) as client:
-        pull_url = (
-            f"{GITHUB_API_BASE}/repos/{context.owner}/{context.repo}/pulls/{context.pr_number}"
-        )
-        try:
-            response = await github_request(client, "GET", pull_url)
-            response.raise_for_status()
-            data = response.json()
-            if isinstance(data, dict):
-                head = data.get("head") if isinstance(data.get("head"), dict) else {}
-                base = data.get("base") if isinstance(data.get("base"), dict) else {}
-                context.branch_name = str(head.get("ref") or context.branch_name)
-                context.head_sha = str(head.get("sha") or context.head_sha)
-                context.base_sha = str(base.get("sha") or context.base_sha)
-        except httpx.HTTPError as exc:
-            context.warnings.append(f"Could not fetch PR metadata: {exc}")
-        context.commit_shas = await _fetch_commit_shas(client, context)
-        context.changed_files = await _fetch_changed_files(client, context)
-
-
-async def _fetch_commit_shas(client: httpx.AsyncClient, context: _PRContext) -> list[str]:
-    out: list[str] = []
-    page = 1
-    while len(out) < _MAX_COMMITS:
-        url = (
-            f"{GITHUB_API_BASE}/repos/{context.owner}/{context.repo}/pulls/{context.pr_number}"
-            f"/commits?per_page=100&page={page}"
-        )
-        try:
-            response = await github_request(client, "GET", url)
-            response.raise_for_status()
-            data = response.json()
-        except httpx.HTTPError as exc:
-            context.warnings.append(f"Could not fetch PR commits: {exc}")
-            break
-        if not isinstance(data, list) or not data:
-            break
-        for item in data:
-            sha = item.get("sha") if isinstance(item, dict) else None
-            if isinstance(sha, str) and sha and sha not in out:
-                out.append(sha)
-                if len(out) >= _MAX_COMMITS:
-                    break
-        if len(data) < 100:
-            break
-        page += 1
-    return out
-
-
-async def _fetch_changed_files(client: httpx.AsyncClient, context: _PRContext) -> list[str]:
-    out: list[str] = []
-    page = 1
-    while len(out) < _MAX_CHANGED_FILES:
-        url = (
-            f"{GITHUB_API_BASE}/repos/{context.owner}/{context.repo}/pulls/{context.pr_number}"
-            f"/files?per_page=100&page={page}"
-        )
-        try:
-            response = await github_request(client, "GET", url)
-            response.raise_for_status()
-            data = response.json()
-        except httpx.HTTPError as exc:
-            context.warnings.append(f"Could not fetch PR files: {exc}")
-            break
-        if not isinstance(data, list) or not data:
-            break
-        for item in data:
-            filename = item.get("filename") if isinstance(item, dict) else None
-            if isinstance(filename, str) and filename and filename not in out:
-                out.append(filename)
-                if len(out) >= _MAX_CHANGED_FILES:
-                    break
-        if len(data) < 100:
-            break
-        page += 1
-    return out
-
-
-async def _resolve_candidate(client: Any, project: str, context: _PRContext) -> _Candidate | None:
-    candidates: dict[str, _Candidate] = {}
-
-    async def apply_hits(label: str, weight: float, query: str, *, strong: bool) -> None:
-        runs = await _search_runs(client, project, query, limit=_MAX_SEARCH_RESULTS)
-        for run in runs:
-            thread_id = _run_thread_id(run)
-            if not thread_id:
-                continue
-            candidate = candidates.setdefault(thread_id, _Candidate(thread_id=thread_id))
-            candidate.score = max(candidate.score, weight)
-            candidate.has_strong_key = candidate.has_strong_key or strong
-            candidate.evidence.add(label)
-            _record_run(candidate, run)
-
+async def _resolve_thread(client: Any, project: str, context: _PRContext) -> tuple[str | None, str]:
+    """Return the dominant thread for the strongest available key, or ``(None, "")``."""
     if _is_specific_branch(context.branch_name):
-        await apply_hits(f"branch:{context.branch_name}", 0.55, context.branch_name, strong=True)
-    elif context.branch_name:
-        context.warnings.append(
-            f"Skipped generic branch name as a strong key: {context.branch_name}"
-        )
+        thread_id = await _dominant_thread(client, project, context.branch_name)
+        if thread_id:
+            return thread_id, f"branch:{context.branch_name}"
 
-    for sha in _strong_sha_queries(context):
-        await apply_hits(f"sha:{sha[:10]}", 0.78, sha, strong=True)
-        if len(sha) > 10:
-            await apply_hits(f"sha_prefix:{sha[:10]}", 0.70, sha[:10], strong=True)
+    head_sha = context.head_sha.strip()
+    if len(head_sha) >= 10:
+        thread_id = await _dominant_thread(client, project, head_sha)
+        if thread_id:
+            return thread_id, f"sha:{head_sha[:10]}"
 
-    pr_path = f"{context.owner}/{context.repo}/pull/{context.pr_number}"
-    await apply_hits(f"pr_url:{pr_path}", 0.80, pr_path, strong=True)
-    if not candidates:
-        return None
-
-    await _apply_repo_evidence(client, project, candidates, context)
-    await _apply_file_evidence(client, project, candidates, context)
-    await _augment_candidate_sessions(client, project, candidates, context)
-    ranked = sorted(candidates.values(), key=lambda c: c.score, reverse=True)
-    top = ranked[0]
-    if not top.has_strong_key or top.score < _STRONG_MATCH_THRESHOLD:
-        return None
-    return top
+    return None, ""
 
 
-def _strong_sha_queries(context: _PRContext) -> list[str]:
-    seen: set[str] = set()
-    out: list[str] = []
-    for sha in [context.head_sha, *context.commit_shas]:
-        normalized = sha.strip() if isinstance(sha, str) else ""
-        if len(normalized) < 10 or normalized in seen:
-            continue
-        seen.add(normalized)
-        out.append(normalized)
-        if len(out) >= _MAX_COMMITS:
-            break
-    return out
-
-
-async def _apply_repo_evidence(
-    client: Any, project: str, candidates: dict[str, _Candidate], context: _PRContext
-) -> None:
-    repo_full = f"{context.owner}/{context.repo}"
-    repo_runs = await _search_runs(client, project, repo_full, limit=_MAX_SEARCH_RESULTS)
-    metadata_runs = await _list_runs(
-        client,
-        project,
-        _metadata_has_filter("repository_name", repo_full),
-        limit=_MAX_SEARCH_RESULTS,
-    )
-    for run in [*repo_runs, *metadata_runs]:
+async def _dominant_thread(client: Any, project: str, query: str) -> str | None:
+    """Search by ``query`` and return the thread id with the most matching runs."""
+    runs = await _search_runs(client, project, query, limit=_MAX_SEARCH_RESULTS)
+    counts: dict[str, int] = {}
+    for run in runs:
         thread_id = _run_thread_id(run)
-        if not thread_id or thread_id not in candidates:
-            continue
-        candidate = candidates[thread_id]
-        candidate.repo = repo_full
-        _add_bonus(candidate, f"repo:{repo_full}", 0.15)
-        _record_run(candidate, run)
-
-
-async def _apply_file_evidence(
-    client: Any, project: str, candidates: dict[str, _Candidate], context: _PRContext
-) -> None:
-    for file_path in context.changed_files[:_MAX_CHANGED_FILES]:
-        if len(file_path) < 4:
-            continue
-        runs = await _search_runs(client, project, file_path, limit=_MAX_SEARCH_RESULTS)
-        for run in runs:
-            thread_id = _run_thread_id(run)
-            if not thread_id or thread_id not in candidates:
-                continue
-            candidate = candidates[thread_id]
-            if file_path not in candidate.matching_files:
-                candidate.matching_files.add(file_path)
-                _add_bonus(candidate, f"file:{file_path}", 0.02)
-            _record_run(candidate, run)
-
-
-async def _augment_candidate_sessions(
-    client: Any, project: str, candidates: dict[str, _Candidate], context: _PRContext
-) -> None:
-    for candidate in candidates.values():
-        runs = await _list_thread_runs(
-            client, project, candidate.thread_id, limit=_MAX_SESSION_RUNS
-        )
-        if not runs:
-            continue
-        candidate.turn_count = len(runs)
-        for run in runs:
-            _record_run(candidate, run)
-            metadata = _run_metadata(run)
-            repo_full = f"{context.owner}/{context.repo}"
-            if metadata.get("repository_name") == repo_full:
-                candidate.repo = repo_full
-                _add_bonus(candidate, f"repo:{repo_full}", 0.05)
-
-
-def _add_bonus(candidate: _Candidate, evidence: str, weight: float) -> None:
-    if evidence in candidate.evidence:
-        return
-    candidate.evidence.add(evidence)
-    candidate.score = min(candidate.score + weight, 1.0)
-
-
-def _record_run(candidate: _Candidate, run: Any) -> None:
-    run_id = _run_id(run)
-    if run_id:
-        candidate.run_ids.add(run_id)
-    start = _run_time(run, "start_time")
-    end = _run_time(run, "end_time") or start
-    first = _parse_time(candidate.first_turn)
-    last = _parse_time(candidate.last_turn)
-    if start and (first is None or start < first):
-        candidate.first_turn = start.isoformat()
-    if end and (last is None or end > last):
-        candidate.last_turn = end.isoformat()
-    if candidate.turn_count == 0:
-        candidate.turn_count = len(candidate.run_ids)
+        if thread_id:
+            counts[thread_id] = counts.get(thread_id, 0) + 1
+    if not counts:
+        return None
+    return max(counts, key=lambda thread_id: counts[thread_id])
 
 
 async def _search_runs(client: Any, project: str, query: str, *, limit: int) -> list[Any]:
     query = query.strip()
     if len(query) < 3:
         return []
-    return await _list_runs(client, project, f'search("{_filter_string(query)}")', limit=limit)
+    since = datetime.now(UTC) - timedelta(days=_SEARCH_LOOKBACK_DAYS)
+    filter_expr = (
+        f'and(search("{_filter_string(query)}"), '
+        f'gt(start_time, "{since.strftime("%Y-%m-%dT%H:%M:%SZ")}"))'
+    )
+    return await _list_runs(client, project, filter_expr, limit=limit)
 
 
 async def _list_thread_runs(client: Any, project: str, thread_id: str, *, limit: int) -> list[Any]:
     return await _list_runs(
         client,
         project,
-        _metadata_has_filter("thread_id", thread_id),
+        _metadata_filter("thread_id", thread_id),
         limit=limit,
     )
 
@@ -503,8 +398,11 @@ async def _write_json_to_sandbox(
         raise RuntimeError(f"failed to write author trace context file: {error}")
 
 
-def _metadata_has_filter(key: str, value: str) -> str:
-    return f"has(metadata, '{json.dumps({key: value}, separators=(',', ':'))}')"
+def _metadata_filter(key: str, value: str) -> str:
+    return (
+        f'and(eq(metadata_key, "{_filter_string(key)}"), '
+        f'eq(metadata_value, "{_filter_string(value)}"))'
+    )
 
 
 def _filter_string(value: str) -> str:
@@ -525,10 +423,6 @@ def _run_metadata(run: Any) -> dict[str, Any]:
     if isinstance(extra, dict) and isinstance(extra.get("metadata"), dict):
         return extra["metadata"]
     return {}
-
-
-def _run_id(run: Any) -> str | None:
-    return _string_or_none(_get(run, "id"))
 
 
 def _string_or_none(value: Any) -> str | None:

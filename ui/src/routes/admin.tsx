@@ -7,6 +7,7 @@ import type {
   DatadogConnectBody,
   LangSmithConnectBody,
   ModelOption,
+  PRTraceResolutionResult,
   TeamSettings,
   UserMapping,
 } from "@/lib/api"
@@ -88,6 +89,7 @@ function TriggerReviewSection() {
   const [url, setUrl] = useState("")
   const [error, setError] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
+  const [trace, setTrace] = useState<PRTraceResolutionResult | null>(null)
 
   const parsed = useMemo(() => {
     const match = PR_URL_RE.exec(url.trim())
@@ -116,10 +118,26 @@ function TriggerReviewSection() {
     },
   })
 
+  const resolveTrace = useMutation({
+    mutationFn: () => {
+      if (!parsed) throw new Error("invalid PR URL")
+      return api.resolveTrace(parsed.owner, parsed.repo, parsed.number)
+    },
+    onSuccess: (result) => {
+      setError(null)
+      setMessage(null)
+      setTrace(result)
+    },
+    onError: (e: Error) => {
+      setTrace(null)
+      setError(e.message)
+    },
+  })
+
   return (
     <SettingsSection
       title="Trigger a review"
-      description="Manually start an Open SWE Review run on a pull request. The repository must be enabled for review."
+      description="Manually start an Open SWE Review run on a pull request, or dry-run author trace resolution for it. The repository must be enabled for review."
     >
       <div className="flex flex-col gap-2 p-4">
         <div className="flex items-center gap-2">
@@ -131,8 +149,17 @@ function TriggerReviewSection() {
               setUrl(e.target.value)
               setMessage(null)
               setError(null)
+              setTrace(null)
             }}
           />
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => resolveTrace.mutate()}
+            disabled={!parsed || resolveTrace.isPending}
+          >
+            {resolveTrace.isPending ? "Resolving…" : "Resolve trace"}
+          </Button>
           <Button
             size="sm"
             onClick={() => trigger.mutate()}
@@ -162,6 +189,33 @@ function TriggerReviewSection() {
             </Link>
           </p>
         )}
+        {trace &&
+          (trace.resolved ? (
+            <p className="text-xs text-muted-foreground">
+              Resolved thread{" "}
+              <code className="font-mono">{trace.thread_id}</code> · confidence{" "}
+              {trace.confidence?.toFixed(2)} · {trace.evidence.join(", ")} ·{" "}
+              {trace.run_count} run{trace.run_count === 1 ? "" : "s"}
+              {trace.trace_url && (
+                <>
+                  {" · "}
+                  <a
+                    href={trace.trace_url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="underline hover:text-foreground"
+                  >
+                    open trace
+                  </a>
+                </>
+              )}
+            </p>
+          ) : (
+            <p className="text-xs text-muted-foreground">
+              No trace resolved — {trace.detail}
+              {trace.project ? ` (project: ${trace.project})` : ""}
+            </p>
+          ))}
         {error && <p className="text-xs text-destructive">{error}</p>}
       </div>
     </SettingsSection>
