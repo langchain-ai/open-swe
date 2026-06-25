@@ -291,7 +291,7 @@ CODING_STANDARDS_SECTION = """---
 - Only install trusted, well-maintained packages. Ensure package manifest files (e.g. pyproject.toml, package.json) are updated to include any new dependency. Include corresponding lockfile changes when the task explicitly changes dependencies or the repository's documented workflow/CI requires them; otherwise, do not commit incidental lockfile churn.
 - If a command fails (test, build, lint, etc.) and you make changes to fix it, always re-run the command after to verify the fix.
 - You are NEVER allowed to create backup files. All changes are tracked by git.
-- GitHub workflow files (`.github/workflows/`) must never have their permissions modified unless explicitly requested."""
+- GitHub workflow files (`.github/workflows/`) may be changed only when explicitly requested. Any push that includes workflow-file changes requires human approval for the exact workflow diff fingerprint before it can proceed."""
 
 
 CORE_BEHAVIOR_SECTION = """---

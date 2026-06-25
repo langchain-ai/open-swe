@@ -44,6 +44,7 @@ from .dashboard.user_mappings import (
 from .dashboard.user_mappings import (
     refresh_cache as refresh_user_mapping_cache,
 )
+from .dashboard.workflow_approval import decide_workflow_push_approval
 from .reviewer_findings import (
     REVIEWER_THREAD_KIND,
     Finding,
@@ -161,8 +162,10 @@ if DASHBOARD_ALLOWED_ORIGINS:
 app.include_router(dashboard_router)
 
 from .dashboard.plan_api import plan_router  # noqa: E402
+from .dashboard.workflow_approval_api import workflow_approval_router  # noqa: E402
 
 app.include_router(plan_router)
+app.include_router(workflow_approval_router)
 
 LINEAR_WEBHOOK_SECRET = os.environ.get("LINEAR_WEBHOOK_SECRET", "")
 GITHUB_WEBHOOK_SECRET = os.environ.get("GITHUB_WEBHOOK_SECRET", "")
@@ -1666,6 +1669,74 @@ async def slack_interactivity(
         action_value = json.loads(str(action.get("value") or "{}"))
     except json.JSONDecodeError:
         return {"status": "ignored", "reason": "Invalid action value"}
+    if action_value.get("type") == "workflow_push_approval":
+        workflow_action = str(action_value.get("action") or "").strip()
+        fingerprint = str(action_value.get("fingerprint") or "").strip()
+        channel = payload.get("channel") if isinstance(payload.get("channel"), dict) else {}
+        message = payload.get("message") if isinstance(payload.get("message"), dict) else {}
+        container = payload.get("container") if isinstance(payload.get("container"), dict) else {}
+        user = payload.get("user") if isinstance(payload.get("user"), dict) else {}
+        channel_id = str(channel.get("id") or container.get("channel_id") or "")
+        thread_ts = str(
+            message.get("thread_ts") or message.get("ts") or container.get("thread_ts") or ""
+        )
+        user_id = str(user.get("id") or "")
+        if not channel_id or not thread_ts or not fingerprint:
+            return {"status": "ignored", "reason": "Missing workflow approval context"}
+
+        thread_id = generate_thread_id_from_slack_thread(channel_id, thread_ts)
+        if not await _slack_user_is_thread_owner(thread_id, user_id):
+            await post_slack_thread_reply(
+                channel_id=channel_id,
+                thread_ts=thread_ts,
+                text="Only the person who requested this run can approve workflow file pushes.",
+            )
+            return {"status": "ignored", "reason": "approver is not the thread owner"}
+
+        if workflow_action not in {"approve", "reject"}:
+            return {"status": "ignored", "reason": "Unknown workflow approval action"}
+        approved = workflow_action == "approve"
+        record = await decide_workflow_push_approval(
+            thread_id, fingerprint, approved=approved, actor=user_id
+        )
+        if record is None:
+            await post_slack_thread_reply(
+                channel_id=channel_id,
+                thread_ts=thread_ts,
+                text="I couldn't find that workflow approval request. Trigger the push again to create a fresh approval.",
+            )
+            return {"status": "ignored", "reason": "workflow approval not found"}
+        if not approved:
+            await post_slack_thread_reply(
+                channel_id=channel_id,
+                thread_ts=thread_ts,
+                text=f"Workflow push rejected for fingerprint `{fingerprint}`. No workflow files will be pushed.",
+            )
+            return {"status": "accepted", "message": "Workflow push rejected"}
+
+        await post_slack_thread_reply(
+            channel_id=channel_id,
+            thread_ts=thread_ts,
+            text=f"Workflow push approved for fingerprint `{fingerprint}`. Open SWE will retry the blocked push.",
+        )
+        repo_config = await get_slack_repo_config(channel_id, thread_ts, slack_user_id=user_id)
+        background_tasks.add_task(
+            process_slack_mention,
+            {
+                "channel_id": channel_id,
+                "thread_ts": thread_ts,
+                "event_ts": str(message.get("ts") or ""),
+                "user_id": user_id,
+                "text": (
+                    "The workflow-file push approval was approved. Retry the blocked "
+                    "git push now; do not alter workflow files before pushing."
+                ),
+                "bot_user_id": SLACK_BOT_USER_ID,
+            },
+            repo_config,
+        )
+        return {"status": "accepted", "message": "Workflow push approved, retry queued"}
+
     if action_value.get("type") == "plan_approval":
         plan_action = str(action_value.get("action") or "").strip()
         channel = payload.get("channel") if isinstance(payload.get("channel"), dict) else {}

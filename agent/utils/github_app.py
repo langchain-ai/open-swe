@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import os
 import time
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -24,17 +24,42 @@ GITHUB_APP_INSTALLATION_ID = os.environ.get("GITHUB_APP_INSTALLATION_ID", "")
 # 5-minute refresh window (``github_proxy.PROXY_TOKEN_REFRESH_WINDOW``) so a
 # near-expiry proxy refresh still mints a genuinely fresh token.
 _TOKEN_CACHE_MARGIN = timedelta(minutes=10)
+RUNTIME_PROXY_TOKEN_PERMISSIONS: dict[str, str] = {
+    "contents": "write",
+    "pull_requests": "write",
+    "issues": "write",
+    "checks": "write",
+    "statuses": "read",
+}
+WORKFLOW_RUNTIME_PROXY_TOKEN_PERMISSIONS: dict[str, str] = {
+    **RUNTIME_PROXY_TOKEN_PERMISSIONS,
+    "workflows": "write",
+}
+
+PermissionMap = Mapping[str, str]
+PermissionKey = tuple[tuple[str, str], ...]
+ScopeKey = tuple[tuple[int, ...], tuple[str, ...], PermissionKey]
+
 # scope key -> (token, expires_at, good_until). In-process only; never persisted.
-_TOKEN_CACHE: dict[tuple[tuple[int, ...], tuple[str, ...]], tuple[str, str | None, datetime]] = {}
+_TOKEN_CACHE: dict[ScopeKey, tuple[str, str | None, datetime]] = {}
+
+
+def normalize_permissions(permissions: PermissionMap | None) -> PermissionKey:
+    """Return a stable, hashable permission scope key."""
+    if not permissions:
+        return ()
+    return tuple(sorted((str(k), str(v)) for k, v in permissions.items() if str(k) and str(v)))
 
 
 def _scope_key(
-    repository_ids: Sequence[int] | None, repositories: Sequence[str] | None
-) -> tuple[tuple[int, ...], tuple[str, ...]]:
-    """Cache key segregating repo-scoped tokens from installation-wide ones."""
+    repository_ids: Sequence[int] | None,
+    repositories: Sequence[str] | None,
+    permissions: PermissionMap | None = None,
+) -> ScopeKey:
+    """Cache key segregating repo and permission-scoped tokens."""
     ids = tuple(sorted(int(i) for i in repository_ids)) if repository_ids else ()
     names = tuple(sorted(str(r) for r in repositories)) if repositories else ()
-    return ids, names
+    return ids, names, normalize_permissions(permissions)
 
 
 def _parse_expiry(expires_at: Any) -> datetime | None:
@@ -53,9 +78,7 @@ def _parse_expiry(expires_at: Any) -> datetime | None:
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
 
-def _cached_token(
-    key: tuple[tuple[int, ...], tuple[str, ...]], *, now: datetime
-) -> tuple[str, str | None] | None:
+def _cached_token(key: ScopeKey, *, now: datetime) -> tuple[str, str | None] | None:
     cached = _TOKEN_CACHE.get(key)
     if cached is None:
         return None
@@ -87,11 +110,13 @@ async def get_github_app_installation_token(
     *,
     repository_ids: Sequence[int] | None = None,
     repositories: Sequence[str] | None = None,
+    permissions: PermissionMap | None = None,
 ) -> str | None:
     """Exchange the GitHub App JWT for an installation access token."""
     token, _ = await get_github_app_installation_token_with_expiry(
         repository_ids=repository_ids,
         repositories=repositories,
+        permissions=permissions,
     )
     return token
 
@@ -100,13 +125,14 @@ async def get_github_app_installation_token_with_expiry(
     *,
     repository_ids: Sequence[int] | None = None,
     repositories: Sequence[str] | None = None,
+    permissions: PermissionMap | None = None,
 ) -> tuple[str | None, str | None]:
     """Exchange the GitHub App JWT for an installation access token and its expiry."""
     if not GITHUB_APP_ID or not GITHUB_APP_PRIVATE_KEY or not GITHUB_APP_INSTALLATION_ID:
         logger.debug("GitHub App env vars not fully configured, skipping app token")
         return None, None
 
-    key = _scope_key(repository_ids, repositories)
+    key = _scope_key(repository_ids, repositories, permissions)
     now = datetime.now(UTC)
     cached = _cached_token(key, now=now)
     if cached is not None:
@@ -117,6 +143,9 @@ async def get_github_app_installation_token_with_expiry(
         body["repository_ids"] = list(repository_ids)
     elif repositories:
         body["repositories"] = list(repositories)
+    permission_key = normalize_permissions(permissions)
+    if permission_key:
+        body["permissions"] = dict(permission_key)
 
     try:
         app_jwt = _generate_app_jwt()
