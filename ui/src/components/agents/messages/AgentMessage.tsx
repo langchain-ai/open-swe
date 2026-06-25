@@ -139,13 +139,18 @@ export function AgentMessage({
 
   const workDurationMs = useMemo(() => {
     if (measuredDurationMs !== null) return measuredDurationMs;
-    if (!message.startedAt) return null;
+    if (!message.startedAt || message.timestampIsFallback) return null;
     const start = Date.parse(message.startedAt);
     const end = Date.parse(message.timestamp);
     if (!Number.isFinite(start) || !Number.isFinite(end)) return null;
     const delta = end - start;
     return delta > 0 ? delta : null;
-  }, [measuredDurationMs, message.startedAt, message.timestamp]);
+  }, [
+    measuredDurationMs,
+    message.startedAt,
+    message.timestamp,
+    message.timestampIsFallback,
+  ]);
 
   const { workItems, replyItems } = useMemo(() => splitWorkAndReply(renderItems), [renderItems]);
   const collapseWork = !isStreaming && workItems.length > 0;
@@ -294,11 +299,13 @@ export function AgentMessage({
         />
       )}
 
-      <MessageTimestamp
-        timestamp={message.timestamp}
-        startedAt={message.startedAt}
-        className="mt-1"
-      />
+      {!message.timestampIsFallback && (
+        <MessageTimestamp
+          timestamp={message.timestamp}
+          startedAt={message.startedAt}
+          className="mt-1"
+        />
+      )}
     </div>
   );
 }

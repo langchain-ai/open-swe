@@ -140,6 +140,7 @@ export interface Message {
   timestamp: string
   /** Timestamp of the first message in an agent turn; used to derive work duration. */
   startedAt?: string
+  timestampIsFallback?: boolean
   chunks: Array<Chunk>
   hidden?: boolean
 }

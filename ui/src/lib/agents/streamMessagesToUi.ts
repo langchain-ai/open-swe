@@ -84,19 +84,29 @@ type AgentTurn = {
   author: Message["author"];
   timestamp: string;
   startedAt: string;
+  timestampIsFallback?: boolean;
   chunks: Array<Chunk>;
 };
 
-function messageTimestamp(raw: BaseMessage): string {
+type MessageTimestamp = {
+  value: string;
+  isFallback: boolean;
+};
+
+function messageTimestamp(raw: BaseMessage): MessageTimestamp {
   const msg = raw as unknown as Record<string, unknown>;
   const createdAt = msg.created_at;
-  if (typeof createdAt === "string" && createdAt) return createdAt;
+  if (typeof createdAt === "string" && createdAt) {
+    return { value: createdAt, isFallback: false };
+  }
   const responseMetadata = msg.response_metadata;
   if (responseMetadata && typeof responseMetadata === "object") {
     const metadataCreatedAt = (responseMetadata as Record<string, unknown>).created_at;
-    if (typeof metadataCreatedAt === "string" && metadataCreatedAt) return metadataCreatedAt;
+    if (typeof metadataCreatedAt === "string" && metadataCreatedAt) {
+      return { value: metadataCreatedAt, isFallback: false };
+    }
   }
-  return new Date().toISOString();
+  return { value: new Date().toISOString(), isFallback: true };
 }
 
 /**
@@ -304,24 +314,33 @@ export function streamMessagesToUi(
     agentTurn = null;
   };
 
-  const appendAgentChunks = (msgId: string, timestamp: string, chunks: Array<Chunk>) => {
+  const appendAgentChunks = (
+    msgId: string,
+    timestamp: string,
+    timestampIsFallback: boolean,
+    chunks: Array<Chunk>,
+  ) => {
     if (!agentTurn) {
       agentTurn = {
         id: msgId,
         author: "agent",
         timestamp,
         startedAt: timestamp,
+        timestampIsFallback,
         chunks: [...chunks],
       };
     } else {
       agentTurn.timestamp = timestamp;
+      agentTurn.timestampIsFallback =
+        agentTurn.timestampIsFallback || timestampIsFallback;
       agentTurn.chunks.push(...chunks);
     }
   };
 
   messages.forEach((raw, index) => {
     const msgId = typeof raw.id === "string" && raw.id ? raw.id : `msg-${index}`;
-    const timestamp = messageTimestamp(raw);
+    const { value: timestamp, isFallback: timestampIsFallback } =
+      messageTimestamp(raw);
 
     if (HumanMessage.isInstance(raw)) {
       flushAgentTurn();
@@ -334,6 +353,7 @@ export function streamMessagesToUi(
         id: msgId,
         author: "user",
         timestamp,
+        timestampIsFallback,
         chunks,
       });
       return;
@@ -375,7 +395,9 @@ export function streamMessagesToUi(
         chunks.push(chunk);
       }
 
-      if (chunks.length) appendAgentChunks(msgId, timestamp, chunks);
+      if (chunks.length) {
+        appendAgentChunks(msgId, timestamp, timestampIsFallback, chunks);
+      }
     }
 
     // `ToolMessage`s no longer produce their own chunk — their status/output is

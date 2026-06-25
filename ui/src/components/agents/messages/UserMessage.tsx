@@ -64,7 +64,13 @@ export function UserMessage({ message }: { message: Message }) {
             </div>
           </div>
         )}
-        <MessageTimestamp timestamp={message.timestamp} align="right" className="mt-1 pr-1" />
+        {!message.timestampIsFallback && (
+          <MessageTimestamp
+            timestamp={message.timestamp}
+            align="right"
+            className="mt-1 pr-1"
+          />
+        )}
       </div>
     </div>
   );
