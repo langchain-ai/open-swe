@@ -1,0 +1,40 @@
+name: Open SWE Trigger Example
+
+on:
+  workflow_dispatch:
+    inputs:
+      prompt:
+        description: Prompt to send to Open SWE
+        required: true
+        type: string
+      assistant_id:
+        description: Assistant id (usually "agent")
+        required: false
+        default: agent
+        type: string
+      thread_id:
+        description: Optional existing thread id (leave blank to create a new thread)
+        required: false
+        default: ""
+        type: string
+
+jobs:
+  trigger-open-swe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Open SWE run
+        id: openswe
+        uses: langchain-ai/open-swe/.github/actions/github-action-trigger@v1
+        with:
+          open_swe_url: ${{ secrets.OPEN_SWE_URL }}
+          open_swe_api_key: ${{ secrets.OPEN_SWE_API_KEY }}
+          prompt: ${{ inputs.prompt }}
+          assistant_id: ${{ inputs.assistant_id }}
+          thread_id: ${{ inputs.thread_id }}
+          if_not_exists: create
+
+      - name: Print run metadata
+        run: |
+          echo "thread_id=${{ steps.openswe.outputs.thread_id }}"
+          echo "run_id=${{ steps.openswe.outputs.run_id }}"
+          echo "response_json=${{ steps.openswe.outputs.response_json }}"
