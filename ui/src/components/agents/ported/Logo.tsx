@@ -9,16 +9,25 @@ export function Logo() {
     "          ░███                                                                     ",
     "          █████                                                                    ",
     "         ░░░░░                                                                     ",
-  ].join("\n");
+  ].join("\n")
 
   return (
-    <div className="w-full" style={{ containerType: "inline-size" }}>
+    <div
+      className="flex w-full flex-col items-center gap-2"
+      style={{ containerType: "inline-size" }}
+    >
       <pre
         className="m-0 w-full overflow-hidden text-center font-mono leading-none text-[#87CEEB]"
         style={{ fontSize: "min(7px, 1.9cqw)" }}
       >
         {ascii}
       </pre>
+      <div
+        className="font-heading font-medium tracking-tight text-[#87CEEB]"
+        style={{ fontSize: "min(12px, 2.8cqw)" }}
+      >
+        by johannes
+      </div>
     </div>
-  );
+  )
 }
