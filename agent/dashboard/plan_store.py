@@ -12,14 +12,20 @@ store operations (no CRDT/WebSocket).
 
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import UTC, datetime
 from typing import Any
 
 from langgraph_sdk import get_client
 
+logger = logging.getLogger(__name__)
+
 PLAN_CONTENT_NAMESPACE = ["plan", "content"]
 PLAN_COMMENTS_NAMESPACE = ["plan", "comments"]
+
+# The plan is mirrored into the sandbox as a real file the agent can re-read.
+PLAN_FILE_PATH = "plan.md"
 
 # Plan lifecycle, stored on both the content record and the thread metadata.
 PLAN_STATUS_PLANNING = "planning"
@@ -41,25 +47,45 @@ def _item_value(item: Any) -> dict[str, Any] | None:
 
 
 async def save_plan_content(
-    thread_id: str, *, markdown: str, status: str = PLAN_STATUS_READY
+    thread_id: str,
+    *,
+    markdown: str,
+    status: str = PLAN_STATUS_READY,
+    clear_comments: bool = True,
 ) -> None:
     """Publish the plan markdown + status for the dashboard to render.
 
     A republished (revised) plan supersedes the prior revision, so comments left
     on it are cleared — otherwise stale feedback would resurface on the new plan
-    and be fed back to the agent on the next approve/reject."""
+    and be fed back to the agent on the next approve/reject. A manual owner edit
+    passes ``clear_comments=False`` so reviewer feedback survives the edit."""
     client = _client()
     await client.store.put_item(
         PLAN_CONTENT_NAMESPACE,
         thread_id,
         {"markdown": markdown, "status": status},
     )
-    try:
-        await clear_plan_comments(thread_id)
-    except Exception:
-        # Best-effort: a failed cleanup must not block publishing the new plan.
-        pass
+    if clear_comments:
+        try:
+            await clear_plan_comments(thread_id)
+        except Exception:
+            # Best-effort: a failed cleanup must not block publishing the new plan.
+            pass
     await _merge_thread_metadata(thread_id, {"plan_status": status, "plan_mode": True})
+
+
+async def write_plan_to_sandbox(thread_id: str, content: str) -> str:
+    """Write ``plan.md`` into the thread's sandbox. Best-effort: a missing sandbox
+    must not block publishing the plan to the review page."""
+    try:
+        from ..utils.sandbox_state import get_sandbox_backend
+
+        backend = await get_sandbox_backend(thread_id)
+        await backend.awrite(PLAN_FILE_PATH, content)
+        return PLAN_FILE_PATH
+    except Exception:
+        logger.warning("Could not write plan.md to sandbox for %s", thread_id, exc_info=True)
+        return PLAN_FILE_PATH
 
 
 async def get_plan_content(thread_id: str) -> dict[str, Any] | None:

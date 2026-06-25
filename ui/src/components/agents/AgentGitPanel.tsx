@@ -42,6 +42,8 @@ import { cn } from "@/lib/utils"
 interface AgentGitPanelProps {
   thread: AgentThread
   messages: Array<Message>
+  collapsed: boolean
+  onCollapsedChange: (next: boolean) => void
 }
 
 interface PanelFile {
@@ -117,12 +119,20 @@ function readStoredPanelWidth(): number {
   return clampPanelWidth(parsed)
 }
 
-function readStoredPanelCollapsed(): boolean {
+export function readStoredPanelCollapsed(): boolean {
   if (typeof window === "undefined") return true
   // Default to collapsed until the user opens it once.
   return (
     window.localStorage.getItem(PANEL_STORAGE_COLLAPSED) !==
     COLLAPSED_STATE_FALSE
+  )
+}
+
+export function writeStoredPanelCollapsed(collapsed: boolean): void {
+  if (typeof window === "undefined") return
+  window.localStorage.setItem(
+    PANEL_STORAGE_COLLAPSED,
+    collapsed ? COLLAPSED_STATE_TRUE : COLLAPSED_STATE_FALSE
   )
 }
 
@@ -267,12 +277,14 @@ export function treeThemeStyle(): React.CSSProperties {
   } as React.CSSProperties
 }
 
-export function AgentGitPanel({ thread, messages }: AgentGitPanelProps) {
+export function AgentGitPanel({
+  thread,
+  messages,
+  collapsed,
+  onCollapsedChange,
+}: AgentGitPanelProps) {
   const [topTab, setTopTab] = useState<"git" | "desktop" | "terminal">("git")
   const [tab, setTab] = useState<"diff" | "review" | "commits">("diff")
-  const [collapsed, setCollapsedState] = useState(() =>
-    readStoredPanelCollapsed()
-  )
   const [width, setWidthState] = useState(() => readStoredPanelWidth())
   const [fullScreen, setFullScreen] = useState(false)
   const isMobile = useIsMobile()
@@ -281,15 +293,9 @@ export function AgentGitPanel({ thread, messages }: AgentGitPanelProps) {
   const overlay = fullScreen || isMobile
   const panelRef = useRef<HTMLDivElement>(null)
 
-  const setCollapsed = (next: boolean) => {
-    setCollapsedState(next)
-    if (typeof window !== "undefined") {
-      window.localStorage.setItem(
-        PANEL_STORAGE_COLLAPSED,
-        next ? COLLAPSED_STATE_TRUE : COLLAPSED_STATE_FALSE
-      )
-    }
-  }
+  // Collapsed state is owned by the parent (so the plan banner can reserve space
+  // for the floating expand button); persistence to localStorage lives there too.
+  const setCollapsed = onCollapsedChange
 
   const applyWidth = useCallback(
     (next: number) => {
