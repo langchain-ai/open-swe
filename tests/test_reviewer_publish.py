@@ -382,36 +382,6 @@ def test_render_review_body_includes_trace_link_when_provided() -> None:
     assert body.endswith("<!-- open-swe-reviewer pr=123 -->")
 
 
-def test_render_review_body_includes_author_context_before_links() -> None:
-    body = render_review_body(
-        pr_number=7,
-        surfaced_count=0,
-        author_context="Considered batch updates before choosing single writes. api_key: secret",
-        ui_url="https://dash.example/agents/tid-1",
-    )
-    assert "### Author path considered" in body
-    assert "api_key: [redacted]" in body
-    assert body.index("### Author path considered") < body.index("[Open in Web]")
-
-
-@pytest.mark.asyncio
-async def test_resolve_author_context_gates_on_setting_and_confidence() -> None:
-    from agent.tools.publish_review import _resolve_author_context
-
-    with patch(
-        "agent.tools.publish_review.get_team_review_author_context_enabled",
-        AsyncMock(return_value=True),
-    ):
-        assert await _resolve_author_context("context", 0.70) == "context"
-        assert await _resolve_author_context("context", 0.69) is None
-
-    with patch(
-        "agent.tools.publish_review.get_team_review_author_context_enabled",
-        AsyncMock(return_value=False),
-    ):
-        assert await _resolve_author_context("context", 0.90) is None
-
-
 def test_publish_review_eval_mode_does_not_call_github() -> None:
     from agent.tools.publish_review import publish_review
 

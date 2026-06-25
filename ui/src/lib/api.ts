@@ -152,7 +152,6 @@ export interface TeamSettings {
   pr_summaries: boolean
   review_trace_links: boolean
   review_tracing_project?: string | null
-  review_author_context_enabled?: boolean
   org_guidelines?: string | null
   default_agent_model?: string | null
   default_agent_reasoning_effort?: string | null

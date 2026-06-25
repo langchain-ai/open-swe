@@ -38,7 +38,6 @@ class TeamSettingsUpdate(BaseModel):
     pr_summaries: bool = True
     review_trace_links: bool = True
     review_tracing_project: str | None = None
-    review_author_context_enabled: bool = False
     org_guidelines: str | None = None
     default_agent_model: str | None = None
     default_agent_reasoning_effort: str | None = None
@@ -153,7 +152,6 @@ def _default_settings() -> dict[str, Any]:
         "pr_summaries": True,
         "review_trace_links": True,
         "review_tracing_project": None,
-        "review_author_context_enabled": False,
         "org_guidelines": None,
         "default_agent_model": fallback_model,
         "default_agent_reasoning_effort": fallback_effort,
@@ -196,6 +194,7 @@ async def get_team_settings() -> dict[str, Any]:
         "autofix_mode",
         "autofix_severity_threshold",
         "autofix_enabled",
+        "review_author_context_enabled",
     ):
         merged.pop(stale_field, None)
     return merged
@@ -207,7 +206,6 @@ async def upsert_team_settings(update: TeamSettingsUpdate) -> dict[str, Any]:
         "pr_summaries": update.pr_summaries,
         "review_trace_links": update.review_trace_links,
         "review_tracing_project": update.review_tracing_project,
-        "review_author_context_enabled": update.review_author_context_enabled,
         "org_guidelines": update.org_guidelines,
         "default_agent_model": update.default_agent_model,
         "default_agent_reasoning_effort": update.default_agent_reasoning_effort,
@@ -334,12 +332,6 @@ async def get_team_review_tracing_project() -> str | None:
     if isinstance(value, str) and value.strip():
         return value.strip()
     return None
-
-
-async def get_team_review_author_context_enabled() -> bool:
-    """Return whether review summaries may include author path context."""
-    settings = await get_team_settings()
-    return bool(settings.get("review_author_context_enabled", False))
 
 
 async def get_org_review_guidelines() -> str | None:

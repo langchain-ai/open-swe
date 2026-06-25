@@ -21,7 +21,6 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
-import { Switch } from "@/components/ui/switch"
 import { api } from "@/lib/api"
 import { useSession } from "@/lib/session"
 
@@ -510,23 +509,6 @@ function PRTraceResolutionSection() {
                 Save
               </Button>
             </div>
-          }
-        />
-        <SettingsRow
-          label="Author path digest"
-          description="When a trace match is confident, include a short public summary of paths the author considered in the published review body."
-          control={
-            <Switch
-              checked={settings.data?.review_author_context_enabled ?? false}
-              onCheckedChange={(enabled) =>
-                settings.data &&
-                save.mutate({
-                  ...settings.data,
-                  review_author_context_enabled: enabled,
-                })
-              }
-              disabled={!settings.data || save.isPending}
-            />
           }
         />
       </div>

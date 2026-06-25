@@ -7,10 +7,7 @@ from typing import Any
 
 from langgraph.config import get_config
 
-from ..dashboard.team_settings import (
-    get_team_review_author_context_enabled,
-    get_team_review_trace_links_enabled,
-)
+from ..dashboard.team_settings import get_team_review_trace_links_enabled
 from ..reviewer_diff import compute_diff_line_set, fetch_pr_diff, is_range_in_diff
 from ..reviewer_findings import (
     SEVERITY_ORDER,
@@ -58,14 +55,10 @@ from ..utils.langsmith import get_langsmith_trace_url
 from ..utils.slack import post_slack_thread_reply
 from ..utils.tracing import REVIEW_TRACING_PROJECT
 
-_AUTHOR_CONTEXT_CONFIDENCE_THRESHOLD = 0.70
-
 
 def publish_review(
     severity_threshold: str = "medium",
     cap: int = 4,
-    author_context: str | None = None,
-    author_context_confidence: float = 0.0,
 ) -> dict[str, Any]:
     """Post all current findings to the PR as a GitHub Review.
 
@@ -85,8 +78,6 @@ def publish_review(
             mentioned in the review summary with a link to the web app, but are
             not posted as inline PR comments.
         cap: Maximum number of inline comments to publish (default 4).
-        author_context: Optional short summary of the author's trace-backed path.
-        author_context_confidence: Confidence from ``resolve_pr_to_threads``.
 
     Returns:
         Dictionary with ``success``, ``review_id``, ``surfaced_count``,
@@ -158,8 +149,6 @@ def publish_review(
                 is_re_review=is_re_review,
                 langgraph_run_id=_current_run_id(config),
                 trace_link_config_override=configurable.get("review_trace_link_enabled"),
-                author_context=author_context,
-                author_context_confidence=author_context_confidence,
             )
         )
     except ReviewerThreadMissingError as exc:
@@ -190,20 +179,6 @@ async def _resolve_review_trace_url(thread_id: str, config_override: object) -> 
     if not thread_id:
         return None
     return get_langsmith_trace_url(thread_id, project_name=REVIEW_TRACING_PROJECT)
-
-
-async def _resolve_author_context(context: str | None, confidence: float) -> str | None:
-    if not isinstance(context, str) or not context.strip():
-        return None
-    try:
-        score = float(confidence)
-    except (TypeError, ValueError):
-        return None
-    if score < _AUTHOR_CONTEXT_CONFIDENCE_THRESHOLD:
-        return None
-    if not await get_team_review_author_context_enabled():
-        return None
-    return context.strip()
 
 
 def _is_reviewer_eval_mode(configurable: dict[str, Any]) -> bool:
@@ -258,8 +233,6 @@ async def _publish_review_async(
     is_re_review: bool,
     langgraph_run_id: str | None = None,
     trace_link_config_override: object = None,
-    author_context: str | None = None,
-    author_context_confidence: float = 0.0,
 ) -> dict[str, Any]:
     thread_id = get_thread_id_from_runtime()
     # The run config's head_sha is frozen at run creation; a push that arrived
@@ -268,10 +241,6 @@ async def _publish_review_async(
     # reviewed, not the stale one this run was created for.
     head_sha = await resolve_review_head_sha(thread_id, {"head_sha": head_sha})
     review_trace_url = await _resolve_review_trace_url(thread_id, trace_link_config_override)
-    author_context_for_review = await _resolve_author_context(
-        author_context,
-        author_context_confidence,
-    )
     review_ui_url = dashboard_review_url(owner, repo, pr_number)
     findings = await _backfill_findings_from_pr_threads(
         thread_id=thread_id,
@@ -372,7 +341,6 @@ async def _publish_review_async(
         trace_url=review_trace_url,
         ui_url=review_ui_url,
         additional_findings_count=additional_findings_count,
-        author_context=author_context_for_review,
     )
 
     review_response = await post_pull_request_review(
@@ -408,7 +376,6 @@ async def _publish_review_async(
                 trace_url=review_trace_url,
                 ui_url=review_ui_url,
                 additional_findings_count=additional_findings_count,
-                author_context=author_context_for_review,
             )
             retry_response = await post_pull_request_review(
                 owner=owner,

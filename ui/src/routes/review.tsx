@@ -20,7 +20,6 @@ const DEFAULT_SETTINGS: TeamSettings = {
   pr_summaries: true,
   review_trace_links: true,
   review_tracing_project: null,
-  review_author_context_enabled: false,
   org_guidelines: null,
   default_agent_model: null,
   default_agent_reasoning_effort: null,

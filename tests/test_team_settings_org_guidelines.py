@@ -11,7 +11,6 @@ from agent.dashboard.team_settings import (
     TeamSettingsUpdate,
     get_org_review_guidelines,
     get_team_default_model,
-    get_team_review_author_context_enabled,
     get_team_review_tracing_project,
 )
 
@@ -57,16 +56,6 @@ async def test_get_team_review_tracing_project_returns_trimmed_text() -> None:
         return_value={"review_tracing_project": "  pajuha\n"},
     ):
         assert await get_team_review_tracing_project() == "pajuha"
-
-
-@pytest.mark.asyncio
-async def test_get_team_review_author_context_enabled_defaults_false() -> None:
-    with patch(
-        "agent.dashboard.team_settings.get_team_settings",
-        new_callable=AsyncMock,
-        return_value={},
-    ):
-        assert await get_team_review_author_context_enabled() is False
 
 
 @pytest.mark.asyncio
