@@ -5,8 +5,15 @@ ARG NODEJS_VERSION=22.22.0-1nodesource1
 ARG UV_VERSION=0.9.26
 ARG YARN_VERSION=4.12.0
 ARG GH_VERSION=2.83.1
+ARG SFW_VERSION=2.0.6
 
 ENV DEBIAN_FRONTEND=noninteractive
+# Skip sfw's daily background update check at runtime. The check hits
+# api.github.com/repos/SocketDev/sfw-free, which the sandbox proxy authenticates
+# with the GitHub App installation token (no access to that repo), so it fails
+# and the wrapper can't fall back to a binary it never managed to fetch. The
+# initial download still runs at build time below, where egress is unrestricted.
+ENV SFW_SKIP_UPDATE_CHECK=1
 
 RUN apt-get update && apt-get install -y \
     git \
@@ -65,7 +72,9 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && rm -rf /var/lib/apt/lists/* \
     && corepack enable \
     && corepack prepare "yarn@${YARN_VERSION}" --activate \
-    && npm i -g sfw
+    && npm i -g "sfw@${SFW_VERSION}" \
+    && sfw --version \
+    && test -e "$(npm root -g)/sfw/.sfw-cache/latest"
 
 ENV GO_VERSION=1.23.5
 
