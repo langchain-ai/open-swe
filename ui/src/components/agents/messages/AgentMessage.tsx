@@ -7,9 +7,11 @@ import { buildRenderItems, summarizeExploration } from "./renderItems";
 import { summarizeChangedFiles } from "./summarizeChangedFiles";
 import { TurnChangedFilesCard } from "./TurnChangedFilesCard";
 import { WorkSummary } from "./WorkSummary";
+import type { ReactNode } from "react";
 import type { RenderItem } from "./renderItems";
 import type { Message } from "@/lib/agents/types";
 import type { ApprovalCallbacks, ChangedFileSummaryItem } from "./types";
+import { formatHoverTimestamp } from "@/lib/agents/messageTimestamps";
 import { SubagentGroup } from "@/components/agents/subagents";
 import { ToolExecution } from "@/components/agents/ported/ToolExecution";
 import { ShellCommand } from "@/components/agents/ported/ShellCommand";
@@ -20,6 +22,32 @@ import { ReplyCard } from "@/components/agents/ported/ReplyCard";
  * agent's actual reply to the user. Everything else is "work".
  */
 const REPLY_ITEM_TYPES = new Set<RenderItem["type"]>(["text-chunk", "reply-item"]);
+
+/**
+ * Wraps a tool render item so a dim timestamp chip fades in on hover, anchored
+ * to the row's top-right corner.
+ */
+function ToolRow({
+  timestamp,
+  className,
+  children,
+}: {
+  timestamp?: string;
+  className?: string;
+  children: ReactNode;
+}) {
+  const label = formatHoverTimestamp(timestamp);
+  return (
+    <div className={`group relative ${className ?? ""}`}>
+      {children}
+      {label && (
+        <time className="pointer-events-none absolute right-1 top-1 z-10 rounded bg-[var(--ui-panel)] px-1.5 py-0.5 text-[10px] leading-4 text-[color:var(--ui-text-dim)] tabular-nums opacity-0 shadow-sm transition-opacity group-hover:opacity-100">
+          {label}
+        </time>
+      )}
+    </div>
+  );
+}
 
 /**
  * Split a finished turn's items into collapsible work and the trailing reply,
@@ -191,13 +219,17 @@ export function AgentMessage({
                 {isExpanded && (
                   <div className="pt-1 pb-1 space-y-0.5">
                     {item.chunks.map((chunk, chunkIndex) => (
-                      <div key={chunk.toolCallId || `explored-chunk-${item.id}-${chunkIndex}`} className="flex-1 min-w-0 text-[color:var(--ui-text-dim)]">
+                      <ToolRow
+                        key={chunk.toolCallId || `explored-chunk-${item.id}-${chunkIndex}`}
+                        timestamp={chunk.timestamp}
+                        className="flex-1 min-w-0 text-[color:var(--ui-text-dim)]"
+                      >
                         <ToolExecution
                           chunk={chunk}
                           projectPath={projectPath}
                           onOpenDiff={callbacks.onOpenDiff}
                         />
-                      </div>
+                      </ToolRow>
                     ))}
                   </div>
                 )}
@@ -214,7 +246,7 @@ export function AgentMessage({
               : undefined;
 
             return (
-              <div key={item.key}>
+              <ToolRow key={item.key} timestamp={item.chunk.timestamp}>
                 <ToolExecution
                   chunk={item.chunk}
                   projectPath={projectPath}
@@ -227,30 +259,30 @@ export function AgentMessage({
                     modifiedContent: fullFileDiff.modifiedContent,
                   } : undefined}
                 />
-              </div>
+              </ToolRow>
             );
           }
 
           case "shell-item":
             return (
-              <div key={item.key}>
+              <ToolRow key={item.key} timestamp={item.chunk.timestamp}>
                 <ShellCommand
                   chunk={item.chunk}
                   projectPath={projectPath}
                 />
-              </div>
+              </ToolRow>
             );
 
           case "reply-item":
             return (
-              <div key={item.key}>
+              <ToolRow key={item.key} timestamp={item.chunk.timestamp}>
                 <ReplyCard chunk={item.chunk} />
-              </div>
+              </ToolRow>
             );
 
           case "tool-item":
             return (
-              <div key={item.key}>
+              <ToolRow key={item.key} timestamp={item.chunk.timestamp}>
                 <ToolExecution
                   chunk={item.chunk}
                   projectPath={projectPath}
@@ -259,7 +291,7 @@ export function AgentMessage({
                   onAutoApprove={callbacks.onAutoApprove}
                   onOpenDiff={callbacks.onOpenDiff}
                 />
-              </div>
+              </ToolRow>
             );
 
           case "text-chunk":

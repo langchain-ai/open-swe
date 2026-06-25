@@ -66,6 +66,8 @@ export interface DiffData {
 export interface ToolExecutionChunk {
   kind: "tool-execution"
   toolCallId: string
+  /** Stable arrival time for the tool call, shown on hover. */
+  timestamp?: string
   title: string
   toolKind: AcpToolKind
   input?: Record<string, unknown>

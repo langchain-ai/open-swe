@@ -1,4 +1,5 @@
 import { AIMessage, HumanMessage, ToolMessage } from "@langchain/core/messages";
+import { messageArrivalTimestamp } from "./messageTimestamps";
 import type { BaseMessage, ContentBlock } from "@langchain/core/messages";
 import type { AssembledToolCall, SubagentDiscoverySnapshot } from "@langchain/react";
 
@@ -93,7 +94,11 @@ type MessageTimestamp = {
   isFallback: boolean;
 };
 
-function messageTimestamp(raw: BaseMessage): MessageTimestamp {
+function messageTimestamp(
+  raw: BaseMessage,
+  msgId: string,
+  resolveCreatedAt?: (messageId: string) => string | undefined,
+): MessageTimestamp {
   const msg = raw as unknown as Record<string, unknown>;
   const createdAt = msg.created_at;
   if (typeof createdAt === "string" && createdAt) {
@@ -105,6 +110,10 @@ function messageTimestamp(raw: BaseMessage): MessageTimestamp {
     if (typeof metadataCreatedAt === "string" && metadataCreatedAt) {
       return { value: metadataCreatedAt, isFallback: false };
     }
+  }
+  const resolved = resolveCreatedAt?.(msgId);
+  if (typeof resolved === "string" && resolved) {
+    return { value: resolved, isFallback: false };
   }
   return { value: new Date().toISOString(), isFallback: true };
 }
@@ -283,6 +292,7 @@ export function streamMessagesToUi(
   messages: Array<BaseMessage>,
   toolCalls: ReadonlyArray<AssembledToolCall> = [],
   subagents: ReadonlyMap<string, SubagentDiscoverySnapshot> = new Map(),
+  resolveCreatedAt?: (messageId: string) => string | undefined,
 ): Array<Message> {
   const toolCallsById = new Map<string, AssembledToolCall>();
   for (const toolCall of toolCalls) {
@@ -340,7 +350,7 @@ export function streamMessagesToUi(
   messages.forEach((raw, index) => {
     const msgId = typeof raw.id === "string" && raw.id ? raw.id : `msg-${index}`;
     const { value: timestamp, isFallback: timestampIsFallback } =
-      messageTimestamp(raw);
+      messageTimestamp(raw, msgId, resolveCreatedAt);
 
     if (HumanMessage.isInstance(raw)) {
       flushAgentTurn();
@@ -376,6 +386,7 @@ export function streamMessagesToUi(
         const chunk: ToolExecutionChunk = {
           kind: "tool-execution",
           toolCallId,
+          timestamp: messageArrivalTimestamp(toolCallId),
           title: toolTitle(name, args),
           toolKind: toolKind(name),
           input: args,
