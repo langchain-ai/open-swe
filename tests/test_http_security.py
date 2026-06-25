@@ -109,6 +109,33 @@ def test_fetch_url_blocks_redirects_to_private_ips(monkeypatch) -> None:
     assert "Request blocked" in result["error"]
 
 
+def test_fetch_url_falls_back_when_markdownify_recurses(monkeypatch) -> None:
+    def fake_request(
+        method: str, url: str, *, timeout: int, headers: dict[str, str]
+    ) -> tuple[FakeResponse, None]:
+        return (
+            FakeResponse(
+                status_code=200,
+                url=url,
+                text="<html><body><p>Hello <strong>world</strong></p><p>Second</p></body></html>",
+            ),
+            None,
+        )
+
+    def recursive_markdownify(_html: str) -> str:
+        raise RecursionError("maximum recursion depth exceeded")
+
+    monkeypatch.setattr(fetch_url_tool, "_request_with_safe_redirects", fake_request)
+    monkeypatch.setattr(fetch_url_tool, "markdownify", recursive_markdownify)
+
+    result = fetch_url_tool.fetch_url("https://example.com/deep")
+
+    assert result["status_code"] == 200
+    assert "Hello" in result["markdown_content"]
+    assert "world" in result["markdown_content"]
+    assert "Second" in result["markdown_content"]
+
+
 class _FakeSocket:
     """Records connect() targets without performing real network I/O."""
 

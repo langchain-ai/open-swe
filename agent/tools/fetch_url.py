@@ -1,3 +1,4 @@
+from html.parser import HTMLParser
 from typing import Any
 
 import requests
@@ -6,6 +7,30 @@ from markdownify import markdownify
 from .http_request import _request_with_safe_redirects
 
 FETCH_URL_MAX_CHARS = 100_000
+
+
+class _TextExtractor(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.parts: list[str] = []
+
+    def handle_data(self, data: str) -> None:
+        text = " ".join(data.split())
+        if text:
+            self.parts.append(text)
+
+    def get_text(self) -> str:
+        return "\n\n".join(self.parts)
+
+
+def _html_to_markdown_content(html: str) -> str:
+    try:
+        return markdownify(html)
+    except RecursionError:
+        parser = _TextExtractor()
+        parser.feed(html)
+        parser.close()
+        return parser.get_text()
 
 
 def fetch_url(url: str, timeout: int = 30) -> dict[str, Any]:
@@ -49,8 +74,7 @@ def fetch_url(url: str, timeout: int = 30) -> dict[str, Any]:
 
         response.raise_for_status()
 
-        # Convert HTML content to markdown
-        markdown_content = markdownify(response.text)
+        markdown_content = _html_to_markdown_content(response.text)
 
         if len(markdown_content) > FETCH_URL_MAX_CHARS:
             markdown_content = (
