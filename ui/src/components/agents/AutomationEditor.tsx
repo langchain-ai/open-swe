@@ -9,12 +9,13 @@ import {
 
 import type { ModelOption } from "@/lib/api"
 import type { AgentSchedule } from "@/lib/agents/types"
+import type { AutomationTemplate } from "@/lib/agents/automation-templates"
 import type { ModelSelection } from "@/lib/agents/provider/useModelOptions"
 import { RepoSelector } from "@/components/agents/RepoSelector"
 import { ScheduleTriggerPicker } from "@/components/agents/ScheduleTriggerPicker"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
-import { describeCron, presetForCron } from "@/lib/agents/cron"
+import { describeCron, isDescribableCron } from "@/lib/agents/cron"
 import {
   useCreateAgentSchedule,
   useDeleteAgentSchedule,
@@ -30,6 +31,8 @@ import { cn } from "@/lib/utils"
 interface AutomationEditorProps {
   mode: "create" | "edit"
   schedule?: AgentSchedule
+  /** Seeds the form in create mode when the user starts from a template. */
+  template?: AutomationTemplate
 }
 
 function scheduleToSelection(
@@ -46,7 +49,11 @@ function scheduleToSelection(
     : null
 }
 
-export function AutomationEditor({ mode, schedule }: AutomationEditorProps) {
+export function AutomationEditor({
+  mode,
+  schedule,
+  template,
+}: AutomationEditorProps) {
   const navigate = useNavigate()
   const reposQuery = useRepos()
   const { models, defaultSelection } = useModelOptions()
@@ -55,11 +62,14 @@ export function AutomationEditor({ mode, schedule }: AutomationEditorProps) {
   const updateSchedule = useUpdateAgentSchedule()
   const deleteSchedule = useDeleteAgentSchedule()
 
-  const [name, setName] = useState(schedule?.name ?? "")
-  const [prompt, setPrompt] = useState(schedule?.prompt ?? "")
-  const [cron, setCron] = useState<string | null>(schedule?.schedule ?? null)
+  const initialCron = schedule?.schedule ?? template?.schedule ?? null
+  const [name, setName] = useState(schedule?.name ?? template?.name ?? "")
+  const [prompt, setPrompt] = useState(
+    schedule?.prompt ?? template?.prompt ?? ""
+  )
+  const [cron, setCron] = useState<string | null>(initialCron)
   const [customMode, setCustomMode] = useState(
-    schedule ? presetForCron(schedule.schedule) === "custom" : false
+    initialCron ? !isDescribableCron(initialCron) : false
   )
   const [repo, setRepo] = useState<string | null>(schedule?.repo ?? null)
   const [enabled, setEnabled] = useState(schedule?.enabled ?? true)

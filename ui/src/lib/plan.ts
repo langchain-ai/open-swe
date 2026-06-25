@@ -113,6 +113,16 @@ export function deletePlanComment(
   )
 }
 
+export function updatePlan(
+  threadId: string,
+  markdown: string
+): Promise<{ status: PlanStatus; markdown: string }> {
+  return req(`/plan/${encodeURIComponent(threadId)}`, {
+    method: "PUT",
+    body: JSON.stringify({ markdown }),
+  })
+}
+
 export function approvePlan(threadId: string): Promise<{ status: string }> {
   return req(`/plan/${encodeURIComponent(threadId)}/approve`, {
     method: "POST",

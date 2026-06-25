@@ -65,6 +65,11 @@ export function describeCron(expr: string): string {
   return expr
 }
 
+/** True when describeCron renders a human-readable label (not the raw expression). */
+export function isDescribableCron(expr: string): boolean {
+  return describeCron(expr) !== expr
+}
+
 /** Match a cron expression back to a known preset id, if any. */
 export function presetForCron(expr: string): CronPreset["id"] | "custom" {
   const normalized = expr.trim().split(/\s+/).join(" ")

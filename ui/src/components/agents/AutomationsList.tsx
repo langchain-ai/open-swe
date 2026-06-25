@@ -9,6 +9,7 @@ import {
 } from "@phosphor-icons/react"
 
 import type { AgentSchedule } from "@/lib/agents/types"
+import { AutomationTemplates } from "@/components/agents/AutomationTemplates"
 import { buttonVariants } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { describeCron } from "@/lib/agents/cron"
@@ -83,6 +84,8 @@ export function AutomationsList() {
             </div>
           )}
         </div>
+
+        <AutomationTemplates />
       </div>
     </div>
   )
