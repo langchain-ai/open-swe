@@ -290,24 +290,31 @@ def _build_pr_context(configurable: dict[str, Any]) -> _PRContext | None:
 
 
 async def _resolve_thread(client: Any, project: str, context: _PRContext) -> tuple[str | None, str]:
-    """Return the dominant thread for the strongest available key, or ``(None, "")``."""
+    """Return the dominant thread for the strongest available key, or ``(None, "")``.
+
+    The branch search is scoped to the repo: branch names like ``fix-tests`` are not
+    unique across repos (or older PRs) in a shared tracing project, so an unscoped
+    branch hit could resolve to an unrelated thread. The full head SHA is globally
+    unique, so it needs no scoping.
+    """
+    repo = f"{context.owner}/{context.repo}"
     if _is_specific_branch(context.branch_name):
-        thread_id = await _dominant_thread(client, project, context.branch_name)
+        thread_id = await _dominant_thread(client, project, [context.branch_name, repo])
         if thread_id:
             return thread_id, f"branch:{context.branch_name}"
 
     head_sha = context.head_sha.strip()
     if len(head_sha) >= 10:
-        thread_id = await _dominant_thread(client, project, head_sha)
+        thread_id = await _dominant_thread(client, project, [head_sha])
         if thread_id:
             return thread_id, f"sha:{head_sha[:10]}"
 
     return None, ""
 
 
-async def _dominant_thread(client: Any, project: str, query: str) -> str | None:
-    """Search by ``query`` and return the thread id with the most matching runs."""
-    runs = await _search_runs(client, project, query, limit=_MAX_SEARCH_RESULTS)
+async def _dominant_thread(client: Any, project: str, terms: list[str]) -> str | None:
+    """Search for runs matching all ``terms`` and return the thread with the most."""
+    runs = await _search_runs(client, project, terms, limit=_MAX_SEARCH_RESULTS)
     counts: dict[str, int] = {}
     for run in runs:
         thread_id = _run_thread_id(run)
@@ -318,15 +325,13 @@ async def _dominant_thread(client: Any, project: str, query: str) -> str | None:
     return max(counts, key=lambda thread_id: counts[thread_id])
 
 
-async def _search_runs(client: Any, project: str, query: str, *, limit: int) -> list[Any]:
-    query = query.strip()
-    if len(query) < 3:
+async def _search_runs(client: Any, project: str, terms: list[str], *, limit: int) -> list[Any]:
+    clauses = [f'search("{_filter_string(t.strip())}")' for t in terms if len(t.strip()) >= 3]
+    if not clauses:
         return []
     since = datetime.now(UTC) - timedelta(days=_SEARCH_LOOKBACK_DAYS)
-    filter_expr = (
-        f'and(search("{_filter_string(query)}"), '
-        f'gt(start_time, "{since.strftime("%Y-%m-%dT%H:%M:%SZ")}"))'
-    )
+    clauses.append(f'gt(start_time, "{since.strftime("%Y-%m-%dT%H:%M:%SZ")}")')
+    filter_expr = f"and({', '.join(clauses)})"
     return await _list_runs(client, project, filter_expr, limit=limit)
 
 

@@ -144,6 +144,11 @@ async def test_prepare_pr_trace_context_resolves_on_branch_alone() -> None:
     assert sandbox.payload["resolution"]["thread_id"] == "thread-1"
     assert sandbox.payload["runs"][0]["outputs"]["message"].startswith("Edited reviewer.py")
     assert any('search("feature/trace-resolution")' in f for f in fake_client.filters)
+    # Branch search is scoped to the repo so a same-named branch elsewhere can't match.
+    assert any(
+        'search("feature/trace-resolution")' in f and 'search("langchain-ai/open-swe")' in f
+        for f in fake_client.filters
+    )
     # Thread runs use documented metadata key/value filter syntax, not has(metadata, ...).
     assert any('eq(metadata_value, "thread-1")' in f for f in fake_client.filters)
     assert not any("has(metadata" in f for f in fake_client.filters)
