@@ -1444,7 +1444,7 @@ import sys
 from pathlib import Path
 
 PAYLOAD = json.loads(base64.b64decode('__PAYLOAD__').decode())
-WORKSPACE = Path('/workspace')
+WORKSPACE_FALLBACK = Path('/workspace')
 
 
 def git(repo, args, check=True):
@@ -1459,12 +1459,24 @@ def git(repo, args, check=True):
     return result
 
 
+def search_roots():
+    roots = [Path.cwd().resolve(), WORKSPACE_FALLBACK]
+    seen = set()
+    for root in roots:
+        if root in seen:
+            continue
+        seen.add(root)
+        if root.exists():
+            yield root
+
+
 def repo_paths():
     repo_name = PAYLOAD.get('repo_name')
-    if isinstance(repo_name, str) and repo_name:
-        yield WORKSPACE / Path(repo_name).name
-    if WORKSPACE.exists():
-        for child in sorted(WORKSPACE.iterdir()):
+    for root in search_roots():
+        if isinstance(repo_name, str) and repo_name:
+            yield root / Path(repo_name).name
+        yield root
+        for child in sorted(root.iterdir()):
             if child.is_dir():
                 yield child
 

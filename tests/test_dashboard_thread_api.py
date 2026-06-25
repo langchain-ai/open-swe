@@ -421,6 +421,17 @@ async def test_recovery_patch_enforces_size_limit(monkeypatch) -> None:
     assert exc_info.value.status_code == 413
 
 
+def test_recovery_patch_searches_command_cwd_before_workspace_fallback() -> None:
+    command = thread_api._recovery_patch_command(
+        {"repo_name": "repo", "base_branch": "main"},
+        "tid",
+    )
+
+    assert "Path.cwd().resolve()" in command
+    assert "WORKSPACE_FALLBACK = Path('/workspace')" in command
+    assert "roots = [Path.cwd().resolve(), WORKSPACE_FALLBACK]" in command
+
+
 async def test_proxy_commands_lazily_creates_missing_thread_only_for_run_start(
     monkeypatch,
 ) -> None:
