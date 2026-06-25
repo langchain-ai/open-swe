@@ -20,6 +20,7 @@ from deepagents.backends.protocol import (
 from langgraph.config import get_config
 
 from .sandbox import create_sandbox
+from .sandbox_safety import AuditedSandboxWrapper
 
 logger = logging.getLogger(__name__)
 
@@ -135,6 +136,10 @@ def set_sandbox_backend(
     if isinstance(sandbox_backend, SandboxBackendProxy):
         SANDBOX_BACKENDS[thread_id] = sandbox_backend
         return sandbox_backend
+
+    # Wrap with command auditing unless already wrapped.
+    if not isinstance(sandbox_backend, AuditedSandboxWrapper):
+        sandbox_backend = AuditedSandboxWrapper(sandbox_backend, thread_id)
 
     existing = SANDBOX_BACKENDS.get(thread_id)
     if isinstance(existing, SandboxBackendProxy):
