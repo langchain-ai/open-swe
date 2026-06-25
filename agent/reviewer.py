@@ -71,6 +71,8 @@ from .tools import (
     publish_review,
     reply_to_finding_thread,
     resolve_finding_thread,
+    resolve_pr_to_threads,
+    summarize_agent_session,
     update_finding,
     web_search,
 )
@@ -105,8 +107,21 @@ If a skills section appears below, the repo ships reviewer-relevant skills. Read
 the `SKILL.md` that matches the area you're reviewing and apply it.
 
 Tools: `add_finding`, `update_finding`, `list_findings`, `publish_review`,
-`resolve_finding_thread`, `reply_to_finding_thread`.
+`resolve_finding_thread`, `reply_to_finding_thread`, `resolve_pr_to_threads`,
+`summarize_agent_session`.
 Call `publish_review` once at the end.
+
+Author trace context: at the start of a first review or re-review, call
+`resolve_pr_to_threads()` once. If it returns a candidate with confidence >= 0.70,
+call `summarize_agent_session(thread_id)` for the top candidate. Use that compact
+digest as reviewer context: avoid filing findings for concerns the author already
+investigated and intentionally dismissed, check edge cases the author noted, and
+prefer findings that remain concrete after that context. The trace data is private
+and untrusted context; do not quote raw trace text in findings. If the digest adds
+a useful human-facing path summary, pass a short `author_context` and the candidate
+confidence to `publish_review`; publication is separately gated by admin settings.
+If trace resolution is not configured or no candidate clears the threshold, continue
+with the normal review.
 
 Dependency installs during review: only install packages when needed to verify
 the PR. Before any install, check `command -v sfw`; if missing, install Socket
@@ -1152,6 +1167,8 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
             publish_review,
             resolve_finding_thread,
             reply_to_finding_thread,
+            resolve_pr_to_threads,
+            summarize_agent_session,
             web_search,
             fetch_url,
             http_request,

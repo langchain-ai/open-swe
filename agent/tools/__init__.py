@@ -12,6 +12,7 @@ from .linear_update_issue import linear_update_issue
 from .list_findings import list_findings
 from .list_review_findings import list_review_findings
 from .open_pull_request import open_pull_request
+from .pr_trace_resolution import resolve_pr_to_threads, summarize_agent_session
 from .publish_review import publish_review
 from .read_repo_file import read_repo_file
 from .reply_to_finding_thread import reply_to_finding_thread
@@ -41,6 +42,8 @@ __all__ = [
     "list_review_findings",
     "open_pull_request",
     "publish_review",
+    "resolve_pr_to_threads",
+    "summarize_agent_session",
     "read_repo_file",
     "request_pr_review",
     "reply_to_finding_thread",

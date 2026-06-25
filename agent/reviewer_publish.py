@@ -51,6 +51,10 @@ _OPEN_SWE_REVIEW_COMMENT_MARKER_RE = re.compile(
     r"<!--\s*open-swe-review-comment\s+(\{.*?\})\s*-->",
     re.DOTALL,
 )
+_SECRET_RE = re.compile(
+    r"(?i)(api[_-]?key|token|secret|password|authorization)([\s:=]+)([^\s'\"`]+)"
+)
+_AUTHOR_CONTEXT_MAX_CHARS = 1_200
 
 
 class ReviewCommentMarker(TypedDict):
@@ -247,6 +251,25 @@ def review_summary_marker(pr_number: int) -> str:
     return f"<!-- open-swe-reviewer pr={pr_number} -->"
 
 
+def render_author_context_section(author_context: str | None) -> str | None:
+    """Render the optional public author-path digest."""
+    if not isinstance(author_context, str):
+        return None
+    text = _sanitize_author_context(author_context)
+    if not text:
+        return None
+    return f"### Author path considered\n\n{text}"
+
+
+def _sanitize_author_context(text: str) -> str:
+    text = text.replace("\x00", " ").strip()
+    text = _SECRET_RE.sub(lambda m: f"{m.group(1)}{m.group(2)}[redacted]", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    if len(text) > _AUTHOR_CONTEXT_MAX_CHARS:
+        text = text[: _AUTHOR_CONTEXT_MAX_CHARS - 1].rstrip() + "…"
+    return text
+
+
 def render_out_of_diff_section(findings: list[Finding]) -> str:
     """Render findings anchored outside the PR diff as a collapsed dropdown.
 
@@ -285,6 +308,7 @@ def render_review_body(
     ui_url: str | None = None,
     out_of_diff_findings: list[Finding] | None = None,
     additional_findings_count: int = 0,
+    author_context: str | None = None,
 ) -> str:
     """Compose the top-level review body.
 
@@ -311,6 +335,9 @@ def render_review_body(
         parts.append(f"{additional_findings_count} additional {noun} can be viewed in the web app.")
     if out_of_diff_findings:
         parts.append(render_out_of_diff_section(out_of_diff_findings))
+    rendered_author_context = render_author_context_section(author_context)
+    if rendered_author_context:
+        parts.append(rendered_author_context)
     links = []
     if ui_url:
         links.append(f"[Open in Web]({ui_url})")

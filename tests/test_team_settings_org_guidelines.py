@@ -7,9 +7,12 @@ from pydantic import ValidationError
 
 from agent.dashboard.team_settings import (
     ORG_GUIDELINES_MAX_CHARS,
+    REVIEW_TRACING_PROJECT_MAX_CHARS,
     TeamSettingsUpdate,
     get_org_review_guidelines,
     get_team_default_model,
+    get_team_review_author_context_enabled,
+    get_team_review_tracing_project,
 )
 
 _AGENT_PAIR = ("anthropic:claude-opus-4-8", "high")
@@ -29,6 +32,41 @@ def test_org_guidelines_trimmed() -> None:
 def test_org_guidelines_rejects_oversized() -> None:
     with pytest.raises(ValidationError):
         TeamSettingsUpdate(org_guidelines="x" * (ORG_GUIDELINES_MAX_CHARS + 1))
+
+
+def test_review_tracing_project_blank_normalizes_to_none() -> None:
+    assert TeamSettingsUpdate(review_tracing_project="   ").review_tracing_project is None
+    assert TeamSettingsUpdate(review_tracing_project=None).review_tracing_project is None
+
+
+def test_review_tracing_project_trimmed() -> None:
+    update = TeamSettingsUpdate(review_tracing_project="  pajuha\n")
+    assert update.review_tracing_project == "pajuha"
+
+
+def test_review_tracing_project_rejects_oversized() -> None:
+    with pytest.raises(ValidationError):
+        TeamSettingsUpdate(review_tracing_project="x" * (REVIEW_TRACING_PROJECT_MAX_CHARS + 1))
+
+
+@pytest.mark.asyncio
+async def test_get_team_review_tracing_project_returns_trimmed_text() -> None:
+    with patch(
+        "agent.dashboard.team_settings.get_team_settings",
+        new_callable=AsyncMock,
+        return_value={"review_tracing_project": "  pajuha\n"},
+    ):
+        assert await get_team_review_tracing_project() == "pajuha"
+
+
+@pytest.mark.asyncio
+async def test_get_team_review_author_context_enabled_defaults_false() -> None:
+    with patch(
+        "agent.dashboard.team_settings.get_team_settings",
+        new_callable=AsyncMock,
+        return_value={},
+    ):
+        assert await get_team_review_author_context_enabled() is False
 
 
 @pytest.mark.asyncio

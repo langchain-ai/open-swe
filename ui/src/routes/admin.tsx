@@ -21,6 +21,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Switch } from "@/components/ui/switch"
 import { api } from "@/lib/api"
 import { useSession } from "@/lib/session"
 
@@ -74,6 +75,8 @@ function AdminPage() {
       </SettingsSection>
 
       <ObservabilityCredentialsSection />
+
+      <PRTraceResolutionSection />
 
       <UserMappingsSection enabled={!!session.data.is_admin} />
     </AppShell>
@@ -438,6 +441,92 @@ function ObservabilityCredentialsSection() {
                 </Button>
               </div>
             )
+          }
+        />
+      </div>
+      {error && <p className="px-4 pb-3 text-xs text-destructive">{error}</p>}
+    </SettingsSection>
+  )
+}
+
+function PRTraceResolutionSection() {
+  const qc = useQueryClient()
+  const settings = useQuery({
+    queryKey: ["teamSettings"],
+    queryFn: api.getTeamSettings,
+  })
+  const [projectDraft, setProjectDraft] = useState("")
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    setProjectDraft(settings.data?.review_tracing_project ?? "")
+  }, [settings.data?.review_tracing_project])
+
+  const save = useMutation({
+    mutationFn: (body: TeamSettings) => api.saveTeamSettings(body),
+    onSuccess: (saved) => {
+      qc.setQueryData(["teamSettings"], saved)
+      setError(null)
+    },
+    onError: (e: Error) => setError(e.message),
+  })
+
+  const savedProject = settings.data?.review_tracing_project ?? ""
+  const projectDirty = projectDraft.trim() !== savedProject
+
+  const saveProject = () => {
+    if (!settings.data || !projectDirty) return
+    save.mutate({
+      ...settings.data,
+      review_tracing_project: projectDraft.trim() || null,
+    })
+  }
+
+  return (
+    <SettingsSection
+      title="PR Trace Resolution"
+      description="Allow Open SWE Review to resolve PRs to author coding-agent traces in a configured LangSmith project. Requires connected LangSmith credentials."
+    >
+      <div className="divide-y divide-border">
+        <SettingsRow
+          label="Tracing project"
+          description="LangSmith project name or ID to search for author traces. Leave blank to disable trace resolution."
+          control={
+            <div className="flex items-center gap-2">
+              <Input
+                className="w-64"
+                placeholder="Project name or ID"
+                value={projectDraft}
+                onChange={(e) => setProjectDraft(e.target.value)}
+                onBlur={saveProject}
+                disabled={!settings.data || save.isPending}
+              />
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={saveProject}
+                disabled={!settings.data || !projectDirty || save.isPending}
+              >
+                Save
+              </Button>
+            </div>
+          }
+        />
+        <SettingsRow
+          label="Author path digest"
+          description="When a trace match is confident, include a short public summary of paths the author considered in the published review body."
+          control={
+            <Switch
+              checked={settings.data?.review_author_context_enabled ?? false}
+              onCheckedChange={(enabled) =>
+                settings.data &&
+                save.mutate({
+                  ...settings.data,
+                  review_author_context_enabled: enabled,
+                })
+              }
+              disabled={!settings.data || save.isPending}
+            />
           }
         />
       </div>
