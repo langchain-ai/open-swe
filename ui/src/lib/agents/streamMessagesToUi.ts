@@ -113,7 +113,7 @@ function messageTimestamp(
   }
   const resolved = resolveCreatedAt?.(msgId);
   if (typeof resolved === "string" && resolved) {
-    return { value: resolved, isFallback: false };
+    return { value: resolved, isFallback: true };
   }
   return { value: new Date().toISOString(), isFallback: true };
 }
