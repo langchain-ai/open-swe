@@ -24,12 +24,16 @@ from pydantic import BaseModel
 from .oauth import require_same_origin_for_mutations, require_session
 from .plan_store import (
     PLAN_STATUS_APPROVED,
+    PLAN_STATUS_CANCELLED,
+    PLAN_STATUS_READY,
     PLAN_STATUS_REVISING,
     add_plan_comment,
     delete_plan_comment,
     get_plan_content,
     list_plan_comments,
+    save_plan_content,
     set_plan_status,
+    write_plan_to_sandbox,
 )
 from .thread_api import (
     _repo_config_from_metadata,
@@ -50,6 +54,10 @@ _SESSION_DEP = Depends(require_session)
 
 class CommentBody(BaseModel):
     body: str
+
+
+class PlanUpdate(BaseModel):
+    markdown: str
 
 
 async def _thread_metadata(thread_id: str) -> dict[str, Any]:
@@ -84,6 +92,32 @@ async def get_plan(thread_id: str, session: dict[str, Any] = _SESSION_DEP) -> di
             "name": session.get("name") or login,
         },
     }
+
+
+@plan_router.put("/{thread_id}")
+async def update_plan(
+    thread_id: str, body: PlanUpdate, session: dict[str, Any] = _SESSION_DEP
+) -> dict[str, Any]:
+    """Owner-only manual edit of the plan markdown.
+
+    Re-publishes the edited plan as ``ready`` (and mirrors it into the sandbox
+    ``plan.md``) while preserving reviewer comments, so the owner can refine the
+    plan before approving it."""
+    metadata = await _thread_metadata(thread_id)
+    if not _user_owns_thread(metadata, session["sub"], session.get("email")):
+        raise HTTPException(403, "only the plan owner can edit the plan")
+    markdown = body.markdown.strip()
+    if not markdown:
+        raise HTTPException(422, "plan markdown cannot be empty")
+    content = await get_plan_content(thread_id) or {}
+    status = content.get("status") or metadata.get("plan_status") or "planning"
+    if status in (PLAN_STATUS_APPROVED, PLAN_STATUS_CANCELLED):
+        raise HTTPException(409, f"cannot edit a {status} plan")
+    await save_plan_content(
+        thread_id, markdown=markdown, status=PLAN_STATUS_READY, clear_comments=False
+    )
+    await write_plan_to_sandbox(thread_id, markdown)
+    return {"status": PLAN_STATUS_READY, "markdown": markdown}
 
 
 @plan_router.get("/{thread_id}/comments")
@@ -136,17 +170,25 @@ async def approve_plan(thread_id: str, session: dict[str, Any] = _SESSION_DEP) -
     metadata = await _thread_metadata(thread_id)
     if not _user_owns_thread(metadata, session["sub"], session.get("email")):
         raise HTTPException(403, "only the plan owner can approve")
-    # Read comments BEFORE mutating state: a store failure here aborts the
-    # decision (500) rather than dispatching the run without the feedback.
+    # Read the published plan + comments BEFORE mutating state: a store failure
+    # here aborts the decision (500) rather than dispatching without them. The
+    # published markdown may have been edited by the reviewer, so it is the
+    # source of truth handed to the agent (not its own stale history) — read it
+    # strictly so a transient failure can't silently drop the edit.
+    content = await get_plan_content(thread_id, raise_on_error=True) or {}
+    plan_markdown = str(content.get("markdown", "")).strip()
     feedback = _format_comments(await list_plan_comments(thread_id, raise_on_error=True))
     await set_plan_status(thread_id, PLAN_STATUS_APPROVED, plan_mode=False)
-    if feedback:
+    if plan_markdown:
         text = (
-            "The plan has been approved. Implement it now, taking this reviewer "
-            f"feedback into account:\n\n{feedback}"
+            "The plan has been approved. Implement it now exactly as written "
+            "below (it may have been edited by the reviewer, so treat this as "
+            f"the source of truth):\n\n{plan_markdown}"
         )
     else:
         text = "The plan has been approved. Implement it now as described in the plan."
+    if feedback:
+        text += "\n\nAlso take this reviewer feedback into account:\n\n" + feedback
     await _dispatch_followup(thread_id, metadata, text, plan_mode=False)
     return {"status": PLAN_STATUS_APPROVED}
 

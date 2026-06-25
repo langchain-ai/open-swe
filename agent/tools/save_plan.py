@@ -14,11 +14,13 @@ from typing import Any
 
 from langgraph.config import get_config
 
-from ..dashboard.plan_store import PLAN_STATUS_READY, save_plan_content
+from ..dashboard.plan_store import (
+    PLAN_STATUS_READY,
+    save_plan_content,
+    write_plan_to_sandbox,
+)
 
 logger = logging.getLogger(__name__)
-
-PLAN_FILE_PATH = "plan.md"
 
 
 def save_plan(plan_markdown: str) -> dict[str, Any]:
@@ -62,20 +64,6 @@ def save_plan(plan_markdown: str) -> dict[str, Any]:
 
 
 async def _save(thread_id: str, content: str) -> str:
-    sandbox_path = await _write_to_sandbox(thread_id, content)
+    sandbox_path = await write_plan_to_sandbox(thread_id, content)
     await save_plan_content(thread_id, markdown=content, status=PLAN_STATUS_READY)
     return sandbox_path
-
-
-async def _write_to_sandbox(thread_id: str, content: str) -> str:
-    """Write ``plan.md`` into the thread's sandbox. Best-effort: a missing sandbox
-    must not block publishing the plan to the review page."""
-    try:
-        from ..utils.sandbox_state import get_sandbox_backend
-
-        backend = await get_sandbox_backend(thread_id)
-        await backend.awrite(PLAN_FILE_PATH, content)
-        return PLAN_FILE_PATH
-    except Exception:
-        logger.warning("Could not write plan.md to sandbox for %s", thread_id, exc_info=True)
-        return PLAN_FILE_PATH

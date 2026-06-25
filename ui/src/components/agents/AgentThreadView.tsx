@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react"
+import { useCallback, useMemo, useState } from "react"
 import { Link } from "@tanstack/react-router"
 import { useStreamContext as useAgentThreadStream } from "@langchain/react"
 import { Map as MapIcon } from "lucide-react"
@@ -8,6 +8,8 @@ import type { ModelSelection } from "@/lib/agents/provider/useModelOptions"
 import {
   AgentGitPanel,
   PANEL_MIN_CHAT_WIDTH,
+  readStoredPanelCollapsed,
+  writeStoredPanelCollapsed,
 } from "@/components/agents/AgentGitPanel"
 import { AgentPromptBar } from "@/components/agents/AgentPromptBar"
 import { Messages } from "@/components/agents/messages"
@@ -15,6 +17,7 @@ import { streamMessagesToUi } from "@/lib/agents/streamMessagesToUi"
 import { useSubmitAgentMessage } from "@/lib/agents/provider/useSubmitAgentMessage"
 import { useModelOptions } from "@/lib/agents/provider/useModelOptions"
 import { useIsMobile } from "@/lib/useIsMobile"
+import { cn } from "@/lib/utils"
 
 interface AgentThreadViewProps {
   thread: AgentThread
@@ -40,6 +43,16 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
   const activeSelection = selection ?? threadSelection ?? defaultSelection
   const [planMode, setPlanMode] = useState<boolean | null>(null)
   const activePlanMode = planMode ?? thread.planMode ?? false
+
+  // Own the git panel's collapsed state so the plan banner can reserve space for
+  // the floating expand button the panel renders while collapsed.
+  const [panelCollapsed, setPanelCollapsed] = useState(() =>
+    readStoredPanelCollapsed()
+  )
+  const handlePanelCollapsedChange = useCallback((next: boolean) => {
+    setPanelCollapsed(next)
+    writeStoredPanelCollapsed(next)
+  }, [])
 
   const baseMessages = useMemo<Array<Message>>(() => {
     const live = streamMessagesToUi(
@@ -77,7 +90,12 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
               to="/agents/$threadId/plan"
               params={{ threadId: thread.id }}
               data-testid="review-plan-link"
-              className="flex items-center justify-between gap-2 border-b border-[var(--ui-border)] bg-[var(--ui-panel)] px-4 py-2 text-xs text-[var(--ui-text)] hover:bg-[var(--ui-panel-2)]"
+              className={cn(
+                "flex items-center justify-between gap-2 border-b border-[var(--ui-border)] bg-[var(--ui-panel)] px-4 py-2 text-xs text-[var(--ui-text)] hover:bg-[var(--ui-panel-2)]",
+                // The collapsed panel floats a fixed expand button in the
+                // top-right corner; clear it so it never covers "Review plan →".
+                panelCollapsed && "pr-14"
+              )}
             >
               <span className="flex items-center gap-2">
                 <MapIcon className="size-3.5 text-[var(--ui-accent)]" />
@@ -156,7 +174,12 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
           </div>
         )}
       </div>
-      <AgentGitPanel thread={thread} messages={baseMessages} />
+      <AgentGitPanel
+        thread={thread}
+        messages={baseMessages}
+        collapsed={panelCollapsed}
+        onCollapsedChange={handlePanelCollapsedChange}
+      />
     </div>
   )
 }

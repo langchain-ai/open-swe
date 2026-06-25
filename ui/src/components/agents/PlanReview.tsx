@@ -7,6 +7,7 @@ import {
   deletePlanComment,
   getPlanComments,
   rejectPlan,
+  updatePlan,
 } from "@/lib/plan"
 import { Button } from "@/components/ui/button"
 import { Markdown } from "@/components/agents/ported"
@@ -55,6 +56,50 @@ export function PlanReview({ plan }: { plan: PlanData }) {
   const [busy, setBusy] = useState<"approve" | "reject" | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
+  // Locally track the displayed markdown so a manual edit shows immediately; the
+  // route's query stops polling once a plan exists, so the prop won't refetch.
+  const [markdown, setMarkdown] = useState(plan.markdown)
+  const [editing, setEditing] = useState(false)
+  const [editDraft, setEditDraft] = useState(plan.markdown)
+  const [saving, setSaving] = useState(false)
+
+  // Reflect external plan updates (e.g. an agent revision) while not editing.
+  useEffect(() => {
+    if (!editing) setMarkdown(plan.markdown)
+  }, [plan.markdown, editing])
+
+  const canEdit =
+    plan.isOwner && plan.status !== "approved" && plan.status !== "cancelled"
+
+  const startEditing = useCallback(() => {
+    setEditDraft(markdown)
+    setEditing(true)
+    setError(null)
+  }, [markdown])
+
+  const cancelEditing = useCallback(() => {
+    setEditing(false)
+    setError(null)
+  }, [])
+
+  const saveEdit = useCallback(async () => {
+    const next = editDraft.trim()
+    if (!next) {
+      setError("The plan cannot be empty.")
+      return
+    }
+    setSaving(true)
+    setError(null)
+    try {
+      const result = await updatePlan(plan.threadId, next)
+      setMarkdown(result.markdown)
+      setEditing(false)
+    } catch (e) {
+      setError((e as Error).message)
+    } finally {
+      setSaving(false)
+    }
+  }, [editDraft, plan.threadId])
 
   // Poll so reviewers see each other's comments without a realtime transport.
   useEffect(() => {
@@ -126,13 +171,13 @@ export function PlanReview({ plan }: { plan: PlanData }) {
 
   const copyPlan = useCallback(async () => {
     setError(null)
-    if (await copyToClipboard(plan.markdown)) {
+    if (await copyToClipboard(markdown)) {
       setCopied(true)
       window.setTimeout(() => setCopied(false), 1500)
     } else {
       setError("Couldn't copy the plan to the clipboard.")
     }
-  }, [plan.markdown])
+  }, [markdown])
 
   return (
     <div
@@ -159,38 +204,72 @@ export function PlanReview({ plan }: { plan: PlanData }) {
               {decision}
             </span>
           )}
-          <Button
-            data-testid="copy-plan"
-            variant="secondary"
-            disabled={!plan.markdown.trim()}
-            onClick={() => void copyPlan()}
-          >
-            {copied ? "Copied!" : "Copy markdown"}
-          </Button>
-          {plan.isOwner && (
-            <Button
-              data-testid="approve-plan"
-              disabled={busy !== null || decision !== null}
-              onClick={() => void decide("approve")}
-            >
-              Approve
-            </Button>
+          {editing ? (
+            <>
+              <Button
+                data-testid="cancel-edit-plan"
+                variant="secondary"
+                disabled={saving}
+                onClick={cancelEditing}
+              >
+                Cancel
+              </Button>
+              <Button
+                data-testid="save-plan"
+                disabled={saving || !editDraft.trim()}
+                onClick={() => void saveEdit()}
+              >
+                {saving ? "Saving…" : "Save"}
+              </Button>
+            </>
+          ) : (
+            <>
+              {canEdit && (
+                <Button
+                  data-testid="edit-plan"
+                  variant="secondary"
+                  disabled={busy !== null || decision !== null}
+                  onClick={startEditing}
+                >
+                  Edit
+                </Button>
+              )}
+              <Button
+                data-testid="copy-plan"
+                variant="secondary"
+                disabled={!markdown.trim()}
+                onClick={() => void copyPlan()}
+              >
+                {copied ? "Copied!" : "Copy markdown"}
+              </Button>
+              {plan.isOwner && (
+                <Button
+                  data-testid="approve-plan"
+                  disabled={busy !== null || decision !== null}
+                  onClick={() => void decide("approve")}
+                >
+                  Approve
+                </Button>
+              )}
+              <Button
+                data-testid="reject-plan"
+                variant="secondary"
+                // Requesting changes feeds the comments to the agent, so it's
+                // meaningless with none — disable until at least one is left.
+                disabled={
+                  busy !== null || decision !== null || comments.length === 0
+                }
+                title={
+                  comments.length === 0
+                    ? "Leave a comment first to request changes"
+                    : undefined
+                }
+                onClick={() => void decide("reject")}
+              >
+                Request changes
+              </Button>
+            </>
           )}
-          <Button
-            data-testid="reject-plan"
-            variant="secondary"
-            // Requesting changes feeds the comments to the agent, so it's
-            // meaningless with none — disable until at least one is left.
-            disabled={busy !== null || decision !== null || comments.length === 0}
-            title={
-              comments.length === 0
-                ? "Leave a comment first to request changes"
-                : undefined
-            }
-            onClick={() => void decide("reject")}
-          >
-            Request changes
-          </Button>
         </div>
       </div>
 
@@ -200,8 +279,21 @@ export function PlanReview({ plan }: { plan: PlanData }) {
           data-testid="plan-document"
           data-color-scheme={resolvedTheme}
         >
-          {plan.markdown.trim() ? (
-            <Markdown content={plan.markdown} />
+          {editing ? (
+            <div className="flex h-full flex-col gap-2">
+              {error && (
+                <p className="text-xs text-[color:var(--ui-danger)]">{error}</p>
+              )}
+              <textarea
+                data-testid="plan-editor"
+                value={editDraft}
+                onChange={(e) => setEditDraft(e.target.value)}
+                spellCheck={false}
+                className="min-h-[20rem] w-full flex-1 resize-none rounded-md border border-[var(--ui-border)] bg-[var(--ui-bg)] px-3 py-2 font-mono text-sm text-[var(--ui-text)] outline-none focus:border-[var(--ui-accent)]"
+              />
+            </div>
+          ) : markdown.trim() ? (
+            <Markdown content={markdown} />
           ) : (
             <p className="text-sm text-[var(--ui-text-dim)]">
               The plan hasn't been written yet.
