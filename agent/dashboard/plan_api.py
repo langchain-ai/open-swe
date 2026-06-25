@@ -173,8 +173,9 @@ async def approve_plan(thread_id: str, session: dict[str, Any] = _SESSION_DEP) -
     # Read the published plan + comments BEFORE mutating state: a store failure
     # here aborts the decision (500) rather than dispatching without them. The
     # published markdown may have been edited by the reviewer, so it is the
-    # source of truth handed to the agent (not its own stale history).
-    content = await get_plan_content(thread_id) or {}
+    # source of truth handed to the agent (not its own stale history) — read it
+    # strictly so a transient failure can't silently drop the edit.
+    content = await get_plan_content(thread_id, raise_on_error=True) or {}
     plan_markdown = str(content.get("markdown", "")).strip()
     feedback = _format_comments(await list_plan_comments(thread_id, raise_on_error=True))
     await set_plan_status(thread_id, PLAN_STATUS_APPROVED, plan_mode=False)

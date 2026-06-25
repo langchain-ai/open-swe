@@ -321,7 +321,7 @@ async def test_approve_plan_dispatches_published_markdown(
     async def fake_meta(thread_id: str) -> dict[str, Any]:
         return {"plan_status": "ready"}
 
-    async def fake_get_content(thread_id: str) -> dict[str, Any]:
+    async def fake_get_content(thread_id: str, *, raise_on_error: bool = False) -> dict[str, Any]:
         return {"markdown": "# Edited plan\n\nstep one", "status": "ready"}
 
     async def fake_list(thread_id: str, *, raise_on_error: bool = False) -> list[dict[str, Any]]:
@@ -348,3 +348,35 @@ async def test_approve_plan_dispatches_published_markdown(
     assert "# Edited plan" in dispatched["text"]
     assert "use snake_case" in dispatched["text"]
     assert dispatched["plan_mode"] is False
+
+
+async def test_approve_plan_aborts_when_plan_read_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent.dashboard import plan_api
+
+    dispatched: list[Any] = []
+
+    async def fake_meta(thread_id: str) -> dict[str, Any]:
+        return {"plan_status": "ready"}
+
+    async def fake_get_content(thread_id: str, *, raise_on_error: bool = False) -> dict[str, Any]:
+        # A transient store failure must abort approval, not silently drop the
+        # owner's edited plan and dispatch the generic fallback text.
+        raise RuntimeError("store down")
+
+    async def fake_set_status(thread_id: str, status: str, *, plan_mode: Any = None) -> None:
+        return None
+
+    async def fake_dispatch(*a: Any, **k: Any) -> None:
+        dispatched.append((a, k))
+
+    monkeypatch.setattr(plan_api, "_thread_metadata", fake_meta)
+    monkeypatch.setattr(plan_api, "_user_owns_thread", lambda *a, **k: True)
+    monkeypatch.setattr(plan_api, "get_plan_content", fake_get_content)
+    monkeypatch.setattr(plan_api, "set_plan_status", fake_set_status)
+    monkeypatch.setattr(plan_api, "_dispatch_followup", fake_dispatch)
+
+    with pytest.raises(RuntimeError):
+        await plan_api.approve_plan("t1", session={"sub": "a", "email": None})
+    assert dispatched == []

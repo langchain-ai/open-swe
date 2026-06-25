@@ -88,11 +88,20 @@ async def write_plan_to_sandbox(thread_id: str, content: str) -> str:
         return PLAN_FILE_PATH
 
 
-async def get_plan_content(thread_id: str) -> dict[str, Any] | None:
+async def get_plan_content(
+    thread_id: str, *, raise_on_error: bool = False
+) -> dict[str, Any] | None:
+    """The published plan record, or ``None`` when none exists.
+
+    With ``raise_on_error=True`` a store failure propagates instead of resolving
+    to ``None``. Approve uses this so a transient failure aborts the decision
+    rather than dispatching the agent without the (possibly edited) plan."""
     client = _client()
     try:
         item = await client.store.get_item(PLAN_CONTENT_NAMESPACE, thread_id)
     except Exception:
+        if raise_on_error:
+            raise
         return None
     return _item_value(item)
 
