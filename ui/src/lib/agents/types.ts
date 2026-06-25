@@ -66,6 +66,8 @@ export interface DiffData {
 export interface ToolExecutionChunk {
   kind: "tool-execution"
   toolCallId: string
+  /** Stable arrival time for the tool call, shown on hover. */
+  timestamp?: string
   title: string
   toolKind: AcpToolKind
   input?: Record<string, unknown>
@@ -140,6 +142,7 @@ export interface Message {
   timestamp: string
   /** Timestamp of the first message in an agent turn; used to derive work duration. */
   startedAt?: string
+  timestampIsFallback?: boolean
   chunks: Array<Chunk>
   hidden?: boolean
 }

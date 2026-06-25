@@ -14,6 +14,7 @@ import {
 import { AgentPromptBar } from "@/components/agents/AgentPromptBar"
 import { Messages } from "@/components/agents/messages"
 import { streamMessagesToUi } from "@/lib/agents/streamMessagesToUi"
+import { messageArrivalTimestamp } from "@/lib/agents/messageTimestamps"
 import { useSubmitAgentMessage } from "@/lib/agents/provider/useSubmitAgentMessage"
 import { useModelOptions } from "@/lib/agents/provider/useModelOptions"
 import { useIsMobile } from "@/lib/useIsMobile"
@@ -58,7 +59,8 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
     const live = streamMessagesToUi(
       stream.messages,
       stream.toolCalls,
-      stream.subagents
+      stream.subagents,
+      messageArrivalTimestamp
     )
     if (live.length > 0) return live
     // Optimistic transcript seeded by `AgentsHome` on thread creation (the
