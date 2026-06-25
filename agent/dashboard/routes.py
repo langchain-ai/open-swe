@@ -155,6 +155,7 @@ from .thread_api import (
     delete_dashboard_thread,
     get_dashboard_thread,
     get_dashboard_thread_pr_diff,
+    get_dashboard_thread_recovery_patch,
     get_dashboard_thread_state,
     list_dashboard_threads,
     list_dashboard_threads_page,
@@ -1531,6 +1532,23 @@ async def api_get_thread(
         session["sub"],
         email=session.get("email"),
         mark_viewed=mark_viewed,
+    )
+
+
+@router.get("/threads/{thread_id}/recovery.patch")
+async def api_get_thread_recovery_patch(
+    thread_id: str,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> Response:
+    content, filename = await get_dashboard_thread_recovery_patch(
+        thread_id,
+        session["sub"],
+        email=session.get("email"),
+    )
+    return Response(
+        content=content,
+        media_type="text/x-diff",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 

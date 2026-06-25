@@ -18,6 +18,7 @@ from langchain_core.messages.content import create_image_block
 from pydantic import BaseModel, ConfigDict, Field
 
 from ..utils.langsmith import get_langsmith_trace_url
+from ..utils.sandbox import create_sandbox
 from ..utils.thread_ops import (
     get_thread_active_status,
     langgraph_client,
@@ -56,6 +57,8 @@ _PROXY_STREAM_TIMEOUT = httpx.Timeout(None)
 _SURFACED_SOURCES: tuple[str, ...] = ("dashboard", "github", "slack", "linear", "schedule")
 # PR lifecycle states surfaced to the UI for a thread's associated pull request.
 _PR_STATES: frozenset[str] = frozenset({"draft", "open", "merged", "closed"})
+_RECOVERY_PATCH_LIMIT_BYTES = 25 * 1024 * 1024
+_RECOVERY_PATCH_TIMEOUT_SECONDS = 120
 
 
 def _agent_version_metadata() -> dict[str, str]:
@@ -1380,6 +1383,235 @@ async def get_dashboard_thread_state(
     if _thread_is_busy(thread) or metadata_run_status in {"pending", "running"}:
         result.pop("next", None)
     return result
+
+
+def _recovery_patch_filename(thread_id: str) -> str:
+    safe = "".join(c if c.isalnum() or c in {"-", "_", "."} else "-" for c in thread_id)
+    return f"open-swe-{(safe or 'thread')[:80]}.patch"
+
+
+def _response_output(result: Any) -> str:
+    output = result.get("output") if isinstance(result, dict) else getattr(result, "output", "")
+    return output if isinstance(output, str) else str(output or "")
+
+
+def _response_exit_code(result: Any) -> int | None:
+    value = (
+        result.get("exit_code") if isinstance(result, dict) else getattr(result, "exit_code", None)
+    )
+    return value if isinstance(value, int) else None
+
+
+def _download_content(result: Any) -> bytes | None:
+    for attr in ("content", "data", "bytes"):
+        value = result.get(attr) if isinstance(result, dict) else getattr(result, attr, None)
+        if isinstance(value, bytes):
+            return value
+        if isinstance(value, str):
+            return value.encode()
+    file_data = (
+        result.get("file_data") if isinstance(result, dict) else getattr(result, "file_data", None)
+    )
+    if isinstance(file_data, bytes):
+        return file_data
+    if isinstance(file_data, str):
+        return file_data.encode()
+    if isinstance(file_data, dict):
+        for key in ("content", "data", "bytes"):
+            value = file_data.get(key)
+            if isinstance(value, bytes):
+                return value
+            if isinstance(value, str):
+                return value.encode()
+    return None
+
+
+def _recovery_patch_command(metadata: dict[str, Any], thread_id: str) -> str:
+    _, name, _ = _metadata_repo(metadata)
+    payload = {
+        "repo_name": name,
+        "base_branch": metadata.get("base_branch")
+        if isinstance(metadata.get("base_branch"), str)
+        else "main",
+        "thread_key": _recovery_patch_filename(thread_id).removesuffix(".patch"),
+    }
+    encoded = base64.b64encode(json.dumps(payload).encode()).decode()
+    script = r"""python - <<'PY'
+import base64
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+PAYLOAD = json.loads(base64.b64decode('__PAYLOAD__').decode())
+WORKSPACE = Path('/workspace')
+
+
+def git(repo, args, check=True):
+    result = subprocess.run(
+        ['git', '-C', str(repo), *args],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    if check and result.returncode != 0:
+        detail = result.stderr.decode(errors='replace').strip()
+        raise RuntimeError(detail or 'git ' + ' '.join(args) + ' failed')
+    return result
+
+
+def repo_paths():
+    repo_name = PAYLOAD.get('repo_name')
+    if isinstance(repo_name, str) and repo_name:
+        yield WORKSPACE / Path(repo_name).name
+    if WORKSPACE.exists():
+        for child in sorted(WORKSPACE.iterdir()):
+            if child.is_dir():
+                yield child
+
+
+def find_repo():
+    seen = set()
+    for path in repo_paths():
+        if path in seen:
+            continue
+        seen.add(path)
+        if not (path / '.git').exists():
+            continue
+        result = git(path, ['rev-parse', '--show-toplevel'], check=False)
+        if result.returncode == 0:
+            root = Path(result.stdout.decode(errors='replace').strip())
+            if root.exists():
+                return root
+    raise RuntimeError('no git repository found in sandbox workspace')
+
+
+def safe_ref(value):
+    if not isinstance(value, str) or not value or len(value) > 200:
+        return None
+    if value.startswith('-') or '\x00' in value or '\n' in value or '\r' in value:
+        return None
+    return value
+
+
+def commit_for(repo, ref):
+    result = git(repo, ['rev-parse', '--verify', ref + '^{commit}'], check=False)
+    if result.returncode == 0:
+        return result.stdout.decode(errors='replace').strip()
+    return None
+
+
+def merge_base(repo):
+    base_branch = safe_ref(PAYLOAD.get('base_branch')) or 'main'
+    refs = ['origin/' + base_branch, base_branch, 'origin/main', 'main', 'origin/master', 'master', 'HEAD~1']
+    for ref in refs:
+        commit = commit_for(repo, ref)
+        if not commit:
+            continue
+        result = git(repo, ['merge-base', 'HEAD', commit], check=False)
+        if result.returncode == 0:
+            return result.stdout.decode(errors='replace').strip()
+        return commit
+    return git(repo, ['hash-object', '-t', 'tree', '/dev/null']).stdout.decode(errors='replace').strip()
+
+
+def write_patch(repo, base):
+    patch_path = Path('/tmp') / ((PAYLOAD.get('thread_key') or 'open-swe-recovery') + '.patch')
+    with patch_path.open('wb') as patch_file:
+        tracked = git(repo, ['diff', '--binary', '--full-index', base, '--', '.']).stdout
+        patch_file.write(tracked)
+        untracked = git(repo, ['ls-files', '--others', '--exclude-standard', '-z']).stdout
+        for raw_path in [p for p in untracked.split(b'\0') if p]:
+            rel_path = raw_path.decode('utf-8', errors='surrogateescape')
+            full_path = repo / rel_path
+            if not full_path.is_file():
+                continue
+            result = git(
+                repo,
+                ['diff', '--no-index', '--binary', '--full-index', '--', '/dev/null', rel_path],
+                check=False,
+            )
+            if result.returncode not in {0, 1}:
+                detail = result.stderr.decode(errors='replace').strip()
+                raise RuntimeError(detail or 'failed to diff untracked file ' + rel_path)
+            if result.stdout:
+                if patch_file.tell() and not result.stdout.startswith(b'\n'):
+                    patch_file.write(b'\n')
+                patch_file.write(result.stdout)
+    return patch_path
+
+
+try:
+    repo = find_repo()
+    base = merge_base(repo)
+    patch_path = write_patch(repo, base)
+    print(json.dumps({'ok': True, 'path': str(patch_path), 'size': patch_path.stat().st_size}))
+except Exception as exc:
+    print(json.dumps({'ok': False, 'error': str(exc)}))
+    sys.exit(1)
+PY"""
+    return script.replace("__PAYLOAD__", encoded)
+
+
+async def get_dashboard_thread_recovery_patch(
+    thread_id: str, login: str, *, email: str | None = None
+) -> tuple[bytes, str]:
+    thread = await _authorized_thread(thread_id, login, email=email)
+    metadata = thread.get("metadata") if isinstance(thread.get("metadata"), dict) else {}
+    sandbox_id = metadata.get("sandbox_id")
+    if not isinstance(sandbox_id, str) or not sandbox_id:
+        raise HTTPException(404, "thread has no recoverable sandbox")
+
+    try:
+        sandbox = await asyncio.to_thread(create_sandbox, sandbox_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Could not connect to sandbox %s for recovery", sandbox_id, exc_info=True)
+        raise HTTPException(502, "could not connect to thread sandbox") from exc
+
+    try:
+        result = await asyncio.to_thread(
+            sandbox.execute,
+            _recovery_patch_command(metadata, thread_id),
+            timeout=_RECOVERY_PATCH_TIMEOUT_SECONDS,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Recovery patch generation failed for %s", thread_id, exc_info=True)
+        raise HTTPException(502, "failed to generate recovery patch") from exc
+
+    output = _response_output(result).strip()
+    try:
+        payload = json.loads(output.splitlines()[-1])
+    except (IndexError, json.JSONDecodeError) as exc:
+        logger.debug("Invalid recovery patch response for %s: %s", thread_id, output)
+        raise HTTPException(502, "failed to generate recovery patch") from exc
+
+    if _response_exit_code(result) not in {0, None} or payload.get("ok") is not True:
+        detail = payload.get("error") if isinstance(payload.get("error"), str) else None
+        logger.debug("Recovery patch generation failed for %s: %s", thread_id, detail)
+        raise HTTPException(502, detail or "failed to generate recovery patch")
+
+    size = payload.get("size")
+    if not isinstance(size, int):
+        raise HTTPException(502, "failed to generate recovery patch")
+    if size == 0:
+        raise HTTPException(404, "thread has no recoverable changes")
+    if size > _RECOVERY_PATCH_LIMIT_BYTES:
+        raise HTTPException(413, "recovery patch is too large to download")
+
+    patch_path = payload.get("path")
+    if not isinstance(patch_path, str) or not patch_path.startswith("/tmp/"):
+        raise HTTPException(502, "failed to generate recovery patch")
+
+    try:
+        downloads = await asyncio.to_thread(sandbox.download_files, [patch_path])
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Recovery patch download failed for %s", thread_id, exc_info=True)
+        raise HTTPException(502, "failed to download recovery patch") from exc
+    if not downloads:
+        raise HTTPException(502, "failed to download recovery patch")
+    content = _download_content(downloads[0])
+    if content is None:
+        raise HTTPException(502, "failed to download recovery patch")
+    return content, _recovery_patch_filename(thread_id)
 
 
 # No app-installation-token fallback: PR file contents must be fetched with
