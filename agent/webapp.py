@@ -66,6 +66,7 @@ from .utils.auth import (
 from .utils.comments import get_recent_comments
 from .utils.dashboard_links import dashboard_thread_url
 from .utils.github_app import (
+    check_write_access,
     get_github_app_installation_token,
     get_github_app_installation_token_with_expiry,
 )
@@ -1067,6 +1068,37 @@ async def _post_account_link_prompt(
         logger.debug("Failed to post account-link prompt to Slack", exc_info=True)
 
 
+async def _build_push_access_prompt_block(repo_config: dict[str, str]) -> str:
+    """Return a system prompt block that surfaces push-access status for the target repo."""
+    owner = (repo_config.get("owner") or "").strip()
+    name = (repo_config.get("name") or "").strip()
+    if not owner or not name:
+        return ""
+    try:
+        has_write = await check_write_access(owner, name)
+    except Exception:  # noqa: BLE001
+        logger.debug("Push access pre-check failed for %s/%s", owner, name, exc_info=True)
+        has_write = None
+    if has_write is True:
+        return (
+            "## Push Access Pre-check\n"
+            f"`{owner}/{name}` is write-enabled for open-swe[bot]; `git push` should succeed.\n\n"
+        )
+    if has_write is False:
+        return (
+            "## PUSH IS NOT AUTHORIZED\n"
+            f"open-swe[bot] does NOT have push access to `{owner}/{name}`. Any `git push` to this "
+            "repo will be rejected with `Permission denied`.\n\n"
+            "Before doing more than a brief read-only investigation:\n"
+            "1. Tell the user up front, in this thread, that push is not authorized.\n"
+            "2. Ask whether to proceed read-only (post a diff for manual application) or whether "
+            "they can grant the Open SWE GitHub App write access to this repo first.\n"
+            "3. Do NOT silently retry `git push` on follow-up mentions — the earlier finding still "
+            "applies until the user confirms access was granted.\n\n"
+        )
+    return ""
+
+
 async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[str, str]) -> None:
     """Process a Slack app mention by creating a run or queuing a mid-run message."""
     channel_id = event_data.get("channel_id", "")
@@ -1148,12 +1180,15 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
         context_messages, user_names_by_id
     )
 
+    push_access_block = await _build_push_access_prompt_block(repo_config)
+
     prompt = (
         "You were mentioned in Slack.\n\n"
         "## Default Repository Hint\n"
         f"{repo_config.get('owner')}/{repo_config.get('name')}\n"
         "Use this only if the Slack conversation does not identify a different repository.\n\n"
-        f"## Triggered by\n{trigger_user}\n\n"
+        + push_access_block
+        + f"## Triggered by\n{trigger_user}\n\n"
         f"## Slack Thread\n- Channel: {channel_id}\n- Thread TS: {thread_ts}\n"
         f"- Context starts at: {context_source}\n\n"
         f"## Conversation Context\n{context_text}\n\n"

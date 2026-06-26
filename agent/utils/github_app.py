@@ -42,6 +42,9 @@ ScopeKey = tuple[tuple[int, ...], tuple[str, ...], PermissionKey]
 # scope key -> (token, expires_at, good_until). In-process only; never persisted.
 _TOKEN_CACHE: dict[ScopeKey, tuple[str, str | None, datetime]] = {}
 
+# (owner_lower, repo_lower) -> has_write_access. In-process only.
+_WRITE_ACCESS_CACHE: dict[tuple[str, str], bool] = {}
+
 
 def normalize_permissions(permissions: PermissionMap | None) -> PermissionKey:
     """Return a stable, hashable permission scope key."""
@@ -91,6 +94,7 @@ def _cached_token(key: ScopeKey, *, now: datetime) -> tuple[str, str | None] | N
 def clear_app_token_cache() -> None:
     """Drop all cached installation tokens (test/maintenance hook)."""
     _TOKEN_CACHE.clear()
+    _WRITE_ACCESS_CACHE.clear()
 
 
 def _generate_app_jwt() -> str:
@@ -168,3 +172,41 @@ async def get_github_app_installation_token_with_expiry(
     except Exception:
         logger.exception("Failed to get GitHub App installation token")
         return None, None
+
+
+async def check_write_access(owner: str, repo: str) -> bool | None:
+    """Return True/False if the GitHub App can push to ``owner/repo``, None on probe failure."""
+    if not owner or not repo:
+        return None
+    cache_key = (owner.lower(), repo.lower())
+    cached = _WRITE_ACCESS_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+
+    token = await get_github_app_installation_token()
+    if not token:
+        return None
+
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"https://api.github.com/repos/{owner}/{repo}",
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Accept": "application/vnd.github+json",
+                    "X-GitHub-Api-Version": "2022-11-28",
+                },
+                timeout=10.0,
+            )
+            if response.status_code == 404:
+                _WRITE_ACCESS_CACHE[cache_key] = False
+                return False
+            response.raise_for_status()
+            data = response.json()
+            permissions = data.get("permissions") if isinstance(data, dict) else None
+            has_write = bool(isinstance(permissions, dict) and permissions.get("push"))
+            _WRITE_ACCESS_CACHE[cache_key] = has_write
+            return has_write
+    except Exception:
+        logger.exception("Failed to probe write access for %s/%s", owner, repo)
+        return None
