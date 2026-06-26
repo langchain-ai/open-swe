@@ -67,7 +67,7 @@ import type {
 import type { ChatAttachment } from "@/components/agents/ReviewChat"
 import type { DiffStyle } from "@/components/agents/utils/diffUtils"
 import { Markdown } from "@/components/agents/ported"
-import { PrHeader as SharedPrHeader } from "@/components/agents/PrHeader"
+import { PrHeader } from "@/components/agents/PrHeader"
 import {
   ReviewChat,
   ReviewChatComposerProvider,
@@ -1120,7 +1120,19 @@ function ReviewBodyInner({
                 config={DIFF_VIRTUALIZER_CONFIG}
               >
                 <div ref={scrollerProbe} aria-hidden className="hidden" />
-                <PrHeader detail={detail} />
+                <PrHeader
+                  url={detail.url}
+                  title={detail.pr.title}
+                  state={detail.pr.state}
+                  headRef={detail.pr.head_ref}
+                  baseRef={detail.pr.base_ref}
+                  author={detail.pr.author?.login}
+                  stats={{
+                    changedFiles: detail.pr.changed_files,
+                    additions: detail.pr.additions,
+                    deletions: detail.pr.deletions,
+                  }}
+                />
                 <div className="mt-4 rounded-lg border border-border bg-card p-4">
                   {detail.pr.body ? (
                     <Markdown
@@ -1253,25 +1265,6 @@ function DiffStyleButton({
     >
       {children}
     </button>
-  )
-}
-
-function PrHeader({ detail }: { detail: ReviewDetail }) {
-  const { pr } = detail
-  return (
-    <SharedPrHeader
-      url={detail.url}
-      title={pr.title}
-      state={pr.state}
-      headRef={pr.head_ref}
-      baseRef={pr.base_ref}
-      author={pr.author?.login}
-      stats={{
-        changedFiles: pr.changed_files,
-        additions: pr.additions,
-        deletions: pr.deletions,
-      }}
-    />
   )
 }
 
