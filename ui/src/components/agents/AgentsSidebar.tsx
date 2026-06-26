@@ -27,6 +27,7 @@ import type { SessionUser } from "@/lib/api"
 import type { AgentSource, AgentThread } from "@/lib/agents/types"
 import type { SidebarLayout } from "@/components/sidebar-layout"
 import { SidebarUserMenu } from "@/components/SidebarUserMenu"
+import { SidebarFilterMenu } from "@/components/agents/SidebarFilterMenu"
 import { Button } from "@/components/ui/button"
 import {
   SidebarCollapseButton,
@@ -34,7 +35,13 @@ import {
   SidebarLayoutProvider,
   useSidebarLayout,
 } from "@/components/sidebar-layout"
-import { groupThreads } from "@/lib/agents/api"
+import {
+  availableFacets,
+  filterThreads,
+  groupThreadsByMode,
+  hasActiveFilters,
+} from "@/lib/agents/sidebarFilter"
+import { useSidebarPrefs } from "@/lib/agents/sidebarPrefs"
 import {
   useDeleteAgentThread,
   useResolveAgentThread,
@@ -101,6 +108,8 @@ export function AgentsSidebar({
   activeThreadId,
   layout,
 }: AgentsSidebarProps) {
+  const { prefs, setGroup, setCompact, setFilters, resetFilters } =
+    useSidebarPrefs()
   const sidebar = useSidebarThreads(RESOLVED_SIDEBAR_LIMIT)
   const activeThreads = sidebar.data?.active.items ?? []
   const resolvedThreads = sidebar.data?.resolved.items ?? []
@@ -108,7 +117,16 @@ export function AgentsSidebar({
   const visibleThreads = [...activeThreads, ...resolvedThreads]
   useSeedAgentThreadDetails(visibleThreads, activeThreadId)
   useRunCompletionNotifier(visibleThreads, activeThreadId)
-  const groups = groupThreads(activeThreads)
+
+  const facets = availableFacets(visibleThreads)
+  const filteredActive = filterThreads(activeThreads, prefs.filters)
+  const filteredResolved = filterThreads(resolvedThreads, prefs.filters)
+  const sections = groupThreadsByMode(filteredActive, prefs.group)
+  const showResolved = prefs.filters.includeResolved
+  const isEmpty =
+    sections.length === 0 &&
+    (!showResolved || filteredResolved.length === 0) &&
+    hasActiveFilters(prefs.filters)
 
   return (
     <SidebarFrame
@@ -159,42 +177,55 @@ export function AgentsSidebar({
       </nav>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
-        <ThreadGroup
-          label="Today"
-          threads={groups.today}
-          activeThreadId={activeThreadId}
-          onNavigate={layout.closeOnMobile}
-        />
-        <ThreadGroup
-          label="Last 7 days"
-          threads={groups.last7}
-          activeThreadId={activeThreadId}
-          onNavigate={layout.closeOnMobile}
-          defaultCollapsed
-        />
-        <ThreadGroup
-          label="Last 30 days"
-          threads={groups.last30}
-          activeThreadId={activeThreadId}
-          onNavigate={layout.closeOnMobile}
-          defaultCollapsed
-        />
-        <ThreadGroup
-          label="Older"
-          threads={groups.older}
-          activeThreadId={activeThreadId}
-          onNavigate={layout.closeOnMobile}
-        />
-        <ResolvedThreadGroup
-          threads={resolvedThreads}
-          hasMore={resolvedHasMore}
-          activeThreadId={activeThreadId}
-          onNavigate={layout.closeOnMobile}
-        />
+        {prefs.group === "none"
+          ? sections[0]?.threads.map((thread) => (
+              <ThreadRow
+                key={thread.id}
+                thread={thread}
+                isActive={thread.id === activeThreadId}
+                onNavigate={layout.closeOnMobile}
+                compact={prefs.compact}
+              />
+            ))
+          : sections.map((section) => (
+              <ThreadGroup
+                key={`${prefs.group}:${section.key}`}
+                label={section.label}
+                threads={section.threads}
+                activeThreadId={activeThreadId}
+                onNavigate={layout.closeOnMobile}
+                defaultCollapsed={section.defaultCollapsed}
+                compact={prefs.compact}
+              />
+            ))}
+        {showResolved && (
+          <ResolvedThreadGroup
+            threads={filteredResolved}
+            hasMore={resolvedHasMore}
+            activeThreadId={activeThreadId}
+            onNavigate={layout.closeOnMobile}
+            compact={prefs.compact}
+          />
+        )}
+        {isEmpty && (
+          <p className="px-2.5 py-6 text-center text-xs text-[var(--ui-text-dim)]">
+            No threads match these filters.
+          </p>
+        )}
       </div>
 
-      <div className="p-2">
-        <SidebarUserMenu user={user} showSettingsLink />
+      <div className="flex items-center gap-1 p-2">
+        <div className="min-w-0 flex-1">
+          <SidebarUserMenu user={user} showSettingsLink />
+        </div>
+        <SidebarFilterMenu
+          prefs={prefs}
+          facets={facets}
+          onGroupChange={setGroup}
+          onFiltersChange={setFilters}
+          onCompactChange={setCompact}
+          onResetFilters={resetFilters}
+        />
       </div>
     </SidebarFrame>
   )
@@ -206,12 +237,14 @@ function ThreadGroup({
   activeThreadId,
   onNavigate,
   defaultCollapsed = false,
+  compact = false,
 }: {
   label: string
   threads: Array<AgentThread>
   activeThreadId?: string
   onNavigate?: () => void
   defaultCollapsed?: boolean
+  compact?: boolean
 }) {
   const [collapsed, setCollapsed] = useState(defaultCollapsed)
   if (threads.length === 0) return null
@@ -219,7 +252,7 @@ function ThreadGroup({
   const ToggleIcon = collapsed ? CaretRightIcon : CaretDownIcon
 
   return (
-    <div className="mb-3">
+    <div className={compact ? "mb-2" : "mb-3"}>
       <button
         type="button"
         onClick={() => setCollapsed((value) => !value)}
@@ -237,6 +270,7 @@ function ThreadGroup({
             thread={thread}
             isActive={thread.id === activeThreadId}
             onNavigate={onNavigate}
+            compact={compact}
           />
         ))}
     </div>
@@ -248,11 +282,13 @@ function ResolvedThreadGroup({
   hasMore,
   activeThreadId,
   onNavigate,
+  compact = false,
 }: {
   threads: Array<AgentThread>
   hasMore: boolean
   activeThreadId?: string
   onNavigate?: () => void
+  compact?: boolean
 }) {
   const [collapsed, setCollapsed] = useState(true)
   if (threads.length === 0) return null
@@ -283,6 +319,7 @@ function ResolvedThreadGroup({
               thread={thread}
               isActive={thread.id === activeThreadId}
               onNavigate={onNavigate}
+              compact={compact}
             />
           ))}
           {hasMore && (
@@ -305,10 +342,12 @@ function ThreadRow({
   thread,
   isActive,
   onNavigate,
+  compact = false,
 }: {
   thread: AgentThread
   isActive: boolean
   onNavigate?: () => void
+  compact?: boolean
 }) {
   const deleteThread = useDeleteAgentThread()
   const resolveThread = useResolveAgentThread()
@@ -367,7 +406,8 @@ function ThreadRow({
               params={{ threadId: thread.id }}
               onClick={onNavigate}
               className={cn(
-                "group mb-0.5 flex h-8 items-center gap-2 rounded-lg px-2.5 transition-colors",
+                "group mb-0.5 flex items-center gap-2 rounded-lg px-2.5 transition-colors",
+                compact ? "h-7 gap-1.5" : "h-8",
                 isActive
                   ? "bg-[var(--ui-accent-bubble)] text-[var(--ui-text)]"
                   : "text-[var(--ui-text-muted)] hover:bg-[var(--ui-sidebar-hover)]",
@@ -405,7 +445,7 @@ function ThreadRow({
           <span className="min-w-0 flex-1 truncate text-xs">
             {thread.title}
           </span>
-          {prMeta && PrIcon && (
+          {!compact && prMeta && PrIcon && (
             <PrIcon
               className={cn(
                 "size-3.5 shrink-0 group-hover:hidden",
@@ -416,7 +456,7 @@ function ThreadRow({
               <title>{prMeta.label}</title>
             </PrIcon>
           )}
-          {badge && (
+          {!compact && badge && (
             <span className="shrink-0 rounded bg-[var(--ui-panel-2)] px-1.5 py-0.5 text-[10px] text-[var(--ui-success)] group-hover:hidden">
               {badge}
             </span>
