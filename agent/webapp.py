@@ -18,7 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
 
-from .completion import handle_run_completion
+from .completion import handle_run_completion, verify_run_complete_token
 from .dashboard import router as dashboard_router
 from .dashboard.agent_overrides import (
     get_profile_default_repo,
@@ -1323,6 +1323,8 @@ async def health_check() -> dict[str, str]:
 @app.post("/webhooks/run-complete")
 async def run_complete_webhook(request: Request) -> dict[str, str]:
     """Platform run-completion webhook: post a failure reply for runs that died."""
+    if not verify_run_complete_token(request.query_params.get("token")):
+        raise HTTPException(status_code=401, detail="Invalid run-complete token")
     try:
         payload = await request.json()
     except Exception:  # noqa: BLE001

@@ -1,64 +1,13 @@
-import ipaddress
-import socket
 from typing import Any
 from urllib.parse import urljoin, urlparse, urlunparse
 
 import httpx
 
+from ..utils.url_safety import resolve_and_validate as _resolve_and_validate
+
 _MAX_REDIRECTS = 5
 
 _REDIRECT_CODES = {301, 302, 303, 307, 308}
-
-
-def _resolve_and_validate(url: str) -> tuple[bool, str, str | None, list | None]:
-    """Resolve a URL's hostname and check every address is safe to contact.
-
-    Returns (is_safe, reason, hostname, addr_infos). When safe, the caller pins
-    the connection to one of ``addr_infos`` so the request cannot pick up a
-    different (e.g. DNS-rebound) address after validation.
-    """
-    try:
-        parsed = urlparse(url)
-        if parsed.scheme not in {"http", "https"}:
-            return False, f"Unsupported URL scheme: {parsed.scheme or '<missing>'}", None, None
-
-        hostname = parsed.hostname
-        if not hostname:
-            return False, "Could not parse hostname from URL", None, None
-
-        try:
-            addr_infos = socket.getaddrinfo(hostname, None)
-        except socket.gaierror:
-            return False, f"Could not resolve hostname: {hostname}", hostname, None
-
-        if not addr_infos:
-            return False, f"Could not resolve hostname: {hostname}", hostname, None
-
-        for addr_info in addr_infos:
-            ip_str = addr_info[4][0]
-            try:
-                ip = ipaddress.ip_address(ip_str)
-            except ValueError:
-                return False, f"Could not parse resolved address: {ip_str}", hostname, None
-
-            # Unwrap IPv4-mapped IPv6 (e.g. ::ffff:127.0.0.1) so a mapped private
-            # address can't slip past the check, then block anything that isn't
-            # publicly routable (covers private/loopback/link-local/reserved/
-            # unspecified/multicast and the cloud metadata 169.254.0.0/16 range).
-            if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
-                ip = ip.ipv4_mapped
-            if not ip.is_global:
-                return False, f"URL resolves to blocked address: {ip_str}", hostname, None
-
-        return True, "", hostname, addr_infos
-    except Exception as e:  # noqa: BLE001
-        return False, f"URL validation error: {e}", None, None
-
-
-def _is_url_safe(url: str) -> tuple[bool, str]:
-    """Check if a URL is safe to request (not targeting private/internal networks)."""
-    is_safe, reason, _, _ = _resolve_and_validate(url)
-    return is_safe, reason
 
 
 def _blocked_response(url: str, reason: str) -> dict[str, Any]:
@@ -98,6 +47,11 @@ async def _request_with_safe_redirects(
     current_method = method.upper()
     current_url = url
     request_kwargs = dict(kwargs)
+    # Pop caller headers/extensions ONCE so they're reused on every redirect hop
+    # (the per-hop Host + SNI are layered on top each time). Popping inside the
+    # loop dropped the caller's Authorization/Accept/etc. on the first redirect.
+    caller_headers = dict(request_kwargs.pop("headers", None) or {})
+    caller_extensions = dict(request_kwargs.pop("extensions", None) or {})
 
     for redirect_count in range(_MAX_REDIRECTS + 1):
         is_safe, reason, hostname, addr_infos = _resolve_and_validate(current_url)
@@ -106,11 +60,8 @@ async def _request_with_safe_redirects(
 
         pinned_ip = addr_infos[0][4][0]
         parsed = urlparse(current_url)
-        host_header = parsed.netloc
-        headers = dict(request_kwargs.pop("headers", None) or {})
-        headers["Host"] = host_header
-        extensions = dict(request_kwargs.pop("extensions", None) or {})
-        extensions["sni_hostname"] = hostname
+        headers = {**caller_headers, "Host": parsed.netloc}
+        extensions = {**caller_extensions, "sni_hostname": hostname}
 
         response = await client.request(
             current_method,

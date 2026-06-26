@@ -85,7 +85,7 @@ async def test_linear_source_comments_on_issue(monkeypatch: pytest.MonkeyPatch) 
     comment = AsyncMock(return_value=True)
     monkeypatch.setattr(completion, "comment_on_linear_issue", comment)
 
-    result = await completion.handle_run_completion({"thread_id": "t1", "status": "interrupted"})
+    result = await completion.handle_run_completion({"thread_id": "t1", "status": "timeout"})
 
     assert result["status"] == "ok"
     comment.assert_awaited_once()
@@ -107,3 +107,32 @@ async def test_no_reply_channel_does_not_flag(monkeypatch: pytest.MonkeyPatch) -
 
     assert result["status"] == "ignored"
     assert client.threads.updates == []
+
+
+@pytest.mark.asyncio
+async def test_interrupted_status_is_ignored(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Follow-ups use multitask_strategy="interrupt", so an interrupted run is a
+    # healthy hand-off, not a failure to report.
+    client = _FakeClient(_slack_metadata())
+    monkeypatch.setattr(completion, "langgraph_client", lambda: client)
+    reply = AsyncMock(return_value=True)
+    monkeypatch.setattr(completion, "post_slack_thread_reply", reply)
+
+    result = await completion.handle_run_completion({"thread_id": "t1", "status": "interrupted"})
+
+    assert result["status"] == "ignored"
+    reply.assert_not_called()
+    assert client.threads.updates == []
+
+
+def test_verify_run_complete_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    # No secret configured (dev): accept anything.
+    monkeypatch.setattr(completion, "RUN_COMPLETE_WEBHOOK_SECRET", None)
+    assert completion.verify_run_complete_token(None) is True
+    assert completion.verify_run_complete_token("whatever") is True
+
+    # Secret configured: require an exact match.
+    monkeypatch.setattr(completion, "RUN_COMPLETE_WEBHOOK_SECRET", "s3cret")
+    assert completion.verify_run_complete_token("s3cret") is True
+    assert completion.verify_run_complete_token("wrong") is False
+    assert completion.verify_run_complete_token(None) is False

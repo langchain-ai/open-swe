@@ -13,7 +13,9 @@ the platform retries the webhook or a checkpoint replays.
 
 from __future__ import annotations
 
+import hmac
 import logging
+import os
 from typing import Any
 
 from .utils.github_app import get_github_app_installation_token
@@ -24,9 +26,25 @@ from .utils.thread_ops import langgraph_client
 
 logger = logging.getLogger(__name__)
 
-# Run statuses that mean the user will otherwise get nothing back.
-_TERMINAL_FAILURE_STATUSES = frozenset({"error", "timeout", "interrupted"})
+# Run statuses that mean the user will otherwise get nothing back. "interrupted"
+# is intentionally excluded: with multitask_strategy="interrupt", a normal
+# follow-up halts the prior run (status "interrupted") while its replacement
+# carries on — that's healthy, not a failure worth a "couldn't finish" reply.
+_TERMINAL_FAILURE_STATUSES = frozenset({"error", "timeout"})
 _FAILURE_REPLY_FLAG = "failure_reply_posted"
+
+# Shared-secret bearer token proving a /webhooks/run-complete call came from our
+# own dispatch (which appends ?token= when this is set) rather than from an
+# attacker hitting the public route. When unset (dev), verification is skipped.
+RUN_COMPLETE_WEBHOOK_SECRET = os.environ.get("RUN_COMPLETE_WEBHOOK_SECRET")
+
+
+def verify_run_complete_token(token: str | None) -> bool:
+    """Return whether a run-completion webhook token is acceptable."""
+    secret = RUN_COMPLETE_WEBHOOK_SECRET
+    if not secret:
+        return True
+    return token is not None and hmac.compare_digest(token, secret)
 
 
 def _failure_text(status: str) -> str:

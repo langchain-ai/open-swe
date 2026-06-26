@@ -13,6 +13,8 @@ from urllib.parse import urlparse
 import httpx
 from langchain_core.messages.content import create_image_block
 
+from .url_safety import is_url_safe
+
 logger = logging.getLogger(__name__)
 
 IMAGE_MARKDOWN_RE = re.compile(r"!\[[^\]]*\]\((https?://[^\s)]+)\)")
@@ -52,6 +54,10 @@ async def fetch_image_block(
 ) -> dict[str, Any] | None:
     """Fetch image bytes and build an image content block."""
     try:
+        safe, reason = is_url_safe(image_url)
+        if not safe:
+            logger.warning("Refusing to fetch image (SSRF guard) %s: %s", image_url, reason)
+            return None
         logger.debug("Fetching image from %s", image_url)
         headers = None
         host = (urlparse(image_url).hostname or "").lower()

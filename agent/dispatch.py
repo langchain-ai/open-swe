@@ -28,9 +28,15 @@ ContentBlocks = str | list[dict[str, Any]]
 
 # Same-server FastAPI route the platform POSTs run completion/failure to. A
 # relative URL loopback-posts into this app (no SSRF/loopback config needed);
-# override with an absolute URL via env for split deployments.
+# override with an absolute URL via env for split deployments. When
+# RUN_COMPLETE_WEBHOOK_SECRET is set, append ?token=<secret> so the route can
+# verify the call came from us (completion.verify_run_complete_token).
+_COMPLETION_WEBHOOK_BASE = os.environ.get("COMPLETION_WEBHOOK_URL") or "/webhooks/run-complete"
+_RUN_COMPLETE_SECRET = os.environ.get("RUN_COMPLETE_WEBHOOK_SECRET")
 COMPLETION_WEBHOOK_URL: str | None = (
-    os.environ.get("COMPLETION_WEBHOOK_URL") or "/webhooks/run-complete"
+    f"{_COMPLETION_WEBHOOK_BASE}?token={_RUN_COMPLETE_SECRET}"
+    if _RUN_COMPLETE_SECRET and "?" not in _COMPLETION_WEBHOOK_BASE
+    else _COMPLETION_WEBHOOK_BASE
 )
 
 
