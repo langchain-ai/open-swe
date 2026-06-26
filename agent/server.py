@@ -56,7 +56,6 @@ from .integrations.notion_mcp import load_notion_tools
 from .middleware import (
     ModelFallbackMiddleware,
     PlanModeMiddleware,
-    RepairOrphanedToolCallsMiddleware,
     SandboxCircuitBreakerMiddleware,
     SanitizeThinkingBlocksMiddleware,
     SanitizeToolInputsMiddleware,
@@ -512,7 +511,7 @@ async def ensure_sandbox_for_thread(
 DEFAULT_LLM_MODEL_ID = DEFAULT_MODEL_ID
 DEFAULT_LLM_MAX_TOKENS = 64_000
 DEFAULT_RECURSION_LIMIT = 9_999
-MODEL_CALL_RECURSION_LIMIT = 5_000  # ~half the recursion limit to account for tool calls
+MODEL_CALL_RECURSION_LIMIT = 250  # run budget cap; caps runaway multi-million-token runs
 
 # Mutating tools hidden from the model while plan mode is active so it can only
 # research and propose a plan. `execute` stays available; plan-mode shell
@@ -841,7 +840,6 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             *fallback_middleware,
             *plan_mode_middleware,
             SanitizeThinkingBlocksMiddleware(),
-            RepairOrphanedToolCallsMiddleware(),
         ],
     ).with_config(config)
 

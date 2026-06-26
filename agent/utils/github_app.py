@@ -12,6 +12,8 @@ from typing import Any
 import httpx
 import jwt
 
+from .http import DEFAULT_HTTP_TIMEOUT
+
 logger = logging.getLogger(__name__)
 
 GITHUB_APP_ID = os.environ.get("GITHUB_APP_ID", "")
@@ -120,7 +122,7 @@ async def get_github_app_installation_token_with_expiry(
 
     try:
         app_jwt = _generate_app_jwt()
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
             response = await client.post(
                 f"https://api.github.com/app/installations/{GITHUB_APP_INSTALLATION_ID}/access_tokens",
                 headers={

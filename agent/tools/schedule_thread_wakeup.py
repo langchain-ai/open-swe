@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -80,7 +79,7 @@ async def _create_wakeup_cron(
     }
 
 
-def schedule_thread_wakeup(delay_minutes: int, prompt: str | None = None) -> dict[str, Any]:
+async def schedule_thread_wakeup(delay_minutes: int, prompt: str | None = None) -> dict[str, Any]:
     """Schedule a one-shot re-trigger of the current thread after a delay.
 
     Use this when you need to poll or check back on something later — e.g.
@@ -132,13 +131,11 @@ def schedule_thread_wakeup(delay_minutes: int, prompt: str | None = None) -> dic
             wakeup_configurable[key] = value
 
     try:
-        return asyncio.run(
-            _create_wakeup_cron(
-                thread_id=thread_id,
-                fire_time=fire_time,
-                prompt=wakeup_prompt,
-                configurable=wakeup_configurable,
-            )
+        return await _create_wakeup_cron(
+            thread_id=thread_id,
+            fire_time=fire_time,
+            prompt=wakeup_prompt,
+            configurable=wakeup_configurable,
         )
     except Exception as exc:
         logger.exception("Failed to schedule thread wakeup for %s", thread_id)

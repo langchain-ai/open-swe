@@ -5,6 +5,7 @@ from __future__ import annotations
 import httpx
 from fastapi import HTTPException
 
+from ..utils.http import DEFAULT_HTTP_TIMEOUT
 from .profiles import get_valid_access_token
 from .review_styles import normalize_repo_full_name
 
@@ -28,7 +29,7 @@ async def assert_repo_access(full_name: str, token: str) -> str:
         "X-GitHub-Api-Version": "2022-11-28",
     }
     owner, name = full_name.split("/", 1)
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
         response = await client.get(
             f"https://api.github.com/repos/{owner}/{name}",
             headers=headers,

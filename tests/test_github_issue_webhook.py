@@ -1015,7 +1015,7 @@ def test_trigger_pr_review_from_ref_respects_dashboard_opt_in(monkeypatch) -> No
     assert called is False
 
 
-def test_request_pr_review_tool_uses_shared_trigger(monkeypatch) -> None:
+async def test_request_pr_review_tool_uses_shared_trigger(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
     async def fake_trigger_pr_review_from_ref(
@@ -1051,7 +1051,7 @@ def test_request_pr_review_tool_uses_shared_trigger(monkeypatch) -> None:
         },
     )
 
-    result = request_pr_review_tool("https://github.com/langchain-ai/open-swe/pull/1244")
+    result = await request_pr_review_tool("https://github.com/langchain-ai/open-swe/pull/1244")
 
     pr_ref = captured["pr_ref"]
     assert isinstance(pr_ref, GitHubPrRef)

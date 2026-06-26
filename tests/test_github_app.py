@@ -26,6 +26,9 @@ class _FakeResponse:
 class _FakeAsyncClient:
     last_post: dict[str, Any] | None = None
 
+    def __init__(self, **kwargs: Any) -> None:
+        pass
+
     async def __aenter__(self) -> _FakeAsyncClient:
         return self
 
@@ -59,6 +62,9 @@ class _CountingResponse:
 class _CountingClient:
     posts = 0
     expires_at = "2099-01-01T00:00:00Z"
+
+    def __init__(self, **kwargs: Any) -> None:
+        pass
 
     async def __aenter__(self) -> _CountingClient:
         return self

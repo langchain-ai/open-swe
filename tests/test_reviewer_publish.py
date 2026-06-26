@@ -382,7 +382,7 @@ def test_render_review_body_includes_trace_link_when_provided() -> None:
     assert body.endswith("<!-- open-swe-reviewer pr=123 -->")
 
 
-def test_publish_review_eval_mode_does_not_call_github() -> None:
+async def test_publish_review_eval_mode_does_not_call_github() -> None:
     from agent.tools.publish_review import publish_review
 
     findings = [
@@ -410,7 +410,7 @@ def test_publish_review_eval_mode_does_not_call_github() -> None:
         patch("agent.tools.publish_review.get_github_token") as get_token,
         patch("agent.tools.publish_review.post_pull_request_review", AsyncMock()) as post_review,
     ):
-        result = publish_review()
+        result = await publish_review()
 
     assert result["success"] is True
     assert result["dry_run"] is True
@@ -466,7 +466,7 @@ async def test_publish_review_surfaces_additional_findings_count_in_body() -> No
     assert "2 additional findings can be viewed in the web app." in posted_body
 
 
-def test_publish_review_forwards_trace_link_config_override() -> None:
+async def test_publish_review_forwards_trace_link_config_override() -> None:
     from agent.tools.publish_review import publish_review
 
     publish_async = AsyncMock(return_value={"success": True})
@@ -487,7 +487,7 @@ def test_publish_review_forwards_trace_link_config_override() -> None:
         patch("agent.tools.publish_review.get_github_token", return_value="token"),
         patch("agent.tools.publish_review._publish_review_async", publish_async),
     ):
-        result = publish_review()
+        result = await publish_review()
 
     assert result == {"success": True}
     assert publish_async.call_args.kwargs["trace_link_config_override"] is False
@@ -2194,7 +2194,7 @@ async def test_publish_review_fetches_pr_diff_when_diff_line_set_missing() -> No
     assert result["unresolvable_findings"] == ["f_bad"]
 
 
-def test_publish_review_tool_returns_structured_error_when_thread_missing() -> None:
+async def test_publish_review_tool_returns_structured_error_when_thread_missing() -> None:
     """A missing reviewer thread surfaces as a do-not-retry tool result instead
     of an exception the middleware swallows into an empty tool message."""
     from agent.reviewer_findings import ReviewerThreadMissingError
@@ -2219,7 +2219,7 @@ def test_publish_review_tool_returns_structured_error_when_thread_missing() -> N
         patch("agent.tools.publish_review.get_github_token", return_value="token"),
         patch("agent.tools.publish_review._publish_review_async", publish_async),
     ):
-        result = publish_review()
+        result = await publish_review()
 
     assert result["success"] is False
     assert result["error"] == "thread_not_found"

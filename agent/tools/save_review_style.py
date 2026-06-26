@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from typing import Any
 
@@ -28,7 +27,7 @@ async def _complete_and_register(full_name: str, **completed_kwargs: Any) -> dic
     return record
 
 
-def save_review_style_prompt(
+async def save_review_style_prompt(
     custom_prompt: str,
     analysis_summary: str = "",
     top_reviewers: str = "",
@@ -55,17 +54,15 @@ def save_review_style_prompt(
     reviews_count = reviews_sampled or int(configurable.get("review_style_reviews_sampled") or 0)
 
     if not custom_prompt.strip():
-        asyncio.run(mark_analysis_failed(full_name, "custom_prompt was empty"))
+        await mark_analysis_failed(full_name, "custom_prompt was empty")
         return {"ok": False, "error": "custom_prompt cannot be empty"}
 
-    record = asyncio.run(
-        _complete_and_register(
-            full_name,
-            custom_prompt=custom_prompt.strip(),
-            analysis_summary=analysis_summary.strip(),
-            top_reviewers=merged_reviewers,
-            prs_sampled=prs_count,
-            reviews_sampled=reviews_count,
-        )
+    record = await _complete_and_register(
+        full_name,
+        custom_prompt=custom_prompt.strip(),
+        analysis_summary=analysis_summary.strip(),
+        top_reviewers=merged_reviewers,
+        prs_sampled=prs_count,
+        reviews_sampled=reviews_count,
     )
     return {"ok": True, "full_name": full_name, "status": record.get("status")}

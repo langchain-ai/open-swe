@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from typing import Any
 
@@ -302,7 +301,7 @@ async def _open_pull_request(
         }
 
 
-def open_pull_request(
+async def open_pull_request(
     owner: str,
     repo: str,
     head: str,
@@ -336,14 +335,12 @@ def open_pull_request(
         "author": str}. ``created`` is False when an open PR already existed.
         On failure: {"success": False, "error": str}.
     """
-    return asyncio.run(
-        _open_pull_request(
-            owner=owner,
-            repo=repo,
-            head=head,
-            base=base,
-            title=title,
-            body=body,
-            draft=draft,
-        )
+    return await _open_pull_request(
+        owner=owner,
+        repo=repo,
+        head=head,
+        base=base,
+        title=title,
+        body=body,
+        draft=draft,
     )

@@ -20,6 +20,8 @@ from langgraph_sdk.client import LangGraphClient
 from agent.utils.dashboard_links import dashboard_thread_url
 from agent.utils.langsmith import get_langsmith_trace_url
 
+from .http import DEFAULT_HTTP_TIMEOUT
+
 logger = logging.getLogger(__name__)
 
 SLACK_API_BASE_URL = "https://slack.com/api"
@@ -273,7 +275,7 @@ async def set_slack_assistant_status(
     if loading_messages:
         payload["loading_messages"] = list(loading_messages)[:10]
 
-    async with httpx.AsyncClient() as http_client:
+    async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
         try:
             response = await http_client.post(
                 f"{SLACK_API_BASE_URL}/assistant.threads.setStatus",
@@ -314,7 +316,7 @@ async def post_slack_thread_reply_with_ts(
     if blocks:
         payload["blocks"] = blocks
 
-    async with httpx.AsyncClient() as http_client:
+    async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
         try:
             response = await http_client.post(
                 f"{SLACK_API_BASE_URL}/chat.postMessage",
@@ -365,7 +367,7 @@ async def post_slack_ephemeral_message(
     if thread_ts:
         payload["thread_ts"] = thread_ts
 
-    async with httpx.AsyncClient() as http_client:
+    async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
         try:
             response = await http_client.post(
                 f"{SLACK_API_BASE_URL}/chat.postEphemeral",
@@ -394,7 +396,7 @@ async def add_slack_reaction(channel_id: str, message_ts: str, emoji: str = "eye
         "name": emoji,
     }
 
-    async with httpx.AsyncClient() as http_client:
+    async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
         try:
             response = await http_client.post(
                 f"{SLACK_API_BASE_URL}/reactions.add",
@@ -419,7 +421,7 @@ async def get_slack_user_info(user_id: str) -> dict[str, Any] | None:
     if not SLACK_BOT_TOKEN:
         return None
 
-    async with httpx.AsyncClient() as http_client:
+    async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
         try:
             response = await http_client.get(
                 f"{SLACK_API_BASE_URL}/users.info",
@@ -444,7 +446,7 @@ async def get_slack_channel_info(channel_id: str) -> dict[str, Any] | None:
     if not SLACK_BOT_TOKEN:
         return None
 
-    async with httpx.AsyncClient() as http_client:
+    async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
         try:
             response = await http_client.get(
                 f"{SLACK_API_BASE_URL}/conversations.info",
@@ -513,7 +515,7 @@ async def fetch_slack_thread_messages(channel_id: str, thread_ts: str) -> list[d
     cursor: str | None = None
     truncated = False
 
-    async with httpx.AsyncClient() as http_client:
+    async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
         while True:
             params: dict[str, str | int] = {"channel": channel_id, "ts": thread_ts, "limit": 200}
             if cursor:
@@ -601,7 +603,7 @@ async def fetch_slack_message_by_ts(channel_id: str, message_ts: str) -> dict[st
     if not SLACK_BOT_TOKEN:
         return None
 
-    async with httpx.AsyncClient() as http_client:
+    async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
         try:
             response = await http_client.get(
                 f"{SLACK_API_BASE_URL}/conversations.history",
@@ -641,7 +643,7 @@ async def get_slack_permalink(channel_id: str, message_ts: str) -> str | None:
     if not SLACK_BOT_TOKEN or not channel_id or not message_ts:
         return None
 
-    async with httpx.AsyncClient() as http_client:
+    async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
         try:
             response = await http_client.get(
                 f"{SLACK_API_BASE_URL}/chat.getPermalink",

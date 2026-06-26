@@ -8,7 +8,7 @@ from exa_py import Exa
 logger = logging.getLogger(__name__)
 
 
-def web_search(
+async def web_search(
     query: str,
     num_results: int = 5,
     include_contents: bool = True,
@@ -57,7 +57,7 @@ def web_search(
         return {"success": True, "results": str(result), "error": None}
 
     try:
-        return asyncio.run(_search())
+        return await _search()
     except Exception as e:
         logger.exception("web_search failed")
         return {"success": False, "results": None, "error": f"{type(e).__name__}: {e}"}

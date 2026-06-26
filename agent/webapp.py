@@ -88,6 +88,7 @@ from .utils.github_token import (
     get_github_token_from_thread,
     invalidate_cached_github_token,
 )
+from .utils.http import DEFAULT_HTTP_TIMEOUT
 from .utils.linear import post_linear_trace_comment
 from .utils.linear_team_repo_map import LINEAR_TEAM_TO_REPO
 from .utils.multimodal import (
@@ -257,7 +258,7 @@ async def react_to_linear_comment(comment_id: str, emoji: str = "👀") -> bool:
     }
     """
 
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
         try:
             response = await client.post(
                 url,
@@ -324,7 +325,7 @@ async def fetch_linear_issue_details(issue_id: str) -> dict[str, Any] | None:
     }
     """
 
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
         try:
             response = await client.post(
                 url,
@@ -930,7 +931,7 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
             logger.info("Preparing %d image(s) for multimodal content", len(image_urls))
             logger.debug("Image URLs: %s", image_urls)
 
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
                 for image_url in image_urls:
                     image_block = await fetch_image_block(image_url, client)
                     if image_block:
@@ -1153,7 +1154,7 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
         resolved_model_id = await resolve_agent_model_id(mapped_login)
         if model_supports_images(resolved_model_id):
             logger.info("Preparing %d image(s) for Slack mention", len(image_urls))
-            async with httpx.AsyncClient() as http_client:
+            async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
                 for image_url in image_urls:
                     image_block = await fetch_image_block(image_url, http_client)
                     if image_block:
@@ -1896,7 +1897,7 @@ async def fetch_github_pr_metadata(pr_ref: GitHubPrRef, *, token: str) -> dict[s
         "Authorization": f"Bearer {token}",
         "X-GitHub-Api-Version": "2022-11-28",
     }
-    async with httpx.AsyncClient() as http_client:
+    async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
         try:
             response = await http_client.get(
                 f"https://api.github.com/repos/{pr_ref.owner}/{pr_ref.repo}/pulls/{pr_ref.number}",
@@ -2286,7 +2287,7 @@ async def _fetch_open_pr_for_branch(
         "X-GitHub-Api-Version": "2022-11-28",
     }
     params = {"state": "open", "head": f"{owner}:{head_ref}", "per_page": 1}
-    async with httpx.AsyncClient() as http_client:
+    async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
         try:
             response = await http_client.get(
                 f"https://api.github.com/repos/{owner}/{repo}/pulls",
@@ -2326,7 +2327,7 @@ async def _fetch_compare_diff(
         "Authorization": f"Bearer {token}",
         "X-GitHub-Api-Version": "2022-11-28",
     }
-    async with httpx.AsyncClient() as http_client:
+    async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
         try:
             response = await http_client.get(
                 f"https://api.github.com/repos/{owner}/{repo}/compare/{base}...{head}",

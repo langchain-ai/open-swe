@@ -169,7 +169,7 @@ def test_plan_mode_guidance_section_present_when_enabled() -> None:
     assert "Plan Mode (ACTIVE)" in prompt
 
 
-def test_enter_plan_mode_tool_returns_command() -> None:
+async def test_enter_plan_mode_tool_returns_command() -> None:
     from langchain_core.messages import ToolMessage
     from langchain_core.tools import tool as as_tool
     from langgraph.types import Command
@@ -178,7 +178,7 @@ def test_enter_plan_mode_tool_returns_command() -> None:
 
     # Wrap as the agent does so the InjectedToolCallId is supplied from the call.
     wrapped = as_tool(enter_plan_mode)
-    result = wrapped.invoke(
+    result = await wrapped.ainvoke(
         {"name": "enter_plan_mode", "args": {}, "id": "call-1", "type": "tool_call"}
     )
     assert isinstance(result, Command)

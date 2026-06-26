@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from typing import Any
 
 from langgraph.config import get_config
@@ -56,7 +55,7 @@ from ..utils.slack import post_slack_thread_reply
 from ..utils.tracing import REVIEW_TRACING_PROJECT
 
 
-def publish_review(
+async def publish_review(
     severity_threshold: str = "medium",
     cap: int = 4,
 ) -> dict[str, Any]:
@@ -122,12 +121,10 @@ def publish_review(
 
     if _is_reviewer_eval_mode(configurable):
         try:
-            return asyncio.run(
-                _publish_review_eval_dry_run_async(
-                    head_sha=head_sha,
-                    severity_threshold=_cast_severity(severity_threshold),
-                    cap=cap,
-                )
+            return await _publish_review_eval_dry_run_async(
+                head_sha=head_sha,
+                severity_threshold=_cast_severity(severity_threshold),
+                cap=cap,
             )
         except ReviewerThreadMissingError as exc:
             return thread_missing_tool_result(exc)
@@ -137,26 +134,24 @@ def publish_review(
         return {"success": False, "error": "No GitHub token available"}
 
     try:
-        return asyncio.run(
-            _publish_review_async(
-                owner=str(repo_config["owner"]),
-                repo=str(repo_config["name"]),
-                pr_number=pr_number,
-                head_sha=head_sha,
-                token=token,
-                severity_threshold=_cast_severity(severity_threshold),
-                cap=cap,
-                is_re_review=is_re_review,
-                langgraph_run_id=_current_run_id(config),
-                trace_link_config_override=configurable.get("review_trace_link_enabled"),
-            )
+        return await _publish_review_async(
+            owner=str(repo_config["owner"]),
+            repo=str(repo_config["name"]),
+            pr_number=pr_number,
+            head_sha=head_sha,
+            token=token,
+            severity_threshold=_cast_severity(severity_threshold),
+            cap=cap,
+            is_re_review=is_re_review,
+            langgraph_run_id=_current_run_id(config),
+            trace_link_config_override=configurable.get("review_trace_link_enabled"),
         )
     except ReviewerThreadMissingError as exc:
         return thread_missing_tool_result(exc)
     except GitHubAuthError as exc:
         thread_id = get_thread_id_from_runtime()
         if thread_id:
-            asyncio.run(invalidate_cached_github_token(thread_id))
+            await invalidate_cached_github_token(thread_id)
         return {
             "success": False,
             "error": (

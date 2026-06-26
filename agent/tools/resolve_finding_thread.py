@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 from typing import Any
 
 from langgraph.config import get_config
@@ -33,7 +32,7 @@ def _normalize_note(note: str | None) -> str | None:
     return normalized or None
 
 
-def resolve_finding_thread(
+async def resolve_finding_thread(
     finding_id: str,
     note: str,
     status: str = "dismissed",
@@ -70,16 +69,14 @@ def resolve_finding_thread(
         return {"success": False, "error": "No GitHub token available"}
 
     try:
-        result = asyncio.run(
-            _resolve_finding_thread_async(
-                finding_id=finding_id,
-                status=status,
-                note=normalized_note,
-                owner=str(repo_config["owner"]),
-                repo=str(repo_config["name"]),
-                pr_number=pr_number,
-                token=token,
-            )
+        result = await _resolve_finding_thread_async(
+            finding_id=finding_id,
+            status=status,
+            note=normalized_note,
+            owner=str(repo_config["owner"]),
+            repo=str(repo_config["name"]),
+            pr_number=pr_number,
+            token=token,
         )
     except ReviewerThreadMissingError as exc:
         return thread_missing_tool_result(exc)
