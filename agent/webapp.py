@@ -15,7 +15,6 @@ from urllib.parse import parse_qs, quote
 import httpx
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from langchain_core.messages.content import create_text_block
 from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
 
@@ -23,63 +22,63 @@ from .completion import handle_run_completion
 from .dashboard import router as dashboard_router
 from .dashboard.agent_overrides import (
     get_profile_default_repo,
-    resolve_agent_model_id,
+    resolve_agent_model_id,  # noqa: F401
     resolve_login_from_email_async,
 )
 from .dashboard.enabled_repos import is_review_repo_enabled
 from .dashboard.oauth import build_settings_url
-from .dashboard.options import model_supports_images
-from .dashboard.profiles import get_profile, get_valid_access_token, has_access_token_record
+from .dashboard.options import model_supports_images  # noqa: F401
+from .dashboard.profiles import (  # noqa: F401
+    get_profile,
+    get_valid_access_token,
+    has_access_token_record,
+)
 from .dashboard.team_settings import (
     get_team_default_repo,
     get_team_settings,
 )
 from .dashboard.user_mappings import (
-    email_for_login,
-    login_for_email,
-    login_for_slack_id,
+    email_for_login,  # noqa: F401
+    login_for_email,  # noqa: F401
+    login_for_slack_id,  # noqa: F401
 )
 from .dashboard.user_mappings import (
-    refresh_cache as refresh_user_mapping_cache,
+    refresh_cache as refresh_user_mapping_cache,  # noqa: F401
 )
 from .dispatch import dispatch_agent_run
 from .reviewer_findings import (
     REVIEWER_THREAD_KIND,
     Finding,
-    FindingInteraction,
-    ReviewerPRMeta,
-    ReviewerSlackThread,
-    append_finding_interaction,
+    append_finding_interaction,  # noqa: F401
     set_reviewer_thread_metadata,
 )
 from .reviewer_findings import (
-    list_findings as list_reviewer_findings,
+    list_findings as list_reviewer_findings,  # noqa: F401
 )
-from .reviewer_publish import fetch_pr_review_threads, post_review_started_comment
-from .reviewer_reconcile import reconcile_findings_with_review_threads
+from .reviewer_publish import fetch_pr_review_threads, post_review_started_comment  # noqa: F401
+from .reviewer_reconcile import reconcile_findings_with_review_threads  # noqa: F401
 from .utils.auth import (
     is_bot_token_only_mode,
     resolve_github_token_from_email,
 )
-from .utils.comments import get_recent_comments
-from .utils.dashboard_links import dashboard_thread_url
+from .utils.comments import get_recent_comments  # noqa: F401
+from .utils.dashboard_links import dashboard_thread_url  # noqa: F401
 from .utils.github_app import (
-    get_github_app_installation_token,
+    get_github_app_installation_token,  # noqa: F401
     get_github_app_installation_token_with_expiry,
 )
-from .utils.github_checks import complete_review_check_run, create_review_check_run
+from .utils.github_checks import complete_review_check_run, create_review_check_run  # noqa: F401
 from .utils.github_comments import (
     OPEN_SWE_TAGS,
-    GitHubAuthError,
-    build_pr_prompt,
+    build_pr_prompt,  # noqa: F401
     derive_pr_state,
-    extract_pr_context,
-    fetch_issue_comments,
-    fetch_pr_comments_since_last_tag,
+    extract_pr_context,  # noqa: F401
+    fetch_issue_comments,  # noqa: F401
+    fetch_pr_comments_since_last_tag,  # noqa: F401
     format_github_comment_body_for_prompt,
-    get_thread_id_from_branch,
-    react_to_github_comment,
-    sanitize_github_comment_body,
+    get_thread_id_from_branch,  # noqa: F401
+    react_to_github_comment,  # noqa: F401
+    sanitize_github_comment_body,  # noqa: F401
     verify_github_signature,
 )
 from .utils.github_org_membership import INTERNAL_BOT_LOGINS, is_user_active_org_member
@@ -89,30 +88,30 @@ from .utils.github_token import (
     invalidate_cached_github_token,
 )
 from .utils.http import DEFAULT_HTTP_TIMEOUT
-from .utils.linear import post_linear_trace_comment
+from .utils.linear import post_linear_trace_comment  # noqa: F401
 from .utils.linear_team_repo_map import LINEAR_TEAM_TO_REPO
 from .utils.multimodal import (
-    dedupe_urls,
-    extract_image_urls,
-    fetch_image_block,
-    vision_not_supported_warning,
+    dedupe_urls,  # noqa: F401
+    extract_image_urls,  # noqa: F401
+    fetch_image_block,  # noqa: F401
+    vision_not_supported_warning,  # noqa: F401
 )
 from .utils.repo import extract_repo_from_text
 from .utils.slack import (
     GitHubPrRef,
-    fetch_slack_thread_messages,
-    format_slack_messages_for_prompt,
+    fetch_slack_thread_messages,  # noqa: F401
+    format_slack_messages_for_prompt,  # noqa: F401
     get_slack_channel_description,
     get_slack_channel_info,
     get_slack_user_info,
-    get_slack_user_names,
+    get_slack_user_names,  # noqa: F401
     post_slack_thread_reply,
-    post_slack_trace_reply,
-    resolve_slack_links_in_context,
-    select_slack_context_messages,
-    set_slack_assistant_status,
-    store_slack_run_mapping,
-    strip_bot_mention,
+    post_slack_trace_reply,  # noqa: F401
+    resolve_slack_links_in_context,  # noqa: F401
+    select_slack_context_messages,  # noqa: F401
+    set_slack_assistant_status,  # noqa: F401
+    store_slack_run_mapping,  # noqa: F401
+    strip_bot_mention,  # noqa: F401
     verify_slack_signature,
 )
 from .utils.slack_feedback import (
@@ -772,227 +771,6 @@ async def _set_thread_plan_mode(thread_id: str, enabled: bool) -> None:
         logger.exception("Failed to persist plan_mode for thread %s", thread_id)
 
 
-async def process_linear_issue(  # noqa: PLR0912, PLR0915
-    issue_data: dict[str, Any], repo_config: dict[str, str]
-) -> None:
-    """Process a Linear issue by creating a new LangGraph thread and run.
-
-    Args:
-        issue_data: The Linear issue data from webhook (basic info only).
-        repo_config: The repo configuration with owner and name.
-    """
-    issue_id = issue_data.get("id", "")
-    logger.info(
-        "Processing Linear issue %s for repo %s/%s",
-        issue_id,
-        repo_config.get("owner"),
-        repo_config.get("name"),
-    )
-
-    triggering_comment_id = issue_data.get("triggering_comment_id", "")
-    if triggering_comment_id:
-        await react_to_linear_comment(triggering_comment_id, "👀")
-
-    thread_id = generate_thread_id_from_issue(issue_id)
-
-    full_issue = await fetch_linear_issue_details(issue_id)
-    if not full_issue:
-        full_issue = issue_data
-
-    user_email = None
-    user_name = None
-    comment_author = issue_data.get("comment_author", {})
-    if comment_author:
-        user_email = comment_author.get("email")
-        user_name = comment_author.get("name")
-    if not user_email:
-        creator = full_issue.get("creator", {})
-        if creator:
-            user_email = creator.get("email")
-            user_name = user_name or creator.get("name")
-    if not user_email:
-        assignee = full_issue.get("assignee", {})
-        if assignee:
-            user_email = assignee.get("email")
-            user_name = user_name or assignee.get("name")
-
-    logger.info("User email for issue %s: %s", issue_id, user_email)
-
-    title = full_issue.get("title", "No title")
-    description = full_issue.get("description") or "No description"
-    image_urls: list[str] = []
-    description_image_urls = extract_image_urls(description)
-    if description_image_urls:
-        image_urls.extend(description_image_urls)
-        logger.debug(
-            "Found %d image URL(s) in issue description",
-            len(description_image_urls),
-        )
-
-    comments = full_issue.get("comments", {}).get("nodes", [])
-    comments_text = ""
-    triggering_comment = issue_data.get("triggering_comment", "")
-    triggering_comment_id = issue_data.get("triggering_comment_id", "")
-
-    bot_message_prefixes = (
-        "🔐 **GitHub Authentication Required**",
-        "✅ **Pull Request Created**",
-        "✅ **Pull Request Updated**",
-        "**Pull Request Created**",
-        "**Pull Request Updated**",
-        "🤖 **Agent Response**",
-        "❌ **Agent Error**",
-    )
-
-    comment_ids: set[str] = set()
-    comment_id_to_index: dict[str, int] = {}
-    if comments:
-        for i, comment in enumerate(comments):
-            comment_id = comment.get("id", "")
-            if comment_id:
-                comment_ids.add(comment_id)
-                comment_id_to_index[comment_id] = i
-
-        relevant_comments = []
-        trigger_index = None
-        if triggering_comment_id:
-            trigger_index = comment_id_to_index.get(triggering_comment_id)
-        if trigger_index is not None:
-            relevant_comments = comments[trigger_index:]
-            logger.debug(
-                "Using triggering comment index %d to build relevant comments",
-                trigger_index,
-            )
-        else:
-            relevant_comments = get_recent_comments(comments, bot_message_prefixes)
-
-        if relevant_comments:
-            comments_text = "\n\n## Comments:\n"
-            for comment in relevant_comments:
-                user = comment.get("user") or {}
-                author = user.get("name", "User")
-                body = comment.get("body", "")
-                body_image_urls = extract_image_urls(body)
-                if body_image_urls:
-                    image_urls.extend(body_image_urls)
-                    logger.debug(
-                        "Found %d image URL(s) in comment by %s",
-                        len(body_image_urls),
-                        author,
-                    )
-                if any(body.startswith(prefix) for prefix in bot_message_prefixes):
-                    continue
-                comments_text += f"\n**{author}:** {body}\n"
-
-    if triggering_comment and triggering_comment_id not in comment_ids:
-        if not comments_text:
-            comments_text = "\n\n## Comments:\n"
-        trigger_author = comment_author.get("name", "Unknown")
-        trigger_body = triggering_comment
-        trigger_image_urls = extract_image_urls(trigger_body)
-        if trigger_image_urls:
-            image_urls.extend(trigger_image_urls)
-            logger.debug(
-                "Found %d image URL(s) in triggering comment by %s",
-                len(trigger_image_urls),
-                trigger_author,
-            )
-        comments_text += f"\n**{trigger_author}:** {trigger_body}\n"
-        logger.debug(
-            "Appended triggering comment %s not present in issue comments list",
-            triggering_comment_id or "<missing-id>",
-        )
-
-    identifier = full_issue.get("identifier", "") or issue_data.get("identifier", "")
-
-    triggered_by_line = f"## Triggered by: {user_name}\n\n" if user_name else ""
-    tag_instruction = (
-        f"When calling linear_comment, tag @{user_name} if you are asking them a question, need their input, or are notifying them of something important (e.g. a completed PR). For simple answers, tagging is not required."
-        if user_name
-        else ""
-    )
-    prompt = (
-        f"Please work on the following issue:\n\n"
-        f"## Repository: {repo_config.get('owner')}/{repo_config.get('name')}\n\n"
-        f"## Title: {title}\n\n"
-        f"{triggered_by_line}"
-        f"## Linear Ticket: {identifier} - Ticket ID: {issue_id}\n\n"
-        f"## Description:\n{description}\n"
-        f"{comments_text}\n\n"
-        f"Please analyze this issue and implement the necessary changes. "
-        f"When you're done, commit and push your changes. {tag_instruction}"
-    )
-    content_blocks: list[dict[str, Any]] = [create_text_block(prompt)]
-    if image_urls:
-        image_urls = dedupe_urls(image_urls)
-        linear_login = await resolve_login_from_email_async(user_email) if user_email else None
-        resolved_model_id = await resolve_agent_model_id(linear_login)
-        if model_supports_images(resolved_model_id):
-            logger.info("Preparing %d image(s) for multimodal content", len(image_urls))
-            logger.debug("Image URLs: %s", image_urls)
-
-            async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
-                for image_url in image_urls:
-                    image_block = await fetch_image_block(image_url, client)
-                    if image_block:
-                        content_blocks.append(image_block)
-            logger.info("Built %d content block(s) for prompt", len(content_blocks))
-        else:
-            logger.warning(
-                "Skipping %d image(s) for Linear issue: model %s does not support images",
-                len(image_urls),
-                resolved_model_id,
-            )
-            prompt += vision_not_supported_warning(resolved_model_id, len(image_urls))
-            content_blocks[0] = create_text_block(prompt)
-            image_urls = []
-
-    linear_project_id = ""
-    linear_issue_number = ""
-    if identifier and "-" in identifier:
-        parts = identifier.split("-", 1)
-        linear_project_id = parts[0]
-        linear_issue_number = parts[1]
-
-    configurable: dict[str, Any] = {
-        "repo": repo_config,
-        "linear_issue": {
-            "id": issue_id,
-            "title": title,
-            "url": full_issue.get("url", "") or issue_data.get("url", ""),
-            "identifier": identifier,
-            "linear_project_id": linear_project_id,
-            "linear_issue_number": linear_issue_number,
-            "triggering_user_name": user_name or "",
-        },
-        "user_email": user_email,
-        "source": "linear",
-    }
-
-    await upsert_agent_thread_owner_metadata(
-        thread_id,
-        source="linear",
-        repo_config=repo_config,
-        user_email=user_email or "",
-        title=title or identifier or "Linear issue",
-        source_context={"linear_issue": configurable["linear_issue"]},
-    )
-
-    run = await dispatch_agent_run(
-        thread_id,
-        content_blocks,
-        configurable,
-        source="linear",
-        metadata=_AGENT_VERSION_METADATA,
-    )
-    logger.info(
-        "LangGraph run dispatched for thread %s (run=%s)",
-        thread_id,
-        run.get("run_id") if isinstance(run, dict) else None,
-    )
-    await post_linear_trace_comment(issue_id, thread_id, triggering_comment_id)
-
-
 async def _post_account_link_prompt(
     channel_id: str,
     thread_ts: str,
@@ -1033,263 +811,6 @@ async def _post_account_link_prompt(
         await post_slack_thread_reply(channel_id, thread_ts, text)
     except Exception:  # noqa: BLE001
         logger.debug("Failed to post account-link prompt to Slack", exc_info=True)
-
-
-async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[str, str]) -> None:
-    """Process a Slack app mention by creating a run or queuing a mid-run message."""
-    channel_id = event_data.get("channel_id", "")
-    thread_ts = event_data.get("thread_ts", "")
-    event_ts = event_data.get("event_ts", "")
-    user_id = event_data.get("user_id", "")
-    text = event_data.get("text", "")
-    bot_user_id = event_data.get("bot_user_id", "")
-
-    if not channel_id or not thread_ts or not event_ts:
-        logger.warning(
-            "Missing Slack event fields (channel_id=%s, thread_ts=%s, event_ts=%s)",
-            channel_id,
-            thread_ts,
-            event_ts,
-        )
-        return
-
-    await set_slack_assistant_status(channel_id, thread_ts)
-
-    thread_id = generate_thread_id_from_slack_thread(channel_id, thread_ts)
-
-    # Prime the user-mapping cache so login/email/slack-id lookups below are warm.
-    try:
-        await refresh_user_mapping_cache()
-    except Exception:  # noqa: BLE001
-        logger.debug("Could not refresh user mapping cache for Slack mention", exc_info=True)
-
-    user_email = None
-    user_name = ""
-    if user_id:
-        slack_user = await get_slack_user_info(user_id)
-        if slack_user:
-            profile = slack_user.get("profile", {})
-            if isinstance(profile, dict):
-                user_email = profile.get("email")
-                user_name = (
-                    profile.get("display_name")
-                    or profile.get("real_name")
-                    or slack_user.get("real_name")
-                    or slack_user.get("name")
-                    or ""
-                )
-
-    thread_messages = await fetch_slack_thread_messages(channel_id, thread_ts)
-    if not any(str(message.get("ts")) == str(event_ts) for message in thread_messages):
-        thread_messages.append({"ts": event_ts, "text": text, "user": user_id})
-
-    context_messages, context_mode = select_slack_context_messages(
-        thread_messages, event_ts, bot_user_id, SLACK_BOT_USERNAME
-    )
-    context_user_ids = [
-        value
-        for value in (message.get("user") for message in context_messages)
-        if isinstance(value, str) and value
-    ]
-    user_names_by_id = await get_slack_user_names(context_user_ids)
-    if user_id and user_name and user_id not in user_names_by_id:
-        user_names_by_id[user_id] = user_name
-    context_text = format_slack_messages_for_prompt(
-        context_messages,
-        user_names_by_id,
-        bot_user_id=bot_user_id,
-        bot_username=SLACK_BOT_USERNAME,
-    )
-    context_source = (
-        "the previous message where I was tagged"
-        if context_mode == "last_mention"
-        else "the beginning of the thread"
-    )
-    clean_text = (
-        strip_bot_mention(text, bot_user_id, bot_username=SLACK_BOT_USERNAME)
-        or "(no text in mention)"
-    )
-    trigger_user = user_name or (f"<@{user_id}>" if user_id else "Unknown user")
-
-    # Auto-resolve cross-posted Slack message links in context
-    resolved_links_section, image_urls_from_links = await resolve_slack_links_in_context(
-        context_messages, user_names_by_id
-    )
-
-    prompt = (
-        "You were mentioned in Slack.\n\n"
-        "## Default Repository Hint\n"
-        f"{repo_config.get('owner')}/{repo_config.get('name')}\n"
-        "Use this only if the Slack conversation does not identify a different repository.\n\n"
-        f"## Triggered by\n{trigger_user}\n\n"
-        f"## Slack Thread\n- Channel: {channel_id}\n- Thread TS: {thread_ts}\n"
-        f"- Context starts at: {context_source}\n\n"
-        f"## Conversation Context\n{context_text}\n\n"
-        f"## Latest Mention Request\n{clean_text}\n\n"
-        + (f"{resolved_links_section}\n\n" if resolved_links_section else "")
-        + "Use `slack_thread_reply` to communicate in this Slack thread for clarifications, "
-        "status updates, and final summaries. Use `slack_read_thread_messages` to read any "
-        "Slack messages by providing channel_id and message_ts."
-    )
-    content_blocks: list[dict[str, Any]] = [create_text_block(prompt)]
-
-    image_urls = dedupe_urls(
-        [url for msg in context_messages for url in extract_image_urls(msg.get("text", ""))]
-        + [
-            f["url_private"]
-            for msg in context_messages
-            for f in msg.get("files", [])
-            if isinstance(f, dict)
-            and f.get("mimetype", "").startswith("image/")
-            and f.get("url_private")
-        ]
-        + image_urls_from_links
-    )
-
-    mapped_login = await login_for_slack_id(user_id)
-    if not mapped_login and user_email:
-        mapped_login = await login_for_email(user_email)
-
-    if image_urls:
-        resolved_model_id = await resolve_agent_model_id(mapped_login)
-        if model_supports_images(resolved_model_id):
-            logger.info("Preparing %d image(s) for Slack mention", len(image_urls))
-            async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
-                for image_url in image_urls:
-                    image_block = await fetch_image_block(image_url, http_client)
-                    if image_block:
-                        content_blocks.append(image_block)
-        else:
-            logger.warning(
-                "Skipping %d image(s) for Slack mention: model %s does not support images",
-                len(image_urls),
-                resolved_model_id,
-            )
-            prompt += vision_not_supported_warning(resolved_model_id, len(image_urls))
-            content_blocks[0] = create_text_block(prompt)
-            image_urls = []
-
-    # Open SWE opens PRs as the triggering user, so a run only proceeds when we
-    # have a valid user GitHub token. Users who have never signed in with
-    # GitHub, and users whose stored authorization is no longer usable, are
-    # blocked and prompted to set up via the dashboard. Bot-token-only
-    # deployments are exempt — they run on the installation token.
-    user_token: str | None = None
-    if mapped_login:
-        try:
-            user_token = await get_valid_access_token(mapped_login)
-        except Exception:  # noqa: BLE001
-            logger.debug(
-                "Failed to resolve GitHub token for %s; treating as unauthenticated",
-                mapped_login,
-                exc_info=True,
-            )
-            user_token = None
-    has_valid_user_token = bool(user_token)
-
-    if not has_valid_user_token and not is_bot_token_only_mode():
-        # A stored-but-unusable token means "sign in again"; no record at all
-        # means the user has never connected GitHub + Slack via the dashboard.
-        # Guard the store read like token resolution above so a transient
-        # failure still yields an actionable prompt and clears the status.
-        has_token_record = False
-        if mapped_login:
-            try:
-                has_token_record = await has_access_token_record(mapped_login)
-            except Exception:  # noqa: BLE001
-                logger.debug(
-                    "Failed to check GitHub token record for %s; prompting sign-in",
-                    mapped_login,
-                    exc_info=True,
-                )
-        reason = "revoked" if has_token_record else "unlinked"
-        logger.info(
-            "Blocking Slack run for thread %s: no valid user GitHub token (%s)",
-            thread_id,
-            reason,
-        )
-        if user_id:
-            await _post_account_link_prompt(
-                channel_id, thread_ts, user_id, user_email, reason=reason
-            )
-        await set_slack_assistant_status(channel_id, thread_ts, status="")
-        return
-
-    configurable: dict[str, Any] = {
-        "repo": repo_config,
-        "slack_thread": {
-            "channel_id": channel_id,
-            "thread_ts": thread_ts,
-            "triggering_user_id": user_id,
-            "triggering_user_name": user_name,
-            "triggering_user_email": user_email,
-            "triggering_event_ts": event_ts,
-        },
-        "user_email": user_email,
-        "source": "slack",
-    }
-    if mapped_login:
-        configurable["github_login"] = mapped_login
-
-    thread_plan_mode = await _get_thread_plan_mode(thread_id)
-    if thread_plan_mode is not None:
-        configurable["plan_mode"] = thread_plan_mode
-
-    langgraph_client = get_client(url=LANGGRAPH_URL)
-    is_first_mention = not await _thread_exists(thread_id)
-    await _upsert_slack_thread_repo_metadata(thread_id, repo_config, langgraph_client)
-    # Pass the login resolved above (from the stable Slack user id) so the thread is
-    # always tagged with github_login — the key the dashboard searches by. Without
-    # it, upsert re-resolves from the Slack profile email, which can miss.
-    await upsert_agent_thread_owner_metadata(
-        thread_id,
-        source="slack",
-        repo_config=repo_config,
-        github_login=mapped_login or "",
-        user_email=user_email or "",
-        title=clean_text if is_first_mention else "",
-        source_context={"slack_thread": configurable["slack_thread"]},
-    )
-
-    run = await dispatch_agent_run(
-        thread_id,
-        content_blocks,
-        configurable,
-        source="slack",
-        metadata=_AGENT_VERSION_METADATA,
-        client=langgraph_client,
-    )
-    logger.info(
-        "Slack LangGraph run %s dispatched for thread %s",
-        _run_id_for_logging(run),
-        thread_id,
-    )
-    run_id = run.get("run_id")
-    if is_first_mention:
-        trace_message_ts = await post_slack_trace_reply(channel_id, thread_ts, thread_id)
-        await set_slack_assistant_status(channel_id, thread_ts)
-        if isinstance(run_id, str) and run_id:
-            await store_slack_run_mapping(
-                langgraph_client,
-                channel_id,
-                thread_ts,
-                run_id,
-                message_ts=trace_message_ts,
-                triggering_user_id=user_id,
-            )
-    else:
-        logger.info(
-            "Skipping Slack trace reply for thread %s — agent will reply when run completes",
-            thread_id,
-        )
-        if isinstance(run_id, str) and run_id:
-            await store_slack_run_mapping(
-                langgraph_client,
-                channel_id,
-                thread_ts,
-                run_id,
-                triggering_user_id=user_id,
-            )
 
 
 def verify_linear_signature(body: bytes, signature: str, secret: str) -> bool:
@@ -1788,54 +1309,6 @@ def _build_github_issue_comments_text(comments: list[dict[str, Any]]) -> str:
     return "\n\n## Comments:\n" + "".join(lines)
 
 
-def build_github_issue_prompt(
-    repo_config: dict[str, str],
-    issue_number: int,
-    issue_id: str,
-    title: str,
-    body: str,
-    comments: list[dict[str, Any]],
-    *,
-    github_login: str,
-    issue_author: str = "",
-) -> str:
-    """Build the user prompt for a GitHub issue-triggered run."""
-    triggered_by_line = f"## Triggered by: {github_login}\n\n" if github_login else ""
-    comments_text = _build_github_issue_comments_text(comments)
-    sanitized_title = sanitize_github_comment_body(title)
-    formatted_body = format_github_comment_body_for_prompt(issue_author or github_login, body)
-    return (
-        "Please work on the following GitHub issue:\n\n"
-        f"## Repository: {repo_config.get('owner')}/{repo_config.get('name')}\n\n"
-        f"{triggered_by_line}"
-        f"## GitHub Issue: #{issue_number} - Issue ID: {issue_id}\n\n"
-        f"## Title: {sanitized_title}\n\n"
-        f"## Description:\n{formatted_body}\n"
-        f"{comments_text}\n\n"
-        "Please analyze this issue and implement the necessary changes. "
-        "When you need to communicate on GitHub, use `GH_TOKEN=dummy gh issue comment` "
-        "with the issue number."
-    )
-
-
-def build_github_issue_followup_prompt(github_login: str, comment_body: str) -> str:
-    """Build the prompt for a follow-up GitHub issue comment."""
-    return (
-        f"**{github_login}:**\n{format_github_comment_body_for_prompt(github_login, comment_body)}"
-    )
-
-
-def build_github_issue_update_prompt(github_login: str, title: str, body: str) -> str:
-    """Build the prompt for a follow-up GitHub issue title/body update."""
-    sanitized_title = sanitize_github_comment_body(title)
-    formatted_body = format_github_comment_body_for_prompt(github_login, body)
-    return (
-        f"**{github_login}:** updated the GitHub issue title/body.\n\n"
-        f"Title: {sanitized_title}\n\n"
-        f"Description:\n{formatted_body}"
-    )
-
-
 async def _trigger_or_queue_run(
     thread_id: str,
     prompt: str,
@@ -1869,26 +1342,6 @@ async def _trigger_or_queue_run(
         metadata=_AGENT_VERSION_METADATA,
     )
     logger.info("LangGraph run created for thread %s from GitHub PR comment", thread_id)
-
-
-def build_github_pr_review_prompt(
-    repo_config: dict[str, str],
-    pr_number: int,
-    pr_url: str,
-    base_sha: str,
-    head_sha: str,
-) -> str:
-    """Build the user prompt for a reviewer-agent run."""
-    return (
-        "Please review this GitHub pull request.\n\n"
-        f"## Repository: {repo_config.get('owner')}/{repo_config.get('name')}\n\n"
-        f"## Pull Request: {pr_url}\n\n"
-        f"## PR Number: {pr_number}\n\n"
-        f"## Base SHA: {base_sha}\n\n"
-        f"## Head SHA: {head_sha}\n\n"
-        "Submit findings as inline GitHub review comments. If there are no real issues, "
-        "submit no comments."
-    )
 
 
 async def fetch_github_pr_metadata(pr_ref: GitHubPrRef, *, token: str) -> dict[str, Any] | None:
@@ -1956,116 +1409,6 @@ async def _reviewer_token_for_repo(
     return await get_github_app_installation_token_with_expiry()
 
 
-async def trigger_pr_review_from_ref(
-    pr_ref: GitHubPrRef,
-    *,
-    source: str,
-    github_login: str = "",
-    github_user_id: int | None = None,
-    slack_channel_id: str = "",
-    slack_thread_ts: str = "",
-) -> dict[str, Any]:
-    repo_config = {"owner": pr_ref.owner, "name": pr_ref.repo}
-    if not await _is_repo_enabled_for_review(repo_config):
-        return {"success": False, "error": "Repository not enabled for review"}
-
-    # Full token to read PR metadata (privacy/id aren't in the trigger ref);
-    # re-scoped below once we know whether the repo is public.
-    app_token, app_token_expires_at = await get_github_app_installation_token_with_expiry()
-    if not app_token:
-        logger.warning("No GitHub App token available for PR reviewer request")
-        return {"success": False, "error": "No GitHub App token available"}
-
-    pr_metadata = await fetch_github_pr_metadata(pr_ref, token=app_token)
-    if not pr_metadata:
-        return {"success": False, "error": "Could not fetch pull request metadata"}
-
-    repo_private = _repo_private_from_pr_metadata(pr_metadata)
-    repo_id = _repo_id_from_pr_metadata(pr_metadata)
-    app_token, app_token_expires_at = await _reviewer_token_for_repo(
-        repo_config,
-        repo_private=repo_private,
-        repo_id=repo_id,
-    )
-    if not app_token:
-        logger.warning("No GitHub App token available for PR reviewer request")
-        return {"success": False, "error": "No GitHub App token available"}
-
-    base_sha = pr_metadata.get("base", {}).get("sha", "")
-    head = pr_metadata.get("head", {})
-    head_sha = head.get("sha", "")
-    branch_name = head.get("ref", "")
-    base_ref = pr_metadata.get("base", {}).get("ref", "")
-    pr_title = pr_metadata.get("title", "")
-    pr_url = pr_metadata.get("html_url", "") or pr_ref.url
-    if not base_sha or not head_sha:
-        logger.warning("Missing base/head SHA for Slack PR review request")
-        return {"success": False, "error": "Pull request metadata is missing base/head SHA"}
-
-    thread_id = generate_reviewer_thread_id(pr_ref.owner, pr_ref.repo, pr_ref.number)
-    langgraph_client = get_client(url=LANGGRAPH_URL)
-    if not await _ensure_thread_exists_for_metadata(thread_id, langgraph_client):
-        return {"success": False, "error": "Could not create reviewer thread"}
-
-    pr_meta: ReviewerPRMeta = {
-        "owner": pr_ref.owner,
-        "name": pr_ref.repo,
-        "number": pr_ref.number,
-        "url": pr_url,
-        "title": pr_title,
-        "head_ref": branch_name,
-        "base_ref": base_ref,
-        "author": (pr_metadata.get("user") or {}).get("login", ""),
-    }
-    slack_thread_meta: ReviewerSlackThread | None = None
-    if slack_channel_id and slack_thread_ts:
-        slack_thread_meta = {
-            "channel_id": slack_channel_id,
-            "thread_ts": slack_thread_ts,
-        }
-    await set_reviewer_thread_metadata(
-        thread_id, pr=pr_meta, watch=True, slack_thread=slack_thread_meta, head_sha=head_sha
-    )
-    await post_review_started_comment(
-        thread_id=thread_id,
-        owner=pr_ref.owner,
-        repo=pr_ref.repo,
-        pr_number=pr_ref.number,
-        token=app_token,
-    )
-
-    prompt = build_github_pr_review_prompt(repo_config, pr_ref.number, pr_url, base_sha, head_sha)
-    configurable = _build_reviewer_configurable(
-        source=source,
-        github_login=github_login,
-        github_user_id=github_user_id,
-        repo_config=repo_config,
-        pr_number=pr_ref.number,
-        pr_url=pr_url,
-        base_sha=base_sha,
-        head_sha=head_sha,
-        branch_name=branch_name,
-        repo_private=repo_private,
-        slack_channel_id=slack_channel_id,
-        slack_thread_ts=slack_thread_ts,
-    )
-
-    logger.info(
-        "Dispatching reviewer run for thread %s from %s PR review request", thread_id, source
-    )
-    run = await dispatch_agent_run(
-        thread_id,
-        prompt,
-        configurable,
-        source=source,
-        assistant_id="reviewer",
-        metadata=_AGENT_VERSION_METADATA,
-        client=langgraph_client,
-    )
-    await _store_current_reviewer_run_id(thread_id, run)
-    return {"success": True, "queued": False, "thread_id": thread_id, "pr_url": pr_url}
-
-
 async def _store_current_reviewer_run_id(thread_id: str, run: Any) -> None:
     run_id = run.get("run_id") if isinstance(run, dict) else None
     if isinstance(run_id, str) and run_id:
@@ -2131,148 +1474,6 @@ async def _draft_review_enabled_for_author(author_login: str) -> bool:
                 return override
     team = await get_team_settings()
     return bool(team.get("review_draft_prs"))
-
-
-async def _dispatch_first_review_from_pr_payload(payload: dict[str, Any], *, source: str) -> None:
-    """Trigger a first-review run on the canonical reviewer thread for a PR."""
-    repo = payload.get("repository", {})
-    pull_request = payload.get("pull_request", {})
-    repo_config = {
-        "owner": repo.get("owner", {}).get("login", ""),
-        "name": repo.get("name", ""),
-    }
-    repo_private = _repo_private_from_payload(payload)
-    repo_id = _repo_id_from_payload(payload)
-    pr_number = pull_request.get("number")
-    pr_url = pull_request.get("html_url", "") or pull_request.get("url", "")
-    branch_name = pull_request.get("head", {}).get("ref", "")
-    base_ref = pull_request.get("base", {}).get("ref", "")
-    base_sha = pull_request.get("base", {}).get("sha", "")
-    head_sha = pull_request.get("head", {}).get("sha", "")
-    pr_title = pull_request.get("title", "")
-    github_login = payload.get("sender", {}).get("login", "")
-    github_user_id = payload.get("sender", {}).get("id")
-
-    if not pr_number or not pr_url or not base_sha or not head_sha:
-        logger.warning("Missing PR context for reviewer dispatch, skipping run")
-        return
-
-    thread_id = generate_reviewer_thread_id(
-        repo_config.get("owner", ""), repo_config.get("name", ""), pr_number
-    )
-
-    pr_meta: ReviewerPRMeta = {
-        "owner": repo_config.get("owner", ""),
-        "name": repo_config.get("name", ""),
-        "number": pr_number,
-        "url": pr_url,
-        "title": pr_title,
-        "head_ref": branch_name,
-        "base_ref": base_ref,
-        "author": (pull_request.get("user") or {}).get("login", ""),
-    }
-    last_reviewed_sha = ""
-    if payload.get("action") == "ready_for_review":
-        metadata = await _get_thread_metadata_safe(thread_id)
-        if metadata is not None and metadata.get("kind") == REVIEWER_THREAD_KIND:
-            existing_last_reviewed_sha = metadata.get("last_reviewed_sha")
-            if isinstance(existing_last_reviewed_sha, str) and existing_last_reviewed_sha:
-                if existing_last_reviewed_sha == head_sha:
-                    await set_reviewer_thread_metadata(thread_id, pr=pr_meta, watch=True)
-                    logger.info(
-                        "Skipping ready_for_review auto-review for %s/%s#%s: "
-                        "head_sha unchanged from last_reviewed_sha",
-                        repo_config.get("owner"),
-                        repo_config.get("name"),
-                        pr_number,
-                    )
-                    return
-                last_reviewed_sha = existing_last_reviewed_sha
-
-    app_token, app_token_expires_at = await _reviewer_token_for_repo(
-        repo_config,
-        repo_private=repo_private,
-        repo_id=repo_id,
-    )
-    if not app_token:
-        logger.warning("No GitHub App token available for reviewer dispatch")
-        return
-
-    langgraph_client = get_client(url=LANGGRAPH_URL)
-    if not await _ensure_thread_exists_for_metadata(thread_id, langgraph_client):
-        return
-
-    await set_reviewer_thread_metadata(thread_id, pr=pr_meta, watch=True, head_sha=head_sha)
-
-    check_run_id = await create_review_check_run(
-        owner=repo_config.get("owner", ""),
-        repo=repo_config.get("name", ""),
-        head_sha=head_sha,
-        token=app_token,
-        details_url=dashboard_thread_url(thread_id),
-    )
-    if check_run_id is not None:
-        await set_reviewer_thread_metadata(thread_id, extra={"review_check_run_id": check_run_id})
-
-    is_re_review = bool(last_reviewed_sha)
-    if is_re_review:
-        prompt = (
-            f"PR #{pr_number} has been marked ready for review. The new HEAD is "
-            f"{head_sha}. Reconcile existing findings against the new diff, add any "
-            f"net-new findings, and call `publish_review` once you're done."
-        )
-    else:
-        prompt = build_github_pr_review_prompt(repo_config, pr_number, pr_url, base_sha, head_sha)
-    configurable = _build_reviewer_configurable(
-        source=source,
-        github_login=github_login,
-        github_user_id=github_user_id,
-        repo_config=repo_config,
-        pr_number=pr_number,
-        pr_url=pr_url,
-        base_sha=base_sha,
-        head_sha=head_sha,
-        branch_name=branch_name,
-        repo_private=repo_private,
-        re_review=is_re_review,
-        last_reviewed_sha=last_reviewed_sha,
-    )
-
-    logger.info("Dispatching reviewer run for thread %s (source=%s)", thread_id, source)
-    run = await dispatch_agent_run(
-        thread_id,
-        prompt,
-        configurable,
-        source=source,
-        assistant_id="reviewer",
-        metadata=_AGENT_VERSION_METADATA,
-        client=langgraph_client,
-    )
-    await _store_current_reviewer_run_id(thread_id, run)
-    logger.info("Reviewer run dispatched for thread %s (source=%s)", thread_id, source)
-
-
-async def process_github_pr_ready(payload: dict[str, Any]) -> None:
-    """Auto-review a PR that has just been opened or marked ready-for-review.
-
-    Drafts are gated by the PR author's ``review_draft_prs`` profile flag
-    (with the team-wide setting as a fallback).
-    """
-    pull_request = payload.get("pull_request", {})
-    is_draft = bool(pull_request.get("draft"))
-    if is_draft:
-        author = pull_request.get("user") or {}
-        author_login = author.get("login", "") if isinstance(author, dict) else ""
-        if not await _draft_review_enabled_for_author(author_login):
-            logger.info(
-                "Skipping auto-review of draft PR by %s: review_draft_prs is disabled",
-                author_login or "<unknown>",
-            )
-            return
-    # Use source="github" so the reviewer resolver can use the GitHub App token;
-    # "github_auto" would fall through to the email-based path, which has no
-    # user_email to route on for webhook-triggered runs.
-    await _dispatch_first_review_from_pr_payload(payload, source="github")
 
 
 async def _fetch_open_pr_for_branch(
@@ -2421,276 +1622,6 @@ async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
             logger.debug("Failed to update pr_state for thread %s", thread_id, exc_info=True)
 
 
-async def process_github_pr_close(payload: dict[str, Any]) -> None:
-    """Toggle watch on the canonical reviewer thread on close/reopen/draft transitions.
-
-    ``reopened`` re-enables watch; ``closed`` always disables it.
-    ``converted_to_draft`` disables watch only when the PR author's effective
-    draft-review setting is off — if drafts should be reviewed, watch stays on
-    so subsequent pushes still trigger re-reviews while the PR is in draft.
-    """
-    repo = payload.get("repository", {})
-    pull_request = payload.get("pull_request", {})
-    repo_config = {
-        "owner": repo.get("owner", {}).get("login", ""),
-        "name": repo.get("name", ""),
-    }
-    pr_number = pull_request.get("number")
-    if not pr_number or not isinstance(pr_number, int):
-        return
-    if not await _is_repo_enabled_for_review(repo_config):
-        return
-
-    thread_id = generate_reviewer_thread_id(
-        repo_config.get("owner", ""), repo_config.get("name", ""), pr_number
-    )
-    metadata = await _get_thread_metadata_safe(thread_id)
-    if metadata is None or metadata.get("kind") != REVIEWER_THREAD_KIND:
-        # No reviewer thread for this PR, nothing to do.
-        logger.debug(
-            "PR %s/%s#%s closed/reopened: no reviewer thread, skipping watch update",
-            repo_config.get("owner"),
-            repo_config.get("name"),
-            pr_number,
-        )
-        return
-    action = payload.get("action", "")
-    if action == "converted_to_draft":
-        author = pull_request.get("user") or {}
-        author_login = author.get("login", "") if isinstance(author, dict) else ""
-        if await _draft_review_enabled_for_author(author_login):
-            logger.info(
-                "PR %s/%s#%s converted to draft but author %s has draft reviews enabled; keeping watch",
-                repo_config.get("owner"),
-                repo_config.get("name"),
-                pr_number,
-                author_login or "<unknown>",
-            )
-            return
-        desired_watch = False
-    else:
-        desired_watch = action == "reopened"
-    if metadata.get("watch") == desired_watch:
-        return
-    await set_reviewer_thread_metadata(thread_id, watch=desired_watch)
-    logger.info("Set watch=%s on reviewer thread %s after PR %s", desired_watch, thread_id, action)
-
-
-async def process_github_push_event(payload: dict[str, Any]) -> None:
-    """Re-trigger the reviewer for a watched PR when its head branch is pushed to."""
-    ref = payload.get("ref", "")
-    after_sha = payload.get("after", "")
-    if not ref.startswith("refs/heads/"):
-        logger.debug("Push ignored: ref %s is not a branch", ref)
-        return
-    if not isinstance(after_sha, str) or not after_sha or set(after_sha) == {"0"}:
-        logger.debug("Push to %s ignored: branch deletion or missing SHA", ref)
-        return
-    head_ref = ref[len("refs/heads/") :]
-
-    repo = payload.get("repository", {})
-    repo_config = {
-        "owner": repo.get("owner", {}).get("login", "") or repo.get("owner", {}).get("name", ""),
-        "name": repo.get("name", ""),
-    }
-    repo_private = _repo_private_from_payload(payload)
-    repo_id = _repo_id_from_payload(payload)
-    if not repo_config["owner"] or not repo_config["name"]:
-        logger.warning("Push to %s ignored: repository owner/name missing from payload", head_ref)
-        return
-    if not await _is_repo_enabled_for_review(repo_config):
-        logger.info(
-            "Push to %s/%s head=%s ignored: repo not enabled for review",
-            repo_config["owner"],
-            repo_config["name"],
-            head_ref,
-        )
-        return
-
-    app_token, app_token_expires_at = await _reviewer_token_for_repo(
-        repo_config,
-        repo_private=repo_private,
-        repo_id=repo_id,
-    )
-    if not app_token:
-        logger.warning("No GitHub App token for push re-review on %s", head_ref)
-        return
-
-    pr = await _fetch_open_pr_for_branch(repo_config, head_ref, token=app_token)
-    if not pr:
-        logger.debug(
-            "No open PR found for push to %s/%s head=%s",
-            repo_config["owner"],
-            repo_config["name"],
-            head_ref,
-        )
-        return
-
-    # Push payloads normally carry repo privacy/id; fall back to PR metadata.
-    # If the repo turns out public, re-scope the token so reviewer.py doesn't
-    # proxy a full-installation token for a public PR.
-    if repo_private is None:
-        repo_private = _repo_private_from_pr_metadata(pr)
-        repo_id = repo_id or _repo_id_from_pr_metadata(pr)
-        if repo_private is False:
-            app_token, app_token_expires_at = await _reviewer_token_for_repo(
-                repo_config,
-                repo_private=repo_private,
-                repo_id=repo_id,
-            )
-            if not app_token:
-                logger.warning("No GitHub App token for push re-review on %s", head_ref)
-                return
-    pr_number = pr.get("number")
-    pr_url = pr.get("html_url") or pr.get("url") or ""
-    base_sha = pr.get("base", {}).get("sha", "")
-    base_ref = pr.get("base", {}).get("ref", "")
-    head_sha = pr.get("head", {}).get("sha", after_sha)
-    pr_title = pr.get("title", "")
-    if not isinstance(pr_number, int) or not base_sha or not head_sha:
-        logger.warning(
-            "Push to %s/%s head=%s ignored: PR metadata missing number/base/head SHA",
-            repo_config["owner"],
-            repo_config["name"],
-            head_ref,
-        )
-        return
-
-    thread_id = generate_reviewer_thread_id(repo_config["owner"], repo_config["name"], pr_number)
-    metadata = await _get_thread_metadata_safe(thread_id)
-    if metadata is None or metadata.get("kind") != REVIEWER_THREAD_KIND:
-        logger.info(
-            "Push to %s/%s#%s ignored: no reviewer thread for this PR. "
-            "Trigger a first review (Slack `@open-swe review <url>` or request "
-            "open-swe[bot] as a GitHub reviewer) to start watching.",
-            repo_config["owner"],
-            repo_config["name"],
-            pr_number,
-        )
-        return
-    if not metadata.get("watch"):
-        logger.info("Push to %s ignored: reviewer thread %s is not watching", head_ref, thread_id)
-        return
-
-    last_reviewed_sha = metadata.get("last_reviewed_sha")
-    if isinstance(last_reviewed_sha, str) and last_reviewed_sha == head_sha:
-        logger.info("Push to %s ignored: head_sha unchanged from last_reviewed_sha", head_ref)
-        return
-    if (
-        isinstance(last_reviewed_sha, str)
-        and last_reviewed_sha
-        and await _is_pr_diff_unchanged_since_last_review(
-            repo_config,
-            base_ref=base_ref,
-            last_reviewed_sha=last_reviewed_sha,
-            head_sha=head_sha,
-            token=app_token,
-        )
-    ):
-        await set_reviewer_thread_metadata(thread_id, last_reviewed_sha=head_sha)
-        # The old head's check disappears once the head moves (GitHub only
-        # shows checks on the current head), so even though no re-review runs,
-        # surface a settled check on the new head.
-        unchanged_check_id = await create_review_check_run(
-            owner=repo_config["owner"],
-            repo=repo_config["name"],
-            head_sha=head_sha,
-            token=app_token,
-            details_url=dashboard_thread_url(thread_id),
-        )
-        if unchanged_check_id is not None:
-            await complete_review_check_run(
-                owner=repo_config["owner"],
-                repo=repo_config["name"],
-                check_run_id=unchanged_check_id,
-                token=app_token,
-                conclusion="success",
-                title="No new changes to review",
-                summary=(
-                    "The pull request diff is unchanged since the last reviewed "
-                    f"commit {last_reviewed_sha}."
-                ),
-            )
-        logger.info(
-            "Push to %s ignored: PR diff unchanged since last reviewed SHA %s",
-            head_ref,
-            last_reviewed_sha,
-        )
-        return
-
-    langgraph_client = get_client(url=LANGGRAPH_URL)
-    if not await _ensure_thread_exists_for_metadata(thread_id, langgraph_client):
-        return
-    try:
-        threads = await fetch_pr_review_threads(
-            owner=repo_config["owner"],
-            repo=repo_config["name"],
-            pr_number=pr_number,
-            token=app_token,
-        )
-        await reconcile_findings_with_review_threads(thread_id, threads)
-    except Exception:
-        logger.warning("Could not sync review threads before push re-review for %s", thread_id)
-
-    pr_meta: ReviewerPRMeta = {
-        "owner": repo_config["owner"],
-        "name": repo_config["name"],
-        "number": pr_number,
-        "url": pr_url,
-        "title": pr_title,
-        "head_ref": head_ref,
-        "base_ref": base_ref,
-        "author": (pr.get("user") or {}).get("login", ""),
-    }
-    await set_reviewer_thread_metadata(thread_id, pr=pr_meta, watch=True, head_sha=head_sha)
-
-    # GitHub only shows check runs on a PR's current head commit, so the check
-    # created on the previous head disappears after a follow-up push. Create a
-    # fresh in-progress check on the new head SHA so the review stays visible;
-    # publish (or the after-agent hook) settles this id.
-    check_run_id = await create_review_check_run(
-        owner=repo_config["owner"],
-        repo=repo_config["name"],
-        head_sha=head_sha,
-        token=app_token,
-        details_url=dashboard_thread_url(thread_id),
-    )
-    if check_run_id is not None:
-        await set_reviewer_thread_metadata(thread_id, extra={"review_check_run_id": check_run_id})
-
-    re_review_prompt = (
-        f"A new commit has been pushed to PR #{pr_number}. The new HEAD is "
-        f"{head_sha}. Reconcile existing findings against the new diff, add any "
-        f"net-new findings, and call `publish_review` once you're done."
-    )
-    configurable = _build_reviewer_configurable(
-        source="github_push",
-        github_login=payload.get("sender", {}).get("login", "") or "",
-        github_user_id=payload.get("sender", {}).get("id"),
-        repo_config=repo_config,
-        pr_number=pr_number,
-        pr_url=pr_url,
-        base_sha=base_sha,
-        head_sha=head_sha,
-        branch_name=head_ref,
-        repo_private=repo_private,
-        re_review=True,
-        last_reviewed_sha=last_reviewed_sha if isinstance(last_reviewed_sha, str) else "",
-    )
-
-    logger.info("Dispatching push re-review run for thread %s", thread_id)
-    run = await dispatch_agent_run(
-        thread_id,
-        re_review_prompt,
-        configurable,
-        source="github_push",
-        assistant_id="reviewer",
-        metadata=_AGENT_VERSION_METADATA,
-        client=langgraph_client,
-    )
-    await _store_current_reviewer_run_id(thread_id, run)
-
-
 async def _refresh_thread_github_token_after_401(thread_id: str, email: str) -> str | None:
     """Invalidate the cached token after a 401 and try to resolve a fresh one."""
     logger.warning(
@@ -2729,127 +1660,6 @@ async def _get_or_resolve_thread_github_token(thread_id: str, email: str) -> str
         thread_id, github_token, expires_at=expires_at if isinstance(expires_at, str) else None
     )
     return github_token
-
-
-async def process_github_pr_comment(payload: dict[str, Any], event_type: str) -> None:
-    """Process a GitHub PR comment that tagged @open-swe.
-
-    Retrieves the existing thread token, reacts with 👀, fetches all comments
-    since the last @open-swe tag, then creates or queues a new run.
-
-    Args:
-        payload: The parsed GitHub webhook payload.
-        event_type: One of 'issue_comment', 'pull_request_review_comment',
-                    'pull_request_review'.
-    """
-    (
-        repo_config,
-        pr_number,
-        branch_name,
-        github_login,
-        pr_url,
-        comment_id,
-        node_id,
-    ) = await extract_pr_context(payload, event_type)
-    github_user_id = payload.get("sender", {}).get("id")
-
-    logger.info(
-        "Processing GitHub PR comment: event=%s, pr=%s, branch=%s",
-        event_type,
-        pr_number,
-        branch_name,
-    )
-
-    thread_id = get_thread_id_from_branch(branch_name) if branch_name else None
-    if not thread_id:
-        if not pr_number:
-            logger.warning(
-                "Could not determine thread_id for branch '%s' (no pr_number), skipping",
-                branch_name,
-            )
-            return
-        owner = repo_config.get("owner", "")
-        name = repo_config.get("name", "")
-        stable_key = f"{owner}/{name}/pr/{pr_number}"
-        thread_id = str(uuid.uuid5(uuid.NAMESPACE_URL, stable_key))
-        logger.info("Generated thread_id %s for non-open-swe branch '%s'", thread_id, branch_name)
-        langgraph_client = get_client(url=LANGGRAPH_URL)
-        try:
-            await langgraph_client.threads.update(thread_id, metadata={"branch_name": branch_name})
-        except Exception as exc:  # noqa: BLE001
-            if _is_not_found_error(exc):
-                await langgraph_client.threads.create(
-                    thread_id=thread_id,
-                    if_exists="do_nothing",
-                    metadata={"branch_name": branch_name},
-                )
-            else:
-                logger.warning("Failed to persist branch_name metadata for thread %s", thread_id)
-
-    email = await email_for_login(github_login) or ""
-    if email:
-        github_token = await _get_or_resolve_thread_github_token(thread_id, email)
-    else:
-        logger.warning("No email mapping for GitHub user '%s', skipping", github_login)
-        return
-
-    if not github_token:
-        logger.warning("No GitHub token for thread %s, skipping", thread_id)
-        return
-
-    if comment_id:
-        try:
-            await react_to_github_comment(
-                repo_config,
-                comment_id,
-                event_type=event_type,
-                token=github_token,
-                pull_number=pr_number,
-                node_id=node_id,
-            )
-        except GitHubAuthError:
-            github_token = await _refresh_thread_github_token_after_401(thread_id, email)
-            if not github_token:
-                logger.warning("Re-auth failed for thread %s after 401; skipping", thread_id)
-                return
-            await react_to_github_comment(
-                repo_config,
-                comment_id,
-                event_type=event_type,
-                token=github_token,
-                pull_number=pr_number,
-                node_id=node_id,
-            )
-
-    if not pr_number:
-        logger.warning("No PR number found in payload, skipping")
-        return
-
-    try:
-        comments = await fetch_pr_comments_since_last_tag(
-            repo_config, pr_number, token=github_token
-        )
-    except GitHubAuthError:
-        github_token = await _refresh_thread_github_token_after_401(thread_id, email)
-        if not github_token:
-            logger.warning("Re-auth failed for thread %s after 401; skipping", thread_id)
-            return
-        comments = await fetch_pr_comments_since_last_tag(
-            repo_config, pr_number, token=github_token
-        )
-    if not comments:
-        logger.info("No comments found since last @open-swe tag for PR %s", pr_number)
-        return
-
-    prompt = build_pr_prompt(comments, pr_url, repo_config=repo_config)
-    await _trigger_or_queue_run(
-        thread_id,
-        prompt,
-        github_login=github_login,
-        github_user_id=github_user_id,
-        repo_config=repo_config,
-        pr_number=pr_number,
-    )
 
 
 def _finding_comment_ids(finding: Finding) -> set[int]:
@@ -2902,272 +1712,6 @@ def _build_queued_finding_reply_prompt(
         "Reassess only this finding, reply only if useful, resolve/dismiss it if "
         "appropriate, and call `publish_review` once."
     )
-
-
-async def process_github_review_finding_reply(payload: dict[str, Any]) -> None:
-    """Route replies to Open SWE review comments back to the reviewer graph."""
-    parent_comment_id = _review_comment_reply_parent_id(payload)
-    if parent_comment_id is None:
-        return
-
-    sender = payload.get("sender", {})
-    sender_login = sender.get("login") if isinstance(sender, dict) else None
-    if sender_login == "open-swe[bot]":
-        return
-
-    repo = payload.get("repository", {})
-    pull_request = payload.get("pull_request", {})
-    repo_config = {
-        "owner": repo.get("owner", {}).get("login", ""),
-        "name": repo.get("name", ""),
-    }
-    repo_private = _repo_private_from_payload(payload)
-    repo_id = _repo_id_from_payload(payload)
-    pr_number = pull_request.get("number")
-    if not isinstance(pr_number, int):
-        return
-
-    thread_id = generate_reviewer_thread_id(
-        repo_config.get("owner", ""), repo_config.get("name", ""), pr_number
-    )
-    metadata = await _get_thread_metadata_safe(thread_id)
-    if metadata is None or metadata.get("kind") != REVIEWER_THREAD_KIND:
-        return
-
-    app_token, app_token_expires_at = await _reviewer_token_for_repo(
-        repo_config,
-        repo_private=repo_private,
-        repo_id=repo_id,
-    )
-    if not app_token:
-        return
-
-    threads = await fetch_pr_review_threads(
-        owner=repo_config["owner"],
-        repo=repo_config["name"],
-        pr_number=pr_number,
-        token=app_token,
-    )
-    await reconcile_findings_with_review_threads(thread_id, threads)
-    findings = await list_reviewer_findings(thread_id)
-    finding = next(
-        (item for item in findings if parent_comment_id in _finding_comment_ids(item)), None
-    )
-    if finding is None:
-        return
-    finding_id = finding.get("id")
-    if not isinstance(finding_id, str):
-        return
-
-    comment = payload.get("comment", {})
-    if not isinstance(comment, dict):
-        return
-    reply_body = comment.get("body") if isinstance(comment.get("body"), str) else ""
-    reply_author = sender_login if isinstance(sender_login, str) else "unknown"
-    reply_comment_id = comment.get("id") if isinstance(comment.get("id"), int) else None
-    interaction: FindingInteraction = {
-        "kind": "human_reply",
-        "github_comment_id": reply_comment_id,
-        "github_parent_comment_id": parent_comment_id,
-        "author": reply_author,
-        "body": reply_body,
-        "created_at": comment.get("created_at")
-        if isinstance(comment.get("created_at"), str)
-        else "",
-        "needs_reassessment": True,
-    }
-    await append_finding_interaction(thread_id, finding_id, interaction)
-
-    base_sha = pull_request.get("base", {}).get("sha", "")
-    head_sha = pull_request.get("head", {}).get("sha", "")
-    pr_url = pull_request.get("html_url", "") or pull_request.get("url", "")
-    branch_name = pull_request.get("head", {}).get("ref", "")
-    configurable = _build_reviewer_configurable(
-        source="github_review_comment",
-        github_login=reply_author,
-        github_user_id=sender.get("id") if isinstance(sender, dict) else None,
-        repo_config=repo_config,
-        pr_number=pr_number,
-        pr_url=pr_url,
-        base_sha=base_sha,
-        head_sha=head_sha,
-        branch_name=branch_name,
-        repo_private=repo_private,
-        re_review=True,
-    )
-    configurable.update(
-        {
-            "reviewer_event": "finding_reply",
-            "finding_reply_id": finding_id,
-            "finding_reply_author": reply_author,
-            "finding_reply_body": reply_body,
-        }
-    )
-    finding_reply_prompt = _build_queued_finding_reply_prompt(
-        finding_id=finding_id,
-        reply_author=reply_author,
-        reply_body=reply_body,
-        pr_number=pr_number,
-    )
-    langgraph_client = get_client(url=LANGGRAPH_URL)
-    run = await dispatch_agent_run(
-        thread_id,
-        finding_reply_prompt,
-        configurable,
-        source="github_review_reply",
-        assistant_id="reviewer",
-        metadata=_AGENT_VERSION_METADATA,
-        client=langgraph_client,
-    )
-    await _store_current_reviewer_run_id(thread_id, run)
-
-
-async def process_github_issue(payload: dict[str, Any], event_type: str) -> None:
-    """Process a GitHub issue or issue comment that tagged @open-swe."""
-    issue = payload.get("issue", {})
-    repo = payload.get("repository", {})
-    repo_config = {
-        "owner": repo.get("owner", {}).get("login", ""),
-        "name": repo.get("name", ""),
-    }
-
-    issue_id = str(issue.get("id", ""))
-    issue_number = issue.get("number")
-    github_login = payload.get("sender", {}).get("login", "")
-    github_user_id = payload.get("sender", {}).get("id")
-    issue_url = issue.get("html_url", "") or issue.get("url", "")
-    title = issue.get("title", "No title")
-    description = issue.get("body") or "No description"
-    issue_author = issue.get("user", {}).get("login", "")
-
-    logger.info(
-        "Processing GitHub issue: event=%s, issue=%s, repo=%s/%s",
-        event_type,
-        issue_number,
-        repo_config.get("owner"),
-        repo_config.get("name"),
-    )
-
-    if not issue_id or not issue_number:
-        logger.warning("Missing GitHub issue id/number, skipping")
-        return
-
-    email = await email_for_login(github_login) or ""
-    if not email:
-        logger.warning("No email mapping for GitHub user '%s', skipping", github_login)
-        return
-
-    thread_id = generate_thread_id_from_github_issue(issue_id)
-    existing_thread = await _thread_exists(thread_id)
-    github_token = await _get_or_resolve_thread_github_token(thread_id, email)
-    app_token = await get_github_app_installation_token()
-    reaction_token = github_token or app_token
-    comment = payload.get("comment", {})
-    comment_id = comment.get("id")
-    if event_type == "issue_comment" and comment_id:
-        if not reaction_token:
-            logger.warning("No GitHub token available to react to issue comment %s", comment_id)
-        else:
-            try:
-                reacted = await react_to_github_comment(
-                    repo_config,
-                    comment_id,
-                    event_type="issue_comment",
-                    token=reaction_token,
-                )
-            except GitHubAuthError:
-                github_token = await _refresh_thread_github_token_after_401(thread_id, email)
-                reaction_token = github_token or app_token
-                reacted = False
-                if reaction_token:
-                    try:
-                        reacted = await react_to_github_comment(
-                            repo_config,
-                            comment_id,
-                            event_type="issue_comment",
-                            token=reaction_token,
-                        )
-                    except GitHubAuthError:
-                        logger.warning(
-                            "Re-auth still produced 401 reacting to issue comment %s",
-                            comment_id,
-                        )
-                        reacted = False
-            if not reacted:
-                logger.warning("Failed to react to GitHub issue comment %s", comment_id)
-
-    if existing_thread:
-        if event_type == "issue_comment":
-            prompt = build_github_issue_followup_prompt(
-                comment.get("user", {}).get("login", github_login) or github_login,
-                comment.get("body", ""),
-            )
-        else:
-            prompt = build_github_issue_update_prompt(github_login, title, description)
-    else:
-        try:
-            comments = await fetch_issue_comments(
-                repo_config, issue_number, token=github_token or app_token
-            )
-        except GitHubAuthError:
-            github_token = await _refresh_thread_github_token_after_401(thread_id, email)
-            comments = await fetch_issue_comments(
-                repo_config, issue_number, token=github_token or app_token
-            )
-        if comment_id and not any(item.get("comment_id") == comment_id for item in comments):
-            comments.append(
-                {
-                    "body": comment.get("body", ""),
-                    "author": comment.get("user", {}).get("login", "unknown"),
-                    "created_at": comment.get("created_at", ""),
-                    "comment_id": comment_id,
-                }
-            )
-            comments.sort(key=lambda item: item.get("created_at", ""))
-
-        prompt = build_github_issue_prompt(
-            repo_config,
-            issue_number,
-            issue_id,
-            title,
-            description,
-            comments,
-            github_login=github_login,
-            issue_author=issue_author,
-        )
-    configurable: dict[str, Any] = {
-        "source": "github",
-        "github_login": github_login,
-        "github_user_id": github_user_id,
-        "repo": repo_config,
-        "github_issue": {
-            "id": issue_id,
-            "number": issue_number,
-            "title": title,
-            "url": issue_url,
-        },
-    }
-
-    await upsert_agent_thread_owner_metadata(
-        thread_id,
-        source="github",
-        repo_config=repo_config,
-        github_login=github_login,
-        title=title or (f"Issue #{issue_number}" if issue_number else ""),
-        source_context={"github_issue": configurable["github_issue"]},
-    )
-
-    logger.info("Dispatching LangGraph run for thread %s from GitHub issue", thread_id)
-    langgraph_client = get_client(url=LANGGRAPH_URL)
-    await dispatch_agent_run(
-        thread_id,
-        prompt,
-        configurable,
-        source="github_issue",
-        metadata=_AGENT_VERSION_METADATA,
-        client=langgraph_client,
-    )
-    logger.info("LangGraph run dispatched for thread %s from GitHub issue", thread_id)
 
 
 @app.post("/webhooks/github")
@@ -3323,3 +1867,24 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks) ->
 
     logger.info("Ignoring unsupported GitHub payload shape for event=%s", event_type)
     return {"status": "ignored", "reason": f"Unsupported payload for event type: {event_type}"}
+
+
+# ---- Webhook handlers (moved to agent/webhooks/, re-exported here) ----
+# Re-exported so the @app routes above and the test suite (which references
+# webapp.process_github_issue, webapp.build_github_issue_prompt, etc.) keep working.
+from .webhooks.github import (  # noqa: E402,F401
+    _dispatch_first_review_from_pr_payload,
+    build_github_issue_followup_prompt,
+    build_github_issue_prompt,
+    build_github_issue_update_prompt,
+    build_github_pr_review_prompt,
+    process_github_issue,
+    process_github_pr_close,
+    process_github_pr_comment,
+    process_github_pr_ready,
+    process_github_push_event,
+    process_github_review_finding_reply,
+    trigger_pr_review_from_ref,
+)
+from .webhooks.linear import process_linear_issue  # noqa: E402,F401
+from .webhooks.slack import process_slack_mention  # noqa: E402,F401
