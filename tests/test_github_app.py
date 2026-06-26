@@ -142,6 +142,48 @@ async def test_installation_token_can_be_scoped_to_repository_ids(
 
 
 @pytest.mark.asyncio
+async def test_installation_token_includes_permissions(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(github_app, "GITHUB_APP_ID", "1")
+    monkeypatch.setattr(github_app, "GITHUB_APP_PRIVATE_KEY", "key")
+    monkeypatch.setattr(github_app, "GITHUB_APP_INSTALLATION_ID", "2")
+    monkeypatch.setattr(github_app, "_generate_app_jwt", lambda: "jwt")
+    monkeypatch.setattr(github_app.httpx, "AsyncClient", _FakeAsyncClient)
+
+    await github_app.get_github_app_installation_token_with_expiry(
+        repositories=["open-swe"], permissions={"workflows": "write", "contents": "write"}
+    )
+
+    assert _FakeAsyncClient.last_post is not None
+    assert _FakeAsyncClient.last_post["json"] == {
+        "repositories": ["open-swe"],
+        "permissions": {"contents": "write", "workflows": "write"},
+    }
+
+
+@pytest.mark.asyncio
+async def test_cache_is_scoped_per_permission_set(monkeypatch: pytest.MonkeyPatch) -> None:
+    future = (datetime.now(UTC) + timedelta(hours=1)).isoformat()
+
+    class Client(_CountingClient):
+        posts = 0
+        expires_at = future
+
+    _configure(monkeypatch, Client)
+
+    await github_app.get_github_app_installation_token_with_expiry(
+        permissions={"contents": "write"}
+    )
+    await github_app.get_github_app_installation_token_with_expiry(
+        permissions={"contents": "write", "workflows": "write"}
+    )
+    await github_app.get_github_app_installation_token_with_expiry(
+        permissions={"contents": "write"}
+    )
+
+    assert Client.posts == 2
+
+
+@pytest.mark.asyncio
 async def test_installation_token_omits_scope_for_full_installation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
