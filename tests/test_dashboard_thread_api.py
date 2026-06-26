@@ -1,4 +1,6 @@
 import base64
+import json
+from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
@@ -302,6 +304,132 @@ def test_thread_summary_omits_pr_when_no_pr_metadata() -> None:
 
     assert "pr" not in summary
     assert "diffStats" not in summary
+
+
+async def test_recovery_patch_requires_thread_owner(monkeypatch) -> None:
+    class FakeThreads:
+        async def get(self, thread_id: str) -> dict[str, object]:
+            return {
+                "thread_id": thread_id,
+                "metadata": {"source": "dashboard", "github_login": "owner", "sandbox_id": "sbx"},
+            }
+
+    class FakeClient:
+        threads = FakeThreads()
+
+    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
+
+    with pytest.raises(HTTPException) as exc_info:
+        await thread_api.get_dashboard_thread_recovery_patch("tid", "intruder")
+
+    assert exc_info.value.status_code == 404
+
+
+async def test_recovery_patch_requires_sandbox(monkeypatch) -> None:
+    async def fake_authorized_thread(thread_id: str, login: str, *, email: str | None = None):
+        return {"thread_id": thread_id, "metadata": {"source": "dashboard", "github_login": login}}
+
+    monkeypatch.setattr(thread_api, "_authorized_thread", fake_authorized_thread)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await thread_api.get_dashboard_thread_recovery_patch("tid", "octocat")
+
+    assert exc_info.value.status_code == 404
+    assert "sandbox" in exc_info.value.detail
+
+
+async def test_recovery_patch_downloads_generated_patch(monkeypatch) -> None:
+    async def fake_authorized_thread(thread_id: str, login: str, *, email: str | None = None):
+        return {
+            "thread_id": thread_id,
+            "metadata": {
+                "source": "dashboard",
+                "github_login": login,
+                "sandbox_id": "sbx",
+                "repo_owner": "octo",
+                "repo_name": "repo",
+                "base_branch": "main",
+            },
+        }
+
+    class FakeSandbox:
+        def execute(self, command: str, *, timeout: int | None = None):
+            assert "repo" in command
+            assert timeout == thread_api._RECOVERY_PATCH_TIMEOUT_SECONDS
+            return SimpleNamespace(
+                output=json.dumps({"ok": True, "path": "/tmp/open-swe-tid.patch", "size": 11}),
+                exit_code=0,
+            )
+
+        def download_files(self, paths: list[str]):
+            assert paths == ["/tmp/open-swe-tid.patch"]
+            return [SimpleNamespace(content=b"patch bytes")]
+
+    monkeypatch.setattr(thread_api, "_authorized_thread", fake_authorized_thread)
+    monkeypatch.setattr(thread_api, "create_sandbox", lambda sandbox_id: FakeSandbox())
+
+    content, filename = await thread_api.get_dashboard_thread_recovery_patch("tid", "octocat")
+
+    assert content == b"patch bytes"
+    assert filename == "open-swe-tid.patch"
+
+
+async def test_recovery_patch_rejects_empty_patch(monkeypatch) -> None:
+    async def fake_authorized_thread(thread_id: str, login: str, *, email: str | None = None):
+        return {"thread_id": thread_id, "metadata": {"sandbox_id": "sbx", "github_login": login}}
+
+    class FakeSandbox:
+        def execute(self, command: str, *, timeout: int | None = None):
+            return SimpleNamespace(
+                output=json.dumps({"ok": True, "path": "/tmp/open-swe-tid.patch", "size": 0}),
+                exit_code=0,
+            )
+
+    monkeypatch.setattr(thread_api, "_authorized_thread", fake_authorized_thread)
+    monkeypatch.setattr(thread_api, "create_sandbox", lambda sandbox_id: FakeSandbox())
+
+    with pytest.raises(HTTPException) as exc_info:
+        await thread_api.get_dashboard_thread_recovery_patch("tid", "octocat")
+
+    assert exc_info.value.status_code == 404
+    assert "changes" in exc_info.value.detail
+
+
+async def test_recovery_patch_enforces_size_limit(monkeypatch) -> None:
+    async def fake_authorized_thread(thread_id: str, login: str, *, email: str | None = None):
+        return {"thread_id": thread_id, "metadata": {"sandbox_id": "sbx", "github_login": login}}
+
+    class FakeSandbox:
+        def execute(self, command: str, *, timeout: int | None = None):
+            return SimpleNamespace(
+                output=json.dumps(
+                    {
+                        "ok": True,
+                        "path": "/tmp/open-swe-tid.patch",
+                        "size": thread_api._RECOVERY_PATCH_LIMIT_BYTES + 1,
+                    }
+                ),
+                exit_code=0,
+            )
+
+    monkeypatch.setattr(thread_api, "_authorized_thread", fake_authorized_thread)
+    monkeypatch.setattr(thread_api, "create_sandbox", lambda sandbox_id: FakeSandbox())
+
+    with pytest.raises(HTTPException) as exc_info:
+        await thread_api.get_dashboard_thread_recovery_patch("tid", "octocat")
+
+    assert exc_info.value.status_code == 413
+
+
+def test_recovery_patch_searches_command_cwd_before_workspace_fallback() -> None:
+    command = thread_api._recovery_patch_command(
+        {"repo_name": "repo", "base_branch": "main"},
+        "tid",
+    )
+
+    assert "Path.cwd().resolve()" in command
+    assert "WORKSPACE_FALLBACK = Path('/workspace')" in command
+    assert "roots = [Path.cwd().resolve(), WORKSPACE_FALLBACK]" in command
 
 
 async def test_proxy_commands_lazily_creates_missing_thread_only_for_run_start(

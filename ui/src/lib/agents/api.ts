@@ -58,6 +58,11 @@ export interface ThreadPrDiff {
   files: Array<ThreadPrDiffFile>
 }
 
+export interface ThreadRecoveryPatch {
+  blob: Blob
+  filename: string
+}
+
 export interface ThreadsPageParams {
   limit?: number
   offset?: number
@@ -123,6 +128,39 @@ async function agentsRequest<T>(
   }
   if (res.status === 204) return undefined as T
   return (await res.json()) as T
+}
+
+function filenameFromContentDisposition(value: string | null): string | null {
+  const match = /filename="([^"]+)"/.exec(value ?? "")
+  return match?.[1] ?? null
+}
+
+async function agentsBlobRequest(path: string): Promise<ThreadRecoveryPatch> {
+  const res = await fetch(`${API_BASE}/dashboard/api${path}`, {
+    credentials: "include",
+    headers: { Accept: "text/x-diff" },
+  })
+  if (!res.ok) {
+    let message = res.statusText
+    try {
+      const body = await res.json()
+      if (body?.detail) {
+        message =
+          typeof body.detail === "string"
+            ? body.detail
+            : JSON.stringify(body.detail)
+      }
+    } catch {
+      /* ignore */
+    }
+    throw new AgentsApiError(res.status, message)
+  }
+  return {
+    blob: await res.blob(),
+    filename:
+      filenameFromContentDisposition(res.headers.get("content-disposition")) ??
+      "open-swe-recovery.patch",
+  }
 }
 
 function buildThreadsPageQuery(params: ThreadsPageParams): string {
@@ -218,6 +256,10 @@ export const agentsApi = {
   getThreadPrDiff: (threadId: string) =>
     agentsRequest<ThreadPrDiff>(
       `/threads/${encodeURIComponent(threadId)}/pr-diff`
+    ),
+  downloadThreadRecoveryPatch: (threadId: string) =>
+    agentsBlobRequest(
+      `/threads/${encodeURIComponent(threadId)}/recovery.patch`
     ),
   streamUrl: (threadId: string) =>
     `${API_BASE}/dashboard/api/threads/${encodeURIComponent(threadId)}/stream`,
