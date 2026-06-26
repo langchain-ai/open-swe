@@ -285,7 +285,7 @@ class FakeScriptedChatModel(BaseChatModel):
         if step < len(script):
             message = script[step](messages)
         else:
-            message = AIMessage(content="All set — let me know if you'd like anything else.")
+            message = AIMessage(content=FOLLOW_UP_REPLY)
         return ChatResult(generations=[ChatGeneration(message=message)])
 
 
