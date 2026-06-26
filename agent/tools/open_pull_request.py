@@ -11,6 +11,7 @@ from langgraph.config import get_config
 from langgraph_sdk import get_client
 
 from ..dashboard.agent_usage import record_agent_pr_usage
+from ..dashboard.plan_store import get_plan_content
 from ..utils.dashboard_links import dashboard_plan_url
 from ..utils.github_app import get_github_app_installation_token
 from ..utils.github_comments import derive_pr_state
@@ -169,9 +170,16 @@ async def _record_pr_telemetry(
         )
 
 
-def _plan_reference_line(configurable: dict[str, Any]) -> str | None:
+async def _plan_reference_line(configurable: dict[str, Any]) -> str | None:
     thread_id = configurable.get("thread_id")
     if not isinstance(thread_id, str):
+        return None
+    try:
+        plan = await get_plan_content(thread_id)
+    except Exception:
+        logger.debug("Failed to look up plan content for %s", thread_id, exc_info=True)
+        return None
+    if not plan or not str(plan.get("markdown", "")).strip():
         return None
     plan_url = dashboard_plan_url(thread_id)
     if not plan_url:
@@ -224,7 +232,7 @@ async def _maybe_append_references(
         if not isinstance(configurable, dict):
             configurable = {}
         lines: list[str] = []
-        plan_line = _plan_reference_line(configurable)
+        plan_line = await _plan_reference_line(configurable)
         if plan_line:
             lines.append(plan_line)
         try:
