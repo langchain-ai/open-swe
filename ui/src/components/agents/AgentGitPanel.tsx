@@ -10,11 +10,9 @@ import {
   useFileTreeSelection,
 } from "@pierre/trees/react"
 import {
-  ArrowSquareOutIcon,
   ArrowsInIcon,
   ArrowsOutIcon,
   CaretDownIcon,
-  GitPullRequestIcon,
   SidebarSimpleIcon,
 } from "@phosphor-icons/react"
 import type { FileContents } from "@pierre/diffs/react"
@@ -26,6 +24,7 @@ import type { ChangedFileSummaryItem } from "@/components/agents/messages"
 import { agentsApi } from "@/lib/agents/api"
 import { useAgentThreadPrDiff } from "@/lib/agents/queries"
 import { ReviewTab } from "@/components/agents/ReviewTab"
+import { PrHeader } from "@/components/agents/PrHeader"
 import { buttonVariants } from "@/components/ui/button"
 import {
   DIFF_VIRTUALIZER_CONFIG,
@@ -518,38 +517,16 @@ export function AgentGitPanel({
         ) : (
           <>
             {pr && (
-              <div className="border-b border-[var(--ui-border)] px-4 py-3">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="truncate text-sm font-medium text-[var(--ui-text)]">
-                      {pr.title} #{pr.number}
-                    </div>
-                    <div className="mt-1 flex items-center gap-2 text-[11px] text-[var(--ui-text-dim)]">
-                      <span className="inline-flex items-center gap-1 rounded border border-[var(--ui-border)] px-1.5 py-0.5 capitalize">
-                        <GitPullRequestIcon className="size-3" />
-                        {pr.state}
-                      </span>
-                      <span>
-                        {pr.headRef} → {pr.baseRef}
-                      </span>
-                    </div>
-                  </div>
-                  {pr.url && (
-                    <a
-                      href={pr.url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className={buttonVariants({
-                        variant: "outline",
-                        size: "sm",
-                      })}
-                    >
-                      <ArrowSquareOutIcon className="size-3" />
-                      View PR
-                    </a>
-                  )}
-                </div>
-              </div>
+              <PrHeader
+                className="border-b border-[var(--ui-border)] px-4 py-3"
+                url={pr.url}
+                title={pr.title}
+                number={pr.number}
+                state={pr.state}
+                headRef={pr.headRef}
+                baseRef={pr.baseRef}
+                titleClassName="truncate text-sm"
+              />
             )}
 
             <div className="flex items-center gap-1 border-b border-[var(--ui-border)] px-3 py-2">

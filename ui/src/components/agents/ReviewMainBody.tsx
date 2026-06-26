@@ -22,7 +22,6 @@ import {
   CodeIcon,
   CopyIcon,
   FlagIcon,
-  GitPullRequestIcon,
   InfoIcon,
   LinkIcon,
   ListBulletsIcon,
@@ -68,6 +67,7 @@ import type {
 import type { ChatAttachment } from "@/components/agents/ReviewChat"
 import type { DiffStyle } from "@/components/agents/utils/diffUtils"
 import { Markdown } from "@/components/agents/ported"
+import { PrHeader } from "@/components/agents/PrHeader"
 import {
   ReviewChat,
   ReviewChatComposerProvider,
@@ -1120,7 +1120,19 @@ function ReviewBodyInner({
                 config={DIFF_VIRTUALIZER_CONFIG}
               >
                 <div ref={scrollerProbe} aria-hidden className="hidden" />
-                <PrHeader detail={detail} />
+                <PrHeader
+                  url={detail.url}
+                  title={detail.pr.title}
+                  state={detail.pr.state}
+                  headRef={detail.pr.head_ref}
+                  baseRef={detail.pr.base_ref}
+                  author={detail.pr.author?.login}
+                  stats={{
+                    changedFiles: detail.pr.changed_files,
+                    additions: detail.pr.additions,
+                    deletions: detail.pr.deletions,
+                  }}
+                />
                 <div className="mt-4 rounded-lg border border-border bg-card p-4">
                   {detail.pr.body ? (
                     <Markdown
@@ -1253,56 +1265,6 @@ function DiffStyleButton({
     >
       {children}
     </button>
-  )
-}
-
-function PrHeader({ detail }: { detail: ReviewDetail }) {
-  const { pr } = detail
-  const stateStyles: Record<string, string> = {
-    open: "border-emerald-600/40 text-emerald-500",
-    draft: "border-border text-muted-foreground",
-    merged: "border-purple-600/40 text-purple-500",
-    closed: "border-red-600/40 text-red-500",
-  }
-  return (
-    <div>
-      <span
-        className={cn(
-          "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] capitalize",
-          stateStyles[pr.state] ?? stateStyles.open
-        )}
-      >
-        <GitPullRequestIcon className="size-3" />
-        {pr.state}
-      </span>
-      <h1 className="mt-2 text-base font-medium">
-        <a
-          href={detail.url}
-          target="_blank"
-          rel="noreferrer"
-          className="hover:underline"
-        >
-          {pr.title}
-        </a>
-      </h1>
-      <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-        {pr.author && (
-          <span className="font-medium text-foreground">{pr.author.login}</span>
-        )}
-        <span className="rounded border border-border px-1.5 py-0.5 font-mono text-[11px]">
-          {pr.base_ref}
-        </span>
-        <span>←</span>
-        <span className="rounded border border-border px-1.5 py-0.5 font-mono text-[11px]">
-          {pr.head_ref}
-        </span>
-        <span>
-          {pr.changed_files} file{pr.changed_files === 1 ? "" : "s"}
-        </span>
-        <span className="text-emerald-500">+{pr.additions}</span>
-        <span className="text-red-500">-{pr.deletions}</span>
-      </div>
-    </div>
   )
 }
 
