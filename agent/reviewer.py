@@ -338,14 +338,23 @@ The dataset expects 1-5 comments per PR (mean ~2).
 
 
 _REPO_READY_NOTE = """The repo is already cloned and checked out at the PR head in
-`{working_dir}` — `cd` there and grep for full file context."""
+`{working_dir}` — `cd` there and grep for full file context.
+
+`{working_dir}` is the ONLY canonical root for this review. Read every repo
+file via a path under `{working_dir}`. Do NOT re-clone the repo to a sibling
+path (e.g. `/{repo_name}`) and do NOT read the same file from two different
+absolute roots in one trace — that doubles read-tool cost without surfacing
+any new information."""
 
 _REPO_NOT_READY_NOTE = """Repo prep FAILED: the checkout in `{working_dir}` may be missing or — worse —
 present but stale (at an old commit). Do NOT trust local files until you have
-re-prepped the tree yourself. Run:
+re-prepped the tree yourself. Recover INTO `{working_dir}` — never into a
+sibling path like `/{repo_name}` — so every subsequent read uses the same
+canonical root. Run:
 
 ```
-cd {working_dir} || {{ cd {parent_dir} && GH_TOKEN=dummy gh repo clone {repo_owner}/{repo_name} && cd {repo_name}; }}
+mkdir -p {parent_dir}
+cd {working_dir} || {{ cd {parent_dir} && GH_TOKEN=dummy gh repo clone {repo_owner}/{repo_name} {repo_name} && cd {working_dir}; }}
 GH_TOKEN=dummy git fetch origin {head_sha_or_placeholder} --quiet || GH_TOKEN=dummy git fetch origin refs/pull/{pr_number}/head --quiet
 git checkout --force {head_sha_or_placeholder} --quiet
 ```
@@ -367,7 +376,10 @@ def _repo_checkout_note(
     head_sha: str,
 ) -> str:
     if repo_ready:
-        return _REPO_READY_NOTE.format(working_dir=working_dir)
+        return _REPO_READY_NOTE.format(
+            working_dir=working_dir,
+            repo_name=repo_name or "<repo>",
+        )
     return _REPO_NOT_READY_NOTE.format(
         working_dir=working_dir,
         parent_dir=posixpath.dirname(working_dir) or working_dir,
