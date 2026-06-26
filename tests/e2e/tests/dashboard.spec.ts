@@ -73,12 +73,7 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     await expect(page.getByText(/anything else you'd like changed/)).toBeVisible();
 
     // The non-owner's message is tagged server-side with their GitHub login, so
-    // the owner can tell who sent it. Visible once the transcript re-hydrates.
-    await expect(async () => {
-      await page.reload();
-      await expect(
-        page.getByText(new RegExp(`@${OTHER_USER.login}`)).first(),
-      ).toBeVisible({ timeout: 8000 });
-    }).toPass({ timeout: 60000 });
+    // the owner can tell who sent it.
+    await expect(page.getByText(new RegExp(`@${OTHER_USER.login}`)).first()).toBeVisible();
   });
 });
