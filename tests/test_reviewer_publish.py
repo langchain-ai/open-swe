@@ -123,9 +123,9 @@ def test_render_inline_comment_body_line_reference_range() -> None:
     assert "*(Refers to line 10)*" in render_inline_comment_body(_f(start_line=10, end_line=10))
 
 
-def test_render_resolution_comment_resolved_uses_note() -> None:
+def test_render_resolution_comment_resolved_uses_note_verbatim() -> None:
     body = render_resolution_comment(_f(status="resolved"), "resolved", note="Fixed at line 5")
-    assert body == "✅ **Resolved**: Fixed at line 5"
+    assert body == "Fixed at line 5"
 
 
 def test_render_resolution_comment_returns_none_without_agent_note() -> None:
@@ -133,15 +133,15 @@ def test_render_resolution_comment_returns_none_without_agent_note() -> None:
     assert body is None
 
 
-def test_render_resolution_comment_dismissed_uses_note() -> None:
+def test_render_resolution_comment_dismissed_uses_note_verbatim() -> None:
     body = render_resolution_comment(_f(status="dismissed"), "dismissed", note="Intended behavior")
-    assert body == "❌ **Dismissed**: Intended behavior"
+    assert body == "Intended behavior"
 
 
-def test_render_resolution_comment_uses_stored_resolution_note() -> None:
+def test_render_resolution_comment_uses_stored_resolution_note_verbatim() -> None:
     finding = _f(status="resolved", resolution_note="The guard now returns before indexing.")
     body = render_resolution_comment(finding, "resolved")
-    assert body == "✅ **Resolved**: The guard now returns before indexing."
+    assert body == "The guard now returns before indexing."
 
 
 def test_parse_review_comment_marker_accepts_valid_marker() -> None:
@@ -1205,7 +1205,7 @@ async def test_re_review_backfills_and_resolves_duplicate_existing_threads() -> 
     assert reply_comment.await_count == 2
     assert (
         reply_comment.await_args_list[0].kwargs["body"]
-        == "✅ **Resolved**: The duplicate threads are fixed by the latest commit."
+        == "The duplicate threads are fixed by the latest commit."
     )
     assert findings[0]["github_review_comment_ids"] == [101, 102]
     assert findings[0]["github_review_thread_ids"] == ["THREAD_1", "THREAD_2"]

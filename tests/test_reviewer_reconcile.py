@@ -174,7 +174,7 @@ async def test_reconcile_duplicate_markers_require_all_threads_terminal() -> Non
 
 
 @pytest.mark.asyncio
-async def test_reconcile_duplicate_markers_resolve_when_all_threads_terminal() -> None:
+async def test_reconcile_duplicate_markers_stay_open_when_some_threads_only_outdated() -> None:
     findings = [
         {
             "id": "f1",
@@ -212,7 +212,7 @@ async def test_reconcile_duplicate_markers_resolve_when_all_threads_terminal() -
             ],
         )
 
-    assert result[0]["status"] == "resolved"
+    assert result[0]["status"] == "open"
     assert "last_reconciliation_note" not in result[0]
     assert result[0]["github_resolved_thread_ids"] == ["THREAD_RESOLVED"]
     assert result[0].get("github_thread_resolved") is not True

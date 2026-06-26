@@ -41,7 +41,7 @@ async def resolve_finding_thread(
 
     Use ``status="resolved"`` when the code now fixes the issue. Use
     ``status="dismissed"`` when analysis shows the original review comment was
-    not valid. ``note`` is required and becomes the GitHub reply body.
+    not valid. ``note`` is required and is posted verbatim as the full GitHub reply body.
     """
     if status not in {"resolved", "dismissed"}:
         return {"success": False, "error": f"Invalid status: {status}"}

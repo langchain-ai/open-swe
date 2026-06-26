@@ -138,22 +138,23 @@ Out-of-diff findings are disabled. `add_finding` rejects any finding whose
 line this PR actually changed.
 
 Re-review: for each open finding, `update_finding(id, status="resolved", note="...")`
-if fixed (include a brief explanation of the fix in `note`), `update_finding` with
+if fixed (write the full GitHub reply body in `note`), `update_finding` with
 new fields + `note` if changed, otherwise do nothing. Add net-new findings with
 `add_finding`.
 
-When you mark a finding as resolved, `publish_review` will automatically post a
-resolution comment to the GitHub thread explaining what was fixed, then close it.
-The `note` field you provide in `update_finding` becomes part of that comment, so
-be specific: "The current code at line X now does Y" beats "This is fixed".
+When you mark a finding as resolved, `publish_review` will automatically post the
+`note` field verbatim to the GitHub thread, then close it. Write the complete
+human-facing reply yourself, including any desired status wording; the system does
+not prepend "Resolved" or "Dismissed".
 
 If a human reply shows one of your published findings is invalid, call
 `resolve_finding_thread(finding_id, status="dismissed", note="...")` after verifying
 the claim (the note should explain why). If the finding is fixed by code, use
-`update_finding(..., status="resolved", note="...")`. Do NOT use
-`reply_to_finding_thread` for resolutions or dismissals — the system posts those
-automatically. Use `reply_to_finding_thread` only when the user directly asks a
-question or a short clarification is needed after pushback.
+`update_finding(..., status="resolved", note="...")`. The note is posted verbatim
+as the complete GitHub reply body; include any desired status wording yourself.
+Do NOT use `reply_to_finding_thread` for resolutions or dismissals — the system
+posts those automatically. Use `reply_to_finding_thread` only when the user
+directly asks a question or a short clarification is needed after pushback.
 
 # The bar: file a finding only if it passes these criteria
 
@@ -580,11 +581,12 @@ def _build_re_review_context(
         f'{last_reviewed_sha}...{head_sha} -H "Accept: application/vnd.github.v3.diff"`, '
         f"then review only what's in that diff.\n\n"
         f"For each open finding above, decide whether the new commits resolved "
-        f'it (`update_finding(id, status="resolved", note="...")`), left it unchanged '
+        f'it (`update_finding(id, status="resolved", note="<full reply body>")`), left it unchanged '
         f"(no action), or changed it materially (`update_finding` with new "
-        f"fields + a `note`). If a human reply on a finding explains why your "
+        f"fields + a full reply-body `note`). If a human reply on a finding explains why your "
         f"comment was invalid, verify that analysis, then call "
         f'`resolve_finding_thread(id, status="dismissed", note="...")` to close it. '
+        f"The `note` is posted verbatim, so write it as the complete GitHub reply body. "
         f"Reply only when directly asked or when a concise clarification is "
         f"necessary. Then add any net-new findings introduced by the "
         f"new diff — but skip anything already covered by an existing PR "
@@ -636,8 +638,9 @@ def _build_finding_reply_context(
         f"## Existing findings\n\n{existing_findings_block}\n\n"
         f"{prior_threads_section}"
         f"Reassess only this finding. If the reply proves the finding is invalid, "
-        f'call `resolve_finding_thread(id, status="dismissed", note="...")`. If code now '
-        f'fixes the finding, call `update_finding(id, status="resolved", note="...")`. '
+        f'call `resolve_finding_thread(id, status="dismissed", note="<full reply body>")`. If code now '
+        f'fixes the finding, call `update_finding(id, status="resolved", note="<full reply body>")`. '
+        f"The `note` is posted verbatim, so write it as the complete GitHub reply body. "
         f"Use `reply_to_finding_thread` only when the user asked a direct "
         f"question or a concise clarification is necessary. Call `publish_review` "
         f"once at the end so pending GitHub thread state is reconciled."
