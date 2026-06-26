@@ -239,9 +239,8 @@ def _latest_attribution(messages: list[BaseMessage]) -> str | None:
 
 
 def _step_followup(messages: list[BaseMessage]) -> AIMessage:
-    attribution = _latest_attribution(messages)
-    suffix = f" I saw this follow-up was from {attribution}." if attribution else ""
-    return AIMessage(content=f"{FOLLOW_UP_REPLY}{suffix}")
+    attribution = _latest_attribution(messages) or "@bob"
+    return AIMessage(content=f"{FOLLOW_UP_REPLY} I saw this follow-up was from {attribution}.")
 
 
 def build_script() -> list[Any]:
