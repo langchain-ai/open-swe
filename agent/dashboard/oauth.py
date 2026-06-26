@@ -18,6 +18,8 @@ from fastapi import HTTPException, Request
 
 from agent.utils.github_org_membership import is_user_active_org_member
 
+from ..utils.http import DEFAULT_HTTP_TIMEOUT
+
 logger = logging.getLogger(__name__)
 
 COOKIE_NAME = "osw_session"
@@ -279,7 +281,7 @@ def is_unrecoverable_refresh_error(exc: BaseException) -> bool:
 async def _request_github_tokens(body: dict[str, str]) -> dict[str, Any]:
     if not GITHUB_APP_CLIENT_ID or not GITHUB_APP_CLIENT_SECRET:
         raise HTTPException(500, "GitHub App OAuth not configured")
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
         resp = await client.post(
             "https://github.com/login/oauth/access_token",
             headers={"Accept": "application/json"},
@@ -334,7 +336,7 @@ async def fetch_github_user(access_token: str) -> tuple[dict[str, Any], str | No
         "Accept": "application/vnd.github+json",
         "X-GitHub-Api-Version": "2022-11-28",
     }
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
         u = await client.get("https://api.github.com/user", headers=headers)
         u.raise_for_status()
         user = u.json()

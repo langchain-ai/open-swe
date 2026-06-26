@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from typing import Annotated
 
@@ -23,7 +22,7 @@ _ENTERED_MESSAGE = (
 )
 
 
-def enter_plan_mode(tool_call_id: Annotated[str, InjectedToolCallId]) -> Command:
+async def enter_plan_mode(tool_call_id: Annotated[str, InjectedToolCallId]) -> Command:
     """Activate plan mode mid-run.
 
     Call this when you believe the task would benefit from a structured
@@ -41,7 +40,7 @@ def enter_plan_mode(tool_call_id: Annotated[str, InjectedToolCallId]) -> Command
     thread_id = _thread_id_from_config()
     if thread_id:
         try:
-            asyncio.run(set_plan_status(thread_id, PLAN_STATUS_PLANNING, plan_mode=True))
+            await set_plan_status(thread_id, PLAN_STATUS_PLANNING, plan_mode=True)
         except Exception:
             logger.warning("Failed to persist plan-mode entry for %s", thread_id, exc_info=True)
     return Command(

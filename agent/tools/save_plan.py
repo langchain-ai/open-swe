@@ -8,7 +8,6 @@ changes. Available in plan mode (it does not modify the repository under review)
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from typing import Any
 
@@ -23,7 +22,7 @@ from ..dashboard.plan_store import (
 logger = logging.getLogger(__name__)
 
 
-def save_plan(plan_markdown: str) -> dict[str, Any]:
+async def save_plan(plan_markdown: str) -> dict[str, Any]:
     """Write your implementation plan as a markdown file and publish it for review.
 
     Use this in plan mode once your plan is ready. The plan is saved as
@@ -56,7 +55,7 @@ def save_plan(plan_markdown: str) -> dict[str, Any]:
         return {"success": False, "error": "no thread_id in run config"}
 
     try:
-        path = asyncio.run(_save(str(thread_id), content))
+        path = await _save(str(thread_id), content)
     except Exception as exc:  # noqa: BLE001
         logger.exception("save_plan failed for thread %s", thread_id)
         return {"success": False, "error": f"failed to save plan: {exc}"}

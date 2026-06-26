@@ -56,9 +56,9 @@ def _existing_finding(**overrides: Any) -> dict[str, Any]:
     return finding
 
 
-def test_add_finding_rejects_invalid_severity() -> None:
+async def test_add_finding_rejects_invalid_severity() -> None:
     with patch("agent.tools.add_finding.get_config", return_value=_config()):
-        result = add_finding(
+        result = await add_finding(
             severity="trivial",
             confidence="high",
             category="x",
@@ -72,9 +72,9 @@ def test_add_finding_rejects_invalid_severity() -> None:
     assert "severity" in result["error"].lower()
 
 
-def test_add_finding_rejects_empty_title() -> None:
+async def test_add_finding_rejects_empty_title() -> None:
     with patch("agent.tools.add_finding.get_config", return_value=_config()):
-        result = add_finding(
+        result = await add_finding(
             severity="high",
             confidence="high",
             category="correctness",
@@ -88,7 +88,7 @@ def test_add_finding_rejects_empty_title() -> None:
     assert "title" in result["error"].lower()
 
 
-def test_add_finding_rejects_out_of_diff_lines() -> None:
+async def test_add_finding_rejects_out_of_diff_lines() -> None:
     captured: list[Any] = []
 
     async def fake_append(_thread_id: str, finding: Any) -> None:
@@ -99,7 +99,7 @@ def test_add_finding_rejects_out_of_diff_lines() -> None:
         patch("agent.tools.add_finding.get_thread_id_from_runtime", return_value="tid-1"),
         patch("agent.tools.add_finding.append_finding", side_effect=fake_append),
     ):
-        result = add_finding(
+        result = await add_finding(
             severity="high",
             confidence="high",
             category="correctness",
@@ -115,7 +115,7 @@ def test_add_finding_rejects_out_of_diff_lines() -> None:
     assert captured == []
 
 
-def test_add_finding_accepts_left_side_anchor_on_old_line() -> None:
+async def test_add_finding_accepts_left_side_anchor_on_old_line() -> None:
     """A finding on a deleted (LEFT-side) line must validate against the
     old-side line set, not the new-side. With only RIGHT lines in 10..40,
     a LEFT anchor at the same number should still pass when the line is in
@@ -136,7 +136,7 @@ def test_add_finding_accepts_left_side_anchor_on_old_line() -> None:
         patch("agent.tools.add_finding.get_thread_id_from_runtime", return_value="tid-1"),
         patch("agent.tools.add_finding.append_finding", new_callable=AsyncMock),
     ):
-        result = add_finding(
+        result = await add_finding(
             severity="high",
             confidence="high",
             category="correctness",
@@ -150,7 +150,7 @@ def test_add_finding_accepts_left_side_anchor_on_old_line() -> None:
     assert result["success"] is True
 
 
-def test_add_finding_left_anchor_outside_old_side_set_rejected() -> None:
+async def test_add_finding_left_anchor_outside_old_side_set_rejected() -> None:
     """A LEFT anchor on a line that's not in the old-side hunk is rejected —
     out-of-diff findings are disabled, validated on the correct side."""
     config = {
@@ -169,7 +169,7 @@ def test_add_finding_left_anchor_outside_old_side_set_rejected() -> None:
         patch("agent.tools.add_finding.get_thread_id_from_runtime", return_value="tid-1"),
         patch("agent.tools.add_finding.append_finding", new_callable=AsyncMock),
     ):
-        result = add_finding(
+        result = await add_finding(
             severity="high",
             confidence="high",
             category="correctness",
@@ -184,9 +184,9 @@ def test_add_finding_left_anchor_outside_old_side_set_rejected() -> None:
     assert result["in_diff"] is False
 
 
-def test_add_finding_rejects_invalid_confidence() -> None:
+async def test_add_finding_rejects_invalid_confidence() -> None:
     with patch("agent.tools.add_finding.get_config", return_value=_config()):
-        result = add_finding(
+        result = await add_finding(
             severity="high",
             confidence="certain",
             category="correctness",
@@ -200,7 +200,7 @@ def test_add_finding_rejects_invalid_confidence() -> None:
     assert "confidence" in result["error"].lower()
 
 
-def test_add_finding_persists_to_thread_metadata() -> None:
+async def test_add_finding_persists_to_thread_metadata() -> None:
     captured: list[Any] = []
 
     async def fake_append(thread_id: str, finding: Any) -> Any:
@@ -212,7 +212,7 @@ def test_add_finding_persists_to_thread_metadata() -> None:
         patch("agent.tools.add_finding.get_thread_id_from_runtime", return_value="tid-1"),
         patch("agent.tools.add_finding.append_finding", side_effect=fake_append),
     ):
-        result = add_finding(
+        result = await add_finding(
             severity="medium",
             confidence="high",
             category="style",
@@ -238,7 +238,7 @@ def test_add_finding_persists_to_thread_metadata() -> None:
     assert persisted["confidence"] == "high"
 
 
-def test_add_finding_uses_resolved_head_sha_for_provenance() -> None:
+async def test_add_finding_uses_resolved_head_sha_for_provenance() -> None:
     """A net-new finding filed during a mid-run re-review must record the live
     head (from thread metadata), not the stale head frozen in the run config."""
     captured: list[Any] = []
@@ -256,7 +256,7 @@ def test_add_finding_uses_resolved_head_sha_for_provenance() -> None:
         ),
         patch("agent.tools.add_finding.append_finding", side_effect=fake_append),
     ):
-        result = add_finding(
+        result = await add_finding(
             severity="medium",
             confidence="high",
             category="style",
@@ -272,7 +272,7 @@ def test_add_finding_uses_resolved_head_sha_for_provenance() -> None:
     assert captured[0]["last_confirmed_sha"] == "freshhead"
 
 
-def test_add_finding_allows_file_level_with_no_lines() -> None:
+async def test_add_finding_allows_file_level_with_no_lines() -> None:
     with (
         patch("agent.tools.add_finding.get_config", return_value=_config()),
         patch("agent.tools.add_finding.get_thread_id_from_runtime", return_value="tid-1"),
@@ -282,7 +282,7 @@ def test_add_finding_allows_file_level_with_no_lines() -> None:
             side_effect=lambda _t, f: f,
         ),
     ):
-        result = add_finding(
+        result = await add_finding(
             severity="low",
             confidence="medium",
             category="style",
@@ -293,13 +293,13 @@ def test_add_finding_allows_file_level_with_no_lines() -> None:
     assert result["success"] is True
 
 
-def test_update_finding_rejects_invalid_status() -> None:
+async def test_update_finding_rejects_invalid_status() -> None:
     with patch("agent.tools.update_finding.get_config", return_value=_config()):
-        result = update_finding(finding_id="f_x", status="archived")
+        result = await update_finding(finding_id="f_x", status="archived")
     assert result["success"] is False
 
 
-def test_resolve_finding_thread_resolves_all_known_threads() -> None:
+async def test_resolve_finding_thread_resolves_all_known_threads() -> None:
     finding = {
         "id": "f1",
         "status": "open",
@@ -322,7 +322,9 @@ def test_resolve_finding_thread_resolves_all_known_threads() -> None:
         patch("agent.tools.resolve_finding_thread.reply_to_review_comment", reply),
         patch("agent.tools.resolve_finding_thread.update_finding_fields", update),
     ):
-        result = resolve_finding_thread("f1", status="resolved", note="Fixed in the latest commit")
+        result = await resolve_finding_thread(
+            "f1", status="resolved", note="Fixed in the latest commit"
+        )
 
     assert result["success"] is True
     assert result["resolved_thread_count"] == 2
@@ -342,31 +344,31 @@ def test_resolve_finding_thread_resolves_all_known_threads() -> None:
     assert updates["resolution_note"] == "Fixed in the latest commit"
 
 
-def test_resolve_finding_thread_requires_note() -> None:
+async def test_resolve_finding_thread_requires_note() -> None:
     with patch(
         "agent.tools.resolve_finding_thread.get_config",
         return_value=_config(repo={"owner": "o", "name": "r"}, pr_number=7),
     ):
-        result = resolve_finding_thread("f1", note=" ", status="resolved")
+        result = await resolve_finding_thread("f1", note=" ", status="resolved")
     assert result["success"] is False
     assert "requires a note" in result["error"]
 
 
-def test_update_finding_rejects_empty_update() -> None:
+async def test_update_finding_rejects_empty_update() -> None:
     with patch("agent.tools.update_finding.get_config", return_value=_config()):
-        result = update_finding(finding_id="f_x")
+        result = await update_finding(finding_id="f_x")
     assert result["success"] is False
     assert "No fields" in result["error"]
 
 
-def test_update_finding_requires_note_for_resolution() -> None:
+async def test_update_finding_requires_note_for_resolution() -> None:
     with patch("agent.tools.update_finding.get_config", return_value=_config()):
-        result = update_finding(finding_id="f_x", status="resolved")
+        result = await update_finding(finding_id="f_x", status="resolved")
     assert result["success"] is False
     assert "requires a note" in result["error"]
 
 
-def test_update_finding_updates_title() -> None:
+async def test_update_finding_updates_title() -> None:
     captured: list[Any] = []
 
     async def fake_update(thread_id: str, finding_id: str, updates: Any) -> Any:
@@ -382,13 +384,13 @@ def test_update_finding_updates_title() -> None:
         ),
         patch("agent.tools.update_finding.update_finding_fields", side_effect=fake_update),
     ):
-        result = update_finding(finding_id="f_a", title="new generated title")
+        result = await update_finding(finding_id="f_a", title="new generated title")
 
     assert result["success"] is True
     assert captured[0]["title"] == "new generated title"
 
 
-def test_add_finding_drops_long_suggestion() -> None:
+async def test_add_finding_drops_long_suggestion() -> None:
     captured: list[Any] = []
 
     async def fake_append(thread_id: str, finding: Any) -> Any:
@@ -401,7 +403,7 @@ def test_add_finding_drops_long_suggestion() -> None:
         patch("agent.tools.add_finding.get_thread_id_from_runtime", return_value="tid-1"),
         patch("agent.tools.add_finding.append_finding", side_effect=fake_append),
     ):
-        result = add_finding(
+        result = await add_finding(
             severity="medium",
             confidence="high",
             category="style",
@@ -419,7 +421,7 @@ def test_add_finding_drops_long_suggestion() -> None:
     assert captured[0]["suggestion"] is None
 
 
-def test_add_finding_keeps_short_suggestion() -> None:
+async def test_add_finding_keeps_short_suggestion() -> None:
     captured: list[Any] = []
 
     async def fake_append(thread_id: str, finding: Any) -> Any:
@@ -432,7 +434,7 @@ def test_add_finding_keeps_short_suggestion() -> None:
         patch("agent.tools.add_finding.get_thread_id_from_runtime", return_value="tid-1"),
         patch("agent.tools.add_finding.append_finding", side_effect=fake_append),
     ):
-        result = add_finding(
+        result = await add_finding(
             severity="medium",
             confidence="medium",
             category="style",
@@ -449,7 +451,7 @@ def test_add_finding_keeps_short_suggestion() -> None:
     assert captured[0]["suggestion"] == short_suggestion
 
 
-def test_add_finding_preserves_multi_line_range() -> None:
+async def test_add_finding_preserves_multi_line_range() -> None:
     """Multi-line ranges are preserved end-to-end (no collapse to start_line)."""
     captured: list[Any] = []
 
@@ -462,7 +464,7 @@ def test_add_finding_preserves_multi_line_range() -> None:
         patch("agent.tools.add_finding.get_thread_id_from_runtime", return_value="tid-1"),
         patch("agent.tools.add_finding.append_finding", side_effect=fake_append),
     ):
-        result = add_finding(
+        result = await add_finding(
             severity="low",
             confidence="low",
             category="style",
@@ -478,7 +480,7 @@ def test_add_finding_preserves_multi_line_range() -> None:
     assert captured[0]["end_line"] == 19
 
 
-def test_update_finding_rejects_long_suggestion_without_clobbering() -> None:
+async def test_update_finding_rejects_long_suggestion_without_clobbering() -> None:
     """Over-cap suggestion alongside other fields: drop suggestion, keep the rest."""
     captured: list[Any] = []
 
@@ -496,7 +498,7 @@ def test_update_finding_rejects_long_suggestion_without_clobbering() -> None:
         ),
         patch("agent.tools.update_finding.update_finding_fields", side_effect=fake_update),
     ):
-        result = update_finding(
+        result = await update_finding(
             finding_id="f_a",
             description="updated description",
             suggestion=long_suggestion,
@@ -508,21 +510,21 @@ def test_update_finding_rejects_long_suggestion_without_clobbering() -> None:
     assert captured[0]["description"] == "updated description"
 
 
-def test_update_finding_long_suggestion_only_returns_failure() -> None:
+async def test_update_finding_long_suggestion_only_returns_failure() -> None:
     """Over-cap suggestion as the only field: fail outright rather than no-op."""
     long_suggestion = "\n".join(f"line_{i}" for i in range(6))
     with (
         patch("agent.tools.update_finding.get_config", return_value=_config()),
         patch("agent.tools.update_finding.get_thread_id_from_runtime", return_value="tid-1"),
     ):
-        result = update_finding(finding_id="f_a", suggestion=long_suggestion)
+        result = await update_finding(finding_id="f_a", suggestion=long_suggestion)
 
     assert result["success"] is False
     assert result.get("suggestion_dropped") is True
     assert "cap" in result["error"]
 
 
-def test_update_finding_empty_string_clears_suggestion() -> None:
+async def test_update_finding_empty_string_clears_suggestion() -> None:
     captured: list[Any] = []
 
     async def fake_update(thread_id: str, finding_id: str, updates: Any) -> Any:
@@ -538,13 +540,13 @@ def test_update_finding_empty_string_clears_suggestion() -> None:
         ),
         patch("agent.tools.update_finding.update_finding_fields", side_effect=fake_update),
     ):
-        result = update_finding(finding_id="f_a", suggestion="")
+        result = await update_finding(finding_id="f_a", suggestion="")
 
     assert result["success"] is True
     assert captured[0]["suggestion"] is None
 
 
-def test_update_finding_passes_through_fields() -> None:
+async def test_update_finding_passes_through_fields() -> None:
     captured: list[Any] = []
 
     async def fake_update(thread_id: str, finding_id: str, updates: Any) -> Any:
@@ -560,7 +562,7 @@ def test_update_finding_passes_through_fields() -> None:
         ),
         patch("agent.tools.update_finding.update_finding_fields", side_effect=fake_update),
     ):
-        result = update_finding(
+        result = await update_finding(
             finding_id="f_a",
             status="resolved",
             note="addressed by new commit",
@@ -574,7 +576,7 @@ def test_update_finding_passes_through_fields() -> None:
     assert updates["resolution_note"] == "addressed by new commit"
 
 
-def test_update_finding_resolves_github_thread_when_pr_context_available() -> None:
+async def test_update_finding_resolves_github_thread_when_pr_context_available() -> None:
     cfg = _config(repo={"owner": "o", "name": "r"}, pr_number=7)
     with (
         patch("agent.tools.update_finding.get_config", return_value=cfg),
@@ -596,7 +598,7 @@ def test_update_finding_resolves_github_thread_when_pr_context_available() -> No
             },
         ) as resolve_async,
     ):
-        result = update_finding(
+        result = await update_finding(
             finding_id="f_a",
             status="resolved",
             note="The latest commit adds the missing guard.",
@@ -609,7 +611,7 @@ def test_update_finding_resolves_github_thread_when_pr_context_available() -> No
     update.assert_not_awaited()
 
 
-def test_update_finding_leaves_open_when_github_resolution_fails() -> None:
+async def test_update_finding_leaves_open_when_github_resolution_fails() -> None:
     cfg = _config(repo={"owner": "o", "name": "r"}, pr_number=7)
     with (
         patch("agent.tools.update_finding.get_config", return_value=cfg),
@@ -630,7 +632,7 @@ def test_update_finding_leaves_open_when_github_resolution_fails() -> None:
             },
         ) as resolve_async,
     ):
-        result = update_finding(
+        result = await update_finding(
             finding_id="f_a",
             status="resolved",
             note="The latest commit adds the missing guard.",
@@ -643,7 +645,7 @@ def test_update_finding_leaves_open_when_github_resolution_fails() -> None:
     update.assert_not_awaited()
 
 
-def test_update_finding_resolves_hidden_finding_locally() -> None:
+async def test_update_finding_resolves_hidden_finding_locally() -> None:
     captured: list[Any] = []
 
     async def fake_update(thread_id: str, finding_id: str, updates: Any) -> Any:
@@ -664,7 +666,7 @@ def test_update_finding_resolves_hidden_finding_locally() -> None:
             new_callable=AsyncMock,
         ) as resolve_async,
     ):
-        result = update_finding(
+        result = await update_finding(
             finding_id="f_a",
             status="resolved",
             note="The latest commit adds the missing guard.",
@@ -677,7 +679,7 @@ def test_update_finding_resolves_hidden_finding_locally() -> None:
     resolve_async.assert_not_awaited()
 
 
-def test_list_findings_filters_by_status() -> None:
+async def test_list_findings_filters_by_status() -> None:
     findings = [
         {"id": "f_a", "status": "open"},
         {"id": "f_b", "status": "resolved"},
@@ -693,13 +695,13 @@ def test_list_findings_filters_by_status() -> None:
         patch("agent.tools.list_findings.list_findings_async", side_effect=fake_list),
         patch("agent.tools.add_finding.get_config", return_value=cfg),
     ):
-        result = list_findings(status_filter="open")
+        result = await list_findings(status_filter="open")
 
     assert result["count"] == 2
     assert [f["id"] for f in result["findings"]] == ["f_a", "f_c"]
 
 
-def test_list_findings_returns_all_when_filter_omitted() -> None:
+async def test_list_findings_returns_all_when_filter_omitted() -> None:
     findings = [{"id": "f_a", "status": "open"}, {"id": "f_b", "status": "resolved"}]
 
     async def fake_list(_thread_id: str) -> list[Any]:
@@ -709,12 +711,12 @@ def test_list_findings_returns_all_when_filter_omitted() -> None:
         patch("agent.tools.list_findings.get_thread_id_from_runtime", return_value="tid-1"),
         patch("agent.tools.list_findings.list_findings_async", side_effect=fake_list),
     ):
-        result = list_findings()
+        result = await list_findings()
 
     assert result["count"] == 2
 
 
-def test_add_finding_returns_structured_error_when_thread_missing() -> None:
+async def test_add_finding_returns_structured_error_when_thread_missing() -> None:
     """A missing reviewer thread must come back as a do-not-retry tool result,
     not a raised exception the agent retries against 10-30 times."""
     from agent.reviewer_findings import ReviewerThreadMissingError
@@ -727,7 +729,7 @@ def test_add_finding_returns_structured_error_when_thread_missing() -> None:
         patch("agent.tools.add_finding.get_thread_id_from_runtime", return_value="tid-1"),
         patch("agent.tools.add_finding.append_finding", side_effect=fake_append),
     ):
-        result = add_finding(
+        result = await add_finding(
             severity="medium",
             confidence="high",
             category="correctness",
@@ -743,7 +745,7 @@ def test_add_finding_returns_structured_error_when_thread_missing() -> None:
     assert "Do not retry" in result["note"]
 
 
-def test_update_finding_returns_structured_error_when_thread_missing() -> None:
+async def test_update_finding_returns_structured_error_when_thread_missing() -> None:
     from agent.reviewer_findings import ReviewerThreadMissingError
 
     async def fake_update(thread_id: str, finding_id: str, updates: Any) -> Any:
@@ -758,7 +760,7 @@ def test_update_finding_returns_structured_error_when_thread_missing() -> None:
         ),
         patch("agent.tools.update_finding.update_finding_fields", side_effect=fake_update),
     ):
-        result = update_finding(finding_id="f_a", status="resolved", note="fixed")
+        result = await update_finding(finding_id="f_a", status="resolved", note="fixed")
 
     assert result["success"] is False
     assert result["error"] == "thread_not_found"

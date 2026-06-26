@@ -18,6 +18,7 @@ from langgraph.store.base import BaseStore
 from langgraph_sdk import get_client
 
 from ..dashboard.options import model_supports_images
+from ..utils.http import DEFAULT_HTTP_TIMEOUT
 from ..utils.multimodal import fetch_image_block, vision_not_supported_warning
 
 logger = logging.getLogger(__name__)
@@ -80,7 +81,7 @@ async def _build_blocks_from_payload(
                 "text": text + vision_not_supported_warning(model_id, len(image_urls)),
             }
         return blocks
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
         for image_url in image_urls:
             image_block = await fetch_image_block(image_url, client)
             if image_block:

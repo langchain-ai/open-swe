@@ -17,6 +17,28 @@ read_repo_file = importlib.import_module("agent.tools.read_repo_file")
 search_repo_code = importlib.import_module("agent.tools.search_repo_code")
 
 
+def _fake_async_client(handler):
+    """Build a fake ``httpx.AsyncClient`` factory whose ``get`` calls ``handler``.
+
+    ``handler(url, headers=..., params=...)`` returns the response object.
+    """
+
+    class _FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def get(self, url, headers=None, params=None):
+            return handler(url, headers=headers, params=params)
+
+    return _FakeClient
+
+
 # --- chat thread list / delete / title ---------------------------------------
 
 
@@ -185,7 +207,8 @@ async def test_assert_chat_thread_access_rejects_unauthorized(monkeypatch, metad
 # --- tools -------------------------------------------------------------------
 
 
-def test_list_review_findings_compacts_and_filters(monkeypatch) -> None:
+@pytest.mark.asyncio
+async def test_list_review_findings_compacts_and_filters(monkeypatch) -> None:
     monkeypatch.setattr(
         list_review_findings,
         "get_config",
@@ -207,7 +230,7 @@ def test_list_review_findings_compacts_and_filters(monkeypatch) -> None:
 
     monkeypatch.setattr(list_review_findings, "list_findings_async", fake_list)
 
-    result = list_review_findings.list_review_findings(status_filter="open")
+    result = await list_review_findings.list_review_findings(status_filter="open")
     assert result["count"] == 1
     finding = result["findings"][0]
     assert finding["id"] == "f1"
@@ -215,14 +238,16 @@ def test_list_review_findings_compacts_and_filters(monkeypatch) -> None:
     assert "github_review_comment_id" not in finding
 
 
-def test_list_review_findings_requires_reviewer_thread(monkeypatch) -> None:
+@pytest.mark.asyncio
+async def test_list_review_findings_requires_reviewer_thread(monkeypatch) -> None:
     monkeypatch.setattr(list_review_findings, "get_config", lambda: {"configurable": {}})
-    result = list_review_findings.list_review_findings()
+    result = await list_review_findings.list_review_findings()
     assert result["count"] == 0
     assert "reviewer thread" in result["error"]
 
 
-def test_read_repo_file_decodes_file(monkeypatch) -> None:
+@pytest.mark.asyncio
+async def test_read_repo_file_decodes_file(monkeypatch) -> None:
     import base64
 
     monkeypatch.setattr(
@@ -240,7 +265,7 @@ def test_read_repo_file_decodes_file(monkeypatch) -> None:
 
     captured: dict[str, Any] = {}
 
-    def fake_get(url, headers=None, params=None, timeout=None):
+    def fake_get(url, headers=None, params=None):
         captured["url"] = url
         captured["params"] = params
         return SimpleNamespace(
@@ -248,16 +273,17 @@ def test_read_repo_file_decodes_file(monkeypatch) -> None:
             json=lambda: {"type": "file", "content": base64.b64encode(b"hello\nworld").decode()},
         )
 
-    monkeypatch.setattr(read_repo_file.requests, "get", fake_get)
+    monkeypatch.setattr(read_repo_file.httpx, "AsyncClient", _fake_async_client(fake_get))
 
-    result = read_repo_file.read_repo_file("src/app.py")
+    result = await read_repo_file.read_repo_file("src/app.py")
     assert result["success"] is True
     assert result["content"] == "hello\nworld"
     assert result["ref"] == "deadbeef"  # defaults to head sha
     assert captured["params"] == {"ref": "deadbeef"}
 
 
-def test_read_repo_file_lists_directory(monkeypatch) -> None:
+@pytest.mark.asyncio
+async def test_read_repo_file_lists_directory(monkeypatch) -> None:
     monkeypatch.setattr(
         read_repo_file,
         "get_config",
@@ -270,7 +296,7 @@ def test_read_repo_file_lists_directory(monkeypatch) -> None:
         },
     )
 
-    def fake_get(url, headers=None, params=None, timeout=None):
+    def fake_get(url, headers=None, params=None):
         return SimpleNamespace(
             status_code=200,
             json=lambda: [
@@ -279,19 +305,21 @@ def test_read_repo_file_lists_directory(monkeypatch) -> None:
             ],
         )
 
-    monkeypatch.setattr(read_repo_file.requests, "get", fake_get)
-    result = read_repo_file.read_repo_file("src")
+    monkeypatch.setattr(read_repo_file.httpx, "AsyncClient", _fake_async_client(fake_get))
+    result = await read_repo_file.read_repo_file("src")
     assert result["success"] is True
     assert {e["name"] for e in result["entries"]} == {"a.py", "sub"}
 
 
-def test_read_repo_file_missing_context(monkeypatch) -> None:
+@pytest.mark.asyncio
+async def test_read_repo_file_missing_context(monkeypatch) -> None:
     monkeypatch.setattr(read_repo_file, "get_config", lambda: {"configurable": {}})
-    result = read_repo_file.read_repo_file("src/app.py")
+    result = await read_repo_file.read_repo_file("src/app.py")
     assert result["success"] is False
 
 
-def test_search_repo_code_scopes_to_repo(monkeypatch) -> None:
+@pytest.mark.asyncio
+async def test_search_repo_code_scopes_to_repo(monkeypatch) -> None:
     monkeypatch.setattr(
         search_repo_code,
         "get_config",
@@ -305,7 +333,7 @@ def test_search_repo_code_scopes_to_repo(monkeypatch) -> None:
     )
     captured: dict[str, Any] = {}
 
-    def fake_get(url, headers=None, params=None, timeout=None):
+    def fake_get(url, headers=None, params=None):
         captured["params"] = params
         return SimpleNamespace(
             status_code=200,
@@ -315,8 +343,8 @@ def test_search_repo_code_scopes_to_repo(monkeypatch) -> None:
             },
         )
 
-    monkeypatch.setattr(search_repo_code.requests, "get", fake_get)
-    result = search_repo_code.search_repo_code("foo")
+    monkeypatch.setattr(search_repo_code.httpx, "AsyncClient", _fake_async_client(fake_get))
+    result = await search_repo_code.search_repo_code("foo")
     assert result["success"] is True
     assert "repo:acme/repo" in captured["params"]["q"]
     assert result["results"][0]["path"] == "src/a.py"

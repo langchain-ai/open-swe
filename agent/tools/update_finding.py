@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from typing import Any
 
 from langgraph.config import get_config
@@ -51,7 +50,7 @@ def _has_published_github_surface(finding: Finding) -> bool:
     )
 
 
-def update_finding(
+async def update_finding(
     finding_id: str,
     status: str | None = None,
     severity: str | None = None,
@@ -132,9 +131,7 @@ def update_finding(
     configurable = config.get("configurable", {}) if isinstance(config, dict) else {}
     if status == "open":
         try:
-            head_sha = asyncio.run(
-                resolve_review_head_sha(get_thread_id_from_runtime(), configurable)
-            )
+            head_sha = await resolve_review_head_sha(get_thread_id_from_runtime(), configurable)
         except ReviewerThreadMissingError as exc:
             return thread_missing_tool_result(exc)
         if head_sha:
@@ -156,7 +153,7 @@ def update_finding(
 
     thread_id = get_thread_id_from_runtime()
     try:
-        findings = asyncio.run(list_findings(thread_id))
+        findings = await list_findings(thread_id)
     except ReviewerThreadMissingError as exc:
         return thread_missing_tool_result(exc)
     finding = next((item for item in findings if item.get("id") == finding_id), None)
@@ -179,7 +176,9 @@ def update_finding(
     ):
         from .resolve_finding_thread import resolve_finding_thread
 
-        resolve_result = resolve_finding_thread(finding_id, status=status, note=normalized_note)
+        resolve_result = await resolve_finding_thread(
+            finding_id, status=status, note=normalized_note
+        )
         if not resolve_result.get("success"):
             return {
                 "success": False,
@@ -206,7 +205,7 @@ def update_finding(
             return result
 
     try:
-        updated = asyncio.run(update_finding_fields(thread_id, finding_id, updates))
+        updated = await update_finding_fields(thread_id, finding_id, updates)
     except ReviewerThreadMissingError as exc:
         return thread_missing_tool_result(exc)
     if updated is None:

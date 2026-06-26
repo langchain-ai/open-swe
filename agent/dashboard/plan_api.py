@@ -21,6 +21,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from langgraph_sdk import get_client
 from pydantic import BaseModel
 
+from ..dispatch import dispatch_agent_run
 from .oauth import require_same_origin_for_mutations, require_session
 from .plan_store import (
     PLAN_STATUS_APPROVED,
@@ -254,11 +255,9 @@ async def _dispatch_followup(
     # mode (implement), reject stays in plan mode (revise the plan).
     configurable["plan_mode"] = plan_mode
 
-    client = get_client()
-    await client.runs.create(
+    await dispatch_agent_run(
         thread_id,
-        "agent",
-        input={"messages": [{"role": "user", "content": text}]},
-        config={"configurable": configurable},
-        if_not_exists="create",
+        text,
+        configurable,
+        source=configurable["source"],
     )

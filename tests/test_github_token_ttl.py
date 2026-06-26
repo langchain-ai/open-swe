@@ -278,7 +278,8 @@ def test_process_github_pr_comment_invalidates_and_reauths_on_401(
     assert fetch_calls == ["fresh-token"]
 
 
-def test_publish_review_invalidates_cached_token_on_401(
+@pytest.mark.asyncio
+async def test_publish_review_invalidates_cached_token_on_401(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import importlib
@@ -310,7 +311,7 @@ def test_publish_review_invalidates_cached_token_on_401(
     monkeypatch.setattr(publish_review_module, "_publish_review_async", fake_publish)
     monkeypatch.setattr(publish_review_module, "get_thread_id_from_runtime", lambda: "thread-xyz")
 
-    result = publish_review_module.publish_review()
+    result = await publish_review_module.publish_review()
     assert result["success"] is False
     assert "401" in result["error"]
     assert invalidated["calls"] == 1

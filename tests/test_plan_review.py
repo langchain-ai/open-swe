@@ -95,19 +95,19 @@ async def test_clear_plan_comments_deletes_each(monkeypatch: pytest.MonkeyPatch)
     assert deleted == ["a", "b"]
 
 
-def test_save_plan_requires_run_context() -> None:
+async def test_save_plan_requires_run_context() -> None:
     from agent.tools.save_plan import save_plan
 
     # No LangGraph run context → no thread_id → graceful error, not a crash.
-    result = save_plan("## Plan")
+    result = await save_plan("## Plan")
     assert result["success"] is False
     assert "thread_id" in result["error"]
 
 
-def test_save_plan_rejects_empty_markdown() -> None:
+async def test_save_plan_rejects_empty_markdown() -> None:
     from agent.tools.save_plan import save_plan
 
-    result = save_plan("   ")
+    result = await save_plan("   ")
     assert result["success"] is False
     assert "empty" in result["error"]
 

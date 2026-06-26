@@ -62,7 +62,7 @@ def test_construct_system_prompt_includes_dependency_vetting_guidance() -> None:
     assert "standard library or a package already in the project's manifest/lockfile" in prompt
     assert "permissive license" in prompt
     assert "never add a floating or unpinned dependency" in prompt
-    assert "list the package name, why it is needed" in prompt
+    assert "the package name, why it is needed" in prompt
 
 
 def test_construct_system_prompt_explains_pause_to_ask_for_dependency_review() -> None:
@@ -76,10 +76,39 @@ def test_construct_system_prompt_explains_pause_to_ask_for_dependency_review() -
 
 
 def test_construct_system_prompt_identifies_own_repo() -> None:
+    from agent.prompt import OPEN_SWE_SHARED_BASE
+
     prompt = construct_system_prompt(working_dir="/workspace")
 
-    assert "Open SWE" in prompt
+    # The per-thread prompt points self-referential tasks at the repo; the
+    # "Open SWE" identity lives in the harness-profile base prompt that
+    # deepagents prepends at runtime (OPEN_SWE_SHARED_BASE).
     assert "langchain-ai/open-swe" in prompt
+    assert "Open SWE" in OPEN_SWE_SHARED_BASE
+
+
+def test_harness_profile_replaces_deepagents_base_for_supported_providers() -> None:
+    """The Open SWE base prompt is registered per provider and replaces the SDK base."""
+    import deepagents.profiles.harness.harness_profiles as hp
+
+    import agent.prompt  # noqa: F401  (registers the profile on import)
+    from agent.prompt import HARNESS_PROFILE_KEYS, OPEN_SWE_SHARED_BASE
+
+    hp._ensure_harness_profiles_loaded()
+    assert set(HARNESS_PROFILE_KEYS) >= {"anthropic", "openai", "google_genai", "fireworks"}
+    for key in HARNESS_PROFILE_KEYS:
+        profile = hp._HARNESS_PROFILES.get(key)
+        assert profile is not None, f"no harness profile registered for {key!r}"
+        assert profile.base_system_prompt == OPEN_SWE_SHARED_BASE
+
+
+def test_shared_base_is_neutral_for_read_only_agents() -> None:
+    """Shared base carries no PR/commit/mutation guidance (it also underlies the reviewer)."""
+    from agent.prompt import OPEN_SWE_SHARED_BASE
+
+    lowered = OPEN_SWE_SHARED_BASE.lower()
+    for forbidden in ("open_pull_request", "open a pr", "commit and push", "draft pr"):
+        assert forbidden not in lowered
 
 
 def test_construct_system_prompt_omits_corridor_prompt_by_default() -> None:
@@ -132,7 +161,7 @@ def test_construct_system_prompt_forbids_force_push() -> None:
 
     assert "Never force-push." in prompt
     assert "Never run `git push --force`" in prompt
-    assert "start from `origin/<branch>`" in prompt
+    assert "`origin/<branch>`" in prompt
     assert "git pull --rebase origin <branch>" in prompt
 
 

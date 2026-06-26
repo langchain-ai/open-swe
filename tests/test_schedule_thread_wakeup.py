@@ -24,38 +24,44 @@ def _config(**overrides: Any) -> dict[str, Any]:
     return base
 
 
-def test_schedule_thread_wakeup_rejects_zero_delay(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_schedule_thread_wakeup_rejects_zero_delay(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(wakeup_tool, "get_config", _config)
-    result = wakeup_tool.schedule_thread_wakeup(0)
+    result = await wakeup_tool.schedule_thread_wakeup(0)
     assert result["success"] is False
     assert "positive" in result["error"].lower()
 
 
-def test_schedule_thread_wakeup_rejects_negative_delay(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_schedule_thread_wakeup_rejects_negative_delay(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(wakeup_tool, "get_config", _config)
-    result = wakeup_tool.schedule_thread_wakeup(-5)
+    result = await wakeup_tool.schedule_thread_wakeup(-5)
     assert result["success"] is False
 
 
-def test_schedule_thread_wakeup_rejects_delay_over_24h(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_schedule_thread_wakeup_rejects_delay_over_24h(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(wakeup_tool, "get_config", _config)
-    result = wakeup_tool.schedule_thread_wakeup(1441)
+    result = await wakeup_tool.schedule_thread_wakeup(1441)
     assert result["success"] is False
     assert "1440" in result["error"]
 
 
-def test_schedule_thread_wakeup_rejects_missing_thread_id(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_schedule_thread_wakeup_rejects_missing_thread_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(
         wakeup_tool,
         "get_config",
         lambda: {"configurable": {"source": "slack"}},
     )
-    result = wakeup_tool.schedule_thread_wakeup(5)
+    result = await wakeup_tool.schedule_thread_wakeup(5)
     assert result["success"] is False
     assert "thread_id" in result["error"].lower()
 
 
-def test_schedule_thread_wakeup_creates_cron(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_schedule_thread_wakeup_creates_cron(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, Any] = {}
 
     async def fake_create_wakeup_cron(
@@ -83,7 +89,7 @@ def test_schedule_thread_wakeup_creates_cron(monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setattr(wakeup_tool, "get_config", _config)
     monkeypatch.setattr(wakeup_tool, "_create_wakeup_cron", fake_create_wakeup_cron)
 
-    result = wakeup_tool.schedule_thread_wakeup(10, prompt="Check CI status")
+    result = await wakeup_tool.schedule_thread_wakeup(10, prompt="Check CI status")
 
     assert result["success"] is True
     assert result["cron_id"] == "cron-abc"
@@ -104,7 +110,7 @@ def test_schedule_thread_wakeup_creates_cron(monkeypatch: pytest.MonkeyPatch) ->
     assert captured["fire_time"].microsecond == 0
 
 
-def test_schedule_thread_wakeup_uses_default_prompt_when_none(
+async def test_schedule_thread_wakeup_uses_default_prompt_when_none(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     captured: dict[str, Any] = {}
@@ -122,12 +128,12 @@ def test_schedule_thread_wakeup_uses_default_prompt_when_none(
     monkeypatch.setattr(wakeup_tool, "get_config", _config)
     monkeypatch.setattr(wakeup_tool, "_create_wakeup_cron", fake_create_wakeup_cron)
 
-    result = wakeup_tool.schedule_thread_wakeup(5)
+    result = await wakeup_tool.schedule_thread_wakeup(5)
     assert result["success"] is True
     assert "automated re-trigger" in captured["prompt"].lower()
 
 
-def test_schedule_thread_wakeup_uses_default_prompt_when_blank(
+async def test_schedule_thread_wakeup_uses_default_prompt_when_blank(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     captured: dict[str, Any] = {}
@@ -145,12 +151,12 @@ def test_schedule_thread_wakeup_uses_default_prompt_when_blank(
     monkeypatch.setattr(wakeup_tool, "get_config", _config)
     monkeypatch.setattr(wakeup_tool, "_create_wakeup_cron", fake_create_wakeup_cron)
 
-    result = wakeup_tool.schedule_thread_wakeup(5, prompt="   ")
+    result = await wakeup_tool.schedule_thread_wakeup(5, prompt="   ")
     assert result["success"] is True
     assert "automated re-trigger" in captured["prompt"].lower()
 
 
-def test_schedule_thread_wakeup_returns_error_on_exception(
+async def test_schedule_thread_wakeup_returns_error_on_exception(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async def fake_create_wakeup_cron(
@@ -165,12 +171,12 @@ def test_schedule_thread_wakeup_returns_error_on_exception(
     monkeypatch.setattr(wakeup_tool, "get_config", _config)
     monkeypatch.setattr(wakeup_tool, "_create_wakeup_cron", fake_create_wakeup_cron)
 
-    result = wakeup_tool.schedule_thread_wakeup(5)
+    result = await wakeup_tool.schedule_thread_wakeup(5)
     assert result["success"] is False
     assert "connection refused" in result["error"]
 
 
-def test_schedule_thread_wakeup_does_not_pass_none_configurable_keys(
+async def test_schedule_thread_wakeup_does_not_pass_none_configurable_keys(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     captured: dict[str, Any] = {}
@@ -188,7 +194,7 @@ def test_schedule_thread_wakeup_does_not_pass_none_configurable_keys(
     monkeypatch.setattr(wakeup_tool, "get_config", _config)
     monkeypatch.setattr(wakeup_tool, "_create_wakeup_cron", fake_create_wakeup_cron)
 
-    result = wakeup_tool.schedule_thread_wakeup(5)
+    result = await wakeup_tool.schedule_thread_wakeup(5)
     assert result["success"] is True
     cfg = captured["configurable"]
     assert "linear_issue" not in cfg

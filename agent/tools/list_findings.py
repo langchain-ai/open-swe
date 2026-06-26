@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from typing import Any
 
 from ..reviewer_findings import (
@@ -15,7 +14,7 @@ from ..reviewer_findings import (
 )
 
 
-def list_findings(status_filter: str | None = None) -> dict[str, Any]:
+async def list_findings(status_filter: str | None = None) -> dict[str, Any]:
     """List findings on the reviewer thread, optionally filtered by status.
 
     Most useful on a re-review run to inspect what existed before deciding
@@ -33,7 +32,7 @@ def list_findings(status_filter: str | None = None) -> dict[str, Any]:
 
     thread_id = get_thread_id_from_runtime()
     try:
-        findings = asyncio.run(list_findings_async(thread_id))
+        findings = await list_findings_async(thread_id)
     except ReviewerThreadMissingError as exc:
         return thread_missing_tool_result(exc)
     if status_filter is not None:

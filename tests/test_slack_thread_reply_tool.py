@@ -19,7 +19,7 @@ def _config() -> dict[str, Any]:
     }
 
 
-def test_slack_thread_reply_returns_structured_error_for_msg_too_long(
+async def test_slack_thread_reply_returns_structured_error_for_msg_too_long(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async def fake_post_and_store_mapping(
@@ -34,7 +34,7 @@ def test_slack_thread_reply_returns_structured_error_for_msg_too_long(
     monkeypatch.setattr(slack_reply_tool, "get_config", _config)
     monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", fake_post_and_store_mapping)
 
-    result = slack_reply_tool.slack_thread_reply("hello")
+    result = await slack_reply_tool.slack_thread_reply("hello")
 
     assert result == {
         "success": False,
@@ -46,7 +46,7 @@ def test_slack_thread_reply_returns_structured_error_for_msg_too_long(
 
 
 @pytest.mark.parametrize("slack_error", ["channel_not_found", "not_in_channel"])
-def test_slack_thread_reply_hints_not_to_retry_channel_errors(
+async def test_slack_thread_reply_hints_not_to_retry_channel_errors(
     slack_error: str,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -62,7 +62,7 @@ def test_slack_thread_reply_hints_not_to_retry_channel_errors(
     monkeypatch.setattr(slack_reply_tool, "get_config", _config)
     monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", fake_post_and_store_mapping)
 
-    result = slack_reply_tool.slack_thread_reply("hello")
+    result = await slack_reply_tool.slack_thread_reply("hello")
 
     assert result["success"] is False
     assert result["error"] == slack_error
@@ -72,7 +72,7 @@ def test_slack_thread_reply_hints_not_to_retry_channel_errors(
     assert "trace output" in result["hint"]
 
 
-def test_slack_thread_reply_rate_limited_hint_includes_retry_after(
+async def test_slack_thread_reply_rate_limited_hint_includes_retry_after(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async def fake_post_and_store_mapping(
@@ -87,7 +87,7 @@ def test_slack_thread_reply_rate_limited_hint_includes_retry_after(
     monkeypatch.setattr(slack_reply_tool, "get_config", _config)
     monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", fake_post_and_store_mapping)
 
-    result = slack_reply_tool.slack_thread_reply("hello")
+    result = await slack_reply_tool.slack_thread_reply("hello")
 
     assert result["success"] is False
     assert result["error"] == "rate_limited: 30"
@@ -96,7 +96,7 @@ def test_slack_thread_reply_rate_limited_hint_includes_retry_after(
     assert "wait" in result["hint"]
 
 
-def test_slack_thread_reply_rate_limited_hint_without_retry_after(
+async def test_slack_thread_reply_rate_limited_hint_without_retry_after(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async def fake_post_and_store_mapping(
@@ -111,14 +111,14 @@ def test_slack_thread_reply_rate_limited_hint_without_retry_after(
     monkeypatch.setattr(slack_reply_tool, "get_config", _config)
     monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", fake_post_and_store_mapping)
 
-    result = slack_reply_tool.slack_thread_reply("hello")
+    result = await slack_reply_tool.slack_thread_reply("hello")
 
     assert result["success"] is False
     assert result["slack_error"] == "rate_limited"
     assert "wait" in result["hint"]
 
 
-def test_slack_thread_reply_uses_post_failed_without_slack_error(
+async def test_slack_thread_reply_uses_post_failed_without_slack_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async def fake_post_and_store_mapping(
@@ -133,7 +133,7 @@ def test_slack_thread_reply_uses_post_failed_without_slack_error(
     monkeypatch.setattr(slack_reply_tool, "get_config", _config)
     monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", fake_post_and_store_mapping)
 
-    result = slack_reply_tool.slack_thread_reply("hello")
+    result = await slack_reply_tool.slack_thread_reply("hello")
 
     assert result["success"] is False
     assert result["error"] == "post failed"
@@ -141,7 +141,7 @@ def test_slack_thread_reply_uses_post_failed_without_slack_error(
     assert result["message_chars"] == 5
 
 
-def test_slack_thread_reply_builds_option_blocks(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_slack_thread_reply_builds_option_blocks(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, Any] = {}
 
     async def fake_post_and_store_mapping(
@@ -159,7 +159,7 @@ def test_slack_thread_reply_builds_option_blocks(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr(slack_reply_tool, "get_config", _config)
     monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", fake_post_and_store_mapping)
 
-    result = slack_reply_tool.slack_thread_reply("Pick one", options=["A", "B"])
+    result = await slack_reply_tool.slack_thread_reply("Pick one", options=["A", "B"])
 
     assert result == {"success": True}
     assert captured["channel_id"] == "C1"

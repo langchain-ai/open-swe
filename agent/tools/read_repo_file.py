@@ -10,7 +10,7 @@ from __future__ import annotations
 import base64
 from typing import Any
 
-import requests
+import httpx
 from langgraph.config import get_config
 
 from ..utils.github_checks import github_headers
@@ -36,7 +36,7 @@ def _chat_repo_context() -> tuple[str, str, str | None, str | None]:
     )
 
 
-def read_repo_file(path: str, ref: str | None = None) -> dict[str, Any]:
+async def read_repo_file(path: str, ref: str | None = None) -> dict[str, Any]:
     """Read a file (or list a directory) from the PR's repository at a git ref.
 
     Use this to inspect code beyond the diff — callers, definitions, neighboring
@@ -64,8 +64,9 @@ def read_repo_file(path: str, ref: str | None = None) -> dict[str, Any]:
     url = f"{_GITHUB_API}/repos/{owner}/{repo}/contents/{clean_path}"
     headers = github_headers(token or "")
     try:
-        response = requests.get(url, headers=headers, params=params, timeout=30)
-    except requests.exceptions.RequestException as exc:
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.get(url, headers=headers, params=params)
+    except httpx.HTTPError as exc:
         return {"success": False, "error": f"GitHub request failed: {exc!s}"}
 
     if response.status_code == 404:

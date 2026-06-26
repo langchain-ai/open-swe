@@ -1,4 +1,3 @@
-import asyncio
 import json
 import os
 from typing import Any
@@ -17,7 +16,7 @@ LANGGRAPH_URL = os.environ.get("LANGGRAPH_URL") or os.environ.get(
 )
 
 
-def slack_thread_reply(
+async def slack_thread_reply(
     message: str,
     options: list[str] | None = None,
     blocks: list[dict[str, Any]] | None = None,
@@ -65,8 +64,8 @@ def slack_thread_reply(
         slack_blocks = _build_plan_approval_blocks(message)
     else:
         slack_blocks = blocks or _build_option_blocks(message, options)
-    message_ts, slack_error = asyncio.run(
-        _post_and_store_mapping(channel_id, thread_ts, message, blocks=slack_blocks)
+    message_ts, slack_error = await _post_and_store_mapping(
+        channel_id, thread_ts, message, blocks=slack_blocks
     )
     if message_ts is None:
         return {

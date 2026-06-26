@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from typing import Any
 
 from langgraph.config import get_config
@@ -26,7 +25,7 @@ from ..reviewer_findings import (
 )
 
 
-def add_finding(
+async def add_finding(
     severity: str,
     confidence: str,
     category: str,
@@ -142,7 +141,7 @@ def add_finding(
 
     thread_id = get_thread_id_from_runtime()
     try:
-        head_sha = asyncio.run(resolve_review_head_sha(thread_id, configurable))
+        head_sha = await resolve_review_head_sha(thread_id, configurable)
     except ReviewerThreadMissingError as exc:
         return thread_missing_tool_result(exc)
 
@@ -163,7 +162,7 @@ def add_finding(
     )
 
     try:
-        asyncio.run(append_finding(thread_id, finding))
+        await append_finding(thread_id, finding)
     except ReviewerThreadMissingError as exc:
         return thread_missing_tool_result(exc)
     result: dict[str, Any] = {"success": True, "finding_id": finding["id"]}
