@@ -35,15 +35,25 @@ _FAILURE_REPLY_FLAG = "failure_reply_posted"
 
 # Shared-secret bearer token proving a /webhooks/run-complete call came from our
 # own dispatch (which appends ?token= when this is set) rather than from an
-# attacker hitting the public route. When unset (dev), verification is skipped.
+# attacker hitting the public route. Fail closed when unset: the route rejects
+# every call, so completion replies stay off until the secret is configured.
 RUN_COMPLETE_WEBHOOK_SECRET = os.environ.get("RUN_COMPLETE_WEBHOOK_SECRET")
+if not RUN_COMPLETE_WEBHOOK_SECRET:
+    logger.warning(
+        "RUN_COMPLETE_WEBHOOK_SECRET is not set; /webhooks/run-complete is fail-closed "
+        "(all calls rejected) and run-failure replies are disabled. Set it to enable them."
+    )
 
 
 def verify_run_complete_token(token: str | None) -> bool:
-    """Return whether a run-completion webhook token is acceptable."""
+    """Return whether a run-completion webhook token is acceptable.
+
+    Fail closed: with no secret configured, reject every call rather than accept
+    unauthenticated requests on a publicly reachable route.
+    """
     secret = RUN_COMPLETE_WEBHOOK_SECRET
     if not secret:
-        return True
+        return False
     return token is not None and hmac.compare_digest(token, secret)
 
 
