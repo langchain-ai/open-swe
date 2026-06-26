@@ -511,7 +511,9 @@ async def ensure_sandbox_for_thread(
 DEFAULT_LLM_MODEL_ID = DEFAULT_MODEL_ID
 DEFAULT_LLM_MAX_TOKENS = 64_000
 DEFAULT_RECURSION_LIMIT = 9_999
-MODEL_CALL_RECURSION_LIMIT = 250  # run budget cap; caps runaway multi-million-token runs
+# High cap to support long-running tasks; a run that hits it still ends with a
+# signal via notify_step_limit_reached rather than dying silently.
+MODEL_CALL_RECURSION_LIMIT = 5_000
 
 # Mutating tools hidden from the model while plan mode is active so it can only
 # research and propose a plan. `execute` stays available; plan-mode shell
