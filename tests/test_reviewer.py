@@ -124,7 +124,7 @@ def test_reviewer_system_prompt_omits_api_standards_when_absent() -> None:
     assert "API standards skill" not in prompt
 
 
-def test_reviewer_system_prompt_includes_socket_firewall_dependency_guidance() -> None:
+def test_reviewer_system_prompt_omits_socket_firewall_guidance() -> None:
     prompt = reviewer._reviewer_system_prompt(
         "/workspace/repo",
         repo_owner="acme",
@@ -132,14 +132,8 @@ def test_reviewer_system_prompt_includes_socket_firewall_dependency_guidance() -
         pr_number=42,
     )
     assert "Dependency installs during review" in prompt
-    assert "command -v sfw" in prompt
-    assert "npm i -g sfw" in prompt
-    assert "sfw npm ci" in prompt
-    assert "sfw uv pip install -e ." in prompt
-    assert "supported registry-fetching installs" in prompt
-    assert "unsupported package managers such as Poetry" in prompt
-    assert "normal documented install command without `sfw`" in prompt
-    assert "sfw poetry" not in prompt
+    assert "sfw" not in prompt
+    assert "Socket Firewall" not in prompt
 
 
 def test_reviewer_system_prompt_includes_dependency_vetting_guidance() -> None:
