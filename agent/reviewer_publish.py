@@ -197,13 +197,8 @@ def render_resolution_comment(
     status: str,
     note: str | None = None,
 ) -> str | None:
-    """Render the agent-provided resolution reply for a review thread."""
-    body = _resolution_body(finding, note)
-    if body is None:
-        return None
-    if status == "resolved":
-        return f"✅ **Resolved**: {body}"
-    return f"❌ **Dismissed**: {body}"
+    """Render the agent-provided reply for a review thread."""
+    return _resolution_body(finding, note)
 
 
 def _resolution_body(finding: Finding, note: str | None) -> str | None:

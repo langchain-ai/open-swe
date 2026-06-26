@@ -334,8 +334,7 @@ async def test_resolve_finding_thread_resolves_all_known_threads() -> None:
     ]
     assert [call.kwargs["review_comment_id"] for call in reply.await_args_list] == [11, 12]
     assert all(
-        "✅ **Resolved**: Fixed in the latest commit" in call.kwargs["body"]
-        for call in reply.await_args_list
+        call.kwargs["body"] == "Fixed in the latest commit" for call in reply.await_args_list
     )
     updates = update.await_args.args[2]
     assert updates["github_thread_resolved"] is True

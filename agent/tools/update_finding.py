@@ -71,7 +71,7 @@ async def update_finding(
             ``Existing findings`` block of the re-review user message).
         status: New status (``open``, ``resolved``, ``dismissed``).
             Use ``resolved`` when the new commits address the issue. Resolving
-            or dismissing requires a ``note`` with the message to post.
+            or dismissing requires a ``note`` with the full message to post.
         severity: New severity, if reassessing.
         confidence: New confidence rating (``low``, ``medium``, ``high``), if
             new commits change how sure you are the finding is a real issue.
@@ -82,7 +82,8 @@ async def update_finding(
             Capped at 4 lines — longer values are dropped (the finding keeps
             its description). Only set this for small, obvious fixes.
         note: Optional free-form note explaining the change. Required when
-            resolving or dismissing because it becomes the GitHub reply body.
+            resolving or dismissing because it is posted verbatim as the full
+            GitHub reply body.
 
     Returns:
         Dictionary with ``success`` and (on success) the updated ``finding``.

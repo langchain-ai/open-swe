@@ -163,10 +163,6 @@ def _sync_thread_status(finding: Finding, matches: list[ReviewThreadMatch]) -> b
         return False
 
     updated = False
-    if finding.get("status") == "open":
-        finding["status"] = "resolved"
-        updated = True
-
     resolved_thread_ids = _str_list(finding.get("github_resolved_thread_ids"))
     all_resolved = True
     for review_thread, _comment_id in matches:
@@ -180,12 +176,18 @@ def _sync_thread_status(finding: Finding, matches: list[ReviewThreadMatch]) -> b
 
     if resolved_thread_ids != _str_list(finding.get("github_resolved_thread_ids")):
         finding["github_resolved_thread_ids"] = resolved_thread_ids
-    if all_resolved and not finding.get("github_thread_resolved"):
+    if not all_resolved:
+        return updated
+
+    if finding.get("status") == "open":
+        finding["status"] = "resolved"
+        updated = True
+    if not finding.get("github_thread_resolved"):
         finding["github_thread_resolved"] = True
         updated = True
     if isinstance(finding.get("id"), str):
         surface = _coerce_surface(finding, str(finding["id"]))
-        surface["state"] = "resolved" if all_resolved else "resolve_pending"
+        surface["state"] = "resolved"
         finding["surface"] = surface
         updated = True
     return updated

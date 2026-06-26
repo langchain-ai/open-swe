@@ -226,12 +226,22 @@ def build_plan_script() -> list[Any]:
 
 
 FOLLOW_UP_REPLY = "Thanks! The PR is ready for review — anything else you'd like changed?"
+_ATTRIBUTION_RE = re.compile(r"@([A-Za-z0-9-]+):")
 
 
-def _step_followup(_messages: list[BaseMessage]) -> AIMessage:
-    # A web/Slack follow-up after the PR exists: a plain reply, no new PR. Its
-    # content lands in the thread transcript the dashboard renders.
-    return AIMessage(content=FOLLOW_UP_REPLY)
+def _latest_attribution(messages: list[BaseMessage]) -> str | None:
+    for msg in reversed(messages):
+        if isinstance(msg, HumanMessage):
+            match = _ATTRIBUTION_RE.search(_text(msg.content))
+            if match:
+                return f"@{match.group(1)}"
+    return None
+
+
+def _step_followup(messages: list[BaseMessage]) -> AIMessage:
+    attribution = _latest_attribution(messages)
+    suffix = f" I saw this follow-up was from {attribution}." if attribution else ""
+    return AIMessage(content=f"{FOLLOW_UP_REPLY}{suffix}")
 
 
 def build_script() -> list[Any]:
@@ -285,7 +295,7 @@ class FakeScriptedChatModel(BaseChatModel):
         if step < len(script):
             message = script[step](messages)
         else:
-            message = AIMessage(content="All set — let me know if you'd like anything else.")
+            message = _step_followup(messages)
         return ChatResult(generations=[ChatGeneration(message=message)])
 
 
