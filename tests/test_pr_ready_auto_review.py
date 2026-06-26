@@ -45,7 +45,6 @@ def _patch_dispatch_deps(monkeypatch: pytest.MonkeyPatch, fake_client: Any) -> N
     monkeypatch.setattr(webapp, "_ensure_thread_exists_for_metadata", AsyncMock(return_value=True))
     monkeypatch.setattr(webapp, "cache_github_token_for_thread", MagicMock())
     monkeypatch.setattr(webapp, "set_reviewer_thread_metadata", AsyncMock())
-    monkeypatch.setattr(webapp, "is_thread_active", AsyncMock(return_value=False))
     monkeypatch.setattr(webapp, "get_client", lambda url: fake_client)
 
 
@@ -77,7 +76,6 @@ async def test_pr_ready_public_repo_uses_scoped_reviewer_token(
     cache_token = MagicMock()
     monkeypatch.setattr(webapp, "cache_github_token_for_thread", cache_token)
     monkeypatch.setattr(webapp, "set_reviewer_thread_metadata", AsyncMock())
-    monkeypatch.setattr(webapp, "is_thread_active", AsyncMock(return_value=False))
     monkeypatch.setattr(webapp, "get_client", lambda url: fake_client)
     monkeypatch.setattr(webapp, "get_profile", AsyncMock(return_value=None))
     monkeypatch.setattr(webapp, "get_team_settings", AsyncMock(return_value={}))
@@ -100,7 +98,6 @@ async def test_pr_ready_private_repo_uses_full_reviewer_token(
     monkeypatch.setattr(webapp, "_ensure_thread_exists_for_metadata", AsyncMock(return_value=True))
     monkeypatch.setattr(webapp, "cache_github_token_for_thread", MagicMock())
     monkeypatch.setattr(webapp, "set_reviewer_thread_metadata", AsyncMock())
-    monkeypatch.setattr(webapp, "is_thread_active", AsyncMock(return_value=False))
     monkeypatch.setattr(webapp, "get_client", lambda url: fake_client)
     monkeypatch.setattr(webapp, "get_profile", AsyncMock(return_value=None))
     monkeypatch.setattr(webapp, "get_team_settings", AsyncMock(return_value={}))

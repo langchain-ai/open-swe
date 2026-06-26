@@ -1,12 +1,16 @@
-"""Shared LangGraph thread helpers for webhooks and the dashboard."""
+"""Shared LangGraph thread helpers for the dashboard.
+
+The webhook triggers (Slack / Linear / GitHub) dispatch through
+``agent.dispatch.dispatch_agent_run`` with ``multitask_strategy="interrupt"``,
+so they no longer need a busy-check or an in-process lock. The store-queue
+below is retained for the dashboard's deliberate "inject a follow-up into a
+run that's already in flight" path (``thread_api.send_dashboard_message``).
+"""
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import os
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
 from typing import Any
 
 from langgraph_sdk import get_client
@@ -14,25 +18,6 @@ from langgraph_sdk import get_client
 logger = logging.getLogger(__name__)
 
 MAX_QUEUED_MESSAGES = 100
-
-_THREAD_RUN_LOCKS: dict[str, asyncio.Lock] = {}
-
-
-def get_thread_run_lock(thread_id: str) -> asyncio.Lock:
-    """Return a per-thread-id asyncio.Lock, creating one lazily if needed."""
-    lock = _THREAD_RUN_LOCKS.get(thread_id)
-    if lock is None:
-        lock = asyncio.Lock()
-        _THREAD_RUN_LOCKS[thread_id] = lock
-    return lock
-
-
-@asynccontextmanager
-async def thread_run_lock(thread_id: str) -> AsyncIterator[None]:
-    """Serialize run dispatch for a thread."""
-    lock = get_thread_run_lock(thread_id)
-    async with lock:
-        yield
 
 
 def langgraph_url() -> str:
@@ -57,15 +42,14 @@ async def get_thread_active_status(thread_id: str) -> bool | None:
         return None
 
 
-async def is_thread_active(thread_id: str) -> bool:
-    """Return whether the thread currently has a running run."""
-    return await get_thread_active_status(thread_id) is True
-
-
 async def queue_message_for_thread(
     thread_id: str, message_content: str | list[dict[str, Any]] | dict[str, Any]
 ) -> bool:
-    """Queue a follow-up message for a busy thread (FIFO store namespace)."""
+    """Queue a follow-up message for a busy thread (FIFO store namespace).
+
+    Used by the dashboard to inject a follow-up into a run that's already in
+    flight; webhook triggers use ``multitask_strategy="interrupt"`` instead.
+    """
     client = langgraph_client()
     try:
         namespace = ("queue", thread_id)
