@@ -596,12 +596,12 @@ function GlobalDefaultsSection({ models }: { models: Array<ModelOption> }) {
   return (
     <SettingsSection
       title="Global defaults"
-      description="Workspace-wide model defaults. Per-user Cloud Agent selections override the agent defaults."
+      description="Workspace-wide planner/executor model defaults. Per-user Cloud Agent selections override the agent defaults."
     >
       <div className="divide-y divide-border">
         <RolePicker
-          label="Open SWE Agent"
-          description="Model used for code-writing runs triggered from Slack, Linear, GitHub, and the Open SWE Agent."
+          label="Open SWE Agent planner"
+          description="Top-level model used for reasoning, image understanding, delegation, and final coordination."
           models={models}
           model={settings.data?.default_agent_model ?? null}
           effort={settings.data?.default_agent_reasoning_effort ?? null}
@@ -616,8 +616,8 @@ function GlobalDefaultsSection({ models }: { models: Array<ModelOption> }) {
           disabled={!settings.data || save.isPending}
         />
         <RolePicker
-          label="Open SWE Agent subagents"
-          description="Model used by delegated main-agent tasks."
+          label="Open SWE Agent executor"
+          description="Model used for delegated repository setup, code changes, focused tests, commits, pushes, and PR updates."
           models={models}
           model={settings.data?.default_agent_subagent_model ?? null}
           effort={
