@@ -257,6 +257,10 @@ def _stub_token(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(opr, "_resolve_pr_author_token", lambda: _coro(("tok", "user")))
 
 
+def _stub_plan(monkeypatch: pytest.MonkeyPatch, plan: dict[str, Any] | None) -> None:
+    monkeypatch.setattr(opr, "get_plan_content", lambda *_a, **_k: _coro(plan))
+
+
 def test_appends_slack_reference_for_private_repo(monkeypatch: pytest.MonkeyPatch) -> None:
     _set_config(
         monkeypatch,
@@ -284,6 +288,101 @@ def test_appends_slack_reference_for_private_repo(monkeypatch: pytest.MonkeyPatc
     assert "- Slack thread: https://slack.example/p1" in sent_body
 
 
+def test_appends_plan_reference_from_thread_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dashboard.example")
+    _set_config(monkeypatch, {"source": "dashboard", "thread_id": "thread-1"})
+    _stub_token(monkeypatch)
+    _stub_plan(monkeypatch, {"markdown": "# Plan\n- step 1", "status": "ready"})
+
+    client = _FakeClient(post=_FakeResponse(201, {"html_url": "u", "number": 1, "user": {}}))
+    _install_client(monkeypatch, client)
+
+    _open_with_body("body")
+
+    assert client.post_calls[0]["json"]["body"] == (
+        "body\n\n## References\n- Plan: https://dashboard.example/agents/thread-1/plan"
+    )
+    assert client.get_calls == []
+
+
+def test_omits_plan_reference_when_no_plan_exists(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dashboard.example")
+    _set_config(monkeypatch, {"source": "dashboard", "thread_id": "thread-1"})
+    _stub_token(monkeypatch)
+    _stub_plan(monkeypatch, None)
+
+    client = _FakeClient(post=_FakeResponse(201, {"html_url": "u", "number": 1, "user": {}}))
+    _install_client(monkeypatch, client)
+
+    _open_with_body("body")
+
+    assert client.post_calls[0]["json"]["body"] == "body"
+    assert client.get_calls == []
+
+
+def test_omits_plan_reference_when_plan_markdown_empty(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dashboard.example")
+    _set_config(monkeypatch, {"source": "dashboard", "thread_id": "thread-1"})
+    _stub_token(monkeypatch)
+    _stub_plan(monkeypatch, {"markdown": "   \n  ", "status": "ready"})
+
+    client = _FakeClient(post=_FakeResponse(201, {"html_url": "u", "number": 1, "user": {}}))
+    _install_client(monkeypatch, client)
+
+    _open_with_body("body")
+
+    assert client.post_calls[0]["json"]["body"] == "body"
+    assert client.get_calls == []
+
+
+def test_omits_plan_reference_when_store_lookup_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dashboard.example")
+    _set_config(monkeypatch, {"source": "dashboard", "thread_id": "thread-1"})
+    _stub_token(monkeypatch)
+
+    async def fail_plan(*_a: Any, **_k: Any) -> Any:
+        raise RuntimeError("store down")
+
+    monkeypatch.setattr(opr, "get_plan_content", fail_plan)
+
+    client = _FakeClient(post=_FakeResponse(201, {"html_url": "u", "number": 1, "user": {}}))
+    _install_client(monkeypatch, client)
+
+    _open_with_body("body")
+
+    assert client.post_calls[0]["json"]["body"] == "body"
+    assert client.get_calls == []
+
+
+def test_plan_reference_survives_source_reference_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dashboard.example")
+    _set_config(
+        monkeypatch,
+        {
+            "source": "slack",
+            "thread_id": "thread-1",
+            "slack_thread": {"channel_id": "C123", "thread_ts": "1700000000.000100"},
+        },
+    )
+    _stub_token(monkeypatch)
+    _stub_plan(monkeypatch, {"markdown": "# Plan\n- step 1", "status": "ready"})
+
+    async def fail_permalink(*_args: Any, **_kwargs: Any) -> str:
+        raise RuntimeError("slack failed")
+
+    monkeypatch.setattr(opr, "get_slack_permalink", fail_permalink)
+    client = _FakeClient(post=_FakeResponse(201, {"html_url": "u", "number": 1, "user": {}}))
+    _install_client(monkeypatch, client)
+
+    _open_with_body("body")
+
+    sent_body = client.post_calls[0]["json"]["body"]
+    assert "- Plan: https://dashboard.example/agents/thread-1/plan" in sent_body
+    assert client.get_calls == []
+
+
 def test_no_reference_for_public_repo(monkeypatch: pytest.MonkeyPatch) -> None:
     _set_config(
         monkeypatch,
@@ -306,6 +405,37 @@ def test_no_reference_for_public_repo(monkeypatch: pytest.MonkeyPatch) -> None:
     _open_with_body("original body")
 
     assert client.post_calls[0]["json"]["body"] == "original body"
+
+
+def test_public_repo_appends_plan_but_not_source_reference(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dashboard.example")
+    _set_config(
+        monkeypatch,
+        {
+            "source": "slack",
+            "thread_id": "thread-1",
+            "slack_thread": {"channel_id": "C123", "thread_ts": "1700000000.000100"},
+        },
+    )
+    _stub_token(monkeypatch)
+    _stub_plan(monkeypatch, {"markdown": "# Plan\n- step 1", "status": "ready"})
+    monkeypatch.setattr(
+        opr, "get_slack_permalink", lambda *_a, **_k: _coro("https://slack.example/p1")
+    )
+
+    client = _RoutingClient(
+        post=_FakeResponse(201, {"html_url": "u", "number": 1, "user": {}}),
+        get_routes={"/repos/langchain-ai/open-swe": _FakeResponse(200, {"private": False})},
+    )
+    _install_client(monkeypatch, client)
+
+    _open_with_body("body")
+
+    sent_body = client.post_calls[0]["json"]["body"]
+    assert "- Plan: https://dashboard.example/agents/thread-1/plan" in sent_body
+    assert "Slack thread" not in sent_body
 
 
 def test_appends_linear_reference_for_private_repo(monkeypatch: pytest.MonkeyPatch) -> None:

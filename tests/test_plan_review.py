@@ -122,6 +122,8 @@ def test_plan_routes_registered() -> None:
     assert "/dashboard/api/plan/{thread_id}/comments" in paths
     assert "/dashboard/api/plan/{thread_id}/comments/{comment_id}" in paths
     assert "/dashboard/api/plan/yjs/{thread_id}" not in paths
+    assert "/dashboard/api/workflow-approval/{thread_id}/{fingerprint}/approve" in paths
+    assert "/dashboard/api/workflow-approval/{thread_id}/{fingerprint}/reject" in paths
 
 
 def test_save_plan_exported_and_wired() -> None:

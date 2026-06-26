@@ -10,11 +10,9 @@ import {
   useFileTreeSelection,
 } from "@pierre/trees/react"
 import {
-  ArrowSquareOutIcon,
   ArrowsInIcon,
   ArrowsOutIcon,
   CaretDownIcon,
-  GitPullRequestIcon,
   SidebarSimpleIcon,
 } from "@phosphor-icons/react"
 import type { FileContents } from "@pierre/diffs/react"
@@ -23,8 +21,10 @@ import type { GitStatus, GitStatusEntry } from "@pierre/trees"
 import type { AgentThread, Message } from "@/lib/agents/types"
 import type { ThreadPrDiffFile } from "@/lib/agents/api"
 import type { ChangedFileSummaryItem } from "@/components/agents/messages"
+import { agentsApi } from "@/lib/agents/api"
 import { useAgentThreadPrDiff } from "@/lib/agents/queries"
 import { ReviewTab } from "@/components/agents/ReviewTab"
+import { PrHeader } from "@/components/agents/PrHeader"
 import { buttonVariants } from "@/components/ui/button"
 import {
   DIFF_VIRTUALIZER_CONFIG,
@@ -346,6 +346,34 @@ export function AgentGitPanel({
   }
 
   const prDiff = useAgentThreadPrDiff(thread.id, Boolean(pr))
+  const [recoveringPatch, setRecoveringPatch] = useState(false)
+  const [recoveryError, setRecoveryError] = useState<string | null>(null)
+  const canDownloadRecovery =
+    thread.status !== "running" && thread.isOwner !== false
+
+  const downloadRecoveryPatch = useCallback(async () => {
+    setRecoveringPatch(true)
+    setRecoveryError(null)
+    try {
+      const { blob, filename } = await agentsApi.downloadThreadRecoveryPatch(
+        thread.id
+      )
+      const url = window.URL.createObjectURL(blob)
+      const link = document.createElement("a")
+      link.href = url
+      link.download = filename
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      window.URL.revokeObjectURL(url)
+    } catch (error) {
+      setRecoveryError(
+        error instanceof Error ? error.message : "Failed to download patch"
+      )
+    } finally {
+      setRecoveringPatch(false)
+    }
+  }, [thread.id])
 
   const chunks = useMemo(
     () => messages.flatMap((message) => message.chunks),
@@ -489,38 +517,16 @@ export function AgentGitPanel({
         ) : (
           <>
             {pr && (
-              <div className="border-b border-[var(--ui-border)] px-4 py-3">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="truncate text-sm font-medium text-[var(--ui-text)]">
-                      {pr.title} #{pr.number}
-                    </div>
-                    <div className="mt-1 flex items-center gap-2 text-[11px] text-[var(--ui-text-dim)]">
-                      <span className="inline-flex items-center gap-1 rounded border border-[var(--ui-border)] px-1.5 py-0.5 capitalize">
-                        <GitPullRequestIcon className="size-3" />
-                        {pr.state}
-                      </span>
-                      <span>
-                        {pr.headRef} → {pr.baseRef}
-                      </span>
-                    </div>
-                  </div>
-                  {pr.url && (
-                    <a
-                      href={pr.url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className={buttonVariants({
-                        variant: "outline",
-                        size: "sm",
-                      })}
-                    >
-                      <ArrowSquareOutIcon className="size-3" />
-                      View PR
-                    </a>
-                  )}
-                </div>
-              </div>
+              <PrHeader
+                className="border-b border-[var(--ui-border)] px-4 py-3"
+                url={pr.url}
+                title={pr.title}
+                number={pr.number}
+                state={pr.state}
+                headRef={pr.headRef}
+                baseRef={pr.baseRef}
+                titleClassName="truncate text-sm"
+              />
             )}
 
             <div className="flex items-center gap-1 border-b border-[var(--ui-border)] px-3 py-2">
@@ -545,19 +551,42 @@ export function AgentGitPanel({
                   {label}
                 </button>
               ))}
-              {files.length > 0 && (
-                <span className="ml-auto flex items-center gap-2 text-[11px] text-[var(--ui-text-dim)]">
-                  <span>
-                    {files.length} file{files.length === 1 ? "" : "s"}
+              <div className="ml-auto flex min-w-0 items-center gap-2">
+                {recoveryError && (
+                  <span
+                    title={recoveryError}
+                    className="max-w-40 truncate text-[11px] text-[var(--ui-danger)]"
+                  >
+                    {recoveryError}
                   </span>
-                  <span className="text-[var(--ui-success)]">
-                    +{totals.additions}
+                )}
+                {canDownloadRecovery && (
+                  <button
+                    type="button"
+                    onClick={downloadRecoveryPatch}
+                    disabled={recoveringPatch}
+                    className={cn(
+                      buttonVariants({ variant: "outline", size: "sm" }),
+                      "h-7 px-2 text-[11px]"
+                    )}
+                  >
+                    {recoveringPatch ? "Preparing…" : "Download patch"}
+                  </button>
+                )}
+                {files.length > 0 && (
+                  <span className="flex items-center gap-2 text-[11px] text-[var(--ui-text-dim)]">
+                    <span>
+                      {files.length} file{files.length === 1 ? "" : "s"}
+                    </span>
+                    <span className="text-[var(--ui-success)]">
+                      +{totals.additions}
+                    </span>
+                    <span className="text-[var(--ui-danger)]">
+                      -{totals.deletions}
+                    </span>
                   </span>
-                  <span className="text-[var(--ui-danger)]">
-                    -{totals.deletions}
-                  </span>
-                </span>
-              )}
+                )}
+              </div>
             </div>
 
             <div className="flex min-h-0 flex-1">

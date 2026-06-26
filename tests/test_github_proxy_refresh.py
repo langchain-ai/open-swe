@@ -105,8 +105,9 @@ class TestMaybeRefreshProxyToken:
 
         assert result is True
         mock_configure.assert_called_once_with("sb-1", "ghs_new")
-        expires_at, _recorded, _scope = github_proxy._PROXY_TOKEN_EXPIRY["thread-1"]
+        expires_at, _recorded, _scope, permissions = github_proxy._PROXY_TOKEN_EXPIRY["thread-1"]
         assert expires_at == datetime(2025, 1, 1, 13, 0, 0, tzinfo=UTC)
+        assert permissions == ()
 
     @pytest.mark.asyncio
     async def test_preserves_repo_scope_on_refresh(self) -> None:
@@ -128,8 +129,9 @@ class TestMaybeRefreshProxyToken:
 
         assert result is True
         token_mock.assert_awaited_once_with(repositories=["open-swe"])
-        _expires, _recorded, scope = github_proxy._PROXY_TOKEN_EXPIRY["thread-1"]
+        _expires, _recorded, scope, permissions = github_proxy._PROXY_TOKEN_EXPIRY["thread-1"]
         assert scope == ("open-swe",)
+        assert permissions == ()
 
     @pytest.mark.asyncio
     async def test_no_refresh_when_token_unavailable(self) -> None:

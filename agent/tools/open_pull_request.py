@@ -10,6 +10,8 @@ from langgraph.config import get_config
 from langgraph_sdk import get_client
 
 from ..dashboard.agent_usage import record_agent_pr_usage
+from ..dashboard.plan_store import get_plan_content
+from ..utils.dashboard_links import dashboard_plan_url
 from ..utils.github_app import get_github_app_installation_token
 from ..utils.github_comments import derive_pr_state
 from ..utils.slack import get_slack_permalink
@@ -167,9 +169,25 @@ async def _record_pr_telemetry(
         )
 
 
-async def _build_source_references() -> str:
-    """Build a `## References` section linking the run's source (Slack/Linear)."""
-    configurable = get_config().get("configurable", {})
+async def _plan_reference_line(configurable: dict[str, Any]) -> str | None:
+    thread_id = configurable.get("thread_id")
+    if not isinstance(thread_id, str):
+        return None
+    try:
+        plan = await get_plan_content(thread_id)
+    except Exception:
+        logger.debug("Failed to look up plan content for %s", thread_id, exc_info=True)
+        return None
+    if not plan or not str(plan.get("markdown", "")).strip():
+        return None
+    plan_url = dashboard_plan_url(thread_id)
+    if not plan_url:
+        return None
+    return f"- Plan: {plan_url}"
+
+
+async def _build_source_reference_lines(configurable: dict[str, Any]) -> list[str]:
+    """Build source reference lines for the run."""
     source = configurable.get("source")
     lines: list[str] = []
 
@@ -190,9 +208,7 @@ async def _build_source_references() -> str:
         elif identifier:
             lines.append(f"- Linear ticket: {identifier}")
 
-    if not lines:
-        return ""
-    return _REFERENCES_HEADING + "\n" + "\n".join(lines)
+    return lines
 
 
 async def _is_private_repo(client: httpx.AsyncClient, token: str, owner: str, repo: str) -> bool:
@@ -204,25 +220,31 @@ async def _is_private_repo(client: httpx.AsyncClient, token: str, owner: str, re
     return bool(data.get("private")) if isinstance(data, dict) else False
 
 
-async def _maybe_append_source_references(
+async def _maybe_append_references(
     client: httpx.AsyncClient, token: str, owner: str, repo: str, body: str
 ) -> str:
-    """Append source references to the PR body for private repos only.
-
-    Gated to private repos so private Slack thread URLs / Linear identifiers are
-    never published to a public PR.
-    """
+    """Append run references to the PR body."""
     try:
         if _REFERENCES_HEADING in body:
             return body
-        references = await _build_source_references()
-        if not references:
+        configurable = get_config().get("configurable", {})
+        if not isinstance(configurable, dict):
+            configurable = {}
+        lines: list[str] = []
+        plan_line = await _plan_reference_line(configurable)
+        if plan_line:
+            lines.append(plan_line)
+        try:
+            source_lines = await _build_source_reference_lines(configurable)
+            if source_lines and await _is_private_repo(client, token, owner, repo):
+                lines.extend(source_lines)
+        except Exception:
+            logger.debug("Failed to append source references to PR body", exc_info=True)
+        if not lines:
             return body
-        if not await _is_private_repo(client, token, owner, repo):
-            return body
-        return f"{body.rstrip()}\n\n{references}"
+        return f"{body.rstrip()}\n\n{_REFERENCES_HEADING}\n" + "\n".join(lines)
     except Exception:
-        logger.debug("Failed to append source references to PR body", exc_info=True)
+        logger.debug("Failed to append references to PR body", exc_info=True)
         return body
 
 
@@ -244,7 +266,7 @@ async def _open_pull_request(
         }
 
     async with httpx.AsyncClient(timeout=30.0) as client:
-        body = await _maybe_append_source_references(client, token, owner, repo, body)
+        body = await _maybe_append_references(client, token, owner, repo, body)
         payload = {"title": title, "head": head, "base": base, "body": body, "draft": draft}
         resp = await client.post(
             f"{GITHUB_API}/repos/{owner}/{repo}/pulls",

@@ -132,6 +132,43 @@ def _build_plan_approval_blocks(message: str) -> list[dict[str, Any]]:
     ]
 
 
+def build_workflow_approval_blocks(message: str, fingerprint: str) -> list[dict[str, Any]]:
+    return [
+        {"type": "section", "text": {"type": "mrkdwn", "text": message}},
+        {
+            "type": "actions",
+            "elements": [
+                {
+                    "type": "button",
+                    "text": {"type": "plain_text", "text": "Approve workflow push", "emoji": True},
+                    "style": "primary",
+                    "value": json.dumps(
+                        {
+                            "type": "workflow_push_approval",
+                            "action": "approve",
+                            "fingerprint": fingerprint,
+                        }
+                    ),
+                    "action_id": "open_swe_option_select",
+                },
+                {
+                    "type": "button",
+                    "text": {"type": "plain_text", "text": "Reject", "emoji": True},
+                    "style": "danger",
+                    "value": json.dumps(
+                        {
+                            "type": "workflow_push_approval",
+                            "action": "reject",
+                            "fingerprint": fingerprint,
+                        }
+                    ),
+                    "action_id": "open_swe_option_select",
+                },
+            ],
+        },
+    ]
+
+
 def _slack_reply_failure_hint(slack_error: str | None) -> str:
     if slack_error == "msg_too_long":
         return "Slack rejected the message as too long; retry with a shorter message."

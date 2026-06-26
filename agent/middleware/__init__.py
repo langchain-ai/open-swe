@@ -12,6 +12,7 @@ from .sanitize_tool_inputs import SanitizeToolInputsMiddleware
 from .settle_review_check import settle_review_check_on_exit
 from .tool_artifact import ToolArtifactMiddleware
 from .tool_error_handler import ToolErrorMiddleware
+from .workflow_push_guard import WorkflowPushGuardMiddleware
 
 __all__ = [
     "ExcludeToolsMiddleware",
@@ -22,6 +23,7 @@ __all__ = [
     "SanitizeToolInputsMiddleware",
     "ToolArtifactMiddleware",
     "ToolErrorMiddleware",
+    "WorkflowPushGuardMiddleware",
     "SandboxCircuitBreakerMiddleware",
     "SlackAssistantStatusMiddleware",
     "check_message_queue_before_model",
