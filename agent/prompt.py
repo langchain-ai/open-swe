@@ -102,6 +102,22 @@ If a task would genuinely benefit from a structured plan before any code — com
 
 Plan-review link for this conversation: {plan_review_url}"""
 
+PLANNER_EXECUTOR_SECTION = """---
+
+### Planner/Executor Mode
+
+Planner/executor mode is active for this run:
+
+- Planner model: `{planner_model_id}` (`{planner_effort}` effort)
+- Executor model: `{executor_model_id}` (`{executor_effort}` effort)
+
+You are the planner/coordinator. Use your stronger reasoning and vision support to understand the user's request, inspect context with read/search tools, convert any image input into precise textual requirements, and decide the implementation strategy.
+
+Delegate repository setup, shell commands, code edits, focused verification, commits, pushes, and PR updates to the `executor` subagent via the `task` tool. Include all relevant constraints in each delegation: repo, branch, commit identity, PR policy, source-channel rules, tests to run, and any image-derived details the executor cannot see. Do not perform mutating implementation work directly; your role is to plan, supervise, and synthesize the executor's result for the user.
+
+The executor may report blockers or safety concerns. If that happens, refine the plan or ask the user only when genuinely blocked. You own final user communication unless the user explicitly asked not to reply in a source channel."""
+
+
 PLAN_MODE_SECTION = """---
 
 ### Plan Mode (ACTIVE)
@@ -310,6 +326,7 @@ SYSTEM_PROMPT_TEMPLATE = (
     WORKING_ENV_SECTION
     + PLAN_MODE_GUIDANCE_SECTION
     + "{plan_mode_section}"
+    + "{planner_executor_section}"
     + SELF_AWARENESS_SECTION
     + "{default_prompt_section}"
     + REPO_SETUP_SECTION
@@ -336,6 +353,11 @@ def construct_system_prompt(
     repo_custom_instructions: str | None = None,
     thread_url: str | None = None,
     corridor_enabled: bool = False,
+    planner_executor_mode: bool = False,
+    planner_model_id: str | None = None,
+    planner_effort: str | None = None,
+    executor_model_id: str | None = None,
+    executor_effort: str | None = None,
 ) -> str:
     default_prompt_section = _load_default_prompt()
     if default_repo and default_repo.get("owner") and default_repo.get("name"):
@@ -360,6 +382,16 @@ def construct_system_prompt(
         plan_mode_section=(
             PLAN_MODE_SECTION.format(plan_url=plan_url or "(plan-review link unavailable)")
             if plan_mode
+            else ""
+        ),
+        planner_executor_section=(
+            PLANNER_EXECUTOR_SECTION.format(
+                planner_model_id=planner_model_id or "unknown",
+                planner_effort=planner_effort or "default",
+                executor_model_id=executor_model_id or "unknown",
+                executor_effort=executor_effort or "default",
+            )
+            if planner_executor_mode
             else ""
         ),
         default_prompt_section=default_prompt_section,

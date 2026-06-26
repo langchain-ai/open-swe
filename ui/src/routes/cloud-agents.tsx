@@ -142,13 +142,13 @@ function CloudAgentsPage() {
     <AppShell
       user={session.data}
       title="Open SWE Agent"
-      description="Configure how the Open SWE Agent picks a model, repository, and PR defaults."
+      description="Configure how the Open SWE Agent picks planner/executor models, repository, and PR defaults."
     >
       <SettingsSection title="Defaults">
         <div className="divide-y divide-border">
           <SettingsRow
-            label="Default Model"
-            description="Used when no model is specified"
+            label="Default Planner Model"
+            description="Top-level model used for reasoning, image understanding, and coordination"
             control={
               <Select value={modelId} onValueChange={(v) => v && setModelId(v)}>
                 <SelectTrigger className="w-40">
@@ -165,8 +165,8 @@ function CloudAgentsPage() {
             }
           />
           <SettingsRow
-            label="Reasoning Effort"
-            description="How hard the model thinks before answering"
+            label="Planner Reasoning Effort"
+            description="How hard the planner thinks before delegating and answering"
             control={
               <Select value={effort} onValueChange={(v) => v && setEffort(v)}>
                 <SelectTrigger className="w-32">
@@ -183,8 +183,8 @@ function CloudAgentsPage() {
             }
           />
           <SettingsRow
-            label="Default Subagent Model"
-            description="Used for delegated tasks launched by your agent"
+            label="Default Executor Model"
+            description="Used for delegated repository setup, code changes, tests, and PR work"
             control={
               <Select
                 value={subagentModelId}
@@ -204,8 +204,8 @@ function CloudAgentsPage() {
             }
           />
           <SettingsRow
-            label="Subagent Reasoning Effort"
-            description="How hard delegated subagents think before answering"
+            label="Executor Reasoning Effort"
+            description="How hard the executor thinks while carrying out delegated work"
             control={
               <Select
                 value={subagentEffort}

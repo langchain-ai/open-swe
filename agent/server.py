@@ -26,7 +26,7 @@ warnings.filterwarnings("ignore", message=".*Pydantic V1.*", category=UserWarnin
 from deepagents import create_deep_agent
 from deepagents.backends import LangSmithSandbox
 from deepagents.backends.protocol import SandboxBackendProtocol
-from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT, SubAgent
+from deepagents.middleware.subagents import SubAgent
 from langchain.agents.middleware import ModelCallLimitMiddleware
 from langchain_core.language_models import BaseChatModel
 from langsmith.sandbox import SandboxClientError
@@ -54,6 +54,7 @@ from .integrations.langsmith import _configure_github_proxy
 from .integrations.langsmith_tools import load_langsmith_tools
 from .integrations.notion_mcp import load_notion_tools
 from .middleware import (
+    ExcludeToolsMiddleware,
     ModelFallbackMiddleware,
     PlanModeMiddleware,
     SandboxCircuitBreakerMiddleware,
@@ -534,8 +535,8 @@ MODEL_CALL_RECURSION_LIMIT = 5_000
 # discipline (no mutating commands) is instructed via the system prompt rather
 # than enforced. `http_request` is excluded because it can POST/PUT/PATCH/DELETE
 # to external services — read-only web research goes through `web_search` /
-# `fetch_url`. `task` is excluded because the general-purpose subagent is built
-# with its own filesystem/PR/Linear tools and does not inherit this exclusion, so
+# `fetch_url`. `task` is excluded because the executor subagent is built with its
+# own filesystem/PR/Linear tools and does not inherit this exclusion, so
 # delegating to it would bypass the read-only intent.
 PLAN_MODE_EXCLUDED_TOOLS: frozenset[str] = frozenset(
     {
@@ -551,12 +552,32 @@ PLAN_MODE_EXCLUDED_TOOLS: frozenset[str] = frozenset(
     }
 )
 
+PLANNER_EXECUTOR_EXCLUDED_TOOLS: frozenset[str] = frozenset(
+    {
+        "write_file",
+        "edit_file",
+        "execute",
+        "http_request",
+        "open_pull_request",
+        "linear_create_issue",
+        "linear_update_issue",
+        "linear_delete_issue",
+    }
+)
 
-def _general_purpose_subagent(model: BaseChatModel) -> SubAgent:
+EXECUTOR_SUBAGENT_PROMPT = """You are Open SWE's executor subagent. Your job is to carry out concrete implementation work delegated by the planner.
+
+Follow the planner's task description exactly, including any repository setup, branch, commit identity, test, PR, and source-channel constraints it passes along. Use tools to inspect files, edit code, run focused verification, commit, push, and open/update pull requests when the delegated task asks for it. Do not redo high-level planning unless the plan is blocked or unsafe; if blocked, explain the blocker and the smallest viable next step. Return a complete concise report with files changed, verification run, commit/PR status, and anything the planner must tell the user."""
+
+
+def _executor_subagent(model: BaseChatModel) -> SubAgent:
     return {
-        "name": GENERAL_PURPOSE_SUBAGENT["name"],
-        "description": GENERAL_PURPOSE_SUBAGENT["description"],
-        "system_prompt": GENERAL_PURPOSE_SUBAGENT["system_prompt"],
+        "name": "executor",
+        "description": (
+            "Executes delegated repository work: setup, code changes, focused tests, "
+            "git commits, pushes, and PR updates from a concrete planner instruction."
+        ),
+        "system_prompt": EXECUTOR_SUBAGENT_PROMPT,
         "model": model,
     }
 
@@ -664,7 +685,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     (model_id, profile_effort), (subagent_model_id, subagent_effort) = team_defaults
     logger.info("Using team default agent model: model=%s effort=%s", model_id, profile_effort)
     logger.info(
-        "Using team default agent subagent model: model=%s effort=%s",
+        "Using team default agent executor model: model=%s effort=%s",
         subagent_model_id,
         subagent_effort,
     )
@@ -687,7 +708,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         )
         if overridden_subagent_model:
             logger.info(
-                "Applying dashboard profile subagent override for %s: model=%s effort=%s",
+                "Applying dashboard profile executor override for %s: model=%s effort=%s",
                 profile_login,
                 overridden_subagent_model,
                 overridden_subagent_effort,
@@ -713,9 +734,39 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         subagent_model_id = per_thread_model
         subagent_effort = per_thread_effort
 
+    per_thread_executor_model = configurable.get("agent_executor_model_id") or configurable.get(
+        "agent_subagent_model_id"
+    )
+    per_thread_executor_effort = configurable.get("agent_executor_effort") or configurable.get(
+        "agent_subagent_effort"
+    )
+    if (
+        isinstance(per_thread_executor_model, str)
+        and per_thread_executor_model in SUPPORTED_MODEL_IDS
+        and isinstance(per_thread_executor_effort, str)
+        and model_supports_effort(per_thread_executor_model, per_thread_executor_effort)
+    ):
+        logger.info(
+            "Applying per-thread executor override: model=%s effort=%s",
+            per_thread_executor_model,
+            per_thread_executor_effort,
+        )
+        subagent_model_id = per_thread_executor_model
+        subagent_effort = per_thread_executor_effort
+
     always_create_prs = profile_create_prs(profile)
     if always_create_prs:
         logger.info("Always Create PRs enabled by profile for %s", profile_login)
+
+    planner_executor_mode = (model_id, profile_effort) != (subagent_model_id, subagent_effort)
+    if planner_executor_mode:
+        logger.info(
+            "Planner/executor mode enabled: planner=%s/%s executor=%s/%s",
+            model_id,
+            profile_effort,
+            subagent_model_id,
+            subagent_effort,
+        )
 
     model_kwargs = provider_model_kwargs(
         model_id,
@@ -751,6 +802,11 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     plan_mode_middleware: list[Any] = [
         PlanModeMiddleware(excluded=PLAN_MODE_EXCLUDED_TOOLS, initial=plan_mode)
     ]
+    planner_executor_middleware: list[Any] = []
+    if planner_executor_mode and not plan_mode:
+        planner_executor_middleware.append(
+            ExcludeToolsMiddleware(excluded=PLANNER_EXECUTOR_EXCLUDED_TOOLS)
+        )
 
     source = (
         configurable.get("source") if isinstance(configurable.get("source"), str) else "dashboard"
@@ -764,6 +820,11 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 "agent_kind": "agent",
                 "model": model_id,
                 "effort": profile_effort,
+                "planner_model": model_id,
+                "planner_effort": profile_effort,
+                "executor_model": subagent_model_id,
+                "executor_effort": subagent_effort,
+                "planner_executor_mode": planner_executor_mode,
                 "source": source,
                 "plan_mode": plan_mode,
             },
@@ -817,6 +878,11 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             repo_custom_instructions=repo_custom_instructions,
             thread_url=dashboard_thread_url(thread_id),
             corridor_enabled=bool(corridor_tools),
+            planner_executor_mode=planner_executor_mode and not plan_mode,
+            planner_model_id=model_id,
+            planner_effort=profile_effort,
+            executor_model_id=subagent_model_id,
+            executor_effort=subagent_effort,
         ),
         tools=[
             http_request,
@@ -841,7 +907,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             *currents_tools,
             *notion_tools,
         ],
-        subagents=[_general_purpose_subagent(subagent_model)],
+        subagents=[_executor_subagent(subagent_model)],
         backend=backend_factory,
         middleware=[
             SanitizeToolInputsMiddleware(),
@@ -857,6 +923,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             SandboxCircuitBreakerMiddleware(),
             *fallback_middleware,
             *plan_mode_middleware,
+            *planner_executor_middleware,
             SanitizeThinkingBlocksMiddleware(),
         ],
     ).with_config(config)

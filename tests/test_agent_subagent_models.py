@@ -3,7 +3,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from langgraph.graph.state import RunnableConfig
 
-from agent.server import get_agent
+from agent.middleware.exclude_tools import ExcludeToolsMiddleware
+from agent.server import EXECUTOR_SUBAGENT_PROMPT, get_agent
 
 
 class _DummyAgent:
@@ -13,7 +14,7 @@ class _DummyAgent:
 
 
 @pytest.mark.asyncio
-async def test_agent_uses_profile_subagent_model_override() -> None:
+async def test_agent_uses_profile_executor_model_override() -> None:
     config: RunnableConfig = {
         "configurable": {
             "__is_for_execution__": True,
@@ -64,7 +65,7 @@ async def test_agent_uses_profile_subagent_model_override() -> None:
         ),
         patch("agent.server.fallback_model_id_for", return_value=None),
         patch("agent.server.make_model", side_effect=[main_model, subagent_model]) as make_model,
-        patch("agent.server.construct_system_prompt", return_value="prompt"),
+        patch("agent.server.construct_system_prompt", return_value="prompt") as construct_prompt,
         patch("agent.server.create_deep_agent", side_effect=fake_create_deep_agent),
     ):
         await get_agent(config)
@@ -72,8 +73,15 @@ async def test_agent_uses_profile_subagent_model_override() -> None:
     assert captured["model"] is main_model
     subagents = captured["subagents"]
     assert isinstance(subagents, list)
-    assert subagents[0]["name"] == "general-purpose"
+    assert subagents[0]["name"] == "executor"
+    assert subagents[0]["system_prompt"] == EXECUTOR_SUBAGENT_PROMPT
     assert subagents[0]["model"] is subagent_model
+    middleware = captured["middleware"]
+    assert any(isinstance(m, ExcludeToolsMiddleware) for m in middleware)
+    construct_prompt.assert_called_once()
+    assert construct_prompt.call_args.kwargs["planner_executor_mode"] is True
+    assert construct_prompt.call_args.kwargs["planner_model_id"] == "anthropic:claude-opus-4-8"
+    assert construct_prompt.call_args.kwargs["executor_model_id"] == "openai:gpt-5.5"
 
     main_call = make_model.call_args_list[0]
     assert main_call.args == ("anthropic:claude-opus-4-8",)
@@ -86,7 +94,7 @@ async def test_agent_uses_profile_subagent_model_override() -> None:
 
 
 @pytest.mark.asyncio
-async def test_agent_subagent_inherits_profile_model_override_without_explicit_pair() -> None:
+async def test_agent_executor_inherits_profile_model_override_without_explicit_pair() -> None:
     config: RunnableConfig = {
         "configurable": {
             "__is_for_execution__": True,
@@ -135,14 +143,19 @@ async def test_agent_subagent_inherits_profile_model_override_without_explicit_p
         ),
         patch("agent.server.fallback_model_id_for", return_value=None),
         patch("agent.server.make_model", side_effect=[main_model, subagent_model]) as make_model,
-        patch("agent.server.construct_system_prompt", return_value="prompt"),
+        patch("agent.server.construct_system_prompt", return_value="prompt") as construct_prompt,
         patch("agent.server.create_deep_agent", side_effect=fake_create_deep_agent),
     ):
         await get_agent(config)
 
     subagents = captured["subagents"]
     assert isinstance(subagents, list)
+    assert subagents[0]["name"] == "executor"
     assert subagents[0]["model"] is subagent_model
+    middleware = captured["middleware"]
+    assert not any(isinstance(m, ExcludeToolsMiddleware) for m in middleware)
+    construct_prompt.assert_called_once()
+    assert construct_prompt.call_args.kwargs["planner_executor_mode"] is False
     assert make_model.call_args_list[0].args == ("anthropic:claude-opus-4-8",)
     assert make_model.call_args_list[1].args == ("anthropic:claude-opus-4-8",)
     assert make_model.call_args_list[1].kwargs["thinking"] == {
