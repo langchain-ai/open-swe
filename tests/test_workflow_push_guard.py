@@ -22,17 +22,17 @@ class _Backend:
     def __init__(self, *, workflow_files: str = ".github/workflows/ci.yml") -> None:
         self.workflow_files = workflow_files
         self.commands: list[str] = []
-        self.head = "head-sha"
+        self.head = "a" * 40
 
     def execute(self, command: str, *, timeout: int | None = None) -> _Response:
         self.commands.append(command)
         if "rev-parse --show-toplevel" in command:
             return _Response("/repo\n")
-        if "rev-parse --abbrev-ref --symbolic-full-name @{u}" in command:
+        if "rev-parse --verify refs/remotes/origin/feature" in command:
             return _Response("", 1)
         if "symbolic-ref --short refs/remotes/origin/HEAD" in command:
             return _Response("origin/main\n")
-        if "merge-base HEAD origin/main" in command:
+        if f"merge-base {self.head} origin/main" in command:
             return _Response("base-sha\n")
         if "diff --name-only" in command:
             return _Response(f"{self.workflow_files}\n" if self.workflow_files else "")
@@ -42,7 +42,7 @@ class _Backend:
             return _Response("git@github.com:langchain-ai/open-swe.git\n")
         if "rev-parse --abbrev-ref HEAD" in command:
             return _Response("feature\n")
-        if "rev-parse HEAD" in command:
+        if "rev-parse HEAD" in command or "rev-parse feature" in command:
             return _Response(f"{self.head}\n")
         return _Response("")
 
@@ -66,6 +66,11 @@ class _Request:
             "id": "call-1",
         }
 
+    def override(self, **kwargs: Any) -> _Request:
+        next_request = _Request()
+        next_request.tool_call = kwargs.get("tool_call", self.tool_call)
+        return next_request
+
 
 @pytest.fixture(autouse=True)
 def _clear_backend_cache() -> Any:
@@ -76,29 +81,67 @@ def _clear_backend_cache() -> Any:
 
 def test_parse_git_push_supports_git_c_and_cd() -> None:
     assert guard._parse_git_push("git -C /repo push origin feature") == guard.ParsedGitPush(
-        repo_dir="/repo"
+        repo_dir="/repo", remote="origin", local_ref="feature", remote_ref="feature"
     )
-    assert guard._parse_git_push("cd /repo && git push origin feature") == guard.ParsedGitPush(
-        repo_dir="/repo"
+    assert guard._parse_git_push(
+        "cd /repo && git push -u origin HEAD:feature"
+    ) == guard.ParsedGitPush(
+        repo_dir="/repo",
+        remote="origin",
+        local_ref="HEAD",
+        remote_ref="feature",
+        set_upstream=True,
     )
     assert guard._parse_git_push("git status && git push") is None
+    assert guard._parse_git_push("git push origin feature; git push origin evil:feature") is None
 
 
 def test_workflow_change_for_push_fingerprints_workflow_diff() -> None:
     backend = _Backend()
-    change = guard._workflow_change_for_push(backend, guard.ParsedGitPush(repo_dir="/repo"))
+    change = guard._workflow_change_for_push(
+        backend,
+        guard.ParsedGitPush(
+            repo_dir="/repo", remote="origin", local_ref="feature", remote_ref="feature"
+        ),
+    )
 
     assert change is not None
     assert change.repo == "https://github.com/langchain-ai/open-swe"
     assert change.branch == "feature"
     assert change.files == [".github/workflows/ci.yml"]
+    assert (
+        change.fixed_command
+        == "git -C /repo push origin aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:refs/heads/feature"
+    )
     assert len(change.fingerprint) == 64
 
 
 def test_workflow_change_for_push_ignores_non_workflow_push() -> None:
     backend = _Backend(workflow_files="")
 
-    assert guard._workflow_change_for_push(backend, guard.ParsedGitPush(repo_dir="/repo")) is None
+    assert (
+        guard._workflow_change_for_push(
+            backend,
+            guard.ParsedGitPush(
+                repo_dir="/repo", remote="origin", local_ref="feature", remote_ref="feature"
+            ),
+        )
+        is None
+    )
+
+
+def test_workflow_change_for_push_rejects_non_current_refspec() -> None:
+    backend = _Backend()
+
+    assert (
+        guard._workflow_change_for_push(
+            backend,
+            guard.ParsedGitPush(
+                repo_dir="/repo", remote="origin", local_ref="evil", remote_ref="feature"
+            ),
+        )
+        is None
+    )
 
 
 async def test_unapproved_workflow_push_blocks_and_posts_slack(
@@ -164,13 +207,21 @@ async def test_approved_workflow_push_elevates_and_restores(
     monkeypatch.setattr(guard, "workflow_push_approved", fake_approved)
     monkeypatch.setattr(guard, "refresh_proxy_token", fake_refresh)
 
-    async def handler(_request: Any) -> ToolMessage:
+    pushed_command = ""
+
+    async def handler(request: Any) -> ToolMessage:
+        nonlocal pushed_command
+        pushed_command = request.tool_call["args"]["command"]
         return ToolMessage(content="pushed", tool_call_id="call-1")
 
     result = await guard.WorkflowPushGuardMiddleware().awrap_tool_call(_Request(), handler)
 
     assert isinstance(result, ToolMessage)
     assert result.content == "pushed"
+    assert (
+        pushed_command
+        == "git -C /repo push origin aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:refs/heads/feature"
+    )
     assert refreshed[0]["workflows"] == "write"
     assert "workflows" not in refreshed[1]
 

@@ -37,12 +37,18 @@ logger = logging.getLogger(__name__)
 
 _WORKFLOW_PREFIX = ".github/workflows/"
 _SHELL_OPERATORS = {";", "|", "||", "&"}
-_ENV_ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=.*")
+_REF_NAME = re.compile(r"^[A-Za-z0-9._/@+-]+$")
+_GIT_OBJECT_ID = re.compile(r"^[0-9a-fA-F]{40,64}$")
+_UNSAFE_RAW_COMMAND = re.compile(r"[;|`$<>\n\r]")
 
 
 @dataclass(frozen=True)
 class ParsedGitPush:
     repo_dir: str | None
+    remote: str
+    local_ref: str
+    remote_ref: str
+    set_upstream: bool = False
 
 
 @dataclass(frozen=True)
@@ -53,6 +59,10 @@ class WorkflowPushChange:
     base_sha: str
     head_sha: str
     files: list[str]
+    remote: str
+    local_ref: str
+    remote_ref: str
+    fixed_command: str
 
 
 @dataclass(frozen=True)
@@ -132,14 +142,13 @@ def _response_ok(response: Any) -> bool:
 
 
 def _parse_git_push(command: str) -> ParsedGitPush | None:
+    stripped = command.strip()
+    if _UNSAFE_RAW_COMMAND.search(stripped) or "&" in stripped.replace("&&", ""):
+        return None
     try:
-        tokens = shlex.split(command.strip())
+        tokens = shlex.split(stripped)
     except ValueError:
         return None
-    if not tokens:
-        return None
-    while tokens and _ENV_ASSIGNMENT.match(tokens[0]):
-        tokens = tokens[1:]
     if not tokens:
         return None
 
@@ -157,16 +166,58 @@ def _parse_git_tokens(tokens: list[str], *, repo_dir: str | None) -> ParsedGitPu
     if not tokens or tokens[0] != "git":
         return None
     i = 1
-    while i < len(tokens):
-        token = tokens[i]
-        if token == "push":
-            return ParsedGitPush(repo_dir=repo_dir)
-        if token == "-C" and i + 1 < len(tokens):
+    while i < len(tokens) and tokens[i] != "push":
+        if tokens[i] == "-C" and i + 1 < len(tokens):
             repo_dir = tokens[i + 1]
             i += 2
             continue
-        i += 1
-    return None
+        return None
+    if i >= len(tokens) or tokens[i] != "push":
+        return None
+    return _parse_push_args(tokens[i + 1 :], repo_dir=repo_dir)
+
+
+def _parse_push_args(tokens: list[str], *, repo_dir: str | None) -> ParsedGitPush | None:
+    set_upstream = False
+    while tokens and tokens[0] in {"-u", "--set-upstream"}:
+        set_upstream = True
+        tokens = tokens[1:]
+    if len(tokens) != 2 or tokens[0] != "origin":
+        return None
+    parsed = _parse_refspec(tokens[1])
+    if parsed is None:
+        return None
+    local_ref, remote_ref = parsed
+    return ParsedGitPush(
+        repo_dir=repo_dir,
+        remote="origin",
+        local_ref=local_ref,
+        remote_ref=remote_ref,
+        set_upstream=set_upstream,
+    )
+
+
+def _parse_refspec(refspec: str) -> tuple[str, str] | None:
+    if refspec.startswith("-") or ".." in refspec:
+        return None
+    if ":" in refspec:
+        parts = refspec.split(":")
+        if len(parts) != 2 or not parts[0] or not parts[1]:
+            return None
+        local_ref, remote_ref = parts
+    else:
+        local_ref = remote_ref = refspec
+    if not _safe_ref(local_ref, allow_head=True) or not _safe_ref(remote_ref, allow_head=False):
+        return None
+    return local_ref, remote_ref
+
+
+def _safe_ref(ref: str, *, allow_head: bool) -> bool:
+    if allow_head and ref == "HEAD":
+        return True
+    if ref == "HEAD" or not _REF_NAME.fullmatch(ref):
+        return False
+    return not any(part in {"", ".", ".."} for part in ref.split("/"))
 
 
 def _git_command(repo_dir: str | None, args: str) -> str:
@@ -237,17 +288,34 @@ def _workflow_change_for_push(backend: Any, parsed: ParsedGitPush) -> WorkflowPu
     if not root:
         return None
 
-    upstream = _run_git(backend, root, "rev-parse --abbrev-ref --symbolic-full-name @{u}")
-    if upstream.ok and _first_line(upstream.output):
-        base_ref = _first_line(upstream.output)
-        range_expr = f"{shlex.quote(base_ref)}..HEAD"
+    branch = _run_git(backend, root, "rev-parse --abbrev-ref HEAD")
+    branch_name = _first_line(branch.output) if branch.ok else ""
+    if not branch_name or branch_name == "HEAD" or parsed.remote_ref != branch_name:
+        return None
+    if parsed.local_ref not in {"HEAD", branch_name}:
+        return None
+
+    target_sha = _run_git(backend, root, f"rev-parse {shlex.quote(parsed.local_ref)}")
+    head = _first_line(target_sha.output) if target_sha.ok else ""
+    if not head or not _GIT_OBJECT_ID.fullmatch(head):
+        return None
+
+    remote_branch = f"refs/remotes/{parsed.remote}/{parsed.remote_ref}"
+    remote_branch_exists = _run_git(
+        backend, root, f"rev-parse --verify {shlex.quote(remote_branch)}"
+    )
+    if remote_branch_exists.ok and _first_line(remote_branch_exists.output):
+        base_ref = remote_branch
+        range_expr = f"{shlex.quote(base_ref)}..{shlex.quote(head)}"
         base_sha = _first_line(_run_git(backend, root, f"rev-parse {shlex.quote(base_ref)}").output)
     else:
         origin_head = _run_git(backend, root, "symbolic-ref --short refs/remotes/origin/HEAD")
         base_ref = _first_line(origin_head.output) if origin_head.ok else "origin/main"
-        range_expr = f"{shlex.quote(base_ref)}...HEAD"
+        range_expr = f"{shlex.quote(base_ref)}...{shlex.quote(head)}"
         base_sha = _first_line(
-            _run_git(backend, root, f"merge-base HEAD {shlex.quote(base_ref)}").output
+            _run_git(
+                backend, root, f"merge-base {shlex.quote(head)} {shlex.quote(base_ref)}"
+            ).output
         )
 
     names = _run_git(
@@ -270,11 +338,13 @@ def _workflow_change_for_push(backend: Any, parsed: ParsedGitPush) -> WorkflowPu
         return None
 
     remote = _run_git(backend, root, "config --get remote.origin.url")
-    branch = _run_git(backend, root, "rev-parse --abbrev-ref HEAD")
-    head_sha = _run_git(backend, root, "rev-parse HEAD")
     repo = _normalize_remote(_first_line(remote.output)) if remote.ok else ""
-    branch_name = _first_line(branch.output) if branch.ok else ""
-    head = _first_line(head_sha.output) if head_sha.ok else ""
+    fixed_refspec = f"{head}:refs/heads/{parsed.remote_ref}"
+    fixed_args = ["push"]
+    if parsed.set_upstream:
+        fixed_args.append("--set-upstream")
+    fixed_args.extend([parsed.remote, fixed_refspec])
+    fixed_command = _git_command(root, " ".join(shlex.quote(arg) for arg in fixed_args))
     payload = {
         "repo": repo,
         "branch": branch_name,
@@ -282,6 +352,10 @@ def _workflow_change_for_push(backend: Any, parsed: ParsedGitPush) -> WorkflowPu
         "head_sha": head,
         "files": files,
         "diff": diff.output,
+        "remote": parsed.remote,
+        "local_ref": parsed.local_ref,
+        "remote_ref": parsed.remote_ref,
+        "fixed_refspec": fixed_refspec,
     }
     return WorkflowPushChange(
         fingerprint=_fingerprint(payload),
@@ -290,6 +364,10 @@ def _workflow_change_for_push(backend: Any, parsed: ParsedGitPush) -> WorkflowPu
         base_sha=base_sha,
         head_sha=head,
         files=files,
+        remote=parsed.remote,
+        local_ref=parsed.local_ref,
+        remote_ref=parsed.remote_ref,
+        fixed_command=fixed_command,
     )
 
 
@@ -315,6 +393,15 @@ def _blocked_message(change: WorkflowPushChange, *, already_rejected: bool = Fal
 def _tool_message_for_request(message: ToolMessage, request: ToolCallRequest) -> ToolMessage:
     message.tool_call_id = _tool_call_id(request)
     return message
+
+
+def _override_execute_command(request: ToolCallRequest, command: str) -> ToolCallRequest:
+    tool_call = getattr(request, "tool_call", None)
+    if not isinstance(tool_call, Mapping):
+        return request
+    args = dict(_tool_args(request))
+    args["command"] = command
+    return request.override(tool_call={**dict(tool_call), "args": args})
 
 
 def _approval_slack_message(change: WorkflowPushChange) -> str:
@@ -424,7 +511,8 @@ class WorkflowPushGuardMiddleware(AgentMiddleware):
         thread_id = _thread_id(request)
         state = await _approval_state(request, change)
         if state == "approved" and thread_id:
-            return await _run_with_workflow_token(thread_id, lambda: handler(request))
+            safe_request = _override_execute_command(request, change.fixed_command)
+            return await _run_with_workflow_token(thread_id, lambda: handler(safe_request))
         return _tool_message_for_request(
             _blocked_message(change, already_rejected=state == "rejected"), request
         )
