@@ -4,6 +4,7 @@ Helpers and constants stay in webapp.py; they are accessed through the module
 object (``webapp.X``) so tests that monkeypatch them keep working.
 """
 
+from datetime import UTC, datetime
 from typing import Any
 
 import httpx
@@ -14,6 +15,85 @@ from agent import webapp
 
 async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[str, str]) -> None:
     """Process a Slack app mention by creating a run or queuing a mid-run message."""
+    try:
+        await _process_slack_mention_impl(event_data, repo_config)
+    except Exception:  # noqa: BLE001
+        webapp.logger.exception("Unexpected error while processing Slack mention")
+        await _notify_slack_processing_error(event_data, repo_config)
+
+
+async def _notify_slack_processing_error(
+    event_data: dict[str, Any], repo_config: dict[str, str]
+) -> None:
+    channel_id = event_data.get("channel_id", "")
+    thread_ts = event_data.get("thread_ts", "")
+    event_ts = event_data.get("event_ts", "")
+    user_id = event_data.get("user_id", "")
+    text = event_data.get("text", "")
+    bot_user_id = event_data.get("bot_user_id", "")
+    if not channel_id or not thread_ts:
+        return
+
+    thread_id = webapp.generate_thread_id_from_slack_thread(channel_id, thread_ts)
+    try:
+        clean_text = (
+            webapp.strip_bot_mention(text, bot_user_id, bot_username=webapp.SLACK_BOT_USERNAME)
+            or "Slack request"
+        )
+        await webapp.upsert_agent_thread_owner_metadata(
+            thread_id,
+            source="slack",
+            repo_config=repo_config,
+            title=clean_text,
+            source_context={
+                "slack_thread": {
+                    "channel_id": channel_id,
+                    "thread_ts": thread_ts,
+                    "triggering_user_id": user_id,
+                    "triggering_event_ts": event_ts,
+                }
+            },
+        )
+    except Exception:  # noqa: BLE001
+        webapp.logger.warning(
+            "Could not persist Slack error metadata for thread %s", thread_id, exc_info=True
+        )
+
+    try:
+        await webapp.get_client(url=webapp.LANGGRAPH_URL).threads.update(
+            thread_id=thread_id,
+            metadata={
+                "latest_run_status": "error",
+                "failure_reply_posted": True,
+                "updated_at_ms": int(datetime.now(UTC).timestamp() * 1000),
+            },
+        )
+    except Exception:  # noqa: BLE001
+        webapp.logger.warning("Could not mark Slack thread %s as errored", thread_id, exc_info=True)
+
+    try:
+        await webapp.set_slack_assistant_status(channel_id, thread_ts, status="")
+    except Exception:  # noqa: BLE001
+        webapp.logger.debug("Could not clear Slack assistant status", exc_info=True)
+
+    dashboard_url = webapp.dashboard_thread_url(thread_id)
+    message = (
+        "⚠️ I hit an unexpected error while handling this Slack thread. "
+        "Send another message and I'll try again."
+    )
+    if dashboard_url:
+        message += f" You can view the error in <{dashboard_url}|Open SWE Web>."
+    try:
+        await webapp.post_slack_thread_reply(channel_id, thread_ts, message)
+    except Exception:  # noqa: BLE001
+        webapp.logger.warning(
+            "Could not post Slack error notification for thread %s", thread_id, exc_info=True
+        )
+
+
+async def _process_slack_mention_impl(
+    event_data: dict[str, Any], repo_config: dict[str, str]
+) -> None:
     channel_id = event_data.get("channel_id", "")
     thread_ts = event_data.get("thread_ts", "")
     event_ts = event_data.get("event_ts", "")
