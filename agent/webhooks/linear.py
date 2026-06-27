@@ -163,31 +163,33 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
         f"When you're done, commit and push your changes. {tag_instruction}"
     )
     content_blocks: list[dict[str, Any]] = [create_text_block(prompt)]
+    image_model_override: tuple[str, str] | None = None
     if image_urls:
         image_urls = webapp.dedupe_urls(image_urls)
         linear_login = (
             await webapp.resolve_login_from_email_async(user_email) if user_email else None
         )
         resolved_model_id = await webapp.resolve_agent_model_id(linear_login)
-        if webapp.model_supports_images(resolved_model_id):
-            webapp.logger.info("Preparing %d image(s) for multimodal content", len(image_urls))
-            webapp.logger.debug("Image URLs: %s", image_urls)
-
-            async with httpx.AsyncClient(timeout=webapp.DEFAULT_HTTP_TIMEOUT) as client:
-                for image_url in image_urls:
-                    image_block = await webapp.fetch_image_block(image_url, client)
-                    if image_block:
-                        content_blocks.append(image_block)
-            webapp.logger.info("Built %d content block(s) for prompt", len(content_blocks))
-        else:
-            webapp.logger.warning(
-                "Skipping %d image(s) for Linear issue: model %s does not support images",
+        if not webapp.model_supports_images(resolved_model_id):
+            fallback_model_id, fallback_effort = webapp.default_vision_model_pair()
+            webapp.logger.info(
+                "Using vision fallback model %s for %d Linear image(s); configured model %s "
+                "does not support images",
+                fallback_model_id,
                 len(image_urls),
                 resolved_model_id,
             )
-            prompt += webapp.vision_not_supported_warning(resolved_model_id, len(image_urls))
-            content_blocks[0] = create_text_block(prompt)
-            image_urls = []
+            resolved_model_id = fallback_model_id
+            image_model_override = (fallback_model_id, fallback_effort)
+        webapp.logger.info("Preparing %d image(s) for multimodal content", len(image_urls))
+        webapp.logger.debug("Image URLs: %s", image_urls)
+
+        async with httpx.AsyncClient(timeout=webapp.DEFAULT_HTTP_TIMEOUT) as client:
+            for image_url in image_urls:
+                image_block = await webapp.fetch_image_block(image_url, client)
+                if image_block:
+                    content_blocks.append(image_block)
+        webapp.logger.info("Built %d content block(s) for prompt", len(content_blocks))
 
     linear_project_id = ""
     linear_issue_number = ""
@@ -210,6 +212,9 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
         "user_email": user_email,
         "source": "linear",
     }
+    if image_model_override:
+        configurable["agent_model_id"] = image_model_override[0]
+        configurable["agent_effort"] = image_model_override[1]
 
     await webapp.upsert_agent_thread_owner_metadata(
         thread_id,

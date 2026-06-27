@@ -27,7 +27,7 @@ from .dashboard.agent_overrides import (
 )
 from .dashboard.enabled_repos import is_review_repo_enabled
 from .dashboard.oauth import build_settings_url
-from .dashboard.options import model_supports_images  # noqa: F401
+from .dashboard.options import default_vision_model_pair, model_supports_images  # noqa: F401
 from .dashboard.profiles import (  # noqa: F401
     get_profile,
     get_valid_access_token,
