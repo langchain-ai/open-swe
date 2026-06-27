@@ -1255,13 +1255,19 @@ async def test_reviewer_populates_diff_line_set_from_github_api() -> None:
         patch("agent.reviewer.make_model", return_value=MagicMock()),
         patch("agent.reviewer.create_deep_agent", side_effect=fake_create_deep_agent),
     ):
-        await reviewer.get_reviewer_agent(config)
+        agent = await reviewer.get_reviewer_agent(config)
 
     mock_fetch_diff.assert_awaited_once_with(
         owner="acme", repo="repo", pr_number=42, token="gh-token"
     )
-    assert config["configurable"]["diff_text"] == pr_diff
-    assert config["configurable"]["diff_line_set"] == {"in_diff.py": {"RIGHT": {10}, "LEFT": {1}}}
+    # The diff is stashed on the agent's bound config (which add_finding reads at
+    # runtime); the caller's input config is left unmutated. See #1584.
+    assert agent.config["configurable"]["diff_text"] == pr_diff
+    assert agent.config["configurable"]["diff_line_set"] == {
+        "in_diff.py": {"RIGHT": {10}, "LEFT": {1}}
+    }
+    assert "diff_text" not in config["configurable"]
+    assert "diff_line_set" not in config["configurable"]
 
 
 @pytest.mark.asyncio
@@ -1320,10 +1326,13 @@ async def test_reviewer_leaves_validation_disabled_when_diff_fetch_fails() -> No
         patch("agent.reviewer.make_model", return_value=MagicMock()),
         patch("agent.reviewer.create_deep_agent", side_effect=fake_create_deep_agent),
     ):
-        await reviewer.get_reviewer_agent(config)
+        agent = await reviewer.get_reviewer_agent(config)
 
-    assert config["configurable"]["diff_text"] == ""
-    assert config["configurable"]["diff_line_set"] is None
+    # Fallback values live on the agent's bound config; the caller's input config
+    # is left unmutated. See #1584.
+    assert agent.config["configurable"]["diff_text"] == ""
+    assert agent.config["configurable"]["diff_line_set"] is None
+    assert "diff_text" not in config["configurable"]
 
 
 @pytest.mark.asyncio

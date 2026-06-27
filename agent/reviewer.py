@@ -825,9 +825,16 @@ async def _resolve_grouping_model(configurable: dict[str, object]) -> BaseChatMo
 
 async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
     """Get or create a reviewer agent with a sandbox + prepped repo."""
+    # Treat the caller's RunnableConfig as read-only. The body below stashes
+    # run-scoped values (recursion limit, PR diff) into the config; without a copy
+    # those writes mutate the caller's dict and leak across runs that share a base
+    # config. Shallow-copy config and the one nested dict we write into. See #1584.
+    config = {**config}
+    config["configurable"] = {**config.get("configurable", {})}
+
     thread_id = config["configurable"].get("thread_id", None)
 
-    config["recursion_limit"] = DEFAULT_RECURSION_LIMIT
+    config.setdefault("recursion_limit", DEFAULT_RECURSION_LIMIT)
 
     if thread_id is None or not graph_loaded_for_execution(config):
         logger.info("No thread_id or not for execution, returning reviewer agent without sandbox")
