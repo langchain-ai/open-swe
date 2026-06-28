@@ -41,15 +41,26 @@ class _FakeStore:
         return {"items": [{"value": value} for value in values[offset : offset + limit]]}
 
 
+class _FakeCrons:
+    def __init__(self) -> None:
+        self.created: list[dict[str, Any]] = []
+
+    async def create(self, assistant_id: str, **kwargs: Any) -> dict[str, Any]:
+        self.created.append({"assistant_id": assistant_id, **kwargs})
+        return {"cron_id": f"cron_{len(self.created)}"}
+
+
 class _FakeClient:
     def __init__(self) -> None:
         self.store = _FakeStore()
+        self.crons = _FakeCrons()
 
 
 @pytest.fixture
 def fake_client(monkeypatch: pytest.MonkeyPatch) -> _FakeClient:
     client = _FakeClient()
     monkeypatch.setattr(queue, "_client", lambda: client)
+    monkeypatch.setattr(scheduler, "_client", lambda: client)
     return client
 
 
@@ -196,3 +207,29 @@ async def test_scheduler_dispatches_delivery_queue_poll(monkeypatch: pytest.Monk
 
     assert result == {"result": {"status": "polled", "items": 2}}
     poll.assert_awaited_once_with()
+
+
+async def test_ensure_delivery_queue_polling_cron_registers_five_minute_task(
+    fake_client: _FakeClient,
+) -> None:
+    record = await scheduler.ensure_delivery_queue_polling_cron()
+
+    assert record["cron_id"] == "cron_1"
+    assert record["schedule"] == "*/5 * * * *"
+    assert len(fake_client.crons.created) == 1
+    created = fake_client.crons.created[0]
+    assert created["assistant_id"] == "scheduler"
+    assert created["schedule"] == "*/5 * * * *"
+    assert created["input"] == {"task": "delivery_queue_poll"}
+    assert created["config"]["configurable"]["task"] == "delivery_queue_poll"
+    assert created["metadata"]["kind"] == "delivery_queue_poll"
+
+
+async def test_ensure_delivery_queue_polling_cron_is_idempotent(
+    fake_client: _FakeClient,
+) -> None:
+    await scheduler.ensure_delivery_queue_polling_cron()
+    second = await scheduler.ensure_delivery_queue_polling_cron()
+
+    assert second["cron_id"] == "cron_1"
+    assert len(fake_client.crons.created) == 1

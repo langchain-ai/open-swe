@@ -162,6 +162,10 @@ async def _queued_item(**overrides: Any) -> dict[str, Any]:
         "credential_identity": "github:user:octocat",
         "github_login": "octocat",
         "repo": {"owner": "langchain-ai", "name": "open-swe"},
+        "sandbox_profile": {"provider": "langsmith", "profile": "sports-cms"},
+        "worktree": {"path": "/tmp/open-swe/worktrees/delivery-checkout-totals"},
+        "gates": [{"name": "unit", "status": "pending"}],
+        "artifacts": [{"type": "preview", "url": "https://preview.example.test"}],
     }
     payload.update(overrides)
     return await queue.upsert_delivery_queue_item(payload, preflight=_ready_preflight())
@@ -267,16 +271,16 @@ async def test_delivery_worker_prompt_contains_worker_contract(
 
     prompt = dispatch_recorder.calls[0]["content"].lower()
     assert record["title"].lower() in prompt
-    assert "reproduce" in prompt
-    assert "root cause" in prompt
-    assert "smallest fix" in prompt
-    assert "tests" in prompt
-    assert "no unrelated refactors" in prompt
+    assert "reproduce the failure in the smallest representative environment" in prompt
+    assert "prove the root cause" in prompt
+    assert "make the smallest credible fix" in prompt
+    assert "relevant regression tests" in prompt
+    assert "do not fold unrelated refactors into the patch" in prompt
     assert "cause" in prompt
     assert "files" in prompt
     assert "proof" in prompt
     assert "risks" in prompt
-    assert "pr summary" in prompt
+    assert "pull-request summary" in prompt
 
 
 async def test_launch_delivery_worker_transitions_queue_status_to_running(
@@ -293,4 +297,20 @@ async def test_launch_delivery_worker_transitions_queue_status_to_running(
     assert updated["status_reason"] == "worker launch dispatched"
     assert updated["worker_thread_id"] == result["worker_thread_id"]
     assert updated["latest_run_id"] == "run-worker-1"
+    assert updated["latest_run"] == {
+        "run_id": "run-worker-1",
+        "status": "running",
+        "worker_thread_id": result["worker_thread_id"],
+        "branch": "delivery/checkout-totals",
+        "base_branch": "main",
+        "sandbox_profile": {"provider": "langsmith", "profile": "sports-cms"},
+        "worktree": {"path": "/tmp/open-swe/worktrees/delivery-checkout-totals"},
+        "model_snapshot": "openai:gpt-5",
+        "credential_identity": "github:user:octocat",
+        "risk_class": "medium",
+        "gates": [{"name": "unit", "status": "pending"}],
+        "artifacts": [{"type": "preview", "url": "https://preview.example.test"}],
+        "blocker_reason": None,
+    }
+    assert updated["runs"] == [updated["latest_run"]]
     assert len(dispatch_recorder.calls) == 1

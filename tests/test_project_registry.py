@@ -97,7 +97,10 @@ async def test_projects_are_isolated_by_project_id(fake_client: _FakeClient) -> 
         "ready_states": ["ready"],
         "labels": ["delivery"],
     }
-    assert beta["queue_eligibility_policy"] == {"ready_states": ["ready"], "labels": ["agent-ready"]}
+    assert beta["queue_eligibility_policy"] == {
+        "ready_states": ["ready"],
+        "labels": ["agent-ready"],
+    }
 
     records = await project_registry.list_delivery_projects()
     assert [record["project_id"] for record in records] == ["alpha", "beta"]

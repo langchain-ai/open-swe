@@ -14,14 +14,14 @@ from .utils.thread_ops import langgraph_client
 DELIVERY_RUN_SOURCE = "delivery_queue"
 ACTIVE_RUN_STATUSES = ("pending", "running")
 
-WORKER_CONTRACT = """Worker contract:
-- Reproduce the issue or requested change before editing.
-- Identify the root cause before making code changes.
-- Make the smallest fix that fully addresses the root cause.
-- Add or update tests that prove the behavior.
-- Make no unrelated refactors.
-- Final response must include cause, files, proof, risks, and PR summary.
-"""
+WORKER_CONTRACT = (
+    "Take a ticket, bug report, failing behavior, or customer complaint and turn it into a "
+    "review-ready patch. Reproduce the failure in the smallest representative environment, prove "
+    "the root cause, make the smallest credible fix, and rerun the original reproduction plus "
+    "relevant regression tests. If the issue cannot be reproduced after two serious attempts, say "
+    "so. Do not fold unrelated refactors into the patch. Finish with the cause, changed files, "
+    "before-and-after proof, risks, and pull-request summary."
+)
 
 
 def _client() -> Any:
@@ -46,6 +46,16 @@ def _first_value(record: Mapping[str, Any], *keys: str) -> Any:
         if value is not None:
             return value
     return None
+
+
+def _mapping_value(record: Mapping[str, Any], key: str) -> dict[str, Any] | None:
+    value = record.get(key)
+    return dict(value) if isinstance(value, Mapping) else None
+
+
+def _list_value(record: Mapping[str, Any], key: str) -> list[Any]:
+    value = record.get(key)
+    return list(value) if isinstance(value, list) else []
 
 
 def _repo_from_item(item: Mapping[str, Any]) -> dict[str, str] | None:
@@ -192,6 +202,36 @@ def build_delivery_worker_configurable(
     return configurable
 
 
+def build_delivery_run_record(
+    item: Mapping[str, Any],
+    *,
+    worker_thread_id: str,
+    run_id: str | None,
+) -> dict[str, Any]:
+    branch = _first_text(item, "branch", "branch_name", "head_ref")
+    return {
+        "run_id": run_id,
+        "status": "running",
+        "worker_thread_id": worker_thread_id,
+        "branch": branch,
+        "base_branch": _first_text(item, "base_branch", "base_ref") or "main",
+        "sandbox_profile": _mapping_value(item, "sandbox_profile"),
+        "worktree": _mapping_value(item, "worktree"),
+        "model_snapshot": _first_value(item, "model_snapshot", "modelSnapshot"),
+        "credential_identity": _first_text(
+            item,
+            "credential_identity",
+            "credentialIdentity",
+            "github_login",
+            "created_by",
+        ),
+        "risk_class": _first_text(item, "risk_class", "riskClass") or "unknown",
+        "gates": _list_value(item, "gates"),
+        "artifacts": _list_value(item, "artifacts"),
+        "blocker_reason": _first_text(item, "blocker_reason", "status_reason") or None,
+    }
+
+
 def build_delivery_worker_prompt(item: Mapping[str, Any]) -> str:
     repo = _repo_from_item(item)
     repo_text = f"{repo['owner']}/{repo['name']}" if repo else "not provided"
@@ -266,10 +306,18 @@ async def launch_delivery_worker(item_id: str, *, client: Any | None = None) -> 
         client=client,
     )
     run_id = _run_id(run)
+    run_record = build_delivery_run_record(
+        item,
+        worker_thread_id=worker_thread_id,
+        run_id=run_id,
+    )
+    previous_runs = item.get("runs") if isinstance(item.get("runs"), list) else []
     extra = {
         "worker_thread_id": worker_thread_id,
         "delivery_worker_thread_id": worker_thread_id,
         "delivery": metadata["delivery"],
+        "latest_run": run_record,
+        "runs": [*previous_runs, run_record],
     }
     if run_id:
         extra["latest_run_id"] = run_id

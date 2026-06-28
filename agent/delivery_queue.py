@@ -272,7 +272,9 @@ async def transition_delivery_queue_status(
 
 async def delivery_queue_poll(poller: Poller | None = None) -> dict[str, Any]:
     if poller is None:
-        return {"status": "idle", "items": 0}
+        from .linear_queue import poll_configured_linear_delivery_queues
+
+        return await poll_configured_linear_delivery_queues()
     result = poller()
     items = await result if inspect.isawaitable(result) else result
     count = 0

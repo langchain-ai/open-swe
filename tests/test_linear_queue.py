@@ -5,9 +5,11 @@ from typing import Any
 import pytest
 
 from agent import delivery_queue as queue
+from agent import project_registry
 from agent.linear_queue import (
     LinearQueueEligibilityPolicy,
     LinearQueueFieldMappings,
+    poll_configured_linear_delivery_queues,
     poll_linear_delivery_queue,
 )
 
@@ -73,6 +75,7 @@ class _FakeLinearClient:
 def fake_queue_client(monkeypatch: pytest.MonkeyPatch) -> _FakeQueueClient:
     client = _FakeQueueClient()
     monkeypatch.setattr(queue, "_client", lambda: client)
+    monkeypatch.setattr(project_registry, "_client", lambda: client)
     return client
 
 
@@ -262,3 +265,42 @@ async def test_policy_scope_excluded_statuses_and_field_mappings(
         "linear_project_names": (),
         "excluded_statuses": ("done", "completed"),
     }
+
+
+async def test_configured_linear_project_policy_is_polled(
+    fake_queue_client: _FakeQueueClient,
+) -> None:
+    await project_registry.upsert_delivery_project(
+        {
+            "project_id": "sports-cms",
+            "name": "Sports CMS",
+            "tracker": {
+                "provider": "linear",
+                "config": {
+                    "team_keys": ["ENG"],
+                    "linear_project_ids": ["project-linear-1"],
+                },
+            },
+            "vcs": {"provider": "github", "config": {"owner": "example", "repo": "sports-cms"}},
+            "queue_eligibility_policy": {
+                "labels": ["agent-ready"],
+                "missing_readiness": "not-ready",
+                "excluded_statuses": ["done", "completed"],
+                "required_fields": ["description"],
+            },
+        }
+    )
+
+    result = await poll_configured_linear_delivery_queues(client=_FakeLinearClient([_issue()]))
+
+    records = await queue.list_delivery_queue_items()
+    assert result == {
+        "status": "polled",
+        "provider": "linear",
+        "projects": 1,
+        "items": 1,
+        "skipped": 0,
+        "errors": [],
+    }
+    assert records[0]["id"] == "sports-cms:linear:lin-1"
+    assert records[0]["status"] == "queued"
