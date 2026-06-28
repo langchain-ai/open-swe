@@ -2,6 +2,7 @@ import logging
 import os
 import shlex
 from pathlib import Path
+from typing import Any
 
 from deepagents import HarnessProfile, register_harness_profile
 
@@ -288,6 +289,37 @@ ALWAYS_CREATE_PR_SECTION = """---
 The user's dashboard setting **Always Create PRs** is enabled. For code-change tasks, always open or update a draft pull request after committing and pushing the branch. This does not apply to questions, explanations, status checks, or other information-only requests where no files are changed."""
 
 
+CACHED_PR_CONTEXT_TEMPLATE = """---
+
+### Cached PR Context
+
+Another agent run on this same pull request finished {age_minutes} minute(s) ago (repo `{repo_owner}/{repo_name}`, PR #{pr_number}{branch_clause}). If the sandbox already has the repo cloned at the PR head with the bot's git identity configured, you may skip the cold-start preamble — do not re-clone, do not re-run `git config`, and do not re-read `AGENTS.md` / `CLAUDE.md` from scratch. Confirm the cached state with one quick check (e.g. `git -C {working_dir} status` or `git -C {working_dir} log -1 --oneline`) and proceed straight to fix analysis. Fall back to the full Repository Setup steps only when that check shows the sandbox is empty or out of date."""
+
+
+def _render_cached_pr_context_section(cached: dict[str, Any] | None, working_dir: str) -> str:
+    if not cached or not isinstance(cached, dict):
+        return ""
+    pr_number = cached.get("pr_number")
+    repo = cached.get("repo") or {}
+    if not isinstance(pr_number, int) or not isinstance(repo, dict):
+        return ""
+    owner = repo.get("owner") or ""
+    name = repo.get("name") or ""
+    if not owner or not name:
+        return ""
+    age_seconds = int(cached.get("age_seconds") or 0)
+    branch = str(cached.get("branch") or "").strip()
+    branch_clause = f", branch `{branch}`" if branch else ""
+    return CACHED_PR_CONTEXT_TEMPLATE.format(
+        age_minutes=max(1, age_seconds // 60),
+        repo_owner=owner,
+        repo_name=name,
+        pr_number=pr_number,
+        branch_clause=branch_clause,
+        working_dir=working_dir,
+    )
+
+
 def _render_repo_instructions_section(instructions: str | None) -> str:
     if not instructions or not instructions.strip():
         return ""
@@ -318,6 +350,7 @@ SYSTEM_PROMPT_TEMPLATE = (
     + EXTERNAL_UNTRUSTED_COMMENTS_SECTION
     + COMMIT_PR_SECTION
     + "{pr_policy_override_section}"
+    + "{cached_pr_context_section}"
     + "{collaboration_section}"
     + "{repo_instructions_section}"
 )
@@ -335,6 +368,7 @@ def construct_system_prompt(
     repo_custom_instructions: str | None = None,
     thread_url: str | None = None,
     corridor_enabled: bool = False,
+    cached_pr_context: dict[str, Any] | None = None,
 ) -> str:
     default_prompt_section = _load_default_prompt()
     if default_repo and default_repo.get("owner") and default_repo.get("name"):
@@ -364,6 +398,7 @@ def construct_system_prompt(
         default_prompt_section=default_prompt_section,
         corridor_prompt_section=CORRIDOR_PROMPT if corridor_enabled else "",
         pr_policy_override_section=ALWAYS_CREATE_PR_SECTION if create_prs else "",
+        cached_pr_context_section=_render_cached_pr_context_section(cached_pr_context, working_dir),
         collaboration_section=_render_collaboration_section(triggering_user_identity, thread_url),
         repo_instructions_section=_render_repo_instructions_section(repo_custom_instructions),
         commit_identity_name=commit_identity_name,

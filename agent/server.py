@@ -817,6 +817,9 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             repo_custom_instructions=repo_custom_instructions,
             thread_url=dashboard_thread_url(thread_id),
             corridor_enabled=bool(corridor_tools),
+            cached_pr_context=configurable.get("_cached_pr_context")
+            if isinstance(configurable.get("_cached_pr_context"), dict)
+            else None,
         ),
         tools=[
             http_request,
