@@ -13,6 +13,7 @@ from .sanitize_tool_inputs import SanitizeToolInputsMiddleware
 from .settle_review_check import settle_review_check_on_exit
 from .tool_artifact import ToolArtifactMiddleware
 from .tool_error_handler import ToolErrorMiddleware
+from .verify_push_claims import VerifyPushClaimsMiddleware
 from .workflow_push_guard import WorkflowPushGuardMiddleware
 
 __all__ = [
@@ -24,6 +25,7 @@ __all__ = [
     "SanitizeToolInputsMiddleware",
     "ToolArtifactMiddleware",
     "ToolErrorMiddleware",
+    "VerifyPushClaimsMiddleware",
     "WorkflowPushGuardMiddleware",
     "SandboxCircuitBreakerMiddleware",
     "SlackAssistantStatusMiddleware",
