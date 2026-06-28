@@ -175,6 +175,38 @@ export interface AgentSchedule {
   updatedAt?: string | null
 }
 
+export interface AgentThreadPr {
+  number: number
+  title: string
+  state: "draft" | "open" | "merged" | "closed"
+  headRef: string
+  baseRef: string
+  url: string
+}
+
+export interface DeliveryGateRollup {
+  status: string
+  passed: number
+  failed: number
+  pending: number
+  total: number
+}
+
+export interface DeliveryRunRollup {
+  queueStatus: string | null
+  workerThreadId: string | null
+  reviewerThreadId: string | null
+  qaThreadId: string | null
+  mergeWorkerThreadId: string | null
+  pr: AgentThreadPr | null
+  previewCount: number
+  artifactCount: number
+  gateRollup: DeliveryGateRollup | null
+  blockerReason: string | null
+  reviewedSha: string | null
+  mergeStatus: string | null
+}
+
 export interface AgentThread {
   id: string
   title: string
@@ -196,14 +228,8 @@ export interface AgentThread {
   updatedAt: number
   traceUrl?: string | null
   messages: Array<Message>
-  pr?: {
-    number: number
-    title: string
-    state: "draft" | "open" | "merged" | "closed"
-    headRef: string
-    baseRef: string
-    url: string
-  }
+  pr?: AgentThreadPr
+  delivery?: DeliveryRunRollup
   diffStats?: {
     files: number
     additions: number

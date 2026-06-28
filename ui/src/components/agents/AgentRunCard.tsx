@@ -8,7 +8,7 @@ import {
 } from "@phosphor-icons/react"
 import { IoLogoGithub, IoLogoSlack } from "react-icons/io5"
 import { SiLinear } from "react-icons/si"
-import type { ComponentType, SVGProps } from "react"
+import type { ComponentType, ReactNode, SVGProps } from "react"
 
 import type { AgentSource, AgentThread } from "@/lib/agents/types"
 import { cn, formatRelativeTime } from "@/lib/utils"
@@ -23,15 +23,67 @@ const SOURCE_META: Record<AgentSource, { icon: SourceIcon; label: string }> = {
   schedule: { icon: CalendarBlankIcon, label: "Schedule" },
 }
 
-interface AgentRunCardProps {
-  thread: AgentThread
+function statusTone(status: string | null | undefined): string {
+  const normalized = status?.toLowerCase()
+  if (!normalized) return ""
+  if (["blocked", "error", "failed", "failure"].includes(normalized)) {
+    return "border-[var(--ui-danger)]/30 text-[var(--ui-danger)]"
+  }
+  if (["passed", "ready", "success", "succeeded", "merged"].includes(normalized)) {
+    return "border-[var(--ui-success)]/30 text-[var(--ui-success)]"
+  }
+  return ""
 }
 
-export function AgentRunCard({ thread }: AgentRunCardProps) {
+function shortSha(sha: string): string {
+  return sha.length > 8 ? sha.slice(0, 8) : sha
+}
+
+function countLabel(count: number, singular: string, plural: string): string {
+  return `${count} ${count === 1 ? singular : plural}`
+}
+
+function DeliveryBadge({
+  children,
+  tone,
+  title,
+}: {
+  children: ReactNode
+  tone?: string
+  title?: string
+}) {
+  return (
+    <span
+      className={cn(
+        "inline-flex max-w-full items-center rounded-md border border-[var(--ui-border)] bg-[var(--ui-panel-2)] px-1.5 py-0.5",
+        tone
+      )}
+      title={title}
+    >
+      {children}
+    </span>
+  )
+}
+
+interface AgentRunCardProps {
+  thread: AgentThread
+  endAdornment?: ReactNode
+}
+
+export function AgentRunCard({ thread, endAdornment }: AgentRunCardProps) {
   const stats = thread.diffStats
   const hasPr = Boolean(thread.pr)
   const source = thread.source ? SOURCE_META[thread.source] : null
   const SourceIcon = source?.icon
+  const delivery = thread.delivery
+  const deliveryThreads = delivery
+    ? [
+        ["Worker", delivery.workerThreadId],
+        ["Review", delivery.reviewerThreadId],
+        ["QA", delivery.qaThreadId],
+        ["Merge", delivery.mergeWorkerThreadId],
+      ].filter((entry): entry is [string, string] => Boolean(entry[1]))
+    : []
 
   return (
     <Link
@@ -76,7 +128,7 @@ export function AgentRunCard({ thread }: AgentRunCardProps) {
         <div className="truncate text-sm font-medium text-[var(--ui-text)]">
           {thread.title}
         </div>
-        <div className="mt-1 flex min-w-0 items-center gap-2 text-xs text-[var(--ui-text-dim)]">
+        <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-[var(--ui-text-dim)]">
           {source && SourceIcon && (
             <>
               <span
@@ -89,13 +141,21 @@ export function AgentRunCard({ thread }: AgentRunCardProps) {
               <span className="shrink-0">·</span>
             </>
           )}
-          <span className="min-w-0 truncate" title={thread.model}>
+          <span className="shrink-0 capitalize">{thread.status}</span>
+          {thread.resolved && (
+            <>
+              <span className="shrink-0">·</span>
+              <span className="shrink-0">resolved</span>
+            </>
+          )}
+          <span className="shrink-0">·</span>
+          <span className="max-w-36 truncate" title={thread.model}>
             {thread.model}
           </span>
           {thread.repo && (
             <>
               <span className="shrink-0">·</span>
-              <span className="min-w-0 truncate" title={thread.repo}>
+              <span className="max-w-36 truncate" title={thread.repo}>
                 {thread.repo}
               </span>
             </>
@@ -105,17 +165,68 @@ export function AgentRunCard({ thread }: AgentRunCardProps) {
             {formatRelativeTime(thread.updatedAt)}
           </span>
         </div>
+        {delivery && (
+          <div className="mt-2 flex min-w-0 flex-wrap items-center gap-1.5 text-[11px] leading-5 text-[var(--ui-text-dim)]">
+            <DeliveryBadge tone={statusTone(delivery.queueStatus)}>
+              Queue {delivery.queueStatus ?? "unknown"}
+            </DeliveryBadge>
+            {delivery.gateRollup && (
+              <DeliveryBadge tone={statusTone(delivery.gateRollup.status)}>
+                Gates {delivery.gateRollup.status}
+                {delivery.gateRollup.total > 0 &&
+                  ` ${delivery.gateRollup.passed}/${delivery.gateRollup.total}`}
+              </DeliveryBadge>
+            )}
+            {delivery.mergeStatus && (
+              <DeliveryBadge tone={statusTone(delivery.mergeStatus)}>
+                Merge {delivery.mergeStatus}
+              </DeliveryBadge>
+            )}
+            {delivery.previewCount > 0 && (
+              <DeliveryBadge>
+                {countLabel(delivery.previewCount, "preview", "previews")}
+              </DeliveryBadge>
+            )}
+            {delivery.artifactCount > 0 && (
+              <DeliveryBadge>
+                {countLabel(delivery.artifactCount, "artifact", "artifacts")}
+              </DeliveryBadge>
+            )}
+            {delivery.reviewedSha && (
+              <DeliveryBadge title={delivery.reviewedSha}>
+                Reviewed {shortSha(delivery.reviewedSha)}
+              </DeliveryBadge>
+            )}
+            {deliveryThreads.map(([label, threadId]) => (
+              <DeliveryBadge key={label} title={threadId}>
+                {label}
+              </DeliveryBadge>
+            ))}
+          </div>
+        )}
+        {delivery?.blockerReason && (
+          <div
+            className="mt-1 truncate text-[11px] text-[var(--ui-danger)]"
+            title={delivery.blockerReason}
+          >
+            Blocked: {delivery.blockerReason}
+          </div>
+        )}
       </div>
 
-      <CheckCircleIcon
-        className={cn(
-          "size-5 shrink-0",
-          thread.status === "finished"
-            ? "text-[var(--ui-text-dim)] opacity-100"
-            : "opacity-0"
-        )}
-        weight="regular"
-      />
+      {endAdornment}
+
+      {!endAdornment && (
+        <CheckCircleIcon
+          className={cn(
+            "size-5 shrink-0",
+            thread.status === "finished"
+              ? "text-[var(--ui-text-dim)] opacity-100"
+              : "opacity-0"
+          )}
+          weight="regular"
+        />
+      )}
     </Link>
   )
 }

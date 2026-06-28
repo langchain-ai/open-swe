@@ -1,4 +1,3 @@
-import { Link } from "@tanstack/react-router"
 import {
   ArrowCounterClockwiseIcon,
   CaretLeftIcon,
@@ -8,6 +7,7 @@ import {
 import { useState } from "react"
 
 import type { AgentSource, AgentStatus, AgentThread } from "@/lib/agents/types"
+import { AgentRunCard } from "@/components/agents/AgentRunCard"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { useResolveAgentThread, useThreadsPage } from "@/lib/agents/queries"
@@ -271,32 +271,24 @@ function ThreadListItem({ thread }: { thread: AgentThread }) {
   }
 
   return (
-    <Link
-      to="/agents/$threadId"
-      params={{ threadId: thread.id }}
-      className="group flex items-center gap-3 rounded-lg border border-transparent px-3 py-2 transition-colors hover:border-[var(--ui-border)] hover:bg-[var(--ui-sidebar-hover)]"
-    >
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-sm text-[var(--ui-text)]">{thread.title}</p>
-        <p className="truncate text-[11px] text-[var(--ui-text-dim)]">
-          {thread.repoFullName || "no repo"} · {thread.status}
-          {isResolved ? " · resolved" : ""}
-        </p>
-      </div>
-      <button
-        type="button"
-        aria-label={isResolved ? "Unresolve thread" : "Resolve thread"}
-        title={isResolved ? "Unresolve thread" : "Resolve thread"}
-        onClick={onToggleResolved}
-        disabled={resolveThread.isPending}
-        className="flex size-6 shrink-0 items-center justify-center rounded text-[var(--ui-text-dim)] hover:bg-[var(--ui-panel-2)] hover:text-[var(--ui-text)]"
-      >
-        {isResolved ? (
-          <ArrowCounterClockwiseIcon className="size-4" />
-        ) : (
-          <CheckCircleIcon className="size-4" />
-        )}
-      </button>
-    </Link>
+    <AgentRunCard
+      thread={thread}
+      endAdornment={
+        <button
+          type="button"
+          aria-label={isResolved ? "Unresolve thread" : "Resolve thread"}
+          title={isResolved ? "Unresolve thread" : "Resolve thread"}
+          onClick={onToggleResolved}
+          disabled={resolveThread.isPending}
+          className="flex size-6 shrink-0 items-center justify-center rounded text-[var(--ui-text-dim)] hover:bg-[var(--ui-panel-2)] hover:text-[var(--ui-text)]"
+        >
+          {isResolved ? (
+            <ArrowCounterClockwiseIcon className="size-4" />
+          ) : (
+            <CheckCircleIcon className="size-4" />
+          )}
+        </button>
+      }
+    />
   )
 }

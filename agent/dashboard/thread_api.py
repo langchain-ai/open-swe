@@ -26,6 +26,7 @@ from ..utils.thread_ops import (
     queue_message_for_thread,
 )
 from .agent_overrides import normalize_profile_overrides
+from .delivery_runs import build_delivery_run_rollup
 from .options import SUPPORTED_MODEL_IDS, model_supports_effort, model_supports_images
 from .pr_diff import build_pr_diff_files
 from .profiles import get_profile, get_valid_access_token
@@ -399,6 +400,9 @@ def _thread_summary(
             "additions": int(diff_stats.get("additions") or 0),
             "deletions": int(diff_stats.get("deletions") or 0),
         }
+    delivery = build_delivery_run_rollup(metadata)
+    if delivery:
+        summary["delivery"] = delivery
     # The transcript hydrates client-side from the SDK (`GET …/state` →
     # `stream.messages`); the summary only carries metadata.
     summary["messages"] = []
