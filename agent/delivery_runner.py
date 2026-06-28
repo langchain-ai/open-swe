@@ -266,11 +266,13 @@ def build_delivery_worker_input(
 
 
 def _item_with_worker_input(
-    item: Mapping[str, Any], worker_input: Mapping[str, Any]
+    item: Mapping[str, Any],
+    worker_input: Mapping[str, Any],
+    project: Mapping[str, Any],
 ) -> dict[str, Any]:
     issue_context = _mapping_from(worker_input.get("issue_context"))
     sandbox_profile = _mapping_from(worker_input.get("sandbox_profile"))
-    return {
+    updated = {
         **dict(item),
         "branch": issue_context.get("branch"),
         "base_branch": issue_context.get("base_branch"),
@@ -280,6 +282,13 @@ def _item_with_worker_input(
         "credential_policy": _mapping_from(worker_input.get("credential_policy")),
         "context_pack": _mapping_from(worker_input.get("context_pack")),
     }
+    repo = _mapping_from(issue_context.get("repository"))
+    if repo:
+        updated["repo"] = repo
+    merge_policy = _mapping_from(project.get("merge_policy"))
+    if merge_policy:
+        updated["merge_policy"] = merge_policy
+    return updated
 
 
 def _run_id(run: Any) -> str | None:
@@ -460,6 +469,25 @@ def build_delivery_worker_prompt(worker_input: Mapping[str, Any]) -> str:
     )
 
 
+def _runtime_fields_for_item(item: Mapping[str, Any]) -> dict[str, Any]:
+    fields: dict[str, Any] = {}
+    for key in (
+        "branch",
+        "base_branch",
+        "sandbox_profile",
+        "worktree",
+        "gate_policy",
+        "credential_policy",
+        "context_pack",
+        "repo",
+        "merge_policy",
+    ):
+        value = item.get(key)
+        if value is not None:
+            fields[key] = value
+    return fields
+
+
 async def _upsert_thread_metadata(client: Any, thread_id: str, metadata: dict[str, Any]) -> None:
     await client.threads.create(thread_id=thread_id, metadata=metadata, if_exists="do_nothing")
     await client.threads.update(thread_id=thread_id, metadata=metadata)
@@ -523,7 +551,7 @@ async def launch_delivery_worker(
         return refused
 
     worker_input = build_delivery_worker_input(item, project, worker_thread_id=worker_thread_id)
-    launch_item = _item_with_worker_input(item, worker_input)
+    launch_item = _item_with_worker_input(item, worker_input, project)
     metadata = build_delivery_worker_metadata(launch_item, worker_thread_id)
     await _upsert_thread_metadata(client, worker_thread_id, metadata)
     run = await dispatch_agent_run(
@@ -543,6 +571,7 @@ async def launch_delivery_worker(
     )
     previous_runs = item.get("runs") if isinstance(item.get("runs"), list) else []
     extra = {
+        **_runtime_fields_for_item(launch_item),
         "worker_thread_id": worker_thread_id,
         "delivery_worker_thread_id": worker_thread_id,
         "delivery": metadata["delivery"],

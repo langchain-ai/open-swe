@@ -292,6 +292,13 @@ def _count_artifacts(result: Mapping[str, Any], evidence: Mapping[str, Any]) -> 
     )
 
 
+def _required_checks(result: Mapping[str, Any]) -> list[dict[str, Any]]:
+    checks = result.get("required_checks")
+    if not isinstance(checks, list):
+        checks = result.get("requiredChecks")
+    return [dict(check) for check in checks or [] if isinstance(check, Mapping)]
+
+
 def _updated_runs(
     item: Mapping[str, Any],
     *,
@@ -354,6 +361,7 @@ async def ingest_delivery_worker_result(
         queue_status=queue_status,
     )
     pr = _mapping(result.get("pr"))
+    required_checks = _required_checks(result)
     extra = {
         "worker_result": worker_result,
         "qa_evidence": qa_evidence,
@@ -373,6 +381,8 @@ async def ingest_delivery_worker_result(
             "gate_rollup": qa_evidence["gate_rollup"],
         },
     }
+    if required_checks:
+        extra["required_checks"] = required_checks
     if pr:
         extra["pr"] = pr
         if isinstance(pr.get("number"), int):
