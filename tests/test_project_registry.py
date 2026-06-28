@@ -235,6 +235,60 @@ def test_default_sports_cms_project_profile_is_ready_for_v1_configuration() -> N
     assert project["membership"] == {"users": []}
 
 
+def test_sports_cms_ddev_sandbox_profile_contains_runtime_gates() -> None:
+    profile = project_registry.sports_cms_ddev_sandbox_profile(
+        project_path="/workspace/sports-cms",
+        preview_url="https://sports.example.test/",
+        theme_path="web/themes/custom/sports_theme",
+        artifact_dir="/tmp/sports-artifacts",
+        sdc_component_id="sports_theme:card_news",
+    )
+
+    assert profile["provider"] == "ddev"
+    runtime = profile["runtime"]
+    assert runtime["project_path"] == "/workspace/sports-cms"
+    assert runtime["preview_url"] == "https://sports.example.test/"
+    gates = runtime["gates"]
+    assert [gate["name"] for gate in gates] == [
+        "drupal_bootstrap",
+        "theme_assets",
+        "sdc_twig_render",
+        "browser_flow",
+        "screenshot",
+        "trace_or_video",
+    ]
+    assert gates[1]["command"] == "test -f web/themes/custom/sports_theme/build/main.min.css"
+    assert "hasDefinition('sports_theme:card_news')" in gates[2]["command"]
+    assert gates[4]["artifact_path"] == "/tmp/sports-artifacts/sports-cms-home.png"
+    assert gates[5]["cwd"] == "/tmp/sports-artifacts"
+    assert gates[5]["artifact_path"] == "/tmp/sports-artifacts/sports-cms-trace.zip"
+
+
+@pytest.mark.parametrize(
+    ("overrides", "message"),
+    [
+        ({"project_path": ""}, "project_path is required"),
+        ({"preview_url": ""}, "preview_url is required"),
+        ({"theme_path": ""}, "theme_path is required"),
+        ({"artifact_dir": ""}, "artifact_dir is required"),
+    ],
+)
+def test_sports_cms_ddev_sandbox_profile_requires_runtime_inputs(
+    overrides: dict[str, str],
+    message: str,
+) -> None:
+    payload = {
+        "project_path": "/workspace/sports-cms",
+        "preview_url": "https://sports.example.test/",
+        "theme_path": "web/themes/custom/sports_theme",
+        "artifact_dir": "/tmp/sports-artifacts",
+        **overrides,
+    }
+
+    with pytest.raises(ValueError, match=message):
+        project_registry.sports_cms_ddev_sandbox_profile(**payload)
+
+
 def test_default_membership_uses_flat_project_users() -> None:
     project = _project("alpha", "Alpha")
 

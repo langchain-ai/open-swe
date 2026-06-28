@@ -245,6 +245,96 @@ def default_sports_cms_delivery_project(
     )
 
 
+def sports_cms_ddev_sandbox_profile(
+    *,
+    project_path: str,
+    preview_url: str,
+    theme_path: str,
+    artifact_dir: str,
+    sdc_component_id: str | None = None,
+) -> dict[str, Any]:
+    project_path = project_path.strip()
+    preview_url = preview_url.strip()
+    theme_path = theme_path.strip().strip("/")
+    artifact_dir = artifact_dir.strip().rstrip("/")
+    if not project_path:
+        raise ValueError("project_path is required")
+    if not preview_url:
+        raise ValueError("preview_url is required")
+    if not theme_path:
+        raise ValueError("theme_path is required")
+    if not artifact_dir:
+        raise ValueError("artifact_dir is required")
+
+    sdc_command = (
+        "ddev drush ev \"echo \\Drupal::service('plugin.manager.sdc')"
+        f"->hasDefinition('{sdc_component_id.strip()}') ? 'ok' : 'missing';\""
+        if sdc_component_id and sdc_component_id.strip()
+        else "ddev drush ev \"echo count(\\Drupal::service('plugin.manager.sdc')"
+        "->getDefinitions()) > 0 ? 'ok' : 'missing';\""
+    )
+    return {
+        "provider": "ddev",
+        "runtime": {
+            "provider": "ddev",
+            "project_path": project_path,
+            "preview_url": preview_url,
+            "gates": [
+                {
+                    "name": "drupal_bootstrap",
+                    "command": (
+                        "ddev drush status "
+                        "--fields=bootstrap,drupal-version,db-status,uri --format=json"
+                    ),
+                },
+                {
+                    "name": "theme_assets",
+                    "command": f"test -f {theme_path}/build/main.min.css",
+                },
+                {
+                    "name": "sdc_twig_render",
+                    "command": sdc_command,
+                },
+                {
+                    "name": "browser_flow",
+                    "command": "curl -k -sS -o /dev/null -w '%{http_code}' {preview_url}",
+                },
+                {
+                    "name": "screenshot",
+                    "command": (
+                        "'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' "
+                        "--headless=new --disable-gpu --no-sandbox "
+                        "--ignore-certificate-errors --screenshot={artifact_path} "
+                        "--window-size=1440,1000 {preview_url}"
+                    ),
+                    "artifact_type": "screenshot",
+                    "artifact_path": f"{artifact_dir}/sports-cms-home.png",
+                },
+                {
+                    "name": "trace_or_video",
+                    "command": (
+                        "node -e \"const { chromium } = require('playwright'); "
+                        "(async()=>{ const url=process.argv[1]; const out=process.argv[2]; "
+                        "const browser=await chromium.launch({ channel:'chrome', headless:true }); "
+                        "const context=await browser.newContext({ ignoreHTTPSErrors:true, "
+                        "viewport:{ width:1440, height:1000 } }); "
+                        "await context.tracing.start({ screenshots:true, snapshots:true }); "
+                        "const page=await context.newPage(); "
+                        "await page.goto(url,{ waitUntil:'networkidle', timeout:60000 }); "
+                        "await context.tracing.stop({ path:out }); await browser.close(); "
+                        '})().catch(err=>{ console.error(err); process.exit(1); });" '
+                        "{preview_url} {artifact_path}"
+                    ),
+                    "cwd": artifact_dir,
+                    "artifact_type": "trace",
+                    "artifact_path": f"{artifact_dir}/sports-cms-trace.zip",
+                    "timeout_seconds": 120,
+                },
+            ],
+        },
+    }
+
+
 def evaluate_project_start_policy(
     project: Mapping[str, Any],
     *,
