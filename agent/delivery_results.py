@@ -6,6 +6,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from .delivery_queue import read_delivery_queue_item, transition_delivery_queue_status
+from .drupal_runtime_gates import CommandRunner, collect_drupal_runtime_evidence
 
 _PASSING_GATE_STATUSES = frozenset({"pass", "passed", "success", "ok", "completed"})
 _FAILING_GATE_STATUSES = frozenset({"fail", "failed", "failure", "error"})
@@ -89,6 +90,32 @@ def _gate_names(values: Any) -> set[str]:
             if name != "unknown":
                 names.add(name)
     return names
+
+
+def _policy_gate_names(gate_policy: Mapping[str, Any]) -> set[str]:
+    return _gate_names(gate_policy.get("blocking_gates")) | _gate_names(
+        gate_policy.get("advisory_gates")
+    )
+
+
+def _without_blocking_gates(
+    gate_policy: Mapping[str, Any],
+    names: set[str],
+) -> dict[str, Any]:
+    policy = dict(gate_policy)
+    blocking_gates: list[Any] = []
+    for value in _list(gate_policy.get("blocking_gates")):
+        if isinstance(value, str):
+            gate_name = value.strip()
+        elif isinstance(value, Mapping):
+            gate_name = _gate_name(value)
+        else:
+            gate_name = ""
+        if gate_name and gate_name in names:
+            continue
+        blocking_gates.append(value)
+    policy["blocking_gates"] = blocking_gates
+    return policy
 
 
 def _artifact_urls(result: Mapping[str, Any], *keys: str, artifact_type: str) -> list[str]:
@@ -280,6 +307,121 @@ def _normalise_worker_result(
         "pull_request_summary": result.get("pull_request_summary"),
         "pr": _mapping(result.get("pr")),
         "qa_evidence": dict(qa_evidence),
+        "pull_request_evidence": _mapping(result.get("pull_request_evidence")),
+        "platform_evidence": _mapping(result.get("platform_evidence")),
+    }
+
+
+def _pr_details(result: Mapping[str, Any]) -> dict[str, Any]:
+    pr = _mapping(result.get("pr"))
+    return pr or _mapping(result.get("pull_request"))
+
+
+def _markdown_link(value: str) -> str:
+    return f"- {value}"
+
+
+def _render_pull_request_evidence(
+    result: Mapping[str, Any],
+    qa_evidence: Mapping[str, Any],
+) -> str:
+    lines = ["## QA Evidence"]
+    preview_url = _string(qa_evidence.get("preview_url"))
+    if preview_url:
+        lines.extend(["", f"- Preview: {preview_url}"])
+    screenshots = [value for value in _list(qa_evidence.get("screenshots")) if _string(value)]
+    videos = [value for value in _list(qa_evidence.get("videos")) if _string(value)]
+    traces = [value for value in _list(qa_evidence.get("traces")) if _string(value)]
+    if screenshots:
+        lines.extend(["", "### Screenshots", *[_markdown_link(value) for value in screenshots]])
+    if videos:
+        lines.extend(["", "### Videos", *[_markdown_link(value) for value in videos]])
+    if traces:
+        lines.extend(["", "### Traces", *[_markdown_link(value) for value in traces]])
+    gates = [gate for gate in _list(qa_evidence.get("gates")) if isinstance(gate, Mapping)]
+    if gates:
+        lines.append("")
+        lines.append("### Gates")
+        for gate in gates:
+            lines.append(f"- {_gate_name(gate)}: {_gate_status(gate) or 'unknown'}")
+    blockers = [
+        blocker for blocker in _list(qa_evidence.get("blockers")) if isinstance(blocker, Mapping)
+    ]
+    if blockers:
+        lines.append("")
+        lines.append("### Blockers")
+        for blocker in blockers:
+            code = _string(blocker.get("code")) or "unknown"
+            message = _string(blocker.get("message"))
+            lines.append(f"- {code}: {message}" if message else f"- {code}")
+    summary = _string(result.get("pull_request_summary"))
+    if summary:
+        lines.extend(["", "### Summary", summary])
+    return "\n".join(lines).strip()
+
+
+def _pull_request_evidence_gate(
+    result: Mapping[str, Any],
+    qa_evidence: Mapping[str, Any],
+) -> dict[str, Any]:
+    pr = _pr_details(result)
+    body = _render_pull_request_evidence(result, qa_evidence)
+    missing: list[str] = []
+    if not pr or not (_string(pr.get("url")) or isinstance(pr.get("number"), int)):
+        missing.append("pull request")
+    if qa_evidence.get("complete") is not True:
+        missing.append("complete QA evidence")
+    if not _string(qa_evidence.get("preview_url")) and qa_evidence.get("browser_relevant") is True:
+        missing.append("preview URL")
+    if not _list(qa_evidence.get("screenshots")) and qa_evidence.get("browser_relevant") is True:
+        missing.append("screenshot")
+    if (
+        not _list(qa_evidence.get("videos"))
+        and not _list(qa_evidence.get("traces"))
+        and qa_evidence.get("browser_relevant") is True
+    ):
+        missing.append("video or trace")
+    status = "failed" if missing else "passed"
+    output = (
+        "PR QA evidence is ready."
+        if status == "passed"
+        else "Missing PR QA evidence: " + ", ".join(missing) + "."
+    )
+    return {
+        "name": "pr_qa_evidence",
+        "status": status,
+        "source": "platform",
+        "platform_verified": True,
+        "output": output,
+        "body": body,
+    }
+
+
+def _with_pull_request_evidence(
+    result: Mapping[str, Any],
+    qa_evidence: Mapping[str, Any],
+    gate_policy: Mapping[str, Any],
+) -> dict[str, Any]:
+    if "pr_qa_evidence" not in _policy_gate_names(gate_policy):
+        return dict(result)
+    gates = [
+        dict(gate) for gate in _list(result.get("executed_gates")) if isinstance(gate, Mapping)
+    ]
+    if not any(_gate_name(gate) == "pr_qa_evidence" for gate in gates):
+        gates.append(_pull_request_evidence_gate(result, qa_evidence))
+    evidence = {
+        "body": _render_pull_request_evidence(result, qa_evidence),
+        "preview_url": qa_evidence.get("preview_url"),
+        "screenshots": _list(qa_evidence.get("screenshots")),
+        "videos": _list(qa_evidence.get("videos")),
+        "traces": _list(qa_evidence.get("traces")),
+        "gates": _list(qa_evidence.get("gates")),
+        "blockers": _list(qa_evidence.get("blockers")),
+    }
+    return {
+        **dict(result),
+        "executed_gates": gates,
+        "pull_request_evidence": evidence,
     }
 
 
@@ -335,15 +477,25 @@ async def ingest_delivery_worker_result(
     result: Mapping[str, Any],
     *,
     gate_policy: Mapping[str, Any] | None = None,
+    platform_runner: CommandRunner | None = None,
 ) -> dict[str, Any]:
     item = await read_delivery_queue_item(item_id)
     if item is None:
         raise KeyError(f"delivery queue item not found: {item_id}")
 
     policy = gate_policy or _mapping(item.get("gate_policy"))
-    verification = verify_worker_result_evidence(result, gate_policy=policy)
+    verified_result = await collect_drupal_runtime_evidence(item, result, runner=platform_runner)
+    if "pr_qa_evidence" in _policy_gate_names(policy):
+        provisional_policy = _without_blocking_gates(policy, {"pr_qa_evidence"})
+        provisional = verify_worker_result_evidence(verified_result, gate_policy=provisional_policy)
+        verified_result = _with_pull_request_evidence(
+            verified_result,
+            provisional["qa_evidence"],
+            policy,
+        )
+    verification = verify_worker_result_evidence(verified_result, gate_policy=policy)
     qa_evidence = verification["qa_evidence"]
-    worker_result = _normalise_worker_result(result, qa_evidence)
+    worker_result = _normalise_worker_result(verified_result, qa_evidence)
     ready = verification["ready_for_review"]
     queue_status = "review" if ready else "blocked"
     blocker_reason = (
@@ -360,8 +512,8 @@ async def ingest_delivery_worker_result(
         qa_evidence=qa_evidence,
         queue_status=queue_status,
     )
-    pr = _mapping(result.get("pr"))
-    required_checks = _required_checks(result)
+    pr = _mapping(verified_result.get("pr"))
+    required_checks = _required_checks(verified_result)
     extra = {
         "worker_result": worker_result,
         "qa_evidence": qa_evidence,
@@ -369,7 +521,7 @@ async def ingest_delivery_worker_result(
         "blocker_reason": None if ready else blocker_reason,
         "gate_rollup": qa_evidence["gate_rollup"],
         "preview_count": 1 if qa_evidence["preview_url"] else 0,
-        "artifact_count": _count_artifacts(result, qa_evidence),
+        "artifact_count": _count_artifacts(verified_result, qa_evidence),
         "latest_run": latest_run,
         "runs": runs,
         "delivery": {
@@ -377,7 +529,7 @@ async def ingest_delivery_worker_result(
             "queue_status": queue_status,
             "blocker_reason": None if ready else blocker_reason,
             "preview_count": 1 if qa_evidence["preview_url"] else 0,
-            "artifact_count": _count_artifacts(result, qa_evidence),
+            "artifact_count": _count_artifacts(verified_result, qa_evidence),
             "gate_rollup": qa_evidence["gate_rollup"],
         },
     }

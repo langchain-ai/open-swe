@@ -212,6 +212,61 @@ async def test_ingest_allows_failed_advisory_gate(fake_client: _FakeClient) -> N
     assert updated["gate_rollup"]["failed"] == 1
 
 
+async def test_ingest_adds_required_pr_qa_evidence_gate(fake_client: _FakeClient) -> None:
+    item = await _running_item(
+        gate_policy={
+            "blocking_gates": ["unit", "browser", "pr_qa_evidence"],
+            "advisory_gates": ["phpstan"],
+        }
+    )
+
+    updated = await results.ingest_delivery_worker_result(item["id"], _valid_result())
+
+    assert updated["status"] == "review"
+    assert updated["qa_evidence"]["complete"] is True
+    assert updated["qa_evidence"]["gate_rollup"] == {
+        "status": "failed",
+        "passed": 3,
+        "failed": 1,
+        "pending": 0,
+        "total": 4,
+    }
+    pr_gate = next(
+        gate for gate in updated["qa_evidence"]["gates"] if gate["name"] == "pr_qa_evidence"
+    )
+    assert pr_gate["status"] == "passed"
+    assert pr_gate["source"] == "platform"
+    assert "## QA Evidence" in pr_gate["body"]
+    assert "https://preview.example.test/teaser" in pr_gate["body"]
+    assert "https://artifacts.example.test/teaser.png" in pr_gate["body"]
+    assert "https://artifacts.example.test/trace.zip" in pr_gate["body"]
+    assert updated["worker_result"]["pull_request_evidence"]["body"] == pr_gate["body"]
+
+
+async def test_ingest_blocks_required_pr_qa_evidence_without_pr(
+    fake_client: _FakeClient,
+) -> None:
+    item = await _running_item(
+        gate_policy={
+            "blocking_gates": ["unit", "browser", "pr_qa_evidence"],
+            "advisory_gates": ["phpstan"],
+        }
+    )
+
+    updated = await results.ingest_delivery_worker_result(
+        item["id"],
+        _valid_result(pr={}),
+    )
+
+    assert updated["status"] == "blocked"
+    assert updated["status_reason"] == "blocking_gate_failed:pr_qa_evidence"
+    pr_gate = next(
+        gate for gate in updated["qa_evidence"]["gates"] if gate["name"] == "pr_qa_evidence"
+    )
+    assert pr_gate["status"] == "failed"
+    assert "Missing PR QA evidence: pull request." == pr_gate["output"]
+
+
 async def test_ingest_blocks_unverified_blocking_gate(fake_client: _FakeClient) -> None:
     item = await _running_item()
 
@@ -228,3 +283,121 @@ async def test_ingest_blocks_unverified_blocking_gate(fake_client: _FakeClient) 
     assert updated["status"] == "blocked"
     assert updated["status_reason"] == "blocking_gate_unverified:unit"
     assert updated["qa_evidence"]["complete"] is False
+
+
+async def test_ingest_collects_platform_drupal_runtime_evidence(
+    fake_client: _FakeClient,
+    tmp_path,
+) -> None:  # noqa: ANN001
+    screenshot = tmp_path / "home.png"
+    trace = tmp_path / "trace.zip"
+    item = await _running_item(
+        sandbox_profile={
+            "provider": "ddev",
+            "runtime": {
+                "provider": "ddev",
+                "project_path": str(tmp_path),
+                "preview_url": "https://sports-preview.test/",
+                "gates": [
+                    {"name": "drupal_bootstrap", "command": "drush status"},
+                    {
+                        "name": "browser_flow",
+                        "command": "curl -k -sS -o /dev/null -w '%{http_code}' {preview_url}",
+                    },
+                    {
+                        "name": "screenshot",
+                        "command": "chrome --screenshot={artifact_path} {preview_url}",
+                        "artifact_type": "screenshot",
+                        "artifact_path": str(screenshot),
+                    },
+                    {
+                        "name": "trace_or_video",
+                        "command": "trace --output={artifact_path} {preview_url}",
+                        "artifact_type": "trace",
+                        "artifact_path": str(trace),
+                    },
+                ],
+            },
+        },
+        gate_policy={
+            "blocking_gates": [
+                "drupal_bootstrap",
+                "browser_flow",
+                "screenshot",
+                "trace_or_video",
+            ],
+        },
+    )
+    commands: list[str] = []
+
+    async def fake_runner(command: str, cwd: str, timeout: int) -> dict[str, Any]:
+        commands.append(command)
+        assert cwd == str(tmp_path)
+        assert timeout == 120
+        if str(screenshot) in command:
+            screenshot.write_bytes(b"png")
+        if str(trace) in command:
+            trace.write_bytes(b"trace")
+        return {"exit_code": 0, "output": "ok"}
+
+    updated = await results.ingest_delivery_worker_result(
+        item["id"],
+        _valid_result(executed_gates=[], preview_url="", screenshots=[], traces=[]),
+        platform_runner=fake_runner,
+    )
+
+    assert updated["status"] == "review"
+    assert updated["qa_evidence"]["complete"] is True
+    assert updated["qa_evidence"]["preview_url"] == "https://sports-preview.test/"
+    assert updated["qa_evidence"]["screenshots"] == [str(screenshot)]
+    assert updated["qa_evidence"]["traces"] == [str(trace)]
+    assert [gate["source"] for gate in updated["qa_evidence"]["gates"]] == [
+        "platform",
+        "platform",
+        "platform",
+        "platform",
+    ]
+    assert updated["worker_result"]["platform_evidence"]["preview_url"] == (
+        "https://sports-preview.test/"
+    )
+    assert len(commands) == 4
+
+
+async def test_ingest_blocks_missing_platform_artifact(
+    fake_client: _FakeClient,
+    tmp_path,
+) -> None:  # noqa: ANN001
+    screenshot = tmp_path / "missing.png"
+    item = await _running_item(
+        sandbox_profile={
+            "provider": "ddev",
+            "runtime": {
+                "provider": "ddev",
+                "project_path": str(tmp_path),
+                "preview_url": "https://sports-preview.test/",
+                "gates": [
+                    {
+                        "name": "screenshot",
+                        "command": "chrome --screenshot={artifact_path} {preview_url}",
+                        "artifact_type": "screenshot",
+                        "artifact_path": str(screenshot),
+                    }
+                ],
+            },
+        },
+        gate_policy={"blocking_gates": ["screenshot"]},
+    )
+
+    async def fake_runner(_command: str, _cwd: str, _timeout: int) -> dict[str, Any]:
+        return {"exit_code": 0, "output": "claimed success"}
+
+    updated = await results.ingest_delivery_worker_result(
+        item["id"],
+        _valid_result(executed_gates=[], preview_url="", screenshots=[], traces=[]),
+        platform_runner=fake_runner,
+    )
+
+    assert updated["status"] == "blocked"
+    assert updated["status_reason"] == "blocking_gate_failed:screenshot"
+    assert updated["qa_evidence"]["complete"] is False
+    assert updated["qa_evidence"]["screenshots"] == []
