@@ -6,6 +6,7 @@ import { SiNotion } from "react-icons/si"
 
 import type { CurrentsConnectBody, SessionUser } from "@/lib/api"
 import { AppShell, SettingsRow, SettingsSection } from "@/components/AppShell"
+import { ProviderTokensSection } from "@/components/ProviderTokensSection"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
@@ -449,6 +450,8 @@ function MySettingsPage() {
       <CurrentsCredentialsSection />
 
       <NotionCredentialsSection />
+
+      <ProviderTokensSection />
 
       <SettingsSection title="Account">
         <SettingsRow

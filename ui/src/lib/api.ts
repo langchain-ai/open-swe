@@ -287,6 +287,25 @@ export interface NotionCredentialStatus {
   updated_at?: string | null
 }
 
+export type ProviderPATProvider = "github" | "linear"
+
+export interface ProviderPATStatus {
+  connected: boolean
+  login?: string
+  provider: ProviderPATProvider | string
+  token_last4?: string
+  created_at?: string | null
+  updated_at?: string | null
+}
+
+export interface ProviderPATUpdateBody {
+  token: string
+}
+
+export interface ProviderPATListPayload {
+  items: Array<ProviderPATStatus>
+}
+
 export interface UserMapping {
   github_login: string
   work_email: string
@@ -810,6 +829,28 @@ export const api = {
     request<NotionCredentialStatus>("/my-credentials/notion", {
       method: "DELETE",
     }),
+  listMyProviderTokens: () =>
+    request<ProviderPATListPayload>("/my-provider-tokens"),
+  getMyProviderToken: (provider: ProviderPATProvider) =>
+    request<ProviderPATStatus>(
+      `/my-provider-tokens/${encodeURIComponent(provider)}`
+    ),
+  saveMyProviderToken: (
+    provider: ProviderPATProvider,
+    body: ProviderPATUpdateBody
+  ) =>
+    request<ProviderPATStatus>(
+      `/my-provider-tokens/${encodeURIComponent(provider)}`,
+      {
+        method: "PUT",
+        body: JSON.stringify(body),
+      }
+    ),
+  revokeMyProviderToken: (provider: ProviderPATProvider) =>
+    request<ProviderPATStatus>(
+      `/my-provider-tokens/${encodeURIComponent(provider)}`,
+      { method: "DELETE" }
+    ),
   listDeliveryProjects: () =>
     request<{ items: Array<DeliveryProjectSummary> }>("/delivery-projects"),
   getDeliveryProjectReadiness: (projectId: string) =>
