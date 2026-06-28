@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any
@@ -24,6 +25,28 @@ WORKER_CONTRACT = (
     "so. Do not fold unrelated refactors into the patch. Finish with the cause, changed files, "
     "before-and-after proof, risks, and pull-request summary."
 )
+WORKER_OUTPUT_CONTRACT: dict[str, Any] = {
+    "required_fields": [
+        "cause",
+        "changed_files",
+        "before_proof",
+        "after_proof",
+        "executed_gates",
+        "risks",
+        "pull_request_summary",
+    ],
+    "before_after_proof_required": True,
+    "pull_request_required": True,
+}
+WORKER_INPUT_KEYS = {
+    "issue_context",
+    "project_profile",
+    "context_pack",
+    "sandbox_profile",
+    "gate_policy",
+    "credential_policy",
+    "output_contract",
+}
 
 
 def _client() -> Any:
@@ -60,6 +83,23 @@ def _list_value(record: Mapping[str, Any], key: str) -> list[Any]:
     return list(value) if isinstance(value, list) else []
 
 
+def _mapping_from(value: Any) -> dict[str, Any]:
+    return dict(value) if isinstance(value, Mapping) else {}
+
+
+def _slug(value: str) -> str:
+    cleaned = []
+    previous_dash = False
+    for char in value.strip().lower():
+        if char.isalnum():
+            cleaned.append(char)
+            previous_dash = False
+        elif not previous_dash:
+            cleaned.append("-")
+            previous_dash = True
+    return "".join(cleaned).strip("-") or "delivery-item"
+
+
 def _repo_from_item(item: Mapping[str, Any]) -> dict[str, str] | None:
     repo = item.get("repo")
     if isinstance(repo, dict):
@@ -81,6 +121,165 @@ def _worker_thread_id_for(item: Mapping[str, Any]) -> str:
     item_id = _first_text(item, "id", "dedupe_key")
     digest = hashlib.sha256(item_id.encode("utf-8")).hexdigest()[:16]
     return f"delivery-worker-{digest}"
+
+
+def _branch_policy(project: Mapping[str, Any]) -> dict[str, Any]:
+    return _mapping_from(project.get("branch_policy"))
+
+
+def _branch_for_item(item: Mapping[str, Any], project: Mapping[str, Any]) -> str:
+    existing = _first_text(item, "branch", "branch_name", "head_ref")
+    if existing:
+        return existing
+    policy = _branch_policy(project)
+    prefix = str(policy.get("branch_prefix") or "delivery").strip().strip("/")
+    source = (
+        _first_text(item, "external_work_item_id", "source_id")
+        or _first_text(item, "title")
+        or _first_text(item, "id", "dedupe_key")
+    )
+    return f"{prefix}/{_slug(source)}" if prefix else _slug(source)
+
+
+def _base_branch_for_item(item: Mapping[str, Any], project: Mapping[str, Any]) -> str:
+    return (
+        _first_text(item, "base_branch", "base_ref")
+        or str(_branch_policy(project).get("base_branch") or "main").strip()
+        or "main"
+    )
+
+
+def _worktree_for_item(
+    item: Mapping[str, Any],
+    project: Mapping[str, Any],
+    *,
+    worker_thread_id: str,
+    branch: str,
+    base_branch: str,
+) -> dict[str, Any]:
+    existing = _mapping_value(item, "worktree")
+    if existing:
+        return existing
+    sandbox_profile = {
+        **_mapping_from(project.get("sandbox_profile")),
+        **(_mapping_value(item, "sandbox_profile") or {}),
+    }
+    root = str(sandbox_profile.get("worktree_root") or "/tmp/open-swe-delivery-worktrees").strip()
+    return {
+        "path": f"{root.rstrip('/')}/{_slug(branch)}",
+        "branch": branch,
+        "base_branch": base_branch,
+        "isolated": True,
+        "worker_thread_id": worker_thread_id,
+        "source": "delivery_runner",
+    }
+
+
+def _sandbox_profile_for_item(
+    item: Mapping[str, Any],
+    project: Mapping[str, Any],
+    *,
+    worktree: Mapping[str, Any],
+) -> dict[str, Any]:
+    sandbox_profile = {
+        **_mapping_from(project.get("sandbox_profile")),
+        **(_mapping_value(item, "sandbox_profile") or {}),
+    }
+    return {**sandbox_profile, "worktree": dict(worktree)}
+
+
+def _credential_policy_for_item(
+    item: Mapping[str, Any], project: Mapping[str, Any]
+) -> dict[str, Any]:
+    policy = _mapping_value(item, "credential_policy") or _mapping_from(
+        project.get("credential_policy")
+    )
+    if not policy:
+        vcs = _mapping_from(project.get("vcs"))
+        policy = {
+            "provider": vcs.get("provider") or "github",
+            "scope": "user",
+            "requires_user_pat": True,
+        }
+    identity = _first_text(item, "credential_identity", "credentialIdentity")
+    if identity:
+        policy = {**policy, "identity": identity}
+    return policy
+
+
+def build_delivery_worker_input(
+    item: Mapping[str, Any],
+    project: Mapping[str, Any],
+    *,
+    worker_thread_id: str,
+) -> dict[str, Any]:
+    branch = _branch_for_item(item, project)
+    base_branch = _base_branch_for_item(item, project)
+    worktree = _worktree_for_item(
+        item,
+        project,
+        worker_thread_id=worker_thread_id,
+        branch=branch,
+        base_branch=base_branch,
+    )
+    repo = _repo_from_item(item)
+    vcs = _mapping_from(project.get("vcs"))
+    tracker = _mapping_from(project.get("tracker"))
+    if repo is None:
+        vcs_config = _mapping_from(vcs.get("config"))
+        owner = vcs_config.get("owner")
+        name = vcs_config.get("repo") or vcs_config.get("name")
+        if isinstance(owner, str) and owner and isinstance(name, str) and name:
+            repo = {"owner": owner, "name": name}
+    worker_input = {
+        "issue_context": {
+            "queue_item_id": _first_text(item, "id", "dedupe_key"),
+            "provider": _first_text(item, "provider", "source_provider"),
+            "external_work_item_id": _first_text(item, "external_work_item_id", "source_id"),
+            "title": _first_text(item, "title"),
+            "description": _first_text(item, "description", "body", "summary"),
+            "url": _first_text(item, "url", "html_url", "web_url"),
+            "repository": repo,
+            "branch": branch,
+            "base_branch": base_branch,
+            "delivery_mode": _first_text(item, "delivery_mode", "deliveryMode") or "pull_request",
+            "risk_class": _first_text(item, "risk_class", "riskClass") or "unknown",
+        },
+        "project_profile": {
+            "project_id": _first_text(project, "project_id") or _first_text(item, "project_id"),
+            "name": _first_text(project, "name"),
+            "tracker_provider": tracker.get("provider"),
+            "vcs_provider": vcs.get("provider"),
+            "repository": repo,
+            "branch_policy": _branch_policy(project),
+            "delivery_modes": list(project.get("delivery_modes") or []),
+        },
+        "context_pack": _mapping_value(item, "context_pack")
+        or _mapping_from(project.get("context_pack")),
+        "sandbox_profile": _sandbox_profile_for_item(item, project, worktree=worktree),
+        "gate_policy": _mapping_value(item, "gate_policy")
+        or _mapping_from(project.get("gate_policy")),
+        "credential_policy": _credential_policy_for_item(item, project),
+        "output_contract": dict(WORKER_OUTPUT_CONTRACT),
+    }
+    return worker_input
+
+
+def _item_with_worker_input(
+    item: Mapping[str, Any], worker_input: Mapping[str, Any]
+) -> dict[str, Any]:
+    issue_context = _mapping_from(worker_input.get("issue_context"))
+    sandbox_profile = _mapping_from(worker_input.get("sandbox_profile"))
+    return {
+        **dict(item),
+        "branch": issue_context.get("branch"),
+        "base_branch": issue_context.get("base_branch"),
+        "sandbox_profile": sandbox_profile,
+        "worktree": _mapping_from(sandbox_profile.get("worktree")),
+        "gate_policy": _mapping_from(worker_input.get("gate_policy")),
+        "credential_policy": _mapping_from(worker_input.get("credential_policy")),
+        "context_pack": _mapping_from(worker_input.get("context_pack")),
+    }
 
 
 def _run_id(run: Any) -> str | None:
@@ -165,11 +364,19 @@ def build_delivery_worker_metadata(
         metadata["repo"] = repo
         metadata["repo_owner"] = repo["owner"]
         metadata["repo_name"] = repo["name"]
+    sandbox_profile = _mapping_value(item, "sandbox_profile")
+    if sandbox_profile:
+        metadata["sandbox_profile"] = sandbox_profile
+    worktree = _mapping_value(item, "worktree")
+    if worktree:
+        metadata["worktree"] = worktree
     return metadata
 
 
 def build_delivery_worker_configurable(
-    item: Mapping[str, Any], worker_thread_id: str
+    item: Mapping[str, Any],
+    worker_thread_id: str,
+    worker_input: Mapping[str, Any],
 ) -> dict[str, Any]:
     repo = _repo_from_item(item)
     branch = _first_text(item, "branch", "branch_name", "head_ref")
@@ -181,6 +388,7 @@ def build_delivery_worker_configurable(
         "source_id": _first_text(item, "external_work_item_id", "source_id"),
         "delivery_mode": _first_text(item, "delivery_mode", "deliveryMode") or "pull_request",
         "risk_class": _first_text(item, "risk_class", "riskClass") or "unknown",
+        "delivery_worker_input": dict(worker_input),
     }
     if branch:
         configurable["branch_name"] = branch
@@ -234,30 +442,18 @@ def build_delivery_run_record(
     }
 
 
-def build_delivery_worker_prompt(item: Mapping[str, Any]) -> str:
-    repo = _repo_from_item(item)
-    repo_text = f"{repo['owner']}/{repo['name']}" if repo else "not provided"
-    title = (
-        _first_text(item, "title") or _first_text(item, "external_work_item_id") or "Delivery item"
-    )
-    description = _first_text(item, "description", "body", "summary")
-    branch = _first_text(item, "branch", "branch_name", "head_ref") or "not provided"
+def build_delivery_worker_prompt(worker_input: Mapping[str, Any]) -> str:
+    issue_context = _mapping_from(worker_input.get("issue_context"))
+    title = _first_text(issue_context, "title", "external_work_item_id") or "Delivery item"
     return "\n".join(
         [
             "Launch this queued delivery item as the implementation worker.",
             "",
-            f"Queue item: {_first_text(item, 'id', 'dedupe_key')}",
-            f"Source: {_first_text(item, 'provider', 'source_provider')} "
-            f"{_first_text(item, 'external_work_item_id', 'source_id')}",
-            f"Repository: {repo_text}",
-            f"Branch: {branch}",
-            f"Delivery mode: {_first_text(item, 'delivery_mode', 'deliveryMode') or 'pull_request'}",
-            f"Risk class: {_first_text(item, 'risk_class', 'riskClass') or 'unknown'}",
             "",
             f"Title: {title}",
             "",
-            "Description:",
-            description or "No additional description was provided.",
+            "Delivery context:",
+            json.dumps(worker_input, indent=2, sort_keys=True),
             "",
             WORKER_CONTRACT,
         ]
@@ -326,12 +522,14 @@ async def launch_delivery_worker(
             refused["active_run_status"] = active_run["status"]
         return refused
 
-    metadata = build_delivery_worker_metadata(item, worker_thread_id)
+    worker_input = build_delivery_worker_input(item, project, worker_thread_id=worker_thread_id)
+    launch_item = _item_with_worker_input(item, worker_input)
+    metadata = build_delivery_worker_metadata(launch_item, worker_thread_id)
     await _upsert_thread_metadata(client, worker_thread_id, metadata)
     run = await dispatch_agent_run(
         worker_thread_id,
-        build_delivery_worker_prompt(item),
-        build_delivery_worker_configurable(item, worker_thread_id),
+        build_delivery_worker_prompt(worker_input),
+        build_delivery_worker_configurable(launch_item, worker_thread_id, worker_input),
         source=DELIVERY_RUN_SOURCE,
         assistant_id="agent",
         metadata=metadata,
@@ -339,7 +537,7 @@ async def launch_delivery_worker(
     )
     run_id = _run_id(run)
     run_record = build_delivery_run_record(
-        item,
+        launch_item,
         worker_thread_id=worker_thread_id,
         run_id=run_id,
     )

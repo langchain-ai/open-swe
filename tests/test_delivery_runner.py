@@ -173,6 +173,38 @@ async def _queued_item(**overrides: Any) -> dict[str, Any]:
     return await queue.upsert_delivery_queue_item(payload, preflight=_ready_preflight())
 
 
+async def _stored_project(**overrides: Any) -> dict[str, Any]:
+    project = project_registry.default_delivery_project(
+        project_id="project-1",
+        name="Project One",
+        tracker_config={"project_id": "linear-project-1"},
+        vcs_config={"owner": "langchain-ai", "repo": "open-swe"},
+        branch_policy={
+            "base_branch": "main",
+            "branch_prefix": "delivery/project-1",
+            "draft_pull_requests": True,
+        },
+        sandbox_profile={
+            "provider": "langsmith",
+            "profile": "sports-cms",
+            "worktree_root": "/tmp/open-swe-delivery-tests",
+        },
+        gate_policy={
+            "agent_review": True,
+            "qa_evidence": True,
+            "blocking_gates": ["unit", "browser"],
+        },
+        context_pack={"documents": ["README.md"], "repositories": ["sports-cms"]},
+        credential_policy={
+            "provider": "github",
+            "scope": "user",
+            "requires_user_pat": True,
+        },
+    )
+    project.update(overrides)
+    return await project_registry.upsert_delivery_project(project)
+
+
 async def test_launch_delivery_worker_dispatches_agent_run(
     fake_client: _FakeClient,
     dispatch_recorder: _DispatchRecorder,
@@ -193,6 +225,58 @@ async def test_launch_delivery_worker_dispatches_agent_run(
     assert call["client"] is fake_client
     assert call["configurable"]["delivery_queue_item_id"] == record["id"]
     assert call["configurable"]["repo"] == {"owner": "langchain-ai", "name": "open-swe"}
+
+
+async def test_launch_delivery_worker_sends_only_allowed_worker_context_blocks(
+    fake_client: _FakeClient,
+    dispatch_recorder: _DispatchRecorder,
+) -> None:
+    await _stored_project()
+    record = await _queued_item(branch="", worktree=None)
+
+    result = await runner.launch_delivery_worker(record["id"], client=fake_client)
+
+    call = dispatch_recorder.calls[0]
+    worker_input = call["configurable"]["delivery_worker_input"]
+    assert set(worker_input) == runner.WORKER_INPUT_KEYS
+    assert worker_input["issue_context"] == {
+        "queue_item_id": record["id"],
+        "provider": "linear",
+        "external_work_item_id": "ENG-123",
+        "title": "Fix checkout totals",
+        "description": "Checkout totals drift after tax recalculation.",
+        "url": "",
+        "repository": {"owner": "langchain-ai", "name": "open-swe"},
+        "branch": "delivery/project-1/eng-123",
+        "base_branch": "main",
+        "delivery_mode": "pull_request",
+        "risk_class": "medium",
+    }
+    assert worker_input["project_profile"]["project_id"] == "project-1"
+    assert worker_input["project_profile"]["name"] == "Project One"
+    assert worker_input["context_pack"] == {
+        "documents": ["README.md"],
+        "repositories": ["sports-cms"],
+    }
+    assert worker_input["gate_policy"]["blocking_gates"] == ["unit", "browser"]
+    assert worker_input["credential_policy"] == {
+        "provider": "github",
+        "scope": "user",
+        "requires_user_pat": True,
+        "identity": "github:user:octocat",
+    }
+    assert worker_input["output_contract"] == runner.WORKER_OUTPUT_CONTRACT
+    assert worker_input["sandbox_profile"]["worktree"] == {
+        "path": "/tmp/open-swe-delivery-tests/delivery-project-1-eng-123",
+        "branch": "delivery/project-1/eng-123",
+        "base_branch": "main",
+        "isolated": True,
+        "worker_thread_id": result["worker_thread_id"],
+        "source": "delivery_runner",
+    }
+    assert "Delivery context:" in call["content"]
+    assert '"issue_context"' in call["content"]
+    assert '"output_contract"' in call["content"]
 
 
 async def test_launch_delivery_worker_refuses_duplicate_active_run(
@@ -297,6 +381,12 @@ async def test_launch_delivery_worker_writes_required_thread_metadata(
     assert metadata["credential_identity"] == "github:user:octocat"
     assert metadata["repo_owner"] == "langchain-ai"
     assert metadata["repo_name"] == "open-swe"
+    assert metadata["sandbox_profile"] == {
+        "provider": "langsmith",
+        "profile": "sports-cms",
+        "worktree": {"path": "/tmp/open-swe/worktrees/delivery-checkout-totals"},
+    }
+    assert metadata["worktree"] == {"path": "/tmp/open-swe/worktrees/delivery-checkout-totals"}
     assert metadata["delivery"] == {
         "queue_status": "running",
         "worker_thread_id": result["worker_thread_id"],
@@ -347,7 +437,11 @@ async def test_launch_delivery_worker_transitions_queue_status_to_running(
         "worker_thread_id": result["worker_thread_id"],
         "branch": "delivery/checkout-totals",
         "base_branch": "main",
-        "sandbox_profile": {"provider": "langsmith", "profile": "sports-cms"},
+        "sandbox_profile": {
+            "provider": "langsmith",
+            "profile": "sports-cms",
+            "worktree": {"path": "/tmp/open-swe/worktrees/delivery-checkout-totals"},
+        },
         "worktree": {"path": "/tmp/open-swe/worktrees/delivery-checkout-totals"},
         "model_snapshot": "openai:gpt-5",
         "credential_identity": "github:user:octocat",

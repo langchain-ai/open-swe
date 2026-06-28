@@ -183,6 +183,25 @@ async def test_branch_policy_storage_and_lookup(fake_client: _FakeClient) -> Non
     }
 
 
+async def test_worker_context_policy_storage(fake_client: _FakeClient) -> None:
+    project = _project("alpha", "Alpha")
+    project["context_pack"] = {"documents": ["README.md"], "repositories": ["alpha"]}
+    project["credential_policy"] = {
+        "provider": "github",
+        "scope": "user",
+        "requires_user_pat": True,
+    }
+
+    stored = await project_registry.upsert_delivery_project(project)
+
+    assert stored["context_pack"] == {"documents": ["README.md"], "repositories": ["alpha"]}
+    assert stored["credential_policy"] == {
+        "provider": "github",
+        "scope": "user",
+        "requires_user_pat": True,
+    }
+
+
 def test_default_sports_cms_project_profile_is_ready_for_v1_configuration() -> None:
     project = project_registry.default_sports_cms_delivery_project(
         tracker_config={"team_keys": ["ENG"], "linear_project_ids": ["project-linear-1"]},
@@ -203,6 +222,16 @@ def test_default_sports_cms_project_profile_is_ready_for_v1_configuration() -> N
     assert project["branch_policy"]["base_branch"] == "main"
     assert project["branch_policy"]["branch_prefix"] == "delivery/sports-cms"
     assert project["sandbox_profile"] == {"provider": "langsmith", "profile": "sports-cms"}
+    assert project["context_pack"] == {
+        "domains": ["drupal", "sdc", "frontend"],
+        "required_context": ["project_readme", "theme_components", "qa_gates"],
+    }
+    assert project["credential_policy"] == {
+        "provider": "github",
+        "scope": "user",
+        "requires_user_pat": True,
+        "allowed_actions": ["branch", "commit", "pull_request"],
+    }
     assert project["membership"] == {"users": []}
 
 

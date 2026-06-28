@@ -48,6 +48,15 @@ _DEFAULT_GATE_POLICY: dict[str, Any] = {
     "qa_evidence": True,
     "required_evidence": ["tests"],
 }
+_DEFAULT_CONTEXT_PACK: dict[str, Any] = {
+    "documents": [],
+    "repositories": [],
+}
+_DEFAULT_CREDENTIAL_POLICY: dict[str, Any] = {
+    "provider": "github",
+    "scope": "user",
+    "requires_user_pat": True,
+}
 _DEFAULT_MERGE_POLICY: dict[str, Any] = {
     "enabled": False,
     "strategy": "squash",
@@ -136,6 +145,8 @@ def default_delivery_project(
     sandbox_profile: Mapping[str, Any] | None = None,
     branch_policy: Mapping[str, Any] | None = None,
     gate_policy: Mapping[str, Any] | None = None,
+    context_pack: Mapping[str, Any] | None = None,
+    credential_policy: Mapping[str, Any] | None = None,
     merge_policy: Mapping[str, Any] | None = None,
     delivery_modes: list[str] | None = None,
     run_limits: Mapping[str, Any] | None = None,
@@ -154,6 +165,8 @@ def default_delivery_project(
         "sandbox_profile": deepcopy(dict(sandbox_profile or _DEFAULT_SANDBOX_PROFILE)),
         "branch_policy": deepcopy(dict(branch_policy or _DEFAULT_BRANCH_POLICY)),
         "gate_policy": deepcopy(dict(gate_policy or _DEFAULT_GATE_POLICY)),
+        "context_pack": deepcopy(dict(context_pack or _DEFAULT_CONTEXT_PACK)),
+        "credential_policy": deepcopy(dict(credential_policy or _DEFAULT_CREDENTIAL_POLICY)),
         "merge_policy": deepcopy(dict(merge_policy or _DEFAULT_MERGE_POLICY)),
         "delivery_modes": list(delivery_modes or ["queued_delivery"]),
         "run_limits": deepcopy(dict(run_limits or _DEFAULT_RUN_LIMITS)),
@@ -200,6 +213,16 @@ def default_sports_cms_delivery_project(
                 "pr_qa_evidence",
             ],
             "advisory_gates": ["phpcs", "phpstan", "phpunit"],
+        },
+        context_pack={
+            "domains": ["drupal", "sdc", "frontend"],
+            "required_context": ["project_readme", "theme_components", "qa_gates"],
+        },
+        credential_policy={
+            "provider": "github",
+            "scope": "user",
+            "requires_user_pat": True,
+            "allowed_actions": ["branch", "commit", "pull_request"],
         },
         membership=membership,
     )
@@ -283,6 +306,8 @@ def _apply_project_update(record: dict[str, Any], payload: Mapping[str, Any]) ->
         "queue_eligibility_policy",
         "branch_policy",
         "gate_policy",
+        "context_pack",
+        "credential_policy",
         "merge_policy",
         "run_limits",
         "membership",
