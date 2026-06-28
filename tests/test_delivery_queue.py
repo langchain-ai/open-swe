@@ -209,6 +209,16 @@ async def test_scheduler_dispatches_delivery_queue_poll(monkeypatch: pytest.Monk
     poll.assert_awaited_once_with()
 
 
+async def test_scheduler_dispatches_delivery_auto_tick(monkeypatch: pytest.MonkeyPatch) -> None:
+    tick = AsyncMock(return_value={"status": "completed", "launched": [{"item_id": "item-1"}]})
+    monkeypatch.setattr(scheduler, "delivery_auto_tick", tick)
+
+    result = await scheduler._launch({"task": "delivery_auto_tick"}, {"configurable": {}})
+
+    assert result == {"result": {"status": "completed", "launched": [{"item_id": "item-1"}]}}
+    tick.assert_awaited_once_with()
+
+
 async def test_ensure_delivery_queue_polling_cron_registers_five_minute_task(
     fake_client: _FakeClient,
 ) -> None:
@@ -233,6 +243,22 @@ async def test_ensure_delivery_queue_polling_cron_is_idempotent(
 
     assert second["cron_id"] == "cron_1"
     assert len(fake_client.crons.created) == 1
+
+
+async def test_ensure_delivery_auto_cron_registers_five_minute_task(
+    fake_client: _FakeClient,
+) -> None:
+    record = await scheduler.ensure_delivery_auto_cron()
+
+    assert record["cron_id"] == "cron_1"
+    assert record["schedule"] == "*/5 * * * *"
+    assert len(fake_client.crons.created) == 1
+    created = fake_client.crons.created[0]
+    assert created["assistant_id"] == "scheduler"
+    assert created["schedule"] == "*/5 * * * *"
+    assert created["input"] == {"task": "delivery_auto_tick"}
+    assert created["config"]["configurable"]["task"] == "delivery_auto_tick"
+    assert created["metadata"]["kind"] == "delivery_auto_tick"
 
 
 async def test_webapp_startup_ensures_delivery_queue_polling_cron(monkeypatch) -> None:  # noqa: ANN001
@@ -266,5 +292,40 @@ async def test_webapp_startup_can_disable_delivery_queue_polling_cron(monkeypatc
     monkeypatch.setattr(webapp, "ensure_delivery_queue_polling_cron", fake_ensure)
 
     await webapp._ensure_delivery_queue_polling_on_startup()
+
+    assert calls == []
+
+
+async def test_webapp_startup_ensures_delivery_auto_cron(monkeypatch) -> None:  # noqa: ANN001
+    from agent import webapp
+
+    calls: list[str] = []
+
+    async def fake_ensure(schedule: str) -> dict[str, Any]:
+        calls.append(schedule)
+        return {"cron_id": "cron_1", "schedule": schedule}
+
+    monkeypatch.setenv("DELIVERY_AUTO_MODE_ENABLED", "true")
+    monkeypatch.setenv("DELIVERY_AUTO_MODE_SCHEDULE", "*/5 * * * *")
+    monkeypatch.setattr(webapp, "ensure_delivery_auto_cron", fake_ensure)
+
+    await webapp._ensure_delivery_auto_on_startup()
+
+    assert calls == ["*/5 * * * *"]
+
+
+async def test_webapp_startup_can_disable_delivery_auto_cron(monkeypatch) -> None:  # noqa: ANN001
+    from agent import webapp
+
+    calls: list[str] = []
+
+    async def fake_ensure(schedule: str) -> dict[str, Any]:
+        calls.append(schedule)
+        return {"cron_id": "cron_1", "schedule": schedule}
+
+    monkeypatch.setenv("DELIVERY_AUTO_MODE_ENABLED", "false")
+    monkeypatch.setattr(webapp, "ensure_delivery_auto_cron", fake_ensure)
+
+    await webapp._ensure_delivery_auto_on_startup()
 
     assert calls == []
