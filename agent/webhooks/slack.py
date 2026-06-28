@@ -253,6 +253,7 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
                 run_id,
                 message_ts=trace_message_ts,
                 triggering_user_id=user_id,
+                trace_message_ts=trace_message_ts,
             )
     else:
         webapp.logger.info(

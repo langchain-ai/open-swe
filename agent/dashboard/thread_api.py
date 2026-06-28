@@ -19,6 +19,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from ..utils.langsmith import get_langsmith_trace_url
 from ..utils.sandbox import create_sandbox
+from ..utils.slack import lookup_slack_thread_run_mapping, update_slack_trace_reply_for_web_handoff
 from ..utils.thread_ops import (
     get_thread_active_status,
     langgraph_client,
@@ -1199,6 +1200,43 @@ async def _enrich_run_start_command(
     return command
 
 
+def _slack_thread_context(metadata: dict[str, Any]) -> dict[str, Any] | None:
+    source_context = metadata.get("source_context")
+    if not isinstance(source_context, dict):
+        return None
+    slack_thread = source_context.get("slack_thread")
+    return slack_thread if isinstance(slack_thread, dict) else None
+
+
+async def _notify_slack_web_handoff(thread_id: str, metadata: dict[str, Any], client: Any) -> None:
+    if metadata.get("source") != "slack":
+        return
+    slack_thread = _slack_thread_context(metadata)
+    if not slack_thread:
+        return
+    channel_id = slack_thread.get("channel_id")
+    thread_ts = slack_thread.get("thread_ts")
+    if not isinstance(channel_id, str) or not channel_id:
+        return
+    if not isinstance(thread_ts, str) or not thread_ts:
+        return
+
+    trace_message_ts = slack_thread.get("trace_message_ts")
+    if not isinstance(trace_message_ts, str) or not trace_message_ts:
+        mapping = await lookup_slack_thread_run_mapping(client, channel_id, thread_ts)
+        if isinstance(mapping, dict):
+            candidate = mapping.get("trace_message_ts")
+            if isinstance(candidate, str) and candidate:
+                trace_message_ts = candidate
+    if not isinstance(trace_message_ts, str) or not trace_message_ts:
+        logger.info(
+            "Skipping Slack web handoff update for thread %s: missing trace message ts", thread_id
+        )
+        return
+
+    await update_slack_trace_reply_for_web_handoff(channel_id, trace_message_ts, thread_id)
+
+
 async def send_dashboard_message(
     thread_id: str, login: str, body: ThreadMessageBody, *, email: str | None = None
 ) -> dict[str, Any]:
@@ -1214,6 +1252,7 @@ async def send_dashboard_message(
     prompt = f"{_attribution_prefix(metadata, login, email)}{body.content.strip()}"
     now_ms = _now_ms()
     chosen_model, chosen_effort = _normalize_model_choice(body.model_id, body.effort)
+    handoff_metadata = dict(metadata)
     metadata_update: dict[str, Any] = {
         "source": _DASHBOARD_SOURCE,
         "updated_at_ms": now_ms,
@@ -1246,6 +1285,10 @@ async def send_dashboard_message(
     queued = await queue_message_for_thread(thread_id, queue_payload)
     if not queued:
         raise HTTPException(502, "failed to queue follow-up message")
+    try:
+        await _notify_slack_web_handoff(thread_id, handoff_metadata, client)
+    except Exception:
+        logger.exception("Failed to update Slack message for dashboard handoff on %s", thread_id)
     thread = await client.threads.get(thread_id)
     return _thread_summary(
         thread if isinstance(thread, dict) else {"thread_id": thread_id, "metadata": metadata}

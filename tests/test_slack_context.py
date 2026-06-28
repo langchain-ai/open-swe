@@ -42,6 +42,22 @@ class _FakeClient:
         self.threads = threads_client
 
 
+class _FakeSlackMappingStore:
+    def __init__(self) -> None:
+        self.items: dict[tuple[tuple[str, ...], str], dict] = {}
+
+    async def put_item(self, namespace: tuple[str, ...], key: str, value: dict) -> None:
+        self.items[(namespace, key)] = {"value": value}
+
+    async def get_item(self, namespace: tuple[str, ...], key: str) -> dict | None:
+        return self.items.get((namespace, key))
+
+
+class _FakeSlackMappingClient:
+    def __init__(self) -> None:
+        self.store = _FakeSlackMappingStore()
+
+
 def test_generate_thread_id_from_slack_thread_is_deterministic() -> None:
     channel_id = "C12345"
     thread_ts = "1730900000.123456"
@@ -49,6 +65,31 @@ def test_generate_thread_id_from_slack_thread_is_deterministic() -> None:
     second = generate_thread_id_from_slack_thread(channel_id, thread_ts)
     assert first == second
     assert len(first) == 36
+
+
+@pytest.mark.asyncio
+async def test_slack_run_mapping_preserves_trace_message_ts() -> None:
+    client = _FakeSlackMappingClient()
+
+    await slack_utils.store_slack_run_mapping(
+        client,
+        "C123",
+        "1.0",
+        "run-1",
+        message_ts="1.1",
+        triggering_user_id="U123",
+        trace_message_ts="1.1",
+    )
+    await slack_utils.store_slack_message_run_mapping(client, "C123", "1.0", "1.2")
+
+    thread_mapping = await slack_utils.lookup_slack_thread_run_mapping(client, "C123", "1.0")
+    message_mapping = await slack_utils.lookup_slack_run_mapping(client, "C123", "1.2")
+    assert thread_mapping is not None
+    assert thread_mapping["trace_message_ts"] == "1.1"
+    assert thread_mapping["triggering_user_id"] == "U123"
+    assert message_mapping is not None
+    assert message_mapping["trace_message_ts"] == "1.1"
+    assert message_mapping["message_ts"] == "1.2"
 
 
 def test_select_slack_context_messages_uses_thread_start_when_no_prior_mention() -> None:
@@ -243,6 +284,60 @@ def test_post_slack_trace_reply_includes_trace_link_and_tip(
     assert any(tip in tip_line for tip in TRACE_REPLY_TIPS)
     assert posted[0]["unfurl_links"] is False
     assert posted[0]["unfurl_media"] is False
+
+
+def test_format_trace_reply_can_show_web_handoff_notice() -> None:
+    text = slack_utils._format_trace_reply(
+        "https://smith/x", "https://app.example.com/agents/thread-id", moved_to_web=True
+    )
+
+    head, _, notice_line = text.partition("\n")
+    assert (
+        head
+        == "<https://smith/x|View trace> • <https://app.example.com/agents/thread-id|Open in Web>"
+    )
+    assert "Conversation moved to Web" in notice_line
+    assert "Tip:" not in notice_line
+
+
+@pytest.mark.asyncio
+async def test_update_slack_trace_reply_for_web_handoff_updates_existing_message(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    updated: list[dict] = []
+
+    async def fake_update_slack_message(
+        channel_id: str,
+        message_ts: str,
+        text: str,
+        *,
+        unfurl_links: bool = True,
+        unfurl_media: bool = True,
+    ) -> tuple[bool, str | None]:
+        updated.append(
+            {
+                "channel_id": channel_id,
+                "message_ts": message_ts,
+                "text": text,
+                "unfurl_links": unfurl_links,
+                "unfurl_media": unfurl_media,
+            }
+        )
+        return True, None
+
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://app.example.com")
+    monkeypatch.setattr(slack_utils, "update_slack_message", fake_update_slack_message)
+    monkeypatch.setattr(slack_utils, "get_langsmith_trace_url", lambda thread_id: "https://smith/x")
+
+    ok = await slack_utils.update_slack_trace_reply_for_web_handoff("C123", "1.1", "thread-id")
+
+    assert ok is True
+    assert len(updated) == 1
+    assert updated[0]["channel_id"] == "C123"
+    assert updated[0]["message_ts"] == "1.1"
+    assert "Conversation moved to Web" in updated[0]["text"]
+    assert updated[0]["unfurl_links"] is False
+    assert updated[0]["unfurl_media"] is False
 
 
 def test_post_slack_trace_reply_can_skip_web_link(
