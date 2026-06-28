@@ -6,6 +6,7 @@ import pytest
 
 from agent import delivery_queue as queue
 from agent import delivery_runner as runner
+from agent import project_registry
 
 
 class _FakeStore:
@@ -123,6 +124,7 @@ class _DispatchRecorder:
 def fake_client(monkeypatch: pytest.MonkeyPatch) -> _FakeClient:
     client = _FakeClient()
     monkeypatch.setattr(queue, "_client", lambda: client)
+    monkeypatch.setattr(project_registry, "_client", lambda: client)
     return client
 
 
@@ -202,16 +204,28 @@ async def test_launch_delivery_worker_refuses_duplicate_active_run(
 
     result = await runner.launch_delivery_worker(record["id"], client=fake_client)
 
-    assert result == {
-        "status": "refused",
-        "reason": "duplicate_active_run",
-        "item_id": record["id"],
-        "worker_thread_id": "worker-existing",
-        "active_run_id": "run-active",
-        "active_run_status": "running",
-    }
+    assert result["status"] == "refused"
+    assert result["reason"] == "duplicate_active_run"
+    assert result["item_id"] == record["id"]
+    assert result["worker_thread_id"] == "worker-existing"
+    assert result["active_run_id"] == "run-active"
+    assert result["active_run_status"] == "running"
+    assert result["blockers"] == [
+        {
+            "code": "duplicate_active_run",
+            "message": "Another active run already exists for this work item.",
+        }
+    ]
     assert dispatch_recorder.calls == []
-    assert (await queue.read_delivery_queue_item(record["id"]))["status"] == "queued"
+    blocked = await queue.read_delivery_queue_item(record["id"])
+    assert blocked["status"] == "blocked"
+    assert blocked["status_reason"] == "start_preflight_failed"
+    assert blocked["blockers"] == [
+        {
+            "code": "duplicate_active_run",
+            "message": "Another active run already exists for this work item.",
+        }
+    ]
 
 
 async def test_launch_delivery_worker_refuses_not_queued_item(
@@ -229,6 +243,36 @@ async def test_launch_delivery_worker_refuses_not_queued_item(
         "current_status": "blocked",
     }
     assert dispatch_recorder.calls == []
+
+
+async def test_launch_delivery_worker_blocks_auto_mode_limit_before_dispatch(
+    fake_client: _FakeClient,
+    dispatch_recorder: _DispatchRecorder,
+) -> None:
+    record = await _queued_item()
+
+    result = await runner.launch_delivery_worker(
+        record["id"],
+        client=fake_client,
+        auto_mode={
+            "ready": False,
+            "blockers": [
+                {
+                    "code": "daily_budget",
+                    "message": "Daily Auto-Mode budget is exhausted.",
+                }
+            ],
+        },
+    )
+
+    blocked = await queue.read_delivery_queue_item(record["id"])
+    assert result["status"] == "refused"
+    assert result["reason"] == "daily_budget"
+    assert dispatch_recorder.calls == []
+    assert blocked["status"] == "blocked"
+    assert blocked["blockers"] == [
+        {"code": "daily_budget", "message": "Daily Auto-Mode budget is exhausted."}
+    ]
 
 
 async def test_launch_delivery_worker_writes_required_thread_metadata(

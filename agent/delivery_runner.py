@@ -7,6 +7,8 @@ from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any
 
+from . import project_registry
+from .delivery_preflight import block_delivery_start, evaluate_delivery_start_preflight
 from .delivery_queue import read_delivery_queue_item, transition_delivery_queue_status
 from .dispatch import dispatch_agent_run
 from .utils.thread_ops import langgraph_client
@@ -267,7 +269,26 @@ async def _upsert_thread_metadata(client: Any, thread_id: str, metadata: dict[st
     await client.threads.update(thread_id=thread_id, metadata=metadata)
 
 
-async def launch_delivery_worker(item_id: str, *, client: Any | None = None) -> dict[str, Any]:
+async def _project_for_item(item: Mapping[str, Any]) -> dict[str, Any]:
+    project_id = _first_text(item, "project_id")
+    project = await project_registry.get_delivery_project(project_id) if project_id else None
+    if project is not None:
+        return project
+    return {
+        "project_id": project_id,
+        "active": True,
+        "kill_switch": False,
+        "sandbox_profile": _mapping_value(item, "sandbox_profile"),
+    }
+
+
+async def launch_delivery_worker(
+    item_id: str,
+    *,
+    client: Any | None = None,
+    start_checks: Mapping[str, Any] | None = None,
+    auto_mode: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     item = await read_delivery_queue_item(item_id)
     if item is None:
         return {"status": "refused", "reason": "missing_queue_item", "item_id": item_id}
@@ -284,15 +305,26 @@ async def launch_delivery_worker(item_id: str, *, client: Any | None = None) -> 
     client = client or _client()
     worker_thread_id = _worker_thread_id_for(item)
     active_run = await _active_run(client, worker_thread_id)
-    if active_run is not None:
-        return {
+    project = await _project_for_item(item)
+    start_result = evaluate_delivery_start_preflight(
+        item,
+        project,
+        checks={**dict(start_checks or {}), "duplicate_active_run": active_run is not None},
+        auto_mode=auto_mode,
+    )
+    if not start_result["ready"]:
+        await block_delivery_start(item_id, start_result)
+        refused = {
             "status": "refused",
-            "reason": "duplicate_active_run",
+            "reason": start_result["blockers"][0]["code"],
             "item_id": item_id,
             "worker_thread_id": worker_thread_id,
-            "active_run_id": active_run["run_id"],
-            "active_run_status": active_run["status"],
+            "blockers": start_result["blockers"],
         }
+        if active_run is not None:
+            refused["active_run_id"] = active_run["run_id"]
+            refused["active_run_status"] = active_run["status"]
+        return refused
 
     metadata = build_delivery_worker_metadata(item, worker_thread_id)
     await _upsert_thread_metadata(client, worker_thread_id, metadata)
