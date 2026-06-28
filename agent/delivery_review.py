@@ -32,6 +32,12 @@ def _string(value: Any) -> str:
     return value.strip() if isinstance(value, str) and value.strip() else ""
 
 
+def _model_selection(item: Mapping[str, Any], role: str) -> dict[str, Any]:
+    snapshot = _mapping(item.get("model_routing_snapshot"))
+    roles = _mapping(snapshot.get("roles"))
+    return _mapping(roles.get(role))
+
+
 def _lower(value: Any) -> str:
     return value.lower() if isinstance(value, str) else ""
 
@@ -92,7 +98,7 @@ def _reviewer_configurable(
     reviewer_thread_id: str,
     qa_required: bool,
 ) -> dict[str, Any]:
-    return {
+    configurable = {
         "thread_id": reviewer_thread_id,
         "source": DELIVERY_REVIEW_SOURCE,
         "delivery_queue_item_id": _string(item.get("id")),
@@ -100,16 +106,28 @@ def _reviewer_configurable(
         "qa_required": qa_required,
         "review_context": _review_context(item),
     }
+    selection = _model_selection(item, "qa_reviewer")
+    if model_id := _string(selection.get("model_id")):
+        configurable["reviewer_model_id"] = model_id
+    if effort := _string(selection.get("effort")):
+        configurable["reviewer_effort"] = effort
+    return configurable
 
 
 def _qa_configurable(item: Mapping[str, Any], *, qa_thread_id: str) -> dict[str, Any]:
-    return {
+    configurable = {
         "thread_id": qa_thread_id,
         "source": DELIVERY_REVIEW_SOURCE,
         "delivery_queue_item_id": _string(item.get("id")),
         "worker_thread_id": _string(item.get("worker_thread_id")),
         "qa_context": _review_context(item),
     }
+    selection = _model_selection(item, "vision")
+    if model_id := _string(selection.get("model_id")):
+        configurable["agent_model_id"] = model_id
+    if effort := _string(selection.get("effort")):
+        configurable["agent_effort"] = effort
+    return configurable
 
 
 def _unresolved_blocking_finding(finding: Mapping[str, Any]) -> bool:
@@ -197,6 +215,8 @@ async def launch_delivery_review_checks(
             "qa_thread_id": qa_thread_id,
         },
     }
+    if model_routing_snapshot := _mapping(item.get("model_routing_snapshot")):
+        reviewer_metadata["model_routing_snapshot"] = model_routing_snapshot
     await _upsert_thread_metadata(client, reviewer_thread_id, reviewer_metadata)
     reviewer_run = await dispatch_agent_run(
         reviewer_thread_id,

@@ -713,6 +713,22 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         subagent_model_id = per_thread_model
         subagent_effort = per_thread_effort
 
+    per_thread_subagent_model = configurable.get("agent_subagent_model_id")
+    per_thread_subagent_effort = configurable.get("agent_subagent_effort")
+    if (
+        isinstance(per_thread_subagent_model, str)
+        and per_thread_subagent_model in SUPPORTED_MODEL_IDS
+        and isinstance(per_thread_subagent_effort, str)
+        and model_supports_effort(per_thread_subagent_model, per_thread_subagent_effort)
+    ):
+        logger.info(
+            "Applying per-thread subagent model override: model=%s effort=%s",
+            per_thread_subagent_model,
+            per_thread_subagent_effort,
+        )
+        subagent_model_id = per_thread_subagent_model
+        subagent_effort = per_thread_subagent_effort
+
     always_create_prs = profile_create_prs(profile)
     if always_create_prs:
         logger.info("Always Create PRs enabled by profile for %s", profile_login)

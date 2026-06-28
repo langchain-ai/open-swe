@@ -8,7 +8,7 @@ from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any
 
-from . import project_registry, project_secrets
+from . import project_model_routing, project_registry, project_secrets
 from .dashboard.provider_pat_vault import resolve_provider_pat
 from .delivery_preflight import block_delivery_start, evaluate_delivery_start_preflight
 from .delivery_queue import read_delivery_queue_item, transition_delivery_queue_status
@@ -273,6 +273,18 @@ async def _ai_hub_ready_for_project(project: Mapping[str, Any]) -> bool | None:
     return bool(result.get("ready"))
 
 
+def _model_routing_snapshot_for_project(project: Mapping[str, Any]) -> dict[str, Any]:
+    return project_model_routing.build_model_routing_snapshot(
+        project,
+        ("executor", "helper", "qa_reviewer", "vision", "fallback"),
+    )
+
+
+def _selection_from_snapshot(snapshot: Mapping[str, Any], role: str) -> dict[str, Any]:
+    roles = _mapping_from(snapshot.get("roles"))
+    return _mapping_from(roles.get(role))
+
+
 def build_delivery_worker_input(
     item: Mapping[str, Any],
     project: Mapping[str, Any],
@@ -435,6 +447,9 @@ def build_delivery_worker_metadata(
     credential_audit = _mapping_value(item, "credential_audit")
     if credential_audit:
         metadata["credential_audit"] = credential_audit
+    model_routing_snapshot = _mapping_value(item, "model_routing_snapshot")
+    if model_routing_snapshot:
+        metadata["model_routing_snapshot"] = model_routing_snapshot
     github_login = _first_text(item, "github_login", "created_by")
     if github_login:
         metadata["github_login"] = github_login
@@ -481,12 +496,25 @@ def build_delivery_worker_configurable(
         configurable["github_user_id"] = github_user_id
     if repo:
         configurable["repo"] = repo
-    agent_model_id = _first_text(item, "agent_model_id", "model_id")
+    model_routing_snapshot = _mapping_value(item, "model_routing_snapshot")
+    executor_model = _selection_from_snapshot(model_routing_snapshot or {}, "executor")
+    helper_model = _selection_from_snapshot(model_routing_snapshot or {}, "helper")
+    agent_model_id = _first_text(executor_model, "model_id") or _first_text(
+        item, "agent_model_id", "model_id"
+    )
     if agent_model_id:
         configurable["agent_model_id"] = agent_model_id
-    agent_effort = _first_text(item, "agent_effort", "effort")
+    agent_effort = _first_text(executor_model, "effort") or _first_text(
+        item, "agent_effort", "effort"
+    )
     if agent_effort:
         configurable["agent_effort"] = agent_effort
+    helper_model_id = _first_text(helper_model, "model_id")
+    if helper_model_id:
+        configurable["agent_subagent_model_id"] = helper_model_id
+    helper_effort = _first_text(helper_model, "effort")
+    if helper_effort:
+        configurable["agent_subagent_effort"] = helper_effort
     return configurable
 
 
@@ -497,7 +525,7 @@ def build_delivery_run_record(
     run_id: str | None,
 ) -> dict[str, Any]:
     branch = _first_text(item, "branch", "branch_name", "head_ref")
-    return {
+    record = {
         "run_id": run_id,
         "status": "running",
         "worker_thread_id": worker_thread_id,
@@ -519,6 +547,9 @@ def build_delivery_run_record(
         "artifacts": _list_value(item, "artifacts"),
         "blocker_reason": _first_text(item, "blocker_reason", "status_reason") or None,
     }
+    if model_routing_snapshot := _mapping_value(item, "model_routing_snapshot"):
+        record["model_routing_snapshot"] = model_routing_snapshot
+    return record
 
 
 def build_delivery_worker_prompt(worker_input: Mapping[str, Any]) -> str:
@@ -553,6 +584,7 @@ def _runtime_fields_for_item(item: Mapping[str, Any]) -> dict[str, Any]:
         "merge_policy",
         "credential_identity",
         "credential_audit",
+        "model_routing_snapshot",
     ):
         value = item.get(key)
         if value is not None:
@@ -614,11 +646,17 @@ async def launch_delivery_worker(
     ai_hub_ready = await _ai_hub_ready_for_project(project)
     if ai_hub_ready is not None:
         start_checks_payload["ai_hub_ready"] = ai_hub_ready
+    model_routing_result = project_model_routing.validate_project_model_routing(project)
+    if not model_routing_result["ready"]:
+        start_checks_payload["model_routing_invalid"] = True
+    model_routing_snapshot = _model_routing_snapshot_for_project(project)
     preflight_item = {
         **dict(item),
         **credential_updates,
         "credential_policy": credential_policy,
     }
+    if model_routing_snapshot.get("roles"):
+        preflight_item["model_routing_snapshot"] = model_routing_snapshot
     start_result = evaluate_delivery_start_preflight(
         preflight_item,
         project,

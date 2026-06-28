@@ -57,6 +57,9 @@ _DEFAULT_AI_HUB_POLICY: dict[str, Any] = {
     "environment": "default",
     "required_secrets": ["AI_HUB_BASE_URL", "AI_HUB_API_KEY"],
 }
+_DEFAULT_MODEL_ROUTING: dict[str, Any] = {
+    "roles": {},
+}
 _DEFAULT_CREDENTIAL_POLICY: dict[str, Any] = {
     "provider": "github",
     "scope": "user",
@@ -152,6 +155,7 @@ def default_delivery_project(
     gate_policy: Mapping[str, Any] | None = None,
     context_pack: Mapping[str, Any] | None = None,
     ai_hub_policy: Mapping[str, Any] | None = None,
+    model_routing: Mapping[str, Any] | None = None,
     credential_policy: Mapping[str, Any] | None = None,
     merge_policy: Mapping[str, Any] | None = None,
     delivery_modes: list[str] | None = None,
@@ -173,6 +177,7 @@ def default_delivery_project(
         "gate_policy": deepcopy(dict(gate_policy or _DEFAULT_GATE_POLICY)),
         "context_pack": deepcopy(dict(context_pack or _DEFAULT_CONTEXT_PACK)),
         "ai_hub_policy": deepcopy(dict(ai_hub_policy or _DEFAULT_AI_HUB_POLICY)),
+        "model_routing": deepcopy(dict(model_routing or _DEFAULT_MODEL_ROUTING)),
         "credential_policy": deepcopy(dict(credential_policy or _DEFAULT_CREDENTIAL_POLICY)),
         "merge_policy": deepcopy(dict(merge_policy or _DEFAULT_MERGE_POLICY)),
         "delivery_modes": list(delivery_modes or ["queued_delivery"]),
@@ -320,6 +325,7 @@ def _apply_project_update(record: dict[str, Any], payload: Mapping[str, Any]) ->
         "gate_policy",
         "context_pack",
         "ai_hub_policy",
+        "model_routing",
         "credential_policy",
         "merge_policy",
         "run_limits",
