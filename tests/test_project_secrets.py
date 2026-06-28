@@ -148,6 +148,48 @@ async def _project(project_id: str = "sports-cms", *, users: list[str] | None = 
     )
 
 
+async def test_delivery_project_list_is_scoped_to_project_members(
+    dashboard_client: TestClient,
+) -> None:
+    await _project("sports-cms", users=["octocat"])
+    await _project("solcom", users=["hubot"])
+
+    response = dashboard_client.get(
+        "/dashboard/api/delivery-projects",
+        headers={"Origin": "http://testserver"},
+        cookies=_session_cookie(login="octocat", email="octo@example.com"),
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert [item["project_id"] for item in payload["items"]] == ["sports-cms"]
+    project = payload["items"][0]
+    assert project["tracker"]["provider"] == "linear"
+    assert project["vcs"]["provider"] == "github"
+    assert project["member_logins"] == ["octocat"]
+
+
+async def test_admin_delivery_project_list_includes_all_projects(
+    dashboard_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("CONFIGURED_ADMINS", "admin@example.com")
+    await _project("sports-cms", users=["octocat"])
+    await _project("solcom", users=["hubot"])
+
+    response = dashboard_client.get(
+        "/dashboard/api/delivery-projects",
+        headers={"Origin": "http://testserver"},
+        cookies=_session_cookie(login="admin", email="admin@example.com"),
+    )
+
+    assert response.status_code == 200
+    assert sorted(item["project_id"] for item in response.json()["items"]) == [
+        "solcom",
+        "sports-cms",
+    ]
+
+
 def _ready_preflight() -> queue.PreflightInput:
     return {
         "active_project": True,
@@ -178,6 +220,34 @@ async def _queued_sports_item() -> dict[str, Any]:
         },
         preflight=_ready_preflight(),
     )
+
+
+async def test_delivery_project_list_includes_latest_runs(
+    dashboard_client: TestClient,
+) -> None:
+    await _project("sports-cms", users=["octocat"])
+    await _queued_sports_item()
+
+    response = dashboard_client.get(
+        "/dashboard/api/delivery-projects",
+        headers={"Origin": "http://testserver"},
+        cookies=_session_cookie(login="octocat", email="octo@example.com"),
+    )
+
+    assert response.status_code == 200
+    project = response.json()["items"][0]
+    assert project["latest_runs"] == [
+        {
+            "id": "sports-cms:linear:SPORT-123",
+            "status": "queued",
+            "title": "Fix Sports CMS teaser",
+            "provider": "linear",
+            "external_work_item_id": "SPORT-123",
+            "thread_id": None,
+            "pull_request_url": None,
+            "updated_at": project["latest_runs"][0]["updated_at"],
+        }
+    ]
 
 
 async def test_project_secrets_are_encrypted_and_scoped_by_project_environment(

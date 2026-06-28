@@ -197,6 +197,39 @@ export interface TeamSettings {
   updated_at?: string | null
 }
 
+export interface DeliveryProjectSummary {
+  project_id: string
+  name: string
+  active: boolean
+  kill_switch: boolean
+  tracker: {
+    provider?: string
+    config?: Record<string, unknown>
+  }
+  vcs: {
+    provider?: string
+    config?: Record<string, unknown>
+  }
+  queue_eligibility_policy: Record<string, unknown>
+  sandbox_profile: Record<string, unknown>
+  branch_policy: Record<string, unknown>
+  gate_policy: Record<string, unknown>
+  merge_policy: Record<string, unknown>
+  run_limits: Record<string, unknown>
+  member_logins: Array<string>
+  delivery_modes: Array<string>
+  latest_runs: Array<{
+    id?: string
+    status?: string
+    title?: string
+    provider?: string
+    external_work_item_id?: string
+    thread_id?: string
+    pull_request_url?: string
+    updated_at?: string
+  }>
+}
+
 export interface ProviderCredentialStatus {
   connected: boolean
   site?: string
@@ -760,6 +793,8 @@ export const api = {
     request<NotionCredentialStatus>("/my-credentials/notion", {
       method: "DELETE",
     }),
+  listDeliveryProjects: () =>
+    request<{ items: Array<DeliveryProjectSummary> }>("/delivery-projects"),
   listEnabledReviewRepos: () =>
     request<{ repos: Array<string> }>("/enabled-review-repos"),
   setEnabledReviewRepo: (full_name: string, enabled: boolean) =>

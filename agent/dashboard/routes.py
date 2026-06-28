@@ -12,7 +12,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from fastapi.responses import RedirectResponse, Response, StreamingResponse
 from pydantic import BaseModel
 
-from .. import project_registry, project_secrets
+from .. import delivery_queue, project_registry, project_secrets
 from .admin import is_admin
 from .agent_instructions import (
     AgentInstructionsCreate,
@@ -290,6 +290,74 @@ def _project_member_logins(project: dict[str, Any]) -> set[str]:
             if isinstance(login, str) and login.strip():
                 logins.add(login.strip().lower())
     return logins
+
+
+def _delivery_queue_summary(item: dict[str, Any]) -> dict[str, Any]:
+    work_item = item.get("work_item") if isinstance(item.get("work_item"), dict) else {}
+    delivery = item.get("delivery") if isinstance(item.get("delivery"), dict) else {}
+    return {
+        "id": item.get("id"),
+        "status": item.get("status"),
+        "title": item.get("title") or work_item.get("title"),
+        "provider": item.get("provider"),
+        "external_work_item_id": item.get("external_work_item_id"),
+        "thread_id": item.get("thread_id") or delivery.get("thread_id"),
+        "pull_request_url": item.get("pull_request_url")
+        or delivery.get("pull_request_url")
+        or delivery.get("pr_url"),
+        "updated_at": item.get("updated_at"),
+    }
+
+
+def _delivery_project_summary(
+    project: dict[str, Any],
+    *,
+    latest_runs: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    return {
+        "project_id": project.get("project_id"),
+        "name": project.get("name"),
+        "active": bool(project.get("active", True)),
+        "kill_switch": bool(project.get("kill_switch", False)),
+        "tracker": project.get("tracker") if isinstance(project.get("tracker"), dict) else {},
+        "vcs": project.get("vcs") if isinstance(project.get("vcs"), dict) else {},
+        "queue_eligibility_policy": (
+            project.get("queue_eligibility_policy")
+            if isinstance(project.get("queue_eligibility_policy"), dict)
+            else {}
+        ),
+        "sandbox_profile": (
+            project.get("sandbox_profile")
+            if isinstance(project.get("sandbox_profile"), dict)
+            else {}
+        ),
+        "branch_policy": (
+            project.get("branch_policy") if isinstance(project.get("branch_policy"), dict) else {}
+        ),
+        "gate_policy": (
+            project.get("gate_policy") if isinstance(project.get("gate_policy"), dict) else {}
+        ),
+        "merge_policy": (
+            project.get("merge_policy") if isinstance(project.get("merge_policy"), dict) else {}
+        ),
+        "run_limits": project.get("run_limits")
+        if isinstance(project.get("run_limits"), dict)
+        else {},
+        "member_logins": sorted(_project_member_logins(project)),
+        "delivery_modes": (
+            list(project.get("delivery_modes"))
+            if isinstance(project.get("delivery_modes"), list)
+            else []
+        ),
+        "latest_runs": [_delivery_queue_summary(item) for item in (latest_runs or [])],
+    }
+
+
+def _can_read_delivery_project(project: dict[str, Any], session: dict[str, Any]) -> bool:
+    if _session_is_admin(session):
+        return True
+    login = str(session.get("sub") or "").strip().lower()
+    return bool(login and login in _project_member_logins(project))
 
 
 async def _require_delivery_project_member(
@@ -649,6 +717,32 @@ async def api_delete_my_provider_token(
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
     return await revoke_provider_pat(session["sub"], provider=provider)
+
+
+@router.get("/delivery-projects")
+async def api_list_delivery_projects(
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, list[dict[str, Any]]]:
+    projects = await project_registry.list_delivery_projects()
+    readable_projects = [
+        project for project in projects if _can_read_delivery_project(project, session)
+    ]
+    latest_runs_by_project: dict[str, list[dict[str, Any]]] = {}
+    for project in readable_projects:
+        project_id = project.get("project_id")
+        if isinstance(project_id, str) and project_id:
+            latest_runs_by_project[project_id] = (
+                await delivery_queue.list_delivery_queue_items({"project_id": project_id})
+            )[:5]
+    return {
+        "items": [
+            _delivery_project_summary(
+                project,
+                latest_runs=latest_runs_by_project.get(str(project.get("project_id")), []),
+            )
+            for project in readable_projects
+        ]
+    }
 
 
 @router.get("/delivery-projects/{project_id}/secrets")

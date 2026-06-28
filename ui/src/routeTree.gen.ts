@@ -9,6 +9,7 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as WorkspacesRouteImport } from './routes/workspaces'
 import { Route as UsageRouteImport } from './routes/usage'
 import { Route as ReviewRouteImport } from './routes/review'
 import { Route as MySettingsRouteImport } from './routes/my-settings'
@@ -19,6 +20,7 @@ import { Route as AgentsRouteImport } from './routes/agents'
 import { Route as AdminRouteImport } from './routes/admin'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AgentsIndexRouteImport } from './routes/agents/index'
+import { Route as WorkspacesProjectIdRouteImport } from './routes/workspaces_.$projectId'
 import { Route as ReviewStylesRouteImport } from './routes/review_.styles'
 import { Route as AgentsSnapshotsRouteImport } from './routes/agents_.snapshots'
 import { Route as AgentsInstructionsRouteImport } from './routes/agents_.instructions'
@@ -33,6 +35,11 @@ import { Route as AgentsAutomationsScheduleIdRouteImport } from './routes/agents
 import { Route as AgentsThreadIdPlanRouteImport } from './routes/agents/$threadId_.plan'
 import { Route as AgentsReviewsOwnerRepoNumberRouteImport } from './routes/agents/reviews/$owner.$repo.$number'
 
+const WorkspacesRoute = WorkspacesRouteImport.update({
+  id: '/workspaces',
+  path: '/workspaces',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const UsageRoute = UsageRouteImport.update({
   id: '/usage',
   path: '/usage',
@@ -82,6 +89,11 @@ const AgentsIndexRoute = AgentsIndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => AgentsRoute,
+} as any)
+const WorkspacesProjectIdRoute = WorkspacesProjectIdRouteImport.update({
+  id: '/workspaces_/$projectId',
+  path: '/workspaces/$projectId',
+  getParentRoute: () => rootRouteImport,
 } as any)
 const ReviewStylesRoute = ReviewStylesRouteImport.update({
   id: '/review_/styles',
@@ -161,12 +173,14 @@ export interface FileRoutesByFullPath {
   '/my-settings': typeof MySettingsRoute
   '/review': typeof ReviewRoute
   '/usage': typeof UsageRoute
+  '/workspaces': typeof WorkspacesRoute
   '/admin/evals': typeof AdminEvalsRoute
   '/agents/$threadId': typeof AgentsThreadIdRoute
   '/agents/threads': typeof AgentsThreadsRoute
   '/agents/instructions': typeof AgentsInstructionsRoute
   '/agents/snapshots': typeof AgentsSnapshotsRoute
   '/review/styles': typeof ReviewStylesRoute
+  '/workspaces/$projectId': typeof WorkspacesProjectIdRoute
   '/agents/': typeof AgentsIndexRoute
   '/agents/$threadId/plan': typeof AgentsThreadIdPlanRoute
   '/agents/automations/$scheduleId': typeof AgentsAutomationsScheduleIdRoute
@@ -185,12 +199,14 @@ export interface FileRoutesByTo {
   '/my-settings': typeof MySettingsRoute
   '/review': typeof ReviewRoute
   '/usage': typeof UsageRoute
+  '/workspaces': typeof WorkspacesRoute
   '/admin/evals': typeof AdminEvalsRoute
   '/agents/$threadId': typeof AgentsThreadIdRoute
   '/agents/threads': typeof AgentsThreadsRoute
   '/agents/instructions': typeof AgentsInstructionsRoute
   '/agents/snapshots': typeof AgentsSnapshotsRoute
   '/review/styles': typeof ReviewStylesRoute
+  '/workspaces/$projectId': typeof WorkspacesProjectIdRoute
   '/agents': typeof AgentsIndexRoute
   '/agents/$threadId/plan': typeof AgentsThreadIdPlanRoute
   '/agents/automations/$scheduleId': typeof AgentsAutomationsScheduleIdRoute
@@ -211,12 +227,14 @@ export interface FileRoutesById {
   '/my-settings': typeof MySettingsRoute
   '/review': typeof ReviewRoute
   '/usage': typeof UsageRoute
+  '/workspaces': typeof WorkspacesRoute
   '/admin_/evals': typeof AdminEvalsRoute
   '/agents/$threadId': typeof AgentsThreadIdRoute
   '/agents/threads': typeof AgentsThreadsRoute
   '/agents_/instructions': typeof AgentsInstructionsRoute
   '/agents_/snapshots': typeof AgentsSnapshotsRoute
   '/review_/styles': typeof ReviewStylesRoute
+  '/workspaces_/$projectId': typeof WorkspacesProjectIdRoute
   '/agents/': typeof AgentsIndexRoute
   '/agents/$threadId_/plan': typeof AgentsThreadIdPlanRoute
   '/agents/automations/$scheduleId': typeof AgentsAutomationsScheduleIdRoute
@@ -238,12 +256,14 @@ export interface FileRouteTypes {
     | '/my-settings'
     | '/review'
     | '/usage'
+    | '/workspaces'
     | '/admin/evals'
     | '/agents/$threadId'
     | '/agents/threads'
     | '/agents/instructions'
     | '/agents/snapshots'
     | '/review/styles'
+    | '/workspaces/$projectId'
     | '/agents/'
     | '/agents/$threadId/plan'
     | '/agents/automations/$scheduleId'
@@ -262,12 +282,14 @@ export interface FileRouteTypes {
     | '/my-settings'
     | '/review'
     | '/usage'
+    | '/workspaces'
     | '/admin/evals'
     | '/agents/$threadId'
     | '/agents/threads'
     | '/agents/instructions'
     | '/agents/snapshots'
     | '/review/styles'
+    | '/workspaces/$projectId'
     | '/agents'
     | '/agents/$threadId/plan'
     | '/agents/automations/$scheduleId'
@@ -287,12 +309,14 @@ export interface FileRouteTypes {
     | '/my-settings'
     | '/review'
     | '/usage'
+    | '/workspaces'
     | '/admin_/evals'
     | '/agents/$threadId'
     | '/agents/threads'
     | '/agents_/instructions'
     | '/agents_/snapshots'
     | '/review_/styles'
+    | '/workspaces_/$projectId'
     | '/agents/'
     | '/agents/$threadId_/plan'
     | '/agents/automations/$scheduleId'
@@ -313,15 +337,24 @@ export interface RootRouteChildren {
   MySettingsRoute: typeof MySettingsRoute
   ReviewRoute: typeof ReviewRoute
   UsageRoute: typeof UsageRoute
+  WorkspacesRoute: typeof WorkspacesRoute
   AdminEvalsRoute: typeof AdminEvalsRoute
   AgentsInstructionsRoute: typeof AgentsInstructionsRoute
   AgentsSnapshotsRoute: typeof AgentsSnapshotsRoute
   ReviewStylesRoute: typeof ReviewStylesRoute
+  WorkspacesProjectIdRoute: typeof WorkspacesProjectIdRoute
   ReviewRepositoriesOwnerRoute: typeof ReviewRepositoriesOwnerRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/workspaces': {
+      id: '/workspaces'
+      path: '/workspaces'
+      fullPath: '/workspaces'
+      preLoaderRoute: typeof WorkspacesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/usage': {
       id: '/usage'
       path: '/usage'
@@ -391,6 +424,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/agents/'
       preLoaderRoute: typeof AgentsIndexRouteImport
       parentRoute: typeof AgentsRoute
+    }
+    '/workspaces_/$projectId': {
+      id: '/workspaces_/$projectId'
+      path: '/workspaces/$projectId'
+      fullPath: '/workspaces/$projectId'
+      preLoaderRoute: typeof WorkspacesProjectIdRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/review_/styles': {
       id: '/review_/styles'
@@ -523,10 +563,12 @@ const rootRouteChildren: RootRouteChildren = {
   MySettingsRoute: MySettingsRoute,
   ReviewRoute: ReviewRoute,
   UsageRoute: UsageRoute,
+  WorkspacesRoute: WorkspacesRoute,
   AdminEvalsRoute: AdminEvalsRoute,
   AgentsInstructionsRoute: AgentsInstructionsRoute,
   AgentsSnapshotsRoute: AgentsSnapshotsRoute,
   ReviewStylesRoute: ReviewStylesRoute,
+  WorkspacesProjectIdRoute: WorkspacesProjectIdRoute,
   ReviewRepositoriesOwnerRoute: ReviewRepositoriesOwnerRoute,
 }
 export const routeTree = rootRouteImport
