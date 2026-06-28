@@ -67,6 +67,10 @@ def _first_count(*sources_and_keys: tuple[Mapping[str, Any], tuple[str, ...]]) -
     return 0
 
 
+def _list(value: Any) -> list[Any]:
+    return list(value) if isinstance(value, list) else []
+
+
 def _gate_rollup(raw: Any) -> dict[str, Any] | None:
     if isinstance(raw, str) and raw.strip():
         return {"status": raw.strip(), "passed": 0, "failed": 0, "pending": 0, "total": 0}
@@ -93,6 +97,48 @@ def _first_gate_rollup(*sources: Mapping[str, Any]) -> dict[str, Any] | None:
         if gate:
             return gate
     return None
+
+
+def _artifact_rollup(store_record: Mapping[str, Any], delivery: Mapping[str, Any]) -> list[Any]:
+    worker_result = _mapping(store_record.get("worker_result"))
+    qa_evidence = _mapping(store_record.get("qa_evidence")) or _mapping(
+        worker_result.get("qa_evidence")
+    )
+    artifacts = [
+        *_list(store_record.get("artifacts")),
+        *_list(delivery.get("artifacts")),
+        *_list(qa_evidence.get("screenshots")),
+        *_list(qa_evidence.get("videos")),
+        *_list(qa_evidence.get("traces")),
+    ]
+    return artifacts
+
+
+def _gate_detail(store_record: Mapping[str, Any], delivery: Mapping[str, Any]) -> list[Any]:
+    qa_evidence = _mapping(store_record.get("qa_evidence"))
+    gates = _list(store_record.get("gates")) or _list(qa_evidence.get("gates"))
+    return gates or _list(delivery.get("gates"))
+
+
+def _blockers(store_record: Mapping[str, Any], delivery: Mapping[str, Any]) -> list[Any]:
+    qa_evidence = _mapping(store_record.get("qa_evidence"))
+    review_result = _mapping(store_record.get("review_result"))
+    blockers = (
+        _list(store_record.get("blockers"))
+        or _list(qa_evidence.get("blockers"))
+        or _list(review_result.get("blockers"))
+    )
+    return blockers or _list(delivery.get("blockers"))
+
+
+def _merge_result(
+    store_record: Mapping[str, Any], delivery: Mapping[str, Any]
+) -> Mapping[str, Any] | None:
+    merge_audit = _mapping(store_record.get("merge_audit")) or _mapping(delivery.get("merge_audit"))
+    if merge_audit:
+        return merge_audit
+    provider = _mapping(store_record.get("merge_result")) or _mapping(delivery.get("merge_result"))
+    return provider or None
 
 
 def _pr_rollup(
@@ -164,7 +210,7 @@ def build_delivery_run_rollup(
 
     return {
         "queueStatus": _first_string(
-            (store, ("queue_status", "queueStatus")),
+            (store, ("queue_status", "queueStatus", "status")),
             (delivery, ("queue_status", "queueStatus")),
             (metadata, ("delivery_queue_status", "queue_status")),
         ),
@@ -189,6 +235,17 @@ def build_delivery_run_rollup(
             (metadata, ("merge_worker_thread_id", "merge_worker")),
         ),
         "pr": _pr_rollup(metadata, delivery, store),
+        "branch": _first_string(
+            (store, ("branch", "branch_name", "head_ref")),
+            (delivery, ("branch", "branch_name", "head_ref")),
+            (metadata, ("branch_name",)),
+        ),
+        "previewUrl": _first_string(
+            (_mapping(store.get("qa_evidence")), ("preview_url", "previewUrl")),
+            (store, ("preview_url", "previewUrl")),
+            (delivery, ("preview_url", "previewUrl")),
+            (metadata, ("preview_url",)),
+        ),
         "previewCount": _first_count(
             (store, ("preview_count", "previewCount")),
             (delivery, ("preview_count", "previewCount")),
@@ -200,6 +257,9 @@ def build_delivery_run_rollup(
             (metadata, ("artifact_count",)),
         ),
         "gateRollup": _first_gate_rollup(store, delivery, metadata),
+        "gates": _gate_detail(store, delivery),
+        "artifacts": _artifact_rollup(store, delivery),
+        "blockers": _blockers(store, delivery),
         "blockerReason": _first_string(
             (store, ("blocker_reason", "blockerReason")),
             (delivery, ("blocker_reason", "blockerReason")),
@@ -215,4 +275,5 @@ def build_delivery_run_rollup(
             (delivery, ("merge_status", "mergeStatus")),
             (metadata, ("merge_status",)),
         ),
+        "mergeResult": _merge_result(store, delivery),
     }

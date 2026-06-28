@@ -17,6 +17,7 @@ from fastapi import HTTPException
 from langchain_core.messages.content import create_image_block
 from pydantic import BaseModel, ConfigDict, Field
 
+from ..delivery_queue import read_delivery_queue_item
 from ..utils.langsmith import get_langsmith_trace_url
 from ..utils.sandbox import create_sandbox
 from ..utils.thread_ops import (
@@ -332,6 +333,7 @@ def _thread_summary(
     latest_run_id: str | None = None,
     owner_login: str | None = None,
     owner_email: str | None = None,
+    delivery_store_record: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     metadata = thread.get("metadata") if isinstance(thread.get("metadata"), dict) else {}
     owner, name, full_name = _metadata_repo(metadata)
@@ -400,13 +402,36 @@ def _thread_summary(
             "additions": int(diff_stats.get("additions") or 0),
             "deletions": int(diff_stats.get("deletions") or 0),
         }
-    delivery = build_delivery_run_rollup(metadata)
+    delivery = build_delivery_run_rollup(metadata, store_record=delivery_store_record)
     if delivery:
         summary["delivery"] = delivery
     # The transcript hydrates client-side from the SDK (`GET …/state` →
     # `stream.messages`); the summary only carries metadata.
     summary["messages"] = []
     return summary
+
+
+def _delivery_queue_item_id(metadata: dict[str, Any]) -> str:
+    value = metadata.get("delivery_queue_item_id")
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    delivery = metadata.get("delivery")
+    if isinstance(delivery, dict):
+        nested = delivery.get("queue_item_id") or delivery.get("delivery_queue_item_id")
+        if isinstance(nested, str) and nested.strip():
+            return nested.strip()
+    return ""
+
+
+async def _delivery_store_record(metadata: dict[str, Any]) -> dict[str, Any] | None:
+    item_id = _delivery_queue_item_id(metadata)
+    if not item_id:
+        return None
+    try:
+        return await read_delivery_queue_item(item_id)
+    except Exception:  # noqa: BLE001
+        logger.debug("Could not load delivery queue item %s", item_id, exc_info=True)
+        return None
 
 
 async def _latest_run_info(client: Any, thread_id: str) -> tuple[str | None, str | None]:
@@ -592,12 +617,15 @@ async def _summarize_thread(
         thread, latest_run_status, latest_run_id = await _refresh_latest_run_metadata(
             client, thread
         )
+    metadata = thread.get("metadata") if isinstance(thread.get("metadata"), dict) else {}
+    delivery_store_record = await _delivery_store_record(metadata)
     return _thread_summary(
         thread,
         latest_run_status=latest_run_status,
         latest_run_id=latest_run_id,
         owner_login=owner_login,
         owner_email=owner_email,
+        delivery_store_record=delivery_store_record,
     )
 
 
@@ -904,6 +932,7 @@ async def get_dashboard_thread(
         latest_run_id=latest_run_id,
         owner_login=login,
         owner_email=email,
+        delivery_store_record=await _delivery_store_record(metadata),
     )
 
 

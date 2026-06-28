@@ -199,12 +199,18 @@ export interface DeliveryRunRollup {
   qaThreadId: string | null
   mergeWorkerThreadId: string | null
   pr: AgentThreadPr | null
+  branch: string | null
+  previewUrl: string | null
   previewCount: number
   artifactCount: number
   gateRollup: DeliveryGateRollup | null
+  gates: Array<Record<string, unknown>>
+  artifacts: Array<unknown>
+  blockers: Array<unknown>
   blockerReason: string | null
   reviewedSha: string | null
   mergeStatus: string | null
+  mergeResult: Record<string, unknown> | null
 }
 
 export interface AgentThread {

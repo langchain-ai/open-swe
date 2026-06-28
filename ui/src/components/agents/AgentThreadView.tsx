@@ -1,7 +1,14 @@
 import { useCallback, useMemo, useState } from "react"
 import { Link } from "@tanstack/react-router"
 import { useStreamContext as useAgentThreadStream } from "@langchain/react"
-import { Map as MapIcon } from "lucide-react"
+import {
+  ExternalLink,
+  GitBranch,
+  GitPullRequest,
+  Map as MapIcon,
+  ShieldCheck,
+} from "lucide-react"
+import type { ReactNode } from "react"
 
 import type { AgentThread, Message } from "@/lib/agents/types"
 import type { ModelSelection } from "@/lib/agents/provider/useModelOptions"
@@ -112,6 +119,7 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
               </span>
             </Link>
           )}
+        {thread.delivery && <DeliveryRunPanel delivery={thread.delivery} />}
         {hasMessages ? (
           <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
             <Messages
@@ -183,5 +191,125 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
         onCollapsedChange={handlePanelCollapsedChange}
       />
     </div>
+  )
+}
+
+type DeliveryRun = NonNullable<AgentThread["delivery"]>
+
+function toneClass(value: string | null | undefined): string {
+  const status = value?.toLowerCase()
+  if (!status) return "border-[var(--ui-border)] text-[var(--ui-text-dim)]"
+  if (["blocked", "failed", "failure", "error"].includes(status)) {
+    return "border-[var(--ui-danger)]/35 text-[var(--ui-danger)]"
+  }
+  if (["review", "passed", "success", "merged", "done"].includes(status)) {
+    return "border-[var(--ui-success)]/35 text-[var(--ui-success)]"
+  }
+  return "border-[var(--ui-border)] text-[var(--ui-text-muted)]"
+}
+
+function shortId(value: string): string {
+  return value.length > 12 ? value.slice(0, 12) : value
+}
+
+function DeliveryPill({
+  children,
+  tone,
+  title,
+}: {
+  children: ReactNode
+  tone?: string
+  title?: string
+}) {
+  return (
+    <span
+      className={cn(
+        "inline-flex min-h-6 max-w-full items-center gap-1 rounded-md border bg-[var(--ui-panel)] px-2 text-[11px] leading-5",
+        tone
+      )}
+      title={title}
+    >
+      {children}
+    </span>
+  )
+}
+
+function DeliveryRunPanel({ delivery }: { delivery: DeliveryRun }) {
+  const deliveryThreads = [
+    ["Worker", delivery.workerThreadId],
+    ["Review", delivery.reviewerThreadId],
+    ["QA", delivery.qaThreadId],
+    ["Merge", delivery.mergeWorkerThreadId],
+  ].filter((entry): entry is [string, string] => Boolean(entry[1]))
+  const gateLabel = delivery.gateRollup
+    ? `${delivery.gateRollup.status} ${delivery.gateRollup.passed}/${delivery.gateRollup.total}`
+    : "unknown"
+
+  return (
+    <section className="border-b border-[var(--ui-border)] bg-[var(--ui-panel)] px-4 py-2">
+      <div className="mx-auto flex max-w-3xl flex-col gap-2">
+        <div className="flex min-w-0 flex-wrap items-center gap-1.5 text-[11px] text-[var(--ui-text-dim)]">
+          <DeliveryPill tone={toneClass(delivery.queueStatus)}>
+            Queue {delivery.queueStatus ?? "unknown"}
+          </DeliveryPill>
+          {delivery.branch && (
+            <DeliveryPill title={delivery.branch}>
+              <GitBranch className="size-3" />
+              <span className="max-w-56 truncate">{delivery.branch}</span>
+            </DeliveryPill>
+          )}
+          {delivery.pr && (
+            <a
+              href={delivery.pr.url}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex min-h-6 max-w-full items-center gap-1 rounded-md border border-[var(--ui-border)] bg-[var(--ui-panel)] px-2 text-[11px] leading-5 text-[var(--ui-text-muted)] hover:text-[var(--ui-text)]"
+            >
+              <GitPullRequest className="size-3" />
+              PR #{delivery.pr.number}
+              <ExternalLink className="size-3" />
+            </a>
+          )}
+          {delivery.previewUrl && (
+            <a
+              href={delivery.previewUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex min-h-6 max-w-full items-center gap-1 rounded-md border border-[var(--ui-border)] bg-[var(--ui-panel)] px-2 text-[11px] leading-5 text-[var(--ui-text-muted)] hover:text-[var(--ui-text)]"
+            >
+              Preview
+              <ExternalLink className="size-3" />
+            </a>
+          )}
+          <DeliveryPill tone={toneClass(delivery.gateRollup?.status)}>
+            <ShieldCheck className="size-3" />
+            Gates {gateLabel}
+          </DeliveryPill>
+          {delivery.mergeStatus && (
+            <DeliveryPill tone={toneClass(delivery.mergeStatus)}>
+              Merge {delivery.mergeStatus}
+            </DeliveryPill>
+          )}
+          {delivery.reviewedSha && (
+            <DeliveryPill title={delivery.reviewedSha}>
+              Reviewed {shortId(delivery.reviewedSha)}
+            </DeliveryPill>
+          )}
+          {deliveryThreads.map(([label, threadId]) => (
+            <DeliveryPill key={label} title={threadId}>
+              {label} {shortId(threadId)}
+            </DeliveryPill>
+          ))}
+          {delivery.artifactCount > 0 && (
+            <DeliveryPill>{delivery.artifactCount} artifacts</DeliveryPill>
+          )}
+        </div>
+        {delivery.blockerReason && (
+          <div className="truncate text-[11px] text-[var(--ui-danger)]">
+            Blocked: {delivery.blockerReason}
+          </div>
+        )}
+      </div>
+    </section>
   )
 }
