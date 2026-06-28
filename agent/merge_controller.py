@@ -52,6 +52,7 @@ def evaluate_auto_merge(
     credential_available: bool,
     kill_switch: bool,
     merge_method: str = "squash",
+    target_branch: str | None = None,
 ) -> MergeDecision:
     """Return a fail-closed, deterministic auto-merge decision for one PR snapshot."""
     blockers: list[str] = []
@@ -72,6 +73,8 @@ def evaluate_auto_merge(
         blockers.append("review_threads_not_distinct")
     if not reviewed_sha or not head_sha or reviewed_sha != head_sha:
         blockers.append("reviewed_sha_mismatch")
+    if target_branch and _pr_base_ref(pr) != target_branch:
+        blockers.append("target_branch_mismatch")
 
     for index, gate in enumerate(qa_checks):
         if not _gate_passed(gate):
@@ -162,6 +165,19 @@ def _pr_head_sha(pr: Mapping[str, Any]) -> str:
 def _pr_number(pr: Mapping[str, Any]) -> int | None:
     number = pr.get("number")
     return number if isinstance(number, int) else None
+
+
+def _pr_base_ref(pr: Mapping[str, Any]) -> str:
+    base = pr.get("base")
+    if isinstance(base, Mapping):
+        ref = base.get("ref")
+        if isinstance(ref, str) and ref:
+            return ref
+    for key in ("base_ref", "target_branch"):
+        value = pr.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return ""
 
 
 def _lower(value: Any) -> str:
