@@ -52,6 +52,11 @@ _DEFAULT_CONTEXT_PACK: dict[str, Any] = {
     "documents": [],
     "repositories": [],
 }
+_DEFAULT_AI_HUB_POLICY: dict[str, Any] = {
+    "enabled": False,
+    "environment": "default",
+    "required_secrets": ["AI_HUB_BASE_URL", "AI_HUB_API_KEY"],
+}
 _DEFAULT_CREDENTIAL_POLICY: dict[str, Any] = {
     "provider": "github",
     "scope": "user",
@@ -146,6 +151,7 @@ def default_delivery_project(
     branch_policy: Mapping[str, Any] | None = None,
     gate_policy: Mapping[str, Any] | None = None,
     context_pack: Mapping[str, Any] | None = None,
+    ai_hub_policy: Mapping[str, Any] | None = None,
     credential_policy: Mapping[str, Any] | None = None,
     merge_policy: Mapping[str, Any] | None = None,
     delivery_modes: list[str] | None = None,
@@ -166,6 +172,7 @@ def default_delivery_project(
         "branch_policy": deepcopy(dict(branch_policy or _DEFAULT_BRANCH_POLICY)),
         "gate_policy": deepcopy(dict(gate_policy or _DEFAULT_GATE_POLICY)),
         "context_pack": deepcopy(dict(context_pack or _DEFAULT_CONTEXT_PACK)),
+        "ai_hub_policy": deepcopy(dict(ai_hub_policy or _DEFAULT_AI_HUB_POLICY)),
         "credential_policy": deepcopy(dict(credential_policy or _DEFAULT_CREDENTIAL_POLICY)),
         "merge_policy": deepcopy(dict(merge_policy or _DEFAULT_MERGE_POLICY)),
         "delivery_modes": list(delivery_modes or ["queued_delivery"]),
@@ -217,6 +224,11 @@ def default_sports_cms_delivery_project(
         context_pack={
             "domains": ["drupal", "sdc", "frontend"],
             "required_context": ["project_readme", "theme_components", "qa_gates"],
+        },
+        ai_hub_policy={
+            "enabled": True,
+            "environment": "default",
+            "required_secrets": ["AI_HUB_BASE_URL", "AI_HUB_API_KEY"],
         },
         credential_policy={
             "provider": "github",
@@ -307,6 +319,7 @@ def _apply_project_update(record: dict[str, Any], payload: Mapping[str, Any]) ->
         "branch_policy",
         "gate_policy",
         "context_pack",
+        "ai_hub_policy",
         "credential_policy",
         "merge_policy",
         "run_limits",

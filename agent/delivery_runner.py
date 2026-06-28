@@ -8,7 +8,7 @@ from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any
 
-from . import project_registry
+from . import project_registry, project_secrets
 from .dashboard.provider_pat_vault import resolve_provider_pat
 from .delivery_preflight import block_delivery_start, evaluate_delivery_start_preflight
 from .delivery_queue import read_delivery_queue_item, transition_delivery_queue_status
@@ -260,6 +260,17 @@ async def _resolve_user_pat_for_preflight(
             "token_last4": resolved.token_last4,
         },
     }
+
+
+async def _ai_hub_ready_for_project(project: Mapping[str, Any]) -> bool | None:
+    policy = _mapping_from(project.get("ai_hub_policy"))
+    if policy.get("enabled") is not True:
+        return None
+    result = await project_secrets.evaluate_ai_hub_readiness(
+        _first_text(project, "project_id"),
+        environment=str(policy.get("environment") or project_secrets.DEFAULT_AI_HUB_ENVIRONMENT),
+    )
+    return bool(result.get("ready"))
 
 
 def build_delivery_worker_input(
@@ -600,6 +611,9 @@ async def launch_delivery_worker(
     start_checks_payload = dict(start_checks or {})
     if credential_ready is not None:
         start_checks_payload["github_credentials"] = credential_ready
+    ai_hub_ready = await _ai_hub_ready_for_project(project)
+    if ai_hub_ready is not None:
+        start_checks_payload["ai_hub_ready"] = ai_hub_ready
     preflight_item = {
         **dict(item),
         **credential_updates,

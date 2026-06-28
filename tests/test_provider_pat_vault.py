@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 
 from agent import delivery_queue as queue
 from agent import delivery_runner as runner
-from agent import project_registry
+from agent import project_registry, project_secrets
 from agent.dashboard import oauth, provider_pat_vault, routes
 
 _TEST_SECRET = "test-secret-with-at-least-thirty-two-bytes"
@@ -123,6 +123,7 @@ def fake_client(monkeypatch: pytest.MonkeyPatch) -> _FakeClient:
     monkeypatch.setattr(provider_pat_vault, "_client", lambda: client)
     monkeypatch.setattr(queue, "_client", lambda: client)
     monkeypatch.setattr(project_registry, "_client", lambda: client)
+    monkeypatch.setattr(project_secrets, "_client", lambda: client)
     return client
 
 
@@ -177,12 +178,12 @@ async def _queued_item(**overrides: Any) -> dict[str, Any]:
 
 
 async def _stored_project() -> dict[str, Any]:
-    return await project_registry.upsert_delivery_project(
-        project_registry.default_sports_cms_delivery_project(
-            tracker_config={"project_ids": ["linear-sports"]},
-            vcs_config={"owner": "example", "repo": "sports-cms"},
-        )
+    project = project_registry.default_sports_cms_delivery_project(
+        tracker_config={"project_ids": ["linear-sports"]},
+        vcs_config={"owner": "example", "repo": "sports-cms"},
     )
+    project["ai_hub_policy"] = {"enabled": False, "environment": "default"}
+    return await project_registry.upsert_delivery_project(project)
 
 
 async def test_user_can_create_update_revoke_and_inspect_redacted_pat(

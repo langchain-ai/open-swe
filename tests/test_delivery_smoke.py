@@ -8,7 +8,7 @@ from agent import delivery_queue as queue
 from agent import delivery_review as review
 from agent import delivery_runner as runner
 from agent import delivery_smoke as smoke
-from agent import project_registry
+from agent import project_registry, project_secrets
 from agent.dashboard import provider_pat_vault
 from agent.merge_controller import MergeResult
 
@@ -145,6 +145,7 @@ def fake_client(monkeypatch: pytest.MonkeyPatch) -> _FakeClient:
     client = _FakeClient()
     monkeypatch.setattr(queue, "_client", lambda: client)
     monkeypatch.setattr(project_registry, "_client", lambda: client)
+    monkeypatch.setattr(project_secrets, "_client", lambda: client)
     monkeypatch.setattr(provider_pat_vault, "_client", lambda: client)
     monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", Fernet.generate_key().decode())
     return client
@@ -245,6 +246,20 @@ async def test_sports_cms_smoke_drives_linear_item_to_auto_merge(
         provider="github",
         token="ghp_sports-cms-token-1234",
     )
+    await project_secrets.upsert_project_secret(
+        "sports-cms",
+        environment="default",
+        name="AI_HUB_BASE_URL",
+        value="https://ai-hub.example/v1",
+        updated_by="octocat",
+    )
+    await project_secrets.upsert_project_secret(
+        "sports-cms",
+        environment="default",
+        name="AI_HUB_API_KEY",
+        value="valid-key",
+        updated_by="octocat",
+    )
     linear_client = _FakeLinearClient([_issue()])
     merge_recorder = _MergeRecorder(MergeResult(True, "merged", "merged", sha="merge-sha"))
 
@@ -302,6 +317,20 @@ async def test_sports_cms_smoke_blocks_before_merge_without_draft_pr_proof(
         "octocat",
         provider="github",
         token="ghp_sports-cms-token-1234",
+    )
+    await project_secrets.upsert_project_secret(
+        "sports-cms",
+        environment="default",
+        name="AI_HUB_BASE_URL",
+        value="https://ai-hub.example/v1",
+        updated_by="octocat",
+    )
+    await project_secrets.upsert_project_secret(
+        "sports-cms",
+        environment="default",
+        name="AI_HUB_API_KEY",
+        value="valid-key",
+        updated_by="octocat",
     )
     linear_client = _FakeLinearClient([_issue()])
     merge_recorder = _MergeRecorder(MergeResult(True, "merged", "merged", sha="merge-sha"))

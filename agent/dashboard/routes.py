@@ -12,6 +12,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from fastapi.responses import RedirectResponse, Response, StreamingResponse
 from pydantic import BaseModel
 
+from .. import project_registry, project_secrets
 from .admin import is_admin
 from .agent_instructions import (
     AgentInstructionsCreate,
@@ -238,6 +239,21 @@ class ProviderPATUpdateBody(BaseModel):
     token: str
 
 
+class ProjectSecretUpdateBody(BaseModel):
+    environment: str = project_secrets.DEFAULT_AI_HUB_ENVIRONMENT
+    value: str
+    kind: str = "api_key"
+
+
+class ProjectSecretTestBody(BaseModel):
+    environment: str = project_secrets.DEFAULT_AI_HUB_ENVIRONMENT
+
+
+class AIHubImportBody(BaseModel):
+    environment: str = project_secrets.DEFAULT_AI_HUB_ENVIRONMENT
+    prefixes: list[str] | None = None
+
+
 def _session_is_admin(session: dict[str, Any]) -> bool:
     return is_admin(session.get("email"), login=session.get("sub"))
 
@@ -256,6 +272,39 @@ def _admin_session(session: dict[str, Any] = _SESSION_DEP) -> dict[str, Any]:
 
 
 _ADMIN_DEP = Depends(_admin_session)
+
+
+def _project_member_logins(project: dict[str, Any]) -> set[str]:
+    membership = project.get("membership")
+    if not isinstance(membership, dict):
+        return set()
+    users = membership.get("users")
+    if not isinstance(users, list):
+        return set()
+    logins: set[str] = set()
+    for user in users:
+        if isinstance(user, str) and user.strip():
+            logins.add(user.strip().lower())
+        elif isinstance(user, dict):
+            login = user.get("login") or user.get("github_login")
+            if isinstance(login, str) and login.strip():
+                logins.add(login.strip().lower())
+    return logins
+
+
+async def _require_delivery_project_member(
+    project_id: str,
+    session: dict[str, Any],
+) -> dict[str, Any]:
+    project = await project_registry.get_delivery_project(project_id)
+    if project is None:
+        raise HTTPException(404, "delivery project not found")
+    if _session_is_admin(session):
+        return project
+    login = str(session.get("sub") or "").strip().lower()
+    if login and login in _project_member_logins(project):
+        return project
+    raise HTTPException(403, "project access required")
 
 
 async def _filter_repo_records_for_user(
@@ -600,6 +649,103 @@ async def api_delete_my_provider_token(
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
     return await revoke_provider_pat(session["sub"], provider=provider)
+
+
+@router.get("/delivery-projects/{project_id}/secrets")
+async def api_list_project_secrets(
+    project_id: str,
+    environment: str = project_secrets.DEFAULT_AI_HUB_ENVIRONMENT,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, list[dict[str, Any]]]:
+    await _require_delivery_project_member(project_id, session)
+    return {
+        "items": await project_secrets.list_project_secrets(
+            project_id,
+            environment=environment,
+        )
+    }
+
+
+@router.put("/delivery-projects/{project_id}/secrets/{name}")
+async def api_put_project_secret(
+    project_id: str,
+    name: str,
+    body: ProjectSecretUpdateBody,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    await _require_delivery_project_member(project_id, session)
+    return await project_secrets.upsert_project_secret(
+        project_id,
+        environment=body.environment,
+        name=name,
+        value=body.value,
+        kind=body.kind,
+        updated_by=str(session["sub"]),
+    )
+
+
+@router.post("/delivery-projects/{project_id}/secrets/{name}/test")
+async def api_test_project_secret(
+    project_id: str,
+    name: str,
+    body: ProjectSecretTestBody,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    await _require_delivery_project_member(project_id, session)
+    return await project_secrets.test_project_secret(
+        project_id,
+        environment=body.environment,
+        name=name,
+    )
+
+
+@router.delete("/delivery-projects/{project_id}/secrets/{name}")
+async def api_delete_project_secret(
+    project_id: str,
+    name: str,
+    environment: str = project_secrets.DEFAULT_AI_HUB_ENVIRONMENT,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    await _require_delivery_project_member(project_id, session)
+    return await project_secrets.revoke_project_secret(
+        project_id,
+        environment=environment,
+        name=name,
+    )
+
+
+@router.get("/delivery-projects/{project_id}/ai-hub/readiness")
+async def api_get_project_ai_hub_readiness(
+    project_id: str,
+    environment: str = project_secrets.DEFAULT_AI_HUB_ENVIRONMENT,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    await _require_delivery_project_member(project_id, session)
+    return await project_secrets.evaluate_ai_hub_readiness(project_id, environment=environment)
+
+
+@router.get("/delivery-projects/{project_id}/ai-hub/import-shape")
+async def api_get_project_ai_hub_import_shape(
+    project_id: str,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    await _require_delivery_project_member(project_id, session)
+    return project_secrets.import_ai_hub_shape_from_env()
+
+
+@router.post("/delivery-projects/{project_id}/ai-hub/import")
+async def api_import_project_ai_hub_secrets(
+    project_id: str,
+    body: AIHubImportBody,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    await _require_delivery_project_member(project_id, session)
+    return await project_secrets.import_ai_hub_secrets_from_env(
+        project_id,
+        environment=body.environment,
+        prefixes=body.prefixes,
+        updated_by=str(session["sub"]),
+    )
 
 
 @router.get("/notion/login")
