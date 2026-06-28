@@ -360,6 +360,237 @@ def _can_read_delivery_project(project: dict[str, Any], session: dict[str, Any])
     return bool(login and login in _project_member_logins(project))
 
 
+def _readiness_check(
+    *,
+    key: str,
+    label: str,
+    ready: bool,
+    section: str,
+    message: str,
+    blockers: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    return {
+        "key": key,
+        "label": label,
+        "ready": ready,
+        "section": section,
+        "message": message,
+        "blockers": blockers or [],
+    }
+
+
+def _has_mapping_values(value: Any, *keys: str) -> bool:
+    if not isinstance(value, dict):
+        return False
+    return all(isinstance(value.get(key), str) and value.get(key).strip() for key in keys)
+
+
+def _project_readiness_environment(project: dict[str, Any]) -> str:
+    ai_hub_policy = project.get("ai_hub_policy")
+    if isinstance(ai_hub_policy, dict):
+        environment = ai_hub_policy.get("environment")
+        if isinstance(environment, str) and environment.strip():
+            return environment.strip()
+    return project_secrets.DEFAULT_AI_HUB_ENVIRONMENT
+
+
+async def _delivery_project_readiness(
+    project: dict[str, Any],
+    session: dict[str, Any],
+) -> dict[str, Any]:
+    project_id = str(project.get("project_id") or "")
+    tracker = project.get("tracker") if isinstance(project.get("tracker"), dict) else {}
+    tracker_config = tracker.get("config") if isinstance(tracker.get("config"), dict) else {}
+    vcs = project.get("vcs") if isinstance(project.get("vcs"), dict) else {}
+    vcs_config = vcs.get("config") if isinstance(vcs.get("config"), dict) else {}
+    sandbox_profile = (
+        project.get("sandbox_profile") if isinstance(project.get("sandbox_profile"), dict) else {}
+    )
+    queue_policy = (
+        project.get("queue_eligibility_policy")
+        if isinstance(project.get("queue_eligibility_policy"), dict)
+        else {}
+    )
+    credential_policy = (
+        project.get("credential_policy") if isinstance(project.get("credential_policy"), dict) else {}
+    )
+    gate_policy = project.get("gate_policy") if isinstance(project.get("gate_policy"), dict) else {}
+    merge_policy = (
+        project.get("merge_policy") if isinstance(project.get("merge_policy"), dict) else {}
+    )
+    run_limits = project.get("run_limits") if isinstance(project.get("run_limits"), dict) else {}
+    model_routing = (
+        project.get("model_routing") if isinstance(project.get("model_routing"), dict) else {}
+    )
+    ai_hub_policy = (
+        project.get("ai_hub_policy") if isinstance(project.get("ai_hub_policy"), dict) else {}
+    )
+
+    tracker_ready = bool(tracker.get("provider")) and bool(tracker_config)
+    repo_ready = bool(vcs.get("provider")) and _has_mapping_values(vcs_config, "owner", "repo")
+    required_pat = credential_policy.get("requires_user_pat") is True
+    provider = str(credential_policy.get("provider") or vcs.get("provider") or "github")
+    pat_status = (
+        await get_provider_pat_status(str(session["sub"]), provider=provider)
+        if required_pat
+        else {"connected": True, "provider": provider}
+    )
+    environment = _project_readiness_environment(project)
+    project_secret_statuses = await project_secrets.list_project_secrets(
+        project_id,
+        environment=environment,
+    )
+    required_secret_names = [
+        str(name)
+        for name in ai_hub_policy.get("required_secrets", [])
+        if isinstance(name, str) and name.strip()
+    ]
+    connected_secret_names = {
+        str(secret.get("name"))
+        for secret in project_secret_statuses
+        if secret.get("connected") is True
+    }
+    missing_secrets = [
+        name for name in required_secret_names if name not in connected_secret_names
+    ]
+    ai_hub_ready = (
+        await project_secrets.evaluate_ai_hub_readiness(project_id, environment=environment)
+        if ai_hub_policy.get("enabled") is True
+        else {"ready": True, "blockers": [], "environment": environment}
+    )
+    sandbox_ready = bool(sandbox_profile.get("provider")) and (
+        bool(sandbox_profile.get("profile")) or isinstance(sandbox_profile.get("runtime"), dict)
+    )
+    model_roles = model_routing.get("roles") if isinstance(model_routing.get("roles"), dict) else {}
+    model_ready = bool(project.get("delivery_modes")) and isinstance(model_roles, dict)
+    queue_ready = bool(queue_policy.get("labels") or queue_policy.get("ready_states"))
+    auto_mode_ready = (
+        bool(project.get("active", True))
+        and not bool(project.get("kill_switch", False))
+        and isinstance(run_limits.get("max_concurrent_runs"), int)
+        and run_limits.get("max_concurrent_runs", 0) > 0
+        and isinstance(run_limits.get("daily_run_budget"), int)
+        and run_limits.get("daily_run_budget", 0) > 0
+    )
+    blocking_gates = gate_policy.get("blocking_gates")
+    qa_ready = bool(gate_policy.get("qa_evidence")) and isinstance(blocking_gates, list) and bool(
+        blocking_gates
+    )
+    merge_ready = bool(merge_policy.get("strategy")) and isinstance(
+        merge_policy.get("required_checks", []),
+        list,
+    )
+
+    checks = [
+        _readiness_check(
+            key="tracker_intake",
+            label="Tracker intake",
+            ready=tracker_ready,
+            section="ticket-intake",
+            message="Linear intake is configured."
+            if tracker_ready
+            else "Configure the Linear workspace, project, labels, and readiness states.",
+        ),
+        _readiness_check(
+            key="repository_access",
+            label="Repository access",
+            ready=repo_ready,
+            section="repositories",
+            message="Default repository is configured."
+            if repo_ready
+            else "Configure the workspace repository owner and name.",
+        ),
+        _readiness_check(
+            key="user_provider_token",
+            label="User provider token",
+            ready=bool(pat_status.get("connected")),
+            section="credentials",
+            message=f"{provider} user token is connected."
+            if pat_status.get("connected")
+            else f"Connect a {provider} provider token for this user.",
+        ),
+        _readiness_check(
+            key="project_secrets",
+            label="Project secrets",
+            ready=not missing_secrets,
+            section="credentials",
+            message="Required project secrets are present."
+            if not missing_secrets
+            else f"Missing project secrets: {', '.join(missing_secrets)}.",
+        ),
+        _readiness_check(
+            key="ai_hub",
+            label="AI Hub",
+            ready=bool(ai_hub_ready.get("ready")),
+            section="credentials",
+            message="AI Hub credentials are ready."
+            if ai_hub_ready.get("ready")
+            else "AI Hub readiness failed.",
+            blockers=list(ai_hub_ready.get("blockers") or []),
+        ),
+        _readiness_check(
+            key="sandbox_profile",
+            label="Sandbox profile",
+            ready=sandbox_ready,
+            section="overview",
+            message="Sandbox profile is configured."
+            if sandbox_ready
+            else "Configure a sandbox profile or runtime.",
+        ),
+        _readiness_check(
+            key="model_routing",
+            label="Model routing",
+            ready=model_ready,
+            section="models",
+            message="Delivery modes and model routing are configured."
+            if model_ready
+            else "Configure delivery modes and model routing.",
+        ),
+        _readiness_check(
+            key="queue_policy",
+            label="Queue policy",
+            ready=queue_ready,
+            section="ticket-intake",
+            message="Queue eligibility policy is configured."
+            if queue_ready
+            else "Configure readiness labels or states for queue intake.",
+        ),
+        _readiness_check(
+            key="auto_mode_limits",
+            label="Auto-Mode limits",
+            ready=auto_mode_ready,
+            section="policies",
+            message="Auto-Mode is enabled and has run budget."
+            if auto_mode_ready
+            else "Enable the project, disable kill switch, and configure positive run limits.",
+        ),
+        _readiness_check(
+            key="qa_gates",
+            label="QA gates",
+            ready=qa_ready,
+            section="policies",
+            message="Blocking QA gates are configured."
+            if qa_ready
+            else "Configure PR QA evidence and blocking gates.",
+        ),
+        _readiness_check(
+            key="merge_policy",
+            label="Merge policy",
+            ready=merge_ready,
+            section="policies",
+            message="Merge policy is configured."
+            if merge_ready
+            else "Configure merge strategy and required checks.",
+        ),
+    ]
+    return {
+        "project_id": project_id,
+        "ready": all(check["ready"] for check in checks),
+        "environment": environment,
+        "checks": checks,
+    }
+
+
 async def _require_delivery_project_member(
     project_id: str,
     session: dict[str, Any],
@@ -743,6 +974,15 @@ async def api_list_delivery_projects(
             for project in readable_projects
         ]
     }
+
+
+@router.get("/delivery-projects/{project_id}/readiness")
+async def api_get_delivery_project_readiness(
+    project_id: str,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    project = await _require_delivery_project_member(project_id, session)
+    return await _delivery_project_readiness(project, session)
 
 
 @router.get("/delivery-projects/{project_id}/secrets")

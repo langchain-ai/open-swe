@@ -230,6 +230,23 @@ export interface DeliveryProjectSummary {
   }>
 }
 
+export interface DeliveryProjectReadiness {
+  project_id: string
+  ready: boolean
+  environment: string
+  checks: Array<{
+    key: string
+    label: string
+    ready: boolean
+    section: string
+    message: string
+    blockers: Array<{
+      code?: string
+      message?: string
+    }>
+  }>
+}
+
 export interface ProviderCredentialStatus {
   connected: boolean
   site?: string
@@ -795,6 +812,10 @@ export const api = {
     }),
   listDeliveryProjects: () =>
     request<{ items: Array<DeliveryProjectSummary> }>("/delivery-projects"),
+  getDeliveryProjectReadiness: (projectId: string) =>
+    request<DeliveryProjectReadiness>(
+      `/delivery-projects/${encodeURIComponent(projectId)}/readiness`
+    ),
   listEnabledReviewRepos: () =>
     request<{ repos: Array<string> }>("/enabled-review-repos"),
   setEnabledReviewRepo: (full_name: string, enabled: boolean) =>

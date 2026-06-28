@@ -250,6 +250,209 @@ async def test_delivery_project_list_includes_latest_runs(
     ]
 
 
+async def _ready_sports_project(users: list[str] | None = None) -> None:
+    await project_registry.upsert_delivery_project(
+        project_registry.default_sports_cms_delivery_project(
+            tracker_config={"project_ids": ["linear-sports"], "labels": ["agent-ready"]},
+            vcs_config={"owner": "example", "repo": "sports-cms"},
+            membership={"users": users or ["octocat"]},
+        )
+    )
+
+
+async def _ready_credentials(login: str = "octocat") -> None:
+    await provider_pat_vault.upsert_provider_pat(
+        login,
+        provider="github",
+        token="ghp_octocat-token-1234",
+    )
+    await project_secrets.upsert_project_secret(
+        "sports-cms",
+        environment="default",
+        name="AI_HUB_BASE_URL",
+        value="https://ai-hub.example/v1",
+        updated_by=login,
+    )
+    await project_secrets.upsert_project_secret(
+        "sports-cms",
+        environment="default",
+        name="AI_HUB_API_KEY",
+        value="valid-key",
+        updated_by=login,
+    )
+
+
+def _check(payload: dict[str, Any], key: str) -> dict[str, Any]:
+    for check in payload["checks"]:
+        if check["key"] == key:
+            return check
+    raise AssertionError(f"missing readiness check: {key}")
+
+
+async def test_delivery_project_readiness_reports_ready_workspace(
+    dashboard_client: TestClient,
+) -> None:
+    await _ready_sports_project()
+    await _ready_credentials()
+
+    response = dashboard_client.get(
+        "/dashboard/api/delivery-projects/sports-cms/readiness",
+        headers={"Origin": "http://testserver"},
+        cookies=_session_cookie(login="octocat", email="octo@example.com"),
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["ready"] is True
+    assert {check["key"]: check["ready"] for check in payload["checks"]} == {
+        "tracker_intake": True,
+        "repository_access": True,
+        "user_provider_token": True,
+        "project_secrets": True,
+        "ai_hub": True,
+        "sandbox_profile": True,
+        "model_routing": True,
+        "queue_policy": True,
+        "auto_mode_limits": True,
+        "qa_gates": True,
+        "merge_policy": True,
+    }
+
+
+async def test_delivery_project_readiness_reports_missing_linear_config(
+    dashboard_client: TestClient,
+) -> None:
+    await _ready_sports_project()
+    await _ready_credentials()
+    project = await project_registry.get_delivery_project("sports-cms")
+    assert project is not None
+    project["tracker"]["config"] = {}
+    await project_registry.upsert_delivery_project(project)
+
+    response = dashboard_client.get(
+        "/dashboard/api/delivery-projects/sports-cms/readiness",
+        headers={"Origin": "http://testserver"},
+        cookies=_session_cookie(login="octocat", email="octo@example.com"),
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["ready"] is False
+    assert _check(payload, "tracker_intake")["ready"] is False
+    assert _check(payload, "tracker_intake")["section"] == "ticket-intake"
+
+
+async def test_delivery_project_readiness_reports_missing_repo(
+    dashboard_client: TestClient,
+) -> None:
+    await _ready_sports_project()
+    await _ready_credentials()
+    project = await project_registry.get_delivery_project("sports-cms")
+    assert project is not None
+    project["vcs"]["config"] = {"owner": "example"}
+    await project_registry.upsert_delivery_project(project)
+
+    response = dashboard_client.get(
+        "/dashboard/api/delivery-projects/sports-cms/readiness",
+        headers={"Origin": "http://testserver"},
+        cookies=_session_cookie(login="octocat", email="octo@example.com"),
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["ready"] is False
+    assert _check(payload, "repository_access")["ready"] is False
+    assert _check(payload, "repository_access")["section"] == "repositories"
+
+
+async def test_delivery_project_readiness_reports_missing_user_pat(
+    dashboard_client: TestClient,
+) -> None:
+    await _ready_sports_project()
+    await project_secrets.upsert_project_secret(
+        "sports-cms",
+        environment="default",
+        name="AI_HUB_BASE_URL",
+        value="https://ai-hub.example/v1",
+        updated_by="octocat",
+    )
+    await project_secrets.upsert_project_secret(
+        "sports-cms",
+        environment="default",
+        name="AI_HUB_API_KEY",
+        value="valid-key",
+        updated_by="octocat",
+    )
+
+    response = dashboard_client.get(
+        "/dashboard/api/delivery-projects/sports-cms/readiness",
+        headers={"Origin": "http://testserver"},
+        cookies=_session_cookie(login="octocat", email="octo@example.com"),
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["ready"] is False
+    assert _check(payload, "user_provider_token")["ready"] is False
+    assert _check(payload, "user_provider_token")["section"] == "credentials"
+
+
+async def test_delivery_project_readiness_reports_missing_ai_hub_secret(
+    dashboard_client: TestClient,
+) -> None:
+    await _ready_sports_project()
+    await provider_pat_vault.upsert_provider_pat(
+        "octocat",
+        provider="github",
+        token="ghp_octocat-token-1234",
+    )
+    await project_secrets.upsert_project_secret(
+        "sports-cms",
+        environment="default",
+        name="AI_HUB_BASE_URL",
+        value="https://ai-hub.example/v1",
+        updated_by="octocat",
+    )
+
+    response = dashboard_client.get(
+        "/dashboard/api/delivery-projects/sports-cms/readiness",
+        headers={"Origin": "http://testserver"},
+        cookies=_session_cookie(login="octocat", email="octo@example.com"),
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["ready"] is False
+    assert _check(payload, "project_secrets")["ready"] is False
+    assert _check(payload, "ai_hub")["ready"] is False
+    assert _check(payload, "ai_hub")["blockers"] == [
+        {"code": "missing_ai_hub_api_key", "message": "AI Hub API key is missing."}
+    ]
+
+
+async def test_delivery_project_readiness_reports_disabled_auto_mode(
+    dashboard_client: TestClient,
+) -> None:
+    await _ready_sports_project()
+    await _ready_credentials()
+    project = await project_registry.get_delivery_project("sports-cms")
+    assert project is not None
+    project["kill_switch"] = True
+    await project_registry.upsert_delivery_project(project)
+
+    response = dashboard_client.get(
+        "/dashboard/api/delivery-projects/sports-cms/readiness",
+        headers={"Origin": "http://testserver"},
+        cookies=_session_cookie(login="octocat", email="octo@example.com"),
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["ready"] is False
+    assert _check(payload, "auto_mode_limits")["ready"] is False
+    assert _check(payload, "auto_mode_limits")["section"] == "policies"
+
+
 async def test_project_secrets_are_encrypted_and_scoped_by_project_environment(
     fake_client: _FakeClient,
 ) -> None:

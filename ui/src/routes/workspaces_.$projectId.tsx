@@ -1,7 +1,10 @@
 import { Link, Navigate, createFileRoute } from "@tanstack/react-router"
 import { useQuery } from "@tanstack/react-query"
 
-import type { DeliveryProjectSummary } from "@/lib/api"
+import type {
+  DeliveryProjectReadiness,
+  DeliveryProjectSummary,
+} from "@/lib/api"
 import { AppShell, SettingsSection } from "@/components/AppShell"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -129,7 +132,87 @@ function WorkspaceRuns({ project }: { project: DeliveryProjectSummary }) {
   )
 }
 
-function WorkspaceDetail({ project }: { project: DeliveryProjectSummary }) {
+function ReadinessPanel({
+  readiness,
+}: {
+  readiness?: DeliveryProjectReadiness
+}) {
+  if (!readiness) {
+    return (
+      <SettingsSection title="Readiness">
+        <div className="p-4">
+          <Skeleton className="h-28 w-full" />
+        </div>
+      </SettingsSection>
+    )
+  }
+  const failed = readiness.checks.filter((check) => !check.ready)
+
+  return (
+    <SettingsSection
+      title="Readiness"
+      description={`Environment: ${readiness.environment}`}
+    >
+      <div className="border-b border-border p-4">
+        <div className="flex items-center gap-2">
+          <Badge variant={readiness.ready ? "default" : "destructive"}>
+            {readiness.ready ? "Ready" : "Blocked"}
+          </Badge>
+          <span className="text-xs text-muted-foreground">
+            {failed.length
+              ? `${failed.length} readiness checks need attention.`
+              : "All delivery readiness checks passed."}
+          </span>
+        </div>
+      </div>
+      <div className="grid gap-0 divide-y divide-border">
+        {readiness.checks.map((check) => (
+          <div
+            key={check.key}
+            className="grid gap-2 px-4 py-3 text-xs sm:grid-cols-[180px_80px_1fr_120px]"
+          >
+            <div className="font-medium text-foreground">{check.label}</div>
+            <div
+              className={check.ready ? "text-foreground" : "text-destructive"}
+            >
+              {check.ready ? "Ready" : "Blocked"}
+            </div>
+            <div className="min-w-0 text-muted-foreground">
+              <div>{check.message}</div>
+              {check.blockers.length ? (
+                <div className="mt-1 space-y-0.5">
+                  {check.blockers.map((blocker) => (
+                    <div key={blocker.code ?? blocker.message}>
+                      {blocker.message ?? blocker.code}
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+            {!check.ready ? (
+              <a
+                href={`#${check.section}`}
+                className="text-muted-foreground hover:text-foreground"
+              >
+                Open section
+              </a>
+            ) : (
+              <span className="text-muted-foreground">-</span>
+            )}
+          </div>
+        ))}
+      </div>
+    </SettingsSection>
+  )
+}
+
+function WorkspaceDetail({
+  project,
+  readiness,
+}: {
+  project: DeliveryProjectSummary
+  readiness?: DeliveryProjectReadiness
+}) {
   const trackerConfig = project.tracker.config ?? {}
   const vcsConfig = project.vcs.config ?? {}
   const sandboxRuntime =
@@ -141,7 +224,10 @@ function WorkspaceDetail({ project }: { project: DeliveryProjectSummary }) {
   return (
     <>
       <SettingsSection title="Overview">
-        <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-start sm:justify-between">
+        <div
+          id="overview"
+          className="flex flex-col gap-3 p-4 sm:flex-row sm:items-start sm:justify-between"
+        >
           <div className="min-w-0">
             <div className="flex items-center gap-2">
               <h2 className="truncate text-sm font-medium">{project.name}</h2>
@@ -168,41 +254,53 @@ function WorkspaceDetail({ project }: { project: DeliveryProjectSummary }) {
         />
       </SettingsSection>
 
+      <ReadinessPanel readiness={readiness} />
+
       <SettingsSection title="Repositories">
-        <KeyValueGrid items={entries(vcsConfig)} />
+        <div id="repositories">
+          <KeyValueGrid items={entries(vcsConfig)} />
+        </div>
       </SettingsSection>
 
       <SettingsSection title="Ticket Intake">
-        <KeyValueGrid
-          items={[
-            ...entries(trackerConfig),
-            ...entries(project.queue_eligibility_policy),
-          ]}
-        />
+        <div id="ticket-intake">
+          <KeyValueGrid
+            items={[
+              ...entries(trackerConfig),
+              ...entries(project.queue_eligibility_policy),
+            ]}
+          />
+        </div>
       </SettingsSection>
 
       <SettingsSection title="Credentials">
-        <KeyValueGrid
-          items={[
-            ["project_secrets", "Project-scoped"],
-            ["provider_tokens", "Per user"],
-            ["ai_hub", "Project readiness gated"],
-          ]}
-        />
+        <div id="credentials">
+          <KeyValueGrid
+            items={[
+              ["project_secrets", "Project-scoped"],
+              ["provider_tokens", "Per user"],
+              ["ai_hub", "Project readiness gated"],
+            ]}
+          />
+        </div>
       </SettingsSection>
 
       <SettingsSection title="Models">
-        <TokenList items={project.delivery_modes} />
+        <div id="models">
+          <TokenList items={project.delivery_modes} />
+        </div>
       </SettingsSection>
 
       <SettingsSection title="Policies">
-        <KeyValueGrid
-          items={[
-            ...entries(project.gate_policy),
-            ...entries(project.merge_policy),
-            ...entries(project.run_limits),
-          ]}
-        />
+        <div id="policies">
+          <KeyValueGrid
+            items={[
+              ...entries(project.gate_policy),
+              ...entries(project.merge_policy),
+              ...entries(project.run_limits),
+            ]}
+          />
+        </div>
       </SettingsSection>
 
       <SettingsSection title="Members">
@@ -222,6 +320,11 @@ function WorkspaceDetailPage() {
   const projects = useQuery({
     queryKey: ["deliveryProjects"],
     queryFn: api.listDeliveryProjects,
+    enabled: !!session.data,
+  })
+  const readiness = useQuery({
+    queryKey: ["deliveryProjectReadiness", projectId],
+    queryFn: () => api.getDeliveryProjectReadiness(projectId),
     enabled: !!session.data,
   })
 
@@ -252,7 +355,7 @@ function WorkspaceDetailPage() {
           </div>
         </SettingsSection>
       ) : project ? (
-        <WorkspaceDetail project={project} />
+        <WorkspaceDetail project={project} readiness={readiness.data} />
       ) : (
         <SettingsSection title="Workspace">
           <div className="px-4 py-6 text-xs text-muted-foreground">
