@@ -16,6 +16,7 @@ agent for code review only:
 # ruff: noqa: E402
 
 import asyncio
+import json
 import logging
 import posixpath
 import re
@@ -76,6 +77,7 @@ from .tools import (
     publish_review,
     reply_to_finding_thread,
     resolve_finding_thread,
+    submit_delivery_review_result,
     update_finding,
     web_search,
 )
@@ -1078,6 +1080,30 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
                 pr_body=pr_body,
                 existing_threads_block=existing_threads_block,
             )
+    delivery_queue_item_id = config["configurable"].get("delivery_queue_item_id")
+    delivery_review_context = config["configurable"].get("review_context")
+    if isinstance(delivery_queue_item_id, str) and delivery_queue_item_id:
+        delivery_payload = (
+            json.dumps(delivery_review_context, indent=2, sort_keys=True)
+            if isinstance(delivery_review_context, dict)
+            else "{}"
+        )
+        delivery_section = "\n".join(
+            [
+                "## Delivery Review Submission",
+                "",
+                f"Delivery queue item: `{delivery_queue_item_id}`.",
+                "",
+                "Review the worker result and QA evidence below. When done, call "
+                "`submit_delivery_review_result` with `reviewed_sha`, `findings`, and "
+                "any blocking status. Do not leave the delivery queue waiting after "
+                "you finish the review.",
+                "",
+                "Delivery review context:",
+                delivery_payload,
+            ]
+        )
+        review_context = f"{review_context}\n\n{delivery_section}".strip()
 
     configured_model_id = config["configurable"].get("reviewer_model_id")
     configured_effort = config["configurable"].get("reviewer_reasoning_effort")
@@ -1178,6 +1204,7 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
             publish_review,
             resolve_finding_thread,
             reply_to_finding_thread,
+            submit_delivery_review_result,
             web_search,
             fetch_url,
             http_request,

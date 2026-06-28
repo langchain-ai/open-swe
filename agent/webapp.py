@@ -1,5 +1,6 @@
 """Custom FastAPI routes for LangGraph server."""
 
+import asyncio
 import hashlib
 import hmac
 import json
@@ -7,7 +8,7 @@ import logging
 import os
 import uuid
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import parse_qs, quote
@@ -140,24 +141,46 @@ def _delivery_auto_enabled() -> bool:
     return value not in {"0", "false", "no", "off"}
 
 
-async def _ensure_delivery_queue_polling_on_startup() -> None:
+def _delivery_cron_startup_delay_seconds() -> float:
+    value = os.environ.get("DELIVERY_CRON_STARTUP_DELAY_SECONDS", "1").strip()
+    try:
+        return max(float(value), 0)
+    except ValueError:
+        return 1
+
+
+async def _ensure_delivery_queue_polling_on_startup() -> bool:
     if not _delivery_queue_polling_enabled():
-        return
+        return True
     schedule = os.environ.get("DELIVERY_QUEUE_POLL_SCHEDULE", DEFAULT_DELIVERY_QUEUE_POLL_SCHEDULE)
     try:
         await ensure_delivery_queue_polling_cron(schedule)
+        return True
     except Exception:  # noqa: BLE001
         logger.exception("Failed to ensure delivery queue polling cron")
+        return False
 
 
-async def _ensure_delivery_auto_on_startup() -> None:
+async def _ensure_delivery_auto_on_startup() -> bool:
     if not _delivery_auto_enabled():
-        return
+        return True
     schedule = os.environ.get("DELIVERY_AUTO_MODE_SCHEDULE", DEFAULT_DELIVERY_AUTO_SCHEDULE)
     try:
         await ensure_delivery_auto_cron(schedule)
+        return True
     except Exception:  # noqa: BLE001
         logger.exception("Failed to ensure delivery auto-mode cron")
+        return False
+
+
+async def _ensure_delivery_crons_after_startup() -> None:
+    delay = _delivery_cron_startup_delay_seconds()
+    if delay:
+        await asyncio.sleep(delay)
+    queue_ok = await _ensure_delivery_queue_polling_on_startup()
+    auto_ok = await _ensure_delivery_auto_on_startup()
+    if not queue_ok or not auto_ok:
+        logger.error("Delivery cron startup registration did not complete")
 
 
 @asynccontextmanager
@@ -167,9 +190,17 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
 
     validate_sandbox_startup_config()
     validate_local_dev_llm_config()
-    await _ensure_delivery_queue_polling_on_startup()
-    await _ensure_delivery_auto_on_startup()
-    yield
+    delivery_cron_task = asyncio.create_task(
+        _ensure_delivery_crons_after_startup(),
+        name="delivery-cron-startup",
+    )
+    try:
+        yield
+    finally:
+        if not delivery_cron_task.done():
+            delivery_cron_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await delivery_cron_task
 
 
 app = FastAPI(lifespan=lifespan)

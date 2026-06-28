@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 from unittest.mock import AsyncMock
 
@@ -329,3 +330,36 @@ async def test_webapp_startup_can_disable_delivery_auto_cron(monkeypatch) -> Non
     await webapp._ensure_delivery_auto_on_startup()
 
     assert calls == []
+
+
+async def test_webapp_lifespan_does_not_block_on_delivery_cron_registration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent import webapp
+    from agent.utils import model, sandbox
+
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def slow_queue_cron() -> bool:
+        started.set()
+        await release.wait()
+        return True
+
+    async def auto_cron() -> bool:
+        return True
+
+    monkeypatch.setenv("DELIVERY_CRON_STARTUP_DELAY_SECONDS", "0")
+    monkeypatch.setattr(model, "validate_local_dev_llm_config", lambda: None)
+    monkeypatch.setattr(sandbox, "validate_sandbox_startup_config", lambda: None)
+    monkeypatch.setattr(webapp, "_ensure_delivery_queue_polling_on_startup", slow_queue_cron)
+    monkeypatch.setattr(webapp, "_ensure_delivery_auto_on_startup", auto_cron)
+
+    lifespan_context = webapp.lifespan(webapp.app)
+    await asyncio.wait_for(lifespan_context.__aenter__(), timeout=0.1)
+
+    try:
+        await asyncio.wait_for(started.wait(), timeout=0.1)
+    finally:
+        release.set()
+        await lifespan_context.__aexit__(None, None, None)

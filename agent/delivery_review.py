@@ -220,7 +220,10 @@ async def launch_delivery_review_checks(
     await _upsert_thread_metadata(client, reviewer_thread_id, reviewer_metadata)
     reviewer_run = await dispatch_agent_run(
         reviewer_thread_id,
-        _prompt("Run an independent delivery review.", context),
+        _prompt(
+            "Run an independent delivery review, then call submit_delivery_review_result.",
+            context,
+        ),
         _reviewer_configurable(
             item, reviewer_thread_id=reviewer_thread_id, qa_required=qa_required
         ),
@@ -240,7 +243,9 @@ async def launch_delivery_review_checks(
         await _upsert_thread_metadata(client, qa_thread_id, qa_metadata)
         qa_run = await dispatch_agent_run(
             qa_thread_id,
-            _prompt("Run configured delivery QA checks.", context),
+            _prompt(
+                "Run configured delivery QA checks, then call submit_delivery_qa_result.", context
+            ),
             _qa_configurable(item, qa_thread_id=qa_thread_id),
             source=DELIVERY_REVIEW_SOURCE,
             assistant_id="agent",
