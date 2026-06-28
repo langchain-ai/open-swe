@@ -22,6 +22,7 @@ from .schedule_thread_wakeup import schedule_thread_wakeup
 from .search_repo_code import search_repo_code
 from .slack_read_thread_messages import slack_read_thread_messages
 from .slack_thread_reply import slack_thread_reply
+from .submit_delivery_worker_result import submit_delivery_worker_result
 from .update_finding import update_finding
 from .web_search import web_search
 
@@ -50,6 +51,7 @@ __all__ = [
     "search_repo_code",
     "slack_read_thread_messages",
     "slack_thread_reply",
+    "submit_delivery_worker_result",
     "update_finding",
     "web_search",
 ]

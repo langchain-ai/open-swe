@@ -566,6 +566,10 @@ def build_delivery_worker_prompt(worker_input: Mapping[str, Any]) -> str:
             json.dumps(worker_input, indent=2, sort_keys=True),
             "",
             WORKER_CONTRACT,
+            "",
+            "When the branch and pull request are ready, call "
+            "`submit_delivery_worker_result` with the complete structured result so the "
+            "platform can verify QA evidence and start review.",
         ]
     )
 
