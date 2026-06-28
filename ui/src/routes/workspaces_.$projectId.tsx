@@ -6,6 +6,7 @@ import type {
   DeliveryProjectSummary,
 } from "@/lib/api"
 import { AppShell, SettingsSection } from "@/components/AppShell"
+import { WorkspaceCredentialsSection } from "@/components/WorkspaceCredentialsSection"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { api } from "@/lib/api"
@@ -273,17 +274,7 @@ function WorkspaceDetail({
         </div>
       </SettingsSection>
 
-      <SettingsSection title="Credentials">
-        <div id="credentials">
-          <KeyValueGrid
-            items={[
-              ["project_secrets", "Project-scoped"],
-              ["provider_tokens", "Per user"],
-              ["ai_hub", "Project readiness gated"],
-            ]}
-          />
-        </div>
-      </SettingsSection>
+      <WorkspaceCredentialsSection projectId={project.project_id} />
 
       <SettingsSection title="Models">
         <div id="models">

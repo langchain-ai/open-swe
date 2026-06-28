@@ -306,6 +306,77 @@ export interface ProviderPATListPayload {
   items: Array<ProviderPATStatus>
 }
 
+export interface ProjectSecretStatus {
+  connected: boolean
+  project_id: string
+  environment: string
+  name: string
+  kind?: string
+  value_last4?: string
+  version?: number
+  created_at?: string | null
+  updated_at?: string | null
+  updated_by?: string
+}
+
+export interface ProjectSecretsPayload {
+  items: Array<ProjectSecretStatus>
+}
+
+export interface ProjectSecretUpdateBody {
+  environment: string
+  value: string
+  kind?: string
+}
+
+export interface ProjectSecretTestBody {
+  environment: string
+}
+
+export interface ProjectSecretTestResult {
+  ready: boolean
+  project_id: string
+  environment: string
+  name: string
+}
+
+export interface AIHubReadiness {
+  ready: boolean
+  environment: string
+  blockers: Array<{
+    code?: string
+    message?: string
+  }>
+}
+
+export interface AIHubImportShape {
+  provider: string
+  candidates: Array<{
+    prefix: string
+    required_secrets: Array<{
+      name: string
+      source_env: string
+      present: boolean
+    }>
+    model_list_env: string
+    model_list_present: boolean
+  }>
+}
+
+export interface AIHubImportBody {
+  environment: string
+  prefixes?: Array<string> | null
+}
+
+export interface AIHubImportResult {
+  provider: string
+  project_id: string
+  environment: string
+  source_prefix: string
+  imported: Array<ProjectSecretStatus>
+  shape: AIHubImportShape
+}
+
 export interface UserMapping {
   github_login: string
   work_email: string
@@ -856,6 +927,55 @@ export const api = {
   getDeliveryProjectReadiness: (projectId: string) =>
     request<DeliveryProjectReadiness>(
       `/delivery-projects/${encodeURIComponent(projectId)}/readiness`
+    ),
+  listProjectSecrets: (projectId: string, environment: string) =>
+    request<ProjectSecretsPayload>(
+      `/delivery-projects/${encodeURIComponent(projectId)}/secrets?environment=${encodeURIComponent(environment)}`
+    ),
+  saveProjectSecret: (
+    projectId: string,
+    name: string,
+    body: ProjectSecretUpdateBody
+  ) =>
+    request<ProjectSecretStatus>(
+      `/delivery-projects/${encodeURIComponent(projectId)}/secrets/${encodeURIComponent(name)}`,
+      {
+        method: "PUT",
+        body: JSON.stringify(body),
+      }
+    ),
+  testProjectSecret: (
+    projectId: string,
+    name: string,
+    body: ProjectSecretTestBody
+  ) =>
+    request<ProjectSecretTestResult>(
+      `/delivery-projects/${encodeURIComponent(projectId)}/secrets/${encodeURIComponent(name)}/test`,
+      {
+        method: "POST",
+        body: JSON.stringify(body),
+      }
+    ),
+  revokeProjectSecret: (projectId: string, name: string, environment: string) =>
+    request<ProjectSecretStatus>(
+      `/delivery-projects/${encodeURIComponent(projectId)}/secrets/${encodeURIComponent(name)}?environment=${encodeURIComponent(environment)}`,
+      { method: "DELETE" }
+    ),
+  getProjectAIHubReadiness: (projectId: string, environment: string) =>
+    request<AIHubReadiness>(
+      `/delivery-projects/${encodeURIComponent(projectId)}/ai-hub/readiness?environment=${encodeURIComponent(environment)}`
+    ),
+  getProjectAIHubImportShape: (projectId: string) =>
+    request<AIHubImportShape>(
+      `/delivery-projects/${encodeURIComponent(projectId)}/ai-hub/import-shape`
+    ),
+  importProjectAIHubSecrets: (projectId: string, body: AIHubImportBody) =>
+    request<AIHubImportResult>(
+      `/delivery-projects/${encodeURIComponent(projectId)}/ai-hub/import`,
+      {
+        method: "POST",
+        body: JSON.stringify(body),
+      }
     ),
   listEnabledReviewRepos: () =>
     request<{ repos: Array<string> }>("/enabled-review-repos"),
