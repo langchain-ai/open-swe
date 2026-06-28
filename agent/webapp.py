@@ -58,6 +58,7 @@ from .reviewer_findings import (
 )
 from .reviewer_publish import fetch_pr_review_threads, post_review_started_comment  # noqa: F401
 from .reviewer_reconcile import reconcile_findings_with_review_threads  # noqa: F401
+from .scheduler import DEFAULT_DELIVERY_QUEUE_POLL_SCHEDULE, ensure_delivery_queue_polling_cron
 from .utils.auth import (
     is_bot_token_only_mode,
     resolve_github_token_from_email,
@@ -124,6 +125,21 @@ from .utils.slack_feedback import (
 logger = logging.getLogger(__name__)
 
 
+def _delivery_queue_polling_enabled() -> bool:
+    value = os.environ.get("DELIVERY_QUEUE_POLL_ENABLED", "true").strip().lower()
+    return value not in {"0", "false", "no", "off"}
+
+
+async def _ensure_delivery_queue_polling_on_startup() -> None:
+    if not _delivery_queue_polling_enabled():
+        return
+    schedule = os.environ.get("DELIVERY_QUEUE_POLL_SCHEDULE", DEFAULT_DELIVERY_QUEUE_POLL_SCHEDULE)
+    try:
+        await ensure_delivery_queue_polling_cron(schedule)
+    except Exception:  # noqa: BLE001
+        logger.exception("Failed to ensure delivery queue polling cron")
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     from .utils.model import validate_local_dev_llm_config
@@ -131,6 +147,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
 
     validate_sandbox_startup_config()
     validate_local_dev_llm_config()
+    await _ensure_delivery_queue_polling_on_startup()
     yield
 
 

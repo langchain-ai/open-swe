@@ -233,3 +233,38 @@ async def test_ensure_delivery_queue_polling_cron_is_idempotent(
 
     assert second["cron_id"] == "cron_1"
     assert len(fake_client.crons.created) == 1
+
+
+async def test_webapp_startup_ensures_delivery_queue_polling_cron(monkeypatch) -> None:  # noqa: ANN001
+    from agent import webapp
+
+    calls: list[str] = []
+
+    async def fake_ensure(schedule: str) -> dict[str, Any]:
+        calls.append(schedule)
+        return {"cron_id": "cron_1", "schedule": schedule}
+
+    monkeypatch.setenv("DELIVERY_QUEUE_POLL_ENABLED", "true")
+    monkeypatch.setenv("DELIVERY_QUEUE_POLL_SCHEDULE", "*/5 * * * *")
+    monkeypatch.setattr(webapp, "ensure_delivery_queue_polling_cron", fake_ensure)
+
+    await webapp._ensure_delivery_queue_polling_on_startup()
+
+    assert calls == ["*/5 * * * *"]
+
+
+async def test_webapp_startup_can_disable_delivery_queue_polling_cron(monkeypatch) -> None:  # noqa: ANN001
+    from agent import webapp
+
+    calls: list[str] = []
+
+    async def fake_ensure(schedule: str) -> dict[str, Any]:
+        calls.append(schedule)
+        return {"cron_id": "cron_1", "schedule": schedule}
+
+    monkeypatch.setenv("DELIVERY_QUEUE_POLL_ENABLED", "false")
+    monkeypatch.setattr(webapp, "ensure_delivery_queue_polling_cron", fake_ensure)
+
+    await webapp._ensure_delivery_queue_polling_on_startup()
+
+    assert calls == []
