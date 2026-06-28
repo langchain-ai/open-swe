@@ -17,6 +17,7 @@ from fastapi import HTTPException
 from langchain_core.messages.content import create_image_block
 from pydantic import BaseModel, ConfigDict, Field
 
+from ..utils.dashboard_handoff import DASHBOARD_HANDOFF_INSTRUCTION
 from ..utils.langsmith import get_langsmith_trace_url
 from ..utils.sandbox import create_sandbox
 from ..utils.slack import lookup_slack_thread_run_mapping, update_slack_trace_reply_for_web_handoff
@@ -1164,7 +1165,10 @@ async def _enrich_run_start_command(
         _validate_command_images(content, model_id=chosen_model or _metadata_model_id(metadata))
         prefix = _attribution_prefix(metadata, login, email)
         if prefix:
-            _set_command_last_message_content(params, _prefix_message_content(content, prefix))
+            content = _prefix_message_content(content, prefix)
+        if metadata.get("source") == "slack":
+            content = _prefix_message_content(content, f"{DASHBOARD_HANDOFF_INSTRUCTION}\n\n")
+        _set_command_last_message_content(params, content)
         metadata_update: dict[str, Any] = {"plan_mode": plan_mode_requested}
         if chosen_model and chosen_effort:
             overrides["agent_model_id"] = chosen_model
@@ -1808,11 +1812,20 @@ async def proxy_dashboard_thread_commands(
     async with httpx.AsyncClient(timeout=_PROXY_REQUEST_TIMEOUT) as client:
         response = await client.post(url, content=outgoing, headers=headers)
 
-    if (
-        parsed.get("method") == "run.start"
-        and response.status_code in {200, 202, 204}
-        and response.content
-    ):
+    run_start_succeeded = parsed.get("method") == "run.start" and response.status_code in {
+        200,
+        202,
+        204,
+    }
+    if run_start_succeeded and not creating:
+        try:
+            await _notify_slack_web_handoff(thread_id, metadata, langgraph_client())
+        except Exception:
+            logger.exception(
+                "Failed to update Slack message for dashboard handoff on %s", thread_id
+            )
+
+    if run_start_succeeded and response.content:
         try:
             payload = json.loads(response.content)
         except json.JSONDecodeError:
