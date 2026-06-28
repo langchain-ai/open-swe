@@ -56,7 +56,9 @@ class PreflightResult(TypedDict):
     blockers: list[PreflightBlocker]
 
 
-Poller = Callable[[], Awaitable[Iterable[Mapping[str, Any]] | None] | Iterable[Mapping[str, Any]] | None]
+Poller = Callable[
+    [], Awaitable[Iterable[Mapping[str, Any]] | None] | Iterable[Mapping[str, Any]] | None
+]
 
 _BLOCKER_MESSAGES: dict[str, str] = {
     "active_project": "Project is not active.",
@@ -250,6 +252,7 @@ async def transition_delivery_queue_status(
     status: DeliveryQueueStatus,
     *,
     reason: str | None = None,
+    extra: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     record = await read_delivery_queue_item(item_id)
     if record is None:
@@ -262,6 +265,8 @@ async def transition_delivery_queue_status(
         "status_reason": reason,
         "updated_at": _now_iso(),
     }
+    if extra:
+        updated.update(extra)
     return await _put_delivery_queue_item(updated)
 
 
