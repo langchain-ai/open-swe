@@ -7,7 +7,7 @@ import logging
 import os
 import time
 import warnings
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -47,6 +47,7 @@ from .dashboard.team_settings import (
     get_team_default_repo,
 )
 from .dashboard.user_mappings import email_for_login
+from .delivery_workspace import provision_delivery_workspace
 from .integrations.corridor_mcp import load_corridor_tools
 from .integrations.currents_tools import load_currents_tools
 from .integrations.datadog_mcp import load_datadog_tools
@@ -371,6 +372,48 @@ async def check_or_recreate_sandbox(
     return sandbox_backend
 
 
+async def _prepare_delivery_workspace_if_needed(
+    configurable: Mapping[str, Any],
+    sandbox_backend: SandboxBackendProtocol,
+    *,
+    default_work_dir: str,
+    thread_id: str,
+) -> str:
+    if configurable.get("source") != "delivery_queue":
+        return default_work_dir
+    worker_input = configurable.get("delivery_worker_input")
+    if not isinstance(worker_input, Mapping):
+        return default_work_dir
+
+    result = await provision_delivery_workspace(
+        sandbox_backend,
+        worker_input=worker_input,
+        default_work_dir=default_work_dir,
+    )
+    metadata: dict[str, Any] = {
+        "delivery_workspace": result,
+        "workspace_provisioning": result,
+    }
+    if result.get("status") == "ready":
+        worktree = {
+            "path": result.get("path"),
+            "branch": result.get("branch"),
+            "base_branch": result.get("base_branch"),
+            "provisioning_status": "ready",
+        }
+        metadata["worktree"] = {key: value for key, value in worktree.items() if value}
+    try:
+        await client.threads.update(thread_id=thread_id, metadata=metadata)
+    except Exception:
+        logger.debug("Failed to write delivery workspace metadata", exc_info=True)
+
+    if result.get("status") != "ready":
+        reason = result.get("reason") or "unknown"
+        raise RuntimeError(f"Delivery workspace provisioning failed: {reason}")
+    path = result.get("path")
+    return path if isinstance(path, str) and path.strip() else default_work_dir
+
+
 def _creating_metadata() -> dict[str, Any]:
     """Metadata that claims the cross-process creation lock with a timestamp."""
     return {"sandbox_id": SANDBOX_CREATING, "sandbox_creating_at": time.time()}
@@ -657,6 +700,12 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     linear_issue_number = linear_issue.get("linear_issue_number", "")
 
     work_dir = await aresolve_sandbox_work_dir(sandbox_backend)
+    work_dir = await _prepare_delivery_workspace_if_needed(
+        configurable,
+        sandbox_backend,
+        default_work_dir=work_dir,
+        thread_id=thread_id,
+    )
 
     def backend_factory(_runtime: object, _thread_id: str = thread_id) -> SandboxBackendProtocol:
         return _get_cached_sandbox_backend(_thread_id)
