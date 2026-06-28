@@ -7,6 +7,7 @@ import pytest
 from agent import delivery_queue as queue
 from agent import delivery_runner as runner
 from agent import project_registry
+from agent.dashboard import provider_pat_vault
 
 
 class _FakeStore:
@@ -125,6 +126,10 @@ def fake_client(monkeypatch: pytest.MonkeyPatch) -> _FakeClient:
     client = _FakeClient()
     monkeypatch.setattr(queue, "_client", lambda: client)
     monkeypatch.setattr(project_registry, "_client", lambda: client)
+    monkeypatch.setattr(provider_pat_vault, "_client", lambda: client)
+    from cryptography.fernet import Fernet
+
+    monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", Fernet.generate_key().decode())
     return client
 
 
@@ -150,6 +155,7 @@ def _ready_preflight() -> queue.PreflightInput:
 
 
 async def _queued_item(**overrides: Any) -> dict[str, Any]:
+    seed_pat = overrides.pop("seed_pat", True)
     payload: dict[str, Any] = {
         "project_id": "project-1",
         "provider": "linear",
@@ -170,6 +176,12 @@ async def _queued_item(**overrides: Any) -> dict[str, Any]:
         "artifacts": [{"type": "preview", "url": "https://preview.example.test"}],
     }
     payload.update(overrides)
+    if seed_pat:
+        await provider_pat_vault.upsert_provider_pat(
+            payload["github_login"],
+            provider="github",
+            token=f"ghp_{payload['github_login']}-delivery-token",
+        )
     return await queue.upsert_delivery_queue_item(payload, preflight=_ready_preflight())
 
 
@@ -445,6 +457,13 @@ async def test_launch_delivery_worker_transitions_queue_status_to_running(
         "worktree": {"path": "/tmp/open-swe/worktrees/delivery-checkout-totals"},
         "model_snapshot": "openai:gpt-5",
         "credential_identity": "github:user:octocat",
+        "credential_audit": {
+            "login": "octocat",
+            "provider": "github",
+            "project_id": "project-1",
+            "action": "preflight",
+            "token_last4": "oken",
+        },
         "risk_class": "medium",
         "gates": [{"name": "unit", "status": "pending"}],
         "artifacts": [{"type": "preview", "url": "https://preview.example.test"}],

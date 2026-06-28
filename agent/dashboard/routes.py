@@ -75,6 +75,12 @@ from .profiles import (
     upsert_access_token_from_github_response,
     upsert_profile,
 )
+from .provider_pat_vault import (
+    get_provider_pat_status,
+    list_provider_pat_status,
+    revoke_provider_pat,
+    upsert_provider_pat,
+)
 from .repo_access import require_repo_access_for_user
 from .repo_snapshots import (
     RepoSnapshotConfigError,
@@ -226,6 +232,10 @@ class PasswordAccountCreateBody(BaseModel):
 
 class PasswordAccountEnabledBody(BaseModel):
     enabled: bool
+
+
+class ProviderPATUpdateBody(BaseModel):
+    token: str
 
 
 def _session_is_admin(session: dict[str, Any]) -> bool:
@@ -558,6 +568,38 @@ async def disconnect_my_notion(
 ) -> dict[str, Any]:
     status = await disconnect_notion(session["sub"])
     return status.get("notion", {"connected": False})
+
+
+@router.get("/my-provider-tokens")
+async def api_list_my_provider_tokens(
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, list[dict[str, Any]]]:
+    return {"items": await list_provider_pat_status(session["sub"])}
+
+
+@router.get("/my-provider-tokens/{provider}")
+async def api_get_my_provider_token(
+    provider: str,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    return await get_provider_pat_status(session["sub"], provider=provider)
+
+
+@router.put("/my-provider-tokens/{provider}")
+async def api_put_my_provider_token(
+    provider: str,
+    body: ProviderPATUpdateBody,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    return await upsert_provider_pat(session["sub"], provider=provider, token=body.token)
+
+
+@router.delete("/my-provider-tokens/{provider}")
+async def api_delete_my_provider_token(
+    provider: str,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    return await revoke_provider_pat(session["sub"], provider=provider)
 
 
 @router.get("/notion/login")

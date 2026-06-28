@@ -9,6 +9,7 @@ from agent import delivery_review as review
 from agent import delivery_runner as runner
 from agent import delivery_smoke as smoke
 from agent import project_registry
+from agent.dashboard import provider_pat_vault
 from agent.merge_controller import MergeResult
 
 
@@ -139,9 +140,13 @@ class _MergeRecorder:
 
 @pytest.fixture
 def fake_client(monkeypatch: pytest.MonkeyPatch) -> _FakeClient:
+    from cryptography.fernet import Fernet
+
     client = _FakeClient()
     monkeypatch.setattr(queue, "_client", lambda: client)
     monkeypatch.setattr(project_registry, "_client", lambda: client)
+    monkeypatch.setattr(provider_pat_vault, "_client", lambda: client)
+    monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", Fernet.generate_key().decode())
     return client
 
 
@@ -172,12 +177,18 @@ def _issue(**overrides: Any) -> dict[str, Any]:
 
 def _project_overrides() -> dict[str, Any]:
     return {
+        "credential_policy": {
+            "provider": "github",
+            "scope": "user",
+            "requires_user_pat": True,
+            "identity": "github:user:octocat",
+        },
         "merge_policy": {
             "enabled": True,
             "strategy": "squash",
             "target_branch": "main",
             "required_checks": ["tests"],
-        }
+        },
     }
 
 
@@ -229,6 +240,11 @@ async def test_sports_cms_smoke_drives_linear_item_to_auto_merge(
     fake_client: _FakeClient,
     dispatch_recorder: _DispatchRecorder,
 ) -> None:
+    await provider_pat_vault.upsert_provider_pat(
+        "octocat",
+        provider="github",
+        token="ghp_sports-cms-token-1234",
+    )
     linear_client = _FakeLinearClient([_issue()])
     merge_recorder = _MergeRecorder(MergeResult(True, "merged", "merged", sha="merge-sha"))
 
@@ -282,6 +298,11 @@ async def test_sports_cms_smoke_blocks_before_merge_without_draft_pr_proof(
     fake_client: _FakeClient,
     dispatch_recorder: _DispatchRecorder,
 ) -> None:
+    await provider_pat_vault.upsert_provider_pat(
+        "octocat",
+        provider="github",
+        token="ghp_sports-cms-token-1234",
+    )
     linear_client = _FakeLinearClient([_issue()])
     merge_recorder = _MergeRecorder(MergeResult(True, "merged", "merged", sha="merge-sha"))
 

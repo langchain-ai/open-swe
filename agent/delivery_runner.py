@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from . import project_registry
+from .dashboard.provider_pat_vault import resolve_provider_pat
 from .delivery_preflight import block_delivery_start, evaluate_delivery_start_preflight
 from .delivery_queue import read_delivery_queue_item, transition_delivery_queue_status
 from .dispatch import dispatch_agent_run
@@ -201,10 +202,64 @@ def _credential_policy_for_item(
             "scope": "user",
             "requires_user_pat": True,
         }
+    provider = str(policy.get("provider") or "github").strip().lower() or "github"
     identity = _first_text(item, "credential_identity", "credentialIdentity")
+    if not identity:
+        login = _first_text(item, "github_login", "created_by")
+        if login:
+            identity = f"{provider}:user:{login}"
     if identity:
         policy = {**policy, "identity": identity}
     return policy
+
+
+def _login_from_credential_identity(identity: str, provider: str) -> str:
+    parts = [part.strip() for part in identity.split(":") if part.strip()]
+    if len(parts) >= 3 and parts[0].lower() == provider.lower() and parts[1].lower() == "user":
+        return parts[2]
+    if len(parts) >= 2 and parts[0].lower() == provider.lower():
+        return parts[-1]
+    return ""
+
+
+def _credential_owner_login(item: Mapping[str, Any], credential_policy: Mapping[str, Any]) -> str:
+    provider = str(credential_policy.get("provider") or "github").strip().lower() or "github"
+    identity = str(credential_policy.get("identity") or "").strip()
+    if identity:
+        return _login_from_credential_identity(identity, provider)
+    return _first_text(item, "github_login", "created_by")
+
+
+async def _resolve_user_pat_for_preflight(
+    item: Mapping[str, Any],
+    project: Mapping[str, Any],
+    credential_policy: Mapping[str, Any],
+) -> tuple[bool | None, dict[str, Any]]:
+    if credential_policy.get("requires_user_pat") is not True:
+        return None, {}
+    provider = str(credential_policy.get("provider") or "github").strip().lower() or "github"
+    login = _credential_owner_login(item, credential_policy)
+    if not login:
+        return False, {}
+    resolved = await resolve_provider_pat(
+        login,
+        provider=provider,
+        project_id=_first_text(project, "project_id") or _first_text(item, "project_id"),
+        action="preflight",
+    )
+    if resolved is None:
+        return False, {}
+    identity = str(credential_policy.get("identity") or f"{provider}:user:{resolved.login}")
+    return True, {
+        "credential_identity": identity,
+        "credential_audit": {
+            "login": resolved.login,
+            "provider": resolved.provider,
+            "project_id": _first_text(project, "project_id") or _first_text(item, "project_id"),
+            "action": "preflight",
+            "token_last4": resolved.token_last4,
+        },
+    }
 
 
 def build_delivery_worker_input(
@@ -366,6 +421,9 @@ def build_delivery_worker_metadata(
             "queue_item_id": item_id,
         },
     }
+    credential_audit = _mapping_value(item, "credential_audit")
+    if credential_audit:
+        metadata["credential_audit"] = credential_audit
     github_login = _first_text(item, "github_login", "created_by")
     if github_login:
         metadata["github_login"] = github_login
@@ -444,6 +502,7 @@ def build_delivery_run_record(
             "github_login",
             "created_by",
         ),
+        "credential_audit": _mapping_value(item, "credential_audit"),
         "risk_class": _first_text(item, "risk_class", "riskClass") or "unknown",
         "gates": _list_value(item, "gates"),
         "artifacts": _list_value(item, "artifacts"),
@@ -481,6 +540,8 @@ def _runtime_fields_for_item(item: Mapping[str, Any]) -> dict[str, Any]:
         "context_pack",
         "repo",
         "merge_policy",
+        "credential_identity",
+        "credential_audit",
     ):
         value = item.get(key)
         if value is not None:
@@ -530,10 +591,24 @@ async def launch_delivery_worker(
     worker_thread_id = _worker_thread_id_for(item)
     active_run = await _active_run(client, worker_thread_id)
     project = await _project_for_item(item)
-    start_result = evaluate_delivery_start_preflight(
+    credential_policy = _credential_policy_for_item(item, project)
+    credential_ready, credential_updates = await _resolve_user_pat_for_preflight(
         item,
         project,
-        checks={**dict(start_checks or {}), "duplicate_active_run": active_run is not None},
+        credential_policy,
+    )
+    start_checks_payload = dict(start_checks or {})
+    if credential_ready is not None:
+        start_checks_payload["github_credentials"] = credential_ready
+    preflight_item = {
+        **dict(item),
+        **credential_updates,
+        "credential_policy": credential_policy,
+    }
+    start_result = evaluate_delivery_start_preflight(
+        preflight_item,
+        project,
+        checks={**start_checks_payload, "duplicate_active_run": active_run is not None},
         auto_mode=auto_mode,
     )
     if not start_result["ready"]:
@@ -550,8 +625,15 @@ async def launch_delivery_worker(
             refused["active_run_status"] = active_run["status"]
         return refused
 
-    worker_input = build_delivery_worker_input(item, project, worker_thread_id=worker_thread_id)
-    launch_item = _item_with_worker_input(item, worker_input, project)
+    worker_input = build_delivery_worker_input(
+        preflight_item,
+        project,
+        worker_thread_id=worker_thread_id,
+    )
+    launch_item = {
+        **_item_with_worker_input(preflight_item, worker_input, project),
+        **credential_updates,
+    }
     metadata = build_delivery_worker_metadata(launch_item, worker_thread_id)
     await _upsert_thread_metadata(client, worker_thread_id, metadata)
     run = await dispatch_agent_run(
