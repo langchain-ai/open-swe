@@ -38,6 +38,11 @@ _DEFAULT_SANDBOX_PROFILE: dict[str, Any] = {
     "provider": "langsmith",
     "profile": "default",
 }
+_DEFAULT_BRANCH_POLICY: dict[str, Any] = {
+    "base_branch": "main",
+    "branch_prefix": "delivery",
+    "draft_pull_requests": True,
+}
 _DEFAULT_GATE_POLICY: dict[str, Any] = {
     "agent_review": True,
     "qa_evidence": True,
@@ -129,6 +134,7 @@ def default_delivery_project(
     vcs_config: Mapping[str, Any] | None = None,
     queue_eligibility_policy: Mapping[str, Any] | None = None,
     sandbox_profile: Mapping[str, Any] | None = None,
+    branch_policy: Mapping[str, Any] | None = None,
     gate_policy: Mapping[str, Any] | None = None,
     merge_policy: Mapping[str, Any] | None = None,
     delivery_modes: list[str] | None = None,
@@ -146,12 +152,57 @@ def default_delivery_project(
             dict(queue_eligibility_policy or _DEFAULT_QUEUE_ELIGIBILITY_POLICY)
         ),
         "sandbox_profile": deepcopy(dict(sandbox_profile or _DEFAULT_SANDBOX_PROFILE)),
+        "branch_policy": deepcopy(dict(branch_policy or _DEFAULT_BRANCH_POLICY)),
         "gate_policy": deepcopy(dict(gate_policy or _DEFAULT_GATE_POLICY)),
         "merge_policy": deepcopy(dict(merge_policy or _DEFAULT_MERGE_POLICY)),
         "delivery_modes": list(delivery_modes or ["queued_delivery"]),
         "run_limits": deepcopy(dict(run_limits or _DEFAULT_RUN_LIMITS)),
         "membership": deepcopy(dict(membership or _DEFAULT_MEMBERSHIP)),
     }
+
+
+def default_sports_cms_delivery_project(
+    *,
+    tracker_config: Mapping[str, Any],
+    vcs_config: Mapping[str, Any],
+    membership: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    return default_delivery_project(
+        project_id="sports-cms",
+        name="Sports CMS",
+        tracker_provider="linear",
+        tracker_config=tracker_config,
+        vcs_provider="github",
+        vcs_config=vcs_config,
+        queue_eligibility_policy={
+            "ready_states": ["ready"],
+            "labels": ["agent-ready"],
+            "missing_readiness": "not-ready",
+            "excluded_statuses": ["done", "completed", "canceled", "cancelled", "duplicate"],
+            "required_fields": ["description"],
+        },
+        sandbox_profile={"provider": "langsmith", "profile": "sports-cms"},
+        branch_policy={
+            "base_branch": "main",
+            "branch_prefix": "delivery/sports-cms",
+            "draft_pull_requests": True,
+        },
+        gate_policy={
+            "agent_review": True,
+            "qa_evidence": True,
+            "blocking_gates": [
+                "drupal_bootstrap",
+                "theme_assets",
+                "sdc_twig_render",
+                "browser_flow",
+                "screenshot",
+                "trace_or_video",
+                "pr_qa_evidence",
+            ],
+            "advisory_gates": ["phpcs", "phpstan", "phpunit"],
+        },
+        membership=membership,
+    )
 
 
 def evaluate_project_start_policy(
@@ -230,6 +281,7 @@ def _apply_project_update(record: dict[str, Any], payload: Mapping[str, Any]) ->
             record[key] = _bool_value(payload[key], key)
     for key in (
         "queue_eligibility_policy",
+        "branch_policy",
         "gate_policy",
         "merge_policy",
         "run_limits",
@@ -283,3 +335,11 @@ async def get_project_merge_policy(project_id: str) -> dict[str, Any] | None:
         return None
     merge_policy = project.get("merge_policy")
     return deepcopy(dict(merge_policy)) if isinstance(merge_policy, Mapping) else None
+
+
+async def get_project_branch_policy(project_id: str) -> dict[str, Any] | None:
+    project = await get_delivery_project(project_id)
+    if project is None:
+        return None
+    branch_policy = project.get("branch_policy")
+    return deepcopy(dict(branch_policy)) if isinstance(branch_policy, Mapping) else None

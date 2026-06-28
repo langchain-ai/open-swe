@@ -165,6 +165,47 @@ async def test_queue_policy_storage(fake_client: _FakeClient) -> None:
     )
 
 
+async def test_branch_policy_storage_and_lookup(fake_client: _FakeClient) -> None:
+    project = _project("alpha", "Alpha")
+    project["branch_policy"] = {
+        "base_branch": "develop",
+        "branch_prefix": "delivery/alpha",
+        "draft_pull_requests": True,
+    }
+    await project_registry.upsert_delivery_project(project)
+
+    branch_policy = await project_registry.get_project_branch_policy("alpha")
+
+    assert branch_policy == {
+        "base_branch": "develop",
+        "branch_prefix": "delivery/alpha",
+        "draft_pull_requests": True,
+    }
+
+
+def test_default_sports_cms_project_profile_is_ready_for_v1_configuration() -> None:
+    project = project_registry.default_sports_cms_delivery_project(
+        tracker_config={"team_keys": ["ENG"], "linear_project_ids": ["project-linear-1"]},
+        vcs_config={"owner": "example", "repo": "sports-cms"},
+    )
+
+    assert project["project_id"] == "sports-cms"
+    assert project["tracker"] == {
+        "provider": "linear",
+        "config": {"team_keys": ["ENG"], "linear_project_ids": ["project-linear-1"]},
+    }
+    assert project["vcs"] == {
+        "provider": "github",
+        "config": {"owner": "example", "repo": "sports-cms"},
+    }
+    assert project["queue_eligibility_policy"]["labels"] == ["agent-ready"]
+    assert project["queue_eligibility_policy"]["missing_readiness"] == "not-ready"
+    assert project["branch_policy"]["base_branch"] == "main"
+    assert project["branch_policy"]["branch_prefix"] == "delivery/sports-cms"
+    assert project["sandbox_profile"] == {"provider": "langsmith", "profile": "sports-cms"}
+    assert project["membership"] == {"users": []}
+
+
 def test_default_membership_uses_flat_project_users() -> None:
     project = _project("alpha", "Alpha")
 
