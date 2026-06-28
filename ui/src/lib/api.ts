@@ -111,8 +111,23 @@ export interface SessionUser {
   login: string
   email: string | null
   avatar_url: string | null
+  auth_source?: string
   is_admin: boolean
   slack_oauth_enabled?: boolean
+}
+
+export interface PasswordLoginBody {
+  email: string
+  password: string
+}
+
+export interface PasswordResetRequestBody {
+  email: string
+}
+
+export interface PasswordResetConfirmBody {
+  token: string
+  password: string
 }
 
 export interface ModelOption {
@@ -603,6 +618,21 @@ export interface ReviewerEvalStatus {
 
 export const api = {
   me: () => request<SessionUser>("/me"),
+  passwordLogin: (body: PasswordLoginBody) =>
+    request<void>("/auth/password/login", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  requestPasswordReset: (body: PasswordResetRequestBody) =>
+    request<{ status: string }>("/auth/password/reset/request", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  confirmPasswordReset: (body: PasswordResetConfirmBody) =>
+    request<void>("/auth/password/reset/confirm", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
   options: () => request<OptionsPayload>("/options"),
   profile: () => request<Profile>("/profile"),
   saveProfile: (body: ProfileUpdate) =>

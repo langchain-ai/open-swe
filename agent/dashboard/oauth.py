@@ -130,12 +130,19 @@ async def enforce_org_login_gate(login: str) -> None:
     raise HTTPException(403, "your GitHub account is not a member of an authorized organization")
 
 
-def issue_session(*, login: str, email: str | None, avatar_url: str | None) -> str:
+def issue_session(
+    *,
+    login: str,
+    email: str | None,
+    avatar_url: str | None,
+    auth_source: str = "github",
+) -> str:
     now = int(time.time())
     payload = {
         "sub": login,
         "email": email,
         "avatar_url": avatar_url,
+        "auth_source": auth_source,
         "iat": now,
         "exp": now + SESSION_TTL_SECONDS,
     }

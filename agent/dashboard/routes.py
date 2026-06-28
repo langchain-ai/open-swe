@@ -60,6 +60,14 @@ from .oauth import (
     sanitize_redirect_to,
 )
 from .options import SUPPORTED_MODELS
+from .password_auth import (
+    authenticate_password,
+    create_password_reset_token,
+    request_password_reset,
+    reset_password,
+    set_password_account_enabled,
+    upsert_password_account,
+)
 from .profiles import (
     ProfileUpdate,
     get_profile,
@@ -193,6 +201,31 @@ router = APIRouter(
 )
 _GITHUB_API_TIMEOUT = httpx.Timeout(10.0, connect=3.0)
 _SKIPPABLE_INSTALLATION_REPO_STATUS_CODES = frozenset({403, 404})
+
+
+class PasswordLoginBody(BaseModel):
+    email: str
+    password: str
+
+
+class PasswordResetRequestBody(BaseModel):
+    email: str
+
+
+class PasswordResetConfirmBody(BaseModel):
+    token: str
+    password: str
+
+
+class PasswordAccountCreateBody(BaseModel):
+    login: str
+    email: str
+    password: str
+    enabled: bool = True
+
+
+class PasswordAccountEnabledBody(BaseModel):
+    enabled: bool
 
 
 def _session_is_admin(session: dict[str, Any]) -> bool:
@@ -401,6 +434,32 @@ async def auth_callback(request: Request, code: str, state: str) -> RedirectResp
     return response
 
 
+@router.post("/auth/password/login")
+async def auth_password_login(body: PasswordLoginBody) -> Response:
+    account = await authenticate_password(body.email, body.password)
+    session_jwt = issue_session(
+        login=str(account["login"]),
+        email=str(account["email"]),
+        avatar_url=None,
+        auth_source="password",
+    )
+    response = Response(status_code=204)
+    _set_session_cookie(response, session_jwt)
+    return response
+
+
+@router.post("/auth/password/reset/request")
+async def auth_password_reset_request(body: PasswordResetRequestBody) -> dict[str, str]:
+    await request_password_reset(body.email)
+    return {"status": "accepted"}
+
+
+@router.post("/auth/password/reset/confirm")
+async def auth_password_reset_confirm(body: PasswordResetConfirmBody) -> Response:
+    await reset_password(body.token, body.password)
+    return Response(status_code=204)
+
+
 @router.post("/auth/logout")
 async def auth_logout() -> Response:
     response = Response(status_code=204)
@@ -415,6 +474,7 @@ async def me(session: dict[str, Any] = _SESSION_DEP) -> dict[str, Any]:
         "login": session["sub"],
         "email": session.get("email"),
         "avatar_url": session.get("avatar_url"),
+        "auth_source": session.get("auth_source", "github"),
         "is_admin": _session_is_admin(session),
         "slack_oauth_enabled": slack_oauth_configured(),
     }
@@ -812,6 +872,37 @@ async def admin_delete_user_mapping(
 ) -> dict[str, bool]:
     deleted = await delete_mapping(github_login)
     return {"deleted": deleted}
+
+
+@router.post("/admin/password-accounts")
+async def admin_create_password_account(
+    body: PasswordAccountCreateBody,
+    admin: dict[str, Any] = _ADMIN_DEP,
+) -> dict[str, Any]:
+    return await upsert_password_account(
+        login=body.login,
+        email=body.email,
+        password=body.password,
+        enabled=body.enabled,
+        invited_by=str(admin["sub"]),
+    )
+
+
+@router.put("/admin/password-accounts/{email}/enabled")
+async def admin_set_password_account_enabled(
+    email: str,
+    body: PasswordAccountEnabledBody,
+    _admin: dict[str, Any] = _ADMIN_DEP,
+) -> dict[str, Any]:
+    return await set_password_account_enabled(email, enabled=body.enabled)
+
+
+@router.post("/admin/password-accounts/{email}/reset-token")
+async def admin_create_password_reset_token(
+    email: str,
+    admin: dict[str, Any] = _ADMIN_DEP,
+) -> dict[str, str]:
+    return await create_password_reset_token(email, requested_by=str(admin["sub"]))
 
 
 @router.get("/admin/evals/reviewer")
