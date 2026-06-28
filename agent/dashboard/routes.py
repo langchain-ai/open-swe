@@ -10,9 +10,9 @@ from typing import Any, Literal
 import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from fastapi.responses import RedirectResponse, Response, StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
-from .. import delivery_queue, project_registry, project_secrets
+from .. import delivery_queue, linear_queue, project_registry, project_secrets
 from .admin import is_admin
 from .agent_instructions import (
     AgentInstructionsCreate,
@@ -254,6 +254,23 @@ class AIHubImportBody(BaseModel):
     prefixes: list[str] | None = None
 
 
+class TicketIntakeUpdateBody(BaseModel):
+    provider: Literal["linear"] = "linear"
+    team_ids: list[str] = Field(default_factory=list)
+    team_keys: list[str] = Field(default_factory=list)
+    team_names: list[str] = Field(default_factory=list)
+    linear_project_ids: list[str] = Field(default_factory=list)
+    linear_project_names: list[str] = Field(default_factory=list)
+    labels: list[str] = Field(default_factory=lambda: ["agent-ready"])
+    ready_states: list[str] = Field(default_factory=lambda: ["ready"])
+    excluded_statuses: list[str] = Field(
+        default_factory=lambda: ["done", "completed", "canceled", "cancelled", "duplicate"]
+    )
+    required_fields: list[str] = Field(default_factory=lambda: ["description"])
+    missing_readiness: Literal["skip", "not-ready"] = "not-ready"
+    polling_interval_minutes: int = 5
+
+
 def _session_is_admin(session: dict[str, Any]) -> bool:
     return is_admin(session.get("email"), login=session.get("sub"))
 
@@ -306,6 +323,86 @@ def _delivery_queue_summary(item: dict[str, Any]) -> dict[str, Any]:
         or delivery.get("pull_request_url")
         or delivery.get("pr_url"),
         "updated_at": item.get("updated_at"),
+    }
+
+
+def _clean_strings(values: list[str]) -> list[str]:
+    return [value.strip() for value in values if isinstance(value, str) and value.strip()]
+
+
+def _linear_credential_available() -> bool:
+    return bool(os.environ.get("LINEAR_API_KEY") or getattr(linear_queue, "LINEAR_API_KEY", ""))
+
+
+def _ticket_intake_payload(project: dict[str, Any]) -> dict[str, Any]:
+    tracker = project.get("tracker") if isinstance(project.get("tracker"), dict) else {}
+    tracker_config = tracker.get("config") if isinstance(tracker.get("config"), dict) else {}
+    queue_policy = (
+        project.get("queue_eligibility_policy")
+        if isinstance(project.get("queue_eligibility_policy"), dict)
+        else {}
+    )
+    labels = _clean_strings(queue_policy.get("labels") or tracker_config.get("labels") or [])
+    return {
+        "provider": str(tracker.get("provider") or "linear"),
+        "credential": {
+            "provider": "linear",
+            "available": _linear_credential_available(),
+            "source": "LINEAR_API_KEY" if _linear_credential_available() else None,
+        },
+        "tracker_config": {
+            "team_ids": _clean_strings(tracker_config.get("team_ids") or []),
+            "team_keys": _clean_strings(tracker_config.get("team_keys") or []),
+            "team_names": _clean_strings(tracker_config.get("team_names") or []),
+            "linear_project_ids": _clean_strings(
+                tracker_config.get("linear_project_ids") or tracker_config.get("project_ids") or []
+            ),
+            "linear_project_names": _clean_strings(
+                tracker_config.get("linear_project_names")
+                or tracker_config.get("project_names")
+                or []
+            ),
+        },
+        "queue_eligibility_policy": {
+            "labels": labels or ["agent-ready"],
+            "ready_states": _clean_strings(queue_policy.get("ready_states") or ["ready"]),
+            "excluded_statuses": _clean_strings(queue_policy.get("excluded_statuses") or []),
+            "required_fields": _clean_strings(queue_policy.get("required_fields") or []),
+            "missing_readiness": queue_policy.get("missing_readiness") or "skip",
+            "polling_interval_minutes": int(queue_policy.get("polling_interval_minutes") or 5),
+        },
+    }
+
+
+def _ticket_intake_update_payload(
+    project: dict[str, Any],
+    body: TicketIntakeUpdateBody,
+) -> dict[str, Any]:
+    if body.polling_interval_minutes != 5:
+        raise HTTPException(422, "V1 polling interval must remain 5 minutes")
+    tracker_config = {
+        "team_ids": _clean_strings(body.team_ids),
+        "team_keys": _clean_strings(body.team_keys),
+        "team_names": _clean_strings(body.team_names),
+        "linear_project_ids": _clean_strings(body.linear_project_ids),
+        "linear_project_names": _clean_strings(body.linear_project_names),
+    }
+    if not any(tracker_config.values()):
+        raise HTTPException(422, "at least one Linear team or project selector is required")
+    labels = _clean_strings(body.labels)
+    if not labels:
+        raise HTTPException(422, "at least one ready label is required")
+    return {
+        "project_id": str(project["project_id"]),
+        "tracker": {"provider": body.provider, "config": tracker_config},
+        "queue_eligibility_policy": {
+            "labels": labels,
+            "ready_states": _clean_strings(body.ready_states) or ["ready"],
+            "excluded_statuses": _clean_strings(body.excluded_statuses),
+            "required_fields": _clean_strings(body.required_fields),
+            "missing_readiness": body.missing_readiness,
+            "polling_interval_minutes": body.polling_interval_minutes,
+        },
     }
 
 
@@ -983,6 +1080,83 @@ async def api_get_delivery_project_readiness(
 ) -> dict[str, Any]:
     project = await _require_delivery_project_member(project_id, session)
     return await _delivery_project_readiness(project, session)
+
+
+@router.get("/delivery-projects/{project_id}/ticket-intake")
+async def api_get_delivery_project_ticket_intake(
+    project_id: str,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    project = await _require_delivery_project_member(project_id, session)
+    return _ticket_intake_payload(project)
+
+
+@router.put("/delivery-projects/{project_id}/ticket-intake")
+async def api_put_delivery_project_ticket_intake(
+    project_id: str,
+    body: TicketIntakeUpdateBody,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    project = await _require_delivery_project_member(project_id, session)
+    updated = await project_registry.upsert_delivery_project(
+        _ticket_intake_update_payload(project, body)
+    )
+    return _ticket_intake_payload(updated)
+
+
+@router.post("/delivery-projects/{project_id}/ticket-intake/test-connection")
+async def api_test_delivery_project_ticket_intake(
+    project_id: str,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    await _require_delivery_project_member(project_id, session)
+    if not _linear_credential_available():
+        return {
+            "status": "missing_credentials",
+            "provider": "linear",
+            "teams": [],
+            "projects": [],
+            "error": "LINEAR_API_KEY is not configured.",
+        }
+    try:
+        return await linear_queue.test_linear_connection()
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "status": "error",
+            "provider": "linear",
+            "teams": [],
+            "projects": [],
+            "error": str(exc),
+        }
+
+
+@router.post("/delivery-projects/{project_id}/ticket-intake/preview")
+async def api_preview_delivery_project_ticket_intake(
+    project_id: str,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    project = await _require_delivery_project_member(project_id, session)
+    if not _linear_credential_available():
+        return {
+            "status": "missing_credentials",
+            "provider": "linear",
+            "counts": {"queued": 0, "not-ready": 0, "blocked": 0, "ignored": 0},
+            "items": [],
+            "error": "LINEAR_API_KEY is not configured.",
+        }
+    try:
+        return await linear_queue.preview_linear_delivery_queue(
+            linear_queue.linear_policy_from_project(project),
+            client=linear_queue.LinearGraphQLIssueClient(),
+        )
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "status": "error",
+            "provider": "linear",
+            "counts": {"queued": 0, "not-ready": 0, "blocked": 0, "ignored": 0},
+            "items": [],
+            "error": str(exc),
+        }
 
 
 @router.get("/delivery-projects/{project_id}/secrets")

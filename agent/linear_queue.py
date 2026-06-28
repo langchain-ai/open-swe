@@ -49,6 +49,10 @@ class LinearIssueClient(Protocol):
     ) -> Awaitable[Iterable[Mapping[str, Any]]] | Iterable[Mapping[str, Any]]: ...
 
 
+class LinearCatalogClient(Protocol):
+    def list_catalog(self) -> Awaitable[Mapping[str, Any]] | Mapping[str, Any]: ...
+
+
 class LinearGraphQLIssueClient:
     def __init__(self, *, page_size: int = 100, max_pages: int = 10) -> None:
         self.page_size = page_size
@@ -103,6 +107,27 @@ class LinearGraphQLIssueClient:
             if cursor is None:
                 break
         return issues
+
+
+class LinearGraphQLCatalogClient:
+    async def list_catalog(self) -> Mapping[str, Any]:
+        query = """
+        query DeliveryQueueCatalog {
+          teams {
+            nodes { id key name }
+          }
+          projects {
+            nodes { id name }
+          }
+        }
+        """
+        result = await _graphql_request(query)
+        if "error" in result:
+            raise RuntimeError(f"linear connection failed: {result['error']}")
+        return {
+            "teams": _mapping(result.get("teams")).get("nodes") or [],
+            "projects": _mapping(result.get("projects")).get("nodes") or [],
+        }
 
 
 def _normal_set(values: Sequence[str]) -> set[str]:
@@ -321,6 +346,96 @@ def _payload_for_issue(
         payload["status"] = "blocked"
         payload["missing_required_fields"] = list(missing_required_fields)
     return payload
+
+
+def _preview_for_issue(
+    issue: Mapping[str, Any],
+    policy: LinearQueueEligibilityPolicy,
+) -> dict[str, Any]:
+    in_scope = _in_scope(issue, policy)
+    excluded = _is_excluded_status(issue, policy)
+    readiness = _has_label(issue, policy.readiness_label)
+    missing_required_fields = _missing_required_fields(issue, policy)
+    if not in_scope:
+        action = "ignored"
+        reason = "out_of_scope"
+    elif excluded:
+        action = "ignored"
+        reason = "excluded_status"
+    elif not readiness and policy.missing_readiness == "skip":
+        action = "ignored"
+        reason = "missing_readiness"
+    elif missing_required_fields:
+        action = "blocked"
+        reason = "missing_required_fields"
+    elif not readiness:
+        action = "not-ready"
+        reason = "missing_readiness"
+    else:
+        action = "queued"
+        reason = "ready"
+    return {
+        "action": action,
+        "reason": reason,
+        "identifier": issue.get("identifier"),
+        "title": issue.get("title"),
+        "url": issue.get("url"),
+        "team": dict(_mapping(issue.get("team"))),
+        "project": dict(_mapping(issue.get("project"))),
+        "state": dict(_mapping(issue.get("state"))),
+        "labels": [dict(label) for label in _labels(issue)],
+        "missing_required_fields": list(missing_required_fields),
+    }
+
+
+async def preview_linear_delivery_queue(
+    policy: LinearQueueEligibilityPolicy,
+    *,
+    client: LinearIssueClient,
+) -> dict[str, Any]:
+    result = client.list_issues(
+        readiness_label=policy.readiness_label,
+        team_ids=policy.team_ids,
+        team_keys=policy.team_keys,
+        team_names=policy.team_names,
+        linear_project_ids=policy.linear_project_ids,
+        linear_project_names=policy.linear_project_names,
+        excluded_statuses=policy.excluded_statuses,
+    )
+    issues = await result if inspect.isawaitable(result) else result
+    items = [_preview_for_issue(issue, policy) for issue in issues]
+    counts = {"queued": 0, "not-ready": 0, "blocked": 0, "ignored": 0}
+    for item in items:
+        action = str(item.get("action"))
+        if action in counts:
+            counts[action] += 1
+    return {
+        "status": "previewed",
+        "provider": "linear",
+        "counts": counts,
+        "items": items,
+    }
+
+
+async def test_linear_connection(
+    *,
+    client: LinearCatalogClient | None = None,
+) -> dict[str, Any]:
+    client = client or LinearGraphQLCatalogClient()
+    result = client.list_catalog()
+    catalog = await result if inspect.isawaitable(result) else result
+    teams = catalog.get("teams") if isinstance(catalog, Mapping) else []
+    projects = catalog.get("projects") if isinstance(catalog, Mapping) else []
+    return {
+        "status": "connected",
+        "provider": "linear",
+        "teams": list(teams) if isinstance(teams, Sequence) and not isinstance(teams, str) else [],
+        "projects": (
+            list(projects)
+            if isinstance(projects, Sequence) and not isinstance(projects, str)
+            else []
+        ),
+    }
 
 
 async def poll_linear_delivery_queue(

@@ -377,6 +377,76 @@ export interface AIHubImportResult {
   shape: AIHubImportShape
 }
 
+export interface TicketIntakeConfig {
+  provider: "linear" | string
+  credential: {
+    provider: "linear" | string
+    available: boolean
+    source?: string | null
+  }
+  tracker_config: {
+    team_ids: Array<string>
+    team_keys: Array<string>
+    team_names: Array<string>
+    linear_project_ids: Array<string>
+    linear_project_names: Array<string>
+  }
+  queue_eligibility_policy: {
+    labels: Array<string>
+    ready_states: Array<string>
+    excluded_statuses: Array<string>
+    required_fields: Array<string>
+    missing_readiness: "skip" | "not-ready" | string
+    polling_interval_minutes: number
+  }
+}
+
+export interface TicketIntakeUpdateBody {
+  provider: "linear"
+  team_ids: Array<string>
+  team_keys: Array<string>
+  team_names: Array<string>
+  linear_project_ids: Array<string>
+  linear_project_names: Array<string>
+  labels: Array<string>
+  ready_states: Array<string>
+  excluded_statuses: Array<string>
+  required_fields: Array<string>
+  missing_readiness: "skip" | "not-ready"
+  polling_interval_minutes: number
+}
+
+export interface LinearCatalogResult {
+  status: string
+  provider: "linear" | string
+  teams: Array<{ id?: string; key?: string; name?: string }>
+  projects: Array<{ id?: string; name?: string }>
+  error?: string
+}
+
+export interface TicketIntakePreview {
+  status: string
+  provider: "linear" | string
+  counts: {
+    queued: number
+    "not-ready": number
+    blocked: number
+    ignored: number
+  }
+  items: Array<{
+    action: string
+    reason?: string
+    identifier?: string | null
+    title?: string | null
+    url?: string | null
+    team?: Record<string, unknown>
+    project?: Record<string, unknown>
+    state?: Record<string, unknown>
+    missing_required_fields?: Array<string>
+  }>
+  error?: string
+}
+
 export interface UserMapping {
   github_login: string
   work_email: string
@@ -927,6 +997,28 @@ export const api = {
   getDeliveryProjectReadiness: (projectId: string) =>
     request<DeliveryProjectReadiness>(
       `/delivery-projects/${encodeURIComponent(projectId)}/readiness`
+    ),
+  getTicketIntake: (projectId: string) =>
+    request<TicketIntakeConfig>(
+      `/delivery-projects/${encodeURIComponent(projectId)}/ticket-intake`
+    ),
+  saveTicketIntake: (projectId: string, body: TicketIntakeUpdateBody) =>
+    request<TicketIntakeConfig>(
+      `/delivery-projects/${encodeURIComponent(projectId)}/ticket-intake`,
+      {
+        method: "PUT",
+        body: JSON.stringify(body),
+      }
+    ),
+  testTicketIntakeConnection: (projectId: string) =>
+    request<LinearCatalogResult>(
+      `/delivery-projects/${encodeURIComponent(projectId)}/ticket-intake/test-connection`,
+      { method: "POST" }
+    ),
+  previewTicketIntake: (projectId: string) =>
+    request<TicketIntakePreview>(
+      `/delivery-projects/${encodeURIComponent(projectId)}/ticket-intake/preview`,
+      { method: "POST" }
     ),
   listProjectSecrets: (projectId: string, environment: string) =>
     request<ProjectSecretsPayload>(

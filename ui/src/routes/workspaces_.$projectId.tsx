@@ -7,6 +7,7 @@ import type {
 } from "@/lib/api"
 import { AppShell, SettingsSection } from "@/components/AppShell"
 import { WorkspaceCredentialsSection } from "@/components/WorkspaceCredentialsSection"
+import { WorkspaceTicketIntakeSection } from "@/components/WorkspaceTicketIntakeSection"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { api } from "@/lib/api"
@@ -214,7 +215,6 @@ function WorkspaceDetail({
   project: DeliveryProjectSummary
   readiness?: DeliveryProjectReadiness
 }) {
-  const trackerConfig = project.tracker.config ?? {}
   const vcsConfig = project.vcs.config ?? {}
   const sandboxRuntime =
     typeof project.sandbox_profile.runtime === "object" &&
@@ -263,16 +263,7 @@ function WorkspaceDetail({
         </div>
       </SettingsSection>
 
-      <SettingsSection title="Ticket Intake">
-        <div id="ticket-intake">
-          <KeyValueGrid
-            items={[
-              ...entries(trackerConfig),
-              ...entries(project.queue_eligibility_policy),
-            ]}
-          />
-        </div>
-      </SettingsSection>
+      <WorkspaceTicketIntakeSection projectId={project.project_id} />
 
       <WorkspaceCredentialsSection projectId={project.project_id} />
 

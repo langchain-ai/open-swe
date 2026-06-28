@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from agent import delivery_queue as queue
+from agent import linear_queue
 from agent import delivery_runner as runner
 from agent import project_registry, project_secrets
 from agent.dashboard import oauth, provider_pat_vault, routes
@@ -340,6 +341,117 @@ async def test_delivery_project_readiness_reports_missing_linear_config(
     assert payload["ready"] is False
     assert _check(payload, "tracker_intake")["ready"] is False
     assert _check(payload, "tracker_intake")["section"] == "ticket-intake"
+
+
+def test_dashboard_ticket_intake_routes_persist_config_and_report_missing_credentials(
+    dashboard_client: TestClient,
+) -> None:
+    import anyio
+
+    anyio.run(_project)
+
+    missing = dashboard_client.post(
+        "/dashboard/api/delivery-projects/sports-cms/ticket-intake/test-connection",
+        headers={"Origin": "http://testserver"},
+        cookies=_session_cookie(),
+    )
+    assert missing.status_code == 200
+    assert missing.json()["status"] == "missing_credentials"
+    assert "LINEAR_API_KEY" in missing.json()["error"]
+
+    saved = dashboard_client.put(
+        "/dashboard/api/delivery-projects/sports-cms/ticket-intake",
+        headers={"Origin": "http://testserver"},
+        cookies=_session_cookie(),
+        json={
+            "provider": "linear",
+            "team_keys": ["SPORT"],
+            "linear_project_ids": ["linear-sports"],
+            "labels": ["agent-ready"],
+            "ready_states": ["ready"],
+            "excluded_statuses": ["done", "completed"],
+            "required_fields": ["description"],
+            "missing_readiness": "not-ready",
+            "polling_interval_minutes": 5,
+        },
+    )
+    assert saved.status_code == 200
+    assert saved.json()["tracker_config"]["team_keys"] == ["SPORT"]
+    assert saved.json()["tracker_config"]["linear_project_ids"] == ["linear-sports"]
+    assert saved.json()["queue_eligibility_policy"]["labels"] == ["agent-ready"]
+
+    project = anyio.run(project_registry.get_delivery_project, "sports-cms")
+    assert project["tracker"] == {
+        "provider": "linear",
+        "config": {
+            "team_ids": [],
+            "team_keys": ["SPORT"],
+            "team_names": [],
+            "linear_project_ids": ["linear-sports"],
+            "linear_project_names": [],
+        },
+    }
+    assert project["queue_eligibility_policy"]["missing_readiness"] == "not-ready"
+
+
+def test_dashboard_ticket_intake_test_and_preview_are_read_only(
+    dashboard_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import anyio
+    from unittest.mock import AsyncMock
+
+    anyio.run(_project)
+    monkeypatch.setenv("LINEAR_API_KEY", "linear-test-key")
+    monkeypatch.setattr(
+        linear_queue,
+        "test_linear_connection",
+        AsyncMock(
+            return_value={
+                "status": "connected",
+                "provider": "linear",
+                "teams": [{"id": "team-1", "key": "SPORT", "name": "Sports"}],
+                "projects": [{"id": "linear-sports", "name": "Sports CMS"}],
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        linear_queue,
+        "preview_linear_delivery_queue",
+        AsyncMock(
+            return_value={
+                "status": "previewed",
+                "provider": "linear",
+                "counts": {"queued": 1, "not-ready": 1, "blocked": 0, "ignored": 0},
+                "items": [
+                    {"action": "queued", "identifier": "SPORT-1", "title": "Ready item"},
+                    {"action": "not-ready", "identifier": "SPORT-2", "title": "Missing label"},
+                ],
+            }
+        ),
+    )
+
+    connected = dashboard_client.post(
+        "/dashboard/api/delivery-projects/sports-cms/ticket-intake/test-connection",
+        headers={"Origin": "http://testserver"},
+        cookies=_session_cookie(),
+    )
+    preview = dashboard_client.post(
+        "/dashboard/api/delivery-projects/sports-cms/ticket-intake/preview",
+        headers={"Origin": "http://testserver"},
+        cookies=_session_cookie(),
+    )
+
+    assert connected.status_code == 200
+    assert connected.json()["teams"][0]["key"] == "SPORT"
+    assert preview.status_code == 200
+    assert preview.json()["counts"] == {
+        "queued": 1,
+        "not-ready": 1,
+        "blocked": 0,
+        "ignored": 0,
+    }
+    assert anyio.run(queue.list_delivery_queue_items) == []
 
 
 async def test_delivery_project_readiness_reports_missing_repo(

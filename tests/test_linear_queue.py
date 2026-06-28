@@ -11,6 +11,7 @@ from agent.linear_queue import (
     LinearQueueFieldMappings,
     poll_configured_linear_delivery_queues,
     poll_linear_delivery_queue,
+    preview_linear_delivery_queue,
 )
 
 
@@ -196,6 +197,41 @@ async def test_poller_has_no_linear_write_side_effects(
         client=linear_client,
     )
 
+    assert linear_client.write_calls == []
+
+
+async def test_preview_maps_issues_without_queue_or_linear_write_side_effects(
+    fake_queue_client: _FakeQueueClient,
+) -> None:
+    linear_client = _FakeLinearClient(
+        [
+            _issue(id="lin-ready"),
+            _issue(id="lin-not-ready", labels={"nodes": []}),
+            _issue(id="lin-blocked", description=""),
+            _issue(id="lin-ignored", state={"id": "state-2", "name": "Done", "type": "completed"}),
+        ]
+    )
+
+    result = await preview_linear_delivery_queue(
+        LinearQueueEligibilityPolicy(
+            project_id="delivery-project",
+            missing_readiness="not-ready",
+            excluded_statuses=("done", "completed"),
+            required_fields=("description",),
+        ),
+        client=linear_client,
+    )
+
+    records = await queue.list_delivery_queue_items()
+    assert result["counts"] == {"queued": 1, "not-ready": 1, "blocked": 1, "ignored": 1}
+    assert [item["action"] for item in result["items"]] == [
+        "queued",
+        "not-ready",
+        "blocked",
+        "ignored",
+    ]
+    assert result["items"][2]["missing_required_fields"] == ["description"]
+    assert records == []
     assert linear_client.write_calls == []
 
 
