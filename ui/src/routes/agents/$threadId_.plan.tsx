@@ -13,7 +13,7 @@ export const Route = createFileRoute("/agents/$threadId_/plan")({
 
 function Centered({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex min-w-0 flex-1 items-center justify-center p-6">
+    <div className="flex min-w-0 flex-1 items-center justify-center px-4 py-6 max-md:pt-14 md:p-6">
       {children}
     </div>
   )
@@ -100,7 +100,7 @@ function PlanPage() {
 
   return (
     <div className="flex min-w-0 flex-1 flex-col">
-      <div className="border-b border-[var(--ui-border)] px-6 pt-3">
+      <div className="border-b border-[var(--ui-border)] px-4 pt-14 md:px-6 md:pt-3">
         <BackLink threadId={threadId} />
       </div>
       <PlanReview plan={plan} />
