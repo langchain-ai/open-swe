@@ -17,9 +17,6 @@ from agent.utils.slack import (
 )
 from agent.webapp import generate_thread_id_from_slack_thread
 
-_TEXT_ONLY_MODEL = "fireworks:accounts/fireworks/models/glm-5p2"
-_VISION_MODEL = "openai:gpt-5.5"
-
 
 class _FakeNotFoundError(Exception):
     status_code = 404
@@ -838,69 +835,6 @@ def test_process_slack_mention_bot_only_mode_runs_without_user_token(
 
     assert "run_create" in captured
     assert "prompt" not in captured
-
-
-def test_process_slack_mention_uses_vision_fallback_for_image_thread(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    captured: dict[str, object] = {}
-    _setup_slack_mention_fakes(monkeypatch, captured)
-
-    async def fake_thread_exists(thread_id: str) -> bool:
-        return False
-
-    async def fake_fetch_slack_thread_messages(channel_id: str, thread_ts: str) -> list[dict]:
-        return [
-            {
-                "ts": "1700000000.000100",
-                "text": "<@UBOT> please inspect this",
-                "user": "U123",
-                "files": [
-                    {
-                        "mimetype": "image/png",
-                        "url_private": "https://files.slack.com/screenshot.png",
-                    }
-                ],
-            }
-        ]
-
-    async def fake_resolve_agent_model_id(login: str | None) -> str:
-        assert login == "mason-gh"
-        return _TEXT_ONLY_MODEL
-
-    async def fake_fetch_image_block(image_url: str, client: object) -> dict[str, str]:
-        captured["image_url"] = image_url
-        return {"type": "image", "source_type": "base64", "mime_type": "image/png", "data": "abc"}
-
-    monkeypatch.setattr(webapp, "_thread_exists", fake_thread_exists)
-    monkeypatch.setattr(webapp, "fetch_slack_thread_messages", fake_fetch_slack_thread_messages)
-    monkeypatch.setattr(webapp, "resolve_agent_model_id", fake_resolve_agent_model_id)
-    monkeypatch.setattr(webapp, "fetch_image_block", fake_fetch_image_block)
-
-    asyncio.run(
-        webapp.process_slack_mention(
-            {
-                "channel_id": "C123",
-                "thread_ts": "1700000000.000100",
-                "event_ts": "1700000000.000100",
-                "user_id": "U123",
-                "text": "<@UBOT> please inspect this",
-                "bot_user_id": "UBOT",
-            },
-            {"owner": "langchain-ai", "name": "open-swe"},
-        )
-    )
-
-    assert captured["image_url"] == "https://files.slack.com/screenshot.png"
-    run_create = captured["run_create"]
-    assert isinstance(run_create, dict)
-    kwargs = run_create["kwargs"]
-    configurable = kwargs["config"]["configurable"]
-    assert configurable["agent_model_id"] == _VISION_MODEL
-    assert configurable["agent_effort"] == "medium"
-    content = kwargs["input"]["messages"][0]["content"]
-    assert any(block.get("type") == "image" for block in content)
-    assert "does not support image input" not in content[0]["text"]
 
 
 class _FakeResponse:

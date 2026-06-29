@@ -85,6 +85,7 @@ from .tools import (
     save_plan,
     schedule_thread_wakeup,
     slack_read_thread_messages,
+    slack_start_new_thread,
     slack_thread_reply,
     web_search,
 )
@@ -546,22 +547,24 @@ DEFAULT_RECURSION_LIMIT = 9_999
 # signal via notify_step_limit_reached rather than dying silently.
 MODEL_CALL_RECURSION_LIMIT = 5_000
 
-# Mutating tools hidden from the model while plan mode is active so it can only
-# research and propose a plan. `execute` stays available; plan-mode shell
-# discipline (no mutating commands) is instructed via the system prompt rather
-# than enforced. `http_request` is excluded because it can POST/PUT/PATCH/DELETE
-# to external services — read-only web research goes through `web_search` /
-# `fetch_url`. `task` is excluded because the general-purpose subagent is built
-# with its own filesystem/PR/Linear tools and does not inherit this exclusion, so
-# delegating to it would bypass the read-only intent.
+# Mutating external tools hidden from the model while plan mode is active so it
+# can only research and propose a plan. File edit tools stay available so the
+# agent can draft and revise a plan under `/workspace/plans/`; prompt guidance
+# restricts them to that plan file outside cloned repositories. `execute` stays available;
+# plan-mode shell discipline (no mutating commands) is instructed via the system
+# prompt rather than enforced. `http_request` is excluded because it can
+# POST/PUT/PATCH/DELETE to external services — read-only web research goes
+# through `web_search` / `fetch_url`. `task` is excluded because the
+# general-purpose subagent is built with its own filesystem/PR/Linear tools and
+# does not inherit this exclusion, so delegating to it would bypass the read-only
+# intent.
 PLAN_MODE_EXCLUDED_TOOLS: frozenset[str] = frozenset(
     {
-        "write_file",
-        "edit_file",
         "task",
         "http_request",
         "open_pull_request",
         "request_pr_review",
+        "slack_start_new_thread",
         "linear_create_issue",
         "linear_update_issue",
         "linear_delete_issue",
@@ -852,6 +855,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             request_pr_review,
             schedule_thread_wakeup,
             slack_read_thread_messages,
+            slack_start_new_thread,
             slack_thread_reply,
             *corridor_tools,
             *observability_tools,

@@ -24,5 +24,6 @@ def create_local_sandbox(sandbox_id: str | None = None):
 
     return LocalShellBackend(
         root_dir=root_dir,
+        virtual_mode=True,
         inherit_env=True,
     )

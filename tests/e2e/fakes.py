@@ -41,12 +41,13 @@ def add_slack_message(
     channel: str, thread_ts: str, *, user: str, text: str, blocks: Any = None, is_bot: bool = False
 ) -> str:
     ts = next_slack_ts()
-    SLACK_MESSAGES.setdefault((channel, thread_ts), []).append(
+    actual_thread_ts = thread_ts or ts
+    SLACK_MESSAGES.setdefault((channel, actual_thread_ts), []).append(
         {
             "user": user,
             "text": text,
             "ts": ts,
-            "thread_ts": thread_ts,
+            "thread_ts": actual_thread_ts,
             "blocks": blocks,
             "is_bot": is_bot,
         }
@@ -56,6 +57,14 @@ def add_slack_message(
 
 def slack_thread(channel: str, thread_ts: str) -> list[dict[str, Any]]:
     return SLACK_MESSAGES.get((channel, thread_ts), [])
+
+
+def slack_messages(channel: str) -> list[dict[str, Any]]:
+    messages: list[dict[str, Any]] = []
+    for (message_channel, _thread_ts), thread_messages in SLACK_MESSAGES.items():
+        if message_channel == channel:
+            messages.extend(thread_messages)
+    return sorted(messages, key=lambda message: message["ts"])
 
 
 # --- GitHub ----------------------------------------------------------------
@@ -149,5 +158,4 @@ def reset() -> None:
     SLACK_MESSAGES.clear()
     PULLS.clear()
     _pr_seq[0] = 0
-    _slack_seq[0] = 1
     seed_bare_remote()

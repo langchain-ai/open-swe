@@ -22,6 +22,7 @@ from langgraph_sdk import get_client
 from pydantic import BaseModel
 
 from ..dispatch import dispatch_agent_run
+from ..utils.slack import post_slack_thread_reply
 from .oauth import require_same_origin_for_mutations, require_session
 from .plan_store import (
     PLAN_STATUS_APPROVED,
@@ -32,6 +33,7 @@ from .plan_store import (
     delete_plan_comment,
     get_plan_content,
     list_plan_comments,
+    plan_file_path_for_thread,
     save_plan_content,
     set_plan_status,
     write_plan_to_sandbox,
@@ -102,7 +104,7 @@ async def update_plan(
     """Owner-only manual edit of the plan markdown.
 
     Re-publishes the edited plan as ``ready`` (and mirrors it into the sandbox
-    ``plan.md``) while preserving reviewer comments, so the owner can refine the
+    plan file) while preserving reviewer comments, so the owner can refine the
     plan before approving it."""
     metadata = await _thread_metadata(thread_id)
     if not _user_owns_thread(metadata, session["sub"], session.get("email")):
@@ -114,10 +116,18 @@ async def update_plan(
     status = content.get("status") or metadata.get("plan_status") or "planning"
     if status in (PLAN_STATUS_APPROVED, PLAN_STATUS_CANCELLED):
         raise HTTPException(409, f"cannot edit a {status} plan")
-    await save_plan_content(
-        thread_id, markdown=markdown, status=PLAN_STATUS_READY, clear_comments=False
+    plan_file_path = content.get("plan_file_path")
+    plan_file_path = (
+        plan_file_path if isinstance(plan_file_path, str) else plan_file_path_for_thread(thread_id)
     )
-    await write_plan_to_sandbox(thread_id, markdown)
+    await save_plan_content(
+        thread_id,
+        markdown=markdown,
+        status=PLAN_STATUS_READY,
+        clear_comments=False,
+        plan_file_path=plan_file_path,
+    )
+    await write_plan_to_sandbox(thread_id, markdown, plan_file_path=plan_file_path)
     return {"status": PLAN_STATUS_READY, "markdown": markdown}
 
 
@@ -178,7 +188,8 @@ async def approve_plan(thread_id: str, session: dict[str, Any] = _SESSION_DEP) -
     # strictly so a transient failure can't silently drop the edit.
     content = await get_plan_content(thread_id, raise_on_error=True) or {}
     plan_markdown = str(content.get("markdown", "")).strip()
-    feedback = _format_comments(await list_plan_comments(thread_id, raise_on_error=True))
+    comments = await list_plan_comments(thread_id, raise_on_error=True)
+    feedback = _format_comments(comments)
     await set_plan_status(thread_id, PLAN_STATUS_APPROVED, plan_mode=False)
     if plan_markdown:
         text = (
@@ -191,6 +202,11 @@ async def approve_plan(thread_id: str, session: dict[str, Any] = _SESSION_DEP) -
     if feedback:
         text += "\n\nAlso take this reviewer feedback into account:\n\n" + feedback
     await _dispatch_followup(thread_id, metadata, text, plan_mode=False)
+    await _maybe_post_plan_approved_to_slack(
+        metadata,
+        comment_count=len(comments),
+        actor=_approval_actor_name(session),
+    )
     return {"status": PLAN_STATUS_APPROVED}
 
 
@@ -203,11 +219,57 @@ async def reject_plan(thread_id: str, session: dict[str, Any] = _SESSION_DEP) ->
     await set_plan_status(thread_id, PLAN_STATUS_REVISING, plan_mode=True)
     text = (
         "The plan needs changes before implementation. Address this reviewer "
-        "feedback and publish an updated plan with the save_plan tool:\n\n"
+        "feedback in the existing Markdown file under /workspace/plans/, then "
+        "publish an updated plan with the save_plan tool:\n\n"
         f"{feedback or '(no specific comments were left)'}"
     )
     await _dispatch_followup(thread_id, metadata, text, plan_mode=True)
     return {"status": PLAN_STATUS_REVISING}
+
+
+def _approval_actor_name(session: dict[str, Any]) -> str:
+    actor = session.get("name") or session.get("sub") or "User"
+    return str(actor).strip() or "User"
+
+
+def _slack_thread_from_metadata(metadata: dict[str, Any]) -> tuple[str, str] | None:
+    source_context = metadata.get("source_context")
+    if not isinstance(source_context, dict):
+        return None
+    slack_thread = source_context.get("slack_thread")
+    if not isinstance(slack_thread, dict):
+        return None
+    channel_id = slack_thread.get("channel_id")
+    thread_ts = slack_thread.get("thread_ts")
+    if not isinstance(channel_id, str) or not channel_id.strip():
+        return None
+    if not isinstance(thread_ts, str) or not thread_ts.strip():
+        return None
+    return channel_id.strip(), thread_ts.strip()
+
+
+def _plan_approved_slack_text(comment_count: int, actor: str) -> str:
+    return f"Plan approved with {comment_count} comments by {actor}\nbeginning implementation"
+
+
+async def _maybe_post_plan_approved_to_slack(
+    metadata: dict[str, Any], *, comment_count: int, actor: str
+) -> None:
+    slack_thread = _slack_thread_from_metadata(metadata)
+    if slack_thread is None:
+        return
+    channel_id, thread_ts = slack_thread
+    try:
+        ok = await post_slack_thread_reply(
+            channel_id,
+            thread_ts,
+            _plan_approved_slack_text(comment_count, actor),
+        )
+    except Exception:
+        logger.warning("Could not post plan approval Slack reply", exc_info=True)
+        return
+    if not ok:
+        logger.warning("Could not post plan approval Slack reply to %s/%s", channel_id, thread_ts)
 
 
 def _format_comments(comments: list[dict[str, Any]]) -> str:

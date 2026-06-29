@@ -102,10 +102,14 @@ from .utils.slack import (
     GitHubPrRef,
     fetch_slack_thread_messages,  # noqa: F401
     format_slack_messages_for_prompt,  # noqa: F401
+    get_slack_channel_context,
+    get_slack_channel_context_description,
     get_slack_channel_description,
     get_slack_channel_info,
     get_slack_user_info,
     get_slack_user_names,  # noqa: F401
+    is_slack_channel_named,
+    normalize_slack_channel_context,  # noqa: F401
     post_slack_thread_reply,
     post_slack_trace_reply,  # noqa: F401
     resolve_slack_links_in_context,  # noqa: F401
@@ -120,6 +124,7 @@ from .utils.slack_feedback import (
     process_slack_reaction_added,
     process_slack_reaction_removed,
 )
+from .utils.thread_ids import generate_thread_id_from_slack_thread
 
 logger = logging.getLogger(__name__)
 
@@ -373,13 +378,6 @@ def generate_thread_id_from_github_issue(issue_id: str) -> str:
     )
 
 
-def generate_thread_id_from_slack_thread(channel_id: str, thread_id: str) -> str:
-    """Generate a deterministic thread ID from a Slack thread identifier."""
-    composite = f"{channel_id}:{thread_id}"
-    md5_hex = hashlib.md5(composite.encode("utf-8")).hexdigest()
-    return str(uuid.UUID(hex=md5_hex))
-
-
 def generate_reviewer_thread_id(owner: str, repo: str, pr_number: int) -> str:
     stable_key = f"{owner}/{repo}/pr/{pr_number}/reviewer"
     return str(uuid.uuid5(uuid.NAMESPACE_URL, stable_key))
@@ -420,19 +418,28 @@ def _run_id_for_logging(run: Any) -> str:
     return run_id if isinstance(run_id, str) and run_id else "<unknown>"
 
 
-async def _is_docs_plz_slack_channel(channel_id: str) -> bool:
+async def _get_slack_channel_context(channel_id: str) -> dict[str, str]:
+    """Fetch Slack channel context without blocking Slack-triggered runs on failure."""
+    try:
+        return await get_slack_channel_context(channel_id)
+    except Exception:  # noqa: BLE001
+        logger.exception("Failed to resolve Slack channel context")
+        return normalize_slack_channel_context(channel_id, None)
+
+
+async def _is_docs_plz_slack_channel(
+    channel_id: str, channel_context: dict[str, Any] | None = None
+) -> bool:
     """Check whether a Slack channel is the docs-plz handoff channel."""
+    if channel_context is not None:
+        return is_slack_channel_named(channel_context, DOCS_PLZ_SLACK_CHANNEL_NAME)
     try:
         channel = await get_slack_channel_info(channel_id)
     except Exception:  # noqa: BLE001
         logger.exception("Failed to resolve Slack channel info for docs-plz gate")
         return False
-    if not isinstance(channel, dict):
-        return False
-    candidate_names = (channel.get("name"), channel.get("name_normalized"))
-    return any(
-        isinstance(name, str) and name.strip().lower() == DOCS_PLZ_SLACK_CHANNEL_NAME
-        for name in candidate_names
+    return is_slack_channel_named(
+        normalize_slack_channel_context(channel_id, channel), DOCS_PLZ_SLACK_CHANNEL_NAME
     )
 
 
@@ -606,6 +613,7 @@ async def get_slack_repo_config(
     channel_id: str,
     thread_ts: str,
     slack_user_id: str | None = None,
+    channel_context: dict[str, Any] | None = None,
 ) -> dict[str, str]:
     """Resolve repository configuration for Slack-triggered runs.
 
@@ -638,7 +646,10 @@ async def get_slack_repo_config(
 
     if not repo_config:
         try:
-            channel_description = await get_slack_channel_description(channel_id)
+            if channel_context is not None:
+                channel_description = get_slack_channel_context_description(channel_context)
+            else:
+                channel_description = await get_slack_channel_description(channel_id)
             if channel_description:
                 channel_repo_config = extract_repo_from_text(
                     channel_description, default_owner=default_owner
@@ -1086,7 +1097,9 @@ async def slack_webhook(request: Request, background_tasks: BackgroundTasks) -> 
     if bot_user_id and user_id == bot_user_id:
         return {"status": "ignored", "reason": "Event from this bot user"}
 
-    if await _is_docs_plz_slack_channel(channel_id):
+    channel_context = await _get_slack_channel_context(channel_id)
+
+    if await _is_docs_plz_slack_channel(channel_id, channel_context):
         background_tasks.add_task(
             post_slack_thread_reply,
             channel_id,
@@ -1097,13 +1110,16 @@ async def slack_webhook(request: Request, background_tasks: BackgroundTasks) -> 
 
     event_data = {
         "channel_id": channel_id,
+        "channel_context": channel_context,
         "thread_ts": thread_ts,
         "event_ts": event_ts,
         "user_id": user_id,
         "text": text,
         "bot_user_id": bot_user_id,
     }
-    repo_config = await get_slack_repo_config(channel_id, thread_ts, slack_user_id=user_id)
+    repo_config = await get_slack_repo_config(
+        channel_id, thread_ts, slack_user_id=user_id, channel_context=channel_context
+    )
 
     background_tasks.add_task(process_slack_mention, event_data, repo_config)
 
@@ -1193,11 +1209,15 @@ async def slack_interactivity(
             thread_ts=thread_ts,
             text=f"Workflow push approved for fingerprint `{fingerprint}`. Open SWE will retry the blocked push.",
         )
-        repo_config = await get_slack_repo_config(channel_id, thread_ts, slack_user_id=user_id)
+        channel_context = await _get_slack_channel_context(channel_id)
+        repo_config = await get_slack_repo_config(
+            channel_id, thread_ts, slack_user_id=user_id, channel_context=channel_context
+        )
         background_tasks.add_task(
             process_slack_mention,
             {
                 "channel_id": channel_id,
+                "channel_context": channel_context,
                 "thread_ts": thread_ts,
                 "event_ts": str(message.get("ts") or ""),
                 "user_id": user_id,
@@ -1244,11 +1264,15 @@ async def slack_interactivity(
                 )
                 return {"status": "ignored", "reason": "approver is not the thread owner"}
             await _set_thread_plan_mode(thread_id, False)
-            repo_config = await get_slack_repo_config(channel_id, thread_ts, slack_user_id=user_id)
+            channel_context = await _get_slack_channel_context(channel_id)
+            repo_config = await get_slack_repo_config(
+                channel_id, thread_ts, slack_user_id=user_id, channel_context=channel_context
+            )
             background_tasks.add_task(
                 process_slack_mention,
                 {
                     "channel_id": channel_id,
+                    "channel_context": channel_context,
                     "thread_ts": thread_ts,
                     "event_ts": str(message.get("ts") or ""),
                     "user_id": user_id,
@@ -1283,11 +1307,15 @@ async def slack_interactivity(
     if not channel_id or not thread_ts or not event_ts or not user_id:
         return {"status": "ignored", "reason": "Missing Slack action context"}
 
-    repo_config = await get_slack_repo_config(channel_id, thread_ts, slack_user_id=user_id)
+    channel_context = await _get_slack_channel_context(channel_id)
+    repo_config = await get_slack_repo_config(
+        channel_id, thread_ts, slack_user_id=user_id, channel_context=channel_context
+    )
     background_tasks.add_task(
         process_slack_mention,
         {
             "channel_id": channel_id,
+            "channel_context": channel_context,
             "thread_ts": thread_ts,
             "event_ts": event_ts,
             "user_id": user_id,

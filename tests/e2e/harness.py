@@ -309,10 +309,18 @@ async def mock_users() -> JSONResponse:
 
 @app.get("/mock/slack/messages")
 async def slack_messages() -> JSONResponse:
-    thread = CURRENT_THREAD["thread_ts"]
-    msgs = fakes.slack_thread(CURRENT_THREAD["channel"], thread) if thread else []
+    msgs = fakes.slack_messages(CURRENT_THREAD["channel"])
     return JSONResponse(
-        [{"user": m["user"], "text": m["text"], "is_bot": m["is_bot"], "ts": m["ts"]} for m in msgs]
+        [
+            {
+                "user": m["user"],
+                "text": m["text"],
+                "is_bot": m["is_bot"],
+                "ts": m["ts"],
+                "thread_ts": m["thread_ts"],
+            }
+            for m in msgs
+        ]
     )
 
 
@@ -496,8 +504,9 @@ async def slack_conversations_info(channel: str = "") -> JSONResponse:
             "channel": {
                 "id": channel,
                 "name": "demo",
-                "topic": {"value": ""},
-                "purpose": {"value": ""},
+                "name_normalized": "demo",
+                "topic": {"value": "Demo channel topic"},
+                "purpose": {"value": "Demo channel purpose"},
             }
         }
     )

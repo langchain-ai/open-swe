@@ -3,7 +3,11 @@ import { Link } from "@tanstack/react-router"
 import { useStreamContext as useAgentThreadStream } from "@langchain/react"
 import { Map as MapIcon } from "lucide-react"
 
-import type { AgentThread, Message } from "@/lib/agents/types"
+import type {
+  AgentThread,
+  Message,
+  QueuedThreadMessage,
+} from "@/lib/agents/types"
 import type { ModelSelection } from "@/lib/agents/provider/useModelOptions"
 import {
   AgentGitPanel,
@@ -22,6 +26,44 @@ import { cn } from "@/lib/utils"
 
 interface AgentThreadViewProps {
   thread: AgentThread
+}
+
+function messageText(message: Message): string {
+  return message.chunks
+    .map((chunk) => (chunk.kind === "text" ? chunk.text : ""))
+    .join("\n")
+    .trim()
+}
+
+function visibleQueuedMessages(
+  queuedMessages: Array<QueuedThreadMessage> | undefined,
+  messages: Array<Message>
+): Array<QueuedThreadMessage> {
+  const queued = queuedMessages ?? []
+  if (queued.length === 0) return queued
+
+  const userMessages = messages
+    .filter((message) => message.author === "user")
+    .map((message) => ({
+      text: messageText(message),
+      timestamp: Date.parse(message.timestamp),
+      consumed: false,
+    }))
+
+  return queued.filter((queuedMessage) => {
+    const queuedText = queuedMessage.content.trim()
+    if (!queuedText) return true
+
+    const match = userMessages.find((message) => {
+      if (message.consumed || !message.text.includes(queuedText)) return false
+      if (!Number.isFinite(message.timestamp)) return true
+      return message.timestamp >= queuedMessage.createdAt - 1000
+    })
+    if (!match) return true
+
+    match.consumed = true
+    return false
+  })
 }
 
 // The stream lives at the `/agents` layout (one persistent provider that
@@ -71,8 +113,13 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
     return live
   }, [stream.messages, stream.toolCalls, stream.subagents, thread.messages])
 
-  const hasMessages = baseMessages.length > 0
   const isStreaming = thread.status === "running" || stream.isLoading
+  const queuedMessages = useMemo(
+    () => visibleQueuedMessages(thread.queuedMessages, baseMessages),
+    [baseMessages, thread.queuedMessages]
+  )
+  const hasMessages = baseMessages.length > 0
+  const hasConversation = hasMessages || queuedMessages.length > 0
   const isThinking = stream.isLoading
   const settingUpSandbox = isThinking && baseMessages.length === 0
   // The transcript hydrates from the SDK (`GET …/state` → `stream.messages`).
@@ -118,10 +165,11 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
               </span>
             </Link>
           )}
-        {hasMessages ? (
+        {hasConversation ? (
           <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
             <Messages
               messages={baseMessages}
+              queuedMessages={queuedMessages}
               isStreaming={isStreaming}
               streamIsLoading={stream.isLoading}
               isThinking={isThinking}
@@ -129,7 +177,7 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
               contentWidthClass="max-w-3xl"
             />
             <div className="shrink-0 px-4 pb-4">
-              <div className="mx-auto w-full min-w-0 max-w-3xl">
+              <div className="mx-auto w-full max-w-3xl min-w-0">
                 <AgentPromptBar
                   placeholder="Add a follow up"
                   compact

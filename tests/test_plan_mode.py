@@ -24,18 +24,19 @@ def test_plan_mode_prompt_absent_by_default() -> None:
 def test_plan_mode_excluded_tools_cover_mutating_tools() -> None:
     excluded = server.PLAN_MODE_EXCLUDED_TOOLS
     for tool in (
-        "write_file",
-        "edit_file",
         "task",
         "open_pull_request",
         "request_pr_review",
+        "slack_start_new_thread",
         "linear_create_issue",
         "linear_update_issue",
         "linear_delete_issue",
     ):
         assert tool in excluded
-    # Read-only tools must stay available.
+    # Read-only tools and plan-file editing tools must stay available.
     assert "read_file" not in excluded
+    assert "write_file" not in excluded
+    assert "edit_file" not in excluded
     assert "execute" not in excluded
 
 
