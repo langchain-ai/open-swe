@@ -27,7 +27,11 @@ logger = logging.getLogger(__name__)
 SLACK_API_BASE_URL = "https://slack.com/api"
 SLACK_BOT_TOKEN = os.environ.get("SLACK_BOT_TOKEN", "")
 SLACK_THREAD_MAX_MESSAGES = 500
+SLACK_CHANNEL_INFO_CACHE_TTL_SECONDS = 300
 DEFAULT_ASSISTANT_STATUS = "is thinking…"
+
+SlackChannelContext = dict[str, str]
+_SLACK_CHANNEL_INFO_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
 
 # Curated rotating loading strings shown by Slack while the indicator is active.
 # Capped at 10 by Slack's API.
@@ -441,10 +445,37 @@ async def get_slack_user_info(user_id: str) -> dict[str, Any] | None:
     return None
 
 
+def clear_slack_channel_info_cache() -> None:
+    """Clear cached Slack channel info."""
+    _SLACK_CHANNEL_INFO_CACHE.clear()
+
+
+def _cached_slack_channel_info(channel_id: str) -> dict[str, Any] | None:
+    cached = _SLACK_CHANNEL_INFO_CACHE.get(channel_id)
+    if not cached:
+        return None
+    expires_at, channel = cached
+    if expires_at <= time.time():
+        _SLACK_CHANNEL_INFO_CACHE.pop(channel_id, None)
+        return None
+    return dict(channel)
+
+
+def _cache_slack_channel_info(channel_id: str, channel: dict[str, Any]) -> None:
+    _SLACK_CHANNEL_INFO_CACHE[channel_id] = (
+        time.time() + SLACK_CHANNEL_INFO_CACHE_TTL_SECONDS,
+        dict(channel),
+    )
+
+
 async def get_slack_channel_info(channel_id: str) -> dict[str, Any] | None:
     """Get Slack channel details (including topic/purpose) by channel ID."""
-    if not SLACK_BOT_TOKEN:
+    if not SLACK_BOT_TOKEN or not channel_id:
         return None
+
+    cached = _cached_slack_channel_info(channel_id)
+    if cached is not None:
+        return cached
 
     async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
         try:
@@ -453,6 +484,12 @@ async def get_slack_channel_info(channel_id: str) -> dict[str, Any] | None:
                 headers=_slack_headers(),
                 params={"channel": channel_id},
             )
+            if getattr(response, "status_code", None) == 429:
+                retry_after = response.headers.get("Retry-After")
+                logger.warning(
+                    "Slack conversations.info rate limited (retry-after=%s)", retry_after
+                )
+                return None
             response.raise_for_status()
             data = response.json()
             if not data.get("ok"):
@@ -460,24 +497,99 @@ async def get_slack_channel_info(channel_id: str) -> dict[str, Any] | None:
                 return None
             channel = data.get("channel")
             if isinstance(channel, dict):
-                return channel
+                _cache_slack_channel_info(channel_id, channel)
+                return dict(channel)
         except httpx.HTTPError:
             logger.exception("Slack conversations.info request failed")
     return None
 
 
-def extract_channel_description_text(channel: dict[str, Any] | None) -> str:
-    """Combine a Slack channel's topic and purpose text into one string."""
+def _channel_section_value(channel: dict[str, Any] | None, key: str) -> str:
     if not isinstance(channel, dict):
         return ""
+    section = channel.get(key)
+    if isinstance(section, dict):
+        value = section.get("value")
+        if isinstance(value, str):
+            return value.strip()
+    value = channel.get(key)
+    return value.strip() if isinstance(value, str) else ""
+
+
+def extract_channel_description_text(channel: dict[str, Any] | None) -> str:
+    """Combine a Slack channel's topic and purpose text into one string."""
+    parts = [
+        value for key in ("topic", "purpose") if (value := _channel_section_value(channel, key))
+    ]
+    return "\n".join(parts)
+
+
+def normalize_slack_channel_context(
+    channel_id: str, channel: dict[str, Any] | None
+) -> SlackChannelContext:
+    """Normalize Slack channel info for prompts and metadata."""
+    name = ""
+    name_normalized = ""
+    if isinstance(channel, dict):
+        raw_name = channel.get("name")
+        raw_normalized = channel.get("name_normalized")
+        if isinstance(raw_name, str):
+            name = raw_name.strip()
+        if isinstance(raw_normalized, str):
+            name_normalized = raw_normalized.strip()
+    topic = _channel_section_value(channel, "topic")
+    purpose = _channel_section_value(channel, "purpose")
+    description = "\n".join(value for value in (topic, purpose) if value)
+    return {
+        "id": channel_id,
+        "name": name,
+        "name_normalized": name_normalized,
+        "topic": topic,
+        "purpose": purpose,
+        "description": description,
+    }
+
+
+def get_slack_channel_context_description(channel_context: dict[str, Any] | None) -> str:
+    """Extract prompt-safe description text from normalized channel context."""
+    if not isinstance(channel_context, dict):
+        return ""
+    description = channel_context.get("description")
+    if isinstance(description, str) and description.strip():
+        return description.strip()
     parts: list[str] = []
     for key in ("topic", "purpose"):
-        section = channel.get(key)
-        if isinstance(section, dict):
-            value = section.get("value")
-            if isinstance(value, str) and value.strip():
-                parts.append(value.strip())
+        value = channel_context.get(key)
+        if isinstance(value, str) and value.strip():
+            parts.append(value.strip())
     return "\n".join(parts)
+
+
+def slack_channel_context_has_metadata(channel_context: dict[str, Any] | None) -> bool:
+    """Return whether normalized channel context has name or description fields."""
+    if not isinstance(channel_context, dict):
+        return False
+    return any(
+        isinstance(channel_context.get(key), str) and channel_context.get(key, "").strip()
+        for key in ("name", "name_normalized", "topic", "purpose", "description")
+    )
+
+
+def is_slack_channel_named(channel_context: dict[str, Any] | None, expected_name: str) -> bool:
+    """Check normalized channel context against a Slack channel name."""
+    if not isinstance(channel_context, dict):
+        return False
+    expected = expected_name.strip().lower()
+    return any(
+        isinstance(value, str) and value.strip().lower() == expected
+        for value in (channel_context.get("name"), channel_context.get("name_normalized"))
+    )
+
+
+async def get_slack_channel_context(channel_id: str) -> SlackChannelContext:
+    """Fetch and normalize Slack channel context."""
+    channel = await get_slack_channel_info(channel_id)
+    return normalize_slack_channel_context(channel_id, channel)
 
 
 async def get_slack_channel_description(channel_id: str) -> str:
