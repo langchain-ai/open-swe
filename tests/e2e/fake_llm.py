@@ -186,19 +186,6 @@ def _step_plan_research(_messages: list[BaseMessage]) -> AIMessage:
     )
 
 
-def _step_prepare_plan_dir(_messages: list[BaseMessage]) -> AIMessage:
-    return AIMessage(
-        content="Preparing the plan directory.",
-        tool_calls=[
-            {
-                "name": "execute",
-                "args": {"command": "mkdir -p /workspace/plans"},
-                "id": "call-plan-dir",
-            }
-        ],
-    )
-
-
 def _step_write_plan(_messages: list[BaseMessage]) -> AIMessage:
     return AIMessage(
         content="Writing the plan file for review.",
@@ -251,7 +238,6 @@ def build_plan_script() -> list[Any]:
         _step_enter_plan,
         _step_plan_link,
         _step_plan_research,
-        _step_prepare_plan_dir,
         _step_write_plan,
         _step_save_plan,
         _step_plan_complete,

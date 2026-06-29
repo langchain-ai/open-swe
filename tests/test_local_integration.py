@@ -2,8 +2,9 @@ import agent.integrations.local as local_mod
 
 
 class _StubLocalShellBackend:
-    def __init__(self, *, root_dir, inherit_env):
+    def __init__(self, *, root_dir, virtual_mode, inherit_env):
         self.root_dir = root_dir
+        self.virtual_mode = virtual_mode
         self.inherit_env = inherit_env
 
 
@@ -16,6 +17,7 @@ def test_create_local_sandbox_creates_missing_root_dir(monkeypatch, tmp_path):
 
     assert root.is_dir()
     assert backend.root_dir == str(root)
+    assert backend.virtual_mode is True
     assert backend.inherit_env is True
 
 
@@ -27,3 +29,4 @@ def test_create_local_sandbox_defaults_to_cwd(monkeypatch, tmp_path):
     backend = local_mod.create_local_sandbox()
 
     assert backend.root_dir == str(tmp_path)
+    assert backend.virtual_mode is True
