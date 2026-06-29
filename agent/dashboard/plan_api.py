@@ -22,6 +22,7 @@ from langgraph_sdk import get_client
 from pydantic import BaseModel
 
 from ..dispatch import dispatch_agent_run
+from ..utils.slack import post_slack_thread_reply
 from .oauth import require_same_origin_for_mutations, require_session
 from .plan_store import (
     PLAN_STATUS_APPROVED,
@@ -178,7 +179,8 @@ async def approve_plan(thread_id: str, session: dict[str, Any] = _SESSION_DEP) -
     # strictly so a transient failure can't silently drop the edit.
     content = await get_plan_content(thread_id, raise_on_error=True) or {}
     plan_markdown = str(content.get("markdown", "")).strip()
-    feedback = _format_comments(await list_plan_comments(thread_id, raise_on_error=True))
+    comments = await list_plan_comments(thread_id, raise_on_error=True)
+    feedback = _format_comments(comments)
     await set_plan_status(thread_id, PLAN_STATUS_APPROVED, plan_mode=False)
     if plan_markdown:
         text = (
@@ -191,6 +193,11 @@ async def approve_plan(thread_id: str, session: dict[str, Any] = _SESSION_DEP) -
     if feedback:
         text += "\n\nAlso take this reviewer feedback into account:\n\n" + feedback
     await _dispatch_followup(thread_id, metadata, text, plan_mode=False)
+    await _maybe_post_plan_approved_to_slack(
+        metadata,
+        comment_count=len(comments),
+        actor=_approval_actor_name(session),
+    )
     return {"status": PLAN_STATUS_APPROVED}
 
 
@@ -208,6 +215,51 @@ async def reject_plan(thread_id: str, session: dict[str, Any] = _SESSION_DEP) ->
     )
     await _dispatch_followup(thread_id, metadata, text, plan_mode=True)
     return {"status": PLAN_STATUS_REVISING}
+
+
+def _approval_actor_name(session: dict[str, Any]) -> str:
+    actor = session.get("name") or session.get("sub") or "User"
+    return str(actor).strip() or "User"
+
+
+def _slack_thread_from_metadata(metadata: dict[str, Any]) -> tuple[str, str] | None:
+    source_context = metadata.get("source_context")
+    if not isinstance(source_context, dict):
+        return None
+    slack_thread = source_context.get("slack_thread")
+    if not isinstance(slack_thread, dict):
+        return None
+    channel_id = slack_thread.get("channel_id")
+    thread_ts = slack_thread.get("thread_ts")
+    if not isinstance(channel_id, str) or not channel_id.strip():
+        return None
+    if not isinstance(thread_ts, str) or not thread_ts.strip():
+        return None
+    return channel_id.strip(), thread_ts.strip()
+
+
+def _plan_approved_slack_text(comment_count: int, actor: str) -> str:
+    return f"Plan approved with {comment_count} comments by {actor}\nbeginning implementation"
+
+
+async def _maybe_post_plan_approved_to_slack(
+    metadata: dict[str, Any], *, comment_count: int, actor: str
+) -> None:
+    slack_thread = _slack_thread_from_metadata(metadata)
+    if slack_thread is None:
+        return
+    channel_id, thread_ts = slack_thread
+    try:
+        ok = await post_slack_thread_reply(
+            channel_id,
+            thread_ts,
+            _plan_approved_slack_text(comment_count, actor),
+        )
+    except Exception:
+        logger.warning("Could not post plan approval Slack reply", exc_info=True)
+        return
+    if not ok:
+        logger.warning("Could not post plan approval Slack reply to %s/%s", channel_id, thread_ts)
 
 
 def _format_comments(comments: list[dict[str, Any]]) -> str:
