@@ -10,6 +10,8 @@ the preceding tool result, exactly as a real model would.
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
 
 from e2e_env import (
@@ -45,8 +47,63 @@ git push origin {FEATURE_BRANCH}
 echo PUSHED_OK
 """.strip()
 
-
 _PLAN_URL_RE = re.compile(r"https?://[^\s\"'<>)\]|]+/plan\b")
+_ATTRIBUTION_RE = re.compile(r"@([A-Za-z0-9-]+):")
+
+ToolArgs = dict[str, Any]
+StepFactory = Callable[[list[BaseMessage]], AIMessage]
+ScriptPredicate = Callable[["ScriptContext"], bool]
+
+
+@dataclass(frozen=True)
+class ToolCallSpec:
+    name: str
+    args: ToolArgs
+    call_id: str
+
+
+@dataclass(frozen=True)
+class StepSpec:
+    content: str = ""
+    tool_calls: tuple[ToolCallSpec, ...] = ()
+    factory: StepFactory | None = None
+
+
+@dataclass(frozen=True)
+class ScriptContext:
+    first_text: str
+    last_text: str
+    human_count: int
+
+
+@dataclass(frozen=True)
+class ScriptRule:
+    name: str
+    predicate: ScriptPredicate
+
+
+def _tool_call(name: str, args: ToolArgs, call_id: str) -> ToolCallSpec:
+    return ToolCallSpec(name=name, args=args, call_id=call_id)
+
+
+def _tool_step(content: str, name: str, args: ToolArgs, call_id: str) -> StepSpec:
+    return StepSpec(content=content, tool_calls=(_tool_call(name, args, call_id),))
+
+
+def _dynamic_step(factory: StepFactory) -> StepSpec:
+    return StepSpec(factory=factory)
+
+
+def _render_step(step: StepSpec, messages: list[BaseMessage]) -> AIMessage:
+    if step.factory is not None:
+        return step.factory(messages)
+    return AIMessage(
+        content=step.content,
+        tool_calls=[
+            {"name": call.name, "args": dict(call.args), "id": call.call_id}
+            for call in step.tool_calls
+        ],
+    )
 
 
 def _text(content: Any) -> str:
@@ -70,8 +127,7 @@ def _pr_url_from_messages(messages: list[BaseMessage]) -> str | None:
 
 
 def _plan_url_from_messages(messages: list[BaseMessage]) -> str | None:
-    """The plan-review URL is injected into the system prompt; a real model would
-    read it the same way."""
+    """The plan-review URL is injected into the system prompt; a real model would read it."""
     for msg in messages:
         match = _PLAN_URL_RE.search(_text(msg.content))
         if match:
@@ -91,64 +147,7 @@ def _reviewer_feedback(messages: list[BaseMessage]) -> str | None:
     return None
 
 
-def _step_implement(_messages: list[BaseMessage]) -> AIMessage:
-    return AIMessage(
-        content="Setting up the repo and implementing the change.",
-        tool_calls=[{"name": "execute", "args": {"command": _IMPLEMENT_SCRIPT}, "id": "call-impl"}],
-    )
-
-
-def _step_open_pr(_messages: list[BaseMessage]) -> AIMessage:
-    return AIMessage(
-        content="Opening a pull request.",
-        tool_calls=[
-            {
-                "name": "open_pull_request",
-                "args": {
-                    "owner": OWNER,
-                    "repo": REPO,
-                    "head": FEATURE_BRANCH,
-                    "base": BASE_BRANCH,
-                    "title": PR_TITLE,
-                    "body": "Adds a `greet()` helper as requested.",
-                    "draft": True,
-                },
-                "id": "call-pr",
-            }
-        ],
-    )
-
-
-def _step_breakout(_messages: list[BaseMessage]) -> AIMessage:
-    return AIMessage(
-        content="Starting a separate Slack thread for the breakout task.",
-        tool_calls=[
-            {
-                "name": "slack_start_new_thread",
-                "args": {
-                    "title": "Add greet() helper",
-                    "instructions": "Please add a greet() helper and open a draft PR in the default repository. Use the current Slack request as context, and report progress in this new thread.",
-                },
-                "id": "call-breakout",
-            }
-        ],
-    )
-
-
-def _step_breakout_reply(_messages: list[BaseMessage]) -> AIMessage:
-    return AIMessage(
-        content="Confirming the breakout thread was started.",
-        tool_calls=[
-            {
-                "name": "slack_thread_reply",
-                "args": {"message": "I started a separate Open SWE thread for that aspect."},
-                "id": "call-breakout-reply",
-            }
-        ],
-    )
-
-
-def _step_reply(messages: list[BaseMessage]) -> AIMessage:
+def _reply_step(messages: list[BaseMessage]) -> AIMessage:
     url = _pr_url_from_messages(messages) or "(PR url unavailable)"
     feedback = _reviewer_feedback(messages)
     extra = f"\n\nReviewer feedback I addressed:\n{feedback}" if feedback else ""
@@ -163,7 +162,6 @@ def _step_reply(messages: list[BaseMessage]) -> AIMessage:
     )
 
 
-# --- plan-mode flow --------------------------------------------------------
 PLAN_MARKDOWN = """## Plan: Add greet() helper
 
 ### Overview
@@ -181,14 +179,7 @@ Add a tiny greeting helper to the demo repo.
 """
 
 
-def _step_enter_plan(_messages: list[BaseMessage]) -> AIMessage:
-    return AIMessage(
-        content="This is worth planning first — entering plan mode.",
-        tool_calls=[{"name": "enter_plan_mode", "args": {}, "id": "call-enter-plan"}],
-    )
-
-
-def _step_plan_link(messages: list[BaseMessage]) -> AIMessage:
+def _plan_link_step(messages: list[BaseMessage]) -> AIMessage:
     url = _plan_url_from_messages(messages) or "(plan link unavailable)"
     return AIMessage(
         content="Sharing the plan-review link.",
@@ -204,25 +195,7 @@ def _step_plan_link(messages: list[BaseMessage]) -> AIMessage:
     )
 
 
-def _step_plan_research(_messages: list[BaseMessage]) -> AIMessage:
-    return AIMessage(
-        content="Reading the repo to ground the plan.",
-        tool_calls=[
-            {"name": "execute", "args": {"command": "echo planning && ls"}, "id": "call-plan-read"}
-        ],
-    )
-
-
-def _step_save_plan(_messages: list[BaseMessage]) -> AIMessage:
-    return AIMessage(
-        content="Saving the plan for review.",
-        tool_calls=[
-            {"name": "save_plan", "args": {"plan_markdown": PLAN_MARKDOWN}, "id": "call-save-plan"}
-        ],
-    )
-
-
-def _step_plan_complete(messages: list[BaseMessage]) -> AIMessage:
+def _plan_complete_step(messages: list[BaseMessage]) -> AIMessage:
     url = _plan_url_from_messages(messages) or "(plan link unavailable)"
     return AIMessage(
         content="Announcing the plan is ready.",
@@ -239,23 +212,7 @@ def _step_plan_complete(messages: list[BaseMessage]) -> AIMessage:
     )
 
 
-def _step_plan_end(_messages: list[BaseMessage]) -> AIMessage:
-    return AIMessage(content="I'll wait for your review and approval before implementing.")
-
-
-def build_plan_script() -> list[Any]:
-    return [
-        _step_enter_plan,
-        _step_plan_link,
-        _step_plan_research,
-        _step_save_plan,
-        _step_plan_complete,
-        _step_plan_end,
-    ]
-
-
 FOLLOW_UP_REPLY = "Thanks! The PR is ready for review — anything else you'd like changed?"
-_ATTRIBUTION_RE = re.compile(r"@([A-Za-z0-9-]+):")
 
 
 def _latest_attribution(messages: list[BaseMessage]) -> str | None:
@@ -267,22 +224,120 @@ def _latest_attribution(messages: list[BaseMessage]) -> str | None:
     return None
 
 
-def _step_followup(messages: list[BaseMessage]) -> AIMessage:
+def _followup_step(messages: list[BaseMessage]) -> AIMessage:
     attribution = _latest_attribution(messages)
     suffix = f" I saw this follow-up was from {attribution}." if attribution else ""
     return AIMessage(content=f"{FOLLOW_UP_REPLY}{suffix}")
 
 
-def build_script() -> list[Any]:
-    return [_step_implement, _step_open_pr, _step_reply]
+SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
+    "implement": (
+        _tool_step(
+            "Setting up the repo and implementing the change.",
+            "execute",
+            {"command": _IMPLEMENT_SCRIPT},
+            "call-impl",
+        ),
+        _tool_step(
+            "Opening a pull request.",
+            "open_pull_request",
+            {
+                "owner": OWNER,
+                "repo": REPO,
+                "head": FEATURE_BRANCH,
+                "base": BASE_BRANCH,
+                "title": PR_TITLE,
+                "body": "Adds a `greet()` helper as requested.",
+                "draft": True,
+            },
+            "call-pr",
+        ),
+        _dynamic_step(_reply_step),
+    ),
+    "breakout": (
+        _tool_step(
+            "Starting a separate Slack thread for the breakout task.",
+            "slack_start_new_thread",
+            {
+                "title": "Add greet() helper",
+                "instructions": "Please add a greet() helper and open a draft PR in the default repository. Use the current Slack request as context, and report progress in this new thread.",
+            },
+            "call-breakout",
+        ),
+        _tool_step(
+            "Confirming the breakout thread was started.",
+            "slack_thread_reply",
+            {"message": "I started a separate Open SWE thread for that aspect."},
+            "call-breakout-reply",
+        ),
+    ),
+    "plan": (
+        _tool_step(
+            "This is worth planning first — entering plan mode.",
+            "enter_plan_mode",
+            {},
+            "call-enter-plan",
+        ),
+        _dynamic_step(_plan_link_step),
+        _tool_step(
+            "Reading the repo to ground the plan.",
+            "execute",
+            {"command": "echo planning && ls"},
+            "call-plan-read",
+        ),
+        _tool_step(
+            "Saving the plan for review.",
+            "save_plan",
+            {"plan_markdown": PLAN_MARKDOWN},
+            "call-save-plan",
+        ),
+        _dynamic_step(_plan_complete_step),
+        StepSpec(content="I'll wait for your review and approval before implementing."),
+    ),
+    "followup": (_dynamic_step(_followup_step),),
+}
 
 
-def build_breakout_script() -> list[Any]:
-    return [_step_breakout, _step_breakout_reply]
+def _is_plan_request(text: str) -> bool:
+    return "plan" in text.lower()
 
 
-def build_followup_script() -> list[Any]:
-    return [_step_followup]
+def _is_breakout_request(text: str) -> bool:
+    t = text.lower()
+    return "break out" in t or "separate thread" in t or "split out" in t
+
+
+def _is_approval(text: str) -> bool:
+    t = text.lower()
+    return "approved" in t and "implement" in t
+
+
+def _is_revision(text: str) -> bool:
+    t = text.lower()
+    return "needs changes" in t or "publish an updated plan" in t
+
+
+SCRIPT_RULES: tuple[ScriptRule, ...] = (
+    ScriptRule("implement", lambda ctx: _is_approval(ctx.last_text)),
+    ScriptRule("plan", lambda ctx: _is_revision(ctx.last_text)),
+    ScriptRule("plan", lambda ctx: ctx.human_count <= 1 and _is_plan_request(ctx.first_text)),
+    ScriptRule(
+        "breakout", lambda ctx: ctx.human_count <= 1 and _is_breakout_request(ctx.first_text)
+    ),
+    ScriptRule("implement", lambda ctx: ctx.human_count <= 1),
+    ScriptRule("followup", lambda _ctx: True),
+)
+
+
+def _script_for(context: ScriptContext) -> tuple[StepSpec, ...]:
+    for rule in SCRIPT_RULES:
+        if rule.predicate(context):
+            return SCRIPT_LIBRARY[rule.name]
+    return SCRIPT_LIBRARY["followup"]
+
+
+def build_script() -> list[StepSpec]:
+    return list(SCRIPT_LIBRARY["implement"])
 
 
 class FakeScriptedChatModel(BaseChatModel):
@@ -305,49 +360,16 @@ class FakeScriptedChatModel(BaseChatModel):
         **kwargs: Any,
     ) -> ChatResult:
         humans = [m for m in messages if isinstance(m, HumanMessage)]
-        first_text = _text(humans[0].content) if humans else ""
-        last_text = _text(humans[-1].content) if humans else ""
+        context = ScriptContext(
+            first_text=_text(humans[0].content) if humans else "",
+            last_text=_text(humans[-1].content) if humans else "",
+            human_count=len(humans),
+        )
+        script = _script_for(context)
 
-        # Pick the script for the current turn by what the latest human asked.
-        if _is_approval(last_text):
-            script = build_script()  # implement + open PR + reply
-        elif _is_revision(last_text):
-            script = build_plan_script()  # re-plan after requested changes
-        elif _is_plan_request(first_text) and len(humans) <= 1:
-            script = build_plan_script()  # first ask was to plan
-        elif _is_breakout_request(first_text) and len(humans) <= 1:
-            script = build_breakout_script()
-        elif len(humans) <= 1:
-            script = build_script()
-        else:
-            script = build_followup_script()
-
-        # Step within the *current* turn: AIMessages since the last human turn.
         last_human = max(
             (i for i, m in enumerate(messages) if isinstance(m, HumanMessage)), default=-1
         )
-        step = sum(1 for m in messages[last_human + 1 :] if isinstance(m, AIMessage))
-        if step < len(script):
-            message = script[step](messages)
-        else:
-            message = _step_followup(messages)
-        return ChatResult(generations=[ChatGeneration(message=message)])
-
-
-def _is_plan_request(text: str) -> bool:
-    return "plan" in text.lower()
-
-
-def _is_breakout_request(text: str) -> bool:
-    t = text.lower()
-    return "break out" in t or "separate thread" in t or "split out" in t
-
-
-def _is_approval(text: str) -> bool:
-    t = text.lower()
-    return "approved" in t and "implement" in t
-
-
-def _is_revision(text: str) -> bool:
-    t = text.lower()
-    return "needs changes" in t or "publish an updated plan" in t
+        step_index = sum(1 for m in messages[last_human + 1 :] if isinstance(m, AIMessage))
+        step = script[step_index] if step_index < len(script) else SCRIPT_LIBRARY["followup"][0]
+        return ChatResult(generations=[ChatGeneration(message=_render_step(step, messages))])
