@@ -95,6 +95,38 @@ async def test_slack_run_mapping_preserves_trace_message_ts() -> None:
     assert message_mapping["message_ts"] == "1.2"
 
 
+@pytest.mark.asyncio
+async def test_slack_run_mapping_preserves_trace_message_ts_on_followup_mention() -> None:
+    """A subsequent Slack mention without trace_message_ts must not clobber the stored timestamp."""
+    client = _FakeSlackMappingClient()
+
+    # First mention stores the trace message ts.
+    await slack_utils.store_slack_run_mapping(
+        client,
+        "C123",
+        "1.0",
+        "run-1",
+        message_ts="1.1",
+        triggering_user_id="U123",
+        trace_message_ts="1.1",
+    )
+
+    # Follow-up mention (non-first) stores a new run_id without trace_message_ts.
+    await slack_utils.store_slack_run_mapping(
+        client,
+        "C123",
+        "1.0",
+        "run-2",
+        triggering_user_id="U456",
+    )
+
+    thread_mapping = await slack_utils.lookup_slack_thread_run_mapping(client, "C123", "1.0")
+    assert thread_mapping is not None
+    assert thread_mapping["run_id"] == "run-2"
+    assert thread_mapping["trace_message_ts"] == "1.1"
+    assert thread_mapping["triggering_user_id"] == "U456"
+
+
 def test_select_slack_context_messages_uses_thread_start_when_no_prior_mention() -> None:
     bot_user_id = "UBOT"
     messages = [
