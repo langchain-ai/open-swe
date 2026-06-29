@@ -200,6 +200,58 @@ async def test_status_transition_updates_record(fake_client: _FakeClient) -> Non
     assert await queue.read_delivery_queue_item(record["id"]) == updated
 
 
+async def test_pause_stale_project_queue_items_marks_repo_mismatches(
+    fake_client: _FakeClient,
+) -> None:
+    stale = await queue.upsert_delivery_queue_item(
+        {
+            "project_id": "sports-cms",
+            "provider": "linear",
+            "external_work_item_id": "ADPHPXC-696",
+            "title": "Old workspace item",
+            "repo": {"owner": "example", "name": "sports-cms"},
+            "status": "blocked",
+            "blockers": [{"code": "credentials", "message": "GitHub credentials missing."}],
+        },
+        preflight=_ready_preflight(),
+    )
+    current = await queue.upsert_delivery_queue_item(
+        {
+            "project_id": "sports-cms",
+            "provider": "linear",
+            "external_work_item_id": "ADPHPXC-700",
+            "title": "Current workspace item",
+            "repo": {"owner": "maphilipps", "name": "adesso-sports-cms"},
+            "status": "queued",
+        },
+        preflight=_ready_preflight(),
+    )
+
+    result = await queue.pause_stale_project_queue_items(
+        {
+            "project_id": "sports-cms",
+            "vcs": {
+                "provider": "github",
+                "config": {"owner": "maphilipps", "repo": "adesso-sports-cms"},
+            },
+        }
+    )
+
+    stale_record = await queue.read_delivery_queue_item(stale["id"])
+    current_record = await queue.read_delivery_queue_item(current["id"])
+    assert result["items"] == 1
+    assert stale_record["status"] == "paused"
+    assert stale_record["status_reason"] == "stale_project_config"
+    assert stale_record["stale_project_config"] is True
+    assert stale_record["stale_repo"] == {"owner": "example", "name": "sports-cms"}
+    assert stale_record["current_repo"] == {
+        "owner": "maphilipps",
+        "name": "adesso-sports-cms",
+    }
+    assert stale_record["blockers"][-1]["code"] == "stale_project_config"
+    assert current_record["status"] == "queued"
+
+
 async def test_scheduler_dispatches_delivery_queue_poll(monkeypatch: pytest.MonkeyPatch) -> None:
     poll = AsyncMock(return_value={"status": "polled", "items": 2})
     monkeypatch.setattr(scheduler, "delivery_queue_poll", poll)

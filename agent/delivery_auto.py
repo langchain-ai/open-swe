@@ -6,9 +6,13 @@ from collections.abc import Mapping
 from typing import Any
 
 from .delivery_preflight import evaluate_auto_mode_limits
-from .delivery_queue import delivery_queue_poll, list_delivery_queue_items
+from .delivery_queue import (
+    delivery_queue_poll,
+    list_delivery_queue_items,
+    pause_stale_project_queue_items,
+)
 from .delivery_runner import launch_delivery_worker
-from .project_registry import get_delivery_project
+from .project_registry import get_delivery_project, list_delivery_projects
 
 
 def _mapping(value: Any) -> dict[str, Any]:
@@ -50,6 +54,16 @@ async def delivery_auto_tick(
     poll: bool = True,
 ) -> dict[str, Any]:
     poll_result = await delivery_queue_poll() if poll else None
+    stale_reconcile: list[dict[str, Any]] = []
+    for project in await list_delivery_projects({"active": True}):
+        result = await pause_stale_project_queue_items(project)
+        if result.get("items"):
+            stale_reconcile.append(
+                {
+                    "project_id": project.get("project_id"),
+                    "items": result.get("items"),
+                }
+            )
     queued_items = _oldest_first(await list_delivery_queue_items({"status": "queued"}))
     active_counts = await _active_counts_by_project()
     queued_seen_by_project: dict[str, int] = {}
@@ -100,6 +114,7 @@ async def delivery_auto_tick(
     return {
         "status": "completed",
         "poll": poll_result,
+        "stale_reconcile": stale_reconcile,
         "queued": len(queued_items),
         "launched": launched,
         "refused": refused,

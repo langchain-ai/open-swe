@@ -99,6 +99,35 @@ async def _queue_item(external_id: str, *, status: str = "queued") -> dict[str, 
 
 
 @pytest.mark.asyncio
+async def test_auto_tick_pauses_stale_repo_queue_items(
+    fake_client: _FakeClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await _project(vcs={"provider": "github", "config": {"owner": "maphilipps", "repo": "adesso-sports-cms"}})
+    stale = await queue.upsert_delivery_queue_item(
+        {
+            "project_id": "sports-cms",
+            "provider": "linear",
+            "external_work_item_id": "ADPHPXC-696",
+            "title": "Old repo item",
+            "repo": {"owner": "example", "name": "sports-cms"},
+            "status": "blocked",
+        },
+        preflight=_ready_preflight(),
+    )
+    launcher = AsyncMock()
+    monkeypatch.setattr(delivery_auto, "launch_delivery_worker", launcher)
+
+    result = await delivery_auto.delivery_auto_tick(client=fake_client, poll=False)
+
+    updated = await queue.read_delivery_queue_item(stale["id"])
+    assert result["stale_reconcile"] == [{"project_id": "sports-cms", "items": 1}]
+    assert updated["status"] == "paused"
+    assert updated["status_reason"] == "stale_project_config"
+    launcher.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_auto_tick_launches_queued_delivery_item(
     fake_client: _FakeClient,
     monkeypatch: pytest.MonkeyPatch,

@@ -21,6 +21,7 @@ DELIVERY_QUEUE_STATUSES = {
     "failed",
 }
 ACTIVE_DELIVERY_QUEUE_STATUSES = {"queued", "running", "review"}
+STALE_RECONCILE_STATUSES = {"not-ready", "queued", "blocked", "running", "review"}
 
 DeliveryQueueStatus = Literal[
     "not-ready",
@@ -135,6 +136,36 @@ def _value_from_item(item: Any) -> dict[str, Any] | None:
         return None
     value = item.get("value") if isinstance(item, dict) else getattr(item, "value", None)
     return value if isinstance(value, dict) else None
+
+
+def _mapping(value: Any) -> Mapping[str, Any]:
+    return value if isinstance(value, Mapping) else {}
+
+
+def _repo_from_project(project: Mapping[str, Any]) -> dict[str, str] | None:
+    vcs = _mapping(project.get("vcs"))
+    config = _mapping(vcs.get("config"))
+    owner = config.get("owner")
+    repo = config.get("repo")
+    if isinstance(owner, str) and owner.strip() and isinstance(repo, str) and repo.strip():
+        return {"owner": owner.strip(), "name": repo.strip()}
+    return None
+
+
+def _repo_from_item(item: Mapping[str, Any]) -> dict[str, str] | None:
+    repo = _mapping(item.get("repo"))
+    owner = repo.get("owner")
+    name = repo.get("name")
+    if isinstance(owner, str) and owner.strip() and isinstance(name, str) and name.strip():
+        return {"owner": owner.strip(), "name": name.strip()}
+    return None
+
+
+def _same_repo(left: Mapping[str, str], right: Mapping[str, str]) -> bool:
+    return (
+        left.get("owner", "").strip().lower() == right.get("owner", "").strip().lower()
+        and left.get("name", "").strip().lower() == right.get("name", "").strip().lower()
+    )
 
 
 def _required_text(payload: Mapping[str, Any], key: str) -> str:
@@ -268,6 +299,54 @@ async def transition_delivery_queue_status(
     if extra:
         updated.update(extra)
     return await _put_delivery_queue_item(updated)
+
+
+async def pause_stale_project_queue_items(project: Mapping[str, Any]) -> dict[str, Any]:
+    project_id = project.get("project_id")
+    if not isinstance(project_id, str) or not project_id.strip():
+        return {"status": "skipped", "reason": "missing_project_id", "items": 0}
+    current_repo = _repo_from_project(project)
+    if current_repo is None:
+        return {"status": "skipped", "reason": "missing_project_repo", "items": 0}
+
+    updated: list[dict[str, Any]] = []
+    for item in await list_delivery_queue_items({"project_id": project_id}):
+        if item.get("status") not in STALE_RECONCILE_STATUSES:
+            continue
+        item_repo = _repo_from_item(item)
+        if item_repo is None or _same_repo(item_repo, current_repo):
+            continue
+        blockers = [
+            blocker
+            for blocker in item.get("blockers", [])
+            if isinstance(blocker, dict) and blocker.get("code") != "stale_project_config"
+        ]
+        blockers.append(
+            {
+                "code": "stale_project_config",
+                "message": "Queue item repository no longer matches the workspace repository.",
+            }
+        )
+        delivery = _mapping(item.get("delivery"))
+        updated.append(
+            await transition_delivery_queue_status(
+                str(item["id"]),
+                "paused",
+                reason="stale_project_config",
+                extra={
+                    "stale_project_config": True,
+                    "stale_repo": item_repo,
+                    "current_repo": current_repo,
+                    "blockers": blockers,
+                    "delivery": {
+                        **dict(delivery),
+                        "queue_status": "paused",
+                        "blocker_reason": "stale_project_config",
+                    },
+                },
+            )
+        )
+    return {"status": "reconciled", "items": len(updated), "updated": updated}
 
 
 async def delivery_queue_poll(poller: Poller | None = None) -> dict[str, Any]:
