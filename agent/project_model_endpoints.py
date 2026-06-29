@@ -11,7 +11,7 @@ from urllib.parse import urlparse
 
 from fastapi import HTTPException
 
-from . import project_registry, project_secrets
+from . import model_endpoint_adapters, project_registry, project_secrets
 
 MODEL_ENDPOINT_PROVIDER_TYPES = {
     "ai_hub",
@@ -340,6 +340,8 @@ async def validate_model_endpoint(
     *,
     environment: str | None,
     endpoint_id: str,
+    requested_model: str | None = None,
+    transport_factory: Any | None = None,
 ) -> dict[str, Any]:
     project = await project_registry.get_delivery_project(project_id)
     if project is None:
@@ -353,41 +355,19 @@ async def validate_model_endpoint(
     endpoint = next((item for item in endpoints if item.get("id") == endpoint_id), None)
     if endpoint is None:
         raise KeyError(f"model endpoint not found: {endpoint_id}")
-    blockers = []
-    if endpoint.get("disabled") is True:
-        blockers.append({"code": "endpoint_disabled", "message": "Endpoint is disabled."})
-    if _string(endpoint.get("auth_type")) != "none":
-        secret_name = _string(endpoint.get("secret_name"))
-        if not secret_name:
-            blockers.append(
-                {"code": "missing_secret_ref", "message": "Secret reference is missing."}
-            )
-        elif not await project_secrets.resolve_project_secret(
-            project_id,
-            environment=environment,
-            name=secret_name,
-        ):
-            blockers.append(
-                {
-                    "code": "missing_secret",
-                    "message": f"Project secret {secret_name} is missing.",
-                }
-            )
-    if not _string_list(endpoint.get("model_ids")) and not bool(
-        endpoint.get("supports_model_discovery")
-    ):
-        blockers.append(
-            {
-                "code": "missing_models",
-                "message": "Add manual models or enable model discovery.",
-            }
-        )
+    validation = await model_endpoint_adapters.adapter_for_endpoint(endpoint).validate(
+        endpoint,
+        project_id=project_id,
+        environment=environment,
+        requested_model=requested_model,
+        transport_factory=transport_factory,
+    )
     return {
-        "ready": not blockers,
+        "ready": validation["ready"],
         "project_id": project_id,
         "environment": environment,
         "id": endpoint_id,
-        "blockers": blockers,
-        "models": _string_list(endpoint.get("model_ids")),
-        "model_discovery": bool(endpoint.get("supports_model_discovery")),
+        "blockers": validation["blockers"],
+        "models": validation["models"],
+        "model_discovery": validation["model_discovery"],
     }
