@@ -485,6 +485,76 @@ export interface WorkspaceRepositorySettingsUpdateBody {
   required_documents: Array<string>
 }
 
+export interface WorkspaceModelEndpoint {
+  id: string
+  display_name: string
+  provider_type: string
+  base_url: string
+  api_path: string
+  auth_type: "bearer" | "api_key" | "none" | string
+  secret_name: string
+  default_headers: Array<string>
+  model_ids: Array<string>
+  organization?: string
+  project?: string
+  timeout_seconds: number
+  rate_limit: Record<string, number>
+  supports_model_discovery: boolean
+  disabled: boolean
+  created_at?: string
+  updated_at?: string
+  secret: {
+    name: string
+    connected: boolean
+    environment: string
+  }
+}
+
+export interface WorkspaceModelEndpointUpdateBody {
+  id?: string | null
+  display_name: string
+  provider_type: string
+  base_url: string
+  api_path: string
+  auth_type: "bearer" | "api_key" | "none"
+  secret_name: string
+  default_headers: Record<string, string>
+  model_ids: Array<string>
+  organization: string
+  project: string
+  timeout_seconds: number
+  rate_limit: Record<string, number>
+  supports_model_discovery: boolean
+  disabled: boolean
+}
+
+export interface WorkspaceModelEndpointListPayload {
+  project_id: string
+  environment: string
+  items: Array<WorkspaceModelEndpoint>
+}
+
+export interface WorkspaceModelEndpointValidation {
+  ready: boolean
+  project_id: string
+  environment: string
+  id: string
+  blockers: Array<{ code?: string; message?: string }>
+  models: Array<string>
+  model_discovery: boolean
+}
+
+export interface WorkspaceModelEndpointPreset {
+  display_name: string
+  provider_type: string
+  base_url: string
+  api_path: string
+  auth_type: "bearer" | "api_key" | "none"
+  secret_name: string
+  model_ids: Array<string>
+  supports_model_discovery: boolean
+}
+
 export interface UserMapping {
   github_login: string
   work_email: string
@@ -1055,6 +1125,60 @@ export const api = {
     request<WorkspaceRepositorySettings>(
       `/delivery-projects/${encodeURIComponent(projectId)}/repositories/test-access`,
       { method: "POST" }
+    ),
+  listModelEndpointPresets: (projectId: string) =>
+    request<{ items: Array<WorkspaceModelEndpointPreset> }>(
+      `/delivery-projects/${encodeURIComponent(projectId)}/model-endpoints/presets`
+    ),
+  listModelEndpoints: (projectId: string, environment: string) =>
+    request<WorkspaceModelEndpointListPayload>(
+      `/delivery-projects/${encodeURIComponent(projectId)}/model-endpoints?environment=${encodeURIComponent(environment)}`
+    ),
+  createModelEndpointPreset: (
+    projectId: string,
+    providerType: string,
+    environment: string
+  ) =>
+    request<WorkspaceModelEndpoint>(
+      `/delivery-projects/${encodeURIComponent(projectId)}/model-endpoints/presets`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          provider_type: providerType,
+          environment,
+        }),
+      }
+    ),
+  saveModelEndpoint: (
+    projectId: string,
+    endpointId: string,
+    environment: string,
+    body: WorkspaceModelEndpointUpdateBody
+  ) =>
+    request<WorkspaceModelEndpoint>(
+      `/delivery-projects/${encodeURIComponent(projectId)}/model-endpoints/${encodeURIComponent(endpointId)}?environment=${encodeURIComponent(environment)}`,
+      {
+        method: "PUT",
+        body: JSON.stringify(body),
+      }
+    ),
+  validateModelEndpoint: (
+    projectId: string,
+    endpointId: string,
+    environment: string
+  ) =>
+    request<WorkspaceModelEndpointValidation>(
+      `/delivery-projects/${encodeURIComponent(projectId)}/model-endpoints/${encodeURIComponent(endpointId)}/validate?environment=${encodeURIComponent(environment)}`,
+      { method: "POST" }
+    ),
+  deleteModelEndpoint: (
+    projectId: string,
+    endpointId: string,
+    environment: string
+  ) =>
+    request<{ deleted: boolean; id: string }>(
+      `/delivery-projects/${encodeURIComponent(projectId)}/model-endpoints/${encodeURIComponent(endpointId)}?environment=${encodeURIComponent(environment)}`,
+      { method: "DELETE" }
     ),
   getTicketIntake: (projectId: string) =>
     request<TicketIntakeConfig>(

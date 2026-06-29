@@ -416,6 +416,7 @@ def _apply_project_update(record: dict[str, Any], payload: Mapping[str, Any]) ->
         "gate_policy",
         "context_pack",
         "ai_hub_policy",
+        "model_endpoint_registry",
         "model_routing",
         "credential_policy",
         "merge_policy",

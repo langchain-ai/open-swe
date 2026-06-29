@@ -12,7 +12,13 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from fastapi.responses import RedirectResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 
-from .. import delivery_queue, linear_queue, project_registry, project_secrets
+from .. import (
+    delivery_queue,
+    linear_queue,
+    project_model_endpoints,
+    project_registry,
+    project_secrets,
+)
 from .admin import is_admin
 from .agent_instructions import (
     AgentInstructionsCreate,
@@ -278,11 +284,32 @@ class RepositorySettingsUpdateBody(BaseModel):
     base_branch: str = "main"
     branch_prefix: str = "delivery"
     draft_pull_requests: bool = True
-    allowed_actions: list[str] = Field(
-        default_factory=lambda: ["branch", "commit", "pull_request"]
-    )
+    allowed_actions: list[str] = Field(default_factory=lambda: ["branch", "commit", "pull_request"])
     context_repositories: list[str] = Field(default_factory=list)
     required_documents: list[str] = Field(default_factory=list)
+
+
+class ModelEndpointUpdateBody(BaseModel):
+    id: str | None = None
+    display_name: str
+    provider_type: str
+    base_url: str
+    api_path: str = "/chat/completions"
+    auth_type: Literal["bearer", "api_key", "none"] = "bearer"
+    secret_name: str = ""
+    default_headers: dict[str, str] = Field(default_factory=dict)
+    model_ids: list[str] = Field(default_factory=list)
+    organization: str = ""
+    project: str = ""
+    timeout_seconds: int = 60
+    rate_limit: dict[str, int] = Field(default_factory=dict)
+    supports_model_discovery: bool = True
+    disabled: bool = False
+
+
+class ModelEndpointPresetCreateBody(BaseModel):
+    provider_type: str
+    environment: str = project_secrets.DEFAULT_AI_HUB_ENVIRONMENT
 
 
 def _session_is_admin(session: dict[str, Any]) -> bool:
@@ -445,7 +472,9 @@ def _repository_settings_payload(
         project.get("branch_policy") if isinstance(project.get("branch_policy"), dict) else {}
     )
     credential_policy = (
-        project.get("credential_policy") if isinstance(project.get("credential_policy"), dict) else {}
+        project.get("credential_policy")
+        if isinstance(project.get("credential_policy"), dict)
+        else {}
     )
     context_pack = (
         project.get("context_pack") if isinstance(project.get("context_pack"), dict) else {}
@@ -489,7 +518,8 @@ def _repository_settings_payload(
             "repositories": context_repositories,
             "required_documents": documents,
         },
-        "access": access_statuses or [
+        "access": access_statuses
+        or [
             {
                 "full_name": full_name,
                 "default": full_name == default_repository,
@@ -679,7 +709,9 @@ async def _delivery_project_readiness(
         else {}
     )
     credential_policy = (
-        project.get("credential_policy") if isinstance(project.get("credential_policy"), dict) else {}
+        project.get("credential_policy")
+        if isinstance(project.get("credential_policy"), dict)
+        else {}
     )
     gate_policy = project.get("gate_policy") if isinstance(project.get("gate_policy"), dict) else {}
     merge_policy = (
@@ -717,9 +749,7 @@ async def _delivery_project_readiness(
         for secret in project_secret_statuses
         if secret.get("connected") is True
     }
-    missing_secrets = [
-        name for name in required_secret_names if name not in connected_secret_names
-    ]
+    missing_secrets = [name for name in required_secret_names if name not in connected_secret_names]
     ai_hub_ready = (
         await project_secrets.evaluate_ai_hub_readiness(project_id, environment=environment)
         if ai_hub_policy.get("enabled") is True
@@ -740,8 +770,10 @@ async def _delivery_project_readiness(
         and run_limits.get("daily_run_budget", 0) > 0
     )
     blocking_gates = gate_policy.get("blocking_gates")
-    qa_ready = bool(gate_policy.get("qa_evidence")) and isinstance(blocking_gates, list) and bool(
-        blocking_gates
+    qa_ready = (
+        bool(gate_policy.get("qa_evidence"))
+        and isinstance(blocking_gates, list)
+        and bool(blocking_gates)
     )
     merge_ready = bool(merge_policy.get("strategy")) and isinstance(
         merge_policy.get("required_checks", []),
@@ -1291,6 +1323,89 @@ async def api_test_delivery_project_repositories(
     return _repository_settings_payload(
         project,
         access_statuses=await _repository_access_statuses(project, session),
+    )
+
+
+@router.get("/delivery-projects/{project_id}/model-endpoints/presets")
+async def api_list_model_endpoint_presets(
+    project_id: str,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    await _require_delivery_project_member(project_id, session)
+    return {"items": project_model_endpoints.endpoint_presets()}
+
+
+@router.get("/delivery-projects/{project_id}/model-endpoints")
+async def api_list_model_endpoints(
+    project_id: str,
+    environment: str = project_secrets.DEFAULT_AI_HUB_ENVIRONMENT,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    await _require_delivery_project_member(project_id, session)
+    return await project_model_endpoints.list_model_endpoints(
+        project_id,
+        environment=environment,
+    )
+
+
+@router.post("/delivery-projects/{project_id}/model-endpoints/presets")
+async def api_create_model_endpoint_preset(
+    project_id: str,
+    body: ModelEndpointPresetCreateBody,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    await _require_delivery_project_member(project_id, session)
+    preset = project_model_endpoints.endpoint_preset(body.provider_type)
+    return await project_model_endpoints.upsert_model_endpoint(
+        project_id,
+        environment=body.environment,
+        payload=preset,
+    )
+
+
+@router.put("/delivery-projects/{project_id}/model-endpoints/{endpoint_id}")
+async def api_put_model_endpoint(
+    project_id: str,
+    endpoint_id: str,
+    body: ModelEndpointUpdateBody,
+    environment: str = project_secrets.DEFAULT_AI_HUB_ENVIRONMENT,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    await _require_delivery_project_member(project_id, session)
+    return await project_model_endpoints.upsert_model_endpoint(
+        project_id,
+        environment=environment,
+        payload={**body.model_dump(), "id": endpoint_id},
+    )
+
+
+@router.post("/delivery-projects/{project_id}/model-endpoints/{endpoint_id}/validate")
+async def api_validate_model_endpoint(
+    project_id: str,
+    endpoint_id: str,
+    environment: str = project_secrets.DEFAULT_AI_HUB_ENVIRONMENT,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    await _require_delivery_project_member(project_id, session)
+    return await project_model_endpoints.validate_model_endpoint(
+        project_id,
+        environment=environment,
+        endpoint_id=endpoint_id,
+    )
+
+
+@router.delete("/delivery-projects/{project_id}/model-endpoints/{endpoint_id}")
+async def api_delete_model_endpoint(
+    project_id: str,
+    endpoint_id: str,
+    environment: str = project_secrets.DEFAULT_AI_HUB_ENVIRONMENT,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    await _require_delivery_project_member(project_id, session)
+    return await project_model_endpoints.delete_model_endpoint(
+        project_id,
+        environment=environment,
+        endpoint_id=endpoint_id,
     )
 
 

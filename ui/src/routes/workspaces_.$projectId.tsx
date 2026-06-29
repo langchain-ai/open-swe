@@ -7,6 +7,7 @@ import type {
 } from "@/lib/api"
 import { AppShell, SettingsSection } from "@/components/AppShell"
 import { WorkspaceCredentialsSection } from "@/components/WorkspaceCredentialsSection"
+import { WorkspaceModelEndpointsSection } from "@/components/WorkspaceModelEndpointsSection"
 import { WorkspaceRepositoriesSection } from "@/components/WorkspaceRepositoriesSection"
 import { WorkspaceTicketIntakeSection } from "@/components/WorkspaceTicketIntakeSection"
 import { Badge } from "@/components/ui/badge"
@@ -264,11 +265,7 @@ function WorkspaceDetail({
 
       <WorkspaceCredentialsSection projectId={project.project_id} />
 
-      <SettingsSection title="Models">
-        <div id="models">
-          <TokenList items={project.delivery_modes} />
-        </div>
-      </SettingsSection>
+      <WorkspaceModelEndpointsSection projectId={project.project_id} />
 
       <SettingsSection title="Policies">
         <div id="policies">
