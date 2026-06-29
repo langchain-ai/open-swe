@@ -96,6 +96,17 @@ def _normalize_rate_limit(value: Any) -> dict[str, int]:
     return normalized
 
 
+def _normalize_model_capabilities(value: Any) -> dict[str, dict[str, Any]]:
+    raw = _mapping(value)
+    normalized: dict[str, dict[str, Any]] = {}
+    for model_id, item in raw.items():
+        model = _string(model_id)
+        capabilities = _mapping(item)
+        if model and capabilities:
+            normalized[model] = capabilities
+    return normalized
+
+
 def endpoint_preset(provider_type: str) -> dict[str, Any]:
     provider_type = provider_type.strip().lower()
     if provider_type == "ai_hub":
@@ -194,6 +205,7 @@ def normalize_endpoint(
         "secret_name": _string(merged.get("secret_name")),
         "default_headers": _normalize_headers(merged.get("default_headers")),
         "model_ids": model_ids,
+        "model_capabilities": _normalize_model_capabilities(merged.get("model_capabilities")),
         "organization": _string(merged.get("organization")),
         "project": _string(merged.get("project")),
         "timeout_seconds": timeout_seconds,

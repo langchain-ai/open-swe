@@ -6,7 +6,12 @@ import pytest
 
 from agent import delivery_queue as queue
 from agent import delivery_runner as runner
-from agent import project_model_routing, project_registry
+from agent import (
+    project_model_endpoints,
+    project_model_routing,
+    project_registry,
+    project_secrets,
+)
 from agent.dashboard import provider_pat_vault
 
 
@@ -107,7 +112,9 @@ def fake_client(monkeypatch: pytest.MonkeyPatch) -> _FakeClient:
 
     client = _FakeClient()
     monkeypatch.setattr(project_registry, "_client", lambda: client)
+    monkeypatch.setattr(project_model_endpoints, "_client", lambda: client, raising=False)
     monkeypatch.setattr(project_model_routing, "_client", lambda: client)
+    monkeypatch.setattr(project_secrets, "_client", lambda: client)
     monkeypatch.setattr(queue, "_client", lambda: client)
     monkeypatch.setattr(provider_pat_vault, "_client", lambda: client)
     monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", Fernet.generate_key().decode())
@@ -286,3 +293,157 @@ async def test_delivery_worker_records_project_model_routing_snapshot(
     snapshot = updated["model_routing_snapshot"]
     assert snapshot["roles"]["executor"]["model_id"] == "anthropic:claude-opus-4-8"
     assert updated["latest_run"]["model_routing_snapshot"] == snapshot
+
+
+async def test_endpoint_model_routing_snapshot_records_provider_metadata(
+    fake_client: _FakeClient,
+    dispatch_recorder: _DispatchRecorder,
+) -> None:
+    await _stored_project()
+    await project_secrets.upsert_project_secret(
+        "sports-cms",
+        environment="default",
+        name="DEEPSEEK_API_KEY",
+        value="deepseek-secret-1234",
+        updated_by="octocat",
+    )
+    await project_model_endpoints.upsert_model_endpoint(
+        "sports-cms",
+        environment="default",
+        payload={
+            **project_model_endpoints.endpoint_preset("deepseek"),
+            "id": "deepseek-main",
+            "model_capabilities": {
+                "deepseek-chat": {
+                    "tool_calling": True,
+                    "context_window": 64000,
+                    "cost": {"input_per_million": 0.2, "currency": "USD"},
+                }
+            },
+        },
+    )
+    project = await project_model_routing.set_project_model_routing(
+        "sports-cms",
+        {
+            "environment": "default",
+            "roles": {
+                "executor": {
+                    "endpoint_id": "deepseek-main",
+                    "model_id": "deepseek-chat",
+                    "effort": "high",
+                    "capabilities": {
+                        "tool_calling": True,
+                        "reasoning": True,
+                        "context_window": 64000,
+                    },
+                },
+                "helper": {"endpoint_id": "deepseek-main", "model_id": "deepseek-reasoner"},
+                "qa": {"endpoint_id": "deepseek-main", "model_id": "deepseek-chat"},
+                "reviewer": {"endpoint_id": "deepseek-main", "model_id": "deepseek-chat"},
+                "browser_proof": {
+                    "endpoint_id": "deepseek-main",
+                    "model_id": "deepseek-chat",
+                },
+                "subagent": {"endpoint_id": "deepseek-main", "model_id": "deepseek-reasoner"},
+            },
+        },
+        actor="octocat",
+    )
+    await provider_pat_vault.upsert_provider_pat(
+        "octocat",
+        provider="github",
+        token="ghp_octocat-token-1234",
+    )
+    record = await _queued_item()
+
+    result = await runner.launch_delivery_worker(record["id"], client=fake_client)
+
+    assert result["status"] == "launched"
+    call = dispatch_recorder.calls[0]
+    assert call["configurable"]["agent_model_id"] == "deepseek-chat"
+    snapshot = (await queue.read_delivery_queue_item(record["id"]))["model_routing_snapshot"]
+    executor = snapshot["roles"]["executor"]
+    assert executor["endpoint_id"] == "deepseek-main"
+    assert executor["provider_type"] == "deepseek"
+    assert executor["base_url_fingerprint"]
+    assert executor["capabilities"] == {
+        "tool_calling": True,
+        "reasoning": True,
+        "context_window": 64000,
+    }
+    assert "deepseek-secret-1234" not in str(snapshot)
+    assert "qa" in snapshot["roles"]
+    assert "reviewer" in snapshot["roles"]
+    assert "browser_proof" in snapshot["roles"]
+    assert "subagent" in snapshot["roles"]
+    payload = project_model_routing.model_routing_payload(project)
+    assert "fallback" in payload["roles"]
+    assert "qa" in payload["roles"]
+    assert "reviewer" in payload["roles"]
+    assert payload["endpoints"][0]["models"][0]["capabilities"]["tool_calling"] is True
+
+
+async def test_disabled_endpoint_blocks_model_routing(
+    fake_client: _FakeClient,
+) -> None:
+    await _stored_project()
+    await project_model_endpoints.upsert_model_endpoint(
+        "sports-cms",
+        environment="default",
+        payload={
+            **project_model_endpoints.endpoint_preset("deepseek"),
+            "id": "deepseek-main",
+            "disabled": True,
+        },
+    )
+
+    with pytest.raises(ValueError, match="disabled"):
+        await project_model_routing.set_project_model_routing(
+            "sports-cms",
+            {
+                "roles": {
+                    "executor": {
+                        "endpoint_id": "deepseek-main",
+                        "model_id": "deepseek-chat",
+                    }
+                }
+            },
+            actor="octocat",
+        )
+
+
+async def test_missing_endpoint_secret_blocks_worker_preflight(
+    fake_client: _FakeClient,
+    dispatch_recorder: _DispatchRecorder,
+) -> None:
+    await _stored_project()
+    await project_model_endpoints.upsert_model_endpoint(
+        "sports-cms",
+        environment="default",
+        payload={**project_model_endpoints.endpoint_preset("deepseek"), "id": "deepseek-main"},
+    )
+    await project_model_routing.set_project_model_routing(
+        "sports-cms",
+        {
+            "roles": {
+                "executor": {
+                    "endpoint_id": "deepseek-main",
+                    "model_id": "deepseek-chat",
+                }
+            }
+        },
+        actor="octocat",
+    )
+    await provider_pat_vault.upsert_provider_pat(
+        "octocat",
+        provider="github",
+        token="ghp_octocat-token-1234",
+    )
+    record = await _queued_item()
+
+    result = await runner.launch_delivery_worker(record["id"], client=fake_client)
+
+    assert result["status"] == "refused"
+    assert result["reason"] == "model_routing"
+    assert result["blockers"][0]["message"] == "Project model routing is invalid."
+    assert dispatch_recorder.calls == []

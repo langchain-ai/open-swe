@@ -520,12 +520,67 @@ export interface WorkspaceModelEndpointUpdateBody {
   secret_name: string
   default_headers: Record<string, string>
   model_ids: Array<string>
+  model_capabilities?: Record<string, WorkspaceModelCapabilities>
   organization: string
   project: string
   timeout_seconds: number
   rate_limit: Record<string, number>
   supports_model_discovery: boolean
   disabled: boolean
+}
+
+export interface WorkspaceModelCapabilities {
+  tool_calling?: boolean
+  vision?: boolean
+  reasoning?: boolean
+  json_schema_mode?: boolean
+  streaming?: boolean
+  context_window?: number
+  cost?: Record<string, number | string>
+}
+
+export interface WorkspaceModelRoutingSelection {
+  endpoint_id?: string
+  model_id: string
+  effort: string
+  capabilities?: WorkspaceModelCapabilities
+  fallback_chain?: Array<WorkspaceModelRoutingSelection>
+}
+
+export interface WorkspaceModelRoutingPayload {
+  project_id: string
+  environment: string
+  roles: Array<string>
+  routing: {
+    environment?: string
+    default?: WorkspaceModelRoutingSelection
+    roles: Record<string, WorkspaceModelRoutingSelection>
+    fallback?: WorkspaceModelRoutingSelection
+  }
+  endpoints: Array<{
+    id: string
+    display_name: string
+    provider_type: string
+    disabled: boolean
+    base_url_fingerprint: string
+    models: Array<{
+      model_id: string
+      capabilities: WorkspaceModelCapabilities
+    }>
+    supports_model_discovery: boolean
+  }>
+  legacy_models: Array<string>
+  validation: {
+    ready: boolean
+    blockers: Array<{ code?: string; message?: string }>
+  }
+}
+
+export interface WorkspaceModelRoutingUpdateBody {
+  environment: string
+  default?: WorkspaceModelRoutingSelection | null
+  roles: Record<string, WorkspaceModelRoutingSelection>
+  fallback?: WorkspaceModelRoutingSelection | null
 }
 
 export interface WorkspaceModelEndpointListPayload {
@@ -1179,6 +1234,21 @@ export const api = {
     request<{ deleted: boolean; id: string }>(
       `/delivery-projects/${encodeURIComponent(projectId)}/model-endpoints/${encodeURIComponent(endpointId)}?environment=${encodeURIComponent(environment)}`,
       { method: "DELETE" }
+    ),
+  getWorkspaceModelRouting: (projectId: string) =>
+    request<WorkspaceModelRoutingPayload>(
+      `/delivery-projects/${encodeURIComponent(projectId)}/model-routing`
+    ),
+  saveWorkspaceModelRouting: (
+    projectId: string,
+    body: WorkspaceModelRoutingUpdateBody
+  ) =>
+    request<WorkspaceModelRoutingPayload>(
+      `/delivery-projects/${encodeURIComponent(projectId)}/model-routing`,
+      {
+        method: "PUT",
+        body: JSON.stringify(body),
+      }
     ),
   getTicketIntake: (projectId: string) =>
     request<TicketIntakeConfig>(

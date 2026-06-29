@@ -276,7 +276,22 @@ async def _ai_hub_ready_for_project(project: Mapping[str, Any]) -> bool | None:
 def _model_routing_snapshot_for_project(project: Mapping[str, Any]) -> dict[str, Any]:
     return project_model_routing.build_model_routing_snapshot(
         project,
-        ("executor", "helper", "qa_reviewer", "vision", "fallback"),
+        (
+            "orchestrator",
+            "executor",
+            "reviewer",
+            "qa",
+            "qa_reviewer",
+            "drupal_backend",
+            "drupal_frontend",
+            "content",
+            "content_editor",
+            "vision",
+            "browser_proof",
+            "helper",
+            "subagent",
+            "fallback",
+        ),
     )
 
 
@@ -650,7 +665,7 @@ async def launch_delivery_worker(
     ai_hub_ready = await _ai_hub_ready_for_project(project)
     if ai_hub_ready is not None:
         start_checks_payload["ai_hub_ready"] = ai_hub_ready
-    model_routing_result = project_model_routing.validate_project_model_routing(project)
+    model_routing_result = await project_model_routing.validate_project_model_routing_ready(project)
     if not model_routing_result["ready"]:
         start_checks_payload["model_routing_invalid"] = True
     model_routing_snapshot = _model_routing_snapshot_for_project(project)

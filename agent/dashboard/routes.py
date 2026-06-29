@@ -16,6 +16,7 @@ from .. import (
     delivery_queue,
     linear_queue,
     project_model_endpoints,
+    project_model_routing,
     project_registry,
     project_secrets,
 )
@@ -299,6 +300,7 @@ class ModelEndpointUpdateBody(BaseModel):
     secret_name: str = ""
     default_headers: dict[str, str] = Field(default_factory=dict)
     model_ids: list[str] = Field(default_factory=list)
+    model_capabilities: dict[str, dict[str, Any]] = Field(default_factory=dict)
     organization: str = ""
     project: str = ""
     timeout_seconds: int = 60
@@ -310,6 +312,13 @@ class ModelEndpointUpdateBody(BaseModel):
 class ModelEndpointPresetCreateBody(BaseModel):
     provider_type: str
     environment: str = project_secrets.DEFAULT_AI_HUB_ENVIRONMENT
+
+
+class ModelRoutingUpdateBody(BaseModel):
+    environment: str = project_secrets.DEFAULT_AI_HUB_ENVIRONMENT
+    default: dict[str, Any] | None = None
+    roles: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    fallback: dict[str, Any] | None = None
 
 
 def _session_is_admin(session: dict[str, Any]) -> bool:
@@ -759,7 +768,12 @@ async def _delivery_project_readiness(
         bool(sandbox_profile.get("profile")) or isinstance(sandbox_profile.get("runtime"), dict)
     )
     model_roles = model_routing.get("roles") if isinstance(model_routing.get("roles"), dict) else {}
-    model_ready = bool(project.get("delivery_modes")) and isinstance(model_roles, dict)
+    model_validation = await project_model_routing.validate_project_model_routing_ready(project)
+    model_ready = (
+        bool(project.get("delivery_modes"))
+        and isinstance(model_roles, dict)
+        and bool(model_validation.get("ready"))
+    )
     queue_ready = bool(queue_policy.get("labels") or queue_policy.get("ready_states"))
     auto_mode_ready = (
         bool(project.get("active", True))
@@ -844,6 +858,7 @@ async def _delivery_project_readiness(
             message="Delivery modes and model routing are configured."
             if model_ready
             else "Configure delivery modes and model routing.",
+            blockers=list(model_validation.get("blockers") or []),
         ),
         _readiness_check(
             key="queue_policy",
@@ -1407,6 +1422,42 @@ async def api_delete_model_endpoint(
         environment=environment,
         endpoint_id=endpoint_id,
     )
+
+
+@router.get("/delivery-projects/{project_id}/model-routing")
+async def api_get_model_routing(
+    project_id: str,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    project = await _require_delivery_project_member(project_id, session)
+    payload = project_model_routing.model_routing_payload(project)
+    validation = await project_model_routing.validate_project_model_routing_ready(project)
+    return {**payload, "validation": validation}
+
+
+@router.put("/delivery-projects/{project_id}/model-routing")
+async def api_put_model_routing(
+    project_id: str,
+    body: ModelRoutingUpdateBody,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    await _require_delivery_project_member(project_id, session)
+    try:
+        project = await project_model_routing.set_project_model_routing(
+            project_id,
+            {
+                "environment": body.environment,
+                "default": body.default,
+                "roles": body.roles,
+                "fallback": body.fallback,
+            },
+            actor=str(session.get("sub") or "unknown"),
+        )
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    payload = project_model_routing.model_routing_payload(project)
+    validation = await project_model_routing.validate_project_model_routing_ready(project)
+    return {**payload, "validation": validation}
 
 
 @router.get("/delivery-projects/{project_id}/ticket-intake")
