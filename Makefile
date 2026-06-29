@@ -8,7 +8,7 @@ all: help
 ######################
 
 dev:
-	uv run langgraph dev
+	uv run langgraph dev --no-browser
 
 run:
 	uv run uvicorn agent.webapp:app --reload --port 8000

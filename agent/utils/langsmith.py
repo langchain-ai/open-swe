@@ -40,6 +40,7 @@ def _resolve_project_id_by_name(project_name: str) -> str | None:
     client = _build_prod_langsmith_client()
     if client is None:
         return None
+
     try:
         project = client.read_project(project_name=project_name)
     except LangSmithNotFoundError:
@@ -49,6 +50,7 @@ def _resolve_project_id_by_name(project_name: str) -> str | None:
         logger.debug("Could not resolve LangSmith project id for %s", project_name)
         _PROJECT_ID_CACHE[project_name] = ""
         return None
+
     project_id = getattr(project, "id", None)
     resolved = str(project_id) if project_id else ""
     _PROJECT_ID_CACHE[project_name] = resolved
@@ -86,6 +88,7 @@ def _build_langsmith_feedback_clients() -> tuple[LangSmithClient, ...]:
     seen: set[tuple[str, str]] = set()
 
     api_endpoint = os.environ.get("LANGSMITH_ENDPOINT", "https://api.smith.langchain.com")
+
     client_configs = (
         (
             os.environ.get("LANGSMITH_API_KEY") or os.environ.get("LANGCHAIN_API_KEY"),
@@ -124,7 +127,7 @@ def create_langsmith_feedback(
     """Create or update deterministic feedback on all configured LangSmith clients."""
     clients = _build_langsmith_feedback_clients()
     if not clients:
-        logger.warning("No LangSmith API key configured, skipping feedback")
+        logger.debug("No LangSmith API key configured, skipping feedback")
         return False
 
     feedback_id = _feedback_id(run_id, key)
@@ -147,6 +150,7 @@ def create_langsmith_feedback(
                 any_success = True
             except Exception:
                 logger.exception("Failed to create or update LangSmith feedback for run %s", run_id)
+
     return any_success
 
 
@@ -154,7 +158,7 @@ def delete_langsmith_feedback(run_id: str, key: str) -> bool:
     """Delete deterministic feedback from all configured LangSmith clients."""
     clients = _build_langsmith_feedback_clients()
     if not clients:
-        logger.warning("No LangSmith API key configured, skipping feedback deletion")
+        logger.debug("No LangSmith API key configured, skipping feedback deletion")
         return False
 
     feedback_id = _feedback_id(run_id, key)
@@ -167,4 +171,5 @@ def delete_langsmith_feedback(run_id: str, key: str) -> bool:
             any_success = True
         except Exception:
             logger.exception("Failed to delete LangSmith feedback for run %s", run_id)
+
     return any_success
