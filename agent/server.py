@@ -96,6 +96,7 @@ from .utils.authorship import (
 )
 from .utils.dashboard_links import dashboard_plan_url, dashboard_thread_url
 from .utils.github_app import (
+    BASE_RUNTIME_PROXY_TOKEN_PERMISSIONS,
     RUNTIME_PROXY_TOKEN_PERMISSIONS,
     PermissionMap,
     get_github_app_installation_token_with_expiry,
@@ -187,12 +188,28 @@ async def _resolve_proxy_token(
     github_proxy_token: str | None,
     *,
     permissions: PermissionMap | None = None,
-) -> tuple[str | None, str | None]:
-    """Resolve the proxy token and its expiry."""
+) -> tuple[str | None, str | None, PermissionMap | None]:
+    """Resolve the proxy token, its expiry, and the effective permission scope."""
     if github_proxy_token:
-        return github_proxy_token, None
-    effective_permissions = permissions or RUNTIME_PROXY_TOKEN_PERMISSIONS
-    return await get_github_app_installation_token_with_expiry(permissions=effective_permissions)
+        return github_proxy_token, None, None
+    if permissions is not None:
+        token, expires_at = await get_github_app_installation_token_with_expiry(
+            permissions=permissions
+        )
+        return token, expires_at, permissions
+
+    token, expires_at = await get_github_app_installation_token_with_expiry(
+        permissions=RUNTIME_PROXY_TOKEN_PERMISSIONS,
+        log_errors=False,
+    )
+    if token:
+        return token, expires_at, RUNTIME_PROXY_TOKEN_PERMISSIONS
+
+    logger.warning("Retrying GitHub proxy token mint without optional Actions read permission")
+    token, expires_at = await get_github_app_installation_token_with_expiry(
+        permissions=BASE_RUNTIME_PROXY_TOKEN_PERMISSIONS
+    )
+    return token, expires_at, BASE_RUNTIME_PROXY_TOKEN_PERMISSIONS if token else None
 
 
 async def _resolve_snapshot_id_for_repo(repo: dict[str, str] | None) -> str | None:
@@ -223,7 +240,7 @@ async def _create_sandbox_with_proxy(
 
     sandbox_type = os.getenv("SANDBOX_TYPE", "langsmith")
     if sandbox_type == "langsmith":
-        token, expires_at = await _resolve_proxy_token(github_proxy_token)
+        token, expires_at, permissions = await _resolve_proxy_token(github_proxy_token)
         if not token:
             msg = "Cannot configure proxy: GitHub App installation token is unavailable"
             logger.error(msg)
@@ -234,7 +251,7 @@ async def _create_sandbox_with_proxy(
             thread_id,
             expires_at,
             repositories=github_proxy_repositories,
-            permissions=None if github_proxy_token else RUNTIME_PROXY_TOKEN_PERMISSIONS,
+            permissions=permissions,
         )
 
     return sandbox_backend
@@ -251,7 +268,7 @@ async def _refresh_github_proxy(
     if os.getenv("SANDBOX_TYPE", "langsmith") != "langsmith":
         return
 
-    token, expires_at = await _resolve_proxy_token(github_proxy_token)
+    token, expires_at, permissions = await _resolve_proxy_token(github_proxy_token)
     if not token:
         logger.warning(
             "Skipping GitHub proxy refresh for sandbox %s: installation token unavailable",
@@ -266,7 +283,7 @@ async def _refresh_github_proxy(
         thread_id,
         expires_at,
         repositories=github_proxy_repositories,
-        permissions=None if github_proxy_token else RUNTIME_PROXY_TOKEN_PERMISSIONS,
+        permissions=permissions,
     )
 
 

@@ -147,6 +147,13 @@ async def test_installation_token_can_be_scoped_to_repository_ids(
     assert _FakeAsyncClient.last_post["json"] == {"repository_ids": [123]}
 
 
+def test_runtime_proxy_token_permissions_include_optional_read_only_actions() -> None:
+    assert "actions" not in github_app.BASE_RUNTIME_PROXY_TOKEN_PERMISSIONS
+    assert github_app.RUNTIME_PROXY_TOKEN_PERMISSIONS["actions"] == "read"
+    assert github_app.RUNTIME_PROXY_TOKEN_PERMISSIONS.get("actions") != "write"
+    assert "actions" not in github_app.WORKFLOW_RUNTIME_PROXY_TOKEN_PERMISSIONS
+
+
 @pytest.mark.asyncio
 async def test_installation_token_includes_permissions(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(github_app, "GITHUB_APP_ID", "1")

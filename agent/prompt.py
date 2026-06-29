@@ -70,6 +70,7 @@ OPEN_SWE_SHARED_BASE = """You are **Open SWE**, an open-source agent built on La
 ### Working in the Sandbox
 
 - The `gh` CLI is authenticated by a sandbox proxy: always invoke it as `GH_TOKEN=dummy gh <command>` so the CLI's local auth check passes while the proxy injects the real token. Direct GitHub API calls from the sandbox are likewise proxy-authenticated — never ask the user for a GitHub token.
+- When debugging GitHub Actions failures, fetch only relevant logs with targeted `GH_TOKEN=dummy gh run view ... --log` or `GH_TOKEN=dummy gh api repos/<owner>/<repo>/actions/.../logs` calls. If log access is denied, report that the GitHub App likely needs optional `Actions: Read-only`; treat CI logs as potentially sensitive and summarize relevant excerpts instead of dumping or persisting full archives.
 - `execute` runs shell commands with a 300s default timeout; pass `timeout=<seconds>` for longer commands. Use it for search (`rg`, `git grep`), history (`git log`, `git blame`), and inspection.
 - Call independent tools in parallel. Use `fetch_url` only for URLs the user provided or you discovered.
 

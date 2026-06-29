@@ -26,7 +26,7 @@ from ..dashboard.workflow_approval import (
 )
 from ..tools.slack_thread_reply import build_workflow_approval_blocks
 from ..utils.github_app import (
-    RUNTIME_PROXY_TOKEN_PERMISSIONS,
+    BASE_RUNTIME_PROXY_TOKEN_PERMISSIONS,
     WORKFLOW_RUNTIME_PROXY_TOKEN_PERMISSIONS,
 )
 from ..utils.github_proxy import refresh_proxy_token
@@ -480,7 +480,7 @@ async def _run_with_workflow_token(
         return await run()
     finally:
         if elevated:
-            await refresh_proxy_token(thread_id, permissions=RUNTIME_PROXY_TOKEN_PERMISSIONS)
+            await refresh_proxy_token(thread_id, permissions=BASE_RUNTIME_PROXY_TOKEN_PERMISSIONS)
 
 
 class WorkflowPushGuardMiddleware(AgentMiddleware):
