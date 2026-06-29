@@ -33,6 +33,7 @@ from .plan_store import (
     delete_plan_comment,
     get_plan_content,
     list_plan_comments,
+    plan_file_path_for_thread,
     save_plan_content,
     set_plan_status,
     write_plan_to_sandbox,
@@ -103,7 +104,7 @@ async def update_plan(
     """Owner-only manual edit of the plan markdown.
 
     Re-publishes the edited plan as ``ready`` (and mirrors it into the sandbox
-    ``plan.md``) while preserving reviewer comments, so the owner can refine the
+    plan file) while preserving reviewer comments, so the owner can refine the
     plan before approving it."""
     metadata = await _thread_metadata(thread_id)
     if not _user_owns_thread(metadata, session["sub"], session.get("email")):
@@ -115,10 +116,18 @@ async def update_plan(
     status = content.get("status") or metadata.get("plan_status") or "planning"
     if status in (PLAN_STATUS_APPROVED, PLAN_STATUS_CANCELLED):
         raise HTTPException(409, f"cannot edit a {status} plan")
-    await save_plan_content(
-        thread_id, markdown=markdown, status=PLAN_STATUS_READY, clear_comments=False
+    plan_file_path = content.get("plan_file_path")
+    plan_file_path = (
+        plan_file_path if isinstance(plan_file_path, str) else plan_file_path_for_thread(thread_id)
     )
-    await write_plan_to_sandbox(thread_id, markdown)
+    await save_plan_content(
+        thread_id,
+        markdown=markdown,
+        status=PLAN_STATUS_READY,
+        clear_comments=False,
+        plan_file_path=plan_file_path,
+    )
+    await write_plan_to_sandbox(thread_id, markdown, plan_file_path=plan_file_path)
     return {"status": PLAN_STATUS_READY, "markdown": markdown}
 
 
@@ -210,7 +219,8 @@ async def reject_plan(thread_id: str, session: dict[str, Any] = _SESSION_DEP) ->
     await set_plan_status(thread_id, PLAN_STATUS_REVISING, plan_mode=True)
     text = (
         "The plan needs changes before implementation. Address this reviewer "
-        "feedback and publish an updated plan with the save_plan tool:\n\n"
+        "feedback in the existing Markdown file under /workspace/plans/, then "
+        "publish an updated plan with the save_plan tool:\n\n"
         f"{feedback or '(no specific comments were left)'}"
     )
     await _dispatch_followup(thread_id, metadata, text, plan_mode=True)

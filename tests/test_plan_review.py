@@ -108,17 +108,81 @@ async def test_save_plan_requires_run_context() -> None:
     from agent.tools.save_plan import save_plan
 
     # No LangGraph run context → no thread_id → graceful error, not a crash.
-    result = await save_plan("## Plan")
+    result = await save_plan("/workspace/plans/2026-06-29-test-plan.md")
     assert result["success"] is False
     assert "thread_id" in result["error"]
 
 
-async def test_save_plan_rejects_empty_markdown() -> None:
+async def test_save_plan_rejects_empty_path() -> None:
     from agent.tools.save_plan import save_plan
 
     result = await save_plan("   ")
     assert result["success"] is False
     assert "empty" in result["error"]
+
+
+async def test_save_plan_rejects_non_markdown_path() -> None:
+    from agent.tools.save_plan import save_plan
+
+    result = await save_plan("/workspace/plans/plan.txt")
+    assert result["success"] is False
+    assert "Markdown" in result["error"]
+
+
+async def test_save_plan_rejects_markdown_outside_plans_dir() -> None:
+    from agent.tools.save_plan import save_plan
+
+    result = await save_plan("/workspace/plan.md")
+    assert result["success"] is False
+    assert "/workspace/plans" in result["error"]
+
+
+async def test_save_plan_reads_markdown_file_from_sandbox(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import importlib
+
+    save_plan_tool = importlib.import_module("agent.tools.save_plan")
+
+    saved: dict[str, Any] = {}
+    reads: list[tuple[str, int, int]] = []
+
+    class _Backend:
+        async def aread(self, file_path: str, offset: int = 0, limit: int = 2000) -> dict[str, Any]:
+            reads.append((file_path, offset, limit))
+            return {"file_data": {"encoding": "utf-8", "content": "# Plan\n\nDo it.\n"}}
+
+    async def fake_backend(thread_id: str) -> _Backend:
+        assert thread_id == "thread-1"
+        return _Backend()
+
+    async def fake_save_content(
+        thread_id: str, *, markdown: str, status: str, plan_file_path: str | None = None
+    ) -> None:
+        saved.update(
+            thread_id=thread_id, markdown=markdown, status=status, plan_file_path=plan_file_path
+        )
+
+    monkeypatch.setattr(
+        save_plan_tool,
+        "get_config",
+        lambda: {"configurable": {"thread_id": "thread-1"}},
+    )
+    monkeypatch.setattr(save_plan_tool, "get_sandbox_backend", fake_backend)
+    monkeypatch.setattr(save_plan_tool, "save_plan_content", fake_save_content)
+
+    result = await save_plan_tool.save_plan("/workspace/plans/2026-06-29-test-plan.md")
+
+    assert result == {"success": True, "path": "/workspace/plans/2026-06-29-test-plan.md"}
+    assert reads == [
+        ("/workspace/plans/2026-06-29-test-plan.md", 0, save_plan_tool._MAX_PLAN_LINES)
+    ]
+    assert saved == {
+        "thread_id": "thread-1",
+        "markdown": "# Plan\n\nDo it.",
+        "status": "ready",
+        "plan_file_path": "/workspace/plans/2026-06-29-test-plan.md",
+    }
 
 
 def test_plan_routes_registered() -> None:
@@ -150,10 +214,25 @@ def test_plan_status_constants() -> None:
     assert plan_store.PLAN_STATUS_REVISING == "revising"
 
 
+def test_plan_file_path_for_thread_uses_plans_dir_and_slug() -> None:
+    from agent.dashboard import plan_store
+
+    path = plan_store.plan_file_path_for_thread("Thread ABC/123")
+    assert path.startswith("/workspace/plans/")
+    assert path.endswith("-thread-abc-123.md")
+
+
 def test_http_request_excluded_in_plan_mode() -> None:
     from agent.server import PLAN_MODE_EXCLUDED_TOOLS
 
     assert "http_request" in PLAN_MODE_EXCLUDED_TOOLS
+
+
+def test_file_edit_tools_available_in_plan_mode_for_plan_file() -> None:
+    from agent.server import PLAN_MODE_EXCLUDED_TOOLS
+
+    assert "write_file" not in PLAN_MODE_EXCLUDED_TOOLS
+    assert "edit_file" not in PLAN_MODE_EXCLUDED_TOOLS
 
 
 class _FakeReq:
@@ -190,6 +269,34 @@ def test_plan_mode_middleware_self_activation_via_state() -> None:
 
 
 # --- manual plan editing -------------------------------------------------
+
+
+async def test_set_plan_status_preserves_plan_file_path(monkeypatch: pytest.MonkeyPatch) -> None:
+    from agent.dashboard import plan_store
+
+    existing = {
+        "markdown": "# Plan",
+        "status": "ready",
+        "plan_file_path": "/workspace/plans/foo.md",
+    }
+    saved: dict[str, Any] = {}
+
+    class _Store:
+        async def get_item(self, *a: Any, **k: Any) -> Any:
+            return {"value": existing}
+
+        async def put_item(self, namespace: Any, key: str, value: Any, *a: Any, **k: Any) -> None:
+            saved.update(value)
+
+    async def fake_merge(thread_id: str, metadata: dict[str, Any]) -> None:
+        return None
+
+    monkeypatch.setattr(plan_store, "_client", lambda: _fake_client(_Store()))
+    monkeypatch.setattr(plan_store, "_merge_thread_metadata", fake_merge)
+
+    await plan_store.set_plan_status("t", plan_store.PLAN_STATUS_REVISING, plan_mode=True)
+    assert saved["plan_file_path"] == "/workspace/plans/foo.md"
+    assert saved["status"] == plan_store.PLAN_STATUS_REVISING
 
 
 async def test_save_plan_content_clear_comments_flag(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -236,13 +343,24 @@ def _patch_update_plan_deps(
         return content
 
     async def fake_save(
-        thread_id: str, *, markdown: str, status: str, clear_comments: bool = True
+        thread_id: str,
+        *,
+        markdown: str,
+        status: str,
+        clear_comments: bool = True,
+        plan_file_path: str | None = None,
     ) -> None:
-        saved.update(markdown=markdown, status=status, clear_comments=clear_comments)
+        saved.update(
+            markdown=markdown,
+            status=status,
+            clear_comments=clear_comments,
+            plan_file_path=plan_file_path,
+        )
 
-    async def fake_write(thread_id: str, c: str) -> str:
+    async def fake_write(thread_id: str, c: str, *, plan_file_path: str | None = None) -> str:
         sandbox["content"] = c
-        return "plan.md"
+        sandbox["plan_file_path"] = plan_file_path
+        return plan_file_path or "/workspace/plans/fallback.md"
 
     monkeypatch.setattr(plan_api, "_thread_metadata", fake_meta)
     monkeypatch.setattr(plan_api, "_user_owns_thread", lambda *a, **k: owner)
@@ -262,7 +380,11 @@ async def test_update_plan_owner_saves_and_mirrors_sandbox(
         monkeypatch,
         metadata={"plan_status": "ready"},
         owner=True,
-        content={"markdown": "old", "status": "ready"},
+        content={
+            "markdown": "old",
+            "status": "ready",
+            "plan_file_path": "/workspace/plans/2026-06-29-existing.md",
+        },
         saved=saved,
         sandbox=sandbox,
     )
@@ -273,7 +395,9 @@ async def test_update_plan_owner_saves_and_mirrors_sandbox(
     assert result == {"status": "ready", "markdown": "# New\n\ndo x"}
     assert saved["status"] == "ready"
     assert saved["clear_comments"] is False
+    assert saved["plan_file_path"] == "/workspace/plans/2026-06-29-existing.md"
     assert sandbox["content"] == "# New\n\ndo x"
+    assert sandbox["plan_file_path"] == "/workspace/plans/2026-06-29-existing.md"
 
 
 async def test_update_plan_rejects_non_owner(monkeypatch: pytest.MonkeyPatch) -> None:
