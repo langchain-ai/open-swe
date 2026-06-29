@@ -114,6 +114,7 @@ Webhooks compute deterministic thread ids so the same Linear issue / Slack threa
 ## Conventions
 
 - Tests are unit-only by default (`tests/`). Integration tests would go under `tests/integration_tests/` (currently empty — `make integration_tests` no-ops if missing).
+- Delivery-platform tickets follow the product Done gate in `docs/workflows/product-done-gate.md`: backend-complete is not product-complete until the relevant UI, browser proof, configured-project proof, credential proof, and closeout evidence requirements are satisfied or linked to an explicit follow-up.
 - New sandbox providers: add a module under `agent/integrations/` and wire it into `SANDBOX_FACTORIES` in `agent/utils/sandbox.py`. See `CUSTOMIZATION.md`.
 - New tools: add to `agent/tools/`, export from `agent/tools/__init__.py`, add to the `tools=[...]` list in `server.py:get_agent` (or `reviewer.py` for reviewer-only tools).
 - New middleware: add to `agent/middleware/`, export from `agent/middleware/__init__.py`, add to the `middleware=[...]` list in `server.py:get_agent` — order is significant (see the stack above).

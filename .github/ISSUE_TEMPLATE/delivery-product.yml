@@ -1,0 +1,47 @@
+name: Delivery product work
+description: Track Open SWE delivery-platform work with product-level completion proof.
+title: "[Delivery] "
+labels: ["Feature"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What user or operator problem does this solve?
+    validations:
+      required: true
+  - type: textarea
+    id: build
+    attributes:
+      label: What to build
+      description: Describe the smallest product-visible change that solves the problem.
+    validations:
+      required: true
+  - type: checkboxes
+    id: done-gate
+    attributes:
+      label: Product Done gate
+      description: See docs/workflows/product-done-gate.md.
+      options:
+        - label: This issue distinguishes backend-complete from product-complete.
+          required: true
+        - label: Product-complete requires relevant UI visibility or an explicit linked follow-up.
+          required: true
+        - label: Frontend changes require browser verification artifacts.
+          required: true
+        - label: Delivery-critical changes require real or representative configured-project proof.
+          required: true
+  - type: checkboxes
+    id: configuration
+    attributes:
+      label: Configuration and credentials
+      options:
+        - label: Linear, GitHub, and workspace settings are manageable by a user when touched.
+        - label: Credential changes prove redacted display, rotation or revoke, and no secret leakage.
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Include tests, browser proof, configured-project proof, and closeout evidence.
+    validations:
+      required: true
