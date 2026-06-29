@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react"
+import { useNavigate } from "@tanstack/react-router"
 
 import type { PlanComment, PlanData } from "@/lib/plan"
 import {
@@ -48,6 +49,7 @@ async function copyToClipboard(text: string): Promise<boolean> {
 }
 
 export function PlanReview({ plan }: { plan: PlanData }) {
+  const navigate = useNavigate()
   const resolvedTheme = useResolvedTheme()
   const [comments, setComments] = useState<Array<PlanComment>>([])
   const [draft, setDraft] = useState("")
@@ -153,20 +155,23 @@ export function PlanReview({ plan }: { plan: PlanData }) {
       setBusy(kind)
       setError(null)
       try {
-        if (kind === "approve") await approvePlan(plan.threadId)
-        else await rejectPlan(plan.threadId)
-        setDecision(
-          kind === "approve"
-            ? "Plan approved — the agent is implementing it."
-            : "Changes requested — the agent is revising the plan."
-        )
+        if (kind === "approve") {
+          await approvePlan(plan.threadId)
+          await navigate({
+            to: "/agents/$threadId",
+            params: { threadId: plan.threadId },
+          })
+          return
+        }
+        await rejectPlan(plan.threadId)
+        setDecision("Changes requested — the agent is revising the plan.")
       } catch (e) {
         setError((e as Error).message)
       } finally {
         setBusy(null)
       }
     },
-    [plan.threadId]
+    [navigate, plan.threadId]
   )
 
   const copyPlan = useCallback(async () => {

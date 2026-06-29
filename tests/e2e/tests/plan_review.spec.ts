@@ -126,10 +126,11 @@ test.describe("Plan review (HTTP comments)", () => {
     await addComment(collab, "Reviewer: please also add a docstring.");
     await expect(collab.getByTestId("plan-comment")).toHaveCount(2);
 
-    // 5. The owner sees the collaborator's comment (polled), then approves.
+    // 5. The owner sees the collaborator's comment (polled), then approves and
+    //    returns to the main conversation while implementation starts.
     await expect(owner.getByTestId("plan-comment")).toHaveCount(2, { timeout: 30_000 });
     await owner.getByTestId("approve-plan").click();
-    await expect(owner.getByTestId("plan-decision")).toContainText(/implementing/i);
+    await expect(owner).toHaveURL(new RegExp(`/agents/${threadId}$`));
 
     // 6. The agent implements, opens a PR, and links it back in the Slack thread,
     //    echoing the reviewers' feedback — which proves the comments were stored
