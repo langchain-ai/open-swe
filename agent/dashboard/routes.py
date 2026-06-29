@@ -86,6 +86,7 @@ from .profiles import (
 from .provider_pat_vault import (
     get_provider_pat_status,
     list_provider_pat_status,
+    resolve_provider_pat,
     revoke_provider_pat,
     upsert_provider_pat,
 )
@@ -396,11 +397,28 @@ def _clean_strings(values: list[str]) -> list[str]:
     return [value.strip() for value in values if isinstance(value, str) and value.strip()]
 
 
-def _linear_credential_available() -> bool:
-    return bool(os.environ.get("LINEAR_API_KEY") or getattr(linear_queue, "LINEAR_API_KEY", ""))
+def _global_linear_token() -> str:
+    return os.environ.get("LINEAR_API_KEY", "").strip()
 
 
-def _ticket_intake_payload(project: dict[str, Any]) -> dict[str, Any]:
+async def _linear_token_for_session(
+    session: dict[str, Any],
+    *,
+    project_id: str,
+    action: str,
+) -> str | None:
+    resolved = await resolve_provider_pat(
+        str(session["sub"]),
+        provider="linear",
+        project_id=project_id,
+        action=action,
+    )
+    if resolved is not None:
+        return resolved.token
+    return _global_linear_token() or None
+
+
+async def _ticket_intake_payload(project: dict[str, Any], session: dict[str, Any]) -> dict[str, Any]:
     tracker = project.get("tracker") if isinstance(project.get("tracker"), dict) else {}
     tracker_config = tracker.get("config") if isinstance(tracker.get("config"), dict) else {}
     queue_policy = (
@@ -409,12 +427,18 @@ def _ticket_intake_payload(project: dict[str, Any]) -> dict[str, Any]:
         else {}
     )
     labels = _clean_strings(queue_policy.get("labels") or tracker_config.get("labels") or [])
+    token = await _linear_token_for_session(
+        session,
+        project_id=str(project.get("project_id") or ""),
+        action="ticket_intake_status",
+    )
+    source = "LINEAR_API_KEY" if token and token == _global_linear_token() else "provider_pat"
     return {
         "provider": str(tracker.get("provider") or "linear"),
         "credential": {
             "provider": "linear",
-            "available": _linear_credential_available(),
-            "source": "LINEAR_API_KEY" if _linear_credential_available() else None,
+            "available": bool(token),
+            "source": source if token else None,
         },
         "tracker_config": {
             "team_ids": _clean_strings(tracker_config.get("team_ids") or []),
@@ -1628,7 +1652,7 @@ async def api_get_delivery_project_ticket_intake(
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
     project = await _require_delivery_project_member(project_id, session)
-    return _ticket_intake_payload(project)
+    return await _ticket_intake_payload(project, session)
 
 
 @router.put("/delivery-projects/{project_id}/ticket-intake")
@@ -1641,7 +1665,7 @@ async def api_put_delivery_project_ticket_intake(
     updated = await project_registry.upsert_delivery_project(
         _ticket_intake_update_payload(project, body)
     )
-    return _ticket_intake_payload(updated)
+    return await _ticket_intake_payload(updated, session)
 
 
 @router.post("/delivery-projects/{project_id}/ticket-intake/test-connection")
@@ -1650,16 +1674,23 @@ async def api_test_delivery_project_ticket_intake(
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
     await _require_delivery_project_member(project_id, session)
-    if not _linear_credential_available():
+    token = await _linear_token_for_session(
+        session,
+        project_id=project_id,
+        action="ticket_intake_test_connection",
+    )
+    if not token:
         return {
             "status": "missing_credentials",
             "provider": "linear",
             "teams": [],
             "projects": [],
-            "error": "LINEAR_API_KEY is not configured.",
+            "error": "Linear provider token is not configured.",
         }
     try:
-        return await linear_queue.test_linear_connection()
+        return await linear_queue.test_linear_connection(
+            client=linear_queue.LinearGraphQLCatalogClient(token=token)
+        )
     except Exception as exc:  # noqa: BLE001
         return {
             "status": "error",
@@ -1676,18 +1707,23 @@ async def api_preview_delivery_project_ticket_intake(
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
     project = await _require_delivery_project_member(project_id, session)
-    if not _linear_credential_available():
+    token = await _linear_token_for_session(
+        session,
+        project_id=project_id,
+        action="ticket_intake_preview",
+    )
+    if not token:
         return {
             "status": "missing_credentials",
             "provider": "linear",
             "counts": {"queued": 0, "not-ready": 0, "blocked": 0, "ignored": 0},
             "items": [],
-            "error": "LINEAR_API_KEY is not configured.",
+            "error": "Linear provider token is not configured.",
         }
     try:
         return await linear_queue.preview_linear_delivery_queue(
             linear_queue.linear_policy_from_project(project),
-            client=linear_queue.LinearGraphQLIssueClient(),
+            client=linear_queue.LinearGraphQLIssueClient(token=token),
         )
     except Exception as exc:  # noqa: BLE001
         return {

@@ -3,9 +3,11 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+from cryptography.fernet import Fernet
 
 from agent import delivery_queue as queue
-from agent import project_registry
+from agent import linear_queue, project_registry
+from agent.dashboard import provider_pat_vault
 from agent.linear_queue import (
     LinearQueueEligibilityPolicy,
     LinearQueueFieldMappings,
@@ -77,6 +79,7 @@ def fake_queue_client(monkeypatch: pytest.MonkeyPatch) -> _FakeQueueClient:
     client = _FakeQueueClient()
     monkeypatch.setattr(queue, "_client", lambda: client)
     monkeypatch.setattr(project_registry, "_client", lambda: client)
+    monkeypatch.setattr(provider_pat_vault, "_client", lambda: client)
     return client
 
 
@@ -340,3 +343,57 @@ async def test_configured_linear_project_policy_is_polled(
     }
     assert records[0]["id"] == "sports-cms:linear:lin-1"
     assert records[0]["status"] == "queued"
+
+
+async def test_configured_linear_poll_uses_project_member_provider_pat(
+    fake_queue_client: _FakeQueueClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("LINEAR_API_KEY", raising=False)
+    monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", Fernet.generate_key().decode())
+    await provider_pat_vault.upsert_provider_pat(
+        "octocat",
+        provider="linear",
+        token="lin_pat_project_member_1234",
+    )
+    await project_registry.upsert_delivery_project(
+        {
+            "project_id": "sports-cms",
+            "name": "Sports CMS",
+            "tracker": {
+                "provider": "linear",
+                "config": {"team_keys": ["ENG"], "linear_project_ids": ["project-linear-1"]},
+            },
+            "vcs": {"provider": "github", "config": {"owner": "example", "repo": "sports-cms"}},
+            "queue_eligibility_policy": {"labels": ["agent-ready"]},
+            "membership": {"users": ["octocat"]},
+        }
+    )
+    captured: dict[str, Any] = {}
+
+    async def fake_graphql_request(
+        _query: str,
+        _variables: dict[str, Any] | None = None,
+        *,
+        token: str | None = None,
+    ) -> dict[str, Any]:
+        captured["token"] = token
+        return {
+            "issues": {
+                "nodes": [_issue()],
+                "pageInfo": {"hasNextPage": False, "endCursor": None},
+            }
+        }
+
+    monkeypatch.setattr(linear_queue, "_graphql_request", fake_graphql_request)
+
+    result = await poll_configured_linear_delivery_queues()
+
+    records = await queue.list_delivery_queue_items()
+    audit = await provider_pat_vault.list_provider_pat_audit("octocat")
+    assert result["status"] == "polled"
+    assert result["items"] == 1
+    assert captured["token"] == "lin_pat_project_member_1234"
+    assert records[0]["id"] == "sports-cms:linear:lin-1"
+    assert audit[0]["provider"] == "linear"
+    assert audit[0]["action"] == "queue_poll"

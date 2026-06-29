@@ -453,7 +453,7 @@ def test_dashboard_ticket_intake_routes_persist_config_and_report_missing_creden
     )
     assert missing.status_code == 200
     assert missing.json()["status"] == "missing_credentials"
-    assert "LINEAR_API_KEY" in missing.json()["error"]
+    assert "Linear provider token" in missing.json()["error"]
 
     saved = dashboard_client.put(
         "/dashboard/api/delivery-projects/sports-cms/ticket-intake",

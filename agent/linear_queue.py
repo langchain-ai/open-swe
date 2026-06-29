@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol
 
 from . import delivery_queue, project_registry
+from .dashboard.provider_pat_vault import resolve_provider_pat
 from .utils.linear import _graphql_request
 
 ReadinessMissingAction = Literal["skip", "not-ready"]
@@ -54,7 +55,14 @@ class LinearCatalogClient(Protocol):
 
 
 class LinearGraphQLIssueClient:
-    def __init__(self, *, page_size: int = 100, max_pages: int = 10) -> None:
+    def __init__(
+        self,
+        *,
+        token: str | None = None,
+        page_size: int = 100,
+        max_pages: int = 10,
+    ) -> None:
+        self.token = token
         self.page_size = page_size
         self.max_pages = max_pages
 
@@ -92,7 +100,11 @@ class LinearGraphQLIssueClient:
         issues: list[Mapping[str, Any]] = []
         cursor: str | None = None
         for _ in range(self.max_pages):
-            result = await _graphql_request(query, {"first": self.page_size, "after": cursor})
+            result = await _graphql_request(
+                query,
+                {"first": self.page_size, "after": cursor},
+                token=self.token,
+            )
             if "error" in result:
                 raise RuntimeError(f"linear issue polling failed: {result['error']}")
             connection = _mapping(result.get("issues"))
@@ -110,6 +122,9 @@ class LinearGraphQLIssueClient:
 
 
 class LinearGraphQLCatalogClient:
+    def __init__(self, *, token: str | None = None) -> None:
+        self.token = token
+
     async def list_catalog(self) -> Mapping[str, Any]:
         query = """
         query DeliveryQueueCatalog {
@@ -121,7 +136,7 @@ class LinearGraphQLCatalogClient:
           }
         }
         """
-        result = await _graphql_request(query)
+        result = await _graphql_request(query, token=self.token)
         if "error" in result:
             raise RuntimeError(f"linear connection failed: {result['error']}")
         return {
@@ -475,12 +490,33 @@ async def poll_linear_delivery_queue(
     return stats
 
 
+def _project_member_logins(project: Mapping[str, Any]) -> list[str]:
+    membership = _mapping(project.get("membership"))
+    users = membership.get("users")
+    if not isinstance(users, Sequence) or isinstance(users, str):
+        return []
+    return [user.strip().lower() for user in users if isinstance(user, str) and user.strip()]
+
+
+async def _linear_issue_client_for_project(project: Mapping[str, Any]) -> LinearGraphQLIssueClient:
+    project_id = str(project.get("project_id") or "")
+    for login in _project_member_logins(project):
+        resolved = await resolve_provider_pat(
+            login,
+            provider="linear",
+            project_id=project_id,
+            action="queue_poll",
+        )
+        if resolved is not None:
+            return LinearGraphQLIssueClient(token=resolved.token)
+    return LinearGraphQLIssueClient()
+
+
 async def poll_configured_linear_delivery_queues(
     *,
     client: LinearIssueClient | None = None,
     projects: Iterable[Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    client = client or LinearGraphQLIssueClient()
     if projects is None:
         projects = await project_registry.list_delivery_projects({"active": True})
     stats: dict[str, Any] = {
@@ -497,9 +533,10 @@ async def poll_configured_linear_delivery_queues(
             continue
         stats["projects"] += 1
         try:
+            project_client = client or await _linear_issue_client_for_project(project)
             result = await poll_linear_delivery_queue(
                 linear_policy_from_project(project),
-                client=client,
+                client=project_client,
             )
         except Exception as exc:  # noqa: BLE001
             stats["errors"].append({"project_id": project.get("project_id"), "message": str(exc)})

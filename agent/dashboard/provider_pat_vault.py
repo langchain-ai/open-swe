@@ -8,9 +8,9 @@ from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import HTTPException
-from langgraph_sdk import get_client
 
 from ..encryption import decrypt_token, encrypt_token
+from ..utils.thread_ops import langgraph_client
 
 PROVIDER_PAT_NAMESPACE: list[str] = ["provider_pat_vault"]
 PROVIDER_PAT_AUDIT_NAMESPACE: list[str] = ["provider_pat_audit"]
@@ -26,7 +26,7 @@ class ResolvedProviderPAT:
 
 
 def _client():
-    return get_client()
+    return langgraph_client()
 
 
 def _now_iso() -> str:

@@ -14,27 +14,36 @@ from .http import DEFAULT_HTTP_TIMEOUT
 
 logger = logging.getLogger(__name__)
 
-LINEAR_API_KEY = os.environ.get("LINEAR_API_KEY", "")
 LINEAR_API_URL = "https://api.linear.app/graphql"
 
 
-def _headers() -> dict[str, str]:
+def _linear_api_key() -> str:
+    return os.environ.get("LINEAR_API_KEY", "")
+
+
+def _headers(token: str) -> dict[str, str]:
     return {
-        "Authorization": LINEAR_API_KEY,
+        "Authorization": token,
         "Content-Type": "application/json",
     }
 
 
-async def _graphql_request(query: str, variables: dict[str, Any] | None = None) -> dict[str, Any]:
+async def _graphql_request(
+    query: str,
+    variables: dict[str, Any] | None = None,
+    *,
+    token: str | None = None,
+) -> dict[str, Any]:
     """Execute a GraphQL request against the Linear API."""
-    if not LINEAR_API_KEY:
+    resolved_token = (token or _linear_api_key()).strip()
+    if not resolved_token:
         return {"error": "LINEAR_API_KEY is not set"}
 
     async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
         try:
             response = await http_client.post(
                 LINEAR_API_URL,
-                headers=_headers(),
+                headers=_headers(resolved_token),
                 json={"query": query, "variables": variables or {}},
             )
             response.raise_for_status()
