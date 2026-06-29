@@ -14,7 +14,7 @@ from typing import Any
 
 from langgraph.config import get_config
 
-from ..dashboard.plan_store import PLAN_STATUS_READY, save_plan_content
+from ..dashboard.plan_store import PLAN_FILE_DIRECTORY, PLAN_STATUS_READY, save_plan_content
 from ..utils.sandbox_state import get_sandbox_backend
 
 logger = logging.getLogger(__name__)
@@ -27,8 +27,8 @@ async def save_plan(plan_file_path: str) -> dict[str, Any]:
     """Publish a Markdown plan file from the sandbox for review.
 
     Use this in plan mode once your plan is ready. First create a Markdown file
-    outside any cloned repository (for example, ``/workspace/plan.md``) with the
-    normal file-editing tools, then pass that file path here. The file contents
+    under ``/workspace/plans/`` using a dated, descriptive filename, then pass
+    that file path here. The file contents
     are published to the plan-review page linked in the conversation, where the
     user (the owner) and any collaborators can read it, leave inline comments,
     and then approve it or request changes. Call it again to publish a revised
@@ -46,7 +46,10 @@ async def save_plan(plan_file_path: str) -> dict[str, Any]:
     if not path:
         return {"success": False, "error": "plan_file_path cannot be empty"}
     if not _is_markdown_path(path):
-        return {"success": False, "error": "plan_file_path must point to a Markdown file"}
+        return {
+            "success": False,
+            "error": f"plan_file_path must point to a Markdown file in {PLAN_FILE_DIRECTORY}",
+        }
 
     try:
         config = get_config()
@@ -61,15 +64,17 @@ async def save_plan(plan_file_path: str) -> dict[str, Any]:
         content = (await _read_plan_file(str(thread_id), path)).strip()
         if not content:
             return {"success": False, "error": "plan file cannot be empty"}
-        await _save(str(thread_id), content)
+        await _save(str(thread_id), content, path)
     except Exception as exc:  # noqa: BLE001
         logger.exception("save_plan failed for thread %s", thread_id)
         return {"success": False, "error": f"failed to save plan: {exc}"}
     return {"success": True, "path": path}
 
 
-async def _save(thread_id: str, content: str) -> None:
-    await save_plan_content(thread_id, markdown=content, status=PLAN_STATUS_READY)
+async def _save(thread_id: str, content: str, path: str) -> None:
+    await save_plan_content(
+        thread_id, markdown=content, status=PLAN_STATUS_READY, plan_file_path=path
+    )
 
 
 async def _read_plan_file(thread_id: str, path: str) -> str:
@@ -99,5 +104,9 @@ def _value(value: Any, key: str) -> Any:
 
 
 def _is_markdown_path(path: str) -> bool:
-    lowered = path.lower()
-    return lowered.endswith(_MARKDOWN_EXTENSIONS) and "\x00" not in lowered
+    if "\x00" in path or not path.startswith(f"{PLAN_FILE_DIRECTORY}/"):
+        return False
+    filename = path.removeprefix(f"{PLAN_FILE_DIRECTORY}/")
+    if not filename or "/" in filename:
+        return False
+    return filename.lower().endswith(_MARKDOWN_EXTENSIONS)

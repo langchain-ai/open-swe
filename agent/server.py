@@ -531,8 +531,8 @@ MODEL_CALL_RECURSION_LIMIT = 5_000
 
 # Mutating external tools hidden from the model while plan mode is active so it
 # can only research and propose a plan. File edit tools stay available so the
-# agent can draft and revise `/workspace/plan.md`; prompt guidance restricts them
-# to that plan file outside cloned repositories. `execute` stays available;
+# agent can draft and revise a plan under `/workspace/plans/`; prompt guidance
+# restricts them to that plan file outside cloned repositories. `execute` stays available;
 # plan-mode shell discipline (no mutating commands) is instructed via the system
 # prompt rather than enforced. `http_request` is excluded because it can
 # POST/PUT/PATCH/DELETE to external services — read-only web research goes

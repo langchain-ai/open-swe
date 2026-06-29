@@ -12,6 +12,7 @@ store operations (no CRDT/WebSocket).
 from __future__ import annotations
 
 import logging
+import re
 import uuid
 from datetime import UTC, datetime
 from typing import Any
@@ -23,8 +24,8 @@ logger = logging.getLogger(__name__)
 PLAN_CONTENT_NAMESPACE = ["plan", "content"]
 PLAN_COMMENTS_NAMESPACE = ["plan", "comments"]
 
-# The plan is mirrored into the sandbox outside cloned repositories.
-PLAN_FILE_PATH = "/workspace/plan.md"
+# Plans are mirrored into the sandbox outside cloned repositories.
+PLAN_FILE_DIRECTORY = "/workspace/plans"
 
 # Plan lifecycle, stored on both the content record and the thread metadata.
 PLAN_STATUS_PLANNING = "planning"
@@ -32,6 +33,12 @@ PLAN_STATUS_READY = "ready"
 PLAN_STATUS_REVISING = "revising"
 PLAN_STATUS_APPROVED = "approved"
 PLAN_STATUS_CANCELLED = "cancelled"
+
+
+def plan_file_path_for_thread(thread_id: str) -> str:
+    date = datetime.now(UTC).strftime("%Y-%m-%d")
+    slug = re.sub(r"[^a-zA-Z0-9-]+", "-", thread_id).strip("-").lower()[:48]
+    return f"{PLAN_FILE_DIRECTORY}/{date}-{slug or 'plan'}.md"
 
 
 def _client() -> Any:
@@ -45,12 +52,22 @@ def _item_value(item: Any) -> dict[str, Any] | None:
     return value if isinstance(value, dict) else None
 
 
+async def _stored_plan_file_path(client: Any, thread_id: str) -> str | None:
+    try:
+        value = _item_value(await client.store.get_item(PLAN_CONTENT_NAMESPACE, thread_id)) or {}
+    except Exception:
+        return None
+    path = value.get("plan_file_path")
+    return path if isinstance(path, str) and path else None
+
+
 async def save_plan_content(
     thread_id: str,
     *,
     markdown: str,
     status: str = PLAN_STATUS_READY,
     clear_comments: bool = True,
+    plan_file_path: str | None = None,
 ) -> None:
     """Publish the plan markdown + status for the dashboard to render.
 
@@ -59,10 +76,15 @@ async def save_plan_content(
     and be fed back to the agent on the next approve/reject. A manual owner edit
     passes ``clear_comments=False`` so reviewer feedback survives the edit."""
     client = _client()
+    if plan_file_path is None:
+        plan_file_path = await _stored_plan_file_path(client, thread_id)
+    record = {"markdown": markdown, "status": status}
+    if plan_file_path:
+        record["plan_file_path"] = plan_file_path
     await client.store.put_item(
         PLAN_CONTENT_NAMESPACE,
         thread_id,
-        {"markdown": markdown, "status": status},
+        record,
     )
     if clear_comments:
         try:
@@ -73,21 +95,24 @@ async def save_plan_content(
     await _merge_thread_metadata(thread_id, {"plan_status": status, "plan_mode": True})
 
 
-async def write_plan_to_sandbox(thread_id: str, content: str) -> str:
+async def write_plan_to_sandbox(
+    thread_id: str, content: str, *, plan_file_path: str | None = None
+) -> str:
     """Mirror the dashboard plan edit into the thread's sandbox.
 
     Best-effort: a missing sandbox must not block publishing the plan to the
     review page.
     """
+    path = plan_file_path or plan_file_path_for_thread(thread_id)
     try:
         from ..utils.sandbox_state import get_sandbox_backend
 
         backend = await get_sandbox_backend(thread_id)
-        await backend.awrite(PLAN_FILE_PATH, content)
-        return PLAN_FILE_PATH
+        await backend.awrite(path, content)
+        return path
     except Exception:
         logger.warning("Could not write plan file to sandbox for %s", thread_id, exc_info=True)
-        return PLAN_FILE_PATH
+        return path
 
 
 async def get_plan_content(

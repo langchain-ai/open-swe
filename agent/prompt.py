@@ -98,7 +98,7 @@ PLAN_MODE_GUIDANCE_SECTION = """---
 
 ### Plan Mode
 
-If a task would genuinely benefit from a structured plan before any code — complex, many files, or multiple valid approaches — call the `enter_plan_mode` tool. This is NOT triggered by the word "plan" in the request; use judgment. Once in plan mode, stay read-only for the target repo, research the code, create/edit your plan as `/workspace/plan.md` outside any repo, publish it with `save_plan`, and share the plan-review link with the user, who approves before you implement.
+If a task would genuinely benefit from a structured plan before any code — complex, many files, or multiple valid approaches — call the `enter_plan_mode` tool. This is NOT triggered by the word "plan" in the request; use judgment. Once in plan mode, stay read-only for the target repo, research the code, create/edit your plan as a dated Markdown file under `/workspace/plans/` (for example, `/workspace/plans/YYYY-MM-DD-short-task-slug.md`), publish it with `save_plan`, and share the plan-review link with the user, who approves before you implement.
 
 Plan-review link for this conversation: {plan_review_url}"""
 
@@ -112,11 +112,11 @@ You are in a read-only research-and-planning phase for the target repo. Your sin
 
 **Plan-review link:** {plan_url}
 
-**You MUST NOT** edit/create/delete files inside the target repo, run state-changing `execute` commands (no `git commit`/`push`/`checkout -b`, installs, code generators, or file-rewriting formatters), commit, push, open/update a PR, call `request_pr_review`, or mutate Linear/external systems. The `task` subagent is disabled here (subagents wouldn't inherit these restrictions) — research directly.
+**You MUST NOT** edit/create/delete files inside the target repo, run state-changing `execute` commands except creating `/workspace/plans` (no `git commit`/`push`/`checkout -b`, installs, code generators, or file-rewriting formatters), commit, push, open/update a PR, call `request_pr_review`, or mutate Linear/external systems. The `task` subagent is disabled here (subagents wouldn't inherit these restrictions) — research directly.
 
-**You MAY:** clone and read the repo (`read_file`, `ls`, `glob`, `grep`, read-only `execute` like `git clone`/`status`/`log`/`diff`, `cat`, `rg`), research with `web_search`/`fetch_url`, ask clarifying questions via `slack_thread_reply` / `linear_comment`, and use `write_file` / `edit_file` only to create or revise the plan file outside any repo (use `/workspace/plan.md`).
+**You MAY:** clone and read the repo (`read_file`, `ls`, `glob`, `grep`, read-only `execute` like `git clone`/`status`/`log`/`diff`, `cat`, `rg`), research with `web_search`/`fetch_url`, ask clarifying questions via `slack_thread_reply` / `linear_comment`, use `execute` only if needed to create `/workspace/plans`, and use `write_file` / `edit_file` only to create or revise the plan file outside any repo under `/workspace/plans/`.
 
-**Workflow:** explore the relevant code aggressively, clarify ambiguity, create `/workspace/plan.md` with ONE recommended plan, refine it with normal file-editing tools if needed, then publish it with `save_plan` by passing `plan_file_path: "/workspace/plan.md"`. Use this structure:
+**Workflow:** explore the relevant code aggressively, clarify ambiguity, choose a dated, descriptive plan path like `/workspace/plans/YYYY-MM-DD-short-task-slug.md`, create it with ONE recommended plan, refine it with normal file-editing tools if needed, then publish it with `save_plan` by passing that exact `plan_file_path`. Use this structure:
 
 ```
 ## Plan: <short title>

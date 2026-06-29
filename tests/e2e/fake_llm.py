@@ -135,6 +135,8 @@ def _step_reply(messages: list[BaseMessage]) -> AIMessage:
 
 
 # --- plan-mode flow --------------------------------------------------------
+PLAN_FILE_PATH = "/workspace/plans/2026-06-29-greet-helper.md"
+
 PLAN_MARKDOWN = """## Plan: Add greet() helper
 
 ### Overview
@@ -184,13 +186,26 @@ def _step_plan_research(_messages: list[BaseMessage]) -> AIMessage:
     )
 
 
+def _step_prepare_plan_dir(_messages: list[BaseMessage]) -> AIMessage:
+    return AIMessage(
+        content="Preparing the plan directory.",
+        tool_calls=[
+            {
+                "name": "execute",
+                "args": {"command": "mkdir -p /workspace/plans"},
+                "id": "call-plan-dir",
+            }
+        ],
+    )
+
+
 def _step_write_plan(_messages: list[BaseMessage]) -> AIMessage:
     return AIMessage(
         content="Writing the plan file for review.",
         tool_calls=[
             {
                 "name": "write_file",
-                "args": {"file_path": "/workspace/plan.md", "content": PLAN_MARKDOWN},
+                "args": {"file_path": PLAN_FILE_PATH, "content": PLAN_MARKDOWN},
                 "id": "call-write-plan",
             }
         ],
@@ -203,7 +218,7 @@ def _step_save_plan(_messages: list[BaseMessage]) -> AIMessage:
         tool_calls=[
             {
                 "name": "save_plan",
-                "args": {"plan_file_path": "/workspace/plan.md"},
+                "args": {"plan_file_path": PLAN_FILE_PATH},
                 "id": "call-save-plan",
             }
         ],
@@ -236,6 +251,7 @@ def build_plan_script() -> list[Any]:
         _step_enter_plan,
         _step_plan_link,
         _step_plan_research,
+        _step_prepare_plan_dir,
         _step_write_plan,
         _step_save_plan,
         _step_plan_complete,
