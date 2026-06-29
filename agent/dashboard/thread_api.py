@@ -28,7 +28,12 @@ from ..utils.thread_ops import (
     queue_message_for_thread,
 )
 from .agent_overrides import normalize_profile_overrides
-from .options import SUPPORTED_MODEL_IDS, model_supports_effort, model_supports_images
+from .options import (
+    SUPPORTED_MODEL_IDS,
+    default_vision_model_pair,
+    model_supports_effort,
+    model_supports_images,
+)
 from .pr_diff import build_pr_diff_files
 from .profiles import get_profile, get_valid_access_token
 from .team_settings import get_team_default_model
@@ -149,6 +154,19 @@ async def _resolve_agent_model_choice(
     if chosen_model and chosen_effort:
         resolved_model, resolved_effort = chosen_model, chosen_effort
     return resolved_model, resolved_effort
+
+
+def _with_vision_fallback(model_id: str, effort: str, *, has_images: bool) -> tuple[str, str]:
+    if not has_images or model_supports_images(model_id):
+        return model_id, effort
+    fallback_model_id, fallback_effort = default_vision_model_pair()
+    logger.info(
+        "Using vision fallback model %s for dashboard image input; configured model %s "
+        "does not support images",
+        fallback_model_id,
+        model_id,
+    )
+    return fallback_model_id, fallback_effort
 
 
 def _now_ms() -> int:
@@ -928,13 +946,18 @@ async def _create_dashboard_thread_record(
     now_ms = _now_ms()
     prompt = prompt.strip()
     resolved_model, resolved_effort = await _resolve_agent_model_choice(profile, model_id, effort)
-    # Validate any attached images against the resolved model (raises 422 for
-    # text-only models). The run itself is started client-side via the stream
-    # commands endpoint, so we only need the validation side effect here.
+    resolved_model, resolved_effort = _with_vision_fallback(
+        resolved_model,
+        resolved_effort,
+        has_images=bool(images),
+    )
     _user_message_content(prompt, images or [], model_id=resolved_model)
     chosen_model, chosen_effort = _normalize_model_choice(model_id, effort)
     metadata_model = chosen_model or profile.get("default_model") or "Default"
     metadata_effort = chosen_effort or profile.get("reasoning_effort")
+    if images and not model_supports_images(str(metadata_model)):
+        metadata_model = resolved_model
+        metadata_effort = resolved_effort
     has_repo = bool(repo_config.get("owner") and repo_config.get("name"))
     metadata: dict[str, Any] = {
         "source": _DASHBOARD_SOURCE,
@@ -1148,6 +1171,7 @@ async def _enrich_run_start_command(
     )
     plan_mode_requested = client_configurable.get("plan_mode") is True
     content = _command_message_content(params)
+    command_images = _dashboard_images_from_content(content)
     overrides: dict[str, Any] = {}
 
     if creating:
@@ -1163,17 +1187,33 @@ async def _enrich_run_start_command(
             repo_config=_parse_repo(client_configurable.get("repo")) or {},
             repo_explicitly_none=client_configurable.get("repo_explicitly_none") is True,
             prompt=_command_prompt_text(content),
-            images=_dashboard_images_from_content(content),
+            images=command_images,
             model_id=client_configurable.get("agent_model_id"),
             effort=client_configurable.get("agent_effort"),
             plan_mode=plan_mode_requested,
         )
         metadata = thread.get("metadata") if isinstance(thread.get("metadata"), dict) else metadata
-        if chosen_model and chosen_effort:
+        if command_images:
+            resolved_model = metadata.get("resolved_model")
+            resolved_effort = metadata.get("resolved_effort")
+            if isinstance(resolved_model, str) and isinstance(resolved_effort, str):
+                overrides["agent_model_id"] = resolved_model
+                overrides["agent_effort"] = resolved_effort
+        elif chosen_model and chosen_effort:
             overrides["agent_model_id"] = chosen_model
             overrides["agent_effort"] = chosen_effort
     else:
-        _validate_command_images(content, model_id=chosen_model or _metadata_model_id(metadata))
+        run_model = chosen_model or _metadata_model_id(metadata)
+        run_effort = chosen_effort
+        if not run_effort:
+            for key in ("resolved_effort", "effort"):
+                value = metadata.get(key)
+                if isinstance(value, str):
+                    run_effort = value
+                    break
+        if command_images and run_model and run_effort:
+            run_model, run_effort = _with_vision_fallback(run_model, run_effort, has_images=True)
+        _validate_command_images(content, model_id=run_model)
         prefix = _attribution_prefix(metadata, login, email)
         if prefix:
             content = _prefix_message_content(content, prefix)
@@ -1181,7 +1221,14 @@ async def _enrich_run_start_command(
             content = _prepend_message_content_block(content, DASHBOARD_HANDOFF_INSTRUCTION)
         _set_command_last_message_content(params, content)
         metadata_update: dict[str, Any] = {"plan_mode": plan_mode_requested}
-        if chosen_model and chosen_effort:
+        if command_images and run_model and run_effort:
+            overrides["agent_model_id"] = run_model
+            overrides["agent_effort"] = run_effort
+            metadata_update["model"] = run_model
+            metadata_update["effort"] = run_effort
+            metadata_update["resolved_model"] = run_model
+            metadata_update["resolved_effort"] = run_effort
+        elif chosen_model and chosen_effort:
             overrides["agent_model_id"] = chosen_model
             overrides["agent_effort"] = chosen_effort
             metadata_update["model"] = chosen_model

@@ -207,7 +207,7 @@ async def test_enrich_run_start_command_creates_and_stamps_new_thread(monkeypatc
     assert enriched["params"]["assistant_id"] == "agent"
 
 
-async def test_enrich_run_start_command_rejects_images_for_resolved_text_only_model(
+async def test_enrich_run_start_command_uses_vision_fallback_for_text_only_model(
     monkeypatch,
 ) -> None:
     created: dict[str, object] = {}
@@ -240,17 +240,23 @@ async def test_enrich_run_start_command_rejects_images_for_resolved_text_only_mo
         },
     }
 
-    with pytest.raises(HTTPException) as exc_info:
-        await thread_api._enrich_run_start_command(
-            "new-tid",
-            "octocat",
-            command,
-            metadata={},
-            creating=True,
-        )
+    enriched = await thread_api._enrich_run_start_command(
+        "new-tid",
+        "octocat",
+        command,
+        metadata={},
+        creating=True,
+    )
 
-    assert exc_info.value.status_code == 422
-    assert "does not support image input" in exc_info.value.detail
+    stamped = created["metadata"]
+    assert isinstance(stamped, dict)
+    assert stamped["model"] == _VISION_MODEL
+    assert stamped["effort"] == "medium"
+    assert stamped["resolved_model"] == _VISION_MODEL
+    assert stamped["resolved_effort"] == "medium"
+    configurable = enriched["params"]["config"]["configurable"]
+    assert configurable["agent_model_id"] == _VISION_MODEL
+    assert configurable["agent_effort"] == "medium"
 
 
 def _thread_with_metadata(metadata: dict) -> dict:
