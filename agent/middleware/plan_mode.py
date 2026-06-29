@@ -1,11 +1,12 @@
 """Plan-mode tool gating.
 
-Hides the mutating tools whenever plan mode is active — either when the run
-starts in plan mode (the per-thread ``plan_mode`` carried in configurable, e.g.
-a reject re-dispatch) OR after the model calls ``enter_plan_mode`` mid-run, which
-sets ``plan_mode`` in the run state. Installed unconditionally so self-activation
-actually restricts the *next* model turn (the tool list is recomputed on every
-model call), rather than only affecting a future run.
+Hides tools that mutate external systems whenever plan mode is active — either
+when the run starts in plan mode (the per-thread ``plan_mode`` carried in
+configurable, e.g. a reject re-dispatch) OR after the model calls
+``enter_plan_mode`` mid-run, which sets ``plan_mode`` in the run state. Installed
+unconditionally so self-activation actually restricts the *next* model turn (the
+tool list is recomputed on every model call), rather than only affecting a future
+run.
 """
 
 from __future__ import annotations
@@ -37,7 +38,7 @@ def _tool_name(tool: BaseTool | dict[str, Any] | Any) -> str | None:
 
 
 class PlanModeMiddleware(AgentMiddleware):
-    """Strip mutating tools from each model request while plan mode is active."""
+    """Strip disallowed tools from each model request while plan mode is active."""
 
     state_schema = PlanModeState
 

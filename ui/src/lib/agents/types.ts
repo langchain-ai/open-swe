@@ -175,6 +175,13 @@ export interface AgentSchedule {
   updatedAt?: string | null
 }
 
+export interface QueuedThreadMessage {
+  id: string
+  content: string
+  images?: Array<ImageChunk>
+  createdAt: number
+}
+
 export interface AgentThread {
   id: string
   title: string
@@ -196,6 +203,7 @@ export interface AgentThread {
   updatedAt: number
   traceUrl?: string | null
   messages: Array<Message>
+  queuedMessages?: Array<QueuedThreadMessage>
   pr?: {
     number: number
     title: string

@@ -10,6 +10,7 @@ the preceding tool result, exactly as a real model would.
 from __future__ import annotations
 
 import re
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -162,6 +163,8 @@ def _reply_step(messages: list[BaseMessage]) -> AIMessage:
     )
 
 
+PLAN_FILE_PATH = "/workspace/plans/2026-06-29-greet-helper.md"
+
 PLAN_MARKDOWN = """## Plan: Add greet() helper
 
 ### Overview
@@ -190,6 +193,41 @@ def _plan_link_step(messages: list[BaseMessage]) -> AIMessage:
                     "message": f"I'm putting together a plan. Follow along and review it here: <{url}|plan review>"
                 },
                 "id": "call-plan-link",
+            }
+        ],
+    )
+
+
+def _plan_research_step(_messages: list[BaseMessage]) -> AIMessage:
+    return AIMessage(
+        content="Reading the repo to ground the plan.",
+        tool_calls=[
+            {"name": "execute", "args": {"command": "echo planning && ls"}, "id": "call-plan-read"}
+        ],
+    )
+
+
+def _write_plan_step(_messages: list[BaseMessage]) -> AIMessage:
+    return AIMessage(
+        content="Writing the plan file for review.",
+        tool_calls=[
+            {
+                "name": "write_file",
+                "args": {"file_path": PLAN_FILE_PATH, "content": PLAN_MARKDOWN},
+                "id": "call-write-plan",
+            }
+        ],
+    )
+
+
+def _save_plan_step(_messages: list[BaseMessage]) -> AIMessage:
+    return AIMessage(
+        content="Saving the plan for review.",
+        tool_calls=[
+            {
+                "name": "save_plan",
+                "args": {"plan_file_path": PLAN_FILE_PATH},
+                "id": "call-save-plan",
             }
         ],
     )
@@ -225,6 +263,11 @@ def _latest_attribution(messages: list[BaseMessage]) -> str | None:
 
 
 def _followup_step(messages: list[BaseMessage]) -> AIMessage:
+    if any(
+        isinstance(msg, HumanMessage) and "Please queue this follow-up" in _text(msg.content)
+        for msg in messages
+    ):
+        time.sleep(2)
     attribution = _latest_attribution(messages)
     suffix = f" I saw this follow-up was from {attribution}." if attribution else ""
     return AIMessage(content=f"{FOLLOW_UP_REPLY}{suffix}")
@@ -279,18 +322,9 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
             "call-enter-plan",
         ),
         _dynamic_step(_plan_link_step),
-        _tool_step(
-            "Reading the repo to ground the plan.",
-            "execute",
-            {"command": "echo planning && ls"},
-            "call-plan-read",
-        ),
-        _tool_step(
-            "Saving the plan for review.",
-            "save_plan",
-            {"plan_markdown": PLAN_MARKDOWN},
-            "call-save-plan",
-        ),
+        _dynamic_step(_plan_research_step),
+        _dynamic_step(_write_plan_step),
+        _dynamic_step(_save_plan_step),
         _dynamic_step(_plan_complete_step),
         StepSpec(content="I'll wait for your review and approval before implementing."),
     ),

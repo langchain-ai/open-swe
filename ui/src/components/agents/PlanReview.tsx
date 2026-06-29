@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react"
+import { useNavigate } from "@tanstack/react-router"
 
 import type { PlanComment, PlanData } from "@/lib/plan"
 import {
@@ -48,6 +49,7 @@ async function copyToClipboard(text: string): Promise<boolean> {
 }
 
 export function PlanReview({ plan }: { plan: PlanData }) {
+  const navigate = useNavigate()
   const resolvedTheme = useResolvedTheme()
   const [comments, setComments] = useState<Array<PlanComment>>([])
   const [draft, setDraft] = useState("")
@@ -153,20 +155,23 @@ export function PlanReview({ plan }: { plan: PlanData }) {
       setBusy(kind)
       setError(null)
       try {
-        if (kind === "approve") await approvePlan(plan.threadId)
-        else await rejectPlan(plan.threadId)
-        setDecision(
-          kind === "approve"
-            ? "Plan approved — the agent is implementing it."
-            : "Changes requested — the agent is revising the plan."
-        )
+        if (kind === "approve") {
+          await approvePlan(plan.threadId)
+          await navigate({
+            to: "/agents/$threadId",
+            params: { threadId: plan.threadId },
+          })
+          return
+        }
+        await rejectPlan(plan.threadId)
+        setDecision("Changes requested — the agent is revising the plan.")
       } catch (e) {
         setError((e as Error).message)
       } finally {
         setBusy(null)
       }
     },
-    [plan.threadId]
+    [navigate, plan.threadId]
   )
 
   const copyPlan = useCallback(async () => {
@@ -184,8 +189,8 @@ export function PlanReview({ plan }: { plan: PlanData }) {
       data-testid="plan-review"
       className="flex min-h-0 flex-1 flex-col bg-[var(--ui-bg)] text-[var(--ui-text)]"
     >
-      <div className="flex items-center justify-between gap-4 border-b border-[var(--ui-border)] px-6 py-3">
-        <div>
+      <div className="flex flex-col gap-3 border-b border-[var(--ui-border)] px-4 py-3 md:flex-row md:items-center md:justify-between md:gap-4 md:px-6">
+        <div className="min-w-0">
           <h1 className="text-base font-semibold text-[var(--ui-text)]">
             Implementation plan
           </h1>
@@ -195,11 +200,11 @@ export function PlanReview({ plan }: { plan: PlanData }) {
             <span data-testid="plan-status">{plan.status}</span>
           </p>
         </div>
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="flex min-w-0 flex-wrap items-center gap-2 md:shrink-0 md:justify-end">
           {decision && (
             <span
               data-testid="plan-decision"
-              className="text-xs text-[var(--ui-text-dim)]"
+              className="w-full text-xs text-[var(--ui-text-dim)] md:w-auto"
             >
               {decision}
             </span>
@@ -273,9 +278,9 @@ export function PlanReview({ plan }: { plan: PlanData }) {
         </div>
       </div>
 
-      <div className="flex min-h-0 flex-1 overflow-hidden">
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto md:flex-row md:overflow-hidden">
         <div
-          className="min-h-0 flex-1 overflow-auto px-6 py-4"
+          className="min-w-0 px-4 py-4 md:min-h-0 md:flex-1 md:overflow-auto md:px-6"
           data-testid="plan-document"
           data-color-scheme={resolvedTheme}
         >
@@ -301,14 +306,14 @@ export function PlanReview({ plan }: { plan: PlanData }) {
           )}
         </div>
 
-        <aside className="flex w-80 shrink-0 flex-col border-l border-[var(--ui-border)]">
+        <aside className="flex shrink-0 flex-col border-t border-[var(--ui-border)] md:w-80 md:border-t-0 md:border-l">
           <div className="border-b border-[var(--ui-border)] px-4 py-3">
             <h2 className="text-sm font-semibold text-[var(--ui-text)]">
               Comments
             </h2>
           </div>
           <div
-            className="min-h-0 flex-1 space-y-3 overflow-auto px-4 py-3"
+            className="max-h-80 space-y-3 overflow-auto px-4 py-3 md:max-h-none md:min-h-0 md:flex-1"
             data-testid="plan-comments"
           >
             {comments.length === 0 ? (

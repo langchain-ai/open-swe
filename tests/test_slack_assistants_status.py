@@ -150,6 +150,30 @@ async def test_post_slack_thread_reply_does_not_call_set_status(
 
 
 @pytest.mark.asyncio
+async def test_update_slack_message_calls_chat_update(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
+
+    client_cm = _async_client_cm(_ok_response())
+    with patch.object(slack_utils.httpx, "AsyncClient", return_value=client_cm):
+        result = await slack_utils.update_slack_message(
+            "C1", "1.1", "moved", unfurl_links=False, unfurl_media=False
+        )
+
+    assert result == (True, None)
+    assert client_cm.post.await_count == 1
+    assert client_cm.post.call_args.args[0].endswith("/chat.update")
+    assert client_cm.post.call_args.kwargs["json"] == {
+        "channel": "C1",
+        "ts": "1.1",
+        "text": "moved",
+        "unfurl_links": False,
+        "unfurl_media": False,
+    }
+
+
+@pytest.mark.asyncio
 async def test_post_slack_thread_reply_with_ts_returns_missing_token_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

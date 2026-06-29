@@ -9,8 +9,45 @@ import { useLiveMarkdownMessageId } from "@/lib/agents/provider/useLiveMarkdownM
 
 const BOTTOM_LOCK_THRESHOLD_PX = 24;
 
-export const Messages = memo(function Messages({
+function QueuedMessages({
+  queuedMessages,
+}: {
+  queuedMessages: NonNullable<MessagesProps["queuedMessages"]>;
+}) {
+  if (queuedMessages.length === 0) return null;
+
+  return (
+    <div className="mb-3 space-y-2" data-testid="queued-messages">
+      {queuedMessages.map((message, index) => {
+        const imageCount = message.images?.length ?? 0;
+        return (
+          <div
+            key={message.id}
+            className="ml-auto max-w-[85%] rounded-2xl border border-dashed border-[var(--ui-border)] bg-[var(--ui-panel)] px-3 py-2 text-[13px] text-[color:var(--ui-text)] shadow-sm"
+            data-testid="queued-message"
+          >
+            <div className="mb-1 flex items-center gap-2 text-[11px] font-medium uppercase tracking-wide text-[color:var(--ui-text-dim)]">
+              <span>
+                {queuedMessages.length > 1 ? `Queued next #${index + 1}` : "Queued next"}
+              </span>
+              <span className="h-1.5 w-1.5 rounded-full bg-[var(--ui-accent)]" />
+            </div>
+            {message.content && <div className="whitespace-pre-wrap break-words">{message.content}</div>}
+            {imageCount > 0 && (
+              <div className="mt-1 text-xs text-[color:var(--ui-text-muted)]">
+                {imageCount} image{imageCount === 1 ? "" : "s"} attached
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+export const Messages = memo(function MessagesComponent({
   messages,
+  queuedMessages = [],
   isStreaming,
   streamIsLoading,
   isThinking,
@@ -212,6 +249,7 @@ export const Messages = memo(function Messages({
               />
             );
           })}
+          <QueuedMessages queuedMessages={queuedMessages} />
           <ThinkingSpinner
             isActive={isThinking ?? streamIsLoading ?? isStreaming}
             settingUpSandbox={settingUpSandbox}
