@@ -127,24 +127,26 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
     if not mapped_login and user_email:
         mapped_login = await webapp.login_for_email(user_email)
 
+    image_model_override: tuple[str, str] | None = None
     if image_urls:
         resolved_model_id = await webapp.resolve_agent_model_id(mapped_login)
-        if webapp.model_supports_images(resolved_model_id):
-            webapp.logger.info("Preparing %d image(s) for Slack mention", len(image_urls))
-            async with httpx.AsyncClient(timeout=webapp.DEFAULT_HTTP_TIMEOUT) as http_client:
-                for image_url in image_urls:
-                    image_block = await webapp.fetch_image_block(image_url, http_client)
-                    if image_block:
-                        content_blocks.append(image_block)
-        else:
-            webapp.logger.warning(
-                "Skipping %d image(s) for Slack mention: model %s does not support images",
+        if not webapp.model_supports_images(resolved_model_id):
+            fallback_model_id, fallback_effort = webapp.default_vision_model_pair()
+            webapp.logger.info(
+                "Using vision fallback model %s for %d Slack image(s); configured model %s "
+                "does not support images",
+                fallback_model_id,
                 len(image_urls),
                 resolved_model_id,
             )
-            prompt += webapp.vision_not_supported_warning(resolved_model_id, len(image_urls))
-            content_blocks[0] = create_text_block(prompt)
-            image_urls = []
+            resolved_model_id = fallback_model_id
+            image_model_override = (fallback_model_id, fallback_effort)
+        webapp.logger.info("Preparing %d image(s) for Slack mention", len(image_urls))
+        async with httpx.AsyncClient(timeout=webapp.DEFAULT_HTTP_TIMEOUT) as http_client:
+            for image_url in image_urls:
+                image_block = await webapp.fetch_image_block(image_url, http_client)
+                if image_block:
+                    content_blocks.append(image_block)
 
     # Open SWE opens PRs as the triggering user, so a run only proceeds when we
     # have a valid user GitHub token. Users who have never signed in with
@@ -207,6 +209,9 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
     }
     if mapped_login:
         configurable["github_login"] = mapped_login
+    if image_model_override:
+        configurable["agent_model_id"] = image_model_override[0]
+        configurable["agent_effort"] = image_model_override[1]
 
     thread_plan_mode = await webapp._get_thread_plan_mode(thread_id)
     if thread_plan_mode is not None:

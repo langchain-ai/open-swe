@@ -125,3 +125,18 @@ def default_model_pair() -> tuple[str, str]:
         return DEFAULT_MODEL_ID, DEFAULT_MODEL_EFFORT
     first = SUPPORTED_MODELS[0]
     return first["id"], first["default_effort"]
+
+
+def default_vision_model_pair() -> tuple[str, str]:
+    """Default OpenAI/Anthropic model pair to use when image input is required."""
+    if (
+        DEFAULT_MODEL_ID in SUPPORTED_MODEL_IDS
+        and model_supports_images(DEFAULT_MODEL_ID)
+        and model_supports_effort(DEFAULT_MODEL_ID, DEFAULT_MODEL_EFFORT)
+        and DEFAULT_MODEL_ID.startswith(("openai:", "anthropic:"))
+    ):
+        return DEFAULT_MODEL_ID, DEFAULT_MODEL_EFFORT
+    for model in SUPPORTED_MODELS:
+        if model["id"].startswith(("openai:", "anthropic:")) and model["supports_images"]:
+            return model["id"], model["default_effort"]
+    return default_model_pair()
