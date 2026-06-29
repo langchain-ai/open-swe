@@ -263,6 +263,11 @@ export interface DeliveryRunRollup {
   reviewedSha?: string | null
   mergeStatus?: string | null
   mergeResult?: Record<string, unknown> | null
+  smokeProof?: {
+    status?: string | null
+    reason?: string | null
+    acceptance?: Record<string, boolean>
+  } | null
 }
 
 export interface DeliveryProjectReadiness {

@@ -382,16 +382,38 @@ async def run_sports_cms_delivery_smoke(
     )
     blocker = _first_failed_acceptance(acceptance)
     if blocker:
+        reason = str(merged.get("blocker_reason") or merged.get("status_reason") or blocker)
+        proof = {**proof, "final_status": merged.get("status")}
+        await transition_delivery_queue_status(
+            item_id,
+            "blocked",
+            reason=reason,
+            extra={
+                "smoke_proof": {
+                    "status": "blocked",
+                    "reason": reason,
+                    "acceptance": acceptance,
+                    "proof": proof,
+                }
+            },
+        )
         return {
             "status": "blocked",
-            "reason": str(merged.get("blocker_reason") or merged.get("status_reason") or blocker),
+            "reason": reason,
             "item_id": item_id,
             "acceptance": acceptance,
-            "proof": {**proof, "final_status": merged.get("status")},
+            "proof": proof,
         }
+    proof = {**proof, "final_status": merged.get("status")}
+    await transition_delivery_queue_status(
+        item_id,
+        "done",
+        reason=str(merged.get("status_reason") or "smoke_passed"),
+        extra={"smoke_proof": {"status": "passed", "acceptance": acceptance, "proof": proof}},
+    )
     return {
         "status": "passed",
         "item_id": item_id,
         "acceptance": acceptance,
-        "proof": {**proof, "final_status": merged.get("status")},
+        "proof": proof,
     }

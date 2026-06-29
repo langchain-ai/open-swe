@@ -143,6 +143,23 @@ def _merge_result(
     return provider or None
 
 
+def _smoke_proof(
+    store_record: Mapping[str, Any], delivery: Mapping[str, Any]
+) -> Mapping[str, Any] | None:
+    proof = _mapping(store_record.get("smoke_proof")) or _mapping(delivery.get("smoke_proof"))
+    if not proof:
+        return None
+    acceptance = _mapping(proof.get("acceptance"))
+    result = {
+        "status": proof.get("status"),
+        "acceptance": dict(acceptance),
+    }
+    reason = proof.get("reason")
+    if reason:
+        result["reason"] = reason
+    return result
+
+
 def _pr_number_from_url(value: Any) -> int | None:
     if not isinstance(value, str):
         return None
@@ -297,4 +314,5 @@ def build_delivery_run_rollup(
             (metadata, ("merge_status",)),
         ),
         "mergeResult": _merge_result(store, delivery),
+        "smokeProof": _smoke_proof(store, delivery),
     }

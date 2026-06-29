@@ -41,6 +41,7 @@ def test_delivery_rollup_reads_store_value_records() -> None:
         "reviewedSha": None,
         "mergeStatus": None,
         "mergeResult": None,
+        "smokeProof": None,
     }
 
 
@@ -131,6 +132,7 @@ def test_thread_summary_includes_delivery_rollup_from_metadata() -> None:
         "reviewedSha": "abc123",
         "mergeStatus": "blocked",
         "mergeResult": None,
+        "smokeProof": None,
     }
 
 
@@ -165,6 +167,18 @@ def test_thread_summary_mixes_persisted_queue_record_into_delivery_rollup() -> N
             "blocker_reason": "qa_evidence_missing_video_or_trace",
             "merge_status": "blocked",
             "merge_audit": {"status": "blocked", "reason": "head_sha_mismatch"},
+            "smoke_proof": {
+                "status": "passed",
+                "acceptance": {
+                    "linear_issue_queued": True,
+                    "worker_branch_created": True,
+                    "draft_pull_request_created": True,
+                    "drupal_sandbox_preview": True,
+                    "qa_evidence_complete": True,
+                    "independent_review_and_qa": True,
+                    "agent_reviewed_auto_merge": True,
+                },
+            },
         },
     )
 
@@ -183,4 +197,16 @@ def test_thread_summary_mixes_persisted_queue_record_into_delivery_rollup() -> N
     assert summary["delivery"]["mergeResult"] == {
         "status": "blocked",
         "reason": "head_sha_mismatch",
+    }
+    assert summary["delivery"]["smokeProof"] == {
+        "status": "passed",
+        "acceptance": {
+            "linear_issue_queued": True,
+            "worker_branch_created": True,
+            "draft_pull_request_created": True,
+            "drupal_sandbox_preview": True,
+            "qa_evidence_complete": True,
+            "independent_review_and_qa": True,
+            "agent_reviewed_auto_merge": True,
+        },
     }

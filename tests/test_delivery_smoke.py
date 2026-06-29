@@ -292,6 +292,8 @@ async def test_sports_cms_smoke_drives_linear_item_to_auto_merge(
         "agent_reviewed_auto_merge": True,
     }
     assert final_item["status"] == "done"
+    assert final_item["smoke_proof"]["status"] == "passed"
+    assert final_item["smoke_proof"]["acceptance"] == proof["acceptance"]
     assert final_item["merge_status"] == "merged"
     assert final_item["merge_commit_sha"] == "merge-sha"
     assert final_item["branch"] == "delivery/sports-cms/lin-sports-1"

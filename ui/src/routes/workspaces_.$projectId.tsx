@@ -148,6 +148,7 @@ function EvidenceLink({ value }: { value: unknown }) {
 
 function DeliveryRunDetails({ delivery }: { delivery?: DeliveryRunRollup | null }) {
   if (!delivery) return null
+  const smokeAcceptance = Object.entries(delivery.smokeProof?.acceptance ?? {})
   const threadItems = [
     ["Worker", delivery.workerThreadId],
     ["Review", delivery.reviewerThreadId],
@@ -181,6 +182,15 @@ function DeliveryRunDetails({ delivery }: { delivery?: DeliveryRunRollup | null 
             {label}
           </Badge>
         ))}
+        {delivery.smokeProof ? (
+          <Badge
+            variant={
+              delivery.smokeProof.status === "passed" ? "default" : "destructive"
+            }
+          >
+            Smoke {delivery.smokeProof.status ?? "recorded"}
+          </Badge>
+        ) : null}
       </div>
       <div className="grid gap-2 text-xs sm:grid-cols-2">
         {delivery.pr?.url ? (
@@ -228,6 +238,15 @@ function DeliveryRunDetails({ delivery }: { delivery?: DeliveryRunRollup | null 
               {delivery.blockerReason}
             </span>
           ) : null}
+        </div>
+      ) : null}
+      {smokeAcceptance.length ? (
+        <div className="flex flex-wrap gap-1.5 text-[10px] text-muted-foreground">
+          {smokeAcceptance.map(([key, passed]) => (
+            <Badge key={key} variant={passed ? "secondary" : "destructive"}>
+              {key.replaceAll("_", " ")}
+            </Badge>
+          ))}
         </div>
       ) : null}
     </div>
