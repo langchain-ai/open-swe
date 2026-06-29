@@ -31,6 +31,7 @@ RUNTIME_PROXY_TOKEN_PERMISSIONS: dict[str, str] = {
     "pull_requests": "write",
     "issues": "write",
     "checks": "write",
+    "actions": "read",
 }
 WORKFLOW_RUNTIME_PROXY_TOKEN_PERMISSIONS: dict[str, str] = {
     **RUNTIME_PROXY_TOKEN_PERMISSIONS,
