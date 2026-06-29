@@ -74,8 +74,62 @@ function mockHarnessProxy(): Plugin | null {
   }
 }
 
+// shiki lazily `import()`s one grammar per language on first render. These libs
+// also only live inside lazy route components, so Vite's startup scanner never
+// reaches them — it discovers them on first thread navigation, re-optimizes deps,
+// and force-reloads, aborting the in-flight route-chunk import ("Failed to fetch
+// dynamically imported module"). Pre-bundling them up front avoids the reload.
+// Uncommon languages not listed just trigger a one-time, graceful re-optimize.
+const SHIKI_LANGS = [
+  "bash",
+  "c",
+  "cpp",
+  "csharp",
+  "css",
+  "diff",
+  "docker",
+  "go",
+  "graphql",
+  "html",
+  "java",
+  "javascript",
+  "json",
+  "jsonc",
+  "jsx",
+  "kotlin",
+  "lua",
+  "make",
+  "markdown",
+  "php",
+  "python",
+  "ruby",
+  "rust",
+  "scala",
+  "shellscript",
+  "sql",
+  "swift",
+  "toml",
+  "tsx",
+  "typescript",
+  "xml",
+  "yaml",
+]
+
 const config = defineConfig({
-  optimizeDeps: { include: ["workbox-window"] },
+  optimizeDeps: {
+    include: [
+      "workbox-window",
+      "streamdown",
+      "shiki",
+      "@pierre/diffs",
+      "@pierre/diffs/react",
+      "@pierre/trees",
+      "@pierre/trees/react",
+      "@shikijs/themes/github-light",
+      "@shikijs/themes/github-dark",
+      ...SHIKI_LANGS.map((lang) => `@shikijs/langs/${lang}`),
+    ],
+  },
   worker: { format: "es" },
   plugins: [
     mockHarnessProxy(),
