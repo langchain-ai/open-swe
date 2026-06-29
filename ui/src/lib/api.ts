@@ -485,6 +485,45 @@ export interface WorkspaceRepositorySettingsUpdateBody {
   required_documents: Array<string>
 }
 
+export interface WorkspaceDeliveryPolicy {
+  project_id: string
+  active: boolean
+  kill_switch: boolean
+  gate_policy: {
+    agent_review: boolean
+    qa_evidence: boolean
+    blocking_gates: Array<string>
+    advisory_gates: Array<string>
+  }
+  merge_policy: {
+    enabled: boolean
+    strategy: string
+    required_checks: Array<string>
+    delete_branch: boolean
+    target_branch: string
+  }
+  run_limits: {
+    max_concurrent_runs: number
+    daily_run_budget: number
+  }
+}
+
+export interface WorkspaceDeliveryPolicyUpdateBody {
+  active: boolean
+  kill_switch: boolean
+  agent_review: boolean
+  qa_evidence: boolean
+  blocking_gates: Array<string>
+  advisory_gates: Array<string>
+  max_concurrent_runs: number
+  daily_run_budget: number
+  merge_enabled: boolean
+  merge_strategy: string
+  required_checks: Array<string>
+  delete_branch: boolean
+  target_branch: string
+}
+
 export interface WorkspaceModelEndpoint {
   id: string
   display_name: string
@@ -1180,6 +1219,21 @@ export const api = {
     request<WorkspaceRepositorySettings>(
       `/delivery-projects/${encodeURIComponent(projectId)}/repositories/test-access`,
       { method: "POST" }
+    ),
+  getWorkspaceDeliveryPolicy: (projectId: string) =>
+    request<WorkspaceDeliveryPolicy>(
+      `/delivery-projects/${encodeURIComponent(projectId)}/delivery-policy`
+    ),
+  saveWorkspaceDeliveryPolicy: (
+    projectId: string,
+    body: WorkspaceDeliveryPolicyUpdateBody
+  ) =>
+    request<WorkspaceDeliveryPolicy>(
+      `/delivery-projects/${encodeURIComponent(projectId)}/delivery-policy`,
+      {
+        method: "PUT",
+        body: JSON.stringify(body),
+      }
     ),
   listModelEndpointPresets: (projectId: string) =>
     request<{ items: Array<WorkspaceModelEndpointPreset> }>(

@@ -250,7 +250,11 @@ async def test_delivery_project_list_includes_latest_runs(
     ]
 
 
-async def _ready_sports_project(users: list[str] | None = None) -> None:
+async def _ready_sports_project(
+    users: list[str] | None = None,
+    *,
+    auto_merge: bool = True,
+) -> None:
     await project_registry.upsert_delivery_project(
         project_registry.default_sports_cms_delivery_project(
             tracker_config={"project_ids": ["linear-sports"], "labels": ["agent-ready"]},
@@ -258,6 +262,17 @@ async def _ready_sports_project(users: list[str] | None = None) -> None:
             membership={"users": users or ["octocat"]},
         )
     )
+    if auto_merge:
+        project = await project_registry.get_delivery_project("sports-cms")
+        assert project is not None
+        project["merge_policy"] = {
+            "enabled": True,
+            "strategy": "squash",
+            "required_checks": ["tests"],
+            "delete_branch": True,
+            "target_branch": "main",
+        }
+        await project_registry.upsert_delivery_project(project)
 
 
 async def _ready_credentials(login: str = "octocat") -> None:
@@ -340,6 +355,80 @@ async def test_delivery_project_readiness_reports_missing_linear_config(
     assert payload["ready"] is False
     assert _check(payload, "tracker_intake")["ready"] is False
     assert _check(payload, "tracker_intake")["section"] == "ticket-intake"
+
+
+async def test_delivery_project_readiness_blocks_disabled_auto_merge(
+    dashboard_client: TestClient,
+) -> None:
+    await _ready_sports_project(auto_merge=False)
+    await _ready_credentials()
+
+    response = dashboard_client.get(
+        "/dashboard/api/delivery-projects/sports-cms/readiness",
+        headers={"Origin": "http://testserver"},
+        cookies=_session_cookie(login="octocat", email="octo@example.com"),
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    merge_check = _check(payload, "merge_policy")
+    assert payload["ready"] is False
+    assert merge_check["ready"] is False
+    assert merge_check["section"] == "delivery-policy"
+    assert merge_check["message"] == (
+        "Enable policy-gated Auto-Merge and configure merge strategy."
+    )
+
+
+def test_delivery_policy_routes_update_auto_merge_and_readiness(
+    dashboard_client: TestClient,
+) -> None:
+    import anyio
+
+    async def _setup() -> None:
+        await _ready_sports_project(auto_merge=False)
+        await _ready_credentials()
+
+    anyio.run(_setup)
+
+    saved = dashboard_client.put(
+        "/dashboard/api/delivery-projects/sports-cms/delivery-policy",
+        headers={"Origin": "http://testserver"},
+        cookies=_session_cookie(login="octocat", email="octo@example.com"),
+        json={
+            "active": True,
+            "kill_switch": False,
+            "agent_review": True,
+            "qa_evidence": True,
+            "blocking_gates": ["drupal_bootstrap", "browser_flow"],
+            "advisory_gates": ["phpunit"],
+            "max_concurrent_runs": 2,
+            "daily_run_budget": 20,
+            "merge_enabled": True,
+            "merge_strategy": "squash",
+            "required_checks": ["tests", "lint"],
+            "delete_branch": True,
+            "target_branch": "main",
+        },
+    )
+
+    assert saved.status_code == 200
+    assert saved.json()["merge_policy"] == {
+        "enabled": True,
+        "strategy": "squash",
+        "required_checks": ["tests", "lint"],
+        "delete_branch": True,
+        "target_branch": "main",
+    }
+
+    readiness = dashboard_client.get(
+        "/dashboard/api/delivery-projects/sports-cms/readiness",
+        headers={"Origin": "http://testserver"},
+        cookies=_session_cookie(login="octocat", email="octo@example.com"),
+    )
+
+    assert readiness.status_code == 200
+    assert _check(readiness.json(), "merge_policy")["ready"] is True
 
 
 def test_dashboard_ticket_intake_routes_persist_config_and_report_missing_credentials(
@@ -680,7 +769,7 @@ async def test_delivery_project_readiness_reports_disabled_auto_mode(
     payload = response.json()
     assert payload["ready"] is False
     assert _check(payload, "auto_mode_limits")["ready"] is False
-    assert _check(payload, "auto_mode_limits")["section"] == "policies"
+    assert _check(payload, "auto_mode_limits")["section"] == "delivery-policy"
 
 
 async def test_project_secrets_are_encrypted_and_scoped_by_project_environment(

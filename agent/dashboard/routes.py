@@ -290,6 +290,22 @@ class RepositorySettingsUpdateBody(BaseModel):
     required_documents: list[str] = Field(default_factory=list)
 
 
+class DeliveryPolicyUpdateBody(BaseModel):
+    active: bool = True
+    kill_switch: bool = False
+    agent_review: bool = True
+    qa_evidence: bool = True
+    blocking_gates: list[str] = Field(default_factory=list)
+    advisory_gates: list[str] = Field(default_factory=list)
+    max_concurrent_runs: int = 1
+    daily_run_budget: int = 10
+    merge_enabled: bool = False
+    merge_strategy: str = "squash"
+    required_checks: list[str] = Field(default_factory=list)
+    delete_branch: bool = True
+    target_branch: str = ""
+
+
 class ModelEndpointUpdateBody(BaseModel):
     id: str | None = None
     display_name: str
@@ -615,6 +631,90 @@ def _repository_settings_update_payload(
     }
 
 
+def _delivery_policy_payload(project: dict[str, Any]) -> dict[str, Any]:
+    gate_policy = project.get("gate_policy") if isinstance(project.get("gate_policy"), dict) else {}
+    merge_policy = (
+        project.get("merge_policy") if isinstance(project.get("merge_policy"), dict) else {}
+    )
+    run_limits = project.get("run_limits") if isinstance(project.get("run_limits"), dict) else {}
+    branch_policy = (
+        project.get("branch_policy") if isinstance(project.get("branch_policy"), dict) else {}
+    )
+    return {
+        "project_id": project.get("project_id"),
+        "active": bool(project.get("active", True)),
+        "kill_switch": bool(project.get("kill_switch", False)),
+        "gate_policy": {
+            "agent_review": gate_policy.get("agent_review") is not False,
+            "qa_evidence": gate_policy.get("qa_evidence") is True,
+            "blocking_gates": _clean_strings(gate_policy.get("blocking_gates") or []),
+            "advisory_gates": _clean_strings(gate_policy.get("advisory_gates") or []),
+        },
+        "merge_policy": {
+            "enabled": merge_policy.get("enabled") is True,
+            "strategy": str(merge_policy.get("strategy") or "squash"),
+            "required_checks": _clean_strings(merge_policy.get("required_checks") or []),
+            "delete_branch": merge_policy.get("delete_branch") is not False,
+            "target_branch": str(
+                merge_policy.get("target_branch")
+                or merge_policy.get("base_branch")
+                or branch_policy.get("base_branch")
+                or "main"
+            ),
+        },
+        "run_limits": {
+            "max_concurrent_runs": int(run_limits.get("max_concurrent_runs") or 1),
+            "daily_run_budget": int(run_limits.get("daily_run_budget") or 10),
+        },
+    }
+
+
+def _delivery_policy_update_payload(
+    project: dict[str, Any],
+    body: DeliveryPolicyUpdateBody,
+) -> dict[str, Any]:
+    blocking_gates = _clean_strings(body.blocking_gates)
+    advisory_gates = _clean_strings(body.advisory_gates)
+    required_checks = _clean_strings(body.required_checks)
+    strategy = body.merge_strategy.strip()
+    target_branch = body.target_branch.strip()
+    if body.qa_evidence and not blocking_gates:
+        raise HTTPException(
+            422, "at least one blocking gate is required when QA evidence is enabled"
+        )
+    if body.max_concurrent_runs < 1:
+        raise HTTPException(422, "max concurrent runs must be positive")
+    if body.daily_run_budget < 1:
+        raise HTTPException(422, "daily run budget must be positive")
+    if body.merge_enabled and not strategy:
+        raise HTTPException(422, "merge strategy is required when auto-merge is enabled")
+    branch_policy = (
+        project.get("branch_policy") if isinstance(project.get("branch_policy"), dict) else {}
+    )
+    return {
+        "project_id": str(project["project_id"]),
+        "active": body.active,
+        "kill_switch": body.kill_switch,
+        "gate_policy": {
+            "agent_review": body.agent_review,
+            "qa_evidence": body.qa_evidence,
+            "blocking_gates": blocking_gates,
+            "advisory_gates": advisory_gates,
+        },
+        "merge_policy": {
+            "enabled": body.merge_enabled,
+            "strategy": strategy or "squash",
+            "required_checks": required_checks,
+            "delete_branch": body.delete_branch,
+            "target_branch": target_branch or str(branch_policy.get("base_branch") or "main"),
+        },
+        "run_limits": {
+            "max_concurrent_runs": body.max_concurrent_runs,
+            "daily_run_budget": body.daily_run_budget,
+        },
+    }
+
+
 def _delivery_project_summary(
     project: dict[str, Any],
     *,
@@ -789,9 +889,10 @@ async def _delivery_project_readiness(
         and isinstance(blocking_gates, list)
         and bool(blocking_gates)
     )
-    merge_ready = bool(merge_policy.get("strategy")) and isinstance(
-        merge_policy.get("required_checks", []),
-        list,
+    merge_ready = (
+        merge_policy.get("enabled") is True
+        and bool(merge_policy.get("strategy"))
+        and isinstance(merge_policy.get("required_checks", []), list)
     )
 
     checks = [
@@ -873,7 +974,7 @@ async def _delivery_project_readiness(
             key="auto_mode_limits",
             label="Auto-Mode limits",
             ready=auto_mode_ready,
-            section="policies",
+            section="delivery-policy",
             message="Auto-Mode is enabled and has run budget."
             if auto_mode_ready
             else "Enable the project, disable kill switch, and configure positive run limits.",
@@ -882,7 +983,7 @@ async def _delivery_project_readiness(
             key="qa_gates",
             label="QA gates",
             ready=qa_ready,
-            section="policies",
+            section="delivery-policy",
             message="Blocking QA gates are configured."
             if qa_ready
             else "Configure PR QA evidence and blocking gates.",
@@ -891,10 +992,10 @@ async def _delivery_project_readiness(
             key="merge_policy",
             label="Merge policy",
             ready=merge_ready,
-            section="policies",
-            message="Merge policy is configured."
+            section="delivery-policy",
+            message="Policy-gated Auto-Merge is enabled."
             if merge_ready
-            else "Configure merge strategy and required checks.",
+            else "Enable policy-gated Auto-Merge and configure merge strategy.",
         ),
     ]
     return {
@@ -1339,6 +1440,28 @@ async def api_test_delivery_project_repositories(
         project,
         access_statuses=await _repository_access_statuses(project, session),
     )
+
+
+@router.get("/delivery-projects/{project_id}/delivery-policy")
+async def api_get_delivery_project_policy(
+    project_id: str,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    project = await _require_delivery_project_member(project_id, session)
+    return _delivery_policy_payload(project)
+
+
+@router.put("/delivery-projects/{project_id}/delivery-policy")
+async def api_put_delivery_project_policy(
+    project_id: str,
+    body: DeliveryPolicyUpdateBody,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    project = await _require_delivery_project_member(project_id, session)
+    updated = await project_registry.upsert_delivery_project(
+        _delivery_policy_update_payload(project, body)
+    )
+    return _delivery_policy_payload(updated)
 
 
 @router.get("/delivery-projects/{project_id}/model-endpoints/presets")

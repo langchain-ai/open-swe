@@ -7,6 +7,7 @@ import type {
 } from "@/lib/api"
 import { AppShell, SettingsSection } from "@/components/AppShell"
 import { WorkspaceCredentialsSection } from "@/components/WorkspaceCredentialsSection"
+import { WorkspaceDeliveryPolicySection } from "@/components/WorkspaceDeliveryPolicySection"
 import { WorkspaceModelEndpointsSection } from "@/components/WorkspaceModelEndpointsSection"
 import { WorkspaceModelRoutingSection } from "@/components/WorkspaceModelRoutingSection"
 import { WorkspaceRepositoriesSection } from "@/components/WorkspaceRepositoriesSection"
@@ -269,6 +270,8 @@ function WorkspaceDetail({
       <WorkspaceModelEndpointsSection projectId={project.project_id} />
 
       <WorkspaceModelRoutingSection projectId={project.project_id} />
+
+      <WorkspaceDeliveryPolicySection projectId={project.project_id} />
 
       <SettingsSection title="Policies">
         <div id="policies">
