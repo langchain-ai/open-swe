@@ -18,18 +18,14 @@ from langgraph.store.base import BaseStore
 from langgraph_sdk import get_client
 
 from ..dashboard.options import model_supports_images
+from ..utils.dashboard_handoff import (  # noqa: F401
+    DASHBOARD_HANDOFF_INSTRUCTION,
+    DASHBOARD_HANDOFF_MARKER,
+)
 from ..utils.http import DEFAULT_HTTP_TIMEOUT
 from ..utils.multimodal import fetch_image_block, vision_not_supported_warning
 
 logger = logging.getLogger(__name__)
-
-DASHBOARD_HANDOFF_MARKER = "[Open SWE Web handoff]"
-DASHBOARD_HANDOFF_INSTRUCTION = (
-    f"{DASHBOARD_HANDOFF_MARKER} This follow-up was sent from Web. "
-    "The conversation has moved to Web, so answer in the dashboard stream with a normal "
-    "assistant message. Do not call slack_thread_reply unless a later Slack message explicitly "
-    "moves the conversation back to Slack."
-)
 
 
 class LinearNotifyState(AgentState):

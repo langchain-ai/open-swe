@@ -28,11 +28,15 @@ async def save_plan(plan_file_path: str) -> dict[str, Any]:
 
     Use this in plan mode once your plan is ready. First create a Markdown file
     under ``/workspace/plans/`` using a dated, descriptive filename, then pass
-    that file path here. The file contents
-    are published to the plan-review page linked in the conversation, where the
-    user (the owner) and any collaborators can read it, leave inline comments,
-    and then approve it or request changes. Call it again to publish a revised
-    file when addressing feedback.
+    that file path here. The file contents are published to the plan-review page
+    linked in the conversation, where the user (the owner) and any collaborators
+    can read it, leave inline comments, and then approve it or request changes.
+    Call it again to publish a revised file when addressing feedback.
+
+    Write the plan in standard Markdown — headings, bullet/numbered lists, and
+    fenced code blocks all render. Keep it concise and high level, focusing on
+    approach, decisions/tradeoffs, risks, and verification; avoid file/function
+    details unless they are unusually tricky or controversial.
 
     Args:
         plan_file_path: Path to the Markdown plan file in the sandbox.

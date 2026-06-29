@@ -18,6 +18,7 @@ import logging
 import os
 from typing import Any
 
+from .utils.dashboard_links import dashboard_thread_url
 from .utils.github_app import get_github_app_installation_token
 from .utils.github_comments import post_github_comment
 from .utils.linear import comment_on_linear_issue
@@ -57,17 +58,20 @@ def verify_run_complete_token(token: str | None) -> bool:
     return token is not None and hmac.compare_digest(token, secret)
 
 
-def _failure_text(status: str) -> str:
+def _failure_text(status: str, dashboard_url: str | None = None) -> str:
     if status == "timeout":
         reason = "timed out"
     elif status == "interrupted":
         reason = "was interrupted before it could finish"
     else:
         reason = "hit an unexpected error"
-    return (
+    text = (
         f"⚠️ I wasn't able to finish that — the run {reason}. "
         "Send another message and I'll pick it back up."
     )
+    if dashboard_url:
+        text += f" You can view the error in <{dashboard_url}|Open SWE Web>."
+    return text
 
 
 async def _post_failure_reply(thread_id: str, metadata: dict[str, Any], status: str) -> bool:
@@ -83,7 +87,8 @@ async def _post_failure_reply(thread_id: str, metadata: dict[str, Any], status: 
             channel_id = slack_thread.get("channel_id")
             thread_ts = slack_thread.get("thread_ts")
             if channel_id and thread_ts:
-                return await post_slack_thread_reply(channel_id, thread_ts, text)
+                slack_text = _failure_text(status, dashboard_thread_url(thread_id))
+                return await post_slack_thread_reply(channel_id, thread_ts, slack_text)
         return False
 
     if source == "linear":

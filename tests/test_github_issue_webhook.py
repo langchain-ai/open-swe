@@ -540,16 +540,23 @@ def test_is_docs_plz_slack_channel_matches_normalized_name(monkeypatch) -> None:
 def test_slack_webhook_gates_docs_plz_channel(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
-    async def fake_is_docs_plz_slack_channel(channel_id: str) -> bool:
+    async def fake_get_slack_channel_context(channel_id: str) -> dict[str, str]:
         captured["checked_channel_id"] = channel_id
-        return True
+        return {
+            "id": channel_id,
+            "name": "Docs Plz",
+            "name_normalized": "docs-plz",
+            "topic": "",
+            "purpose": "",
+            "description": "",
+        }
 
     async def fake_post_slack_thread_reply(channel_id: str, thread_ts: str, text: str) -> bool:
         captured["reply"] = {"channel_id": channel_id, "thread_ts": thread_ts, "text": text}
         return True
 
     async def fail_get_slack_repo_config(
-        channel_id: str, thread_ts: str, slack_user_id: str | None = None
+        channel_id: str, thread_ts: str, slack_user_id: str | None = None, **kwargs: object
     ) -> dict[str, str]:
         raise AssertionError("docs-plz gate should skip repo resolution")
 
@@ -562,7 +569,7 @@ def test_slack_webhook_gates_docs_plz_channel(monkeypatch) -> None:
     monkeypatch.setattr(webapp, "SLACK_BOT_USER_ID", "UBOT")
     monkeypatch.setattr(webapp, "SLACK_BOT_USERNAME", "open-swe")
     monkeypatch.setattr(slack_utils.time, "time", lambda: 1700000000)
-    monkeypatch.setattr(webapp, "_is_docs_plz_slack_channel", fake_is_docs_plz_slack_channel)
+    monkeypatch.setattr(webapp, "_get_slack_channel_context", fake_get_slack_channel_context)
     monkeypatch.setattr(webapp, "post_slack_thread_reply", fake_post_slack_thread_reply)
     monkeypatch.setattr(webapp, "get_slack_repo_config", fail_get_slack_repo_config)
     monkeypatch.setattr(webapp, "process_slack_mention", fail_process_slack_mention)
@@ -595,13 +602,30 @@ def test_slack_webhook_gates_docs_plz_channel(monkeypatch) -> None:
 def test_slack_webhook_routes_review_command_to_agent(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
+    channel_context = {
+        "id": "C123",
+        "name": "eng-open-swe",
+        "name_normalized": "eng-open-swe",
+        "topic": "Coordinate work",
+        "purpose": "repo:langchain-ai/open-swe",
+        "description": "Coordinate work\nrepo:langchain-ai/open-swe",
+    }
+
+    async def fake_get_slack_channel_context(channel_id: str) -> dict[str, str]:
+        captured["channel_context_request"] = channel_id
+        return channel_context
+
     async def fake_get_slack_repo_config(
-        channel_id: str, thread_ts: str, slack_user_id: str | None = None
+        channel_id: str,
+        thread_ts: str,
+        slack_user_id: str | None = None,
+        channel_context: dict[str, str] | None = None,
     ) -> dict[str, str]:
         captured["repo_config_request"] = {
             "channel_id": channel_id,
             "thread_ts": thread_ts,
             "slack_user_id": slack_user_id,
+            "channel_context": channel_context,
         }
         return {"owner": "langchain-ai", "name": "open-swe"}
 
@@ -615,6 +639,7 @@ def test_slack_webhook_routes_review_command_to_agent(monkeypatch) -> None:
     monkeypatch.setattr(webapp, "SLACK_BOT_USER_ID", "UBOT")
     monkeypatch.setattr(webapp, "SLACK_BOT_USERNAME", "open-swe")
     monkeypatch.setattr(slack_utils.time, "time", lambda: 1700000000)
+    monkeypatch.setattr(webapp, "_get_slack_channel_context", fake_get_slack_channel_context)
     monkeypatch.setattr(webapp, "get_slack_repo_config", fake_get_slack_repo_config)
     monkeypatch.setattr(webapp, "process_slack_mention", fake_process_slack_mention)
 
@@ -636,8 +661,16 @@ def test_slack_webhook_routes_review_command_to_agent(monkeypatch) -> None:
     assert response.status_code == 200
     assert response.json()["message"] == "Slack mention queued"
     assert captured["repo_config"] == {"owner": "langchain-ai", "name": "open-swe"}
+    assert captured["channel_context_request"] == "C123"
+    assert captured["repo_config_request"] == {
+        "channel_id": "C123",
+        "thread_ts": "1700000000.000100",
+        "slack_user_id": "U123",
+        "channel_context": channel_context,
+    }
     event_data = captured["event_data"]
     assert isinstance(event_data, dict)
+    assert event_data["channel_context"] == channel_context
     assert event_data["text"] == "<@UBOT> review https://github.com/langchain-ai/open-swe/pull/1244"
 
 
@@ -645,7 +678,7 @@ def test_slack_webhook_malformed_review_command_starts_agent(monkeypatch) -> Non
     captured: dict[str, object] = {}
 
     async def fake_get_slack_repo_config(
-        channel_id: str, thread_ts: str, slack_user_id: str | None = None
+        channel_id: str, thread_ts: str, slack_user_id: str | None = None, **kwargs: object
     ) -> dict[str, str]:
         return {"owner": "langchain-ai", "name": "open-swe"}
 
@@ -691,7 +724,7 @@ def test_slack_webhook_non_pr_review_request_starts_agent(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
     async def fake_get_slack_repo_config(
-        channel_id: str, thread_ts: str, slack_user_id: str | None = None
+        channel_id: str, thread_ts: str, slack_user_id: str | None = None, **kwargs: object
     ) -> dict[str, str]:
         captured["repo_config_request"] = {
             "channel_id": channel_id,
@@ -747,7 +780,7 @@ def test_slack_webhook_threaded_followup_uses_parent_thread_ts(monkeypatch) -> N
     captured: dict[str, object] = {}
 
     async def fake_get_slack_repo_config(
-        channel_id: str, thread_ts: str, slack_user_id: str | None = None
+        channel_id: str, thread_ts: str, slack_user_id: str | None = None, **kwargs: object
     ) -> dict[str, str]:
         captured["repo_config_request"] = {
             "channel_id": channel_id,

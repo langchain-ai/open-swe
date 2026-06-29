@@ -10,6 +10,7 @@ the preceding tool result, exactly as a real model would.
 from __future__ import annotations
 
 import re
+import time
 from typing import Any
 
 from e2e_env import (
@@ -259,6 +260,11 @@ def _latest_attribution(messages: list[BaseMessage]) -> str | None:
 
 
 def _step_followup(messages: list[BaseMessage]) -> AIMessage:
+    if any(
+        isinstance(msg, HumanMessage) and "Please queue this follow-up" in _text(msg.content)
+        for msg in messages
+    ):
+        time.sleep(2)
     attribution = _latest_attribution(messages)
     suffix = f" I saw this follow-up was from {attribution}." if attribution else ""
     return AIMessage(content=f"{FOLLOW_UP_REPLY}{suffix}")

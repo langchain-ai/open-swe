@@ -30,10 +30,25 @@ class _FakeRuns:
         return {"run_id": "run-1"}
 
 
+class _FakeStore:
+    def __init__(
+        self, items: dict[tuple[tuple[str, ...], str], dict[str, Any]] | None = None
+    ) -> None:
+        self.items = items or {}
+
+    async def get_item(self, namespace: tuple[str, ...], key: str) -> dict[str, Any] | None:
+        return self.items.get((namespace, key))
+
+
 class _FakeClient:
-    def __init__(self, metadata: dict[str, Any]) -> None:
+    def __init__(
+        self,
+        metadata: dict[str, Any],
+        store_items: dict[tuple[tuple[str, ...], str], dict[str, Any]] | None = None,
+    ) -> None:
         self.threads = _FakeThreads(metadata)
         self.runs = _FakeRuns()
+        self.store = _FakeStore(store_items)
 
 
 async def _inactive_thread(thread_id: str) -> bool:
@@ -160,6 +175,104 @@ async def test_dashboard_followup_on_busy_thread_queues_dashboard_handoff(
 
     assert client.threads.updates[0]["source"] == "dashboard"
     assert queued_messages == [{"text": "continue in web", "source": "dashboard"}]
+
+
+@pytest.mark.asyncio
+async def test_dashboard_followup_on_busy_slack_thread_updates_trace_reply(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    metadata = {
+        "source": "slack",
+        "github_login": "octocat",
+        "triggering_user_email": "octocat@example.com",
+        "source_context": {
+            "slack_thread": {
+                "channel_id": "C1",
+                "thread_ts": "123.45",
+                "trace_message_ts": "123.46",
+            }
+        },
+    }
+    client = _FakeClient(metadata)
+    queued_messages: list[object] = []
+    handoff_updates: list[dict[str, str]] = []
+
+    async def fake_queue_message_for_thread(thread_id: str, message_content: object) -> bool:
+        queued_messages.append(message_content)
+        return True
+
+    async def fake_update_trace_reply(channel_id: str, message_ts: str, thread_id: str) -> bool:
+        handoff_updates.append(
+            {"channel_id": channel_id, "message_ts": message_ts, "thread_id": thread_id}
+        )
+        return True
+
+    monkeypatch.setattr(thread_api, "langgraph_client", lambda: client)
+    monkeypatch.setattr(thread_api, "get_thread_active_status", _active_thread)
+    monkeypatch.setattr(thread_api, "queue_message_for_thread", fake_queue_message_for_thread)
+    monkeypatch.setattr(
+        thread_api, "update_slack_trace_reply_for_web_handoff", fake_update_trace_reply
+    )
+
+    await thread_api.send_dashboard_message(
+        "thread-1",
+        "octocat",
+        thread_api.ThreadMessageBody(content="continue in web"),
+        email="octocat@example.com",
+    )
+
+    assert queued_messages == [{"text": "continue in web", "source": "dashboard"}]
+    assert handoff_updates == [
+        {"channel_id": "C1", "message_ts": "123.46", "thread_id": "thread-1"}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_dashboard_followup_uses_stored_trace_reply_timestamp(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    metadata = {
+        "source": "slack",
+        "github_login": "octocat",
+        "triggering_user_email": "octocat@example.com",
+        "source_context": {"slack_thread": {"channel_id": "C1", "thread_ts": "123.45"}},
+    }
+    client = _FakeClient(
+        metadata,
+        {
+            (("slack_run_map", "C1"), "thread:123.45"): {
+                "value": {"run_id": "run-1", "thread_ts": "123.45", "trace_message_ts": "123.46"}
+            }
+        },
+    )
+    handoff_updates: list[dict[str, str]] = []
+
+    async def fake_queue_message_for_thread(thread_id: str, message_content: object) -> bool:
+        return True
+
+    async def fake_update_trace_reply(channel_id: str, message_ts: str, thread_id: str) -> bool:
+        handoff_updates.append(
+            {"channel_id": channel_id, "message_ts": message_ts, "thread_id": thread_id}
+        )
+        return True
+
+    monkeypatch.setattr(thread_api, "langgraph_client", lambda: client)
+    monkeypatch.setattr(thread_api, "get_thread_active_status", _active_thread)
+    monkeypatch.setattr(thread_api, "queue_message_for_thread", fake_queue_message_for_thread)
+    monkeypatch.setattr(
+        thread_api, "update_slack_trace_reply_for_web_handoff", fake_update_trace_reply
+    )
+
+    await thread_api.send_dashboard_message(
+        "thread-1",
+        "octocat",
+        thread_api.ThreadMessageBody(content="continue in web"),
+        email="octocat@example.com",
+    )
+
+    assert handoff_updates == [
+        {"channel_id": "C1", "message_ts": "123.46", "thread_id": "thread-1"}
+    ]
 
 
 @pytest.mark.asyncio
