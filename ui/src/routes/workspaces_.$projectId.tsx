@@ -275,6 +275,11 @@ function AutoModeTickSummary({
 }) {
   if (!result) return null
   const pollErrors = result.poll?.errors ?? []
+  const needsLinearToken = pollErrors.some((error) =>
+    String(error.message ?? "")
+      .toLowerCase()
+      .includes("linear provider token")
+  )
   return (
     <div className="space-y-3 px-4 pb-4 text-xs">
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -302,6 +307,14 @@ function AutoModeTickSummary({
             </div>
           ))}
         </div>
+      ) : null}
+      {needsLinearToken ? (
+        <a
+          href="/my-settings?provider=linear"
+          className="inline-flex text-destructive underline-offset-4 hover:underline"
+        >
+          Open Profile Settings to connect Linear
+        </a>
       ) : null}
       {result.refused.length ? (
         <div className="space-y-1 text-muted-foreground">
