@@ -99,6 +99,9 @@ function ProviderTokenRow({
     setError(null)
     setTestResult(null)
     void qc.invalidateQueries({ queryKey: ["myProviderTokens"] })
+    void qc.invalidateQueries({ queryKey: ["deliveryProjects"] })
+    void qc.invalidateQueries({ queryKey: ["deliveryProjectReadiness"] })
+    void qc.invalidateQueries({ queryKey: ["ticketIntake"] })
   }
   const onError = (e: Error) => {
     setError(e.message)

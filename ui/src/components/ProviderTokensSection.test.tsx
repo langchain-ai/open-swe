@@ -36,6 +36,12 @@ function renderWithQueryClient(children: ReactNode) {
   )
 }
 
+function renderWithClient(children: ReactNode, client: QueryClient) {
+  return render(
+    <QueryClientProvider client={client}>{children}</QueryClientProvider>
+  )
+}
+
 describe("ProviderTokensSection", () => {
   afterEach(() => {
     cleanup()
@@ -126,6 +132,48 @@ describe("ProviderTokensSection", () => {
     )
     await waitFor(() => expect(githubToken).toHaveProperty("value", ""))
     expect(document.body.textContent).not.toContain("ghp_updated_5555")
+  })
+
+  it("refreshes workspace readiness queries after provider token changes", async () => {
+    const client = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+        mutations: { retry: false },
+      },
+    })
+    const invalidateQueries = vi.spyOn(client, "invalidateQueries")
+    renderWithClient(<ProviderTokensSection />, client)
+
+    const linearToken = await screen.findByLabelText(
+      "Linear personal access token"
+    )
+    fireEvent.change(linearToken, { target: { value: "lin_secret_9999" } })
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Save Linear token" })
+      ).toHaveProperty("disabled", false)
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Save Linear token" }))
+
+    await waitFor(() =>
+      expect(mockApi.saveMyProviderToken).toHaveBeenCalledWith("linear", {
+        token: "lin_secret_9999",
+      })
+    )
+    await waitFor(() =>
+      expect(invalidateQueries).toHaveBeenCalledWith({
+        queryKey: ["myProviderTokens"],
+      })
+    )
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ["deliveryProjects"],
+    })
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ["deliveryProjectReadiness"],
+    })
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ["ticketIntake"],
+    })
   })
 
   it("revokes a connected provider token", async () => {
