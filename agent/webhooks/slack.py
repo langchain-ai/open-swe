@@ -337,6 +337,7 @@ async def _process_slack_mention_impl(
                 run_id,
                 message_ts=trace_message_ts,
                 triggering_user_id=user_id,
+                trace_message_ts=trace_message_ts,
             )
     else:
         webapp.logger.info(
