@@ -64,7 +64,6 @@ async def _notify_slack_processing_error(
             thread_id=thread_id,
             metadata={
                 "latest_run_status": "error",
-                "failure_reply_posted": True,
                 "updated_at_ms": int(datetime.now(UTC).timestamp() * 1000),
             },
         )

@@ -63,7 +63,7 @@ async def test_slack_processing_error_posts_dashboard_link(
     update = client.threads.updates[0]
     assert update["thread_id"] == "t1"
     assert update["metadata"]["latest_run_status"] == "error"
-    assert update["metadata"]["failure_reply_posted"] is True
+    assert "failure_reply_posted" not in update["metadata"]
     assert isinstance(update["metadata"]["updated_at_ms"], int)
     set_status.assert_awaited_once_with("C1", "123.45", status="")
     post_reply.assert_awaited_once()
