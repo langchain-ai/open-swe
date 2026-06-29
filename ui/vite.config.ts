@@ -124,6 +124,10 @@ const config = defineConfig({
         navigateFallback: "/_shell.html",
         navigateFallbackDenylist: [/^\/dashboard\/api\//, /^\/_serverFn\//],
         globPatterns: ["**/*.{js,css,png,svg,ico,webmanifest}"],
+        // Mermaid (bundled by Streamdown for ```mermaid blocks) is a ~2MB lazily
+        // loaded chunk; keep it out of the precache manifest so it doesn't bloat
+        // the SW install (and trip workbox's 2 MiB size limit). It loads on demand.
+        globIgnores: ["**/mermaid-*.js"],
         additionalManifestEntries: [
           { url: "/_shell.html", revision: new Date().toISOString() },
         ],

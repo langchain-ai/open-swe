@@ -1,9 +1,10 @@
 import { memo, useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { MultiFileDiff } from "@pierre/diffs/react";
-import { DiffView } from "./DiffView";
+import { toolHeaderType, toolStatusToHeaderState } from "../messages/aiElements/toolAdapter";
 import type { AcpToolKind, ToolExecutionChunk } from "@/lib/agents/types";
 import { useDiffOptions } from "@/components/agents/utils/diffUtils";
 import { countLineChanges } from "@/components/agents/utils/diffStats";
+import { Tool, ToolContent, ToolHeader } from "@/components/ai-elements/tool";
 
 interface ToolExecutionProps {
   chunk: ToolExecutionChunk;
@@ -81,9 +82,14 @@ function formatToolDisplay(
   }
 }
 
-const InlineDiffCollapsible = memo(function InlineDiffCollapsible({
+/**
+ * The diff body shown inside an edit tool's collapsible content: a file header
+ * (path + line-change counts) above a scrollable pierre `MultiFileDiff` with
+ * fade-in edge shadows. Kept on the `--ui-*` palette — this is the
+ * domain-specific diff viewer, not an AI Elements primitive.
+ */
+const DiffBox = memo(function DiffBox({
   filePath,
-  fileName,
   originalContent,
   newContent,
   additions,
@@ -91,19 +97,16 @@ const InlineDiffCollapsible = memo(function InlineDiffCollapsible({
   isError,
 }: {
   filePath: string;
-  fileName: string;
   originalContent: string;
   newContent: string;
   additions: number;
   deletions: number;
   isError: boolean;
 }) {
-  const [expanded, setExpanded] = useState(false);
-  const toggle = useCallback(() => setExpanded((prev) => !prev), []);
   const diffOptions = useDiffOptions();
   const inlineDiffOptions = useMemo(
     () => ({ ...diffOptions, disableFileHeader: true }),
-    [diffOptions]
+    [diffOptions],
   );
   const scrollRef = useRef<HTMLDivElement>(null);
   const [scrolledFromTop, setScrolledFromTop] = useState(false);
@@ -117,8 +120,8 @@ const InlineDiffCollapsible = memo(function InlineDiffCollapsible({
   }, []);
 
   useLayoutEffect(() => {
-    if (expanded) updateScrollIndicators();
-  }, [expanded, updateScrollIndicators]);
+    updateScrollIndicators();
+  }, [updateScrollIndicators]);
 
   const edgeShadows = [
     scrolledFromTop ? "inset 0 12px 10px -10px rgba(42, 63, 95, 0.95)" : "",
@@ -130,60 +133,26 @@ const InlineDiffCollapsible = memo(function InlineDiffCollapsible({
   const oldFile = { name: filePath, contents: originalContent };
   const newFile = { name: filePath, contents: newContent };
 
-  if (!expanded) {
-    return (
-      <div className="my-0.5 text-[12px] leading-5">
-        <button
-          type="button"
-          onClick={toggle}
-          className="inline-flex items-center gap-1.5 text-left hover:brightness-125 transition-colors"
-        >
-          <span className={isError ? "text-red-400" : "text-[color:var(--ui-text-muted)]"}>
-            Edited <span className="text-[color:var(--ui-accent)]">{fileName}</span>
-          </span>
-        </button>
-      </div>
-    );
-  }
-
   return (
-    <div className="my-1">
-      <div className="my-0.5 text-[12px] leading-5 mb-1.5">
-        <button
-          type="button"
-          onClick={toggle}
-          className="inline-flex items-center gap-1.5 text-left hover:brightness-125 transition-colors"
+    <div className="overflow-hidden rounded-lg border border-[var(--ui-border-subtle)] bg-[var(--ui-code-bubble)]">
+      <div className="flex items-center gap-2 px-3 py-2">
+        <span
+          className={`min-w-0 flex-1 truncate text-[13px] ${isError ? "text-red-400" : "text-[color:var(--ui-accent)]"}`}
         >
-          <span className={isError ? "text-red-400" : "text-[color:var(--ui-text-muted)]"}>
-            Edited file
-          </span>
-          <span className="text-[color:var(--ui-text-dim)] text-[10px]">▾</span>
-        </button>
+          {filePath}
+        </span>
+        <span className="flex shrink-0 items-center gap-2 text-xs">
+          <span className="text-green-400">+{additions}</span>
+          <span className="text-red-400">-{deletions}</span>
+        </span>
       </div>
-
-      <div className="rounded-lg bg-[var(--ui-code-bubble)] overflow-hidden border border-[var(--ui-border-subtle)]">
-        <div className="px-3 py-2 flex items-center gap-2">
-          <span className={`text-[13px] truncate flex-1 min-w-0 ${isError ? "text-red-400" : "text-[color:var(--ui-accent)]"}`}>
-            {filePath}
-          </span>
-          <span className="shrink-0 text-xs flex items-center gap-2">
-            <span className="text-green-400">+{additions}</span>
-            <span className="text-red-400">-{deletions}</span>
-          </span>
-        </div>
-
-        <div
-          ref={scrollRef}
-          onScroll={updateScrollIndicators}
-          className="border-t border-[var(--ui-border)] max-h-[250px] overflow-auto"
-          style={{ boxShadow: edgeShadows || "none" }}
-        >
-          <MultiFileDiff
-            oldFile={oldFile}
-            newFile={newFile}
-            options={inlineDiffOptions}
-          />
-        </div>
+      <div
+        ref={scrollRef}
+        onScroll={updateScrollIndicators}
+        className="max-h-[250px] overflow-auto border-t border-[var(--ui-border)]"
+        style={{ boxShadow: edgeShadows || "none" }}
+      >
+        <MultiFileDiff oldFile={oldFile} newFile={newFile} options={inlineDiffOptions} />
       </div>
     </div>
   );
@@ -195,68 +164,68 @@ export const ToolExecution = memo(function ToolExecution({
   resolvedDiffData,
 }: ToolExecutionProps) {
   const { title, toolKind, input, status, output } = chunk;
-  const diffs = chunk.diffs?.length ? chunk.diffs : (chunk.diffData ? [chunk.diffData] : []);
+  const diffs = chunk.diffs?.length ? chunk.diffs : chunk.diffData ? [chunk.diffData] : [];
   const diffData = diffs[diffs.length - 1];
+  const isEditOp =
+    toolKind === "edit" || toolKind === "delete" || toolKind === "move" || diffData != null;
+  const state = toolStatusToHeaderState(status);
 
-  const isEditOp = toolKind === "edit" || toolKind === "delete" || toolKind === "move" || diffData != null;
-  const isCompletedEditOp = isEditOp && diffData && (status === "completed" || status === "error");
-  const editedFilePath = diffData ? stripProjectPath(diffData.filePath, projectPath) : "";
-  const editedFileName = editedFilePath ? getFileName(editedFilePath) : "";
-  const diffStats = diffData ? countLineChanges(diffData.originalContent, diffData.newContent, diffData.filePath) : null;
-
-  if (isCompletedEditOp && diffStats) {
-    return (
-      <InlineDiffCollapsible
-        filePath={editedFilePath || diffData.filePath}
-        fileName={editedFileName || editedFilePath || diffData.filePath}
-        originalContent={resolvedDiffData?.originalContent ?? diffData.originalContent ?? ""}
-        newContent={resolvedDiffData?.modifiedContent ?? diffData.newContent}
-        additions={diffStats.additions}
-        deletions={diffStats.deletions}
-        isError={status === "error"}
-      />
+  if (isEditOp && diffData) {
+    const editedFilePath = stripProjectPath(diffData.filePath, projectPath);
+    const editedFileName = getFileName(editedFilePath);
+    const stats = countLineChanges(
+      diffData.originalContent,
+      diffData.newContent,
+      diffData.filePath,
     );
-  }
+    const verb = status === "in_progress" ? "Editing" : "Edited";
+    const showDiff = status !== "in_progress";
 
-  if (isEditOp && status === "pending" && diffData) {
     return (
-      <div className="my-1 text-[12px] leading-5">
-        <DiffView diffData={diffData} />
-        <span className="text-[color:var(--ui-text-dim)]">Waiting for approval...</span>
-      </div>
-    );
-  }
-
-  if (isEditOp && status === "in_progress") {
-    const path = stripProjectPath(
-      diffData?.filePath ||
-      (input?.filePath as string) ||
-      (input?.path as string) || "file",
-      projectPath,
-    );
-    return (
-      <div className="my-0.5 text-[12px] leading-5">
-        <span className="text-yellow-400">Editing {getFileName(path)}...</span>
-      </div>
+      <Tool className="mb-0" defaultOpen={false}>
+        <ToolHeader
+          state={state}
+          title={`${verb} ${editedFileName}`}
+          type={toolHeaderType(toolKind)}
+        />
+        {showDiff && (
+          <ToolContent>
+            <DiffBox
+              additions={stats.additions}
+              deletions={stats.deletions}
+              filePath={editedFilePath || diffData.filePath}
+              isError={status === "error"}
+              newContent={resolvedDiffData?.modifiedContent ?? diffData.newContent}
+              originalContent={resolvedDiffData?.originalContent ?? diffData.originalContent ?? ""}
+            />
+            {status === "pending" && (
+              <p className="text-muted-foreground text-xs">Waiting for approval…</p>
+            )}
+          </ToolContent>
+        )}
+      </Tool>
     );
   }
 
   const displayName = formatToolDisplay(title, toolKind, input, projectPath);
-  const statusTextClass =
-    status === "error"
-      ? "text-red-400"
-      : status === "in_progress" || status === "pending"
-        ? "text-yellow-400"
-        : "text-[color:var(--ui-text-muted)]";
+  const trimmedOutput = output?.trim();
 
   return (
-    <div className="my-0.5 text-[12px] leading-5">
-      <div className="flex items-center gap-2 min-w-0">
-        <span className={`${statusTextClass} truncate`}>{displayName}</span>
-        {status === "error" && output && (
-          <span className="text-red-400/80 truncate">{output.slice(0, 80)}</span>
-        )}
-      </div>
-    </div>
+    <Tool className="mb-0" defaultOpen={false}>
+      <ToolHeader state={state} title={displayName} type={toolHeaderType(toolKind)} />
+      {trimmedOutput && (
+        <ToolContent>
+          <pre
+            className={`max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-md p-3 font-mono text-xs ${
+              status === "error"
+                ? "bg-destructive/10 text-destructive"
+                : "bg-muted/50 text-muted-foreground"
+            }`}
+          >
+            {trimmedOutput}
+          </pre>
+        </ToolContent>
+      )}
+    </Tool>
   );
 });

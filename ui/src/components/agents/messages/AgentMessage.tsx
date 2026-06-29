@@ -3,16 +3,16 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ChunkRenderer } from "./ChunkRenderer";
 import { MessageTimestamp } from "./MessageTimestamp";
 import { ReasoningBlock } from "./ReasoningBlock";
-import { buildRenderItems, summarizeExploration } from "./renderItems";
+import { buildRenderItems } from "./renderItems";
 import { summarizeChangedFiles } from "./summarizeChangedFiles";
 import { TurnChangedFilesCard } from "./TurnChangedFilesCard";
 import { WorkSummary } from "./WorkSummary";
+import { ExploredTask, SubagentTask } from "./aiElements/TaskGroups";
 import type { ReactNode } from "react";
 import type { RenderItem } from "./renderItems";
 import type { Message } from "@/lib/agents/types";
 import type { ApprovalCallbacks, ChangedFileSummaryItem } from "./types";
 import { formatHoverTimestamp } from "@/lib/agents/messageTimestamps";
-import { SubagentGroup } from "@/components/agents/subagents";
 import { ToolExecution } from "@/components/agents/ported/ToolExecution";
 import { ShellCommand } from "@/components/agents/ported/ShellCommand";
 import { ReplyCard } from "@/components/agents/ported/ReplyCard";
@@ -199,46 +199,21 @@ export function AgentMessage({
           }
 
           case "explored-group": {
-            const summary = summarizeExploration(item.chunks);
             const isExpanded = expandedExploredGroups[item.id] ?? false;
             return (
-              <div key={item.key}>
-                <button
-                  type="button"
-                  onClick={() =>
-                    setExpandedExploredGroups((prev) => ({
-                      ...prev,
-                      [item.id]: !(prev[item.id] ?? false),
-                    }))
-                  }
-                  className="w-full flex items-center justify-between py-1 text-left hover:opacity-90 transition-opacity"
-                >
-                  <span className="text-[color:var(--ui-text-muted)] text-[12px]">{summary}</span>
-                  <span className="text-[color:var(--ui-text-dim)] text-xs">{isExpanded ? "Hide" : "Show"}</span>
-                </button>
-                {isExpanded && (
-                  <div className="pt-1 pb-1 space-y-0.5">
-                    {item.chunks.map((chunk, chunkIndex) => (
-                      <ToolRow
-                        key={chunk.toolCallId || `explored-chunk-${item.id}-${chunkIndex}`}
-                        timestamp={chunk.timestamp}
-                        className="flex-1 min-w-0 text-[color:var(--ui-text-dim)]"
-                      >
-                        <ToolExecution
-                          chunk={chunk}
-                          projectPath={projectPath}
-                          onOpenDiff={callbacks.onOpenDiff}
-                        />
-                      </ToolRow>
-                    ))}
-                  </div>
-                )}
-              </div>
+              <ExploredTask
+                key={item.key}
+                chunks={item.chunks}
+                open={isExpanded}
+                onOpenChange={(open) =>
+                  setExpandedExploredGroups((prev) => ({ ...prev, [item.id]: open }))
+                }
+              />
             );
           }
 
           case "subagent-group":
-            return <SubagentGroup key={item.key} chunks={item.chunks} />;
+            return <SubagentTask key={item.key} chunks={item.chunks} />;
 
           case "edit-item": {
             const fullFileDiff = item.chunk.diffData

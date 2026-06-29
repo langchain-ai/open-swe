@@ -1,13 +1,14 @@
-import { useState } from "react";
-import { ChevronRight } from "lucide-react";
+import { ChevronDownIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
+import { Task, TaskContent, TaskTrigger } from "@/components/ai-elements/task";
 import { formatElapsed } from "@/lib/utils";
 
 /**
  * Collapses a finished agent turn's working steps (reasoning, tool calls,
  * exploration, edits, …) behind a single "Worked for …" toggle so the
- * transcript shows only the final reply by default.
+ * transcript shows only the final reply by default. Built on the AI Elements
+ * Task collapsible.
  */
 export function WorkSummary({
   durationMs,
@@ -16,29 +17,18 @@ export function WorkSummary({
   durationMs: number | null;
   children: ReactNode;
 }) {
-  const [expanded, setExpanded] = useState(false);
   const label =
     durationMs && durationMs >= 1000 ? `Worked for ${formatElapsed(durationMs)}` : "Worked";
 
   return (
-    <div className="my-1">
-      <button
-        type="button"
-        onClick={() => setExpanded((value) => !value)}
-        className="flex items-center gap-1 text-left transition-opacity hover:opacity-90"
-        aria-expanded={expanded}
-      >
-        <ChevronRight
-          className={`h-3 w-3 text-[color:var(--ui-text-dim)] shrink-0 transition-transform ${expanded ? "rotate-90" : ""}`}
-          aria-hidden
-        />
-        <span className="text-xs text-[color:var(--ui-text-dim)]">{label}</span>
-      </button>
-      {expanded && (
-        <div className="mt-1 ml-1 space-y-2 border-l-2 border-[var(--ui-border)] pl-3">
-          {children}
+    <Task className="my-1" defaultOpen={false}>
+      <TaskTrigger title={label}>
+        <div className="flex cursor-pointer items-center gap-2 text-muted-foreground text-sm transition-colors hover:text-foreground">
+          <ChevronDownIcon className="size-4 transition-transform group-data-[state=open]:rotate-180" />
+          <span>{label}</span>
         </div>
-      )}
-    </div>
+      </TaskTrigger>
+      <TaskContent>{children}</TaskContent>
+    </Task>
   );
 }

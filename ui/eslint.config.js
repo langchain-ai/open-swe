@@ -11,6 +11,9 @@ export default [
       "dist/**",
       "src/routeTree.gen.ts",
       "src/components/ui/**",
+      // Vendored AI Elements (shadcn registry) components — kept close to
+      // upstream so they can be re-pulled; not linted to our local style.
+      "src/components/ai-elements/**",
       // Ported from a desktop host app and excluded from tsconfig (not yet
       // integrated), so type-aware linting cannot resolve them. Keep this list
       // in sync with the `exclude` entries in tsconfig.json.
