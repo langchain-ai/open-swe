@@ -152,7 +152,9 @@ describe("WorkspaceCredentialsSection", () => {
     const providerTokens = await screen.findByRole("link", {
       name: "Open Profile Settings",
     })
-    expect(providerTokens.getAttribute("href")).toBe("/my-settings")
+    expect(providerTokens.getAttribute("href")).toBe(
+      "/my-settings?provider=linear"
+    )
     expect(
       await screen.findByText("AI Hub base URL is missing.")
     ).not.toBeNull()

@@ -765,7 +765,7 @@ async def test_delivery_project_readiness_reports_missing_user_pat(
     assert payload["ready"] is False
     assert _check(payload, "user_provider_token")["ready"] is False
     assert _check(payload, "user_provider_token")["section"] == "credentials"
-    assert _check(payload, "user_provider_token")["action_href"] == "/my-settings"
+    assert _check(payload, "user_provider_token")["action_href"] == "/my-settings?provider=github"
     assert _check(payload, "user_provider_token")["action_label"] == "Open profile settings"
 
 
@@ -804,7 +804,7 @@ async def test_delivery_project_readiness_reports_missing_linear_provider_pat(
     assert payload["ready"] is False
     assert _check(payload, "tracker_provider_token")["ready"] is False
     assert _check(payload, "tracker_provider_token")["section"] == "credentials"
-    assert _check(payload, "tracker_provider_token")["action_href"] == "/my-settings"
+    assert _check(payload, "tracker_provider_token")["action_href"] == "/my-settings?provider=linear"
     assert _check(payload, "tracker_provider_token")["action_label"] == "Open profile settings"
 
 

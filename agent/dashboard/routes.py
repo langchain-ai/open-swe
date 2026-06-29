@@ -993,7 +993,7 @@ async def _delivery_project_readiness(
             message="Linear provider token is connected."
             if tracker_credential_ready
             else "Connect a Linear provider token for queue polling.",
-            action_href="/my-settings",
+            action_href="/my-settings?provider=linear",
             action_label="Open profile settings",
         ),
         _readiness_check(
@@ -1014,7 +1014,7 @@ async def _delivery_project_readiness(
             message=f"{provider} user token is connected."
             if pat_status.get("connected")
             else f"Connect a {provider} provider token for this user.",
-            action_href="/my-settings",
+            action_href=f"/my-settings?provider={provider}",
             action_label="Open profile settings",
         ),
         _readiness_check(

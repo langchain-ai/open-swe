@@ -8,10 +8,10 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react"
-import type { ReactNode } from "react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { ProviderTokensSection } from "./ProviderTokensSection"
+import type { ReactNode } from "react"
 
 const mockApi = vi.hoisted(() => ({
   listMyProviderTokens: vi.fn(),
@@ -76,6 +76,15 @@ describe("ProviderTokensSection", () => {
       )
     ).not.toBeNull()
     expect(document.body.textContent).not.toContain("ghp_secret-token-1234")
+  })
+
+  it("focuses the preferred provider token field", async () => {
+    renderWithQueryClient(<ProviderTokensSection preferredProvider="linear" />)
+
+    const linearToken = await screen.findByLabelText(
+      "Linear personal access token"
+    )
+    await waitFor(() => expect(document.activeElement).toBe(linearToken))
   })
 
   it("creates and updates provider tokens without displaying the entered value", async () => {

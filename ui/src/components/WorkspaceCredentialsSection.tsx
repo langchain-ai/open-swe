@@ -287,7 +287,7 @@ export function WorkspaceCredentialsSection({
           control={
             <a
               className={buttonVariants({ size: "sm", variant: "outline" })}
-              href="/my-settings"
+              href="/my-settings?provider=linear"
             >
               Open Profile Settings
             </a>

@@ -4,7 +4,11 @@ import { useState } from "react"
 import { IoLogoSlack } from "react-icons/io5"
 import { SiNotion } from "react-icons/si"
 
-import type { CurrentsConnectBody, SessionUser } from "@/lib/api"
+import type {
+  CurrentsConnectBody,
+  ProviderPATProvider,
+  SessionUser,
+} from "@/lib/api"
 import { AppShell, SettingsRow, SettingsSection } from "@/components/AppShell"
 import { ProviderTokensSection } from "@/components/ProviderTokensSection"
 import { Button } from "@/components/ui/button"
@@ -35,6 +39,12 @@ import {
 import { cn } from "@/lib/utils"
 
 export const Route = createFileRoute("/my-settings")({
+  validateSearch: (search): { provider?: ProviderPATProvider } => ({
+    provider:
+      search.provider === "github" || search.provider === "linear"
+        ? search.provider
+        : undefined,
+  }),
   component: MySettingsPage,
 })
 
@@ -348,6 +358,7 @@ function NotionCredentialsSection() {
 
 function MySettingsPage() {
   const session = useSession()
+  const search = Route.useSearch()
   const qc = useQueryClient()
   const navigate = useNavigate()
   const profile = useProfile()
@@ -451,7 +462,7 @@ function MySettingsPage() {
 
       <NotionCredentialsSection />
 
-      <ProviderTokensSection />
+      <ProviderTokensSection preferredProvider={search.provider} />
 
       <SettingsSection title="Account">
         <SettingsRow

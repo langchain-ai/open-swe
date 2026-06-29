@@ -1,14 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 
-import { SettingsRow, SettingsSection } from "@/components/AppShell"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import type {
   ProviderPATProvider,
   ProviderPATStatus,
   ProviderPATUpdateBody,
 } from "@/lib/api"
+import { SettingsRow, SettingsSection } from "@/components/AppShell"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import { api } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
@@ -56,16 +56,30 @@ function ProviderTokenRow({
   blocked,
   status,
   isLoading,
+  isPreferred,
 }: {
   provider: ProviderPATProvider
   label: string
   blocked: string
   status: ProviderPATStatus
   isLoading: boolean
+  isPreferred: boolean
 }) {
   const qc = useQueryClient()
   const [token, setToken] = useState("")
   const [error, setError] = useState<string | null>(null)
+  const inputId = `provider-token-${provider}`
+
+  useEffect(() => {
+    if (!isPreferred || isLoading) return
+    const input = document.getElementById(inputId)
+    if (!(input instanceof HTMLInputElement)) return
+    const scrollIntoView = input.scrollIntoView as
+      | ((options?: ScrollIntoViewOptions) => void)
+      | undefined
+    scrollIntoView?.call(input, { block: "center" })
+    input.focus({ preventScroll: true })
+  }, [inputId, isLoading, isPreferred])
 
   const onSuccess = () => {
     setToken("")
@@ -126,6 +140,7 @@ function ProviderTokenRow({
           </div>
           <div className="flex flex-col gap-2 sm:flex-row">
             <Input
+              id={inputId}
               aria-label={`${label} personal access token`}
               className="w-full sm:w-64"
               placeholder={connected ? "New token" : "Personal access token"}
@@ -154,7 +169,11 @@ function ProviderTokenRow({
   )
 }
 
-export function ProviderTokensSection() {
+export function ProviderTokensSection({
+  preferredProvider,
+}: {
+  preferredProvider?: ProviderPATProvider
+}) {
   const tokens = useQuery({
     queryKey: ["myProviderTokens"],
     queryFn: api.listMyProviderTokens,
@@ -174,12 +193,13 @@ export function ProviderTokensSection() {
             blocked={item.blocked}
             status={statusForProvider(tokens.data?.items, item.provider)}
             isLoading={tokens.isLoading}
+            isPreferred={preferredProvider === item.provider}
           />
         ))}
       </div>
       {tokens.error && (
         <p className="px-4 pb-3 text-xs text-destructive">
-          {(tokens.error as Error).message}
+          {tokens.error.message}
         </p>
       )}
     </SettingsSection>
