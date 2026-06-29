@@ -197,10 +197,10 @@ function ReadinessPanel({
             </div>
             {!check.ready ? (
               <a
-                href={`#${check.section}`}
+                href={check.action_href ?? `#${check.section}`}
                 className="text-muted-foreground hover:text-foreground"
               >
-                Open section
+                {check.action_label ?? "Open section"}
               </a>
             ) : (
               <span className="text-muted-foreground">-</span>

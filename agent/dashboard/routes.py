@@ -798,8 +798,10 @@ def _readiness_check(
     section: str,
     message: str,
     blockers: list[dict[str, Any]] | None = None,
+    action_href: str | None = None,
+    action_label: str | None = None,
 ) -> dict[str, Any]:
-    return {
+    check = {
         "key": key,
         "label": label,
         "ready": ready,
@@ -807,6 +809,11 @@ def _readiness_check(
         "message": message,
         "blockers": blockers or [],
     }
+    if action_href:
+        check["action_href"] = action_href
+    if action_label:
+        check["action_label"] = action_label
+    return check
 
 
 def _has_mapping_values(value: Any, *keys: str) -> bool:
@@ -986,6 +993,8 @@ async def _delivery_project_readiness(
             message="Linear provider token is connected."
             if tracker_credential_ready
             else "Connect a Linear provider token for queue polling.",
+            action_href="/my-settings",
+            action_label="Open profile settings",
         ),
         _readiness_check(
             key="repository_access",
@@ -1005,6 +1014,8 @@ async def _delivery_project_readiness(
             message=f"{provider} user token is connected."
             if pat_status.get("connected")
             else f"Connect a {provider} provider token for this user.",
+            action_href="/my-settings",
+            action_label="Open profile settings",
         ),
         _readiness_check(
             key="project_secrets",

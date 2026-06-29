@@ -240,6 +240,8 @@ export interface DeliveryProjectReadiness {
     ready: boolean
     section: string
     message: string
+    action_href?: string
+    action_label?: string
     blockers: Array<{
       code?: string
       message?: string
