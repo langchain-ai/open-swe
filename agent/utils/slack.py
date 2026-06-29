@@ -915,9 +915,7 @@ async def store_slack_run_mapping(
     """Persist Slack thread/message to LangGraph run mapping."""
     namespace = (_SLACK_RUN_MAP_NAMESPACE, channel_id)
     if not trace_message_ts:
-        existing = await lookup_slack_thread_run_mapping(
-            langgraph_client, channel_id, thread_ts
-        )
+        existing = await lookup_slack_thread_run_mapping(langgraph_client, channel_id, thread_ts)
         if isinstance(existing, dict):
             candidate = existing.get("trace_message_ts")
             if isinstance(candidate, str) and candidate:
