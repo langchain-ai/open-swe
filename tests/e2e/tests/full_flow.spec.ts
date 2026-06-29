@@ -37,6 +37,26 @@ test.describe("Open SWE full flow", () => {
     await expect(page.locator('.pr[data-pr="1"]')).toContainText("greet.py");
   });
 
+  test("Slack breakout request starts a new top-level Open SWE thread", async ({ page }) => {
+    await page.locator("#text").fill("<@U0BOT> please break out adding a greet() helper into a separate thread");
+    await page.locator("#send").click();
+
+    const breakout = page
+      .locator(".msg.bot")
+      .filter({ hasText: /Open SWE breakout thread:\* Add greet\(\) helper/ });
+    await expect(breakout).toBeVisible({ timeout: 60_000 });
+    const breakoutThreadTs = await breakout.getAttribute("data-thread-ts");
+    expect(breakoutThreadTs).toBeTruthy();
+
+    const breakoutThreadMessages = page.locator(`.msg.bot[data-thread-ts="${breakoutThreadTs}"]`);
+    await expect(breakoutThreadMessages.locator('a[href*="/agents/"]')).toBeVisible({
+      timeout: 60_000,
+    });
+    await expect(
+      page.locator(".msg.bot").filter({ hasText: "I started a separate Open SWE thread" }),
+    ).toBeVisible({ timeout: 60_000 });
+  });
+
   test("a message that does not mention the bot produces no run and no PR", async ({ page }) => {
     await page.locator("#mention").uncheck();
     await page.locator("#text").fill("just chatting with the team, nothing for the bot");

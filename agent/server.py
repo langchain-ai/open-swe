@@ -85,6 +85,7 @@ from .tools import (
     save_plan,
     schedule_thread_wakeup,
     slack_read_thread_messages,
+    slack_start_new_thread,
     slack_thread_reply,
     web_search,
 )
@@ -835,6 +836,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             request_pr_review,
             schedule_thread_wakeup,
             slack_read_thread_messages,
+            slack_start_new_thread,
             slack_thread_reply,
             *corridor_tools,
             *observability_tools,

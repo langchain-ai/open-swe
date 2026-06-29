@@ -119,6 +119,35 @@ def _step_open_pr(_messages: list[BaseMessage]) -> AIMessage:
     )
 
 
+def _step_breakout(_messages: list[BaseMessage]) -> AIMessage:
+    return AIMessage(
+        content="Starting a separate Slack thread for the breakout task.",
+        tool_calls=[
+            {
+                "name": "slack_start_new_thread",
+                "args": {
+                    "title": "Add greet() helper",
+                    "instructions": "Please add a greet() helper and open a draft PR in the default repository. Use the current Slack request as context, and report progress in this new thread.",
+                },
+                "id": "call-breakout",
+            }
+        ],
+    )
+
+
+def _step_breakout_reply(_messages: list[BaseMessage]) -> AIMessage:
+    return AIMessage(
+        content="Confirming the breakout thread was started.",
+        tool_calls=[
+            {
+                "name": "slack_thread_reply",
+                "args": {"message": "I started a separate Open SWE thread for that aspect."},
+                "id": "call-breakout-reply",
+            }
+        ],
+    )
+
+
 def _step_reply(messages: list[BaseMessage]) -> AIMessage:
     url = _pr_url_from_messages(messages) or "(PR url unavailable)"
     feedback = _reviewer_feedback(messages)
@@ -248,6 +277,10 @@ def build_script() -> list[Any]:
     return [_step_implement, _step_open_pr, _step_reply]
 
 
+def build_breakout_script() -> list[Any]:
+    return [_step_breakout, _step_breakout_reply]
+
+
 def build_followup_script() -> list[Any]:
     return [_step_followup]
 
@@ -282,6 +315,8 @@ class FakeScriptedChatModel(BaseChatModel):
             script = build_plan_script()  # re-plan after requested changes
         elif _is_plan_request(first_text) and len(humans) <= 1:
             script = build_plan_script()  # first ask was to plan
+        elif _is_breakout_request(first_text) and len(humans) <= 1:
+            script = build_breakout_script()
         elif len(humans) <= 1:
             script = build_script()
         else:
@@ -301,6 +336,11 @@ class FakeScriptedChatModel(BaseChatModel):
 
 def _is_plan_request(text: str) -> bool:
     return "plan" in text.lower()
+
+
+def _is_breakout_request(text: str) -> bool:
+    t = text.lower()
+    return "break out" in t or "separate thread" in t or "split out" in t
 
 
 def _is_approval(text: str) -> bool:
