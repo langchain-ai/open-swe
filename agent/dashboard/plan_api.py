@@ -182,11 +182,6 @@ async def approve_plan(thread_id: str, session: dict[str, Any] = _SESSION_DEP) -
     comments = await list_plan_comments(thread_id, raise_on_error=True)
     feedback = _format_comments(comments)
     await set_plan_status(thread_id, PLAN_STATUS_APPROVED, plan_mode=False)
-    await _maybe_post_plan_approved_to_slack(
-        metadata,
-        comment_count=len(comments),
-        actor=_approval_actor_name(session),
-    )
     if plan_markdown:
         text = (
             "The plan has been approved. Implement it now exactly as written "
@@ -198,6 +193,11 @@ async def approve_plan(thread_id: str, session: dict[str, Any] = _SESSION_DEP) -
     if feedback:
         text += "\n\nAlso take this reviewer feedback into account:\n\n" + feedback
     await _dispatch_followup(thread_id, metadata, text, plan_mode=False)
+    await _maybe_post_plan_approved_to_slack(
+        metadata,
+        comment_count=len(comments),
+        actor=_approval_actor_name(session),
+    )
     return {"status": PLAN_STATUS_APPROVED}
 
 
