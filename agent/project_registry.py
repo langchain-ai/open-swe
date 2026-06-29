@@ -190,6 +190,7 @@ def default_sports_cms_delivery_project(
     *,
     tracker_config: Mapping[str, Any],
     vcs_config: Mapping[str, Any],
+    sandbox_profile: Mapping[str, Any] | None = None,
     membership: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     return default_delivery_project(
@@ -206,7 +207,7 @@ def default_sports_cms_delivery_project(
             "excluded_statuses": ["done", "completed", "canceled", "cancelled", "duplicate"],
             "required_fields": ["description"],
         },
-        sandbox_profile={"provider": "langsmith", "profile": "sports-cms"},
+        sandbox_profile=sandbox_profile or {"provider": "langsmith", "profile": "sports-cms"},
         branch_policy={
             "base_branch": "main",
             "branch_prefix": "delivery/sports-cms",

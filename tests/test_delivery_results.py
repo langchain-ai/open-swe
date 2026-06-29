@@ -289,8 +289,8 @@ async def test_ingest_collects_platform_drupal_runtime_evidence(
     fake_client: _FakeClient,
     tmp_path,
 ) -> None:  # noqa: ANN001
-    screenshot = tmp_path / "home.png"
-    trace = tmp_path / "trace.zip"
+    screenshot = tmp_path / "artifacts" / "home.png"
+    trace = tmp_path / "artifacts" / "trace.zip"
     item = await _running_item(
         sandbox_profile={
             "provider": "ddev",
@@ -335,8 +335,10 @@ async def test_ingest_collects_platform_drupal_runtime_evidence(
         assert cwd == str(tmp_path)
         assert timeout == 120
         if str(screenshot) in command:
+            assert screenshot.parent.is_dir()
             screenshot.write_bytes(b"png")
         if str(trace) in command:
+            assert trace.parent.is_dir()
             trace.write_bytes(b"trace")
         return {"exit_code": 0, "output": "ok"}
 

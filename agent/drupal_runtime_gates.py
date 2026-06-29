@@ -122,13 +122,15 @@ async def _run_gate(
         timeout if isinstance(timeout, int) and timeout > 0 else DEFAULT_GATE_TIMEOUT_SECONDS
     )
     cwd = _string(gate.get("cwd")) or project_path
+    artifact_type = _string(gate.get("artifact_type") or gate.get("artifactType"))
+    bucket = _artifact_bucket(artifact_type)
+    if bucket and artifact_path:
+        Path(artifact_path).parent.mkdir(parents=True, exist_ok=True)
     result = await runner(command, cwd, timeout_seconds)
     exit_code = result.get("exit_code")
     output = _string(result.get("output"))
     status = "passed" if exit_code == 0 else "failed"
     artifacts: dict[str, list[str]] = {}
-    artifact_type = _string(gate.get("artifact_type") or gate.get("artifactType"))
-    bucket = _artifact_bucket(artifact_type)
     if bucket and artifact_path:
         if Path(artifact_path).exists():
             artifacts[bucket] = [artifact_path]

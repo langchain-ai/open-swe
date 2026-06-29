@@ -235,6 +235,25 @@ def test_default_sports_cms_project_profile_is_ready_for_v1_configuration() -> N
     assert project["membership"] == {"users": []}
 
 
+def test_default_sports_cms_project_accepts_runtime_sandbox_profile() -> None:
+    sandbox_profile = project_registry.sports_cms_ddev_sandbox_profile(
+        project_path="/workspace/sports-cms",
+        preview_url="https://sports.example.test/",
+        theme_path="web/themes/custom/sports_theme",
+        artifact_dir="/tmp/sports-artifacts",
+    )
+
+    project = project_registry.default_sports_cms_delivery_project(
+        tracker_config={"team_keys": ["ENG"], "linear_project_ids": ["project-linear-1"]},
+        vcs_config={"owner": "example", "repo": "sports-cms"},
+        sandbox_profile=sandbox_profile,
+    )
+
+    assert project["sandbox_profile"]["provider"] == "ddev"
+    assert project["sandbox_profile"]["runtime"]["project_path"] == "/workspace/sports-cms"
+    assert project["sandbox_profile"]["runtime"]["preview_url"] == "https://sports.example.test/"
+
+
 def test_sports_cms_ddev_sandbox_profile_contains_runtime_gates() -> None:
     profile = project_registry.sports_cms_ddev_sandbox_profile(
         project_path="/workspace/sports-cms",

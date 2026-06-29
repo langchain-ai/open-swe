@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from collections.abc import Mapping
 from typing import Any
 
@@ -12,7 +13,11 @@ from .delivery_queue import (
     transition_delivery_queue_status,
 )
 from .linear_queue import LinearIssueClient, linear_policy_from_project, poll_linear_delivery_queue
-from .project_registry import default_sports_cms_delivery_project, upsert_delivery_project
+from .project_registry import (
+    default_sports_cms_delivery_project,
+    sports_cms_ddev_sandbox_profile,
+    upsert_delivery_project,
+)
 
 
 def _mapping(value: Any) -> dict[str, Any]:
@@ -39,6 +44,23 @@ def _merge_project(
         else:
             merged[key] = value
     return merged
+
+
+def _sports_cms_sandbox_profile_from_env(env: Mapping[str, str]) -> dict[str, Any] | None:
+    project_path = _string(
+        env.get("SPORTS_CMS_DDEV_PROJECT_PATH") or env.get("SPORTS_CMS_PROJECT_PATH")
+    )
+    preview_url = _string(env.get("SPORTS_CMS_PREVIEW_URL"))
+    if not project_path or not preview_url:
+        return None
+    return sports_cms_ddev_sandbox_profile(
+        project_path=project_path,
+        preview_url=preview_url,
+        theme_path=_string(env.get("SPORTS_CMS_THEME_PATH")) or "web/themes/custom/adesso_theme",
+        artifact_dir=_string(env.get("SPORTS_CMS_ARTIFACT_DIR"))
+        or "/tmp/open-swe-sports-cms-artifacts",
+        sdc_component_id=_string(env.get("SPORTS_CMS_SDC_COMPONENT_ID")) or None,
+    )
 
 
 async def _select_queue_item(
@@ -202,6 +224,7 @@ async def run_sports_cms_delivery_smoke(
         default_sports_cms_delivery_project(
             tracker_config=tracker_config,
             vcs_config=vcs_config,
+            sandbox_profile=_sports_cms_sandbox_profile_from_env(os.environ),
         ),
         project_overrides,
     )

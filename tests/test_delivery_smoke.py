@@ -309,6 +309,41 @@ async def test_sports_cms_smoke_drives_linear_item_to_auto_merge(
     assert merge_recorder.calls[0]["pr_number"] == 42
 
 
+async def test_sports_cms_smoke_uses_configured_ddev_runtime_profile(
+    fake_client: _FakeClient,
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:  # noqa: ANN001
+    project_path = tmp_path / "sports-cms"
+    project_path.mkdir()
+    artifact_dir = tmp_path / "artifacts"
+    monkeypatch.setenv("SPORTS_CMS_DDEV_PROJECT_PATH", str(project_path))
+    monkeypatch.setenv("SPORTS_CMS_PREVIEW_URL", "https://sports-preview.test/")
+    monkeypatch.setenv("SPORTS_CMS_THEME_PATH", "web/themes/custom/sports_theme")
+    monkeypatch.setenv("SPORTS_CMS_ARTIFACT_DIR", str(artifact_dir))
+
+    proof = await smoke.run_sports_cms_delivery_smoke(
+        tracker_config={"team_keys": ["SPORT"], "project_ids": ["linear-sports"]},
+        vcs_config={"owner": "example", "repo": "sports-cms"},
+        linear_client=_FakeLinearClient([]),
+        client=fake_client,
+        worker_result=_worker_result(),
+        review_result={"qa_result": {"passed": True}},
+        merge_token="token",
+    )
+
+    stored_project = await project_registry.get_delivery_project("sports-cms")
+    assert proof["status"] == "blocked"
+    assert proof["reason"] == "linear_issue_not_queued"
+    assert stored_project is not None
+    assert stored_project["sandbox_profile"]["provider"] == "ddev"
+    runtime = stored_project["sandbox_profile"]["runtime"]
+    assert runtime["project_path"] == str(project_path)
+    assert runtime["preview_url"] == "https://sports-preview.test/"
+    assert runtime["gates"][1]["command"] == "test -f web/themes/custom/sports_theme/build/main.min.css"
+    assert runtime["gates"][4]["artifact_path"] == str(artifact_dir / "sports-cms-home.png")
+
+
 async def test_sports_cms_smoke_blocks_before_merge_without_draft_pr_proof(
     fake_client: _FakeClient,
     dispatch_recorder: _DispatchRecorder,
