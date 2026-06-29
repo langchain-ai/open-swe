@@ -227,7 +227,42 @@ export interface DeliveryProjectSummary {
     thread_id?: string
     pull_request_url?: string
     updated_at?: string
+    delivery?: DeliveryRunRollup | null
   }>
+}
+
+export interface DeliveryRunRollup {
+  queueStatus?: string | null
+  workerThreadId?: string | null
+  reviewerThreadId?: string | null
+  qaThreadId?: string | null
+  mergeWorkerThreadId?: string | null
+  pr?: {
+    number: number
+    title?: string | null
+    state?: string | null
+    headRef?: string | null
+    baseRef?: string | null
+    url: string
+  } | null
+  branch?: string | null
+  previewUrl?: string | null
+  previewCount: number
+  artifactCount: number
+  gateRollup?: {
+    status: string
+    passed: number
+    failed: number
+    pending: number
+    total: number
+  } | null
+  gates: Array<unknown>
+  artifacts: Array<unknown>
+  blockers: Array<unknown>
+  blockerReason?: string | null
+  reviewedSha?: string | null
+  mergeStatus?: string | null
+  mergeResult?: Record<string, unknown> | null
 }
 
 export interface DeliveryProjectReadiness {

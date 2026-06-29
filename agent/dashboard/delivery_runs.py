@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from typing import Any
 
 _PR_STATES = frozenset({"draft", "open", "merged", "closed"})
+_GITHUB_PR_URL_RE = re.compile(r"https://github\.com/[^/\s]+/[^/\s]+/pull/(\d+)")
 _DELIVERY_DIRECT_KEYS = frozenset(
     {
         "delivery_queue_status",
@@ -141,6 +143,15 @@ def _merge_result(
     return provider or None
 
 
+def _pr_number_from_url(value: Any) -> int | None:
+    if not isinstance(value, str):
+        return None
+    match = _GITHUB_PR_URL_RE.search(value)
+    if not match:
+        return None
+    return int(match.group(1))
+
+
 def _pr_rollup(
     metadata: Mapping[str, Any],
     delivery: Mapping[str, Any],
@@ -156,10 +167,20 @@ def _pr_rollup(
     pr_url = (
         nested_pr.get("url")
         or store_record.get("pr_url")
+        or store_record.get("pull_request_url")
+        or store_record.get("pullRequestUrl")
         or delivery.get("pr_url")
+        or delivery.get("pull_request_url")
+        or delivery.get("pullRequestUrl")
         or metadata.get("pr_url")
+        or metadata.get("pull_request_url")
+        or metadata.get("pullRequestUrl")
     )
-    if isinstance(pr_number, bool) or not isinstance(pr_number, int) or not isinstance(pr_url, str):
+    if isinstance(pr_number, bool):
+        return None
+    if not isinstance(pr_number, int):
+        pr_number = _pr_number_from_url(pr_url)
+    if not isinstance(pr_number, int) or not isinstance(pr_url, str):
         return None
 
     title = _first_string(
@@ -176,8 +197,8 @@ def _pr_rollup(
     )
     head_ref = _first_string(
         (nested_pr, ("headRef", "head_ref")),
-        (store_record, ("head_ref", "branch_name")),
-        (delivery, ("head_ref", "branch_name")),
+        (store_record, ("head_ref", "branch_name", "branch")),
+        (delivery, ("head_ref", "branch_name", "branch")),
         (metadata, ("branch_name",)),
     )
     base_ref = _first_string(

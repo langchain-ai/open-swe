@@ -37,6 +37,7 @@ from .agent_usage import (
     refresh_usage_leaderboard_cache,
 )
 from .analyzer_cron import remove_continual_cron
+from .delivery_runs import build_delivery_run_rollup
 from .enabled_repos import (
     list_enabled_review_repos,
     set_review_repo_enabled,
@@ -380,6 +381,7 @@ def _project_member_logins(project: dict[str, Any]) -> set[str]:
 def _delivery_queue_summary(item: dict[str, Any]) -> dict[str, Any]:
     work_item = item.get("work_item") if isinstance(item.get("work_item"), dict) else {}
     delivery = item.get("delivery") if isinstance(item.get("delivery"), dict) else {}
+    delivery_rollup = build_delivery_run_rollup({}, store_record=item)
     return {
         "id": item.get("id"),
         "status": item.get("status"),
@@ -391,6 +393,7 @@ def _delivery_queue_summary(item: dict[str, Any]) -> dict[str, Any]:
         or delivery.get("pull_request_url")
         or delivery.get("pr_url"),
         "updated_at": item.get("updated_at"),
+        "delivery": delivery_rollup,
     }
 
 

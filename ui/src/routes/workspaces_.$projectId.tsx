@@ -6,6 +6,7 @@ import type {
   DeliveryAutoModeTickResult,
   DeliveryProjectReadiness,
   DeliveryProjectSummary,
+  DeliveryRunRollup,
 } from "@/lib/api"
 import { AppShell, SettingsSection } from "@/components/AppShell"
 import { WorkspaceCredentialsSection } from "@/components/WorkspaceCredentialsSection"
@@ -108,6 +109,131 @@ function TokenList({ items }: { items: Array<string> }) {
   )
 }
 
+function shortSha(value: string | null | undefined): string | null {
+  return value ? value.slice(0, 8) : null
+}
+
+function objectLabel(value: unknown): string {
+  if (typeof value === "string" && value.trim()) return value.trim()
+  if (!value || typeof value !== "object") return ""
+  const record = value as Record<string, unknown>
+  const name = text(record.name)
+  const status = text(record.status)
+  const message = text(record.message)
+  const code = text(record.code)
+  if (name !== "Not set" && status !== "Not set") return `${name}: ${status}`
+  if (code !== "Not set" && message !== "Not set") return `${code}: ${message}`
+  if (message !== "Not set") return message
+  if (status !== "Not set") return status
+  return JSON.stringify(value)
+}
+
+function EvidenceLink({ value }: { value: unknown }) {
+  const label = objectLabel(value)
+  if (!label) return null
+  if (label.startsWith("http://") || label.startsWith("https://")) {
+    return (
+      <a
+        href={label}
+        className="truncate text-muted-foreground hover:text-foreground"
+        target="_blank"
+        rel="noreferrer"
+      >
+        {label}
+      </a>
+    )
+  }
+  return <span className="truncate text-muted-foreground">{label}</span>
+}
+
+function DeliveryRunDetails({ delivery }: { delivery?: DeliveryRunRollup | null }) {
+  if (!delivery) return null
+  const threadItems = [
+    ["Worker", delivery.workerThreadId],
+    ["Review", delivery.reviewerThreadId],
+    ["QA", delivery.qaThreadId],
+    ["Merge", delivery.mergeWorkerThreadId],
+  ].filter(([, value]) => value)
+  const statusItems = [
+    ["Branch", delivery.branch],
+    ["Reviewed", shortSha(delivery.reviewedSha)],
+    ["Merge", delivery.mergeStatus],
+  ].filter(([, value]) => value)
+  const blockers = delivery.blockers.map(objectLabel).filter(Boolean)
+  return (
+    <div className="space-y-2 sm:col-span-3">
+      <div className="flex flex-wrap gap-1.5 text-[10px] text-muted-foreground">
+        {delivery.gateRollup ? (
+          <Badge variant="secondary">
+            Gates {delivery.gateRollup.status}{" "}
+            {delivery.gateRollup.total
+              ? `${delivery.gateRollup.passed}/${delivery.gateRollup.total}`
+              : ""}
+          </Badge>
+        ) : null}
+        {statusItems.map(([label, value]) => (
+          <Badge key={label} variant="secondary">
+            {label} {value}
+          </Badge>
+        ))}
+        {threadItems.map(([label, value]) => (
+          <Badge key={label} variant="outline" title={value ?? undefined}>
+            {label}
+          </Badge>
+        ))}
+      </div>
+      <div className="grid gap-2 text-xs sm:grid-cols-2">
+        {delivery.pr?.url ? (
+          <a
+            href={delivery.pr.url}
+            className="truncate text-muted-foreground hover:text-foreground"
+            target="_blank"
+            rel="noreferrer"
+          >
+            PR #{delivery.pr.number}: {delivery.pr.title ?? "Untitled"}
+          </a>
+        ) : null}
+        {delivery.previewUrl ? (
+          <a
+            href={delivery.previewUrl}
+            className="truncate text-muted-foreground hover:text-foreground"
+            target="_blank"
+            rel="noreferrer"
+          >
+            Preview: {delivery.previewUrl}
+          </a>
+        ) : null}
+      </div>
+      {delivery.artifacts.length ? (
+        <div className="grid gap-1 text-xs sm:grid-cols-2">
+          {delivery.artifacts.slice(0, 4).map((artifact, index) => (
+            <EvidenceLink key={index} value={artifact} />
+          ))}
+        </div>
+      ) : null}
+      {delivery.gates.length || blockers.length || delivery.blockerReason ? (
+        <div className="grid gap-1 text-xs text-muted-foreground sm:grid-cols-2">
+          {delivery.gates.slice(0, 4).map((gate, index) => (
+            <span key={`gate-${index}`} className="truncate">
+              {objectLabel(gate)}
+            </span>
+          ))}
+          {blockers.map((blocker, index) => (
+            <span key={`blocker-${index}`} className="truncate text-destructive">
+              {blocker}
+            </span>
+          ))}
+          {delivery.blockerReason ? (
+            <span className="truncate text-destructive">
+              {delivery.blockerReason}
+            </span>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
 function WorkspaceRuns({ project }: { project: DeliveryProjectSummary }) {
   if (!project.latest_runs.length) {
     return (
@@ -135,6 +261,7 @@ function WorkspaceRuns({ project }: { project: DeliveryProjectSummary }) {
           <div className="truncate text-muted-foreground">
             {text(run.updated_at)}
           </div>
+          <DeliveryRunDetails delivery={run.delivery} />
         </div>
       ))}
     </div>

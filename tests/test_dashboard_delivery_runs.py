@@ -44,6 +44,26 @@ def test_delivery_rollup_reads_store_value_records() -> None:
     }
 
 
+def test_delivery_rollup_builds_pr_from_pull_request_url() -> None:
+    rollup = build_delivery_run_rollup(
+        {},
+        store_record={
+            "status": "review",
+            "branch": "delivery/eng-123",
+            "pull_request_url": "https://github.com/example/repo/pull/123",
+        },
+    )
+
+    assert rollup["pr"] == {
+        "number": 123,
+        "title": "Untitled agent",
+        "state": "open",
+        "headRef": "delivery/eng-123",
+        "baseRef": "main",
+        "url": "https://github.com/example/repo/pull/123",
+    }
+
+
 def test_thread_summary_includes_delivery_rollup_from_metadata() -> None:
     summary = thread_api._thread_summary(
         {
