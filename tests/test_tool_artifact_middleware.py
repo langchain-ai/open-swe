@@ -81,7 +81,8 @@ async def test_edit_file_stamps_full_file_diff(register_backend) -> None:
             "originalContent": "line1\nOLD\nline3\n",
             "newContent": "line1\nNEW\nline3\n",
             "isNewFile": False,
-        }
+        },
+        "changed": True,
     }
     assert backend.reads == ["/repo/a.py"]
 
@@ -133,7 +134,8 @@ async def test_write_file_new_file(register_backend) -> None:
             "originalContent": None,
             "newContent": "hello\n",
             "isNewFile": True,
-        }
+        },
+        "changed": True,
     }
 
 
@@ -227,3 +229,57 @@ async def test_existing_artifact_is_merged(register_backend) -> None:
 
     assert result.artifact["existing"] == "kept"
     assert result.artifact["diff"]["newContent"] == "NEW\n"
+    assert result.artifact["changed"] is True
+
+
+async def test_edit_file_noop_marks_changed_false_and_prefixes_content(register_backend) -> None:
+    backend = FakeBackend({"/repo/a.py": FakeReadResult(content="line1\nSAME\nline3\n")})
+    register_backend("t1", backend)
+    request = _request(
+        "edit_file", {"file_path": "/repo/a.py", "old_string": "SAME", "new_string": "SAME"}
+    )
+
+    async def handler(_req: Any) -> ToolMessage:
+        return _ok("edit_file")
+
+    result = await ToolArtifactMiddleware().awrap_tool_call(request, handler)
+
+    assert result.artifact["changed"] is False
+    assert result.artifact["diff"]["originalContent"] == result.artifact["diff"]["newContent"]
+    assert result.content.startswith("[NO-OP: file content unchanged")
+    assert "ok" in result.content
+
+
+async def test_write_file_noop_marks_changed_false_and_prefixes_content(register_backend) -> None:
+    backend = FakeBackend({"/repo/x.py": FakeReadResult(content="same content\n")})
+    register_backend("t1", backend)
+    request = _request("write_file", {"file_path": "/repo/x.py", "content": "same content\n"})
+
+    async def handler(_req: Any) -> ToolMessage:
+        return _ok("write_file")
+
+    result = await ToolArtifactMiddleware().awrap_tool_call(request, handler)
+
+    assert result.artifact["changed"] is False
+    assert result.content.startswith("[NO-OP: file content unchanged")
+
+
+async def test_noop_prefix_is_not_duplicated_on_replay(register_backend) -> None:
+    backend = FakeBackend({"/repo/a.py": FakeReadResult(content="SAME\n")})
+    register_backend("t1", backend)
+    request = _request(
+        "edit_file", {"file_path": "/repo/a.py", "old_string": "SAME", "new_string": "SAME"}
+    )
+
+    async def handler(_req: Any) -> ToolMessage:
+        message = _ok("edit_file")
+        message.content = (
+            "[NO-OP: file content unchanged by this call — do NOT retry the same edit. "
+            "Re-read the file to confirm its current state, try a structurally different "
+            "edit, or surface the blocker and stop.]\n\nok"
+        )
+        return message
+
+    result = await ToolArtifactMiddleware().awrap_tool_call(request, handler)
+
+    assert result.content.count("[NO-OP:") == 1

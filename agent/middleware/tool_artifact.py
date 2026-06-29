@@ -42,6 +42,15 @@ _MAX_DIFF_LINES = 20_000
 
 _NOT_FOUND_HINTS = ("not found", "no such file", "does not exist", "file_not_found", "enoent")
 
+# Prepended to the tool result content when an edit_file/write_file call did
+# not change the file's bytes. Surfacing this in the model-visible content is
+# what stops agents from re-applying the same edit in a tight loop.
+_NOOP_NOTICE_PREFIX = (
+    "[NO-OP: file content unchanged by this call — do NOT retry the same edit. "
+    "Re-read the file to confirm its current state, try a structurally different "
+    "edit, or surface the blocker and stop.]\n\n"
+)
+
 
 def _tool_name(request: ToolCallRequest) -> str | None:
     tool_call = getattr(request, "tool_call", None)
@@ -123,7 +132,7 @@ def _build_diff_artifact(
     before: str | None,
     before_kind: str | None,
 ) -> dict[str, Any] | None:
-    """Pure: build the ``{"diff": {...}}`` artifact, or ``None`` to skip."""
+    """Pure: build the ``{"diff": {...}, "changed": bool}`` artifact, or ``None`` to skip."""
     file_path = _file_path(args)
     if file_path is None:
         return None
@@ -166,7 +175,8 @@ def _diff(
             "originalContent": original,
             "newContent": new_content,
             "isNewFile": is_new,
-        }
+        },
+        "changed": original != new_content,
     }
 
 
@@ -175,6 +185,11 @@ def _stamp(result: ToolMessage | Command, artifact: dict[str, Any] | None) -> No
         return
     existing = result.artifact if isinstance(result.artifact, Mapping) else None
     result.artifact = {**existing, **artifact} if existing else artifact
+    # Surface no-op edits in the model-visible content so the agent doesn't
+    # treat an identical re-edit as fresh progress and loop on it.
+    if artifact.get("changed") is False and isinstance(result.content, str):
+        if not result.content.startswith(_NOOP_NOTICE_PREFIX):
+            result.content = _NOOP_NOTICE_PREFIX + result.content
 
 
 class ToolArtifactMiddleware(AgentMiddleware):
