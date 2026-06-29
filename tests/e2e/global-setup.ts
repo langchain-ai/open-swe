@@ -14,9 +14,9 @@ export default function globalSetup() {
   if (existsSync(shell) && !process.env.E2E_FORCE_UI_BUILD) return;
 
   if (!existsSync(resolve(ui, "node_modules"))) {
-    execSync("pnpm install --frozen-lockfile", { cwd: ui, stdio: "inherit" });
+    execSync("corepack pnpm install --frozen-lockfile", { cwd: ui, stdio: "inherit" });
   }
-  execSync("pnpm run build", {
+  execSync("corepack pnpm run build", {
     cwd: ui,
     stdio: "inherit",
     env: { ...process.env, VITE_DASHBOARD_API_BASE_URL: `http://127.0.0.1:${port}` },
