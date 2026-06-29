@@ -137,10 +137,14 @@ async def set_plan_status(thread_id: str, status: str, *, plan_mode: bool | None
     """Update the plan lifecycle status on both the content record and metadata."""
     existing = await get_plan_content(thread_id) or {}
     client = _client()
+    record: dict[str, Any] = {"markdown": existing.get("markdown", ""), "status": status}
+    plan_file_path = existing.get("plan_file_path")
+    if isinstance(plan_file_path, str) and plan_file_path:
+        record["plan_file_path"] = plan_file_path
     await client.store.put_item(
         PLAN_CONTENT_NAMESPACE,
         thread_id,
-        {"markdown": existing.get("markdown", ""), "status": status},
+        record,
     )
     metadata: dict[str, Any] = {"plan_status": status}
     if plan_mode is not None:
