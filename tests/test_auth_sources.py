@@ -117,6 +117,60 @@ def test_resolve_github_token_slack_no_token_raises(
         asyncio.run(auth.resolve_github_token(_slack_config(), "t1"))
 
 
+def test_resolve_github_token_delivery_queue_uses_provider_pat(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class Resolved:
+        token = "ghp-delivery-token"
+
+    async def fake_resolve_provider_pat(
+        login: str,
+        *,
+        provider: str,
+        project_id: str = "",
+        action: str = "provider_access",
+    ):
+        assert login == "octocat"
+        assert provider == "github"
+        assert action == "delivery_queue_run"
+        return Resolved()
+
+    monkeypatch.setattr(
+        "agent.dashboard.provider_pat_vault.resolve_provider_pat", fake_resolve_provider_pat
+    )
+
+    config = {
+        "configurable": {
+            "source": "delivery_queue",
+            "thread_id": "t1",
+            "delivery_worker_input": {
+                "credential_policy": {
+                    "provider": "github",
+                    "identity": "github:user:octocat",
+                    "requires_user_pat": True,
+                }
+            },
+        }
+    }
+
+    token, expires_at = asyncio.run(auth.resolve_github_token(config, "t1"))
+
+    assert (token, expires_at) == ("ghp-delivery-token", None)
+
+
+def test_resolve_github_token_delivery_queue_requires_identity() -> None:
+    config = {
+        "configurable": {
+            "source": "delivery_queue",
+            "thread_id": "t1",
+            "delivery_worker_input": {"credential_policy": {"provider": "github"}},
+        }
+    }
+
+    with pytest.raises(RuntimeError, match="missing credential identity"):
+        asyncio.run(auth.resolve_github_token(config, "t1"))
+
+
 def test_resolve_github_token_per_user_wins_over_bot_only_mode(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

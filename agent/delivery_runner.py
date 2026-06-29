@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
+import uuid
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any
@@ -120,8 +120,7 @@ def _worker_thread_id_for(item: Mapping[str, Any]) -> str:
     if existing:
         return existing
     item_id = _first_text(item, "id", "dedupe_key")
-    digest = hashlib.sha256(item_id.encode("utf-8")).hexdigest()[:16]
-    return f"delivery-worker-{digest}"
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"open-swe:delivery-worker:{item_id}"))
 
 
 def _branch_policy(project: Mapping[str, Any]) -> dict[str, Any]:

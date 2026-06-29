@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+from uuid import UUID
 
 import pytest
 
@@ -227,7 +228,7 @@ async def test_launch_delivery_worker_dispatches_agent_run(
 
     assert result["status"] == "launched"
     assert result["item_id"] == record["id"]
-    assert result["worker_thread_id"].startswith("delivery-worker-")
+    assert str(UUID(result["worker_thread_id"])) == result["worker_thread_id"]
     assert result["run_id"] == "run-worker-1"
     assert len(dispatch_recorder.calls) == 1
     call = dispatch_recorder.calls[0]

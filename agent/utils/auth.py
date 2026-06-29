@@ -398,6 +398,45 @@ async def _resolve_bot_installation_token(thread_id: str) -> tuple[str, str | No
     return _cache_resolved_github_token(thread_id, bot_token, expires_at=expires_at)
 
 
+def _login_from_provider_identity(identity: str, provider: str) -> str:
+    parts = [part.strip() for part in identity.split(":") if part.strip()]
+    if len(parts) >= 3 and parts[0].lower() == provider.lower() and parts[1].lower() == "user":
+        return parts[2]
+    if len(parts) >= 2 and parts[0].lower() == provider.lower():
+        return parts[-1]
+    return ""
+
+
+async def _resolve_delivery_queue_token(
+    configurable: dict[str, Any], thread_id: str
+) -> tuple[str, str | None]:
+    worker_input = configurable.get("delivery_worker_input")
+    credential_policy = (
+        worker_input.get("credential_policy")
+        if isinstance(worker_input, dict)
+        and isinstance(worker_input.get("credential_policy"), dict)
+        else {}
+    )
+    provider = str(credential_policy.get("provider") or "github").strip().lower() or "github"
+    if provider != "github":
+        raise RuntimeError(f"Unsupported delivery queue credential provider: {provider}")
+    login = _login_from_provider_identity(str(credential_policy.get("identity") or ""), provider)
+    if not login:
+        raise RuntimeError("GitHub auth failed for delivery queue: missing credential identity")
+
+    from ..dashboard.provider_pat_vault import resolve_provider_pat
+
+    resolved = await resolve_provider_pat(
+        login,
+        provider=provider,
+        project_id=str(configurable.get("project_id") or ""),
+        action="delivery_queue_run",
+    )
+    if resolved is None:
+        raise GitHubUserAuthRequired("delivery_queue", login)
+    return _cache_resolved_github_token(thread_id, resolved.token)
+
+
 async def resolve_github_token(config: RunnableConfig, thread_id: str) -> tuple[str, str | None]:
     """Resolve a GitHub token from the run config based on the source.
 
@@ -418,6 +457,9 @@ async def resolve_github_token(config: RunnableConfig, thread_id: str) -> tuple[
         raise RuntimeError(f"GitHub auth failed for thread {thread_id}: missing source")
 
     github_login = configurable.get("github_login")
+
+    if source == "delivery_queue":
+        return await _resolve_delivery_queue_token(configurable, thread_id)
 
     # Per-user OAuth from the dashboard store wins even in bot-token-only mode,
     # for sources that carry a mapped GitHub login (Slack, dashboard). This is
