@@ -1,0 +1,1328 @@
+<title>Fork Management Playbook — open-swe</title>
+<meta name="description" content="Industry-standard branching strategy for managing parallel PoCs on a forked OSS project — upstream sync, demo workflow, file ownership, and product journey.">
+
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:         #080C14;
+    --surface:    #0F1623;
+    --surface-2:  #161E2E;
+    --surface-3:  #1C2640;
+    --border:     #263050;
+    --border-2:   #1E2840;
+
+    --text:       #D8E4F0;
+    --text-muted: #6B7E99;
+    --text-dim:   #3D5070;
+
+    --blue:       #5B9CF6;
+    --cyan:       #38C9D4;
+    --purple:     #A98DF7;
+    --green:      #3EC98A;
+    --amber:      #E8A23A;
+    --red:        #F0645A;
+    --pink:       #E06DC0;
+
+    --main-c:   var(--blue);
+    --base-c:   var(--cyan);
+    --poc-c:    var(--purple);
+    --stable-c: var(--green);
+    --wip-c:    var(--amber);
+    --future-c: var(--text-dim);
+    --product-c: var(--pink);
+
+    --mono: 'Cascadia Code', 'Fira Code', 'SF Mono', ui-monospace, monospace;
+    --sans: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+
+    --sidebar-w: 230px;
+    --content-max: 860px;
+    --radius: 6px;
+  }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 14.5px;
+    line-height: 1.7;
+    display: flex;
+    min-height: 100vh;
+  }
+
+  /* ── Sidebar ── */
+  .sidebar {
+    width: var(--sidebar-w);
+    flex-shrink: 0;
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    overflow-y: auto;
+    background: var(--surface);
+    border-right: 1px solid var(--border-2);
+    padding: 28px 0;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .sidebar-brand {
+    padding: 0 20px 20px;
+    border-bottom: 1px solid var(--border-2);
+    margin-bottom: 16px;
+  }
+
+  .sidebar-brand .repo {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text-muted);
+    letter-spacing: .04em;
+    text-transform: uppercase;
+  }
+
+  .sidebar-brand .title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+    margin-top: 4px;
+  }
+
+  .nav-section {
+    padding: 0 12px;
+    margin-bottom: 4px;
+  }
+
+  .nav-label {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    padding: 6px 8px 4px;
+  }
+
+  .nav-item {
+    display: block;
+    padding: 5px 8px;
+    border-radius: 4px;
+    color: var(--text-muted);
+    text-decoration: none;
+    font-size: 12.5px;
+    transition: background .12s, color .12s;
+  }
+  .nav-item:hover { background: var(--surface-2); color: var(--text); }
+  .nav-item.active { background: var(--surface-3); color: var(--blue); }
+
+  .nav-sub {
+    padding-left: 16px;
+    font-size: 12px;
+  }
+
+  /* ── Main ── */
+  main {
+    flex: 1;
+    min-width: 0;
+    padding: 48px 48px 96px;
+    max-width: calc(var(--content-max) + 96px);
+  }
+
+  /* ── Typography ── */
+  h1 {
+    font-size: 28px;
+    font-weight: 700;
+    color: var(--text);
+    letter-spacing: -.02em;
+    text-wrap: balance;
+    margin-bottom: 8px;
+  }
+
+  .page-meta {
+    font-size: 12px;
+    color: var(--text-muted);
+    font-family: var(--mono);
+    margin-bottom: 40px;
+    display: flex;
+    gap: 20px;
+  }
+
+  h2 {
+    font-size: 19px;
+    font-weight: 700;
+    color: var(--text);
+    letter-spacing: -.01em;
+    text-wrap: balance;
+    margin: 56px 0 16px;
+    padding-top: 56px;
+    border-top: 1px solid var(--border-2);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  h2:first-of-type { margin-top: 0; padding-top: 0; border-top: none; }
+
+  .section-num {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text-dim);
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 1px 6px;
+    letter-spacing: .05em;
+  }
+
+  h3 {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--text);
+    margin: 28px 0 10px;
+    letter-spacing: -.005em;
+    text-wrap: balance;
+  }
+
+  p { margin-bottom: 12px; color: var(--text); }
+  p:last-child { margin-bottom: 0; }
+
+  strong { color: var(--text); font-weight: 600; }
+
+  a { color: var(--blue); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  /* ── Code ── */
+  code {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    background: var(--surface-2);
+    border: 1px solid var(--border-2);
+    border-radius: 3px;
+    padding: 1px 5px;
+    color: var(--cyan);
+  }
+
+  pre {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 18px 20px;
+    overflow-x: auto;
+    line-height: 1.65;
+    margin: 14px 0;
+    color: var(--text);
+  }
+
+  pre code {
+    background: none;
+    border: none;
+    padding: 0;
+    color: inherit;
+    font-size: inherit;
+  }
+
+  .c  { color: var(--text-muted); }  /* comment */
+  .kw { color: var(--blue); }        /* keyword / command */
+  .br { color: var(--purple); }      /* branch name */
+  .tg { color: var(--amber); }       /* tag */
+  .ok { color: var(--green); }       /* success */
+  .er { color: var(--red); }         /* error/warning */
+  .str{ color: var(--cyan); }        /* string */
+
+  /* ── Cards / Callouts ── */
+  .callout {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--blue);
+    border-radius: var(--radius);
+    padding: 14px 18px;
+    margin: 14px 0;
+    font-size: 13.5px;
+  }
+
+  .callout.warn  { border-left-color: var(--amber); }
+  .callout.ok    { border-left-color: var(--green); }
+  .callout.info  { border-left-color: var(--cyan); }
+
+  .callout-label {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    margin-bottom: 6px;
+  }
+
+  .callout .callout-label { color: var(--blue); }
+  .callout.warn .callout-label { color: var(--amber); }
+  .callout.ok .callout-label { color: var(--green); }
+  .callout.info .callout-label { color: var(--cyan); }
+
+  /* ── Tables ── */
+  .table-wrap { overflow-x: auto; margin: 14px 0; }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  th {
+    text-align: left;
+    padding: 8px 14px;
+    background: var(--surface-2);
+    color: var(--text-muted);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    border-bottom: 1px solid var(--border);
+  }
+
+  td {
+    padding: 9px 14px;
+    border-bottom: 1px solid var(--border-2);
+    vertical-align: top;
+    color: var(--text);
+  }
+
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: var(--surface-2); }
+
+  /* ── Branch diagram ── */
+  .branch-tree {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 28px 28px 24px;
+    margin: 16px 0;
+    font-family: var(--mono);
+    font-size: 12.5px;
+  }
+
+  .branch-row {
+    display: flex;
+    align-items: flex-start;
+    margin-bottom: 0;
+    position: relative;
+    padding: 5px 0;
+  }
+
+  .tree-line {
+    white-space: pre;
+    color: var(--text-dim);
+    flex-shrink: 0;
+    line-height: 1.5;
+  }
+
+  .branch-node {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 3px 10px;
+    border-radius: 4px;
+    border: 1px solid;
+    font-size: 12px;
+    line-height: 1;
+    flex-shrink: 0;
+  }
+
+  .branch-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  .branch-desc {
+    color: var(--text-muted);
+    margin-left: 12px;
+    font-size: 11.5px;
+    align-self: center;
+  }
+
+  .branch-tag {
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 3px;
+    border: 1px solid var(--amber);
+    color: var(--amber);
+    margin-left: 6px;
+  }
+
+  .b-main    { border-color: var(--main-c);    color: var(--main-c);    }
+  .b-base    { border-color: var(--base-c);    color: var(--base-c);    }
+  .b-poc     { border-color: var(--poc-c);     color: var(--poc-c);     }
+  .b-stable  { border-color: var(--stable-c);  color: var(--stable-c);  }
+  .b-future  { border-color: var(--border);    color: var(--text-dim);  }
+  .b-product { border-color: var(--product-c); color: var(--product-c); }
+  .b-integ   { border-color: var(--border);    color: var(--text-muted);}
+
+  .dot-main    { background: var(--main-c); }
+  .dot-base    { background: var(--base-c); }
+  .dot-poc     { background: var(--poc-c); }
+  .dot-stable  { background: var(--stable-c); }
+  .dot-future  { background: var(--text-dim); }
+  .dot-product { background: var(--product-c); }
+
+  /* ── Status pills ── */
+  .pill {
+    display: inline-block;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    padding: 2px 8px;
+    border-radius: 20px;
+    font-family: var(--mono);
+  }
+
+  .pill-stable  { background: rgba(62,201,138,.12); color: var(--green); border: 1px solid rgba(62,201,138,.3); }
+  .pill-wip     { background: rgba(232,162,58,.12);  color: var(--amber); border: 1px solid rgba(232,162,58,.3); }
+  .pill-future  { background: rgba(61,80,112,.2);    color: var(--text-dim); border: 1px solid var(--border); }
+  .pill-product { background: rgba(224,109,192,.12); color: var(--pink);  border: 1px solid rgba(224,109,192,.3); }
+  .pill-danger  { background: rgba(240,100,90,.12);  color: var(--red);   border: 1px solid rgba(240,100,90,.3); }
+
+  /* ── Steps ── */
+  .steps { list-style: none; margin: 14px 0; }
+
+  .step {
+    display: flex;
+    gap: 16px;
+    padding: 14px 0;
+    border-bottom: 1px solid var(--border-2);
+  }
+
+  .step:last-child { border-bottom: none; }
+
+  .step-n {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    margin-top: 2px;
+  }
+
+  .step-body { flex: 1; min-width: 0; }
+  .step-title { font-weight: 600; color: var(--text); margin-bottom: 4px; font-size: 14px; }
+  .step-body p { font-size: 13.5px; color: var(--text); margin-bottom: 8px; }
+  .step-body pre { margin: 8px 0; }
+
+  /* ── Ownership YAML mock ── */
+  .yaml { color: var(--text); }
+  .yaml .y-key  { color: var(--blue); }
+  .yaml .y-val  { color: var(--cyan); }
+  .yaml .y-str  { color: var(--green); }
+  .yaml .y-com  { color: var(--text-muted); }
+
+  /* ── Checklist ── */
+  .checklist { list-style: none; margin: 10px 0; }
+  .checklist li {
+    padding: 5px 0 5px 24px;
+    position: relative;
+    font-size: 13.5px;
+    border-bottom: 1px solid var(--border-2);
+  }
+  .checklist li:last-child { border-bottom: none; }
+  .checklist li::before {
+    content: '☐';
+    position: absolute;
+    left: 0;
+    color: var(--text-dim);
+    font-size: 13px;
+  }
+
+  /* ── Journey timeline ── */
+  .timeline { margin: 20px 0; }
+  .tl-item {
+    display: flex;
+    gap: 20px;
+    padding-bottom: 28px;
+    position: relative;
+  }
+  .tl-item::before {
+    content: '';
+    position: absolute;
+    left: 15px;
+    top: 32px;
+    bottom: 0;
+    width: 1px;
+    background: var(--border);
+  }
+  .tl-item:last-child::before { display: none; }
+  .tl-dot {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    border: 2px solid var(--border);
+    background: var(--surface-2);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 700;
+    flex-shrink: 0;
+    color: var(--text-muted);
+    z-index: 1;
+  }
+  .tl-content { flex: 1; padding-top: 4px; }
+  .tl-label { font-size: 11px; font-family: var(--mono); color: var(--text-muted); letter-spacing: .05em; text-transform: uppercase; margin-bottom: 4px; }
+  .tl-title { font-size: 15px; font-weight: 600; color: var(--text); margin-bottom: 6px; }
+  .tl-body  { font-size: 13.5px; color: var(--text); }
+
+  .tl-item.phase-poc    .tl-dot { border-color: var(--purple); color: var(--purple); }
+  .tl-item.phase-stable .tl-dot { border-color: var(--green);  color: var(--green); }
+  .tl-item.phase-decide .tl-dot { border-color: var(--amber);  color: var(--amber); }
+  .tl-item.phase-product.tl-dot { border-color: var(--pink);   color: var(--pink); }
+
+  /* ── Divider ── */
+  hr { border: none; border-top: 1px solid var(--border-2); margin: 32px 0; }
+
+  /* ── Small utilities ── */
+  .mono { font-family: var(--mono); font-size: 12.5px; }
+  .muted { color: var(--text-muted); }
+  .mt-8  { margin-top: 8px; }
+  .mt-16 { margin-top: 16px; }
+  .flex-row { display: flex; gap: 12px; flex-wrap: wrap; }
+
+  @media (max-width: 900px) {
+    .sidebar { display: none; }
+    main { padding: 28px 20px 64px; }
+  }
+</style>
+
+<!-- ── Sidebar ── -->
+<nav class="sidebar">
+  <div class="sidebar-brand">
+    <div class="repo">ghosh-sayak / open-swe</div>
+    <div class="title">Fork Management Playbook</div>
+  </div>
+
+  <div class="nav-section">
+    <div class="nav-label">Context</div>
+    <a class="nav-item" href="#state">Current State</a>
+    <a class="nav-item" href="#arch">Target Architecture</a>
+  </div>
+
+  <div class="nav-section">
+    <div class="nav-label">Setup</div>
+    <a class="nav-item" href="#phase1">Phase 1 — Restructure</a>
+    <a class="nav-item nav-sub" href="#phase1-rename">Rename branches</a>
+    <a class="nav-item nav-sub" href="#phase1-base">Create base layer</a>
+    <a class="nav-item nav-sub" href="#phase1-worktrees">Git worktrees</a>
+    <a class="nav-item nav-sub" href="#phase1-github">GitHub settings</a>
+  </div>
+
+  <div class="nav-section">
+    <div class="nav-label">K8s PoC</div>
+    <a class="nav-item" href="#k8s">Start K8s PoC</a>
+    <a class="nav-item nav-sub" href="#k8s-branch">Branch setup</a>
+    <a class="nav-item nav-sub" href="#k8s-daily">Daily workflow</a>
+  </div>
+
+  <div class="nav-section">
+    <div class="nav-label">Workflows</div>
+    <a class="nav-item" href="#sync">Upstream Sync</a>
+    <a class="nav-item" href="#demo">Demo Workflow</a>
+    <a class="nav-item" href="#ownership">File Ownership</a>
+  </div>
+
+  <div class="nav-section">
+    <div class="nav-label">Reference</div>
+    <a class="nav-item" href="#checklists">Checklists</a>
+    <a class="nav-item" href="#naming">Naming Convention</a>
+    <a class="nav-item" href="#product">Product Journey</a>
+  </div>
+</nav>
+
+<!-- ── Main content ── -->
+<main>
+
+  <h1>Fork Management Playbook</h1>
+  <div class="page-meta">
+    <span>fork: langchain-ai/open-swe</span>
+    <span>origin: ghosh-sayak/open-swe</span>
+    <span>updated: 2026-06-29</span>
+    <span style="color:var(--green)">✓ Phase 1 complete · ✓ Phase 2 complete</span>
+  </div>
+
+  <!-- ═══ 1. Current State ═══ -->
+  <h2 id="state"><span class="section-num">01</span> Current State</h2>
+
+  <p>Actual branch state as of 2026-06-29, after completing Phase 1 and Phase 2.</p>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>Branch</th><th>Status</th><th>Worktree</th><th>What it contains</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>main</code></td>
+          <td><span class="pill pill-stable">Synced</span></td>
+          <td>—</td>
+          <td>Clean upstream mirror at <code>6d125526</code>. Never commit here directly.</td>
+        </tr>
+        <tr>
+          <td><code>base/core-custom</code></td>
+          <td><span class="pill pill-stable">Active</span></td>
+          <td><code>~/workspace/open-swe-base/</code></td>
+          <td>Shared infra on top of <code>main</code>: SearXNG, langsmith null-guard, Makefile, pyproject, .gitignore, upstream-sync-status.md. Commit: <code>1809e02e</code></td>
+        </tr>
+        <tr>
+          <td><code>poc/daytona</code></td>
+          <td><span class="pill pill-stable">Stable</span></td>
+          <td><code>~/workspace/open-swe/</code></td>
+          <td>Daytona sandbox integration on top of <code>base/core-custom</code>. Tagged <code>poc/daytona-v1.0</code>. Rarely touched — stable reference only.</td>
+        </tr>
+        <tr>
+          <td><code>poc/k8s-sandbox</code></td>
+          <td><span class="pill pill-wip">WIP</span></td>
+          <td><code>~/workspace/open-swe-k8s/</code></td>
+          <td>K8s agent sandbox PoC. Branched from <code>base/core-custom</code> HEAD (<code>1809e02e</code>). Clean slate — no Daytona code. Active development here.</td>
+        </tr>
+        <tr>
+          <td><code>local/self-hosted</code></td>
+          <td><span class="pill pill-future">Kept</span></td>
+          <td>—</td>
+          <td>Old name for <code>poc/daytona</code>. Kept on origin intentionally as a reference. Do not commit to this branch.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="callout info">
+    <div class="callout-label">Worktree quick reference</div>
+    Run <code>git worktree list</code> from any of the three directories to see all active worktrees and their branches at a glance.
+  </div>
+
+
+  <!-- ═══ 2. Target Architecture ═══ -->
+  <h2 id="arch"><span class="section-num">02</span> Target Architecture</h2>
+
+  <p>Every branch has exactly one parent. Upstream changes flow down the hierarchy automatically through the cascade rebase. No branch ever directly touches <code>main</code> except through a fast-forward.</p>
+
+  <div class="branch-tree">
+    <!-- main -->
+    <div class="branch-row">
+      <span class="tree-line">  </span>
+      <span class="branch-node b-main"><span class="branch-dot dot-main"></span>main</span>
+      <span class="branch-desc">← upstream mirror — never commit here directly</span>
+    </div>
+    <!-- connector -->
+    <div class="branch-row" style="padding:0"><span class="tree-line">  │</span></div>
+    <!-- base -->
+    <div class="branch-row">
+      <span class="tree-line">  └── </span>
+      <span class="branch-node b-base"><span class="branch-dot dot-base"></span>base/core-custom</span>
+      <span class="branch-desc">← shared infra: SearXNG, gh-auth, langsmith, Makefile</span>
+    </div>
+    <!-- connector multi -->
+    <div class="branch-row" style="padding:0"><span class="tree-line">        │</span></div>
+    <!-- poc/daytona -->
+    <div class="branch-row">
+      <span class="tree-line">        ├── </span>
+      <span class="branch-node b-stable"><span class="branch-dot dot-stable"></span>poc/daytona</span>
+      <span class="branch-tag">v1.0-stable</span>
+      <span class="branch-desc">← DONE — Daytona sandbox integration</span>
+    </div>
+    <!-- poc/k8s -->
+    <div class="branch-row">
+      <span class="tree-line">        ├── </span>
+      <span class="branch-node b-poc"><span class="branch-dot dot-poc"></span>poc/k8s-sandbox</span>
+      <span class="branch-desc">← ACTIVE — K8s agent sandbox integration</span>
+    </div>
+    <!-- poc/client -->
+    <div class="branch-row">
+      <span class="tree-line">        ├── </span>
+      <span class="branch-node b-future"><span class="branch-dot dot-future"></span>poc/client-migration</span>
+      <span class="branch-desc">← FUTURE — internal agent → open-swe fork</span>
+    </div>
+    <!-- integration -->
+    <div class="branch-row">
+      <span class="tree-line">        └── </span>
+      <span class="branch-node b-integ">integration</span>
+      <span class="branch-desc">← EPHEMERAL — rebuilt from all PoCs for combined test</span>
+    </div>
+    <!-- connector to product -->
+    <div class="branch-row" style="padding: 12px 0 0"><span class="tree-line">  </span></div>
+    <div class="branch-row">
+      <span class="tree-line">  </span>
+      <span class="branch-node b-product"><span class="branch-dot dot-product"></span>product/main</span>
+      <span class="branch-desc">← FUTURE — created from the winning PoC after decision</span>
+    </div>
+  </div>
+
+  <div class="table-wrap" style="margin-top:20px">
+    <table>
+      <thead>
+        <tr><th>Branch</th><th>Parent</th><th>Lifetime</th><th>Force-push OK?</th><th>Who commits</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><code>main</code></td><td>—</td><td>Permanent</td><td>Never</td><td>Upstream merge only</td></tr>
+        <tr><td><code>base/core-custom</code></td><td><code>main</code></td><td>Permanent</td><td>After sync rebase</td><td>Shared infra changes only</td></tr>
+        <tr><td><code>poc/*</code></td><td><code>base/core-custom</code></td><td>Months (PoC lifetime)</td><td>After sync rebase</td><td>PoC developer</td></tr>
+        <tr><td><code>wip/*</code></td><td><code>poc/*</code></td><td>Days–weeks</td><td>Yes</td><td>Developer freely</td></tr>
+        <tr><td><code>integration</code></td><td>—</td><td>Ephemeral (rebuilt)</td><td>Always (rebuild)</td><td>Script only</td></tr>
+        <tr><td><code>demo/*</code></td><td>Tag snapshot</td><td>Short (keep for ref)</td><td>Never</td><td>Nobody — frozen</td></tr>
+        <tr><td><code>product/main</code></td><td>Winning <code>poc/*</code></td><td>Permanent</td><td>After release rebase</td><td>Product team via PR</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+
+  <!-- ═══ 3. Phase 1: Restructure ═══ -->
+  <h2 id="phase1"><span class="section-num">03</span> Phase 1 — One-Time Restructure <span class="pill pill-stable">✓ Done 2026-06-29</span></h2>
+
+  <p>Run this once. It does not touch working Daytona code — it builds the missing layers around it.</p>
+
+  <!-- Step 1: rename -->
+  <h3 id="phase1-rename">Step 1 — Rename <code>local/self-hosted</code> → <code>poc/daytona</code></h3>
+
+  <p>The working branch becomes the Daytona PoC reference. Rename locally and on origin.</p>
+
+<pre><span class="c"># On local machine</span>
+git branch -m local/self-hosted <span class="br">poc/daytona</span>
+
+<span class="c"># Push new name to origin</span>
+git push origin <span class="br">poc/daytona</span>
+
+<span class="c"># Optionally delete old name on origin (kept intentionally in this setup)</span>
+<span class="c"># git push origin --delete local/self-hosted</span>
+
+<span class="c"># Tag the current stable state before doing anything else</span>
+git tag <span class="tg">poc/daytona-v1.0</span> poc/daytona
+git push origin <span class="tg">poc/daytona-v1.0</span></pre>
+
+  <div class="callout ok">
+    <div class="callout-label">Why tag first</div>
+    The tag is immutable. Even if something goes wrong in later steps, <code>poc/daytona-v1.0</code> is a permanent, safe restore point to demo from.
+  </div>
+
+  <div class="callout info">
+    <div class="callout-label">Note — local/self-hosted on origin</div>
+    <code>local/self-hosted</code> was intentionally kept on origin as a historical reference. It is identical to <code>poc/daytona</code> at the point of rename. Do not commit to it.
+  </div>
+
+  <!-- Step 2: base layer -->
+  <h3 id="phase1-base">Step 2 — Create <code>base/core-custom</code></h3>
+
+  <p><code>base/core-custom</code> holds only the shared changes that every PoC needs. Since <code>poc/daytona</code> bundles shared + Daytona-specific together, the cleanest approach is to apply the shared changes fresh from <code>main</code> rather than trying to split the existing commit.</p>
+
+  <p><strong>Shared changes that go into <code>base/core-custom</code>:</strong></p>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>File</th><th>Change</th></tr></thead>
+      <tbody>
+        <tr><td><code>agent/tools/web_search.py</code></td><td>Full replacement — SearXNG instead of Exa</td></tr>
+        <tr><td><code>agent/utils/langsmith.py</code></td><td>Null-guard on <code>_compose_langsmith_project_url</code></td></tr>
+        <tr><td><code>Makefile</code></td><td>Disable tracing, add <code>--no-browser</code></td></tr>
+        <tr><td><code>pyproject.toml</code></td><td>Remove <code>exa-py</code></td></tr>
+        <tr><td><code>.gitignore</code></td><td>Add <code>.idea</code>, <code>.claude</code>, scratch dirs</td></tr>
+        <tr><td><code>customization/upstream-sync-status.md</code></td><td>Sync tracking doc</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+<pre><span class="c"># Branch from clean main</span>
+git checkout main
+git checkout -b <span class="br">base/core-custom</span>
+
+<span class="c"># Apply only the shared file changes</span>
+<span class="c"># Copy from poc/daytona (don't cherry-pick the whole commit — it includes Daytona-specific)</span>
+git checkout <span class="br">poc/daytona</span> -- \
+  agent/tools/web_search.py \
+  agent/utils/langsmith.py \
+  Makefile \
+  pyproject.toml \
+  .gitignore \
+  customization/upstream-sync-status.md
+
+<span class="c"># Verify only shared files are staged (no agent/server.py, no sandbox-image/)</span>
+git diff --cached --name-only
+
+git commit -m <span class="str">"base: shared infra — SearXNG, langsmith null-guard, Makefile, pyproject"</span>
+git push origin <span class="br">base/core-custom</span></pre>
+
+  <div class="callout warn">
+    <div class="callout-label">Important</div>
+    <code>agent/server.py</code> is intentionally excluded from <code>base/core-custom</code>. The Daytona <code>elif</code> blocks are Daytona-specific. The K8s PoC will add its own <code>elif sandbox_type == "k8s":</code> blocks directly in <code>poc/k8s-sandbox</code>.
+  </div>
+
+  <!-- Step 3: worktrees -->
+  <h3 id="phase1-worktrees">Step 3 — Set up Git Worktrees for Parallel Development</h3>
+
+  <p>Git worktrees let you have multiple branches checked out simultaneously in separate directories — no <code>git stash</code>, no branch switching, no lost context when jumping between PoCs.</p>
+
+<pre><span class="c"># From the main repo directory (currently on poc/daytona)</span>
+cd ~/workspace/open-swe
+
+<span class="c"># Add base worktree — poc/k8s-sandbox worktree is added in Phase 2</span>
+git worktree add ../open-swe-base <span class="br">base/core-custom</span>
+
+<span class="c"># List all worktrees</span>
+git worktree list</pre>
+
+  <div class="callout warn">
+    <div class="callout-label">Gotcha — do not create poc/k8s-sandbox from inside a worktree</div>
+    If you run <code>git checkout -b poc/k8s-sandbox</code> from within <code>open-swe-base/</code>, git moves that worktree onto the new branch. Then <code>git worktree add ../open-swe-k8s poc/k8s-sandbox</code> fails with <em>"already used by worktree"</em>. Fix: switch <code>open-swe-base</code> back to <code>base/core-custom</code> first, then add the worktree from <code>open-swe/</code>. The K8s branch creation is handled correctly in Phase 2 below.
+  </div>
+
+  <p>After Phase 1 Step 3 you have:</p>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Directory</th><th>Branch</th><th>Use for</th></tr></thead>
+      <tbody>
+        <tr><td><code>~/workspace/open-swe/</code></td><td><code>poc/daytona</code></td><td>Stable Daytona reference — rarely touched</td></tr>
+        <tr><td><code>~/workspace/open-swe-base/</code></td><td><code>base/core-custom</code></td><td>Shared infra changes only</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>The K8s worktree (<code>open-swe-k8s/</code>) is added at the end of Phase 2.</p>
+
+  <!-- Step 4: GitHub -->
+  <h3 id="phase1-github">Step 4 — GitHub Branch Protection Rulesets</h3>
+
+  <p>Go to <strong>Settings → Rules → Rulesets → New branch ruleset</strong> on <code>ghosh-sayak/open-swe</code>. Create one ruleset per row below. Use <strong>Include by pattern</strong> for the target branch field.</p>
+
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Ruleset name</th><th>Target pattern</th><th>Rules ON</th><th>Rules OFF</th><th>Reason</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><code>main</code></td>
+          <td><code>main</code></td>
+          <td>Require PR (0 approvals) · Block force pushes · Restrict deletions</td>
+          <td>—</td>
+          <td>Upstream mirror — never pollute</td>
+        </tr>
+        <tr>
+          <td><code>base-core-custom</code></td>
+          <td><code>base/core-custom</code></td>
+          <td>Require PR (1 approval) · Restrict deletions</td>
+          <td>Block force pushes <em>(needed for rebase)</em></td>
+          <td>Shared layer — changes affect all PoCs</td>
+        </tr>
+        <tr>
+          <td><code>poc-branches</code></td>
+          <td><code>poc/**</code></td>
+          <td>Restrict deletions</td>
+          <td>Block force pushes <em>(needed for rebase)</em> · No PR required</td>
+          <td>PoC branches — developer discretion, preserved</td>
+        </tr>
+        <tr>
+          <td><code>product-main</code></td>
+          <td><code>product/main</code></td>
+          <td>Require PR (1 approval) · Block force pushes · Restrict deletions</td>
+          <td>Require status checks <em>(add once CI is configured)</em></td>
+          <td>Product branch — same rigor as production</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="callout info">
+    <div class="callout-label">Note — Require status checks</div>
+    GitHub requires at least one status check to be named before the rule can be saved. Skip it now and re-enable on <code>product-main</code> once CI is configured and a check name is known.
+  </div>
+
+
+  <!-- ═══ 4. K8s PoC ═══ -->
+  <h2 id="k8s"><span class="section-num">04</span> Phase 2 — Starting the K8s PoC <span class="pill pill-stable">✓ Done 2026-06-29</span></h2>
+
+  <h3 id="k8s-branch">Branch Setup</h3>
+
+<pre><span class="c"># Step 1 — ensure base is current with main</span>
+cd ~/workspace/open-swe-base
+git fetch origin
+git checkout <span class="br">base/core-custom</span>
+git rebase main                     <span class="c"># only if main moved</span>
+
+<span class="c"># Step 2 — create K8s PoC branch and push</span>
+<span class="c"># IMPORTANT: do NOT run this from inside open-swe-base/ — see gotcha below</span>
+<span class="c"># Switch back to the main repo directory first</span>
+cd ~/workspace/open-swe
+git checkout <span class="br">base/core-custom</span>      <span class="c"># temporarily checkout base here</span>
+git checkout -b <span class="br">poc/k8s-sandbox</span>
+git push origin <span class="br">poc/k8s-sandbox</span> -u
+
+<span class="c"># Step 3 — restore main repo to poc/daytona, then add worktree</span>
+git checkout <span class="br">poc/daytona</span>
+git worktree add ../open-swe-k8s <span class="br">poc/k8s-sandbox</span>
+
+<span class="c"># Verify</span>
+git worktree list</pre>
+
+  <div class="callout warn">
+    <div class="callout-label">Gotcha — branch already used by worktree</div>
+    If <code>poc/k8s-sandbox</code> is created while <code>open-swe-base/</code> is checked out to it, <code>git worktree add</code> will fail with <em>"already used by worktree"</em>. The fix: always create new PoC branches from the <strong>main repo directory</strong> (<code>open-swe/</code>), not from a worktree that you need to keep on a different branch.
+  </div>
+
+  <p>Final state: <code>poc/k8s-sandbox</code> starts exactly at <code>base/core-custom</code> HEAD (<code>1809e02e</code>) — it has SearXNG, the langsmith fix, and the Makefile changes, but none of the Daytona-specific code. Clean slate for K8s.</p>
+
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Directory</th><th>Branch</th><th>Use for</th></tr></thead>
+      <tbody>
+        <tr><td><code>~/workspace/open-swe/</code></td><td><code>poc/daytona</code></td><td>Stable Daytona reference — rarely touched</td></tr>
+        <tr><td><code>~/workspace/open-swe-base/</code></td><td><code>base/core-custom</code></td><td>Shared infra changes only</td></tr>
+        <tr><td><code>~/workspace/open-swe-k8s/</code></td><td><code>poc/k8s-sandbox</code></td><td>Active K8s PoC development</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3 id="k8s-daily">Daily Development Workflow</h3>
+
+  <ol class="steps">
+    <li class="step">
+      <div class="step-n">1</div>
+      <div class="step-body">
+        <div class="step-title">Work in the K8s worktree</div>
+        <p>All K8s development happens in <code>~/workspace/open-swe-k8s/</code>. The Daytona worktree is untouched.</p>
+<pre>cd ~/workspace/open-swe-k8s
+<span class="c"># develop, test, commit normally</span>
+git add agent/integrations/k8s.py agent/server.py
+git commit -m <span class="str">"poc(k8s): add K8s sandbox provider"</span>
+git push origin <span class="br">poc/k8s-sandbox</span></pre>
+      </div>
+    </li>
+    <li class="step">
+      <div class="step-n">2</div>
+      <div class="step-body">
+        <div class="step-title">Experimental sub-branches from <code>poc/k8s-sandbox</code></div>
+        <p>For risky experiments within the PoC, use a <code>wip/</code> branch. If it works, merge back; if not, discard.</p>
+<pre>git checkout -b <span class="br">wip/k8s-resource-limits</span>
+<span class="c"># ...experiment...</span>
+git checkout <span class="br">poc/k8s-sandbox</span>
+git merge --no-ff <span class="br">wip/k8s-resource-limits</span>  <span class="c"># if it worked</span>
+git branch -d <span class="br">wip/k8s-resource-limits</span>        <span class="c"># clean up</span></pre>
+      </div>
+    </li>
+    <li class="step">
+      <div class="step-n">3</div>
+      <div class="step-body">
+        <div class="step-title">Commit message convention</div>
+        <p>Prefix commits so the git log is readable across branches:</p>
+<pre><span class="str">"poc(k8s): &lt;what&gt;"</span>          <span class="c"># K8s-specific feature/fix</span>
+<span class="str">"poc(daytona): &lt;what&gt;"</span>      <span class="c"># Daytona-specific</span>
+<span class="str">"base: &lt;what&gt;"</span>              <span class="c"># shared infra change</span>
+<span class="str">"docs: &lt;what&gt;"</span>              <span class="c"># documentation</span>
+<span class="str">"sync: upstream to &lt;hash&gt;"</span>  <span class="c"># after an upstream rebase</span></pre>
+      </div>
+    </li>
+    <li class="step">
+      <div class="step-n">4</div>
+      <div class="step-body">
+        <div class="step-title">Update the file ownership table when adding new files</div>
+        <p>Every time a new file is created in a PoC branch, add it to <code>.fork/ownership.yml</code> immediately — not at the end of the sprint. See <a href="#ownership">File Ownership</a> section.</p>
+      </div>
+    </li>
+  </ol>
+
+
+  <!-- ═══ 5. Upstream Sync ═══ -->
+  <h2 id="sync"><span class="section-num">05</span> Upstream Sync — The Cascade</h2>
+
+  <p>Run this weekly (or whenever upstream merges something significant). The key rule: <strong>always rebase PoC branches onto <code>base/core-custom</code>, not onto <code>main</code> directly</strong> — otherwise you lose the shared infra changes and have to re-apply them manually.</p>
+
+  <div class="callout info">
+    <div class="callout-label">Prerequisite — upstream remote</div>
+    Before running any sync, verify the upstream remote is configured:<br><br>
+    <code>git remote -v</code> → should show <code>upstream → https://github.com/langchain-ai/open-swe.git</code><br><br>
+    If it's missing, add it once:<br>
+    <code>git remote add upstream https://github.com/langchain-ai/open-swe.git</code>
+  </div>
+
+<pre><span class="c">━━━ Step 1: Fetch + impact check ━━━━━━━━━━━━━━━━━━━━</span>
+<span class="c"># Run from the main repo directory</span>
+cd ~/workspace/open-swe
+git fetch upstream
+
+<span class="c"># What files did upstream change since our last sync?</span>
+git log main..upstream/main --name-only --format="" | sort -u > /tmp/upstream-files.txt
+
+<span class="c"># What files does our base layer own (differ from main)?</span>
+git diff main...<span class="br">base/core-custom</span> --name-only | sort -u > /tmp/base-files.txt
+
+<span class="c"># Print the intersection — files upstream touched that WE also modified.</span>
+<span class="c"># These are the files that will conflict. Review before touching anything.</span>
+comm -12 /tmp/upstream-files.txt /tmp/base-files.txt
+
+<span class="c">━━━ Step 2: Fast-forward main ━━━━━━━━━━━━━━━━━━━━━━━</span>
+<span class="c"># Still in ~/workspace/open-swe/</span>
+git checkout main
+git merge upstream/main --ff-only    <span class="c"># fails if not a clean fast-forward — investigate before proceeding</span>
+git push origin main
+
+<span class="c">━━━ Step 3: Rebase base layer ━━━━━━━━━━━━━━━━━━━━━━━</span>
+<span class="c"># Resolve ALL shared-file conflicts HERE — not in the PoC branches</span>
+cd ~/workspace/open-swe-base
+git checkout <span class="br">base/core-custom</span>
+git rebase main
+<span class="c"># If conflicts: edit the file, git add <file>, git rebase --continue</span>
+<span class="c"># See "Conflict ownership per layer" table below for how to resolve each file</span>
+git push origin <span class="br">base/core-custom</span> --force-with-lease
+
+<span class="c">━━━ Step 4: Rebase each PoC onto the updated base ━━━</span>
+<span class="c"># K8s PoC — resolve only K8s-specific conflicts here</span>
+cd ~/workspace/open-swe-k8s
+git checkout <span class="br">poc/k8s-sandbox</span>
+git rebase <span class="br">base/core-custom</span>
+git push origin <span class="br">poc/k8s-sandbox</span> --force-with-lease
+
+<span class="c"># Daytona PoC — resolve only Daytona-specific conflicts here</span>
+cd ~/workspace/open-swe
+git checkout <span class="br">poc/daytona</span>
+git rebase <span class="br">base/core-custom</span>
+git push origin <span class="br">poc/daytona</span> --force-with-lease
+
+<span class="c">━━━ Step 5: Rebuild integration ━━━━━━━━━━━━━━━━━━━━━</span>
+<span class="c"># SKIP — integration branch does not exist yet.</span>
+<span class="c"># When you need it, create it first:</span>
+<span class="c">#   git checkout -b integration base/core-custom</span>
+<span class="c">#   git push origin integration</span>
+<span class="c"># Then on subsequent syncs:</span>
+<span class="c">#   git checkout integration</span>
+<span class="c">#   git reset --hard base/core-custom</span>
+<span class="c">#   git merge --no-ff poc/daytona poc/k8s-sandbox</span>
+<span class="c">#   git push origin integration --force-with-lease</span></pre>
+
+  <div class="callout info">
+    <div class="callout-label">Why rebase onto base, not main</div>
+    If <code>poc/k8s-sandbox</code> rebased onto <code>main</code> directly, it would lose the shared infra changes from <code>base/core-custom</code> and require re-applying them manually. Rebasing onto <code>base/core-custom</code> means the shared changes are already baked in — the PoC branch only deals with its own delta.
+  </div>
+
+  <h3>Conflict ownership per layer</h3>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>File</th><th>Conflict appears in</th><th>Resolution</th></tr></thead>
+      <tbody>
+        <tr><td><code>agent/tools/web_search.py</code></td><td><code>base/core-custom</code> rebase</td><td>Keep SearXNG version entirely</td></tr>
+        <tr><td><code>agent/utils/langsmith.py</code></td><td><code>base/core-custom</code> rebase</td><td>Keep null-guard; accept upstream's minor changes</td></tr>
+        <tr><td><code>pyproject.toml</code></td><td><code>base/core-custom</code> rebase</td><td>Accept upstream versions; re-verify <code>exa-py</code> is absent</td></tr>
+        <tr><td><code>agent/server.py</code> (Daytona blocks)</td><td><code>poc/daytona</code> rebase only</td><td>Keep <code>elif sandbox_type == "daytona":</code> blocks</td></tr>
+        <tr><td><code>agent/server.py</code> (K8s blocks)</td><td><code>poc/k8s-sandbox</code> rebase only</td><td>Keep <code>elif sandbox_type == "k8s":</code> blocks</td></tr>
+        <tr><td><code>agent/integrations/daytona.py</code></td><td><code>poc/daytona</code> rebase only</td><td>Accept upstream, keep Daytona-specific additions</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+
+  <!-- ═══ 6. Demo Workflow ═══ -->
+  <h2 id="demo"><span class="section-num">06</span> Demo Workflow — Stable Demo While WIP Continues</h2>
+
+  <p>Never demo from a live <code>poc/*</code> branch. The correct pattern: <strong>tag a stable point → demo from the tag → continue WIP uninterrupted</strong>.</p>
+
+  <ol class="steps">
+    <li class="step">
+      <div class="step-n">1</div>
+      <div class="step-body">
+        <div class="step-title">Tag the demo-ready state</div>
+        <p>Do this as soon as the feature you want to demo is working — not the day of the demo.</p>
+<pre>cd ~/workspace/open-swe-k8s
+git tag <span class="tg">poc/k8s-demo-v0.1</span>
+git push origin <span class="tg">poc/k8s-demo-v0.1</span></pre>
+      </div>
+    </li>
+    <li class="step">
+      <div class="step-n">2</div>
+      <div class="step-body">
+        <div class="step-title">Create a frozen demo worktree from the tag</div>
+        <p>This is a separate directory — completely isolated from your WIP. Your development in <code>open-swe-k8s/</code> continues without any risk.</p>
+<pre>git worktree add ../open-swe-k8s-demo <span class="tg">poc/k8s-demo-v0.1</span>
+<span class="c"># Demo runs from this directory. Nothing here changes.</span></pre>
+      </div>
+    </li>
+    <li class="step">
+      <div class="step-n">3</div>
+      <div class="step-body">
+        <div class="step-title">Demo day</div>
+        <p>Start the backend from <code>open-swe-k8s-demo/</code>. Your <code>open-swe-k8s/</code> working directory is untouched — you can keep committing WIP there during the demo if needed.</p>
+      </div>
+    </li>
+    <li class="step">
+      <div class="step-n">4</div>
+      <div class="step-body">
+        <div class="step-title">Clean up after demo</div>
+<pre>git worktree remove ../open-swe-k8s-demo
+<span class="c"># Tag remains permanently as a reference point</span></pre>
+      </div>
+    </li>
+  </ol>
+
+  <h3>Tag naming convention</h3>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Tag pattern</th><th>Meaning</th><th>Example</th></tr></thead>
+      <tbody>
+        <tr><td><code>poc/&lt;name&gt;-demo-v&lt;N&gt;</code></td><td>Snapshot shown to management</td><td><code>poc/k8s-demo-v1</code></td></tr>
+        <tr><td><code>poc/&lt;name&gt;-stable-v&lt;N.M&gt;</code></td><td>Stable reference (PoC complete)</td><td><code>poc/daytona-stable-v1.0</code></td></tr>
+        <tr><td><code>product/v&lt;semver&gt;</code></td><td>Product release</td><td><code>product/v0.2.0</code></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+
+  <!-- ═══ 7. File Ownership ═══ -->
+  <h2 id="ownership"><span class="section-num">07</span> File Ownership System</h2>
+
+  <p>Create <code>.fork/ownership.yml</code> at the root of the repo. This is the single source of truth for which branch owns which file. Update it every time a new file is added to any branch.</p>
+
+  <div class="callout warn">
+    <div class="callout-label">Not yet created</div>
+    Neither <code>.fork/ownership.yml</code> nor <code>scripts/check-ownership.sh</code> exist in the repo yet. The templates below are ready to copy in. Create both files before the first upstream sync and commit them to <code>base/core-custom</code> so all PoC branches inherit them.
+  </div>
+
+<pre class="yaml"><span class="y-com"># .fork/ownership.yml</span>
+<span class="y-com"># Format: each branch lists the files it ADDS OR MODIFIES on top of its parent.</span>
+<span class="y-com"># "partial" = branch modifies specific sections only, not the whole file.</span>
+
+<span class="y-key">base/core-custom</span><span class="y-val">:</span>
+  <span class="y-key">parent</span><span class="y-val">:</span> <span class="y-str">main</span>
+  <span class="y-key">description</span><span class="y-val">:</span> <span class="y-str">Shared infra changes applied to all PoCs</span>
+  <span class="y-key">owns</span><span class="y-val">:</span>
+    <span class="y-val">-</span> <span class="y-str">agent/tools/web_search.py</span>
+    <span class="y-val">-</span> <span class="y-str">agent/utils/langsmith.py</span>
+    <span class="y-val">-</span> <span class="y-str">Makefile</span>
+    <span class="y-val">-</span> <span class="y-str">pyproject.toml</span>
+    <span class="y-val">-</span> <span class="y-str">.gitignore</span>
+    <span class="y-val">-</span> <span class="y-str">customization/upstream-sync-status.md</span>
+
+<span class="y-key">poc/daytona</span><span class="y-val">:</span>
+  <span class="y-key">parent</span><span class="y-val">:</span> <span class="y-str">base/core-custom</span>
+  <span class="y-key">status</span><span class="y-val">:</span> <span class="y-str">stable</span>
+  <span class="y-key">stable_tag</span><span class="y-val">:</span> <span class="y-str">poc/daytona-v1.0</span>
+  <span class="y-key">description</span><span class="y-val">:</span> <span class="y-str">Daytona OSS sandbox — gh wrapper, hosts.yml auth</span>
+  <span class="y-key">owns</span><span class="y-val">:</span>
+    <span class="y-val">-</span> <span class="y-str">agent/integrations/daytona.py</span>
+    <span class="y-val">-</span> <span class="y-str">sandbox-image/open-swe-sandbox.Dockerfile</span>
+    <span class="y-val">-</span> <span class="y-str">sandbox-image/README.md</span>
+    <span class="y-val">-</span> <span class="y-str">scripts/create_daytona_snapshot.py</span>
+    <span class="y-val">-</span> <span class="y-str">customization/open-swe-daytona-setup.md</span>
+  <span class="y-key">partial</span><span class="y-val">:</span>
+    <span class="y-key">agent/server.py</span><span class="y-val">:</span> <span class="y-str">elif sandbox_type == "daytona" blocks in _create_sandbox_with_proxy and _refresh_github_proxy</span>
+
+<span class="y-key">poc/k8s-sandbox</span><span class="y-val">:</span>
+  <span class="y-key">parent</span><span class="y-val">:</span> <span class="y-str">base/core-custom</span>
+  <span class="y-key">status</span><span class="y-val">:</span> <span class="y-str">wip</span>
+  <span class="y-key">description</span><span class="y-val">:</span> <span class="y-str">Kubernetes Agents Sandbox integration</span>
+  <span class="y-key">owns</span><span class="y-val">:</span>
+    <span class="y-val">-</span> <span class="y-str">agent/integrations/k8s.py</span>           <span class="y-com"># to be created</span>
+    <span class="y-val">-</span> <span class="y-str">k8s/</span>                                  <span class="y-com"># manifests, helm charts</span>
+  <span class="y-key">partial</span><span class="y-val">:</span>
+    <span class="y-key">agent/server.py</span><span class="y-val">:</span> <span class="y-str">elif sandbox_type == "k8s" blocks</span></pre>
+
+  <h3>Validation script — <code>scripts/check-ownership.sh</code></h3>
+
+  <p>Copy this script into <code>scripts/check-ownership.sh</code> and commit it to <code>base/core-custom</code>. Run it before every upstream sync to see which owned files upstream has touched.</p>
+
+<pre><span class="c">#!/usr/bin/env bash</span>
+<span class="c"># scripts/check-ownership.sh</span>
+<span class="c"># Usage: bash scripts/check-ownership.sh</span>
+
+<span class="kw">set</span> -euo pipefail
+BRANCHES=(<span class="str">"base/core-custom"</span> <span class="str">"poc/daytona"</span> <span class="str">"poc/k8s-sandbox"</span>)
+
+<span class="kw">echo</span> <span class="str">"━━━ Upstream changes since last sync ━━━"</span>
+git fetch upstream -q
+git log main..upstream/main --name-only --format="" | sort -u
+
+<span class="kw">echo</span> <span class="str">""</span>
+<span class="kw">echo</span> <span class="str">"━━━ Files owned per branch ━━━"</span>
+<span class="kw">for</span> branch <span class="kw">in</span> <span class="str">"${BRANCHES[@]}"</span>; <span class="kw">do</span>
+  parent=$(git log --pretty=format:<span class="str">"%D"</span> <span class="str">"${branch}"</span> | grep -oE <span class="str">'[^ ,]+/[^ ,]+'</span> | head -1)
+  <span class="kw">echo</span> <span class="str">""</span>
+  <span class="kw">echo</span> <span class="str">"  Branch: ${branch}"</span>
+  git diff <span class="str">"main...${branch}"</span> --name-only | sort -u | sed <span class="str">'s/^/    /'</span>
+<span class="kw">done</span>
+
+<span class="kw">echo</span> <span class="str">""</span>
+<span class="kw">echo</span> <span class="str">"━━━ Cross-reference: upstream ∩ owned files ━━━"</span>
+git log main..upstream/main --name-only --format="" | sort -u > /tmp/up.txt
+<span class="kw">for</span> branch <span class="kw">in</span> <span class="str">"${BRANCHES[@]}"</span>; <span class="kw">do</span>
+  git diff <span class="str">"main...${branch}"</span> --name-only | sort -u > /tmp/br.txt
+  hits=$(comm -12 /tmp/up.txt /tmp/br.txt)
+  <span class="kw">if</span> [ -n <span class="str">"${hits}"</span> ]; <span class="kw">then</span>
+    <span class="kw">echo</span> <span class="str">"  ⚠ ${branch} — upstream touched owned files:"</span>
+    <span class="kw">echo</span> <span class="str">"${hits}"</span> | sed <span class="str">'s/^/      /'</span>
+  <span class="kw">fi</span>
+<span class="kw">done</span>
+<span class="kw">echo</span> <span class="str">""</span>
+<span class="kw">echo</span> <span class="str">"Done. Resolve warnings before rebasing."</span></pre>
+
+
+  <!-- ═══ 8. Checklists ═══ -->
+  <h2 id="checklists"><span class="section-num">08</span> Maintenance Checklists</h2>
+
+  <h3>When starting a new PoC</h3>
+  <ul class="checklist">
+    <li>Ensure <code>base/core-custom</code> is current with <code>main</code></li>
+    <li>Branch new PoC from <code>base/core-custom</code>, NOT from <code>main</code> or another <code>poc/*</code></li>
+    <li>Add worktree: <code>git worktree add ../open-swe-&lt;name&gt; poc/&lt;name&gt;</code></li>
+    <li>Push branch and set upstream: <code>git push origin poc/&lt;name&gt; -u</code></li>
+    <li>Add entry to <code>.fork/ownership.yml</code></li>
+    <li>Add branch to <code>scripts/check-ownership.sh</code> BRANCHES array</li>
+    <li>Update GitHub branch protection rules</li>
+    <li>Add row to <code>customization/upstream-sync-status.md</code> ownership table</li>
+  </ul>
+
+  <h3>When adding a new file to any branch</h3>
+  <ul class="checklist">
+    <li>Add the file path to <code>.fork/ownership.yml</code> under the correct branch</li>
+    <li>Commit the ownership update in the same PR/commit as the file addition</li>
+    <li>If the file is shared infra → add to <code>base/core-custom</code> and cherry-pick/propagate to active PoC branches</li>
+  </ul>
+
+  <h3>Before every demo</h3>
+  <ul class="checklist">
+    <li>Tag the current stable state: <code>git tag poc/&lt;name&gt;-demo-vN</code></li>
+    <li>Create frozen demo worktree from the tag</li>
+    <li>Verify demo worktree starts clean (run backend, confirm no errors)</li>
+    <li>Confirm WIP worktree is NOT the one being demoed</li>
+    <li>Push the tag to origin for the record</li>
+  </ul>
+
+  <h3>Weekly upstream sync</h3>
+  <ul class="checklist">
+    <li>Run <code>bash scripts/check-ownership.sh</code> from <code>~/workspace/open-swe/</code> and read the output — <strong>requires the script to exist first</strong> (see Section 07)</li>
+    <li>Fast-forward <code>main</code> from <code>~/workspace/open-swe/</code> and push to origin</li>
+    <li>Rebase <code>base/core-custom</code> from <code>~/workspace/open-swe-base/</code> — resolve shared-file conflicts here, not in PoC branches</li>
+    <li>Rebase <code>poc/k8s-sandbox</code> from <code>~/workspace/open-swe-k8s/</code> onto updated <code>base/core-custom</code></li>
+    <li>Rebase <code>poc/daytona</code> from <code>~/workspace/open-swe/</code> onto updated <code>base/core-custom</code></li>
+    <li>Force-push all rebased branches with <code>--force-with-lease</code></li>
+    <li>Verify <code>exa-py</code> is absent from <code>pyproject.toml</code> (silently re-added by upstream in the past)</li>
+    <li>Update <code>customization/upstream-sync-status.md</code></li>
+  </ul>
+
+
+  <!-- ═══ 9. Naming Convention ═══ -->
+  <h2 id="naming"><span class="section-num">09</span> Naming Convention</h2>
+
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Prefix</th><th>Example</th><th>Lifetime</th><th>Purpose</th></tr></thead>
+      <tbody>
+        <tr><td><code>main</code></td><td><code>main</code></td><td>Permanent</td><td>Upstream mirror</td></tr>
+        <tr><td><code>base/</code></td><td><code>base/core-custom</code></td><td>Permanent</td><td>Shared infra layer</td></tr>
+        <tr><td><code>poc/</code></td><td><code>poc/k8s-sandbox</code></td><td>Months</td><td>Active PoC</td></tr>
+        <tr><td><code>wip/</code></td><td><code>wip/k8s-resource-limits</code></td><td>Days–weeks</td><td>Risky experiment within a PoC</td></tr>
+        <tr><td><code>demo/</code></td><td><code>demo/k8s-v0.1</code></td><td>Short (archive)</td><td>Frozen demo snapshot branch (rare — prefer tags)</td></tr>
+        <tr><td><code>fix/</code></td><td><code>fix/fetch-url-recursion</code></td><td>Short</td><td>Contribution back to upstream — branches from <code>main</code></td></tr>
+        <tr><td><code>client/</code></td><td><code>client/migration-v1</code></td><td>Long</td><td>Client-side agent migration</td></tr>
+        <tr><td><code>product/</code></td><td><code>product/main</code></td><td>Permanent</td><td>Post-decision product branch</td></tr>
+        <tr><td><code>integration</code></td><td><code>integration</code></td><td>Ephemeral</td><td>All active PoCs merged for combined test</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+
+  <!-- ═══ 10. Product Journey ═══ -->
+  <h2 id="product"><span class="section-num">10</span> The Product Journey</h2>
+
+  <p>The PoC phase ends with a decision. Here is the full arc from PoC to product, and when to extract into a separate repo.</p>
+
+  <div class="timeline">
+
+    <div class="tl-item phase-poc">
+      <div class="tl-dot">P1</div>
+      <div class="tl-content">
+        <div class="tl-label">Now → Decision</div>
+        <div class="tl-title">Parallel PoC Development</div>
+        <div class="tl-body">
+          Multiple <code>poc/*</code> branches live on the fork. Each PoC is periodically rebased onto <code>base/core-custom</code>. Management sees frozen demo tags. Engineers develop in worktrees without interfering with each other.
+        </div>
+      </div>
+    </div>
+
+    <div class="tl-item phase-stable">
+      <div class="tl-dot">P2</div>
+      <div class="tl-content">
+        <div class="tl-label">PoC Complete</div>
+        <div class="tl-title">Winning PoC Selected</div>
+        <div class="tl-body">
+          Management picks the winning sandbox (say K8s). Tag it: <code>poc/k8s-stable-v1.0</code>. Archive or freeze losing PoC branches — don't delete, they may hold learnings.
+          <pre style="margin-top:10px">git tag <span class="tg">poc/k8s-stable-v1.0</span> poc/k8s-sandbox
+git push origin <span class="tg">poc/k8s-stable-v1.0</span>
+
+<span class="c"># Archive losing branches (rename, not delete)</span>
+git branch -m poc/daytona archived/poc/daytona
+git push origin archived/poc/daytona
+git push origin --delete poc/daytona</pre>
+        </div>
+      </div>
+    </div>
+
+    <div class="tl-item phase-decide">
+      <div class="tl-dot">P3</div>
+      <div class="tl-content">
+        <div class="tl-label">Post-Decision</div>
+        <div class="tl-title">Create <code>product/main</code></div>
+        <div class="tl-body">
+          Branch <code>product/main</code> from the winning PoC tag. This becomes the source of truth for the product. It continues to track upstream through the cascade. Apply branch protection and require PRs from this point.
+          <pre style="margin-top:10px">git checkout -b <span class="br">product/main</span> <span class="tg">poc/k8s-stable-v1.0</span>
+git push origin <span class="br">product/main</span> -u
+
+<span class="c"># From now on: work → PR → code review → merge into product/main</span>
+<span class="c"># Upstream sync still flows: main → base/core-custom → product/main</span></pre>
+        </div>
+      </div>
+    </div>
+
+    <div class="tl-item phase-product">
+      <div class="tl-dot">P4</div>
+      <div class="tl-content">
+        <div class="tl-label">Product Release</div>
+        <div class="tl-title">Semver Tags on <code>product/main</code></div>
+        <div class="tl-body">
+          Ship with <code>product/v0.1.0</code>, <code>product/v0.2.0</code>, etc. Upstream sync continues — every few weeks rebase <code>base/core-custom</code> onto new upstream, then <code>product/main</code> onto <code>base/core-custom</code>.
+        </div>
+      </div>
+    </div>
+
+    <div class="tl-item">
+      <div class="tl-dot" style="border-color:var(--pink);color:var(--pink)">P5</div>
+      <div class="tl-content">
+        <div class="tl-label">Optional: High Divergence</div>
+        <div class="tl-title">Extract to a Separate Repository</div>
+        <div class="tl-body">
+          <p>Extract to a separate repo when: <strong>(a)</strong> the product's CI/CD, team access, and deploy pipeline diverge enough that the fork is friction, not help; <strong>(b)</strong> upstream sync conflicts are taking more than 2 hours per week; <strong>(c)</strong> you have your own release cadence independent of upstream.</p>
+          <p>If you extract: add the upstream fork as a git remote in the new repo and keep the cascade sync. The branching structure stays the same — only the GitHub org/repo changes.</p>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="callout warn">
+    <div class="callout-label">Decision rule — one repo vs separate</div>
+    Stay in one repo as long as upstream sync conflicts take under 1 hour per week and the product isn't deploying independently of the PoC branches. Extract when the fork becomes a liability, not before.
+  </div>
+
+</main>
+
+<script>
+  // Highlight active nav item on scroll
+  const sections = document.querySelectorAll('h2[id]');
+  const navItems = document.querySelectorAll('.nav-item');
+  const io = new IntersectionObserver(entries => {
+    entries.forEach(e => {
+      if (e.isIntersecting) {
+        navItems.forEach(n => n.classList.remove('active'));
+        const a = document.querySelector(`.nav-item[href="#${e.target.id}"]`);
+        if (a) a.classList.add('active');
+      }
+    });
+  }, { rootMargin: '-20% 0px -70% 0px' });
+  sections.forEach(s => io.observe(s));
+</script>
