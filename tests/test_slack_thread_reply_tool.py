@@ -28,6 +28,7 @@ async def test_slack_thread_reply_returns_structured_error_for_msg_too_long(
         message: str,
         *,
         blocks: list[dict[str, Any]] | None = None,
+        **_: Any,
     ) -> tuple[str | None, str | None]:
         return None, "msg_too_long"
 
@@ -56,6 +57,7 @@ async def test_slack_thread_reply_hints_not_to_retry_channel_errors(
         message: str,
         *,
         blocks: list[dict[str, Any]] | None = None,
+        **_: Any,
     ) -> tuple[str | None, str | None]:
         return None, slack_error
 
@@ -81,6 +83,7 @@ async def test_slack_thread_reply_rate_limited_hint_includes_retry_after(
         message: str,
         *,
         blocks: list[dict[str, Any]] | None = None,
+        **_: Any,
     ) -> tuple[str | None, str | None]:
         return None, "rate_limited: 30"
 
@@ -105,6 +108,7 @@ async def test_slack_thread_reply_rate_limited_hint_without_retry_after(
         message: str,
         *,
         blocks: list[dict[str, Any]] | None = None,
+        **_: Any,
     ) -> tuple[str | None, str | None]:
         return None, "rate_limited"
 
@@ -127,6 +131,7 @@ async def test_slack_thread_reply_uses_post_failed_without_slack_error(
         message: str,
         *,
         blocks: list[dict[str, Any]] | None = None,
+        **_: Any,
     ) -> tuple[str | None, str | None]:
         return None, None
 
@@ -150,6 +155,7 @@ async def test_slack_thread_reply_builds_option_blocks(monkeypatch: pytest.Monke
         message: str,
         *,
         blocks: list[dict[str, Any]] | None = None,
+        **_: Any,
     ) -> tuple[str | None, str | None]:
         captured.update(
             {"channel_id": channel_id, "thread_ts": thread_ts, "message": message, "blocks": blocks}
@@ -169,3 +175,62 @@ async def test_slack_thread_reply_builds_option_blocks(monkeypatch: pytest.Monke
     assert actions["type"] == "actions"
     assert [button["text"]["text"] for button in actions["elements"]] == ["A", "B"]
     assert actions["elements"][0]["action_id"] == "open_swe_option_select"
+
+
+async def test_slack_thread_reply_dedupes_identical_back_to_back_reply(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    call_count = {"posts": 0}
+
+    async def fake_post_and_store_mapping(
+        channel_id: str,
+        thread_ts: str,
+        message: str,
+        *,
+        blocks: list[dict[str, Any]] | None = None,
+        **_: Any,
+    ) -> tuple[str | None, str | None]:
+        call_count["posts"] += 1
+        return "2.0", None
+
+    config_with_run = {
+        "configurable": {
+            "slack_thread": {"channel_id": "C1", "thread_ts": "1.0"},
+            "run_id": "run-1",
+        }
+    }
+
+    async def fake_get_last(
+        client: Any, channel_id: str, thread_ts: str, run_id: str
+    ) -> tuple[str, str] | None:
+        return fake_get_last.value  # type: ignore[attr-defined]
+
+    fake_get_last.value = None  # type: ignore[attr-defined]
+
+    async def fake_store_last(
+        client: Any,
+        channel_id: str,
+        thread_ts: str,
+        run_id: str,
+        message_ts: str,
+        normalized_text: str,
+    ) -> None:
+        fake_get_last.value = (message_ts, normalized_text)  # type: ignore[attr-defined]
+
+    monkeypatch.setattr(slack_reply_tool, "get_config", lambda: config_with_run)
+    monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", fake_post_and_store_mapping)
+    monkeypatch.setattr(slack_reply_tool, "get_last_outgoing_message_for_thread", fake_get_last)
+    monkeypatch.setattr(slack_reply_tool, "store_last_outgoing_message_for_thread", fake_store_last)
+    monkeypatch.setattr(slack_reply_tool, "get_client", lambda url: object())
+
+    first = await slack_reply_tool.slack_thread_reply("Hello   world")
+    assert first == {"success": True}
+
+    # Pre-populate as if post_and_store_mapping had persisted normalized text.
+    fake_get_last.value = ("2.0", "Hello world")  # type: ignore[attr-defined]
+
+    second = await slack_reply_tool.slack_thread_reply("  Hello world  ")
+    assert second["success"] is False
+    assert second["error"] == "duplicate of previous reply — not sent"
+    assert "previous reply" in second["hint"]
+    assert call_count["posts"] == 1

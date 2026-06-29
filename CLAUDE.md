@@ -87,6 +87,8 @@ Reviewer-only tools (in `agent/reviewer.py`): `add_finding`, `update_finding`, `
 
 Built-in deepagents tools (`read_file`, `write_file`, `edit_file`, `ls`, `glob`, `grep`, `execute`, `write_todos`, `task` for subagent spawning, …) are added by `create_deep_agent` itself; don't duplicate them.
 
+If `slack_thread_reply` returns `error: 'duplicate of previous reply — not sent'`, treat that as the message having already been delivered. Move on; do not retry.
+
 ### Models, profiles, and team defaults
 
 Model + reasoning effort are resolved per run in this precedence (highest wins):

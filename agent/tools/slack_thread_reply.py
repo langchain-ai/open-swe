@@ -7,7 +7,10 @@ from langgraph_sdk import get_client
 
 from ..utils.slack import (
     convert_mentions_to_slack_format,
+    get_last_outgoing_message_for_thread,
+    normalize_slack_reply_text,
     post_slack_thread_reply_with_ts,
+    store_last_outgoing_message_for_thread,
     store_slack_message_run_mapping,
 )
 
@@ -60,12 +63,31 @@ async def slack_thread_reply(
         return {"success": False, "error": "Message cannot be empty"}
 
     message = convert_mentions_to_slack_format(message)
+    normalized_message = normalize_slack_reply_text(message)
+    run_id = _current_run_id(config)
+    langgraph_client = get_client(url=LANGGRAPH_URL)
+    if run_id:
+        last = await get_last_outgoing_message_for_thread(
+            langgraph_client, channel_id, thread_ts, run_id
+        )
+        if last is not None and last[1] == normalized_message:
+            return {
+                "success": False,
+                "error": "duplicate of previous reply — not sent",
+                "hint": "The previous reply with identical content is still visible in this thread; skip the repost.",
+            }
     if plan_approval:
         slack_blocks = _build_plan_approval_blocks(message)
     else:
         slack_blocks = blocks or _build_option_blocks(message, options)
     message_ts, slack_error = await _post_and_store_mapping(
-        channel_id, thread_ts, message, blocks=slack_blocks
+        channel_id,
+        thread_ts,
+        message,
+        blocks=slack_blocks,
+        normalized_text=normalized_message,
+        run_id=run_id,
+        langgraph_client=langgraph_client,
     )
     if message_ts is None:
         return {
@@ -186,17 +208,41 @@ def _slack_reply_failure_hint(slack_error: str | None) -> str:
     return "Slack post failed; retry once with a concise message or surface the failure to the user via the trace output."
 
 
+def _current_run_id(config: dict[str, Any]) -> str | None:
+    candidates = [config.get("run_id")]
+    configurable = config.get("configurable")
+    if isinstance(configurable, dict):
+        candidates.append(configurable.get("run_id"))
+    for candidate in candidates:
+        if isinstance(candidate, str) and candidate:
+            return candidate
+    return None
+
+
 async def _post_and_store_mapping(
     channel_id: str,
     thread_ts: str,
     message: str,
     *,
     blocks: list[dict[str, Any]] | None = None,
+    normalized_text: str | None = None,
+    run_id: str | None = None,
+    langgraph_client: Any | None = None,
 ) -> tuple[str | None, str | None]:
     message_ts, slack_error = await post_slack_thread_reply_with_ts(
         channel_id, thread_ts, message, blocks=blocks
     )
     if message_ts:
-        langgraph_client = get_client(url=LANGGRAPH_URL)
+        if langgraph_client is None:
+            langgraph_client = get_client(url=LANGGRAPH_URL)
         await store_slack_message_run_mapping(langgraph_client, channel_id, thread_ts, message_ts)
+        if run_id and normalized_text is not None:
+            await store_last_outgoing_message_for_thread(
+                langgraph_client,
+                channel_id,
+                thread_ts,
+                run_id,
+                message_ts,
+                normalized_text,
+            )
     return message_ts, slack_error

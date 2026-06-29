@@ -1040,6 +1040,14 @@ async def update_slack_trace_reply_for_web_handoff(
 _SLACK_RUN_MAP_NAMESPACE = "slack_run_map"
 _THREAD_RUN_KEY_PREFIX = "thread:"
 _MESSAGE_RUN_KEY_PREFIX = "message:"
+_THREAD_LAST_REPLY_KEY_PREFIX = "thread_last_reply:"
+
+_SLACK_REPLY_WHITESPACE_RE = re.compile(r"\s+")
+
+
+def normalize_slack_reply_text(text: str) -> str:
+    """Normalize a Slack reply for duplicate detection."""
+    return _SLACK_REPLY_WHITESPACE_RE.sub(" ", text).strip()
 
 
 def _extract_run_id_from_store_item(item: dict[str, Any] | None) -> str | None:
@@ -1140,6 +1148,69 @@ async def store_slack_message_run_mapping(
             channel_id,
             message_ts,
         )
+
+
+async def store_last_outgoing_message_for_thread(
+    langgraph_client: LangGraphClient,
+    channel_id: str,
+    thread_ts: str,
+    run_id: str,
+    message_ts: str,
+    normalized_text: str,
+) -> None:
+    """Persist the last outgoing reply for a thread within a single run."""
+    namespace = (_SLACK_RUN_MAP_NAMESPACE, channel_id)
+    try:
+        await langgraph_client.store.put_item(
+            namespace,
+            f"{_THREAD_LAST_REPLY_KEY_PREFIX}{thread_ts}",
+            {
+                "run_id": run_id,
+                "thread_ts": thread_ts,
+                "message_ts": message_ts,
+                "normalized_text": normalized_text,
+            },
+        )
+    except Exception:
+        logger.exception(
+            "Failed to store Slack last outgoing reply for channel=%s thread=%s run=%s",
+            channel_id,
+            thread_ts,
+            run_id,
+        )
+
+
+async def get_last_outgoing_message_for_thread(
+    langgraph_client: LangGraphClient,
+    channel_id: str,
+    thread_ts: str,
+    run_id: str,
+) -> tuple[str, str] | None:
+    """Return `(message_ts, normalized_text)` for the last reply in this run, else None."""
+    namespace = (_SLACK_RUN_MAP_NAMESPACE, channel_id)
+    try:
+        item = await langgraph_client.store.get_item(
+            namespace, f"{_THREAD_LAST_REPLY_KEY_PREFIX}{thread_ts}"
+        )
+    except Exception:
+        logger.exception(
+            "Failed to look up Slack last outgoing reply for channel=%s thread=%s",
+            channel_id,
+            thread_ts,
+        )
+        return None
+    if not item:
+        return None
+    value = item.get("value")
+    if not isinstance(value, dict):
+        return None
+    if value.get("run_id") != run_id:
+        return None
+    message_ts = value.get("message_ts")
+    normalized_text = value.get("normalized_text")
+    if not isinstance(message_ts, str) or not isinstance(normalized_text, str):
+        return None
+    return message_ts, normalized_text
 
 
 async def lookup_slack_thread_run_mapping(
