@@ -546,6 +546,27 @@ def test_dashboard_ticket_intake_routes_persist_config_and_report_missing_creden
     assert missing.json()["status"] == "missing_credentials"
     assert "Linear provider token" in missing.json()["error"]
 
+    async def seed_linear_pat() -> None:
+        await provider_pat_vault.upsert_provider_pat(
+            "octocat",
+            provider="linear",
+            token="lin_ticket-intake-token-1234",
+        )
+
+    anyio.run(seed_linear_pat)
+    connected = dashboard_client.get(
+        "/dashboard/api/delivery-projects/sports-cms/ticket-intake",
+        headers={"Origin": "http://testserver"},
+        cookies=_session_cookie(),
+    )
+    assert connected.status_code == 200
+    assert connected.json()["credential"] == {
+        "provider": "linear",
+        "available": True,
+        "source": "provider_pat",
+    }
+    assert "lin_ticket-intake-token-1234" not in str(connected.json())
+
     saved = dashboard_client.put(
         "/dashboard/api/delivery-projects/sports-cms/ticket-intake",
         headers={"Origin": "http://testserver"},

@@ -8,10 +8,10 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react"
-import type { ReactNode } from "react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { WorkspaceTicketIntakeSection } from "./WorkspaceTicketIntakeSection"
+import type { ReactNode } from "react"
 
 const mockApi = vi.hoisted(() => ({
   getTicketIntake: vi.fn(),
@@ -113,7 +113,9 @@ describe("WorkspaceTicketIntakeSection", () => {
     )
 
     expect(await screen.findByText("Ticket Intake")).not.toBeNull()
-    expect(await screen.findByText(/LINEAR_API_KEY is missing/)).not.toBeNull()
+    expect(
+      await screen.findByText(/Connect a Linear provider token/)
+    ).not.toBeNull()
     expect(screen.getByLabelText("Linear team keys")).toHaveProperty(
       "value",
       "SPORT"
@@ -122,6 +124,39 @@ describe("WorkspaceTicketIntakeSection", () => {
       "value",
       "linear-sports"
     )
+  })
+
+  it("reports provider PAT as the Linear credential source", async () => {
+    mockApi.getTicketIntake.mockResolvedValueOnce({
+      provider: "linear",
+      credential: {
+        provider: "linear",
+        available: true,
+        source: "provider_pat",
+      },
+      tracker_config: {
+        team_ids: [],
+        team_keys: ["SPORT"],
+        team_names: [],
+        linear_project_ids: ["linear-sports"],
+        linear_project_names: [],
+      },
+      queue_eligibility_policy: {
+        labels: ["agent-ready"],
+        ready_states: ["ready"],
+        excluded_statuses: ["done", "completed"],
+        required_fields: ["description"],
+        missing_readiness: "not-ready",
+        polling_interval_minutes: 5,
+      },
+    })
+
+    renderWithQueryClient(
+      <WorkspaceTicketIntakeSection projectId="sports-cms" />
+    )
+
+    expect(await screen.findByText("provider_pat is configured.")).not.toBeNull()
+    expect(await screen.findByText("Available")).not.toBeNull()
   })
 
   it("saves tracker config and queue eligibility policy", async () => {

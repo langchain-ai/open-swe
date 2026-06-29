@@ -1,16 +1,16 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useRef, useState } from "react"
 
-import { SettingsRow, SettingsSection } from "@/components/AppShell"
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import type {
   LinearCatalogResult,
   TicketIntakeConfig,
   TicketIntakePreview,
   TicketIntakeUpdateBody,
 } from "@/lib/api"
+import { SettingsRow, SettingsSection } from "@/components/AppShell"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import { api } from "@/lib/api"
 
 function splitList(value: string): Array<string> {
@@ -221,7 +221,7 @@ export function WorkspaceTicketIntakeSection({
           description={
             credential?.available
               ? `${credential.source ?? "Linear credential"} is configured.`
-              : "LINEAR_API_KEY is missing. Polling and preview cannot read Linear."
+              : "Connect a Linear provider token in Profile Settings. Polling and preview cannot read Linear yet."
           }
           control={
             <Badge variant={credential?.available ? "default" : "destructive"}>
