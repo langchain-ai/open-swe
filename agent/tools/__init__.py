@@ -21,6 +21,7 @@ from .save_plan import save_plan
 from .schedule_thread_wakeup import schedule_thread_wakeup
 from .search_repo_code import search_repo_code
 from .slack_read_thread_messages import slack_read_thread_messages
+from .slack_start_new_thread import slack_start_new_thread
 from .slack_thread_reply import slack_thread_reply
 from .update_finding import update_finding
 from .web_search import web_search
@@ -49,6 +50,7 @@ __all__ = [
     "schedule_thread_wakeup",
     "search_repo_code",
     "slack_read_thread_messages",
+    "slack_start_new_thread",
     "slack_thread_reply",
     "update_finding",
     "web_search",

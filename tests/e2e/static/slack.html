@@ -47,7 +47,7 @@
           .map((m) => {
             const who = m.is_bot ? "open-swe (bot)" : userNames[m.user] || m.user;
             const linked = m.text.replace(/<(https?:\/\/[^|>]+)\|([^>]+)>/g, '<a href="$1">$2</a>');
-            return `<div class="msg ${m.is_bot ? "bot" : ""}" data-bot="${m.is_bot}"><div class="who">${who}</div><div class="text">${linked}</div></div>`;
+            return `<div class="msg ${m.is_bot ? "bot" : ""}" data-bot="${m.is_bot}" data-thread-ts="${m.thread_ts || ""}"><div class="who">${who}</div><div class="text">${linked}</div></div>`;
           })
           .join("");
         $("thread").innerHTML = html || "<p style='color:#888'>No messages yet.</p>";

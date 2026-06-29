@@ -85,6 +85,7 @@ from .tools import (
     save_plan,
     schedule_thread_wakeup,
     slack_read_thread_messages,
+    slack_start_new_thread,
     slack_thread_reply,
     web_search,
 )
@@ -546,6 +547,7 @@ PLAN_MODE_EXCLUDED_TOOLS: frozenset[str] = frozenset(
         "http_request",
         "open_pull_request",
         "request_pr_review",
+        "slack_start_new_thread",
         "linear_create_issue",
         "linear_update_issue",
         "linear_delete_issue",
@@ -836,6 +838,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             request_pr_review,
             schedule_thread_wakeup,
             slack_read_thread_messages,
+            slack_start_new_thread,
             slack_thread_reply,
             *corridor_tools,
             *observability_tools,

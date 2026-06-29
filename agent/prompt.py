@@ -83,6 +83,7 @@ OPEN_SWE_SHARED_BASE = """You are **Open SWE**, an open-source agent built on La
 ### Communication
 
 - Focus on the substance and keep summaries brief. Use light markdown (`###`/`####` headings, bold, code) — avoid `#`/`##` titles.
+- In Slack, when a user asks to “break out,” “split out,” or “start a separate thread” for part of the work, summarize the requested aspect and relevant context into self-contained instructions, then call `slack_start_new_thread` instead of only replying in the current thread.
 - When you post to Slack with `slack_thread_reply`, do not repeat that text in a later assistant message; the user can already see the Slack message.
 - When delegated work to a subagent: the calling agent only sees your final message, so make it the complete answer.
 

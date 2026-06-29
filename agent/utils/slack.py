@@ -297,26 +297,26 @@ async def set_slack_assistant_status(
             return False
 
 
-async def post_slack_thread_reply_with_ts(
+async def _post_slack_message_with_ts(
     channel_id: str,
-    thread_ts: str,
     text: str,
     *,
+    thread_ts: str | None = None,
     unfurl_links: bool = True,
     unfurl_media: bool = True,
     blocks: list[dict[str, Any]] | None = None,
 ) -> tuple[str | None, str | None]:
-    """Post a reply in a Slack thread and return its Slack timestamp and error."""
     if not SLACK_BOT_TOKEN:
         return None, "missing_slack_bot_token"
 
     payload: dict[str, Any] = {
         "channel": channel_id,
-        "thread_ts": thread_ts,
         "text": text,
         "unfurl_links": unfurl_links,
         "unfurl_media": unfurl_media,
     }
+    if thread_ts is not None:
+        payload["thread_ts"] = thread_ts
     if blocks:
         payload["blocks"] = blocks
 
@@ -348,6 +348,44 @@ async def post_slack_thread_reply_with_ts(
         except httpx.HTTPError as exc:
             logger.exception("Slack chat.postMessage request failed")
             return None, f"http_error: {type(exc).__name__}"
+
+
+async def post_slack_thread_reply_with_ts(
+    channel_id: str,
+    thread_ts: str,
+    text: str,
+    *,
+    unfurl_links: bool = True,
+    unfurl_media: bool = True,
+    blocks: list[dict[str, Any]] | None = None,
+) -> tuple[str | None, str | None]:
+    """Post a reply in a Slack thread and return its Slack timestamp and error."""
+    return await _post_slack_message_with_ts(
+        channel_id,
+        text,
+        thread_ts=thread_ts,
+        unfurl_links=unfurl_links,
+        unfurl_media=unfurl_media,
+        blocks=blocks,
+    )
+
+
+async def post_slack_top_level_message_with_ts(
+    channel_id: str,
+    text: str,
+    *,
+    unfurl_links: bool = True,
+    unfurl_media: bool = True,
+    blocks: list[dict[str, Any]] | None = None,
+) -> tuple[str | None, str | None]:
+    """Post a top-level Slack message and return its timestamp and error."""
+    return await _post_slack_message_with_ts(
+        channel_id,
+        text,
+        unfurl_links=unfurl_links,
+        unfurl_media=unfurl_media,
+        blocks=blocks,
+    )
 
 
 async def update_slack_message(

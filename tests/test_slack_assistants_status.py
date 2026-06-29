@@ -271,6 +271,36 @@ async def test_post_slack_thread_reply_with_ts_sends_blocks(
     assert client_cm.post.call_args.kwargs["json"]["blocks"] == blocks
 
 
+@pytest.mark.asyncio
+async def test_post_slack_top_level_message_with_ts_omits_thread_ts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
+
+    client_cm = _async_client_cm(_ok_response())
+    with patch.object(slack_utils.httpx, "AsyncClient", return_value=client_cm):
+        result = await slack_utils.post_slack_top_level_message_with_ts("C1", "hello")
+
+    assert result == ("1.0", None)
+    payload = client_cm.post.call_args.kwargs["json"]
+    assert payload["channel"] == "C1"
+    assert payload["text"] == "hello"
+    assert "thread_ts" not in payload
+
+
+@pytest.mark.asyncio
+async def test_post_slack_top_level_message_with_ts_returns_slack_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
+
+    client_cm = _async_client_cm(_err_response("msg_too_long"))
+    with patch.object(slack_utils.httpx, "AsyncClient", return_value=client_cm):
+        result = await slack_utils.post_slack_top_level_message_with_ts("C1", "hello")
+
+    assert result == (None, "msg_too_long")
+
+
 async def test_post_slack_thread_reply_preserves_bool_return_on_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

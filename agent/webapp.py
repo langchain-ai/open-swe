@@ -124,6 +124,7 @@ from .utils.slack_feedback import (
     process_slack_reaction_added,
     process_slack_reaction_removed,
 )
+from .utils.thread_ids import generate_thread_id_from_slack_thread
 
 logger = logging.getLogger(__name__)
 
@@ -375,13 +376,6 @@ def generate_thread_id_from_github_issue(issue_id: str) -> str:
         f"{hash_bytes[:8]}-{hash_bytes[8:12]}-{hash_bytes[12:16]}-"
         f"{hash_bytes[16:20]}-{hash_bytes[20:32]}"
     )
-
-
-def generate_thread_id_from_slack_thread(channel_id: str, thread_id: str) -> str:
-    """Generate a deterministic thread ID from a Slack thread identifier."""
-    composite = f"{channel_id}:{thread_id}"
-    md5_hex = hashlib.md5(composite.encode("utf-8")).hexdigest()
-    return str(uuid.UUID(hex=md5_hex))
 
 
 def generate_reviewer_thread_id(owner: str, repo: str, pr_number: int) -> str:
