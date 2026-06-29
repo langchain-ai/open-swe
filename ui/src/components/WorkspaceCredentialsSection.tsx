@@ -1,15 +1,15 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useMemo, useState } from "react"
 
-import { SettingsRow, SettingsSection } from "@/components/AppShell"
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import type {
   AIHubImportResult,
   ProjectSecretStatus,
   ProjectSecretUpdateBody,
 } from "@/lib/api"
+import { SettingsRow, SettingsSection } from "@/components/AppShell"
+import { Badge } from "@/components/ui/badge"
+import { Button, buttonVariants } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import { api } from "@/lib/api"
 
 const DEFAULT_ENVIRONMENT = "default"
@@ -279,6 +279,18 @@ export function WorkspaceCredentialsSection({
                 )
               }
             />
+          }
+        />
+        <SettingsRow
+          label="Provider tokens"
+          description="Personal GitHub and Linear tokens are managed per user and required for queue polling, branch delivery, and tracker operations."
+          control={
+            <a
+              className={buttonVariants({ size: "sm", variant: "outline" })}
+              href="/my-settings"
+            >
+              Open Profile Settings
+            </a>
           }
         />
         <SettingsRow

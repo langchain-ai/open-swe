@@ -8,10 +8,10 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react"
-import type { ReactNode } from "react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-
 import { WorkspaceCredentialsSection } from "./WorkspaceCredentialsSection"
+import type { ReactNode } from "react"
+
 
 const mockApi = vi.hoisted(() => ({
   listProjectSecrets: vi.fn(),
@@ -149,6 +149,10 @@ describe("WorkspaceCredentialsSection", () => {
     )
 
     expect(await screen.findByText("AI Hub readiness")).not.toBeNull()
+    const providerTokens = await screen.findByRole("link", {
+      name: "Open Profile Settings",
+    })
+    expect(providerTokens.getAttribute("href")).toBe("/my-settings")
     expect(
       await screen.findByText("AI Hub base URL is missing.")
     ).not.toBeNull()
