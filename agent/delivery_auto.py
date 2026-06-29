@@ -52,10 +52,16 @@ async def delivery_auto_tick(
     *,
     client: Any | None = None,
     poll: bool = True,
+    project_id: str | None = None,
 ) -> dict[str, Any]:
-    poll_result = await delivery_queue_poll() if poll else None
+    if project_id:
+        project = await get_delivery_project(project_id)
+        projects = [project] if project and project.get("active", True) is True else []
+    else:
+        projects = await list_delivery_projects({"active": True})
+    poll_result = await delivery_queue_poll(projects=projects) if poll else None
     stale_reconcile: list[dict[str, Any]] = []
-    for project in await list_delivery_projects({"active": True}):
+    for project in projects:
         result = await pause_stale_project_queue_items(project)
         if result.get("items"):
             stale_reconcile.append(
@@ -64,7 +70,10 @@ async def delivery_auto_tick(
                     "items": result.get("items"),
                 }
             )
-    queued_items = _oldest_first(await list_delivery_queue_items({"status": "queued"}))
+    queue_filter = {"status": "queued"}
+    if project_id:
+        queue_filter["project_id"] = project_id
+    queued_items = _oldest_first(await list_delivery_queue_items(queue_filter))
     active_counts = await _active_counts_by_project()
     queued_seen_by_project: dict[str, int] = {}
     launched: list[dict[str, Any]] = []
@@ -113,6 +122,7 @@ async def delivery_auto_tick(
 
     return {
         "status": "completed",
+        "project_id": project_id,
         "poll": poll_result,
         "stale_reconcile": stale_reconcile,
         "queued": len(queued_items),

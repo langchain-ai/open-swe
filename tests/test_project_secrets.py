@@ -7,9 +7,9 @@ from cryptography.fernet import Fernet
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
+from agent import delivery_auto, linear_queue, project_registry, project_secrets
 from agent import delivery_queue as queue
 from agent import delivery_runner as runner
-from agent import linear_queue, project_registry, project_secrets
 from agent.dashboard import oauth, provider_pat_vault, routes
 
 _TEST_SECRET = "test-secret-with-at-least-thirty-two-bytes"
@@ -369,6 +369,40 @@ async def test_delivery_project_readiness_reports_missing_linear_config(
     assert payload["ready"] is False
     assert _check(payload, "tracker_intake")["ready"] is False
     assert _check(payload, "tracker_intake")["section"] == "ticket-intake"
+
+
+async def test_delivery_project_auto_mode_tick_runs_scoped_workspace_tick(
+    dashboard_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await _ready_sports_project()
+    called: dict[str, Any] = {}
+
+    async def fake_tick(*, project_id: str | None = None, poll: bool = True) -> dict[str, Any]:
+        called["project_id"] = project_id
+        called["poll"] = poll
+        return {
+            "status": "completed",
+            "project_id": project_id,
+            "poll": {"status": "error", "errors": [{"message": "Linear provider token is not configured."}]},
+            "queued": 0,
+            "launched": [],
+            "refused": [],
+            "skipped": [],
+            "stale_reconcile": [],
+        }
+
+    monkeypatch.setattr(delivery_auto, "delivery_auto_tick", fake_tick)
+
+    response = dashboard_client.post(
+        "/dashboard/api/delivery-projects/sports-cms/auto-mode/tick",
+        headers={"Origin": "http://testserver"},
+        cookies=_session_cookie(login="octocat", email="octo@example.com"),
+    )
+
+    assert response.status_code == 200
+    assert called == {"project_id": "sports-cms", "poll": True}
+    assert response.json()["poll"]["status"] == "error"
 
 
 async def test_delivery_project_readiness_blocks_disabled_auto_merge(

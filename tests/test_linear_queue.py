@@ -397,3 +397,33 @@ async def test_configured_linear_poll_uses_project_member_provider_pat(
     assert records[0]["id"] == "sports-cms:linear:lin-1"
     assert audit[0]["provider"] == "linear"
     assert audit[0]["action"] == "queue_poll"
+
+
+async def test_configured_linear_poll_reports_missing_provider_pat(
+    fake_queue_client: _FakeQueueClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("LINEAR_API_KEY", raising=False)
+    await project_registry.upsert_delivery_project(
+        {
+            "project_id": "sports-cms",
+            "name": "Sports CMS",
+            "tracker": {
+                "provider": "linear",
+                "config": {"team_keys": ["ENG"], "linear_project_ids": ["project-linear-1"]},
+            },
+            "vcs": {"provider": "github", "config": {"owner": "example", "repo": "sports-cms"}},
+            "queue_eligibility_policy": {"labels": ["agent-ready"]},
+            "membership": {"users": ["octocat"]},
+        }
+    )
+
+    result = await poll_configured_linear_delivery_queues()
+
+    assert result["status"] == "error"
+    assert result["errors"] == [
+        {
+            "project_id": "sports-cms",
+            "message": "Linear provider token is not configured.",
+        }
+    ]

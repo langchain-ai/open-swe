@@ -98,6 +98,25 @@ async def _queue_item(external_id: str, *, status: str = "queued") -> dict[str, 
     )
 
 
+async def _queue_item_for_project(
+    project_id: str,
+    external_id: str,
+    *,
+    status: str = "queued",
+) -> dict[str, Any]:
+    return await queue.upsert_delivery_queue_item(
+        {
+            "project_id": project_id,
+            "provider": "linear",
+            "external_work_item_id": external_id,
+            "title": f"Ticket {external_id}",
+            "description": "Implement a delivery ticket.",
+            "status": status,
+        },
+        preflight=_ready_preflight(),
+    )
+
+
 @pytest.mark.asyncio
 async def test_auto_tick_pauses_stale_repo_queue_items(
     fake_client: _FakeClient,
@@ -218,4 +237,44 @@ async def test_auto_tick_can_poll_before_launching(
 
     assert result["poll"] == {"status": "polled", "items": 1}
     assert result["launched"] == [{"status": "launched", "item_id": item["id"]}]
-    poll.assert_awaited_once_with()
+    polled_projects = poll.await_args.kwargs["projects"]
+    assert [project["project_id"] for project in polled_projects] == ["sports-cms"]
+
+
+@pytest.mark.asyncio
+async def test_auto_tick_can_be_scoped_to_one_project(
+    fake_client: _FakeClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await _project()
+    other_project = project_registry.default_delivery_project(
+        project_id="other-cms",
+        name="Other CMS",
+        tracker_config={"project_id": "linear-other"},
+        vcs_config={"owner": "example", "repo": "other-cms"},
+        run_limits={
+            "max_concurrent_auto_runs": 1,
+            "max_auto_startable_items": 5,
+            "daily_run_budget": 10,
+        },
+    )
+    await project_registry.upsert_delivery_project(other_project)
+    sports_item = await _queue_item_for_project("sports-cms", "SPORT-1")
+    await _queue_item_for_project("other-cms", "OTHER-1")
+    poll = AsyncMock(return_value={"status": "polled", "projects": 1, "items": 0})
+    launcher = AsyncMock(return_value={"status": "launched", "item_id": sports_item["id"]})
+    monkeypatch.setattr(delivery_auto, "delivery_queue_poll", poll)
+    monkeypatch.setattr(delivery_auto, "launch_delivery_worker", launcher)
+
+    result = await delivery_auto.delivery_auto_tick(
+        client=fake_client,
+        poll=True,
+        project_id="sports-cms",
+    )
+
+    assert result["project_id"] == "sports-cms"
+    assert result["queued"] == 1
+    assert result["launched"] == [{"status": "launched", "item_id": sports_item["id"]}]
+    assert [call.args[0] for call in launcher.await_args_list] == [sports_item["id"]]
+    polled_projects = poll.await_args.kwargs["projects"]
+    assert [project["project_id"] for project in polled_projects] == ["sports-cms"]

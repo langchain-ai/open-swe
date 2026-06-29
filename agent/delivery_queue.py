@@ -349,11 +349,15 @@ async def pause_stale_project_queue_items(project: Mapping[str, Any]) -> dict[st
     return {"status": "reconciled", "items": len(updated), "updated": updated}
 
 
-async def delivery_queue_poll(poller: Poller | None = None) -> dict[str, Any]:
+async def delivery_queue_poll(
+    poller: Poller | None = None,
+    *,
+    projects: list[Mapping[str, Any]] | None = None,
+) -> dict[str, Any]:
     if poller is None:
         from .linear_queue import poll_configured_linear_delivery_queues
 
-        return await poll_configured_linear_delivery_queues()
+        return await poll_configured_linear_delivery_queues(projects=projects)
     result = poller()
     items = await result if inspect.isawaitable(result) else result
     count = 0

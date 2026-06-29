@@ -13,6 +13,7 @@ from fastapi.responses import RedirectResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 
 from .. import (
+    delivery_auto,
     delivery_queue,
     linear_queue,
     project_model_endpoints,
@@ -1492,6 +1493,15 @@ async def api_get_delivery_project_readiness(
 ) -> dict[str, Any]:
     project = await _require_delivery_project_member(project_id, session)
     return await _delivery_project_readiness(project, session)
+
+
+@router.post("/delivery-projects/{project_id}/auto-mode/tick")
+async def api_run_delivery_project_auto_mode_tick(
+    project_id: str,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    await _require_delivery_project_member(project_id, session)
+    return await delivery_auto.delivery_auto_tick(project_id=project_id, poll=True)
 
 
 @router.get("/delivery-projects/{project_id}/repositories")

@@ -249,6 +249,34 @@ export interface DeliveryProjectReadiness {
   }>
 }
 
+export interface DeliveryAutoModeTickResult {
+  status: string
+  project_id?: string | null
+  poll?: {
+    status?: string
+    provider?: string
+    projects?: number
+    items?: number
+    skipped?: number
+    errors?: Array<{
+      project_id?: string
+      message?: string
+    }>
+  } | null
+  stale_reconcile: Array<{
+    project_id?: string
+    items?: number
+  }>
+  queued: number
+  launched: Array<Record<string, unknown>>
+  refused: Array<Record<string, unknown>>
+  skipped: Array<{
+    item_id?: string
+    project_id?: string
+    reason?: string
+  }>
+}
+
 export interface ProviderCredentialStatus {
   connected: boolean
   site?: string
@@ -1201,6 +1229,11 @@ export const api = {
   getDeliveryProjectReadiness: (projectId: string) =>
     request<DeliveryProjectReadiness>(
       `/delivery-projects/${encodeURIComponent(projectId)}/readiness`
+    ),
+  runWorkspaceAutoModeTick: (projectId: string) =>
+    request<DeliveryAutoModeTickResult>(
+      `/delivery-projects/${encodeURIComponent(projectId)}/auto-mode/tick`,
+      { method: "POST" }
     ),
   getWorkspaceRepositories: (projectId: string) =>
     request<WorkspaceRepositorySettings>(

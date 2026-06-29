@@ -1,7 +1,9 @@
 import { Link, Navigate, createFileRoute } from "@tanstack/react-router"
-import { useQuery } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useState } from "react"
 
 import type {
+  DeliveryAutoModeTickResult,
   DeliveryProjectReadiness,
   DeliveryProjectSummary,
 } from "@/lib/api"
@@ -13,6 +15,7 @@ import { WorkspaceModelRoutingSection } from "@/components/WorkspaceModelRouting
 import { WorkspaceRepositoriesSection } from "@/components/WorkspaceRepositoriesSection"
 import { WorkspaceTicketIntakeSection } from "@/components/WorkspaceTicketIntakeSection"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { api } from "@/lib/api"
 import { useSession } from "@/lib/session"
@@ -138,6 +141,95 @@ function WorkspaceRuns({ project }: { project: DeliveryProjectSummary }) {
   )
 }
 
+function AutoModeTickSummary({
+  result,
+}: {
+  result: DeliveryAutoModeTickResult | null
+}) {
+  if (!result) return null
+  const pollErrors = result.poll?.errors ?? []
+  return (
+    <div className="space-y-3 px-4 pb-4 text-xs">
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        {[
+          ["poll", result.poll?.status ?? "not run"],
+          ["queued", result.queued],
+          ["launched", result.launched.length],
+          ["skipped", result.skipped.length],
+        ].map(([label, value]) => (
+          <div key={label} className="rounded-md border border-border p-2">
+            <div className="text-[10px] font-medium text-muted-foreground uppercase">
+              {label}
+            </div>
+            <div className="mt-0.5 font-medium text-foreground">
+              {String(value)}
+            </div>
+          </div>
+        ))}
+      </div>
+      {pollErrors.length ? (
+        <div className="space-y-1 text-destructive">
+          {pollErrors.map((error, index) => (
+            <div key={`${error.project_id ?? "poll"}-${index}`}>
+              {error.message ?? "Auto-Mode poll failed."}
+            </div>
+          ))}
+        </div>
+      ) : null}
+      {result.refused.length ? (
+        <div className="space-y-1 text-muted-foreground">
+          {result.refused.map((item, index) => (
+            <div key={`${String(item.item_id ?? "refused")}-${index}`}>
+              {String(item.reason ?? item.status ?? "Launch refused")}
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function WorkspaceAutoModeSection({ projectId }: { projectId: string }) {
+  const qc = useQueryClient()
+  const [result, setResult] = useState<DeliveryAutoModeTickResult | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const runTick = useMutation({
+    mutationFn: () => api.runWorkspaceAutoModeTick(projectId),
+    onSuccess: (next) => {
+      setResult(next)
+      setError(null)
+      void qc.invalidateQueries({ queryKey: ["deliveryProjects"] })
+      void qc.invalidateQueries({
+        queryKey: ["deliveryProjectReadiness", projectId],
+      })
+    },
+    onError: (e: Error) => setError(e.message),
+  })
+
+  return (
+    <SettingsSection
+      title="Auto-Mode"
+      description="Poll Linear for this workspace and start eligible queued delivery work."
+    >
+      <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="text-xs text-muted-foreground">
+          Runs one scoped tick for this workspace. Linear polling remains
+          poll-only; delivery starts only for eligible queue items.
+        </div>
+        <Button
+          size="sm"
+          onClick={() => runTick.mutate()}
+          disabled={runTick.isPending}
+        >
+          {runTick.isPending ? "Running…" : "Run Auto-Mode now"}
+        </Button>
+      </div>
+      <AutoModeTickSummary result={result} />
+      {error ? <p className="px-4 pb-4 text-xs text-destructive">{error}</p> : null}
+    </SettingsSection>
+  )
+}
+
 function ReadinessPanel({
   readiness,
 }: {
@@ -260,6 +352,8 @@ function WorkspaceDetail({
       </SettingsSection>
 
       <ReadinessPanel readiness={readiness} />
+
+      <WorkspaceAutoModeSection projectId={project.project_id} />
 
       <WorkspaceRepositoriesSection projectId={project.project_id} />
 

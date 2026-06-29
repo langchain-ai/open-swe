@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import inspect
+import os
 from collections.abc import Awaitable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol
@@ -509,6 +510,8 @@ async def _linear_issue_client_for_project(project: Mapping[str, Any]) -> Linear
         )
         if resolved is not None:
             return LinearGraphQLIssueClient(token=resolved.token)
+    if not os.environ.get("LINEAR_API_KEY", "").strip():
+        raise RuntimeError("Linear provider token is not configured.")
     return LinearGraphQLIssueClient()
 
 
