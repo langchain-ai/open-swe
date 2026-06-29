@@ -9,6 +9,10 @@ import httpx
 import pytest
 
 from agent.integrations.langsmith import _configure_github_proxy
+from agent.utils.github_app import (
+    BASE_RUNTIME_PROXY_TOKEN_PERMISSIONS,
+    RUNTIME_PROXY_TOKEN_PERMISSIONS,
+)
 
 
 class TestSandboxFactoryLoading:
@@ -187,7 +191,7 @@ class TestCreateSandboxWithProxy:
                 "agent.server.get_github_app_installation_token_with_expiry",
                 new_callable=AsyncMock,
                 return_value=("ghs_install", None),
-            ),
+            ) as mock_get_token,
             patch("agent.server.create_sandbox") as mock_create,
             patch("agent.server._configure_github_proxy") as mock_proxy,
             patch.dict("os.environ", {"SANDBOX_TYPE": "langsmith", "LANGSMITH_API_KEY": "ls-key"}),
@@ -200,6 +204,44 @@ class TestCreateSandboxWithProxy:
 
             mock_create.assert_called_once_with(snapshot_id=None)
             mock_proxy.assert_called_once_with("sandbox-123", "ghs_install")
+            assert (
+                mock_get_token.await_args.kwargs["permissions"] == RUNTIME_PROXY_TOKEN_PERMISSIONS
+            )
+
+    @pytest.mark.asyncio
+    async def test_falls_back_when_optional_actions_permission_is_unavailable(self) -> None:
+        """Sandbox creation should still work before an install grants Actions read."""
+        with (
+            patch(
+                "agent.server.get_github_app_installation_token_with_expiry",
+                new_callable=AsyncMock,
+                side_effect=[(None, None), ("ghs_install", "expires")],
+            ) as mock_get_token,
+            patch("agent.server.create_sandbox") as mock_create,
+            patch("agent.server._configure_github_proxy") as mock_proxy,
+            patch("agent.server.record_proxy_token_expiry") as mock_record,
+            patch.dict("os.environ", {"SANDBOX_TYPE": "langsmith", "LANGSMITH_API_KEY": "ls-key"}),
+        ):
+            mock_create.return_value = MagicMock(id="sandbox-123")
+
+            from agent.server import _create_sandbox_with_proxy
+
+            await _create_sandbox_with_proxy(thread_id="thread-123")
+
+            assert mock_get_token.await_args_list[0].kwargs["permissions"] == (
+                RUNTIME_PROXY_TOKEN_PERMISSIONS
+            )
+            assert mock_get_token.await_args_list[0].kwargs["log_errors"] is False
+            assert mock_get_token.await_args_list[1].kwargs["permissions"] == (
+                BASE_RUNTIME_PROXY_TOKEN_PERMISSIONS
+            )
+            mock_proxy.assert_called_once_with("sandbox-123", "ghs_install")
+            mock_record.assert_called_once_with(
+                "thread-123",
+                "expires",
+                repositories=None,
+                permissions=BASE_RUNTIME_PROXY_TOKEN_PERMISSIONS,
+            )
 
     @pytest.mark.asyncio
     async def test_skips_proxy_for_non_langsmith(self) -> None:

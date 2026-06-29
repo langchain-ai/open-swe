@@ -104,6 +104,15 @@ def test_shared_base_is_neutral_for_read_only_agents() -> None:
         assert forbidden not in lowered
 
 
+def test_shared_base_explains_github_actions_log_access() -> None:
+    from agent.prompt import OPEN_SWE_SHARED_BASE
+
+    assert "GitHub Actions failures" in OPEN_SWE_SHARED_BASE
+    assert "GH_TOKEN=dummy gh run view ... --log" in OPEN_SWE_SHARED_BASE
+    assert "Actions: Read-only" in OPEN_SWE_SHARED_BASE
+    assert "treat CI logs as potentially sensitive" in OPEN_SWE_SHARED_BASE
+
+
 def test_construct_system_prompt_omits_corridor_prompt_by_default() -> None:
     prompt = construct_system_prompt(working_dir="/workspace")
 
