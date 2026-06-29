@@ -27,6 +27,7 @@ def test_plan_mode_excluded_tools_cover_mutating_tools() -> None:
         "task",
         "open_pull_request",
         "request_pr_review",
+        "slack_start_new_thread",
         "linear_create_issue",
         "linear_update_issue",
         "linear_delete_issue",

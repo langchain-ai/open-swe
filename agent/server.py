@@ -547,6 +547,7 @@ PLAN_MODE_EXCLUDED_TOOLS: frozenset[str] = frozenset(
         "http_request",
         "open_pull_request",
         "request_pr_review",
+        "slack_start_new_thread",
         "linear_create_issue",
         "linear_update_issue",
         "linear_delete_issue",
