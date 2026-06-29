@@ -32,8 +32,9 @@ async def save_plan(plan_markdown: str) -> dict[str, Any]:
     again to overwrite the plan with a revised version when addressing feedback.
 
     Write the plan in standard Markdown — headings, bullet/numbered lists, and
-    fenced code blocks all render. Structure it clearly (overview, files to
-    change, ordered steps, risks).
+    fenced code blocks all render. Keep it concise and high level, focusing on
+    approach, decisions/tradeoffs, risks, and verification; avoid file/function
+    details unless they are unusually tricky or controversial.
 
     Args:
         plan_markdown: The full plan, as a Markdown document.
