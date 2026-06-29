@@ -447,6 +447,44 @@ export interface TicketIntakePreview {
   error?: string
 }
 
+export interface WorkspaceRepositorySettings {
+  provider: "github" | string
+  repositories: Array<string>
+  default_repository: string
+  branch_policy: {
+    base_branch: string
+    branch_prefix: string
+    draft_pull_requests: boolean
+  }
+  credential_policy: {
+    provider: "github" | string
+    requires_user_pat: boolean
+    allowed_actions: Array<string>
+  }
+  context_pack: {
+    repositories: Array<string>
+    required_documents: Array<string>
+  }
+  access: Array<{
+    full_name: string
+    default: boolean
+    status: string
+    message?: string
+  }>
+}
+
+export interface WorkspaceRepositorySettingsUpdateBody {
+  provider: "github"
+  repositories: Array<string>
+  default_repository: string
+  base_branch: string
+  branch_prefix: string
+  draft_pull_requests: boolean
+  allowed_actions: Array<string>
+  context_repositories: Array<string>
+  required_documents: Array<string>
+}
+
 export interface UserMapping {
   github_login: string
   work_email: string
@@ -997,6 +1035,26 @@ export const api = {
   getDeliveryProjectReadiness: (projectId: string) =>
     request<DeliveryProjectReadiness>(
       `/delivery-projects/${encodeURIComponent(projectId)}/readiness`
+    ),
+  getWorkspaceRepositories: (projectId: string) =>
+    request<WorkspaceRepositorySettings>(
+      `/delivery-projects/${encodeURIComponent(projectId)}/repositories`
+    ),
+  saveWorkspaceRepositories: (
+    projectId: string,
+    body: WorkspaceRepositorySettingsUpdateBody
+  ) =>
+    request<WorkspaceRepositorySettings>(
+      `/delivery-projects/${encodeURIComponent(projectId)}/repositories`,
+      {
+        method: "PUT",
+        body: JSON.stringify(body),
+      }
+    ),
+  testWorkspaceRepositoryAccess: (projectId: string) =>
+    request<WorkspaceRepositorySettings>(
+      `/delivery-projects/${encodeURIComponent(projectId)}/repositories/test-access`,
+      { method: "POST" }
     ),
   getTicketIntake: (projectId: string) =>
     request<TicketIntakeConfig>(

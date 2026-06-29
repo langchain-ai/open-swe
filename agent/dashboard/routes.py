@@ -271,6 +271,20 @@ class TicketIntakeUpdateBody(BaseModel):
     polling_interval_minutes: int = 5
 
 
+class RepositorySettingsUpdateBody(BaseModel):
+    provider: Literal["github"] = "github"
+    repositories: list[str] = Field(default_factory=list)
+    default_repository: str
+    base_branch: str = "main"
+    branch_prefix: str = "delivery"
+    draft_pull_requests: bool = True
+    allowed_actions: list[str] = Field(
+        default_factory=lambda: ["branch", "commit", "pull_request"]
+    )
+    context_repositories: list[str] = Field(default_factory=list)
+    required_documents: list[str] = Field(default_factory=list)
+
+
 def _session_is_admin(session: dict[str, Any]) -> bool:
     return is_admin(session.get("email"), login=session.get("sub"))
 
@@ -402,6 +416,162 @@ def _ticket_intake_update_payload(
             "required_fields": _clean_strings(body.required_fields),
             "missing_readiness": body.missing_readiness,
             "polling_interval_minutes": body.polling_interval_minutes,
+        },
+    }
+
+
+def _normalize_repository_names(values: list[str], *, field_name: str) -> list[str]:
+    normalized: list[str] = []
+    for value in values:
+        if not isinstance(value, str) or not value.strip():
+            continue
+        try:
+            full_name = normalize_repo_full_name(value)
+        except ValueError as exc:
+            raise HTTPException(422, f"{field_name}: {exc}") from exc
+        if full_name not in normalized:
+            normalized.append(full_name)
+    return normalized
+
+
+def _repository_settings_payload(
+    project: dict[str, Any],
+    *,
+    access_statuses: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    vcs = project.get("vcs") if isinstance(project.get("vcs"), dict) else {}
+    vcs_config = vcs.get("config") if isinstance(vcs.get("config"), dict) else {}
+    branch_policy = (
+        project.get("branch_policy") if isinstance(project.get("branch_policy"), dict) else {}
+    )
+    credential_policy = (
+        project.get("credential_policy") if isinstance(project.get("credential_policy"), dict) else {}
+    )
+    context_pack = (
+        project.get("context_pack") if isinstance(project.get("context_pack"), dict) else {}
+    )
+    default_repository = ""
+    if _has_mapping_values(vcs_config, "owner", "repo"):
+        default_repository = f"{vcs_config['owner']}/{vcs_config['repo']}"
+    repositories = _normalize_repository_names(
+        [
+            *(
+                vcs_config.get("repositories")
+                if isinstance(vcs_config.get("repositories"), list)
+                else []
+            ),
+            default_repository,
+        ],
+        field_name="repositories",
+    )
+    context_repositories = _normalize_repository_names(
+        context_pack.get("repositories")
+        if isinstance(context_pack.get("repositories"), list)
+        else [],
+        field_name="context_repositories",
+    )
+    documents = _clean_strings(context_pack.get("documents") or [])
+    return {
+        "provider": str(vcs.get("provider") or "github"),
+        "repositories": repositories,
+        "default_repository": default_repository,
+        "branch_policy": {
+            "base_branch": branch_policy.get("base_branch") or "main",
+            "branch_prefix": branch_policy.get("branch_prefix") or "delivery",
+            "draft_pull_requests": branch_policy.get("draft_pull_requests") is not False,
+        },
+        "credential_policy": {
+            "provider": credential_policy.get("provider") or "github",
+            "requires_user_pat": credential_policy.get("requires_user_pat") is True,
+            "allowed_actions": _clean_strings(credential_policy.get("allowed_actions") or []),
+        },
+        "context_pack": {
+            "repositories": context_repositories,
+            "required_documents": documents,
+        },
+        "access": access_statuses or [
+            {
+                "full_name": full_name,
+                "default": full_name == default_repository,
+                "status": "unchecked",
+            }
+            for full_name in repositories
+        ],
+    }
+
+
+async def _repository_access_statuses(
+    project: dict[str, Any],
+    session: dict[str, Any],
+) -> list[dict[str, Any]]:
+    payload = _repository_settings_payload(project)
+    statuses: list[dict[str, Any]] = []
+    for full_name in payload["repositories"]:
+        record = {
+            "full_name": full_name,
+            "default": full_name == payload["default_repository"],
+            "status": "ready",
+            "message": "Repository access verified.",
+        }
+        try:
+            await require_repo_access_for_user(session["sub"], full_name)
+        except HTTPException as exc:
+            record["status"] = "blocked"
+            record["message"] = str(exc.detail)
+        statuses.append(record)
+    return statuses
+
+
+def _repository_settings_update_payload(
+    project: dict[str, Any],
+    body: RepositorySettingsUpdateBody,
+) -> dict[str, Any]:
+    default_repository = normalize_repo_full_name(body.default_repository)
+    repositories = _normalize_repository_names(
+        [*body.repositories, default_repository],
+        field_name="repositories",
+    )
+    context_repositories = _normalize_repository_names(
+        body.context_repositories or repositories,
+        field_name="context_repositories",
+    )
+    allowed_actions = _clean_strings(body.allowed_actions)
+    if not allowed_actions:
+        raise HTTPException(422, "at least one allowed delivery action is required")
+    base_branch = body.base_branch.strip()
+    branch_prefix = body.branch_prefix.strip()
+    if not base_branch:
+        raise HTTPException(422, "base branch is required")
+    if not branch_prefix:
+        raise HTTPException(422, "branch prefix is required")
+    owner, repo = default_repository.split("/", 1)
+    existing_context = (
+        project.get("context_pack") if isinstance(project.get("context_pack"), dict) else {}
+    )
+    return {
+        "project_id": str(project["project_id"]),
+        "vcs": {
+            "provider": body.provider,
+            "config": {"owner": owner, "repo": repo, "repositories": repositories},
+        },
+        "branch_policy": {
+            "base_branch": base_branch,
+            "branch_prefix": branch_prefix,
+            "draft_pull_requests": body.draft_pull_requests,
+        },
+        "credential_policy": {
+            **(
+                project.get("credential_policy")
+                if isinstance(project.get("credential_policy"), dict)
+                else {}
+            ),
+            "provider": body.provider,
+            "allowed_actions": allowed_actions,
+        },
+        "context_pack": {
+            **existing_context,
+            "repositories": context_repositories,
+            "documents": _clean_strings(body.required_documents),
         },
     }
 
@@ -1080,6 +1250,48 @@ async def api_get_delivery_project_readiness(
 ) -> dict[str, Any]:
     project = await _require_delivery_project_member(project_id, session)
     return await _delivery_project_readiness(project, session)
+
+
+@router.get("/delivery-projects/{project_id}/repositories")
+async def api_get_delivery_project_repositories(
+    project_id: str,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    project = await _require_delivery_project_member(project_id, session)
+    return _repository_settings_payload(
+        project,
+        access_statuses=await _repository_access_statuses(project, session),
+    )
+
+
+@router.put("/delivery-projects/{project_id}/repositories")
+async def api_put_delivery_project_repositories(
+    project_id: str,
+    body: RepositorySettingsUpdateBody,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    project = await _require_delivery_project_member(project_id, session)
+    try:
+        payload = _repository_settings_update_payload(project, body)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    updated = await project_registry.upsert_delivery_project(payload)
+    return _repository_settings_payload(
+        updated,
+        access_statuses=await _repository_access_statuses(updated, session),
+    )
+
+
+@router.post("/delivery-projects/{project_id}/repositories/test-access")
+async def api_test_delivery_project_repositories(
+    project_id: str,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    project = await _require_delivery_project_member(project_id, session)
+    return _repository_settings_payload(
+        project,
+        access_statuses=await _repository_access_statuses(project, session),
+    )
 
 
 @router.get("/delivery-projects/{project_id}/ticket-intake")

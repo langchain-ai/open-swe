@@ -4,13 +4,12 @@ from typing import Any
 
 import pytest
 from cryptography.fernet import Fernet
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
 from agent import delivery_queue as queue
-from agent import linear_queue
 from agent import delivery_runner as runner
-from agent import project_registry, project_secrets
+from agent import linear_queue, project_registry, project_secrets
 from agent.dashboard import oauth, provider_pat_vault, routes
 
 _TEST_SECRET = "test-secret-with-at-least-thirty-two-bytes"
@@ -398,8 +397,9 @@ def test_dashboard_ticket_intake_test_and_preview_are_read_only(
     dashboard_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import anyio
     from unittest.mock import AsyncMock
+
+    import anyio
 
     anyio.run(_project)
     monkeypatch.setenv("LINEAR_API_KEY", "linear-test-key")
@@ -452,6 +452,124 @@ def test_dashboard_ticket_intake_test_and_preview_are_read_only(
         "ignored": 0,
     }
     assert anyio.run(queue.list_delivery_queue_items) == []
+
+
+def test_dashboard_repository_settings_persist_project_policy(
+    dashboard_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import anyio
+
+    anyio.run(_project)
+
+    async def fake_repo_access(_login: str, _full_name: str) -> str:
+        return "token"
+
+    monkeypatch.setattr(routes, "require_repo_access_for_user", fake_repo_access)
+
+    response = dashboard_client.put(
+        "/dashboard/api/delivery-projects/sports-cms/repositories",
+        headers={"Origin": "http://testserver"},
+        cookies=_session_cookie(),
+        json={
+            "provider": "github",
+            "repositories": ["example/sports-cms", "example/theme-kit"],
+            "default_repository": "example/theme-kit",
+            "base_branch": "develop",
+            "branch_prefix": "delivery/sports",
+            "draft_pull_requests": False,
+            "allowed_actions": ["branch", "commit", "pull_request"],
+            "context_repositories": ["example/sports-cms"],
+            "required_documents": ["README.md", "docs/gates.md"],
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["default_repository"] == "example/theme-kit"
+    assert payload["branch_policy"] == {
+        "base_branch": "develop",
+        "branch_prefix": "delivery/sports",
+        "draft_pull_requests": False,
+    }
+    assert [repo["status"] for repo in payload["access"]] == ["ready", "ready"]
+
+    project = anyio.run(project_registry.get_delivery_project, "sports-cms")
+    assert project["vcs"] == {
+        "provider": "github",
+        "config": {
+            "owner": "example",
+            "repo": "theme-kit",
+            "repositories": ["example/sports-cms", "example/theme-kit"],
+        },
+    }
+    assert project["credential_policy"]["allowed_actions"] == [
+        "branch",
+        "commit",
+        "pull_request",
+    ]
+    assert project["context_pack"]["repositories"] == ["example/sports-cms"]
+    assert project["context_pack"]["documents"] == ["README.md", "docs/gates.md"]
+
+
+def test_dashboard_repository_settings_reject_invalid_repo_name(
+    dashboard_client: TestClient,
+) -> None:
+    import anyio
+
+    anyio.run(_project)
+
+    response = dashboard_client.put(
+        "/dashboard/api/delivery-projects/sports-cms/repositories",
+        headers={"Origin": "http://testserver"},
+        cookies=_session_cookie(),
+        json={
+            "provider": "github",
+            "repositories": [],
+            "default_repository": "not-a-full-name",
+            "base_branch": "main",
+            "branch_prefix": "delivery",
+            "draft_pull_requests": True,
+            "allowed_actions": ["branch"],
+            "context_repositories": [],
+            "required_documents": [],
+        },
+    )
+
+    assert response.status_code == 422
+    assert "owner/repo" in response.json()["detail"]
+
+
+def test_dashboard_repository_access_status_reports_inaccessible_repo(
+    dashboard_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import anyio
+
+    anyio.run(_project)
+
+    async def fake_repo_access(_login: str, full_name: str) -> str:
+        if full_name == "example/sports-cms":
+            raise HTTPException(403, "no access to this private repository")
+        return "token"
+
+    monkeypatch.setattr(routes, "require_repo_access_for_user", fake_repo_access)
+
+    response = dashboard_client.post(
+        "/dashboard/api/delivery-projects/sports-cms/repositories/test-access",
+        headers={"Origin": "http://testserver"},
+        cookies=_session_cookie(),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["access"] == [
+        {
+            "full_name": "example/sports-cms",
+            "default": True,
+            "status": "blocked",
+            "message": "no access to this private repository",
+        }
+    ]
 
 
 async def test_delivery_project_readiness_reports_missing_repo(

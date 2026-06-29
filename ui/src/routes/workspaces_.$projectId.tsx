@@ -7,6 +7,7 @@ import type {
 } from "@/lib/api"
 import { AppShell, SettingsSection } from "@/components/AppShell"
 import { WorkspaceCredentialsSection } from "@/components/WorkspaceCredentialsSection"
+import { WorkspaceRepositoriesSection } from "@/components/WorkspaceRepositoriesSection"
 import { WorkspaceTicketIntakeSection } from "@/components/WorkspaceTicketIntakeSection"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -257,11 +258,7 @@ function WorkspaceDetail({
 
       <ReadinessPanel readiness={readiness} />
 
-      <SettingsSection title="Repositories">
-        <div id="repositories">
-          <KeyValueGrid items={entries(vcsConfig)} />
-        </div>
-      </SettingsSection>
+      <WorkspaceRepositoriesSection projectId={project.project_id} />
 
       <WorkspaceTicketIntakeSection projectId={project.project_id} />
 
