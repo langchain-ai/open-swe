@@ -17,6 +17,7 @@ const mockApi = vi.hoisted(() => ({
   listMyProviderTokens: vi.fn(),
   saveMyProviderToken: vi.fn(),
   revokeMyProviderToken: vi.fn(),
+  testMyProviderToken: vi.fn(),
 }))
 
 vi.mock("@/lib/api", () => ({
@@ -62,6 +63,15 @@ describe("ProviderTokensSection", () => {
     )
     mockApi.revokeMyProviderToken.mockImplementation((provider) =>
       Promise.resolve({ connected: false, provider })
+    )
+    mockApi.testMyProviderToken.mockImplementation((provider) =>
+      Promise.resolve({
+        connected: true,
+        provider,
+        status: "valid",
+        message: `${provider} token verified.`,
+        identity: "Octo Cat",
+      })
     )
   })
 
@@ -128,6 +138,20 @@ describe("ProviderTokensSection", () => {
     await waitFor(() =>
       expect(mockApi.revokeMyProviderToken).toHaveBeenCalledWith("github")
     )
+  })
+
+  it("tests a connected provider token without displaying the token value", async () => {
+    renderWithQueryClient(<ProviderTokensSection />)
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Test GitHub token" })
+    )
+
+    await waitFor(() =>
+      expect(mockApi.testMyProviderToken).toHaveBeenCalledWith("github")
+    )
+    expect(await screen.findByText("github token verified. Octo Cat")).not.toBeNull()
+    expect(document.body.textContent).not.toContain("ghp_secret-token-1234")
   })
 
   it("shows API errors for failed token saves", async () => {

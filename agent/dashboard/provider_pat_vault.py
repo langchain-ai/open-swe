@@ -7,13 +7,17 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
+import httpx
 from fastapi import HTTPException
 
 from ..encryption import decrypt_token, encrypt_token
+from ..utils.http import DEFAULT_HTTP_TIMEOUT
 from ..utils.thread_ops import langgraph_client
 
 PROVIDER_PAT_NAMESPACE: list[str] = ["provider_pat_vault"]
 PROVIDER_PAT_AUDIT_NAMESPACE: list[str] = ["provider_pat_audit"]
+GITHUB_USER_URL = "https://api.github.com/user"
+LINEAR_API_URL = "https://api.linear.app/graphql"
 
 
 @dataclass(frozen=True)
@@ -187,3 +191,154 @@ async def list_provider_pat_audit(login: str | None = None) -> list[dict[str, An
     items = result.get("items") if isinstance(result, dict) else getattr(result, "items", [])
     records = [value for item in items or [] if (value := _value_from_item(item)) is not None]
     return sorted(records, key=lambda item: str(item.get("created_at", "")))
+
+
+def _test_result(
+    *,
+    provider: str,
+    status: str,
+    message: str,
+    connected: bool,
+    identity: str | None = None,
+) -> dict[str, Any]:
+    result: dict[str, Any] = {
+        "connected": connected,
+        "provider": provider,
+        "status": status,
+        "message": message,
+    }
+    if identity:
+        result["identity"] = identity
+    return result
+
+
+def _identity_from_user(payload: dict[str, Any]) -> str | None:
+    for key in ("login", "email", "name", "id"):
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+async def _test_github_token(token: str, provider: str) -> dict[str, Any]:
+    try:
+        async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
+            response = await client.get(
+                GITHUB_USER_URL,
+                headers={
+                    "Accept": "application/vnd.github+json",
+                    "Authorization": f"Bearer {token}",
+                    "X-GitHub-Api-Version": "2022-11-28",
+                },
+            )
+    except httpx.HTTPError:
+        return _test_result(
+            provider=provider,
+            status="error",
+            message="GitHub token could not be verified.",
+            connected=True,
+        )
+    if response.status_code == 401:
+        return _test_result(
+            provider=provider,
+            status="invalid",
+            message="GitHub rejected this token.",
+            connected=True,
+        )
+    if response.status_code >= 400:
+        return _test_result(
+            provider=provider,
+            status="error",
+            message="GitHub token verification failed.",
+            connected=True,
+        )
+    payload = response.json()
+    identity = _identity_from_user(payload if isinstance(payload, dict) else {})
+    return _test_result(
+        provider=provider,
+        status="valid",
+        message="GitHub token verified.",
+        connected=True,
+        identity=identity,
+    )
+
+
+async def _test_linear_token(token: str, provider: str) -> dict[str, Any]:
+    query = "query ProviderTokenViewer { viewer { id name email } }"
+    try:
+        async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
+            response = await client.post(
+                LINEAR_API_URL,
+                headers={"Authorization": token, "Content-Type": "application/json"},
+                json={"query": query, "variables": {}},
+            )
+    except httpx.HTTPError:
+        return _test_result(
+            provider=provider,
+            status="error",
+            message="Linear token could not be verified.",
+            connected=True,
+        )
+    if response.status_code in {401, 403}:
+        return _test_result(
+            provider=provider,
+            status="invalid",
+            message="Linear rejected this token.",
+            connected=True,
+        )
+    if response.status_code >= 400:
+        return _test_result(
+            provider=provider,
+            status="error",
+            message="Linear token verification failed.",
+            connected=True,
+        )
+    payload = response.json()
+    if isinstance(payload, dict) and payload.get("errors"):
+        return _test_result(
+            provider=provider,
+            status="invalid",
+            message="Linear rejected this token.",
+            connected=True,
+        )
+    viewer = payload.get("data", {}).get("viewer") if isinstance(payload, dict) else None
+    if not isinstance(viewer, dict):
+        return _test_result(
+            provider=provider,
+            status="error",
+            message="Linear token verification returned no viewer.",
+            connected=True,
+        )
+    return _test_result(
+        provider=provider,
+        status="valid",
+        message="Linear token verified.",
+        connected=True,
+        identity=_identity_from_user(viewer),
+    )
+
+
+async def test_provider_pat(login: str, *, provider: str) -> dict[str, Any]:
+    provider = _normalize_provider(provider)
+    resolved = await resolve_provider_pat(
+        login,
+        provider=provider,
+        action="provider_token_test",
+    )
+    if resolved is None:
+        return _test_result(
+            provider=provider,
+            status="missing",
+            message="Provider token is not connected.",
+            connected=False,
+        )
+    if provider == "github":
+        return await _test_github_token(resolved.token, provider)
+    if provider == "linear":
+        return await _test_linear_token(resolved.token, provider)
+    return _test_result(
+        provider=provider,
+        status="unsupported",
+        message="Token verification is not supported for this provider.",
+        connected=True,
+    )

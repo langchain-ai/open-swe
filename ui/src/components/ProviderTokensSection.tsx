@@ -4,6 +4,7 @@ import { useEffect, useState } from "react"
 import type {
   ProviderPATProvider,
   ProviderPATStatus,
+  ProviderPATTestResult,
   ProviderPATUpdateBody,
 } from "@/lib/api"
 import { SettingsRow, SettingsSection } from "@/components/AppShell"
@@ -38,6 +39,15 @@ function formatUpdatedAt(value: string | null | undefined): string {
   return parsed.toLocaleString()
 }
 
+function testResultClassName(result: ProviderPATTestResult | null): string {
+  if (!result) return "text-muted-foreground"
+  if (result.status === "valid") return "text-primary"
+  if (result.status === "invalid" || result.status === "missing") {
+    return "text-destructive"
+  }
+  return "text-muted-foreground"
+}
+
 function statusForProvider(
   items: Array<ProviderPATStatus> | undefined,
   provider: ProviderPATProvider
@@ -68,6 +78,9 @@ function ProviderTokenRow({
   const qc = useQueryClient()
   const [token, setToken] = useState("")
   const [error, setError] = useState<string | null>(null)
+  const [testResult, setTestResult] = useState<ProviderPATTestResult | null>(
+    null
+  )
   const inputId = `provider-token-${provider}`
 
   useEffect(() => {
@@ -84,9 +97,13 @@ function ProviderTokenRow({
   const onSuccess = () => {
     setToken("")
     setError(null)
+    setTestResult(null)
     void qc.invalidateQueries({ queryKey: ["myProviderTokens"] })
   }
-  const onError = (e: Error) => setError(e.message)
+  const onError = (e: Error) => {
+    setError(e.message)
+    setTestResult(null)
+  }
 
   const save = useMutation({
     mutationFn: (body: ProviderPATUpdateBody) =>
@@ -97,6 +114,14 @@ function ProviderTokenRow({
   const revoke = useMutation({
     mutationFn: () => api.revokeMyProviderToken(provider),
     onSuccess,
+    onError,
+  })
+  const test = useMutation({
+    mutationFn: () => api.testMyProviderToken(provider),
+    onSuccess: (result) => {
+      setError(null)
+      setTestResult(result)
+    },
     onError,
   })
 
@@ -127,15 +152,26 @@ function ProviderTokenRow({
               {connected ? "Connected" : "Not connected"}
             </span>
             {connected && (
-              <Button
-                size="sm"
-                variant="outline"
-                aria-label={`Revoke ${label} token`}
-                onClick={() => revoke.mutate()}
-                disabled={revoke.isPending}
-              >
-                Revoke
-              </Button>
+              <>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  aria-label={`Test ${label} token`}
+                  onClick={() => test.mutate()}
+                  disabled={test.isPending}
+                >
+                  {test.isPending ? "Testing..." : "Test"}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  aria-label={`Revoke ${label} token`}
+                  onClick={() => revoke.mutate()}
+                  disabled={revoke.isPending}
+                >
+                  Revoke
+                </Button>
+              </>
             )}
           </div>
           <div className="flex flex-col gap-2 sm:flex-row">
@@ -161,6 +197,18 @@ function ProviderTokenRow({
           {error && (
             <p className="max-w-72 text-right text-xs text-destructive">
               {error}
+            </p>
+          )}
+          {testResult && (
+            <p
+              className={cn(
+                "max-w-72 text-right text-xs",
+                testResultClassName(testResult)
+              )}
+            >
+              {testResult.identity
+                ? `${testResult.message} ${testResult.identity}`
+                : testResult.message}
             </p>
           )}
         </div>

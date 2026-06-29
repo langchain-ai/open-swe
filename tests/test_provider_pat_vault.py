@@ -271,6 +271,57 @@ async def test_pat_use_is_audited_without_token_value(fake_client: _FakeClient) 
     assert "ghp_audited-token-7777" not in str(audit)
 
 
+async def test_provider_pat_test_reports_missing_token(fake_client: _FakeClient) -> None:
+    result = await provider_pat_vault.test_provider_pat("octocat", provider="linear")
+
+    assert result == {
+        "connected": False,
+        "provider": "linear",
+        "status": "missing",
+        "message": "Provider token is not connected.",
+    }
+
+
+async def test_provider_pat_test_resolves_token_without_returning_it(
+    fake_client: _FakeClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen: dict[str, str] = {}
+    await provider_pat_vault.upsert_provider_pat(
+        "octocat",
+        provider="linear",
+        token="lin_secret-token-1234",
+    )
+
+    async def fake_test_linear_token(token: str, provider: str) -> dict[str, Any]:
+        seen["token"] = token
+        seen["provider"] = provider
+        return {
+            "connected": True,
+            "provider": provider,
+            "status": "valid",
+            "message": "Linear token verified.",
+            "identity": "Octo Cat",
+        }
+
+    monkeypatch.setattr(provider_pat_vault, "_test_linear_token", fake_test_linear_token)
+
+    result = await provider_pat_vault.test_provider_pat("octocat", provider="linear")
+
+    assert seen == {"token": "lin_secret-token-1234", "provider": "linear"}
+    assert result == {
+        "connected": True,
+        "provider": "linear",
+        "status": "valid",
+        "message": "Linear token verified.",
+        "identity": "Octo Cat",
+    }
+    assert "lin_secret-token-1234" not in str(result)
+    audit = await provider_pat_vault.list_provider_pat_audit("octocat")
+    assert audit[0]["action"] == "provider_token_test"
+    assert audit[0]["token_last4"] == "1234"
+
+
 async def test_repository_access_falls_back_to_user_provider_pat(
     fake_client: _FakeClient,
     monkeypatch: pytest.MonkeyPatch,
@@ -407,3 +458,37 @@ def test_dashboard_pat_routes_are_user_scoped_and_redacted(
     )
     assert deleted.status_code == 200
     assert deleted.json() == {"connected": False, "provider": "github"}
+
+
+def test_dashboard_pat_test_route_is_redacted(
+    dashboard_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_test_provider_pat(login: str, *, provider: str) -> dict[str, Any]:
+        assert login == "octocat"
+        assert provider == "linear"
+        return {
+            "connected": True,
+            "provider": "linear",
+            "status": "valid",
+            "message": "Linear token verified.",
+            "identity": "Octo Cat",
+        }
+
+    monkeypatch.setattr(routes, "test_provider_pat", fake_test_provider_pat)
+
+    response = dashboard_client.post(
+        "/dashboard/api/my-provider-tokens/linear/test",
+        headers={"Origin": "http://testserver"},
+        cookies=_session_cookie(),
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "connected": True,
+        "provider": "linear",
+        "status": "valid",
+        "message": "Linear token verified.",
+        "identity": "Octo Cat",
+    }
+    assert "lin_secret" not in str(response.json())

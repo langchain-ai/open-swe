@@ -367,6 +367,14 @@ export interface ProviderPATUpdateBody {
   token: string
 }
 
+export interface ProviderPATTestResult {
+  connected: boolean
+  provider: ProviderPATProvider | string
+  status: "valid" | "invalid" | "missing" | "error" | "unsupported" | string
+  message: string
+  identity?: string
+}
+
 export interface ProviderPATListPayload {
   items: Array<ProviderPATStatus>
 }
@@ -1258,6 +1266,11 @@ export const api = {
     request<ProviderPATStatus>(
       `/my-provider-tokens/${encodeURIComponent(provider)}`,
       { method: "DELETE" }
+    ),
+  testMyProviderToken: (provider: ProviderPATProvider) =>
+    request<ProviderPATTestResult>(
+      `/my-provider-tokens/${encodeURIComponent(provider)}/test`,
+      { method: "POST" }
     ),
   listDeliveryProjects: () =>
     request<{ items: Array<DeliveryProjectSummary> }>("/delivery-projects"),

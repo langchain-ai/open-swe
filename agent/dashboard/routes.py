@@ -90,6 +90,7 @@ from .provider_pat_vault import (
     list_provider_pat_status,
     resolve_provider_pat,
     revoke_provider_pat,
+    test_provider_pat,
     upsert_provider_pat,
 )
 from .repo_access import require_repo_access_for_user
@@ -1461,6 +1462,14 @@ async def api_delete_my_provider_token(
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
     return await revoke_provider_pat(session["sub"], provider=provider)
+
+
+@router.post("/my-provider-tokens/{provider}/test")
+async def api_test_my_provider_token(
+    provider: str,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    return await test_provider_pat(session["sub"], provider=provider)
 
 
 @router.get("/delivery-projects")
