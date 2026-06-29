@@ -505,6 +505,35 @@ def test_get_slack_repo_config_ignores_repo_syntax_in_message(
     assert repo == {"owner": "saved-owner", "name": "saved-repo"}
 
 
+def test_get_slack_repo_config_uses_prefetched_channel_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    threads_client = _FakeThreadsClient(thread={"metadata": {}})
+
+    async def fail_get_slack_channel_description(channel_id: str) -> str:
+        raise AssertionError("prefetched channel context should avoid a duplicate Slack lookup")
+
+    monkeypatch.setattr(webapp, "get_client", lambda url: _FakeClient(threads_client))
+    monkeypatch.setattr(webapp, "get_slack_channel_description", fail_get_slack_channel_description)
+
+    repo = asyncio.run(
+        webapp.get_slack_repo_config(
+            "C123",
+            "1.234",
+            channel_context={
+                "id": "C123",
+                "name": "eng-open-swe",
+                "name_normalized": "eng-open-swe",
+                "topic": "repo:langchain-ai/open-swe",
+                "purpose": "agent work",
+                "description": "repo:langchain-ai/open-swe\nagent work",
+            },
+        )
+    )
+
+    assert repo == {"owner": "langchain-ai", "name": "open-swe"}
+
+
 def test_get_slack_repo_config_applies_profile_default_repo(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -660,6 +689,14 @@ def test_process_slack_mention_creates_thread_first_run_with_trace_reply(
         webapp.process_slack_mention(
             {
                 "channel_id": "C123",
+                "channel_context": {
+                    "id": "C123",
+                    "name": "Eng Open SWE",
+                    "name_normalized": "eng-open-swe",
+                    "topic": "Coordinate Open SWE work",
+                    "purpose": "repo:langchain-ai/open-swe",
+                    "description": "Coordinate Open SWE work\nrepo:langchain-ai/open-swe",
+                },
                 "thread_ts": thread_ts,
                 "event_ts": event_ts,
                 "user_id": "U123",
@@ -690,7 +727,9 @@ def test_process_slack_mention_creates_thread_first_run_with_trace_reply(
     assert kwargs["if_not_exists"] == "create"
     assert kwargs["multitask_strategy"] == "interrupt"
     assert kwargs["durability"] == "sync"
-    assert kwargs["config"]["configurable"]["slack_thread"]["thread_ts"] == thread_ts
+    slack_thread_config = kwargs["config"]["configurable"]["slack_thread"]
+    assert slack_thread_config["thread_ts"] == thread_ts
+    assert slack_thread_config["channel_context"]["name_normalized"] == "eng-open-swe"
     prompt_block = kwargs["input"]["messages"][0]["content"][0]
     assert "## Default Repository Hint\nlangchain-ai/open-swe" in prompt_block["text"]
     assert (
@@ -698,8 +737,45 @@ def test_process_slack_mention_creates_thread_first_run_with_trace_reply(
         in (prompt_block["text"])
     )
     assert prompt_block["text"].count("## Slack Thread") == 1
+    assert "Channel ID: C123" in prompt_block["text"]
+    assert "Channel name: #eng-open-swe" in prompt_block["text"]
     assert f"Thread TS: {thread_ts}" in prompt_block["text"]
+    assert "Slack-provided channel description" in prompt_block["text"]
+    assert "Coordinate Open SWE work" in prompt_block["text"]
+    assert "repo:langchain-ai/open-swe" in prompt_block["text"]
     assert "## Latest Mention Request\ncontinue on the branch" in prompt_block["text"]
+
+
+def test_process_slack_mention_prompt_omits_missing_channel_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+    _setup_slack_mention_fakes(monkeypatch, captured)
+
+    async def fake_thread_exists(thread_id: str) -> bool:
+        return False
+
+    monkeypatch.setattr(webapp, "_thread_exists", fake_thread_exists)
+
+    asyncio.run(
+        webapp.process_slack_mention(
+            {
+                "channel_id": "C123",
+                "thread_ts": "1700000000.000100",
+                "event_ts": "1700000000.000200",
+                "user_id": "U123",
+                "text": "<@UBOT> do the thing",
+                "bot_user_id": "UBOT",
+            },
+            {"owner": "langchain-ai", "name": "open-swe"},
+        )
+    )
+
+    run_create = captured["run_create"]
+    prompt_block = run_create["kwargs"]["input"]["messages"][0]["content"][0]
+    assert "Channel ID: C123" in prompt_block["text"]
+    assert "Channel name:" not in prompt_block["text"]
+    assert "Slack-provided channel description" not in prompt_block["text"]
 
 
 def test_process_slack_mention_skips_trace_reply_on_followup_mention(
@@ -903,10 +979,20 @@ def test_process_slack_mention_mapped_user_with_token_runs_as_user(
     monkeypatch.setattr(webapp, "login_for_slack_id", fake_login_for_slack_id)
     monkeypatch.setattr(webapp, "upsert_agent_thread_owner_metadata", fake_upsert_owner)
 
+    channel_context = {
+        "id": "C123",
+        "name": "eng-open-swe",
+        "name_normalized": "eng-open-swe",
+        "topic": "Coordinate Open SWE work",
+        "purpose": "",
+        "description": "Coordinate Open SWE work",
+    }
+
     asyncio.run(
         webapp.process_slack_mention(
             {
                 "channel_id": "C123",
+                "channel_context": channel_context,
                 "thread_ts": "1700000000.000100",
                 "event_ts": "1700000000.000200",
                 "user_id": "U123",
@@ -920,6 +1006,10 @@ def test_process_slack_mention_mapped_user_with_token_runs_as_user(
     run_create = captured["run_create"]
     configurable = run_create["kwargs"]["config"]["configurable"]
     assert configurable["github_login"] == "mason-gh"
+    assert configurable["slack_thread"]["channel_context"] == channel_context
+    assert owner_meta["source_context"] == {
+        "slack_thread": configurable["slack_thread"],
+    }
     # The thread is tagged with the login resolved from the Slack user id, so it
     # surfaces in the web Agents UI even when the Slack profile email does not
     # resolve to a mapping (login_for_email returns None in this harness).
@@ -1031,8 +1121,12 @@ def test_process_slack_mention_uses_vision_fallback_for_image_thread(
 
 
 class _FakeResponse:
-    def __init__(self, payload: dict) -> None:
+    def __init__(
+        self, payload: dict, status_code: int = 200, headers: dict[str, str] | None = None
+    ) -> None:
         self._payload = payload
+        self.status_code = status_code
+        self.headers = headers or {}
 
     def raise_for_status(self) -> None:
         return None
@@ -1053,6 +1147,67 @@ class _FakeAsyncClient:
 
     async def get(self, url: str, **kwargs: object) -> _FakeResponse:
         return _FakeResponse(self._payload)
+
+
+def test_get_slack_channel_info_uses_global_ttl_cache(monkeypatch: pytest.MonkeyPatch) -> None:
+    slack_utils.clear_slack_channel_info_cache()
+    calls = 0
+    payload = {
+        "ok": True,
+        "channel": {
+            "id": "C123",
+            "name": "eng-open-swe",
+            "topic": {"value": "Coordinate work"},
+            "purpose": {"value": "repo:langchain-ai/open-swe"},
+        },
+    }
+
+    class _CountingAsyncClient:
+        async def __aenter__(self) -> "_CountingAsyncClient":
+            return self
+
+        async def __aexit__(self, *exc: object) -> None:
+            return None
+
+        async def get(self, url: str, **kwargs: object) -> _FakeResponse:
+            nonlocal calls
+            calls += 1
+            return _FakeResponse(payload)
+
+    monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
+    monkeypatch.setattr(slack_utils.httpx, "AsyncClient", lambda *a, **k: _CountingAsyncClient())
+
+    first = asyncio.run(slack_utils.get_slack_channel_info("C123"))
+    second = asyncio.run(slack_utils.get_slack_channel_info("C123"))
+
+    assert first == payload["channel"]
+    assert second == payload["channel"]
+    assert calls == 1
+    slack_utils.clear_slack_channel_info_cache()
+
+
+def test_get_slack_channel_info_rate_limit_is_non_fatal(monkeypatch: pytest.MonkeyPatch) -> None:
+    slack_utils.clear_slack_channel_info_cache()
+
+    class _RateLimitedAsyncClient:
+        async def __aenter__(self) -> "_RateLimitedAsyncClient":
+            return self
+
+        async def __aexit__(self, *exc: object) -> None:
+            return None
+
+        async def get(self, url: str, **kwargs: object) -> _FakeResponse:
+            return _FakeResponse(
+                {"ok": False, "error": "ratelimited"},
+                status_code=429,
+                headers={"Retry-After": "30"},
+            )
+
+    monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
+    monkeypatch.setattr(slack_utils.httpx, "AsyncClient", lambda *a, **k: _RateLimitedAsyncClient())
+
+    assert asyncio.run(slack_utils.get_slack_channel_info("C123")) is None
+    assert slack_utils._SLACK_CHANNEL_INFO_CACHE == {}
 
 
 def test_get_slack_permalink_returns_link(monkeypatch: pytest.MonkeyPatch) -> None:
