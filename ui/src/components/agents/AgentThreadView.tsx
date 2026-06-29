@@ -37,11 +37,10 @@ function messageText(message: Message): string {
 
 function visibleQueuedMessages(
   queuedMessages: Array<QueuedThreadMessage> | undefined,
-  messages: Array<Message>,
-  isStreaming: boolean
+  messages: Array<Message>
 ): Array<QueuedThreadMessage> {
   const queued = queuedMessages ?? []
-  if (queued.length === 0 || isStreaming) return queued
+  if (queued.length === 0) return queued
 
   const userMessages = messages
     .filter((message) => message.author === "user")
@@ -116,9 +115,8 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
 
   const isStreaming = thread.status === "running" || stream.isLoading
   const queuedMessages = useMemo(
-    () =>
-      visibleQueuedMessages(thread.queuedMessages, baseMessages, isStreaming),
-    [baseMessages, isStreaming, thread.queuedMessages]
+    () => visibleQueuedMessages(thread.queuedMessages, baseMessages),
+    [baseMessages, thread.queuedMessages]
   )
   const hasMessages = baseMessages.length > 0
   const hasConversation = hasMessages || queuedMessages.length > 0
