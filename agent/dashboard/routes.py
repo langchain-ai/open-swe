@@ -859,6 +859,17 @@ async def _delivery_project_readiness(
     )
 
     tracker_ready = bool(tracker.get("provider")) and bool(tracker_config)
+    tracker_provider = str(tracker.get("provider") or "linear").strip().lower()
+    linear_token = (
+        await _linear_token_for_session(
+            session,
+            project_id=project_id,
+            action="readiness",
+        )
+        if tracker_provider == "linear"
+        else "not-required"
+    )
+    tracker_credential_ready = tracker_provider != "linear" or bool(linear_token)
     repo_config_ready = bool(vcs.get("provider")) and _has_mapping_values(
         vcs_config, "owner", "repo"
     )
@@ -966,6 +977,15 @@ async def _delivery_project_readiness(
             message="Linear intake is configured."
             if tracker_ready
             else "Configure the Linear workspace, project, labels, and readiness states.",
+        ),
+        _readiness_check(
+            key="tracker_provider_token",
+            label="Tracker provider token",
+            ready=tracker_credential_ready,
+            section="credentials",
+            message="Linear provider token is connected."
+            if tracker_credential_ready
+            else "Connect a Linear provider token for queue polling.",
         ),
         _readiness_check(
             key="repository_access",

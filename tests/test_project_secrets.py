@@ -289,6 +289,11 @@ async def _ready_credentials(login: str = "octocat") -> None:
         provider="github",
         token="ghp_octocat-token-1234",
     )
+    await provider_pat_vault.upsert_provider_pat(
+        login,
+        provider="linear",
+        token="lin_octocat-token-1234",
+    )
     await project_secrets.upsert_project_secret(
         "sports-cms",
         environment="default",
@@ -329,6 +334,7 @@ async def test_delivery_project_readiness_reports_ready_workspace(
     assert payload["ready"] is True
     assert {check["key"]: check["ready"] for check in payload["checks"]} == {
         "tracker_intake": True,
+        "tracker_provider_token": True,
         "repository_access": True,
         "user_provider_token": True,
         "project_secrets": True,
@@ -759,6 +765,43 @@ async def test_delivery_project_readiness_reports_missing_user_pat(
     assert payload["ready"] is False
     assert _check(payload, "user_provider_token")["ready"] is False
     assert _check(payload, "user_provider_token")["section"] == "credentials"
+
+
+async def test_delivery_project_readiness_reports_missing_linear_provider_pat(
+    dashboard_client: TestClient,
+) -> None:
+    await _ready_sports_project()
+    await provider_pat_vault.upsert_provider_pat(
+        "octocat",
+        provider="github",
+        token="ghp_octocat-token-1234",
+    )
+    await project_secrets.upsert_project_secret(
+        "sports-cms",
+        environment="default",
+        name="AI_HUB_BASE_URL",
+        value="https://ai-hub.example/v1",
+        updated_by="octocat",
+    )
+    await project_secrets.upsert_project_secret(
+        "sports-cms",
+        environment="default",
+        name="AI_HUB_API_KEY",
+        value="valid-key",
+        updated_by="octocat",
+    )
+
+    response = dashboard_client.get(
+        "/dashboard/api/delivery-projects/sports-cms/readiness",
+        headers={"Origin": "http://testserver"},
+        cookies=_session_cookie(login="octocat", email="octo@example.com"),
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["ready"] is False
+    assert _check(payload, "tracker_provider_token")["ready"] is False
+    assert _check(payload, "tracker_provider_token")["section"] == "credentials"
 
 
 async def test_delivery_project_readiness_reports_missing_ai_hub_secret(
