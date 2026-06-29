@@ -39,6 +39,15 @@ def test_format_comments_empty() -> None:
     assert _format_comments([]) == ""
 
 
+def test_plan_approved_slack_text_mentions_comments_actor_and_start() -> None:
+    from agent.dashboard.plan_api import _plan_approved_slack_text
+
+    assert (
+        _plan_approved_slack_text(2, "Alice")
+        == "Plan approved with 2 comments by Alice\nbeginning implementation"
+    )
+
+
 def test_plan_comment_helpers_exported() -> None:
     from agent.dashboard import plan_store
 
@@ -349,6 +358,62 @@ async def test_approve_plan_dispatches_published_markdown(
     # The (possibly edited) published plan is the source of truth, plus feedback.
     assert "# Edited plan" in dispatched["text"]
     assert "use snake_case" in dispatched["text"]
+    assert dispatched["plan_mode"] is False
+
+
+async def test_approve_plan_posts_slack_approval_notice(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent.dashboard import plan_api
+
+    posted: dict[str, Any] = {}
+    dispatched: dict[str, Any] = {}
+
+    async def fake_meta(thread_id: str) -> dict[str, Any]:
+        return {
+            "plan_status": "ready",
+            "source_context": {"slack_thread": {"channel_id": "C1", "thread_ts": "123.45"}},
+        }
+
+    async def fake_get_content(thread_id: str, *, raise_on_error: bool = False) -> dict[str, Any]:
+        return {"markdown": "# Plan", "status": "ready"}
+
+    async def fake_list(thread_id: str, *, raise_on_error: bool = False) -> list[dict[str, Any]]:
+        return [
+            {"author": "alice", "body": "looks good"},
+            {"author": "bob", "body": "add a test"},
+        ]
+
+    async def fake_set_status(thread_id: str, status: str, *, plan_mode: Any = None) -> None:
+        return None
+
+    async def fake_post(channel_id: str, thread_ts: str, text: str) -> bool:
+        posted.update(channel_id=channel_id, thread_ts=thread_ts, text=text)
+        return True
+
+    async def fake_dispatch(
+        thread_id: str, metadata: dict[str, Any], text: str, *, plan_mode: bool
+    ) -> None:
+        dispatched.update(text=text, plan_mode=plan_mode)
+
+    monkeypatch.setattr(plan_api, "_thread_metadata", fake_meta)
+    monkeypatch.setattr(plan_api, "_user_owns_thread", lambda *a, **k: True)
+    monkeypatch.setattr(plan_api, "get_plan_content", fake_get_content)
+    monkeypatch.setattr(plan_api, "list_plan_comments", fake_list)
+    monkeypatch.setattr(plan_api, "set_plan_status", fake_set_status)
+    monkeypatch.setattr(plan_api, "post_slack_thread_reply", fake_post)
+    monkeypatch.setattr(plan_api, "_dispatch_followup", fake_dispatch)
+
+    result = await plan_api.approve_plan(
+        "t1", session={"sub": "alice", "email": None, "name": "Alice Example"}
+    )
+
+    assert result["status"] == "approved"
+    assert posted == {
+        "channel_id": "C1",
+        "thread_ts": "123.45",
+        "text": "Plan approved with 2 comments by Alice Example\nbeginning implementation",
+    }
     assert dispatched["plan_mode"] is False
 
 
