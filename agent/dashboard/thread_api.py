@@ -17,8 +17,10 @@ from fastapi import HTTPException
 from langchain_core.messages.content import create_image_block
 from pydantic import BaseModel, ConfigDict, Field
 
+from ..utils.dashboard_handoff import DASHBOARD_HANDOFF_INSTRUCTION
 from ..utils.langsmith import get_langsmith_trace_url
 from ..utils.sandbox import create_sandbox
+from ..utils.slack import lookup_slack_thread_run_mapping, update_slack_trace_reply_for_web_handoff
 from ..utils.thread_ops import (
     get_thread_active_status,
     langgraph_client,
@@ -26,7 +28,12 @@ from ..utils.thread_ops import (
     queue_message_for_thread,
 )
 from .agent_overrides import normalize_profile_overrides
-from .options import SUPPORTED_MODEL_IDS, model_supports_effort, model_supports_images
+from .options import (
+    SUPPORTED_MODEL_IDS,
+    default_vision_model_pair,
+    model_supports_effort,
+    model_supports_images,
+)
 from .pr_diff import build_pr_diff_files
 from .profiles import get_profile, get_valid_access_token
 from .team_settings import get_team_default_model
@@ -147,6 +154,19 @@ async def _resolve_agent_model_choice(
     if chosen_model and chosen_effort:
         resolved_model, resolved_effort = chosen_model, chosen_effort
     return resolved_model, resolved_effort
+
+
+def _with_vision_fallback(model_id: str, effort: str, *, has_images: bool) -> tuple[str, str]:
+    if not has_images or model_supports_images(model_id):
+        return model_id, effort
+    fallback_model_id, fallback_effort = default_vision_model_pair()
+    logger.info(
+        "Using vision fallback model %s for dashboard image input; configured model %s "
+        "does not support images",
+        fallback_model_id,
+        model_id,
+    )
+    return fallback_model_id, fallback_effort
 
 
 def _now_ms() -> int:
@@ -926,13 +946,18 @@ async def _create_dashboard_thread_record(
     now_ms = _now_ms()
     prompt = prompt.strip()
     resolved_model, resolved_effort = await _resolve_agent_model_choice(profile, model_id, effort)
-    # Validate any attached images against the resolved model (raises 422 for
-    # text-only models). The run itself is started client-side via the stream
-    # commands endpoint, so we only need the validation side effect here.
+    resolved_model, resolved_effort = _with_vision_fallback(
+        resolved_model,
+        resolved_effort,
+        has_images=bool(images),
+    )
     _user_message_content(prompt, images or [], model_id=resolved_model)
     chosen_model, chosen_effort = _normalize_model_choice(model_id, effort)
     metadata_model = chosen_model or profile.get("default_model") or "Default"
     metadata_effort = chosen_effort or profile.get("reasoning_effort")
+    if images and not model_supports_images(str(metadata_model)):
+        metadata_model = resolved_model
+        metadata_effort = resolved_effort
     has_repo = bool(repo_config.get("owner") and repo_config.get("name"))
     metadata: dict[str, Any] = {
         "source": _DASHBOARD_SOURCE,
@@ -1050,6 +1075,17 @@ def _prefix_message_content(content: Any, prefix: str) -> Any:
     return content
 
 
+def _prepend_message_content_block(content: Any, text: str) -> Any:
+    block = {"type": "text", "text": text}
+    if isinstance(content, str):
+        return [block, {"type": "text", "text": content}]
+    if isinstance(content, list):
+        return [block, *content]
+    if content is None:
+        return [block]
+    return content
+
+
 def _command_prompt_text(content: Any) -> str:
     if isinstance(content, str):
         return content.strip()
@@ -1135,6 +1171,7 @@ async def _enrich_run_start_command(
     )
     plan_mode_requested = client_configurable.get("plan_mode") is True
     content = _command_message_content(params)
+    command_images = _dashboard_images_from_content(content)
     overrides: dict[str, Any] = {}
 
     if creating:
@@ -1150,22 +1187,48 @@ async def _enrich_run_start_command(
             repo_config=_parse_repo(client_configurable.get("repo")) or {},
             repo_explicitly_none=client_configurable.get("repo_explicitly_none") is True,
             prompt=_command_prompt_text(content),
-            images=_dashboard_images_from_content(content),
+            images=command_images,
             model_id=client_configurable.get("agent_model_id"),
             effort=client_configurable.get("agent_effort"),
             plan_mode=plan_mode_requested,
         )
         metadata = thread.get("metadata") if isinstance(thread.get("metadata"), dict) else metadata
-        if chosen_model and chosen_effort:
+        if command_images:
+            resolved_model = metadata.get("resolved_model")
+            resolved_effort = metadata.get("resolved_effort")
+            if isinstance(resolved_model, str) and isinstance(resolved_effort, str):
+                overrides["agent_model_id"] = resolved_model
+                overrides["agent_effort"] = resolved_effort
+        elif chosen_model and chosen_effort:
             overrides["agent_model_id"] = chosen_model
             overrides["agent_effort"] = chosen_effort
     else:
-        _validate_command_images(content, model_id=chosen_model or _metadata_model_id(metadata))
+        run_model = chosen_model or _metadata_model_id(metadata)
+        run_effort = chosen_effort
+        if not run_effort:
+            for key in ("resolved_effort", "effort"):
+                value = metadata.get(key)
+                if isinstance(value, str):
+                    run_effort = value
+                    break
+        if command_images and run_model and run_effort:
+            run_model, run_effort = _with_vision_fallback(run_model, run_effort, has_images=True)
+        _validate_command_images(content, model_id=run_model)
         prefix = _attribution_prefix(metadata, login, email)
         if prefix:
-            _set_command_last_message_content(params, _prefix_message_content(content, prefix))
+            content = _prefix_message_content(content, prefix)
+        if metadata.get("source") == "slack":
+            content = _prepend_message_content_block(content, DASHBOARD_HANDOFF_INSTRUCTION)
+        _set_command_last_message_content(params, content)
         metadata_update: dict[str, Any] = {"plan_mode": plan_mode_requested}
-        if chosen_model and chosen_effort:
+        if command_images and run_model and run_effort:
+            overrides["agent_model_id"] = run_model
+            overrides["agent_effort"] = run_effort
+            metadata_update["model"] = run_model
+            metadata_update["effort"] = run_effort
+            metadata_update["resolved_model"] = run_model
+            metadata_update["resolved_effort"] = run_effort
+        elif chosen_model and chosen_effort:
             overrides["agent_model_id"] = chosen_model
             overrides["agent_effort"] = chosen_effort
             metadata_update["model"] = chosen_model
@@ -1199,6 +1262,43 @@ async def _enrich_run_start_command(
     return command
 
 
+def _slack_thread_context(metadata: dict[str, Any]) -> dict[str, Any] | None:
+    source_context = metadata.get("source_context")
+    if not isinstance(source_context, dict):
+        return None
+    slack_thread = source_context.get("slack_thread")
+    return slack_thread if isinstance(slack_thread, dict) else None
+
+
+async def _notify_slack_web_handoff(thread_id: str, metadata: dict[str, Any], client: Any) -> None:
+    if metadata.get("source") != "slack":
+        return
+    slack_thread = _slack_thread_context(metadata)
+    if not slack_thread:
+        return
+    channel_id = slack_thread.get("channel_id")
+    thread_ts = slack_thread.get("thread_ts")
+    if not isinstance(channel_id, str) or not channel_id:
+        return
+    if not isinstance(thread_ts, str) or not thread_ts:
+        return
+
+    trace_message_ts = slack_thread.get("trace_message_ts")
+    if not isinstance(trace_message_ts, str) or not trace_message_ts:
+        mapping = await lookup_slack_thread_run_mapping(client, channel_id, thread_ts)
+        if isinstance(mapping, dict):
+            candidate = mapping.get("trace_message_ts")
+            if isinstance(candidate, str) and candidate:
+                trace_message_ts = candidate
+    if not isinstance(trace_message_ts, str) or not trace_message_ts:
+        logger.info(
+            "Skipping Slack web handoff update for thread %s: missing trace message ts", thread_id
+        )
+        return
+
+    await update_slack_trace_reply_for_web_handoff(channel_id, trace_message_ts, thread_id)
+
+
 async def send_dashboard_message(
     thread_id: str, login: str, body: ThreadMessageBody, *, email: str | None = None
 ) -> dict[str, Any]:
@@ -1214,6 +1314,7 @@ async def send_dashboard_message(
     prompt = f"{_attribution_prefix(metadata, login, email)}{body.content.strip()}"
     now_ms = _now_ms()
     chosen_model, chosen_effort = _normalize_model_choice(body.model_id, body.effort)
+    handoff_metadata = dict(metadata)
     metadata_update: dict[str, Any] = {
         "source": _DASHBOARD_SOURCE,
         "updated_at_ms": now_ms,
@@ -1246,6 +1347,10 @@ async def send_dashboard_message(
     queued = await queue_message_for_thread(thread_id, queue_payload)
     if not queued:
         raise HTTPException(502, "failed to queue follow-up message")
+    try:
+        await _notify_slack_web_handoff(thread_id, handoff_metadata, client)
+    except Exception:
+        logger.exception("Failed to update Slack message for dashboard handoff on %s", thread_id)
     thread = await client.threads.get(thread_id)
     return _thread_summary(
         thread if isinstance(thread, dict) else {"thread_id": thread_id, "metadata": metadata}
@@ -1765,11 +1870,20 @@ async def proxy_dashboard_thread_commands(
     async with httpx.AsyncClient(timeout=_PROXY_REQUEST_TIMEOUT) as client:
         response = await client.post(url, content=outgoing, headers=headers)
 
-    if (
-        parsed.get("method") == "run.start"
-        and response.status_code in {200, 202, 204}
-        and response.content
-    ):
+    run_start_succeeded = parsed.get("method") == "run.start" and response.status_code in {
+        200,
+        202,
+        204,
+    }
+    if run_start_succeeded and not creating:
+        try:
+            await _notify_slack_web_handoff(thread_id, metadata, langgraph_client())
+        except Exception:
+            logger.exception(
+                "Failed to update Slack message for dashboard handoff on %s", thread_id
+            )
+
+    if run_start_succeeded and response.content:
         try:
             payload = json.loads(response.content)
         except json.JSONDecodeError:

@@ -1,4 +1,4 @@
-import type { Message, Project } from "@/lib/agents/types";
+import type { Message, Project, QueuedThreadMessage } from "@/lib/agents/types";
 
 export interface ChangedFileSummaryItem {
   filePath: string;
@@ -21,6 +21,7 @@ export type MessagesScrollControl = {
 
 export interface MessagesProps extends ApprovalCallbacks {
   messages: Array<Message>;
+  queuedMessages?: Array<QueuedThreadMessage>;
   isStreaming: boolean;
   /** Live run signal from `useStream().isLoading` — drives Streamdown token animation. */
   streamIsLoading?: boolean;

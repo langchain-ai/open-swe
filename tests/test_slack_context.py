@@ -17,6 +17,9 @@ from agent.utils.slack import (
 )
 from agent.webapp import generate_thread_id_from_slack_thread
 
+_TEXT_ONLY_MODEL = "fireworks:accounts/fireworks/models/glm-5p2"
+_VISION_MODEL = "openai:gpt-5.5"
+
 
 class _FakeNotFoundError(Exception):
     status_code = 404
@@ -42,6 +45,22 @@ class _FakeClient:
         self.threads = threads_client
 
 
+class _FakeSlackMappingStore:
+    def __init__(self) -> None:
+        self.items: dict[tuple[tuple[str, ...], str], dict] = {}
+
+    async def put_item(self, namespace: tuple[str, ...], key: str, value: dict) -> None:
+        self.items[(namespace, key)] = {"value": value}
+
+    async def get_item(self, namespace: tuple[str, ...], key: str) -> dict | None:
+        return self.items.get((namespace, key))
+
+
+class _FakeSlackMappingClient:
+    def __init__(self) -> None:
+        self.store = _FakeSlackMappingStore()
+
+
 def test_generate_thread_id_from_slack_thread_is_deterministic() -> None:
     channel_id = "C12345"
     thread_ts = "1730900000.123456"
@@ -49,6 +68,63 @@ def test_generate_thread_id_from_slack_thread_is_deterministic() -> None:
     second = generate_thread_id_from_slack_thread(channel_id, thread_ts)
     assert first == second
     assert len(first) == 36
+
+
+@pytest.mark.asyncio
+async def test_slack_run_mapping_preserves_trace_message_ts() -> None:
+    client = _FakeSlackMappingClient()
+
+    await slack_utils.store_slack_run_mapping(
+        client,
+        "C123",
+        "1.0",
+        "run-1",
+        message_ts="1.1",
+        triggering_user_id="U123",
+        trace_message_ts="1.1",
+    )
+    await slack_utils.store_slack_message_run_mapping(client, "C123", "1.0", "1.2")
+
+    thread_mapping = await slack_utils.lookup_slack_thread_run_mapping(client, "C123", "1.0")
+    message_mapping = await slack_utils.lookup_slack_run_mapping(client, "C123", "1.2")
+    assert thread_mapping is not None
+    assert thread_mapping["trace_message_ts"] == "1.1"
+    assert thread_mapping["triggering_user_id"] == "U123"
+    assert message_mapping is not None
+    assert message_mapping["trace_message_ts"] == "1.1"
+    assert message_mapping["message_ts"] == "1.2"
+
+
+@pytest.mark.asyncio
+async def test_slack_run_mapping_preserves_trace_message_ts_on_followup_mention() -> None:
+    """A subsequent Slack mention without trace_message_ts must not clobber the stored timestamp."""
+    client = _FakeSlackMappingClient()
+
+    # First mention stores the trace message ts.
+    await slack_utils.store_slack_run_mapping(
+        client,
+        "C123",
+        "1.0",
+        "run-1",
+        message_ts="1.1",
+        triggering_user_id="U123",
+        trace_message_ts="1.1",
+    )
+
+    # Follow-up mention (non-first) stores a new run_id without trace_message_ts.
+    await slack_utils.store_slack_run_mapping(
+        client,
+        "C123",
+        "1.0",
+        "run-2",
+        triggering_user_id="U456",
+    )
+
+    thread_mapping = await slack_utils.lookup_slack_thread_run_mapping(client, "C123", "1.0")
+    assert thread_mapping is not None
+    assert thread_mapping["run_id"] == "run-2"
+    assert thread_mapping["trace_message_ts"] == "1.1"
+    assert thread_mapping["triggering_user_id"] == "U456"
 
 
 def test_select_slack_context_messages_uses_thread_start_when_no_prior_mention() -> None:
@@ -243,6 +319,60 @@ def test_post_slack_trace_reply_includes_trace_link_and_tip(
     assert any(tip in tip_line for tip in TRACE_REPLY_TIPS)
     assert posted[0]["unfurl_links"] is False
     assert posted[0]["unfurl_media"] is False
+
+
+def test_format_trace_reply_can_show_web_handoff_notice() -> None:
+    text = slack_utils._format_trace_reply(
+        "https://smith/x", "https://app.example.com/agents/thread-id", moved_to_web=True
+    )
+
+    head, _, notice_line = text.partition("\n")
+    assert (
+        head
+        == "<https://smith/x|View trace> • <https://app.example.com/agents/thread-id|Open in Web>"
+    )
+    assert "Conversation moved to Web" in notice_line
+    assert "Tip:" not in notice_line
+
+
+@pytest.mark.asyncio
+async def test_update_slack_trace_reply_for_web_handoff_updates_existing_message(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    updated: list[dict] = []
+
+    async def fake_update_slack_message(
+        channel_id: str,
+        message_ts: str,
+        text: str,
+        *,
+        unfurl_links: bool = True,
+        unfurl_media: bool = True,
+    ) -> tuple[bool, str | None]:
+        updated.append(
+            {
+                "channel_id": channel_id,
+                "message_ts": message_ts,
+                "text": text,
+                "unfurl_links": unfurl_links,
+                "unfurl_media": unfurl_media,
+            }
+        )
+        return True, None
+
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://app.example.com")
+    monkeypatch.setattr(slack_utils, "update_slack_message", fake_update_slack_message)
+    monkeypatch.setattr(slack_utils, "get_langsmith_trace_url", lambda thread_id: "https://smith/x")
+
+    ok = await slack_utils.update_slack_trace_reply_for_web_handoff("C123", "1.1", "thread-id")
+
+    assert ok is True
+    assert len(updated) == 1
+    assert updated[0]["channel_id"] == "C123"
+    assert updated[0]["message_ts"] == "1.1"
+    assert "Conversation moved to Web" in updated[0]["text"]
+    assert updated[0]["unfurl_links"] is False
+    assert updated[0]["unfurl_media"] is False
 
 
 def test_post_slack_trace_reply_can_skip_web_link(
@@ -835,6 +965,69 @@ def test_process_slack_mention_bot_only_mode_runs_without_user_token(
 
     assert "run_create" in captured
     assert "prompt" not in captured
+
+
+def test_process_slack_mention_uses_vision_fallback_for_image_thread(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+    _setup_slack_mention_fakes(monkeypatch, captured)
+
+    async def fake_thread_exists(thread_id: str) -> bool:
+        return False
+
+    async def fake_fetch_slack_thread_messages(channel_id: str, thread_ts: str) -> list[dict]:
+        return [
+            {
+                "ts": "1700000000.000100",
+                "text": "<@UBOT> please inspect this",
+                "user": "U123",
+                "files": [
+                    {
+                        "mimetype": "image/png",
+                        "url_private": "https://files.slack.com/screenshot.png",
+                    }
+                ],
+            }
+        ]
+
+    async def fake_resolve_agent_model_id(login: str | None) -> str:
+        assert login == "mason-gh"
+        return _TEXT_ONLY_MODEL
+
+    async def fake_fetch_image_block(image_url: str, client: object) -> dict[str, str]:
+        captured["image_url"] = image_url
+        return {"type": "image", "source_type": "base64", "mime_type": "image/png", "data": "abc"}
+
+    monkeypatch.setattr(webapp, "_thread_exists", fake_thread_exists)
+    monkeypatch.setattr(webapp, "fetch_slack_thread_messages", fake_fetch_slack_thread_messages)
+    monkeypatch.setattr(webapp, "resolve_agent_model_id", fake_resolve_agent_model_id)
+    monkeypatch.setattr(webapp, "fetch_image_block", fake_fetch_image_block)
+
+    asyncio.run(
+        webapp.process_slack_mention(
+            {
+                "channel_id": "C123",
+                "thread_ts": "1700000000.000100",
+                "event_ts": "1700000000.000100",
+                "user_id": "U123",
+                "text": "<@UBOT> please inspect this",
+                "bot_user_id": "UBOT",
+            },
+            {"owner": "langchain-ai", "name": "open-swe"},
+        )
+    )
+
+    assert captured["image_url"] == "https://files.slack.com/screenshot.png"
+    run_create = captured["run_create"]
+    assert isinstance(run_create, dict)
+    kwargs = run_create["kwargs"]
+    configurable = kwargs["config"]["configurable"]
+    assert configurable["agent_model_id"] == _VISION_MODEL
+    assert configurable["agent_effort"] == "medium"
+    content = kwargs["input"]["messages"][0]["content"]
+    assert any(block.get("type") == "image" for block in content)
+    assert "does not support image input" not in content[0]["text"]
 
 
 class _FakeResponse:
