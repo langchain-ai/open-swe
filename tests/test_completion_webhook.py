@@ -38,6 +38,9 @@ async def test_error_status_posts_slack_failure_reply(monkeypatch: pytest.Monkey
     monkeypatch.setattr(completion, "langgraph_client", lambda: client)
     reply = AsyncMock(return_value=True)
     monkeypatch.setattr(completion, "post_slack_thread_reply", reply)
+    monkeypatch.setattr(
+        completion, "dashboard_thread_url", lambda thread_id: f"https://ui/{thread_id}"
+    )
 
     result = await completion.handle_run_completion({"thread_id": "t1", "status": "error"})
 
@@ -46,6 +49,7 @@ async def test_error_status_posts_slack_failure_reply(monkeypatch: pytest.Monkey
     args = reply.await_args.args
     assert args[0] == "C1"
     assert args[1] == "123.45"
+    assert "<https://ui/t1|Open SWE Web>" in args[2]
     assert client.threads.updates == [{"failure_reply_posted": True}]
 
 

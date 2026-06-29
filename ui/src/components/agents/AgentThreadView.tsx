@@ -134,6 +134,12 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
         className="flex min-w-0 flex-1 flex-col"
         style={isMobile ? undefined : { minWidth: PANEL_MIN_CHAT_WIDTH }}
       >
+        {thread.status === "error" && (
+          <div className="border-b border-[var(--ui-border)] bg-[var(--ui-danger)]/10 px-4 py-2 text-xs text-[var(--ui-danger)]">
+            The last run hit an error before it could finish. Send another
+            message to retry.
+          </div>
+        )}
         {thread.planStatus &&
           thread.planStatus !== "approved" &&
           thread.planStatus !== "cancelled" && (
