@@ -1052,6 +1052,17 @@ def _prefix_message_content(content: Any, prefix: str) -> Any:
     return content
 
 
+def _prepend_message_content_block(content: Any, text: str) -> Any:
+    block = {"type": "text", "text": text}
+    if isinstance(content, str):
+        return [block, {"type": "text", "text": content}]
+    if isinstance(content, list):
+        return [block, *content]
+    if content is None:
+        return [block]
+    return content
+
+
 def _command_prompt_text(content: Any) -> str:
     if isinstance(content, str):
         return content.strip()
@@ -1167,7 +1178,7 @@ async def _enrich_run_start_command(
         if prefix:
             content = _prefix_message_content(content, prefix)
         if metadata.get("source") == "slack":
-            content = _prefix_message_content(content, f"{DASHBOARD_HANDOFF_INSTRUCTION}\n\n")
+            content = _prepend_message_content_block(content, DASHBOARD_HANDOFF_INSTRUCTION)
         _set_command_last_message_content(params, content)
         metadata_update: dict[str, Any] = {"plan_mode": plan_mode_requested}
         if chosen_model and chosen_effort:

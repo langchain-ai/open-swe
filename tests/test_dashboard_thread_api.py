@@ -527,9 +527,11 @@ async def test_enrich_run_start_command_adds_web_handoff_for_slack_thread(monkey
         email="teammate@example.com",
     )
 
-    last = enriched["params"]["input"]["messages"][-1]
-    assert last["content"].startswith(thread_api.DASHBOARD_HANDOFF_INSTRUCTION)
-    assert "@teammate: continue here" in last["content"]
+    content = enriched["params"]["input"]["messages"][-1]["content"]
+    assert content[0] == {"type": "text", "text": thread_api.DASHBOARD_HANDOFF_INSTRUCTION}
+    assert content[1] == {"type": "text", "text": "@teammate: continue here"}
+    assert content[0]["text"].startswith("<open_swe_web_handoff>\n")
+    assert content[0]["text"].endswith("\n</open_swe_web_handoff>")
 
 
 async def test_enrich_run_start_command_adds_web_handoff_before_image_blocks(monkeypatch) -> None:
@@ -771,8 +773,8 @@ async def test_proxy_run_start_from_slack_thread_updates_trace_reply(monkeypatch
     outgoing = captured["outgoing"]
     assert isinstance(outgoing, dict)
     content = outgoing["params"]["input"]["messages"][-1]["content"]
-    assert content.startswith(thread_api.DASHBOARD_HANDOFF_INSTRUCTION)
-    assert "continue here" in content
+    assert content[0] == {"type": "text", "text": thread_api.DASHBOARD_HANDOFF_INSTRUCTION}
+    assert content[1] == {"type": "text", "text": "continue here"}
     assert captured["handoff_update"] == {
         "channel_id": "C1",
         "message_ts": "123.46",
