@@ -98,7 +98,7 @@ PLAN_MODE_GUIDANCE_SECTION = """---
 
 ### Plan Mode
 
-If a task would genuinely benefit from a structured plan before any code — complex, many files, or multiple valid approaches — call the `enter_plan_mode` tool. This is NOT triggered by the word "plan" in the request; use judgment. Once in plan mode, stay read-only, research the code, save your plan with `save_plan` (it writes `plan.md` and publishes a review page), and share the plan-review link with the user, who approves before you implement.
+If a task would genuinely benefit from a structured plan before any code — complex, many files, or multiple valid approaches — call the `enter_plan_mode` tool. This is NOT triggered by the word "plan" in the request; use judgment. Once in plan mode, stay read-only for the target repo, research the code, create/edit your plan as `/workspace/plan.md` outside any repo, publish it with `save_plan`, and share the plan-review link with the user, who approves before you implement.
 
 Plan-review link for this conversation: {plan_review_url}"""
 
@@ -108,15 +108,15 @@ PLAN_MODE_SECTION = """---
 
 **Plan mode is enabled for this run. This supersedes any instruction telling you to edit code, commit, push, or open a pull request.**
 
-You are in a read-only research-and-planning phase. Your single deliverable is a clear, reviewable implementation plan saved with `save_plan` — NOT code changes. Share the plan-review link below with the user right after entering plan mode and again when the plan is ready.
+You are in a read-only research-and-planning phase for the target repo. Your single deliverable is a clear, reviewable implementation plan saved as a Markdown file outside any repo and published with `save_plan` — NOT code changes. Share the plan-review link below with the user right after entering plan mode and again when the plan is ready.
 
 **Plan-review link:** {plan_url}
 
-**You MUST NOT** edit/create/delete files, run state-changing `execute` commands (no `git commit`/`push`/`checkout -b`, installs, code generators, or file-rewriting formatters), commit, push, open/update a PR, call `request_pr_review`, or mutate Linear/external systems. The `task` subagent is disabled here (subagents wouldn't inherit these restrictions) — research directly.
+**You MUST NOT** edit/create/delete files inside the target repo, run state-changing `execute` commands (no `git commit`/`push`/`checkout -b`, installs, code generators, or file-rewriting formatters), commit, push, open/update a PR, call `request_pr_review`, or mutate Linear/external systems. The `task` subagent is disabled here (subagents wouldn't inherit these restrictions) — research directly.
 
-**You MAY (read-only):** clone and read the repo (`read_file`, `ls`, `glob`, `grep`, read-only `execute` like `git clone`/`status`/`log`/`diff`, `cat`, `rg`), research with `web_search`/`fetch_url`, and ask clarifying questions via `slack_thread_reply` / `linear_comment`.
+**You MAY:** clone and read the repo (`read_file`, `ls`, `glob`, `grep`, read-only `execute` like `git clone`/`status`/`log`/`diff`, `cat`, `rg`), research with `web_search`/`fetch_url`, ask clarifying questions via `slack_thread_reply` / `linear_comment`, and use `write_file` / `edit_file` only to create or revise the plan file outside any repo (use `/workspace/plan.md`).
 
-**Workflow:** explore the relevant code aggressively, clarify ambiguity, then save ONE recommended plan with `save_plan` (pass the full Markdown as `plan_markdown`) using this structure:
+**Workflow:** explore the relevant code aggressively, clarify ambiguity, create `/workspace/plan.md` with ONE recommended plan, refine it with normal file-editing tools if needed, then publish it with `save_plan` by passing `plan_file_path: "/workspace/plan.md"`. Use this structure:
 
 ```
 ## Plan: <short title>

@@ -1,8 +1,7 @@
 """Persistence for the plan-review feature.
 
 The plan lives in two places:
-  - the agent's sandbox, as a real ``plan.md`` file (written by the ``save_plan``
-    tool — the source artifact the agent produces and can re-read), and
+  - the agent's sandbox, as a real Markdown file the agent creates and edits, and
   - the LangGraph store, as the published snapshot the dashboard renders.
 
 Reviewers leave whole-document comments, stored one item per comment under
@@ -24,8 +23,8 @@ logger = logging.getLogger(__name__)
 PLAN_CONTENT_NAMESPACE = ["plan", "content"]
 PLAN_COMMENTS_NAMESPACE = ["plan", "comments"]
 
-# The plan is mirrored into the sandbox as a real file the agent can re-read.
-PLAN_FILE_PATH = "plan.md"
+# The plan is mirrored into the sandbox outside cloned repositories.
+PLAN_FILE_PATH = "/workspace/plan.md"
 
 # Plan lifecycle, stored on both the content record and the thread metadata.
 PLAN_STATUS_PLANNING = "planning"
@@ -75,8 +74,11 @@ async def save_plan_content(
 
 
 async def write_plan_to_sandbox(thread_id: str, content: str) -> str:
-    """Write ``plan.md`` into the thread's sandbox. Best-effort: a missing sandbox
-    must not block publishing the plan to the review page."""
+    """Mirror the dashboard plan edit into the thread's sandbox.
+
+    Best-effort: a missing sandbox must not block publishing the plan to the
+    review page.
+    """
     try:
         from ..utils.sandbox_state import get_sandbox_backend
 
@@ -84,7 +86,7 @@ async def write_plan_to_sandbox(thread_id: str, content: str) -> str:
         await backend.awrite(PLAN_FILE_PATH, content)
         return PLAN_FILE_PATH
     except Exception:
-        logger.warning("Could not write plan.md to sandbox for %s", thread_id, exc_info=True)
+        logger.warning("Could not write plan file to sandbox for %s", thread_id, exc_info=True)
         return PLAN_FILE_PATH
 
 

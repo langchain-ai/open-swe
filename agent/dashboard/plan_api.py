@@ -102,8 +102,8 @@ async def update_plan(
     """Owner-only manual edit of the plan markdown.
 
     Re-publishes the edited plan as ``ready`` (and mirrors it into the sandbox
-    ``plan.md``) while preserving reviewer comments, so the owner can refine the
-    plan before approving it."""
+    at ``/workspace/plan.md``) while preserving reviewer comments, so the owner
+    can refine the plan before approving it."""
     metadata = await _thread_metadata(thread_id)
     if not _user_owns_thread(metadata, session["sub"], session.get("email")):
         raise HTTPException(403, "only the plan owner can edit the plan")
@@ -203,7 +203,8 @@ async def reject_plan(thread_id: str, session: dict[str, Any] = _SESSION_DEP) ->
     await set_plan_status(thread_id, PLAN_STATUS_REVISING, plan_mode=True)
     text = (
         "The plan needs changes before implementation. Address this reviewer "
-        "feedback and publish an updated plan with the save_plan tool:\n\n"
+        "feedback in /workspace/plan.md, then publish an updated plan with "
+        "the save_plan tool:\n\n"
         f"{feedback or '(no specific comments were left)'}"
     )
     await _dispatch_followup(thread_id, metadata, text, plan_mode=True)

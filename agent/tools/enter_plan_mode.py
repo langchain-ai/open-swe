@@ -15,10 +15,10 @@ from ..dashboard.plan_store import PLAN_STATUS_PLANNING, set_plan_status
 logger = logging.getLogger(__name__)
 
 _ENTERED_MESSAGE = (
-    "Plan mode is active. Stay read-only: research the codebase, then record your "
-    "implementation plan with the `save_plan` tool (it publishes the plan to the "
-    "review page) and share the plan-review link in the source channel. Do not edit "
-    "files, commit, push, or open a PR — wait for the user to approve the plan."
+    "Plan mode is active. Stay read-only for the target repo: research the codebase, "
+    "create or edit the plan at `/workspace/plan.md`, then publish it with the "
+    "`save_plan` tool and share the plan-review link in the source channel. Do not "
+    "edit repo files, commit, push, or open a PR — wait for the user to approve the plan."
 )
 
 
@@ -31,10 +31,11 @@ async def enter_plan_mode(tool_call_id: Annotated[str, InjectedToolCallId]) -> C
     NOT triggered by the word "plan" appearing in the request; use your
     judgment about whether planning is genuinely warranted.
 
-    Once activated, stay read-only: research the codebase, then record your plan
-    with the ``save_plan`` tool (it publishes the plan to the review page) and
-    share the plan-review link with the user. Do not edit files, commit, push,
-    or open a PR — the user reviews the plan and approves it before you
+    Once activated, stay read-only for the target repo: research the codebase,
+    create or edit the Markdown plan outside any repo (for example,
+    ``/workspace/plan.md``), then publish it with the ``save_plan`` tool and
+    share the plan-review link with the user. Do not edit repo files, commit,
+    push, or open a PR — the user reviews the plan and approves it before you
     implement.
     """
     thread_id = _thread_id_from_config()

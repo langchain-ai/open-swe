@@ -184,11 +184,28 @@ def _step_plan_research(_messages: list[BaseMessage]) -> AIMessage:
     )
 
 
+def _step_write_plan(_messages: list[BaseMessage]) -> AIMessage:
+    return AIMessage(
+        content="Writing the plan file for review.",
+        tool_calls=[
+            {
+                "name": "write_file",
+                "args": {"file_path": "/workspace/plan.md", "content": PLAN_MARKDOWN},
+                "id": "call-write-plan",
+            }
+        ],
+    )
+
+
 def _step_save_plan(_messages: list[BaseMessage]) -> AIMessage:
     return AIMessage(
         content="Saving the plan for review.",
         tool_calls=[
-            {"name": "save_plan", "args": {"plan_markdown": PLAN_MARKDOWN}, "id": "call-save-plan"}
+            {
+                "name": "save_plan",
+                "args": {"plan_file_path": "/workspace/plan.md"},
+                "id": "call-save-plan",
+            }
         ],
     )
 
@@ -219,6 +236,7 @@ def build_plan_script() -> list[Any]:
         _step_enter_plan,
         _step_plan_link,
         _step_plan_research,
+        _step_write_plan,
         _step_save_plan,
         _step_plan_complete,
         _step_plan_end,

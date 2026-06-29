@@ -99,17 +99,62 @@ async def test_save_plan_requires_run_context() -> None:
     from agent.tools.save_plan import save_plan
 
     # No LangGraph run context → no thread_id → graceful error, not a crash.
-    result = await save_plan("## Plan")
+    result = await save_plan("/workspace/plan.md")
     assert result["success"] is False
     assert "thread_id" in result["error"]
 
 
-async def test_save_plan_rejects_empty_markdown() -> None:
+async def test_save_plan_rejects_empty_path() -> None:
     from agent.tools.save_plan import save_plan
 
     result = await save_plan("   ")
     assert result["success"] is False
     assert "empty" in result["error"]
+
+
+async def test_save_plan_rejects_non_markdown_path() -> None:
+    from agent.tools.save_plan import save_plan
+
+    result = await save_plan("/workspace/plan.txt")
+    assert result["success"] is False
+    assert "Markdown" in result["error"]
+
+
+async def test_save_plan_reads_markdown_file_from_sandbox(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import importlib
+
+    save_plan_tool = importlib.import_module("agent.tools.save_plan")
+
+    saved: dict[str, Any] = {}
+    reads: list[tuple[str, int, int]] = []
+
+    class _Backend:
+        async def aread(self, file_path: str, offset: int = 0, limit: int = 2000) -> dict[str, Any]:
+            reads.append((file_path, offset, limit))
+            return {"file_data": {"encoding": "utf-8", "content": "# Plan\n\nDo it.\n"}}
+
+    async def fake_backend(thread_id: str) -> _Backend:
+        assert thread_id == "thread-1"
+        return _Backend()
+
+    async def fake_save_content(thread_id: str, *, markdown: str, status: str) -> None:
+        saved.update(thread_id=thread_id, markdown=markdown, status=status)
+
+    monkeypatch.setattr(
+        save_plan_tool,
+        "get_config",
+        lambda: {"configurable": {"thread_id": "thread-1"}},
+    )
+    monkeypatch.setattr(save_plan_tool, "get_sandbox_backend", fake_backend)
+    monkeypatch.setattr(save_plan_tool, "save_plan_content", fake_save_content)
+
+    result = await save_plan_tool.save_plan("/workspace/plan.md")
+
+    assert result == {"success": True, "path": "/workspace/plan.md"}
+    assert reads == [("/workspace/plan.md", 0, save_plan_tool._MAX_PLAN_LINES)]
+    assert saved == {"thread_id": "thread-1", "markdown": "# Plan\n\nDo it.", "status": "ready"}
 
 
 def test_plan_routes_registered() -> None:
@@ -145,6 +190,13 @@ def test_http_request_excluded_in_plan_mode() -> None:
     from agent.server import PLAN_MODE_EXCLUDED_TOOLS
 
     assert "http_request" in PLAN_MODE_EXCLUDED_TOOLS
+
+
+def test_file_edit_tools_available_in_plan_mode_for_plan_file() -> None:
+    from agent.server import PLAN_MODE_EXCLUDED_TOOLS
+
+    assert "write_file" not in PLAN_MODE_EXCLUDED_TOOLS
+    assert "edit_file" not in PLAN_MODE_EXCLUDED_TOOLS
 
 
 class _FakeReq:
