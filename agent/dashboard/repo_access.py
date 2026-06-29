@@ -7,6 +7,7 @@ from fastapi import HTTPException
 
 from ..utils.http import DEFAULT_HTTP_TIMEOUT
 from .profiles import get_valid_access_token
+from .provider_pat_vault import resolve_provider_pat
 from .review_styles import normalize_repo_full_name
 
 
@@ -39,19 +40,38 @@ async def assert_repo_access(full_name: str, token: str) -> str:
 
 
 async def require_repo_access_for_user(login: str, full_name: str) -> str:
+    full_name = normalize_repo_full_name(full_name)
     token = await get_valid_access_token(login)
-    if not token:
-        raise HTTPException(401, "github token unavailable, re-login required")
+    if token:
+        try:
+            await assert_repo_access(full_name, token)
+            return token
+        except HTTPException as exc:
+            if exc.status_code != 401:
+                raise
+            token = await get_valid_access_token(login, force_refresh=True)
+            if token:
+                await assert_repo_access(full_name, token)
+                return token
+
+    resolved_pat = await resolve_provider_pat(
+        login,
+        provider="github",
+        project_id="",
+        action="repository_access",
+    )
+    if not resolved_pat:
+        raise HTTPException(401, "github token unavailable, connect provider token or re-login")
     try:
-        await assert_repo_access(full_name, token)
+        await assert_repo_access(full_name, resolved_pat.token)
     except HTTPException as exc:
-        if exc.status_code != 401:
-            raise
-        token = await get_valid_access_token(login, force_refresh=True)
-        if not token:
-            raise HTTPException(401, "github token expired, re-login required") from exc
-        await assert_repo_access(full_name, token)
-    return token
+        if exc.status_code == 401:
+            raise HTTPException(
+                401,
+                "github token expired, connect provider token or re-login",
+            ) from exc
+        raise
+    return resolved_pat.token
 
 
 async def repo_config_for_user(login: str, full_name: str | None) -> dict[str, str] | None:

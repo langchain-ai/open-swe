@@ -835,7 +835,45 @@ async def _delivery_project_readiness(
     )
 
     tracker_ready = bool(tracker.get("provider")) and bool(tracker_config)
-    repo_ready = bool(vcs.get("provider")) and _has_mapping_values(vcs_config, "owner", "repo")
+    repo_config_ready = bool(vcs.get("provider")) and _has_mapping_values(
+        vcs_config, "owner", "repo"
+    )
+    repository_payload = _repository_settings_payload(project)
+    default_repository = repository_payload.get("default_repository")
+    repository_access_statuses = (
+        await _repository_access_statuses(project, session) if repo_config_ready else []
+    )
+    default_repository_access = next(
+        (
+            status
+            for status in repository_access_statuses
+            if status.get("full_name") == default_repository
+        ),
+        None,
+    )
+    repo_ready = (
+        repo_config_ready
+        and isinstance(default_repository_access, dict)
+        and default_repository_access.get("status") == "ready"
+    )
+    repo_blockers = []
+    if not repo_config_ready:
+        repo_blockers.append(
+            {
+                "code": "missing_repository_config",
+                "message": "Configure the workspace repository owner and name.",
+            }
+        )
+    elif not repo_ready:
+        repo_blockers.append(
+            {
+                "code": "repository_access_blocked",
+                "message": str(
+                    (default_repository_access or {}).get("message")
+                    or "Default repository access is blocked."
+                ),
+            }
+        )
     required_pat = credential_policy.get("requires_user_pat") is True
     provider = str(credential_policy.get("provider") or vcs.get("provider") or "github")
     pat_status = (
@@ -910,9 +948,10 @@ async def _delivery_project_readiness(
             label="Repository access",
             ready=repo_ready,
             section="repositories",
-            message="Default repository is configured."
+            message="Default repository access is verified."
             if repo_ready
-            else "Configure the workspace repository owner and name.",
+            else "Verify the default repository and current user provider token.",
+            blockers=repo_blockers,
         ),
         _readiness_check(
             key="user_provider_token",

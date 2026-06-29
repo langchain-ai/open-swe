@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from agent import delivery_queue as queue
 from agent import delivery_runner as runner
 from agent import project_registry, project_secrets
-from agent.dashboard import oauth, provider_pat_vault, routes
+from agent.dashboard import oauth, provider_pat_vault, repo_access, routes
 
 _TEST_SECRET = "test-secret-with-at-least-thirty-two-bytes"
 
@@ -269,6 +269,43 @@ async def test_pat_use_is_audited_without_token_value(fake_client: _FakeClient) 
         }
     ]
     assert "ghp_audited-token-7777" not in str(audit)
+
+
+async def test_repository_access_falls_back_to_user_provider_pat(
+    fake_client: _FakeClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen: dict[str, str] = {}
+    await provider_pat_vault.upsert_provider_pat(
+        "octocat",
+        provider="github",
+        token="ghp_repo-access-token-4321",
+    )
+
+    async def no_oauth_token(_login: str, *, force_refresh: bool = False) -> None:
+        return None
+
+    async def fake_assert_repo_access(full_name: str, token: str) -> str:
+        seen["full_name"] = full_name
+        seen["token"] = token
+        return full_name
+
+    monkeypatch.setattr(repo_access, "get_valid_access_token", no_oauth_token)
+    monkeypatch.setattr(repo_access, "assert_repo_access", fake_assert_repo_access)
+
+    token = await repo_access.require_repo_access_for_user(
+        "octocat",
+        "example/sports-cms",
+    )
+
+    assert token == "ghp_repo-access-token-4321"
+    assert seen == {
+        "full_name": "example/sports-cms",
+        "token": "ghp_repo-access-token-4321",
+    }
+    audit = await provider_pat_vault.list_provider_pat_audit("octocat")
+    assert audit[0]["action"] == "repository_access"
+    assert audit[0]["token_last4"] == "4321"
 
 
 async def test_delivery_worker_blocks_before_dispatch_when_user_pat_missing(

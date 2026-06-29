@@ -131,6 +131,14 @@ def dashboard_client(fake_client: _FakeClient) -> TestClient:
     return TestClient(app)
 
 
+@pytest.fixture(autouse=True)
+def default_repository_access(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_repo_access(_login: str, _full_name: str) -> str:
+        return "token"
+
+    monkeypatch.setattr(routes, "require_repo_access_for_user", fake_repo_access)
+
+
 def _session_cookie(login: str = "octocat", email: str = "octo@example.com") -> dict[str, str]:
     token = oauth.issue_session(login=login, email=email, avatar_url=None)
     return {oauth.COOKIE_NAME: token}
@@ -682,6 +690,43 @@ async def test_delivery_project_readiness_reports_missing_repo(
     assert payload["ready"] is False
     assert _check(payload, "repository_access")["ready"] is False
     assert _check(payload, "repository_access")["section"] == "repositories"
+
+
+async def test_delivery_project_readiness_reports_blocked_repo_access(
+    dashboard_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await _ready_sports_project()
+    await _ready_credentials()
+
+    async def fake_repo_access(_login: str, full_name: str) -> str:
+        if full_name == "example/sports-cms":
+            raise HTTPException(403, "no access to this private repository")
+        return "token"
+
+    monkeypatch.setattr(routes, "require_repo_access_for_user", fake_repo_access)
+
+    response = dashboard_client.get(
+        "/dashboard/api/delivery-projects/sports-cms/readiness",
+        headers={"Origin": "http://testserver"},
+        cookies=_session_cookie(login="octocat", email="octo@example.com"),
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    repo_check = _check(payload, "repository_access")
+    assert payload["ready"] is False
+    assert repo_check["ready"] is False
+    assert repo_check["section"] == "repositories"
+    assert repo_check["message"] == (
+        "Verify the default repository and current user provider token."
+    )
+    assert repo_check["blockers"] == [
+        {
+            "code": "repository_access_blocked",
+            "message": "no access to this private repository",
+        }
+    ]
 
 
 async def test_delivery_project_readiness_reports_missing_user_pat(
