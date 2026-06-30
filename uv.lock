@@ -2015,6 +2015,7 @@ dependencies = [
     { name = "langsmith" },
     { name = "markdownify" },
     { name = "pyjwt" },
+    { name = "stagehand" },
     { name = "uvicorn" },
 ]
 
@@ -2053,6 +2054,7 @@ requires-dist = [
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=9.0.3" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=1.4.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.15.15" },
+    { name = "stagehand", specifier = ">=3.21.0" },
     { name = "uvicorn", specifier = ">=0.48.0" },
 ]
 provides-extras = ["dev"]
@@ -3164,6 +3166,26 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/26/8c/f9290339ef6d79badbc010f067cd769d6601ec11a57d78569c683fb4dd87/sse_starlette-3.3.4.tar.gz", hash = "sha256:aaf92fc067af8a5427192895ac028e947b484ac01edbc3caf00e7e7137c7bef1", size = 32427, upload-time = "2026-03-29T09:00:23.307Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/f8/7f/3de5402f39890ac5660b86bcf5c03f9d855dad5c4ed764866d7b592b46fd/sse_starlette-3.3.4-py3-none-any.whl", hash = "sha256:84bb06e58939a8b38d8341f1bc9792f06c2b53f48c608dd207582b664fc8f3c1", size = 14330, upload-time = "2026-03-29T09:00:21.846Z" },
+]
+
+[[package]]
+name = "stagehand"
+version = "3.21.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "anyio" },
+    { name = "distro" },
+    { name = "httpx" },
+    { name = "pydantic" },
+    { name = "sniffio" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/d3/9e/9ef10edcb636c3df3faca08f1a5db3acba4e3823fe1b8b6b4012761c6250/stagehand-3.21.0.tar.gz", hash = "sha256:61a2eb63a0ae80ea9abdcd0763fe64d65f0ce0256c7d32f32d2dbf5850d04b9e", size = 288582, upload-time = "2026-05-29T18:58:11.364Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/0b/69/a0c8dda211afa167d62d3a584210c13a491fa2d3eb21a95f7034d055093b/stagehand-3.21.0-py3-none-macosx_10_9_x86_64.whl", hash = "sha256:9ea9b5c7f04d4272696ea9a1540ebfe5b42898b901b30233ca0eacac1e91ab66", size = 34440438, upload-time = "2026-05-29T18:58:00.081Z" },
+    { url = "https://files.pythonhosted.org/packages/8f/b1/7c02be736d9bd528b5080e4bf180bc1bc3cfefd90a3108282af618e48467/stagehand-3.21.0-py3-none-macosx_11_0_arm64.whl", hash = "sha256:c52443f9c6794024d125095c97b45e12ad7de746d96de18d7d7e9ea415d98bd3", size = 33138242, upload-time = "2026-05-29T18:58:03.231Z" },
+    { url = "https://files.pythonhosted.org/packages/6d/4c/ad560b9d211f478d44bf84bad7dcfbccba37fd41888a3d1027dbf69553ab/stagehand-3.21.0-py3-none-manylinux2014_x86_64.whl", hash = "sha256:f66abc7c721747a4aafa010ea2120156343103d3c27d3bf8403862945e83898f", size = 37221780, upload-time = "2026-05-29T18:58:09.382Z" },
+    { url = "https://files.pythonhosted.org/packages/d9/1d/6a290870a96c54ed0d49e9461ae3c0ddec472d9d9ef09a176dacd1dbc32b/stagehand-3.21.0-py3-none-win_amd64.whl", hash = "sha256:2757e9cb081b79aa14903f2b1e3c3db1178957e08c676af7517cf3e95af7e7bb", size = 30710662, upload-time = "2026-05-29T18:58:06.12Z" },
 ]
 
 [[package]]

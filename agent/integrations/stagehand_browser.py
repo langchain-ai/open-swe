@@ -10,7 +10,7 @@ Two execution modes, selected by ``STAGEHAND_ENV`` (default ``LOCAL``):
   local Chromium. Nothing leaves the host. Needs a Chrome/Chromium binary;
   point at it with ``STAGEHAND_LOCAL_CHROME_PATH`` if auto-detection fails.
 * ``BROWSERBASE`` — the browser runs on Browserbase's cloud. Requires
-  ``BROWSERBASE_API_KEY`` (and a project via ``BROWSERBASE_PROJECT_ID``).
+  ``BROWSERBASE_API_KEY``. ``BROWSERBASE_PROJECT_ID`` is forwarded when set.
 
 Stagehand's ``act``/``observe``/``extract`` call an LLM. In ``BROWSERBASE``
 mode the hosted Stagehand API ships with model support, so no model key is
@@ -36,6 +36,8 @@ import os
 from typing import Any
 
 from langgraph.config import get_config
+
+from ..utils.url_safety import is_url_safe
 
 logger = logging.getLogger(__name__)
 
@@ -98,6 +100,7 @@ def _build_client() -> Any:
     return AsyncStagehand(
         server="local" if _is_local() else "remote",
         browserbase_api_key=os.getenv("BROWSERBASE_API_KEY"),
+        browserbase_project_id=os.getenv("BROWSERBASE_PROJECT_ID"),
         model_api_key=_model_api_key(),
         local_headless=_headless(),
         local_chrome_path=os.getenv("STAGEHAND_LOCAL_CHROME_PATH"),
@@ -119,6 +122,13 @@ def _browser_spec() -> dict[str, Any]:
     return {"type": "local", "launch_options": launch_options}
 
 
+def _browserbase_session_create_params() -> dict[str, Any]:
+    if _is_local():
+        return {}
+    project_id = os.getenv("BROWSERBASE_PROJECT_ID")
+    return {"project_id": project_id} if project_id else {}
+
+
 async def _get_session(create: bool = True) -> Any:
     """Return the live Stagehand session for this thread, creating one if needed."""
     thread_id = _thread_id()
@@ -129,20 +139,18 @@ async def _get_session(create: bool = True) -> Any:
         if not create:
             return None
         client = _build_client()
-        session = await client.sessions.start(
-            model_name=_model_name(), browser=_browser_spec()
-        )
+        session_kwargs: dict[str, Any] = {"model_name": _model_name(), "browser": _browser_spec()}
+        browserbase_session_create_params = _browserbase_session_create_params()
+        if browserbase_session_create_params:
+            session_kwargs["browserbase_session_create_params"] = browserbase_session_create_params
+        session = await client.sessions.start(**session_kwargs)
         _SESSIONS[thread_id] = (client, session)
         logger.info("Started Stagehand session %s for thread %s", session.id, thread_id)
         return session
 
 
 def _session_meta(session: Any) -> dict[str, Any]:
-    data = getattr(session, "data", None)
     meta: dict[str, Any] = {"session_id": getattr(session, "id", None)}
-    cdp_url = getattr(data, "cdp_url", None)
-    if cdp_url:
-        meta["cdp_url"] = cdp_url
     if not _is_local() and meta.get("session_id"):
         meta["replay_url"] = f"https://www.browserbase.com/sessions/{meta['session_id']}"
     return meta
@@ -163,6 +171,9 @@ async def browser_navigate(url: str) -> dict[str, Any]:
         error}`` on failure.
     """
     try:
+        safe, reason = is_url_safe(url)
+        if not safe:
+            return {"success": False, "error": f"browser_navigate blocked: {reason}"}
         session = await _get_session()
         await session.navigate(url=url)
         return {"success": True, "url": url, **_session_meta(session)}
@@ -215,9 +226,7 @@ async def browser_observe(instruction: str) -> dict[str, Any]:
         return {"success": False, "error": f"browser_observe failed: {e!s}"}
 
 
-async def browser_extract(
-    instruction: str, schema: dict[str, Any] | None = None
-) -> dict[str, Any]:
+async def browser_extract(instruction: str, schema: dict[str, Any] | None = None) -> dict[str, Any]:
     """Extract structured data from the current page.
 
     Args:
@@ -289,7 +298,11 @@ def _to_jsonable(result: Any) -> Any:
     data = getattr(result, "data", None)
     if data is not None and data is not result:
         return _to_jsonable(data)
-    return result if isinstance(result, (dict, list, str, int, float, bool, type(None))) else str(result)
+    return (
+        result
+        if isinstance(result, (dict, list, str, int, float, bool, type(None)))
+        else str(result)
+    )
 
 
 def load_browser_tools() -> list[Any]:
