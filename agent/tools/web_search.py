@@ -8,10 +8,25 @@ from exa_py import Exa
 logger = logging.getLogger(__name__)
 
 
+def _truncate_result_texts(result: Any, max_chars: int) -> None:
+    """Head-truncate each Exa result's ``text`` field in place."""
+    items = getattr(result, "results", None)
+    if not isinstance(items, list):
+        return
+    for item in items:
+        text = getattr(item, "text", None)
+        if isinstance(text, str) and len(text) > max_chars:
+            try:
+                item.text = text[:max_chars]
+            except Exception:
+                pass
+
+
 async def web_search(
     query: str,
     num_results: int = 5,
-    include_contents: bool = True,
+    include_contents: bool = False,
+    max_chars_per_result: int = 8000,
 ) -> dict[str, Any]:
     """Search the web using Exa to find relevant information.
 
@@ -21,7 +36,11 @@ async def web_search(
     Args:
         query: The search query
         num_results: Number of results to return (default: 5)
-        include_contents: Whether to include full page contents (default: True)
+        include_contents: Whether to include full page contents (default: False).
+            Snippet-only mode by default; opt in with ``True`` to fetch full text,
+            which is then truncated per-result to ``max_chars_per_result``.
+        max_chars_per_result: When ``include_contents=True``, head-truncate each
+            result's ``text`` field to this many characters (default: 8000).
 
     Returns:
         Dictionary containing:
@@ -47,6 +66,7 @@ async def web_search(
                 num_results=num_results,
                 type="auto",
             )
+            _truncate_result_texts(result, max_chars_per_result)
         else:
             result = await asyncio.to_thread(
                 client.search,

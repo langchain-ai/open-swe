@@ -54,6 +54,7 @@ from .integrations.langsmith import _configure_github_proxy
 from .integrations.langsmith_tools import load_langsmith_tools
 from .integrations.notion_mcp import load_notion_tools
 from .middleware import (
+    CapToolResultsMiddleware,
     ModelFallbackMiddleware,
     PlanModeMiddleware,
     SandboxCircuitBreakerMiddleware,
@@ -867,6 +868,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         middleware=[
             SanitizeToolInputsMiddleware(),
             ModelCallLimitMiddleware(run_limit=MODEL_CALL_RECURSION_LIMIT, exit_behavior="end"),
+            CapToolResultsMiddleware(),
             ToolErrorMiddleware(),
             ToolArtifactMiddleware(),
             WorkflowPushGuardMiddleware(),

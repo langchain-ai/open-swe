@@ -1,3 +1,4 @@
+from .cap_tool_results import CapToolResultsMiddleware
 from .check_message_queue import check_message_queue_before_model
 from .ensure_no_empty_msg import ensure_no_empty_msg
 from .exclude_tools import ExcludeToolsMiddleware
@@ -16,6 +17,7 @@ from .tool_error_handler import ToolErrorMiddleware
 from .workflow_push_guard import WorkflowPushGuardMiddleware
 
 __all__ = [
+    "CapToolResultsMiddleware",
     "ExcludeToolsMiddleware",
     "ModelFallbackMiddleware",
     "PlanModeMiddleware",
