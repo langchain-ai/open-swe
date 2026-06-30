@@ -17,6 +17,8 @@ export const agentThreadKeys = {
     ["agent-threads", "lists", "sidebar", params] as const,
   detail: (threadId: string) => ["agent-threads", threadId] as const,
   prDiff: (threadId: string) => ["agent-threads", threadId, "pr-diff"] as const,
+  workflowApprovals: (threadId: string) =>
+    ["agent-threads", threadId, "workflow-approvals"] as const,
   page: (params: ThreadsPageParams) =>
     ["agent-threads", "lists", "page", params] as const,
 }
@@ -122,6 +124,47 @@ export function useAgentThreadPrDiff(threadId: string, enabled: boolean) {
     enabled,
     staleTime: 30_000,
     retry: false,
+  })
+}
+
+export function useWorkflowApprovals(
+  threadId: string,
+  options: { pollWhileActive?: boolean } = {}
+) {
+  return useQuery({
+    queryKey: agentThreadKeys.workflowApprovals(threadId),
+    queryFn: () => agentsApi.listWorkflowApprovals(threadId),
+    enabled: Boolean(threadId),
+    refetchInterval: (query) =>
+      options.pollWhileActive ||
+      query.state.data?.approvals.some(
+        (approval) => approval.status === "pending"
+      )
+        ? 3000
+        : false,
+    retry: false,
+  })
+}
+
+export function useWorkflowApprovalDecision(threadId: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (vars: {
+      fingerprint: string
+      decision: "approve" | "reject"
+    }) =>
+      vars.decision === "approve"
+        ? agentsApi.approveWorkflowPush(threadId, vars.fingerprint)
+        : agentsApi.rejectWorkflowPush(threadId, vars.fingerprint),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: agentThreadKeys.workflowApprovals(threadId),
+      })
+      void queryClient.invalidateQueries({
+        queryKey: agentThreadKeys.detail(threadId),
+      })
+      invalidateAgentThreadLists(queryClient)
+    },
   })
 }
 
