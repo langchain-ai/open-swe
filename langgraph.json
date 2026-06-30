@@ -8,5 +8,6 @@
   },
   "http": {
 	  "app": "agent.webapp:app"
-  }
+  },
+  "dependencies": ["."]
 }
