@@ -9,6 +9,14 @@ import pytest
 wakeup_tool = importlib.import_module("agent.tools.schedule_thread_wakeup")
 
 
+@pytest.fixture(autouse=True)
+def _stub_thread_wakeup_count(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def _zero(_thread_id: str) -> int:
+        return 0
+
+    monkeypatch.setattr(wakeup_tool, "_count_thread_wakeup_crons", _zero)
+
+
 def _config(**overrides: Any) -> dict[str, Any]:
     base: dict[str, Any] = {
         "configurable": {
@@ -241,3 +249,54 @@ def test_build_one_shot_cron_handles_month_boundary() -> None:
     assert parts[1] == "23"
     assert parts[2] == "31"
     assert parts[3] == "12"
+
+
+async def test_schedule_thread_wakeup_refuses_past_tick_cap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    create_calls: list[dict[str, Any]] = []
+
+    async def fake_create_wakeup_cron(**kwargs: Any) -> dict[str, Any]:
+        create_calls.append(kwargs)
+        return {"success": True, "cron_id": "should-not-happen"}
+
+    async def fake_count(_thread_id: str) -> int:
+        return wakeup_tool._MAX_WAKEUP_TICKS_PER_THREAD
+
+    monkeypatch.setattr(wakeup_tool, "get_config", _config)
+    monkeypatch.setattr(wakeup_tool, "_count_thread_wakeup_crons", fake_count)
+    monkeypatch.setattr(wakeup_tool, "_create_wakeup_cron", fake_create_wakeup_cron)
+
+    result = await wakeup_tool.schedule_thread_wakeup(10)
+
+    assert result["success"] is False
+    assert "refusing to re-arm" in result["error"]
+    assert str(wakeup_tool._MAX_WAKEUP_TICKS_PER_THREAD) in result["error"]
+    assert create_calls == []
+
+
+async def test_schedule_thread_wakeup_allows_under_tick_cap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    create_calls: list[dict[str, Any]] = []
+
+    async def fake_create_wakeup_cron(**kwargs: Any) -> dict[str, Any]:
+        create_calls.append(kwargs)
+        return {
+            "success": True,
+            "cron_id": "cron-xyz",
+            "scheduled_for": "2024-01-01T00:00:00+00:00",
+            "thread_id": kwargs["thread_id"],
+        }
+
+    async def fake_count(_thread_id: str) -> int:
+        return wakeup_tool._MAX_WAKEUP_TICKS_PER_THREAD - 1
+
+    monkeypatch.setattr(wakeup_tool, "get_config", _config)
+    monkeypatch.setattr(wakeup_tool, "_count_thread_wakeup_crons", fake_count)
+    monkeypatch.setattr(wakeup_tool, "_create_wakeup_cron", fake_create_wakeup_cron)
+
+    result = await wakeup_tool.schedule_thread_wakeup(10)
+
+    assert result["success"] is True
+    assert len(create_calls) == 1

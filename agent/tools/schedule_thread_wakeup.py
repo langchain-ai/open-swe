@@ -17,11 +17,19 @@ _AGENT_ASSISTANT_ID = "agent"
 _MIN_DELAY_SECONDS = 60
 _MAX_DELAY_SECONDS = 86_400
 _END_TIME_PADDING_SECONDS = 90
+_MAX_WAKEUP_TICKS_PER_THREAD = 3
+_WAKEUP_CRON_KIND = "thread_wakeup"
+_WAKEUP_SEARCH_LIMIT = 100
 
 _DEFAULT_WAKEUP_PROMPT = (
-    "This is an automated re-trigger of this thread. The agent scheduled this "
-    "wakeup to poll for updates. Check the current state of whatever you were "
-    "waiting on and continue from there."
+    "This is an automated re-trigger of this thread. Before doing any new "
+    "work, count how many prior wakeup turns this thread already has — if "
+    "you have already polled 3+ times for the same target (same PR, same "
+    "branch, same deploy), STOP scheduling further wakeups, report status "
+    "to the source channel, and exit. Otherwise check the current state of "
+    "what you were waiting on and continue. Do not re-clone, re-read "
+    "AGENTS.md, or re-derive task context that an earlier turn already "
+    "established in this thread."
 )
 
 
@@ -46,6 +54,17 @@ def _build_one_shot_cron(fire_time: datetime) -> str:
     )
 
 
+async def _count_thread_wakeup_crons(thread_id: str) -> int:
+    """Return how many wakeup crons already exist for this thread."""
+    client = get_client(url=langgraph_url())
+    crons = await client.crons.search(
+        thread_id=thread_id,
+        metadata={"kind": _WAKEUP_CRON_KIND},
+        limit=_WAKEUP_SEARCH_LIMIT,
+    )
+    return len(crons or [])
+
+
 async def _create_wakeup_cron(
     *,
     thread_id: str,
@@ -66,7 +85,7 @@ async def _create_wakeup_cron(
         end_time=end_time,
         timezone="UTC",
         metadata={
-            "kind": "thread_wakeup",
+            "kind": _WAKEUP_CRON_KIND,
             "thread_id": thread_id,
         },
     )
@@ -109,6 +128,22 @@ async def schedule_thread_wakeup(delay_minutes: int, prompt: str | None = None) 
     thread_id = configurable.get("thread_id")
     if not isinstance(thread_id, str) or not thread_id:
         return {"success": False, "error": "No thread_id in current run config"}
+
+    try:
+        prior_wakeup_count = await _count_thread_wakeup_crons(thread_id)
+    except Exception as exc:
+        logger.exception("Failed to count prior wakeup crons for %s", thread_id)
+        return {"success": False, "error": str(exc)}
+    if prior_wakeup_count >= _MAX_WAKEUP_TICKS_PER_THREAD:
+        return {
+            "success": False,
+            "error": (
+                f"thread {thread_id} has already scheduled {prior_wakeup_count} "
+                f"wakeup ticks (cap is {_MAX_WAKEUP_TICKS_PER_THREAD}); refusing "
+                "to re-arm. Report status to the source channel and exit; if "
+                "polling must continue, ask the user to open a new thread."
+            ),
+        }
 
     fire_time = _ceil_to_next_minute(datetime.now(UTC) + timedelta(seconds=delay_seconds))
     wakeup_prompt = (
