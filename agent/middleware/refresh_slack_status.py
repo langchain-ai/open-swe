@@ -55,6 +55,7 @@ _TOOL_STATUS: dict[str, str] = {
     "fetch_url": "fetching a URL...",
     "http_request": "making an HTTP request...",
     "request_pr_review": "requesting a PR review...",
+    "slack_add_reaction": "reacting in Slack...",
     "slack_read_thread_messages": "reading Slack history...",
     "slack_thread_reply": "drafting a Slack reply...",
     "linear_comment": "commenting on Linear...",

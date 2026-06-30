@@ -221,8 +221,10 @@ async def _process_slack_mention_impl(
         f"## Latest Mention Request\n{clean_text}\n\n"
         + (f"{resolved_links_section}\n\n" if resolved_links_section else "")
         + "Use `slack_thread_reply` to communicate in this Slack thread for clarifications, "
-        "status updates, and final summaries. Use `slack_read_thread_messages` to read any "
-        "Slack messages by providing channel_id and message_ts."
+        "substantive updates, and final summaries. Use `slack_add_reaction` with :eyes: "
+        "instead of posting perfunctory confirmation replies to user follow-up requests. "
+        "Use `slack_read_thread_messages` to read any Slack messages by providing channel_id "
+        "and message_ts."
     )
     content_blocks: list[dict[str, Any]] = [create_text_block(prompt)]
 
