@@ -1,12 +1,66 @@
 from __future__ import annotations
 
 import importlib
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
 
 wakeup_tool = importlib.import_module("agent.tools.schedule_thread_wakeup")
+
+# Captured before the autouse stub replaces it, for the one test that needs the real wrapper.
+_real_purge_best_effort = wakeup_tool._purge_expired_wakeups_best_effort
+
+
+@pytest.fixture(autouse=True)
+def _stub_purge(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep the opportunistic purge from touching the network in every test."""
+
+    async def _noop() -> None:
+        return None
+
+    monkeypatch.setattr(wakeup_tool, "_purge_expired_wakeups_best_effort", _noop)
+
+
+class _FakeCrons:
+    def __init__(self, crons: list[dict[str, Any]]) -> None:
+        self._crons = list(crons)
+        self.deleted: list[str] = []
+        self.search_calls: list[dict[str, Any]] = []
+
+    async def search(
+        self,
+        *,
+        metadata: dict[str, Any] | None = None,
+        limit: int = 10,
+        offset: int = 0,
+        **_: Any,
+    ) -> list[dict[str, Any]]:
+        self.search_calls.append({"metadata": metadata, "limit": limit, "offset": offset})
+        items = [
+            c
+            for c in self._crons
+            if not metadata
+            or all((c.get("metadata") or {}).get(k) == v for k, v in metadata.items())
+        ]
+        return items[offset : offset + limit]
+
+    async def delete(self, cron_id: str) -> None:
+        self.deleted.append(cron_id)
+        self._crons = [c for c in self._crons if c.get("cron_id") != cron_id]
+
+
+class _FakeClient:
+    def __init__(self, crons: list[dict[str, Any]]) -> None:
+        self.crons = _FakeCrons(crons)
+
+
+def _wakeup_cron(cron_id: str, end_time: datetime | None) -> dict[str, Any]:
+    return {
+        "cron_id": cron_id,
+        "end_time": end_time.isoformat() if end_time else None,
+        "metadata": {"kind": "thread_wakeup"},
+    }
 
 
 def _config(**overrides: Any) -> dict[str, Any]:
@@ -241,3 +295,71 @@ def test_build_one_shot_cron_handles_month_boundary() -> None:
     assert parts[1] == "23"
     assert parts[2] == "31"
     assert parts[3] == "12"
+
+
+async def test_purge_deletes_only_expired_wakeups() -> None:
+    now = datetime(2026, 6, 30, 22, 0, tzinfo=UTC)
+    client = _FakeClient(
+        [
+            _wakeup_cron("expired-1", now - timedelta(hours=1)),
+            _wakeup_cron("expired-2", now - timedelta(days=1)),
+            _wakeup_cron("future-1", now + timedelta(hours=1)),
+            _wakeup_cron("no-end", None),
+        ]
+    )
+
+    deleted = await wakeup_tool.purge_expired_wakeup_crons(client, now=now)
+
+    assert deleted == 2
+    assert client.crons.deleted == ["expired-1", "expired-2"]
+    # Search is scoped to the thread_wakeup kind so other crons are never seen.
+    assert client.crons.search_calls[0]["metadata"] == {"kind": "thread_wakeup"}
+
+
+async def test_purge_paginates(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(wakeup_tool, "_PURGE_PAGE_SIZE", 2)
+    now = datetime(2026, 6, 30, 22, 0, tzinfo=UTC)
+    client = _FakeClient([_wakeup_cron(f"expired-{i}", now - timedelta(hours=1)) for i in range(3)])
+
+    deleted = await wakeup_tool.purge_expired_wakeup_crons(client, now=now)
+
+    assert deleted == 3
+    assert sorted(client.crons.deleted) == ["expired-0", "expired-1", "expired-2"]
+    # Two pages fetched (offset 0 and 2), then a short final page ends the loop.
+    assert [c["offset"] for c in client.crons.search_calls] == [0, 2]
+
+
+async def test_best_effort_purge_swallows_errors(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def boom(*_: Any, **__: Any) -> int:
+        raise RuntimeError("search failed")
+
+    monkeypatch.setattr(wakeup_tool, "purge_expired_wakeup_crons", boom)
+    monkeypatch.setattr(wakeup_tool, "get_client", lambda url: object())
+
+    # The real wrapper must never propagate — a purge failure can't block wakeups.
+    await _real_purge_best_effort()
+
+
+async def test_schedule_purges_before_creating(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[str] = []
+
+    async def spy_purge() -> None:
+        calls.append("purge")
+
+    async def fake_create_wakeup_cron(**kwargs: Any) -> dict[str, Any]:
+        calls.append("create")
+        return {
+            "success": True,
+            "cron_id": "cron-1",
+            "scheduled_for": "",
+            "thread_id": kwargs["thread_id"],
+        }
+
+    monkeypatch.setattr(wakeup_tool, "get_config", _config)
+    monkeypatch.setattr(wakeup_tool, "_purge_expired_wakeups_best_effort", spy_purge)
+    monkeypatch.setattr(wakeup_tool, "_create_wakeup_cron", fake_create_wakeup_cron)
+
+    result = await wakeup_tool.schedule_thread_wakeup(5)
+
+    assert result["success"] is True
+    assert calls == ["purge", "create"]

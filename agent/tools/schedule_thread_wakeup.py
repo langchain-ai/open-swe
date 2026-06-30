@@ -18,6 +18,9 @@ _MIN_DELAY_SECONDS = 60
 _MAX_DELAY_SECONDS = 86_400
 _END_TIME_PADDING_SECONDS = 90
 
+_WAKEUP_KIND = "thread_wakeup"
+_PURGE_PAGE_SIZE = 100
+
 _DEFAULT_WAKEUP_PROMPT = (
     "This is an automated re-trigger of this thread. The agent scheduled this "
     "wakeup to poll for updates. Check the current state of whatever you were "
@@ -44,6 +47,71 @@ def _build_one_shot_cron(fire_time: datetime) -> str:
             "*",
         ]
     )
+
+
+def _parse_iso(value: Any) -> datetime | None:
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+async def find_expired_wakeup_cron_ids(client: Any, *, now: datetime) -> list[str]:
+    """Return the ids of ``thread_wakeup`` crons whose ``end_time`` has passed.
+
+    Conservative: matches solely on ``metadata.kind == "thread_wakeup"`` AND a
+    past ``end_time``, so analyzer/dashboard crons are never selected. Paginates
+    fully before returning so the result is stable to delete afterwards.
+    """
+    expired_ids: list[str] = []
+    offset = 0
+    while True:
+        page = await client.crons.search(
+            metadata={"kind": _WAKEUP_KIND},
+            limit=_PURGE_PAGE_SIZE,
+            offset=offset,
+        )
+        if not page:
+            break
+        for cron in page:
+            if not isinstance(cron, dict):
+                continue
+            end_time = _parse_iso(cron.get("end_time"))
+            cron_id = cron.get("cron_id")
+            if end_time is not None and end_time < now and isinstance(cron_id, str) and cron_id:
+                expired_ids.append(cron_id)
+        if len(page) < _PURGE_PAGE_SIZE:
+            break
+        offset += len(page)
+    return expired_ids
+
+
+async def purge_expired_wakeup_crons(client: Any, *, now: datetime) -> int:
+    """Delete ``thread_wakeup`` crons whose ``end_time`` has already passed.
+
+    Each wakeup is a thread-bound cron with an ``end_time`` (~90s past its fire)
+    that stops it re-firing, but the cron row itself is never removed, so dead
+    rows accumulate. This deletes only those dead rows. Returns the count deleted.
+    """
+    expired_ids = await find_expired_wakeup_cron_ids(client, now=now)
+    deleted = 0
+    for cron_id in expired_ids:
+        await client.crons.delete(cron_id)
+        deleted += 1
+    return deleted
+
+
+async def _purge_expired_wakeups_best_effort() -> None:
+    """Opportunistically purge expired wakeup crons; never raises."""
+    try:
+        client = get_client(url=langgraph_url())
+        deleted = await purge_expired_wakeup_crons(client, now=datetime.now(UTC))
+        if deleted:
+            logger.info("Purged %d expired thread_wakeup cron(s)", deleted)
+    except Exception:
+        logger.warning("Failed to purge expired thread_wakeup crons", exc_info=True)
 
 
 async def _create_wakeup_cron(
@@ -129,6 +197,8 @@ async def schedule_thread_wakeup(delay_minutes: int, prompt: str | None = None) 
         value = configurable.get(key)
         if value is not None:
             wakeup_configurable[key] = value
+
+    await _purge_expired_wakeups_best_effort()
 
     try:
         return await _create_wakeup_cron(
