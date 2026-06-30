@@ -53,6 +53,7 @@ from .integrations.datadog_mcp import load_datadog_tools
 from .integrations.langsmith import _configure_github_proxy
 from .integrations.langsmith_tools import load_langsmith_tools
 from .integrations.notion_mcp import load_notion_tools
+from .integrations.stagehand_browser import load_browser_tools
 from .middleware import (
     ModelFallbackMiddleware,
     PlanModeMiddleware,
@@ -581,6 +582,48 @@ def _general_purpose_subagent(model: BaseChatModel) -> SubAgent:
     }
 
 
+BROWSER_SUBAGENT_DESCRIPTION = (
+    "Drives a real browser (Stagehand, running locally or on Browserbase) to "
+    "accomplish tasks that require interacting with live web pages: logging "
+    "into dashboards, clicking through flows, filling forms, reading "
+    "JS-rendered content, reproducing UI bugs, and extracting structured data. "
+    "Prefer the `fetch_url` tool for static page reads; delegate here only when "
+    "the task needs interaction or JavaScript-rendered content."
+)
+
+BROWSER_SUBAGENT_SYSTEM_PROMPT = """You are a browser automation specialist. You control a real Chromium \
+browser via Stagehand tools.
+
+Workflow:
+1. Call `browser_navigate` to open the browser and go to the starting URL.
+2. Use `browser_observe` to find actionable elements before acting when the \
+page is unfamiliar.
+3. Use `browser_act` for clicks/typing/navigation with concise \
+natural-language instructions (one action per call).
+4. Use `browser_extract` to pull the specific data the caller asked for, \
+passing a JSON schema when you need a precise shape.
+5. Always call `browser_close` when finished to release the session.
+
+Guidance:
+- Take one concrete step at a time and verify the result before the next.
+- Keep instructions specific and grounded in what `browser_observe`/\
+`browser_extract` returned.
+- Do not exfiltrate credentials or secrets. Only act on the task you were \
+delegated.
+- Return a concise summary of what you did and the data you extracted; include \
+the session replay URL if one was returned."""
+
+
+def _browser_subagent(model: BaseChatModel, tools: list[Any]) -> SubAgent:
+    return {
+        "name": "browser",
+        "description": BROWSER_SUBAGENT_DESCRIPTION,
+        "system_prompt": BROWSER_SUBAGENT_SYSTEM_PROMPT,
+        "tools": tools,
+        "model": model,
+    }
+
+
 def _get_cached_sandbox_backend(thread_id: str) -> SandboxBackendProtocol:
     sandbox_backend = SANDBOX_BACKENDS.get(thread_id)
     if sandbox_backend is None:
@@ -805,6 +848,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         await _observability_authorized(config, profile_login)
     )
     corridor_tools = await _load_corridor_mcp_tools()
+    browser_tools = load_browser_tools()
 
     currents_tools: list[Any] = []
     notion_tools: list[Any] = []
@@ -862,7 +906,14 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             *currents_tools,
             *notion_tools,
         ],
-        subagents=[_general_purpose_subagent(subagent_model)],
+        subagents=[
+            _general_purpose_subagent(subagent_model),
+            *(
+                [_browser_subagent(subagent_model, browser_tools)]
+                if browser_tools
+                else []
+            ),
+        ],
         backend=backend_factory,
         middleware=[
             SanitizeToolInputsMiddleware(),
