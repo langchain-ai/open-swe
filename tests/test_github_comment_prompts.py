@@ -58,6 +58,15 @@ def test_construct_system_prompt_includes_dependency_vetting_guidance() -> None:
     assert "the package name, why it is needed" in prompt
 
 
+def test_construct_system_prompt_installs_missing_verification_dependencies() -> None:
+    prompt = construct_system_prompt(working_dir="/workspace")
+
+    assert "install or sync the project's declared dependencies" in prompt
+    assert "focused verification command fails" in prompt
+    assert "ModuleNotFoundError" in prompt
+    assert "rerun the same focused verification" in prompt
+
+
 def test_construct_system_prompt_explains_pause_to_ask_for_dependency_review() -> None:
     prompt = construct_system_prompt(working_dir="/workspace")
 
