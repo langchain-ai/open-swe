@@ -128,18 +128,40 @@ class TestModelFallbackMiddleware:
         assert "data retention enabled" in result.text
 
     @pytest.mark.asyncio
-    async def test_async_does_not_double_fall_back(self) -> None:
-        """If the fallback also fails transiently, the error propagates."""
+    async def test_async_returns_ai_message_when_fallback_also_fails(self) -> None:
+        """If the fallback also fails transiently, surface a user-facing AIMessage."""
         middleware = ModelFallbackMiddleware(MagicMock())
         calls: list[object] = []
 
         async def handler(req: object) -> object:
             calls.append(req)
+            if len(calls) == 1:
+                raise _anthropic_overloaded()
             raise _openai_5xx()
 
-        with pytest.raises(openai.APIStatusError):
-            await middleware.awrap_model_call(_make_request(), handler)
+        result = await middleware.awrap_model_call(_make_request(), handler)
 
+        assert isinstance(result, AIMessage)
+        assert "APIStatusError" in result.text
+        assert "Primary error" in result.text
+        assert "fallback error" in result.text
+        assert len(calls) == 2
+
+    def test_sync_returns_ai_message_when_fallback_also_fails(self) -> None:
+        middleware = ModelFallbackMiddleware(MagicMock())
+        calls: list[object] = []
+
+        def handler(req: object) -> object:
+            calls.append(req)
+            if len(calls) == 1:
+                raise _anthropic_overloaded()
+            raise _openai_5xx()
+
+        result = middleware.wrap_model_call(_make_request(), handler)
+
+        assert isinstance(result, AIMessage)
+        assert "Primary error" in result.text
+        assert "fallback error" in result.text
         assert len(calls) == 2
 
     def test_sync_falls_over_on_overloaded(self) -> None:

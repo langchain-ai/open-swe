@@ -117,7 +117,21 @@ class ModelFallbackMiddleware(AgentMiddleware):
                 getattr(self._fallback_model, "model_name", None)
                 or getattr(self._fallback_model, "model", "fallback"),
             )
-            return handler(request.override(model=self._fallback_model))
+            try:
+                return handler(request.override(model=self._fallback_model))
+            except Exception as fallback_exc:
+                logger.error(
+                    "Both primary and fallback model failed: primary=%s fallback=%s",
+                    type(exc).__name__,
+                    type(fallback_exc).__name__,
+                )
+                return AIMessage(
+                    content=(
+                        "Both the primary and fallback models failed transiently. "
+                        f"Primary error: {type(exc).__name__}; fallback error: {type(fallback_exc).__name__}. "
+                        "Please retry in a few minutes."
+                    )
+                )
 
     async def awrap_model_call(
         self,
@@ -139,4 +153,18 @@ class ModelFallbackMiddleware(AgentMiddleware):
                 getattr(self._fallback_model, "model_name", None)
                 or getattr(self._fallback_model, "model", "fallback"),
             )
-            return await handler(request.override(model=self._fallback_model))
+            try:
+                return await handler(request.override(model=self._fallback_model))
+            except Exception as fallback_exc:
+                logger.error(
+                    "Both primary and fallback model failed: primary=%s fallback=%s",
+                    type(exc).__name__,
+                    type(fallback_exc).__name__,
+                )
+                return AIMessage(
+                    content=(
+                        "Both the primary and fallback models failed transiently. "
+                        f"Primary error: {type(exc).__name__}; fallback error: {type(fallback_exc).__name__}. "
+                        "Please retry in a few minutes."
+                    )
+                )
