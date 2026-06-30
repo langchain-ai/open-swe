@@ -41,6 +41,7 @@ import {
   MultiFileDiff,
   Virtualizer,
   WorkerPoolContextProvider,
+  useVirtualizer,
 } from "@pierre/diffs/react"
 import type { Icon } from "@phosphor-icons/react"
 import type { FileContents } from "@pierre/diffs/react"
@@ -73,7 +74,10 @@ import {
   ReviewChatComposerProvider,
   useReviewChatComposer,
 } from "@/components/agents/ReviewChat"
-import { ReviewSidebarPanel } from "@/components/agents/ReviewSidebar"
+import {
+  ReviewSidebarPanel,
+  renderInlineCode,
+} from "@/components/agents/ReviewSidebar"
 import {
   DIFF_VIRTUALIZER_CONFIG,
   DIFF_VIRTUAL_METRICS,
@@ -253,6 +257,60 @@ function scrollCardToTop(el: HTMLElement, scroller: HTMLElement | null): void {
     }
   }
   requestAnimationFrame(align)
+}
+
+// The virtualizer instance returned by useVirtualizer(); exposes
+// getOffsetInScrollContainer for accurate scroll targeting.
+type DiffVirtualizer = NonNullable<ReturnType<typeof useVirtualizer>>
+
+// Breathing room left above a block/file when it's scrolled to the top.
+const SCROLL_TOP_GAP = 8
+
+// Scroll a block / file card flush to the top of the diff scroller using the
+// virtualizer's own geometry. getOffsetInScrollContainer returns the element's
+// absolute offset within the scroll content; with uniform fixed-height rows
+// (see diffUtils) that offset is stable, so a single smooth scroll lands
+// precisely. As any not-yet-measured rows above the target reconcile during the
+// scroll the offset can shift slightly, so once the scroll settles we re-read it
+// and re-assert exactly once — no 240-frame correction loop needed.
+function scrollCardToTopVirtual(
+  el: HTMLElement,
+  scroller: HTMLElement,
+  virtualizer: DiffVirtualizer
+): void {
+  const targetTop = () =>
+    clampScrollTop(
+      scroller,
+      virtualizer.getOffsetInScrollContainer(el) - SCROLL_TOP_GAP
+    )
+  scroller.scrollTo({ top: targetTop(), behavior: "smooth" })
+  let frames = 0
+  let lastTop = Number.NaN
+  let stableFrames = 0
+  const settle = () => {
+    if (frames++ > 120) return
+    const top = scroller.scrollTop
+    if (top === lastTop) stableFrames++
+    else {
+      stableFrames = 0
+      lastTop = top
+    }
+    if (stableFrames < 3) {
+      requestAnimationFrame(settle)
+      return
+    }
+    const desired = targetTop()
+    if (Math.abs(desired - scroller.scrollTop) > 1) {
+      scroller.scrollTo({ top: desired, behavior: "auto" })
+    }
+  }
+  requestAnimationFrame(settle)
+}
+
+// Older stored summaries embed `[label](#loc=path:line)` diff links; render the
+// label as inline code instead so no stale jump-links leak into the block body.
+function stripLocationLinks(summary: string): string {
+  return summary.replace(/\[([^\]]+)\]\(#loc=[^)]*\)/g, "`$1`")
 }
 
 interface PositionedDiffInstance {
@@ -561,8 +619,12 @@ function ReviewBodyInner({
     range: SelectedLineRange
   } | null>(null)
   const diffScrollElRef = useRef<HTMLDivElement | null>(null)
+  const virtualizerRef = useRef<DiffVirtualizer | null>(null)
   const findingScrollRequestRef = useRef(0)
   const groupRefs = useRef<Record<number, HTMLDivElement | null>>({})
+  // The block pinned at the top of the diff (scroll-spy), highlighted in the
+  // agenda sidebar.
+  const [activeGroup, setActiveGroup] = useState<number | null>(null)
   const [diffStyle, setDiffStyleState] = useState<DiffStyle>(() =>
     readStoredDiffStyle()
   )
@@ -726,11 +788,6 @@ function ReviewBodyInner({
     return groupedView.map((group) => ({
       index: group.index,
       title: group.title,
-      summary: group.summary,
-      additions: group.additions,
-      deletions: group.deletions,
-      fileCount: group.files.length,
-      files: group.files.map((file) => file.path),
     }))
   }, [groupedView])
 
@@ -759,16 +816,59 @@ function ReviewBodyInner({
     setExpandedFiles((prev) => ({ ...prev, [path]: true }))
     requestAnimationFrame(() => {
       const el = fileRefs.current[path]
-      if (el) scrollCardToTop(el, diffScrollElRef.current)
+      const scroller = diffScrollElRef.current
+      if (!el || !scroller) return
+      if (virtualizerRef.current)
+        scrollCardToTopVirtual(el, scroller, virtualizerRef.current)
+      else scrollCardToTop(el, scroller)
     })
   }, [])
 
   const scrollToGroup = useCallback((index: number) => {
     requestAnimationFrame(() => {
       const el = groupRefs.current[index]
-      if (el) scrollCardToTop(el, diffScrollElRef.current)
+      const scroller = diffScrollElRef.current
+      if (!el || !scroller) return
+      if (virtualizerRef.current)
+        scrollCardToTopVirtual(el, scroller, virtualizerRef.current)
+      else scrollCardToTop(el, scroller)
     })
   }, [])
+
+  // Scroll-spy: track which block's header is currently pinned at the top of the
+  // diff scroller and surface it as the active agenda row (Google-Docs outline).
+  useEffect(() => {
+    if (view !== "ai" || !groupedView || groupedView.length === 0) {
+      setActiveGroup(null)
+      return
+    }
+    const scroller = diffScrollElRef.current
+    if (!scroller) return
+    let raf = 0
+    const compute = () => {
+      raf = 0
+      const top = scroller.getBoundingClientRect().top
+      let current = groupedView[0]?.index ?? null
+      for (const group of groupedView) {
+        const el = groupRefs.current[group.index]
+        if (!el) continue
+        if (el.getBoundingClientRect().top - top <= SCROLL_TOP_GAP + 2)
+          current = group.index
+        else break
+      }
+      setActiveGroup(current)
+    }
+    const onScroll = () => {
+      if (raf) return
+      raf = requestAnimationFrame(compute)
+    }
+    compute()
+    scroller.addEventListener("scroll", onScroll, { passive: true })
+    return () => {
+      scroller.removeEventListener("scroll", onScroll)
+      if (raf) cancelAnimationFrame(raf)
+    }
+  }, [view, groupedView])
 
   const filesByPath = useMemo(
     () => new Map((diffFiles ?? []).map((file) => [file.path, file])),
@@ -1055,6 +1155,7 @@ function ReviewBodyInner({
       view,
       onViewChange: setView,
       onSelectGroup: scrollToGroup,
+      activeGroup,
     }),
     [
       detail.number,
@@ -1066,6 +1167,7 @@ function ReviewBodyInner({
       view,
       setView,
       scrollToGroup,
+      activeGroup,
     ]
   )
 
@@ -1122,7 +1224,10 @@ function ReviewBodyInner({
                 )}
                 config={DIFF_VIRTUALIZER_CONFIG}
               >
-                <div ref={scrollerProbe} aria-hidden className="hidden" />
+                <VirtualizerBridge
+                  probeRef={scrollerProbe}
+                  instanceRef={virtualizerRef}
+                />
                 <PrHeader
                   url={detail.url}
                   title={detail.pr.title}
@@ -1271,21 +1376,54 @@ function DiffStyleButton({
   )
 }
 
+// Grabs the virtualizer instance from context (only available inside
+// <Virtualizer>) and lifts it to the parent ref so scroll-to can read accurate
+// offsets. Doubles as the hidden scroll-element probe.
+function VirtualizerBridge({
+  probeRef,
+  instanceRef,
+}: {
+  probeRef: (node: HTMLDivElement | null) => void
+  instanceRef: React.MutableRefObject<DiffVirtualizer | null>
+}) {
+  const virtualizer = useVirtualizer()
+  useEffect(() => {
+    instanceRef.current = virtualizer ?? null
+  }, [virtualizer, instanceRef])
+  return <div ref={probeRef} aria-hidden className="hidden" />
+}
+
+// The block header: number + title + stats, then the block description. Pinned
+// at the top of the diff scroller while scrolling the block (Google-Docs feel),
+// stacked above Pierre's in-diff sticky header (z-index 4). A long description
+// scrolls within the pinned header instead of consuming the viewport.
 function GroupHeader({ group }: { group: ResolvedGroup }) {
+  const title = useMemo(() => renderInlineCode(group.title), [group.title])
+  const summary = useMemo(
+    () => (group.summary ? stripLocationLinks(group.summary) : ""),
+    [group.summary]
+  )
   return (
-    <div className="flex items-center gap-2">
-      <span className="flex size-5 shrink-0 items-center justify-center rounded bg-[var(--ui-panel-2)] text-[11px] font-medium text-muted-foreground">
-        {group.index}
-      </span>
-      <h3 className="min-w-0 truncate text-sm font-medium">{group.title}</h3>
-      <span className="flex shrink-0 items-center gap-1.5 font-mono text-[11px]">
-        {group.additions > 0 && (
-          <span className="text-emerald-500">+{group.additions}</span>
-        )}
-        {group.deletions > 0 && (
-          <span className="text-red-500">-{group.deletions}</span>
-        )}
-      </span>
+    <div className="sticky top-0 z-[5] border-b border-border bg-background pb-2">
+      <div className="flex items-center gap-2">
+        <span className="flex size-5 shrink-0 items-center justify-center rounded bg-[var(--ui-panel-2)] text-[11px] font-medium text-muted-foreground">
+          {group.index}
+        </span>
+        <h3 className="min-w-0 flex-1 truncate text-sm font-medium">{title}</h3>
+        <span className="flex shrink-0 items-center gap-1.5 font-mono text-[11px]">
+          {group.additions > 0 && (
+            <span className="text-emerald-500">+{group.additions}</span>
+          )}
+          {group.deletions > 0 && (
+            <span className="text-red-500">-{group.deletions}</span>
+          )}
+        </span>
+      </div>
+      {summary && (
+        <div className="mt-2 max-h-40 overflow-y-auto text-xs text-muted-foreground">
+          <Markdown content={summary} />
+        </div>
+      )}
     </div>
   )
 }
