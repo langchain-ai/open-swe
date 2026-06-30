@@ -23,8 +23,14 @@ function fileLabel(count: number): string {
   return count === 1 ? "1 file" : `${count} files`
 }
 
-export function WorkflowApprovalCard({ threadId }: { threadId: string }) {
-  const query = useWorkflowApprovals(threadId)
+export function WorkflowApprovalCard({
+  threadId,
+  pollWhileActive = false,
+}: {
+  threadId: string
+  pollWhileActive?: boolean
+}) {
+  const query = useWorkflowApprovals(threadId, { pollWhileActive })
   const decision = useWorkflowApprovalDecision(threadId)
   const [error, setError] = useState<string | null>(null)
   const approvals = useMemo(

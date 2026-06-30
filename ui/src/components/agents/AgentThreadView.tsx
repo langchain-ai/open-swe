@@ -139,7 +139,10 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
             message to retry.
           </div>
         )}
-        <WorkflowApprovalCard threadId={thread.id} />
+        <WorkflowApprovalCard
+          threadId={thread.id}
+          pollWhileActive={isStreaming}
+        />
         {thread.planStatus &&
           thread.planStatus !== "approved" &&
           thread.planStatus !== "cancelled" && (

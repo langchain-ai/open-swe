@@ -127,12 +127,16 @@ export function useAgentThreadPrDiff(threadId: string, enabled: boolean) {
   })
 }
 
-export function useWorkflowApprovals(threadId: string) {
+export function useWorkflowApprovals(
+  threadId: string,
+  options: { pollWhileActive?: boolean } = {}
+) {
   return useQuery({
     queryKey: agentThreadKeys.workflowApprovals(threadId),
     queryFn: () => agentsApi.listWorkflowApprovals(threadId),
     enabled: Boolean(threadId),
     refetchInterval: (query) =>
+      options.pollWhileActive ||
       query.state.data?.approvals.some(
         (approval) => approval.status === "pending"
       )
