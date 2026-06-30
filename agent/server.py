@@ -908,11 +908,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         ],
         subagents=[
             _general_purpose_subagent(subagent_model),
-            *(
-                [_browser_subagent(subagent_model, browser_tools)]
-                if browser_tools
-                else []
-            ),
+            *([_browser_subagent(subagent_model, browser_tools)] if browser_tools else []),
         ],
         backend=backend_factory,
         middleware=[
