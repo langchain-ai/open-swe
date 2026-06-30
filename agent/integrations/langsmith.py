@@ -38,10 +38,11 @@ PROXY_CONFIG_RETRYABLE_STATUS_CODES = frozenset({408, 409, 425, 429, 500, 502, 5
 def _get_langsmith_api_key() -> str | None:
     """Get LangSmith API key from environment.
 
-    Checks LANGSMITH_API_KEY first, then falls back to LANGSMITH_API_KEY_PROD
-    for LangGraph Cloud deployments where LANGSMITH_API_KEY is reserved.
+    Prefers LANGSMITH_API_KEY_PROD (user-supplied) over LANGSMITH_API_KEY
+    (reserved by LangGraph Cloud) so sandbox operations use a key with
+    full workspace permissions.
     """
-    return os.environ.get("LANGSMITH_API_KEY") or os.environ.get("LANGSMITH_API_KEY_PROD")
+    return os.environ.get("LANGSMITH_API_KEY_PROD") or os.environ.get("LANGSMITH_API_KEY")
 
 
 def _parse_optional_int(name: str, default: int) -> int:
