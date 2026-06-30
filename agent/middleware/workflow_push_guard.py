@@ -25,6 +25,7 @@ from ..dashboard.workflow_approval import (
     workflow_push_approved,
 )
 from ..tools.slack_thread_reply import build_workflow_approval_blocks
+from ..utils.dashboard_links import dashboard_workflow_approval_url
 from ..utils.github_app import (
     BASE_RUNTIME_PROXY_TOKEN_PERMISSIONS,
     RUNTIME_PROXY_TOKEN_PERMISSIONS,
@@ -41,6 +42,8 @@ _SHELL_OPERATORS = {";", "|", "||", "&"}
 _REF_NAME = re.compile(r"^[A-Za-z0-9._/@+-]+$")
 _GIT_OBJECT_ID = re.compile(r"^[0-9a-fA-F]{40,64}$")
 _UNSAFE_RAW_COMMAND = re.compile(r"[;|`$<>\n\r]")
+_DIFF_PREVIEW_MAX_CHARS = 20_000
+_DIFF_PREVIEW_MAX_LINES = 400
 
 
 @dataclass(frozen=True)
@@ -60,6 +63,9 @@ class WorkflowPushChange:
     base_sha: str
     head_sha: str
     files: list[str]
+    diff_stats: dict[str, int]
+    diff_preview: str
+    diff_preview_truncated: bool
     remote: str
     local_ref: str
     remote_ref: str
@@ -258,6 +264,44 @@ def _fingerprint(payload: Mapping[str, Any]) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+def _diff_preview(diff: str) -> tuple[str, bool]:
+    if len(diff) <= _DIFF_PREVIEW_MAX_CHARS:
+        lines = diff.splitlines()
+        if len(lines) <= _DIFF_PREVIEW_MAX_LINES:
+            return diff, False
+    preview_lines: list[str] = []
+    char_count = 0
+    truncated = False
+    for line in diff.splitlines():
+        next_count = char_count + len(line) + 1
+        if len(preview_lines) >= _DIFF_PREVIEW_MAX_LINES or next_count > _DIFF_PREVIEW_MAX_CHARS:
+            truncated = True
+            break
+        preview_lines.append(line)
+        char_count = next_count
+    return "\n".join(preview_lines), truncated
+
+
+def _diff_stats(files: list[str], numstat: str) -> dict[str, int]:
+    additions = 0
+    deletions = 0
+    for line in numstat.splitlines():
+        parts = line.split("\t")
+        if len(parts) < 3:
+            continue
+        if parts[0].isdigit():
+            additions += int(parts[0])
+        if parts[1].isdigit():
+            deletions += int(parts[1])
+    return {"files": len(files), "additions": additions, "deletions": deletions}
+
+
+def _approval_url(thread_id: str | None, fingerprint: str) -> str | None:
+    if not thread_id:
+        return None
+    return dashboard_workflow_approval_url(thread_id, fingerprint)
+
+
 def _run_coroutine_sync(coro: Awaitable[ToolMessage | Command]) -> ToolMessage | Command:
     try:
         asyncio.get_running_loop()
@@ -337,6 +381,9 @@ def _workflow_change_for_push(backend: Any, parsed: ParsedGitPush) -> WorkflowPu
     diff = _run_git(backend, root, f"diff --binary --full-index {range_expr} -- .github/workflows")
     if not diff.ok or not diff.output:
         return None
+    numstat = _run_git(backend, root, f"diff --numstat {range_expr} -- .github/workflows")
+    diff_preview, diff_preview_truncated = _diff_preview(diff.output)
+    diff_stats = _diff_stats(files, numstat.output if numstat.ok else "")
 
     remote = _run_git(backend, root, "config --get remote.origin.url")
     repo = _normalize_remote(_first_line(remote.output)) if remote.ok else ""
@@ -365,6 +412,9 @@ def _workflow_change_for_push(backend: Any, parsed: ParsedGitPush) -> WorkflowPu
         base_sha=base_sha,
         head_sha=head,
         files=files,
+        diff_stats=diff_stats,
+        diff_preview=diff_preview,
+        diff_preview_truncated=diff_preview_truncated,
         remote=parsed.remote,
         local_ref=parsed.local_ref,
         remote_ref=parsed.remote_ref,
@@ -372,7 +422,12 @@ def _workflow_change_for_push(backend: Any, parsed: ParsedGitPush) -> WorkflowPu
     )
 
 
-def _blocked_message(change: WorkflowPushChange, *, already_rejected: bool = False) -> ToolMessage:
+def _blocked_message(
+    change: WorkflowPushChange,
+    *,
+    approval_url: str | None = None,
+    already_rejected: bool = False,
+) -> ToolMessage:
     status = "rejected" if already_rejected else "approval_required"
     content = {
         "status": "error",
@@ -380,13 +435,18 @@ def _blocked_message(change: WorkflowPushChange, *, already_rejected: bool = Fal
         "error": (
             "This git push includes GitHub workflow file changes and requires human "
             "approval before Open SWE can push it. Retry the same standalone git push "
-            "after the thread owner approves the workflow diff."
+            "after the thread owner approves the workflow diff in Slack or the web UI."
         ),
         "workflow_approval_status": status,
         "fingerprint": change.fingerprint,
         "files": change.files,
         "repo": change.repo,
         "branch": change.branch,
+        "base_sha": change.base_sha,
+        "head_sha": change.head_sha,
+        "diff_stats": change.diff_stats,
+        "diff_preview_truncated": change.diff_preview_truncated,
+        "approval_url": approval_url,
     }
     return ToolMessage(content=json.dumps(content), tool_call_id="", status="error")
 
@@ -405,17 +465,21 @@ def _override_execute_command(request: ToolCallRequest, command: str) -> ToolCal
     return request.override(tool_call={**dict(tool_call), "args": args})
 
 
-def _approval_slack_message(change: WorkflowPushChange) -> str:
+def _approval_slack_message(change: WorkflowPushChange, approval_url: str | None = None) -> str:
     files = "\n".join(f"• `{path}`" for path in change.files[:10])
     if len(change.files) > 10:
         files += f"\n• …and {len(change.files) - 10} more"
     repo = change.repo or "the repository"
     branch = change.branch or "the current branch"
+    stats = change.diff_stats
+    web_review = f"\n\n*Review diff:* <{approval_url}|Open in Web>" if approval_url else ""
     return (
         "*Workflow file approval required*\n"
         f"Open SWE is trying to push changes to GitHub workflow files in `{repo}` on `{branch}`.\n\n"
         f"*Files:*\n{files}\n\n"
-        f"*Fingerprint:* `{change.fingerprint}`\n\n"
+        f"*Diff stat:* {stats.get('files', len(change.files))} files, "
+        f"+{stats.get('additions', 0)} / -{stats.get('deletions', 0)}\n"
+        f"*Fingerprint:* `{change.fingerprint}`{web_review}\n\n"
         "Approve only if this exact workflow diff is expected. If the workflow files change, "
         "a new fingerprint will be required."
     )
@@ -434,7 +498,9 @@ async def _post_slack_approval_if_needed(
     thread_ts = slack_thread.get("thread_ts")
     if not isinstance(channel_id, str) or not isinstance(thread_ts, str):
         return
-    message = _approval_slack_message(change)
+    message = _approval_slack_message(
+        change, _approval_url(_thread_id(request), change.fingerprint)
+    )
     message_ts, error = await post_slack_thread_reply_with_ts(
         channel_id,
         thread_ts,
@@ -452,6 +518,7 @@ async def _approval_state(request: ToolCallRequest, change: WorkflowPushChange) 
     if not thread_id:
         return "missing_thread"
     try:
+        approval_url = _approval_url(thread_id, change.fingerprint)
         if await workflow_push_approved(thread_id, change.fingerprint):
             return "approved"
         record, _created = await ensure_workflow_push_pending(
@@ -462,6 +529,10 @@ async def _approval_state(request: ToolCallRequest, change: WorkflowPushChange) 
             base_sha=change.base_sha,
             head_sha=change.head_sha,
             files=change.files,
+            diff_stats=change.diff_stats,
+            diff_preview=change.diff_preview,
+            diff_preview_truncated=change.diff_preview_truncated,
+            approval_url=approval_url,
         )
         await _post_slack_approval_if_needed(request, change, record)
         return str(record.get("status") or "pending")
@@ -521,7 +592,12 @@ class WorkflowPushGuardMiddleware(AgentMiddleware):
             safe_request = _override_execute_command(request, change.fixed_command)
             return await _run_with_workflow_token(thread_id, lambda: handler(safe_request))
         return _tool_message_for_request(
-            _blocked_message(change, already_rejected=state == "rejected"), request
+            _blocked_message(
+                change,
+                approval_url=_approval_url(thread_id, change.fingerprint),
+                already_rejected=state == "rejected",
+            ),
+            request,
         )
 
     def wrap_tool_call(

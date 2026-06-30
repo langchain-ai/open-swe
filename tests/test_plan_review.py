@@ -195,8 +195,64 @@ def test_plan_routes_registered() -> None:
     assert "/dashboard/api/plan/{thread_id}/comments" in paths
     assert "/dashboard/api/plan/{thread_id}/comments/{comment_id}" in paths
     assert "/dashboard/api/plan/yjs/{thread_id}" not in paths
+    assert "/dashboard/api/workflow-approval/{thread_id}" in paths
     assert "/dashboard/api/workflow-approval/{thread_id}/{fingerprint}/approve" in paths
     assert "/dashboard/api/workflow-approval/{thread_id}/{fingerprint}/reject" in paths
+
+
+async def test_list_workflow_approvals_requires_readable_thread(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from fastapi import HTTPException
+
+    from agent.dashboard import workflow_approval_api
+
+    async def fake_metadata(thread_id: str) -> dict[str, Any]:
+        assert thread_id == "thread-1"
+        return {"source": "unknown"}
+
+    monkeypatch.setattr(workflow_approval_api, "_thread_metadata", fake_metadata)
+    monkeypatch.setattr(workflow_approval_api, "_thread_is_readable", lambda metadata: False)
+
+    with pytest.raises(HTTPException) as exc:
+        await workflow_approval_api.list_workflow_push_approvals(
+            "thread-1", {"sub": "octocat", "email": "octo@example.com"}
+        )
+
+    assert exc.value.status_code == 404
+
+
+async def test_list_workflow_approvals_returns_owner_and_records(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent.dashboard import workflow_approval_api
+
+    async def fake_metadata(thread_id: str) -> dict[str, Any]:
+        assert thread_id == "thread-1"
+        return {"source": "slack", "github_login": "octocat"}
+
+    async def fake_approvals(thread_id: str) -> dict[str, dict[str, Any]]:
+        assert thread_id == "thread-1"
+        return {
+            "abc": {
+                "fingerprint": "abc",
+                "status": "pending",
+                "files": [".github/workflows/ci.yml"],
+                "diff_stats": {"files": 1, "additions": 1, "deletions": 0},
+            }
+        }
+
+    monkeypatch.setattr(workflow_approval_api, "_thread_metadata", fake_metadata)
+    monkeypatch.setattr(workflow_approval_api, "_thread_is_readable", lambda metadata: True)
+    monkeypatch.setattr(workflow_approval_api, "get_workflow_push_approvals", fake_approvals)
+
+    result = await workflow_approval_api.list_workflow_push_approvals(
+        "thread-1", {"sub": "octocat", "email": "octo@example.com"}
+    )
+
+    assert result["isOwner"] is True
+    assert result["approvals"][0]["fingerprint"] == "abc"
+    assert result["approvals"][0]["diffStats"] == {"files": 1, "additions": 1, "deletions": 0}
 
 
 def test_save_plan_exported_and_wired() -> None:

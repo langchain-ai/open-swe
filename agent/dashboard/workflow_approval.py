@@ -13,6 +13,7 @@ WORKFLOW_APPROVAL_PENDING = "pending"
 WORKFLOW_APPROVAL_APPROVED = "approved"
 WORKFLOW_APPROVAL_REJECTED = "rejected"
 _MAX_APPROVAL_RECORDS = 20
+_TERMINAL_STATUSES = {WORKFLOW_APPROVAL_APPROVED, WORKFLOW_APPROVAL_REJECTED}
 
 
 def _now() -> str:
@@ -53,31 +54,96 @@ async def ensure_workflow_push_pending(
     base_sha: str,
     head_sha: str,
     files: list[str],
+    diff_stats: Mapping[str, Any] | None = None,
+    diff_preview: str | None = None,
+    diff_preview_truncated: bool = False,
+    approval_url: str | None = None,
 ) -> tuple[dict[str, Any], bool]:
     """Store a pending approval unless a terminal record already exists."""
     approvals = await get_workflow_push_approvals(thread_id)
     existing = approvals.get(fingerprint)
-    if existing and existing.get("status") in {
-        WORKFLOW_APPROVAL_PENDING,
-        WORKFLOW_APPROVAL_APPROVED,
-        WORKFLOW_APPROVAL_REJECTED,
-    }:
+    if existing and existing.get("status") in _TERMINAL_STATUSES:
         return existing, False
 
-    record = {
-        "fingerprint": fingerprint,
-        "status": WORKFLOW_APPROVAL_PENDING,
+    review_fields = {
         "repo": repo,
         "branch": branch,
         "base_sha": base_sha,
         "head_sha": head_sha,
-        "files": files,
+        "files": list(files),
+        "diff_stats": _normalize_diff_stats(diff_stats, len(files)),
+        "diff_preview": diff_preview or "",
+        "diff_preview_truncated": diff_preview_truncated,
+        "approval_url": approval_url,
+    }
+    if existing and existing.get("status") == WORKFLOW_APPROVAL_PENDING:
+        record = {**existing, **review_fields}
+        approvals[fingerprint] = record
+        await _save_approvals(thread_id, approvals)
+        return record, False
+
+    record = {
+        "fingerprint": fingerprint,
+        "status": WORKFLOW_APPROVAL_PENDING,
+        **review_fields,
         "requested_at": _now(),
         "notified": False,
     }
     approvals[fingerprint] = record
     await _save_approvals(thread_id, approvals)
     return record, True
+
+
+def _safe_int(value: Any, default: int = 0) -> int:
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError):
+        return default
+
+
+def _normalize_diff_stats(value: Mapping[str, Any] | None, file_count: int) -> dict[str, int]:
+    if not isinstance(value, Mapping):
+        return {"files": file_count, "additions": 0, "deletions": 0}
+    return {
+        "files": _safe_int(value.get("files"), file_count),
+        "additions": _safe_int(value.get("additions")),
+        "deletions": _safe_int(value.get("deletions")),
+    }
+
+
+def workflow_push_approval_response(record: Mapping[str, Any]) -> dict[str, Any]:
+    files = record.get("files")
+    diff_stats = record.get("diff_stats")
+    requested_at = record.get("requested_at")
+    decided_at = record.get("decided_at")
+    decided_by = record.get("decided_by")
+    approval_url = record.get("approval_url")
+    return {
+        "fingerprint": str(record.get("fingerprint") or ""),
+        "status": str(record.get("status") or WORKFLOW_APPROVAL_PENDING),
+        "repo": str(record.get("repo") or ""),
+        "branch": str(record.get("branch") or ""),
+        "baseSha": str(record.get("base_sha") or ""),
+        "headSha": str(record.get("head_sha") or ""),
+        "files": [str(path) for path in files] if isinstance(files, list) else [],
+        "diffStats": _normalize_diff_stats(
+            diff_stats if isinstance(diff_stats, Mapping) else None,
+            len(files) if isinstance(files, list) else 0,
+        ),
+        "diffPreview": str(record.get("diff_preview") or ""),
+        "diffPreviewTruncated": record.get("diff_preview_truncated") is True,
+        "approvalUrl": approval_url if isinstance(approval_url, str) and approval_url else None,
+        "requestedAt": requested_at if isinstance(requested_at, str) else None,
+        "decidedAt": decided_at if isinstance(decided_at, str) else None,
+        "decidedBy": decided_by if isinstance(decided_by, str) else None,
+    }
+
+
+def workflow_push_approval_responses(
+    approvals: Mapping[str, Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    ordered = sorted(approvals.values(), key=lambda r: str(r.get("requested_at", "")), reverse=True)
+    return [workflow_push_approval_response(record) for record in ordered]
 
 
 async def mark_workflow_push_notified(thread_id: str, fingerprint: str) -> None:

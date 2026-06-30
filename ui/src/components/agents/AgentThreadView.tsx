@@ -16,6 +16,7 @@ import {
   writeStoredPanelCollapsed,
 } from "@/components/agents/AgentGitPanel"
 import { AgentPromptBar } from "@/components/agents/AgentPromptBar"
+import { WorkflowApprovalCard } from "@/components/agents/WorkflowApprovalCard"
 import { Messages } from "@/components/agents/messages"
 import { streamMessagesToUi } from "@/lib/agents/streamMessagesToUi"
 import { messageArrivalTimestamp } from "@/lib/agents/messageTimestamps"
@@ -138,6 +139,7 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
             message to retry.
           </div>
         )}
+        <WorkflowApprovalCard threadId={thread.id} />
         {thread.planStatus &&
           thread.planStatus !== "approved" &&
           thread.planStatus !== "cancelled" && (
