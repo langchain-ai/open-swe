@@ -29,6 +29,7 @@ dependencies = [
     "exa-py>=2.13.0",
     "langchain-google-genai>=4.2.4",
     "langchain-mcp-adapters>=0.2.2",
+    "stagehand>=3.21.0",
 ]
 
 [project.optional-dependencies]

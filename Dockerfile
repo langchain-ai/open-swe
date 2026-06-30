@@ -76,6 +76,13 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && sfw --version \
     && test -e "$(npm root -g)/sfw/.sfw-cache/latest"
 
+# Chromium for Stagehand LOCAL browser mode (STAGEHAND_ENV=LOCAL). Skipped at
+# runtime when STAGEHAND_ENV=BROWSERBASE (browser runs on Browserbase cloud).
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends chromium \
+    && rm -rf /var/lib/apt/lists/*
+ENV STAGEHAND_LOCAL_CHROME_PATH=/usr/bin/chromium
+
 ENV GO_VERSION=1.23.5
 
 RUN curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-$(dpkg --print-architecture).tar.gz" | tar -C /usr/local -xz
