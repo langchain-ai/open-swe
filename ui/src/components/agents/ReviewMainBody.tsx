@@ -1116,7 +1116,10 @@ function ReviewBodyInner({
             >
               <Virtualizer
                 className="relative min-h-0 flex-1 overflow-y-auto"
-                contentClassName="mx-auto w-full max-w-6xl px-6 py-6"
+                contentClassName={cn(
+                  "mx-auto w-full px-6 py-6",
+                  diffStyle === "split" ? "max-w-none" : "max-w-6xl"
+                )}
                 config={DIFF_VIRTUALIZER_CONFIG}
               >
                 <div ref={scrollerProbe} aria-hidden className="hidden" />

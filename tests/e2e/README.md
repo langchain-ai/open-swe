@@ -54,7 +54,7 @@ extra fake is the OAuth-token store (an external credential).
 
 The UI is built by `global-setup.ts` with `VITE_DASHBOARD_API_BASE_URL` pointed at
 the harness. It builds once; set `E2E_FORCE_UI_BUILD=1` to rebuild (e.g. after a
-UI change or port change). Requires `bun`.
+UI change or port change). Requires Corepack with `pnpm` enabled.
 
 ## Run
 
