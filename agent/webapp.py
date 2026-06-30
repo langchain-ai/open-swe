@@ -129,6 +129,26 @@ from .utils.thread_ids import generate_thread_id_from_slack_thread
 logger = logging.getLogger(__name__)
 
 
+# Opt-in leak diagnostics. Bursts of aiohttp "Unclosed client session" warnings
+# (from a third-party SDK) leak fds + memory in prod, but the warning omits the
+# allocation site. With tracemalloc running, aiohttp appends an "Object allocated
+# at" traceback to each warning, naming the exact source. Inert unless the env
+# var is set, so this is safe to ship and flip on for one diagnostic run.
+if os.environ.get("DEBUG_TRACEMALLOC"):
+    import tracemalloc
+
+    try:
+        _tracemalloc_frames = int(os.environ.get("DEBUG_TRACEMALLOC_FRAMES") or "25")
+    except ValueError:
+        _tracemalloc_frames = 25
+    tracemalloc.start(_tracemalloc_frames)
+    logger.warning(
+        "DEBUG_TRACEMALLOC enabled: tracemalloc started (%d frames) to attribute "
+        "unclosed-session warnings",
+        _tracemalloc_frames,
+    )
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     from .utils.model import validate_local_dev_llm_config
