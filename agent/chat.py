@@ -105,8 +105,15 @@ async def _resolve_chat_model(configurable: dict) -> tuple[str, str]:
 
 async def get_chat_agent(config: RunnableConfig) -> Pregel:
     """Get a read-only PR chat agent. No sandbox; PR context comes via config."""
+    # Treat the caller's RunnableConfig as read-only. The body below stashes
+    # run-scoped values (recursion limit, GitHub App token) into the config; without
+    # a copy those writes mutate the caller's dict and leak across runs that share a
+    # base config. Shallow-copy config and the one nested dict we write into. #1584.
+    config = {**config}
+    config["configurable"] = {**config.get("configurable", {})}
+
     thread_id = config["configurable"].get("thread_id")
-    config["recursion_limit"] = DEFAULT_RECURSION_LIMIT
+    config.setdefault("recursion_limit", DEFAULT_RECURSION_LIMIT)
 
     if thread_id is None or not graph_loaded_for_execution(config):
         return create_deep_agent(system_prompt="", tools=[]).with_config(config)
