@@ -1,8 +1,9 @@
-import { Navigate, createFileRoute } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 
 import { AgentInstructionsPanel } from "@/components/AgentInstructionsPanel";
 import { AppShell } from "@/components/AppShell";
 import { Skeleton } from "@/components/ui/skeleton";
+import { RequireLogin } from "@/lib/auth-redirect";
 import { useSession } from "@/lib/session";
 
 export const Route = createFileRoute("/agents_/instructions")({
@@ -19,7 +20,7 @@ function AgentInstructionsPage() {
       </main>
     );
   }
-  if (!session.data) return <Navigate to="/login" />;
+  if (!session.data) return <RequireLogin />;
 
   return (
     <AppShell

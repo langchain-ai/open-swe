@@ -1,4 +1,4 @@
-import { Link, Navigate, createFileRoute } from "@tanstack/react-router"
+import { Link, createFileRoute } from "@tanstack/react-router"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { ArrowLeftIcon, GitPullRequestIcon } from "@phosphor-icons/react"
@@ -9,6 +9,7 @@ import { ReviewMainBody } from "@/components/agents/ReviewMainBody"
 import { useSidebarControls } from "@/components/sidebar-layout"
 import { Skeleton } from "@/components/ui/skeleton"
 import { api } from "@/lib/api"
+import { RequireLogin } from "@/lib/auth-redirect"
 import { useSession } from "@/lib/session"
 import { cn } from "@/lib/utils"
 
@@ -70,7 +71,7 @@ function ReviewDetailPage() {
       </main>
     )
   }
-  if (!session.data) return <Navigate to="/login" />
+  if (!session.data) return <RequireLogin />
 
   return (
     <div className="flex min-w-0 flex-1 flex-col overflow-hidden bg-background text-foreground">
