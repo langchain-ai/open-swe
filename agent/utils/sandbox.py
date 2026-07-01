@@ -11,6 +11,7 @@ SANDBOX_FACTORIES: dict[str, tuple[str, str]] = {
     "daytona": ("agent.integrations.daytona", "create_daytona_sandbox"),
     "modal": ("agent.integrations.modal", "create_modal_sandbox"),
     "runloop": ("agent.integrations.runloop", "create_runloop_sandbox"),
+    "e2b": ("agent.integrations.e2b", "create_e2b_sandbox"),
     "local": ("agent.integrations.local", "create_local_sandbox"),
 }
 
@@ -35,7 +36,7 @@ def create_sandbox(
     """Create or reconnect to a sandbox using the configured provider.
 
     The provider is selected via the SANDBOX_TYPE environment variable.
-    Supported values: langsmith (default), daytona, modal, runloop, local.
+    Supported values: langsmith (default), daytona, modal, runloop, e2b, local.
 
     Args:
         sandbox_id: Optional existing sandbox ID to reconnect to.
