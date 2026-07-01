@@ -149,7 +149,9 @@ def _configure_github_proxy(sandbox_name: str, github_token: str) -> None:
     if not api_key:
         logger.warning("No LangSmith API key found, skipping GitHub proxy configuration")
         return
-    langsmith_endpoint = os.environ.get("LANGSMITH_ENDPOINT", "https://api.smith.langchain.com")
+    langsmith_endpoint = os.environ.get("LANGSMITH_ENDPOINT_PROD") or os.environ.get(
+        "LANGSMITH_ENDPOINT", "https://api.smith.langchain.com"
+    )
     url = f"{langsmith_endpoint}/v2/sandboxes/boxes/{sandbox_name}"
     payload = {"proxy_config": {"rules": _github_proxy_rules(github_token)}}
     with httpx.Client(timeout=PROXY_CONFIG_TIMEOUT_SECONDS) as client:
