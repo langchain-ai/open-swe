@@ -1,6 +1,7 @@
 {
   "framework": null,
-  "buildCommand": "bun run build",
+  "buildCommand": "pnpm run build",
+  "installCommand": "pnpm install --frozen-lockfile",
   "outputDirectory": ".output/public",
   "rewrites": [
     {

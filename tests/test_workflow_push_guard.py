@@ -37,7 +37,11 @@ class _Backend:
         if "diff --name-only" in command:
             return _Response(f"{self.workflow_files}\n" if self.workflow_files else "")
         if "diff --binary --full-index" in command:
-            return _Response("diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml\n")
+            return _Response(
+                "diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml\n+new\n-old\n"
+            )
+        if "diff --numstat" in command:
+            return _Response("1\t1\t.github/workflows/ci.yml\n")
         if "config --get remote.origin.url" in command:
             return _Response("git@github.com:langchain-ai/open-swe.git\n")
         if "rev-parse --abbrev-ref HEAD" in command:
@@ -109,11 +113,42 @@ def test_workflow_change_for_push_fingerprints_workflow_diff() -> None:
     assert change.repo == "https://github.com/langchain-ai/open-swe"
     assert change.branch == "feature"
     assert change.files == [".github/workflows/ci.yml"]
+    assert change.diff_stats == {"files": 1, "additions": 1, "deletions": 1}
+    assert change.diff_preview_truncated is False
+    assert "diff --git" in change.diff_preview
     assert (
         change.fixed_command
         == "git -C /repo push origin aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:refs/heads/feature"
     )
     assert len(change.fingerprint) == 64
+
+
+def test_workflow_approval_response_serializes_review_fields() -> None:
+    from agent.dashboard.workflow_approval import workflow_push_approval_response
+
+    response = workflow_push_approval_response(
+        {
+            "fingerprint": "abc",
+            "status": "pending",
+            "repo": "https://github.com/langchain-ai/open-swe",
+            "branch": "feature",
+            "base_sha": "b" * 40,
+            "head_sha": "a" * 40,
+            "files": [".github/workflows/ci.yml"],
+            "diff_stats": {"files": 1, "additions": 2, "deletions": 3},
+            "diff_preview": "diff --git ...",
+            "diff_preview_truncated": True,
+            "approval_url": "https://openswe.vercel.app/agents/thread?workflowApproval=abc",
+            "requested_at": "2026-06-30T00:00:00+00:00",
+        }
+    )
+
+    assert response["fingerprint"] == "abc"
+    assert response["baseSha"] == "b" * 40
+    assert response["headSha"] == "a" * 40
+    assert response["diffStats"] == {"files": 1, "additions": 2, "deletions": 3}
+    assert response["diffPreviewTruncated"] is True
+    assert response["approvalUrl"].endswith("workflowApproval=abc")
 
 
 def test_workflow_change_for_push_ignores_non_workflow_push() -> None:
@@ -153,7 +188,10 @@ async def test_unapproved_workflow_push_blocks_and_posts_slack(
     async def fake_approved(thread_id: str, fingerprint: str) -> bool:
         return False
 
+    pending_kwargs: dict[str, Any] = {}
+
     async def fake_pending(thread_id: str, **kwargs: Any) -> tuple[dict[str, Any], bool]:
+        pending_kwargs.update(kwargs)
         return {"fingerprint": kwargs["fingerprint"], "status": "pending", "notified": False}, True
 
     async def fake_post(
@@ -187,7 +225,13 @@ async def test_unapproved_workflow_push_blocks_and_posts_slack(
     payload = json.loads(str(result.content))
     assert payload["workflow_approval_status"] == "approval_required"
     assert payload["files"] == [".github/workflows/ci.yml"]
+    assert payload["diff_stats"] == {"files": 1, "additions": 1, "deletions": 1}
+    assert payload["approval_url"].endswith("?workflowApproval=" + payload["fingerprint"])
+    assert pending_kwargs["diff_preview"]
+    assert pending_kwargs["diff_preview_truncated"] is False
+    assert pending_kwargs["approval_url"] == payload["approval_url"]
     assert posted["channel_id"] == "C123"
+    assert "Open in Web" in posted["message"]
     assert posted["blocks"][1]["elements"][0]["value"]
 
 

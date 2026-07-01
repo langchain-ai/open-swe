@@ -8,8 +8,12 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from .oauth import require_same_origin_for_mutations, require_session
 from .plan_api import _dispatch_followup, _thread_metadata
-from .thread_api import _user_owns_thread
-from .workflow_approval import decide_workflow_push_approval
+from .thread_api import _thread_is_readable, _user_owns_thread
+from .workflow_approval import (
+    decide_workflow_push_approval,
+    get_workflow_push_approvals,
+    workflow_push_approval_responses,
+)
 
 workflow_approval_router = APIRouter(
     prefix="/dashboard/api/workflow-approval",
@@ -17,6 +21,22 @@ workflow_approval_router = APIRouter(
     dependencies=[Depends(require_same_origin_for_mutations)],
 )
 _SESSION_DEP = Depends(require_session)
+
+
+@workflow_approval_router.get("/{thread_id}")
+async def list_workflow_push_approvals(
+    thread_id: str, session: dict[str, Any] = _SESSION_DEP
+) -> dict[str, Any]:
+    metadata = await _thread_metadata(thread_id)
+    if not _thread_is_readable(metadata):
+        raise HTTPException(404, "thread not found")
+    is_owner = _user_owns_thread(metadata, session["sub"], session.get("email"))
+    approvals = await get_workflow_push_approvals(thread_id)
+    return {
+        "threadId": thread_id,
+        "isOwner": is_owner,
+        "approvals": workflow_push_approval_responses(approvals),
+    }
 
 
 @workflow_approval_router.post("/{thread_id}/{fingerprint}/approve")

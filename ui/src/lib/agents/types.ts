@@ -182,6 +182,37 @@ export interface QueuedThreadMessage {
   createdAt: number
 }
 
+export type WorkflowApprovalStatus = "pending" | "approved" | "rejected"
+
+export interface WorkflowDiffStats {
+  files: number
+  additions: number
+  deletions: number
+}
+
+export interface WorkflowPushApproval {
+  fingerprint: string
+  status: WorkflowApprovalStatus
+  repo: string
+  branch: string
+  baseSha: string
+  headSha: string
+  files: Array<string>
+  diffStats: WorkflowDiffStats
+  diffPreview: string
+  diffPreviewTruncated: boolean
+  approvalUrl: string | null
+  requestedAt: string | null
+  decidedAt: string | null
+  decidedBy: string | null
+}
+
+export interface WorkflowPushApprovalsResponse {
+  threadId: string
+  isOwner: boolean
+  approvals: Array<WorkflowPushApproval>
+}
+
 export interface AgentThread {
   id: string
   title: string

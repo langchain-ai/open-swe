@@ -16,7 +16,7 @@ Open SWE has two runnable pieces:
 - [uv](https://docs.astral.sh/uv/) package manager
 - [LangGraph CLI](https://docs.langchain.com/langsmith/cli)
 - [ngrok](https://ngrok.com/) (for local development — exposes webhook endpoints to the internet)
-- [Bun](https://bun.sh/) (only if you want to run the dashboard UI locally — see step 8). Node 20+ also works, but `ui/bun.lock` is the canonical lockfile.
+- [pnpm](https://pnpm.io/) (only if you want to run the dashboard UI locally — see step 8). Node 20+ also works, but `ui/pnpm-lock.yaml` is the canonical lockfile.
 
 ## 1. Clone and install
 
@@ -582,11 +582,11 @@ The dashboard is the web app in `ui/`. It's a static TanStack Start client that 
 
 ```bash
 cd ui
-bun install
+pnpm install
 cat > .env <<'EOF'
 VITE_DASHBOARD_API_BASE_URL="http://localhost:2024"
 EOF
-bun run dev          # vite dev --port 3000 -> http://localhost:3000
+pnpm run dev          # vite dev --port 3000 -> http://localhost:3000
 ```
 
 The dashboard needs `VITE_DASHBOARD_API_BASE_URL` in `ui/.env` pointing at the backend for local dev. The file is intentionally untracked because `.env*` files are gitignored.
@@ -595,7 +595,7 @@ The client calls `${VITE_DASHBOARD_API_BASE_URL}/dashboard/api/*` with `credenti
 
 For the dashboard login to succeed, you need (from steps 3c / 6): `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET`, `DASHBOARD_JWT_SECRET`, `DASHBOARD_API_BASE_URL`, `DASHBOARD_BASE_URL`, and `DASHBOARD_ALLOWED_ORIGINS`. To reach the admin pages (user mappings, etc.), add your GitHub login or email to `CONFIGURED_ADMINS`.
 
-Other UI scripts: `bun run build`, `bun run typecheck`, `bun run lint`, `bun run test`.
+Other UI scripts: `pnpm run build`, `pnpm run typecheck`, `pnpm run lint`, `pnpm run test`.
 
 ## 9. Verify it works
 

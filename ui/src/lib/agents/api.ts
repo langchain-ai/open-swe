@@ -1,4 +1,10 @@
-import type { AgentSchedule, AgentThread, ImageChunk, Message } from "./types"
+import type {
+  AgentSchedule,
+  AgentThread,
+  ImageChunk,
+  Message,
+  WorkflowPushApprovalsResponse,
+} from "./types"
 
 export type { AgentSchedule, AgentThread, Message }
 
@@ -233,6 +239,20 @@ export const agentsApi = {
       `/threads/${encodeURIComponent(threadId)}${
         options?.markViewed === false ? "?mark_viewed=false" : ""
       }`
+    ),
+  listWorkflowApprovals: (threadId: string) =>
+    agentsRequest<WorkflowPushApprovalsResponse>(
+      `/workflow-approval/${encodeURIComponent(threadId)}`
+    ),
+  approveWorkflowPush: (threadId: string, fingerprint: string) =>
+    agentsRequest<{ status: string; fingerprint: string }>(
+      `/workflow-approval/${encodeURIComponent(threadId)}/${encodeURIComponent(fingerprint)}/approve`,
+      { method: "POST" }
+    ),
+  rejectWorkflowPush: (threadId: string, fingerprint: string) =>
+    agentsRequest<{ status: string; fingerprint: string }>(
+      `/workflow-approval/${encodeURIComponent(threadId)}/${encodeURIComponent(fingerprint)}/reject`,
+      { method: "POST" }
     ),
   queueMessage: (threadId: string, body: ThreadMessageRequest) =>
     agentsRequest<AgentThread>(

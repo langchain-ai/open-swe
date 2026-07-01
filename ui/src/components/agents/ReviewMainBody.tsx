@@ -41,6 +41,7 @@ import {
   MultiFileDiff,
   Virtualizer,
   WorkerPoolContextProvider,
+  useVirtualizer,
 } from "@pierre/diffs/react"
 import type { Icon } from "@phosphor-icons/react"
 import type { FileContents } from "@pierre/diffs/react"
@@ -73,7 +74,10 @@ import {
   ReviewChatComposerProvider,
   useReviewChatComposer,
 } from "@/components/agents/ReviewChat"
-import { ReviewSidebarPanel } from "@/components/agents/ReviewSidebar"
+import {
+  ReviewSidebarPanel,
+  renderInlineCode,
+} from "@/components/agents/ReviewSidebar"
 import {
   DIFF_VIRTUALIZER_CONFIG,
   DIFF_VIRTUAL_METRICS,
@@ -213,46 +217,60 @@ function selectedRangeFromDiff(
   }
 }
 
-// Scroll a file card / group flush to the top of the diff scroller. Under
-// virtualization, scrollIntoView computes its target against estimated row
-// heights; scrolling past unmeasured files reconciles their real heights
-// mid-animation and the Virtualizer re-pins its scroll anchor, which leaves the
-// target off the top. Once the smooth scroll settles, re-assert alignment (now
-// against measured heights) until the target sits at the top or the budget runs
-// out. Respects the element's scroll-margin-top.
-function scrollCardToTop(el: HTMLElement, scroller: HTMLElement | null): void {
-  el.scrollIntoView({ block: "start", behavior: "smooth" })
-  if (!scroller) return
-  let frames = 0
-  let lastTop = Number.NaN
-  let stableFrames = 0
-  let corrections = 0
-  const align = () => {
-    if (frames++ > 240) return
-    const top = scroller.scrollTop
-    if (top === lastTop) stableFrames++
-    else {
-      stableFrames = 0
-      lastTop = top
-    }
-    // Wait for the smooth scroll + height reconciliation to settle.
-    if (stableFrames < 3) {
-      requestAnimationFrame(align)
-      return
-    }
+// Scroll a file card / group flush to the top of the diff scroller (fallback
+// when no virtualizer geometry is available). Jumps instantly to a bounding-rect
+// target — respecting the element's scroll-margin-top — then holds that target
+// as content above reflows, so no smooth-scroll animation races the height
+// reconciliation. Returns a stop fn to cancel the hold.
+function scrollCardToTop(
+  el: HTMLElement,
+  scroller: HTMLElement | null
+): () => void {
+  if (!scroller) {
+    el.scrollIntoView({ block: "start" })
+    return () => {}
+  }
+  return jumpAndHold(scroller, () => {
     const marginTop = parseFloat(getComputedStyle(el).scrollMarginTop) || 0
     const delta =
       el.getBoundingClientRect().top -
       scroller.getBoundingClientRect().top -
       marginTop
-    if (Math.abs(delta) > 1 && corrections++ < 5) {
-      el.scrollIntoView({ block: "start", behavior: "smooth" })
-      stableFrames = 0
-      lastTop = Number.NaN
-      requestAnimationFrame(align)
-    }
-  }
-  requestAnimationFrame(align)
+    return clampScrollTop(scroller, scroller.scrollTop + delta)
+  })
+}
+
+// The virtualizer instance returned by useVirtualizer(); exposes
+// getOffsetInScrollContainer for accurate scroll targeting.
+type DiffVirtualizer = NonNullable<ReturnType<typeof useVirtualizer>>
+
+// Breathing room left above a block/file when it's scrolled to the top.
+const SCROLL_TOP_GAP = 8
+
+// Scroll a block / file card flush to the top of the diff scroller using the
+// virtualizer's own geometry. getOffsetInScrollContainer returns the element's
+// absolute offset within the scroll content; with uniform fixed-height rows
+// (see diffUtils) that offset is stable, so an instant jump lands precisely.
+// jumpAndHold then re-reads the offset whenever the content reflows (rows above
+// measuring/expanding) and re-asserts it, so the target stays pinned to the top.
+// Returns a stop fn to cancel the hold.
+function scrollCardToTopVirtual(
+  el: HTMLElement,
+  scroller: HTMLElement,
+  virtualizer: DiffVirtualizer
+): () => void {
+  return jumpAndHold(scroller, () =>
+    clampScrollTop(
+      scroller,
+      virtualizer.getOffsetInScrollContainer(el) - SCROLL_TOP_GAP
+    )
+  )
+}
+
+// Older stored summaries embed `[label](#loc=path:line)` diff links; render the
+// label as inline code instead so no stale jump-links leak into the block body.
+function stripLocationLinks(summary: string): string {
+  return summary.replace(/\[([^\]]+)\]\(#loc=[^)]*\)/g, "`$1`")
 }
 
 interface PositionedDiffInstance {
@@ -283,16 +301,68 @@ function clampScrollTop(scroller: HTMLElement, top: number): number {
   )
 }
 
-function scrollElementToCenter(el: HTMLElement, scroller: HTMLElement): number {
+// How long to keep re-asserting a scroll target after the initial jump.
+const SCROLL_HOLD_TIMEOUT_MS = 700
+
+// Jump the scroller to getTarget() instantly, then re-assert that target each
+// time the scroll content reflows (off-screen cards mounting, files expanding,
+// annotation cards measuring) — a ResizeObserver is the real "layout settled"
+// signal, replacing fixed frame-budget correction loops. Bails the moment the
+// user scrolls so we never fight them, and disconnects after a short ceiling.
+function jumpAndHold(
+  scroller: HTMLElement,
+  getTarget: () => number,
+  timeout = SCROLL_HOLD_TIMEOUT_MS
+): () => void {
+  let raf = 0
+  let stopped = false
+  let timer = 0
+  let ro: ResizeObserver | null = null
+  const stop = () => {
+    if (stopped) return
+    stopped = true
+    ro?.disconnect()
+    if (raf) cancelAnimationFrame(raf)
+    scroller.removeEventListener("wheel", stop)
+    scroller.removeEventListener("touchstart", stop)
+    window.clearTimeout(timer)
+  }
+  const reassert = () => {
+    raf = 0
+    if (stopped) return
+    const desired = getTarget()
+    if (Math.abs(desired - scroller.scrollTop) > 1) {
+      scroller.scrollTo({ top: desired, behavior: "auto" })
+    }
+  }
+  const schedule = () => {
+    if (!raf && !stopped) raf = requestAnimationFrame(reassert)
+  }
+  scroller.scrollTo({ top: getTarget(), behavior: "auto" })
+  ro = new ResizeObserver(schedule)
+  ro.observe(scroller.firstElementChild ?? scroller)
+  scroller.addEventListener("wheel", stop, { passive: true })
+  scroller.addEventListener("touchstart", stop, { passive: true })
+  timer = window.setTimeout(stop, timeout)
+  return stop
+}
+
+// Absolute scrollTop that centers el within the scroller's viewport.
+function elementCenterTarget(el: HTMLElement, scroller: HTMLElement): number {
   const elementRect = el.getBoundingClientRect()
   const scrollerRect = scroller.getBoundingClientRect()
   const delta =
     elementRect.top -
     scrollerRect.top -
     (scroller.clientHeight - elementRect.height) / 2
-  const targetTop = clampScrollTop(scroller, scroller.scrollTop + delta)
+  return clampScrollTop(scroller, scroller.scrollTop + delta)
+}
+
+function scrollElementToCenter(el: HTMLElement, scroller: HTMLElement): number {
+  const before = scroller.scrollTop
+  const targetTop = elementCenterTarget(el, scroller)
   scroller.scrollTo({ top: targetTop, behavior: "auto" })
-  return Math.abs(delta)
+  return Math.abs(targetTop - before)
 }
 
 function scrollDiffLineToCenter(
@@ -561,8 +631,15 @@ function ReviewBodyInner({
     range: SelectedLineRange
   } | null>(null)
   const diffScrollElRef = useRef<HTMLDivElement | null>(null)
+  const virtualizerRef = useRef<DiffVirtualizer | null>(null)
   const findingScrollRequestRef = useRef(0)
+  // Cancels the in-flight scroll "hold" (see jumpAndHold) when a new navigation
+  // begins or the component unmounts, so holds never fight each other.
+  const scrollHoldStopRef = useRef<(() => void) | null>(null)
   const groupRefs = useRef<Record<number, HTMLDivElement | null>>({})
+  // The block pinned at the top of the diff (scroll-spy), highlighted in the
+  // agenda sidebar.
+  const [activeGroup, setActiveGroup] = useState<number | null>(null)
   const [diffStyle, setDiffStyleState] = useState<DiffStyle>(() =>
     readStoredDiffStyle()
   )
@@ -726,11 +803,6 @@ function ReviewBodyInner({
     return groupedView.map((group) => ({
       index: group.index,
       title: group.title,
-      summary: group.summary,
-      additions: group.additions,
-      deletions: group.deletions,
-      fileCount: group.files.length,
-      files: group.files.map((file) => file.path),
     }))
   }, [groupedView])
 
@@ -757,18 +829,65 @@ function ReviewBodyInner({
   const scrollToFile = useCallback((path: string) => {
     setSelectedFile(path)
     setExpandedFiles((prev) => ({ ...prev, [path]: true }))
+    scrollHoldStopRef.current?.()
     requestAnimationFrame(() => {
       const el = fileRefs.current[path]
-      if (el) scrollCardToTop(el, diffScrollElRef.current)
+      const scroller = diffScrollElRef.current
+      if (!el || !scroller) return
+      scrollHoldStopRef.current = virtualizerRef.current
+        ? scrollCardToTopVirtual(el, scroller, virtualizerRef.current)
+        : scrollCardToTop(el, scroller)
     })
   }, [])
 
   const scrollToGroup = useCallback((index: number) => {
+    scrollHoldStopRef.current?.()
     requestAnimationFrame(() => {
       const el = groupRefs.current[index]
-      if (el) scrollCardToTop(el, diffScrollElRef.current)
+      const scroller = diffScrollElRef.current
+      if (!el || !scroller) return
+      scrollHoldStopRef.current = virtualizerRef.current
+        ? scrollCardToTopVirtual(el, scroller, virtualizerRef.current)
+        : scrollCardToTop(el, scroller)
     })
   }, [])
+
+  useEffect(() => () => scrollHoldStopRef.current?.(), [])
+
+  // Scroll-spy: track which block's header is currently pinned at the top of the
+  // diff scroller and surface it as the active agenda row (Google-Docs outline).
+  useEffect(() => {
+    if (view !== "ai" || !groupedView || groupedView.length === 0) {
+      setActiveGroup(null)
+      return
+    }
+    const scroller = diffScrollElRef.current
+    if (!scroller) return
+    let raf = 0
+    const compute = () => {
+      raf = 0
+      const top = scroller.getBoundingClientRect().top
+      let current = groupedView[0]?.index ?? null
+      for (const group of groupedView) {
+        const el = groupRefs.current[group.index]
+        if (!el) continue
+        if (el.getBoundingClientRect().top - top <= SCROLL_TOP_GAP + 2)
+          current = group.index
+        else break
+      }
+      setActiveGroup(current)
+    }
+    const onScroll = () => {
+      if (raf) return
+      raf = requestAnimationFrame(compute)
+    }
+    compute()
+    scroller.addEventListener("scroll", onScroll, { passive: true })
+    return () => {
+      scroller.removeEventListener("scroll", onScroll)
+      if (raf) cancelAnimationFrame(raf)
+    }
+  }, [view, groupedView])
 
   const filesByPath = useMemo(
     () => new Map((diffFiles ?? []).map((file) => [file.path, file])),
@@ -903,6 +1022,7 @@ function ReviewBodyInner({
       if (!willExpand || !isAnchored(finding)) return
       setSelectedFile(finding.file)
       setExpandedFiles((prev) => ({ ...prev, [finding.file]: true }))
+      scrollHoldStopRef.current?.()
       let frames = 0
       let lineScrollDone = false
       const snap = () => {
@@ -910,12 +1030,13 @@ function ReviewBodyInner({
         const scroller = diffScrollElRef.current
         if (!scroller) return
 
+        // Once the finding's inline card has mounted (its diff rows window in
+        // under virtualization), center it and hold as the card settles.
         const annotation = annotationRefs.current[finding.id]
         if (annotation?.isConnected && annotation.getClientRects().length > 0) {
-          const delta = scrollElementToCenter(annotation, scroller)
-          if (delta <= 1 || frames >= FINDING_SCROLL_MAX_FRAMES) return
-          frames += 1
-          requestAnimationFrame(snap)
+          scrollHoldStopRef.current = jumpAndHold(scroller, () =>
+            elementCenterTarget(annotation, scroller)
+          )
           return
         }
 
@@ -961,6 +1082,7 @@ function ReviewBodyInner({
     }
     setSelectedFile(path)
     setExpandedFiles((prev) => ({ ...prev, [path]: true }))
+    scrollHoldStopRef.current?.()
     const requestId = ++findingScrollRequestRef.current
     const side: SelectionSide =
       openComment.side === "LEFT" ? "deletions" : "additions"
@@ -975,10 +1097,9 @@ function ReviewBodyInner({
       const annotation = annotationRefs.current[key]
       if (annotation?.isConnected && annotation.getClientRects().length > 0) {
         mounted = true
-        const delta = scrollElementToCenter(annotation, scroller)
-        if (delta <= 1 || frames >= FINDING_SCROLL_MAX_FRAMES) return
-        frames += 1
-        requestAnimationFrame(snap)
+        scrollHoldStopRef.current = jumpAndHold(scroller, () =>
+          elementCenterTarget(annotation, scroller)
+        )
         return
       }
       const diffTarget = diffInstanceRefs.current[path]
@@ -1055,6 +1176,7 @@ function ReviewBodyInner({
       view,
       onViewChange: setView,
       onSelectGroup: scrollToGroup,
+      activeGroup,
     }),
     [
       detail.number,
@@ -1066,6 +1188,7 @@ function ReviewBodyInner({
       view,
       setView,
       scrollToGroup,
+      activeGroup,
     ]
   )
 
@@ -1116,10 +1239,16 @@ function ReviewBodyInner({
             >
               <Virtualizer
                 className="relative min-h-0 flex-1 overflow-y-auto"
-                contentClassName="mx-auto w-full max-w-6xl px-6 py-6"
+                contentClassName={cn(
+                  "mx-auto w-full px-6 py-6",
+                  diffStyle === "split" ? "max-w-none" : "max-w-6xl"
+                )}
                 config={DIFF_VIRTUALIZER_CONFIG}
               >
-                <div ref={scrollerProbe} aria-hidden className="hidden" />
+                <VirtualizerBridge
+                  probeRef={scrollerProbe}
+                  instanceRef={virtualizerRef}
+                />
                 <PrHeader
                   url={detail.url}
                   title={detail.pr.title}
@@ -1268,21 +1397,54 @@ function DiffStyleButton({
   )
 }
 
+// Grabs the virtualizer instance from context (only available inside
+// <Virtualizer>) and lifts it to the parent ref so scroll-to can read accurate
+// offsets. Doubles as the hidden scroll-element probe.
+function VirtualizerBridge({
+  probeRef,
+  instanceRef,
+}: {
+  probeRef: (node: HTMLDivElement | null) => void
+  instanceRef: React.MutableRefObject<DiffVirtualizer | null>
+}) {
+  const virtualizer = useVirtualizer()
+  useEffect(() => {
+    instanceRef.current = virtualizer ?? null
+  }, [virtualizer, instanceRef])
+  return <div ref={probeRef} aria-hidden className="hidden" />
+}
+
+// The block header: number + title + stats, then the block description. Pinned
+// at the top of the diff scroller while scrolling the block (Google-Docs feel),
+// stacked above Pierre's in-diff sticky header (z-index 4). A long description
+// scrolls within the pinned header instead of consuming the viewport.
 function GroupHeader({ group }: { group: ResolvedGroup }) {
+  const title = useMemo(() => renderInlineCode(group.title), [group.title])
+  const summary = useMemo(
+    () => (group.summary ? stripLocationLinks(group.summary) : ""),
+    [group.summary]
+  )
   return (
-    <div className="flex items-center gap-2">
-      <span className="flex size-5 shrink-0 items-center justify-center rounded bg-[var(--ui-panel-2)] text-[11px] font-medium text-muted-foreground">
-        {group.index}
-      </span>
-      <h3 className="min-w-0 truncate text-sm font-medium">{group.title}</h3>
-      <span className="flex shrink-0 items-center gap-1.5 font-mono text-[11px]">
-        {group.additions > 0 && (
-          <span className="text-emerald-500">+{group.additions}</span>
-        )}
-        {group.deletions > 0 && (
-          <span className="text-red-500">-{group.deletions}</span>
-        )}
-      </span>
+    <div className="sticky top-0 z-[5] border-b border-border bg-background pb-2">
+      <div className="flex items-center gap-2">
+        <span className="flex size-5 shrink-0 items-center justify-center rounded bg-[var(--ui-panel-2)] text-[11px] font-medium text-muted-foreground">
+          {group.index}
+        </span>
+        <h3 className="min-w-0 flex-1 truncate text-sm font-medium">{title}</h3>
+        <span className="flex shrink-0 items-center gap-1.5 font-mono text-[11px]">
+          {group.additions > 0 && (
+            <span className="text-emerald-500">+{group.additions}</span>
+          )}
+          {group.deletions > 0 && (
+            <span className="text-red-500">-{group.deletions}</span>
+          )}
+        </span>
+      </div>
+      {summary && (
+        <div className="mt-2 max-h-40 overflow-y-auto text-xs text-muted-foreground">
+          <Markdown content={summary} />
+        </div>
+      )}
     </div>
   )
 }

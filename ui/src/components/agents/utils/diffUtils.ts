@@ -70,6 +70,18 @@ export const DIFF_UNSAFE_CSS = `
 [data-gutter-buffer="annotation"][data-selected-line] {
   --diffs-line-bg: var(--ui-panel) !important;
 }
+
+/* Pin every code row to one exact, uniform height (kept in sync with
+   DIFF_VIRTUAL_METRICS.lineHeight below). In scroll mode code never wraps, so a
+   hard height won't clip content — it just makes the virtualizer's per-line
+   estimate match measured layout, so scroll-to lands precisely instead of
+   over/under-shooting as off-estimate rows reconcile while scrolling. */
+[data-line] {
+  height: 18px !important;
+  min-height: 18px !important;
+  max-height: 18px !important;
+  line-height: 18px !important;
+}
 `
 
 export const diffOptions = {
@@ -104,6 +116,8 @@ export const DIFF_VIRTUALIZER_CONFIG = {
 
 export const DIFF_VIRTUAL_METRICS = {
   hunkLineCount: 80,
+  // Must match the hard `[data-line]` height pinned in DIFF_UNSAFE_CSS so the
+  // virtualizer's pre-measurement estimate equals the measured row height.
   lineHeight: 18,
   diffHeaderHeight: 0,
   spacing: 8,

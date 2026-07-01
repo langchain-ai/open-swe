@@ -140,7 +140,7 @@ The model is configured in the `get_agent()` function in `agent/server.py`. By d
 
 ```bash
 # Set the model via environment variable (uses provider:model format)
-LLM_MODEL_ID="anthropic:claude-sonnet-4-6"
+LLM_MODEL_ID="anthropic:claude-sonnet-5"
 ```
 
 If `LLM_MODEL_ID` is not set, the default model (`openai:gpt-5.5`) is used.
@@ -153,7 +153,7 @@ Use the `provider:model` format:
 
 ```python
 # Anthropic
-model=make_model("anthropic:claude-sonnet-4-6", temperature=0, max_tokens=16_000)
+model=make_model("anthropic:claude-sonnet-5", temperature=0, max_tokens=16_000)
 
 # OpenAI (uses Responses API by default)
 model=make_model("openai:gpt-5.5", max_tokens=128_000, reasoning={"effort": "medium"})
@@ -167,7 +167,7 @@ The `make_model()` helper in `agent/utils/model.py` wraps `langchain.chat_models
 ```python
 from langchain_anthropic import ChatAnthropic
 
-model = ChatAnthropic(model_name="claude-sonnet-4-6", temperature=0, max_tokens=16_000)
+model = ChatAnthropic(model_name="claude-sonnet-5", temperature=0, max_tokens=16_000)
 
 return create_deep_agent(
     model=model,
@@ -185,7 +185,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     
     if source == "slack":
         # Faster model for Slack Q&A
-        model = make_model("anthropic:claude-sonnet-4-6", temperature=0, max_tokens=16_000)
+        model = make_model("anthropic:claude-sonnet-5", temperature=0, max_tokens=16_000)
     else:
         # Full model for code changes from Linear
         model = make_model("openai:gpt-5.5", max_tokens=128_000, reasoning={"effort": "medium"})
@@ -271,6 +271,23 @@ else:
 
 return create_deep_agent(tools=tools, ...)
 ```
+
+### Browser automation (Stagehand + Browserbase)
+
+A `browser` subagent drives a real Chromium via the [Stagehand](https://github.com/browserbase/stagehand-python) SDK, exposing `browser_navigate`, `browser_act`, `browser_observe`, `browser_extract`, and `browser_close`. The main agent delegates to it for tasks that need live interaction or JS-rendered pages (logging in, clicking flows, reproducing UI bugs, scraping structured data); static reads should still use `fetch_url`.
+
+The tools are added in `agent/server.py` (gated by `load_browser_tools()`), and live in `agent/integrations/stagehand_browser.py`. One browser session is kept per agent thread and reused across calls. The tools are a no-op unless configured:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `STAGEHAND_ENV` | `LOCAL` | `LOCAL` runs a local Chromium in-process; `BROWSERBASE` runs the browser on Browserbase cloud. |
+| `STAGEHAND_MODEL_API_KEY` | falls back to `MODEL_API_KEY`, then `ANTHROPIC_API_KEY` | LLM key Stagehand uses for `act`/`observe`/`extract`. Required for `LOCAL`; optional for `BROWSERBASE` (the hosted Stagehand API ships with model support). |
+| `STAGEHAND_MODEL` | `anthropic/claude-sonnet-4-5` | Model Stagehand uses. |
+| `BROWSERBASE_API_KEY` / `BROWSERBASE_PROJECT_ID` | — | `BROWSERBASE_API_KEY` is required when `STAGEHAND_ENV=BROWSERBASE`; `BROWSERBASE_PROJECT_ID` is forwarded when set. |
+| `STAGEHAND_LOCAL_CHROME_PATH` | `/usr/bin/chromium` in Docker | Path to the Chrome/Chromium binary for `LOCAL` mode. |
+| `STAGEHAND_HEADLESS` | `true` | Run the local browser headless. |
+
+For `LOCAL` mode the Dockerfile installs `chromium`; for `BROWSERBASE` mode no browser binary is needed in the image.
 
 ---
 
