@@ -1425,7 +1425,7 @@ function GroupHeader({ group }: { group: ResolvedGroup }) {
     [group.summary]
   )
   return (
-    <div className="sticky top-0 z-[5] border-b border-border bg-background pt-2 pb-2">
+    <div className="sticky top-0 z-[5] border-b border-border bg-background py-2">
       <div className="flex items-center gap-2">
         <span className="flex size-5 shrink-0 items-center justify-center rounded bg-[var(--ui-panel-2)] text-[11px] font-medium text-muted-foreground">
           {group.index}
