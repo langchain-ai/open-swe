@@ -17,7 +17,7 @@ dependencies = [
     "langgraph>=1.1.10",
     "markdownify>=1.2.2",
     "langchain-anthropic>=1.4.6",
-    "langgraph-cli[inmem]>=0.4.27",
+    "langgraph-cli[inmem]>=0.4.30",
     "langsmith==0.9.3",
     "langchain-openai>=1.2.2",
     "langchain-fireworks>=1.4.2",
