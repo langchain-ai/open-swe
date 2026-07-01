@@ -18,6 +18,7 @@ from __future__ import annotations
 import logging
 import os
 from typing import Any
+from urllib.parse import urlparse
 
 from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
@@ -26,21 +27,53 @@ logger = logging.getLogger(__name__)
 
 ContentBlocks = str | list[dict[str, Any]]
 
-# Same-server FastAPI route the platform POSTs run completion/failure to. A
-# relative URL loopback-posts into this app (no SSRF/loopback config needed);
-# override with an absolute URL via env for split deployments. The route is
-# fail-closed on RUN_COMPLETE_WEBHOOK_SECRET, so only register the webhook when
-# the secret is set, appending it as ?token= so the route can verify the call
-# came from us (completion.verify_run_complete_token). Unset → no webhook.
+# FastAPI route the platform POSTs run completion/failure to. The platform
+# rejects loopback webhooks (relative URLs / localhost) — they bypass auth via
+# the in-process ASGI transport — so a loopback URL would 422 *every* run at
+# create time. COMPLETION_WEBHOOK_URL must therefore be the deployment's
+# absolute https URL (…/webhooks/run-complete). The route is fail-closed on
+# RUN_COMPLETE_WEBHOOK_SECRET, so we only attach the webhook when the secret is
+# set, appending it as ?token= so the route can verify the call came from us
+# (completion.verify_run_complete_token). Secret unset, or URL relative/loopback
+# → no webhook attached (the completion reply is best-effort; it must never
+# break run creation).
 _COMPLETION_WEBHOOK_BASE = os.environ.get("COMPLETION_WEBHOOK_URL") or "/webhooks/run-complete"
 _RUN_COMPLETE_SECRET = os.environ.get("RUN_COMPLETE_WEBHOOK_SECRET")
-COMPLETION_WEBHOOK_URL: str | None
-if not _RUN_COMPLETE_SECRET:
-    COMPLETION_WEBHOOK_URL = None
-elif "?" in _COMPLETION_WEBHOOK_BASE:
-    COMPLETION_WEBHOOK_URL = _COMPLETION_WEBHOOK_BASE
-else:
-    COMPLETION_WEBHOOK_URL = f"{_COMPLETION_WEBHOOK_BASE}?token={_RUN_COMPLETE_SECRET}"
+
+
+def _is_loopback_webhook(url: str) -> bool:
+    """Whether a webhook URL is relative or points at localhost (platform-rejected)."""
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        return True  # relative / schemeless
+    return (parsed.hostname or "").lower() in {"localhost", "127.0.0.1", "::1"}
+
+
+def _resolve_completion_webhook_url(base: str, secret: str | None) -> str | None:
+    """Resolve the completion webhook URL, or None to attach no webhook.
+
+    Degrades to None (with a warning) for a relative/loopback URL rather than
+    letting a rejected webhook poison every ``runs.create``.
+    """
+    if not secret:
+        return None
+    if _is_loopback_webhook(base):
+        logger.warning(
+            "RUN_COMPLETE_WEBHOOK_SECRET is set but COMPLETION_WEBHOOK_URL (%r) is relative "
+            "or loopback; the platform rejects such webhooks, so run-completion replies are "
+            "disabled. Set COMPLETION_WEBHOOK_URL to the deployment's absolute https URL "
+            "ending in /webhooks/run-complete to enable them.",
+            base,
+        )
+        return None
+    if "?" in base:
+        return base
+    return f"{base}?token={secret}"
+
+
+COMPLETION_WEBHOOK_URL: str | None = _resolve_completion_webhook_url(
+    _COMPLETION_WEBHOOK_BASE, _RUN_COMPLETE_SECRET
+)
 
 
 def _langgraph_url() -> str:
