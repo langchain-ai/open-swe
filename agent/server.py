@@ -57,6 +57,7 @@ from .integrations.stagehand_browser import load_browser_tools
 from .middleware import (
     ModelFallbackMiddleware,
     PlanModeMiddleware,
+    PullRequestCreationGuardMiddleware,
     SandboxCircuitBreakerMiddleware,
     SanitizeThinkingBlocksMiddleware,
     SanitizeToolInputsMiddleware,
@@ -918,6 +919,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             ModelCallLimitMiddleware(run_limit=MODEL_CALL_RECURSION_LIMIT, exit_behavior="end"),
             ToolErrorMiddleware(),
             ToolArtifactMiddleware(),
+            PullRequestCreationGuardMiddleware(),
             WorkflowPushGuardMiddleware(),
             refresh_github_proxy_before_model,
             check_message_queue_before_model,
