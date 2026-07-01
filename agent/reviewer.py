@@ -34,6 +34,7 @@ from langchain.agents.middleware import ModelCallLimitMiddleware
 from langchain_core.language_models.chat_models import BaseChatModel
 
 from .dashboard.team_settings import (
+    get_effective_gateway_enabled,
     get_org_review_guidelines,
     get_team_default_grouping_model,
     get_team_default_model_pair,
@@ -800,7 +801,9 @@ def _on_background_task_done(task: asyncio.Task[None]) -> None:
         logger.warning("Background reviewer task failed: %s", exc)
 
 
-async def _resolve_grouping_model(configurable: dict[str, object]) -> BaseChatModel:
+async def _resolve_grouping_model(
+    configurable: dict[str, object], *, use_gateway: bool
+) -> BaseChatModel:
     """Resolve the model for the diff-grouping pass.
 
     Per-run override (``grouping_model_id``/``grouping_reasoning_effort``) wins;
@@ -820,7 +823,7 @@ async def _resolve_grouping_model(configurable: dict[str, object]) -> BaseChatMo
         max_tokens=DEFAULT_LLM_MAX_TOKENS,
         openai_reasoning_default=DEFAULT_LLM_REASONING,
     )
-    return make_model(model_id, **model_kwargs)
+    return make_model(model_id, use_gateway=use_gateway, **model_kwargs)
 
 
 async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
@@ -1147,8 +1150,11 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
     if review_context:
         system_prompt = f"{system_prompt}\n\n{review_context}"
 
-    reviewer_model = make_model(model_id, **model_kwargs)
-    reviewer_subagent_model = make_model(subagent_model_id, **subagent_model_kwargs)
+    use_gateway = await get_effective_gateway_enabled()
+    reviewer_model = make_model(model_id, use_gateway=use_gateway, **model_kwargs)
+    reviewer_subagent_model = make_model(
+        subagent_model_id, use_gateway=use_gateway, **subagent_model_kwargs
+    )
 
     # Kick off the AI-sorted diff grouping pass at run start, concurrently with
     # the review, so it adds ~0 latency. First-review and re-review only — a
@@ -1156,7 +1162,9 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
     # its own errors and the UI falls back to the folder view when groups are
     # absent.
     if reviewer_event != "finding_reply" and pr_diff_text and thread_id:
-        grouping_model = await _resolve_grouping_model(config["configurable"])
+        grouping_model = await _resolve_grouping_model(
+            config["configurable"], use_gateway=use_gateway
+        )
         grouping_task = asyncio.create_task(
             maybe_generate_and_store_diff_groups(
                 thread_id=thread_id,

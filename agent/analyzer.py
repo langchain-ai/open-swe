@@ -29,6 +29,7 @@ from deepagents.backends.protocol import SandboxBackendProtocol
 from deepagents.backends.state import StateBackend
 from langchain.agents.middleware import ModelCallLimitMiddleware
 
+from .dashboard.team_settings import get_effective_gateway_enabled
 from .integrations.langsmith import _configure_github_proxy
 from .middleware import SanitizeToolInputsMiddleware, ToolErrorMiddleware
 from .review_style_guidance import REVIEWER_STYLE_THEMES
@@ -116,6 +117,7 @@ async def get_analyzer(config: RunnableConfig) -> Pregel:
     backend = CompositeBackend(default=sandbox_backend, routes={SKILLS_ROUTE: StateBackend()})
 
     model_id = DEFAULT_LLM_MODEL_ID
+    use_gateway = await get_effective_gateway_enabled()
     model_kwargs = provider_model_kwargs(
         model_id,
         None,
@@ -135,7 +137,7 @@ async def get_analyzer(config: RunnableConfig) -> Pregel:
     system_prompt = f"{system_prompt}\n\n{user_context}"
 
     return create_deep_agent(
-        model=make_model(model_id, **model_kwargs),
+        model=make_model(model_id, use_gateway=use_gateway, **model_kwargs),
         system_prompt=system_prompt,
         tools=[save_review_style_prompt, read_finding_outcomes],
         backend=backend,

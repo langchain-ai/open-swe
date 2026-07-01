@@ -22,6 +22,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Switch } from "@/components/ui/switch"
 import { api } from "@/lib/api"
 import { useSession } from "@/lib/session"
 
@@ -53,6 +54,8 @@ function AdminPage() {
       description="Workspace-wide defaults and user mappings."
     >
       <GlobalDefaultsSection models={options.data?.models ?? []} />
+
+      <LLMGatewaySection />
 
       <TriggerReviewSection />
 
@@ -563,6 +566,51 @@ function PRTraceResolutionSection() {
                 Save
               </Button>
             </div>
+          }
+        />
+      </div>
+      {error && <p className="px-4 pb-3 text-xs text-destructive">{error}</p>}
+    </SettingsSection>
+  )
+}
+
+function LLMGatewaySection() {
+  const qc = useQueryClient()
+  const settings = useQuery({
+    queryKey: ["teamSettings"],
+    queryFn: api.getTeamSettings,
+  })
+  const [error, setError] = useState<string | null>(null)
+
+  const save = useMutation({
+    mutationFn: (body: TeamSettings) => api.saveTeamSettings(body),
+    onSuccess: (saved) => {
+      qc.setQueryData(["teamSettings"], saved)
+      setError(null)
+    },
+    onError: (e: Error) => setError(e.message),
+  })
+
+  const enabled = settings.data?.gateway_enabled ?? false
+
+  return (
+    <SettingsSection
+      title="LLM Gateway"
+      description="Route agent and reviewer LLM calls through the LangSmith LLM Gateway. It authenticates with the workspace LangSmith API key and resolves provider keys from Provider Secrets, so no provider keys are needed at runtime. Requires the gateway (private beta) enabled for your organization."
+    >
+      <div className="divide-y divide-border">
+        <SettingsRow
+          label="Route through the gateway"
+          description="Overrides the LANGSMITH_GATEWAY_ENABLED deployment default. OpenAI, Anthropic, and Fireworks are routed; other providers call the provider directly."
+          control={
+            <Switch
+              checked={enabled}
+              onCheckedChange={(checked) =>
+                settings.data &&
+                save.mutate({ ...settings.data, gateway_enabled: checked })
+              }
+              disabled={!settings.data || save.isPending}
+            />
           }
         />
       </div>
