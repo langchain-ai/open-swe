@@ -175,6 +175,22 @@ def test_make_model_gateway_openai_converts_reasoning_for_chat_completions(
     assert "reasoning" not in captured
 
 
+def test_make_model_gateway_openai_preserves_reasoning_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LANGSMITH_API_KEY", "ls-key")
+    captured, fake = _capture_init_chat_model()
+    with patch.object(model, "init_chat_model", fake):
+        model.make_model(
+            "openai:gpt-5.5",
+            use_gateway=True,
+            reasoning={"effort": "none"},
+        )
+    assert captured["use_responses_api"] is False
+    assert captured["reasoning_effort"] == "none"
+    assert "reasoning" not in captured
+
+
 def test_make_model_gateway_openai_responses_optin_keeps_reasoning(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

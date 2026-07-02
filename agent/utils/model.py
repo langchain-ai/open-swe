@@ -58,7 +58,7 @@ def _coerce_openai_chat_completions_kwargs(model_kwargs: dict[str, object]) -> N
     reasoning = model_kwargs.pop("reasoning", None)
     if isinstance(reasoning, dict):
         effort = reasoning.get("effort")
-        if isinstance(effort, str) and effort != "none":
+        if isinstance(effort, str):
             model_kwargs.setdefault("reasoning_effort", effort)
 
 
