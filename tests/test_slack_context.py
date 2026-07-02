@@ -174,6 +174,92 @@ def test_format_slack_messages_for_prompt_replaces_bot_id_mention_in_text() -> N
     assert formatted == "@alice(U123): @open-swe status update?"
 
 
+def test_format_slack_messages_for_prompt_image_only_message() -> None:
+    formatted = format_slack_messages_for_prompt(
+        [
+            {
+                "ts": "1.0",
+                "text": "",
+                "user": "U123",
+                "files": [{"mimetype": "image/png", "name": "dashboard.png"}],
+            }
+        ],
+        {"U123": "alice"},
+    )
+
+    assert formatted == (
+        '@alice(U123): [attachment: image/png "dashboard.png" — not accessible; '
+        "agent has no image/file tool]"
+    )
+    assert "[non-text message]" not in formatted
+
+
+def test_format_slack_messages_for_prompt_text_plus_image() -> None:
+    formatted = format_slack_messages_for_prompt(
+        [
+            {
+                "ts": "1.0",
+                "text": "please analyze this chart",
+                "user": "U123",
+                "files": [{"mimetype": "image/png", "name": "chart.png"}],
+            }
+        ],
+        {"U123": "alice"},
+    )
+
+    assert formatted == (
+        "@alice(U123): please analyze this chart\n"
+        '[attachment: image/png "chart.png" — not accessible; '
+        "agent has no image/file tool]"
+    )
+
+
+def test_format_slack_messages_for_prompt_file_without_filename() -> None:
+    formatted = format_slack_messages_for_prompt(
+        [
+            {
+                "ts": "1.0",
+                "text": "",
+                "user": "U123",
+                "files": [{"mimetype": "image/jpeg"}],
+            }
+        ],
+        {"U123": "alice"},
+    )
+
+    assert formatted == (
+        "@alice(U123): [attachment: image/jpeg — not accessible; agent has no image/file tool]"
+    )
+
+
+def test_format_slack_messages_for_prompt_attachment_block_with_image_url() -> None:
+    formatted = format_slack_messages_for_prompt(
+        [
+            {
+                "ts": "1.0",
+                "text": "",
+                "user": "U123",
+                "attachments": [{"image_url": "https://example.com/chart.png"}],
+            }
+        ],
+        {"U123": "alice"},
+    )
+
+    assert formatted == (
+        "@alice(U123): [attachment: image at https://example.com/chart.png — "
+        "not accessible; agent has no image tool]"
+    )
+
+
+def test_format_slack_messages_for_prompt_falls_back_when_no_text_or_attachments() -> None:
+    formatted = format_slack_messages_for_prompt(
+        [{"ts": "1.0", "text": "", "user": "U123"}],
+        {"U123": "alice"},
+    )
+
+    assert formatted == "@alice(U123): [non-text message]"
+
+
 def test_post_slack_trace_reply_includes_web_link_without_trace_url(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

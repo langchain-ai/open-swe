@@ -213,6 +213,60 @@ def select_slack_context_messages(
     return up_to_current, "thread_start"
 
 
+def _describe_non_text_parts(message: dict[str, Any]) -> list[str]:
+    """Render Slack file/attachment parts as capability-gap markers."""
+    markers: list[str] = []
+
+    files = message.get("files")
+    if isinstance(files, list):
+        for file_item in files:
+            if not isinstance(file_item, dict):
+                continue
+            mimetype = file_item.get("mimetype") or file_item.get("filetype") or "unknown"
+            name = file_item.get("name") or file_item.get("title")
+            if isinstance(name, str) and name.strip():
+                markers.append(
+                    f'[attachment: {mimetype} "{name.strip()}" — not accessible; '
+                    f"agent has no image/file tool]"
+                )
+            else:
+                markers.append(
+                    f"[attachment: {mimetype} — not accessible; agent has no image/file tool]"
+                )
+
+    attachments = message.get("attachments")
+    if isinstance(attachments, list):
+        for attachment in attachments:
+            if not isinstance(attachment, dict):
+                continue
+            image_url = attachment.get("image_url")
+            if isinstance(image_url, str) and image_url.strip():
+                markers.append(
+                    f"[attachment: image at {image_url.strip()} — not accessible; "
+                    f"agent has no image tool]"
+                )
+                continue
+            files_in_attachment = attachment.get("files")
+            if isinstance(files_in_attachment, list):
+                for file_item in files_in_attachment:
+                    if not isinstance(file_item, dict):
+                        continue
+                    mimetype = file_item.get("mimetype") or file_item.get("filetype") or "unknown"
+                    name = file_item.get("name") or file_item.get("title")
+                    if isinstance(name, str) and name.strip():
+                        markers.append(
+                            f'[attachment: {mimetype} "{name.strip()}" — not accessible; '
+                            f"agent has no image/file tool]"
+                        )
+                    else:
+                        markers.append(
+                            f"[attachment: {mimetype} — not accessible; "
+                            f"agent has no image/file tool]"
+                        )
+
+    return markers
+
+
 def format_slack_messages_for_prompt(
     messages: list[dict[str, Any]],
     user_names_by_id: dict[str, str] | None = None,
@@ -225,14 +279,17 @@ def format_slack_messages_for_prompt(
 
     lines: list[str] = []
     for message in messages:
-        text = (
-            replace_bot_mention_with_username(
-                str(message.get("text", "")),
-                bot_user_id=bot_user_id,
-                bot_username=bot_username,
-            ).strip()
-            or "[non-text message]"
-        )
+        text = replace_bot_mention_with_username(
+            str(message.get("text", "")),
+            bot_user_id=bot_user_id,
+            bot_username=bot_username,
+        ).strip()
+        attachments = _describe_non_text_parts(message)
+        if attachments:
+            attachment_block = "\n".join(attachments)
+            text = f"{text}\n{attachment_block}" if text else attachment_block
+        elif not text:
+            text = "[non-text message]"
         user_id = message.get("user")
         if isinstance(user_id, str) and user_id:
             author_name = (user_names_by_id or {}).get(user_id) or user_id
