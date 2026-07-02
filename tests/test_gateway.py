@@ -5,7 +5,9 @@ from __future__ import annotations
 from typing import Any
 from unittest.mock import patch
 
+import httpx
 import pytest
+from fireworks import AsyncFireworks
 
 from agent.utils import gateway, model
 
@@ -65,6 +67,48 @@ def test_fireworks_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
     overrides = gateway.gateway_overrides("fireworks:accounts/fireworks/models/glm-5p2")
     assert overrides is not None
     assert overrides["base_url"] == "https://gateway.smith.langchain.com/fireworks"
+
+
+async def test_fireworks_sdk_uses_allowlisted_gateway_path() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "id": "chatcmpl-test",
+                "object": "chat.completion",
+                "created": 0,
+                "model": "accounts/fireworks/models/glm-5p2",
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {"role": "assistant", "content": "ok"},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+            },
+        )
+
+    http_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    try:
+        client = AsyncFireworks(
+            api_key="dummy",
+            base_url="https://gateway.smith.langchain.com/fireworks",
+            http_client=http_client,
+            max_retries=0,
+        )
+        await client.chat.completions.create(
+            model="accounts/fireworks/models/glm-5p2",
+            messages=[{"role": "user", "content": "hi"}],
+        )
+    finally:
+        await http_client.aclose()
+
+    assert len(requests) == 1
+    assert requests[0].url.path == "/fireworks/v1/chat/completions"
 
 
 def test_google_genai_routes_to_gemini(monkeypatch: pytest.MonkeyPatch) -> None:
