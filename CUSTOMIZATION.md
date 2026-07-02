@@ -193,6 +193,24 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     return create_deep_agent(model=model, ...)
 ```
 
+### Routing through the LangSmith LLM Gateway
+
+Model calls can be proxied through the [LangSmith LLM Gateway](https://docs.langchain.com/langsmith/llm-gateway) (private beta) instead of hitting providers directly. The gateway authenticates with your **LangSmith API key** (reusing the existing `LANGSMITH_API_KEY` / `LANGSMITH_API_KEY_PROD`) and resolves the real provider key from workspace Provider Secrets, so no provider API keys are needed at runtime — and it adds central spend limits, PII/secrets redaction, and tracing. Your org must have the gateway enabled with Provider Secrets configured.
+
+Routing is opt-in and off by default. Enable it either way:
+
+| Env var | Default | Purpose |
+|---|---|---|
+| `LANGSMITH_GATEWAY_ENABLED` | `false` | Deployment-level default for gateway routing. |
+| `LANGSMITH_GATEWAY_BASE_URL` | `https://gateway.smith.langchain.com` | Override for a regional or self-hosted gateway host. |
+| `LANGSMITH_GATEWAY_OPENAI_USE_RESPONSES` | `false` | Keep the OpenAI Responses API through the gateway (see caveat). Only set if your gateway proxies `/v1/responses`. |
+
+The admin panel (**Admin → LLM Gateway**) exposes a per-workspace toggle stored in team settings; when set it overrides the `LANGSMITH_GATEWAY_ENABLED` env default (a `None`/unset team value inherits the env default).
+
+Routing is applied centrally in `make_model` (`agent/utils/model.py`), which resolves the effective on/off and delegates URL/key wiring to `agent/utils/gateway.py`. **OpenAI, Anthropic, Fireworks, and Google Gemini** are routed (their LangChain integrations accept `base_url` + `api_key`); Google Vertex (service-account auth) and any other provider call the provider directly with a logged warning.
+
+**Caveat — OpenAI endpoint:** open-swe uses the OpenAI Responses API over a `wss://` base URL by default, which an HTTPS proxy can't carry. When the gateway is on, gateway-routed OpenAI falls back to **Chat Completions** (dropping the Responses API's visible reasoning summaries) unless `LANGSMITH_GATEWAY_OPENAI_USE_RESPONSES=true`. Anthropic and Fireworks are unaffected.
+
 ---
 
 ## 3. Tools

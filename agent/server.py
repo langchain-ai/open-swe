@@ -43,6 +43,7 @@ from .dashboard.agent_usage import record_agent_thread_usage
 from .dashboard.options import DEFAULT_MODEL_ID, SUPPORTED_MODEL_IDS, model_supports_effort
 from .dashboard.repo_snapshots import resolve_repo_snapshot_id
 from .dashboard.team_settings import (
+    get_effective_gateway_enabled,
     get_team_default_model_pair,
     get_team_default_repo,
 )
@@ -707,11 +708,13 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         ensure_sandbox_for_thread(thread_id, repo=prompt_default_repo)
     )
     team_defaults_task = asyncio.create_task(get_team_default_model_pair("agent"))
+    gateway_task = asyncio.create_task(get_effective_gateway_enabled())
     profile_task = asyncio.create_task(load_profile(profile_login)) if profile_login else None
-    triggering_user_identity, sandbox_backend, team_defaults = await asyncio.gather(
+    triggering_user_identity, sandbox_backend, team_defaults, use_gateway = await asyncio.gather(
         triggering_user_identity_task,
         sandbox_task,
         team_defaults_task,
+        gateway_task,
     )
     profile = await profile_task if profile_task is not None else None
     del github_token
@@ -799,7 +802,9 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         if fallback_model_id.startswith("openai:"):
             fallback_kwargs["reasoning"] = DEFAULT_LLM_REASONING
         fallback_middleware.append(
-            ModelFallbackMiddleware(make_model(fallback_model_id, **fallback_kwargs))
+            ModelFallbackMiddleware(
+                make_model(fallback_model_id, use_gateway=use_gateway, **fallback_kwargs)
+            )
         )
         logger.info("Configured model fallback %s -> %s", model_id, fallback_model_id)
 
@@ -866,8 +871,8 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             notion_tools = []
 
     logger.info("Returning agent with sandbox for thread %s", thread_id)
-    main_model = make_model(model_id, **model_kwargs)
-    subagent_model = make_model(subagent_model_id, **subagent_model_kwargs)
+    main_model = make_model(model_id, use_gateway=use_gateway, **model_kwargs)
+    subagent_model = make_model(subagent_model_id, use_gateway=use_gateway, **subagent_model_kwargs)
     return create_deep_agent(
         model=main_model,
         system_prompt=construct_system_prompt(
