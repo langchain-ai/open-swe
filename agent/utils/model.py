@@ -40,6 +40,7 @@ class AnthropicThinking(TypedDict, total=False):
 class ModelKwargs(TypedDict, total=False):
     max_tokens: int | None
     reasoning: OpenAIReasoning | None
+    reasoning_effort: OpenAIReasoningEffort | None
     thinking: AnthropicThinking | None
     effort: AnthropicEffort | None
     thinking_level: GoogleThinkingLevel | None
@@ -49,6 +50,16 @@ class ModelKwargs(TypedDict, total=False):
 
 
 _ANTHROPIC_EFFORTS: set[AnthropicEffort] = {"low", "medium", "high", "xhigh", "max"}
+
+
+def _coerce_openai_chat_completions_kwargs(model_kwargs: dict[str, object]) -> None:
+    if model_kwargs.get("use_responses_api") is not False:
+        return
+    reasoning = model_kwargs.pop("reasoning", None)
+    if isinstance(reasoning, dict):
+        effort = reasoning.get("effort")
+        if isinstance(effort, str) and effort != "none":
+            model_kwargs.setdefault("reasoning_effort", effort)
 
 
 def make_model(model_id: str, *, use_gateway: bool | None = None, **kwargs: Unpack[ModelKwargs]):
@@ -73,6 +84,9 @@ def make_model(model_id: str, *, use_gateway: bool | None = None, **kwargs: Unpa
         overrides = gateway_overrides(model_id)
         if overrides is not None:
             model_kwargs.update(overrides)
+
+    if model_id.startswith("openai:"):
+        _coerce_openai_chat_completions_kwargs(model_kwargs)
 
     return init_chat_model(model=model_id, **model_kwargs)
 

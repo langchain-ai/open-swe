@@ -22,7 +22,6 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
-import { Switch } from "@/components/ui/switch"
 import { api } from "@/lib/api"
 import { useSession } from "@/lib/session"
 
@@ -574,6 +573,20 @@ function PRTraceResolutionSection() {
   )
 }
 
+type GatewayMode = "inherit" | "enabled" | "disabled"
+
+function gatewayMode(value: boolean | null | undefined): GatewayMode {
+  if (value === true) return "enabled"
+  if (value === false) return "disabled"
+  return "inherit"
+}
+
+function gatewayModeValue(mode: GatewayMode): boolean | null {
+  if (mode === "enabled") return true
+  if (mode === "disabled") return false
+  return null
+}
+
 function LLMGatewaySection() {
   const qc = useQueryClient()
   const settings = useQuery({
@@ -591,7 +604,7 @@ function LLMGatewaySection() {
     onError: (e: Error) => setError(e.message),
   })
 
-  const enabled = settings.data?.gateway_enabled ?? false
+  const mode = gatewayMode(settings.data?.gateway_enabled)
 
   return (
     <SettingsSection
@@ -601,16 +614,28 @@ function LLMGatewaySection() {
       <div className="divide-y divide-border">
         <SettingsRow
           label="Route through the gateway"
-          description="Overrides the LANGSMITH_GATEWAY_ENABLED deployment default. OpenAI, Anthropic, Fireworks, and Google Gemini are routed; other providers call the provider directly."
+          description="Inherit uses the LANGSMITH_GATEWAY_ENABLED deployment default. OpenAI, Anthropic, Fireworks, and Google Gemini are routed; other providers call the provider directly."
           control={
-            <Switch
-              checked={enabled}
-              onCheckedChange={(checked) =>
+            <Select
+              value={mode}
+              onValueChange={(next) =>
                 settings.data &&
-                save.mutate({ ...settings.data, gateway_enabled: checked })
+                save.mutate({
+                  ...settings.data,
+                  gateway_enabled: gatewayModeValue(next as GatewayMode),
+                })
               }
               disabled={!settings.data || save.isPending}
-            />
+            >
+              <SelectTrigger className="w-48">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="inherit">Inherit deployment default</SelectItem>
+                <SelectItem value="enabled">Enabled</SelectItem>
+                <SelectItem value="disabled">Disabled</SelectItem>
+              </SelectContent>
+            </Select>
           }
         />
       </div>

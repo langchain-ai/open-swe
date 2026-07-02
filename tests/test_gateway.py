@@ -159,6 +159,36 @@ def test_make_model_gateway_openai_replaces_websocket(
     assert captured["api_key"] == "ls-key"
 
 
+def test_make_model_gateway_openai_converts_reasoning_for_chat_completions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LANGSMITH_API_KEY", "ls-key")
+    captured, fake = _capture_init_chat_model()
+    with patch.object(model, "init_chat_model", fake):
+        model.make_model(
+            "openai:gpt-5.5",
+            use_gateway=True,
+            reasoning={"effort": "high", "summary": "auto"},
+        )
+    assert captured["use_responses_api"] is False
+    assert captured["reasoning_effort"] == "high"
+    assert "reasoning" not in captured
+
+
+def test_make_model_gateway_openai_responses_optin_keeps_reasoning(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LANGSMITH_API_KEY", "ls-key")
+    monkeypatch.setenv("LANGSMITH_GATEWAY_OPENAI_USE_RESPONSES", "true")
+    reasoning = {"effort": "high", "summary": "auto"}
+    captured, fake = _capture_init_chat_model()
+    with patch.object(model, "init_chat_model", fake):
+        model.make_model("openai:gpt-5.5", use_gateway=True, reasoning=reasoning)
+    assert captured["use_responses_api"] is True
+    assert captured["reasoning"] == reasoning
+    assert "reasoning_effort" not in captured
+
+
 def test_make_model_gateway_follows_env_default(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("LANGSMITH_API_KEY", "ls-key")
     monkeypatch.setenv("LANGSMITH_GATEWAY_ENABLED", "true")
@@ -166,6 +196,15 @@ def test_make_model_gateway_follows_env_default(monkeypatch: pytest.MonkeyPatch)
     with patch.object(model, "init_chat_model", fake):
         model.make_model("anthropic:claude-opus-4-8")  # use_gateway=None -> env default
     assert captured["base_url"] == "https://gateway.smith.langchain.com/anthropic"
+    assert captured["api_key"] == "ls-key"
+
+
+def test_make_model_gateway_google_genai(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LANGSMITH_API_KEY", "ls-key")
+    captured, fake = _capture_init_chat_model()
+    with patch.object(model, "init_chat_model", fake):
+        model.make_model("google_genai:gemini-3.5-flash", use_gateway=True)
+    assert captured["base_url"] == "https://gateway.smith.langchain.com/gemini"
     assert captured["api_key"] == "ls-key"
 
 
