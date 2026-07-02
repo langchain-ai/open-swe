@@ -65,12 +65,15 @@ def gateway_env_default() -> bool:
 def gateway_openai_use_responses() -> bool:
     """Whether gateway-routed OpenAI keeps the Responses API.
 
-    Defaults to ``False``: the gateway's documented OpenAI surface is Chat
-    Completions, and an HTTPS proxy can't carry open-swe's default ``wss://``
-    Responses stream. Set ``LANGSMITH_GATEWAY_OPENAI_USE_RESPONSES=true`` only if
-    the gateway proxies ``/v1/responses``.
+    Defaults to ``True`` because OpenAI reasoning models with tool calls reject
+    ``reasoning_effort`` on Chat Completions. Set
+    ``LANGSMITH_GATEWAY_OPENAI_USE_RESPONSES=false`` only for deployments that
+    need to force Chat Completions through the gateway.
     """
-    return _env_bool(os.environ.get("LANGSMITH_GATEWAY_OPENAI_USE_RESPONSES"))
+    raw = os.environ.get("LANGSMITH_GATEWAY_OPENAI_USE_RESPONSES")
+    if raw is None:
+        return True
+    return _env_bool(raw)
 
 
 def resolve_gateway_enabled(team_value: bool | None) -> bool:
@@ -117,7 +120,7 @@ def gateway_overrides(model_id: str) -> dict[str, object] | None:
         "api_key": api_key,
     }
     if provider == "openai":
-        # An HTTPS proxy can't carry the wss:// Responses stream make_model sets by
-        # default; route Chat Completions unless the deployment opts back in.
+        # Use HTTPS Responses through the gateway by default; tool-calling OpenAI
+        # reasoning models reject reasoning_effort on Chat Completions.
         overrides["use_responses_api"] = gateway_openai_use_responses()
     return overrides

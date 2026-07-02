@@ -8,6 +8,8 @@ from unittest.mock import patch
 import httpx
 import pytest
 from fireworks import AsyncFireworks
+from langchain_core.messages import HumanMessage
+from langchain_openai import ChatOpenAI
 
 from agent.utils import gateway, model
 
@@ -31,7 +33,7 @@ def _clean_gateway_env(monkeypatch: pytest.MonkeyPatch) -> None:
 # --- gateway_overrides --------------------------------------------------------
 
 
-def test_openai_overrides_use_chat_completions_by_default(
+def test_openai_overrides_use_responses_by_default(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("LANGSMITH_API_KEY", "ls-key")
@@ -39,16 +41,62 @@ def test_openai_overrides_use_chat_completions_by_default(
     assert overrides == {
         "base_url": "https://gateway.smith.langchain.com/openai/v1",
         "api_key": "ls-key",
-        "use_responses_api": False,
+        "use_responses_api": True,
     }
 
 
-def test_openai_overrides_responses_optin(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_openai_overrides_chat_completions_optout(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("LANGSMITH_API_KEY", "ls-key")
-    monkeypatch.setenv("LANGSMITH_GATEWAY_OPENAI_USE_RESPONSES", "true")
+    monkeypatch.setenv("LANGSMITH_GATEWAY_OPENAI_USE_RESPONSES", "false")
     overrides = gateway.gateway_overrides("openai:gpt-5.5")
     assert overrides is not None
-    assert overrides["use_responses_api"] is True
+    assert overrides["use_responses_api"] is False
+
+
+async def test_openai_sdk_uses_gateway_responses_path() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "id": "resp_test",
+                "object": "response",
+                "created_at": 0,
+                "status": "completed",
+                "model": "gpt-5.5",
+                "output": [
+                    {
+                        "id": "msg_test",
+                        "type": "message",
+                        "role": "assistant",
+                        "status": "completed",
+                        "content": [
+                            {"type": "output_text", "text": "ok", "annotations": []}
+                        ],
+                    }
+                ],
+                "usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
+            },
+        )
+
+    http_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    try:
+        chat_model = ChatOpenAI(
+            model="gpt-5.5",
+            api_key="dummy",
+            base_url="https://gateway.smith.langchain.com/openai/v1",
+            use_responses_api=True,
+            http_async_client=http_client,
+            max_retries=0,
+        )
+        await chat_model.ainvoke([HumanMessage(content="hi")])
+    finally:
+        await http_client.aclose()
+
+    assert len(requests) == 1
+    assert requests[0].url.path == "/openai/v1/responses"
 
 
 def test_anthropic_overrides_have_no_responses_flag(
@@ -217,14 +265,15 @@ def test_make_model_gateway_openai_replaces_websocket(
     with patch.object(model, "init_chat_model", fake):
         model.make_model("openai:gpt-5.5", use_gateway=True)
     assert captured["base_url"] == "https://gateway.smith.langchain.com/openai/v1"
-    assert captured["use_responses_api"] is False
+    assert captured["use_responses_api"] is True
     assert captured["api_key"] == "ls-key"
 
 
-def test_make_model_gateway_openai_converts_reasoning_for_chat_completions(
+def test_make_model_gateway_openai_chat_completions_optout_converts_reasoning(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("LANGSMITH_API_KEY", "ls-key")
+    monkeypatch.setenv("LANGSMITH_GATEWAY_OPENAI_USE_RESPONSES", "false")
     captured, fake = _capture_init_chat_model()
     with patch.object(model, "init_chat_model", fake):
         model.make_model(
@@ -248,16 +297,15 @@ def test_make_model_gateway_openai_preserves_reasoning_none(
             use_gateway=True,
             reasoning={"effort": "none"},
         )
-    assert captured["use_responses_api"] is False
-    assert captured["reasoning_effort"] == "none"
-    assert "reasoning" not in captured
+    assert captured["use_responses_api"] is True
+    assert captured["reasoning"] == {"effort": "none"}
+    assert "reasoning_effort" not in captured
 
 
-def test_make_model_gateway_openai_responses_optin_keeps_reasoning(
+def test_make_model_gateway_openai_responses_keeps_reasoning(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("LANGSMITH_API_KEY", "ls-key")
-    monkeypatch.setenv("LANGSMITH_GATEWAY_OPENAI_USE_RESPONSES", "true")
     reasoning = {"effort": "high", "summary": "auto"}
     captured, fake = _capture_init_chat_model()
     with patch.object(model, "init_chat_model", fake):
