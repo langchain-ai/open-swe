@@ -601,7 +601,7 @@ function LLMGatewaySection() {
       <div className="divide-y divide-border">
         <SettingsRow
           label="Route through the gateway"
-          description="Overrides the LANGSMITH_GATEWAY_ENABLED deployment default. OpenAI, Anthropic, and Fireworks are routed; other providers call the provider directly."
+          description="Overrides the LANGSMITH_GATEWAY_ENABLED deployment default. OpenAI, Anthropic, Fireworks, and Google Gemini are routed; other providers call the provider directly."
           control={
             <Switch
               checked={enabled}

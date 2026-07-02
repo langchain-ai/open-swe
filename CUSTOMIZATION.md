@@ -207,7 +207,7 @@ Routing is opt-in and off by default. Enable it either way:
 
 The admin panel (**Admin → LLM Gateway**) exposes a per-workspace toggle stored in team settings; when set it overrides the `LANGSMITH_GATEWAY_ENABLED` env default (a `None`/unset team value inherits the env default).
 
-Routing is applied centrally in `make_model` (`agent/utils/model.py`), which resolves the effective on/off and delegates URL/key wiring to `agent/utils/gateway.py`. **OpenAI, Anthropic, and Fireworks** are routed (their LangChain integrations accept `base_url` + `api_key`); other providers (Google Gemini/Vertex) call the provider directly with a logged warning.
+Routing is applied centrally in `make_model` (`agent/utils/model.py`), which resolves the effective on/off and delegates URL/key wiring to `agent/utils/gateway.py`. **OpenAI, Anthropic, Fireworks, and Google Gemini** are routed (their LangChain integrations accept `base_url` + `api_key`); Google Vertex (service-account auth) and any other provider call the provider directly with a logged warning.
 
 **Caveat — OpenAI endpoint:** open-swe uses the OpenAI Responses API over a `wss://` base URL by default, which an HTTPS proxy can't carry. When the gateway is on, gateway-routed OpenAI falls back to **Chat Completions** (dropping the Responses API's visible reasoning summaries) unless `LANGSMITH_GATEWAY_OPENAI_USE_RESPONSES=true`. Anthropic and Fireworks are unaffected.
 

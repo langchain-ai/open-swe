@@ -18,16 +18,18 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_GATEWAY_BASE_URL = "https://gateway.smith.langchain.com"
 
-# Provider prefix -> base-URL suffix appended to the gateway host. Only providers
-# whose LangChain integration accepts ``base_url`` + ``api_key`` through
-# ``init_chat_model`` are routed. The suffix matches each SDK's own path handling:
-# the OpenAI/Fireworks SDKs append ``/chat/completions`` to a ``/v1`` base, while
-# the Anthropic SDK appends ``/v1/messages`` to a bare host. google_genai/vertex
-# are intentionally absent (langchain-google-genai has no clean base_url override).
+# Provider prefix -> base-URL suffix appended to the gateway host. Each suffix
+# matches the SDK's own path handling: the OpenAI/Fireworks SDKs append
+# ``/chat/completions`` to a ``/v1`` base, the Anthropic SDK appends
+# ``/v1/messages`` to a bare host, and the google-genai SDK appends
+# ``/<api_version>/models/...`` to a bare host. Vertex (``google_vertexai``, which
+# uses service-account auth rather than a bearer key) and any other provider are
+# not routed and call the provider directly.
 _GATEWAY_PROVIDER_PATHS: dict[str, str] = {
     "openai": "/openai/v1",
     "anthropic": "/anthropic",
     "fireworks": "/fireworks/v1",
+    "google_genai": "/gemini",
 }
 
 

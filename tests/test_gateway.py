@@ -66,9 +66,19 @@ def test_fireworks_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
     assert overrides["base_url"] == "https://gateway.smith.langchain.com/fireworks/v1"
 
 
+def test_google_genai_routes_to_gemini(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LANGSMITH_API_KEY", "ls-key")
+    overrides = gateway.gateway_overrides("google_genai:gemini-3.5-flash")
+    assert overrides == {
+        "base_url": "https://gateway.smith.langchain.com/gemini",
+        "api_key": "ls-key",
+    }
+
+
 def test_unsupported_provider_passes_through(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("LANGSMITH_API_KEY", "ls-key")
-    assert gateway.gateway_overrides("google_genai:gemini-3.5-flash") is None
+    # Vertex authenticates with a service account, not a bearer key, so it isn't routed.
+    assert gateway.gateway_overrides("google_vertexai:gemini-2.5-pro") is None
 
 
 def test_missing_api_key_passes_through(monkeypatch: pytest.MonkeyPatch) -> None:
