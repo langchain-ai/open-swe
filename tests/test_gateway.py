@@ -64,7 +64,7 @@ def test_fireworks_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("LANGSMITH_API_KEY", "ls-key")
     overrides = gateway.gateway_overrides("fireworks:accounts/fireworks/models/glm-5p2")
     assert overrides is not None
-    assert overrides["base_url"] == "https://gateway.smith.langchain.com/fireworks/v1"
+    assert overrides["base_url"] == "https://gateway.smith.langchain.com/fireworks"
 
 
 def test_google_genai_routes_to_gemini(monkeypatch: pytest.MonkeyPatch) -> None:
