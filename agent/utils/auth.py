@@ -69,7 +69,7 @@ def is_bot_token_only_mode() -> bool:
 def _retry_instruction(source: str) -> str:
     if source == "slack":
         return "Once authenticated, mention me again in this Slack thread to retry."
-    return "Once authenticated, reply to this issue mentioning @openswe to retry."
+    return "Once authenticated, reply to this issue mentioning @jarvis-aeteq to retry."
 
 
 def _source_account_label(source: str) -> str:

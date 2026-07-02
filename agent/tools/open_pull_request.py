@@ -29,7 +29,7 @@ async def _resolve_pr_author_token() -> tuple[str | None, str]:
     Prefers the triggering user's OAuth token (so the PR is created *as them*)
     for Slack/dashboard runs with a mapped GitHub login, resolving it by login
     from the dashboard OAuth store. Falls back to the GitHub App installation
-    token (creator = open-swe[bot]) for GitHub-triggered runs, unmapped users,
+    token (creator = jarvis-aeteq[bot]) for GitHub-triggered runs, unmapped users,
     or bot-token-only deployments — preserving today's behavior.
 
     The token is resolved by login rather than read from the shared thread
@@ -46,7 +46,9 @@ async def _resolve_pr_author_token() -> tuple[str | None, str]:
         user_token = await get_valid_access_token(github_login.strip())
         if user_token:
             return user_token, "user"
-        logger.info("No valid user token for %s; opening PR as open-swe[bot]", github_login.strip())
+        logger.info(
+            "No valid user token for %s; opening PR as jarvis-aeteq[bot]", github_login.strip()
+        )
 
     return await get_github_app_installation_token(), "bot"
 
@@ -335,7 +337,7 @@ async def open_pull_request(
     """Open a draft GitHub pull request attributed to the triggering user.
 
     Use this to OPEN a NEW pull request (instead of `gh pr create`) so the PR is
-    created as the person who triggered the run rather than open-swe[bot]. Push
+    created as the person who triggered the run rather than jarvis-aeteq[bot]. Push
     your branch with `git push origin <branch>` BEFORE calling this.
 
     For everything else — updating an existing PR, marking it ready for review,

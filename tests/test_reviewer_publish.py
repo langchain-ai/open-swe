@@ -1086,7 +1086,7 @@ async def test_re_review_backfills_existing_marker_and_skips_duplicate_post() ->
         "comments": [
             {
                 "id": 101,
-                "author": "open-swe[bot]",
+                "author": "jarvis-aeteq[bot]",
                 "body": render_inline_comment_body(finding),
                 "created_at": "2026-05-27T10:00:00Z",
             }
@@ -1147,7 +1147,7 @@ async def test_re_review_backfills_and_resolves_duplicate_existing_threads() -> 
             "comments": [
                 {
                     "id": 101,
-                    "author": "open-swe[bot]",
+                    "author": "jarvis-aeteq[bot]",
                     "body": render_inline_comment_body(finding),
                     "created_at": "2026-05-27T10:00:00Z",
                 }
@@ -1160,7 +1160,7 @@ async def test_re_review_backfills_and_resolves_duplicate_existing_threads() -> 
             "comments": [
                 {
                     "id": 102,
-                    "author": "open-swe[bot]",
+                    "author": "jarvis-aeteq[bot]",
                     "body": render_inline_comment_body(finding),
                     "created_at": "2026-05-27T10:01:00Z",
                 }
@@ -1227,7 +1227,7 @@ async def test_publish_review_backfills_from_threads_when_review_comments_are_em
         "comments": [
             {
                 "id": 202,
-                "author": "open-swe[bot]",
+                "author": "jarvis-aeteq[bot]",
                 "body": render_inline_comment_body(finding),
                 "created_at": "2026-05-27T10:00:00Z",
             }
@@ -1698,7 +1698,7 @@ async def test_fetch_pr_review_threads_parses_threads_and_comments() -> None:
                                     "nodes": [
                                         {
                                             "databaseId": 101,
-                                            "author": {"login": "open-swe[bot]"},
+                                            "author": {"login": "jarvis-aeteq[bot]"},
                                             "authorAssociation": "MEMBER",
                                             "body": "additionalTtlPrefixes removes lifecycle rules",
                                             "createdAt": "2026-05-23T10:00:00Z",

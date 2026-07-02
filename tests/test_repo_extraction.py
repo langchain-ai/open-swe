@@ -92,7 +92,7 @@ class TestLinearWebhookRepoOverride:
             "action": "create",
             "data": {
                 "id": "comment-123",
-                "body": "@openswe please fix this repo:custom-org/custom-repo",
+                "body": "@jarvis-aeteq please fix this repo:custom-org/custom-repo",
                 "issue": {
                     "id": "issue-456",
                     "title": "Test issue",
@@ -146,7 +146,7 @@ class TestLinearWebhookRepoOverride:
             "action": "create",
             "data": {
                 "id": "comment-123",
-                "body": "@openswe please fix this bug",
+                "body": "@jarvis-aeteq please fix this bug",
                 "issue": {
                     "id": "issue-456",
                     "title": "Test issue",

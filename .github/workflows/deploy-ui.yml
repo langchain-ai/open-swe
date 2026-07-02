@@ -1,0 +1,31 @@
+name: Deploy UI to S3
+
+on:
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    name: Deploy
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ui
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v4
+        with:
+          version: "latest"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "latest"
+          cache: pnpm
+      - name: Build
+        run: pnpm run build
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::388096320259:role/deploy-openswe-ui-role
+          aws-region: eu-north-1
+      - name: Upload to S3
+        run: aws s3 sync .output/public s3://openswe-ui --delete

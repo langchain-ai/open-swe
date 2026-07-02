@@ -89,7 +89,7 @@ async def _reply_to_finding_thread_async(
         "kind": "bot_reply",
         "github_comment_id": reply_id if isinstance(reply_id, int) else None,
         "github_parent_comment_id": comment_id,
-        "author": "open-swe[bot]",
+        "author": "jarvis-aeteq[bot]",
         "body": body.strip(),
         "created_at": "",
         "needs_reassessment": False,

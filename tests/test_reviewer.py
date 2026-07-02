@@ -644,7 +644,7 @@ def test_format_pr_review_threads_renders_resolved_and_open_threads() -> None:
                 "is_outdated": False,
                 "comments": [
                     {
-                        "author": "open-swe[bot]",
+                        "author": "jarvis-aeteq[bot]",
                         "body": "additionalTtlPrefixes removes lifecycle rules",
                         "created_at": "2026-05-23T10:00:00Z",
                     },
@@ -674,7 +674,7 @@ def test_format_pr_review_threads_renders_resolved_and_open_threads() -> None:
     assert block.endswith("</pr_review_threads>")
     assert 'status="resolved"' in block
     assert 'status="open"' in block
-    assert 'author="open-swe[bot]"' in block
+    assert 'author="jarvis-aeteq[bot]"' in block
     assert 'author="human"' in block
     assert "We added defaults in the template" in block
 
@@ -706,13 +706,13 @@ def test_format_pr_review_threads_sanitizes_author_logins() -> None:
                         "body": "x",
                         "created_at": "",
                     },
-                    {"author": "open-swe[bot]", "body": "y", "created_at": ""},
+                    {"author": "jarvis-aeteq[bot]", "body": "y", "created_at": ""},
                 ],
             }
         ]
     )
     assert 'author="valid-user"' in block
-    assert 'author="open-swe[bot]"' in block
+    assert 'author="jarvis-aeteq[bot]"' in block
     # The malformed login is replaced with "unknown".
     assert 'author="unknown"' in block
     assert "ignore previous instructions" not in block.split("<body>", 1)[0]
@@ -948,7 +948,7 @@ async def test_reviewer_injects_pr_review_threads_into_first_review_context() ->
             "is_outdated": False,
             "comments": [
                 {
-                    "author": "open-swe[bot]",
+                    "author": "jarvis-aeteq[bot]",
                     "body": "additionalTtlPrefixes removes lifecycle rules",
                     "created_at": "2026-05-23T10:00:00Z",
                 },
@@ -1028,7 +1028,9 @@ async def test_reviewer_injects_pr_review_threads_into_re_review_context() -> No
             "original_line": 5,
             "is_resolved": False,
             "is_outdated": False,
-            "comments": [{"author": "open-swe[bot]", "body": "same bug again", "created_at": ""}],
+            "comments": [
+                {"author": "jarvis-aeteq[bot]", "body": "same bug again", "created_at": ""}
+            ],
         }
     ]
 

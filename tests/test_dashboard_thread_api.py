@@ -10,7 +10,7 @@ from agent.dashboard.agent_overrides import resolve_agent_model_id
 from agent.dashboard.options import model_supports_images
 
 _TEXT_ONLY_MODEL = "fireworks:accounts/fireworks/models/deepseek-v4-pro"
-_VISION_MODEL = "openai:gpt-5.5"
+_VISION_MODEL = "anthropic:claude-opus-4-8"
 
 
 def _image() -> thread_api.DashboardImageBody:

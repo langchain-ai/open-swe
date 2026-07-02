@@ -1837,7 +1837,7 @@ def _build_queued_finding_reply_prompt(
 
 @app.post("/webhooks/github")
 async def github_webhook(request: Request, background_tasks: BackgroundTasks) -> dict[str, str]:
-    """Handle GitHub webhooks for issue and PR events that tag @open-swe."""
+    """Handle GitHub webhooks for issue and PR events that tag @jarvis-aeteq."""
     body = await request.body()
 
     signature = request.headers.get("X-Hub-Signature-256", "")
@@ -1927,8 +1927,8 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks) ->
 
         issue_text = f"{issue.get('title', '')}\n\n{issue.get('body', '')}".lower()
         if not any(tag in issue_text for tag in OPEN_SWE_TAGS):
-            logger.info("Ignoring issue that does not mention @openswe or @open-swe")
-            return {"status": "ignored", "reason": "Issue does not mention @openswe or @open-swe"}
+            logger.info("Ignoring issue that does not mention @jarvis-aeteq")
+            return {"status": "ignored", "reason": "Issue does not mention @jarvis-aeteq"}
 
         gate_rejection = await _enforce_public_repo_org_gate(payload, event_type)
         if gate_rejection is not None:
@@ -1964,11 +1964,11 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks) ->
 
     if not any(tag in comment_body.lower() for tag in OPEN_SWE_TAGS):
         logger.debug(
-            "Ignoring GitHub %s%s that does not mention @openswe or @open-swe",
+            "Ignoring GitHub %s%s that does not mention @jarvis-aeteq",
             event_type,
             f" action={action}" if action else "",
         )
-        return {"status": "ignored", "reason": "Comment does not mention @openswe or @open-swe"}
+        return {"status": "ignored", "reason": "Comment does not mention @jarvis-aeteq"}
 
     gate_rejection = await _enforce_public_repo_org_gate(payload, event_type)
     if gate_rejection is not None:

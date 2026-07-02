@@ -839,7 +839,7 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
     repo_config = config["configurable"].get("repo") or {}
     github_token: str | None = None
     if config["configurable"].get("source"):
-        # Reviewer runs always act as the GitHub App (open-swe[bot]). Resolve the
+        # Reviewer runs always act as the GitHub App (jarvis-aeteq[bot]). Resolve the
         # installation token in this process at run start rather than relying on a
         # token cached by the webhook handler, which runs in a separate process. The
         # App token also bypasses org SAML enforcement that blocks user OAuth tokens.

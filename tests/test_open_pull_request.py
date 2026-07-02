@@ -159,7 +159,8 @@ def test_falls_back_to_bot_for_github_source(monkeypatch: pytest.MonkeyPatch) ->
 
     client = _FakeClient(
         post=_FakeResponse(
-            201, {"html_url": "https://x/pull/2", "number": 2, "user": {"login": "open-swe[bot]"}}
+            201,
+            {"html_url": "https://x/pull/2", "number": 2, "user": {"login": "jarvis-aeteq[bot]"}},
         )
     )
     _install_client(monkeypatch, client)

@@ -256,10 +256,10 @@ async def fetch_issue_comments(
 async def fetch_pr_comments_since_last_tag(
     repo_config: dict[str, str], pr_number: int, *, token: str
 ) -> list[dict[str, Any]]:
-    """Fetch all PR comments/reviews since the last @open-swe tag.
+    """Fetch all PR comments/reviews since the last @jarvis-aeteq tag.
 
     Fetches from all 3 GitHub comment sources, merges and sorts chronologically,
-    then returns every comment from the last @open-swe mention onwards.
+    then returns every comment from the last @jarvis-aeteq mention onwards.
 
     For inline review comments the dict also includes:
     - 'path': file path commented on
@@ -272,7 +272,7 @@ async def fetch_pr_comments_since_last_tag(
         token: GitHub access token.
 
     Returns:
-        List of comment dicts ordered chronologically from last @open-swe tag.
+        List of comment dicts ordered chronologically from last @jarvis-aeteq tag.
     """
     owner = repo_config.get("owner", "")
     repo = repo_config.get("name", "")
@@ -342,7 +342,7 @@ async def fetch_pr_comments_since_last_tag(
     # Sort all comments chronologically
     all_comments.sort(key=lambda c: c.get("created_at", ""))
 
-    # Find all @openswe / @open-swe mention positions
+    # Find all @jarvis-aeteq / @jarvis-aeteq mention positions
     tag_indices = [
         i
         for i, comment in enumerate(all_comments)
@@ -352,7 +352,7 @@ async def fetch_pr_comments_since_last_tag(
     if not tag_indices:
         return []
 
-    # If this is the first @openswe invocation (only one tag), return ALL
+    # If this is the first @jarvis-aeteq invocation (only one tag), return ALL
     # comments so the agent has full context — inline review comments are
     # drafted before submission and appear earlier in the sorted list.
     # For repeat invocations, return everything since the previous tag.

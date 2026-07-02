@@ -1,8 +1,8 @@
 """Per-PR auto-fix opt-out, stored in the LangGraph Store.
 
 Auto-fix is gated by the per-user ``auto_fix_ci`` profile flag.
-On top of that, a single PR can be silenced with ``@open-swe autofix off`` (and
-re-enabled with ``@open-swe autofix on``), mirroring Cursor's
+On top of that, a single PR can be silenced with ``@jarvis-aeteq autofix off`` (and
+re-enabled with ``@jarvis-aeteq autofix on``), mirroring Cursor's
 ``@cursor autofix off`` per-PR control. The toggle lives here rather than on the
 agent thread so a disable command is honored even before any fix run exists.
 """
