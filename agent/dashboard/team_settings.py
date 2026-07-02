@@ -17,6 +17,7 @@ from pydantic import BaseModel, field_validator, model_validator
 
 from ..utils.gateway import resolve_gateway_enabled
 from .options import (
+    FABLE_MODEL_IDS,
     SUPPORTED_MODEL_IDS,
     default_model_pair,
     model_supports_effort,
@@ -41,6 +42,7 @@ class TeamSettingsUpdate(BaseModel):
     # Tri-state LLM Gateway toggle: True/False is authoritative, None inherits the
     # LANGSMITH_GATEWAY_ENABLED deployment default.
     gateway_enabled: bool | None = None
+    fable_enabled: bool = False
     review_tracing_project: str | None = None
     org_guidelines: str | None = None
     default_agent_model: str | None = None
@@ -116,6 +118,19 @@ class TeamSettingsUpdate(BaseModel):
         _validate_model_effort_pair(
             self.default_chat_model, self.default_chat_reasoning_effort, "review chat"
         )
+        if not self.fable_enabled:
+            for field, model in (
+                ("default_agent_model", self.default_agent_model),
+                ("default_agent_subagent_model", self.default_agent_subagent_model),
+                ("default_reviewer_model", self.default_reviewer_model),
+                ("default_reviewer_subagent_model", self.default_reviewer_subagent_model),
+                ("default_grouping_model", self.default_grouping_model),
+                ("default_chat_model", self.default_chat_model),
+            ):
+                if model in FABLE_MODEL_IDS:
+                    raise ValueError(
+                        f"{field} is set to a Fable model ({model}) but fable_enabled is False"
+                    )
         return self
 
 
@@ -156,6 +171,7 @@ def _default_settings() -> dict[str, Any]:
         "pr_summaries": True,
         "review_trace_links": True,
         "gateway_enabled": None,
+        "fable_enabled": False,
         "review_tracing_project": None,
         "org_guidelines": None,
         "default_agent_model": fallback_model,
@@ -211,6 +227,7 @@ async def upsert_team_settings(update: TeamSettingsUpdate) -> dict[str, Any]:
         "pr_summaries": update.pr_summaries,
         "review_trace_links": update.review_trace_links,
         "gateway_enabled": update.gateway_enabled,
+        "fable_enabled": update.fable_enabled,
         "review_tracing_project": update.review_tracing_project,
         "org_guidelines": update.org_guidelines,
         "default_agent_model": update.default_agent_model,
@@ -336,6 +353,13 @@ async def get_team_gateway_enabled() -> bool | None:
     settings = await get_team_settings()
     value = settings.get("gateway_enabled")
     return value if isinstance(value, bool) else None
+
+
+async def get_team_fable_enabled() -> bool:
+    """Return whether Fable models are enabled for the team."""
+    settings = await get_team_settings()
+    value = settings.get("fable_enabled")
+    return bool(value) if isinstance(value, bool) else False
 
 
 async def get_effective_gateway_enabled() -> bool:

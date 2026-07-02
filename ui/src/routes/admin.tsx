@@ -22,6 +22,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Switch } from "@/components/ui/switch"
 import { api } from "@/lib/api"
 import { RequireLogin } from "@/lib/auth-redirect"
 import { useSession } from "@/lib/session"
@@ -56,6 +57,8 @@ function AdminPage() {
       <GlobalDefaultsSection models={options.data?.models ?? []} />
 
       <LLMGatewaySection />
+
+      <FableSection />
 
       <TriggerReviewSection />
 
@@ -637,6 +640,44 @@ function LLMGatewaySection() {
                 <SelectItem value="disabled">Disabled</SelectItem>
               </SelectContent>
             </Select>
+          }
+        />
+      </div>
+      {error && <p className="px-4 pb-3 text-xs text-destructive">{error}</p>}
+    </SettingsSection>
+  )
+}
+
+function FableSection() {
+  const qc = useQueryClient()
+  const settings = useQuery({ queryKey: ["teamSettings"], queryFn: api.getTeamSettings })
+  const [error, setError] = useState<string | null>(null)
+  const save = useMutation({
+    mutationFn: (body: TeamSettings) => api.saveTeamSettings(body),
+    onSuccess: (saved) => {
+      qc.setQueryData(["teamSettings"], saved)
+      qc.invalidateQueries({ queryKey: ["options"] }) // refresh pickers so Fable appears/disappears
+      setError(null)
+    },
+    onError: (e: Error) => setError(e.message),
+  })
+  return (
+    <SettingsSection
+      title="Fable"
+      description="Claude Fable 5 runs safety classifiers that inspect and may retain requests, so it is not compatible with Zero Data Retention (ZDR). Off by default; enable only if your workspace does not require ZDR."
+    >
+      <div className="divide-y divide-border">
+        <SettingsRow
+          label="Allow Fable models"
+          description="When on, Fable 5 is selectable in the agent, reviewer, and chat model pickers. When off, it is hidden and any run that resolves to Fable falls back to Opus."
+          control={
+            <Switch
+              checked={!!settings.data?.fable_enabled}
+              onCheckedChange={(next) =>
+                settings.data && save.mutate({ ...settings.data, fable_enabled: next })
+              }
+              disabled={!settings.data || save.isPending}
+            />
           }
         />
       </div>

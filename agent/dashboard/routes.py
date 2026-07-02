@@ -59,7 +59,7 @@ from .oauth import (
     require_session,
     sanitize_redirect_to,
 )
-from .options import SUPPORTED_MODELS
+from .options import FABLE_MODEL_IDS, SUPPORTED_MODELS
 from .profiles import (
     ProfileUpdate,
     get_profile,
@@ -145,6 +145,7 @@ from .team_settings import (
     TeamSettingsUpdate,
     get_team_default_model,
     get_team_default_subagent_model,
+    get_team_fable_enabled,
     get_team_settings,
     upsert_team_settings,
 )
@@ -424,8 +425,14 @@ async def me(session: dict[str, Any] = _SESSION_DEP) -> dict[str, Any]:
 async def options() -> dict[str, Any]:
     agent_model, agent_effort = await get_team_default_model("agent")
     subagent_model, subagent_effort = await get_team_default_subagent_model("agent")
+    fable_enabled = await get_team_fable_enabled()
+    models = (
+        SUPPORTED_MODELS
+        if fable_enabled
+        else [m for m in SUPPORTED_MODELS if m["id"] not in FABLE_MODEL_IDS]
+    )
     return {
-        "models": SUPPORTED_MODELS,
+        "models": models,
         "default_agent_model": agent_model,
         "default_agent_reasoning_effort": agent_effort,
         "default_agent_subagent_model": subagent_model,
@@ -447,6 +454,12 @@ async def put_my_profile(
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
     update.validate_pairing()
+    if not await get_team_fable_enabled():
+        if (
+            update.default_model in FABLE_MODEL_IDS
+            or update.default_subagent_model in FABLE_MODEL_IDS
+        ):
+            raise HTTPException(400, "Fable is disabled for this workspace")
     return await upsert_profile(session["sub"], session.get("email") or "", update)
 
 

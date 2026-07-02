@@ -28,8 +28,16 @@ warnings.filterwarnings("ignore", message=".*Pydantic V1.*", category=UserWarnin
 from deepagents import create_deep_agent
 from langchain.agents.middleware import ModelCallLimitMiddleware
 
-from .dashboard.options import SUPPORTED_MODEL_IDS, model_supports_effort
-from .dashboard.team_settings import get_effective_gateway_enabled, get_team_default_model
+from .dashboard.options import (
+    SUPPORTED_MODEL_IDS,
+    gate_fable_model,
+    model_supports_effort,
+)
+from .dashboard.team_settings import (
+    get_effective_gateway_enabled,
+    get_team_default_model,
+    get_team_fable_enabled,
+)
 from .middleware import (
     ExcludeToolsMiddleware,
     SanitizeThinkingBlocksMiddleware,
@@ -123,6 +131,9 @@ async def get_chat_agent(config: RunnableConfig) -> Pregel:
         configurable["chat_github_token"] = token
 
     model_id, effort = await _resolve_chat_model(configurable)
+    model_id, effort = gate_fable_model(
+        model_id, effort, fable_enabled=await get_team_fable_enabled()
+    )
     use_gateway = await get_effective_gateway_enabled()
     model_kwargs = provider_model_kwargs(
         model_id,

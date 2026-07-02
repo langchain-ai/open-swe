@@ -31,12 +31,13 @@ from .agent_overrides import normalize_profile_overrides
 from .options import (
     SUPPORTED_MODEL_IDS,
     default_vision_model_pair,
+    gate_fable_model,
     model_supports_effort,
     model_supports_images,
 )
 from .pr_diff import build_pr_diff_files
 from .profiles import get_profile, get_valid_access_token
-from .team_settings import get_team_default_model
+from .team_settings import get_team_default_model, get_team_fable_enabled
 from .user_mappings import email_for_login
 
 logger = logging.getLogger(__name__)
@@ -153,6 +154,9 @@ async def _resolve_agent_model_choice(
     chosen_model, chosen_effort = _normalize_model_choice(model_id, effort)
     if chosen_model and chosen_effort:
         resolved_model, resolved_effort = chosen_model, chosen_effort
+    resolved_model, resolved_effort = gate_fable_model(
+        resolved_model, resolved_effort, fable_enabled=await get_team_fable_enabled()
+    )
     return resolved_model, resolved_effort
 
 

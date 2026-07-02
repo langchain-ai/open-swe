@@ -40,12 +40,18 @@ from .dashboard.agent_overrides import (
     resolve_github_login,
 )
 from .dashboard.agent_usage import record_agent_thread_usage
-from .dashboard.options import DEFAULT_MODEL_ID, SUPPORTED_MODEL_IDS, model_supports_effort
+from .dashboard.options import (
+    DEFAULT_MODEL_ID,
+    SUPPORTED_MODEL_IDS,
+    gate_fable_model,
+    model_supports_effort,
+)
 from .dashboard.repo_snapshots import resolve_repo_snapshot_id
 from .dashboard.team_settings import (
     get_effective_gateway_enabled,
     get_team_default_model_pair,
     get_team_default_repo,
+    get_team_fable_enabled,
 )
 from .dashboard.user_mappings import email_for_login
 from .integrations.corridor_mcp import load_corridor_tools
@@ -709,12 +715,20 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     )
     team_defaults_task = asyncio.create_task(get_team_default_model_pair("agent"))
     gateway_task = asyncio.create_task(get_effective_gateway_enabled())
+    fable_task = asyncio.create_task(get_team_fable_enabled())
     profile_task = asyncio.create_task(load_profile(profile_login)) if profile_login else None
-    triggering_user_identity, sandbox_backend, team_defaults, use_gateway = await asyncio.gather(
+    (
+        triggering_user_identity,
+        sandbox_backend,
+        team_defaults,
+        use_gateway,
+        fable_enabled,
+    ) = await asyncio.gather(
         triggering_user_identity_task,
         sandbox_task,
         team_defaults_task,
         gateway_task,
+        fable_task,
     )
     profile = await profile_task if profile_task is not None else None
     del github_token
@@ -783,6 +797,13 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     always_create_prs = profile_create_prs(profile)
     if always_create_prs:
         logger.info("Always Create PRs enabled by profile for %s", profile_login)
+
+    model_id, profile_effort = gate_fable_model(
+        model_id, profile_effort, fable_enabled=fable_enabled
+    )
+    subagent_model_id, subagent_effort = gate_fable_model(
+        subagent_model_id, subagent_effort, fable_enabled=fable_enabled
+    )
 
     model_kwargs = provider_model_kwargs(
         model_id,
