@@ -875,6 +875,20 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     logger.info("Returning agent with sandbox for thread %s", thread_id)
     main_model = make_model(model_id, use_gateway=use_gateway, **model_kwargs)
     subagent_model = make_model(subagent_model_id, use_gateway=use_gateway, **subagent_model_kwargs)
+    slack_thread_cfg = configurable.get("slack_thread") or {}
+    has_slack_context = bool(
+        isinstance(slack_thread_cfg, dict) and slack_thread_cfg.get("channel_id")
+    )
+    slack_tools: list[Any] = (
+        [
+            slack_add_reaction,
+            slack_read_thread_messages,
+            slack_start_new_thread,
+            slack_thread_reply,
+        ]
+        if has_slack_context
+        else []
+    )
     return create_deep_agent(
         model=main_model,
         system_prompt=construct_system_prompt(
@@ -906,10 +920,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             open_pull_request,
             request_pr_review,
             schedule_thread_wakeup,
-            slack_add_reaction,
-            slack_read_thread_messages,
-            slack_start_new_thread,
-            slack_thread_reply,
+            *slack_tools,
             *corridor_tools,
             *observability_tools,
             *currents_tools,

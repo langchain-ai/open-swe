@@ -34,7 +34,9 @@ def _base_config() -> RunnableConfig:
     }
 
 
-async def _capture_create_deep_agent_kwargs() -> dict[str, object]:
+async def _capture_create_deep_agent_kwargs(
+    config: RunnableConfig | None = None,
+) -> dict[str, object]:
     captured: dict[str, object] = {}
 
     def fake_create_deep_agent(**kwargs: object) -> _DummyAgent:
@@ -69,7 +71,7 @@ async def _capture_create_deep_agent_kwargs() -> dict[str, object]:
         patch("agent.server.construct_system_prompt", return_value="prompt"),
         patch("agent.server.create_deep_agent", side_effect=fake_create_deep_agent),
     ):
-        await get_agent(_base_config())
+        await get_agent(config if config is not None else _base_config())
 
     return captured
 
@@ -101,3 +103,48 @@ async def test_agent_keeps_message_queue_and_step_limit_middleware() -> None:
     present = {type(m).__name__ for m in middleware}
     assert "check_message_queue_before_model" in present
     assert "notify_step_limit_reached" in present
+
+
+_SLACK_TOOL_NAMES = {
+    "slack_add_reaction",
+    "slack_read_thread_messages",
+    "slack_start_new_thread",
+    "slack_thread_reply",
+}
+
+
+def _tool_names(tools: object) -> set[str]:
+    assert isinstance(tools, list)
+    names: set[str] = set()
+    for tool in tools:
+        name = getattr(tool, "name", None) or getattr(tool, "__name__", None)
+        if isinstance(name, str):
+            names.add(name)
+    return names
+
+
+@pytest.mark.asyncio
+async def test_slack_tools_omitted_without_slack_context() -> None:
+    captured = await _capture_create_deep_agent_kwargs()
+    names = _tool_names(captured["tools"])
+    assert not (_SLACK_TOOL_NAMES & names), (
+        "Slack tools must not be registered for dashboard/direct-chat runs "
+        "without a slack_thread.channel_id"
+    )
+
+
+@pytest.mark.asyncio
+async def test_slack_tools_registered_when_slack_thread_channel_present() -> None:
+    config: RunnableConfig = {
+        "configurable": {
+            "__is_for_execution__": True,
+            "thread_id": "thread-slack",
+            "github_login": "octocat",
+            "source": "slack",
+            "slack_thread": {"channel_id": "C123", "thread_ts": "1.0"},
+        },
+        "metadata": {},
+    }
+    captured = await _capture_create_deep_agent_kwargs(config)
+    names = _tool_names(captured["tools"])
+    assert _SLACK_TOOL_NAMES <= names
