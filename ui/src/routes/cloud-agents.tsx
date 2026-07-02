@@ -1,4 +1,4 @@
-import { Link, Navigate, createFileRoute } from "@tanstack/react-router"
+import { Link, createFileRoute } from "@tanstack/react-router"
 import { CaretRightIcon } from "@phosphor-icons/react"
 import { useEffect, useRef, useState } from "react"
 
@@ -23,6 +23,7 @@ import {
   useRepos,
   useSaveProfile,
 } from "@/lib/profile"
+import { RequireLogin } from "@/lib/auth-redirect"
 import { useSession } from "@/lib/session"
 
 export const Route = createFileRoute("/cloud-agents")({
@@ -112,7 +113,7 @@ function CloudAgentsPage() {
       </main>
     )
   }
-  if (!session.data) return <Navigate to="/login" />
+  if (!session.data) return <RequireLogin />
 
   const fallbackModel = defaultAgentModel
   const fallbackEffort = defaultAgentEffort

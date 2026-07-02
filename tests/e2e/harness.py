@@ -18,8 +18,10 @@ import json
 import os
 import sys
 import time
+from html import escape
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -185,29 +187,43 @@ async def control_login_get(login: str = "", email: str = "", next_url: str = ""
 
 
 @app.get("/dashboard/api/auth/login")
-async def mock_github_login(redirect_to: str = "", login: str = "") -> Response:
-    """Mock stand-in for GitHub OAuth: the dashboard's "Continue with GitHub"
-    button lands here. With no ``login``, render a picker of the fake GitHub
-    test users; once one is chosen, mint the real session cookie and redirect
-    back into the dashboard (``redirect_to``)."""
+async def mock_github_login(redirect_to: str = "") -> Response:
+    """E2E stand-in for the dashboard OAuth start route.
+
+    The real route would redirect to github.com. Keep the dashboard-facing URL
+    intact, then hand off to the fake GitHub simulator so Playwright exercises a
+    browser login flow instead of test code pre-minting a session cookie.
+    """
+    ui = os.environ.get("DASHBOARD_BASE_URL", "").rstrip("/")
+    dest = redirect_to or (f"{ui}/agents" if ui else "/agents")
+    return RedirectResponse(f"/fake-gh/login/oauth/authorize?redirect_to={quote(dest)}", 302)
+
+
+@app.get("/fake-gh/login/oauth/authorize")
+async def fake_github_authorize(redirect_to: str = "", login: str = "") -> Response:
+    """Fake GitHub OAuth consent/login page for dashboard e2e tests."""
     ui = os.environ.get("DASHBOARD_BASE_URL", "").rstrip("/")
     dest = redirect_to or (f"{ui}/agents" if ui else "/agents")
     if not login:
         options = "".join(
-            f'<option value="{u["login"]}">{u["name"]} (@{u["login"]})</option>' for u in TEST_USERS
+            f'<option value="{escape(u["login"], quote=True)}">'
+            f"{escape(u['name'])} (@{escape(u['login'])})</option>"
+            for u in TEST_USERS
         )
         return HTMLResponse(
-            f"""<!doctype html><meta charset=utf-8><title>Continue with GitHub (mock)</title>
+            f"""<!doctype html><meta charset=utf-8><title>GitHub · Authorize open-swe</title>
             <body style="font-family:system-ui;max-width:420px;margin:3rem auto;padding:0 1rem">
-            <h1 style="font-size:1.1rem">Continue with GitHub (mock)</h1>
-            <p style="color:#888;font-size:0.9rem">Pick a fake GitHub account to sign in as.</p>
-            <form method=get action=/dashboard/api/auth/login>
-              <input type=hidden name=redirect_to value="{dest}">
-              <select name=login style="font:inherit;padding:0.4rem">{options}</select>
-              <button style="font:inherit;padding:0.45rem 0.9rem;cursor:pointer">Continue</button>
-            </form>
-            <p style="color:#888;font-size:0.85rem">Tip: use a separate browser or profile per
-            user so their sessions don't overwrite each other.</p>
+            <main data-testid="fake-github-login">
+              <h1 style="font-size:1.1rem">Authorize open-swe</h1>
+              <p style="color:#888;font-size:0.9rem">Pick a fake GitHub account to continue.</p>
+              <form method=get action=/fake-gh/login/oauth/authorize>
+                <input type=hidden name=redirect_to value="{escape(dest, quote=True)}">
+                <label>GitHub user
+                  <select name=login style="font:inherit;padding:0.4rem">{options}</select>
+                </label>
+                <button style="font:inherit;padding:0.45rem 0.9rem;cursor:pointer">Authorize open-swe</button>
+              </form>
+            </main>
             </body>"""
         )
     match = next((u for u in TEST_USERS if u["login"] == login), None)

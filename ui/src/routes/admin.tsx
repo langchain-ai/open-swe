@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
 import { api } from "@/lib/api"
+import { RequireLogin } from "@/lib/auth-redirect"
 import { useSession } from "@/lib/session"
 
 export const Route = createFileRoute("/admin")({ component: AdminPage })
@@ -43,7 +44,7 @@ function AdminPage() {
       </main>
     )
   }
-  if (!session.data) return <Navigate to="/login" />
+  if (!session.data) return <RequireLogin />
   if (!session.data.is_admin) return <Navigate to="/my-settings" />
 
   return (
@@ -53,6 +54,8 @@ function AdminPage() {
       description="Workspace-wide defaults and user mappings."
     >
       <GlobalDefaultsSection models={options.data?.models ?? []} />
+
+      <LLMGatewaySection />
 
       <TriggerReviewSection />
 
@@ -563,6 +566,77 @@ function PRTraceResolutionSection() {
                 Save
               </Button>
             </div>
+          }
+        />
+      </div>
+      {error && <p className="px-4 pb-3 text-xs text-destructive">{error}</p>}
+    </SettingsSection>
+  )
+}
+
+type GatewayMode = "inherit" | "enabled" | "disabled"
+
+function gatewayMode(value: boolean | null | undefined): GatewayMode {
+  if (value === true) return "enabled"
+  if (value === false) return "disabled"
+  return "inherit"
+}
+
+function gatewayModeValue(mode: GatewayMode): boolean | null {
+  if (mode === "enabled") return true
+  if (mode === "disabled") return false
+  return null
+}
+
+function LLMGatewaySection() {
+  const qc = useQueryClient()
+  const settings = useQuery({
+    queryKey: ["teamSettings"],
+    queryFn: api.getTeamSettings,
+  })
+  const [error, setError] = useState<string | null>(null)
+
+  const save = useMutation({
+    mutationFn: (body: TeamSettings) => api.saveTeamSettings(body),
+    onSuccess: (saved) => {
+      qc.setQueryData(["teamSettings"], saved)
+      setError(null)
+    },
+    onError: (e: Error) => setError(e.message),
+  })
+
+  const mode = gatewayMode(settings.data?.gateway_enabled)
+
+  return (
+    <SettingsSection
+      title="LLM Gateway"
+      description="Route agent and reviewer LLM calls through the LangSmith LLM Gateway. It authenticates with the workspace LangSmith API key and resolves provider keys from Provider Secrets, so no provider keys are needed at runtime. Requires the gateway (private beta) enabled for your organization."
+    >
+      <div className="divide-y divide-border">
+        <SettingsRow
+          label="Route through the gateway"
+          description="Inherit uses the LANGSMITH_GATEWAY_ENABLED deployment default. OpenAI, Anthropic, Fireworks, and Google Gemini are routed; other providers call the provider directly."
+          control={
+            <Select
+              value={mode}
+              onValueChange={(next) =>
+                settings.data &&
+                save.mutate({
+                  ...settings.data,
+                  gateway_enabled: gatewayModeValue(next as GatewayMode),
+                })
+              }
+              disabled={!settings.data || save.isPending}
+            >
+              <SelectTrigger className="w-48">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="inherit">Inherit deployment default</SelectItem>
+                <SelectItem value="enabled">Enabled</SelectItem>
+                <SelectItem value="disabled">Disabled</SelectItem>
+              </SelectContent>
+            </Select>
           }
         />
       </div>

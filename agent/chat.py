@@ -29,7 +29,7 @@ from deepagents import create_deep_agent
 from langchain.agents.middleware import ModelCallLimitMiddleware
 
 from .dashboard.options import SUPPORTED_MODEL_IDS, model_supports_effort
-from .dashboard.team_settings import get_team_default_model
+from .dashboard.team_settings import get_effective_gateway_enabled, get_team_default_model
 from .middleware import (
     ExcludeToolsMiddleware,
     SanitizeThinkingBlocksMiddleware,
@@ -123,6 +123,7 @@ async def get_chat_agent(config: RunnableConfig) -> Pregel:
         configurable["chat_github_token"] = token
 
     model_id, effort = await _resolve_chat_model(configurable)
+    use_gateway = await get_effective_gateway_enabled()
     model_kwargs = provider_model_kwargs(
         model_id,
         effort,
@@ -137,7 +138,7 @@ async def get_chat_agent(config: RunnableConfig) -> Pregel:
     )
 
     return create_deep_agent(
-        model=make_model(model_id, **model_kwargs),
+        model=make_model(model_id, use_gateway=use_gateway, **model_kwargs),
         system_prompt=system_prompt,
         tools=[
             read_repo_file,

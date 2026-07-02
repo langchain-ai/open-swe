@@ -1,4 +1,4 @@
-import { Navigate, createFileRoute, useNavigate } from "@tanstack/react-router"
+import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
 import { IoLogoSlack } from "react-icons/io5"
@@ -24,6 +24,7 @@ import {
   useProfile,
   useSaveProfile,
 } from "@/lib/profile"
+import { RequireLogin } from "@/lib/auth-redirect"
 import { useSession } from "@/lib/session"
 import {
   notificationsEnabled,
@@ -366,7 +367,7 @@ function MySettingsPage() {
       </main>
     )
   }
-  if (!session.data) return <Navigate to="/login" />
+  if (!session.data) return <RequireLogin />
 
   const handleLogout = async () => {
     await api.logout()

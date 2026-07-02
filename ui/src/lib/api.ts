@@ -164,6 +164,8 @@ export interface TeamSettings {
   review_draft_prs: boolean
   pr_summaries: boolean
   review_trace_links: boolean
+  /** Tri-state LLM Gateway toggle; null inherits the LANGSMITH_GATEWAY_ENABLED default. */
+  gateway_enabled?: boolean | null
   review_tracing_project?: string | null
   org_guidelines?: string | null
   default_agent_model?: string | null
@@ -814,7 +816,7 @@ export const api = {
 
 export function loginUrl(redirectTo?: string): string {
   const target =
-    redirectTo ?? (typeof window !== "undefined" ? window.location.origin : "")
+    redirectTo ?? (typeof window !== "undefined" ? window.location.href : "")
   const qs = target ? `?redirect_to=${encodeURIComponent(target)}` : ""
   return `${API_BASE}/dashboard/api/auth/login${qs}`
 }

@@ -4,6 +4,7 @@ from typing import Literal, TypedDict, Unpack
 from langchain.chat_models import init_chat_model
 
 from ..dashboard.options import DEFAULT_MODEL_ID
+from .gateway import gateway_env_default, gateway_overrides
 
 OPENAI_RESPONSES_WS_BASE_URL = "wss://api.openai.com/v1"
 
@@ -39,6 +40,7 @@ class AnthropicThinking(TypedDict, total=False):
 class ModelKwargs(TypedDict, total=False):
     max_tokens: int | None
     reasoning: OpenAIReasoning | None
+    reasoning_effort: OpenAIReasoningEffort | None
     thinking: AnthropicThinking | None
     effort: AnthropicEffort | None
     thinking_level: GoogleThinkingLevel | None
@@ -50,13 +52,41 @@ class ModelKwargs(TypedDict, total=False):
 _ANTHROPIC_EFFORTS: set[AnthropicEffort] = {"low", "medium", "high", "xhigh", "max"}
 
 
-def make_model(model_id: str, **kwargs: Unpack[ModelKwargs]):
+def _coerce_openai_chat_completions_kwargs(model_kwargs: dict[str, object]) -> None:
+    if model_kwargs.get("use_responses_api") is not False:
+        return
+    reasoning = model_kwargs.pop("reasoning", None)
+    if isinstance(reasoning, dict):
+        effort = reasoning.get("effort")
+        if isinstance(effort, str):
+            model_kwargs.setdefault("reasoning_effort", effort)
+
+
+def make_model(model_id: str, *, use_gateway: bool | None = None, **kwargs: Unpack[ModelKwargs]):
+    """Build a chat model, optionally routed through the LangSmith LLM Gateway.
+
+    ``use_gateway`` resolves the deployment default (``LANGSMITH_GATEWAY_ENABLED``)
+    when ``None``; async callers pass the team-settings-resolved value. When on,
+    gateway ``base_url``/``api_key``/``use_responses_api`` override the direct
+    provider defaults below (see :mod:`agent.utils.gateway`).
+    """
     model_kwargs: dict[str, object] = kwargs.copy()
     model_kwargs.setdefault("max_retries", DEFAULT_MAX_RETRIES)
 
     if model_id.startswith("openai:"):
+        # Direct-provider default: Responses API over the OpenAI websocket base.
+        # Gateway routing overrides this below (an HTTP(S) proxy can't carry wss).
         model_kwargs["base_url"] = OPENAI_RESPONSES_WS_BASE_URL
         model_kwargs["use_responses_api"] = True
+
+    enabled = gateway_env_default() if use_gateway is None else use_gateway
+    if enabled:
+        overrides = gateway_overrides(model_id)
+        if overrides is not None:
+            model_kwargs.update(overrides)
+
+    if model_id.startswith("openai:"):
+        _coerce_openai_chat_completions_kwargs(model_kwargs)
 
     return init_chat_model(model=model_id, **model_kwargs)
 
