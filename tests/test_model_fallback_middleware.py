@@ -48,6 +48,19 @@ def _anthropic_model_not_available_error() -> anthropic.BadRequestError:
     return anthropic.BadRequestError("model unavailable", response=response, body=body)
 
 
+def _openai_invalid_request_error() -> openai.BadRequestError:
+    body = {
+        "error": {
+            "type": "invalid_request_error",
+            "message": "Unsupported parameter: 'reasoning_effort' is not supported with this model.",
+            "code": "unsupported_parameter",
+        }
+    }
+    request = httpx.Request("POST", "https://api.openai.com/v1/chat/completions")
+    response = httpx.Response(400, request=request, json=body)
+    return openai.BadRequestError("bad request", response=response, body=body)
+
+
 def _make_request() -> MagicMock:
     request = MagicMock()
     request.override = MagicMock(return_value=MagicMock(name="overridden_request"))
@@ -101,7 +114,7 @@ class TestModelFallbackMiddleware:
         assert calls[1] is request.override.return_value
 
     @pytest.mark.asyncio
-    async def test_async_propagates_non_transient_error(self) -> None:
+    async def test_async_surfaces_non_transient_error_as_message(self) -> None:
         middleware = ModelFallbackMiddleware(MagicMock())
         calls: list[object] = []
 
@@ -109,10 +122,49 @@ class TestModelFallbackMiddleware:
             calls.append(req)
             raise ValueError("not transient")
 
-        with pytest.raises(ValueError, match="not transient"):
-            await middleware.awrap_model_call(_make_request(), handler)
+        result = await middleware.awrap_model_call(_make_request(), handler)
 
+        assert isinstance(result, AIMessage)
+        assert "ValueError" in result.text
+        assert "not transient" in result.text
         assert len(calls) == 1
+
+    @pytest.mark.asyncio
+    async def test_async_surfaces_openai_invalid_request_as_message(self) -> None:
+        middleware = ModelFallbackMiddleware(MagicMock())
+
+        async def handler(_req: object) -> object:
+            raise _openai_invalid_request_error()
+
+        result = await middleware.awrap_model_call(_make_request(), handler)
+
+        assert isinstance(result, AIMessage)
+        assert "OpenAI request was rejected as invalid" in result.text
+        assert "reasoning_effort" in result.text
+
+    def test_sync_surfaces_openai_invalid_request_as_message(self) -> None:
+        middleware = ModelFallbackMiddleware(MagicMock())
+
+        def handler(_req: object) -> object:
+            raise _openai_invalid_request_error()
+
+        result = middleware.wrap_model_call(_make_request(), handler)
+
+        assert isinstance(result, AIMessage)
+        assert "OpenAI request was rejected as invalid" in result.text
+        assert "reasoning_effort" in result.text
+
+    def test_sync_surfaces_non_transient_error_as_message(self) -> None:
+        middleware = ModelFallbackMiddleware(MagicMock())
+
+        def handler(_req: object) -> object:
+            raise RuntimeError("boom")
+
+        result = middleware.wrap_model_call(_make_request(), handler)
+
+        assert isinstance(result, AIMessage)
+        assert "RuntimeError" in result.text
+        assert "boom" in result.text
 
     @pytest.mark.asyncio
     async def test_async_surfaces_model_unavailable_error(self) -> None:

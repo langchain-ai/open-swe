@@ -75,6 +75,12 @@ def _provider_access_error_message(exc: BaseException) -> str | None:
                 f"Anthropic returned: {provider_message} "
                 "Choose a different model or update the workspace's Anthropic access and retry."
             )
+        provider_message = _nested_str(body, "error", "message") or str(exc)
+        return (
+            "The Anthropic request was rejected as invalid. "
+            f"Anthropic returned: {provider_message} "
+            "Verify the model ID and parameter set (e.g. reasoning_effort, tools) and retry."
+        )
 
     if isinstance(exc, (openai.BadRequestError, openai.NotFoundError)):
         body = _error_body(exc)
@@ -86,8 +92,24 @@ def _provider_access_error_message(exc: BaseException) -> str | None:
                 f"OpenAI returned: {provider_message} "
                 "Choose a different model or update the workspace's OpenAI access and retry."
             )
+        provider_message = _nested_str(body, "error", "message") or str(exc)
+        return (
+            "The OpenAI request was rejected as invalid. "
+            f"OpenAI returned: {provider_message} "
+            "Verify the model ID and parameter set (e.g. reasoning_effort, tools) and retry."
+        )
 
     return None
+
+
+def _unhandled_model_error_message(exc: BaseException) -> str:
+    body = _error_body(exc)
+    provider_message = _nested_str(body, "error", "message") or str(exc)
+    return (
+        "The model call failed and cannot be retried automatically: "
+        f"{type(exc).__name__}: {provider_message}. "
+        "Please verify the configured model, provider routing, and parameters."
+    )
 
 
 class ModelFallbackMiddleware(AgentMiddleware):
@@ -110,7 +132,11 @@ class ModelFallbackMiddleware(AgentMiddleware):
                 logger.warning("Model access error surfaced to user: %s", type(exc).__name__)
                 return AIMessage(content=access_error_message)
             if not _should_fallback(exc):
-                raise
+                logger.warning(
+                    "Non-retryable model error surfaced as AIMessage: %s",
+                    type(exc).__name__,
+                )
+                return AIMessage(content=_unhandled_model_error_message(exc))
             logger.warning(
                 "Primary model failed (%s); falling back to %s",
                 type(exc).__name__,
@@ -132,7 +158,11 @@ class ModelFallbackMiddleware(AgentMiddleware):
                 logger.warning("Model access error surfaced to user: %s", type(exc).__name__)
                 return AIMessage(content=access_error_message)
             if not _should_fallback(exc):
-                raise
+                logger.warning(
+                    "Non-retryable model error surfaced as AIMessage: %s",
+                    type(exc).__name__,
+                )
+                return AIMessage(content=_unhandled_model_error_message(exc))
             logger.warning(
                 "Primary model failed (%s); falling back to %s",
                 type(exc).__name__,
