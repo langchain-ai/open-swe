@@ -32,7 +32,7 @@ __all__ = [
     "verify_github_signature",
 ]
 
-OPEN_SWE_TAGS = ("@openswe", "@open-swe", "@openswe-dev")
+OPEN_SWE_TAGS = ("@jarvis-aeteq",)
 UNTRUSTED_GITHUB_COMMENT_OPEN_TAG = "<dangerous-external-untrusted-users-comment>"
 UNTRUSTED_GITHUB_COMMENT_CLOSE_TAG = "</dangerous-external-untrusted-users-comment>"
 _SANITIZED_UNTRUSTED_GITHUB_COMMENT_OPEN_TAG = "[blocked-untrusted-comment-tag-open]"
