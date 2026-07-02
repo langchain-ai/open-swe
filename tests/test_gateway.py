@@ -12,6 +12,7 @@ from agent.utils import gateway, model
 _GATEWAY_ENV_VARS = (
     "LANGSMITH_API_KEY",
     "LANGSMITH_API_KEY_PROD",
+    "LANGSMITH_GATEWAY_API_KEY",
     "LANGSMITH_GATEWAY_ENABLED",
     "LANGSMITH_GATEWAY_BASE_URL",
     "LANGSMITH_GATEWAY_OPENAI_USE_RESPONSES",
@@ -90,6 +91,23 @@ def test_prod_key_used_as_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
     overrides = gateway.gateway_overrides("anthropic:claude-opus-4-8")
     assert overrides is not None
     assert overrides["api_key"] == "ls-prod-key"
+
+
+def test_prod_key_preferred_over_platform_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LANGSMITH_API_KEY", "ls-platform-key")
+    monkeypatch.setenv("LANGSMITH_API_KEY_PROD", "ls-prod-key")
+    overrides = gateway.gateway_overrides("anthropic:claude-opus-4-8")
+    assert overrides is not None
+    assert overrides["api_key"] == "ls-prod-key"
+
+
+def test_gateway_key_preferred_over_prod_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LANGSMITH_API_KEY", "ls-platform-key")
+    monkeypatch.setenv("LANGSMITH_API_KEY_PROD", "ls-prod-key")
+    monkeypatch.setenv("LANGSMITH_GATEWAY_API_KEY", "ls-gateway-key")
+    overrides = gateway.gateway_overrides("anthropic:claude-opus-4-8")
+    assert overrides is not None
+    assert overrides["api_key"] == "ls-gateway-key"
 
 
 def test_base_url_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
