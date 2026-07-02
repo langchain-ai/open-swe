@@ -1,16 +1,44 @@
-import { Navigate, createFileRoute } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
+import { useEffect, useMemo } from "react";
 
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { loginUrl } from "@/lib/api";
+import {
+  DEFAULT_AUTH_REDIRECT,
+  authRedirectUrl,
+  consumeAuthRedirect,
+  getRememberedAuthRedirect,
+  rememberAuthRedirect,
+} from "@/lib/auth-redirect";
 import { useSession } from "@/lib/session";
 import { cn } from "@/lib/utils";
 
-export const Route = createFileRoute("/login")({ component: Login });
+type LoginSearch = { redirect?: string };
+
+export const Route = createFileRoute("/login")({
+  validateSearch: (search: Record<string, unknown>): LoginSearch => ({
+    redirect: typeof search.redirect === "string" ? search.redirect : undefined,
+  }),
+  component: Login,
+});
 
 function Login() {
   const session = useSession();
+  const search = Route.useSearch();
+  const redirectParam = search.redirect;
+  const intendedPath = useMemo(
+    () =>
+      redirectParam
+        ? rememberAuthRedirect(redirectParam)
+        : getRememberedAuthRedirect() ?? DEFAULT_AUTH_REDIRECT,
+    [redirectParam]
+  );
+  const authenticatedRedirect = useMemo(
+    () => (session.data ? consumeAuthRedirect(redirectParam) : null),
+    [redirectParam, session.data]
+  );
 
   if (session.isLoading) {
     return (
@@ -20,8 +48,8 @@ function Login() {
     );
   }
 
-  if (session.data) {
-    return <Navigate to="/my-settings" />;
+  if (authenticatedRedirect) {
+    return <ClientRedirect path={authenticatedRedirect} />;
   }
 
   return (
@@ -35,11 +63,26 @@ function Login() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <a href={loginUrl()} className={cn(buttonVariants({ size: "lg" }), "w-full")}>
+          <a
+            href={loginUrl(authRedirectUrl(intendedPath))}
+            className={cn(buttonVariants({ size: "lg" }), "w-full")}
+          >
             Continue with GitHub
           </a>
         </CardContent>
       </Card>
+    </main>
+  );
+}
+
+function ClientRedirect({ path }: { path: string }) {
+  useEffect(() => {
+    if (typeof window !== "undefined") window.location.replace(path);
+  }, [path]);
+
+  return (
+    <main className="flex min-h-svh items-center justify-center p-6">
+      <Skeleton className="h-40 w-80" />
     </main>
   );
 }

@@ -4,7 +4,10 @@ import { useEffect, useState } from "react"
 import { ArrowLeft } from "lucide-react"
 
 import { PlanReview } from "@/components/agents/PlanReview"
+import { buttonVariants } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
+import { loginUrl } from "@/lib/api"
+import { authRedirectUrl, currentAuthRedirectPath } from "@/lib/auth-redirect"
 import { PlanApiError, getPlan } from "@/lib/plan"
 
 export const Route = createFileRoute("/agents/$threadId_/plan")({
@@ -29,6 +32,18 @@ function BackLink({ threadId }: { threadId: string }) {
       <ArrowLeft className="size-3.5" />
       Back to conversation
     </Link>
+  )
+}
+
+export function planSignInHref(): string {
+  return loginUrl(authRedirectUrl(currentAuthRedirectPath()))
+}
+
+export function PlanSignInButton() {
+  return (
+    <a href={planSignInHref()} className={buttonVariants({ size: "sm" })}>
+      Sign in to view this plan
+    </a>
   )
 }
 
@@ -70,6 +85,7 @@ function PlanPage() {
               ? "Please sign in to view this plan."
               : "This plan could not be found."}
           </p>
+          {status === 401 ? <PlanSignInButton /> : null}
           <BackLink threadId={threadId} />
         </div>
       </Centered>

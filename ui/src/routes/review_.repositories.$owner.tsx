@@ -1,4 +1,4 @@
-import { Navigate, createFileRoute } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 
@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { ApiError, api } from "@/lib/api";
+import { RequireLogin } from "@/lib/auth-redirect";
 import { useSession } from "@/lib/session";
 
 const PAGE_SIZE = 20;
@@ -78,7 +79,7 @@ function RepositoriesOwnerPage() {
       </main>
     );
   }
-  if (!session.data) return <Navigate to="/login" />;
+  if (!session.data) return <RequireLogin />;
 
   const canEdit = session.data.is_admin;
   const enabledCount = ownerRepos.filter((r) => enabledSet.has(r.full_name)).length;

@@ -1,8 +1,9 @@
-import { Navigate, createFileRoute } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 
 import { AppShell } from "@/components/AppShell";
 import { ReviewStylesPanel } from "@/components/ReviewStylesPanel";
 import { Skeleton } from "@/components/ui/skeleton";
+import { RequireLogin } from "@/lib/auth-redirect";
 import { useSession } from "@/lib/session";
 
 export const Route = createFileRoute("/review_/styles")({ component: ReviewStylesPage });
@@ -17,7 +18,7 @@ function ReviewStylesPage() {
       </main>
     );
   }
-  if (!session.data) return <Navigate to="/login" />;
+  if (!session.data) return <RequireLogin />;
 
   return (
     <AppShell
