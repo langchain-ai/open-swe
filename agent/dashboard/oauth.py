@@ -80,21 +80,34 @@ def _origin_of(url: str) -> str:
     return f"{scheme}://{host}:{port}"
 
 
-def sanitize_redirect_to(redirect_to: str | None) -> str:
-    """Return a safe post-login redirect URL.
+def _is_blocked_redirect_path(path: str) -> bool:
+    return path in {"/login", "/dashboard/api", "/_serverFn"} or path.startswith(
+        ("/login/", "/login?", "/login#", "/dashboard/api/", "/_serverFn/")
+    )
 
-    Falls back to DASHBOARD_BASE_URL when the supplied URL's origin isn't
-    explicitly allowed. This blocks the open-redirect / phishing primitive
-    where an attacker drops their own URL into `?redirect_to=`.
-    """
+
+def sanitize_redirect_to(redirect_to: str | None) -> str:
+    """Return a safe post-login redirect URL."""
     fallback = os.environ.get("DASHBOARD_BASE_URL", "").strip()
     if not redirect_to:
         return fallback
-    candidate_origin = _origin_of(redirect_to)
+    trimmed = redirect_to.strip()
+    parsed = urlparse(trimmed)
+    if (
+        trimmed.startswith("/")
+        and not trimmed.startswith("//")
+        and not parsed.scheme
+        and not parsed.netloc
+        and not _is_blocked_redirect_path(parsed.path)
+    ):
+        return trimmed
+    if _is_blocked_redirect_path(parsed.path):
+        return fallback
+    candidate_origin = _origin_of(trimmed)
     if not candidate_origin:
         return fallback
     if candidate_origin in allowed_dashboard_origins():
-        return redirect_to
+        return trimmed
     logger.warning("Rejected redirect_to=%r — origin not in allowlist", redirect_to)
     return fallback
 
