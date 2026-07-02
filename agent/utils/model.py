@@ -46,6 +46,8 @@ class ModelKwargs(TypedDict, total=False):
     thinking_level: GoogleThinkingLevel | None
     temperature: float | None
     max_retries: int | None
+    store: bool | None
+    include: list[str] | None
     model_kwargs: dict[str, object] | None
 
 
@@ -60,6 +62,17 @@ def _coerce_openai_chat_completions_kwargs(model_kwargs: dict[str, object]) -> N
         effort = reasoning.get("effort")
         if isinstance(effort, str):
             model_kwargs.setdefault("reasoning_effort", effort)
+
+
+def _configure_openai_responses_kwargs(model_kwargs: dict[str, object]) -> None:
+    if model_kwargs.get("use_responses_api") is False:
+        return
+    model_kwargs.setdefault("store", False)
+    include = model_kwargs.get("include")
+    if include is None:
+        model_kwargs["include"] = ["reasoning.encrypted_content"]
+    elif isinstance(include, list) and "reasoning.encrypted_content" not in include:
+        include.append("reasoning.encrypted_content")
 
 
 def make_model(model_id: str, *, use_gateway: bool | None = None, **kwargs: Unpack[ModelKwargs]):
@@ -86,6 +99,7 @@ def make_model(model_id: str, *, use_gateway: bool | None = None, **kwargs: Unpa
             model_kwargs.update(overrides)
 
     if model_id.startswith("openai:"):
+        _configure_openai_responses_kwargs(model_kwargs)
         _coerce_openai_chat_completions_kwargs(model_kwargs)
 
     return init_chat_model(model=model_id, **model_kwargs)

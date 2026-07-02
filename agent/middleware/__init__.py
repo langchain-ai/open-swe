@@ -9,6 +9,7 @@ from .refresh_slack_status import SlackAssistantStatusMiddleware
 from .repair_orphaned_tool_calls import RepairOrphanedToolCallsMiddleware
 from .sandbox_circuit_breaker import SandboxCircuitBreakerMiddleware
 from .sanitize_fireworks_messages import SanitizeFireworksMessagesMiddleware
+from .sanitize_openai_responses import SanitizeOpenAIResponsesMiddleware
 from .sanitize_thinking_blocks import SanitizeThinkingBlocksMiddleware
 from .sanitize_tool_inputs import SanitizeToolInputsMiddleware
 from .settle_review_check import settle_review_check_on_exit
@@ -22,6 +23,7 @@ __all__ = [
     "PlanModeMiddleware",
     "RepairOrphanedToolCallsMiddleware",
     "SanitizeFireworksMessagesMiddleware",
+    "SanitizeOpenAIResponsesMiddleware",
     "SanitizeThinkingBlocksMiddleware",
     "SanitizeToolInputsMiddleware",
     "ToolArtifactMiddleware",
