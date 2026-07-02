@@ -3,6 +3,9 @@ name: Deploy UI to S3
 on:
   workflow_dispatch:
 
+permissions:
+  id-token: write
+
 jobs:
   deploy:
     name: Deploy
