@@ -37,12 +37,16 @@ class AnthropicThinking(TypedDict, total=False):
     display: AnthropicThinkingDisplay
 
 
+class AnthropicOutputConfig(TypedDict, total=False):
+    effort: AnthropicEffort
+
+
 class ModelKwargs(TypedDict, total=False):
     max_tokens: int | None
     reasoning: OpenAIReasoning | None
     reasoning_effort: OpenAIReasoningEffort | None
     thinking: AnthropicThinking | None
-    effort: AnthropicEffort | None
+    output_config: AnthropicOutputConfig | None
     thinking_level: GoogleThinkingLevel | None
     temperature: float | None
     max_retries: int | None
@@ -208,7 +212,7 @@ def provider_model_kwargs(
             kwargs["thinking"] = thinking
         effort = anthropic_effort_for(profile_effort)
         if effort is not None:
-            kwargs["effort"] = effort
+            kwargs["output_config"] = {"effort": effort}
     elif model_id.startswith("google_genai:") and is_gemini_3_family(model_id):
         thinking_level = google_thinking_level_for(profile_effort)
         if thinking_level is not None:

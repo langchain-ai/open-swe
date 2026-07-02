@@ -18,7 +18,8 @@ def test_sonnet_5_is_supported_with_documented_efforts() -> None:
 def test_sonnet_5_efforts_map_to_anthropic_kwargs(effort: str) -> None:
     kwargs = provider_model_kwargs(SONNET_5_ID, effort, max_tokens=16_000)
     assert kwargs["max_tokens"] == 16_000
-    assert kwargs["effort"] == effort
+    assert kwargs["output_config"] == {"effort": effort}
+    assert "effort" not in kwargs
     assert kwargs["thinking"] == {"type": "adaptive", "display": "summarized"}
 
 

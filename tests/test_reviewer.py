@@ -346,7 +346,8 @@ async def test_reviewer_applies_eval_model_and_effort_overrides() -> None:
     main_model_call = make_model.call_args_list[0]
     assert main_model_call.args == ("anthropic:claude-opus-4-8",)
     assert main_model_call.kwargs["thinking"] == {"type": "adaptive", "display": "summarized"}
-    assert main_model_call.kwargs["effort"] == "high"
+    assert main_model_call.kwargs["output_config"] == {"effort": "high"}
+    assert "effort" not in main_model_call.kwargs
     subagent_model_call = make_model.call_args_list[1]
     assert subagent_model_call.args == ("openai:gpt-5.5",)
     assert subagent_model_call.kwargs["reasoning"] == {"effort": "low", "summary": "auto"}
@@ -394,11 +395,13 @@ async def test_reviewer_subagent_inherits_eval_model_without_explicit_override()
     main_model_call = make_model.call_args_list[0]
     assert main_model_call.args == ("anthropic:claude-opus-4-8",)
     assert main_model_call.kwargs["thinking"] == {"type": "adaptive", "display": "summarized"}
-    assert main_model_call.kwargs["effort"] == "high"
+    assert main_model_call.kwargs["output_config"] == {"effort": "high"}
+    assert "effort" not in main_model_call.kwargs
     subagent_model_call = make_model.call_args_list[1]
     assert subagent_model_call.args == ("anthropic:claude-opus-4-8",)
     assert subagent_model_call.kwargs["thinking"] == {"type": "adaptive", "display": "summarized"}
-    assert subagent_model_call.kwargs["effort"] == "high"
+    assert subagent_model_call.kwargs["output_config"] == {"effort": "high"}
+    assert "effort" not in subagent_model_call.kwargs
 
 
 @pytest.mark.asyncio
