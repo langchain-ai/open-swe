@@ -20,6 +20,7 @@ jobs:
         with:
           node-version: "latest"
           cache: pnpm
+          cache-dependency-path: ui/pnpm-lock.yaml
       - name: Build
         run: pnpm run build
       - name: Configure AWS credentials
