@@ -204,13 +204,13 @@ Routing is opt-in and off by default. Enable it either way:
 | `LANGSMITH_GATEWAY_ENABLED` | `false` | Deployment-level default for gateway routing. |
 | `LANGSMITH_GATEWAY_API_KEY` | unset | Optional dedicated LangSmith key for Gateway calls. Prefer this in LangGraph Cloud if the platform-provided `LANGSMITH_API_KEY` lacks `gateway:invoke`. Falls back to `LANGSMITH_API_KEY_PROD`, then `LANGSMITH_API_KEY`. |
 | `LANGSMITH_GATEWAY_BASE_URL` | `https://gateway.smith.langchain.com` | Override for a regional or self-hosted gateway host. |
-| `LANGSMITH_GATEWAY_OPENAI_USE_RESPONSES` | `false` | Keep the OpenAI Responses API through the gateway (see caveat). Only set if your gateway proxies `/v1/responses`. |
+| `LANGSMITH_GATEWAY_OPENAI_USE_RESPONSES` | `true` | Use the OpenAI Responses API through the gateway. Set to `false` only to force Chat Completions for OpenAI models. |
 
 The admin panel (**Admin → LLM Gateway**) exposes a per-workspace toggle stored in team settings; when set it overrides the `LANGSMITH_GATEWAY_ENABLED` env default (a `None`/unset team value inherits the env default).
 
 Routing is applied centrally in `make_model` (`agent/utils/model.py`), which resolves the effective on/off and delegates URL/key wiring to `agent/utils/gateway.py`. **OpenAI, Anthropic, Fireworks, and Google Gemini** are routed (their LangChain integrations accept `base_url` + `api_key`); Google Vertex (service-account auth) and any other provider call the provider directly with a logged warning.
 
-**Caveat — OpenAI endpoint:** open-swe uses the OpenAI Responses API over a `wss://` base URL by default, which an HTTPS proxy can't carry. When the gateway is on, gateway-routed OpenAI falls back to **Chat Completions** (dropping the Responses API's visible reasoning summaries) unless `LANGSMITH_GATEWAY_OPENAI_USE_RESPONSES=true`. Anthropic and Fireworks are unaffected.
+**Caveat — OpenAI endpoint:** open-swe uses the OpenAI Responses API by default because OpenAI reasoning models with function tools reject `reasoning_effort` on Chat Completions. Direct OpenAI calls use a `wss://` base URL; gateway-routed OpenAI uses the HTTPS gateway base URL with Responses enabled. Set `LANGSMITH_GATEWAY_OPENAI_USE_RESPONSES=false` only if you need to force Chat Completions. Anthropic and Fireworks are unaffected.
 
 ---
 

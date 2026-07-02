@@ -19,16 +19,17 @@ logger = logging.getLogger(__name__)
 DEFAULT_GATEWAY_BASE_URL = "https://gateway.smith.langchain.com"
 
 # Provider prefix -> base-URL suffix appended to the gateway host. Each suffix
-# matches the SDK's own path handling: the OpenAI/Fireworks SDKs append
-# ``/chat/completions`` to a ``/v1`` base, the Anthropic SDK appends
-# ``/v1/messages`` to a bare host, and the google-genai SDK appends
+# matches the SDK's own path handling: the OpenAI SDK appends
+# ``/chat/completions`` to a ``/v1`` base, Fireworks appends
+# ``/v1/chat/completions`` to a bare provider host, Anthropic appends
+# ``/v1/messages`` to a bare host, and google-genai appends
 # ``/<api_version>/models/...`` to a bare host. Vertex (``google_vertexai``, which
 # uses service-account auth rather than a bearer key) and any other provider are
 # not routed and call the provider directly.
 _GATEWAY_PROVIDER_PATHS: dict[str, str] = {
     "openai": "/openai/v1",
     "anthropic": "/anthropic",
-    "fireworks": "/fireworks/v1",
+    "fireworks": "/fireworks",
     "google_genai": "/gemini",
 }
 
@@ -64,12 +65,15 @@ def gateway_env_default() -> bool:
 def gateway_openai_use_responses() -> bool:
     """Whether gateway-routed OpenAI keeps the Responses API.
 
-    Defaults to ``False``: the gateway's documented OpenAI surface is Chat
-    Completions, and an HTTPS proxy can't carry open-swe's default ``wss://``
-    Responses stream. Set ``LANGSMITH_GATEWAY_OPENAI_USE_RESPONSES=true`` only if
-    the gateway proxies ``/v1/responses``.
+    Defaults to ``True`` because OpenAI reasoning models with tool calls reject
+    ``reasoning_effort`` on Chat Completions. Set
+    ``LANGSMITH_GATEWAY_OPENAI_USE_RESPONSES=false`` only for deployments that
+    need to force Chat Completions through the gateway.
     """
-    return _env_bool(os.environ.get("LANGSMITH_GATEWAY_OPENAI_USE_RESPONSES"))
+    raw = os.environ.get("LANGSMITH_GATEWAY_OPENAI_USE_RESPONSES")
+    if raw is None:
+        return True
+    return _env_bool(raw)
 
 
 def resolve_gateway_enabled(team_value: bool | None) -> bool:
@@ -116,7 +120,7 @@ def gateway_overrides(model_id: str) -> dict[str, object] | None:
         "api_key": api_key,
     }
     if provider == "openai":
-        # An HTTPS proxy can't carry the wss:// Responses stream make_model sets by
-        # default; route Chat Completions unless the deployment opts back in.
+        # Use HTTPS Responses through the gateway by default; tool-calling OpenAI
+        # reasoning models reject reasoning_effort on Chat Completions.
         overrides["use_responses_api"] = gateway_openai_use_responses()
     return overrides
