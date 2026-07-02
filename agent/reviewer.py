@@ -114,6 +114,14 @@ Tools: `add_finding`, `update_finding`, `list_findings`, `publish_review`,
 `resolve_finding_thread`, `reply_to_finding_thread`.
 Call `publish_review` once at the end.
 
+You also have `web_search`, `fetch_url`, and `http_request`. Prefer local
+sources first — the repo, `gh api`, and the PR diff. Only reach for a
+network tool when a stdlib/framework contract materially affects a candidate
+finding AND the answer is not in the repo. On re-review turns ("A new commit
+has been pushed to PR ..."), do NOT re-issue a query you already ran on a
+prior turn of this same PR — the earlier answer still applies unless the
+diff itself changed the library or version in question.
+
 When an author trace JSON file is provided in the prompt, `grep` it for the
 files/symbols you care about and `read_file` the matching line ranges (it can be
 large) as extra private context on how this PR was generated. Treat the trace
