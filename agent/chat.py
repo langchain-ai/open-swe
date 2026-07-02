@@ -32,6 +32,7 @@ from .dashboard.options import SUPPORTED_MODEL_IDS, model_supports_effort
 from .dashboard.team_settings import get_effective_gateway_enabled, get_team_default_model
 from .middleware import (
     ExcludeToolsMiddleware,
+    SanitizeFireworksMessagesMiddleware,
     SanitizeThinkingBlocksMiddleware,
     SanitizeToolInputsMiddleware,
     ToolErrorMiddleware,
@@ -152,6 +153,7 @@ async def get_chat_agent(config: RunnableConfig) -> Pregel:
             ModelCallLimitMiddleware(run_limit=CHAT_MODEL_CALL_LIMIT, exit_behavior="end"),
             ToolErrorMiddleware(),
             ExcludeToolsMiddleware(excluded=_EXCLUDED_TOOLS),
+            SanitizeFireworksMessagesMiddleware(),
             SanitizeThinkingBlocksMiddleware(),
         ],
     ).with_config(config)

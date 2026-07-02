@@ -59,6 +59,7 @@ from .middleware import (
     ModelFallbackMiddleware,
     PlanModeMiddleware,
     SandboxCircuitBreakerMiddleware,
+    SanitizeFireworksMessagesMiddleware,
     SanitizeThinkingBlocksMiddleware,
     SanitizeToolInputsMiddleware,
     SlackAssistantStatusMiddleware,
@@ -932,6 +933,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             SandboxCircuitBreakerMiddleware(),
             *fallback_middleware,
             *plan_mode_middleware,
+            SanitizeFireworksMessagesMiddleware(),
             SanitizeThinkingBlocksMiddleware(),
         ],
     ).with_config(config)

@@ -41,6 +41,7 @@ from .dashboard.team_settings import (
 )
 from .middleware import (
     RepairOrphanedToolCallsMiddleware,
+    SanitizeFireworksMessagesMiddleware,
     SanitizeThinkingBlocksMiddleware,
     SanitizeToolInputsMiddleware,
     SlackAssistantStatusMiddleware,
@@ -1200,6 +1201,7 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
             refresh_github_proxy_before_model,
             check_message_queue_before_model,
             SlackAssistantStatusMiddleware(),
+            SanitizeFireworksMessagesMiddleware(),
             SanitizeThinkingBlocksMiddleware(),
             RepairOrphanedToolCallsMiddleware(),
             settle_review_check_on_exit,
