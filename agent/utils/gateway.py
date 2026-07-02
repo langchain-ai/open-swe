@@ -40,11 +40,15 @@ def _env_bool(value: str | None) -> bool:
 def _langsmith_api_key() -> str | None:
     """LangSmith API key used to authenticate gateway calls.
 
-    Mirrors ``agent.integrations.langsmith._get_langsmith_api_key``:
-    ``LANGSMITH_API_KEY`` first, then ``LANGSMITH_API_KEY_PROD`` for LangGraph
-    Cloud deployments where ``LANGSMITH_API_KEY`` is reserved.
+    Prefer a gateway-specific key, then the prod LangSmith key. LangGraph Cloud
+    may inject ``LANGSMITH_API_KEY`` for tracing/platform APIs, and that key can
+    lack the ``gateway:invoke`` permission required by the LLM Gateway.
     """
-    return os.environ.get("LANGSMITH_API_KEY") or os.environ.get("LANGSMITH_API_KEY_PROD")
+    return (
+        os.environ.get("LANGSMITH_GATEWAY_API_KEY")
+        or os.environ.get("LANGSMITH_API_KEY_PROD")
+        or os.environ.get("LANGSMITH_API_KEY")
+    )
 
 
 def gateway_base_url() -> str:
@@ -102,7 +106,8 @@ def gateway_overrides(model_id: str) -> dict[str, object] | None:
     api_key = _langsmith_api_key()
     if not api_key:
         logger.warning(
-            "LangSmith gateway enabled but no LANGSMITH_API_KEY(_PROD) is set; "
+            "LangSmith gateway enabled but no LANGSMITH_GATEWAY_API_KEY or "
+            "LANGSMITH_API_KEY(_PROD) is set; "
             "calling the provider directly"
         )
         return None
