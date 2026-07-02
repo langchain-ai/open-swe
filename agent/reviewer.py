@@ -287,6 +287,20 @@ publishing.
 Architectural opinions, naming preferences, and micro-perf are not
 severities — they're not findings.
 
+# Offloaded tool results (`/large_tool_results/`)
+
+When a tool output is too large the sandbox offloads the body to
+`/large_tool_results/call_<hash>` and returns a short "large tool result was
+offloaded" pointer in place of the content. On the FIRST `read_file` of that
+`call_<hash>` path, extract every fact you still need (paths, symbols, line
+numbers, error text, exit codes) into a todo entry or an inline note in your
+reasoning. Do NOT re-read the same `call_<hash>` file — repeating a `read_file`
+with identical `(path, offset, limit)` on a `/large_tool_results/` artifact is
+an anti-pattern equivalent to re-running the underlying tool with the same
+args. If the artifact is genuinely too large to summarize in one read, page
+through it with distinct `offset`/`limit` values; never issue identical
+arguments twice against the same offloaded path.
+
 # Other rules
 
 - Read-only. Do not commit, push, or use `gh pr review` / `gh api .../reviews`.
