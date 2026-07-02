@@ -334,6 +334,8 @@ def test_make_model_direct_openai_uses_responses_websocket() -> None:
         model.make_model("openai:gpt-5.5", use_gateway=False)
     assert captured["base_url"] == model.OPENAI_RESPONSES_WS_BASE_URL
     assert captured["use_responses_api"] is True
+    assert captured["store"] is False
+    assert captured["include"] == ["reasoning.encrypted_content"]
 
 
 def test_make_model_gateway_openai_replaces_websocket(
@@ -345,6 +347,8 @@ def test_make_model_gateway_openai_replaces_websocket(
         model.make_model("openai:gpt-5.5", use_gateway=True)
     assert captured["base_url"] == "https://gateway.smith.langchain.com/openai/v1"
     assert captured["use_responses_api"] is True
+    assert captured["store"] is False
+    assert captured["include"] == ["reasoning.encrypted_content"]
     assert captured["api_key"] == "ls-key"
 
 
@@ -363,6 +367,8 @@ def test_make_model_gateway_openai_chat_completions_optout_converts_reasoning(
     assert captured["use_responses_api"] is False
     assert captured["reasoning_effort"] == "high"
     assert "reasoning" not in captured
+    assert "include" not in captured
+    assert "store" not in captured
 
 
 def test_make_model_gateway_openai_preserves_reasoning_none(
@@ -377,6 +383,8 @@ def test_make_model_gateway_openai_preserves_reasoning_none(
             reasoning={"effort": "none"},
         )
     assert captured["use_responses_api"] is True
+    assert captured["store"] is False
+    assert captured["include"] == ["reasoning.encrypted_content"]
     assert captured["reasoning"] == {"effort": "none"}
     assert "reasoning_effort" not in captured
 
@@ -390,6 +398,8 @@ def test_make_model_gateway_openai_responses_keeps_reasoning(
     with patch.object(model, "init_chat_model", fake):
         model.make_model("openai:gpt-5.5", use_gateway=True, reasoning=reasoning)
     assert captured["use_responses_api"] is True
+    assert captured["store"] is False
+    assert captured["include"] == ["reasoning.encrypted_content"]
     assert captured["reasoning"] == reasoning
     assert "reasoning_effort" not in captured
 
@@ -422,4 +432,6 @@ def test_make_model_gateway_without_key_falls_back_direct(
     # No key -> overrides skipped -> the direct-provider websocket base stands.
     assert captured["base_url"] == model.OPENAI_RESPONSES_WS_BASE_URL
     assert captured["use_responses_api"] is True
+    assert captured["store"] is False
+    assert captured["include"] == ["reasoning.encrypted_content"]
     assert "api_key" not in captured
