@@ -25,8 +25,21 @@ async function botMessages(request: APIRequestContext): Promise<Array<string>> {
   return msgs.filter((m) => m.is_bot).map((m) => m.text);
 }
 
-async function addComment(page: Page, text: string) {
-  await page.getByTestId("comment-input").fill(text);
+async function addComment(
+  page: Page,
+  text: string,
+  shortcut?: "meta" | "control",
+) {
+  const input = page.getByTestId("comment-input");
+  await input.fill(text);
+  if (shortcut === "meta") {
+    await input.press("Meta+Enter");
+    return;
+  }
+  if (shortcut === "control") {
+    await input.press("Control+Enter");
+    return;
+  }
   await page.getByTestId("comment-submit").click();
 }
 
@@ -145,8 +158,8 @@ test.describe("Plan review (HTTP comments)", () => {
     expect(clipboard).toContain("## Plan: Add greet() helper");
     expect(clipboard).toContain("### Verification");
 
-    // Owner leaves a comment.
-    await addComment(owner, "Owner: looks solid, ship it.");
+    // Owner leaves a comment with Cmd+Enter.
+    await addComment(owner, "Owner: looks solid, ship it.", "meta");
     await expect(owner.getByTestId("plan-comment")).toHaveCount(1);
     await expect(owner.getByTestId("reject-plan")).toBeEnabled();
 
@@ -171,8 +184,8 @@ test.describe("Plan review (HTTP comments)", () => {
     await expect(collab.getByTestId("approve-plan")).toHaveCount(0);
     await expect(collab.getByTestId("reject-plan")).toBeVisible();
 
-    // Collaborator leaves feedback.
-    await addComment(collab, "Reviewer: please also add a docstring.");
+    // Collaborator leaves feedback with Ctrl+Enter.
+    await addComment(collab, "Reviewer: please also add a docstring.", "control");
     await expect(collab.getByTestId("plan-comment")).toHaveCount(2);
 
     // 6. The owner sees the collaborator's comment (polled), then approves and
