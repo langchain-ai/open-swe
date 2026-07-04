@@ -89,6 +89,15 @@ def test_construct_system_prompt_identifies_own_repo() -> None:
     assert "Open SWE" in OPEN_SWE_SHARED_BASE
 
 
+def test_shared_base_requires_terse_slack_replies_with_share_path() -> None:
+    from agent.prompt import OPEN_SWE_SHARED_BASE
+
+    assert "keep every reply terse" in OPEN_SWE_SHARED_BASE
+    assert "Do not paste long output" in OPEN_SWE_SHARED_BASE
+    assert "`save_plan`" in OPEN_SWE_SHARED_BASE
+    assert "plan-review link" in OPEN_SWE_SHARED_BASE
+
+
 def test_harness_profile_replaces_deepagents_base_for_supported_providers() -> None:
     """The Open SWE base prompt is registered per provider and replaces the SDK base."""
     import deepagents.profiles.harness.harness_profiles as hp
