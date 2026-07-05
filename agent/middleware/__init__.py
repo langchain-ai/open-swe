@@ -13,6 +13,7 @@ from .sanitize_openai_responses import SanitizeOpenAIResponsesMiddleware
 from .sanitize_thinking_blocks import SanitizeThinkingBlocksMiddleware
 from .sanitize_tool_inputs import SanitizeToolInputsMiddleware
 from .settle_review_check import settle_review_check_on_exit
+from .subdir_agents import SubdirAgentsReadMiddleware
 from .tool_artifact import ToolArtifactMiddleware
 from .tool_error_handler import ToolErrorMiddleware
 from .workflow_push_guard import WorkflowPushGuardMiddleware
@@ -26,6 +27,7 @@ __all__ = [
     "SanitizeOpenAIResponsesMiddleware",
     "SanitizeThinkingBlocksMiddleware",
     "SanitizeToolInputsMiddleware",
+    "SubdirAgentsReadMiddleware",
     "ToolArtifactMiddleware",
     "ToolErrorMiddleware",
     "WorkflowPushGuardMiddleware",
