@@ -29,16 +29,30 @@ dismissed several times is a rule.
 The current `custom_prompt` is the starting point — you are editing it, not rewriting
 from scratch. Read it (it is summarized for you / available via the dashboard record).
 Keep what still holds, strengthen rules the outcomes confirm, and remove or soften rules
-the outcomes contradict. Optionally do a **light** `gh` top-up
-(`GH_TOKEN=dummy gh ...`) to confirm a pattern, but outcomes are the primary signal — do
-not re-run a full PR crawl.
+the outcomes contradict.
 
 Stay aligned with the reviewer-agent themes in the system prompt.
 
+### Optional light `gh` top-up (non-empty outcomes only)
+
+Only when `read_finding_outcomes` returned at least one `confirmed` or `dismissed`
+entry, you MAY do a **light** `gh` top-up (`GH_TOKEN=dummy gh ...`) to confirm a
+pattern surfaced by those outcomes. Outcomes are the primary signal — do not re-run
+a full PR crawl. If outcomes were empty, skip this subsection entirely; see the
+empty-outcomes short-circuit in section 3.
+
 ## 3. Save
 
-Call `save_review_style_prompt` once with the refined `custom_prompt` (400–1200 words),
-an `analysis_summary` that names what changed this cycle (e.g. "promoted N-pattern after
-3 confirmed fixes; dropped M-pattern after repeated dismissals"), and the
-`top_reviewers` / counts you have. If outcomes were empty and nothing changed, say so in
-`analysis_summary` and re-save the existing prompt unchanged rather than degrading it.
+**Empty-outcomes short-circuit.** If `read_finding_outcomes` returned
+`confirmed: 0` AND `dismissed: 0`, STOP the investigation immediately. Do NOT
+clone the repo, do NOT run `gh pr list` / `gh pr diff` / `git show` / `gh repo
+clone`, do NOT read `CLAUDE.md` or any other repo files. Call
+`save_review_style_prompt` once with the existing `custom_prompt` unchanged and
+an `analysis_summary` that names the empty-outcomes state (e.g. "0 confirmed,
+0 dismissed since last cycle; preserved prior prompt verbatim"). This is a
+nightly cron; repos with no new outcomes must exit in under 10 steps.
+
+Otherwise (non-empty outcomes), call `save_review_style_prompt` once with the
+refined `custom_prompt` (400–1200 words), an `analysis_summary` that names what
+changed this cycle (e.g. "promoted N-pattern after 3 confirmed fixes; dropped
+M-pattern after repeated dismissals"), and the `top_reviewers` / counts you have.
