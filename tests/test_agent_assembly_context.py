@@ -101,3 +101,13 @@ async def test_agent_keeps_message_queue_and_step_limit_middleware() -> None:
     present = {type(m).__name__ for m in middleware}
     assert "check_message_queue_before_model" in present
     assert "notify_step_limit_reached" in present
+
+
+@pytest.mark.asyncio
+async def test_agent_includes_report_platform_issue_tool() -> None:
+    from agent.tools import report_platform_issue
+
+    captured = await _capture_create_deep_agent_kwargs()
+    tools = captured["tools"]
+    assert isinstance(tools, list)
+    assert report_platform_issue in tools
