@@ -314,17 +314,13 @@ def test_thread_summary_omits_pr_when_no_pr_metadata() -> None:
 
 
 def test_thread_summary_exposes_sandbox_id() -> None:
-    summary = thread_api._thread_summary(
-        _thread_with_metadata({"sandbox_id": "sb-abc123"})
-    )
+    summary = thread_api._thread_summary(_thread_with_metadata({"sandbox_id": "sb-abc123"}))
 
     assert summary["sandboxId"] == "sb-abc123"
 
 
 def test_thread_summary_hides_creating_sandbox_sentinel() -> None:
-    summary = thread_api._thread_summary(
-        _thread_with_metadata({"sandbox_id": "__creating__"})
-    )
+    summary = thread_api._thread_summary(_thread_with_metadata({"sandbox_id": "__creating__"}))
 
     assert summary["sandboxId"] is None
 
