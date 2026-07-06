@@ -161,28 +161,6 @@ class SubdirAgentsReadMiddleware(AgentMiddleware):
         self._loaded[self._thread_key(request)].add(file_path)
         return True
 
-    def _load_sync(self, request: ToolCallRequest, file_path: str) -> str | None:
-        if self._mark_direct_agents_read(request, file_path):
-            return None
-        backend = self._backend(request)
-        if backend is None:
-            return None
-        loaded_paths = self._loaded[self._thread_key(request)]
-        loaded: list[tuple[str, str]] = []
-        for path in _candidate_agents_paths(file_path):
-            if path in loaded_paths:
-                continue
-            loaded_paths.add(path)
-            try:
-                text = _extract_text(backend.read(path, offset=0, limit=_MAX_AGENTS_LINES))
-            except Exception:
-                logger.debug("subdir_agents: read failed for %s", path, exc_info=True)
-                continue
-            if text is None:
-                continue
-            loaded.append((path, text))
-        return _system_reminder(file_path, loaded) if loaded else None
-
     async def _load_async(self, request: ToolCallRequest, file_path: str) -> str | None:
         if self._mark_direct_agents_read(request, file_path):
             return None
@@ -204,19 +182,6 @@ class SubdirAgentsReadMiddleware(AgentMiddleware):
                 continue
             loaded.append((path, text))
         return _system_reminder(file_path, loaded) if loaded else None
-
-    def wrap_tool_call(
-        self,
-        request: ToolCallRequest,
-        handler: Callable[[ToolCallRequest], ToolMessage | Command],
-    ) -> ToolMessage | Command:
-        if _tool_name(request) != _READ_FILE:
-            return handler(request)
-        result = handler(request)
-        file_path = _file_path(_tool_args(request))
-        if file_path is None or not _can_append_reminder(result):
-            return result
-        return _append_reminder(result, self._load_sync(request, file_path))
 
     async def awrap_tool_call(
         self,

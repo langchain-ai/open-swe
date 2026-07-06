@@ -25,7 +25,7 @@ class FakeBackend:
         self.results = results
         self.reads: list[str] = []
 
-    def read(self, file_path: str, offset: int = 0, limit: int = 2000) -> Any:
+    async def aread(self, file_path: str, offset: int = 0, limit: int = 2000) -> Any:
         self.reads.append(file_path)
         result = self.results.get(file_path)
         if isinstance(result, Exception):
@@ -33,9 +33,6 @@ class FakeBackend:
         if result is None:
             return FakeReadResult(error="File not found")
         return result
-
-    async def aread(self, file_path: str, offset: int = 0, limit: int = 2000) -> Any:
-        return self.read(file_path, offset, limit)
 
 
 def _request(name: str, args: dict[str, Any], thread_id: str = "t1") -> Any:
@@ -152,3 +149,13 @@ async def test_missing_backend_is_graceful() -> None:
     result = await SubdirAgentsReadMiddleware().awrap_tool_call(request, handler)
 
     assert result.content == "file content"
+
+
+def test_sync_tool_call_is_not_supported() -> None:
+    request = _request("read_file", {"file_path": "/repo/a.py"})
+
+    def handler(_req: Any) -> ToolMessage:
+        return _ok("read_file")
+
+    with pytest.raises(NotImplementedError):
+        SubdirAgentsReadMiddleware().wrap_tool_call(request, handler)
