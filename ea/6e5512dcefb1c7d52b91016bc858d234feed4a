@@ -1,0 +1,19 @@
+AGENTS.md
+  s_1452bdeb08a90e::t_d084cc25e45acb 120
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "ea6e5512dcefb1c7d52b91016bc858d234feed4a",
+  "prompts": {},
+  "sessions": {
+    "s_1452bdeb08a90e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8bfa93f9-66da-47d4-9e86-0a30a13f6bde",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "open-swe[bot] <open-swe@users.noreply.github.com>"
+    }
+  }
+}
