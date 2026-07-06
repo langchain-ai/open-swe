@@ -1,0 +1,26 @@
+ui/playwright.config.ts
+  s_dd56f9b79f79f0::t_76b700c4ddc4a4 22
+  s_dd56f9b79f79f0::t_2d9a1fed1319ff 6-8
+ui/src/components/agents/AgentsSidebar.tsx
+  s_dd56f9b79f79f0::t_cea61bed5b7e03 516,523-528,530-531,534-535,538-541,543-544,546-572
+  s_dd56f9b79f79f0::t_4788d4d6438fb5 500-515,518-522
+  s_dd56f9b79f79f0::t_4b38097bab2ac4 573-574
+ui/e2e/sandbox-id.spec.ts
+  s_dd56f9b79f79f0::t_55d9be89efb8de 108-111
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "f8d582a0ffedb79b3a1f9ada8d6aede1fffeb4d3",
+  "prompts": {},
+  "sessions": {
+    "s_dd56f9b79f79f0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3970a4c2-d299-485a-8de1-8066fd384003",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "open-swe[bot] <open-swe@users.noreply.github.com>"
+    }
+  }
+}
