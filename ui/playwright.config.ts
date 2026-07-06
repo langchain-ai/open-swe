@@ -3,6 +3,9 @@ import { defineConfig, devices } from "@playwright/test"
 const PORT = 3000
 const BASE_URL = `http://localhost:${PORT}`
 
+// Opt-in slow-motion for headed walkthroughs: `SLOWMO=800 pnpm test:e2e --headed`.
+const slowMo = process.env.SLOWMO ? Number(process.env.SLOWMO) : undefined
+
 export default defineConfig({
   testDir: "./e2e",
   timeout: 30_000,
@@ -16,6 +19,7 @@ export default defineConfig({
     // test can assert what landed there.
     permissions: ["clipboard-read", "clipboard-write"],
     trace: "on-first-retry",
+    launchOptions: slowMo ? { slowMo } : {},
   },
   projects: [
     {

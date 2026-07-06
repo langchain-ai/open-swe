@@ -105,4 +105,8 @@ test("iPad: kebab menu copies the sandbox id", async ({ page }, testInfo) => {
 
   const clip = await page.evaluate(() => navigator.clipboard.readText())
   expect(clip).toBe(SANDBOX_ID)
+
+  // Tapping the kebab must open the menu, not follow the row's Link into the
+  // thread.
+  await expect(page).toHaveURL(/\/agents$/)
 })

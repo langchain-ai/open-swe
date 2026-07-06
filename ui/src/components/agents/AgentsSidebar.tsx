@@ -497,75 +497,81 @@ function ThreadRow({
             </button>
           )}
           {/* Tap target for touch devices (iPad), which have no right-click or
-              hover — mirrors the right-click menu so every action is reachable. */}
-          <Menu.Root>
-            <Menu.Trigger
-              render={
-                <button
-                  type="button"
-                  aria-label="Thread actions"
-                  onClick={(e) => {
-                    e.preventDefault()
-                    e.stopPropagation()
-                  }}
-                  className="hidden size-4 shrink-0 items-center justify-center rounded text-[var(--ui-text-dim)] [@media(hover:none)]:flex hover:bg-[var(--ui-panel-2)] hover:text-[var(--ui-text)]"
+              hover — mirrors the right-click menu so every action is reachable.
+              The wrapper cancels the click at the DOM level so tapping the
+              kebab opens the menu instead of navigating the row's Link. */}
+          <span
+            className="contents"
+            onClick={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+            }}
+          >
+            <Menu.Root>
+              <Menu.Trigger
+                render={
+                  <button
+                    type="button"
+                    aria-label="Thread actions"
+                    className="hidden size-4 shrink-0 items-center justify-center rounded text-[var(--ui-text-dim)] hover:bg-[var(--ui-panel-2)] hover:text-[var(--ui-text)] [@media(hover:none)]:flex"
+                  >
+                    <DotsThreeIcon className="size-4" weight="bold" />
+                  </button>
+                }
+              />
+              <Menu.Portal>
+                <Menu.Positioner
+                  align="end"
+                  sideOffset={4}
+                  className="z-50 outline-none"
                 >
-                  <DotsThreeIcon className="size-4" weight="bold" />
-                </button>
-              }
-            />
-            <Menu.Portal>
-              <Menu.Positioner
-                align="end"
-                sideOffset={4}
-                className="z-50 outline-none"
-              >
-                <Menu.Popup className="min-w-[10rem] overflow-hidden rounded-md border border-[var(--ui-border)] bg-popover p-1 text-popover-foreground shadow-md outline-none data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95">
-                  <Menu.Item
-                    disabled={!thread.traceUrl}
-                    onClick={openTrace}
-                    className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-xs outline-none select-none data-highlighted:bg-[var(--ui-sidebar-hover)] data-disabled:pointer-events-none data-disabled:opacity-50"
-                  >
-                    <TreeStructureIcon className="size-3.5" />
-                    Open trace
-                  </Menu.Item>
-                  <Menu.Item
-                    disabled={!thread.sandboxId}
-                    onClick={copySandboxId}
-                    title={thread.sandboxId ?? undefined}
-                    className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-xs outline-none select-none data-highlighted:bg-[var(--ui-sidebar-hover)] data-disabled:pointer-events-none data-disabled:opacity-50"
-                  >
-                    <CopyIcon className="size-3.5" />
-                    Copy sandbox ID
-                  </Menu.Item>
-                  {!isReadOnly && (
+                  <Menu.Popup className="min-w-[10rem] overflow-hidden rounded-md border border-[var(--ui-border)] bg-popover p-1 text-popover-foreground shadow-md outline-none data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95">
                     <Menu.Item
-                      onClick={() => onToggleResolved()}
-                      disabled={resolveThread.isPending}
+                      disabled={!thread.traceUrl}
+                      onClick={openTrace}
                       className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-xs outline-none select-none data-highlighted:bg-[var(--ui-sidebar-hover)] data-disabled:pointer-events-none data-disabled:opacity-50"
                     >
-                      {isResolved ? (
-                        <ArrowCounterClockwiseIcon className="size-3.5" />
-                      ) : (
-                        <CheckCircleIcon className="size-3.5" />
-                      )}
-                      {isResolved ? "Unresolve thread" : "Resolve thread"}
+                      <TreeStructureIcon className="size-3.5" />
+                      Open trace
                     </Menu.Item>
-                  )}
-                  {!isReadOnly && (
                     <Menu.Item
-                      onClick={() => onDelete()}
-                      disabled={isDeleting}
-                      className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-xs text-[var(--ui-danger)] outline-none select-none data-highlighted:bg-[var(--ui-sidebar-hover)] data-disabled:pointer-events-none data-disabled:opacity-50"
+                      disabled={!thread.sandboxId}
+                      onClick={copySandboxId}
+                      title={thread.sandboxId ?? undefined}
+                      className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-xs outline-none select-none data-highlighted:bg-[var(--ui-sidebar-hover)] data-disabled:pointer-events-none data-disabled:opacity-50"
                     >
-                      <TrashIcon className="size-3.5" />
-                      Delete thread
+                      <CopyIcon className="size-3.5" />
+                      Copy sandbox ID
                     </Menu.Item>
-                  )}
-                </Menu.Popup>
-              </Menu.Positioner>
-            </Menu.Portal>
-          </Menu.Root>
+                    {!isReadOnly && (
+                      <Menu.Item
+                        onClick={() => onToggleResolved()}
+                        disabled={resolveThread.isPending}
+                        className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-xs outline-none select-none data-highlighted:bg-[var(--ui-sidebar-hover)] data-disabled:pointer-events-none data-disabled:opacity-50"
+                      >
+                        {isResolved ? (
+                          <ArrowCounterClockwiseIcon className="size-3.5" />
+                        ) : (
+                          <CheckCircleIcon className="size-3.5" />
+                        )}
+                        {isResolved ? "Unresolve thread" : "Resolve thread"}
+                      </Menu.Item>
+                    )}
+                    {!isReadOnly && (
+                      <Menu.Item
+                        onClick={() => onDelete()}
+                        disabled={isDeleting}
+                        className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-xs text-[var(--ui-danger)] outline-none select-none data-highlighted:bg-[var(--ui-sidebar-hover)] data-disabled:pointer-events-none data-disabled:opacity-50"
+                      >
+                        <TrashIcon className="size-3.5" />
+                        Delete thread
+                      </Menu.Item>
+                    )}
+                  </Menu.Popup>
+                </Menu.Positioner>
+              </Menu.Portal>
+            </Menu.Root>
+          </span>
         </ContextMenu.Trigger>
         <ContextMenu.Portal>
           <ContextMenu.Positioner className="z-50 outline-none">
