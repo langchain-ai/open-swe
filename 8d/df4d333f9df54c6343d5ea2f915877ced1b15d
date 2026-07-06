@@ -1,0 +1,19 @@
+tests/test_dashboard_thread_api.py
+  s_dd56f9b79f79f0::t_353f769e8d5e75 317,323
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "8ddf4d333f9df54c6343d5ea2f915877ced1b15d",
+  "prompts": {},
+  "sessions": {
+    "s_dd56f9b79f79f0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3970a4c2-d299-485a-8de1-8066fd384003",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "open-swe[bot] <open-swe@users.noreply.github.com>"
+    }
+  }
+}
