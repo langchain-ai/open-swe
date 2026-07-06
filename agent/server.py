@@ -129,6 +129,7 @@ SANDBOX_POLL_INTERVAL = 1.0
 
 from .utils.sandbox_state import (
     SANDBOX_BACKENDS,
+    get_or_create_sandbox_backend_proxy,
     get_sandbox_id_from_metadata,
     set_sandbox_backend,
     unwrap_sandbox_backend,
@@ -632,10 +633,7 @@ def _browser_subagent(model: BaseChatModel, tools: list[Any]) -> SubAgent:
 
 
 def _get_cached_sandbox_backend(thread_id: str) -> SandboxBackendProtocol:
-    sandbox_backend = SANDBOX_BACKENDS.get(thread_id)
-    if sandbox_backend is None:
-        raise RuntimeError(f"No sandbox backend cached for thread {thread_id}")
-    return sandbox_backend
+    return get_or_create_sandbox_backend_proxy(thread_id)
 
 
 async def _observability_authorized(config: RunnableConfig, profile_login: str | None) -> bool:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from deepagents.backends.protocol import (
@@ -17,6 +18,7 @@ from deepagents.backends.protocol import (
     WriteResult,
 )
 from langgraph.config import get_config
+from langgraph_sdk import get_client
 
 from .sandbox import create_sandbox
 
@@ -26,31 +28,68 @@ logger = logging.getLogger(__name__)
 class SandboxBackendProxy(SandboxBackendProtocol):
     """Stable per-thread backend handle whose target can be replaced."""
 
-    def __init__(self, backend: SandboxBackendProtocol) -> None:
+    def __init__(
+        self,
+        backend: SandboxBackendProtocol | None = None,
+        *,
+        thread_id: str | None = None,
+    ) -> None:
         self._backend = backend
+        self._thread_id = thread_id
+        self._lock: asyncio.Lock | None = None
 
     @property
     def current(self) -> SandboxBackendProtocol:
-        return self._backend
+        return self._get_backend()
 
     @property
     def id(self) -> str:
-        return self._backend.id
+        return self._get_backend().id
 
     def replace_backend(self, backend: SandboxBackendProtocol) -> None:
         self._backend = backend
 
+    def _get_backend(self) -> SandboxBackendProtocol:
+        if self._backend is None:
+            suffix = f" for thread {self._thread_id}" if self._thread_id else ""
+            raise RuntimeError(f"No sandbox backend cached{suffix}")
+        return self._backend
+
+    def _get_lock(self) -> asyncio.Lock:
+        if self._lock is None:
+            self._lock = asyncio.Lock()
+        return self._lock
+
+    async def _aget_backend(self) -> SandboxBackendProtocol:
+        if self._backend is not None:
+            return self._backend
+        if not self._thread_id:
+            raise RuntimeError("No sandbox backend cached")
+
+        async with self._get_lock():
+            if self._backend is not None:
+                return self._backend
+
+            sandbox_id = await get_sandbox_id_from_metadata(self._thread_id)
+            if not sandbox_id:
+                raise ValueError(f"Missing sandbox_id in thread metadata for {self._thread_id}")
+
+            logger.info("Reconnecting sandbox backend for thread %s from metadata", self._thread_id)
+            self._backend = await create_sandbox(sandbox_id)
+            SANDBOX_BACKENDS[self._thread_id] = self
+            return self._backend
+
     def ls(self, path: str) -> LsResult:
-        return self._backend.ls(path)
+        return self._get_backend().ls(path)
 
     async def als(self, path: str) -> LsResult:
-        return await self._backend.als(path)
+        return await (await self._aget_backend()).als(path)
 
     def read(self, file_path: str, offset: int = 0, limit: int = 2000) -> ReadResult:
-        return self._backend.read(file_path, offset, limit)
+        return self._get_backend().read(file_path, offset, limit)
 
     async def aread(self, file_path: str, offset: int = 0, limit: int = 2000) -> ReadResult:
-        return await self._backend.aread(file_path, offset, limit)
+        return await (await self._aget_backend()).aread(file_path, offset, limit)
 
     def grep(
         self,
@@ -58,7 +97,7 @@ class SandboxBackendProxy(SandboxBackendProtocol):
         path: str | None = None,
         glob: str | None = None,
     ) -> GrepResult:
-        return self._backend.grep(pattern, path, glob)
+        return self._get_backend().grep(pattern, path, glob)
 
     async def agrep(
         self,
@@ -66,19 +105,19 @@ class SandboxBackendProxy(SandboxBackendProtocol):
         path: str | None = None,
         glob: str | None = None,
     ) -> GrepResult:
-        return await self._backend.agrep(pattern, path, glob)
+        return await (await self._aget_backend()).agrep(pattern, path, glob)
 
     def glob(self, pattern: str, path: str = "/") -> GlobResult:
-        return self._backend.glob(pattern, path)
+        return self._get_backend().glob(pattern, path)
 
     async def aglob(self, pattern: str, path: str = "/") -> GlobResult:
-        return await self._backend.aglob(pattern, path)
+        return await (await self._aget_backend()).aglob(pattern, path)
 
     def write(self, file_path: str, content: str) -> WriteResult:
-        return self._backend.write(file_path, content)
+        return self._get_backend().write(file_path, content)
 
     async def awrite(self, file_path: str, content: str) -> WriteResult:
-        return await self._backend.awrite(file_path, content)
+        return await (await self._aget_backend()).awrite(file_path, content)
 
     def edit(
         self,
@@ -87,7 +126,7 @@ class SandboxBackendProxy(SandboxBackendProtocol):
         new_string: str,
         replace_all: bool = False,
     ) -> EditResult:
-        return self._backend.edit(file_path, old_string, new_string, replace_all)
+        return self._get_backend().edit(file_path, old_string, new_string, replace_all)
 
     async def aedit(
         self,
@@ -96,25 +135,27 @@ class SandboxBackendProxy(SandboxBackendProtocol):
         new_string: str,
         replace_all: bool = False,
     ) -> EditResult:
-        return await self._backend.aedit(file_path, old_string, new_string, replace_all)
+        return await (await self._aget_backend()).aedit(
+            file_path, old_string, new_string, replace_all
+        )
 
     def upload_files(self, files: list[tuple[str, bytes]]) -> list[FileUploadResponse]:
-        return self._backend.upload_files(files)
+        return self._get_backend().upload_files(files)
 
     async def aupload_files(self, files: list[tuple[str, bytes]]) -> list[FileUploadResponse]:
-        return await self._backend.aupload_files(files)
+        return await (await self._aget_backend()).aupload_files(files)
 
     def download_files(self, paths: list[str]) -> list[FileDownloadResponse]:
-        return self._backend.download_files(paths)
+        return self._get_backend().download_files(paths)
 
     async def adownload_files(self, paths: list[str]) -> list[FileDownloadResponse]:
-        return await self._backend.adownload_files(paths)
+        return await (await self._aget_backend()).adownload_files(paths)
 
     def execute(self, command: str, *, timeout: int | None = None) -> ExecuteResponse:
-        return self._backend.execute(command, timeout=timeout)
+        return self._get_backend().execute(command, timeout=timeout)
 
     async def aexecute(self, command: str, *, timeout: int | None = None) -> ExecuteResponse:
-        return await self._backend.aexecute(command, timeout=timeout)
+        return await (await self._aget_backend()).aexecute(command, timeout=timeout)
 
 
 # Thread ID -> stable SandboxBackendProxy, shared between server.py and middleware.
@@ -140,9 +181,19 @@ def set_sandbox_backend(
         existing.replace_backend(sandbox_backend)
         return existing
 
-    proxy = SandboxBackendProxy(sandbox_backend)
+    proxy = SandboxBackendProxy(sandbox_backend, thread_id=thread_id)
     SANDBOX_BACKENDS[thread_id] = proxy
     return proxy
+
+
+def get_or_create_sandbox_backend_proxy(thread_id: str) -> SandboxBackendProxy:
+    sandbox_backend = SANDBOX_BACKENDS.get(thread_id)
+    if sandbox_backend:
+        return sandbox_backend
+
+    sandbox_backend = SandboxBackendProxy(thread_id=thread_id)
+    SANDBOX_BACKENDS[thread_id] = sandbox_backend
+    return sandbox_backend
 
 
 def clear_sandbox_backend(thread_id: str) -> None:
@@ -153,13 +204,26 @@ async def get_sandbox_id_from_metadata(thread_id: str) -> str | None:
     """Fetch sandbox_id from thread metadata."""
     try:
         config = get_config()
+        metadata = config.get("metadata", {})
+        if isinstance(metadata, dict):
+            sandbox_id = metadata.get("sandbox_id")
+            if isinstance(sandbox_id, str):
+                return sandbox_id
     except Exception:
-        logger.exception("Failed to read thread metadata for sandbox")
+        logger.debug(
+            "Failed to read inline thread metadata for sandbox; falling back to live lookup",
+            exc_info=True,
+        )
+
+    try:
+        client = get_client()
+        thread = await client.threads.get(thread_id)
+    except Exception:
+        logger.exception("Failed to fetch live thread metadata for sandbox")
         return None
-    metadata = config.get("metadata", {})
-    if not isinstance(metadata, dict):
-        return None
-    sandbox_id = metadata.get("sandbox_id")
+
+    metadata = thread.get("metadata", {}) if isinstance(thread, dict) else {}
+    sandbox_id = metadata.get("sandbox_id") if isinstance(metadata, dict) else None
     return sandbox_id if isinstance(sandbox_id, str) else None
 
 
