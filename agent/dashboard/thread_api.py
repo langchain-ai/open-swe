@@ -1679,7 +1679,7 @@ async def get_dashboard_thread_recovery_patch(
         raise HTTPException(404, "thread has no recoverable sandbox")
 
     try:
-        sandbox = await asyncio.to_thread(create_sandbox, sandbox_id)
+        sandbox = await create_sandbox(sandbox_id)
     except Exception as exc:  # noqa: BLE001
         logger.debug("Could not connect to sandbox %s for recovery", sandbox_id, exc_info=True)
         raise HTTPException(502, "could not connect to thread sandbox") from exc

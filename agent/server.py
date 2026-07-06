@@ -51,7 +51,7 @@ from .dashboard.user_mappings import email_for_login
 from .integrations.corridor_mcp import load_corridor_tools
 from .integrations.currents_tools import load_currents_tools
 from .integrations.datadog_mcp import load_datadog_tools
-from .integrations.langsmith import _configure_github_proxy
+from .integrations.langsmith import _configure_github_proxy, get_async_sandbox_client
 from .integrations.langsmith_tools import load_langsmith_tools
 from .integrations.notion_mcp import load_notion_tools
 from .integrations.stagehand_browser import load_browser_tools
@@ -174,20 +174,21 @@ async def _start_langsmith_sandbox_if_needed(sandbox_backend: SandboxBackendProt
     if not isinstance(current_backend, LangSmithSandbox):
         return
 
-    sandbox = current_backend._sandbox  # noqa: SLF001
-    status = await asyncio.to_thread(sandbox._client.get_sandbox_status, sandbox.name)  # noqa: SLF001
-    status_name = getattr(status, "status", status)
-    status_name = getattr(status_name, "value", status_name)
-    status_text = str(status_name or "").lower()
-    if status_text in {"running", "ready"}:
-        return
+    name = current_backend.id
+    async with get_async_sandbox_client() as client:
+        status = await client.get_sandbox_status(name)
+        status_name = getattr(status, "status", status)
+        status_name = getattr(status_name, "value", status_name)
+        status_text = str(status_name or "").lower()
+        if status_text in {"running", "ready"}:
+            return
 
-    logger.info(
-        "Starting LangSmith sandbox %s before proxy refresh (status=%s)",
-        current_backend.id,
-        status_text or "unknown",
-    )
-    await asyncio.to_thread(sandbox.start)
+        logger.info(
+            "Starting LangSmith sandbox %s before proxy refresh (status=%s)",
+            name,
+            status_text or "unknown",
+        )
+        await client.start_sandbox(name)
 
 
 async def _resolve_proxy_token(
@@ -242,7 +243,7 @@ async def _create_sandbox_with_proxy(
 ) -> SandboxBackendProtocol:
     """Create a new sandbox with GitHub proxy auth configured."""
     snapshot_id = await _resolve_snapshot_id_for_repo(repo)
-    sandbox_backend = await asyncio.to_thread(create_sandbox, snapshot_id=snapshot_id)
+    sandbox_backend = await create_sandbox(snapshot_id=snapshot_id)
 
     sandbox_type = os.getenv("SANDBOX_TYPE", "langsmith")
     if sandbox_type == "langsmith":
@@ -252,7 +253,7 @@ async def _create_sandbox_with_proxy(
             logger.error(msg)
             raise ValueError(msg)
         await _start_langsmith_sandbox_if_needed(sandbox_backend)
-        await asyncio.to_thread(_configure_github_proxy, sandbox_backend.id, token)
+        await _configure_github_proxy(sandbox_backend.id, token)
         record_proxy_token_expiry(
             thread_id,
             expires_at,
@@ -284,7 +285,7 @@ async def _refresh_github_proxy(
 
     current_backend = unwrap_sandbox_backend(sandbox_backend)
     await _start_langsmith_sandbox_if_needed(current_backend)
-    await asyncio.to_thread(_configure_github_proxy, current_backend.id, token)
+    await _configure_github_proxy(current_backend.id, token)
     record_proxy_token_expiry(
         thread_id,
         expires_at,
@@ -503,7 +504,7 @@ async def ensure_sandbox_for_thread(
         logger.info("Connecting to existing sandbox %s", sandbox_id)
         created_replacement_sandbox = False
         try:
-            sandbox_backend = await asyncio.to_thread(create_sandbox, sandbox_id)
+            sandbox_backend = await create_sandbox(sandbox_id)
         except Exception:
             logger.warning("Failed to connect to existing sandbox %s, creating new one", sandbox_id)
             await client.threads.update(thread_id=thread_id, metadata=_creating_metadata())

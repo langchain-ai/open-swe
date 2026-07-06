@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 
 from deepagents.backends.protocol import (
@@ -174,5 +173,5 @@ async def get_sandbox_backend(thread_id: str) -> SandboxBackendProxy:
     if not sandbox_id:
         raise ValueError(f"Missing sandbox_id in thread metadata for {thread_id}")
 
-    sandbox_backend = await asyncio.to_thread(create_sandbox, sandbox_id)
+    sandbox_backend = await create_sandbox(sandbox_id)
     return set_sandbox_backend(thread_id, sandbox_backend)
