@@ -1,9 +1,10 @@
 """Main entry point and graph factory for the Open SWE agent.
 
-Kept deliberately small: resolve the model, ensure one sandbox for the thread,
-build a curated tool list, and hand a lean middleware stack to
-``create_deep_agent``. All per-thread state lives in the sandbox + thread
-metadata; the agent itself is stateless.
+Resolves the model, ensures one sandbox per thread (simplified
+get-or-create-then-reconnect, no cross-process ``__creating__`` sentinel),
+builds the curated tool list plus optional integrations, and wires the
+middleware stack. All per-thread state lives in the sandbox + thread metadata;
+the agent itself is stateless.
 """
 # ruff: noqa: E402
 
@@ -34,6 +35,7 @@ from langchain.agents.middleware import ModelCallLimitMiddleware
 from langchain_core.language_models import BaseChatModel
 from langsmith.sandbox import SandboxClientError
 
+from .dashboard.admin import is_observability_authorized
 from .dashboard.agent_overrides import (
     load_profile,
     normalize_profile_overrides,
@@ -49,10 +51,18 @@ from .dashboard.team_settings import (
     get_team_default_model_pair,
     get_team_default_repo,
 )
+from .dashboard.user_mappings import email_for_login
+from .integrations.corridor_mcp import load_corridor_tools
+from .integrations.currents_tools import load_currents_tools
+from .integrations.datadog_mcp import load_datadog_tools
 from .integrations.langsmith import _configure_github_proxy, get_async_sandbox_client
+from .integrations.langsmith_tools import load_langsmith_tools
+from .integrations.notion_mcp import load_notion_tools
+from .integrations.stagehand_browser import load_browser_tools
 from .middleware import (
     BasePrepareRunMiddleware,
     ModelFallbackMiddleware,
+    PlanModeMiddleware,
     SanitizeFireworksMessagesMiddleware,
     SanitizeOpenAIResponsesMiddleware,
     SanitizeThinkingBlocksMiddleware,
@@ -67,6 +77,7 @@ from .middleware import (
 )
 from .prompt import construct_system_prompt
 from .tools import (
+    enter_plan_mode,
     fetch_url,
     http_request,
     linear_comment,
@@ -78,6 +89,7 @@ from .tools import (
     linear_update_issue,
     open_pull_request,
     request_pr_review,
+    save_plan,
     schedule_thread_wakeup,
     slack_add_reaction,
     slack_read_thread_messages,
@@ -92,7 +104,7 @@ from .utils.authorship import (
     OPEN_SWE_BOT_NAME,
     resolve_triggering_user_identity,
 )
-from .utils.dashboard_links import dashboard_thread_url
+from .utils.dashboard_links import dashboard_plan_url, dashboard_thread_url
 from .utils.github_app import (
     BASE_RUNTIME_PROXY_TOKEN_PERMISSIONS,
     RUNTIME_PROXY_TOKEN_PERMISSIONS,
@@ -474,6 +486,29 @@ DEFAULT_LLM_MAX_TOKENS = 64_000
 DEFAULT_RECURSION_LIMIT = 9_999
 MODEL_CALL_RECURSION_LIMIT = 5_000
 
+# Mutating external tools hidden from the model while plan mode is active so it
+# can only research and propose a plan. File edit tools stay available so the
+# agent can draft and revise a plan under `/workspace/plans/`; prompt guidance
+# restricts them to that plan file outside cloned repositories. `execute` stays
+# available; plan-mode shell discipline (no mutating commands) is instructed via
+# the system prompt rather than enforced. `http_request` is excluded because it
+# can POST/PUT/PATCH/DELETE to external services — read-only web research goes
+# through `web_search` / `fetch_url`. `task` is excluded because the
+# general-purpose subagent is built with its own tools and does not inherit this
+# exclusion, so delegating to it would bypass the read-only intent.
+PLAN_MODE_EXCLUDED_TOOLS: frozenset[str] = frozenset(
+    {
+        "task",
+        "http_request",
+        "open_pull_request",
+        "request_pr_review",
+        "slack_start_new_thread",
+        "linear_create_issue",
+        "linear_update_issue",
+        "linear_delete_issue",
+    }
+)
+
 
 def _general_purpose_subagent(model: BaseChatModel) -> SubAgent:
     return {
@@ -484,12 +519,109 @@ def _general_purpose_subagent(model: BaseChatModel) -> SubAgent:
     }
 
 
+BROWSER_SUBAGENT_DESCRIPTION = (
+    "Drives a real browser (Stagehand, running locally or on Browserbase) to "
+    "accomplish tasks that require interacting with live web pages: logging "
+    "into dashboards, clicking through flows, filling forms, reading "
+    "JS-rendered content, reproducing UI bugs, and extracting structured data. "
+    "Prefer the `fetch_url` tool for static page reads; delegate here only when "
+    "the task needs interaction or JavaScript-rendered content."
+)
+
+BROWSER_SUBAGENT_SYSTEM_PROMPT = """You are a browser automation specialist. You control a real Chromium \
+browser via Stagehand tools.
+
+Workflow:
+1. Call `browser_navigate` to open the browser and go to the starting URL.
+2. Use `browser_observe` to find actionable elements before acting when the \
+page is unfamiliar.
+3. Use `browser_act` for clicks/typing/navigation with concise \
+natural-language instructions (one action per call).
+4. Use `browser_extract` to pull the specific data the caller asked for, \
+passing a JSON schema when you need a precise shape.
+5. Always call `browser_close` when finished to release the session.
+
+Guidance:
+- Take one concrete step at a time and verify the result before the next.
+- Keep instructions specific and grounded in what `browser_observe`/\
+`browser_extract` returned.
+- Do not exfiltrate credentials or secrets. Only act on the task you were \
+delegated.
+- Return a concise summary of what you did and the data you extracted; include \
+the session replay URL if one was returned."""
+
+
+def _browser_subagent(model: BaseChatModel, tools: list[Any]) -> SubAgent:
+    return {
+        "name": "browser",
+        "description": BROWSER_SUBAGENT_DESCRIPTION,
+        "system_prompt": BROWSER_SUBAGENT_SYSTEM_PROMPT,
+        "tools": tools,
+        "model": model,
+    }
+
+
 def _get_cached_sandbox_backend(
     thread_id: str,
     *,
     reconnect: Callable[[], Awaitable[SandboxBackendProtocol]] | None = None,
 ) -> SandboxBackendProtocol:
     return get_or_create_sandbox_backend_proxy(thread_id, reconnect=reconnect)
+
+
+async def _observability_authorized(config: RunnableConfig, profile_login: str | None) -> bool:
+    """Whether the triggering user may use the team observability tools.
+
+    Gates on admin / explicitly-authorized emails so prompt-injected runs from
+    untrusted contributors cannot reach the team's Datadog/LangSmith data.
+    """
+    configurable = (config or {}).get("configurable") or {}
+    slack_thread = configurable.get("slack_thread") or {}
+    config_login = configurable.get("github_login")
+    candidate_login = profile_login or (config_login if isinstance(config_login, str) else None)
+    candidate_emails = [
+        configurable.get("user_email"),
+        slack_thread.get("triggering_user_email"),
+    ]
+    if any(is_observability_authorized(email, login=candidate_login) for email in candidate_emails):
+        return True
+    return is_observability_authorized(
+        await email_for_login(candidate_login), login=candidate_login
+    )
+
+
+async def _cached_tool_loader(key: str, ttl_seconds: float, loader: Any) -> list[Any]:
+    try:
+        return await ttl_cache.cached(key, ttl_seconds, loader)
+    except Exception:
+        logger.warning("Failed to load cached tools for %s", key, exc_info=True)
+        return []
+
+
+async def _load_observability_tools(authorized: bool) -> list[Any]:
+    """Datadog (MCP) + LangSmith read tools when the team has connected them.
+
+    Credentials live server-side in team settings; the sandbox never holds them.
+    Only loaded for authorized (admin / allow-listed) triggering users so an
+    untrusted run cannot exfiltrate team observability data. Failures degrade to
+    no tools so the agent still starts.
+    """
+    if not authorized:
+        return []
+    datadog_tools, langsmith_tools = await asyncio.gather(
+        _cached_tool_loader(f"tools:datadog:{id(load_datadog_tools)}", 600, load_datadog_tools),
+        _cached_tool_loader(
+            f"tools:langsmith:{id(load_langsmith_tools)}", 600, load_langsmith_tools
+        ),
+    )
+    return [*datadog_tools, *langsmith_tools]
+
+
+async def _load_corridor_mcp_tools() -> list[Any]:
+    """Corridor MCP tools when the deployment environment has configured them."""
+    return await _cached_tool_loader(
+        f"tools:corridor:{id(load_corridor_tools)}", 600, load_corridor_tools
+    )
 
 
 async def _cached_team_default_model_pair(kind: str):
@@ -530,6 +662,8 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         linear_project_id: str,
         linear_issue_number: str,
         create_prs: bool,
+        plan_mode: bool,
+        corridor_enabled: bool,
     ) -> None:
         self._thread_id = thread_id
         self._config = config
@@ -541,6 +675,8 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         self._linear_project_id = linear_project_id
         self._linear_issue_number = linear_issue_number
         self._create_prs = create_prs
+        self._plan_mode = plan_mode
+        self._corridor_enabled = corridor_enabled
 
     def _prepare_config_fingerprint(self) -> Any:
         configurable = (self._config or {}).get("configurable") or {}
@@ -549,6 +685,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             "thread_id": self._thread_id,
             "source": self._source,
             "repo": configurable.get("repo"),
+            "plan_mode": self._plan_mode,
             "model": self._model_id,
             "effort": self._effort,
         }
@@ -579,6 +716,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                     "model": self._model_id,
                     "effort": self._effort,
                     "source": self._source,
+                    "plan_mode": self._plan_mode,
                 },
             )
             await record_agent_thread_usage(
@@ -603,8 +741,11 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 triggering_user_identity=triggering_user_identity,
                 create_prs=self._create_prs,
                 default_repo=prompt_default_repo,
+                plan_mode=self._plan_mode,
+                plan_url=dashboard_plan_url(self._thread_id),
                 repo_custom_instructions=repo_custom_instructions,
                 thread_url=dashboard_thread_url(self._thread_id),
+                corridor_enabled=self._corridor_enabled,
             ),
         }
 
@@ -727,6 +868,41 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     user_email = configurable.get("user_email")
     user_email = user_email if isinstance(user_email, str) else ""
 
+    # Plan mode is entered only when the model decides to (the `enter_plan_mode`
+    # tool sets it in run state). The configurable value just carries that
+    # decision across a thread's messages and the approve/reject follow-ups; a
+    # fresh run with nothing set starts out of plan mode. Installed
+    # unconditionally and state-aware: it also restricts tools after a mid-run
+    # `enter_plan_mode` call, not just when plan mode is set up front.
+    plan_mode = configurable.get("plan_mode") is True
+    if plan_mode:
+        logger.info("Plan mode enabled for thread %s", thread_id)
+    plan_mode_middleware: list[Any] = [
+        PlanModeMiddleware(excluded=PLAN_MODE_EXCLUDED_TOOLS, initial=plan_mode)
+    ]
+
+    observability_tools = await _load_observability_tools(
+        await _observability_authorized(config, profile_login)
+    )
+    corridor_tools = await _load_corridor_mcp_tools()
+    browser_tools = load_browser_tools()
+
+    currents_tools: list[Any] = []
+    notion_tools: list[Any] = []
+    if profile_login:
+        currents_tools, notion_tools = await asyncio.gather(
+            _cached_tool_loader(
+                f"tools:currents:{profile_login}:{id(load_currents_tools)}",
+                300,
+                lambda: load_currents_tools(profile_login),
+            ),
+            _cached_tool_loader(
+                f"tools:notion:{profile_login}:{id(load_notion_tools)}",
+                300,
+                lambda: load_notion_tools(profile_login),
+            ),
+        )
+
     logger.info("Returning agent with sandbox for thread %s", thread_id)
     main_model = make_model(model_id, use_gateway=use_gateway, **model_kwargs)
     subagent_model = make_model(subagent_model_id, use_gateway=use_gateway, **subagent_model_kwargs)
@@ -737,6 +913,8 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             http_request,
             fetch_url,
             web_search,
+            enter_plan_mode,
+            save_plan,
             linear_comment,
             linear_create_issue,
             linear_delete_issue,
@@ -751,9 +929,14 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             slack_read_thread_messages,
             slack_start_new_thread,
             slack_thread_reply,
+            *corridor_tools,
+            *observability_tools,
+            *currents_tools,
+            *notion_tools,
         ],
         subagents=[
             _general_purpose_subagent(subagent_model),
+            *([_browser_subagent(subagent_model, browser_tools)] if browser_tools else []),
         ],
         backend=backend_factory,
         middleware=[
@@ -768,6 +951,8 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 linear_project_id=linear_project_id,
                 linear_issue_number=linear_issue_number,
                 create_prs=always_create_prs,
+                plan_mode=plan_mode,
+                corridor_enabled=bool(corridor_tools),
             ),
             SanitizeToolInputsMiddleware(),
             ModelCallLimitMiddleware(run_limit=MODEL_CALL_RECURSION_LIMIT, exit_behavior="end"),
@@ -779,6 +964,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             SlackAssistantStatusMiddleware(),
             notify_step_limit_reached,
             *fallback_middleware,
+            *plan_mode_middleware,
             SanitizeOpenAIResponsesMiddleware(),
             SanitizeFireworksMessagesMiddleware(),
             SanitizeThinkingBlocksMiddleware(),

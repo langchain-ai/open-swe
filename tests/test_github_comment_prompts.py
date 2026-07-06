@@ -129,6 +129,14 @@ def test_construct_system_prompt_omits_corridor_prompt_by_default() -> None:
     assert "Corridor Security Analysis" not in prompt
 
 
+def test_construct_system_prompt_includes_corridor_prompt_when_enabled() -> None:
+    prompt = construct_system_prompt(working_dir="/workspace", corridor_enabled=True)
+
+    assert "<corridor>" in prompt
+    assert "Corridor Security Analysis" in prompt
+    assert "analyzePlan" in prompt
+
+
 def test_construct_system_prompt_omits_collaboration_section_without_identity() -> None:
     prompt = construct_system_prompt(working_dir="/workspace")
 
