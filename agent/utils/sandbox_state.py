@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Awaitable, Callable
 
 from deepagents.backends.protocol import (
     EditResult,
@@ -33,9 +34,11 @@ class SandboxBackendProxy(SandboxBackendProtocol):
         backend: SandboxBackendProtocol | None = None,
         *,
         thread_id: str | None = None,
+        reconnect: Callable[[], Awaitable[SandboxBackendProtocol]] | None = None,
     ) -> None:
         self._backend = backend
         self._thread_id = thread_id
+        self._reconnect = reconnect
         self._lock: asyncio.Lock | None = None
 
     @property
@@ -48,6 +51,16 @@ class SandboxBackendProxy(SandboxBackendProtocol):
 
     def replace_backend(self, backend: SandboxBackendProtocol) -> None:
         self._backend = backend
+
+    @property
+    def has_backend(self) -> bool:
+        return self._backend is not None
+
+    def set_reconnect(
+        self,
+        reconnect: Callable[[], Awaitable[SandboxBackendProtocol]] | None,
+    ) -> None:
+        self._reconnect = reconnect
 
     def _get_backend(self) -> SandboxBackendProtocol:
         if self._backend is None:
@@ -68,6 +81,12 @@ class SandboxBackendProxy(SandboxBackendProtocol):
 
         async with self._get_lock():
             if self._backend is not None:
+                return self._backend
+
+            if self._reconnect is not None:
+                logger.info("Reconnecting sandbox backend for thread %s", self._thread_id)
+                sandbox_backend = await self._reconnect()
+                self._backend = unwrap_sandbox_backend(sandbox_backend)
                 return self._backend
 
             sandbox_id = await get_sandbox_id_from_metadata(self._thread_id)
@@ -186,12 +205,17 @@ def set_sandbox_backend(
     return proxy
 
 
-def get_or_create_sandbox_backend_proxy(thread_id: str) -> SandboxBackendProxy:
+def get_or_create_sandbox_backend_proxy(
+    thread_id: str,
+    *,
+    reconnect: Callable[[], Awaitable[SandboxBackendProtocol]] | None = None,
+) -> SandboxBackendProxy:
     sandbox_backend = SANDBOX_BACKENDS.get(thread_id)
     if sandbox_backend:
+        sandbox_backend.set_reconnect(reconnect)
         return sandbox_backend
 
-    sandbox_backend = SandboxBackendProxy(thread_id=thread_id)
+    sandbox_backend = SandboxBackendProxy(thread_id=thread_id, reconnect=reconnect)
     SANDBOX_BACKENDS[thread_id] = sandbox_backend
     return sandbox_backend
 
@@ -230,7 +254,7 @@ async def get_sandbox_id_from_metadata(thread_id: str) -> str | None:
 async def get_sandbox_backend(thread_id: str) -> SandboxBackendProxy:
     """Get sandbox backend from cache, or connect using thread metadata."""
     sandbox_backend = SANDBOX_BACKENDS.get(thread_id)
-    if sandbox_backend:
+    if sandbox_backend and sandbox_backend.has_backend:
         return sandbox_backend
 
     sandbox_id = await get_sandbox_id_from_metadata(thread_id)

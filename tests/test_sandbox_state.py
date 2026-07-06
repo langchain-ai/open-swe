@@ -61,6 +61,38 @@ async def test_sandbox_proxy_reconnects_from_metadata_once(monkeypatch: pytest.M
 
 
 @pytest.mark.asyncio
+async def test_sandbox_proxy_uses_registered_reconnect_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    thread_id = "thread-1"
+    clear_sandbox_backend(thread_id)
+    reconnected: list[str] = []
+
+    async def reconnect():
+        reconnected.append(thread_id)
+        await asyncio.sleep(0)
+        return _FakeSandboxBackend()
+
+    async def create_sandbox(sandbox_id: str):
+        raise AssertionError(f"unexpected direct reconnect to {sandbox_id}")
+
+    monkeypatch.setattr("agent.utils.sandbox_state.create_sandbox", create_sandbox)
+
+    proxy = get_or_create_sandbox_backend_proxy(thread_id, reconnect=reconnect)
+    results = await asyncio.gather(*(proxy.aexecute(f"cmd-{idx}") for idx in range(5)))
+
+    assert reconnected == [thread_id]
+    assert [result.output for result in results] == [
+        "sandbox-1: cmd-0: None",
+        "sandbox-1: cmd-1: None",
+        "sandbox-1: cmd-2: None",
+        "sandbox-1: cmd-3: None",
+        "sandbox-1: cmd-4: None",
+    ]
+    clear_sandbox_backend(thread_id)
+
+
+@pytest.mark.asyncio
 async def test_sandbox_id_metadata_falls_back_to_live_thread(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
