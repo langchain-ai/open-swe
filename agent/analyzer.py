@@ -102,6 +102,19 @@ class PrepareAnalyzerRunMiddleware(BasePrepareRunMiddleware):
         self._thread_id = thread_id
         self._config = config
 
+    def _prepare_config_fingerprint(self) -> object:
+        configurable = self._config.get("configurable", {})
+        return {
+            "prepare_run_id": configurable.get("prepare_run_id")
+            if isinstance(configurable, dict)
+            else None,
+            "thread_id": self._thread_id,
+            "full_name": configurable.get("review_style_full_name")
+            if isinstance(configurable, dict)
+            else None,
+            "mode": configurable.get("analyzer_mode") if isinstance(configurable, dict) else None,
+        }
+
     async def _prepare(self, state: dict, runtime: object) -> dict:  # noqa: ARG002
         sandbox_backend = await ensure_sandbox_for_thread(self._thread_id)
         work_dir = await aresolve_sandbox_work_dir(sandbox_backend)

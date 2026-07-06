@@ -112,6 +112,23 @@ class PrepareChatRunMiddleware(BasePrepareRunMiddleware):
     def __init__(self, *, config: RunnableConfig) -> None:
         self._config = config
 
+    def _prepare_config_fingerprint(self) -> object:
+        configurable = self._config.get("configurable", {})
+        return {
+            "prepare_run_id": configurable.get("prepare_run_id")
+            if isinstance(configurable, dict)
+            else None,
+            "repo_owner": configurable.get("chat_repo_owner")
+            if isinstance(configurable, dict)
+            else None,
+            "repo_name": configurable.get("chat_repo_name")
+            if isinstance(configurable, dict)
+            else None,
+            "pr_number": configurable.get("chat_pr_number")
+            if isinstance(configurable, dict)
+            else None,
+        }
+
     async def _prepare(self, state: dict, runtime: object) -> dict:  # noqa: ARG002
         configurable = self._config["configurable"]
         repo_owner = str(configurable.get("chat_repo_owner") or "")

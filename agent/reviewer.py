@@ -885,6 +885,29 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
         self._config = config
         self._use_gateway = use_gateway
 
+    def _prepare_config_fingerprint(self) -> Any:
+        configurable = self._config.get("configurable", {})
+        repo_config = configurable.get("repo") if isinstance(configurable, dict) else None
+        return {
+            "prepare_run_id": configurable.get("prepare_run_id")
+            if isinstance(configurable, dict)
+            else None,
+            "thread_id": self._thread_id,
+            "repo": repo_config,
+            "pr_number": configurable.get("pr_number") if isinstance(configurable, dict) else None,
+            "base_sha": configurable.get("base_sha") if isinstance(configurable, dict) else None,
+            "head_sha": configurable.get("head_sha") if isinstance(configurable, dict) else None,
+            "last_reviewed_sha": configurable.get("last_reviewed_sha")
+            if isinstance(configurable, dict)
+            else None,
+            "reviewer_event": configurable.get("reviewer_event")
+            if isinstance(configurable, dict)
+            else None,
+            "finding_reply_id": configurable.get("finding_reply_id")
+            if isinstance(configurable, dict)
+            else None,
+        }
+
     async def _prepare(self, state: dict[str, Any], runtime: object) -> dict[str, Any]:
         configurable = self._config["configurable"]
         repo_config = configurable.get("repo") or {}

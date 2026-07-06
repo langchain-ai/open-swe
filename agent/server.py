@@ -747,6 +747,18 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         self._plan_mode = plan_mode
         self._corridor_enabled = corridor_enabled
 
+    def _prepare_config_fingerprint(self) -> Any:
+        configurable = (self._config or {}).get("configurable") or {}
+        return {
+            "prepare_run_id": configurable.get("prepare_run_id"),
+            "thread_id": self._thread_id,
+            "source": self._source,
+            "repo": configurable.get("repo"),
+            "plan_mode": self._plan_mode,
+            "model": self._model_id,
+            "effort": self._effort,
+        }
+
     async def _prepare(self, state: dict[str, Any], runtime: object) -> dict[str, Any]:  # noqa: ARG002
         github_token, _expires_at = await resolve_github_token(self._config, self._thread_id)
         configurable = (self._config or {}).get("configurable") or {}

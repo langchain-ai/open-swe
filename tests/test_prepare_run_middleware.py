@@ -23,12 +23,27 @@ async def test_prepare_latch_skips_second_call():
     middleware = DummyPrepareMiddleware()
 
     update = await middleware.abefore_agent({}, None)
+    fingerprint = update.pop("run_prepared_for")
+    assert isinstance(fingerprint, str)
     assert update == {
         "run_prepared": True,
         "work_dir": "/tmp/work",
         "rendered_system_prompt": "prepared prompt",
     }
-    assert await middleware.abefore_agent({"run_prepared": True}, None) is None
+    assert (
+        await middleware.abefore_agent(
+            {"run_prepared": True, "run_prepared_for": fingerprint}, None
+        )
+        is None
+    )
+    assert middleware.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_prepare_latch_reruns_when_fingerprint_changes():
+    middleware = DummyPrepareMiddleware()
+
+    assert await middleware.abefore_agent({"run_prepared": True, "run_prepared_for": "stale"}, None)
     assert middleware.calls == 1
 
 
