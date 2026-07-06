@@ -577,7 +577,11 @@ def _build_re_review_context(
         f"Fetch the diff since the previous reviewed SHA yourself with "
         f"`GH_TOKEN=dummy gh api repos/{repo_owner}/{repo_name}/compare/"
         f'{last_reviewed_sha}...{head_sha} -H "Accept: application/vnd.github.v3.diff"`, '
-        f"then review only what's in that diff.\n\n"
+        f"then review only what's in that diff. This single compare call is authoritative — "
+        f"do NOT iterate through intermediate commits (no `gh api .../compare/<mid1>...<mid2>` "
+        f"walks), do NOT call `gh pr view`/`gh pr diff`/`git log`/`git show` to cross-check, "
+        f"and do NOT re-run the compare command. If it fails once, treat that as transient "
+        f"and proceed to reconcile existing findings against the previous review.\n\n"
         f"For each open finding above, decide whether the new commits resolved "
         f'it (`update_finding(id, status="resolved", note="<full reply body>")`), left it unchanged '
         f"(no action), or changed it materially (`update_finding` with new "
