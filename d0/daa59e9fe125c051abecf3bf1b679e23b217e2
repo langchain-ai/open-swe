@@ -1,0 +1,60 @@
+tests/test_proxy_auth.py
+  s_ed73bd463da23a::t_71cd947a827aae 18-24,26,37,47,53,59-60,62,91,94,106-107,109,114,117,123-124,126,131,143,154-155,157,162,170,179-180,183,201-202,226-227,256-257,273,308-320,343,387-391,397,434,466,474-475,485-486,494,502-503,513-514
+  s_ed73bd463da23a::t_321b7542e0f411 144-146,171-173
+pyproject.toml
+  s_ed73bd463da23a::t_0fb795bb98b0e0 21
+tests/test_repo_snapshots.py
+  s_ed73bd463da23a::t_a5b23ad9f051c9 278,284,289,291,296,302,307,309
+agent/utils/github_proxy.py
+  s_ed73bd463da23a::t_2178301a41c370 146
+agent/utils/sandbox_state.py
+  s_ed73bd463da23a::t_0b04dc64603772 176
+agent/integrations/langsmith.py
+  s_ed73bd463da23a::t_e8d2eb987d4f22 447,460-466,470-482,484-492,494,497,499,501-502
+  s_ed73bd463da23a::t_536402c3882460 386,396
+  s_ed73bd463da23a::t_89aca9db436bab 231,240,243,248,259-262
+  s_ed73bd463da23a::t_2bc4177edf4fe3 18
+  s_ed73bd463da23a::t_f9fdf796da2c7d 136,154,157,186
+  s_ed73bd463da23a::t_8f0fc21dcdd578 190-194
+  s_ed73bd463da23a::t_121d1f2fdd57e8 195
+tests/test_github_proxy_refresh.py
+  s_ed73bd463da23a::t_0fd21df3288f33 129-132
+  s_ed73bd463da23a::t_8dc16fefbe9008 102-105
+agent/analyzer.py
+  s_ed73bd463da23a::t_3cd74b6fad33e1 87
+agent/dashboard/thread_api.py
+  s_ed73bd463da23a::t_85587573c69bdd 1682
+agent/server.py
+  s_ed73bd463da23a::t_9e7c4390fabedc 54
+  s_ed73bd463da23a::t_f1c6d2fceae010 246
+  s_ed73bd463da23a::t_3dd2600a35767a 288
+  s_ed73bd463da23a::t_65f2a1797bf055 507
+  s_ed73bd463da23a::t_2a1995b5221a2d 256
+  s_ed73bd463da23a::t_51b3a970bd33c0 177-191
+tests/test_stale_sandbox_creating.py
+  s_ed73bd463da23a::t_1cbad64f280e1a 87-91
+tests/test_dashboard_thread_api.py
+  s_ed73bd463da23a::t_d7137563bd9832 4
+  s_ed73bd463da23a::t_1b4a3888acf1a8 376,396,423
+agent/utils/sandbox.py
+  s_ed73bd463da23a::t_e55a953267850f 1,5,9
+  s_ed73bd463da23a::t_a7b170e9891556 32,42-44,56-60
+uv.lock
+  s_ed73bd463da23a::t_0f748998f95ecb 1699,1717,1719,2050
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "d0daa59e9fe125c051abecf3bf1b679e23b217e2",
+  "prompts": {},
+  "sessions": {
+    "s_ed73bd463da23a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "36005ece-db3f-4e7b-a986-a82b15aecb3b",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "open-swe[bot] <open-swe@users.noreply.github.com>"
+    }
+  }
+}
