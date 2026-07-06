@@ -18,7 +18,7 @@ dependencies = [
     "markdownify>=1.2.2",
     "langchain-anthropic>=1.4.6",
     "langgraph-cli[inmem]>=0.4.27",
-    "langsmith==0.9.3",
+    "langsmith==0.9.7",
     "langchain-openai>=1.2.2",
     "langchain-fireworks>=1.4.2",
     # langchain-fireworks 1.4.2 pins a pre-release fireworks-ai; opt in explicitly so uv resolves it.

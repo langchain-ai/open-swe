@@ -12,7 +12,6 @@ on public repos even when the GitHub App is not installed on them.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import os
 import warnings
@@ -85,7 +84,7 @@ async def _configure_sandbox_github_proxy(
     if os.getenv("SANDBOX_TYPE", "langsmith") != "langsmith":
         return
     backend = unwrap_sandbox_backend(sandbox_backend)
-    await asyncio.to_thread(_configure_github_proxy, backend.id, github_token)
+    await _configure_github_proxy(backend.id, github_token)
 
 
 async def get_analyzer(config: RunnableConfig) -> Pregel:

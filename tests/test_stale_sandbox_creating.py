@@ -84,7 +84,11 @@ async def test_fresh_sandbox_creating_waits_for_other_worker() -> None:
         ),
         patch("agent.server.client.threads.get", new_callable=AsyncMock, side_effect=threads),
         patch("agent.server.asyncio.sleep", new_callable=AsyncMock),
-        patch("agent.server.create_sandbox", return_value=existing_backend) as connect_sandbox,
+        patch(
+            "agent.server.create_sandbox",
+            new_callable=AsyncMock,
+            return_value=existing_backend,
+        ) as connect_sandbox,
         patch("agent.server._create_sandbox_with_proxy", new_callable=AsyncMock) as create_sandbox,
         patch("agent.server.check_or_recreate_sandbox", side_effect=passthrough),
         patch("agent.server._refresh_github_proxy_or_recreate", side_effect=passthrough),

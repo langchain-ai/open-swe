@@ -1,10 +1,12 @@
+import asyncio
 import os
 from collections.abc import Callable
 from importlib import import_module
+from typing import Any
 
 from deepagents.backends.protocol import SandboxBackendProtocol
 
-SandboxFactory = Callable[[str | None], SandboxBackendProtocol]
+SandboxFactory = Callable[..., Any]
 
 SANDBOX_FACTORIES: dict[str, tuple[str, str]] = {
     "langsmith": ("agent.integrations.langsmith", "create_langsmith_sandbox"),
@@ -27,7 +29,7 @@ def _load_sandbox_factory(sandbox_type: str) -> SandboxFactory:
     return factory
 
 
-def create_sandbox(
+async def create_sandbox(
     sandbox_id: str | None = None,
     *,
     snapshot_id: str | None = None,
@@ -36,6 +38,9 @@ def create_sandbox(
 
     The provider is selected via the SANDBOX_TYPE environment variable.
     Supported values: langsmith (default), daytona, modal, runloop, local.
+
+    The langsmith provider provisions natively async; the other providers wrap
+    sync SDKs and are bridged onto the event loop with ``asyncio.to_thread``.
 
     Args:
         sandbox_id: Optional existing sandbox ID to reconnect to.
@@ -48,9 +53,11 @@ def create_sandbox(
     """
     sandbox_type = os.getenv("SANDBOX_TYPE", "langsmith")
     factory = _load_sandbox_factory(sandbox_type)
-    if sandbox_type == "langsmith" and snapshot_id is not None:
-        return factory(sandbox_id, snapshot_id=snapshot_id)
-    return factory(sandbox_id)
+    if sandbox_type == "langsmith":
+        if snapshot_id is not None:
+            return await factory(sandbox_id, snapshot_id=snapshot_id)
+        return await factory(sandbox_id)
+    return await asyncio.to_thread(factory, sandbox_id)
 
 
 def validate_sandbox_startup_config() -> None:
