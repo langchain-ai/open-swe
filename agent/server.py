@@ -1,11 +1,14 @@
-"""Main entry point and CLI loop for Open SWE agent."""
+"""Main entry point and graph factory for the Open SWE agent.
+
+Kept deliberately small: resolve the model, ensure one sandbox for the thread,
+build a curated tool list, and hand a lean middleware stack to
+``create_deep_agent``. All per-thread state lives in the sandbox + thread
+metadata; the agent itself is stateless.
+"""
 # ruff: noqa: E402
 
-# Suppress deprecation warnings from langchain_core (e.g., Pydantic V1 on Python 3.14+)
-# ruff: noqa: E402
 import logging
 import os
-import time
 import warnings
 from collections.abc import Awaitable, Callable, Sequence
 from typing import Any
@@ -31,7 +34,6 @@ from langchain.agents.middleware import ModelCallLimitMiddleware
 from langchain_core.language_models import BaseChatModel
 from langsmith.sandbox import SandboxClientError
 
-from .dashboard.admin import is_observability_authorized
 from .dashboard.agent_overrides import (
     load_profile,
     normalize_profile_overrides,
@@ -47,19 +49,10 @@ from .dashboard.team_settings import (
     get_team_default_model_pair,
     get_team_default_repo,
 )
-from .dashboard.user_mappings import email_for_login
-from .integrations.corridor_mcp import load_corridor_tools
-from .integrations.currents_tools import load_currents_tools
-from .integrations.datadog_mcp import load_datadog_tools
 from .integrations.langsmith import _configure_github_proxy, get_async_sandbox_client
-from .integrations.langsmith_tools import load_langsmith_tools
-from .integrations.notion_mcp import load_notion_tools
-from .integrations.stagehand_browser import load_browser_tools
 from .middleware import (
     BasePrepareRunMiddleware,
     ModelFallbackMiddleware,
-    PlanModeMiddleware,
-    SandboxCircuitBreakerMiddleware,
     SanitizeFireworksMessagesMiddleware,
     SanitizeOpenAIResponsesMiddleware,
     SanitizeThinkingBlocksMiddleware,
@@ -69,13 +62,11 @@ from .middleware import (
     ToolErrorMiddleware,
     WorkflowPushGuardMiddleware,
     check_message_queue_before_model,
-    ensure_no_empty_msg,
     notify_step_limit_reached,
     refresh_github_proxy_before_model,
 )
 from .prompt import construct_system_prompt
 from .tools import (
-    enter_plan_mode,
     fetch_url,
     http_request,
     linear_comment,
@@ -87,7 +78,6 @@ from .tools import (
     linear_update_issue,
     open_pull_request,
     request_pr_review,
-    save_plan,
     schedule_thread_wakeup,
     slack_add_reaction,
     slack_read_thread_messages,
@@ -102,7 +92,7 @@ from .utils.authorship import (
     OPEN_SWE_BOT_NAME,
     resolve_triggering_user_identity,
 )
-from .utils.dashboard_links import dashboard_plan_url, dashboard_thread_url
+from .utils.dashboard_links import dashboard_thread_url
 from .utils.github_app import (
     BASE_RUNTIME_PROXY_TOKEN_PERMISSIONS,
     RUNTIME_PROXY_TOKEN_PERMISSIONS,
@@ -119,14 +109,6 @@ from .utils.model import (
 )
 from .utils.sandbox import create_sandbox
 from .utils.sandbox_paths import aresolve_sandbox_work_dir
-from .utils.tracing import AGENT_TRACING_PROJECT, traced_graph_factory
-
-client = get_client()
-
-SANDBOX_CREATING = "__creating__"
-SANDBOX_CREATION_TIMEOUT = 180
-SANDBOX_POLL_INTERVAL = 1.0
-
 from .utils.sandbox_state import (
     SANDBOX_BACKENDS,
     get_or_create_sandbox_backend_proxy,
@@ -134,6 +116,9 @@ from .utils.sandbox_state import (
     set_sandbox_backend,
     unwrap_sandbox_backend,
 )
+from .utils.tracing import AGENT_TRACING_PROJECT, traced_graph_factory
+
+client = get_client()
 
 
 async def _resolve_prompt_default_repo(configurable: dict[str, Any]) -> dict[str, str] | None:
@@ -343,28 +328,19 @@ async def _recreate_sandbox(
     github_proxy_repositories: Sequence[str] | None = None,
     repo: dict[str, str] | None = None,
 ) -> SandboxBackendProtocol:
-    """Recreate a sandbox after a connection failure.
+    """Create a fresh sandbox (with proxy auth) after a connection failure.
 
-    Sets the SANDBOX_CREATING sentinel and creates a fresh sandbox
-    (with proxy auth configured), swapping the per-thread proxy target.
     The agent is responsible for cloning repos via tools.
     """
-    await client.threads.update(thread_id=thread_id, metadata=_creating_metadata())
-    try:
-        sandbox_backend = set_sandbox_backend(
-            thread_id,
-            await _create_sandbox_with_proxy(
-                github_proxy_token,
-                thread_id=thread_id,
-                github_proxy_repositories=github_proxy_repositories,
-                repo=repo,
-            ),
-        )
-    except Exception:
-        logger.exception("Failed to recreate sandbox after connection failure")
-        await client.threads.update(thread_id=thread_id, metadata=_RESET_METADATA)
-        raise
-    return sandbox_backend
+    return set_sandbox_backend(
+        thread_id,
+        await _create_sandbox_with_proxy(
+            github_proxy_token,
+            thread_id=thread_id,
+            github_proxy_repositories=github_proxy_repositories,
+            repo=repo,
+        ),
+    )
 
 
 async def check_or_recreate_sandbox(
@@ -398,44 +374,6 @@ async def check_or_recreate_sandbox(
     return sandbox_backend
 
 
-def _creating_metadata() -> dict[str, Any]:
-    """Metadata that claims the cross-process creation lock with a timestamp."""
-    return {"sandbox_id": SANDBOX_CREATING, "sandbox_creating_at": time.time()}
-
-
-_RESET_METADATA: dict[str, Any] = {"sandbox_id": None, "sandbox_creating_at": None}
-
-
-async def _resolve_creating_sentinel(thread_id: str) -> str | None:
-    """Resolve a ``__creating__`` sentinel seen with no cached backend.
-
-    The sentinel is a cross-process lock: another worker may still be creating
-    the sandbox. Poll live thread metadata until it resolves to a real id. Only
-    when the sentinel is older than ``SANDBOX_CREATION_TIMEOUT`` (e.g. the
-    creating worker was restarted) is it treated as stale: metadata is reset and
-    ``None`` is returned so the caller creates a fresh sandbox. A sentinel with
-    no timestamp (written before this field existed) is also treated as stale.
-    """
-    while True:
-        thread = await client.threads.get(thread_id)
-        metadata = thread.get("metadata", {}) if isinstance(thread, dict) else {}
-        sandbox_id = metadata.get("sandbox_id") if isinstance(metadata, dict) else None
-
-        if sandbox_id != SANDBOX_CREATING:
-            return sandbox_id if isinstance(sandbox_id, str) else None
-
-        creating_at = metadata.get("sandbox_creating_at") if isinstance(metadata, dict) else None
-        age = time.time() - creating_at if isinstance(creating_at, (int, float)) else None
-        if age is None or age > SANDBOX_CREATION_TIMEOUT:
-            logger.warning(
-                "Resetting stale SANDBOX_CREATING for thread %s (age=%s)", thread_id, age
-            )
-            await client.threads.update(thread_id=thread_id, metadata=_RESET_METADATA)
-            return None
-
-        await asyncio.sleep(SANDBOX_POLL_INTERVAL)
-
-
 def graph_loaded_for_execution(config: RunnableConfig) -> bool:
     """Check if the graph is loaded for actual execution vs introspection."""
     return (
@@ -454,28 +392,25 @@ async def ensure_sandbox_for_thread(
 ) -> SandboxBackendProtocol:
     """Get-or-create a healthy sandbox bound to ``thread_id``.
 
-    Implements the four-state lifecycle described in AGENTS.md:
+    Three cases (dispatch uses ``multitask_strategy="interrupt"``, so a thread
+    never provisions two sandboxes concurrently — no cross-process sentinel is
+    needed):
 
-    1. Cached in memory → ping; recreate on ``SandboxClientError``.
-    2. Metadata says ``__creating__`` and no cache → wait for the creating
-       worker; only reset if the sentinel is proven stale (timestamp/timeout).
-    3. No sandbox at all → create one and persist the id.
-    4. Metadata has an id but no cache → reconnect; recreate on failure.
+    1. Cached in memory -> ping; recreate on ``SandboxClientError``; refresh proxy.
+    2. Metadata has an id -> reconnect; recreate on failure; refresh proxy.
+    3. No sandbox at all -> create one and persist the id.
 
     For LangSmith sandboxes, also refreshes the GitHub App proxy auth. When
     ``repo`` has a ``ready`` repo-scoped snapshot, newly created sandboxes boot
     from it; otherwise the configured ``DEFAULT_SANDBOX_SNAPSHOT_ID`` is used.
-    Persists the resulting ``sandbox_id`` to thread metadata, and on the
-    first creation/reconnect for this thread initializes git identity.
+    Re-applies git identity every run because reused/reconnected sandboxes can
+    lose their ``--global`` config, and Vercel preview deploys reject commits
+    whose author email can't be resolved to a GitHub account.
     """
     sandbox_backend = SANDBOX_BACKENDS.get(thread_id)
     if sandbox_backend is not None and not sandbox_backend.has_backend:
         sandbox_backend = None
     sandbox_id = await get_sandbox_id_from_metadata(thread_id)
-
-    if sandbox_id == SANDBOX_CREATING and not sandbox_backend:
-        logger.info("Sandbox creation in progress for thread %s, waiting...", thread_id)
-        sandbox_id = await _resolve_creating_sentinel(thread_id)
 
     if sandbox_backend:
         logger.info("Using cached sandbox backend for thread %s", thread_id)
@@ -489,43 +424,26 @@ async def ensure_sandbox_for_thread(
             )
     elif sandbox_id is None:
         logger.info("Creating new sandbox for thread %s", thread_id)
-        await client.threads.update(thread_id=thread_id, metadata=_creating_metadata())
+        sandbox_backend = await _create_sandbox_with_proxy(
+            github_proxy_token,
+            thread_id=thread_id,
+            github_proxy_repositories=github_proxy_repositories,
+            repo=repo,
+        )
+        logger.info("Sandbox created: %s", sandbox_backend.id)
+    else:
+        logger.info("Connecting to existing sandbox %s", sandbox_id)
         try:
+            sandbox_backend = await create_sandbox(sandbox_id)
+        except Exception:
+            logger.warning("Failed to connect to existing sandbox %s, creating new one", sandbox_id)
             sandbox_backend = await _create_sandbox_with_proxy(
                 github_proxy_token,
                 thread_id=thread_id,
                 github_proxy_repositories=github_proxy_repositories,
                 repo=repo,
             )
-            logger.info("Sandbox created: %s", sandbox_backend.id)
-        except Exception:
-            logger.exception("Failed to create sandbox")
-            try:
-                await client.threads.update(thread_id=thread_id, metadata=_RESET_METADATA)
-            except Exception:
-                logger.exception("Failed to reset sandbox_id metadata")
-            raise
-    else:
-        logger.info("Connecting to existing sandbox %s", sandbox_id)
-        created_replacement_sandbox = False
-        try:
-            sandbox_backend = await create_sandbox(sandbox_id)
-        except Exception:
-            logger.warning("Failed to connect to existing sandbox %s, creating new one", sandbox_id)
-            await client.threads.update(thread_id=thread_id, metadata=_creating_metadata())
-            try:
-                sandbox_backend = await _create_sandbox_with_proxy(
-                    github_proxy_token,
-                    thread_id=thread_id,
-                    github_proxy_repositories=github_proxy_repositories,
-                    repo=repo,
-                )
-                created_replacement_sandbox = True
-            except Exception:
-                logger.exception("Failed to create replacement sandbox")
-                await client.threads.update(thread_id=thread_id, metadata=_RESET_METADATA)
-                raise
-        if not created_replacement_sandbox:
+        else:
             original_sandbox_id = sandbox_backend.id
             sandbox_backend = await check_or_recreate_sandbox(
                 sandbox_backend, thread_id, github_proxy_token, github_proxy_repositories, repo
@@ -542,10 +460,6 @@ async def ensure_sandbox_for_thread(
             thread_id=thread_id, metadata={"sandbox_id": sandbox_backend.id}
         )
 
-    # Re-apply git identity every run: cached/reconnected sandboxes may have
-    # lost their `--global` config (or had it overwritten), and Vercel preview
-    # deploys reject commits whose author email can't be resolved to a GitHub
-    # account.
     await _configure_git_identity(sandbox_backend)
 
     return sandbox_backend
@@ -553,34 +467,12 @@ async def ensure_sandbox_for_thread(
 
 DEFAULT_LLM_MODEL_ID = DEFAULT_MODEL_ID
 DEFAULT_LLM_MAX_TOKENS = 64_000
+# Kept high across all graphs: coding tasks legitimately run 30-60 minutes and
+# make many tool/model calls. These are runaway backstops, not step budgets; a
+# run that hits the model-call cap still ends with a signal via
+# ``notify_step_limit_reached`` rather than dying silently.
 DEFAULT_RECURSION_LIMIT = 9_999
-# High cap to support long-running tasks; a run that hits it still ends with a
-# signal via notify_step_limit_reached rather than dying silently.
 MODEL_CALL_RECURSION_LIMIT = 5_000
-
-# Mutating external tools hidden from the model while plan mode is active so it
-# can only research and propose a plan. File edit tools stay available so the
-# agent can draft and revise a plan under `/workspace/plans/`; prompt guidance
-# restricts them to that plan file outside cloned repositories. `execute` stays available;
-# plan-mode shell discipline (no mutating commands) is instructed via the system
-# prompt rather than enforced. `http_request` is excluded because it can
-# POST/PUT/PATCH/DELETE to external services — read-only web research goes
-# through `web_search` / `fetch_url`. `task` is excluded because the
-# general-purpose subagent is built with its own filesystem/PR/Linear tools and
-# does not inherit this exclusion, so delegating to it would bypass the read-only
-# intent.
-PLAN_MODE_EXCLUDED_TOOLS: frozenset[str] = frozenset(
-    {
-        "task",
-        "http_request",
-        "open_pull_request",
-        "request_pr_review",
-        "slack_start_new_thread",
-        "linear_create_issue",
-        "linear_update_issue",
-        "linear_delete_issue",
-    }
-)
 
 
 def _general_purpose_subagent(model: BaseChatModel) -> SubAgent:
@@ -592,109 +484,12 @@ def _general_purpose_subagent(model: BaseChatModel) -> SubAgent:
     }
 
 
-BROWSER_SUBAGENT_DESCRIPTION = (
-    "Drives a real browser (Stagehand, running locally or on Browserbase) to "
-    "accomplish tasks that require interacting with live web pages: logging "
-    "into dashboards, clicking through flows, filling forms, reading "
-    "JS-rendered content, reproducing UI bugs, and extracting structured data. "
-    "Prefer the `fetch_url` tool for static page reads; delegate here only when "
-    "the task needs interaction or JavaScript-rendered content."
-)
-
-BROWSER_SUBAGENT_SYSTEM_PROMPT = """You are a browser automation specialist. You control a real Chromium \
-browser via Stagehand tools.
-
-Workflow:
-1. Call `browser_navigate` to open the browser and go to the starting URL.
-2. Use `browser_observe` to find actionable elements before acting when the \
-page is unfamiliar.
-3. Use `browser_act` for clicks/typing/navigation with concise \
-natural-language instructions (one action per call).
-4. Use `browser_extract` to pull the specific data the caller asked for, \
-passing a JSON schema when you need a precise shape.
-5. Always call `browser_close` when finished to release the session.
-
-Guidance:
-- Take one concrete step at a time and verify the result before the next.
-- Keep instructions specific and grounded in what `browser_observe`/\
-`browser_extract` returned.
-- Do not exfiltrate credentials or secrets. Only act on the task you were \
-delegated.
-- Return a concise summary of what you did and the data you extracted; include \
-the session replay URL if one was returned."""
-
-
-def _browser_subagent(model: BaseChatModel, tools: list[Any]) -> SubAgent:
-    return {
-        "name": "browser",
-        "description": BROWSER_SUBAGENT_DESCRIPTION,
-        "system_prompt": BROWSER_SUBAGENT_SYSTEM_PROMPT,
-        "tools": tools,
-        "model": model,
-    }
-
-
 def _get_cached_sandbox_backend(
     thread_id: str,
     *,
     reconnect: Callable[[], Awaitable[SandboxBackendProtocol]] | None = None,
 ) -> SandboxBackendProtocol:
     return get_or_create_sandbox_backend_proxy(thread_id, reconnect=reconnect)
-
-
-async def _observability_authorized(config: RunnableConfig, profile_login: str | None) -> bool:
-    """Whether the triggering user may use the team observability tools.
-
-    Gates on admin / explicitly-authorized emails so prompt-injected runs from
-    untrusted contributors cannot reach the team's Datadog/LangSmith data.
-    """
-    configurable = (config or {}).get("configurable") or {}
-    slack_thread = configurable.get("slack_thread") or {}
-    config_login = configurable.get("github_login")
-    candidate_login = profile_login or (config_login if isinstance(config_login, str) else None)
-    candidate_emails = [
-        configurable.get("user_email"),
-        slack_thread.get("triggering_user_email"),
-    ]
-    if any(is_observability_authorized(email, login=candidate_login) for email in candidate_emails):
-        return True
-    return is_observability_authorized(
-        await email_for_login(candidate_login), login=candidate_login
-    )
-
-
-async def _cached_tool_loader(key: str, ttl_seconds: float, loader: Any) -> list[Any]:
-    try:
-        return await ttl_cache.cached(key, ttl_seconds, loader)
-    except Exception:
-        logger.warning("Failed to load cached tools for %s", key, exc_info=True)
-        return []
-
-
-async def _load_observability_tools(authorized: bool) -> list[Any]:
-    """Datadog (MCP) + LangSmith read tools when the team has connected them.
-
-    Credentials live server-side in team settings; the sandbox never holds them.
-    Only loaded for authorized (admin / allow-listed) triggering users so an
-    untrusted run cannot exfiltrate team observability data. Failures degrade to
-    no tools so the agent still starts.
-    """
-    if not authorized:
-        return []
-    datadog_tools, langsmith_tools = await asyncio.gather(
-        _cached_tool_loader(f"tools:datadog:{id(load_datadog_tools)}", 600, load_datadog_tools),
-        _cached_tool_loader(
-            f"tools:langsmith:{id(load_langsmith_tools)}", 600, load_langsmith_tools
-        ),
-    )
-    return [*datadog_tools, *langsmith_tools]
-
-
-async def _load_corridor_mcp_tools() -> list[Any]:
-    """Corridor MCP tools when the deployment environment has configured them."""
-    return await _cached_tool_loader(
-        f"tools:corridor:{id(load_corridor_tools)}", 600, load_corridor_tools
-    )
 
 
 async def _cached_team_default_model_pair(kind: str):
@@ -735,8 +530,6 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         linear_project_id: str,
         linear_issue_number: str,
         create_prs: bool,
-        plan_mode: bool,
-        corridor_enabled: bool,
     ) -> None:
         self._thread_id = thread_id
         self._config = config
@@ -748,8 +541,6 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         self._linear_project_id = linear_project_id
         self._linear_issue_number = linear_issue_number
         self._create_prs = create_prs
-        self._plan_mode = plan_mode
-        self._corridor_enabled = corridor_enabled
 
     def _prepare_config_fingerprint(self) -> Any:
         configurable = (self._config or {}).get("configurable") or {}
@@ -758,7 +549,6 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             "thread_id": self._thread_id,
             "source": self._source,
             "repo": configurable.get("repo"),
-            "plan_mode": self._plan_mode,
             "model": self._model_id,
             "effort": self._effort,
         }
@@ -789,7 +579,6 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                     "model": self._model_id,
                     "effort": self._effort,
                     "source": self._source,
-                    "plan_mode": self._plan_mode,
                 },
             )
             await record_agent_thread_usage(
@@ -814,11 +603,8 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 triggering_user_identity=triggering_user_identity,
                 create_prs=self._create_prs,
                 default_repo=prompt_default_repo,
-                plan_mode=self._plan_mode,
-                plan_url=dashboard_plan_url(self._thread_id),
                 repo_custom_instructions=repo_custom_instructions,
                 thread_url=dashboard_thread_url(self._thread_id),
-                corridor_enabled=self._corridor_enabled,
             ),
         }
 
@@ -862,11 +648,6 @@ async def get_agent(config: RunnableConfig) -> Pregel:
 
     (model_id, profile_effort), (subagent_model_id, subagent_effort) = team_defaults
     logger.info("Using team default agent model: model=%s effort=%s", model_id, profile_effort)
-    logger.info(
-        "Using team default agent subagent model: model=%s effort=%s",
-        subagent_model_id,
-        subagent_effort,
-    )
 
     if profile_login and profile:
         overridden_model, overridden_effort = normalize_profile_overrides(profile)
@@ -940,46 +721,11 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         )
         logger.info("Configured model fallback %s -> %s", model_id, fallback_model_id)
 
-    # Plan mode is entered only when the model decides to (the `enter_plan_mode`
-    # tool sets it in run state). The configurable value just carries that
-    # decision across a thread's messages and the approve/reject follow-ups; a
-    # fresh run with nothing set starts out of plan mode.
-    plan_mode = configurable.get("plan_mode") is True
-    if plan_mode:
-        logger.info("Plan mode enabled for thread %s", thread_id)
-    # Installed unconditionally and state-aware: it also restricts tools after a
-    # mid-run `enter_plan_mode` call, not just when plan mode is set up front.
-    plan_mode_middleware: list[Any] = [
-        PlanModeMiddleware(excluded=PLAN_MODE_EXCLUDED_TOOLS, initial=plan_mode)
-    ]
-
     source = (
         configurable.get("source") if isinstance(configurable.get("source"), str) else "dashboard"
     )
     user_email = configurable.get("user_email")
     user_email = user_email if isinstance(user_email, str) else ""
-
-    observability_tools = await _load_observability_tools(
-        await _observability_authorized(config, profile_login)
-    )
-    corridor_tools = await _load_corridor_mcp_tools()
-    browser_tools = load_browser_tools()
-
-    currents_tools: list[Any] = []
-    notion_tools: list[Any] = []
-    if profile_login:
-        currents_tools, notion_tools = await asyncio.gather(
-            _cached_tool_loader(
-                f"tools:currents:{profile_login}:{id(load_currents_tools)}",
-                300,
-                lambda: load_currents_tools(profile_login),
-            ),
-            _cached_tool_loader(
-                f"tools:notion:{profile_login}:{id(load_notion_tools)}",
-                300,
-                lambda: load_notion_tools(profile_login),
-            ),
-        )
 
     logger.info("Returning agent with sandbox for thread %s", thread_id)
     main_model = make_model(model_id, use_gateway=use_gateway, **model_kwargs)
@@ -991,8 +737,6 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             http_request,
             fetch_url,
             web_search,
-            enter_plan_mode,
-            save_plan,
             linear_comment,
             linear_create_issue,
             linear_delete_issue,
@@ -1007,14 +751,9 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             slack_read_thread_messages,
             slack_start_new_thread,
             slack_thread_reply,
-            *corridor_tools,
-            *observability_tools,
-            *currents_tools,
-            *notion_tools,
         ],
         subagents=[
             _general_purpose_subagent(subagent_model),
-            *([_browser_subagent(subagent_model, browser_tools)] if browser_tools else []),
         ],
         backend=backend_factory,
         middleware=[
@@ -1029,8 +768,6 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 linear_project_id=linear_project_id,
                 linear_issue_number=linear_issue_number,
                 create_prs=always_create_prs,
-                plan_mode=plan_mode,
-                corridor_enabled=bool(corridor_tools),
             ),
             SanitizeToolInputsMiddleware(),
             ModelCallLimitMiddleware(run_limit=MODEL_CALL_RECURSION_LIMIT, exit_behavior="end"),
@@ -1040,11 +777,8 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             refresh_github_proxy_before_model,
             check_message_queue_before_model,
             SlackAssistantStatusMiddleware(),
-            ensure_no_empty_msg,
             notify_step_limit_reached,
-            SandboxCircuitBreakerMiddleware(),
             *fallback_middleware,
-            *plan_mode_middleware,
             SanitizeOpenAIResponsesMiddleware(),
             SanitizeFireworksMessagesMiddleware(),
             SanitizeThinkingBlocksMiddleware(),

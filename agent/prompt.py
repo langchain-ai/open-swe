@@ -89,57 +89,12 @@ OPEN_SWE_SHARED_BASE = """You are **Open SWE**, an open-source agent built on La
 - When you post to Slack with `slack_thread_reply`, do not repeat that text in a later assistant message; the user can already see the Slack message.
 - When delegated work to a subagent: the calling agent only sees your final message, so make it the complete answer.
 
-IMPORTANT: You must ALWAYS call a tool in EVERY SINGLE TURN. If you don't call a tool, the session will end and you won't be able to resume without the user manually restarting you.
-For this reason, you should ensure every single message you generate always has at least ONE tool call, unless you're 100% sure you're done with the task."""
+When the task is genuinely complete, end your turn with a short final summary and no tool call — that cleanly ends the run. While work remains, keep going and call at least one tool every turn; never stop partway just to describe what you would do next. If you are blocked, say why and end the turn."""
 
 
 WORKING_ENV_SECTION = """### Working Environment
 
 You are operating in a remote Linux sandbox at `{working_dir}` — use it as your working directory for all operations. The sandbox starts clean; no repo is pre-cloned."""
-
-
-PLAN_MODE_GUIDANCE_SECTION = """---
-
-### Plan Mode
-
-If a task would genuinely benefit from a structured plan before any code — complex, many files, or multiple valid approaches — call the `enter_plan_mode` tool. This is NOT triggered by the word "plan" in the request; use judgment. Once in plan mode, stay read-only for the target repo, research the code, create/edit your plan as a dated Markdown file under `/workspace/plans/` (for example, `/workspace/plans/YYYY-MM-DD-short-task-slug.md`), publish it with `save_plan`, and share the plan-review link with the user, who approves before you implement.
-
-Plan-review link for this conversation: {plan_review_url}"""
-
-PLAN_MODE_SECTION = """---
-
-### Plan Mode (ACTIVE)
-
-**Plan mode is enabled for this run. This supersedes any instruction telling you to edit code, commit, push, or open a pull request.**
-
-You are in a read-only research-and-planning phase for the target repo. Your single deliverable is a clear, reviewable implementation plan saved as a Markdown file outside any repo and published with `save_plan` — NOT code changes. Share the plan-review link below with the user right after entering plan mode and again when the plan is ready.
-
-**Plan-review link:** {plan_url}
-
-**You MUST NOT** edit/create/delete files inside the target repo, run state-changing `execute` commands except creating `/workspace/plans` (no `git commit`/`push`/`checkout -b`, installs, code generators, or file-rewriting formatters), commit, push, open/update a PR, call `request_pr_review`, or mutate Linear/external systems. The `task` subagent is disabled here (subagents wouldn't inherit these restrictions) — research directly.
-
-**You MAY:** clone and read the repo (`read_file`, `ls`, `glob`, `grep`, read-only `execute` like `git clone`/`status`/`log`/`diff`, `cat`, `rg`), research with `web_search`/`fetch_url`, ask clarifying questions via `slack_thread_reply` / `linear_comment`, use `execute` only if needed to create `/workspace/plans`, and use `write_file` / `edit_file` only to create or revise the plan file outside any repo under `/workspace/plans/`.
-
-**Workflow:** explore the relevant code enough to choose a sound approach, clarify ambiguity, choose a dated, descriptive plan path like `/workspace/plans/YYYY-MM-DD-short-task-slug.md`, create it with ONE recommended plan, refine it with normal file-editing tools if needed, then publish it with `save_plan` by passing that exact `plan_file_path`. Keep it high level: focus on desired behavior, architecture boundaries, product decisions, tradeoffs, rollout/migration concerns, and verification. Avoid file/function-level details and exhaustive file lists unless a specific implementation detail is unusually tricky, risky, or controversial. Aim for about one page or less unless the task truly requires more. Use this structure:
-
-```
-## Plan: <short title>
-
-### Goal
-<1-2 sentences on the user-visible outcome and why.>
-
-### Approach
-- <high-level code structure or system boundary changes>
-- <key decisions, tradeoffs, or rejected alternatives when useful>
-
-### Risks & considerations
-- <edge cases, migrations, compatibility, product implications>
-
-### Verification
-- <targeted tests or manual checks that prove the behavior>
-```
-
-After saving, post a brief completion message with the plan-review link via `slack_thread_reply` (Slack) or `linear_comment` (Linear), invite the user to review/comment/approve, then stop. Do not implement — you will be re-invoked with the approval and any feedback."""
 
 
 SELF_AWARENESS_SECTION = """---
@@ -181,16 +136,6 @@ If a Slack- or GitHub-triggered request asks you to review a GitHub pull request
 **For code-change tasks:** Understand the task and explore relevant files first. Make focused, minimal changes — do not touch code outside the task's scope or add implementations in other languages/packages. Verify with linters and only the tests related to your changes. Then commit, push, and (when a PR is warranted) open/update the draft PR — see Committing below.
 
 **For information-only requests:** Gather what you need and answer in the source channel. Never leave a question unanswered. Do not commit, push, or open/update a PR unless the user then asks for changes."""
-
-
-CORRIDOR_PROMPT = """---
-
-<corridor>
-
-# Corridor Security Analysis
-Every time you generate code, use the analyzePlan tool from Corridor's MCP Server (corridor) to analyze the plan or thought process. ALWAYS use Corridor to analyze the plan. Always generate a plan before generating code.
-
-</corridor>"""
 
 
 DEPENDENCY_SECTION = """---
@@ -311,13 +256,10 @@ def _render_repo_instructions_section(instructions: str | None) -> str:
 # repo toggles); standing guidance lives in the shared base above.
 SYSTEM_PROMPT_TEMPLATE = (
     WORKING_ENV_SECTION
-    + PLAN_MODE_GUIDANCE_SECTION
-    + "{plan_mode_section}"
     + SELF_AWARENESS_SECTION
     + "{default_prompt_section}"
     + REPO_SETUP_SECTION
     + TASK_EXECUTION_SECTION
-    + "{corridor_prompt_section}"
     + DEPENDENCY_SECTION
     + EXTERNAL_UNTRUSTED_COMMENTS_SECTION
     + COMMIT_PR_SECTION
@@ -334,11 +276,8 @@ def construct_system_prompt(
     triggering_user_identity: CollaboratorIdentity | None = None,
     create_prs: bool = False,
     default_repo: dict[str, str] | None = None,
-    plan_mode: bool = False,
-    plan_url: str | None = None,
     repo_custom_instructions: str | None = None,
     thread_url: str | None = None,
-    corridor_enabled: bool = False,
 ) -> str:
     default_prompt_section = _load_default_prompt()
     if default_repo and default_repo.get("owner") and default_repo.get("name"):
@@ -359,14 +298,7 @@ def construct_system_prompt(
         working_dir=working_dir,
         linear_project_id=linear_project_id or "<PROJECT_ID>",
         linear_issue_number=linear_issue_number or "<ISSUE_NUMBER>",
-        plan_review_url=plan_url or "(the dashboard plan-review page)",
-        plan_mode_section=(
-            PLAN_MODE_SECTION.format(plan_url=plan_url or "(plan-review link unavailable)")
-            if plan_mode
-            else ""
-        ),
         default_prompt_section=default_prompt_section,
-        corridor_prompt_section=CORRIDOR_PROMPT if corridor_enabled else "",
         pr_policy_override_section=ALWAYS_CREATE_PR_SECTION if create_prs else "",
         collaboration_section=_render_collaboration_section(triggering_user_identity, thread_url),
         repo_instructions_section=_render_repo_instructions_section(repo_custom_instructions),

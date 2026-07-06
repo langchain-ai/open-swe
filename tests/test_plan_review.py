@@ -278,19 +278,6 @@ def test_plan_file_path_for_thread_uses_plans_dir_and_slug() -> None:
     assert path.endswith("-thread-abc-123.md")
 
 
-def test_http_request_excluded_in_plan_mode() -> None:
-    from agent.server import PLAN_MODE_EXCLUDED_TOOLS
-
-    assert "http_request" in PLAN_MODE_EXCLUDED_TOOLS
-
-
-def test_file_edit_tools_available_in_plan_mode_for_plan_file() -> None:
-    from agent.server import PLAN_MODE_EXCLUDED_TOOLS
-
-    assert "write_file" not in PLAN_MODE_EXCLUDED_TOOLS
-    assert "edit_file" not in PLAN_MODE_EXCLUDED_TOOLS
-
-
 class _FakeReq:
     def __init__(self, tools: list[Any], state: dict[str, Any]) -> None:
         self.tools = tools
