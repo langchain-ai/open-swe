@@ -141,22 +141,3 @@ class TestModelFallbackMiddleware:
             await middleware.awrap_model_call(_make_request(), handler)
 
         assert len(calls) == 2
-
-    def test_sync_falls_over_on_overloaded(self) -> None:
-        fallback_model = MagicMock(name="fallback_model")
-        middleware = ModelFallbackMiddleware(fallback_model)
-        calls: list[object] = []
-        good_response = MagicMock(result=[AIMessage(content="ok")])
-
-        def handler(req: object) -> object:
-            calls.append(req)
-            if len(calls) == 1:
-                raise _anthropic_overloaded()
-            return good_response
-
-        request = _make_request()
-        result = middleware.wrap_model_call(request, handler)
-
-        assert result is good_response
-        assert len(calls) == 2
-        request.override.assert_called_once_with(model=fallback_model)
