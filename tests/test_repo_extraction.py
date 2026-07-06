@@ -19,11 +19,13 @@ class TestExtractRepoFromText:
         assert result == {"owner": "langchain-ai", "name": "langchainjs"}
 
     def test_repo_colon_name_only_uses_default_owner(self) -> None:
-        result = extract_repo_from_text("fix bug in repo:langchainplus")
+        result = extract_repo_from_text(
+            "fix bug in repo:langchainplus", default_owner="langchain-ai"
+        )
         assert result == {"owner": "langchain-ai", "name": "langchainplus"}
 
     def test_repo_space_name_only_uses_default_owner(self) -> None:
-        result = extract_repo_from_text("fix bug in repo open-swe")
+        result = extract_repo_from_text("fix bug in repo open-swe", default_owner="langchain-ai")
         assert result == {"owner": "langchain-ai", "name": "open-swe"}
 
     def test_repo_name_only_custom_default_owner(self) -> None:
