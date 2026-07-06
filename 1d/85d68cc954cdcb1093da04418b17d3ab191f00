@@ -1,0 +1,33 @@
+tests/test_repair_orphaned_tool_calls.py
+  s_1452bdeb08a90e::t_70e6663d7d6a5c 29-32,34-35,41-44,58-59,65,69-70,80,86-87,98
+agent/middleware/sanitize_fireworks_messages.py
+  s_1452bdeb08a90e::t_b68de6b1cb08bb 22
+tests/test_sanitize_thinking_blocks.py
+  s_1452bdeb08a90e::t_a0c87fa5328fe5 19-22,24-25,35,39,44-45,51,75-76,81
+agent/middleware/sanitize_openai_responses.py
+  s_1452bdeb08a90e::t_358d45635327d2 10
+agent/middleware/sanitize_thinking_blocks.py
+  s_1452bdeb08a90e::t_eb9a10376f3b6a 9
+tests/test_sanitize_fireworks_messages.py
+  s_1452bdeb08a90e::t_b79d811d465635 27-30,32-34,40-43,46,50,57-58,65,70-71,78,83,92,97-98,105
+agent/middleware/model_fallback.py
+  s_1452bdeb08a90e::t_75d232051bc79d 22
+agent/middleware/repair_orphaned_tool_calls.py
+  s_1452bdeb08a90e::t_d51b2732cb49f4 24
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "1d85d68cc954cdcb1093da04418b17d3ab191f00",
+  "prompts": {},
+  "sessions": {
+    "s_1452bdeb08a90e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8bfa93f9-66da-47d4-9e86-0a30a13f6bde",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "open-swe[bot] <open-swe@users.noreply.github.com>"
+    }
+  }
+}
