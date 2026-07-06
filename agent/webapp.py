@@ -151,12 +151,15 @@ if os.environ.get("DEBUG_TRACEMALLOC"):
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-    from .utils.model import validate_local_dev_llm_config
+    from .utils.model import close_cached_models, validate_local_dev_llm_config
     from .utils.sandbox import validate_sandbox_startup_config
 
     validate_sandbox_startup_config()
     validate_local_dev_llm_config()
-    yield
+    try:
+        yield
+    finally:
+        await close_cached_models()
 
 
 app = FastAPI(lifespan=lifespan)

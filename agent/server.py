@@ -56,6 +56,7 @@ from .integrations.langsmith_tools import load_langsmith_tools
 from .integrations.notion_mcp import load_notion_tools
 from .integrations.stagehand_browser import load_browser_tools
 from .middleware import (
+    BasePrepareRunMiddleware,
     ModelFallbackMiddleware,
     PlanModeMiddleware,
     SandboxCircuitBreakerMiddleware,
@@ -94,6 +95,7 @@ from .tools import (
     slack_thread_reply,
     web_search,
 )
+from .utils import ttl_cache
 from .utils.auth import resolve_github_token
 from .utils.authorship import (
     OPEN_SWE_BOT_EMAIL,
@@ -657,6 +659,14 @@ async def _observability_authorized(config: RunnableConfig, profile_login: str |
     )
 
 
+async def _cached_tool_loader(key: str, ttl_seconds: float, loader: Any) -> list[Any]:
+    try:
+        return await ttl_cache.cached(key, ttl_seconds, loader)
+    except Exception:
+        logger.warning("Failed to load cached tools for %s", key, exc_info=True)
+        return []
+
+
 async def _load_observability_tools(authorized: bool) -> list[Any]:
     """Datadog (MCP) + LangSmith read tools when the team has connected them.
 
@@ -667,24 +677,146 @@ async def _load_observability_tools(authorized: bool) -> list[Any]:
     """
     if not authorized:
         return []
-    try:
-        datadog_tools, langsmith_tools = await asyncio.gather(
-            load_datadog_tools(),
-            load_langsmith_tools(),
-        )
-    except Exception:
-        logger.warning("Failed to load observability tools", exc_info=True)
-        return []
+    datadog_tools, langsmith_tools = await asyncio.gather(
+        _cached_tool_loader(f"tools:datadog:{id(load_datadog_tools)}", 600, load_datadog_tools),
+        _cached_tool_loader(
+            f"tools:langsmith:{id(load_langsmith_tools)}", 600, load_langsmith_tools
+        ),
+    )
     return [*datadog_tools, *langsmith_tools]
 
 
 async def _load_corridor_mcp_tools() -> list[Any]:
     """Corridor MCP tools when the deployment environment has configured them."""
-    try:
-        return await load_corridor_tools()
-    except Exception:
-        logger.warning("Failed to load Corridor MCP tools", exc_info=True)
-        return []
+    return await _cached_tool_loader(
+        f"tools:corridor:{id(load_corridor_tools)}", 600, load_corridor_tools
+    )
+
+
+async def _cached_team_default_model_pair(kind: str):
+    return await ttl_cache.cached(
+        f"team-default-model-pair:{kind}:{id(get_team_default_model_pair)}",
+        60,
+        lambda: get_team_default_model_pair(kind),
+    )
+
+
+async def _cached_gateway_enabled() -> bool:
+    return await ttl_cache.cached(
+        f"team:gateway-enabled:{id(get_effective_gateway_enabled)}",
+        60,
+        get_effective_gateway_enabled,
+    )
+
+
+async def _cached_profile(profile_login: str | None):
+    if not profile_login:
+        return None
+    return await ttl_cache.cached(
+        f"profile:{profile_login}:{id(load_profile)}", 30, lambda: load_profile(profile_login)
+    )
+
+
+class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
+    def __init__(
+        self,
+        *,
+        thread_id: str,
+        config: RunnableConfig,
+        profile_login: str | None,
+        model_id: str,
+        effort: str | None,
+        source: str,
+        user_email: str,
+        linear_project_id: str,
+        linear_issue_number: str,
+        create_prs: bool,
+        plan_mode: bool,
+        corridor_enabled: bool,
+    ) -> None:
+        self._thread_id = thread_id
+        self._config = config
+        self._profile_login = profile_login
+        self._model_id = model_id
+        self._effort = effort
+        self._source = source
+        self._user_email = user_email
+        self._linear_project_id = linear_project_id
+        self._linear_issue_number = linear_issue_number
+        self._create_prs = create_prs
+        self._plan_mode = plan_mode
+        self._corridor_enabled = corridor_enabled
+
+    def _prepare_config_fingerprint(self) -> Any:
+        configurable = (self._config or {}).get("configurable") or {}
+        return {
+            "prepare_run_id": configurable.get("prepare_run_id"),
+            "thread_id": self._thread_id,
+            "source": self._source,
+            "repo": configurable.get("repo"),
+            "plan_mode": self._plan_mode,
+            "model": self._model_id,
+            "effort": self._effort,
+        }
+
+    async def _prepare(self, state: dict[str, Any], runtime: object) -> dict[str, Any]:  # noqa: ARG002
+        github_token, _expires_at = await resolve_github_token(self._config, self._thread_id)
+        configurable = (self._config or {}).get("configurable") or {}
+        prompt_default_repo = await _resolve_prompt_default_repo(configurable)
+        triggering_user_identity_task = asyncio.create_task(
+            asyncio.to_thread(resolve_triggering_user_identity, self._config, github_token)
+        )
+        sandbox_task = asyncio.create_task(
+            ensure_sandbox_for_thread(self._thread_id, repo=prompt_default_repo)
+        )
+        triggering_user_identity, sandbox_backend = await asyncio.gather(
+            triggering_user_identity_task,
+            sandbox_task,
+        )
+        del github_token
+        work_dir = await aresolve_sandbox_work_dir(sandbox_backend)
+        repo_custom_instructions = await _resolve_repo_custom_instructions(prompt_default_repo)
+
+        try:
+            await client.threads.update(
+                thread_id=self._thread_id,
+                metadata={
+                    "agent_kind": "agent",
+                    "model": self._model_id,
+                    "effort": self._effort,
+                    "source": self._source,
+                    "plan_mode": self._plan_mode,
+                },
+            )
+            await record_agent_thread_usage(
+                thread_id=self._thread_id,
+                github_login=self._profile_login,
+                user_email=self._user_email,
+                model_id=self._model_id,
+                effort=self._effort,
+                source=self._source,
+            )
+        except Exception:
+            logger.debug(
+                "Failed to record agent usage for thread %s", self._thread_id, exc_info=True
+            )
+
+        return {
+            "work_dir": work_dir,
+            "rendered_system_prompt": construct_system_prompt(
+                working_dir=work_dir,
+                linear_project_id=self._linear_project_id,
+                linear_issue_number=self._linear_issue_number,
+                triggering_user_identity=triggering_user_identity,
+                create_prs=self._create_prs,
+                default_repo=prompt_default_repo,
+                plan_mode=self._plan_mode,
+                plan_url=dashboard_plan_url(self._thread_id),
+                repo_custom_instructions=repo_custom_instructions,
+                thread_url=dashboard_thread_url(self._thread_id),
+                corridor_enabled=self._corridor_enabled,
+            ),
+        }
 
 
 async def get_agent(config: RunnableConfig) -> Pregel:
@@ -700,33 +832,19 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             tools=[],
         ).with_config(config)
 
-    github_token, _expires_at = await resolve_github_token(config, thread_id)
     profile_login = resolve_github_login(config)
     configurable = (config or {}).get("configurable") or {}
-    prompt_default_repo = await _resolve_prompt_default_repo(configurable)
-    triggering_user_identity_task = asyncio.create_task(
-        asyncio.to_thread(resolve_triggering_user_identity, config, github_token)
+    # Team/profile settings are accepted stale for a short TTL so graph factories
+    # stay off the critical path during worker load and retry storms.
+    team_defaults, use_gateway, profile = await asyncio.gather(
+        _cached_team_default_model_pair("agent"),
+        _cached_gateway_enabled(),
+        _cached_profile(profile_login),
     )
-    sandbox_task = asyncio.create_task(
-        ensure_sandbox_for_thread(thread_id, repo=prompt_default_repo)
-    )
-    team_defaults_task = asyncio.create_task(get_team_default_model_pair("agent"))
-    gateway_task = asyncio.create_task(get_effective_gateway_enabled())
-    profile_task = asyncio.create_task(load_profile(profile_login)) if profile_login else None
-    triggering_user_identity, sandbox_backend, team_defaults, use_gateway = await asyncio.gather(
-        triggering_user_identity_task,
-        sandbox_task,
-        team_defaults_task,
-        gateway_task,
-    )
-    profile = await profile_task if profile_task is not None else None
-    del github_token
 
     linear_issue = config["configurable"].get("linear_issue", {})
     linear_project_id = linear_issue.get("linear_project_id", "")
     linear_issue_number = linear_issue.get("linear_issue_number", "")
-
-    work_dir = await aresolve_sandbox_work_dir(sandbox_backend)
 
     def backend_factory(_runtime: object, _thread_id: str = thread_id) -> SandboxBackendProtocol:
         return _get_cached_sandbox_backend(_thread_id)
@@ -829,29 +947,6 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     )
     user_email = configurable.get("user_email")
     user_email = user_email if isinstance(user_email, str) else ""
-    try:
-        await client.threads.update(
-            thread_id=thread_id,
-            metadata={
-                "agent_kind": "agent",
-                "model": model_id,
-                "effort": profile_effort,
-                "source": source,
-                "plan_mode": plan_mode,
-            },
-        )
-        await record_agent_thread_usage(
-            thread_id=thread_id,
-            github_login=profile_login,
-            user_email=user_email,
-            model_id=model_id,
-            effort=profile_effort,
-            source=source,
-        )
-    except Exception:
-        logger.debug("Failed to record agent usage for thread %s", thread_id, exc_info=True)
-
-    repo_custom_instructions = await _resolve_repo_custom_instructions(prompt_default_repo)
 
     observability_tools = await _load_observability_tools(
         await _observability_authorized(config, profile_login)
@@ -862,35 +957,25 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     currents_tools: list[Any] = []
     notion_tools: list[Any] = []
     if profile_login:
-        try:
-            currents_tools = await load_currents_tools(profile_login)
-        except Exception:
-            logger.warning("Failed to load Currents tools", exc_info=True)
-            currents_tools = []
-        try:
-            notion_tools = await load_notion_tools(profile_login)
-        except Exception:
-            logger.warning("Failed to load Notion tools", exc_info=True)
-            notion_tools = []
+        currents_tools, notion_tools = await asyncio.gather(
+            _cached_tool_loader(
+                f"tools:currents:{profile_login}:{id(load_currents_tools)}",
+                300,
+                lambda: load_currents_tools(profile_login),
+            ),
+            _cached_tool_loader(
+                f"tools:notion:{profile_login}:{id(load_notion_tools)}",
+                300,
+                lambda: load_notion_tools(profile_login),
+            ),
+        )
 
     logger.info("Returning agent with sandbox for thread %s", thread_id)
     main_model = make_model(model_id, use_gateway=use_gateway, **model_kwargs)
     subagent_model = make_model(subagent_model_id, use_gateway=use_gateway, **subagent_model_kwargs)
     return create_deep_agent(
         model=main_model,
-        system_prompt=construct_system_prompt(
-            working_dir=work_dir,
-            linear_project_id=linear_project_id,
-            linear_issue_number=linear_issue_number,
-            triggering_user_identity=triggering_user_identity,
-            create_prs=always_create_prs,
-            default_repo=prompt_default_repo,
-            plan_mode=plan_mode,
-            plan_url=dashboard_plan_url(thread_id),
-            repo_custom_instructions=repo_custom_instructions,
-            thread_url=dashboard_thread_url(thread_id),
-            corridor_enabled=bool(corridor_tools),
-        ),
+        system_prompt="",
         tools=[
             http_request,
             fetch_url,
@@ -922,6 +1007,20 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         ],
         backend=backend_factory,
         middleware=[
+            PrepareAgentRunMiddleware(
+                thread_id=thread_id,
+                config=config,
+                profile_login=profile_login,
+                model_id=model_id,
+                effort=profile_effort,
+                source=source,
+                user_email=user_email,
+                linear_project_id=linear_project_id,
+                linear_issue_number=linear_issue_number,
+                create_prs=always_create_prs,
+                plan_mode=plan_mode,
+                corridor_enabled=bool(corridor_tools),
+            ),
             SanitizeToolInputsMiddleware(),
             ModelCallLimitMiddleware(run_limit=MODEL_CALL_RECURSION_LIMIT, exit_behavior="end"),
             ToolErrorMiddleware(),

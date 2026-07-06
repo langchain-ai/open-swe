@@ -323,6 +323,11 @@ class TestRefreshProxyOnSandboxReuse:
         """Cached sandboxes should get a fresh proxy token before git operations."""
         config = self._execution_config()
         mock_sandbox = MagicMock(id="sandbox-cached")
+        captured: dict[str, object] = {}
+
+        def fake_create_deep_agent(**kwargs):
+            captured.update(kwargs)
+            return _DummyAgent()
 
         with (
             patch(
@@ -353,7 +358,7 @@ class TestRefreshProxyOnSandboxReuse:
             ),
             patch("agent.server.make_model", return_value=MagicMock()),
             patch("agent.server.construct_system_prompt", return_value="prompt"),
-            patch("agent.server.create_deep_agent", return_value=_DummyAgent()),
+            patch("agent.server.create_deep_agent", side_effect=fake_create_deep_agent),
             patch.dict(
                 "agent.server.SANDBOX_BACKENDS",
                 {"thread-123": mock_sandbox},
@@ -364,6 +369,8 @@ class TestRefreshProxyOnSandboxReuse:
             from agent.server import get_agent
 
             await get_agent(config)
+            prepare = captured["middleware"][0]
+            await prepare.abefore_agent({}, None)
 
             mock_proxy.assert_called_once_with("sandbox-cached", "ghs_fresh")
 
@@ -372,6 +379,11 @@ class TestRefreshProxyOnSandboxReuse:
         """Reconnected sandboxes should also get a fresh proxy token."""
         config = self._execution_config()
         mock_sandbox = MagicMock(id="sandbox-existing")
+        captured: dict[str, object] = {}
+
+        def fake_create_deep_agent(**kwargs):
+            captured.update(kwargs)
+            return _DummyAgent()
 
         with (
             patch(
@@ -402,13 +414,15 @@ class TestRefreshProxyOnSandboxReuse:
             ),
             patch("agent.server.make_model", return_value=MagicMock()),
             patch("agent.server.construct_system_prompt", return_value="prompt"),
-            patch("agent.server.create_deep_agent", return_value=_DummyAgent()),
+            patch("agent.server.create_deep_agent", side_effect=fake_create_deep_agent),
             patch.dict("agent.server.SANDBOX_BACKENDS", {}, clear=True),
             patch.dict("os.environ", {"SANDBOX_TYPE": "langsmith"}),
         ):
             from agent.server import get_agent
 
             await get_agent(config)
+            prepare = captured["middleware"][0]
+            await prepare.abefore_agent({}, None)
 
             mock_create.assert_called_once_with("sandbox-existing")
             mock_proxy.assert_called_once_with("sandbox-existing", "ghs_fresh")

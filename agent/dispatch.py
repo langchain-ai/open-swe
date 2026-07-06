@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import logging
 import os
+import uuid
 from typing import Any
 from urllib.parse import urlparse
 
@@ -103,6 +104,7 @@ async def dispatch_agent_run(
     the graph (``"agent"`` or ``"reviewer"``).
     """
     client = client or dispatch_client()
+    configurable = {**configurable, "prepare_run_id": str(uuid.uuid4())}
     run = await client.runs.create(
         thread_id,
         assistant_id,
