@@ -9,6 +9,7 @@ from .refresh_github_proxy import refresh_github_proxy_before_model
 from .refresh_slack_status import SlackAssistantStatusMiddleware
 from .repair_orphaned_tool_calls import RepairOrphanedToolCallsMiddleware
 from .sandbox_circuit_breaker import SandboxCircuitBreakerMiddleware
+from .sandbox_startup_error import SandboxStartupErrorMiddleware
 from .sanitize_fireworks_messages import SanitizeFireworksMessagesMiddleware
 from .sanitize_openai_responses import SanitizeOpenAIResponsesMiddleware
 from .sanitize_thinking_blocks import SanitizeThinkingBlocksMiddleware
@@ -33,6 +34,7 @@ __all__ = [
     "ToolErrorMiddleware",
     "WorkflowPushGuardMiddleware",
     "SandboxCircuitBreakerMiddleware",
+    "SandboxStartupErrorMiddleware",
     "SlackAssistantStatusMiddleware",
     "check_message_queue_before_model",
     "ensure_no_empty_msg",

@@ -26,6 +26,16 @@ from .sandbox import create_sandbox
 logger = logging.getLogger(__name__)
 
 
+class SandboxBackendNotReady(RuntimeError):
+    """Sync sandbox access before async reconnect populated the backend."""
+
+    def __init__(self, thread_id: str | None, reason: str) -> None:
+        self.thread_id = thread_id
+        self.reason = reason
+        suffix = f" for thread {thread_id}" if thread_id else ""
+        super().__init__(f"Sandbox backend not ready{suffix}: {reason}")
+
+
 class SandboxBackendProxy(SandboxBackendProtocol):
     """Stable per-thread backend handle whose target can be replaced."""
 
@@ -64,8 +74,12 @@ class SandboxBackendProxy(SandboxBackendProtocol):
 
     def _get_backend(self) -> SandboxBackendProtocol:
         if self._backend is None:
-            suffix = f" for thread {self._thread_id}" if self._thread_id else ""
-            raise RuntimeError(f"No sandbox backend cached{suffix}")
+            if self._thread_id:
+                raise SandboxBackendNotReady(
+                    thread_id=self._thread_id,
+                    reason="sync tool call before async reconnect",
+                )
+            raise RuntimeError("No sandbox backend cached")
         return self._backend
 
     def _get_lock(self) -> asyncio.Lock:
