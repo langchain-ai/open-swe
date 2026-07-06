@@ -173,20 +173,6 @@ class SlackAssistantStatusMiddleware(AgentMiddleware):
         status = _TOOL_STATUS.get(name or "", DEFAULT_ASSISTANT_STATUS)
         return await self._run_with_heartbeat(status, handler(request))
 
-    def wrap_model_call(
-        self,
-        request: ModelRequest,
-        handler: Callable[[ModelRequest], ModelResponse],
-    ) -> ModelResponse:
-        return handler(request)
-
-    def wrap_tool_call(
-        self,
-        request: ToolCallRequest,
-        handler: Callable[[ToolCallRequest], ToolMessage | Command],
-    ) -> ToolMessage | Command:
-        return handler(request)
-
     async def _try_set(self, status: str) -> None:
         try:
             slack_thread = _slack_thread_from_config()
