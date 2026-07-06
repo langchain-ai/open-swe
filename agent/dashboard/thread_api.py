@@ -374,6 +374,14 @@ def _thread_summary(
     thread_id = thread.get("thread_id") or thread.get("id")
     trace_url = get_langsmith_trace_url(thread_id) if isinstance(thread_id, str) else None
 
+    raw_sandbox_id = metadata.get("sandbox_id")
+    # "__creating__" is the in-flight sentinel written before the real id lands.
+    sandbox_id = (
+        raw_sandbox_id
+        if isinstance(raw_sandbox_id, str) and raw_sandbox_id and raw_sandbox_id != "__creating__"
+        else None
+    )
+
     summary: dict[str, Any] = {
         "id": thread_id,
         "title": title,
@@ -402,6 +410,7 @@ def _thread_summary(
         "updatedAt": int(updated_at) if isinstance(updated_at, (int, float)) else _now_ms(),
         "isOwner": (_user_owns_thread(metadata, owner_login, owner_email) if owner_login else True),
         "traceUrl": trace_url,
+        "sandboxId": sandbox_id,
     }
     if isinstance(pr_number, int) and isinstance(pr_url, str):
         summary["pr"] = {
