@@ -150,11 +150,11 @@ async def get_analyzer(config: RunnableConfig) -> Pregel:
     if thread_id is None or not graph_loaded_for_execution(config):
         return create_deep_agent(system_prompt="", tools=[]).with_config(config)
 
+    async def reconnect_backend(_thread_id: str = thread_id):
+        return await ensure_sandbox_for_thread(_thread_id)
+
     def backend_factory(_runtime: object, _thread_id: str = thread_id):
-        try:
-            default_backend = _get_cached_sandbox_backend(_thread_id)
-        except RuntimeError:
-            default_backend = StateBackend()
+        default_backend = _get_cached_sandbox_backend(_thread_id, reconnect=reconnect_backend)
         return CompositeBackend(default=default_backend, routes={SKILLS_ROUTE: StateBackend()})
 
     model_id = DEFAULT_LLM_MODEL_ID

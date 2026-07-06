@@ -31,6 +31,7 @@ warnings.filterwarnings("ignore", module="langchain_core._api.deprecation")
 warnings.filterwarnings("ignore", message=".*Pydantic V1.*", category=UserWarning)
 
 from deepagents import create_deep_agent
+from deepagents.backends.protocol import SandboxBackendProtocol
 from deepagents.middleware.skills import SkillsMiddleware
 from langchain.agents.middleware import ModelCallLimitMiddleware
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -871,6 +872,40 @@ class PrepareReviewerRunState(PrepareRunState):
     diff_line_set: NotRequired[dict[str, dict[str, set[int]]] | None]
 
 
+async def _ensure_reviewer_sandbox_for_thread(
+    thread_id: str,
+    configurable: dict[str, Any],
+) -> tuple[SandboxBackendProtocol, str | None]:
+    repo_config = configurable.get("repo") or {}
+    github_token: str | None = None
+    if configurable.get("source"):
+        repo_name_for_token = str(repo_config.get("name") or "")
+        github_token, expires_at = await get_github_app_installation_token_with_expiry(
+            repositories=[repo_name_for_token] if repo_name_for_token else None
+        )
+        if not github_token:
+            raise RuntimeError(
+                f"GitHub App installation token unavailable for reviewer thread {thread_id}"
+            )
+        cache_github_token_for_thread(thread_id, github_token, expires_at=expires_at)
+
+    repo_name_for_scope = str(repo_config.get("name") or "")
+    repo_for_snapshot = (
+        {"owner": str(repo_config["owner"]), "name": str(repo_config["name"])}
+        if repo_config.get("owner") and repo_config.get("name")
+        else None
+    )
+    return (
+        await ensure_sandbox_for_thread(
+            thread_id,
+            github_proxy_token=github_token,
+            github_proxy_repositories=[repo_name_for_scope] if repo_name_for_scope else None,
+            repo=repo_for_snapshot,
+        ),
+        github_token,
+    )
+
+
 class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
     state_schema = PrepareReviewerRunState
 
@@ -911,29 +946,8 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
     async def _prepare(self, state: dict[str, Any], runtime: object) -> dict[str, Any]:
         configurable = self._config["configurable"]
         repo_config = configurable.get("repo") or {}
-        github_token: str | None = None
-        if configurable.get("source"):
-            repo_name_for_token = str(repo_config.get("name") or "")
-            github_token, expires_at = await get_github_app_installation_token_with_expiry(
-                repositories=[repo_name_for_token] if repo_name_for_token else None
-            )
-            if not github_token:
-                raise RuntimeError(
-                    f"GitHub App installation token unavailable for reviewer thread {self._thread_id}"
-                )
-            cache_github_token_for_thread(self._thread_id, github_token, expires_at=expires_at)
-
-        repo_name_for_scope = str(repo_config.get("name") or "")
-        repo_for_snapshot = (
-            {"owner": str(repo_config["owner"]), "name": str(repo_config["name"])}
-            if repo_config.get("owner") and repo_config.get("name")
-            else None
-        )
-        sandbox_backend = await ensure_sandbox_for_thread(
-            self._thread_id,
-            github_proxy_token=github_token,
-            github_proxy_repositories=[repo_name_for_scope] if repo_name_for_scope else None,
-            repo=repo_for_snapshot,
+        sandbox_backend, github_token = await _ensure_reviewer_sandbox_for_thread(
+            self._thread_id, configurable
         )
         work_dir = await aresolve_sandbox_work_dir(sandbox_backend)
 
@@ -1249,8 +1263,17 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
         subagent_model_id, use_gateway=use_gateway, **subagent_model_kwargs
     )
 
+    async def reconnect_backend(
+        _thread_id: str = thread_id,
+        _configurable: dict[str, Any] = configurable,
+    ) -> SandboxBackendProtocol:
+        sandbox_backend, _github_token = await _ensure_reviewer_sandbox_for_thread(
+            _thread_id, _configurable
+        )
+        return sandbox_backend
+
     def backend_factory(_runtime: object, _thread_id: str = thread_id):
-        return _get_cached_sandbox_backend(_thread_id)
+        return _get_cached_sandbox_backend(_thread_id, reconnect=reconnect_backend)
 
     return create_deep_agent(
         model=reviewer_model,

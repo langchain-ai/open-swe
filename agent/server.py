@@ -7,7 +7,7 @@ import logging
 import os
 import time
 import warnings
-from collections.abc import Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -129,6 +129,7 @@ SANDBOX_POLL_INTERVAL = 1.0
 
 from .utils.sandbox_state import (
     SANDBOX_BACKENDS,
+    get_or_create_sandbox_backend_proxy,
     get_sandbox_id_from_metadata,
     set_sandbox_backend,
     unwrap_sandbox_backend,
@@ -468,6 +469,8 @@ async def ensure_sandbox_for_thread(
     first creation/reconnect for this thread initializes git identity.
     """
     sandbox_backend = SANDBOX_BACKENDS.get(thread_id)
+    if sandbox_backend is not None and not sandbox_backend.has_backend:
+        sandbox_backend = None
     sandbox_id = await get_sandbox_id_from_metadata(thread_id)
 
     if sandbox_id == SANDBOX_CREATING and not sandbox_backend:
@@ -631,11 +634,12 @@ def _browser_subagent(model: BaseChatModel, tools: list[Any]) -> SubAgent:
     }
 
 
-def _get_cached_sandbox_backend(thread_id: str) -> SandboxBackendProtocol:
-    sandbox_backend = SANDBOX_BACKENDS.get(thread_id)
-    if sandbox_backend is None:
-        raise RuntimeError(f"No sandbox backend cached for thread {thread_id}")
-    return sandbox_backend
+def _get_cached_sandbox_backend(
+    thread_id: str,
+    *,
+    reconnect: Callable[[], Awaitable[SandboxBackendProtocol]] | None = None,
+) -> SandboxBackendProtocol:
+    return get_or_create_sandbox_backend_proxy(thread_id, reconnect=reconnect)
 
 
 async def _observability_authorized(config: RunnableConfig, profile_login: str | None) -> bool:
@@ -846,8 +850,15 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     linear_project_id = linear_issue.get("linear_project_id", "")
     linear_issue_number = linear_issue.get("linear_issue_number", "")
 
+    async def reconnect_backend(
+        _thread_id: str = thread_id,
+        _configurable: dict[str, Any] = configurable,
+    ) -> SandboxBackendProtocol:
+        prompt_default_repo = await _resolve_prompt_default_repo(_configurable)
+        return await ensure_sandbox_for_thread(_thread_id, repo=prompt_default_repo)
+
     def backend_factory(_runtime: object, _thread_id: str = thread_id) -> SandboxBackendProtocol:
-        return _get_cached_sandbox_backend(_thread_id)
+        return _get_cached_sandbox_backend(_thread_id, reconnect=reconnect_backend)
 
     (model_id, profile_effort), (subagent_model_id, subagent_effort) = team_defaults
     logger.info("Using team default agent model: model=%s effort=%s", model_id, profile_effort)
