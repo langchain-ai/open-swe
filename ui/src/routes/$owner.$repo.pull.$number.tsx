@@ -1,7 +1,7 @@
 import { Link, Navigate, createFileRoute } from "@tanstack/react-router"
 import { useEffect, useMemo, useRef } from "react"
 import { ArrowSquareOutIcon, GitPullRequestIcon } from "@phosphor-icons/react"
-import { useMutation } from "@tanstack/react-query"
+import { useMutation, useQuery } from "@tanstack/react-query"
 
 import { buttonVariants } from "@/components/ui/button"
 import {
@@ -31,6 +31,12 @@ function PullRequestReviewLinkPage() {
     () => `https://github.com/${owner}/${repo}/pull/${number}`,
     [owner, repo, number]
   )
+  const existingReview = useQuery({
+    queryKey: ["review", owner, repo, prNumber],
+    queryFn: () => api.getReview(owner, repo, prNumber),
+    enabled: !!session.data && Number.isFinite(prNumber),
+    retry: false,
+  })
   const triggerRef = useRef<string | null>(null)
   const triggerReview = useMutation({
     mutationFn: () => api.reReview(owner, repo, prNumber),
@@ -38,11 +44,22 @@ function PullRequestReviewLinkPage() {
 
   useEffect(() => {
     if (!session.data || !Number.isFinite(prNumber)) return
+    if (existingReview.isLoading || existingReview.data?.status === "running") {
+      return
+    }
     const key = `${owner}/${repo}#${prNumber}`
     if (triggerRef.current === key) return
     triggerRef.current = key
     triggerReview.mutate()
-  }, [owner, repo, prNumber, session.data, triggerReview])
+  }, [
+    existingReview.data?.status,
+    existingReview.isLoading,
+    owner,
+    repo,
+    prNumber,
+    session.data,
+    triggerReview,
+  ])
 
   if (session.isLoading) {
     return (
@@ -67,7 +84,7 @@ function PullRequestReviewLinkPage() {
     )
   }
 
-  if (triggerReview.isSuccess) {
+  if (existingReview.data?.status === "running" || triggerReview.isSuccess) {
     return (
       <Navigate
         to="/agents/reviews/$owner/$repo/$number"
@@ -92,10 +109,20 @@ function PullRequestReviewLinkPage() {
     )
   }
 
+  const isCheckingExistingReview = existingReview.isLoading
+
   return (
     <ReviewLinkCard
-      title="Starting Open SWE review"
-      description="This PR link was recognized. Open SWE is starting a review and will redirect you to the stable review page."
+      title={
+        isCheckingExistingReview
+          ? "Checking review status"
+          : "Starting Open SWE review"
+      }
+      description={
+        isCheckingExistingReview
+          ? "This PR link was recognized. Open SWE is checking whether a review is already running."
+          : "Open SWE is starting a review and will redirect you to the stable review page."
+      }
       owner={owner}
       repo={repo}
       number={number}
