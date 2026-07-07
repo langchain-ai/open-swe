@@ -63,6 +63,7 @@ Set the `SANDBOX_TYPE` environment variable to switch providers. Each provider h
 | `langsmith` (default) | `agent/integrations/langsmith.py` | `LANGSMITH_API_KEY_PROD`, `SANDBOX_TYPE="langsmith"` |
 | `daytona` | `agent/integrations/daytona.py` | `DAYTONA_API_KEY`, `SANDBOX_TYPE="daytona"`, optional `DAYTONA_SANDBOX_SNAPSHOT` |
 | `runloop` | `agent/integrations/runloop.py` | `RUNLOOP_API_KEY`, `SANDBOX_TYPE="runloop"` |
+| `e2b` | `agent/integrations/e2b.py` | `E2B_API_KEY`, `SANDBOX_TYPE="e2b"`, optional `E2B_TEMPLATE` |
 | `modal` | `agent/integrations/modal.py` | Modal credentials, `SANDBOX_TYPE="modal"` |
 | `local` | `agent/integrations/local.py` | None (no isolation — development only), `SANDBOX_TYPE="local"` |
 
@@ -86,14 +87,12 @@ def create_my_provider_sandbox(sandbox_id: str | None = None):
     ...
 ```
 
-2. **Register it** in `agent/utils/sandbox.py` by importing your factory and adding it to `SANDBOX_FACTORIES`:
+2. **Register it** in `agent/utils/sandbox.py` by adding it to `SANDBOX_FACTORIES`:
 
 ```python
-from agent.integrations.my_provider import create_my_provider_sandbox
-
 SANDBOX_FACTORIES = {
     ...
-    "my_provider": create_my_provider_sandbox,
+    "my_provider": ("agent.integrations.my_provider", "create_my_provider_sandbox"),
 }
 ```
 
@@ -192,6 +191,25 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     
     return create_deep_agent(model=model, ...)
 ```
+
+### Routing through the LangSmith LLM Gateway
+
+Model calls can be proxied through the [LangSmith LLM Gateway](https://docs.langchain.com/langsmith/llm-gateway) (private beta) instead of hitting providers directly. The gateway authenticates with a **LangSmith API key** that has the `gateway:invoke` permission and resolves the real provider key from workspace Provider Secrets, so no provider API keys are needed at runtime — and it adds central spend limits, PII/secrets redaction, and tracing. Your org must have the gateway enabled with Provider Secrets configured.
+
+Routing is opt-in and off by default. Enable it either way:
+
+| Env var | Default | Purpose |
+|---|---|---|
+| `LANGSMITH_GATEWAY_ENABLED` | `false` | Deployment-level default for gateway routing. |
+| `LANGSMITH_GATEWAY_API_KEY` | unset | Optional dedicated LangSmith key for Gateway calls. Prefer this in LangGraph Cloud if the platform-provided `LANGSMITH_API_KEY` lacks `gateway:invoke`. Falls back to `LANGSMITH_API_KEY_PROD`, then `LANGSMITH_API_KEY`. |
+| `LANGSMITH_GATEWAY_BASE_URL` | `https://gateway.smith.langchain.com` | Override for a regional or self-hosted gateway host. |
+| `LANGSMITH_GATEWAY_OPENAI_USE_RESPONSES` | `true` | Use the OpenAI Responses API through the gateway. Set to `false` only to force Chat Completions for OpenAI models. |
+
+The admin panel (**Admin → LLM Gateway**) exposes a per-workspace toggle stored in team settings; when set it overrides the `LANGSMITH_GATEWAY_ENABLED` env default (a `None`/unset team value inherits the env default).
+
+Routing is applied centrally in `make_model` (`agent/utils/model.py`), which resolves the effective on/off and delegates URL/key wiring to `agent/utils/gateway.py`. **OpenAI, Anthropic, Fireworks, and Google Gemini** are routed (their LangChain integrations accept `base_url` + `api_key`); Google Vertex (service-account auth) and any other provider call the provider directly with a logged warning.
+
+**Caveat — OpenAI endpoint:** open-swe uses the OpenAI Responses API by default because OpenAI reasoning models with function tools reject `reasoning_effort` on Chat Completions. Direct OpenAI calls use a `wss://` base URL; gateway-routed OpenAI uses the HTTPS gateway base URL with Responses enabled. Set `LANGSMITH_GATEWAY_OPENAI_USE_RESPONSES=false` only if you need to force Chat Completions. Anthropic and Fireworks are unaffected.
 
 ---
 

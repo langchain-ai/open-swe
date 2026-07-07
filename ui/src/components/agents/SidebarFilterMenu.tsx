@@ -21,15 +21,15 @@ import {
 import { cn } from "@/lib/utils"
 
 const POPUP_CLASS =
-  "z-50 min-w-[12rem] origin-(--transform-origin) overflow-hidden rounded-md border border-[var(--ui-border)] bg-popover p-1 text-popover-foreground shadow-md outline-none data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95"
+  "z-50 min-w-[12rem] origin-(--transform-origin) overflow-hidden rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md outline-none data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95"
 
 const ITEM_CLASS =
-  "flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-xs outline-none select-none data-highlighted:bg-[var(--ui-sidebar-hover)] data-disabled:pointer-events-none data-disabled:opacity-50"
+  "flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-xs outline-none select-none data-highlighted:bg-muted data-disabled:pointer-events-none data-disabled:opacity-50"
 
 const LABEL_CLASS =
-  "px-2 py-1 text-[10px] font-medium tracking-wide text-[var(--ui-text-dim)] uppercase"
+  "px-2 py-1 text-[10px] font-medium tracking-wide text-muted-foreground uppercase"
 
-const SEPARATOR_CLASS = "my-1 h-px bg-[var(--ui-border)]"
+const SEPARATOR_CLASS = "my-1 h-px bg-border"
 
 function Indicator() {
   return <CheckIcon className="size-3.5 shrink-0" weight="bold" />
@@ -38,7 +38,7 @@ function Indicator() {
 function CountBadge({ count }: { count: number }) {
   if (count <= 0) return null
   return (
-    <span className="ml-auto rounded bg-[var(--ui-panel-2)] px-1.5 py-0.5 text-[10px] text-[var(--ui-text-muted)]">
+    <span className="ml-auto rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
       {count}
     </span>
   )

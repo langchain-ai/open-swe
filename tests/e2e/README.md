@@ -12,17 +12,17 @@ This drives the **whole happy path** through two mock UIs:
 Only the **LLM** and the **external SaaS HTTP boundaries** are faked. All agent
 code runs for real.
 
-| Piece | Real or fake |
-|---|---|
-| Slack webhook → `process_slack_mention` → run dispatch | **real** (`agent.webapp`) |
-| `get_agent`, deepagents loop, tools, middleware, prompt | **real** |
-| `open_pull_request`, `slack_thread_reply` tools | **real** |
-| Sandbox | **real** `local` provider, rooted in a throwaway temp dir |
-| Git remote ("GitHub") | **real git**, a local bare repo the agent clones/pushes |
-| The LLM | **fake** — a scripted model (`fake_llm.py`) emitting a fixed tool sequence |
-| `api.github.com` REST (PR create) | **fake** (`/fake-gh/...`), state rendered at `/mock/github` |
-| `slack.com/api` (post message, etc.) | **fake** (`/fake-slack/...`), thread rendered at `/mock/slack` |
-| GitHub App token mint, `api.github.com/user` identity | stubbed (offline) |
+| Piece                                                            | Real or fake                                                               |
+| ---------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| Slack webhook → `process_slack_mention` → run dispatch           | **real** (`agent.webapp`)                                                  |
+| `get_agent`, deepagents loop, tools, middleware, prompt          | **real**                                                                   |
+| `open_pull_request`, `slack_thread_reply` tools                  | **real**                                                                   |
+| Sandbox                                                          | **real** `local` provider, rooted in a throwaway temp dir                  |
+| Git remote ("GitHub")                                            | **real git**, a local bare repo the agent clones/pushes                    |
+| The LLM                                                          | **fake** — a scripted model (`fake_llm.py`) emitting a fixed tool sequence |
+| `api.github.com` REST (PR create) + dashboard GitHub OAuth login | **fake** (`/fake-gh/...`), state rendered at `/mock/github`                |
+| `slack.com/api` (post message, etc.)                             | **fake** (`/fake-slack/...`), thread rendered at `/mock/slack`             |
+| GitHub App token mint, `api.github.com/user` identity            | stubbed (offline)                                                          |
 
 The fake GitHub/Slack stores are the single source of truth the mock UIs render,
 so what Playwright asserts on is exactly what the real agent produced.

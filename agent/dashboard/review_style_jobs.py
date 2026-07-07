@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import uuid
 from typing import Any
 
 from langgraph_sdk import get_client
@@ -139,7 +140,7 @@ async def start_bootstrap_analysis(
                 ],
                 "files": build_skill_files(),
             },
-            config={"configurable": configurable},
+            config={"configurable": {**configurable, "prepare_run_id": str(uuid.uuid4())}},
             if_not_exists="create",
         )
         run_id = run.get("run_id") if isinstance(run, dict) else getattr(run, "run_id", None)
@@ -172,7 +173,7 @@ async def start_continual_run(
             thread_id,
             _ASSISTANT_ID,
             input=build_continual_run_input(full_name),
-            config={"configurable": configurable},
+            config={"configurable": {**configurable, "prepare_run_id": str(uuid.uuid4())}},
             if_not_exists="create",
         )
         run_id = run.get("run_id") if isinstance(run, dict) else getattr(run, "run_id", None)

@@ -2,6 +2,7 @@ import { Navigate, createFileRoute } from "@tanstack/react-router"
 
 import { AppShell } from "@/components/AppShell"
 import { RepoSnapshotsPanel } from "@/components/RepoSnapshotsPanel"
+import { RequireLogin } from "@/lib/auth-redirect"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useSession } from "@/lib/session"
 
@@ -19,7 +20,7 @@ function RepoSnapshotsPage() {
       </main>
     )
   }
-  if (!session.data) return <Navigate to="/login" />
+  if (!session.data) return <RequireLogin />
   if (!session.data.is_admin) return <Navigate to="/my-settings" />
 
   return (
