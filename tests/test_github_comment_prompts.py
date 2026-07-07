@@ -176,6 +176,15 @@ def test_construct_system_prompt_forbids_force_push() -> None:
     assert "git pull --rebase origin <branch>" in prompt
 
 
+def test_construct_system_prompt_forbids_pr_creation_fallbacks() -> None:
+    prompt = construct_system_prompt(working_dir="/workspace")
+
+    assert '"404"/"Not Found" from `open_pull_request`' in prompt
+    assert "do not retry via `gh pr create`" in prompt
+    assert "`gh api repos/.../pulls`" in prompt
+    assert "direct REST `POST /repos/.../pulls`" in prompt
+
+
 def test_construct_system_prompt_includes_coauthor_trailer_when_identity_present() -> None:
     identity = CollaboratorIdentity(
         display_name="octocat",

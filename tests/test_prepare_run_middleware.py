@@ -104,6 +104,34 @@ async def test_ttl_cache_single_flight_and_stale_while_error():
 
 
 @pytest.mark.asyncio
+async def test_ttl_cache_stale_while_revalidate_refreshes_in_background():
+    ttl_cache.clear()
+    ttl_cache.set_cached("k", "stale", -1)
+    refresh_started = asyncio.Event()
+    allow_refresh = asyncio.Event()
+    calls = 0
+
+    async def loader():
+        nonlocal calls
+        calls += 1
+        refresh_started.set()
+        await allow_refresh.wait()
+        return "fresh"
+
+    assert await ttl_cache.cached_stale_while_revalidate("k", 60, loader) == "stale"
+    await asyncio.wait_for(refresh_started.wait(), timeout=1)
+    assert calls == 1
+
+    allow_refresh.set()
+    for _ in range(20):
+        if await ttl_cache.cached_stale_while_revalidate("k", 60, loader) == "fresh":
+            break
+        await asyncio.sleep(0.01)
+    else:
+        raise AssertionError("stale cache entry was not refreshed")
+
+
+@pytest.mark.asyncio
 async def test_ttl_cache_exception_without_stale_is_not_cached():
     ttl_cache.clear()
     calls = 0

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import logging
 import warnings
+from typing import Any
 
 from langgraph.graph.state import RunnableConfig
 from langgraph.pregel import Pregel
@@ -27,6 +28,7 @@ warnings.filterwarnings("ignore", message=".*Pydantic V1.*", category=UserWarnin
 
 from deepagents import create_deep_agent
 from langchain.agents.middleware import ModelCallLimitMiddleware
+from langchain_core.language_models import BaseChatModel
 
 from .dashboard.options import (
     SUPPORTED_MODEL_IDS,
@@ -59,6 +61,7 @@ from .tools import (
     web_search,
 )
 from .utils import ttl_cache
+from .utils.deferred_model import make_deferred_error_model
 from .utils.github_app import get_github_app_installation_token
 from .utils.model import DEFAULT_LLM_REASONING, make_model, provider_model_kwargs
 from .utils.tracing import AGENT_TRACING_PROJECT, traced_graph_factory
@@ -114,6 +117,14 @@ async def _cached_team_chat_model() -> tuple[str, str]:
         60,
         lambda: get_team_default_model("chat"),
     )
+
+
+def _make_model_or_defer(model_id: str, *, use_gateway: bool, **kwargs: Any) -> BaseChatModel:
+    try:
+        return make_model(model_id, use_gateway=use_gateway, **kwargs)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Deferring chat model setup failure for %s", model_id, exc_info=True)
+        return make_deferred_error_model(e, model_id=model_id)
 
 
 class PrepareChatRunMiddleware(BasePrepareRunMiddleware):
@@ -192,7 +203,7 @@ async def get_chat_agent(config: RunnableConfig) -> Pregel:
     )
 
     return create_deep_agent(
-        model=make_model(model_id, use_gateway=use_gateway, **model_kwargs),
+        model=_make_model_or_defer(model_id, use_gateway=use_gateway, **model_kwargs),
         system_prompt="",
         tools=[
             read_repo_file,

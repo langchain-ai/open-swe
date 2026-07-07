@@ -817,7 +817,10 @@ export const api = {
 
 export function loginUrl(redirectTo?: string): string {
   const target =
-    redirectTo ?? (typeof window !== "undefined" ? window.location.href : "")
+    redirectTo ??
+    (typeof window !== "undefined"
+      ? `${window.location.pathname}${window.location.search}${window.location.hash}`
+      : "")
   const qs = target ? `?redirect_to=${encodeURIComponent(target)}` : ""
   return `${API_BASE}/dashboard/api/auth/login${qs}`
 }

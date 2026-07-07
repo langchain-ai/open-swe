@@ -31,6 +31,7 @@ import { Route as ReviewRepositoriesOwnerRouteImport } from './routes/review_.re
 import { Route as AgentsAutomationsNewRouteImport } from './routes/agents/automations/new'
 import { Route as AgentsAutomationsScheduleIdRouteImport } from './routes/agents/automations/$scheduleId'
 import { Route as AgentsThreadIdPlanRouteImport } from './routes/agents/$threadId_.plan'
+import { Route as OwnerRepoPullNumberRouteImport } from './routes/$owner.$repo.pull.$number'
 import { Route as AgentsReviewsOwnerRepoNumberRouteImport } from './routes/agents/reviews/$owner.$repo.$number'
 
 const UsageRoute = UsageRouteImport.update({
@@ -144,6 +145,11 @@ const AgentsThreadIdPlanRoute = AgentsThreadIdPlanRouteImport.update({
   path: '/$threadId/plan',
   getParentRoute: () => AgentsRoute,
 } as any)
+const OwnerRepoPullNumberRoute = OwnerRepoPullNumberRouteImport.update({
+  id: '/$owner/$repo/pull/$number',
+  path: '/$owner/$repo/pull/$number',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AgentsReviewsOwnerRepoNumberRoute =
   AgentsReviewsOwnerRepoNumberRouteImport.update({
     id: '/reviews/$owner/$repo/$number',
@@ -174,6 +180,7 @@ export interface FileRoutesByFullPath {
   '/review/repositories/$owner': typeof ReviewRepositoriesOwnerRoute
   '/agents/automations/': typeof AgentsAutomationsIndexRoute
   '/agents/reviews/': typeof AgentsReviewsIndexRoute
+  '/$owner/$repo/pull/$number': typeof OwnerRepoPullNumberRoute
   '/agents/reviews/$owner/$repo/$number': typeof AgentsReviewsOwnerRepoNumberRoute
 }
 export interface FileRoutesByTo {
@@ -198,6 +205,7 @@ export interface FileRoutesByTo {
   '/review/repositories/$owner': typeof ReviewRepositoriesOwnerRoute
   '/agents/automations': typeof AgentsAutomationsIndexRoute
   '/agents/reviews': typeof AgentsReviewsIndexRoute
+  '/$owner/$repo/pull/$number': typeof OwnerRepoPullNumberRoute
   '/agents/reviews/$owner/$repo/$number': typeof AgentsReviewsOwnerRepoNumberRoute
 }
 export interface FileRoutesById {
@@ -224,6 +232,7 @@ export interface FileRoutesById {
   '/review_/repositories/$owner': typeof ReviewRepositoriesOwnerRoute
   '/agents/automations/': typeof AgentsAutomationsIndexRoute
   '/agents/reviews/': typeof AgentsReviewsIndexRoute
+  '/$owner/$repo/pull/$number': typeof OwnerRepoPullNumberRoute
   '/agents/reviews/$owner/$repo/$number': typeof AgentsReviewsOwnerRepoNumberRoute
 }
 export interface FileRouteTypes {
@@ -251,6 +260,7 @@ export interface FileRouteTypes {
     | '/review/repositories/$owner'
     | '/agents/automations/'
     | '/agents/reviews/'
+    | '/$owner/$repo/pull/$number'
     | '/agents/reviews/$owner/$repo/$number'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -275,6 +285,7 @@ export interface FileRouteTypes {
     | '/review/repositories/$owner'
     | '/agents/automations'
     | '/agents/reviews'
+    | '/$owner/$repo/pull/$number'
     | '/agents/reviews/$owner/$repo/$number'
   id:
     | '__root__'
@@ -300,6 +311,7 @@ export interface FileRouteTypes {
     | '/review_/repositories/$owner'
     | '/agents/automations/'
     | '/agents/reviews/'
+    | '/$owner/$repo/pull/$number'
     | '/agents/reviews/$owner/$repo/$number'
   fileRoutesById: FileRoutesById
 }
@@ -318,6 +330,7 @@ export interface RootRouteChildren {
   AgentsSnapshotsRoute: typeof AgentsSnapshotsRoute
   ReviewStylesRoute: typeof ReviewStylesRoute
   ReviewRepositoriesOwnerRoute: typeof ReviewRepositoriesOwnerRoute
+  OwnerRepoPullNumberRoute: typeof OwnerRepoPullNumberRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -476,6 +489,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AgentsThreadIdPlanRouteImport
       parentRoute: typeof AgentsRoute
     }
+    '/$owner/$repo/pull/$number': {
+      id: '/$owner/$repo/pull/$number'
+      path: '/$owner/$repo/pull/$number'
+      fullPath: '/$owner/$repo/pull/$number'
+      preLoaderRoute: typeof OwnerRepoPullNumberRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/agents/reviews/$owner/$repo/$number': {
       id: '/agents/reviews/$owner/$repo/$number'
       path: '/reviews/$owner/$repo/$number'
@@ -528,6 +548,7 @@ const rootRouteChildren: RootRouteChildren = {
   AgentsSnapshotsRoute: AgentsSnapshotsRoute,
   ReviewStylesRoute: ReviewStylesRoute,
   ReviewRepositoriesOwnerRoute: ReviewRepositoriesOwnerRoute,
+  OwnerRepoPullNumberRoute: OwnerRepoPullNumberRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

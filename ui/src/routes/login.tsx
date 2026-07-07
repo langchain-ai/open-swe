@@ -7,7 +7,6 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { loginUrl } from "@/lib/api";
 import {
   DEFAULT_AUTH_REDIRECT,
-  authRedirectUrl,
   consumeAuthRedirect,
   getRememberedAuthRedirect,
   rememberAuthRedirect,
@@ -64,7 +63,7 @@ function Login() {
         </CardHeader>
         <CardContent>
           <a
-            href={loginUrl(authRedirectUrl(intendedPath))}
+            href={loginUrl(intendedPath)}
             className={cn(buttonVariants({ size: "lg" }), "w-full")}
           >
             Continue with GitHub

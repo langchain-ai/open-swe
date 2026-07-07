@@ -10,6 +10,7 @@ from typing import Any
 from fastapi import HTTPException
 from pydantic import BaseModel, Field, field_validator
 
+from ..dispatch import create_durable_run
 from ..utils.thread_ops import langgraph_client
 from .options import SUPPORTED_MODEL_IDS, gate_fable_model, model_supports_effort
 from .profiles import get_profile, get_valid_access_token
@@ -439,12 +440,13 @@ async def launch_scheduled_agent_run(schedule_id: str) -> dict[str, Any]:
     client = _client()
     await client.threads.create(thread_id=thread_id, metadata=metadata, if_exists="do_nothing")
     await client.threads.update(thread_id=thread_id, metadata=metadata)
-    run = await client.runs.create(
+    run = await create_durable_run(
         thread_id,
         _AGENT_ASSISTANT_ID,
         input={"messages": [{"role": "user", "content": record["prompt"]}]},
+        source="schedule",
         config=await _agent_run_config(record, thread_id),
-        if_not_exists="create",
+        client=client,
         stream_mode=["values", "updates", "messages-tuple"],
         stream_resumable=True,
     )
