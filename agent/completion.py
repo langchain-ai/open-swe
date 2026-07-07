@@ -7,8 +7,8 @@ short failure reply to the originating channel, so a run that died on a server
 recycle or hit a limit never leaves the user in silence.
 
 This decouples "the user gets an answer" from "the agent remembered to reply."
-The reply is idempotent: a per-thread metadata flag prevents double-posting when
-the platform retries the webhook or a checkpoint replays.
+The reply is idempotent per run: thread metadata records which run ids already
+posted a failure reply, so platform webhook retries do not duplicate messages.
 """
 
 from __future__ import annotations
@@ -32,7 +32,9 @@ logger = logging.getLogger(__name__)
 # follow-up halts the prior run (status "interrupted") while its replacement
 # carries on — that's healthy, not a failure worth a "couldn't finish" reply.
 _TERMINAL_FAILURE_STATUSES = frozenset({"error", "timeout"})
-_FAILURE_REPLY_FLAG = "failure_reply_posted"
+_FAILURE_REPLY_RUN_ID = "failure_reply_posted_run_id"
+_FAILURE_REPLY_RUN_IDS = "failure_reply_posted_run_ids"
+_MAX_FAILURE_REPLY_RUN_IDS = 20
 
 # Shared-secret bearer token proving a /webhooks/run-complete call came from our
 # own dispatch (which appends ?token= when this is set) rather than from an
@@ -116,6 +118,24 @@ async def _post_failure_reply(thread_id: str, metadata: dict[str, Any], status: 
     return False
 
 
+def _posted_failure_run_ids(metadata: dict[str, Any]) -> list[str]:
+    raw = metadata.get(_FAILURE_REPLY_RUN_IDS)
+    ids = [item for item in raw if isinstance(item, str) and item] if isinstance(raw, list) else []
+    latest = metadata.get(_FAILURE_REPLY_RUN_ID)
+    if isinstance(latest, str) and latest and latest not in ids:
+        ids.append(latest)
+    return ids
+
+
+def _failure_reply_metadata(metadata: dict[str, Any], run_id: str) -> dict[str, Any]:
+    ids = [item for item in _posted_failure_run_ids(metadata) if item != run_id]
+    ids.append(run_id)
+    return {
+        _FAILURE_REPLY_RUN_ID: run_id,
+        _FAILURE_REPLY_RUN_IDS: ids[-_MAX_FAILURE_REPLY_RUN_IDS:],
+    }
+
+
 async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
     """Handle a platform run-completion webhook POST.
 
@@ -124,8 +144,11 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
     """
     status = payload.get("status")
     thread_id = payload.get("thread_id")
+    run_id = payload.get("run_id")
     if not isinstance(thread_id, str) or not thread_id:
         return {"status": "ignored", "reason": "missing thread_id"}
+    if not isinstance(run_id, str) or not run_id:
+        return {"status": "ignored", "reason": "missing run_id"}
     if status not in _TERMINAL_FAILURE_STATUSES:
         return {"status": "ignored", "reason": f"non-failure status: {status}"}
 
@@ -138,15 +161,18 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
 
     metadata = thread.get("metadata") if isinstance(thread, dict) else None
     metadata = metadata if isinstance(metadata, dict) else {}
-    if metadata.get(_FAILURE_REPLY_FLAG):
-        return {"status": "ignored", "reason": "failure reply already posted"}
+    if run_id in _posted_failure_run_ids(metadata):
+        return {"status": "ignored", "reason": "failure reply already posted for run"}
 
     posted = await _post_failure_reply(thread_id, metadata, status)
     if not posted:
         return {"status": "ignored", "reason": "no reply posted"}
 
     try:
-        await client.threads.update(thread_id=thread_id, metadata={_FAILURE_REPLY_FLAG: True})
+        await client.threads.update(
+            thread_id=thread_id,
+            metadata=_failure_reply_metadata(metadata, run_id),
+        )
     except Exception:  # noqa: BLE001
         logger.warning("run-complete: could not flag thread %s", thread_id, exc_info=True)
     logger.info("Posted failure reply for thread %s (status=%s)", thread_id, status)

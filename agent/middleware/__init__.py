@@ -14,6 +14,8 @@ from .sanitize_openai_responses import SanitizeOpenAIResponsesMiddleware
 from .sanitize_thinking_blocks import SanitizeThinkingBlocksMiddleware
 from .sanitize_tool_inputs import SanitizeToolInputsMiddleware
 from .settle_review_check import settle_review_check_on_exit
+from .task_retry import task_on_failure, task_retry_on
+from .timeout_wrapup import TimeoutWrapupMiddleware
 from .tool_artifact import ToolArtifactMiddleware
 from .tool_error_handler import ToolErrorMiddleware
 from .workflow_push_guard import WorkflowPushGuardMiddleware
@@ -31,6 +33,7 @@ __all__ = [
     "SanitizeToolInputsMiddleware",
     "ToolArtifactMiddleware",
     "ToolErrorMiddleware",
+    "TimeoutWrapupMiddleware",
     "WorkflowPushGuardMiddleware",
     "SandboxCircuitBreakerMiddleware",
     "SlackAssistantStatusMiddleware",
@@ -39,4 +42,6 @@ __all__ = [
     "notify_step_limit_reached",
     "refresh_github_proxy_before_model",
     "settle_review_check_on_exit",
+    "task_on_failure",
+    "task_retry_on",
 ]
