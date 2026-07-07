@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react"
 import { useNavigate } from "@tanstack/react-router"
+import type { KeyboardEvent } from "react"
 
 import type { PlanComment, PlanData } from "@/lib/plan"
 import {
@@ -142,6 +143,16 @@ export function PlanReview({ plan }: { plan: PlanData }) {
       setPosting(false)
     }
   }, [draft, plan.threadId])
+
+  const handleCommentKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLTextAreaElement>) => {
+      if (event.key !== "Enter" || (!event.metaKey && !event.ctrlKey)) return
+      event.preventDefault()
+      if (posting || !draft.trim()) return
+      void submitComment()
+    },
+    [draft, posting, submitComment]
+  )
 
   const removeComment = useCallback(
     async (id: string) => {
@@ -365,6 +376,7 @@ export function PlanReview({ plan }: { plan: PlanData }) {
                 data-testid="comment-input"
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
+                onKeyDown={handleCommentKeyDown}
                 placeholder="Leave a comment on the plan"
                 rows={3}
                 className="w-full resize-none rounded-md border border-[var(--ui-border)] bg-[var(--ui-bg)] px-2 py-1.5 text-sm text-[var(--ui-text)] outline-none focus:border-[var(--ui-accent)]"

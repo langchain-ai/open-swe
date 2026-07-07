@@ -159,9 +159,19 @@ def test_construct_system_prompt_does_not_require_pr_for_questions() -> None:
 
     assert "Do not create commits, branches, or pull requests for questions" in prompt
     assert "For information-only requests" in prompt
+    assert "check them out before answering" in prompt
+    assert "answer fully inline" in prompt
     assert "open or update a draft PR when the user asks for one" in prompt
     assert "Always Create PRs Policy Override" not in prompt
     assert "Always push, open/update the draft PR" not in prompt
+
+
+def test_shared_base_summarizes_slack_information_answers() -> None:
+    from agent.prompt import OPEN_SWE_SHARED_BASE
+
+    assert "Slack-triggered information-only answers" in OPEN_SWE_SHARED_BASE
+    assert "post only a concise summary" in OPEN_SWE_SHARED_BASE
+    assert "complete answer inline" in OPEN_SWE_SHARED_BASE
 
 
 def test_construct_system_prompt_includes_always_create_prs_override() -> None:
@@ -184,6 +194,15 @@ def test_construct_system_prompt_forbids_force_push() -> None:
     assert "Never run `git push --force`" in prompt
     assert "`origin/<branch>`" in prompt
     assert "git pull --rebase origin <branch>" in prompt
+
+
+def test_construct_system_prompt_forbids_pr_creation_fallbacks() -> None:
+    prompt = construct_system_prompt(working_dir="/workspace")
+
+    assert '"404"/"Not Found" from `open_pull_request`' in prompt
+    assert "do not retry via `gh pr create`" in prompt
+    assert "`gh api repos/.../pulls`" in prompt
+    assert "direct REST `POST /repos/.../pulls`" in prompt
 
 
 def test_construct_system_prompt_includes_coauthor_trailer_when_identity_present() -> None:

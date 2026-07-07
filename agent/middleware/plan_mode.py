@@ -69,13 +69,6 @@ class PlanModeMiddleware(AgentMiddleware):
             return request
         return request.override(tools=filtered)
 
-    def wrap_model_call(
-        self,
-        request: ModelRequest,
-        handler: Callable[[ModelRequest], ModelResponse],
-    ) -> ModelResponse:
-        return handler(self._filter(request))
-
     async def awrap_model_call(
         self,
         request: ModelRequest,

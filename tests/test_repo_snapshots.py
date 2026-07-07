@@ -275,37 +275,37 @@ async def test_run_snapshot_build_failure_marks_failed() -> None:
     assert statuses[-1] == "failed"
 
 
-def test_create_langsmith_sandbox_uses_repo_snapshot_override() -> None:
+async def test_create_langsmith_sandbox_uses_repo_snapshot_override() -> None:
     from agent.integrations import langsmith
 
     fake_backend = MagicMock()
     fake_backend.id = "box-1"
     provider = MagicMock()
-    provider.get_or_create.return_value = fake_backend
+    provider.get_or_create = AsyncMock(return_value=fake_backend)
 
     with (
         patch.dict("os.environ", {"DEFAULT_SANDBOX_SNAPSHOT_ID": "env-default"}, clear=True),
         patch.object(langsmith, "LangSmithProvider", return_value=provider),
-        patch.object(langsmith, "_update_thread_sandbox_metadata"),
+        patch.object(langsmith, "_update_thread_sandbox_metadata", new_callable=AsyncMock),
     ):
-        langsmith.create_langsmith_sandbox(snapshot_id="repo-snap")
+        await langsmith.create_langsmith_sandbox(snapshot_id="repo-snap")
 
     assert provider.get_or_create.call_args.kwargs["snapshot_id"] == "repo-snap"
 
 
-def test_create_langsmith_sandbox_falls_back_to_default() -> None:
+async def test_create_langsmith_sandbox_falls_back_to_default() -> None:
     from agent.integrations import langsmith
 
     fake_backend = MagicMock()
     fake_backend.id = "box-2"
     provider = MagicMock()
-    provider.get_or_create.return_value = fake_backend
+    provider.get_or_create = AsyncMock(return_value=fake_backend)
 
     with (
         patch.dict("os.environ", {"DEFAULT_SANDBOX_SNAPSHOT_ID": "env-default"}, clear=True),
         patch.object(langsmith, "LangSmithProvider", return_value=provider),
-        patch.object(langsmith, "_update_thread_sandbox_metadata"),
+        patch.object(langsmith, "_update_thread_sandbox_metadata", new_callable=AsyncMock),
     ):
-        langsmith.create_langsmith_sandbox()
+        await langsmith.create_langsmith_sandbox()
 
     assert provider.get_or_create.call_args.kwargs["snapshot_id"] == "env-default"

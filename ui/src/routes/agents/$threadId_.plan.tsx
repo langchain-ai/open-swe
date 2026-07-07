@@ -7,7 +7,7 @@ import { PlanReview } from "@/components/agents/PlanReview"
 import { buttonVariants } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { loginUrl } from "@/lib/api"
-import { authRedirectUrl, currentAuthRedirectPath } from "@/lib/auth-redirect"
+import { currentAuthRedirectPath } from "@/lib/auth-redirect"
 import { PlanApiError, getPlan } from "@/lib/plan"
 
 export const Route = createFileRoute("/agents/$threadId_/plan")({
@@ -36,7 +36,7 @@ function BackLink({ threadId }: { threadId: string }) {
 }
 
 export function planSignInHref(): string {
-  return loginUrl(authRedirectUrl(currentAuthRedirectPath()))
+  return loginUrl(currentAuthRedirectPath())
 }
 
 export function PlanSignInButton() {

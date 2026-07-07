@@ -141,10 +141,16 @@ async def get_plan_content(
 async def set_plan_status(thread_id: str, status: str, *, plan_mode: bool | None = None) -> None:
     """Update the plan lifecycle status on both the content record and metadata."""
     existing = await get_plan_content(thread_id) or {}
+    entering_plan_after_share = (
+        existing.get("status") == PLAN_STATUS_SHARED and status == PLAN_STATUS_PLANNING
+    )
     client = _client()
-    record: dict[str, Any] = {"markdown": existing.get("markdown", ""), "status": status}
+    record: dict[str, Any] = {
+        "markdown": "" if entering_plan_after_share else existing.get("markdown", ""),
+        "status": status,
+    }
     plan_file_path = existing.get("plan_file_path")
-    if isinstance(plan_file_path, str) and plan_file_path:
+    if not entering_plan_after_share and isinstance(plan_file_path, str) and plan_file_path:
         record["plan_file_path"] = plan_file_path
     await client.store.put_item(
         PLAN_CONTENT_NAMESPACE,

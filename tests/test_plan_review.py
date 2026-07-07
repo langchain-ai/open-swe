@@ -452,6 +452,38 @@ async def test_set_plan_status_preserves_plan_file_path(monkeypatch: pytest.Monk
     assert saved["status"] == plan_store.PLAN_STATUS_REVISING
 
 
+async def test_set_plan_status_clears_shared_content_when_entering_plan_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent.dashboard import plan_store
+
+    existing = {
+        "markdown": "# Old report",
+        "status": "shared",
+        "plan_file_path": "/workspace/plans/old-report.md",
+    }
+    saved: dict[str, Any] = {}
+    merged: dict[str, Any] = {}
+
+    class _Store:
+        async def get_item(self, *a: Any, **k: Any) -> Any:
+            return {"value": existing}
+
+        async def put_item(self, namespace: Any, key: str, value: Any, *a: Any, **k: Any) -> None:
+            saved.update(value)
+
+    async def fake_merge(thread_id: str, metadata: dict[str, Any]) -> None:
+        merged.update(metadata)
+
+    monkeypatch.setattr(plan_store, "_client", lambda: _fake_client(_Store()))
+    monkeypatch.setattr(plan_store, "_merge_thread_metadata", fake_merge)
+
+    await plan_store.set_plan_status("t", plan_store.PLAN_STATUS_PLANNING, plan_mode=True)
+
+    assert saved == {"markdown": "", "status": "planning"}
+    assert merged == {"plan_status": "planning", "plan_mode": True}
+
+
 async def test_save_plan_content_clear_comments_flag(monkeypatch: pytest.MonkeyPatch) -> None:
     from agent.dashboard import plan_store
 
