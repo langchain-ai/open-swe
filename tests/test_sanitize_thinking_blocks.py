@@ -16,8 +16,13 @@ def _make_request(messages: list[object], model: object | None = None) -> MagicM
     return request
 
 
+async def _noop_handler(_req: object) -> object:
+    return MagicMock()
+
+
 class TestSanitizeThinkingBlocksMiddleware:
-    def test_drops_empty_thinking_block_for_anthropic(self) -> None:
+    @pytest.mark.asyncio
+    async def test_drops_empty_thinking_block_for_anthropic(self) -> None:
         message = AIMessage(
             content=[
                 {"type": "thinking", "signature": "abc", "thinking": ""},
@@ -27,22 +32,23 @@ class TestSanitizeThinkingBlocksMiddleware:
         request = _make_request([message])
         response = MagicMock()
 
-        def handler(req: object) -> object:
+        async def handler(req: object) -> object:
             assert req is request
             return response
 
-        result = SanitizeThinkingBlocksMiddleware().wrap_model_call(request, handler)
+        result = await SanitizeThinkingBlocksMiddleware().awrap_model_call(request, handler)
 
         assert result is response
         assert message.content == [{"type": "text", "text": "ok"}]
 
-    def test_preserves_non_empty_thinking_block_for_anthropic(self) -> None:
+    @pytest.mark.asyncio
+    async def test_preserves_non_empty_thinking_block_for_anthropic(self) -> None:
         thinking_block = {"type": "thinking", "signature": "abc", "thinking": "reasoning"}
         text_block = {"type": "text", "text": "ok"}
         message = AIMessage(content=[thinking_block, text_block])
         request = _make_request([message])
 
-        SanitizeThinkingBlocksMiddleware().wrap_model_call(request, lambda req: MagicMock())
+        await SanitizeThinkingBlocksMiddleware().awrap_model_call(request, _noop_handler)
 
         assert message.content == [thinking_block, text_block]
 
@@ -66,11 +72,12 @@ class TestSanitizeThinkingBlocksMiddleware:
         assert result is response
         assert message.content == [{"type": "text", "text": "ok"}]
 
-    def test_ignores_non_anthropic_models(self) -> None:
+    @pytest.mark.asyncio
+    async def test_ignores_non_anthropic_models(self) -> None:
         thinking_block = {"type": "thinking", "signature": "abc", "thinking": ""}
         message = AIMessage(content=[thinking_block, {"type": "text", "text": "ok"}])
         request = _make_request([message], model=MagicMock())
 
-        SanitizeThinkingBlocksMiddleware().wrap_model_call(request, lambda req: MagicMock())
+        await SanitizeThinkingBlocksMiddleware().awrap_model_call(request, _noop_handler)
 
         assert message.content == [thinking_block, {"type": "text", "text": "ok"}]

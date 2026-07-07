@@ -111,3 +111,13 @@ async def test_agent_includes_report_platform_issue_tool() -> None:
     tools = captured["tools"]
     assert isinstance(tools, list)
     assert report_platform_issue in tools
+
+
+@pytest.mark.asyncio
+async def test_task_retry_wraps_inside_tool_error_middleware() -> None:
+    captured = await _capture_create_deep_agent_kwargs()
+    middleware = captured["middleware"]
+    assert isinstance(middleware, list)
+    names = [type(m).__name__ for m in middleware]
+
+    assert names.index("ToolErrorMiddleware") < names.index("ToolRetryMiddleware")

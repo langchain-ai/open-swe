@@ -17,8 +17,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from deepagents.backends.utils import create_file_data
-
 SKILLS_DIR = Path(__file__).resolve().parent.parent / "skills"
 SKILLS_ROUTE = "/skills/"
 
@@ -41,6 +39,9 @@ def build_skill_files() -> dict[str, Any]:
     can serve them. Keys omit the ``/skills`` prefix (stripped by the composite
     route); values are ``FileData`` v2 entries.
     """
+    # deferred: pulls deepagents -> langchain_anthropic -> anthropic at import time
+    from deepagents.backends.utils import create_file_data
+
     files: dict[str, Any] = {}
     for skill in ANALYZER_MODES.values():
         skill_md = SKILLS_DIR / skill / "SKILL.md"

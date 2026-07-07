@@ -26,14 +26,22 @@ def _ai_with_tool_call(call_id: str, name: str = "execute") -> AIMessage:
     )
 
 
+async def _noop_handler(_req: object) -> object:
+    return MagicMock()
+
+
 class TestRepairOrphanedToolCallsMiddleware:
-    def test_inserts_synthetic_result_for_orphaned_tool_call(self) -> None:
+    @pytest.mark.asyncio
+    async def test_inserts_synthetic_result_for_orphaned_tool_call(self) -> None:
         ai = _ai_with_tool_call("call_1")
         follow_up = HumanMessage(content="continue")
         request = _make_request([HumanMessage(content="hi"), ai, follow_up])
         response = MagicMock()
 
-        result = RepairOrphanedToolCallsMiddleware().wrap_model_call(request, lambda req: response)
+        async def handler(_req: object) -> object:
+            return response
+
+        result = await RepairOrphanedToolCallsMiddleware().awrap_model_call(request, handler)
 
         assert result is response
         messages = request.messages
@@ -47,17 +55,19 @@ class TestRepairOrphanedToolCallsMiddleware:
         assert payload["recovery"] == INTERRUPTED_TOOL_RECOVERY
         assert payload["name"] == "execute"
 
-    def test_leaves_satisfied_tool_calls_untouched(self) -> None:
+    @pytest.mark.asyncio
+    async def test_leaves_satisfied_tool_calls_untouched(self) -> None:
         ai = _ai_with_tool_call("call_1")
         tool = ToolMessage(content="done", tool_call_id="call_1")
         original = [HumanMessage(content="hi"), ai, tool]
         request = _make_request(list(original))
 
-        RepairOrphanedToolCallsMiddleware().wrap_model_call(request, lambda req: MagicMock())
+        await RepairOrphanedToolCallsMiddleware().awrap_model_call(request, _noop_handler)
 
         assert request.messages == original
 
-    def test_repairs_multiple_orphans_on_one_message(self) -> None:
+    @pytest.mark.asyncio
+    async def test_repairs_multiple_orphans_on_one_message(self) -> None:
         ai = AIMessage(
             content="",
             tool_calls=[
@@ -67,13 +77,14 @@ class TestRepairOrphanedToolCallsMiddleware:
         )
         request = _make_request([ai])
 
-        RepairOrphanedToolCallsMiddleware().wrap_model_call(request, lambda req: MagicMock())
+        await RepairOrphanedToolCallsMiddleware().awrap_model_call(request, _noop_handler)
 
         messages = request.messages
         assert [getattr(m, "tool_call_id", None) for m in messages[1:]] == ["call_1", "call_2"]
         assert all(isinstance(m, ToolMessage) for m in messages[1:])
 
-    def test_partial_repair_keeps_existing_result(self) -> None:
+    @pytest.mark.asyncio
+    async def test_partial_repair_keeps_existing_result(self) -> None:
         ai = AIMessage(
             content="",
             tool_calls=[
@@ -84,7 +95,7 @@ class TestRepairOrphanedToolCallsMiddleware:
         tool = ToolMessage(content="done", tool_call_id="call_1")
         request = _make_request([ai, tool])
 
-        RepairOrphanedToolCallsMiddleware().wrap_model_call(request, lambda req: MagicMock())
+        await RepairOrphanedToolCallsMiddleware().awrap_model_call(request, _noop_handler)
 
         synthetic = [
             m for m in request.messages if isinstance(m, ToolMessage) and m.status == "error"

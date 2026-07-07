@@ -41,11 +41,12 @@ class _FakeClient:
         return self._post
 
     async def get(
-        self, url: str, *, headers: dict[str, str], params: dict[str, str]
+        self, url: str, *, headers: dict[str, str], params: dict[str, str] | None = None
     ) -> _FakeResponse:
         self.get_calls.append({"url": url, "headers": headers, "params": params})
-        assert self._get is not None
-        return self._get
+        if self._get is not None:
+            return self._get
+        return _FakeResponse(200, {"name": "ok"})
 
 
 class _RoutingClient:
@@ -76,7 +77,7 @@ class _RoutingClient:
         for needle, resp in self._get_routes.items():
             if needle in url:
                 return resp
-        raise AssertionError(f"unexpected GET {url}")
+        return _FakeResponse(200, {"name": "ok"})
 
 
 def _install_client(monkeypatch: pytest.MonkeyPatch, client: _FakeClient | _RoutingClient) -> None:
@@ -140,6 +141,40 @@ def test_uses_user_token_for_slack_with_login(monkeypatch: pytest.MonkeyPatch) -
         "body": "body",
         "draft": True,
     }
+
+
+def test_uses_user_token_for_linear_with_login(monkeypatch: pytest.MonkeyPatch) -> None:
+    _set_config(monkeypatch, {"source": "linear", "github_login": "johannes117"})
+
+    from agent.dashboard import profiles
+
+    async def fake_user_token(login: str, **_kw: Any) -> str | None:
+        assert login == "johannes117"
+        return "user-tok"
+
+    monkeypatch.setattr(profiles, "get_valid_access_token", fake_user_token)
+
+    async def fail_bot() -> str | None:
+        raise AssertionError("bot token should not be used when a user token exists")
+
+    monkeypatch.setattr(opr, "get_github_app_installation_token", fail_bot)
+
+    client = _FakeClient(
+        post=_FakeResponse(
+            201,
+            {"html_url": "https://x/pull/1", "number": 1, "user": {"login": "johannes117"}},
+        )
+    )
+    _install_client(monkeypatch, client)
+
+    result = _open()
+
+    assert result["success"] is True
+    assert result["created"] is True
+    assert result["url"] == "https://x/pull/1"
+    assert result["author"] == "johannes117"
+    assert result["token_kind"] == "user"
+    assert client.post_calls[0]["headers"]["Authorization"] == "Bearer user-tok"
 
 
 def test_falls_back_to_bot_for_github_source(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -212,7 +247,8 @@ def test_returns_existing_pr_on_422(monkeypatch: pytest.MonkeyPatch) -> None:
     assert result["success"] is True
     assert result["created"] is False
     assert result["number"] == 9
-    assert client.get_calls[0]["params"] == {
+    pr_lookup = [call for call in client.get_calls if call["params"]]
+    assert pr_lookup[0]["params"] == {
         "head": "langchain-ai:open-swe/feature",
         "state": "open",
     }
@@ -226,13 +262,69 @@ def test_error_surfaced_on_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(profiles, "get_valid_access_token", lambda *_a, **_k: _coro("user-tok"))
     monkeypatch.setattr(opr, "get_github_app_installation_token", lambda: _coro("bot"))
 
-    client = _FakeClient(post=_FakeResponse(403, text="Resource not accessible"))
+    client = _FakeClient(post=_FakeResponse(403, {"message": "Resource not accessible"}))
     _install_client(monkeypatch, client)
 
     result = _open()
 
     assert result["success"] is False
+    assert result["code"] == "github_pr_create_failed"
+    assert result["recoverable_by_agent"] is False
+    assert result["pr_created"] is False
     assert "403" in result["error"]
+
+
+def test_404_create_returns_actionable_access_diagnostic(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    _set_config(monkeypatch, {"source": "slack", "github_login": "johannes117", "thread_id": "t1"})
+    _stub_token(monkeypatch)
+    client = _FakeClient(post=_FakeResponse(404, {"message": "Not Found"}))
+    _install_client(monkeypatch, client)
+
+    result = _open()
+
+    assert result["success"] is False
+    assert result["code"] == "github_app_access_missing_or_repo_not_found"
+    assert result["recoverable_by_agent"] is False
+    assert result["owner"] == "langchain-ai"
+    assert result["repo"] == "open-swe"
+    assert result["head"] == "open-swe/feature"
+    assert result["base"] == "main"
+    assert result["branch_pushed"] is True
+    assert result["pr_created"] is False
+    assert "install or grant" in result["suggested_action"]
+    assert "PR created: no" in result["error"]
+    assert (
+        "open_pull_request_failed code=github_app_access_missing_or_repo_not_found" in caplog.text
+    )
+
+
+def test_preflight_head_branch_404_reports_branch_not_pushed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _set_config(monkeypatch, {"source": "slack", "github_login": "johannes117"})
+    _stub_token(monkeypatch)
+    client = _RoutingClient(
+        post=_FakeResponse(201, {"html_url": "u", "number": 1, "user": {}}),
+        get_routes={
+            "/repos/langchain-ai/open-swe/branches/main": _FakeResponse(200, {"name": "main"}),
+            "/repos/langchain-ai/open-swe/branches/open-swe%2Ffeature": _FakeResponse(
+                404, {"message": "Branch not found"}
+            ),
+            "/repos/langchain-ai/open-swe": _FakeResponse(200, {"private": True}),
+        },
+    )
+    _install_client(monkeypatch, client)
+
+    result = _open()
+
+    assert result["success"] is False
+    assert result["code"] == "github_pr_branch_not_visible"
+    assert result["branch_pushed"] is False
+    assert result["head_branch_visible"] is False
+    assert result["failed_step"] == "preflight_head_branch"
+    assert client.post_calls == []
 
 
 async def _coro(value: Any) -> Any:
@@ -302,7 +394,7 @@ def test_appends_plan_reference_from_thread_id(monkeypatch: pytest.MonkeyPatch) 
     assert client.post_calls[0]["json"]["body"] == (
         "body\n\n## References\n- Plan: https://dashboard.example/agents/thread-1/plan"
     )
-    assert client.get_calls == []
+    assert client.post_calls
 
 
 def test_omits_plan_reference_when_no_plan_exists(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -317,7 +409,7 @@ def test_omits_plan_reference_when_no_plan_exists(monkeypatch: pytest.MonkeyPatc
     _open_with_body("body")
 
     assert client.post_calls[0]["json"]["body"] == "body"
-    assert client.get_calls == []
+    assert client.post_calls
 
 
 def test_omits_plan_reference_when_plan_markdown_empty(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -332,7 +424,7 @@ def test_omits_plan_reference_when_plan_markdown_empty(monkeypatch: pytest.Monke
     _open_with_body("body")
 
     assert client.post_calls[0]["json"]["body"] == "body"
-    assert client.get_calls == []
+    assert client.post_calls
 
 
 def test_omits_plan_reference_when_store_lookup_fails(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -351,7 +443,7 @@ def test_omits_plan_reference_when_store_lookup_fails(monkeypatch: pytest.Monkey
     _open_with_body("body")
 
     assert client.post_calls[0]["json"]["body"] == "body"
-    assert client.get_calls == []
+    assert client.post_calls
 
 
 def test_plan_reference_survives_source_reference_failure(
@@ -380,7 +472,7 @@ def test_plan_reference_survives_source_reference_failure(
 
     sent_body = client.post_calls[0]["json"]["body"]
     assert "- Plan: https://dashboard.example/agents/thread-1/plan" in sent_body
-    assert client.get_calls == []
+    assert client.post_calls
 
 
 def test_no_reference_for_public_repo(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -470,7 +562,7 @@ def test_skips_append_when_no_source_context(monkeypatch: pytest.MonkeyPatch) ->
     _open_with_body("body")
 
     assert client.post_calls[0]["json"]["body"] == "body"
-    assert client.get_calls == []
+    assert client.post_calls
 
 
 def test_does_not_duplicate_existing_references(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -489,7 +581,7 @@ def test_does_not_duplicate_existing_references(monkeypatch: pytest.MonkeyPatch)
     _open_with_body("body\n\n## References\n- existing")
 
     assert client.post_calls[0]["json"]["body"] == "body\n\n## References\n- existing"
-    assert client.get_calls == []
+    assert client.post_calls
 
 
 def test_derive_pr_state_prefers_merged() -> None:

@@ -21,7 +21,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from langchain.agents.middleware import AgentMiddleware
-from langchain.agents.middleware.types import ModelCallResult, ModelRequest, ModelResponse
+from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_core.messages import AIMessage, ToolMessage
 
 logger = logging.getLogger(__name__)
@@ -97,16 +97,6 @@ def _repair_messages(messages: list[Any]) -> list[Any] | None:
 
 class RepairOrphanedToolCallsMiddleware(AgentMiddleware):
     """Insert synthetic tool results for interrupted tool calls before model calls."""
-
-    def wrap_model_call(
-        self,
-        request: ModelRequest,
-        handler: Callable[[ModelRequest], ModelResponse],
-    ) -> ModelCallResult:
-        repaired = _repair_messages(request.messages)
-        if repaired is not None:
-            request.messages[:] = repaired
-        return handler(request)
 
     async def awrap_model_call(
         self,

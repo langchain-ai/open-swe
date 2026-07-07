@@ -4,6 +4,7 @@ from agent.dashboard.options import SUPPORTED_MODELS, provider_fallback_pair
 from agent.utils.model import provider_model_kwargs
 
 SONNET_5_ID = "anthropic:claude-sonnet-5"
+FABLE_5_ID = "anthropic:claude-fable-5"
 
 
 def test_sonnet_5_is_supported_with_documented_efforts() -> None:
@@ -34,3 +35,19 @@ def test_opus_fallback_stays_on_opus_family() -> None:
         "anthropic:claude-opus-4-8",
         "xhigh",
     )
+
+
+def test_fable_5_is_supported_with_documented_efforts() -> None:
+    fable = next(m for m in SUPPORTED_MODELS if m["id"] == FABLE_5_ID)
+    assert fable["label"] == "Fable 5"
+    assert fable["efforts"] == ["low", "medium", "high", "xhigh", "max"]
+    assert fable["default_effort"] == "high"
+    assert fable["supports_images"] is True
+
+
+@pytest.mark.parametrize("effort", ["low", "medium", "high", "xhigh", "max"])
+def test_fable_5_efforts_map_to_anthropic_kwargs(effort: str) -> None:
+    kwargs = provider_model_kwargs(FABLE_5_ID, effort, max_tokens=16_000)
+    assert kwargs["max_tokens"] == 16_000
+    assert kwargs["effort"] == effort
+    assert kwargs["thinking"] == {"type": "adaptive", "display": "summarized"}
