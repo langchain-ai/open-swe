@@ -1,19 +1,35 @@
-"""Middleware that falls back to a secondary model when the primary fails transiently.
+"""Middleware that retries model calls across a primary and fallback provider.
 
-Wraps the model call. When the primary model raises a transient provider error
-(5xx, 429, connection/timeout), the same request is retried once against the
-configured fallback model. The fallback is bound to tools by the agent factory
-on the second call, so swapping ``request.model`` is sufficient.
+Wraps the model call. When a model raises a transient provider error (5xx,
+429, connection/timeout), the request is retried, alternating between the
+primary and the configured fallback model with exponential backoff between
+attempts. The fallback is bound to tools by the agent factory on each call,
+so swapping ``request.model`` is sufficient.
+
+Why alternate with backoff instead of failing over once: both providers can
+be routed through the same LLM Gateway, so a gateway outage takes out the
+"cross-provider" fallback too. A single immediate failover cannot ride out
+even a short shared outage (the gateway's 502 page literally says "try again
+in 30 seconds"), and an unprotected fallback call crashes the whole run.
+Alternating with a backoff schedule that reaches past 30s lets a long-running
+agent run survive multi-minute provider or gateway blips.
 
 Bidirectional: if the primary is Anthropic the fallback is typically OpenAI,
 and vice versa. The middleware itself is provider-agnostic — it inspects the
-exception type/status code to decide whether to fall over.
+exception type/status code to decide whether an attempt is retryable.
+
+If every attempt fails, the middleware either raises the last error or (by
+default) returns a terminal ``AIMessage`` explaining the outage, so the run
+ends with a visible message in Slack/GitHub instead of an abrupt crash. The
+turn's progress is checkpointed, so the user can retrigger to continue.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
-from collections.abc import Awaitable, Callable
+import random
+from collections.abc import Awaitable, Callable, Sequence
 from typing import Any
 
 import anthropic
@@ -38,6 +54,22 @@ _TRANSIENT_EXCEPTIONS: tuple[type[BaseException], ...] = (
     openai.RateLimitError,
     openai.InternalServerError,
     httpx.TransportError,
+)
+
+# Seconds slept before each retry attempt (attempt 0 is the initial call).
+# The first failover is immediate: a provider-specific outage should not delay
+# the cross-provider retry. Later delays grow past the ~30s the gateway's 502
+# page asks for. Each attempt additionally benefits from the SDK's own
+# ``max_retries`` backoff, so worst-case wall time before giving up is a few
+# minutes — acceptable for a long-running agent, far better than crashing.
+DEFAULT_BACKOFF_SCHEDULE: tuple[float, ...] = (0.0, 5.0, 15.0, 30.0, 45.0)
+
+MODEL_OUTAGE_MESSAGE = (
+    "I wasn't able to reach the language model providers after several retries "
+    "(both the primary and fallback models returned transient errors, e.g. "
+    "502/503/overloaded). This is a temporary provider or gateway outage, not a "
+    "problem with your task. My progress so far has been saved — please retrigger "
+    "the run in a few minutes to continue."
 )
 
 
@@ -93,30 +125,88 @@ def _provider_access_error_message(exc: BaseException) -> str | None:
 
 
 class ModelFallbackMiddleware(AgentMiddleware):
-    """Retry the model call against a fallback provider on transient errors."""
+    """Retry the model call across primary and fallback providers on transient errors.
 
-    def __init__(self, fallback_model: BaseChatModel) -> None:
+    Args:
+        fallback_model: Cross-provider model used on odd-numbered attempts.
+        backoff_schedule: Seconds slept before each retry. ``len(schedule) + 1``
+            is the total number of attempts. Delays get ±25% jitter.
+        surface_outage_message: When all attempts fail, return a terminal
+            ``AIMessage`` describing the outage instead of raising, so the run
+            ends gracefully with a user-visible message rather than a crash.
+            Set to ``False`` to re-raise the last error (e.g. if platform-level
+            alerting keys off failed runs).
+    """
+
+    def __init__(
+        self,
+        fallback_model: BaseChatModel,
+        *,
+        backoff_schedule: Sequence[float] = DEFAULT_BACKOFF_SCHEDULE,
+        surface_outage_message: bool = True,
+    ) -> None:
         super().__init__()
         self._fallback_model = fallback_model
+        self._backoff_schedule = tuple(backoff_schedule)
+        self._surface_outage_message = surface_outage_message
+
+    def _fallback_name(self) -> str:
+        return (
+            getattr(self._fallback_model, "model_name", None)
+            or getattr(self._fallback_model, "model", None)
+            or "fallback"
+        )
 
     async def awrap_model_call(
         self,
         request: ModelRequest,
         handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
     ) -> Any:
-        try:
-            return await handler(request)
-        except Exception as exc:
-            access_error_message = _provider_access_error_message(exc)
-            if access_error_message is not None:
-                logger.warning("Model access error surfaced to user: %s", type(exc).__name__)
-                return AIMessage(content=access_error_message)
-            if not _should_fallback(exc):
-                raise
-            logger.warning(
-                "Primary model failed (%s); falling back to %s",
-                type(exc).__name__,
-                getattr(self._fallback_model, "model_name", None)
-                or getattr(self._fallback_model, "model", "fallback"),
+        total_attempts = len(self._backoff_schedule) + 1
+        last_exc: BaseException | None = None
+
+        for attempt in range(total_attempts):
+            # Alternate: primary on even attempts, fallback on odd. If one
+            # provider recovers first (or only one is down), we find it.
+            use_fallback = attempt % 2 == 1
+            attempt_request = (
+                request.override(model=self._fallback_model) if use_fallback else request
             )
-            return await handler(request.override(model=self._fallback_model))
+            try:
+                return await handler(attempt_request)
+            except Exception as exc:
+                access_error_message = _provider_access_error_message(exc)
+                if access_error_message is not None:
+                    logger.warning("Model access error surfaced to user: %s", type(exc).__name__)
+                    return AIMessage(content=access_error_message)
+                if not _should_fallback(exc):
+                    raise
+                last_exc = exc
+                if attempt + 1 >= total_attempts:
+                    break
+                delay = self._backoff_schedule[attempt]
+                if delay > 0:
+                    delay += random.uniform(0, delay * 0.25)
+                logger.warning(
+                    "Model call failed transiently (%s) on %s model "
+                    "(attempt %d/%d); retrying %s model in %.1fs",
+                    type(exc).__name__,
+                    "fallback" if use_fallback else "primary",
+                    attempt + 1,
+                    total_attempts,
+                    "primary" if use_fallback else f"fallback ({self._fallback_name()})",
+                    delay,
+                )
+                if delay > 0:
+                    await asyncio.sleep(delay)
+
+        assert last_exc is not None  # loop always sets it before breaking
+        logger.error(
+            "Model call failed after %d attempts across primary and fallback (%s): %s",
+            total_attempts,
+            self._fallback_name(),
+            last_exc,
+        )
+        if self._surface_outage_message:
+            return AIMessage(content=MODEL_OUTAGE_MESSAGE)
+        raise last_exc

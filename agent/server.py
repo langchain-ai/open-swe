@@ -31,7 +31,7 @@ from deepagents import create_deep_agent
 from deepagents.backends import LangSmithSandbox
 from deepagents.backends.protocol import SandboxBackendProtocol
 from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT, SubAgent
-from langchain.agents.middleware import ModelCallLimitMiddleware
+from langchain.agents.middleware import ModelCallLimitMiddleware, ToolRetryMiddleware
 from langchain_core.language_models import BaseChatModel
 from langsmith.sandbox import SandboxClientError
 
@@ -68,12 +68,15 @@ from .middleware import (
     SanitizeThinkingBlocksMiddleware,
     SanitizeToolInputsMiddleware,
     SlackAssistantStatusMiddleware,
+    TimeoutWrapupMiddleware,
     ToolArtifactMiddleware,
     ToolErrorMiddleware,
     WorkflowPushGuardMiddleware,
     check_message_queue_before_model,
     notify_step_limit_reached,
     refresh_github_proxy_before_model,
+    task_on_failure,
+    task_retry_on,
 )
 from .prompt import construct_system_prompt
 from .tools import (
@@ -105,6 +108,7 @@ from .utils.authorship import (
     resolve_triggering_user_identity,
 )
 from .utils.dashboard_links import dashboard_plan_url, dashboard_thread_url
+from .utils.deferred_model import make_deferred_error_model
 from .utils.github_app import (
     BASE_RUNTIME_PROXY_TOKEN_PERMISSIONS,
     RUNTIME_PROXY_TOKEN_PERMISSIONS,
@@ -648,6 +652,19 @@ async def _cached_profile(profile_login: str | None):
     )
 
 
+def _make_model_or_defer(
+    model_id: str,
+    *,
+    use_gateway: bool,
+    **kwargs: Any,
+) -> BaseChatModel:
+    try:
+        return make_model(model_id, use_gateway=use_gateway, **kwargs)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Deferring model setup failure for %s", model_id, exc_info=True)
+        return make_deferred_error_model(e, model_id=model_id)
+
+
 class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
     def __init__(
         self,
@@ -857,7 +874,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             fallback_kwargs["reasoning"] = DEFAULT_LLM_REASONING
         fallback_middleware.append(
             ModelFallbackMiddleware(
-                make_model(fallback_model_id, use_gateway=use_gateway, **fallback_kwargs)
+                _make_model_or_defer(fallback_model_id, use_gateway=use_gateway, **fallback_kwargs)
             )
         )
         logger.info("Configured model fallback %s -> %s", model_id, fallback_model_id)
@@ -904,8 +921,12 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         )
 
     logger.info("Returning agent with sandbox for thread %s", thread_id)
-    main_model = make_model(model_id, use_gateway=use_gateway, **model_kwargs)
-    subagent_model = make_model(subagent_model_id, use_gateway=use_gateway, **subagent_model_kwargs)
+    main_model = _make_model_or_defer(model_id, use_gateway=use_gateway, **model_kwargs)
+    subagent_model = _make_model_or_defer(
+        subagent_model_id,
+        use_gateway=use_gateway,
+        **subagent_model_kwargs,
+    )
     return create_deep_agent(
         model=main_model,
         system_prompt="",
@@ -957,11 +978,20 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             SanitizeToolInputsMiddleware(),
             ModelCallLimitMiddleware(run_limit=MODEL_CALL_RECURSION_LIMIT, exit_behavior="end"),
             ToolErrorMiddleware(),
+            ToolRetryMiddleware(
+                max_retries=2,
+                tools=["task"],
+                retry_on=task_retry_on,
+                on_failure=task_on_failure,
+                initial_delay=1.0,
+                max_delay=10.0,
+            ),
             ToolArtifactMiddleware(),
             WorkflowPushGuardMiddleware(),
             refresh_github_proxy_before_model,
             check_message_queue_before_model,
             SlackAssistantStatusMiddleware(),
+            TimeoutWrapupMiddleware(),
             notify_step_limit_reached,
             *fallback_middleware,
             *plan_mode_middleware,
