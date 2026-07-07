@@ -216,7 +216,7 @@ class TestCreateSandboxWithProxy:
 
     @pytest.mark.asyncio
     async def test_falls_back_when_optional_actions_permission_is_unavailable(self) -> None:
-        """Sandbox creation should still work before an install grants Actions read."""
+        """Sandbox creation should still keep workflow scope without Actions read."""
         with (
             patch(
                 "agent.server.get_github_app_installation_token_with_expiry",
@@ -241,6 +241,7 @@ class TestCreateSandboxWithProxy:
             assert mock_get_token.await_args_list[1].kwargs["permissions"] == (
                 BASE_RUNTIME_PROXY_TOKEN_PERMISSIONS
             )
+            assert mock_get_token.await_args_list[1].kwargs["permissions"]["workflows"] == "write"
             mock_proxy.assert_called_once_with("sandbox-123", "ghs_install")
             mock_record.assert_called_once_with(
                 "thread-123",

@@ -12,9 +12,10 @@ from pydantic import BaseModel, Field, field_validator
 
 from ..dispatch import create_durable_run
 from ..utils.thread_ops import langgraph_client
-from .options import SUPPORTED_MODEL_IDS, model_supports_effort
+from .options import SUPPORTED_MODEL_IDS, gate_fable_model, model_supports_effort
 from .profiles import get_profile, get_valid_access_token
 from .repo_access import repo_config_for_user, require_repo_access_for_user
+from .team_settings import get_team_fable_enabled
 from .thread_api import _agent_version_metadata, _now_ms, _resolve_run_email
 
 logger = logging.getLogger(__name__)
@@ -376,7 +377,7 @@ def _agent_run_metadata(record: dict[str, Any], thread_id: str) -> dict[str, Any
     return metadata
 
 
-def _agent_run_config(record: dict[str, Any], thread_id: str) -> dict[str, Any]:
+async def _agent_run_config(record: dict[str, Any], thread_id: str) -> dict[str, Any]:
     configurable: dict[str, Any] = {
         "thread_id": thread_id,
         "source": "schedule",
@@ -390,6 +391,9 @@ def _agent_run_config(record: dict[str, Any], thread_id: str) -> dict[str, Any]:
         configurable["repo"] = repo
     model, effort = _normalize_model_choice(record.get("model"), record.get("effort"))
     if model and effort:
+        model, effort = gate_fable_model(
+            model, effort, fable_enabled=await get_team_fable_enabled()
+        )
         configurable["agent_model_id"] = model
         configurable["agent_effort"] = effort
     return {"configurable": configurable, "metadata": _agent_version_metadata()}
@@ -441,7 +445,7 @@ async def launch_scheduled_agent_run(schedule_id: str) -> dict[str, Any]:
         _AGENT_ASSISTANT_ID,
         input={"messages": [{"role": "user", "content": record["prompt"]}]},
         source="schedule",
-        config=_agent_run_config(record, thread_id),
+        config=await _agent_run_config(record, thread_id),
         client=client,
         stream_mode=["values", "updates", "messages-tuple"],
         stream_resumable=True,

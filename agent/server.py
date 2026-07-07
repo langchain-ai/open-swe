@@ -44,12 +44,18 @@ from .dashboard.agent_overrides import (
     resolve_github_login,
 )
 from .dashboard.agent_usage import record_agent_thread_usage
-from .dashboard.options import DEFAULT_MODEL_ID, SUPPORTED_MODEL_IDS, model_supports_effort
+from .dashboard.options import (
+    DEFAULT_MODEL_ID,
+    SUPPORTED_MODEL_IDS,
+    gate_fable_model,
+    model_supports_effort,
+)
 from .dashboard.repo_snapshots import resolve_repo_snapshot_id
 from .dashboard.team_settings import (
     get_effective_gateway_enabled,
     get_team_default_model_pair,
     get_team_default_repo,
+    get_team_fable_enabled,
 )
 from .dashboard.user_mappings import email_for_login
 from .integrations.corridor_mcp import load_corridor_tools
@@ -63,6 +69,7 @@ from .middleware import (
     BasePrepareRunMiddleware,
     ModelFallbackMiddleware,
     PlanModeMiddleware,
+    PullRequestCreationGuardMiddleware,
     SanitizeFireworksMessagesMiddleware,
     SanitizeOpenAIResponsesMiddleware,
     SanitizeThinkingBlocksMiddleware,
@@ -135,6 +142,23 @@ from .utils.sandbox_state import (
 from .utils.tracing import AGENT_TRACING_PROJECT, traced_graph_factory
 
 client = get_client()
+
+DEFAULT_TOOL_LOADER_TIMEOUT_SECONDS = 5.0
+
+
+def _tool_loader_timeout_seconds() -> float:
+    raw_timeout = os.environ.get("TOOL_LOADER_TIMEOUT_SECONDS")
+    if not raw_timeout:
+        return DEFAULT_TOOL_LOADER_TIMEOUT_SECONDS
+    try:
+        timeout = float(raw_timeout)
+    except ValueError:
+        logger.warning("Invalid TOOL_LOADER_TIMEOUT_SECONDS=%r; using default", raw_timeout)
+        return DEFAULT_TOOL_LOADER_TIMEOUT_SECONDS
+    if timeout <= 0:
+        logger.warning("TOOL_LOADER_TIMEOUT_SECONDS must be positive; using default")
+        return DEFAULT_TOOL_LOADER_TIMEOUT_SECONDS
+    return timeout
 
 
 async def _resolve_prompt_default_repo(configurable: dict[str, Any]) -> dict[str, str] | None:
@@ -595,8 +619,14 @@ async def _observability_authorized(config: RunnableConfig, profile_login: str |
 
 
 async def _cached_tool_loader(key: str, ttl_seconds: float, loader: Any) -> list[Any]:
+    async def load_with_timeout() -> list[Any]:
+        return await asyncio.wait_for(loader(), timeout=_tool_loader_timeout_seconds())
+
     try:
-        return await ttl_cache.cached(key, ttl_seconds, loader)
+        return await ttl_cache.cached_stale_while_revalidate(key, ttl_seconds, load_with_timeout)
+    except TimeoutError:
+        logger.warning("Timed out loading cached tools for %s", key, exc_info=True)
+        return []
     except Exception:
         logger.warning("Failed to load cached tools for %s", key, exc_info=True)
         return []
@@ -641,6 +671,14 @@ async def _cached_gateway_enabled() -> bool:
         f"team:gateway-enabled:{id(get_effective_gateway_enabled)}",
         60,
         get_effective_gateway_enabled,
+    )
+
+
+async def _cached_fable_enabled() -> bool:
+    return await ttl_cache.cached(
+        f"team:fable-enabled:{id(get_team_fable_enabled)}",
+        60,
+        get_team_fable_enabled,
     )
 
 
@@ -784,10 +822,11 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     configurable = (config or {}).get("configurable") or {}
     # Team/profile settings are accepted stale for a short TTL so graph factories
     # stay off the critical path during worker load and retry storms.
-    team_defaults, use_gateway, profile = await asyncio.gather(
+    team_defaults, use_gateway, profile, fable_enabled = await asyncio.gather(
         _cached_team_default_model_pair("agent"),
         _cached_gateway_enabled(),
         _cached_profile(profile_login),
+        _cached_fable_enabled(),
     )
 
     linear_issue = config["configurable"].get("linear_issue", {})
@@ -854,6 +893,13 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     always_create_prs = profile_create_prs(profile)
     if always_create_prs:
         logger.info("Always Create PRs enabled by profile for %s", profile_login)
+
+    model_id, profile_effort = gate_fable_model(
+        model_id, profile_effort, fable_enabled=fable_enabled
+    )
+    subagent_model_id, subagent_effort = gate_fable_model(
+        subagent_model_id, subagent_effort, fable_enabled=fable_enabled
+    )
 
     model_kwargs = provider_model_kwargs(
         model_id,
@@ -987,6 +1033,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 max_delay=10.0,
             ),
             ToolArtifactMiddleware(),
+            PullRequestCreationGuardMiddleware(),
             WorkflowPushGuardMiddleware(),
             refresh_github_proxy_before_model,
             check_message_queue_before_model,

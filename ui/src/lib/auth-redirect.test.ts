@@ -33,15 +33,13 @@ describe("auth redirect helpers", () => {
     expect(window.sessionStorage.getItem(AUTH_REDIRECT_STORAGE_KEY)).toBe(path)
   })
 
-  it("resolves login targets to absolute same-origin URLs", () => {
+  it("builds login targets from relative same-origin paths", () => {
     const path = rememberAuthRedirect("/agents/thread-1/plan?from=slack#review")
 
-    const target = `${window.location.origin}/agents/thread-1/plan?from=slack#review`
-
-    expect(authRedirectUrl(path)).toBe(target)
-    expect(loginUrl(authRedirectUrl(path))).toContain(
-      encodeURIComponent(target)
+    expect(authRedirectUrl(path)).toBe(
+      `${window.location.origin}/agents/thread-1/plan?from=slack#review`
     )
+    expect(loginUrl(path)).toContain(encodeURIComponent(path))
   })
 
   it("consumes remembered targets and clears session storage", () => {
@@ -67,10 +65,11 @@ describe("auth redirect helpers", () => {
     window.history.pushState({}, "", "/agents/thread-1/plan?from=slack")
 
     expect(currentAuthRedirectPath()).toBe("/agents/thread-1/plan?from=slack")
-    expect(loginUrl(authRedirectUrl(currentAuthRedirectPath()))).toContain(
-      encodeURIComponent(
-        `${window.location.origin}/agents/thread-1/plan?from=slack`
-      )
+    expect(loginUrl(currentAuthRedirectPath())).toContain(
+      encodeURIComponent("/agents/thread-1/plan?from=slack")
+    )
+    expect(loginUrl()).toContain(
+      encodeURIComponent("/agents/thread-1/plan?from=slack")
     )
   })
 })

@@ -259,6 +259,7 @@ export function optimisticThread(
     createdAt: now,
     updatedAt: now,
     traceUrl: null,
+    sandboxId: null,
     messages: message.chunks.length > 0 ? [message] : [],
   }
 }

@@ -31,14 +31,11 @@ BASE_RUNTIME_PROXY_TOKEN_PERMISSIONS: dict[str, str] = {
     "pull_requests": "write",
     "issues": "write",
     "checks": "write",
+    "workflows": "write",
 }
 RUNTIME_PROXY_TOKEN_PERMISSIONS: dict[str, str] = {
     **BASE_RUNTIME_PROXY_TOKEN_PERMISSIONS,
     "actions": "read",
-}
-WORKFLOW_RUNTIME_PROXY_TOKEN_PERMISSIONS: dict[str, str] = {
-    **BASE_RUNTIME_PROXY_TOKEN_PERMISSIONS,
-    "workflows": "write",
 }
 
 PermissionMap = Mapping[str, str]

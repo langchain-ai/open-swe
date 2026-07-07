@@ -401,8 +401,10 @@ async def _resolve_bot_installation_token(thread_id: str) -> tuple[str, str | No
 async def resolve_github_token(config: RunnableConfig, thread_id: str) -> tuple[str, str | None]:
     """Resolve a GitHub token from the run config based on the source.
 
-    Routes to the correct auth method depending on whether the run was
-    triggered from GitHub (login-based) or Linear/Slack (email-based).
+    Routes to the correct auth method depending on the source. Sources that
+    carry a mapped GitHub login (Slack, Linear, dashboard, schedule) resolve a
+    per-user OAuth token from the dashboard store; GitHub runs are login-based;
+    otherwise resolution falls back to email-based auth.
 
     In bot-token-only mode (LANGSMITH_API_KEY_PROD set without
     X_SERVICE_AUTH_JWT_SECRET), the GitHub App installation token is used
@@ -420,10 +422,10 @@ async def resolve_github_token(config: RunnableConfig, thread_id: str) -> tuple[
     github_login = configurable.get("github_login")
 
     # Per-user OAuth from the dashboard store wins even in bot-token-only mode,
-    # for sources that carry a mapped GitHub login (Slack, dashboard). This is
-    # what lets the agent open PRs as the triggering user.
+    # for sources that carry a mapped GitHub login (Slack, Linear, dashboard).
+    # This is what lets the agent open PRs as the triggering user.
     if (
-        source in ("slack", "dashboard", "schedule")
+        source in ("slack", "linear", "dashboard", "schedule")
         and isinstance(github_login, str)
         and github_login.strip()
     ):
