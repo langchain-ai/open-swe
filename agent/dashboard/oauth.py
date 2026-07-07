@@ -100,6 +100,8 @@ def sanitize_redirect_to(redirect_to: str | None) -> str:
         and not parsed.netloc
         and not _is_blocked_redirect_path(parsed.path)
     ):
+        if fallback:
+            return f"{fallback.rstrip('/')}{trimmed}"
         return trimmed
     if _is_blocked_redirect_path(parsed.path):
         return fallback
