@@ -315,6 +315,18 @@ def test_thread_summary_omits_pr_when_no_pr_metadata() -> None:
     assert "diffStats" not in summary
 
 
+def test_thread_summary_exposes_sandbox_id() -> None:
+    summary = thread_api._thread_summary(_thread_with_metadata({"sandbox_id": "sb-abc123"}))
+
+    assert summary["sandboxId"] == "sb-abc123"
+
+
+def test_thread_summary_hides_creating_sandbox_sentinel() -> None:
+    summary = thread_api._thread_summary(_thread_with_metadata({"sandbox_id": "__creating__"}))
+
+    assert summary["sandboxId"] is None
+
+
 async def test_recovery_patch_requires_thread_owner(monkeypatch) -> None:
     class FakeThreads:
         async def get(self, thread_id: str) -> dict[str, object]:
