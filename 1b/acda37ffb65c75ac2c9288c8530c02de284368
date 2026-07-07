@@ -1,0 +1,32 @@
+ui/src/components/agents/AgentsSidebar.tsx
+  s_dd56f9b79f79f0::t_84d162fd6c26b2 491,500,509
+  s_dd56f9b79f79f0::t_87c70cc6fd892a 413
+  s_dd56f9b79f79f0::t_2e09cb814eec00 523
+  s_dd56f9b79f79f0::t_722976387aafbf 506,510,517,520,524,527
+  s_dd56f9b79f79f0::t_d3d0900ae01d14 487
+  s_dd56f9b79f79f0::t_431c0c76f56894 407-412,414-418,465-475,477-486,488-490,493-499,502-505,507-508,511-516,518-519,521-522,525-526,528-533
+  s_dd56f9b79f79f0::t_f9d64b1c33fe2c 14
+  s_dd56f9b79f79f0::t_f3f9e10a59b122 402
+tests/e2e/tests/sandbox_id.spec.ts
+  s_dd56f9b79f79f0::t_83e5a477d11a23 1
+  s_dd56f9b79f79f0::t_198d3ab946baf8 47,61-62
+  s_dd56f9b79f79f0::t_4d8ee3c1f3a17f 100
+  s_dd56f9b79f79f0::t_935d0c3d39dd31 41-45
+  s_dd56f9b79f79f0::t_4064f64cc7456a 63
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "1bacda37ffb65c75ac2c9288c8530c02de284368",
+  "prompts": {},
+  "sessions": {
+    "s_dd56f9b79f79f0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3970a4c2-d299-485a-8de1-8066fd384003",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "open-swe[bot] <open-swe@users.noreply.github.com>"
+    }
+  }
+}
