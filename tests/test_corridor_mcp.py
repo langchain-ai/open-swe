@@ -119,7 +119,11 @@ async def test_get_agent_passes_corridor_prompt_state() -> None:
         "metadata": {},
     }
 
-    def fake_create_deep_agent(**_kwargs):
+    captured: dict[str, object] = {}
+
+    def fake_create_deep_agent(**kwargs):
+        captured.update(kwargs)
+
         class _DummyAgent:
             def with_config(self, _config):
                 return self
@@ -174,6 +178,8 @@ async def test_get_agent_passes_corridor_prompt_state() -> None:
             patch.object(server, "create_deep_agent", side_effect=fake_create_deep_agent),
         ):
             await server.get_agent(config)
+            prepare = captured["middleware"][0]
+            await prepare.abefore_agent({}, None)
         return bool(prompt.call_args.kwargs["corridor_enabled"])
 
     assert await run_with_corridor_tools([]) is False

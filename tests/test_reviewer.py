@@ -208,6 +208,8 @@ async def test_reviewer_resolves_app_installation_token_at_run_start() -> None:
         patch("agent.reviewer.create_deep_agent", return_value=dummy_agent) as create_agent,
     ):
         await reviewer.get_reviewer_agent(config)
+        prepare = create_agent.call_args.kwargs["middleware"][0]
+        await prepare.abefore_agent({}, None)
 
     metadata = config["metadata"]
     assert isinstance(metadata, dict)
@@ -259,9 +261,11 @@ async def test_reviewer_reuses_app_token_for_sandbox_proxy() -> None:
         ),
         patch("agent.reviewer.fetch_agents_md", new_callable=AsyncMock, return_value=None),
         patch("agent.reviewer.make_model", return_value=MagicMock()),
-        patch("agent.reviewer.create_deep_agent", return_value=_DummyAgent()),
+        patch("agent.reviewer.create_deep_agent", return_value=_DummyAgent()) as create_agent,
     ):
         await reviewer.get_reviewer_agent(config)
+        prepare = create_agent.call_args.kwargs["middleware"][0]
+        await prepare.abefore_agent({}, None)
 
     mock_sandbox.assert_awaited_once_with(
         "reviewer-thread-id",
@@ -294,10 +298,13 @@ async def test_reviewer_raises_when_app_installation_token_unavailable() -> None
             new_callable=AsyncMock,
             return_value=MagicMock(),
         ) as mock_sandbox,
-        patch("agent.reviewer.create_deep_agent", return_value=_DummyAgent()),
+        patch("agent.reviewer.make_model", return_value=MagicMock()),
+        patch("agent.reviewer.create_deep_agent", return_value=_DummyAgent()) as create_agent,
     ):
+        await reviewer.get_reviewer_agent(config)
+        prepare = create_agent.call_args.kwargs["middleware"][0]
         with pytest.raises(RuntimeError, match="installation token unavailable"):
-            await reviewer.get_reviewer_agent(config)
+            await prepare.abefore_agent({}, None)
 
     mock_sandbox.assert_not_awaited()
 
@@ -421,6 +428,7 @@ async def test_reviewer_injects_repo_style_during_eval() -> None:
 
     def fake_create_deep_agent(*, system_prompt: str, **kwargs: object) -> _DummyAgent:
         captured["system_prompt"] = system_prompt
+        captured["middleware"] = kwargs["middleware"]
         return _DummyAgent()
 
     with (
@@ -448,6 +456,9 @@ async def test_reviewer_injects_repo_style_during_eval() -> None:
         ),
     ):
         await reviewer.get_reviewer_agent(config)
+        prepare = captured["middleware"][0]
+        updates = await prepare.abefore_agent({}, None)
+        captured["system_prompt"] = updates["rendered_system_prompt"]
 
     assert "Repository-specific review style" in captured["system_prompt"]
     assert "Flag table rerender regressions" in captured["system_prompt"]
@@ -472,6 +483,7 @@ async def test_reviewer_inlines_org_guidelines_into_system_prompt() -> None:
 
     def fake_create_deep_agent(*, system_prompt: str, **kwargs: object) -> _DummyAgent:
         captured["system_prompt"] = system_prompt
+        captured["middleware"] = kwargs["middleware"]
         return _DummyAgent()
 
     with (
@@ -509,6 +521,9 @@ async def test_reviewer_inlines_org_guidelines_into_system_prompt() -> None:
         patch("agent.reviewer.create_deep_agent", side_effect=fake_create_deep_agent),
     ):
         await reviewer.get_reviewer_agent(config)
+        prepare = captured["middleware"][0]
+        updates = await prepare.abefore_agent({}, None)
+        captured["system_prompt"] = updates["rendered_system_prompt"]
 
     assert "Organization-wide review guidelines" in captured["system_prompt"]
     assert "disables a CI gate" in captured["system_prompt"]
@@ -547,6 +562,7 @@ async def test_reviewer_inlines_agents_md_into_system_prompt() -> None:
 
     def fake_create_deep_agent(*, system_prompt: str, **kwargs: object) -> _DummyAgent:
         captured["system_prompt"] = system_prompt
+        captured["middleware"] = kwargs["middleware"]
         return _DummyAgent()
 
     with (
@@ -574,6 +590,9 @@ async def test_reviewer_inlines_agents_md_into_system_prompt() -> None:
         patch("agent.reviewer.create_deep_agent", side_effect=fake_create_deep_agent),
     ):
         await reviewer.get_reviewer_agent(config)
+        prepare = captured["middleware"][0]
+        updates = await prepare.abefore_agent({}, None)
+        captured["system_prompt"] = updates["rendered_system_prompt"]
 
     mock_fetch_agents_md.assert_awaited_once_with("acme", "repo", "base-sha-xyz", token="gh-token")
     assert "Repository conventions (AGENTS.md / CLAUDE.md)" in captured["system_prompt"]
@@ -599,6 +618,7 @@ async def test_reviewer_inlines_claude_md_when_agents_md_absent() -> None:
 
     def fake_create_deep_agent(*, system_prompt: str, **kwargs: object) -> _DummyAgent:
         captured["system_prompt"] = system_prompt
+        captured["middleware"] = kwargs["middleware"]
         return _DummyAgent()
 
     with (
@@ -626,6 +646,9 @@ async def test_reviewer_inlines_claude_md_when_agents_md_absent() -> None:
         patch("agent.reviewer.create_deep_agent", side_effect=fake_create_deep_agent),
     ):
         await reviewer.get_reviewer_agent(config)
+        prepare = captured["middleware"][0]
+        updates = await prepare.abefore_agent({}, None)
+        captured["system_prompt"] = updates["rendered_system_prompt"]
 
     mock_fetch_agents_md.assert_awaited_once_with("acme", "repo", "base-sha-xyz", token="gh-token")
     assert "Repository conventions (AGENTS.md / CLAUDE.md)" in captured["system_prompt"]
@@ -937,6 +960,7 @@ async def test_reviewer_injects_pr_review_threads_into_first_review_context() ->
 
     def fake_create_deep_agent(*, system_prompt: str, **kwargs: object) -> _DummyAgent:
         captured["system_prompt"] = system_prompt
+        captured["middleware"] = kwargs["middleware"]
         return _DummyAgent()
 
     fake_threads = [
@@ -991,6 +1015,9 @@ async def test_reviewer_injects_pr_review_threads_into_first_review_context() ->
         patch("agent.reviewer.create_deep_agent", side_effect=fake_create_deep_agent),
     ):
         await reviewer.get_reviewer_agent(config)
+        prepare = captured["middleware"][0]
+        updates = await prepare.abefore_agent({}, None)
+        captured["system_prompt"] = updates["rendered_system_prompt"]
 
     mock_fetch_threads.assert_awaited_once()
     assert "Pre-existing PR review threads" in captured["system_prompt"]
@@ -1019,6 +1046,7 @@ async def test_reviewer_injects_pr_review_threads_into_re_review_context() -> No
 
     def fake_create_deep_agent(*, system_prompt: str, **kwargs: object) -> _DummyAgent:
         captured["system_prompt"] = system_prompt
+        captured["middleware"] = kwargs["middleware"]
         return _DummyAgent()
 
     fake_threads = [
@@ -1067,6 +1095,9 @@ async def test_reviewer_injects_pr_review_threads_into_re_review_context() -> No
         patch("agent.reviewer.create_deep_agent", side_effect=fake_create_deep_agent),
     ):
         await reviewer.get_reviewer_agent(config)
+        prepare = captured["middleware"][0]
+        updates = await prepare.abefore_agent({}, None)
+        captured["system_prompt"] = updates["rendered_system_prompt"]
 
     assert "A new commit has been pushed" in captured["system_prompt"]
     assert "Pre-existing PR review threads" in captured["system_prompt"]
@@ -1093,6 +1124,7 @@ async def test_reviewer_omits_threads_block_when_fetch_returns_empty() -> None:
 
     def fake_create_deep_agent(*, system_prompt: str, **kwargs: object) -> _DummyAgent:
         captured["system_prompt"] = system_prompt
+        captured["middleware"] = kwargs["middleware"]
         return _DummyAgent()
 
     with (
@@ -1125,6 +1157,9 @@ async def test_reviewer_omits_threads_block_when_fetch_returns_empty() -> None:
         patch("agent.reviewer.create_deep_agent", side_effect=fake_create_deep_agent),
     ):
         await reviewer.get_reviewer_agent(config)
+        prepare = captured["middleware"][0]
+        updates = await prepare.abefore_agent({}, None)
+        captured["system_prompt"] = updates["rendered_system_prompt"]
 
     # The rule text mentions the wrapper tag, but the actual rendered XML
     # data block (which always has a `</pr_review_threads>` closer and a
@@ -1152,6 +1187,7 @@ async def test_reviewer_continues_when_thread_fetch_raises() -> None:
 
     def fake_create_deep_agent(*, system_prompt: str, **kwargs: object) -> _DummyAgent:
         captured["system_prompt"] = system_prompt
+        captured["middleware"] = kwargs["middleware"]
         return _DummyAgent()
 
     with (
@@ -1184,6 +1220,9 @@ async def test_reviewer_continues_when_thread_fetch_raises() -> None:
         patch("agent.reviewer.create_deep_agent", side_effect=fake_create_deep_agent),
     ):
         await reviewer.get_reviewer_agent(config)
+        prepare = captured["middleware"][0]
+        updates = await prepare.abefore_agent({}, None)
+        captured["system_prompt"] = updates["rendered_system_prompt"]
 
     # The reviewer must still produce a usable prompt even if the thread
     # fetch fails; the first-review user-message context should still appear.
@@ -1218,7 +1257,10 @@ async def test_reviewer_populates_diff_line_set_from_github_api() -> None:
         "+touched\n"
     )
 
+    captured: dict[str, object] = {}
+
     def fake_create_deep_agent(*, system_prompt: str, **kwargs: object) -> _DummyAgent:
+        captured["middleware"] = kwargs["middleware"]
         return _DummyAgent()
 
     with (
@@ -1256,12 +1298,14 @@ async def test_reviewer_populates_diff_line_set_from_github_api() -> None:
         patch("agent.reviewer.create_deep_agent", side_effect=fake_create_deep_agent),
     ):
         await reviewer.get_reviewer_agent(config)
+        prepare = captured["middleware"][0]
+        updates = await prepare.abefore_agent({}, None)
 
     mock_fetch_diff.assert_awaited_once_with(
         owner="acme", repo="repo", pr_number=42, token="gh-token"
     )
-    assert config["configurable"]["diff_text"] == pr_diff
-    assert config["configurable"]["diff_line_set"] == {"in_diff.py": {"RIGHT": {10}, "LEFT": {1}}}
+    assert updates["diff_text"] == pr_diff
+    assert updates["diff_line_set"] == {"in_diff.py": {"RIGHT": {10}, "LEFT": {1}}}
 
 
 @pytest.mark.asyncio
@@ -1283,7 +1327,10 @@ async def test_reviewer_leaves_validation_disabled_when_diff_fetch_fails() -> No
         "metadata": {},
     }
 
+    captured: dict[str, object] = {}
+
     def fake_create_deep_agent(*, system_prompt: str, **kwargs: object) -> _DummyAgent:
+        captured["middleware"] = kwargs["middleware"]
         return _DummyAgent()
 
     with (
@@ -1321,9 +1368,11 @@ async def test_reviewer_leaves_validation_disabled_when_diff_fetch_fails() -> No
         patch("agent.reviewer.create_deep_agent", side_effect=fake_create_deep_agent),
     ):
         await reviewer.get_reviewer_agent(config)
+        prepare = captured["middleware"][0]
+        updates = await prepare.abefore_agent({}, None)
 
-    assert config["configurable"]["diff_text"] == ""
-    assert config["configurable"]["diff_line_set"] is None
+    assert updates["diff_text"] == ""
+    assert updates["diff_line_set"] is None
 
 
 @pytest.mark.asyncio
@@ -1345,6 +1394,7 @@ async def test_reviewer_injects_pr_title_and_body_into_context() -> None:
 
     def fake_create_deep_agent(*, system_prompt: str, **kwargs: object) -> _DummyAgent:
         captured["system_prompt"] = system_prompt
+        captured["middleware"] = kwargs["middleware"]
         return _DummyAgent()
 
     with (
@@ -1387,6 +1437,9 @@ async def test_reviewer_injects_pr_title_and_body_into_context() -> None:
         patch("agent.reviewer.create_deep_agent", side_effect=fake_create_deep_agent),
     ):
         await reviewer.get_reviewer_agent(config)
+        prepare = captured["middleware"][0]
+        updates = await prepare.abefore_agent({}, None)
+        captured["system_prompt"] = updates["rendered_system_prompt"]
 
     mock_fetch_metadata.assert_awaited_once_with(
         owner="acme", repo="repo", pr_number=42, token="gh-token"

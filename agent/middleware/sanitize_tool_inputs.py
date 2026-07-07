@@ -73,13 +73,6 @@ class SanitizeToolInputsMiddleware(AgentMiddleware):
         new_tool_call = {**tool_call, "args": sanitized_args}
         return request.override(tool_call=new_tool_call)
 
-    def wrap_tool_call(
-        self,
-        request: ToolCallRequest,
-        handler: Callable[[ToolCallRequest], ToolMessage | Command],
-    ) -> ToolMessage | Command:
-        return handler(self._sanitize_request(request))
-
     async def awrap_tool_call(
         self,
         request: ToolCallRequest,

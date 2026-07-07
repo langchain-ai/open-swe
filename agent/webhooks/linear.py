@@ -163,13 +163,16 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
         f"When you're done, commit and push your changes. {tag_instruction}"
     )
     content_blocks: list[dict[str, Any]] = [create_text_block(prompt)]
+
+    # Resolve the GitHub login from the Linear email via the same user-mapping
+    # store Slack uses, so PRs open *as the triggering user* and the thread is
+    # tagged for the dashboard.
+    mapped_login = await webapp.resolve_login_from_email_async(user_email) if user_email else None
+
     image_model_override: tuple[str, str] | None = None
     if image_urls:
         image_urls = webapp.dedupe_urls(image_urls)
-        linear_login = (
-            await webapp.resolve_login_from_email_async(user_email) if user_email else None
-        )
-        resolved_model_id = await webapp.resolve_agent_model_id(linear_login)
+        resolved_model_id = await webapp.resolve_agent_model_id(mapped_login)
         if not webapp.model_supports_images(resolved_model_id):
             fallback_model_id, fallback_effort = webapp.default_vision_model_pair()
             webapp.logger.info(
@@ -212,6 +215,8 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
         "user_email": user_email,
         "source": "linear",
     }
+    if mapped_login:
+        configurable["github_login"] = mapped_login
     if image_model_override:
         configurable["agent_model_id"] = image_model_override[0]
         configurable["agent_effort"] = image_model_override[1]
@@ -220,6 +225,7 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
         thread_id,
         source="linear",
         repo_config=repo_config,
+        github_login=mapped_login or "",
         user_email=user_email or "",
         title=title or identifier or "Linear issue",
         source_context={"linear_issue": configurable["linear_issue"]},

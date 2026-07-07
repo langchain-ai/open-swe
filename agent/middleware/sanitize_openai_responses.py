@@ -7,7 +7,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from langchain.agents.middleware import AgentMiddleware
-from langchain.agents.middleware.types import ModelCallResult, ModelRequest, ModelResponse
+from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_core.messages import AIMessage
 
 try:
@@ -65,15 +65,6 @@ def _sanitize_messages(messages: list[Any]) -> None:
 
 class SanitizeOpenAIResponsesMiddleware(AgentMiddleware):
     """Drop non-replayable OpenAI Responses reasoning item references."""
-
-    def wrap_model_call(
-        self,
-        request: ModelRequest,
-        handler: Callable[[ModelRequest], ModelResponse],
-    ) -> ModelCallResult:
-        if _is_chat_openai(request.model):
-            _sanitize_messages(request.messages)
-        return handler(request)
 
     async def awrap_model_call(
         self,

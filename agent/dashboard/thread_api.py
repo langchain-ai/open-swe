@@ -19,7 +19,6 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from ..utils.dashboard_handoff import DASHBOARD_HANDOFF_INSTRUCTION
 from ..utils.langsmith import get_langsmith_trace_url
-from ..utils.sandbox import create_sandbox
 from ..utils.slack import lookup_slack_thread_run_mapping, update_slack_trace_reply_for_web_handoff
 from ..utils.thread_ops import (
     get_thread_active_status,
@@ -31,12 +30,13 @@ from .agent_overrides import normalize_profile_overrides
 from .options import (
     SUPPORTED_MODEL_IDS,
     default_vision_model_pair,
+    gate_fable_model,
     model_supports_effort,
     model_supports_images,
 )
 from .pr_diff import build_pr_diff_files
 from .profiles import get_profile, get_valid_access_token
-from .team_settings import get_team_default_model
+from .team_settings import get_team_default_model, get_team_fable_enabled
 from .user_mappings import email_for_login
 
 logger = logging.getLogger(__name__)
@@ -66,6 +66,13 @@ _SURFACED_SOURCES: tuple[str, ...] = ("dashboard", "github", "slack", "linear", 
 _PR_STATES: frozenset[str] = frozenset({"draft", "open", "merged", "closed"})
 _RECOVERY_PATCH_LIMIT_BYTES = 25 * 1024 * 1024
 _RECOVERY_PATCH_TIMEOUT_SECONDS = 120
+
+
+async def create_sandbox(*args: Any, **kwargs: Any) -> Any:
+    # deferred: pulls deepagents -> langchain_anthropic -> anthropic at import time
+    from ..utils.sandbox import create_sandbox as _create_sandbox
+
+    return await _create_sandbox(*args, **kwargs)
 
 
 def _agent_version_metadata() -> dict[str, str]:
@@ -153,6 +160,9 @@ async def _resolve_agent_model_choice(
     chosen_model, chosen_effort = _normalize_model_choice(model_id, effort)
     if chosen_model and chosen_effort:
         resolved_model, resolved_effort = chosen_model, chosen_effort
+    resolved_model, resolved_effort = gate_fable_model(
+        resolved_model, resolved_effort, fable_enabled=await get_team_fable_enabled()
+    )
     return resolved_model, resolved_effort
 
 
@@ -1679,7 +1689,7 @@ async def get_dashboard_thread_recovery_patch(
         raise HTTPException(404, "thread has no recoverable sandbox")
 
     try:
-        sandbox = await asyncio.to_thread(create_sandbox, sandbox_id)
+        sandbox = await create_sandbox(sandbox_id)
     except Exception as exc:  # noqa: BLE001
         logger.debug("Could not connect to sandbox %s for recovery", sandbox_id, exc_info=True)
         raise HTTPException(502, "could not connect to thread sandbox") from exc

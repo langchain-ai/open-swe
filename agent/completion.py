@@ -2,13 +2,14 @@
 
 The platform POSTs a run-completion payload to ``/webhooks/run-complete`` (wired
 as the ``webhook`` on every dispatched run, see ``agent.dispatch``). When a run
-ends in a failure state (``error`` / ``timeout`` / ``interrupted``) we post a
+ends in a failure state (``error`` / ``timeout``) we post a
 short failure reply to the originating channel, so a run that died on a server
 recycle or hit a limit never leaves the user in silence.
 
 This decouples "the user gets an answer" from "the agent remembered to reply."
-The reply is idempotent: a per-thread metadata flag prevents double-posting when
-the platform retries the webhook or a checkpoint replays.
+The reply is idempotent per run when the webhook includes a run id. Older or
+manual payloads without a run id fall back to legacy thread-level idempotence so
+missing ids degrade dedupe instead of silencing failure replies.
 """
 
 from __future__ import annotations
@@ -33,6 +34,9 @@ logger = logging.getLogger(__name__)
 # carries on — that's healthy, not a failure worth a "couldn't finish" reply.
 _TERMINAL_FAILURE_STATUSES = frozenset({"error", "timeout"})
 _FAILURE_REPLY_FLAG = "failure_reply_posted"
+_FAILURE_REPLY_RUN_ID = "failure_reply_posted_run_id"
+_FAILURE_REPLY_RUN_IDS = "failure_reply_posted_run_ids"
+_MAX_FAILURE_REPLY_RUN_IDS = 20
 
 # Shared-secret bearer token proving a /webhooks/run-complete call came from our
 # own dispatch (which appends ?token= when this is set) rather than from an
@@ -116,6 +120,26 @@ async def _post_failure_reply(thread_id: str, metadata: dict[str, Any], status: 
     return False
 
 
+def _posted_failure_run_ids(metadata: dict[str, Any]) -> list[str]:
+    raw = metadata.get(_FAILURE_REPLY_RUN_IDS)
+    ids = [item for item in raw if isinstance(item, str) and item] if isinstance(raw, list) else []
+    latest = metadata.get(_FAILURE_REPLY_RUN_ID)
+    if isinstance(latest, str) and latest and latest not in ids:
+        ids.append(latest)
+    return ids
+
+
+def _failure_reply_metadata(metadata: dict[str, Any], run_id: str | None) -> dict[str, Any]:
+    if run_id is None:
+        return {_FAILURE_REPLY_FLAG: True}
+    ids = [item for item in _posted_failure_run_ids(metadata) if item != run_id]
+    ids.append(run_id)
+    return {
+        _FAILURE_REPLY_RUN_ID: run_id,
+        _FAILURE_REPLY_RUN_IDS: ids[-_MAX_FAILURE_REPLY_RUN_IDS:],
+    }
+
+
 async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
     """Handle a platform run-completion webhook POST.
 
@@ -124,6 +148,8 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
     """
     status = payload.get("status")
     thread_id = payload.get("thread_id")
+    raw_run_id = payload.get("run_id")
+    run_id = raw_run_id if isinstance(raw_run_id, str) and raw_run_id else None
     if not isinstance(thread_id, str) or not thread_id:
         return {"status": "ignored", "reason": "missing thread_id"}
     if status not in _TERMINAL_FAILURE_STATUSES:
@@ -138,15 +164,23 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
 
     metadata = thread.get("metadata") if isinstance(thread, dict) else None
     metadata = metadata if isinstance(metadata, dict) else {}
-    if metadata.get(_FAILURE_REPLY_FLAG):
-        return {"status": "ignored", "reason": "failure reply already posted"}
+    if run_id is None:
+        # Payloads without run ids fall back to the old per-thread flag; run-scoped
+        # dedupe intentionally does not read it so future runs can still report.
+        if metadata.get(_FAILURE_REPLY_FLAG):
+            return {"status": "ignored", "reason": "failure reply already posted"}
+    elif run_id in _posted_failure_run_ids(metadata):
+        return {"status": "ignored", "reason": "failure reply already posted for run"}
 
     posted = await _post_failure_reply(thread_id, metadata, status)
     if not posted:
         return {"status": "ignored", "reason": "no reply posted"}
 
     try:
-        await client.threads.update(thread_id=thread_id, metadata={_FAILURE_REPLY_FLAG: True})
+        await client.threads.update(
+            thread_id=thread_id,
+            metadata=_failure_reply_metadata(metadata, run_id),
+        )
     except Exception:  # noqa: BLE001
         logger.warning("run-complete: could not flag thread %s", thread_id, exc_info=True)
     logger.info("Posted failure reply for thread %s (status=%s)", thread_id, status)

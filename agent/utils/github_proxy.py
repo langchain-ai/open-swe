@@ -9,7 +9,6 @@ before-model middleware re-configure the proxy before it goes stale.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import os
 from collections.abc import Sequence
@@ -144,7 +143,7 @@ async def refresh_proxy_token(
     from ..integrations.langsmith import _configure_github_proxy
 
     current_backend = unwrap_sandbox_backend(sandbox_backend)
-    await asyncio.to_thread(_configure_github_proxy, current_backend.id, token)
+    await _configure_github_proxy(current_backend.id, token)
     record_proxy_token_expiry(
         thread_id,
         expires_at,
