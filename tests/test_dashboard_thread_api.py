@@ -1462,3 +1462,35 @@ async def test_options_includes_fable_when_enabled() -> None:
     ):
         payload = await routes.options()
     assert _FABLE in [m["id"] for m in payload["models"]]
+
+
+@pytest.mark.asyncio
+async def test_options_gates_stale_fable_default_when_disabled() -> None:
+    # A stale Fable team default must not be advertised as the default while Fable
+    # is omitted from the selectable list, or the Cloud Agents page would offer a
+    # default that PUT /profile then rejects.
+    fable_pair = (_FABLE, "high")
+    with (
+        patch(
+            "agent.dashboard.routes.get_team_fable_enabled",
+            new_callable=AsyncMock,
+            return_value=False,
+        ),
+        patch(
+            "agent.dashboard.routes.get_team_default_model",
+            new_callable=AsyncMock,
+            return_value=fable_pair,
+        ),
+        patch(
+            "agent.dashboard.routes.get_team_default_subagent_model",
+            new_callable=AsyncMock,
+            return_value=fable_pair,
+        ),
+    ):
+        payload = await routes.options()
+    model_ids = [m["id"] for m in payload["models"]]
+    assert _FABLE not in model_ids
+    assert payload["default_agent_model"] != _FABLE
+    assert payload["default_agent_subagent_model"] != _FABLE
+    assert payload["default_agent_model"] in model_ids
+    assert payload["default_agent_subagent_model"] in model_ids

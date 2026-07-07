@@ -20,6 +20,7 @@ from .options import (
     FABLE_MODEL_IDS,
     SUPPORTED_MODEL_IDS,
     default_model_pair,
+    gate_fable_model,
     model_supports_effort,
     provider_fallback_pair,
 )
@@ -119,18 +120,25 @@ class TeamSettingsUpdate(BaseModel):
             self.default_chat_model, self.default_chat_reasoning_effort, "review chat"
         )
         if not self.fable_enabled:
-            for field, model in (
-                ("default_agent_model", self.default_agent_model),
-                ("default_agent_subagent_model", self.default_agent_subagent_model),
-                ("default_reviewer_model", self.default_reviewer_model),
-                ("default_reviewer_subagent_model", self.default_reviewer_subagent_model),
-                ("default_grouping_model", self.default_grouping_model),
-                ("default_chat_model", self.default_chat_model),
+            # Disabling Fable is the ZDR kill switch and must always succeed: rather
+            # than reject a payload that still carries a Fable default, swap each
+            # Fable default to its safe non-Fable fallback (mirrors the runtime
+            # gate_fable_model guard) so the stored record can't advertise Fable.
+            for model_field, effort_field in (
+                ("default_agent_model", "default_agent_reasoning_effort"),
+                ("default_agent_subagent_model", "default_agent_subagent_reasoning_effort"),
+                ("default_reviewer_model", "default_reviewer_reasoning_effort"),
+                ("default_reviewer_subagent_model", "default_reviewer_subagent_reasoning_effort"),
+                ("default_grouping_model", "default_grouping_reasoning_effort"),
+                ("default_chat_model", "default_chat_reasoning_effort"),
             ):
+                model = getattr(self, model_field)
                 if model in FABLE_MODEL_IDS:
-                    raise ValueError(
-                        f"{field} is set to a Fable model ({model}) but fable_enabled is False"
+                    new_model, new_effort = gate_fable_model(
+                        model, getattr(self, effort_field), fable_enabled=False
                     )
+                    setattr(self, model_field, new_model)
+                    setattr(self, effort_field, new_effort)
         return self
 
 

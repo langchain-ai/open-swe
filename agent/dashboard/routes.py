@@ -59,7 +59,7 @@ from .oauth import (
     require_session,
     sanitize_redirect_to,
 )
-from .options import FABLE_MODEL_IDS, SUPPORTED_MODELS
+from .options import FABLE_MODEL_IDS, SUPPORTED_MODELS, gate_fable_model
 from .profiles import (
     ProfileUpdate,
     get_profile,
@@ -426,6 +426,13 @@ async def options() -> dict[str, Any]:
     agent_model, agent_effort = await get_team_default_model("agent")
     subagent_model, subagent_effort = await get_team_default_subagent_model("agent")
     fable_enabled = await get_team_fable_enabled()
+    # Never advertise a default that isn't in the selectable list: when Fable is
+    # off, gate a stale Fable default down to its non-Fable fallback so the Cloud
+    # Agents page (and the PUT /profile it drives) don't choke on it.
+    agent_model, agent_effort = gate_fable_model(agent_model, agent_effort, fable_enabled=fable_enabled)
+    subagent_model, subagent_effort = gate_fable_model(
+        subagent_model, subagent_effort, fable_enabled=fable_enabled
+    )
     models = (
         SUPPORTED_MODELS
         if fable_enabled
