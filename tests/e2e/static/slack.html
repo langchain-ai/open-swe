@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Mock Slack — #demo</title>
+    <style>
+      body { font-family: system-ui, sans-serif; max-width: 680px; margin: 1.5rem auto; padding: 0 1rem; }
+      h1 { font-size: 1.1rem; }
+      .msg { border: 1px solid #e5e7eb; border-radius: 8px; padding: 0.5rem 0.75rem; margin: 0.5rem 0; }
+      .msg.bot { background: #f0f7ff; }
+      .who { font-weight: 700; font-size: 0.8rem; color: #444; }
+      .text { white-space: pre-wrap; }
+      .compose { display: flex; gap: 0.5rem; margin-top: 1rem; }
+      .compose input { flex: 1; padding: 0.5rem; font: inherit; }
+      button { padding: 0.5rem 0.9rem; font: inherit; cursor: pointer; }
+      a { color: #1264a3; }
+    </style>
+  </head>
+  <body>
+    <h1>#demo — Slack (mock)</h1>
+    <div class="compose">
+      <select id="user" title="sender"></select>
+      <input id="text" value="<@U0BOT> please add a greet() helper and open a PR" />
+      <button id="send">Send</button>
+      <button id="reset">Reset</button>
+    </div>
+    <label style="font-size:0.8rem"><input type="checkbox" id="mention" checked /> mention the bot (app_mention)</label>
+    <div id="thread"></div>
+
+    <script>
+      const $ = (id) => document.getElementById(id);
+      const userNames = {}; // slack_id -> display name
+
+      async function loadUsers() {
+        try {
+          const users = await (await fetch("/mock/users")).json();
+          $("user").innerHTML = users
+            .map((u) => `<option value="${u.slack_id}">${u.name}</option>`)
+            .join("");
+          for (const u of users) userNames[u.slack_id] = u.name;
+        } catch (_) {}
+      }
+
+      function render(messages) {
+        const html = messages
+          .map((m) => {
+            const who = m.is_bot ? "open-swe (bot)" : userNames[m.user] || m.user;
+            const linked = m.text.replace(/<(https?:\/\/[^|>]+)\|([^>]+)>/g, '<a href="$1">$2</a>');
+            return `<div class="msg ${m.is_bot ? "bot" : ""}" data-bot="${m.is_bot}" data-thread-ts="${m.thread_ts || ""}"><div class="who">${who}</div><div class="text">${linked}</div></div>`;
+          })
+          .join("");
+        $("thread").innerHTML = html || "<p style='color:#888'>No messages yet.</p>";
+      }
+
+      async function poll() {
+        try {
+          const res = await fetch("/mock/slack/messages");
+          render(await res.json());
+        } catch (_) {}
+      }
+
+      $("send").addEventListener("click", async () => {
+        await fetch("/mock/slack/send", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            text: $("text").value,
+            mention_bot: $("mention").checked,
+            user: $("user").value,
+          }),
+        });
+        poll();
+      });
+
+      $("reset").addEventListener("click", async () => {
+        await fetch("/control/reset", { method: "POST" });
+        render([]);
+      });
+
+      loadUsers();
+      poll();
+      setInterval(poll, 1000);
+    </script>
+  </body>
+</html>

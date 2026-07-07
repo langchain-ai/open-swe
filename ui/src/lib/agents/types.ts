@@ -66,6 +66,8 @@ export interface DiffData {
 export interface ToolExecutionChunk {
   kind: "tool-execution"
   toolCallId: string
+  /** Stable arrival time for the tool call, shown on hover. */
+  timestamp?: string
   title: string
   toolKind: AcpToolKind
   input?: Record<string, unknown>
@@ -140,6 +142,7 @@ export interface Message {
   timestamp: string
   /** Timestamp of the first message in an agent turn; used to derive work duration. */
   startedAt?: string
+  timestampIsFallback?: boolean
   chunks: Array<Chunk>
   hidden?: boolean
 }
@@ -172,6 +175,44 @@ export interface AgentSchedule {
   updatedAt?: string | null
 }
 
+export interface QueuedThreadMessage {
+  id: string
+  content: string
+  images?: Array<ImageChunk>
+  createdAt: number
+}
+
+export type WorkflowApprovalStatus = "pending" | "approved" | "rejected"
+
+export interface WorkflowDiffStats {
+  files: number
+  additions: number
+  deletions: number
+}
+
+export interface WorkflowPushApproval {
+  fingerprint: string
+  status: WorkflowApprovalStatus
+  repo: string
+  branch: string
+  baseSha: string
+  headSha: string
+  files: Array<string>
+  diffStats: WorkflowDiffStats
+  diffPreview: string
+  diffPreviewTruncated: boolean
+  approvalUrl: string | null
+  requestedAt: string | null
+  decidedAt: string | null
+  decidedBy: string | null
+}
+
+export interface WorkflowPushApprovalsResponse {
+  threadId: string
+  isOwner: boolean
+  approvals: Array<WorkflowPushApproval>
+}
+
 export interface AgentThread {
   id: string
   title: string
@@ -180,16 +221,20 @@ export interface AgentThread {
   branch: string
   model: string
   effort?: string | null
+  planMode?: boolean
+  planStatus?: string | null
   source?: AgentSource
   status: AgentStatus
   viewed: boolean
   viewedAt?: number | null
   resolved?: boolean
   resolvedAt?: number | null
+  isOwner?: boolean
   createdAt: number
   updatedAt: number
   traceUrl?: string | null
   messages: Array<Message>
+  queuedMessages?: Array<QueuedThreadMessage>
   pr?: {
     number: number
     title: string

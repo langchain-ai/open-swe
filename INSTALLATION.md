@@ -16,7 +16,7 @@ Open SWE has two runnable pieces:
 - [uv](https://docs.astral.sh/uv/) package manager
 - [LangGraph CLI](https://docs.langchain.com/langsmith/cli)
 - [ngrok](https://ngrok.com/) (for local development — exposes webhook endpoints to the internet)
-- [Bun](https://bun.sh/) (only if you want to run the dashboard UI locally — see step 8). Node 20+ also works, but `ui/bun.lock` is the canonical lockfile.
+- [pnpm](https://pnpm.io/) (only if you want to run the dashboard UI locally — see step 8). Node 20+ also works, but `ui/pnpm-lock.yaml` is the canonical lockfile.
 
 ## 1. Clone and install
 
@@ -78,6 +78,8 @@ Write this down. You'll use it in the callback URL below and again in step 4 whe
      - Issues: Read & write
      - Checks: Read & write — reports an "Open SWE Review" check run on PRs while an auto-review runs, and reads third-party CI conclusions for the auto-fix flow (it watches failing checks on agent-authored PRs and pushes fixes). Without it, check-run creation fails (logged, best-effort) but reviews still work, and CI auto-fix is disabled.
      - Commit statuses: Read-only — only needed if you enable the `Status` event below; the CI auto-fix flow reads the legacy combined commit-status API for integrations that report via statuses instead of check runs. Without it, status-based CI is silently ignored (logged as "Failed to read combined status").
+     - Actions: Read-only — optional; lets Open SWE's sandbox proxy tokens download GitHub Actions workflow/job logs when troubleshooting CI failures. Do **not** grant Actions write for log access: write permission also allows rerunning, canceling, and deleting workflow runs, which is unnecessary for diagnostics.
+     - Workflows: Read & write — required to let Open SWE push branches containing GitHub Actions workflow changes after explicit human approval. Runtime sandbox tokens are still minted without this permission by default and are elevated only around an approved workflow push.
      - Metadata: Read-only
    - **Organization permissions** (required only if you plan to set `ALLOWED_GITHUB_ORGS` — see step 5 / Security):
      - Members: Read-only — used to verify org membership for the dashboard-login gate via `GET /orgs/{org}/memberships/{username}`. Without this permission that call returns 403, the check fails closed, and **every** dashboard login is rejected.
@@ -208,13 +210,17 @@ DEFAULT_SANDBOX_SNAPSHOT_FS_CAPACITY_BYTES="34359738368"
 DEFAULT_SANDBOX_VCPUS="4"
 # Optional; memory in bytes per sandbox. Default is 15 GiB.
 DEFAULT_SANDBOX_MEM_BYTES="16106127360"
-# Optional; auto-stop a sandbox after this many seconds of inactivity. Default is 600 (10 min). 0 disables.
-DEFAULT_SANDBOX_IDLE_TTL_SECONDS="600"
+# Optional; auto-stop a sandbox after this many seconds of inactivity. Default is 7200 (2 hours). 0 disables.
+DEFAULT_SANDBOX_IDLE_TTL_SECONDS="7200"
 # Optional; delete a stopped sandbox after this many seconds. Default is 86400 (24 hours). 0 disables.
 DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS="86400"
+# Optional; required only for the admin Repository Snapshots page/template generator.
+REPO_SNAPSHOT_BASE_IMAGE="<your-docker-hub>/<name-of-your-image>"
 ```
 
 `DEFAULT_SANDBOX_SNAPSHOT_ID` is required when `SANDBOX_TYPE=langsmith`. The server validates this at startup and refuses to boot if it's missing. The snapshot should include the GitHub CLI from the project Dockerfile; Open SWE authenticates `git` and `gh` through the LangSmith sandbox proxy using runtime-minted GitHub App installation tokens, not deployment-stored GitHub access tokens.
+
+`REPO_SNAPSHOT_BASE_IMAGE` should point at the same published Open SWE sandbox image you used to create the default snapshot (for example, the image built from `./Dockerfile`). The admin **Repository Snapshots** page uses it as the `FROM` line when generating per-repo Dockerfile templates. If it is not set, template generation is intentionally disabled so admins do not accidentally build repo-scoped snapshots from a bare image that lacks Open SWE's required tools (`git`, `gh`, `sfw`, language runtimes, and proxy assumptions).
 
 ## 5. Set up triggers
 
@@ -471,9 +477,9 @@ DASHBOARD_JWT_SECRET=""                # Generate with: openssl rand -hex 32
 # Required whenever the frontend and API are on different origins — including local
 # dev (UI :3000 -> API :2024 is cross-origin). CORS is only enabled when this is set.
 DASHBOARD_ALLOWED_ORIGINS="http://localhost:3000"  # prod: your frontend origin(s)
-# Comma-separated email allowlist for admin dashboard endpoints (matched against the
-# logged-in user's GitHub email). Empty => nobody is an admin.
-CONFIGURED_ADMINS=""                   # e.g. "alice@my-org.com,bob@my-org.com"
+# Comma-separated GitHub login or email allowlist for admin dashboard endpoints.
+# Empty => nobody is an admin.
+CONFIGURED_ADMINS=""                   # e.g. "alice,bob@my-org.com"
 # URL of the LangGraph server the FastAPI side calls to trigger/stream runs.
 # Defaults to http://localhost:2024 locally; set to your deployment URL in prod.
 LANGGRAPH_URL="http://localhost:2024"
@@ -513,7 +519,7 @@ DEFAULT_SANDBOX_SNAPSHOT_ID=""         # Required when SANDBOX_TYPE=langsmith (s
 DEFAULT_SANDBOX_SNAPSHOT_FS_CAPACITY_BYTES=""  # Root FS size in bytes (default: 32 GiB)
 DEFAULT_SANDBOX_VCPUS=""               # vCPUs per sandbox (default: 4)
 DEFAULT_SANDBOX_MEM_BYTES=""           # Memory in bytes per sandbox (default: 15 GiB)
-DEFAULT_SANDBOX_IDLE_TTL_SECONDS=""    # Auto-stop after N seconds idle (default: 600; 0 disables)
+DEFAULT_SANDBOX_IDLE_TTL_SECONDS=""    # Auto-stop after N seconds idle (default: 7200; 0 disables)
 DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS=""  # Delete N seconds after stop (default: 86400; 0 disables)
 
 # === Token Encryption ===
@@ -576,20 +582,20 @@ The dashboard is the web app in `ui/`. It's a static TanStack Start client that 
 
 ```bash
 cd ui
-bun install
+pnpm install
 cat > .env <<'EOF'
 VITE_DASHBOARD_API_BASE_URL="http://localhost:2024"
 EOF
-bun run dev          # vite dev --port 3000 -> http://localhost:3000
+pnpm run dev          # vite dev --port 3000 -> http://localhost:3000
 ```
 
 The dashboard needs `VITE_DASHBOARD_API_BASE_URL` in `ui/.env` pointing at the backend for local dev. The file is intentionally untracked because `.env*` files are gitignored.
 
 The client calls `${VITE_DASHBOARD_API_BASE_URL}/dashboard/api/*` with `credentials: "include"`, so the backend's `osw_session` cookie rides along. Because the UI (`:3000`) and API (`:2024`) are different origins, the backend needs **CORS** enabled for the UI origin — set `DASHBOARD_ALLOWED_ORIGINS="http://localhost:3000"` (CORS is off unless this is set). Keep `DASHBOARD_API_BASE_URL` on an `http://` URL locally so the cookie uses `SameSite=Lax` rather than `Secure`.
 
-For the dashboard login to succeed, you need (from steps 3c / 6): `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET`, `DASHBOARD_JWT_SECRET`, `DASHBOARD_API_BASE_URL`, `DASHBOARD_BASE_URL`, and `DASHBOARD_ALLOWED_ORIGINS`. To reach the admin pages (user mappings, etc.), add your GitHub email to `CONFIGURED_ADMINS`.
+For the dashboard login to succeed, you need (from steps 3c / 6): `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET`, `DASHBOARD_JWT_SECRET`, `DASHBOARD_API_BASE_URL`, `DASHBOARD_BASE_URL`, and `DASHBOARD_ALLOWED_ORIGINS`. To reach the admin pages (user mappings, etc.), add your GitHub login or email to `CONFIGURED_ADMINS`.
 
-Other UI scripts: `bun run build`, `bun run typecheck`, `bun run lint`, `bun run test`.
+Other UI scripts: `pnpm run build`, `pnpm run typecheck`, `pnpm run lint`, `pnpm run test`.
 
 ## 9. Verify it works
 
@@ -621,7 +627,7 @@ Other UI scripts: `bun run build`, `bun run typecheck`, `bun run lint`, `bun run
 
 1. With the backend (step 7) and UI (step 8) both running, open `http://localhost:3000`
 2. Click **Sign in with GitHub** — you'll be sent through the GitHub OAuth flow and back to the dashboard
-3. You should land logged-in and be able to see your profile/settings. If your email is in `CONFIGURED_ADMINS`, the **Admin** pages (e.g. User mappings) are available.
+3. You should land logged-in and be able to see your profile/settings. If your GitHub login or email is in `CONFIGURED_ADMINS`, the **Admin** pages (e.g. User mappings) are available.
 
 ## 10. Production deployment
 
@@ -674,7 +680,7 @@ Alternatively, you can run the dashboard as a direct cross-origin client: set `V
 - OAuth `redirect_uri` mismatch: the GitHub App must list `<DASHBOARD_API_BASE_URL>/dashboard/api/auth/callback` as a callback URL (step 3b). Locally that's `http://localhost:2024/dashboard/api/auth/callback`.
 - Login redirects but the session doesn't stick: this is almost always a cookie problem. Locally, keep `DASHBOARD_API_BASE_URL` on `http://` (so cookies are `SameSite=Lax`); in prod use `https://` for both API and frontend and add the frontend origin to `DASHBOARD_ALLOWED_ORIGINS`.
 - Login rejected with an org error: `ALLOWED_GITHUB_ORGS` gates dashboard login (and requires the App's Organization → Members: Read-only permission). See step 5.
-- Admin pages 403: add your GitHub email to `CONFIGURED_ADMINS`.
+- Admin pages 403: add your GitHub login or email to `CONFIGURED_ADMINS`.
 
 ### Dashboard UI can't reach the backend
 

@@ -1,0 +1,7 @@
+{
+  "name": "open-swe",
+  "private": true,
+  "scripts": {
+    "dev:mock": "bash tests/e2e/dev-mock.sh"
+  }
+}

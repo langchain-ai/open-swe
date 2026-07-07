@@ -1,9 +1,13 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useStreamContext as useAgentThreadStream } from "@langchain/react";
+import { useMutation, useQueryClient } from "@tanstack/react-query"
+import { useStreamContext as useAgentThreadStream } from "@langchain/react"
 
-import type { SendAgentMessageVariables } from "@/lib/agents/queries";
-import { AgentsApiError, agentsApi } from "@/lib/agents/api";
-import { agentThreadKeys, invalidateAgentThreadLists } from "@/lib/agents/queries";
+import type { SendAgentMessageVariables } from "@/lib/agents/queries"
+import type { AgentThread } from "@/lib/agents/types"
+import { AgentsApiError, agentsApi } from "@/lib/agents/api"
+import {
+  agentThreadKeys,
+  invalidateAgentThreadLists,
+} from "@/lib/agents/queries"
 
 /**
  * Construct the message content for the LangGraph run.
@@ -12,14 +16,44 @@ import { agentThreadKeys, invalidateAgentThreadLists } from "@/lib/agents/querie
  * @returns The message content.
  */
 function messageContent(vars: SendAgentMessageVariables) {
-  const text = vars.content.trim();
-  const imageBlocks = vars.images?.map((image) => ({
-    type: "image",
-    base64: image.base64,
-    mime_type: image.mimeType,
-    ...(image.fileName ? { file_name: image.fileName } : {}),
-  })) ?? [];
-  return [...imageBlocks, ...(text ? [{ type: "text", text }] : [])];
+  const text = vars.content.trim()
+  const imageBlocks =
+    vars.images?.map((image) => ({
+      type: "image",
+      base64: image.base64,
+      mime_type: image.mimeType,
+      ...(image.fileName ? { file_name: image.fileName } : {}),
+    })) ?? []
+  return [...imageBlocks, ...(text ? [{ type: "text", text }] : [])]
+}
+
+function appendQueuedMessage(
+  thread: AgentThread,
+  vars: SendAgentMessageVariables,
+  id: string,
+  createdAt: number
+): AgentThread {
+  return {
+    ...thread,
+    queuedMessages: [
+      ...(thread.queuedMessages ?? []),
+      {
+        id,
+        content: vars.content.trim(),
+        images: vars.images,
+        createdAt,
+      },
+    ],
+  }
+}
+
+function removeQueuedMessage(thread: AgentThread, id: string): AgentThread {
+  return {
+    ...thread,
+    queuedMessages: thread.queuedMessages?.filter(
+      (message) => message.id !== id
+    ),
+  }
 }
 
 /**
@@ -32,46 +66,65 @@ function messageContent(vars: SendAgentMessageVariables) {
  * That endpoint writes to the thread store; `check_message_queue_before_model`
  * injects the message into the *current* run before the next model call — the
  * same mid-run follow-up path used by Slack, Linear, and GitHub webhooks.
- * 
+ *
  * @param threadId - The ID of the thread to submit the message to.
  * @returns The mutation object.
  */
 export function useSubmitAgentMessage(threadId: string) {
-  const queryClient = useQueryClient();
-  const stream = useAgentThreadStream();
+  const queryClient = useQueryClient()
+  const stream = useAgentThreadStream()
 
   return useMutation({
     mutationFn: async (vars: SendAgentMessageVariables) => {
-      const queue = () =>
-        agentsApi.queueMessage(threadId, {
-          content: vars.content,
-          images: vars.images,
-          model_id: vars.model_id,
-          effort: vars.effort,
-        });
-
-      if (stream.isLoading) {
-        await queue();
-        return;
-      }
-
-      try {
-        await queue();
-        return;
-      } catch (error) {
-        if (!(error instanceof AgentsApiError) || error.status !== 409) {
-          throw error;
+      const queue = async () => {
+        const queuedAt = Date.now()
+        const queuedId = `queued-${queuedAt}-${Math.random().toString(36).slice(2)}`
+        queryClient.setQueryData<AgentThread>(
+          agentThreadKeys.detail(threadId),
+          (prev) =>
+            prev ? appendQueuedMessage(prev, vars, queuedId, queuedAt) : prev
+        )
+        try {
+          await agentsApi.queueMessage(threadId, {
+            content: vars.content,
+            images: vars.images,
+            model_id: vars.model_id,
+            effort: vars.effort,
+            plan_mode: vars.plan_mode,
+          })
+        } catch (error) {
+          queryClient.setQueryData<AgentThread>(
+            agentThreadKeys.detail(threadId),
+            (prev) => (prev ? removeQueuedMessage(prev, queuedId) : prev)
+          )
+          throw error
         }
       }
 
-      const config = (!vars.model_id || !vars.effort)
-        ? undefined
-        : {
-          configurable: {
-            agent_model_id: vars.model_id,
-            agent_effort: vars.effort,
-          },
-        };
+      if (stream.isLoading) {
+        await queue()
+        return
+      }
+
+      try {
+        await queue()
+        return
+      } catch (error) {
+        if (!(error instanceof AgentsApiError) || error.status !== 409) {
+          throw error
+        }
+      }
+
+      const configurable: Record<string, unknown> = {}
+      if (vars.model_id && vars.effort) {
+        configurable.agent_model_id = vars.model_id
+        configurable.agent_effort = vars.effort
+      }
+      if (vars.plan_mode) {
+        configurable.plan_mode = true
+      }
+      const config =
+        Object.keys(configurable).length > 0 ? { configurable } : undefined
 
       // Don't await: `stream.submit` resolves only when the run *finishes*, so
       // awaiting would keep the mutation `isPending` (and the prompt bar
@@ -80,7 +133,7 @@ export function useSubmitAgentMessage(threadId: string) {
       void stream
         .submit(
           { messages: [{ type: "human", content: messageContent(vars) }] },
-          { config },
+          { config }
         )
         .catch(() => {
           // The run failed to start (e.g. expired OAuth token → 401, or a
@@ -88,16 +141,16 @@ export function useSubmitAgentMessage(threadId: string) {
           // `status: "running"`. Surface the failure and clear the busy state
           // instead of leaving the thread falsely running.
           queryClient.setQueryData(agentThreadKeys.detail(threadId), (prev) =>
-            prev ? { ...prev, status: "error" as const } : prev,
-          );
-          invalidateAgentThreadLists(queryClient);
-        });
+            prev ? { ...prev, status: "error" as const } : prev
+          )
+          invalidateAgentThreadLists(queryClient)
+        })
     },
     onSuccess: () => {
       queryClient.setQueryData(agentThreadKeys.detail(threadId), (prev) =>
-        prev ? { ...prev, status: "running" as const } : prev,
-      );
-      invalidateAgentThreadLists(queryClient);
+        prev ? { ...prev, status: "running" as const } : prev
+      )
+      invalidateAgentThreadLists(queryClient)
     },
-  });
+  })
 }

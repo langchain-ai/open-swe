@@ -55,6 +55,7 @@ _TOOL_STATUS: dict[str, str] = {
     "fetch_url": "fetching a URL...",
     "http_request": "making an HTTP request...",
     "request_pr_review": "requesting a PR review...",
+    "slack_add_reaction": "reacting in Slack...",
     "slack_read_thread_messages": "reading Slack history...",
     "slack_thread_reply": "drafting a Slack reply...",
     "linear_comment": "commenting on Linear...",
@@ -171,20 +172,6 @@ class SlackAssistantStatusMiddleware(AgentMiddleware):
         name = _tool_call_name(request.tool_call)
         status = _TOOL_STATUS.get(name or "", DEFAULT_ASSISTANT_STATUS)
         return await self._run_with_heartbeat(status, handler(request))
-
-    def wrap_model_call(
-        self,
-        request: ModelRequest,
-        handler: Callable[[ModelRequest], ModelResponse],
-    ) -> ModelResponse:
-        return handler(request)
-
-    def wrap_tool_call(
-        self,
-        request: ToolCallRequest,
-        handler: Callable[[ToolCallRequest], ToolMessage | Command],
-    ) -> ToolMessage | Command:
-        return handler(request)
 
     async def _try_set(self, status: str) -> None:
         try:

@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from fastapi import HTTPException
 
 from agent.dashboard import review_chat_api
 
@@ -14,6 +15,28 @@ from agent.dashboard import review_chat_api
 list_review_findings = importlib.import_module("agent.tools.list_review_findings")
 read_repo_file = importlib.import_module("agent.tools.read_repo_file")
 search_repo_code = importlib.import_module("agent.tools.search_repo_code")
+
+
+def _fake_async_client(handler):
+    """Build a fake ``httpx.AsyncClient`` factory whose ``get`` calls ``handler``.
+
+    ``handler(url, headers=..., params=...)`` returns the response object.
+    """
+
+    class _FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def get(self, url, headers=None, params=None):
+            return handler(url, headers=headers, params=params)
+
+    return _FakeClient
 
 
 # --- chat thread list / delete / title ---------------------------------------
@@ -184,7 +207,8 @@ async def test_assert_chat_thread_access_rejects_unauthorized(monkeypatch, metad
 # --- tools -------------------------------------------------------------------
 
 
-def test_list_review_findings_compacts_and_filters(monkeypatch) -> None:
+@pytest.mark.asyncio
+async def test_list_review_findings_compacts_and_filters(monkeypatch) -> None:
     monkeypatch.setattr(
         list_review_findings,
         "get_config",
@@ -206,7 +230,7 @@ def test_list_review_findings_compacts_and_filters(monkeypatch) -> None:
 
     monkeypatch.setattr(list_review_findings, "list_findings_async", fake_list)
 
-    result = list_review_findings.list_review_findings(status_filter="open")
+    result = await list_review_findings.list_review_findings(status_filter="open")
     assert result["count"] == 1
     finding = result["findings"][0]
     assert finding["id"] == "f1"
@@ -214,14 +238,16 @@ def test_list_review_findings_compacts_and_filters(monkeypatch) -> None:
     assert "github_review_comment_id" not in finding
 
 
-def test_list_review_findings_requires_reviewer_thread(monkeypatch) -> None:
+@pytest.mark.asyncio
+async def test_list_review_findings_requires_reviewer_thread(monkeypatch) -> None:
     monkeypatch.setattr(list_review_findings, "get_config", lambda: {"configurable": {}})
-    result = list_review_findings.list_review_findings()
+    result = await list_review_findings.list_review_findings()
     assert result["count"] == 0
     assert "reviewer thread" in result["error"]
 
 
-def test_read_repo_file_decodes_file(monkeypatch) -> None:
+@pytest.mark.asyncio
+async def test_read_repo_file_decodes_file(monkeypatch) -> None:
     import base64
 
     monkeypatch.setattr(
@@ -239,7 +265,7 @@ def test_read_repo_file_decodes_file(monkeypatch) -> None:
 
     captured: dict[str, Any] = {}
 
-    def fake_get(url, headers=None, params=None, timeout=None):
+    def fake_get(url, headers=None, params=None):
         captured["url"] = url
         captured["params"] = params
         return SimpleNamespace(
@@ -247,16 +273,17 @@ def test_read_repo_file_decodes_file(monkeypatch) -> None:
             json=lambda: {"type": "file", "content": base64.b64encode(b"hello\nworld").decode()},
         )
 
-    monkeypatch.setattr(read_repo_file.requests, "get", fake_get)
+    monkeypatch.setattr(read_repo_file.httpx, "AsyncClient", _fake_async_client(fake_get))
 
-    result = read_repo_file.read_repo_file("src/app.py")
+    result = await read_repo_file.read_repo_file("src/app.py")
     assert result["success"] is True
     assert result["content"] == "hello\nworld"
     assert result["ref"] == "deadbeef"  # defaults to head sha
     assert captured["params"] == {"ref": "deadbeef"}
 
 
-def test_read_repo_file_lists_directory(monkeypatch) -> None:
+@pytest.mark.asyncio
+async def test_read_repo_file_lists_directory(monkeypatch) -> None:
     monkeypatch.setattr(
         read_repo_file,
         "get_config",
@@ -269,7 +296,7 @@ def test_read_repo_file_lists_directory(monkeypatch) -> None:
         },
     )
 
-    def fake_get(url, headers=None, params=None, timeout=None):
+    def fake_get(url, headers=None, params=None):
         return SimpleNamespace(
             status_code=200,
             json=lambda: [
@@ -278,19 +305,21 @@ def test_read_repo_file_lists_directory(monkeypatch) -> None:
             ],
         )
 
-    monkeypatch.setattr(read_repo_file.requests, "get", fake_get)
-    result = read_repo_file.read_repo_file("src")
+    monkeypatch.setattr(read_repo_file.httpx, "AsyncClient", _fake_async_client(fake_get))
+    result = await read_repo_file.read_repo_file("src")
     assert result["success"] is True
     assert {e["name"] for e in result["entries"]} == {"a.py", "sub"}
 
 
-def test_read_repo_file_missing_context(monkeypatch) -> None:
+@pytest.mark.asyncio
+async def test_read_repo_file_missing_context(monkeypatch) -> None:
     monkeypatch.setattr(read_repo_file, "get_config", lambda: {"configurable": {}})
-    result = read_repo_file.read_repo_file("src/app.py")
+    result = await read_repo_file.read_repo_file("src/app.py")
     assert result["success"] is False
 
 
-def test_search_repo_code_scopes_to_repo(monkeypatch) -> None:
+@pytest.mark.asyncio
+async def test_search_repo_code_scopes_to_repo(monkeypatch) -> None:
     monkeypatch.setattr(
         search_repo_code,
         "get_config",
@@ -304,7 +333,7 @@ def test_search_repo_code_scopes_to_repo(monkeypatch) -> None:
     )
     captured: dict[str, Any] = {}
 
-    def fake_get(url, headers=None, params=None, timeout=None):
+    def fake_get(url, headers=None, params=None):
         captured["params"] = params
         return SimpleNamespace(
             status_code=200,
@@ -314,8 +343,8 @@ def test_search_repo_code_scopes_to_repo(monkeypatch) -> None:
             },
         )
 
-    monkeypatch.setattr(search_repo_code.requests, "get", fake_get)
-    result = search_repo_code.search_repo_code("foo")
+    monkeypatch.setattr(search_repo_code.httpx, "AsyncClient", _fake_async_client(fake_get))
+    result = await search_repo_code.search_repo_code("foo")
     assert result["success"] is True
     assert "repo:acme/repo" in captured["params"]["q"]
     assert result["results"][0]["path"] == "src/a.py"
@@ -376,7 +405,9 @@ def _client_for_enrich(existing_metadata: dict[str, Any] | None) -> tuple[Any, d
     return client, captured
 
 
-def _patch_enrich_deps(monkeypatch, *, metadata: dict[str, Any] | None) -> dict[str, Any]:
+def _patch_enrich_deps(
+    monkeypatch, *, metadata: dict[str, Any] | None, current_head: str = "abc123def456"
+) -> dict[str, Any]:
     client, captured = _client_for_enrich(metadata)
     monkeypatch.setattr(review_chat_api, "langgraph_client", lambda: client)
 
@@ -389,9 +420,14 @@ def _patch_enrich_deps(monkeypatch, *, metadata: dict[str, Any] | None) -> dict[
     async def fake_token(repositories=None):
         return "app-token"
 
+    async def fake_head(owner, repo, pr_number):
+        captured["head_calls"] = captured.get("head_calls", 0) + 1
+        return current_head
+
     monkeypatch.setattr(review_chat_api, "get_review", fake_get_review)
     monkeypatch.setattr(review_chat_api, "fetch_pr_diff", fake_diff)
     monkeypatch.setattr(review_chat_api, "get_github_app_installation_token", fake_token)
+    monkeypatch.setattr(review_chat_api, "get_pr_head_sha", fake_head)
     return captured
 
 
@@ -455,6 +491,86 @@ async def test_enrich_chat_command_reseeds_on_head_change(monkeypatch) -> None:
     assert set(files) == {"/pr/overview.md", "/pr/diff.patch", "/pr/findings.md"}
     assert params["config"]["configurable"]["chat_head_sha"] == "abc123def456"
     assert {"chat_head_sha": "abc123def456"} in captured["updated"]
+
+
+@pytest.mark.asyncio
+async def test_enrich_chat_command_keeps_context_when_reseed_fails(monkeypatch) -> None:
+    # Existing chat whose head moved, but loading the fresh context fails: the
+    # command must keep answering from the last seeded context instead of erroring.
+    captured = _patch_enrich_deps(
+        monkeypatch,
+        metadata={"kind": "review_chat", "chat_head_sha": "old-stale-sha"},
+        current_head="new-head-sha",
+    )
+
+    async def failing_build(*args, **kwargs):
+        raise HTTPException(404, "review not found")
+
+    monkeypatch.setattr(review_chat_api, "_build_pr_context", failing_build)
+    command = {"method": "run.start", "params": {"input": {"messages": []}}}
+
+    enriched = await review_chat_api._enrich_chat_command(
+        command,
+        owner="acme",
+        repo="repo",
+        pr_number=7,
+        login="octocat",
+        thread_id="ct-1",
+        thread_metadata={"kind": "review_chat", "chat_head_sha": "old-stale-sha"},
+    )
+
+    params = enriched["params"]
+    assert "files" not in params["input"]  # no reseed
+    assert params["config"]["configurable"]["chat_head_sha"] == "old-stale-sha"
+    assert params["assistant_id"] == "chat"
+    assert captured["updated"] == []  # head metadata not advanced on failure
+
+
+@pytest.mark.asyncio
+async def test_enrich_chat_command_surfaces_reseed_failure_on_create(monkeypatch) -> None:
+    # A brand-new chat has no prior context to fall back to, so a seeding failure
+    # must surface rather than silently produce an empty conversation.
+    _patch_enrich_deps(monkeypatch, metadata=None)
+
+    async def failing_build(*args, **kwargs):
+        raise HTTPException(404, "review not found")
+
+    monkeypatch.setattr(review_chat_api, "_build_pr_context", failing_build)
+    command = {"method": "run.start", "params": {"input": {"messages": []}}}
+
+    with pytest.raises(HTTPException):
+        await review_chat_api._enrich_chat_command(
+            command, owner="acme", repo="repo", pr_number=7, login="octocat", thread_id="ct-1"
+        )
+
+
+@pytest.mark.asyncio
+async def test_enrich_chat_command_uses_passed_metadata_without_refetch(monkeypatch) -> None:
+    # When the caller supplies the already-fetched metadata, enrichment must not
+    # issue a second thread read on the hot path.
+    captured = _patch_enrich_deps(
+        monkeypatch, metadata={"kind": "review_chat", "chat_head_sha": "abc123def456"}
+    )
+
+    async def boom(thread_id: str) -> None:
+        raise AssertionError("metadata was supplied; must not refetch the thread")
+
+    monkeypatch.setattr(review_chat_api, "_get_chat_thread_metadata", boom)
+    command = {"method": "run.start", "params": {"input": {"messages": []}}}
+
+    enriched = await review_chat_api._enrich_chat_command(
+        command,
+        owner="acme",
+        repo="repo",
+        pr_number=7,
+        login="octocat",
+        thread_id="ct-1",
+        thread_metadata={"kind": "review_chat", "chat_head_sha": "abc123def456"},
+    )
+
+    assert enriched["params"]["config"]["configurable"]["chat_head_sha"] == "abc123def456"
+    assert "files" not in enriched["params"]["input"]
+    assert captured.get("head_calls") == 1  # lightweight head lookup, no full get_review
 
 
 @pytest.mark.asyncio

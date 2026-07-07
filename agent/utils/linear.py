@@ -10,6 +10,8 @@ import httpx
 
 from agent.utils.langsmith import get_langsmith_trace_url
 
+from .http import DEFAULT_HTTP_TIMEOUT
+
 logger = logging.getLogger(__name__)
 
 LINEAR_API_KEY = os.environ.get("LINEAR_API_KEY", "")
@@ -28,7 +30,7 @@ async def _graphql_request(query: str, variables: dict[str, Any] | None = None) 
     if not LINEAR_API_KEY:
         return {"error": "LINEAR_API_KEY is not set"}
 
-    async with httpx.AsyncClient() as http_client:
+    async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
         try:
             response = await http_client.post(
                 LINEAR_API_URL,

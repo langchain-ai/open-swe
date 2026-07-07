@@ -65,11 +65,12 @@ Configured in `agent/server.py:get_agent`, runs around every model call (in this
 3. `ToolErrorMiddleware` — catches tool exceptions and surfaces them as tool messages.
 4. `check_message_queue_before_model` — pulls Linear comments / Slack messages that arrived mid-run from the thread queue and injects them as user messages before the next LLM call. This is what makes "message the agent while it's working" work.
 5. `SlackAssistantStatusMiddleware` — keeps the Slack "assistant is typing"-style status up to date around model calls.
-6. `notify_step_limit_reached` — after-agent hook that posts a Slack reply when the agent hits the step limit, so the user gets a clear signal instead of silence.
-7. `SandboxCircuitBreakerMiddleware` — trips the agent out of repeated sandbox failures instead of looping.
-8. `ModelFallbackMiddleware` (optional, last) — added only when `LLM_FALLBACK_MODEL_ID` or the per-model default fallback differs from the primary model.
+6. `ensure_no_empty_msg` — after-model hook; when the model emits a message with no tool call (and hasn't already messaged the user or confirmed completion) it re-injects a synthetic `no_op` / `confirming_completion` tool call so the run continues instead of ending prematurely.
+7. `notify_step_limit_reached` — after-agent hook that posts a Slack reply when the agent hits the step limit, so the user gets a clear signal instead of silence.
+8. `SandboxCircuitBreakerMiddleware` — trips the agent out of repeated sandbox failures instead of looping.
+9. `ModelFallbackMiddleware` (optional, last) — added only when `LLM_FALLBACK_MODEL_ID` or the per-model default fallback differs from the primary model.
 
-The agent ends its turn naturally when the model emits a final message with no tool call; there is intentionally no middleware that forces a tool call on every turn.
+The system prompt instructs the agent to call a tool every turn, and `ensure_no_empty_msg` re-injects a tool call when it doesn't — together these keep runs from stopping partway through a task.
 
 Other middleware exists in `agent/middleware/` (`ExcludeToolsMiddleware`) but isn't wired into the default agent. The reviewer uses a leaner stack: `SanitizeToolInputsMiddleware`, `ModelCallLimitMiddleware`, `ToolErrorMiddleware`, `SlackAssistantStatusMiddleware`.
 
@@ -80,7 +81,7 @@ There is intentionally no after-agent safety net that opens a PR for the agent. 
 All tools live in `agent/tools/` and are flat-imported via `agent/tools/__init__.py`. The set is intentionally small and curated — see README "Tools — Curated, Not Accumulated".
 
 Wired into `get_agent`:
-`http_request`, `fetch_url`, `web_search`, `linear_comment`, `linear_create_issue`, `linear_delete_issue`, `linear_get_issue`, `linear_get_issue_comments`, `linear_list_teams`, `linear_update_issue`, `request_pr_review`, `slack_read_thread_messages`, `slack_thread_reply`.
+`http_request`, `fetch_url`, `web_search`, `linear_comment`, `linear_create_issue`, `linear_delete_issue`, `linear_get_issue`, `linear_get_issue_comments`, `linear_list_teams`, `linear_update_issue`, `request_pr_review`, `schedule_thread_wakeup`, `slack_add_reaction`, `slack_read_thread_messages`, `slack_thread_reply`.
 
 Reviewer-only tools (in `agent/reviewer.py`): `add_finding`, `update_finding`, `list_findings`, `publish_review`. The review-style analyzer uses `save_review_style` (exported as `save_review_style_prompt`).
 

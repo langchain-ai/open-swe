@@ -15,6 +15,7 @@ from typing import Any, Literal
 from langgraph_sdk import get_client
 from pydantic import BaseModel, field_validator, model_validator
 
+from ..utils.gateway import resolve_gateway_enabled
 from .options import (
     SUPPORTED_MODEL_IDS,
     default_model_pair,
@@ -30,12 +31,17 @@ TEAM_SETTINGS_KEY = "default"
 # Cap the org-wide guidelines so a runaway value can't dominate the reviewer
 # prompt. Generous enough for a detailed policy, small enough to stay bounded.
 ORG_GUIDELINES_MAX_CHARS = 10_000
+REVIEW_TRACING_PROJECT_MAX_CHARS = 256
 
 
 class TeamSettingsUpdate(BaseModel):
     review_draft_prs: bool = False
     pr_summaries: bool = True
     review_trace_links: bool = True
+    # Tri-state LLM Gateway toggle: True/False is authoritative, None inherits the
+    # LANGSMITH_GATEWAY_ENABLED deployment default.
+    gateway_enabled: bool | None = None
+    review_tracing_project: str | None = None
     org_guidelines: str | None = None
     default_agent_model: str | None = None
     default_agent_reasoning_effort: str | None = None
@@ -64,6 +70,23 @@ class TeamSettingsUpdate(BaseModel):
         if len(text) > ORG_GUIDELINES_MAX_CHARS:
             raise ValueError(
                 f"org_guidelines must be at most {ORG_GUIDELINES_MAX_CHARS} characters"
+            )
+        return text
+
+    @field_validator("review_tracing_project", mode="before")
+    @classmethod
+    def _normalize_review_tracing_project(cls, v: object) -> str | None:
+        if v is None:
+            return None
+        if not isinstance(v, str):
+            raise ValueError("review_tracing_project must be a string")
+        text = v.strip()
+        if not text:
+            return None
+        if len(text) > REVIEW_TRACING_PROJECT_MAX_CHARS:
+            raise ValueError(
+                "review_tracing_project must be at most "
+                f"{REVIEW_TRACING_PROJECT_MAX_CHARS} characters"
             )
         return text
 
@@ -132,6 +155,8 @@ def _default_settings() -> dict[str, Any]:
         "review_draft_prs": False,
         "pr_summaries": True,
         "review_trace_links": True,
+        "gateway_enabled": None,
+        "review_tracing_project": None,
         "org_guidelines": None,
         "default_agent_model": fallback_model,
         "default_agent_reasoning_effort": fallback_effort,
@@ -174,6 +199,7 @@ async def get_team_settings() -> dict[str, Any]:
         "autofix_mode",
         "autofix_severity_threshold",
         "autofix_enabled",
+        "review_author_context_enabled",
     ):
         merged.pop(stale_field, None)
     return merged
@@ -184,6 +210,8 @@ async def upsert_team_settings(update: TeamSettingsUpdate) -> dict[str, Any]:
         "review_draft_prs": update.review_draft_prs,
         "pr_summaries": update.pr_summaries,
         "review_trace_links": update.review_trace_links,
+        "gateway_enabled": update.gateway_enabled,
+        "review_tracing_project": update.review_tracing_project,
         "org_guidelines": update.org_guidelines,
         "default_agent_model": update.default_agent_model,
         "default_agent_reasoning_effort": update.default_agent_reasoning_effort,
@@ -301,6 +329,27 @@ async def get_team_review_trace_links_enabled() -> bool:
     """Return whether GitHub review bodies should include a LangSmith trace link."""
     settings = await get_team_settings()
     return bool(settings.get("review_trace_links", True))
+
+
+async def get_team_gateway_enabled() -> bool | None:
+    """Return the stored LLM Gateway toggle (``None`` means inherit the env default)."""
+    settings = await get_team_settings()
+    value = settings.get("gateway_enabled")
+    return value if isinstance(value, bool) else None
+
+
+async def get_effective_gateway_enabled() -> bool:
+    """Resolve whether LLM Gateway routing is on: team setting, else env default."""
+    return resolve_gateway_enabled(await get_team_gateway_enabled())
+
+
+async def get_team_review_tracing_project() -> str | None:
+    """Return the LangSmith tracing project used for PR trace resolution."""
+    settings = await get_team_settings()
+    value = settings.get("review_tracing_project")
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return None
 
 
 async def get_org_review_guidelines() -> str | None:

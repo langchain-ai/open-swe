@@ -22,6 +22,13 @@ SUPPORTED_MODELS: list[ModelOption] = [
         "supports_images": True,
     },
     {
+        "id": "anthropic:claude-sonnet-5",
+        "label": "Sonnet 5",
+        "efforts": ["low", "medium", "high", "xhigh", "max"],
+        "default_effort": "high",
+        "supports_images": True,
+    },
+    {
         "id": "openai:gpt-5.5",
         "label": "GPT-5.5",
         "efforts": ["none", "low", "medium", "high", "xhigh"],
@@ -83,6 +90,16 @@ def _provider_of(model_id: str) -> str | None:
     return provider if rest else None
 
 
+def _claude_family_of(model_id: str) -> str | None:
+    provider, _, name = model_id.partition(":")
+    if provider != "anthropic" or not name.startswith("claude-"):
+        return None
+    parts = name.split("-")
+    if len(parts) < 2:
+        return None
+    return "-".join(parts[:2])
+
+
 def _fallback_effort_for(model: ModelOption, effort: object) -> str | None:
     if not isinstance(effort, str):
         return None
@@ -98,19 +115,25 @@ def _fallback_effort_for(model: ModelOption, effort: object) -> str | None:
 
 
 def provider_fallback_pair(model_id: object, effort: object = None) -> tuple[str, str] | None:
-    """Newest supported ``(model_id, effort)`` for the same provider as ``model_id``.
+    """Newest supported ``(model_id, effort)`` for the same provider/family.
 
     Keeps a stored selection on its original provider when its exact id has
-    dropped out of the supported set (e.g. an Opus minor-version bump), instead
-    of falling through to the cross-provider global default. Preserves ``effort``
-    when the fallback model supports it, otherwise uses that model's default
-    effort. Returns ``None`` when no supported model shares the provider.
+    dropped out of the supported set (e.g. an Opus minor-version bump), preferring
+    the same Claude family when available instead of falling through to the
+    cross-provider global default. Preserves ``effort`` when the fallback model
+    supports it, otherwise uses that model's default effort. Returns ``None`` when
+    no supported model shares the provider.
     """
     if not isinstance(model_id, str):
         return None
     provider = _provider_of(model_id)
     if provider is None:
         return None
+    family = _claude_family_of(model_id)
+    if family is not None:
+        for m in SUPPORTED_MODELS:
+            if _provider_of(m["id"]) == provider and _claude_family_of(m["id"]) == family:
+                return m["id"], _fallback_effort_for(m, effort) or m["default_effort"]
     for m in SUPPORTED_MODELS:
         if _provider_of(m["id"]) == provider:
             return m["id"], _fallback_effort_for(m, effort) or m["default_effort"]
@@ -125,3 +148,18 @@ def default_model_pair() -> tuple[str, str]:
         return DEFAULT_MODEL_ID, DEFAULT_MODEL_EFFORT
     first = SUPPORTED_MODELS[0]
     return first["id"], first["default_effort"]
+
+
+def default_vision_model_pair() -> tuple[str, str]:
+    """Default OpenAI/Anthropic model pair to use when image input is required."""
+    if (
+        DEFAULT_MODEL_ID in SUPPORTED_MODEL_IDS
+        and model_supports_images(DEFAULT_MODEL_ID)
+        and model_supports_effort(DEFAULT_MODEL_ID, DEFAULT_MODEL_EFFORT)
+        and DEFAULT_MODEL_ID.startswith(("openai:", "anthropic:"))
+    ):
+        return DEFAULT_MODEL_ID, DEFAULT_MODEL_EFFORT
+    for model in SUPPORTED_MODELS:
+        if model["id"].startswith(("openai:", "anthropic:")) and model["supports_images"]:
+            return model["id"], model["default_effort"]
+    return default_model_pair()

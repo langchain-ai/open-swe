@@ -3,7 +3,7 @@ import { useStreamContext as useAgentThreadStream } from "@langchain/react"
 import { useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
 
-import type { AgentThread, ImageChunk } from "@/lib/agents/types"
+import type { ImageChunk } from "@/lib/agents/types"
 import type { CreateAgentThreadVariables } from "@/lib/agents/queries"
 import type { ModelSelection } from "@/lib/agents/provider/useModelOptions"
 import { AgentPromptBar } from "@/components/agents/AgentPromptBar"
@@ -13,6 +13,7 @@ import {
   agentThreadKeys,
   invalidateAgentThreadLists,
   optimisticThread,
+  seedAgentThreadLists,
 } from "@/lib/agents/queries"
 import { useModelOptions } from "@/lib/agents/provider/useModelOptions"
 import { useProfile, useRepos } from "@/lib/profile"
@@ -43,6 +44,7 @@ export function AgentsHome() {
   const { models, defaultSelection } = useModelOptions()
   const [selection, setSelection] = useState<ModelSelection | null>(null)
   const activeSelection = selection ?? defaultSelection
+  const [planMode, setPlanMode] = useState(false)
   const [submitting, setSubmitting] = useState(false)
 
   const reposQuery = useRepos()
@@ -67,12 +69,7 @@ export function AgentsHome() {
     draftRef.current = null
     const thread = optimisticThread(id, draft)
     queryClient.setQueryData(agentThreadKeys.detail(id), thread)
-    // Surface the thread in the sidebar immediately; the list's running
-    // refetch reconciles to server truth once the run.start stamps it.
-    queryClient.setQueryData<Array<AgentThread>>(agentThreadKeys.all, (prev) => [
-      thread,
-      ...(prev?.filter((existing) => existing.id !== id) ?? []),
-    ])
+    seedAgentThreadLists(queryClient, thread)
     invalidateAgentThreadLists(queryClient)
     void navigate({ to: "/agents/$threadId", params: { threadId: id } })
   }, [stream.threadId, queryClient, navigate])
@@ -98,10 +95,13 @@ export function AgentsHome() {
     }
     if (repo) configurable.repo = repo
     if (repoOverride === null) configurable.repo_explicitly_none = true
+    if (planMode) configurable.plan_mode = true
 
     stream
       .submit(
-        { messages: [{ type: "human", content: promptContent(prompt, images) }] },
+        {
+          messages: [{ type: "human", content: promptContent(prompt, images) }],
+        },
         { config: { configurable } }
       )
       .catch(() => {
@@ -127,6 +127,8 @@ export function AgentsHome() {
             repos={reposQuery.data?.repositories}
             selectedRepo={repo}
             onRepoChange={setRepoOverride}
+            planMode={planMode}
+            onPlanModeChange={setPlanMode}
           />
         </div>
       </div>

@@ -25,7 +25,7 @@ from ..reviewer_findings import REVIEWER_THREAD_KIND
 from ..utils.github_app import get_github_app_installation_token
 from ..utils.thread_ops import langgraph_client, langgraph_url
 from .options import SUPPORTED_MODEL_IDS, model_supports_effort
-from .review_api import classify_finding, get_review, reviewer_thread_id
+from .review_api import classify_finding, get_pr_head_sha, get_review, reviewer_thread_id
 from .thread_api import (
     _DASHBOARD_STREAM_MODES,
     _langgraph_proxy_headers,
@@ -37,6 +37,8 @@ logger = logging.getLogger(__name__)
 
 _CHAT_ASSISTANT_ID = "chat"
 _CHAT_SOURCE = "review_chat"
+# Sentinel: caller did not pre-fetch the thread metadata, so fetch it here.
+_UNFETCHED = object()
 _PROXY_REQUEST_TIMEOUT = httpx.Timeout(30.0, connect=5.0)
 _MAX_DIFF_CHARS = 400_000
 
@@ -314,6 +316,7 @@ async def _enrich_chat_command(
     pr_number: int,
     login: str,
     thread_id: str,
+    thread_metadata: Any = _UNFETCHED,
 ) -> dict[str, Any]:
     if command.get("method") != "run.start":
         return command
@@ -323,7 +326,11 @@ async def _enrich_chat_command(
         params = {}
         command["params"] = params
 
-    metadata = await _get_chat_thread_metadata(thread_id)
+    # Reuse the metadata the access check already fetched to avoid a duplicate
+    # thread read on the hot path; fall back to fetching it when not supplied.
+    if thread_metadata is _UNFETCHED:
+        thread_metadata = await _get_chat_thread_metadata(thread_id)
+    metadata = thread_metadata
     created = metadata is None
     if created:
         await _create_chat_thread(
@@ -358,46 +365,59 @@ async def _enrich_chat_command(
     stored_head = metadata.get("chat_head_sha") if isinstance(metadata, dict) else None
     stored_head = stored_head if isinstance(stored_head, str) else ""
 
+    # Detect head movement with a single lightweight PR lookup instead of a full
+    # ``get_review`` (which also fetches check runs + the reviewer thread). The
+    # full review is only fetched below, by ``_build_pr_context``, when we
+    # actually need to reseed. On lookup failure, keep the existing context.
     review: dict[str, Any] | None = None
     needs_seed = created
     if not created:
-        try:
-            review = await get_review(owner, repo, pr_number)
-        except HTTPException:
-            review = None  # transient/missing review: keep the existing context
-        if review is not None:
-            current_head = _review_head_sha(review)
-            needs_seed = bool(current_head) and current_head != stored_head
+        current_head = await get_pr_head_sha(owner, repo, pr_number)
+        needs_seed = bool(current_head) and current_head != stored_head
 
     if needs_seed:
-        token = await get_github_app_installation_token(repositories=[repo])
-        if not token:
-            raise HTTPException(503, "GitHub App token unavailable")
         try:
+            token = await get_github_app_installation_token(repositories=[repo])
+            if not token:
+                raise HTTPException(503, "GitHub App token unavailable")
             pr_files, head_sha = await _build_pr_context(
                 owner, repo, pr_number, token, review=review
             )
-        except HTTPException:
-            raise
         except Exception as exc:  # noqa: BLE001
-            logger.warning("Failed to seed PR chat context for %s/%s#%s", owner, repo, pr_number)
-            raise HTTPException(502, "could not load PR context") from exc
-        if head_sha:
-            configurable["chat_head_sha"] = head_sha
-            await langgraph_client().threads.update(
-                thread_id=thread_id, metadata={"chat_head_sha": head_sha}
+            # An existing chat can keep answering from its last seeded context, so
+            # a transient reseed failure shouldn't break the conversation. A fresh
+            # chat (or one never seeded) has nothing to fall back to, so surface it.
+            if created or not stored_head:
+                if isinstance(exc, HTTPException):
+                    raise
+                logger.warning(
+                    "Failed to seed PR chat context for %s/%s#%s", owner, repo, pr_number
+                )
+                raise HTTPException(502, "could not load PR context") from exc
+            logger.warning(
+                "Failed to reseed PR chat context for %s/%s#%s; keeping last seeded context",
+                owner,
+                repo,
+                pr_number,
             )
-        elif stored_head:
             configurable["chat_head_sha"] = stored_head
-        run_input = params.get("input")
-        if not isinstance(run_input, dict):
-            run_input = {}
-        existing_files = run_input.get("files")
-        run_input["files"] = {
-            **(existing_files if isinstance(existing_files, dict) else {}),
-            **pr_files,
-        }
-        params["input"] = run_input
+        else:
+            if head_sha:
+                configurable["chat_head_sha"] = head_sha
+                await langgraph_client().threads.update(
+                    thread_id=thread_id, metadata={"chat_head_sha": head_sha}
+                )
+            elif stored_head:
+                configurable["chat_head_sha"] = stored_head
+            run_input = params.get("input")
+            if not isinstance(run_input, dict):
+                run_input = {}
+            existing_files = run_input.get("files")
+            run_input["files"] = {
+                **(existing_files if isinstance(existing_files, dict) else {}),
+                **pr_files,
+            }
+            params["input"] = run_input
     elif stored_head:
         configurable["chat_head_sha"] = stored_head
 
@@ -420,8 +440,9 @@ async def proxy_review_chat_commands(
     content_type: str = "application/json",
 ) -> tuple[int, bytes, str | None]:
     # Reject threads the caller doesn't own; a missing thread is created lazily
-    # below on the first `run.start` (with the caller as owner).
-    await assert_chat_thread_access(thread_id, owner, repo, pr_number, login)
+    # below on the first `run.start` (with the caller as owner). Reuse the
+    # fetched metadata to avoid a second thread read during enrichment.
+    metadata = await assert_chat_thread_access(thread_id, owner, repo, pr_number, login)
     _require_json_content_type(content_type)
     try:
         parsed = json.loads(body)
@@ -431,7 +452,13 @@ async def proxy_review_chat_commands(
         raise HTTPException(400, "command body must be a JSON object")
 
     enriched = await _enrich_chat_command(
-        parsed, owner=owner, repo=repo, pr_number=pr_number, login=login, thread_id=thread_id
+        parsed,
+        owner=owner,
+        repo=repo,
+        pr_number=pr_number,
+        login=login,
+        thread_id=thread_id,
+        thread_metadata=metadata,
     )
     url = f"{langgraph_url().rstrip('/')}/threads/{thread_id}/commands"
     headers = _langgraph_proxy_headers(content_type=content_type)

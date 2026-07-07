@@ -18,6 +18,8 @@ from urllib.parse import urlencode
 import httpx
 from fastapi import HTTPException
 
+from ..utils.http import DEFAULT_HTTP_TIMEOUT
+
 logger = logging.getLogger(__name__)
 
 SLACK_CLIENT_ID = os.environ.get("SLACK_CLIENT_ID", "")
@@ -88,7 +90,7 @@ def verify_team(identity: SlackIdentity) -> None:
 
 async def exchange_slack_code(code: str, redirect_uri: str) -> str:
     """Exchange an authorization code for a user access token."""
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
         resp = await client.post(
             _TOKEN_URL,
             data={
@@ -108,7 +110,7 @@ async def exchange_slack_code(code: str, redirect_uri: str) -> str:
 
 async def fetch_slack_identity(access_token: str) -> SlackIdentity:
     """Resolve the signed-in Slack user's verified identity."""
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
         resp = await client.get(
             _USERINFO_URL,
             headers={"Authorization": f"Bearer {access_token}"},

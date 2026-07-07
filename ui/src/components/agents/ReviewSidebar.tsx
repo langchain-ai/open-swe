@@ -1,14 +1,10 @@
-import { createContext, useContext, useEffect, useMemo, useState } from "react"
+import { memo, useCallback, useEffect, useMemo } from "react"
 import {
   FileTree,
   useFileTree,
   useFileTreeSelection,
 } from "@pierre/trees/react"
-import {
-  CaretRightIcon,
-  ListBulletsIcon,
-  TreeViewIcon,
-} from "@phosphor-icons/react"
+import { ListBulletsIcon, TreeViewIcon } from "@phosphor-icons/react"
 import type { ReactNode } from "react"
 
 import type {
@@ -17,9 +13,11 @@ import type {
   GitStatusEntry,
 } from "@pierre/trees"
 import type { ReviewDiffFile } from "@/lib/api"
-import { Markdown } from "@/components/agents/ported"
 import { Skeleton } from "@/components/ui/skeleton"
-import { TREE_UNSAFE_CSS, treeThemeStyle } from "@/components/agents/AgentGitPanel"
+import {
+  TREE_UNSAFE_CSS,
+  treeThemeStyle,
+} from "@/components/agents/AgentGitPanel"
 import { cn } from "@/lib/utils"
 
 function reviewFileGitStatus(status: ReviewDiffFile["status"]): GitStatus {
@@ -34,11 +32,6 @@ export type ReviewSidebarView = "ai" | "files"
 export interface ReviewSidebarGroup {
   index: number
   title: string
-  summary: string
-  additions: number
-  deletions: number
-  fileCount: number
-  files: Array<string>
 }
 
 export interface ReviewSidebarData {
@@ -51,38 +44,9 @@ export interface ReviewSidebarData {
   view: ReviewSidebarView
   onViewChange: (view: ReviewSidebarView) => void
   onSelectGroup: (index: number) => void
-}
-
-const ReviewSidebarContext = createContext<{
-  data: ReviewSidebarData | null
-  setData: (data: ReviewSidebarData | null) => void
-} | null>(null)
-
-export function ReviewSidebarProvider({
-  children,
-}: {
-  children: React.ReactNode
-}) {
-  const [data, setData] = useState<ReviewSidebarData | null>(null)
-  const value = useMemo(() => ({ data, setData }), [data])
-  return (
-    <ReviewSidebarContext.Provider value={value}>
-      {children}
-    </ReviewSidebarContext.Provider>
-  )
-}
-
-export function useReviewSidebarData(): ReviewSidebarData | null {
-  return useContext(ReviewSidebarContext)?.data ?? null
-}
-
-export function useRegisterReviewSidebar(data: ReviewSidebarData) {
-  const setData = useContext(ReviewSidebarContext)?.setData
-  useEffect(() => {
-    if (!setData) return
-    setData(data)
-    return () => setData(null)
-  }, [setData, data])
+  // The block currently pinned at the top of the diff (scroll-spy), highlighted
+  // in the agenda. null when no block is active or the AI view isn't shown.
+  activeGroup: number | null
 }
 
 export function ReviewSidebarPanel({ data }: { data: ReviewSidebarData }) {
@@ -102,8 +66,8 @@ export function ReviewSidebarPanel({ data }: { data: ReviewSidebarData }) {
       {showAi ? (
         <ReviewGroupList
           groups={data.groups ?? []}
+          activeGroup={data.activeGroup}
           onSelectGroup={data.onSelectGroup}
-          onSelectFile={data.onSelect}
         />
       ) : !data.files ? (
         <div className="px-4 pt-1">
@@ -179,43 +143,31 @@ function ReviewViewToggleButton({
 
 function ReviewGroupList({
   groups,
+  activeGroup,
   onSelectGroup,
-  onSelectFile,
 }: {
   groups: Array<ReviewSidebarGroup>
+  activeGroup: number | null
   onSelectGroup: (index: number) => void
-  onSelectFile: (path: string) => void
 }) {
   return (
-    <div className="min-h-0 flex-1 divide-y divide-[var(--ui-border-subtle)] overflow-y-auto">
+    <div className="min-h-0 flex-1 overflow-y-auto py-1">
       {groups.map((group) => (
         <ReviewGroupRow
           key={group.index}
           group={group}
-          onSelect={() => onSelectGroup(group.index)}
-          onSelectFile={onSelectFile}
+          active={group.index === activeGroup}
+          onSelectGroup={onSelectGroup}
         />
       ))}
     </div>
   )
 }
 
-function splitPath(path: string): { dir: string; base: string } {
-  const idx = path.lastIndexOf("/")
-  if (idx === -1) return { dir: "", base: path }
-  return { dir: path.slice(0, idx), base: path.slice(idx + 1) }
-}
-
-// Older stored summaries embed `[label](#loc=path:line)` diff links. Render the
-// label as inline code instead so no stale jump-links leak into the explanation.
-function stripLocationLinks(summary: string): string {
-  return summary.replace(/\[([^\]]+)\]\(#loc=[^)]*\)/g, "`$1`")
-}
-
 // Render a title with `backtick`-delimited spans as inline code chips, matching
 // the Markdown component's inline-code styling, without pulling in the full
 // block renderer for a single line.
-function renderInlineCode(text: string): Array<ReactNode> {
+export function renderInlineCode(text: string): Array<ReactNode> {
   return text.split(/(`[^`]+`)/g).map((part, i) => {
     if (part.length >= 2 && part.startsWith("`") && part.endsWith("`")) {
       return (
@@ -231,95 +183,64 @@ function renderInlineCode(text: string): Array<ReactNode> {
   })
 }
 
-function ReviewGroupRow({
+// A single agenda entry: just the block number + title, like a Google-Docs
+// outline. Clicking (or Enter/Space) scrolls the diff to that block. The active
+// block (scroll-spy) gets an accent rule + emphasis. memo'd so scroll-spy
+// re-renders only repaint the rows whose active state actually changed.
+const ReviewGroupRow = memo(function ReviewGroupRow({
   group,
-  onSelect,
-  onSelectFile,
+  active,
+  onSelectGroup,
 }: {
   group: ReviewSidebarGroup
-  onSelect: () => void
-  onSelectFile: (path: string) => void
+  active: boolean
+  onSelectGroup: (index: number) => void
 }) {
-  const [expanded, setExpanded] = useState(false)
+  const title = useMemo(() => renderInlineCode(group.title), [group.title])
+  const selectGroup = useCallback(
+    () => onSelectGroup(group.index),
+    [onSelectGroup, group.index]
+  )
+  const onKeyDown = useCallback(
+    (event: React.KeyboardEvent) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault()
+        onSelectGroup(group.index)
+      }
+    },
+    [onSelectGroup, group.index]
+  )
+
   return (
-    <div className="px-3 py-3 transition-colors hover:bg-[var(--ui-sidebar-hover)]">
-      <button
-        type="button"
-        onClick={onSelect}
-        className="flex w-full items-start gap-2 text-left"
+    <div
+      role="button"
+      tabIndex={0}
+      aria-current={active ? "true" : undefined}
+      onClick={selectGroup}
+      onKeyDown={onKeyDown}
+      className={cn(
+        "flex cursor-pointer items-start gap-2 border-l-2 px-3 py-1.5 text-left transition-colors",
+        active
+          ? "border-[var(--ui-accent)] bg-[var(--ui-sidebar-hover)]"
+          : "border-transparent hover:bg-[var(--ui-sidebar-hover)]"
+      )}
+    >
+      <span className="mt-px shrink-0 text-[11px] font-medium text-[var(--ui-text-dim)] tabular-nums">
+        {group.index}.
+      </span>
+      <span
+        className={cn(
+          "min-w-0 text-xs leading-5",
+          active
+            ? "font-medium text-[var(--ui-text)]"
+            : "text-[var(--ui-text-muted)]"
+        )}
       >
-        <span className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded bg-[var(--ui-panel-2)] text-[11px] font-medium text-[var(--ui-text-dim)]">
-          {group.index}
-        </span>
-        <span className="min-w-0 flex-1">
-          <span className="block text-xs leading-5 font-medium text-[var(--ui-text)]">
-            {renderInlineCode(group.title)}
-          </span>
-          <span className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-[var(--ui-text-dim)]">
-            <span>
-              {group.fileCount} file{group.fileCount === 1 ? "" : "s"}
-            </span>
-            {group.additions > 0 && (
-              <span className="text-emerald-500">+{group.additions}</span>
-            )}
-            {group.deletions > 0 && (
-              <span className="text-red-500">-{group.deletions}</span>
-            )}
-          </span>
-        </span>
-      </button>
-
-      {group.files.length > 0 && (
-        <div className="mt-2 space-y-0.5 pl-7">
-          {group.files.map((path) => {
-            const { dir, base } = splitPath(path)
-            return (
-              <button
-                key={path}
-                type="button"
-                onClick={() => onSelectFile(path)}
-                title={path}
-                className="flex w-full items-baseline gap-1.5 text-left text-[11px] hover:text-[var(--ui-accent)]"
-              >
-                <span className="shrink-0 font-medium text-[var(--ui-text-muted)]">
-                  {base}
-                </span>
-                {dir && (
-                  <span className="min-w-0 truncate text-[var(--ui-text-dim)]">
-                    {dir}
-                  </span>
-                )}
-              </button>
-            )
-          })}
-        </div>
-      )}
-
-      {group.summary && (
-        <div className="mt-2">
-          <button
-            type="button"
-            onClick={() => setExpanded((value) => !value)}
-            className="inline-flex items-center gap-1 text-[11px] font-medium text-[var(--ui-accent)]"
-          >
-            <CaretRightIcon
-              className={cn(
-                "size-3 transition-transform",
-                expanded && "rotate-90"
-              )}
-            />
-            Read explanation
-          </button>
-          {expanded && (
-            <div className="mt-1.5">
-              <Markdown content={stripLocationLinks(group.summary)} />
-            </div>
-          )}
-        </div>
-      )}
+        {title}
+      </span>
     </div>
   )
-}
+})
 
 function ReviewFileTreeExplorer({
   files,

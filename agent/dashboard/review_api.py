@@ -8,12 +8,16 @@ with the App installation token.
 
 from __future__ import annotations
 
+import ipaddress
 import logging
+import re
+import socket
 from collections.abc import Awaitable, Callable
 from typing import Any, Literal
+from urllib.parse import urljoin, urlparse
 
 import httpx
-from fastapi import HTTPException
+from fastapi import HTTPException, Response
 
 from ..reviewer_findings import REVIEWER_THREAD_KIND
 from ..utils.github_app import get_github_app_installation_token
@@ -49,6 +53,43 @@ async def _github_get(
         raise HTTPException(502, f"GitHub request failed ({response.status_code})")
     if accept and "json" not in accept:
         return response.text
+    return response.json()
+
+
+def _github_error_message(response: httpx.Response) -> str:
+    """Best-effort extraction of GitHub's error message for surfacing to the UI."""
+    fallback = f"GitHub request failed ({response.status_code})"
+    try:
+        data = response.json()
+    except ValueError:
+        return fallback
+    if not isinstance(data, dict):
+        return fallback
+    message = data.get("message")
+    message_str = message if isinstance(message, str) else ""
+    errors = data.get("errors")
+    detail_parts: list[str] = []
+    if isinstance(errors, list):
+        for err in errors:
+            if isinstance(err, dict) and isinstance(err.get("message"), str):
+                detail_parts.append(err["message"])
+    detail = "; ".join(detail_parts)
+    if message_str and detail:
+        return f"{message_str}: {detail}"
+    return message_str or detail or fallback
+
+
+async def _github_post(path: str, token: str, *, json: dict[str, Any]) -> Any:
+    async with httpx.AsyncClient(timeout=_GITHUB_TIMEOUT) as client:
+        response = await client.post(
+            f"{_GITHUB_API}{path}", headers=github_headers(token), json=json
+        )
+    if response.status_code >= 400:
+        message = _github_error_message(response)
+        logger.warning("GitHub POST %s failed: %s %s", path, response.status_code, message)
+        # Pass 4xx through verbatim (422 = line not in diff, 403 = perms); collapse
+        # 5xx to a 502 so a GitHub outage doesn't masquerade as a client error.
+        raise HTTPException(response.status_code if response.status_code < 500 else 502, message)
     return response.json()
 
 
@@ -345,6 +386,130 @@ async def _fetch_check_runs(owner: str, repo: str, sha: str, token: str) -> list
     return out
 
 
+async def get_pr_head_sha(owner: str, repo: str, pr_number: int) -> str:
+    """Return the PR's current head SHA from GitHub, or "" if unavailable.
+
+    A lightweight alternative to :func:`get_review` for callers that only need to
+    detect whether the PR head has moved (e.g. the chat staleness check).
+    """
+    try:
+        token = await _require_app_token()
+        payload = await _github_get(f"/repos/{owner}/{repo}/pulls/{pr_number}", token)
+    except HTTPException:
+        return ""
+    head = payload.get("head") if isinstance(payload, dict) else None
+    sha = head.get("sha") if isinstance(head, dict) else None
+    return sha if isinstance(sha, str) else ""
+
+
+async def create_review_comment(
+    owner: str,
+    repo: str,
+    pr_number: int,
+    *,
+    token: str,
+    path: str,
+    line: int,
+    side: Literal["LEFT", "RIGHT"],
+    body: str,
+    start_line: int | None = None,
+    start_side: Literal["LEFT", "RIGHT"] | None = None,
+) -> dict[str, Any]:
+    """Post a single inline review comment to a PR using the caller's token.
+
+    Unlike the reviewer agent (which batches comments into one review via the App
+    token), this posts a standalone comment immediately, authored by the signed-in
+    user. ``commit_id`` is the PR's live head SHA. GitHub errors surface verbatim so
+    the UI can explain a 422 (line not part of the diff) or 403 (missing permission).
+    """
+    head_sha = await get_pr_head_sha(owner, repo, pr_number)
+    if not head_sha:
+        raise HTTPException(502, "could not resolve PR head commit")
+    payload: dict[str, Any] = {
+        "body": body,
+        "commit_id": head_sha,
+        "path": path,
+        "line": line,
+        "side": side,
+    }
+    # GitHub forbids multi-line ranges that span sides; only add the range start
+    # when it is a distinct earlier line on the same side.
+    if start_line is not None and start_line != line:
+        payload["start_line"] = start_line
+        payload["start_side"] = start_side or side
+    return await _github_post(
+        f"/repos/{owner}/{repo}/pulls/{pr_number}/comments", token, json=payload
+    )
+
+
+_HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
+# Inline comments the reviewer posts carry this hidden marker (see reviewer_publish).
+_OPEN_SWE_COMMENT_RE = re.compile(r"<!--\s*open-swe-review-comment\b")
+_REVIEW_COMMENTS_PER_PAGE = 100
+# Bound the fetch so a pathological PR can't trigger unbounded paging (~2000 comments).
+_MAX_REVIEW_COMMENT_PAGES = 20
+
+
+def _clean_comment_body(body: str) -> str:
+    return _HTML_COMMENT_RE.sub("", body).strip()
+
+
+def _normalize_review_comment(item: dict[str, Any]) -> dict[str, Any]:
+    body = item.get("body") if isinstance(item.get("body"), str) else ""
+    user = item.get("user") if isinstance(item.get("user"), dict) else {}
+    line = item.get("line")
+    if not isinstance(line, int):
+        original = item.get("original_line")
+        line = original if isinstance(original, int) else None
+    return {
+        "id": item.get("id"),
+        "author": user.get("login") if isinstance(user.get("login"), str) else "",
+        "author_avatar_url": (
+            user.get("avatar_url") if isinstance(user.get("avatar_url"), str) else ""
+        ),
+        "path": item.get("path") if isinstance(item.get("path"), str) else "",
+        "line": line,
+        "side": item.get("side") if item.get("side") in ("LEFT", "RIGHT") else "RIGHT",
+        "body": _clean_comment_body(body),
+        "html_url": item.get("html_url") if isinstance(item.get("html_url"), str) else "",
+        "created_at": item.get("created_at") if isinstance(item.get("created_at"), str) else "",
+        "is_open_swe": bool(_OPEN_SWE_COMMENT_RE.search(body)),
+        # GitHub nulls `position` when the line no longer appears in the current
+        # diff — i.e. the comment is outdated and can't be rendered inline.
+        "is_outdated": not isinstance(item.get("position"), int),
+    }
+
+
+async def list_review_comments(owner: str, repo: str, pr_number: int) -> dict[str, Any]:
+    """List inline review comments on a PR (newest first), normalized for the UI.
+
+    Surfaces every inline comment on the PR — including humans' — not just the
+    reviewer's findings. ``is_open_swe`` flags the reviewer's own (marker-bearing)
+    comments so the UI can separate them from other people's. Pages through the
+    full list (bounded by ``_MAX_REVIEW_COMMENT_PAGES``) so older comments aren't
+    silently dropped.
+    """
+    token = await _require_app_token()
+    comments: list[dict[str, Any]] = []
+    for page in range(1, _MAX_REVIEW_COMMENT_PAGES + 1):
+        raw = await _github_get(
+            f"/repos/{owner}/{repo}/pulls/{pr_number}/comments",
+            token,
+            params={
+                "per_page": _REVIEW_COMMENTS_PER_PAGE,
+                "page": page,
+                "sort": "created",
+                "direction": "desc",
+            },
+        )
+        if not isinstance(raw, list) or not raw:
+            break
+        comments.extend(_normalize_review_comment(item) for item in raw if isinstance(item, dict))
+        if len(raw) < _REVIEW_COMMENTS_PER_PAGE:
+            break
+    return {"comments": comments}
+
+
 async def get_review(owner: str, repo: str, pr_number: int) -> dict[str, Any]:
     thread_id = reviewer_thread_id(owner, repo, pr_number)
     client = langgraph_client()
@@ -407,6 +572,129 @@ async def get_review_diff(owner: str, repo: str, pr_number: int) -> dict[str, An
     }
 
 
+# --- PR description image proxy ----------------------------------------------
+# PR bodies can embed images hosted on GitHub (user-attachment uploads,
+# *.githubusercontent.com). For private repos those URLs require GitHub auth the
+# browser doesn't have, so they render broken. We proxy them through the App
+# installation token. The host allowlist + per-redirect public-IP check guard
+# against SSRF (only GitHub-owned hosts are ever contacted).
+
+_ALLOWED_IMAGE_HOST_SUFFIXES = (".githubusercontent.com",)
+_MAX_IMAGE_REDIRECTS = 5
+_MAX_IMAGE_BYTES = 25 * 1024 * 1024
+# Only safe raster formats — SVG (image/svg+xml) can execute script in our
+# origin, so it is never served.
+_ALLOWED_IMAGE_CONTENT_TYPES = frozenset(
+    {"image/png", "image/jpeg", "image/gif", "image/webp", "image/avif"}
+)
+
+
+def _is_allowed_image_url(url: str) -> bool:
+    parsed = urlparse(url)
+    if parsed.scheme != "https":
+        return False
+    host = (parsed.hostname or "").lower()
+    if not host:
+        return False
+    if host == "github.com" or host == "www.github.com":
+        # On github.com only user-attachment assets are images worth proxying.
+        return parsed.path.startswith("/user-attachments/")
+    return any(host.endswith(suffix) for suffix in _ALLOWED_IMAGE_HOST_SUFFIXES)
+
+
+def _host_resolves_public(hostname: str) -> bool:
+    try:
+        addr_infos = socket.getaddrinfo(hostname, None)
+    except socket.gaierror:
+        return False
+    if not addr_infos:
+        return False
+    for addr_info in addr_infos:
+        try:
+            ip = ipaddress.ip_address(addr_info[4][0])
+        except ValueError:
+            return False
+        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
+            return False
+    return True
+
+
+def _validate_image_url(url: str) -> None:
+    if not _is_allowed_image_url(url):
+        raise HTTPException(400, "image host not allowed")
+    hostname = urlparse(url).hostname or ""
+    if not _host_resolves_public(hostname):
+        raise HTTPException(400, "image host not allowed")
+
+
+async def _require_image_in_pr(owner: str, repo: str, pr_number: int, url: str, token: str) -> None:
+    """Bind the requested image to the authorized PR.
+
+    The proxy fetches with the App installation token, which can read every repo
+    the App is installed on. Without this check a caller authorized for one repo
+    could proxy an image URL from another private repo (IDOR). Only URLs that
+    actually appear in this PR's body are allowed.
+    """
+    pr_payload = await _github_get(f"/repos/{owner}/{repo}/pulls/{pr_number}", token)
+    body = pr_payload.get("body") or ""
+    if url not in body:
+        raise HTTPException(403, "image not referenced by this PR")
+
+
+async def proxy_pr_image(owner: str, repo: str, pr_number: int, url: str) -> Response:
+    """Stream a GitHub-hosted PR image through the App token.
+
+    The URL must appear in the target PR's body (bound to the authorized
+    resource), and every URL (including redirect targets) is validated against
+    the GitHub host allowlist and a public-IP check before it is contacted.
+    """
+    _validate_image_url(url)
+    token = await _require_app_token()
+    await _require_image_in_pr(owner, repo, pr_number, url, token)
+    headers = {"Authorization": f"Bearer {token}", "Accept": "image/*"}
+
+    current_url = url
+    async with httpx.AsyncClient(timeout=_GITHUB_TIMEOUT, follow_redirects=False) as client:
+        for _ in range(_MAX_IMAGE_REDIRECTS + 1):
+            async with client.stream("GET", current_url, headers=headers) as response:
+                if response.is_redirect:
+                    location = response.headers.get("Location")
+                    if not location:
+                        raise HTTPException(502, "image fetch failed (redirect without target)")
+                    current_url = urljoin(str(response.url), location)
+                    _validate_image_url(current_url)
+                    continue
+
+                if response.status_code >= 400:
+                    raise HTTPException(502, f"image fetch failed ({response.status_code})")
+
+                content_type = (
+                    response.headers.get("Content-Type", "").lower().split(";", 1)[0].strip()
+                )
+                if content_type not in _ALLOWED_IMAGE_CONTENT_TYPES:
+                    raise HTTPException(415, "unsupported image type")
+
+                # Stream and abort once over the cap so a large (or lying) upstream
+                # can't make the worker buffer the whole file.
+                content = bytearray()
+                async for chunk in response.aiter_bytes():
+                    content.extend(chunk)
+                    if len(content) > _MAX_IMAGE_BYTES:
+                        raise HTTPException(413, "image too large")
+
+                return Response(
+                    content=bytes(content),
+                    media_type=content_type,
+                    headers={
+                        "Cache-Control": "private, max-age=300",
+                        "X-Content-Type-Options": "nosniff",
+                        "Content-Security-Policy": "default-src 'none'; sandbox",
+                    },
+                )
+
+    raise HTTPException(502, "too many redirects fetching image")
+
+
 async def trigger_re_review(owner: str, repo: str, pr_number: int, login: str) -> dict[str, Any]:
     from ..utils.slack import GitHubPrRef
     from ..webapp import trigger_pr_review_from_ref
@@ -421,3 +709,38 @@ async def trigger_re_review(owner: str, repo: str, pr_number: int, login: str) -
     if not result.get("success"):
         raise HTTPException(502, str(result.get("error") or "could not trigger review"))
     return result
+
+
+async def dry_run_trace_resolution(owner: str, repo: str, pr_number: int) -> dict[str, Any]:
+    """Resolve a PR to its author coding-agent thread without running a review."""
+    from dataclasses import asdict
+
+    from ..reviewer_trace_context import resolve_pr_trace
+    from ..utils.github_app import get_github_app_installation_token_with_expiry
+    from ..utils.slack import GitHubPrRef
+    from ..webapp import fetch_github_pr_metadata
+
+    pr_ref = GitHubPrRef(
+        owner=owner,
+        repo=repo,
+        number=pr_number,
+        url=f"https://github.com/{owner}/{repo}/pull/{pr_number}",
+    )
+    token, _ = await get_github_app_installation_token_with_expiry()
+    if not token:
+        raise HTTPException(502, "No GitHub App token available")
+    pr_metadata = await fetch_github_pr_metadata(pr_ref, token=token)
+    if not pr_metadata:
+        raise HTTPException(502, "Could not fetch pull request metadata")
+
+    head = pr_metadata.get("head") or {}
+    base = pr_metadata.get("base") or {}
+    configurable = {
+        "repo": {"owner": owner, "name": repo},
+        "pr_number": pr_number,
+        "pr_url": pr_metadata.get("html_url") or pr_ref.url,
+        "branch_name": head.get("ref", ""),
+        "head_sha": head.get("sha", ""),
+        "base_sha": base.get("sha", ""),
+    }
+    return asdict(await resolve_pr_trace(configurable=configurable))

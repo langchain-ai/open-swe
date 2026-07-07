@@ -15,6 +15,7 @@ from langgraph_sdk import get_client
 
 from .github_app import get_github_app_installation_token_with_expiry
 from .github_token import cache_github_token_for_thread, get_github_token_from_thread
+from .http import DEFAULT_HTTP_TIMEOUT
 from .linear import comment_on_linear_issue
 from .slack import post_slack_thread_reply
 
@@ -114,7 +115,7 @@ async def get_ls_user_id_from_email(email: str) -> dict[str, str | None]:
 
     url = f"{LANGSMITH_API_URL}/api/v1/workspaces/current/members/active"
 
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
         try:
             response = await client.get(
                 url,
@@ -172,7 +173,7 @@ async def get_github_token_for_user(ls_user_id: str, tenant_id: str) -> dict[str
             "ls_user_id": ls_user_id,
         }
 
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
             response = await client.post(
                 f"{LANGSMITH_HOST_API_URL}/v2/auth/authenticate",
                 json=payload,

@@ -1,6 +1,13 @@
 import { useMemo } from "react"
 import { preloadHighlighter } from "@pierre/diffs"
+import type {
+  VirtualFileMetrics,
+  WorkerInitializationRenderOptions,
+  WorkerPoolOptions,
+} from "@pierre/diffs/react"
 import { useResolvedTheme } from "@/lib/theme"
+
+export type DiffStyle = "unified" | "split"
 
 export const DIFF_UNSAFE_CSS = `
 [data-diffs-header],
@@ -55,6 +62,26 @@ export const DIFF_UNSAFE_CSS = `
   background-color: var(--ui-accent-bubble) !important;
   color: var(--ui-text-dim) !important;
 }
+
+/* A selected line propagates [data-selected-line] onto its annotation row and
+   gutter, bleeding the selection background behind inline annotation content.
+   Keep the code line highlighted, but hold the annotation row at the panel bg. */
+[data-line-annotation][data-selected-line],
+[data-gutter-buffer="annotation"][data-selected-line] {
+  --diffs-line-bg: var(--ui-panel) !important;
+}
+
+/* Pin every code row to one exact, uniform height (kept in sync with
+   DIFF_VIRTUAL_METRICS.lineHeight below). In scroll mode code never wraps, so a
+   hard height won't clip content — it just makes the virtualizer's per-line
+   estimate match measured layout, so scroll-to lands precisely instead of
+   over/under-shooting as off-estimate rows reconcile while scrolling. */
+[data-line] {
+  height: 18px !important;
+  min-height: 18px !important;
+  max-height: 18px !important;
+  line-height: 18px !important;
+}
 `
 
 export const diffOptions = {
@@ -71,12 +98,69 @@ export const diffOptions = {
   tokenizeMaxLength: 120_000,
 }
 
-export function useDiffOptions() {
+export function useDiffOptions(diffStyle: DiffStyle = "unified") {
   const resolvedTheme = useResolvedTheme()
   return useMemo(
-    () => ({ ...diffOptions, themeType: resolvedTheme }),
-    [resolvedTheme]
+    () => ({ ...diffOptions, themeType: resolvedTheme, diffStyle }),
+    [resolvedTheme, diffStyle]
   )
+}
+
+// Shared virtualization + worker-pool config for <Virtualizer>/<MultiFileDiff>.
+// Tuned for the agent git panel and the PR reviews page; keep them aligned so
+// both viewers window rows and offload highlighting identically.
+export const DIFF_VIRTUALIZER_CONFIG = {
+  overscrollSize: 1200,
+  intersectionObserverMargin: 4800,
+}
+
+export const DIFF_VIRTUAL_METRICS = {
+  hunkLineCount: 80,
+  // Must match the hard `[data-line]` height pinned in DIFF_UNSAFE_CSS so the
+  // virtualizer's pre-measurement estimate equals the measured row height.
+  lineHeight: 18,
+  diffHeaderHeight: 0,
+  spacing: 8,
+} satisfies Partial<VirtualFileMetrics>
+
+export const DIFF_WORKER_POOL_OPTIONS = {
+  workerFactory: () =>
+    new Worker(
+      new URL("@pierre/diffs/worker/worker-portable.js", import.meta.url),
+      { type: "module" }
+    ),
+  poolSize: 2,
+  totalASTLRUCacheSize: 120,
+} satisfies WorkerPoolOptions
+
+export const DIFF_WORKER_HIGHLIGHTER_OPTIONS = {
+  theme: { light: "pierre-light", dark: "pierre-dark" },
+  lineDiffType: "word-alt",
+  maxLineDiffLength: 800,
+  tokenizeMaxLineLength: 1200,
+  langs: ["text"],
+} satisfies WorkerInitializationRenderOptions
+
+function hashFileContents(contents: string): string {
+  let hash = 0x811c9dc5
+  for (let i = 0; i < contents.length; i++) {
+    hash ^= contents.charCodeAt(i)
+    hash = Math.imul(hash, 0x01000193)
+  }
+  return (hash >>> 0).toString(36)
+}
+
+// Stable per-file content key so the worker pool dedupes highlight work across
+// re-renders instead of re-tokenizing identical content. Added/removed/binary/
+// oversized blobs arrive as null (see pr_diff.py); coerce to "" so the key never
+// dereferences null — these files don't render a diff, so the exact key is moot.
+export function fileContentsCacheKey(
+  path: string,
+  side: "old" | "new",
+  contents: string | null | undefined
+): string {
+  const text = contents ?? ""
+  return `${path}:${side}:${text.length}:${hashFileContents(text)}`
 }
 
 let highlighterWarmup: Promise<void> | null = null

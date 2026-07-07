@@ -1,16 +1,10 @@
-import {
-  Navigate,
-  Outlet,
-  createFileRoute,
-  useRouterState,
-} from "@tanstack/react-router"
+import { Outlet, createFileRoute, useRouterState } from "@tanstack/react-router"
 
 import { AgentsShell } from "@/components/agents/AgentsSidebar"
 import { Skeleton } from "@/components/ui/skeleton"
 import agentsCss from "@/styles/agents.css?url"
 import { AgentThreadStreamProvider } from "@/lib/agents/AgentThreadStreamProvider"
-import { useAgentThreads } from "@/lib/agents/queries"
-import { useRunCompletionNotifier } from "@/lib/agents/useRunCompletionNotifier"
+import { RequireLogin } from "@/lib/auth-redirect"
 import { useSession } from "@/lib/session"
 
 export const Route = createFileRoute("/agents")({
@@ -35,9 +29,6 @@ function AgentsLayout() {
       ? threadId
       : undefined
 
-  const threadsQuery = useAgentThreads()
-  useRunCompletionNotifier(threadsQuery.data, activeThreadId)
-
   if (session.isLoading) {
     return (
       <main className="agents-ui flex h-svh items-center justify-center bg-[var(--ui-bg)] p-6">
@@ -46,7 +37,7 @@ function AgentsLayout() {
     )
   }
 
-  if (!session.data) return <Navigate to="/login" />
+  if (!session.data) return <RequireLogin />
 
   return (
     <AgentsShell user={session.data} activeThreadId={activeThreadId}>

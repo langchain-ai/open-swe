@@ -1,12 +1,18 @@
-import { memo, useMemo } from "react";
-import { Streamdown } from "streamdown";
-import type { ReactNode } from "react";
+import { Component, memo, useMemo } from "react";
+import { Streamdown, defaultUrlTransform } from "streamdown";
+import type { ComponentProps, ReactNode } from "react";
 import "streamdown/styles.css";
 
 interface MarkdownProps {
   content: string;
   /** When true, keep Streamdown in streaming mode for the duration of the run. */
   isLive?: boolean;
+  /**
+   * Rewrite image `src` URLs before rendering (e.g. route private GitHub
+   * attachments through an authenticated proxy). Return the URL unchanged to
+   * leave it as-is.
+   */
+  transformImageUrl?: (src: string) => string;
 }
 
 /**
@@ -61,6 +67,14 @@ const STREAMDOWN_COMPONENTS = {
     </div>
   ),
   hr: () => <hr className="border-[var(--ui-border-subtle)] my-3" />,
+  img: ({ src, alt }: ComponentProps<"img">) => (
+    <img
+      src={typeof src === "string" ? src : undefined}
+      alt={alt ?? ""}
+      loading="lazy"
+      className="my-2 h-auto max-w-full rounded-md border border-[var(--ui-border-subtle)]"
+    />
+  ),
   code: ({ className, children }: { className?: string; children?: ReactNode }) => {
     const text = String(children);
     const match = /language-([^\s]+)/.exec(className || "");
@@ -76,9 +90,50 @@ const STREAMDOWN_COMPONENTS = {
 
 const SHIKI_THEME: ["github-light", "github-dark"] = ["github-light", "github-dark"];
 
+interface BoundaryProps {
+  content: string;
+  children: ReactNode;
+}
+
+interface BoundaryState {
+  failed: boolean;
+  key: string;
+}
+
+// Streamdown bundles Mermaid and renders ```mermaid blocks itself; a diagram it
+// can't parse throws during render and, with no boundary, white-screens the
+// whole page. Contain it and fall back to the raw markdown text.
+class MarkdownErrorBoundary extends Component<BoundaryProps, BoundaryState> {
+  state: BoundaryState = { failed: false, key: this.props.content };
+
+  static getDerivedStateFromError(): Partial<BoundaryState> {
+    return { failed: true };
+  }
+
+  static getDerivedStateFromProps(
+    props: BoundaryProps,
+    state: BoundaryState
+  ): Partial<BoundaryState> | null {
+    if (props.content !== state.key) return { failed: false, key: props.content };
+    return null;
+  }
+
+  render(): ReactNode {
+    if (this.state.failed) {
+      return (
+        <pre className="whitespace-pre-wrap break-words [overflow-wrap:anywhere] font-sans text-[color:var(--ui-text)]">
+          {this.props.content}
+        </pre>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 export const Markdown = memo(function Markdown({
   content,
   isLive = false,
+  transformImageUrl,
 }: MarkdownProps) {
   const components = useMemo(
     () => ({
@@ -97,19 +152,32 @@ export const Markdown = memo(function Markdown({
     []
   );
 
+  const urlTransform = useMemo(() => {
+    if (!transformImageUrl) return undefined;
+    return (
+      url: string,
+      key: string,
+      node: Parameters<typeof defaultUrlTransform>[2]
+    ) =>
+      key === "src" ? transformImageUrl(url) : defaultUrlTransform(url, key, node);
+  }, [transformImageUrl]);
+
   return (
     <div className="min-w-0 max-w-full text-[13px] leading-6 break-words [overflow-wrap:anywhere] [&_.streamdown]:text-[color:var(--ui-text)]">
-      <Streamdown
-        mode={isLive ? "streaming" : "static"}
-        parseIncompleteMarkdown={isLive}
-        isAnimating={isLive}
-        animated={isLive ? STREAMDOWN_ANIMATED : false}
-        shikiTheme={SHIKI_THEME}
-        className="streamdown-agent min-w-0 max-w-full"
-        components={components}
-      >
-        {content}
-      </Streamdown>
+      <MarkdownErrorBoundary content={content}>
+        <Streamdown
+          mode={isLive ? "streaming" : "static"}
+          parseIncompleteMarkdown={isLive}
+          isAnimating={isLive}
+          animated={isLive ? STREAMDOWN_ANIMATED : false}
+          shikiTheme={SHIKI_THEME}
+          className="streamdown-agent min-w-0 max-w-full"
+          components={components}
+          urlTransform={urlTransform}
+        >
+          {content}
+        </Streamdown>
+      </MarkdownErrorBoundary>
     </div>
   );
 });

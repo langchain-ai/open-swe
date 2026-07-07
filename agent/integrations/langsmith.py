@@ -6,7 +6,6 @@ import asyncio
 import base64
 import logging
 import os
-import time
 from abc import ABC, abstractmethod
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FuturesTimeout
@@ -16,8 +15,8 @@ import httpx
 from deepagents.backends import LangSmithSandbox
 from deepagents.backends.protocol import ExecuteResponse, SandboxBackendProtocol
 from langsmith.sandbox import (
+    AsyncSandboxClient,
     CommandTimeoutError,
-    SandboxClient,
     SandboxConnectionError,
     SandboxServerReloadError,
 )
@@ -27,7 +26,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_SNAPSHOT_FS_CAPACITY_BYTES = 32 * 1024**3
 DEFAULT_SANDBOX_VCPUS = 2
 DEFAULT_SANDBOX_MEM_BYTES = 7936 * 1024**2  # 7936 MiB ("large" tier cap)
-DEFAULT_SANDBOX_IDLE_TTL_SECONDS = 10 * 60  # 10 minutes
+DEFAULT_SANDBOX_IDLE_TTL_SECONDS = 2 * 60 * 60  # 2 hours
 DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS = 24 * 60 * 60  # 24 hours
 PROXY_CONFIG_MAX_ATTEMPTS = 3
 PROXY_CONFIG_TIMEOUT_SECONDS = 10.0
@@ -134,7 +133,7 @@ def _is_retryable_proxy_config_error(exc: BaseException) -> bool:
     return isinstance(exc, httpx.TransportError)
 
 
-def _configure_github_proxy(sandbox_name: str, github_token: str) -> None:
+async def _configure_github_proxy(sandbox_name: str, github_token: str) -> None:
     """Configure sandbox proxy to inject GitHub auth for GitHub traffic.
 
     Uses the LangSmith proxy-config API to set up header injection so that
@@ -152,10 +151,10 @@ def _configure_github_proxy(sandbox_name: str, github_token: str) -> None:
     langsmith_endpoint = os.environ.get("LANGSMITH_ENDPOINT", "https://api.smith.langchain.com")
     url = f"{langsmith_endpoint}/v2/sandboxes/boxes/{sandbox_name}"
     payload = {"proxy_config": {"rules": _github_proxy_rules(github_token)}}
-    with httpx.Client(timeout=PROXY_CONFIG_TIMEOUT_SECONDS) as client:
+    async with httpx.AsyncClient(timeout=PROXY_CONFIG_TIMEOUT_SECONDS) as client:
         for attempt in range(PROXY_CONFIG_MAX_ATTEMPTS):
             try:
-                response = client.patch(
+                response = await client.patch(
                     url,
                     json=payload,
                     headers={"X-API-Key": api_key},
@@ -184,13 +183,20 @@ def _configure_github_proxy(sandbox_name: str, github_token: str) -> None:
                     type(exc).__name__,
                     delay,
                 )
-                time.sleep(delay)
+                await asyncio.sleep(delay)
     logger.info("Configured GitHub proxy for sandbox %s", sandbox_name)
 
 
-def create_langsmith_sandbox(
+def get_async_sandbox_client() -> AsyncSandboxClient:
+    """Build an ``AsyncSandboxClient`` from the resolved LangSmith API key."""
+    return AsyncSandboxClient(api_key=_get_langsmith_api_key())
+
+
+async def create_langsmith_sandbox(
     sandbox_id: str | None = None,
     github_token: str | None = None,
+    *,
+    snapshot_id: str | None = None,
 ) -> SandboxBackendProtocol:
     """Create or connect to a LangSmith sandbox without automatic cleanup.
 
@@ -203,13 +209,15 @@ def create_langsmith_sandbox(
                    If None, creates a new sandbox.
         github_token: Optional GitHub token. Used to configure proxy auth on
                       new sandboxes. Ignored when connecting to an existing sandbox.
+        snapshot_id: Optional repo-scoped snapshot to boot from. When omitted,
+                      falls back to DEFAULT_SANDBOX_SNAPSHOT_ID.
 
     Returns:
         SandboxBackendProtocol instance
     """
     api_key = _get_langsmith_api_key()
     (
-        snapshot_id,
+        default_snapshot_id,
         fs_capacity_bytes,
         vcpus,
         mem_bytes,
@@ -217,29 +225,29 @@ def create_langsmith_sandbox(
         delete_after_stop_seconds,
     ) = _get_sandbox_snapshot_config()
 
+    effective_snapshot_id = snapshot_id or default_snapshot_id
+
     provider = LangSmithProvider(api_key=api_key)
-    backend = provider.get_or_create(
+    backend = await provider.get_or_create(
         sandbox_id=sandbox_id,
-        snapshot_id=snapshot_id,
+        snapshot_id=effective_snapshot_id,
         fs_capacity_bytes=fs_capacity_bytes,
         vcpus=vcpus,
         mem_bytes=mem_bytes,
         idle_ttl_seconds=idle_ttl_seconds,
         delete_after_stop_seconds=delete_after_stop_seconds,
     )
-    _update_thread_sandbox_metadata(backend.id)
+    await _update_thread_sandbox_metadata(backend.id)
 
     if sandbox_id is None and github_token:
-        _configure_github_proxy(backend.id, github_token)
+        await _configure_github_proxy(backend.id, github_token)
 
     return backend
 
 
-def _update_thread_sandbox_metadata(sandbox_id: str) -> None:
+async def _update_thread_sandbox_metadata(sandbox_id: str) -> None:
     """Update thread metadata with sandbox_id."""
     try:
-        import asyncio
-
         from langgraph.config import get_config
         from langgraph_sdk import get_client
 
@@ -248,19 +256,10 @@ def _update_thread_sandbox_metadata(sandbox_id: str) -> None:
         if not thread_id:
             return
         client = get_client()
-
-        async def _update() -> None:
-            await client.threads.update(
-                thread_id=thread_id,
-                metadata={"sandbox_id": sandbox_id},
-            )
-
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            asyncio.run(_update())
-        else:
-            loop.create_task(_update())
+        await client.threads.update(
+            thread_id=thread_id,
+            metadata={"sandbox_id": sandbox_id},
+        )
     except Exception:
         pass
 
@@ -384,7 +383,7 @@ class SandboxProvider(ABC):
     """Interface for creating and deleting sandbox backends."""
 
     @abstractmethod
-    def get_or_create(
+    async def get_or_create(
         self,
         *,
         sandbox_id: str | None = None,
@@ -394,7 +393,7 @@ class SandboxProvider(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def delete(
+    async def delete(
         self,
         *,
         sandbox_id: str,
@@ -408,13 +407,10 @@ class LangSmithProvider(SandboxProvider):
     """LangSmith sandbox provider implementation."""
 
     def __init__(self, api_key: str | None = None) -> None:
-        from langsmith import sandbox
-
         self._api_key = api_key or _get_langsmith_api_key()
         if not self._api_key:
             msg = "LANGSMITH_API_KEY (or LANGSMITH_API_KEY_PROD) not set"
             raise ValueError(msg)
-        self._client: SandboxClient = sandbox.SandboxClient(api_key=self._api_key)
 
     @classmethod
     def validate_startup_config(cls) -> None:
@@ -448,7 +444,7 @@ class LangSmithProvider(SandboxProvider):
                 msg = f"{name} must be >= 0, got {value}"
                 raise ValueError(msg)
 
-    def get_or_create(
+    async def get_or_create(
         self,
         *,
         sandbox_id: str | None = None,
@@ -461,38 +457,46 @@ class LangSmithProvider(SandboxProvider):
         delete_after_stop_seconds: int | None = None,
         **kwargs: Any,
     ) -> SandboxBackendProtocol:
-        """Get existing or create new LangSmith sandbox."""
+        """Get existing or create new LangSmith sandbox.
+
+        Provisioning runs natively async via ``AsyncSandboxClient``. The
+        resulting ``AsyncSandbox`` is converted to a sync ``Sandbox`` via
+        ``to_sync()`` so it satisfies the deepagents sync ``SandboxBackendProtocol``
+        that ``TimeoutLangSmithSandbox`` and the agent's file/execute tools expect.
+        """
         if kwargs:
             msg = f"Received unsupported arguments: {list(kwargs.keys())}"
             raise TypeError(msg)
-        if sandbox_id:
+        async with AsyncSandboxClient(api_key=self._api_key) as client:
+            if sandbox_id:
+                try:
+                    sandbox = await client.get_sandbox(name=sandbox_id)
+                except Exception as e:
+                    msg = f"Failed to connect to existing sandbox '{sandbox_id}': {e}"
+                    raise RuntimeError(msg) from e
+                return TimeoutLangSmithSandbox(sandbox.to_sync())
+
+            if not snapshot_id:
+                msg = "DEFAULT_SANDBOX_SNAPSHOT_ID must be set when SANDBOX_TYPE=langsmith"
+                raise ValueError(msg)
+
             try:
-                sandbox = self._client.get_sandbox(name=sandbox_id)
+                sandbox = await client.create_sandbox(
+                    snapshot_id=snapshot_id,
+                    fs_capacity_bytes=fs_capacity_bytes,
+                    vcpus=vcpus,
+                    mem_bytes=mem_bytes,
+                    idle_ttl_seconds=idle_ttl_seconds,
+                    delete_after_stop_seconds=delete_after_stop_seconds,
+                    timeout=timeout,
+                )
             except Exception as e:
-                msg = f"Failed to connect to existing sandbox '{sandbox_id}': {e}"
+                msg = f"Failed to create sandbox from snapshot '{snapshot_id}': {e}"
                 raise RuntimeError(msg) from e
-            return TimeoutLangSmithSandbox(sandbox)
 
-        if not snapshot_id:
-            msg = "DEFAULT_SANDBOX_SNAPSHOT_ID must be set when SANDBOX_TYPE=langsmith"
-            raise ValueError(msg)
+            return TimeoutLangSmithSandbox(sandbox.to_sync())
 
-        try:
-            sandbox = self._client.create_sandbox(
-                snapshot_id=snapshot_id,
-                fs_capacity_bytes=fs_capacity_bytes,
-                vcpus=vcpus,
-                mem_bytes=mem_bytes,
-                idle_ttl_seconds=idle_ttl_seconds,
-                delete_after_stop_seconds=delete_after_stop_seconds,
-                timeout=timeout,
-            )
-        except Exception as e:
-            msg = f"Failed to create sandbox from snapshot '{snapshot_id}': {e}"
-            raise RuntimeError(msg) from e
-
-        return TimeoutLangSmithSandbox(sandbox)
-
-    def delete(self, *, sandbox_id: str, **kwargs: Any) -> None:
+    async def delete(self, *, sandbox_id: str, **kwargs: Any) -> None:
         """Delete a LangSmith sandbox."""
-        self._client.delete_sandbox(sandbox_id)
+        async with AsyncSandboxClient(api_key=self._api_key) as client:
+            await client.delete_sandbox(sandbox_id)

@@ -7,7 +7,6 @@ by the dashboard chat proxy.
 
 from __future__ import annotations
 
-import asyncio
 from typing import Any
 
 from langgraph.config import get_config
@@ -35,7 +34,7 @@ def _compact(finding: dict[str, Any]) -> dict[str, Any]:
     return {key: finding.get(key) for key in _COMPACT_FIELDS if finding.get(key) is not None}
 
 
-def list_review_findings(status_filter: str | None = None) -> dict[str, Any]:
+async def list_review_findings(status_filter: str | None = None) -> dict[str, Any]:
     """List the findings the reviewer published for this PR.
 
     Use this to ground answers about the review — what was flagged, the
@@ -61,7 +60,7 @@ def list_review_findings(status_filter: str | None = None) -> dict[str, Any]:
         return {"findings": [], "count": 0, "error": "reviewer thread unavailable"}
 
     try:
-        findings = asyncio.run(list_findings_async(reviewer_thread_id))
+        findings = await list_findings_async(reviewer_thread_id)
     except Exception as exc:  # noqa: BLE001
         return {"findings": [], "count": 0, "error": f"could not load findings: {exc!s}"}
 

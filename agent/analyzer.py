@@ -12,7 +12,6 @@ on public repos even when the GitHub App is not installed on them.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import os
 import warnings
@@ -29,18 +28,21 @@ from deepagents.backends.protocol import SandboxBackendProtocol
 from deepagents.backends.state import StateBackend
 from langchain.agents.middleware import ModelCallLimitMiddleware
 
+from .dashboard.team_settings import get_effective_gateway_enabled
 from .integrations.langsmith import _configure_github_proxy
-from .middleware import SanitizeToolInputsMiddleware, ToolErrorMiddleware
+from .middleware import BasePrepareRunMiddleware, SanitizeToolInputsMiddleware, ToolErrorMiddleware
 from .review_style_guidance import REVIEWER_STYLE_THEMES
 from .server import (
     DEFAULT_LLM_MAX_TOKENS,
     DEFAULT_LLM_MODEL_ID,
     DEFAULT_RECURSION_LIMIT,
+    _get_cached_sandbox_backend,
     ensure_sandbox_for_thread,
     graph_loaded_for_execution,
 )
 from .tools.read_finding_outcomes import read_finding_outcomes
 from .tools.save_review_style import save_review_style_prompt
+from .utils import ttl_cache
 from .utils.analyzer_skills import SKILLS_ROUTE, skill_path_for_mode
 from .utils.github_app import get_github_app_installation_token
 from .utils.model import DEFAULT_LLM_REASONING, make_model, provider_model_kwargs
@@ -84,7 +86,61 @@ async def _configure_sandbox_github_proxy(
     if os.getenv("SANDBOX_TYPE", "langsmith") != "langsmith":
         return
     backend = unwrap_sandbox_backend(sandbox_backend)
-    await asyncio.to_thread(_configure_github_proxy, backend.id, github_token)
+    await _configure_github_proxy(backend.id, github_token)
+
+
+async def _cached_gateway_enabled() -> bool:
+    return await ttl_cache.cached(
+        f"team:gateway-enabled:{id(get_effective_gateway_enabled)}",
+        60,
+        get_effective_gateway_enabled,
+    )
+
+
+class PrepareAnalyzerRunMiddleware(BasePrepareRunMiddleware):
+    def __init__(self, *, thread_id: str, config: RunnableConfig) -> None:
+        self._thread_id = thread_id
+        self._config = config
+
+    def _prepare_config_fingerprint(self) -> object:
+        configurable = self._config.get("configurable", {})
+        return {
+            "prepare_run_id": configurable.get("prepare_run_id")
+            if isinstance(configurable, dict)
+            else None,
+            "thread_id": self._thread_id,
+            "full_name": configurable.get("review_style_full_name")
+            if isinstance(configurable, dict)
+            else None,
+            "mode": configurable.get("analyzer_mode") if isinstance(configurable, dict) else None,
+        }
+
+    async def _prepare(self, state: dict, runtime: object) -> dict:  # noqa: ARG002
+        sandbox_backend = await ensure_sandbox_for_thread(self._thread_id)
+        work_dir = await aresolve_sandbox_work_dir(sandbox_backend)
+        configurable = self._config["configurable"]
+        full_name = str(configurable.get("review_style_full_name") or "owner/repo")
+        owner, _, name = full_name.partition("/")
+        samples_text = str(configurable.get("review_style_samples_text") or "")
+        mode = str(configurable.get("analyzer_mode") or "bootstrap")
+        github_token = configurable.get("review_style_github_token")
+        if not (isinstance(github_token, str) and github_token):
+            github_token = await get_github_app_installation_token()
+        if isinstance(github_token, str) and github_token:
+            await _configure_sandbox_github_proxy(sandbox_backend, github_token)
+        system_prompt = STYLE_ANALYZER_PROMPT.format(
+            repo_owner=owner or "<owner>",
+            repo_name=name or "<repo>",
+            working_dir=work_dir,
+            mode=mode,
+            skill_path=skill_path_for_mode(mode),
+            reviewer_themes=REVIEWER_STYLE_THEMES.strip(),
+        )
+        user_context = f"Repository: `{full_name}`\n\n{samples_text}".strip()
+        return {
+            "work_dir": work_dir,
+            "rendered_system_prompt": f"{system_prompt}\n\n{user_context}",
+        }
 
 
 async def get_analyzer(config: RunnableConfig) -> Pregel:
@@ -94,28 +150,15 @@ async def get_analyzer(config: RunnableConfig) -> Pregel:
     if thread_id is None or not graph_loaded_for_execution(config):
         return create_deep_agent(system_prompt="", tools=[]).with_config(config)
 
-    sandbox_backend = await ensure_sandbox_for_thread(thread_id)
-    work_dir = await aresolve_sandbox_work_dir(sandbox_backend)
+    async def reconnect_backend(_thread_id: str = thread_id):
+        return await ensure_sandbox_for_thread(_thread_id)
 
-    configurable = config["configurable"]
-    full_name = str(configurable.get("review_style_full_name") or "owner/repo")
-    owner, _, name = full_name.partition("/")
-    samples_text = str(configurable.get("review_style_samples_text") or "")
-    mode = str(configurable.get("analyzer_mode") or "bootstrap")
-
-    github_token = configurable.get("review_style_github_token")
-    if not (isinstance(github_token, str) and github_token):
-        # Nightly continual runs have no fresh dashboard OAuth token; fall back to
-        # the GitHub App installation token so `gh` still works through the proxy.
-        github_token = await get_github_app_installation_token()
-    if isinstance(github_token, str) and github_token:
-        await _configure_sandbox_github_proxy(sandbox_backend, github_token)
-
-    # Skills are served from a virtual StateBackend route; gh/clone/execute stay on
-    # the sandbox. SKILL.md files are seeded into the `files` channel at invoke time.
-    backend = CompositeBackend(default=sandbox_backend, routes={SKILLS_ROUTE: StateBackend()})
+    def backend_factory(_runtime: object, _thread_id: str = thread_id):
+        default_backend = _get_cached_sandbox_backend(_thread_id, reconnect=reconnect_backend)
+        return CompositeBackend(default=default_backend, routes={SKILLS_ROUTE: StateBackend()})
 
     model_id = DEFAULT_LLM_MODEL_ID
+    use_gateway = await _cached_gateway_enabled()
     model_kwargs = provider_model_kwargs(
         model_id,
         None,
@@ -123,24 +166,14 @@ async def get_analyzer(config: RunnableConfig) -> Pregel:
         openai_reasoning_default=DEFAULT_LLM_REASONING,
     )
 
-    system_prompt = STYLE_ANALYZER_PROMPT.format(
-        repo_owner=owner or "<owner>",
-        repo_name=name or "<repo>",
-        working_dir=work_dir,
-        mode=mode,
-        skill_path=skill_path_for_mode(mode),
-        reviewer_themes=REVIEWER_STYLE_THEMES.strip(),
-    )
-    user_context = f"Repository: `{full_name}`\n\n{samples_text}".strip()
-    system_prompt = f"{system_prompt}\n\n{user_context}"
-
     return create_deep_agent(
-        model=make_model(model_id, **model_kwargs),
-        system_prompt=system_prompt,
+        model=make_model(model_id, use_gateway=use_gateway, **model_kwargs),
+        system_prompt="",
         tools=[save_review_style_prompt, read_finding_outcomes],
-        backend=backend,
+        backend=backend_factory,
         skills=[SKILLS_ROUTE],
         middleware=[
+            PrepareAnalyzerRunMiddleware(thread_id=thread_id, config=config),
             SanitizeToolInputsMiddleware(),
             ModelCallLimitMiddleware(
                 run_limit=STYLE_ANALYZER_MODEL_CALL_LIMIT,

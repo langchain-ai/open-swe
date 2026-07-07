@@ -382,6 +382,7 @@ def _agent_run_config(record: dict[str, Any], thread_id: str) -> dict[str, Any]:
         "github_login": record.get("created_by"),
         "user_email": record.get("user_email"),
         "schedule_id": record["id"],
+        "prepare_run_id": str(uuid.uuid4()),
     }
     repo = record.get("repo") if isinstance(record.get("repo"), dict) else None
     if repo and repo.get("owner") and repo.get("name"):

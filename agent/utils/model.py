@@ -1,12 +1,48 @@
-from typing import Literal, TypedDict, Unpack
+import asyncio
+import os
+from typing import Any, Literal, TypedDict, Unpack
 
 from langchain.chat_models import init_chat_model
+
+from ..dashboard.options import DEFAULT_MODEL_ID
+from .gateway import gateway_env_default, gateway_overrides
 
 OPENAI_RESPONSES_WS_BASE_URL = "wss://api.openai.com/v1"
 
 # Anthropic SDK default is 2; a 529 burst can outlive that. Bump to give the
 # primary provider a fair chance before the fallback middleware kicks in.
 DEFAULT_MAX_RETRIES = 6
+
+_MODEL_CACHE: dict[
+    tuple[str, bool | None, int | None, tuple[tuple[str, str], ...], int | None], Any
+] = {}
+
+
+def _loop_cache_key() -> int | None:
+    try:
+        return id(asyncio.get_running_loop())
+    except RuntimeError:
+        return None
+
+
+def _freeze_model_kwargs(kwargs: dict[str, object]) -> tuple[tuple[str, str], ...]:
+    return tuple(sorted((key, repr(value)) for key, value in kwargs.items()))
+
+
+async def close_cached_models() -> None:
+    models = list(_MODEL_CACHE.values())
+    _MODEL_CACHE.clear()
+    for model in models:
+        close = getattr(model, "aclose", None)
+        if callable(close):
+            await close()
+            continue
+        close = getattr(model, "close", None)
+        if callable(close):
+            result = close()
+            if asyncio.iscoroutine(result):
+                await result
+
 
 OpenAIReasoningEffort = Literal["none", "low", "medium", "high", "xhigh"]
 # OpenAI's Responses API only returns human-readable reasoning text when a
@@ -36,26 +72,81 @@ class AnthropicThinking(TypedDict, total=False):
 class ModelKwargs(TypedDict, total=False):
     max_tokens: int | None
     reasoning: OpenAIReasoning | None
+    reasoning_effort: OpenAIReasoningEffort | None
     thinking: AnthropicThinking | None
     effort: AnthropicEffort | None
     thinking_level: GoogleThinkingLevel | None
     temperature: float | None
     max_retries: int | None
+    store: bool | None
+    include: list[str] | None
     model_kwargs: dict[str, object] | None
 
 
 _ANTHROPIC_EFFORTS: set[AnthropicEffort] = {"low", "medium", "high", "xhigh", "max"}
 
 
-def make_model(model_id: str, **kwargs: Unpack[ModelKwargs]):
+def _coerce_openai_chat_completions_kwargs(model_kwargs: dict[str, object]) -> None:
+    if model_kwargs.get("use_responses_api") is not False:
+        return
+    reasoning = model_kwargs.pop("reasoning", None)
+    if isinstance(reasoning, dict):
+        effort = reasoning.get("effort")
+        if isinstance(effort, str):
+            model_kwargs.setdefault("reasoning_effort", effort)
+
+
+def _configure_openai_responses_kwargs(model_kwargs: dict[str, object]) -> None:
+    if model_kwargs.get("use_responses_api") is False:
+        return
+    model_kwargs.setdefault("store", False)
+    include = model_kwargs.get("include")
+    if include is None:
+        model_kwargs["include"] = ["reasoning.encrypted_content"]
+    elif isinstance(include, list) and "reasoning.encrypted_content" not in include:
+        include.append("reasoning.encrypted_content")
+
+
+def make_model(model_id: str, *, use_gateway: bool | None = None, **kwargs: Unpack[ModelKwargs]):
+    """Build a chat model, optionally routed through the LangSmith LLM Gateway.
+
+    ``use_gateway`` resolves the deployment default (``LANGSMITH_GATEWAY_ENABLED``)
+    when ``None``; async callers pass the team-settings-resolved value. When on,
+    gateway ``base_url``/``api_key``/``use_responses_api`` override the direct
+    provider defaults below (see :mod:`agent.utils.gateway`).
+    """
     model_kwargs: dict[str, object] = kwargs.copy()
     model_kwargs.setdefault("max_retries", DEFAULT_MAX_RETRIES)
 
     if model_id.startswith("openai:"):
+        # Direct-provider default: Responses API over the OpenAI websocket base.
+        # Gateway routing overrides this below (an HTTP(S) proxy can't carry wss).
         model_kwargs["base_url"] = OPENAI_RESPONSES_WS_BASE_URL
         model_kwargs["use_responses_api"] = True
 
-    return init_chat_model(model=model_id, **model_kwargs)
+    enabled = gateway_env_default() if use_gateway is None else use_gateway
+    if enabled:
+        overrides = gateway_overrides(model_id)
+        if overrides is not None:
+            model_kwargs.update(overrides)
+
+    if model_id.startswith("openai:"):
+        _configure_openai_responses_kwargs(model_kwargs)
+        _coerce_openai_chat_completions_kwargs(model_kwargs)
+
+    key = (
+        model_id,
+        use_gateway,
+        model_kwargs.get("max_tokens") if isinstance(model_kwargs.get("max_tokens"), int) else None,
+        _freeze_model_kwargs(model_kwargs),
+        _loop_cache_key(),
+    )
+    cached = _MODEL_CACHE.get(key)
+    if cached is not None:
+        return cached
+    model = init_chat_model(model=model_id, **model_kwargs)
+    _MODEL_CACHE[key] = model
+    return model
 
 
 def fallback_model_id_for(primary_model_id: str) -> str | None:
@@ -68,7 +159,7 @@ def fallback_model_id_for(primary_model_id: str) -> str | None:
     if primary_model_id.startswith("anthropic:"):
         return "openai:gpt-5.5"
     if primary_model_id.startswith("openai:"):
-        return "anthropic:claude-opus-4-5"
+        return "anthropic:claude-opus-4-8"
     return None
 
 
@@ -185,3 +276,29 @@ def provider_model_kwargs(
         if effort is not None:
             kwargs["model_kwargs"] = {"reasoning_effort": effort}
     return kwargs
+
+
+def validate_local_dev_llm_config() -> None:
+    """Validate API keys for the locally configured default model.
+
+    This check only runs in localhost development environments and is
+    intended to catch missing credentials for the default model specified
+    via LLM_MODEL_ID/DEFAULT_MODEL_ID. Runtime model selection may come
+    from team, profile, or thread configuration and is not validated here.
+    """
+    dashboard_url = os.environ.get("DASHBOARD_BASE_URL", "")
+    if not dashboard_url.startswith("http://localhost"):
+        return
+
+    model_id = os.environ.get("LLM_MODEL_ID", DEFAULT_MODEL_ID)
+
+    if model_id.startswith("openai:") and not os.environ.get("OPENAI_API_KEY"):
+        raise ValueError(f"OPENAI_API_KEY is required for configured model {model_id}")
+    elif model_id.startswith("anthropic:") and not os.environ.get("ANTHROPIC_API_KEY"):
+        raise ValueError(f"ANTHROPIC_API_KEY is required for configured model {model_id}")
+    elif model_id.startswith("google_genai:") and not os.environ.get("GOOGLE_API_KEY"):
+        raise ValueError(f"GOOGLE_API_KEY is required for configured model {model_id}")
+    elif model_id.startswith("groq:") and not os.environ.get("GROQ_API_KEY"):
+        raise ValueError(f"GROQ_API_KEY is required for configured model {model_id}")
+    elif model_id.startswith("fireworks:") and not os.environ.get("FIREWORKS_API_KEY"):
+        raise ValueError(f"FIREWORKS_API_KEY is required for configured model {model_id}")

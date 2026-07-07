@@ -1,4 +1,3 @@
-import asyncio
 from typing import Any
 
 from ..utils.slack import (
@@ -34,7 +33,7 @@ async def _fetch_and_format(channel_id: str, message_ts: str) -> dict[str, Any]:
     }
 
 
-def slack_read_thread_messages(channel_id: str, message_ts: str) -> dict[str, Any]:
+async def slack_read_thread_messages(channel_id: str, message_ts: str) -> dict[str, Any]:
     """Read messages from a Slack thread.
 
     Use this tool to read messages from a Slack channel or thread.
@@ -52,7 +51,7 @@ def slack_read_thread_messages(channel_id: str, message_ts: str) -> dict[str, An
     if not message_ts or not message_ts.strip():
         return {"success": False, "error": "message_ts is required"}
 
-    result = asyncio.run(_fetch_and_format(channel_id.strip(), message_ts.strip()))
+    result = await _fetch_and_format(channel_id.strip(), message_ts.strip())
     if not result.get("success"):
         return {
             "success": False,

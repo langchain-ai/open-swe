@@ -14,6 +14,43 @@ if (!API_BASE && typeof window !== "undefined") {
   console.warn("VITE_DASHBOARD_API_BASE_URL is not set")
 }
 
+const GITHUB_IMAGE_HOST_RE =
+  /^(?:www\.)?github\.com$|\.githubusercontent\.com$/i
+
+/**
+ * Build an authenticated proxy URL for GitHub-hosted PR images. Private-repo
+ * attachments can't be loaded directly by the browser, so they're routed
+ * through the dashboard backend which holds the App token. Non-GitHub image
+ * URLs are returned unchanged.
+ */
+export function reviewImageProxyUrl(
+  owner: string,
+  repo: string,
+  number: number,
+  src: string
+): string {
+  let parsed: URL
+  try {
+    parsed = new URL(src)
+  } catch {
+    return src
+  }
+  if (
+    parsed.protocol !== "https:" ||
+    !GITHUB_IMAGE_HOST_RE.test(parsed.hostname)
+  ) {
+    return src
+  }
+  if (
+    /^(?:www\.)?github\.com$/i.test(parsed.hostname) &&
+    !parsed.pathname.startsWith("/user-attachments/")
+  ) {
+    return src
+  }
+  const path = `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/image`
+  return `${API_BASE}/dashboard/api${path}?url=${encodeURIComponent(src)}`
+}
+
 export class ApiError extends Error {
   constructor(
     public readonly status: number,
@@ -55,6 +92,19 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   }
   if (res.status === 204) return undefined as T
   return (await res.json()) as T
+}
+
+export interface PRTraceResolutionResult {
+  resolved: boolean
+  detail: string
+  project: string | null
+  thread_id: string | null
+  confidence: number | null
+  evidence: Array<string>
+  trace_url: string | null
+  run_count: number
+  first_turn: string | null
+  last_turn: string | null
 }
 
 export interface SessionUser {
@@ -114,6 +164,9 @@ export interface TeamSettings {
   review_draft_prs: boolean
   pr_summaries: boolean
   review_trace_links: boolean
+  /** Tri-state LLM Gateway toggle; null inherits the LANGSMITH_GATEWAY_ENABLED default. */
+  gateway_enabled?: boolean | null
+  review_tracing_project?: string | null
   org_guidelines?: string | null
   default_agent_model?: string | null
   default_agent_reasoning_effort?: string | null
@@ -163,6 +216,12 @@ export interface CurrentsCredentialStatus {
 
 export interface CurrentsConnectBody {
   api_key: string
+}
+
+export interface NotionCredentialStatus {
+  connected: boolean
+  token_expires_at?: string | null
+  updated_at?: string | null
 }
 
 export interface UserMapping {
@@ -277,6 +336,39 @@ export interface AgentInstructions {
   updated_at?: string
 }
 
+export type RepoSnapshotStatus = "none" | "building" | "ready" | "failed"
+
+export interface RepoSnapshot {
+  full_name: string
+  owner?: string
+  name?: string
+  dockerfile: string
+  snapshot_id: string | null
+  snapshot_name: string | null
+  status: RepoSnapshotStatus
+  status_message: string | null
+  build_log: string | null
+  fs_capacity_bytes?: number
+  vcpus?: number
+  mem_bytes?: number
+  target?: string | null
+  build_args?: Record<string, string> | null
+  build_started_at?: string | null
+  last_built_at?: string | null
+  created_by?: string
+  created_at?: string
+  updated_at?: string
+}
+
+export interface RepoSnapshotUpdateBody {
+  dockerfile: string
+  fs_capacity_bytes?: number | null
+  vcpus?: number | null
+  mem_bytes?: number | null
+  target?: string | null
+  build_args?: Record<string, string> | null
+}
+
 export type FindingSeverity = "low" | "medium" | "high" | "critical"
 export type FindingConfidence = "low" | "medium" | "high"
 export type FindingStatus = "open" | "resolved" | "dismissed"
@@ -310,6 +402,39 @@ export interface ReviewFinding {
   github_review_comment_id: number | null
   interactions: Array<FindingInteraction>
   group: FindingGroup
+}
+
+export interface ReviewCommentCreate {
+  path: string
+  line: number
+  side: "LEFT" | "RIGHT"
+  body: string
+  start_line?: number | null
+  start_side?: "LEFT" | "RIGHT" | null
+}
+
+export interface ReviewCommentResult {
+  id: number
+  html_url: string
+}
+
+export interface PrReviewComment {
+  id: number
+  author: string
+  author_avatar_url: string
+  path: string
+  line: number | null
+  side: "LEFT" | "RIGHT"
+  body: string
+  html_url: string
+  created_at: string
+  is_open_swe: boolean
+  // Outdated: the line no longer appears in the current diff, so it can't render inline.
+  is_outdated: boolean
+}
+
+export interface ReviewCommentsPayload {
+  comments: Array<PrReviewComment>
 }
 
 export interface ReviewCounts {
@@ -539,6 +664,32 @@ export const api = {
     request<void>(`/agent-instructions/${encodeURIComponent(full_name)}`, {
       method: "DELETE",
     }),
+  listRepoSnapshots: () => request<Array<RepoSnapshot>>("/repo-snapshots"),
+  createRepoSnapshot: (full_name: string) =>
+    request<RepoSnapshot>("/repo-snapshots", {
+      method: "POST",
+      body: JSON.stringify({ full_name }),
+    }),
+  getRepoSnapshot: (full_name: string) =>
+    request<RepoSnapshot>(`/repo-snapshots/${encodeURIComponent(full_name)}`),
+  getRepoSnapshotTemplate: (full_name: string) =>
+    request<{ dockerfile: string }>(
+      `/repo-snapshots/template?full_name=${encodeURIComponent(full_name)}`
+    ),
+  saveRepoSnapshot: (full_name: string, body: RepoSnapshotUpdateBody) =>
+    request<RepoSnapshot>(`/repo-snapshots/${encodeURIComponent(full_name)}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  buildRepoSnapshot: (full_name: string) =>
+    request<RepoSnapshot>(
+      `/repo-snapshots/${encodeURIComponent(full_name)}/build`,
+      { method: "POST" }
+    ),
+  deleteRepoSnapshot: (full_name: string) =>
+    request<void>(`/repo-snapshots/${encodeURIComponent(full_name)}`, {
+      method: "DELETE",
+    }),
   getTeamSettings: () => request<TeamSettings>("/team-settings"),
   saveTeamSettings: (body: TeamSettings) =>
     request<TeamSettings>("/team-settings", {
@@ -573,6 +724,12 @@ export const api = {
     }),
   disconnectCurrents: () =>
     request<CurrentsCredentialStatus>("/my-credentials/currents", {
+      method: "DELETE",
+    }),
+  getMyNotionStatus: () =>
+    request<NotionCredentialStatus>("/my-credentials/notion"),
+  disconnectNotion: () =>
+    request<NotionCredentialStatus>("/my-credentials/notion", {
       method: "DELETE",
     }),
   listEnabledReviewRepos: () =>
@@ -634,17 +791,40 @@ export const api = {
       `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/re-review`,
       { method: "POST" }
     ),
+  resolveTrace: (owner: string, repo: string, number: number) =>
+    request<PRTraceResolutionResult>(
+      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/resolve-trace`,
+      { method: "POST" }
+    ),
+  createReviewComment: (
+    owner: string,
+    repo: string,
+    number: number,
+    body: ReviewCommentCreate
+  ) =>
+    request<ReviewCommentResult>(
+      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/comments`,
+      { method: "POST", body: JSON.stringify(body) }
+    ),
+  listReviewComments: (owner: string, repo: string, number: number) =>
+    request<ReviewCommentsPayload>(
+      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/comments`
+    ),
   getReviewerEval: () => request<ReviewerEvalStatus>("/admin/evals/reviewer"),
   logout: () => request<void>("/auth/logout", { method: "POST" }),
 }
 
 export function loginUrl(redirectTo?: string): string {
   const target =
-    redirectTo ?? (typeof window !== "undefined" ? window.location.origin : "")
+    redirectTo ?? (typeof window !== "undefined" ? window.location.href : "")
   const qs = target ? `?redirect_to=${encodeURIComponent(target)}` : ""
   return `${API_BASE}/dashboard/api/auth/login${qs}`
 }
 
 export function slackConnectUrl(): string {
   return `${API_BASE}/dashboard/api/slack/login`
+}
+
+export function notionConnectUrl(): string {
+  return `${API_BASE}/dashboard/api/notion/login`
 }

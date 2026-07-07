@@ -1,0 +1,142 @@
+from __future__ import annotations
+
+from typing import Any
+from unittest.mock import AsyncMock
+
+import pytest
+
+from agent import completion
+
+
+class _FakeThreads:
+    def __init__(self, metadata: dict[str, Any]) -> None:
+        self._metadata = metadata
+        self.updates: list[dict[str, Any]] = []
+
+    async def get(self, thread_id: str) -> dict[str, Any]:
+        return {"thread_id": thread_id, "metadata": self._metadata}
+
+    async def update(self, *, thread_id: str, metadata: dict[str, Any]) -> None:
+        self.updates.append(metadata)
+
+
+class _FakeClient:
+    def __init__(self, metadata: dict[str, Any]) -> None:
+        self.threads = _FakeThreads(metadata)
+
+
+def _slack_metadata() -> dict[str, Any]:
+    return {
+        "source": "slack",
+        "source_context": {"slack_thread": {"channel_id": "C1", "thread_ts": "123.45"}},
+    }
+
+
+@pytest.mark.asyncio
+async def test_error_status_posts_slack_failure_reply(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = _FakeClient(_slack_metadata())
+    monkeypatch.setattr(completion, "langgraph_client", lambda: client)
+    reply = AsyncMock(return_value=True)
+    monkeypatch.setattr(completion, "post_slack_thread_reply", reply)
+    monkeypatch.setattr(
+        completion, "dashboard_thread_url", lambda thread_id: f"https://ui/{thread_id}"
+    )
+
+    result = await completion.handle_run_completion({"thread_id": "t1", "status": "error"})
+
+    assert result["status"] == "ok"
+    reply.assert_awaited_once()
+    args = reply.await_args.args
+    assert args[0] == "C1"
+    assert args[1] == "123.45"
+    assert "<https://ui/t1|Open SWE Web>" in args[2]
+    assert client.threads.updates == [{"failure_reply_posted": True}]
+
+
+@pytest.mark.asyncio
+async def test_success_status_is_ignored(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = _FakeClient(_slack_metadata())
+    monkeypatch.setattr(completion, "langgraph_client", lambda: client)
+    reply = AsyncMock(return_value=True)
+    monkeypatch.setattr(completion, "post_slack_thread_reply", reply)
+
+    result = await completion.handle_run_completion({"thread_id": "t1", "status": "success"})
+
+    assert result["status"] == "ignored"
+    reply.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_idempotent_when_already_replied(monkeypatch: pytest.MonkeyPatch) -> None:
+    metadata = _slack_metadata()
+    metadata["failure_reply_posted"] = True
+    client = _FakeClient(metadata)
+    monkeypatch.setattr(completion, "langgraph_client", lambda: client)
+    reply = AsyncMock(return_value=True)
+    monkeypatch.setattr(completion, "post_slack_thread_reply", reply)
+
+    result = await completion.handle_run_completion({"thread_id": "t1", "status": "timeout"})
+
+    assert result["status"] == "ignored"
+    reply.assert_not_called()
+    assert client.threads.updates == []
+
+
+@pytest.mark.asyncio
+async def test_linear_source_comments_on_issue(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = _FakeClient({"source": "linear", "source_context": {"linear_issue": {"id": "iss_1"}}})
+    monkeypatch.setattr(completion, "langgraph_client", lambda: client)
+    comment = AsyncMock(return_value=True)
+    monkeypatch.setattr(completion, "comment_on_linear_issue", comment)
+
+    result = await completion.handle_run_completion({"thread_id": "t1", "status": "timeout"})
+
+    assert result["status"] == "ok"
+    comment.assert_awaited_once()
+    assert comment.await_args.args[0] == "iss_1"
+
+
+@pytest.mark.asyncio
+async def test_missing_thread_id_is_ignored() -> None:
+    result = await completion.handle_run_completion({"status": "error"})
+    assert result["status"] == "ignored"
+
+
+@pytest.mark.asyncio
+async def test_no_reply_channel_does_not_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = _FakeClient({"source": "schedule"})
+    monkeypatch.setattr(completion, "langgraph_client", lambda: client)
+
+    result = await completion.handle_run_completion({"thread_id": "t1", "status": "error"})
+
+    assert result["status"] == "ignored"
+    assert client.threads.updates == []
+
+
+@pytest.mark.asyncio
+async def test_interrupted_status_is_ignored(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Follow-ups use multitask_strategy="interrupt", so an interrupted run is a
+    # healthy hand-off, not a failure to report.
+    client = _FakeClient(_slack_metadata())
+    monkeypatch.setattr(completion, "langgraph_client", lambda: client)
+    reply = AsyncMock(return_value=True)
+    monkeypatch.setattr(completion, "post_slack_thread_reply", reply)
+
+    result = await completion.handle_run_completion({"thread_id": "t1", "status": "interrupted"})
+
+    assert result["status"] == "ignored"
+    reply.assert_not_called()
+    assert client.threads.updates == []
+
+
+def test_verify_run_complete_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    # No secret configured: fail closed (reject everything).
+    monkeypatch.setattr(completion, "RUN_COMPLETE_WEBHOOK_SECRET", None)
+    assert completion.verify_run_complete_token(None) is False
+    assert completion.verify_run_complete_token("whatever") is False
+
+    # Secret configured: require an exact match.
+    monkeypatch.setattr(completion, "RUN_COMPLETE_WEBHOOK_SECRET", "s3cret")
+    assert completion.verify_run_complete_token("s3cret") is True
+    assert completion.verify_run_complete_token("wrong") is False
+    assert completion.verify_run_complete_token(None) is False

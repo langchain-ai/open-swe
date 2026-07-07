@@ -17,6 +17,7 @@ return create_deep_agent(
     middleware=[
         ToolErrorMiddleware(),
         check_message_queue_before_model,
+        ensure_no_empty_msg,
         notify_step_limit_reached,
     ],
 )
@@ -37,11 +38,14 @@ DEFAULT_SANDBOX_SNAPSHOT_ID="<snapshot-uuid>"                      # Required
 DEFAULT_SANDBOX_SNAPSHOT_FS_CAPACITY_BYTES="34359738368"           # Optional, default 32 GiB
 DEFAULT_SANDBOX_VCPUS="4"                                          # Optional, default 4
 DEFAULT_SANDBOX_MEM_BYTES="16106127360"                            # Optional, default 15 GiB
-DEFAULT_SANDBOX_IDLE_TTL_SECONDS="600"                             # Optional, default 600 (10 min); 0 disables
+DEFAULT_SANDBOX_IDLE_TTL_SECONDS="7200"                            # Optional, default 7200 (2 h); 0 disables
 DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS="86400"                  # Optional, default 86400 (24 h); 0 disables
+REPO_SNAPSHOT_BASE_IMAGE="<registry>/<open-swe-sandbox-image>"      # Optional; required for admin-generated repo snapshot templates
 ```
 
 This is useful for pre-installing languages, frameworks, or internal tools that your repos depend on — reducing setup time per agent run. The default snapshot includes the GitHub CLI; agents invoke it as `GH_TOKEN=dummy gh <command>` and rely on the LangSmith proxy for the real credentials.
+
+`REPO_SNAPSHOT_BASE_IMAGE` should point to the published Docker image used to create your default Open SWE sandbox snapshot (typically the image built from this repository's `Dockerfile`). The admin **Repository Snapshots** page uses it as the base image when generating per-repo Dockerfile templates. If it is not configured, template generation fails closed instead of suggesting a bare image that would be missing Open SWE's required sandbox tools.
 
 For LangSmith sandboxes, Open SWE configures two GitHub proxy rules whenever a sandbox is created or reattached to a run:
 
@@ -135,7 +139,7 @@ The model is configured in the `get_agent()` function in `agent/server.py`. By d
 
 ```bash
 # Set the model via environment variable (uses provider:model format)
-LLM_MODEL_ID="anthropic:claude-sonnet-4-6"
+LLM_MODEL_ID="anthropic:claude-sonnet-5"
 ```
 
 If `LLM_MODEL_ID` is not set, the default model (`openai:gpt-5.5`) is used.
@@ -148,7 +152,7 @@ Use the `provider:model` format:
 
 ```python
 # Anthropic
-model=make_model("anthropic:claude-sonnet-4-6", temperature=0, max_tokens=16_000)
+model=make_model("anthropic:claude-sonnet-5", temperature=0, max_tokens=16_000)
 
 # OpenAI (uses Responses API by default)
 model=make_model("openai:gpt-5.5", max_tokens=128_000, reasoning={"effort": "medium"})
@@ -162,7 +166,7 @@ The `make_model()` helper in `agent/utils/model.py` wraps `langchain.chat_models
 ```python
 from langchain_anthropic import ChatAnthropic
 
-model = ChatAnthropic(model_name="claude-sonnet-4-6", temperature=0, max_tokens=16_000)
+model = ChatAnthropic(model_name="claude-sonnet-5", temperature=0, max_tokens=16_000)
 
 return create_deep_agent(
     model=model,
@@ -180,13 +184,32 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     
     if source == "slack":
         # Faster model for Slack Q&A
-        model = make_model("anthropic:claude-sonnet-4-6", temperature=0, max_tokens=16_000)
+        model = make_model("anthropic:claude-sonnet-5", temperature=0, max_tokens=16_000)
     else:
         # Full model for code changes from Linear
         model = make_model("openai:gpt-5.5", max_tokens=128_000, reasoning={"effort": "medium"})
     
     return create_deep_agent(model=model, ...)
 ```
+
+### Routing through the LangSmith LLM Gateway
+
+Model calls can be proxied through the [LangSmith LLM Gateway](https://docs.langchain.com/langsmith/llm-gateway) (private beta) instead of hitting providers directly. The gateway authenticates with a **LangSmith API key** that has the `gateway:invoke` permission and resolves the real provider key from workspace Provider Secrets, so no provider API keys are needed at runtime — and it adds central spend limits, PII/secrets redaction, and tracing. Your org must have the gateway enabled with Provider Secrets configured.
+
+Routing is opt-in and off by default. Enable it either way:
+
+| Env var | Default | Purpose |
+|---|---|---|
+| `LANGSMITH_GATEWAY_ENABLED` | `false` | Deployment-level default for gateway routing. |
+| `LANGSMITH_GATEWAY_API_KEY` | unset | Optional dedicated LangSmith key for Gateway calls. Prefer this in LangGraph Cloud if the platform-provided `LANGSMITH_API_KEY` lacks `gateway:invoke`. Falls back to `LANGSMITH_API_KEY_PROD`, then `LANGSMITH_API_KEY`. |
+| `LANGSMITH_GATEWAY_BASE_URL` | `https://gateway.smith.langchain.com` | Override for a regional or self-hosted gateway host. |
+| `LANGSMITH_GATEWAY_OPENAI_USE_RESPONSES` | `true` | Use the OpenAI Responses API through the gateway. Set to `false` only to force Chat Completions for OpenAI models. |
+
+The admin panel (**Admin → LLM Gateway**) exposes a per-workspace toggle stored in team settings; when set it overrides the `LANGSMITH_GATEWAY_ENABLED` env default (a `None`/unset team value inherits the env default).
+
+Routing is applied centrally in `make_model` (`agent/utils/model.py`), which resolves the effective on/off and delegates URL/key wiring to `agent/utils/gateway.py`. **OpenAI, Anthropic, Fireworks, and Google Gemini** are routed (their LangChain integrations accept `base_url` + `api_key`); Google Vertex (service-account auth) and any other provider call the provider directly with a logged warning.
+
+**Caveat — OpenAI endpoint:** open-swe uses the OpenAI Responses API by default because OpenAI reasoning models with function tools reject `reasoning_effort` on Chat Completions. Direct OpenAI calls use a `wss://` base URL; gateway-routed OpenAI uses the HTTPS gateway base URL with Responses enabled. Set `LANGSMITH_GATEWAY_OPENAI_USE_RESPONSES=false` only if you need to force Chat Completions. Anthropic and Fireworks are unaffected.
 
 ---
 
@@ -266,6 +289,23 @@ else:
 
 return create_deep_agent(tools=tools, ...)
 ```
+
+### Browser automation (Stagehand + Browserbase)
+
+A `browser` subagent drives a real Chromium via the [Stagehand](https://github.com/browserbase/stagehand-python) SDK, exposing `browser_navigate`, `browser_act`, `browser_observe`, `browser_extract`, and `browser_close`. The main agent delegates to it for tasks that need live interaction or JS-rendered pages (logging in, clicking flows, reproducing UI bugs, scraping structured data); static reads should still use `fetch_url`.
+
+The tools are added in `agent/server.py` (gated by `load_browser_tools()`), and live in `agent/integrations/stagehand_browser.py`. One browser session is kept per agent thread and reused across calls. The tools are a no-op unless configured:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `STAGEHAND_ENV` | `LOCAL` | `LOCAL` runs a local Chromium in-process; `BROWSERBASE` runs the browser on Browserbase cloud. |
+| `STAGEHAND_MODEL_API_KEY` | falls back to `MODEL_API_KEY`, then `ANTHROPIC_API_KEY` | LLM key Stagehand uses for `act`/`observe`/`extract`. Required for `LOCAL`; optional for `BROWSERBASE` (the hosted Stagehand API ships with model support). |
+| `STAGEHAND_MODEL` | `anthropic/claude-sonnet-4-5` | Model Stagehand uses. |
+| `BROWSERBASE_API_KEY` / `BROWSERBASE_PROJECT_ID` | — | `BROWSERBASE_API_KEY` is required when `STAGEHAND_ENV=BROWSERBASE`; `BROWSERBASE_PROJECT_ID` is forwarded when set. |
+| `STAGEHAND_LOCAL_CHROME_PATH` | `/usr/bin/chromium` in Docker | Path to the Chrome/Chromium binary for `LOCAL` mode. |
+| `STAGEHAND_HEADLESS` | `true` | Run the local browser headless. |
+
+For `LOCAL` mode the Dockerfile installs `chromium`; for `BROWSERBASE` mode no browser binary is needed in the image.
 
 ---
 
@@ -461,6 +501,7 @@ Middleware hooks run around the agent loop. Open SWE includes:
 |---|---|---|
 | `ToolErrorMiddleware` | Tool error handler | Catches and formats tool errors |
 | `check_message_queue_before_model` | Before model | Injects follow-up messages that arrived mid-run |
+| `ensure_no_empty_msg` | After model | Re-injects a tool call when the model stops without one, so runs don't end prematurely |
 | `notify_step_limit_reached` | After agent | Posts a Slack reply when the agent hits the model-call limit |
 
 There is intentionally no after-agent middleware that opens a PR for the agent. The agent is responsible for committing, pushing, opening/updating the draft PR, and replying in the source channel. If you want a deterministic backstop for your fork, add an `@after_agent` hook here.
@@ -486,6 +527,7 @@ Then add it to the middleware list:
 middleware=[
     ToolErrorMiddleware(),
     check_message_queue_before_model,
+    ensure_no_empty_msg,
     notify_step_limit_reached,
     run_ci_check,  # new middleware
 ],

@@ -1,4 +1,4 @@
-import { Link, Navigate, createFileRoute } from "@tanstack/react-router"
+import { Link, createFileRoute } from "@tanstack/react-router"
 import { CaretRightIcon } from "@phosphor-icons/react"
 import { useEffect, useRef, useState } from "react"
 
@@ -23,6 +23,7 @@ import {
   useRepos,
   useSaveProfile,
 } from "@/lib/profile"
+import { RequireLogin } from "@/lib/auth-redirect"
 import { useSession } from "@/lib/session"
 
 export const Route = createFileRoute("/cloud-agents")({
@@ -112,7 +113,7 @@ function CloudAgentsPage() {
       </main>
     )
   }
-  if (!session.data) return <Navigate to="/login" />
+  if (!session.data) return <RequireLogin />
 
   const fallbackModel = defaultAgentModel
   const fallbackEffort = defaultAgentEffort
@@ -321,13 +322,33 @@ function CloudAgentsPage() {
           className="flex items-center justify-between gap-6 px-4 py-3 hover:bg-muted/40"
         >
           <div className="flex flex-col gap-0.5">
-            <span className="text-xs font-medium text-foreground">Repository Instructions</span>
+            <span className="text-xs font-medium text-foreground">
+              Repository Instructions
+            </span>
             <span className="text-xs text-muted-foreground">
-              Per-repo custom instructions injected into the agent's system prompt.
+              Per-repo custom instructions injected into the agent's system
+              prompt.
             </span>
           </div>
           <CaretRightIcon className="size-3.5 shrink-0 text-muted-foreground" />
         </Link>
+        {session.data?.is_admin && (
+          <Link
+            to="/agents/snapshots"
+            className="flex items-center justify-between gap-6 px-4 py-3 hover:bg-muted/40"
+          >
+            <div className="flex flex-col gap-0.5">
+              <span className="text-xs font-medium text-foreground">
+                Repository Snapshots
+              </span>
+              <span className="text-xs text-muted-foreground">
+                Build a per-repo sandbox image from a custom Dockerfile. Falls
+                back to the default image.
+              </span>
+            </div>
+            <CaretRightIcon className="size-3.5 shrink-0 text-muted-foreground" />
+          </Link>
+        )}
       </SettingsSection>
 
       {error && <p className="text-xs text-destructive">{error}</p>}

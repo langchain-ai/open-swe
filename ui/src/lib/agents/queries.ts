@@ -4,14 +4,21 @@ import { useEffect } from "react"
 
 import { agentsApi } from "./api"
 import type { QueryClient } from "@tanstack/react-query"
-import type { ScheduleUpdateRequest, ThreadsPageParams } from "./api"
+import type {
+  ScheduleUpdateRequest,
+  SidebarThreads,
+  ThreadsPageParams,
+} from "./api"
 import type { AgentThread, Chunk, ImageChunk, Message } from "./types"
 
 export const agentThreadKeys = {
   lists: ["agent-threads", "lists"] as const,
-  all: ["agent-threads", "lists", "all"] as const,
+  sidebar: (params: { activeLimit: number; resolvedLimit: number }) =>
+    ["agent-threads", "lists", "sidebar", params] as const,
   detail: (threadId: string) => ["agent-threads", threadId] as const,
   prDiff: (threadId: string) => ["agent-threads", threadId, "pr-diff"] as const,
+  workflowApprovals: (threadId: string) =>
+    ["agent-threads", threadId, "workflow-approvals"] as const,
   page: (params: ThreadsPageParams) =>
     ["agent-threads", "lists", "page", params] as const,
 }
@@ -20,14 +27,37 @@ export function invalidateAgentThreadLists(queryClient: QueryClient): void {
   void queryClient.invalidateQueries({ queryKey: agentThreadKeys.lists })
 }
 
+export function seedAgentThreadLists(
+  queryClient: QueryClient,
+  thread: AgentThread
+): void {
+  queryClient.setQueriesData<SidebarThreads>(
+    { queryKey: ["agent-threads", "lists", "sidebar"] },
+    (prev) => {
+      if (!prev) return prev
+      const activeItems = [
+        thread,
+        ...prev.active.items.filter((item) => item.id !== thread.id),
+      ].slice(0, prev.active.limit)
+      const resolvedItems = prev.resolved.items.filter(
+        (item) => item.id !== thread.id
+      )
+      return {
+        ...prev,
+        active: { ...prev.active, items: activeItems },
+        resolved: { ...prev.resolved, items: resolvedItems },
+      }
+    }
+  )
+}
+
 export const agentScheduleKeys = {
   all: ["agent-schedules"] as const,
 }
 
-// The list endpoint (`GET /threads`) and the detail endpoint
-// (`GET /threads/{id}`) return the same per-thread summary, so warming the
-// detail cache from the already-fetched list avoids a fan-out of one request
-// per sidebar thread. Navigation stays instant; the real (mark-viewed) fetch
+// Sidebar lists and detail reads return the same per-thread summary, so warming
+// the detail cache from the already-fetched sidebar avoids a fan-out of one
+// request per thread. Navigation stays instant; the real (mark-viewed) fetch
 // fires only when a thread is actually opened. The active thread is skipped so
 // its live detail query stays the source of truth.
 export function useSeedAgentThreadDetails(
@@ -49,52 +79,31 @@ export function useSeedAgentThreadDetails(
   }, [activeThreadId, queryClient, threads])
 }
 
-export function useAgentThreads() {
-  return useQuery({
-    queryKey: agentThreadKeys.all,
-    queryFn: () => agentsApi.listThreads(),
-    refetchInterval: (query) =>
-      query.state.data?.some((thread) => thread.status === "running")
-        ? 2000
-        : false,
-  })
-}
-
-// The sidebar fetches active (unresolved) and resolved threads separately so
-// resolving the most-recent threads can't hide older active ones behind a
-// shared cap — each list is filled server-side from its own filtered query.
 const SIDEBAR_ACTIVE_LIMIT = 50
 
-function sidebarRefetchInterval(query: {
-  state: { data?: { items: Array<AgentThread> } }
-}) {
-  return query.state.data?.items.some((thread) => thread.status === "running")
+function sidebarThreads(data?: SidebarThreads): Array<AgentThread> {
+  return [...(data?.active.items ?? []), ...(data?.resolved.items ?? [])]
+}
+
+function sidebarRefetchInterval(query: { state: { data?: SidebarThreads } }) {
+  return sidebarThreads(query.state.data).some(
+    (thread) => thread.status === "running"
+  )
     ? 2000
     : false
 }
 
 export function useSidebarThreads(resolvedLimit: number) {
-  const active = useQuery({
-    queryKey: agentThreadKeys.page({
-      resolved: false,
-      limit: SIDEBAR_ACTIVE_LIMIT,
-    }),
-    queryFn: () =>
-      agentsApi.listThreadsPage({
-        resolved: false,
-        limit: SIDEBAR_ACTIVE_LIMIT,
-      }),
+  const params = {
+    activeLimit: SIDEBAR_ACTIVE_LIMIT,
+    resolvedLimit,
+  }
+  return useQuery({
+    queryKey: agentThreadKeys.sidebar(params),
+    queryFn: () => agentsApi.listSidebarThreads(params),
     refetchInterval: sidebarRefetchInterval,
     placeholderData: (prev) => prev,
   })
-  const resolved = useQuery({
-    queryKey: agentThreadKeys.page({ resolved: true, limit: resolvedLimit }),
-    queryFn: () =>
-      agentsApi.listThreadsPage({ resolved: true, limit: resolvedLimit }),
-    refetchInterval: sidebarRefetchInterval,
-    placeholderData: (prev) => prev,
-  })
-  return { active, resolved }
 }
 
 export function useAgentThread(threadId: string) {
@@ -115,6 +124,47 @@ export function useAgentThreadPrDiff(threadId: string, enabled: boolean) {
     enabled,
     staleTime: 30_000,
     retry: false,
+  })
+}
+
+export function useWorkflowApprovals(
+  threadId: string,
+  options: { pollWhileActive?: boolean } = {}
+) {
+  return useQuery({
+    queryKey: agentThreadKeys.workflowApprovals(threadId),
+    queryFn: () => agentsApi.listWorkflowApprovals(threadId),
+    enabled: Boolean(threadId),
+    refetchInterval: (query) =>
+      options.pollWhileActive ||
+      query.state.data?.approvals.some(
+        (approval) => approval.status === "pending"
+      )
+        ? 3000
+        : false,
+    retry: false,
+  })
+}
+
+export function useWorkflowApprovalDecision(threadId: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (vars: {
+      fingerprint: string
+      decision: "approve" | "reject"
+    }) =>
+      vars.decision === "approve"
+        ? agentsApi.approveWorkflowPush(threadId, vars.fingerprint)
+        : agentsApi.rejectWorkflowPush(threadId, vars.fingerprint),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: agentThreadKeys.workflowApprovals(threadId),
+      })
+      void queryClient.invalidateQueries({
+        queryKey: agentThreadKeys.detail(threadId),
+      })
+      invalidateAgentThreadLists(queryClient)
+    },
   })
 }
 
@@ -205,6 +255,7 @@ export function optimisticThread(
     status: "running",
     viewed: true,
     viewedAt: now,
+    isOwner: true,
     createdAt: now,
     updatedAt: now,
     traceUrl: null,
@@ -217,6 +268,7 @@ export interface SendAgentMessageVariables {
   images?: Array<ImageChunk>
   model_id?: string | null
   effort?: string | null
+  plan_mode?: boolean
 }
 
 export function useCancelAgentThread(threadId: string) {

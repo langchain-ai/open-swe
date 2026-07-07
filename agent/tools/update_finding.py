@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from typing import Any
 
 from langgraph.config import get_config
@@ -51,7 +50,7 @@ def _has_published_github_surface(finding: Finding) -> bool:
     )
 
 
-def update_finding(
+async def update_finding(
     finding_id: str,
     status: str | None = None,
     severity: str | None = None,
@@ -72,7 +71,7 @@ def update_finding(
             ``Existing findings`` block of the re-review user message).
         status: New status (``open``, ``resolved``, ``dismissed``).
             Use ``resolved`` when the new commits address the issue. Resolving
-            or dismissing requires a ``note`` with the message to post.
+            or dismissing requires a ``note`` with the full message to post.
         severity: New severity, if reassessing.
         confidence: New confidence rating (``low``, ``medium``, ``high``), if
             new commits change how sure you are the finding is a real issue.
@@ -83,7 +82,8 @@ def update_finding(
             Capped at 4 lines — longer values are dropped (the finding keeps
             its description). Only set this for small, obvious fixes.
         note: Optional free-form note explaining the change. Required when
-            resolving or dismissing because it becomes the GitHub reply body.
+            resolving or dismissing because it is posted verbatim as the full
+            GitHub reply body.
 
     Returns:
         Dictionary with ``success`` and (on success) the updated ``finding``.
@@ -132,9 +132,7 @@ def update_finding(
     configurable = config.get("configurable", {}) if isinstance(config, dict) else {}
     if status == "open":
         try:
-            head_sha = asyncio.run(
-                resolve_review_head_sha(get_thread_id_from_runtime(), configurable)
-            )
+            head_sha = await resolve_review_head_sha(get_thread_id_from_runtime(), configurable)
         except ReviewerThreadMissingError as exc:
             return thread_missing_tool_result(exc)
         if head_sha:
@@ -156,7 +154,7 @@ def update_finding(
 
     thread_id = get_thread_id_from_runtime()
     try:
-        findings = asyncio.run(list_findings(thread_id))
+        findings = await list_findings(thread_id)
     except ReviewerThreadMissingError as exc:
         return thread_missing_tool_result(exc)
     finding = next((item for item in findings if item.get("id") == finding_id), None)
@@ -179,7 +177,9 @@ def update_finding(
     ):
         from .resolve_finding_thread import resolve_finding_thread
 
-        resolve_result = resolve_finding_thread(finding_id, status=status, note=normalized_note)
+        resolve_result = await resolve_finding_thread(
+            finding_id, status=status, note=normalized_note
+        )
         if not resolve_result.get("success"):
             return {
                 "success": False,
@@ -206,7 +206,7 @@ def update_finding(
             return result
 
     try:
-        updated = asyncio.run(update_finding_fields(thread_id, finding_id, updates))
+        updated = await update_finding_fields(thread_id, finding_id, updates)
     except ReviewerThreadMissingError as exc:
         return thread_missing_tool_result(exc)
     if updated is None:

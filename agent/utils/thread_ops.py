@@ -1,4 +1,11 @@
-"""Shared LangGraph thread helpers for webhooks and the dashboard."""
+"""Shared LangGraph thread helpers for the dashboard.
+
+The webhook triggers (Slack / Linear / GitHub) dispatch through
+``agent.dispatch.dispatch_agent_run`` with ``multitask_strategy="interrupt"``,
+so they no longer need a busy-check or an in-process lock. The store-queue
+below is retained for the dashboard's deliberate "inject a follow-up into a
+run that's already in flight" path (``thread_api.send_dashboard_message``).
+"""
 
 from __future__ import annotations
 
@@ -35,15 +42,14 @@ async def get_thread_active_status(thread_id: str) -> bool | None:
         return None
 
 
-async def is_thread_active(thread_id: str) -> bool:
-    """Return whether the thread currently has a running run."""
-    return await get_thread_active_status(thread_id) is True
-
-
 async def queue_message_for_thread(
     thread_id: str, message_content: str | list[dict[str, Any]] | dict[str, Any]
 ) -> bool:
-    """Queue a follow-up message for a busy thread (FIFO store namespace)."""
+    """Queue a follow-up message for a busy thread (FIFO store namespace).
+
+    Used by the dashboard to inject a follow-up into a run that's already in
+    flight; webhook triggers use ``multitask_strategy="interrupt"`` instead.
+    """
     client = langgraph_client()
     try:
         namespace = ("queue", thread_id)

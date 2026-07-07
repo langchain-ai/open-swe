@@ -1,4 +1,4 @@
-import { Link, Navigate, createFileRoute } from "@tanstack/react-router";
+import { Link, createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CaretRightIcon } from "@phosphor-icons/react";
 import { useEffect, useMemo, useState } from "react";
@@ -11,6 +11,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { ApiError, api } from "@/lib/api";
+import { RequireLogin } from "@/lib/auth-redirect";
 import { useSession } from "@/lib/session";
 
 export const Route = createFileRoute("/review")({ component: ReviewPage });
@@ -19,6 +20,7 @@ const DEFAULT_SETTINGS: TeamSettings = {
   review_draft_prs: false,
   pr_summaries: true,
   review_trace_links: true,
+  review_tracing_project: null,
   org_guidelines: null,
   default_agent_model: null,
   default_agent_reasoning_effort: null,
@@ -65,7 +67,7 @@ function ReviewPage() {
       </main>
     );
   }
-  if (!session.data) return <Navigate to="/login" />;
+  if (!session.data) return <RequireLogin />;
 
   const current: TeamSettings = local;
   const canEdit = session.data.is_admin;

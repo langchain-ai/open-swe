@@ -1,0 +1,11 @@
+{
+  "$schema": "https://langgra.ph/schema.json",
+  "python_version": "3.12",
+  "dependencies": ["."],
+  "graphs": {
+    "agent": "./tests/e2e/agent_entrypoint.py:traced_agent"
+  },
+  "http": {
+    "app": "./tests/e2e/harness.py:app"
+  }
+}

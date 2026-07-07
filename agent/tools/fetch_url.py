@@ -1,6 +1,6 @@
 from typing import Any
 
-import requests
+import httpx
 from markdownify import markdownify
 
 from .http_request import _request_with_safe_redirects
@@ -8,7 +8,7 @@ from .http_request import _request_with_safe_redirects
 FETCH_URL_MAX_CHARS = 100_000
 
 
-def fetch_url(url: str, timeout: int = 30) -> dict[str, Any]:
+async def fetch_url(url: str, timeout: int = 30) -> dict[str, Any]:
     """Fetch content from a URL and convert HTML to markdown format.
 
     This tool fetches web page content and converts it to clean markdown text,
@@ -34,23 +34,24 @@ def fetch_url(url: str, timeout: int = 30) -> dict[str, Any]:
     4. NEVER show the raw markdown to the user unless specifically requested
     """
     try:
-        response, blocked = _request_with_safe_redirects(
-            "GET",
-            url,
-            timeout=timeout,
-            headers={"User-Agent": "Mozilla/5.0 (compatible; DeepAgents/1.0)"},
-        )
-        if blocked:
-            return {
-                "error": blocked["content"],
-                "status_code": blocked["status_code"],
-                "url": blocked["url"],
-            }
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            response, blocked = await _request_with_safe_redirects(
+                client,
+                "GET",
+                url,
+                headers={"User-Agent": "Mozilla/5.0 (compatible; DeepAgents/1.0)"},
+            )
+            if blocked:
+                return {
+                    "error": blocked["content"],
+                    "status_code": blocked["status_code"],
+                    "url": blocked["url"],
+                }
 
-        response.raise_for_status()
+            response.raise_for_status()
 
-        # Convert HTML content to markdown
-        markdown_content = markdownify(response.text)
+            # Convert HTML content to markdown
+            markdown_content = markdownify(response.text)
 
         if len(markdown_content) > FETCH_URL_MAX_CHARS:
             markdown_content = (
@@ -64,5 +65,5 @@ def fetch_url(url: str, timeout: int = 30) -> dict[str, Any]:
             "status_code": response.status_code,
             "content_length": len(markdown_content),
         }
-    except requests.exceptions.RequestException as e:
+    except httpx.HTTPError as e:
         return {"error": f"Fetch URL error: {e!s}", "url": url}

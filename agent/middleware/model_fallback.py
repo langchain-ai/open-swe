@@ -19,7 +19,7 @@ from typing import Any
 import anthropic
 import openai
 from langchain.agents.middleware import AgentMiddleware
-from langchain.agents.middleware.types import ModelCallResult, ModelRequest, ModelResponse
+from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage
 
@@ -96,28 +96,6 @@ class ModelFallbackMiddleware(AgentMiddleware):
     def __init__(self, fallback_model: BaseChatModel) -> None:
         super().__init__()
         self._fallback_model = fallback_model
-
-    def wrap_model_call(
-        self,
-        request: ModelRequest,
-        handler: Callable[[ModelRequest], ModelResponse],
-    ) -> ModelCallResult:
-        try:
-            return handler(request)
-        except Exception as exc:
-            access_error_message = _provider_access_error_message(exc)
-            if access_error_message is not None:
-                logger.warning("Model access error surfaced to user: %s", type(exc).__name__)
-                return AIMessage(content=access_error_message)
-            if not _should_fallback(exc):
-                raise
-            logger.warning(
-                "Primary model failed (%s); falling back to %s",
-                type(exc).__name__,
-                getattr(self._fallback_model, "model_name", None)
-                or getattr(self._fallback_model, "model", "fallback"),
-            )
-            return handler(request.override(model=self._fallback_model))
 
     async def awrap_model_call(
         self,

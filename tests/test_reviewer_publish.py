@@ -123,9 +123,9 @@ def test_render_inline_comment_body_line_reference_range() -> None:
     assert "*(Refers to line 10)*" in render_inline_comment_body(_f(start_line=10, end_line=10))
 
 
-def test_render_resolution_comment_resolved_uses_note() -> None:
+def test_render_resolution_comment_resolved_uses_note_verbatim() -> None:
     body = render_resolution_comment(_f(status="resolved"), "resolved", note="Fixed at line 5")
-    assert body == "✅ **Resolved**: Fixed at line 5"
+    assert body == "Fixed at line 5"
 
 
 def test_render_resolution_comment_returns_none_without_agent_note() -> None:
@@ -133,15 +133,15 @@ def test_render_resolution_comment_returns_none_without_agent_note() -> None:
     assert body is None
 
 
-def test_render_resolution_comment_dismissed_uses_note() -> None:
+def test_render_resolution_comment_dismissed_uses_note_verbatim() -> None:
     body = render_resolution_comment(_f(status="dismissed"), "dismissed", note="Intended behavior")
-    assert body == "❌ **Dismissed**: Intended behavior"
+    assert body == "Intended behavior"
 
 
-def test_render_resolution_comment_uses_stored_resolution_note() -> None:
+def test_render_resolution_comment_uses_stored_resolution_note_verbatim() -> None:
     finding = _f(status="resolved", resolution_note="The guard now returns before indexing.")
     body = render_resolution_comment(finding, "resolved")
-    assert body == "✅ **Resolved**: The guard now returns before indexing."
+    assert body == "The guard now returns before indexing."
 
 
 def test_parse_review_comment_marker_accepts_valid_marker() -> None:
@@ -212,6 +212,40 @@ def test_render_review_body_no_findings_message() -> None:
     body = render_review_body(pr_number=99, surfaced_count=0)
     assert "## ✅ Open SWE Review: No issues found" in body
     assert "Open SWE reviewed this PR and found no potential bugs to report." in body
+    assert "additional" not in body
+
+
+def test_render_review_body_with_additional_findings_and_ui_link() -> None:
+    body = render_review_body(
+        pr_number=99,
+        surfaced_count=0,
+        additional_findings_count=2,
+        ui_url="https://dash.example/agents/reviews/o/r/99",
+    )
+    assert "## ✅ Open SWE Review: No issues found" in body
+    assert "2 additional findings can be viewed in the web app." in body
+    assert "[Open in Web](https://dash.example/agents/reviews/o/r/99)" in body
+
+
+def test_render_review_body_with_single_additional_finding_uses_singular() -> None:
+    body = render_review_body(pr_number=99, surfaced_count=0, additional_findings_count=1)
+    assert "1 additional finding can be viewed in the web app." in body
+
+
+def test_render_review_body_with_surfaced_and_additional_findings() -> None:
+    body = render_review_body(
+        pr_number=99,
+        surfaced_count=3,
+        additional_findings_count=2,
+        ui_url="https://dash.example/agents/reviews/o/r/99",
+    )
+    assert "found 3 potential issues." in body
+    assert "2 additional findings can be viewed in the web app." in body
+
+
+def test_render_review_body_additional_findings_zero_omits_line() -> None:
+    body = render_review_body(pr_number=99, surfaced_count=0, additional_findings_count=0)
+    assert "additional" not in body
 
 
 def test_render_status_comment_reviewing_includes_ui_link(monkeypatch: Any) -> None:
@@ -348,7 +382,7 @@ def test_render_review_body_includes_trace_link_when_provided() -> None:
     assert body.endswith("<!-- open-swe-reviewer pr=123 -->")
 
 
-def test_publish_review_eval_mode_does_not_call_github() -> None:
+async def test_publish_review_eval_mode_does_not_call_github() -> None:
     from agent.tools.publish_review import publish_review
 
     findings = [
@@ -376,7 +410,7 @@ def test_publish_review_eval_mode_does_not_call_github() -> None:
         patch("agent.tools.publish_review.get_github_token") as get_token,
         patch("agent.tools.publish_review.post_pull_request_review", AsyncMock()) as post_review,
     ):
-        result = publish_review()
+        result = await publish_review()
 
     assert result["success"] is True
     assert result["dry_run"] is True
@@ -387,7 +421,52 @@ def test_publish_review_eval_mode_does_not_call_github() -> None:
     set_meta.assert_awaited_once_with("tid", last_reviewed_sha="sha")
 
 
-def test_publish_review_forwards_trace_link_config_override() -> None:
+@pytest.mark.asyncio
+async def test_publish_review_surfaces_additional_findings_count_in_body() -> None:
+    """When all surfaced findings are above threshold but sub-threshold findings
+    exist, the review body must mention how many additional findings are in the
+    web app."""
+    from agent.tools.publish_review import _publish_review_async
+
+    findings = [
+        _f(id="f_low_1", severity="low", file="a.py", start_line=1, end_line=1),
+        _f(id="f_low_2", severity="low", file="b.py", start_line=2, end_line=2),
+    ]
+    post_review = AsyncMock(return_value={"id": 555})
+    fetch_comments = AsyncMock(return_value=[])
+
+    with (
+        patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
+        patch("agent.tools.publish_review.list_findings_async", AsyncMock(return_value=findings)),
+        patch("agent.tools.publish_review.post_pull_request_review", post_review),
+        patch("agent.tools.publish_review.fetch_review_comments", fetch_comments),
+        patch(
+            "agent.tools.publish_review._resolve_threads_for_resolved_findings",
+            new_callable=AsyncMock,
+            return_value=0,
+        ),
+        patch("agent.tools.publish_review.set_reviewer_thread_metadata", AsyncMock()),
+        patch("agent.tools.publish_review._maybe_post_slack_completion_reply", AsyncMock()),
+    ):
+        result = await _publish_review_async(
+            owner="o",
+            repo="r",
+            pr_number=7,
+            head_sha="sha",
+            token="t",
+            severity_threshold="medium",
+            cap=15,
+            is_re_review=False,
+        )
+
+    assert result["success"] is True
+    assert result["surfaced_count"] == 0
+    posted_body = post_review.await_args.kwargs["body"]
+    assert "No issues found" in posted_body
+    assert "2 additional findings can be viewed in the web app." in posted_body
+
+
+async def test_publish_review_forwards_trace_link_config_override() -> None:
     from agent.tools.publish_review import publish_review
 
     publish_async = AsyncMock(return_value={"success": True})
@@ -408,7 +487,7 @@ def test_publish_review_forwards_trace_link_config_override() -> None:
         patch("agent.tools.publish_review.get_github_token", return_value="token"),
         patch("agent.tools.publish_review._publish_review_async", publish_async),
     ):
-        result = publish_review()
+        result = await publish_review()
 
     assert result == {"success": True}
     assert publish_async.call_args.kwargs["trace_link_config_override"] is False
@@ -1126,7 +1205,7 @@ async def test_re_review_backfills_and_resolves_duplicate_existing_threads() -> 
     assert reply_comment.await_count == 2
     assert (
         reply_comment.await_args_list[0].kwargs["body"]
-        == "✅ **Resolved**: The duplicate threads are fixed by the latest commit."
+        == "The duplicate threads are fixed by the latest commit."
     )
     assert findings[0]["github_review_comment_ids"] == [101, 102]
     assert findings[0]["github_review_thread_ids"] == ["THREAD_1", "THREAD_2"]
@@ -2115,7 +2194,7 @@ async def test_publish_review_fetches_pr_diff_when_diff_line_set_missing() -> No
     assert result["unresolvable_findings"] == ["f_bad"]
 
 
-def test_publish_review_tool_returns_structured_error_when_thread_missing() -> None:
+async def test_publish_review_tool_returns_structured_error_when_thread_missing() -> None:
     """A missing reviewer thread surfaces as a do-not-retry tool result instead
     of an exception the middleware swallows into an empty tool message."""
     from agent.reviewer_findings import ReviewerThreadMissingError
@@ -2140,7 +2219,7 @@ def test_publish_review_tool_returns_structured_error_when_thread_missing() -> N
         patch("agent.tools.publish_review.get_github_token", return_value="token"),
         patch("agent.tools.publish_review._publish_review_async", publish_async),
     ):
-        result = publish_review()
+        result = await publish_review()
 
     assert result["success"] is False
     assert result["error"] == "thread_not_found"
