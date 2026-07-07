@@ -136,6 +136,23 @@ from .utils.tracing import AGENT_TRACING_PROJECT, traced_graph_factory
 
 client = get_client()
 
+DEFAULT_TOOL_LOADER_TIMEOUT_SECONDS = 5.0
+
+
+def _tool_loader_timeout_seconds() -> float:
+    raw_timeout = os.environ.get("TOOL_LOADER_TIMEOUT_SECONDS")
+    if not raw_timeout:
+        return DEFAULT_TOOL_LOADER_TIMEOUT_SECONDS
+    try:
+        timeout = float(raw_timeout)
+    except ValueError:
+        logger.warning("Invalid TOOL_LOADER_TIMEOUT_SECONDS=%r; using default", raw_timeout)
+        return DEFAULT_TOOL_LOADER_TIMEOUT_SECONDS
+    if timeout <= 0:
+        logger.warning("TOOL_LOADER_TIMEOUT_SECONDS must be positive; using default")
+        return DEFAULT_TOOL_LOADER_TIMEOUT_SECONDS
+    return timeout
+
 
 async def _resolve_prompt_default_repo(configurable: dict[str, Any]) -> dict[str, str] | None:
     repo_config = configurable.get("repo")
@@ -595,8 +612,14 @@ async def _observability_authorized(config: RunnableConfig, profile_login: str |
 
 
 async def _cached_tool_loader(key: str, ttl_seconds: float, loader: Any) -> list[Any]:
+    async def load_with_timeout() -> list[Any]:
+        return await asyncio.wait_for(loader(), timeout=_tool_loader_timeout_seconds())
+
     try:
-        return await ttl_cache.cached(key, ttl_seconds, loader)
+        return await ttl_cache.cached_stale_while_revalidate(key, ttl_seconds, load_with_timeout)
+    except TimeoutError:
+        logger.warning("Timed out loading cached tools for %s", key, exc_info=True)
+        return []
     except Exception:
         logger.warning("Failed to load cached tools for %s", key, exc_info=True)
         return []
