@@ -427,7 +427,7 @@ async def gh_get_repo(owner: str, repo: str) -> JSONResponse:
     return JSONResponse({"full_name": f"{owner}/{repo}", "private": False})
 
 
-@app.get("/fake-gh/repos/{owner}/{repo}/branches/{branch}")
+@app.get("/fake-gh/repos/{owner}/{repo}/branches/{branch:path}")
 async def gh_get_branch(owner: str, repo: str, branch: str) -> JSONResponse:  # noqa: ARG001
     if not fakes.branch_exists(branch):
         return JSONResponse({"message": "Branch not found"}, status_code=404)
