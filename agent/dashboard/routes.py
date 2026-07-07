@@ -429,7 +429,9 @@ async def options() -> dict[str, Any]:
     # Never advertise a default that isn't in the selectable list: when Fable is
     # off, gate a stale Fable default down to its non-Fable fallback so the Cloud
     # Agents page (and the PUT /profile it drives) don't choke on it.
-    agent_model, agent_effort = gate_fable_model(agent_model, agent_effort, fable_enabled=fable_enabled)
+    agent_model, agent_effort = gate_fable_model(
+        agent_model, agent_effort, fable_enabled=fable_enabled
+    )
     subagent_model, subagent_effort = gate_fable_model(
         subagent_model, subagent_effort, fable_enabled=fable_enabled
     )
