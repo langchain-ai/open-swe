@@ -977,6 +977,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             ),
             SanitizeToolInputsMiddleware(),
             ModelCallLimitMiddleware(run_limit=MODEL_CALL_RECURSION_LIMIT, exit_behavior="end"),
+            ToolErrorMiddleware(),
             ToolRetryMiddleware(
                 max_retries=2,
                 tools=["task"],
@@ -985,7 +986,6 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 initial_delay=1.0,
                 max_delay=10.0,
             ),
-            ToolErrorMiddleware(),
             ToolArtifactMiddleware(),
             WorkflowPushGuardMiddleware(),
             refresh_github_proxy_before_model,
