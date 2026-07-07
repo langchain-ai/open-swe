@@ -19,7 +19,6 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from ..utils.dashboard_handoff import DASHBOARD_HANDOFF_INSTRUCTION
 from ..utils.langsmith import get_langsmith_trace_url
-from ..utils.sandbox import create_sandbox
 from ..utils.slack import lookup_slack_thread_run_mapping, update_slack_trace_reply_for_web_handoff
 from ..utils.thread_ops import (
     get_thread_active_status,
@@ -66,6 +65,13 @@ _SURFACED_SOURCES: tuple[str, ...] = ("dashboard", "github", "slack", "linear", 
 _PR_STATES: frozenset[str] = frozenset({"draft", "open", "merged", "closed"})
 _RECOVERY_PATCH_LIMIT_BYTES = 25 * 1024 * 1024
 _RECOVERY_PATCH_TIMEOUT_SECONDS = 120
+
+
+async def create_sandbox(*args: Any, **kwargs: Any) -> Any:
+    # deferred: pulls deepagents -> langchain_anthropic -> anthropic at import time
+    from ..utils.sandbox import create_sandbox as _create_sandbox
+
+    return await _create_sandbox(*args, **kwargs)
 
 
 def _agent_version_metadata() -> dict[str, str]:

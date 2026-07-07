@@ -1,22 +1,27 @@
-from .check_message_queue import check_message_queue_before_model
-from .ensure_no_empty_msg import ensure_no_empty_msg
-from .exclude_tools import ExcludeToolsMiddleware
-from .model_fallback import ModelFallbackMiddleware
-from .notify_step_limit import notify_step_limit_reached
-from .plan_mode import PlanModeMiddleware
-from .prepare_run import BasePrepareRunMiddleware, PrepareRunState
-from .refresh_github_proxy import refresh_github_proxy_before_model
-from .refresh_slack_status import SlackAssistantStatusMiddleware
-from .repair_orphaned_tool_calls import RepairOrphanedToolCallsMiddleware
-from .sandbox_circuit_breaker import SandboxCircuitBreakerMiddleware
-from .sanitize_fireworks_messages import SanitizeFireworksMessagesMiddleware
-from .sanitize_openai_responses import SanitizeOpenAIResponsesMiddleware
-from .sanitize_thinking_blocks import SanitizeThinkingBlocksMiddleware
-from .sanitize_tool_inputs import SanitizeToolInputsMiddleware
-from .settle_review_check import settle_review_check_on_exit
-from .tool_artifact import ToolArtifactMiddleware
-from .tool_error_handler import ToolErrorMiddleware
-from .workflow_push_guard import WorkflowPushGuardMiddleware
+from typing import TYPE_CHECKING, Any
+
+_MIDDLEWARE_MODULES = {
+    "check_message_queue_before_model": ".check_message_queue",
+    "ensure_no_empty_msg": ".ensure_no_empty_msg",
+    "ExcludeToolsMiddleware": ".exclude_tools",
+    "ModelFallbackMiddleware": ".model_fallback",
+    "notify_step_limit_reached": ".notify_step_limit",
+    "PlanModeMiddleware": ".plan_mode",
+    "BasePrepareRunMiddleware": ".prepare_run",
+    "PrepareRunState": ".prepare_run",
+    "refresh_github_proxy_before_model": ".refresh_github_proxy",
+    "SlackAssistantStatusMiddleware": ".refresh_slack_status",
+    "RepairOrphanedToolCallsMiddleware": ".repair_orphaned_tool_calls",
+    "SandboxCircuitBreakerMiddleware": ".sandbox_circuit_breaker",
+    "SanitizeFireworksMessagesMiddleware": ".sanitize_fireworks_messages",
+    "SanitizeOpenAIResponsesMiddleware": ".sanitize_openai_responses",
+    "SanitizeThinkingBlocksMiddleware": ".sanitize_thinking_blocks",
+    "SanitizeToolInputsMiddleware": ".sanitize_tool_inputs",
+    "settle_review_check_on_exit": ".settle_review_check",
+    "ToolArtifactMiddleware": ".tool_artifact",
+    "ToolErrorMiddleware": ".tool_error_handler",
+    "WorkflowPushGuardMiddleware": ".workflow_push_guard",
+}
 
 __all__ = [
     "ExcludeToolsMiddleware",
@@ -40,3 +45,33 @@ __all__ = [
     "refresh_github_proxy_before_model",
     "settle_review_check_on_exit",
 ]
+
+if TYPE_CHECKING:
+    from .check_message_queue import check_message_queue_before_model
+    from .ensure_no_empty_msg import ensure_no_empty_msg
+    from .exclude_tools import ExcludeToolsMiddleware
+    from .model_fallback import ModelFallbackMiddleware
+    from .notify_step_limit import notify_step_limit_reached
+    from .plan_mode import PlanModeMiddleware
+    from .prepare_run import BasePrepareRunMiddleware, PrepareRunState
+    from .refresh_github_proxy import refresh_github_proxy_before_model
+    from .refresh_slack_status import SlackAssistantStatusMiddleware
+    from .repair_orphaned_tool_calls import RepairOrphanedToolCallsMiddleware
+    from .sandbox_circuit_breaker import SandboxCircuitBreakerMiddleware
+    from .sanitize_fireworks_messages import SanitizeFireworksMessagesMiddleware
+    from .sanitize_openai_responses import SanitizeOpenAIResponsesMiddleware
+    from .sanitize_thinking_blocks import SanitizeThinkingBlocksMiddleware
+    from .sanitize_tool_inputs import SanitizeToolInputsMiddleware
+    from .settle_review_check import settle_review_check_on_exit
+    from .tool_artifact import ToolArtifactMiddleware
+    from .tool_error_handler import ToolErrorMiddleware
+    from .workflow_push_guard import WorkflowPushGuardMiddleware
+
+
+def __getattr__(name: str) -> Any:
+    module_name = _MIDDLEWARE_MODULES.get(name)
+    if module_name is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    from importlib import import_module
+
+    return getattr(import_module(module_name, __name__), name)

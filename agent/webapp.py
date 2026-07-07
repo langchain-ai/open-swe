@@ -1,5 +1,6 @@
 """Custom FastAPI routes for LangGraph server."""
 
+import asyncio
 import hashlib
 import hmac
 import json
@@ -7,7 +8,7 @@ import logging
 import os
 import uuid
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import parse_qs, quote
@@ -149,6 +150,15 @@ if os.environ.get("DEBUG_TRACEMALLOC"):
     )
 
 
+async def _warm_deployment_tool_caches() -> None:
+    try:
+        from .server import warm_deployment_tool_caches
+
+        await warm_deployment_tool_caches()
+    except Exception:
+        logger.debug("Deployment tool cache warmup failed", exc_info=True)
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     from .utils.model import close_cached_models, validate_local_dev_llm_config
@@ -156,9 +166,14 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
 
     validate_sandbox_startup_config()
     validate_local_dev_llm_config()
+    warmup_task = asyncio.create_task(_warm_deployment_tool_caches())
     try:
         yield
     finally:
+        if not warmup_task.done():
+            warmup_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await warmup_task
         await close_cached_models()
 
 
