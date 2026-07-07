@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import importlib
+from typing import Any
+
+import pytest
 
 dispatch = importlib.import_module("agent.dispatch")
 
@@ -43,3 +46,67 @@ def test_resolve_absolute_url_appends_token() -> None:
 def test_resolve_absolute_url_with_existing_query_left_as_is() -> None:
     url = f"{_ABSOLUTE}?token=preset"
     assert dispatch._resolve_completion_webhook_url(url, "s3cret") == url
+
+
+class _FakeRuns:
+    def __init__(self) -> None:
+        self.created: list[dict[str, Any]] = []
+
+    async def create(self, thread_id: str, assistant_id: str, **kwargs: Any) -> dict[str, str]:
+        self.created.append({"thread_id": thread_id, "assistant_id": assistant_id, **kwargs})
+        return {"run_id": "run-1"}
+
+
+class _FakeClient:
+    def __init__(self) -> None:
+        self.runs = _FakeRuns()
+
+
+@pytest.mark.asyncio
+async def test_create_durable_run_applies_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = _FakeClient()
+    monkeypatch.setattr(dispatch, "COMPLETION_WEBHOOK_URL", "https://app/webhooks/run-complete")
+
+    run = await dispatch.create_durable_run(
+        "thread-1",
+        "agent",
+        input={"messages": [{"role": "user", "content": "hi"}]},
+        source="test",
+        config={"configurable": {"thread_id": "thread-1"}, "metadata": {"kind": "test"}},
+        client=client,
+    )
+
+    assert run == {"run_id": "run-1"}
+    created = client.runs.created[0]
+    assert created["durability"] == "sync"
+    assert created["multitask_strategy"] == "interrupt"
+    assert created["if_not_exists"] == "create"
+    assert created["webhook"] == "https://app/webhooks/run-complete"
+    assert created["config"]["metadata"] == {"kind": "test"}
+    assert created["config"]["configurable"]["thread_id"] == "thread-1"
+    assert isinstance(created["config"]["configurable"]["prepare_run_id"], str)
+
+
+@pytest.mark.asyncio
+async def test_create_durable_run_preserves_existing_prepare_id_and_stream_kwargs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _FakeClient()
+    monkeypatch.setattr(dispatch, "COMPLETION_WEBHOOK_URL", None)
+
+    await dispatch.create_durable_run(
+        "thread-1",
+        "agent",
+        input={"messages": []},
+        source="schedule",
+        config={"configurable": {"prepare_run_id": "existing"}},
+        stream_mode=["values"],
+        stream_resumable=True,
+        client=client,
+    )
+
+    created = client.runs.created[0]
+    assert "webhook" not in created
+    assert created["stream_mode"] == ["values"]
+    assert created["stream_resumable"] is True
+    assert created["config"]["configurable"]["prepare_run_id"] == "existing"

@@ -2,9 +2,10 @@ import asyncio
 import os
 from collections.abc import Callable
 from importlib import import_module
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from deepagents.backends.protocol import SandboxBackendProtocol
+if TYPE_CHECKING:
+    from deepagents.backends.protocol import SandboxBackendProtocol
 
 SandboxFactory = Callable[..., Any]
 
@@ -34,7 +35,7 @@ async def create_sandbox(
     sandbox_id: str | None = None,
     *,
     snapshot_id: str | None = None,
-) -> SandboxBackendProtocol:
+) -> "SandboxBackendProtocol":
     """Create or reconnect to a sandbox using the configured provider.
 
     The provider is selected via the SANDBOX_TYPE environment variable.
