@@ -67,6 +67,12 @@ class TestShouldFallback:
         exc = anthropic.RateLimitError("rate", response=response, body={})
         assert _should_fallback(exc) is True
 
+    def test_httpx_remote_protocol_error_falls_back(self) -> None:
+        exc = httpx.RemoteProtocolError(
+            "peer closed connection without sending complete message body (incomplete chunked read)"
+        )
+        assert _should_fallback(exc) is True
+
     def test_anthropic_400_does_not_fall_back(self) -> None:
         request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
         response = httpx.Response(400, request=request, json={"error": {}})
@@ -90,6 +96,31 @@ class TestModelFallbackMiddleware:
             calls.append(req)
             if len(calls) == 1:
                 raise _anthropic_overloaded()
+            return good_response
+
+        request = _make_request()
+        result = await middleware.awrap_model_call(request, handler)
+
+        assert result is good_response
+        assert len(calls) == 2
+        request.override.assert_called_once_with(model=fallback_model)
+        assert calls[1] is request.override.return_value
+
+    @pytest.mark.asyncio
+    async def test_async_falls_over_on_stream_transport_error(self) -> None:
+        fallback_model = MagicMock(name="fallback_model")
+        middleware = ModelFallbackMiddleware(fallback_model)
+
+        calls: list[object] = []
+        good_response = MagicMock(result=[AIMessage(content="ok from fallback")])
+
+        async def handler(req: object) -> object:
+            calls.append(req)
+            if len(calls) == 1:
+                raise httpx.RemoteProtocolError(
+                    "peer closed connection without sending complete message body "
+                    "(incomplete chunked read)"
+                )
             return good_response
 
         request = _make_request()

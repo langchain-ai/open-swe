@@ -17,6 +17,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 import anthropic
+import httpx
 import openai
 from langchain.agents.middleware import AgentMiddleware
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
@@ -36,6 +37,7 @@ _TRANSIENT_EXCEPTIONS: tuple[type[BaseException], ...] = (
     openai.APITimeoutError,
     openai.RateLimitError,
     openai.InternalServerError,
+    httpx.TransportError,
 )
 
 
