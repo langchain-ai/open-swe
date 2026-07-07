@@ -20,6 +20,9 @@ _MIDDLEWARE_MODULES = {
     "SanitizeThinkingBlocksMiddleware": ".sanitize_thinking_blocks",
     "SanitizeToolInputsMiddleware": ".sanitize_tool_inputs",
     "settle_review_check_on_exit": ".settle_review_check",
+    "task_on_failure": ".task_retry",
+    "task_retry_on": ".task_retry",
+    "TimeoutWrapupMiddleware": ".timeout_wrapup",
     "ToolArtifactMiddleware": ".tool_artifact",
     "ToolErrorMiddleware": ".tool_error_handler",
     "WorkflowPushGuardMiddleware": ".workflow_push_guard",
@@ -38,6 +41,7 @@ __all__ = [
     "SanitizeToolInputsMiddleware",
     "ToolArtifactMiddleware",
     "ToolErrorMiddleware",
+    "TimeoutWrapupMiddleware",
     "WorkflowPushGuardMiddleware",
     "SandboxCircuitBreakerMiddleware",
     "SlackAssistantStatusMiddleware",
@@ -46,6 +50,8 @@ __all__ = [
     "notify_step_limit_reached",
     "refresh_github_proxy_before_model",
     "settle_review_check_on_exit",
+    "task_on_failure",
+    "task_retry_on",
 ]
 
 if TYPE_CHECKING:
@@ -65,6 +71,8 @@ if TYPE_CHECKING:
     from .sanitize_thinking_blocks import SanitizeThinkingBlocksMiddleware
     from .sanitize_tool_inputs import SanitizeToolInputsMiddleware
     from .settle_review_check import settle_review_check_on_exit
+    from .task_retry import task_on_failure, task_retry_on
+    from .timeout_wrapup import TimeoutWrapupMiddleware
     from .tool_artifact import ToolArtifactMiddleware
     from .tool_error_handler import ToolErrorMiddleware
     from .workflow_push_guard import WorkflowPushGuardMiddleware

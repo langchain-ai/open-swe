@@ -15,6 +15,7 @@ from __future__ import annotations
 import logging
 import os
 import warnings
+from typing import Any
 
 from langgraph.graph.state import RunnableConfig
 from langgraph.pregel import Pregel
@@ -27,10 +28,16 @@ from deepagents.backends.composite import CompositeBackend
 from deepagents.backends.protocol import SandboxBackendProtocol
 from deepagents.backends.state import StateBackend
 from langchain.agents.middleware import ModelCallLimitMiddleware
+from langchain_core.language_models import BaseChatModel
 
 from .dashboard.team_settings import get_effective_gateway_enabled
 from .integrations.langsmith import _configure_github_proxy
-from .middleware import BasePrepareRunMiddleware, SanitizeToolInputsMiddleware, ToolErrorMiddleware
+from .middleware import (
+    BasePrepareRunMiddleware,
+    SanitizeToolInputsMiddleware,
+    TimeoutWrapupMiddleware,
+    ToolErrorMiddleware,
+)
 from .review_style_guidance import REVIEWER_STYLE_THEMES
 from .server import (
     DEFAULT_LLM_MAX_TOKENS,
@@ -44,6 +51,7 @@ from .tools.read_finding_outcomes import read_finding_outcomes
 from .tools.save_review_style import save_review_style_prompt
 from .utils import ttl_cache
 from .utils.analyzer_skills import SKILLS_ROUTE, skill_path_for_mode
+from .utils.deferred_model import make_deferred_error_model
 from .utils.github_app import get_github_app_installation_token
 from .utils.model import DEFAULT_LLM_REASONING, make_model, provider_model_kwargs
 from .utils.sandbox_paths import aresolve_sandbox_work_dir
@@ -95,6 +103,14 @@ async def _cached_gateway_enabled() -> bool:
         60,
         get_effective_gateway_enabled,
     )
+
+
+def _make_model_or_defer(model_id: str, *, use_gateway: bool, **kwargs: Any) -> BaseChatModel:
+    try:
+        return make_model(model_id, use_gateway=use_gateway, **kwargs)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Deferring analyzer model setup failure for %s", model_id, exc_info=True)
+        return make_deferred_error_model(e, model_id=model_id)
 
 
 class PrepareAnalyzerRunMiddleware(BasePrepareRunMiddleware):
@@ -167,7 +183,7 @@ async def get_analyzer(config: RunnableConfig) -> Pregel:
     )
 
     return create_deep_agent(
-        model=make_model(model_id, use_gateway=use_gateway, **model_kwargs),
+        model=_make_model_or_defer(model_id, use_gateway=use_gateway, **model_kwargs),
         system_prompt="",
         tools=[save_review_style_prompt, read_finding_outcomes],
         backend=backend_factory,
@@ -180,6 +196,7 @@ async def get_analyzer(config: RunnableConfig) -> Pregel:
                 exit_behavior="end",
             ),
             ToolErrorMiddleware(),
+            TimeoutWrapupMiddleware(),
         ],
     ).with_config(config)
 

@@ -23,11 +23,26 @@ from langsmith.sandbox import (
 
 logger = logging.getLogger(__name__)
 
+try:
+    from langsmith.sandbox import SandboxNotReadyError
+except ImportError:  # pragma: no cover - depends on langsmith SDK version
+    SANDBOX_NOT_READY_ERRORS: tuple[type[BaseException], ...] = ()
+else:
+    SANDBOX_NOT_READY_ERRORS = (SandboxNotReadyError,)
+
 DEFAULT_SNAPSHOT_FS_CAPACITY_BYTES = 32 * 1024**3
 DEFAULT_SANDBOX_VCPUS = 2
 DEFAULT_SANDBOX_MEM_BYTES = 7936 * 1024**2  # 7936 MiB ("large" tier cap)
 DEFAULT_SANDBOX_IDLE_TTL_SECONDS = 2 * 60 * 60  # 2 hours
 DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS = 24 * 60 * 60  # 24 hours
+SANDBOX_CREATE_MAX_ATTEMPTS = 3
+SANDBOX_CREATE_RETRY_DELAYS_SECONDS = (1.0, 3.0)
+SANDBOX_CREATE_RETRYABLE_STATUS_CODES = frozenset({408, 409, 425, 429, 500, 502, 503, 504, 529})
+SANDBOX_READY_STATUSES = frozenset({"ready", "running"})
+SANDBOX_RECONNECT_STARTABLE_STATUSES = frozenset({"stopped", "paused", "idle"})
+SANDBOX_RECONNECT_PENDING_STATUSES = frozenset({"creating", "pending", "starting", "resuming"})
+SANDBOX_RECONNECT_READY_TIMEOUT_SECONDS = 30.0
+SANDBOX_RECONNECT_READY_POLL_SECONDS = 2.0
 PROXY_CONFIG_MAX_ATTEMPTS = 3
 PROXY_CONFIG_TIMEOUT_SECONDS = 10.0
 PROXY_CONFIG_RETRY_DELAYS_SECONDS = (0.5, 1.0)
@@ -131,6 +146,85 @@ def _is_retryable_proxy_config_error(exc: BaseException) -> bool:
     if isinstance(exc, httpx.HTTPStatusError):
         return exc.response.status_code in PROXY_CONFIG_RETRYABLE_STATUS_CODES
     return isinstance(exc, httpx.TransportError)
+
+
+def _status_text(sandbox_or_status: Any) -> str:
+    status = getattr(sandbox_or_status, "status", sandbox_or_status)
+    status = getattr(status, "value", status)
+    return str(status or "").lower()
+
+
+def _is_retryable_sandbox_create_error(exc: BaseException) -> bool:
+    response = getattr(exc, "response", None)
+    status_code = getattr(response, "status_code", None) or getattr(exc, "status_code", None)
+    if isinstance(status_code, int):
+        return status_code in SANDBOX_CREATE_RETRYABLE_STATUS_CODES
+    return exc.__class__.__name__ in {
+        "ResourceCreationError",
+        "SandboxAPIError",
+        "SandboxConnectionError",
+        "SandboxNotReadyError",
+    }
+
+
+async def _wait_for_reconnected_sandbox(
+    client: AsyncSandboxClient,
+    sandbox_id: str,
+    *,
+    timeout_seconds: float = SANDBOX_RECONNECT_READY_TIMEOUT_SECONDS,
+    poll_seconds: float = SANDBOX_RECONNECT_READY_POLL_SECONDS,
+) -> Any:
+    deadline = asyncio.get_running_loop().time() + timeout_seconds
+    last_sandbox = await client.get_sandbox(name=sandbox_id)
+    while True:
+        status = _status_text(last_sandbox)
+        if status in SANDBOX_READY_STATUSES or status not in SANDBOX_RECONNECT_PENDING_STATUSES:
+            return last_sandbox
+        if asyncio.get_running_loop().time() >= deadline:
+            return last_sandbox
+        await asyncio.sleep(
+            min(poll_seconds, max(deadline - asyncio.get_running_loop().time(), 0.0))
+        )
+        last_sandbox = await client.get_sandbox(name=sandbox_id)
+
+
+async def _create_sandbox_with_retry(
+    client: AsyncSandboxClient,
+    *,
+    snapshot_id: str,
+    fs_capacity_bytes: int | None,
+    vcpus: int | None,
+    mem_bytes: int | None,
+    idle_ttl_seconds: int | None,
+    delete_after_stop_seconds: int | None,
+    timeout: int,
+) -> Any:
+    for attempt in range(SANDBOX_CREATE_MAX_ATTEMPTS):
+        try:
+            return await client.create_sandbox(
+                snapshot_id=snapshot_id,
+                fs_capacity_bytes=fs_capacity_bytes,
+                vcpus=vcpus,
+                mem_bytes=mem_bytes,
+                idle_ttl_seconds=idle_ttl_seconds,
+                delete_after_stop_seconds=delete_after_stop_seconds,
+                timeout=timeout,
+            )
+        except Exception as exc:
+            if attempt == SANDBOX_CREATE_MAX_ATTEMPTS - 1 or not _is_retryable_sandbox_create_error(
+                exc
+            ):
+                raise
+            delay = SANDBOX_CREATE_RETRY_DELAYS_SECONDS[
+                min(attempt, len(SANDBOX_CREATE_RETRY_DELAYS_SECONDS) - 1)
+            ]
+            logger.warning(
+                "Failed to create LangSmith sandbox (%s); retrying in %.1fs",
+                type(exc).__name__,
+                delay,
+            )
+            await asyncio.sleep(delay)
+    raise RuntimeError("unreachable sandbox retry state")
 
 
 async def _configure_github_proxy(sandbox_name: str, github_token: str) -> None:
@@ -326,7 +420,7 @@ class TimeoutLangSmithSandbox(LangSmithSandbox):
         # connect/setup failures raise here — fall back to the base path.
         try:
             handle = self._sandbox.run(command, timeout=effective, wait=False)
-        except (*self._WS_FALLBACK_ERRORS, TimeoutError):
+        except (*self._WS_FALLBACK_ERRORS, *SANDBOX_NOT_READY_ERRORS, TimeoutError):
             return self._base_execute(command, timeout)
         deadline = self._deadline(effective)
         pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="sbx-exec")
@@ -339,7 +433,7 @@ class TimeoutLangSmithSandbox(LangSmithSandbox):
                 return self._timeout_response(deadline, server_side=False)
             except CommandTimeoutError:
                 return self._timeout_response(effective, server_side=True)
-            except self._WS_FALLBACK_ERRORS:
+            except (*self._WS_FALLBACK_ERRORS, *SANDBOX_NOT_READY_ERRORS):
                 return self._base_execute(command, timeout)
             return self._result_to_response(result)
         finally:
@@ -362,7 +456,7 @@ class TimeoutLangSmithSandbox(LangSmithSandbox):
             handle = await asyncio.to_thread(
                 self._sandbox.run, command, timeout=effective, wait=False
             )
-        except (*self._WS_FALLBACK_ERRORS, TimeoutError):
+        except (*self._WS_FALLBACK_ERRORS, *SANDBOX_NOT_READY_ERRORS, TimeoutError):
             return await asyncio.to_thread(self._base_execute, command, timeout)
         deadline = self._deadline(effective)
         try:
@@ -374,7 +468,7 @@ class TimeoutLangSmithSandbox(LangSmithSandbox):
             return self._timeout_response(deadline, server_side=False)
         except CommandTimeoutError:
             return self._timeout_response(effective, server_side=True)
-        except self._WS_FALLBACK_ERRORS:
+        except (*self._WS_FALLBACK_ERRORS, *SANDBOX_NOT_READY_ERRORS):
             return await asyncio.to_thread(self._base_execute, command, timeout)
         return self._result_to_response(result)
 
@@ -474,6 +568,24 @@ class LangSmithProvider(SandboxProvider):
                 except Exception as e:
                     msg = f"Failed to connect to existing sandbox '{sandbox_id}': {e}"
                     raise RuntimeError(msg) from e
+                status = _status_text(sandbox)
+                if status and status not in SANDBOX_READY_STATUSES:
+                    if status in SANDBOX_RECONNECT_STARTABLE_STATUSES:
+                        try:
+                            logger.info(
+                                "Starting LangSmith sandbox %s before reconnect (status=%s)",
+                                sandbox_id,
+                                status,
+                            )
+                            await client.start_sandbox(sandbox_id)
+                            sandbox = await _wait_for_reconnected_sandbox(client, sandbox_id)
+                            status = _status_text(sandbox)
+                        except Exception as e:
+                            msg = f"Failed to start existing sandbox '{sandbox_id}' ({status})"
+                            raise RuntimeError(msg) from e
+                    if status not in SANDBOX_READY_STATUSES:
+                        msg = f"Existing sandbox '{sandbox_id}' is {status or 'unknown'}, not reusable"
+                        raise RuntimeError(msg)
                 return TimeoutLangSmithSandbox(sandbox.to_sync())
 
             if not snapshot_id:
@@ -481,7 +593,8 @@ class LangSmithProvider(SandboxProvider):
                 raise ValueError(msg)
 
             try:
-                sandbox = await client.create_sandbox(
+                sandbox = await _create_sandbox_with_retry(
+                    client,
                     snapshot_id=snapshot_id,
                     fs_capacity_bytes=fs_capacity_bytes,
                     vcpus=vcpus,
