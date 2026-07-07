@@ -36,11 +36,13 @@ from deepagents.middleware.skills import SkillsMiddleware
 from langchain.agents.middleware import ModelCallLimitMiddleware
 from langchain_core.language_models.chat_models import BaseChatModel
 
+from .dashboard.options import gate_fable_model
 from .dashboard.team_settings import (
     get_effective_gateway_enabled,
     get_org_review_guidelines,
     get_team_default_grouping_model,
     get_team_default_model_pair,
+    get_team_fable_enabled,
 )
 from .middleware import (
     BasePrepareRunMiddleware,
@@ -841,6 +843,9 @@ async def _resolve_grouping_model(
         effort = configured_effort if isinstance(configured_effort, str) else None
     else:
         model_id, effort = await get_team_default_grouping_model()
+    model_id, effort = gate_fable_model(
+        model_id, effort, fable_enabled=await get_team_fable_enabled()
+    )
     model_kwargs = provider_model_kwargs(
         model_id,
         effort,
@@ -1259,6 +1264,13 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
         subagent_effort = (
             configured_subagent_effort if isinstance(configured_subagent_effort, str) else None
         )
+    fable_enabled = await get_team_fable_enabled()
+    model_id, reasoning_effort = gate_fable_model(
+        model_id, reasoning_effort, fable_enabled=fable_enabled
+    )
+    subagent_model_id, subagent_effort = gate_fable_model(
+        subagent_model_id, subagent_effort, fable_enabled=fable_enabled
+    )
     model_kwargs = provider_model_kwargs(
         model_id,
         reasoning_effort,

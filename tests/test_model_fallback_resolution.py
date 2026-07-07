@@ -5,7 +5,10 @@ import pytest
 from agent.dashboard.agent_overrides import normalize_profile_overrides
 from agent.dashboard.options import (
     DEFAULT_MODEL_ID,
+    FABLE_MODEL_IDS,
     default_model_pair,
+    fable_disabled_fallback,
+    gate_fable_model,
     provider_fallback_pair,
 )
 from agent.dashboard.team_settings import get_team_default_model
@@ -79,3 +82,31 @@ def test_profile_unknown_provider_defers_to_team_default() -> None:
 def test_global_default_is_supported() -> None:
     model, _ = default_model_pair()
     assert model == DEFAULT_MODEL_ID
+
+
+def test_gate_fable_passthrough_when_enabled() -> None:
+    assert gate_fable_model("anthropic:claude-fable-5", "high", fable_enabled=True) == (
+        "anthropic:claude-fable-5",
+        "high",
+    )
+
+
+def test_gate_fable_swaps_to_opus_when_disabled() -> None:
+    assert gate_fable_model("anthropic:claude-fable-5", "high", fable_enabled=False) == (
+        "anthropic:claude-opus-4-8",
+        "high",
+    )
+
+
+def test_gate_fable_leaves_non_fable_ids_alone() -> None:
+    assert gate_fable_model("openai:gpt-5.5", "high", fable_enabled=False) == (
+        "openai:gpt-5.5",
+        "high",
+    )
+
+
+def test_fable_disabled_fallback_is_non_fable_anthropic() -> None:
+    model, effort = fable_disabled_fallback("high")
+    assert model == "anthropic:claude-opus-4-8"
+    assert model not in FABLE_MODEL_IDS
+    assert effort == "high"
