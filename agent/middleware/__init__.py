@@ -9,8 +9,9 @@ _MIDDLEWARE_MODULES = {
     "ModelFallbackMiddleware": ".model_fallback",
     "notify_step_limit_reached": ".notify_step_limit",
     "PlanModeMiddleware": ".plan_mode",
-    "BasePrepareRunMiddleware": ".prepare_run",
     "PrepareRunState": ".prepare_run",
+    "BasePrepareRunMiddleware": ".prepare_run",
+    "PullRequestCreationGuardMiddleware": ".pr_creation_guard",
     "refresh_github_proxy_before_model": ".refresh_github_proxy",
     "SlackAssistantStatusMiddleware": ".refresh_slack_status",
     "RepairOrphanedToolCallsMiddleware": ".repair_orphaned_tool_calls",
@@ -34,6 +35,7 @@ __all__ = [
     "BasePrepareRunMiddleware",
     "PlanModeMiddleware",
     "PrepareRunState",
+    "PullRequestCreationGuardMiddleware",
     "RepairOrphanedToolCallsMiddleware",
     "SanitizeFireworksMessagesMiddleware",
     "SanitizeOpenAIResponsesMiddleware",
@@ -61,6 +63,7 @@ if TYPE_CHECKING:
     from .model_fallback import ModelFallbackMiddleware
     from .notify_step_limit import notify_step_limit_reached
     from .plan_mode import PlanModeMiddleware
+    from .pr_creation_guard import PullRequestCreationGuardMiddleware
     from .prepare_run import BasePrepareRunMiddleware, PrepareRunState
     from .refresh_github_proxy import refresh_github_proxy_before_model
     from .refresh_slack_status import SlackAssistantStatusMiddleware
