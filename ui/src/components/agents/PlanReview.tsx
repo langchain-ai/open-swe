@@ -59,7 +59,7 @@ export function PlanReview({ plan }: { plan: PlanData }) {
   const [error, setError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
   // Locally track the displayed markdown so a manual edit shows immediately; the
-  // route's query stops polling once a plan exists, so the prop won't refetch.
+  // route's query stops polling once content exists, so the prop won't refetch.
   const [markdown, setMarkdown] = useState(plan.markdown)
   const [editing, setEditing] = useState(false)
   const [editDraft, setEditDraft] = useState(plan.markdown)
@@ -70,8 +70,12 @@ export function PlanReview({ plan }: { plan: PlanData }) {
     if (!editing) setMarkdown(plan.markdown)
   }, [plan.markdown, editing])
 
+  const isShared = plan.status === "shared"
   const canEdit =
-    plan.isOwner && plan.status !== "approved" && plan.status !== "cancelled"
+    plan.isOwner &&
+    !isShared &&
+    plan.status !== "approved" &&
+    plan.status !== "cancelled"
 
   const startEditing = useCallback(() => {
     setEditDraft(markdown)
@@ -114,13 +118,14 @@ export function PlanReview({ plan }: { plan: PlanData }) {
         /* transient; next tick retries */
       }
     }
+    if (isShared) return
     void load()
     const timer = setInterval(load, POLL_MS)
     return () => {
       cancelled = true
       clearInterval(timer)
     }
-  }, [plan.threadId])
+  }, [isShared, plan.threadId])
 
   const submitComment = useCallback(async () => {
     const body = draft.trim()
@@ -192,10 +197,10 @@ export function PlanReview({ plan }: { plan: PlanData }) {
       <div className="flex flex-col gap-3 border-b border-[var(--ui-border)] px-4 py-3 md:flex-row md:items-center md:justify-between md:gap-4 md:px-6">
         <div className="min-w-0">
           <h1 className="text-base font-semibold text-[var(--ui-text)]">
-            Implementation plan
+            {isShared ? "Shared response" : "Implementation plan"}
           </h1>
           <p className="text-xs text-[var(--ui-text-dim)]">
-            Reviewing as {plan.user.name}
+            {isShared ? "Viewing" : "Reviewing"} as {plan.user.name}
             {plan.isOwner ? " (owner)" : ""} · status:{" "}
             <span data-testid="plan-status">{plan.status}</span>
           </p>
@@ -247,7 +252,7 @@ export function PlanReview({ plan }: { plan: PlanData }) {
               >
                 {copied ? "Copied!" : "Copy markdown"}
               </Button>
-              {plan.isOwner && (
+              {!isShared && plan.isOwner && (
                 <Button
                   data-testid="approve-plan"
                   disabled={busy !== null || decision !== null}
@@ -256,23 +261,25 @@ export function PlanReview({ plan }: { plan: PlanData }) {
                   Approve
                 </Button>
               )}
-              <Button
-                data-testid="reject-plan"
-                variant="secondary"
-                // Requesting changes feeds the comments to the agent, so it's
-                // meaningless with none — disable until at least one is left.
-                disabled={
-                  busy !== null || decision !== null || comments.length === 0
-                }
-                title={
-                  comments.length === 0
-                    ? "Leave a comment first to request changes"
-                    : undefined
-                }
-                onClick={() => void decide("reject")}
-              >
-                Request changes
-              </Button>
+              {!isShared && (
+                <Button
+                  data-testid="reject-plan"
+                  variant="secondary"
+                  // Requesting changes feeds the comments to the agent, so it's
+                  // meaningless with none — disable until at least one is left.
+                  disabled={
+                    busy !== null || decision !== null || comments.length === 0
+                  }
+                  title={
+                    comments.length === 0
+                      ? "Leave a comment first to request changes"
+                      : undefined
+                  }
+                  onClick={() => void decide("reject")}
+                >
+                  Request changes
+                </Button>
+              )}
             </>
           )}
         </div>
@@ -306,73 +313,75 @@ export function PlanReview({ plan }: { plan: PlanData }) {
           )}
         </div>
 
-        <aside className="flex shrink-0 flex-col border-t border-[var(--ui-border)] md:w-80 md:border-t-0 md:border-l">
-          <div className="border-b border-[var(--ui-border)] px-4 py-3">
-            <h2 className="text-sm font-semibold text-[var(--ui-text)]">
-              Comments
-            </h2>
-          </div>
-          <div
-            className="max-h-80 space-y-3 overflow-auto px-4 py-3 md:max-h-none md:min-h-0 md:flex-1"
-            data-testid="plan-comments"
-          >
-            {comments.length === 0 ? (
-              <p className="text-xs text-[var(--ui-text-dim)]">
-                No comments yet.
-              </p>
-            ) : (
-              comments.map((c) => (
-                <div
-                  key={c.id}
-                  data-testid="plan-comment"
-                  className="rounded-md border border-[var(--ui-border)] bg-[var(--ui-panel)] px-3 py-2"
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-xs font-medium text-[var(--ui-text)]">
-                      {c.author}
-                    </span>
-                    <button
-                      type="button"
-                      data-testid="comment-delete"
-                      className="text-xs text-[var(--ui-text-dim)] hover:text-[var(--ui-text)]"
-                      onClick={() => void removeComment(c.id)}
-                    >
-                      Delete
-                    </button>
-                  </div>
-                  <p className="mt-1 text-sm whitespace-pre-wrap text-[var(--ui-text)]">
-                    {c.body}
-                  </p>
-                </div>
-              ))
-            )}
-          </div>
-          <div className="border-t border-[var(--ui-border)] p-3">
-            {error && (
-              <p className="mb-2 text-xs text-[color:var(--ui-danger)]">
-                {error}
-              </p>
-            )}
-            <textarea
-              data-testid="comment-input"
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              placeholder="Leave a comment on the plan"
-              rows={3}
-              className="w-full resize-none rounded-md border border-[var(--ui-border)] bg-[var(--ui-bg)] px-2 py-1.5 text-sm text-[var(--ui-text)] outline-none focus:border-[var(--ui-accent)]"
-            />
-            <div className="mt-2 flex justify-end">
-              <Button
-                data-testid="comment-submit"
-                size="sm"
-                disabled={posting || !draft.trim()}
-                onClick={() => void submitComment()}
-              >
-                Comment
-              </Button>
+        {!isShared && (
+          <aside className="flex shrink-0 flex-col border-t border-[var(--ui-border)] md:w-80 md:border-t-0 md:border-l">
+            <div className="border-b border-[var(--ui-border)] px-4 py-3">
+              <h2 className="text-sm font-semibold text-[var(--ui-text)]">
+                Comments
+              </h2>
             </div>
-          </div>
-        </aside>
+            <div
+              className="max-h-80 space-y-3 overflow-auto px-4 py-3 md:max-h-none md:min-h-0 md:flex-1"
+              data-testid="plan-comments"
+            >
+              {comments.length === 0 ? (
+                <p className="text-xs text-[var(--ui-text-dim)]">
+                  No comments yet.
+                </p>
+              ) : (
+                comments.map((c) => (
+                  <div
+                    key={c.id}
+                    data-testid="plan-comment"
+                    className="rounded-md border border-[var(--ui-border)] bg-[var(--ui-panel)] px-3 py-2"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-medium text-[var(--ui-text)]">
+                        {c.author}
+                      </span>
+                      <button
+                        type="button"
+                        data-testid="comment-delete"
+                        className="text-xs text-[var(--ui-text-dim)] hover:text-[var(--ui-text)]"
+                        onClick={() => void removeComment(c.id)}
+                      >
+                        Delete
+                      </button>
+                    </div>
+                    <p className="mt-1 text-sm whitespace-pre-wrap text-[var(--ui-text)]">
+                      {c.body}
+                    </p>
+                  </div>
+                ))
+              )}
+            </div>
+            <div className="border-t border-[var(--ui-border)] p-3">
+              {error && (
+                <p className="mb-2 text-xs text-[color:var(--ui-danger)]">
+                  {error}
+                </p>
+              )}
+              <textarea
+                data-testid="comment-input"
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                placeholder="Leave a comment on the plan"
+                rows={3}
+                className="w-full resize-none rounded-md border border-[var(--ui-border)] bg-[var(--ui-bg)] px-2 py-1.5 text-sm text-[var(--ui-text)] outline-none focus:border-[var(--ui-accent)]"
+              />
+              <div className="mt-2 flex justify-end">
+                <Button
+                  data-testid="comment-submit"
+                  size="sm"
+                  disabled={posting || !draft.trim()}
+                  onClick={() => void submitComment()}
+                >
+                  Comment
+                </Button>
+              </div>
+            </div>
+          </aside>
+        )}
       </div>
     </div>
   )

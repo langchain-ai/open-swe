@@ -96,6 +96,7 @@ def test_shared_base_requires_terse_slack_replies_with_share_path() -> None:
     assert "Do not paste long output" in OPEN_SWE_SHARED_BASE
     assert "`save_plan`" in OPEN_SWE_SHARED_BASE
     assert "plan-review link" in OPEN_SWE_SHARED_BASE
+    assert "does not enter plan mode" in OPEN_SWE_SHARED_BASE
 
 
 def test_harness_profile_replaces_deepagents_base_for_supported_providers() -> None:

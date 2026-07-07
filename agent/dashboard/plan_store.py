@@ -27,9 +27,10 @@ PLAN_COMMENTS_NAMESPACE = ["plan", "comments"]
 # Plans are mirrored into the sandbox outside cloned repositories.
 PLAN_FILE_DIRECTORY = "/workspace/plans"
 
-# Plan lifecycle, stored on both the content record and the thread metadata.
+# Plan/share lifecycle, stored on both the content record and the thread metadata.
 PLAN_STATUS_PLANNING = "planning"
 PLAN_STATUS_READY = "ready"
+PLAN_STATUS_SHARED = "shared"
 PLAN_STATUS_REVISING = "revising"
 PLAN_STATUS_APPROVED = "approved"
 PLAN_STATUS_CANCELLED = "cancelled"
@@ -68,8 +69,9 @@ async def save_plan_content(
     status: str = PLAN_STATUS_READY,
     clear_comments: bool = True,
     plan_file_path: str | None = None,
+    plan_mode: bool | None = True,
 ) -> None:
-    """Publish the plan markdown + status for the dashboard to render.
+    """Publish markdown + status for the dashboard to render.
 
     A republished (revised) plan supersedes the prior revision, so comments left
     on it are cleared — otherwise stale feedback would resurface on the new plan
@@ -92,7 +94,10 @@ async def save_plan_content(
         except Exception:
             # Best-effort: a failed cleanup must not block publishing the new plan.
             pass
-    await _merge_thread_metadata(thread_id, {"plan_status": status, "plan_mode": True})
+    metadata: dict[str, Any] = {"plan_status": status}
+    if plan_mode is not None:
+        metadata["plan_mode"] = plan_mode
+    await _merge_thread_metadata(thread_id, metadata)
 
 
 async def write_plan_to_sandbox(
