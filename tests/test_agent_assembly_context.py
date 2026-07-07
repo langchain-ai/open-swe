@@ -104,6 +104,16 @@ async def test_agent_keeps_message_queue_and_step_limit_middleware() -> None:
 
 
 @pytest.mark.asyncio
+async def test_agent_includes_report_platform_issue_tool() -> None:
+    from agent.tools import report_platform_issue
+
+    captured = await _capture_create_deep_agent_kwargs()
+    tools = captured["tools"]
+    assert isinstance(tools, list)
+    assert report_platform_issue in tools
+
+
+@pytest.mark.asyncio
 async def test_task_retry_wraps_inside_tool_error_middleware() -> None:
     captured = await _capture_create_deep_agent_kwargs()
     middleware = captured["middleware"]
