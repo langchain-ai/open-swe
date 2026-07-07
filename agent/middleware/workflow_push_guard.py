@@ -24,12 +24,6 @@ from ..dashboard.workflow_approval import (
 )
 from ..tools.slack_thread_reply import build_workflow_approval_blocks
 from ..utils.dashboard_links import dashboard_workflow_approval_url
-from ..utils.github_app import (
-    BASE_RUNTIME_PROXY_TOKEN_PERMISSIONS,
-    RUNTIME_PROXY_TOKEN_PERMISSIONS,
-    WORKFLOW_RUNTIME_PROXY_TOKEN_PERMISSIONS,
-)
-from ..utils.github_proxy import refresh_proxy_token
 from ..utils.sandbox_state import SANDBOX_BACKENDS
 from ..utils.slack import post_slack_thread_reply_with_ts
 
@@ -516,26 +510,6 @@ async def _approval_state(request: ToolCallRequest, change: WorkflowPushChange) 
         return "approval_error"
 
 
-async def _run_with_workflow_token(
-    thread_id: str,
-    run: Callable[[], Awaitable[ToolMessage | Command]],
-) -> ToolMessage | Command:
-    elevated = await refresh_proxy_token(
-        thread_id, permissions=WORKFLOW_RUNTIME_PROXY_TOKEN_PERMISSIONS
-    )
-    try:
-        return await run()
-    finally:
-        if elevated:
-            restored = await refresh_proxy_token(
-                thread_id, permissions=RUNTIME_PROXY_TOKEN_PERMISSIONS
-            )
-            if not restored:
-                await refresh_proxy_token(
-                    thread_id, permissions=BASE_RUNTIME_PROXY_TOKEN_PERMISSIONS
-                )
-
-
 class WorkflowPushGuardMiddleware(AgentMiddleware):
     """Require approval before pushing `.github/workflows` changes."""
 
@@ -563,9 +537,9 @@ class WorkflowPushGuardMiddleware(AgentMiddleware):
     ) -> ToolMessage | Command:
         thread_id = _thread_id(request)
         state = await _approval_state(request, change)
-        if state == "approved" and thread_id:
+        if state == "approved":
             safe_request = _override_execute_command(request, change.fixed_command)
-            return await _run_with_workflow_token(thread_id, lambda: handler(safe_request))
+            return await handler(safe_request)
         return _tool_message_for_request(
             _blocked_message(
                 change,

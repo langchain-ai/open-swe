@@ -27,6 +27,8 @@ from langgraph_sdk.client import LangGraphClient
 logger = logging.getLogger(__name__)
 
 ContentBlocks = str | list[dict[str, Any]]
+RunInput = dict[str, Any]
+RunConfig = dict[str, Any]
 
 # FastAPI route the platform POSTs run completion/failure to. The platform
 # rejects loopback webhooks (relative URLs / localhost) — they bypass auth via
@@ -87,6 +89,65 @@ def dispatch_client() -> LangGraphClient:
     return get_client(url=_langgraph_url())
 
 
+def _config_with_prepare_run_id(
+    config: RunConfig | None,
+    metadata: dict[str, Any] | None,
+) -> RunConfig:
+    run_config = dict(config or {})
+    configurable = run_config.get("configurable")
+    configurable = dict(configurable) if isinstance(configurable, dict) else {}
+    configurable.setdefault("prepare_run_id", str(uuid.uuid4()))
+    run_config["configurable"] = configurable
+    if metadata is not None:
+        run_config["metadata"] = metadata
+    return run_config
+
+
+async def create_durable_run(
+    thread_id: str,
+    assistant_id: str,
+    *,
+    input: RunInput,
+    source: str,
+    config: RunConfig | None = None,
+    metadata: dict[str, Any] | None = None,
+    client: LangGraphClient | None = None,
+    multitask_strategy: str = "interrupt",
+    durability: str = "sync",
+    if_not_exists: str = "create",
+    stream_mode: Any | None = None,
+    stream_resumable: bool | None = None,
+    after_seconds: int | float | None = None,
+) -> dict[str, Any]:
+    """Create a run with Open SWE's durable LangGraph defaults."""
+    client = client or dispatch_client()
+    create_kwargs: dict[str, Any] = {
+        "input": input,
+        "config": _config_with_prepare_run_id(config, metadata),
+        "multitask_strategy": multitask_strategy,
+        "durability": durability,
+        "if_not_exists": if_not_exists,
+    }
+    if COMPLETION_WEBHOOK_URL:
+        create_kwargs["webhook"] = COMPLETION_WEBHOOK_URL
+    if stream_mode is not None:
+        create_kwargs["stream_mode"] = stream_mode
+    if stream_resumable is not None:
+        create_kwargs["stream_resumable"] = stream_resumable
+    if after_seconds is not None:
+        create_kwargs["after_seconds"] = after_seconds
+
+    run = await client.runs.create(thread_id, assistant_id, **create_kwargs)
+    logger.info(
+        "Dispatched %s run on thread %s (source=%s, run=%s)",
+        assistant_id,
+        thread_id,
+        source,
+        run.get("run_id") if isinstance(run, dict) else None,
+    )
+    return run
+
+
 async def dispatch_agent_run(
     thread_id: str,
     content: ContentBlocks,
@@ -103,23 +164,12 @@ async def dispatch_agent_run(
     contract. ``source`` is for logging/metadata only; ``assistant_id`` selects
     the graph (``"agent"`` or ``"reviewer"``).
     """
-    client = client or dispatch_client()
-    configurable = {**configurable, "prepare_run_id": str(uuid.uuid4())}
-    run = await client.runs.create(
+    return await create_durable_run(
         thread_id,
         assistant_id,
         input={"messages": [{"role": "user", "content": content}]},
-        config={"configurable": configurable, "metadata": metadata or {}},
-        multitask_strategy="interrupt",
-        durability="sync",
-        webhook=COMPLETION_WEBHOOK_URL,
-        if_not_exists="create",
+        config={"configurable": configurable},
+        metadata=metadata or {},
+        source=source,
+        client=client or dispatch_client(),
     )
-    logger.info(
-        "Dispatched %s run on thread %s (source=%s, run=%s)",
-        assistant_id,
-        thread_id,
-        source,
-        run.get("run_id") if isinstance(run, dict) else None,
-    )
-    return run

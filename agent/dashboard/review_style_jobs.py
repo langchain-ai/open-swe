@@ -9,6 +9,7 @@ from typing import Any
 
 from langgraph_sdk import get_client
 
+from ..dispatch import create_durable_run
 from ..review_style_collector import (
     collect_review_samples,
     format_samples_for_analyzer,
@@ -123,7 +124,7 @@ async def start_bootstrap_analysis(
     )
 
     try:
-        run = await client.runs.create(
+        run = await create_durable_run(
             thread_id,
             _ASSISTANT_ID,
             input={
@@ -140,8 +141,9 @@ async def start_bootstrap_analysis(
                 ],
                 "files": build_skill_files(),
             },
+            source="review-style-bootstrap",
             config={"configurable": {**configurable, "prepare_run_id": str(uuid.uuid4())}},
-            if_not_exists="create",
+            client=client,
         )
         run_id = run.get("run_id") if isinstance(run, dict) else getattr(run, "run_id", None)
         record = await update_review_style(
@@ -169,12 +171,14 @@ async def start_continual_run(
     configurable = build_continual_run_configurable(full_name)
     thread_id = configurable["thread_id"]
     try:
-        run = await _client().runs.create(
+        client = _client()
+        run = await create_durable_run(
             thread_id,
             _ASSISTANT_ID,
             input=build_continual_run_input(full_name),
+            source="review-style-continual",
             config={"configurable": {**configurable, "prepare_run_id": str(uuid.uuid4())}},
-            if_not_exists="create",
+            client=client,
         )
         run_id = run.get("run_id") if isinstance(run, dict) else getattr(run, "run_id", None)
         return await update_review_style(

@@ -368,6 +368,9 @@ async def test_launch_scheduled_agent_run_starts_fresh_agent_thread(fake_client,
     assert run["thread_id"] == thread_id
     assert run["assistant_id"] == "agent"
     assert run["input"]["messages"][0]["content"] == record["prompt"]
+    assert run["durability"] == "sync"
+    assert run["multitask_strategy"] == "interrupt"
+    assert run["if_not_exists"] == "create"
     assert run["config"]["configurable"]["source"] == "schedule"
     assert run["config"]["configurable"]["repo"] == record["repo"]
 
