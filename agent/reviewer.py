@@ -51,6 +51,7 @@ from .middleware import (
     SanitizeThinkingBlocksMiddleware,
     SanitizeToolInputsMiddleware,
     SlackAssistantStatusMiddleware,
+    TimeoutWrapupMiddleware,
     ToolErrorMiddleware,
     check_message_queue_before_model,
     refresh_github_proxy_before_model,
@@ -91,6 +92,7 @@ from .tools import (
 from .utils import ttl_cache
 from .utils.agents_md import fetch_agents_md
 from .utils.api_standards_skill import fetch_api_standards_skill
+from .utils.deferred_model import make_deferred_error_model
 from .utils.github_app import get_github_app_installation_token_with_expiry
 from .utils.github_token import cache_github_token_for_thread
 from .utils.model import DEFAULT_LLM_REASONING, make_model, provider_model_kwargs
@@ -801,6 +803,19 @@ def _format_existing_findings(findings: list[dict]) -> str:
 _BACKGROUND_TASKS: set[asyncio.Task[None]] = set()
 
 
+def _make_model_or_defer(
+    model_id: str,
+    *,
+    use_gateway: bool,
+    **kwargs: Any,
+) -> BaseChatModel:
+    try:
+        return make_model(model_id, use_gateway=use_gateway, **kwargs)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Deferring reviewer model setup failure for %s", model_id, exc_info=True)
+        return make_deferred_error_model(e, model_id=model_id)
+
+
 def _on_background_task_done(task: asyncio.Task[None]) -> None:
     _BACKGROUND_TASKS.discard(task)
     if task.cancelled():
@@ -832,7 +847,7 @@ async def _resolve_grouping_model(
         max_tokens=DEFAULT_LLM_MAX_TOKENS,
         openai_reasoning_default=DEFAULT_LLM_REASONING,
     )
-    return make_model(model_id, use_gateway=use_gateway, **model_kwargs)
+    return _make_model_or_defer(model_id, use_gateway=use_gateway, **model_kwargs)
 
 
 async def _cached_reviewer_team_defaults():
@@ -1258,8 +1273,8 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
     )
 
     use_gateway = await _cached_gateway_enabled()
-    reviewer_model = make_model(model_id, use_gateway=use_gateway, **model_kwargs)
-    reviewer_subagent_model = make_model(
+    reviewer_model = _make_model_or_defer(model_id, use_gateway=use_gateway, **model_kwargs)
+    reviewer_subagent_model = _make_model_or_defer(
         subagent_model_id, use_gateway=use_gateway, **subagent_model_kwargs
     )
 
@@ -1303,6 +1318,7 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
             refresh_github_proxy_before_model,
             check_message_queue_before_model,
             SlackAssistantStatusMiddleware(),
+            TimeoutWrapupMiddleware(),
             SanitizeOpenAIResponsesMiddleware(),
             SanitizeFireworksMessagesMiddleware(),
             SanitizeThinkingBlocksMiddleware(),
