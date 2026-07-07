@@ -636,6 +636,7 @@ def test_process_slack_mention_unmapped_user_blocked_and_prompted(
     monkeypatch.setattr(webapp, "login_for_slack_id", fake_login_for_slack_id)
     monkeypatch.setattr(webapp, "login_for_email", fake_login_for_email)
     monkeypatch.setattr(webapp, "_post_account_link_prompt", fake_post_prompt)
+    monkeypatch.setattr(webapp, "is_bot_token_only_mode", lambda: False)
 
     asyncio.run(
         webapp.process_slack_mention(
@@ -686,6 +687,7 @@ def test_process_slack_mention_mapped_user_no_token_record_prompts_setup(
     monkeypatch.setattr(webapp, "get_valid_access_token", fake_get_valid_access_token)
     monkeypatch.setattr(webapp, "has_access_token_record", fake_has_token_record)
     monkeypatch.setattr(webapp, "_post_account_link_prompt", fake_post_prompt)
+    monkeypatch.setattr(webapp, "is_bot_token_only_mode", lambda: False)
 
     asyncio.run(
         webapp.process_slack_mention(
@@ -732,6 +734,7 @@ def test_process_slack_mention_mapped_user_unusable_token_prompts_revoked(
     monkeypatch.setattr(webapp, "get_valid_access_token", fake_get_valid_access_token)
     monkeypatch.setattr(webapp, "has_access_token_record", fake_has_token_record)
     monkeypatch.setattr(webapp, "_post_account_link_prompt", fake_post_prompt)
+    monkeypatch.setattr(webapp, "is_bot_token_only_mode", lambda: False)
 
     asyncio.run(
         webapp.process_slack_mention(

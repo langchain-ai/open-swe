@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Annotated, Any
 
 from langgraph.config import get_config
+from langgraph.prebuilt import InjectedState
 
 from ..dashboard.team_settings import get_team_review_trace_links_enabled
 from ..reviewer_diff import compute_diff_line_set, fetch_pr_diff, is_range_in_diff
@@ -58,6 +59,7 @@ from ..utils.tracing import REVIEW_TRACING_PROJECT
 async def publish_review(
     severity_threshold: str = "medium",
     cap: int = 4,
+    state: Annotated[dict[str, Any] | None, InjectedState] = None,
 ) -> dict[str, Any]:
     """Post all current findings to the PR as a GitHub Review.
 
@@ -145,6 +147,7 @@ async def publish_review(
             is_re_review=is_re_review,
             langgraph_run_id=_current_run_id(config),
             trace_link_config_override=configurable.get("review_trace_link_enabled"),
+            state=state,
         )
     except ReviewerThreadMissingError as exc:
         return thread_missing_tool_result(exc)
@@ -228,6 +231,7 @@ async def _publish_review_async(
     is_re_review: bool,
     langgraph_run_id: str | None = None,
     trace_link_config_override: object = None,
+    state: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     thread_id = get_thread_id_from_runtime()
     # The run config's head_sha is frozen at run creation; a push that arrived
@@ -362,6 +366,7 @@ async def _publish_review_async(
             repo=repo,
             pr_number=pr_number,
             token=token,
+            state=state,
         )
         if dropped_ids and valid_with_payload:
             retry_inline = [p for _, p in valid_with_payload]
@@ -762,6 +767,7 @@ async def _resolve_diff_line_set(
     repo: str,
     pr_number: int,
     token: str,
+    state: dict[str, Any] | None = None,
 ) -> dict[str, set[int]] | None:
     """Return the new-side line set for the PR diff, fetching it if needed.
 
@@ -772,6 +778,10 @@ async def _resolve_diff_line_set(
     fly. Returns ``None`` if the fetch fails — caller treats that as "we
     can't tell which finding is bad, don't retry blindly".
     """
+    if isinstance(state, dict):
+        state_cached = state.get("diff_line_set")
+        if isinstance(state_cached, dict):
+            return state_cached
     config = get_config()
     configurable = config.get("configurable", {}) if isinstance(config, dict) else {}
     cached = configurable.get("diff_line_set") if isinstance(configurable, dict) else None
@@ -791,6 +801,7 @@ async def _filter_against_pr_diff(
     repo: str,
     pr_number: int,
     token: str,
+    state: dict[str, Any] | None = None,
 ) -> tuple[list[tuple[dict[str, Any], dict[str, Any]]], list[str]]:
     """Drop findings whose path/line range is not in the current PR diff.
 
@@ -800,7 +811,7 @@ async def _filter_against_pr_diff(
     original error rather than retry blindly.
     """
     diff_line_set = await _resolve_diff_line_set(
-        owner=owner, repo=repo, pr_number=pr_number, token=token
+        owner=owner, repo=repo, pr_number=pr_number, token=token, state=state
     )
     if diff_line_set is None:
         return list(eligible_with_payload), []
