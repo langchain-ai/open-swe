@@ -1,11 +1,15 @@
-"""Main entry point and CLI loop for Open SWE agent."""
+"""Main entry point and graph factory for the Open SWE agent.
+
+Resolves the model, ensures one sandbox per thread (simplified
+get-or-create-then-reconnect, no cross-process ``__creating__`` sentinel),
+builds the curated tool list plus optional integrations, and wires the
+middleware stack. All per-thread state lives in the sandbox + thread metadata;
+the agent itself is stateless.
+"""
 # ruff: noqa: E402
 
-# Suppress deprecation warnings from langchain_core (e.g., Pydantic V1 on Python 3.14+)
-# ruff: noqa: E402
 import logging
 import os
-import time
 import warnings
 from collections.abc import Awaitable, Callable, Sequence
 from typing import Any
@@ -59,7 +63,6 @@ from .middleware import (
     BasePrepareRunMiddleware,
     ModelFallbackMiddleware,
     PlanModeMiddleware,
-    SandboxCircuitBreakerMiddleware,
     SanitizeFireworksMessagesMiddleware,
     SanitizeOpenAIResponsesMiddleware,
     SanitizeThinkingBlocksMiddleware,
@@ -69,7 +72,6 @@ from .middleware import (
     ToolErrorMiddleware,
     WorkflowPushGuardMiddleware,
     check_message_queue_before_model,
-    ensure_no_empty_msg,
     notify_step_limit_reached,
     refresh_github_proxy_before_model,
 )
@@ -119,14 +121,6 @@ from .utils.model import (
 )
 from .utils.sandbox import create_sandbox
 from .utils.sandbox_paths import aresolve_sandbox_work_dir
-from .utils.tracing import AGENT_TRACING_PROJECT, traced_graph_factory
-
-client = get_client()
-
-SANDBOX_CREATING = "__creating__"
-SANDBOX_CREATION_TIMEOUT = 180
-SANDBOX_POLL_INTERVAL = 1.0
-
 from .utils.sandbox_state import (
     SANDBOX_BACKENDS,
     get_or_create_sandbox_backend_proxy,
@@ -134,6 +128,9 @@ from .utils.sandbox_state import (
     set_sandbox_backend,
     unwrap_sandbox_backend,
 )
+from .utils.tracing import AGENT_TRACING_PROJECT, traced_graph_factory
+
+client = get_client()
 
 
 async def _resolve_prompt_default_repo(configurable: dict[str, Any]) -> dict[str, str] | None:
@@ -343,28 +340,19 @@ async def _recreate_sandbox(
     github_proxy_repositories: Sequence[str] | None = None,
     repo: dict[str, str] | None = None,
 ) -> SandboxBackendProtocol:
-    """Recreate a sandbox after a connection failure.
+    """Create a fresh sandbox (with proxy auth) after a connection failure.
 
-    Sets the SANDBOX_CREATING sentinel and creates a fresh sandbox
-    (with proxy auth configured), swapping the per-thread proxy target.
     The agent is responsible for cloning repos via tools.
     """
-    await client.threads.update(thread_id=thread_id, metadata=_creating_metadata())
-    try:
-        sandbox_backend = set_sandbox_backend(
-            thread_id,
-            await _create_sandbox_with_proxy(
-                github_proxy_token,
-                thread_id=thread_id,
-                github_proxy_repositories=github_proxy_repositories,
-                repo=repo,
-            ),
-        )
-    except Exception:
-        logger.exception("Failed to recreate sandbox after connection failure")
-        await client.threads.update(thread_id=thread_id, metadata=_RESET_METADATA)
-        raise
-    return sandbox_backend
+    return set_sandbox_backend(
+        thread_id,
+        await _create_sandbox_with_proxy(
+            github_proxy_token,
+            thread_id=thread_id,
+            github_proxy_repositories=github_proxy_repositories,
+            repo=repo,
+        ),
+    )
 
 
 async def check_or_recreate_sandbox(
@@ -398,44 +386,6 @@ async def check_or_recreate_sandbox(
     return sandbox_backend
 
 
-def _creating_metadata() -> dict[str, Any]:
-    """Metadata that claims the cross-process creation lock with a timestamp."""
-    return {"sandbox_id": SANDBOX_CREATING, "sandbox_creating_at": time.time()}
-
-
-_RESET_METADATA: dict[str, Any] = {"sandbox_id": None, "sandbox_creating_at": None}
-
-
-async def _resolve_creating_sentinel(thread_id: str) -> str | None:
-    """Resolve a ``__creating__`` sentinel seen with no cached backend.
-
-    The sentinel is a cross-process lock: another worker may still be creating
-    the sandbox. Poll live thread metadata until it resolves to a real id. Only
-    when the sentinel is older than ``SANDBOX_CREATION_TIMEOUT`` (e.g. the
-    creating worker was restarted) is it treated as stale: metadata is reset and
-    ``None`` is returned so the caller creates a fresh sandbox. A sentinel with
-    no timestamp (written before this field existed) is also treated as stale.
-    """
-    while True:
-        thread = await client.threads.get(thread_id)
-        metadata = thread.get("metadata", {}) if isinstance(thread, dict) else {}
-        sandbox_id = metadata.get("sandbox_id") if isinstance(metadata, dict) else None
-
-        if sandbox_id != SANDBOX_CREATING:
-            return sandbox_id if isinstance(sandbox_id, str) else None
-
-        creating_at = metadata.get("sandbox_creating_at") if isinstance(metadata, dict) else None
-        age = time.time() - creating_at if isinstance(creating_at, (int, float)) else None
-        if age is None or age > SANDBOX_CREATION_TIMEOUT:
-            logger.warning(
-                "Resetting stale SANDBOX_CREATING for thread %s (age=%s)", thread_id, age
-            )
-            await client.threads.update(thread_id=thread_id, metadata=_RESET_METADATA)
-            return None
-
-        await asyncio.sleep(SANDBOX_POLL_INTERVAL)
-
-
 def graph_loaded_for_execution(config: RunnableConfig) -> bool:
     """Check if the graph is loaded for actual execution vs introspection."""
     return (
@@ -454,28 +404,25 @@ async def ensure_sandbox_for_thread(
 ) -> SandboxBackendProtocol:
     """Get-or-create a healthy sandbox bound to ``thread_id``.
 
-    Implements the four-state lifecycle described in AGENTS.md:
+    Three cases (dispatch uses ``multitask_strategy="interrupt"``, so a thread
+    never provisions two sandboxes concurrently — no cross-process sentinel is
+    needed):
 
-    1. Cached in memory → ping; recreate on ``SandboxClientError``.
-    2. Metadata says ``__creating__`` and no cache → wait for the creating
-       worker; only reset if the sentinel is proven stale (timestamp/timeout).
-    3. No sandbox at all → create one and persist the id.
-    4. Metadata has an id but no cache → reconnect; recreate on failure.
+    1. Cached in memory -> ping; recreate on ``SandboxClientError``; refresh proxy.
+    2. Metadata has an id -> reconnect; recreate on failure; refresh proxy.
+    3. No sandbox at all -> create one and persist the id.
 
     For LangSmith sandboxes, also refreshes the GitHub App proxy auth. When
     ``repo`` has a ``ready`` repo-scoped snapshot, newly created sandboxes boot
     from it; otherwise the configured ``DEFAULT_SANDBOX_SNAPSHOT_ID`` is used.
-    Persists the resulting ``sandbox_id`` to thread metadata, and on the
-    first creation/reconnect for this thread initializes git identity.
+    Re-applies git identity every run because reused/reconnected sandboxes can
+    lose their ``--global`` config, and Vercel preview deploys reject commits
+    whose author email can't be resolved to a GitHub account.
     """
     sandbox_backend = SANDBOX_BACKENDS.get(thread_id)
     if sandbox_backend is not None and not sandbox_backend.has_backend:
         sandbox_backend = None
     sandbox_id = await get_sandbox_id_from_metadata(thread_id)
-
-    if sandbox_id == SANDBOX_CREATING and not sandbox_backend:
-        logger.info("Sandbox creation in progress for thread %s, waiting...", thread_id)
-        sandbox_id = await _resolve_creating_sentinel(thread_id)
 
     if sandbox_backend:
         logger.info("Using cached sandbox backend for thread %s", thread_id)
@@ -489,43 +436,26 @@ async def ensure_sandbox_for_thread(
             )
     elif sandbox_id is None:
         logger.info("Creating new sandbox for thread %s", thread_id)
-        await client.threads.update(thread_id=thread_id, metadata=_creating_metadata())
+        sandbox_backend = await _create_sandbox_with_proxy(
+            github_proxy_token,
+            thread_id=thread_id,
+            github_proxy_repositories=github_proxy_repositories,
+            repo=repo,
+        )
+        logger.info("Sandbox created: %s", sandbox_backend.id)
+    else:
+        logger.info("Connecting to existing sandbox %s", sandbox_id)
         try:
+            sandbox_backend = await create_sandbox(sandbox_id)
+        except Exception:
+            logger.warning("Failed to connect to existing sandbox %s, creating new one", sandbox_id)
             sandbox_backend = await _create_sandbox_with_proxy(
                 github_proxy_token,
                 thread_id=thread_id,
                 github_proxy_repositories=github_proxy_repositories,
                 repo=repo,
             )
-            logger.info("Sandbox created: %s", sandbox_backend.id)
-        except Exception:
-            logger.exception("Failed to create sandbox")
-            try:
-                await client.threads.update(thread_id=thread_id, metadata=_RESET_METADATA)
-            except Exception:
-                logger.exception("Failed to reset sandbox_id metadata")
-            raise
-    else:
-        logger.info("Connecting to existing sandbox %s", sandbox_id)
-        created_replacement_sandbox = False
-        try:
-            sandbox_backend = await create_sandbox(sandbox_id)
-        except Exception:
-            logger.warning("Failed to connect to existing sandbox %s, creating new one", sandbox_id)
-            await client.threads.update(thread_id=thread_id, metadata=_creating_metadata())
-            try:
-                sandbox_backend = await _create_sandbox_with_proxy(
-                    github_proxy_token,
-                    thread_id=thread_id,
-                    github_proxy_repositories=github_proxy_repositories,
-                    repo=repo,
-                )
-                created_replacement_sandbox = True
-            except Exception:
-                logger.exception("Failed to create replacement sandbox")
-                await client.threads.update(thread_id=thread_id, metadata=_RESET_METADATA)
-                raise
-        if not created_replacement_sandbox:
+        else:
             original_sandbox_id = sandbox_backend.id
             sandbox_backend = await check_or_recreate_sandbox(
                 sandbox_backend, thread_id, github_proxy_token, github_proxy_repositories, repo
@@ -542,10 +472,6 @@ async def ensure_sandbox_for_thread(
             thread_id=thread_id, metadata={"sandbox_id": sandbox_backend.id}
         )
 
-    # Re-apply git identity every run: cached/reconnected sandboxes may have
-    # lost their `--global` config (or had it overwritten), and Vercel preview
-    # deploys reject commits whose author email can't be resolved to a GitHub
-    # account.
     await _configure_git_identity(sandbox_backend)
 
     return sandbox_backend
@@ -553,22 +479,23 @@ async def ensure_sandbox_for_thread(
 
 DEFAULT_LLM_MODEL_ID = DEFAULT_MODEL_ID
 DEFAULT_LLM_MAX_TOKENS = 64_000
+# Kept high across all graphs: coding tasks legitimately run 30-60 minutes and
+# make many tool/model calls. These are runaway backstops, not step budgets; a
+# run that hits the model-call cap still ends with a signal via
+# ``notify_step_limit_reached`` rather than dying silently.
 DEFAULT_RECURSION_LIMIT = 9_999
-# High cap to support long-running tasks; a run that hits it still ends with a
-# signal via notify_step_limit_reached rather than dying silently.
 MODEL_CALL_RECURSION_LIMIT = 5_000
 
 # Mutating external tools hidden from the model while plan mode is active so it
 # can only research and propose a plan. File edit tools stay available so the
 # agent can draft and revise a plan under `/workspace/plans/`; prompt guidance
-# restricts them to that plan file outside cloned repositories. `execute` stays available;
-# plan-mode shell discipline (no mutating commands) is instructed via the system
-# prompt rather than enforced. `http_request` is excluded because it can
-# POST/PUT/PATCH/DELETE to external services — read-only web research goes
+# restricts them to that plan file outside cloned repositories. `execute` stays
+# available; plan-mode shell discipline (no mutating commands) is instructed via
+# the system prompt rather than enforced. `http_request` is excluded because it
+# can POST/PUT/PATCH/DELETE to external services — read-only web research goes
 # through `web_search` / `fetch_url`. `task` is excluded because the
-# general-purpose subagent is built with its own filesystem/PR/Linear tools and
-# does not inherit this exclusion, so delegating to it would bypass the read-only
-# intent.
+# general-purpose subagent is built with its own tools and does not inherit this
+# exclusion, so delegating to it would bypass the read-only intent.
 PLAN_MODE_EXCLUDED_TOOLS: frozenset[str] = frozenset(
     {
         "task",
@@ -862,11 +789,6 @@ async def get_agent(config: RunnableConfig) -> Pregel:
 
     (model_id, profile_effort), (subagent_model_id, subagent_effort) = team_defaults
     logger.info("Using team default agent model: model=%s effort=%s", model_id, profile_effort)
-    logger.info(
-        "Using team default agent subagent model: model=%s effort=%s",
-        subagent_model_id,
-        subagent_effort,
-    )
 
     if profile_login and profile:
         overridden_model, overridden_effort = normalize_profile_overrides(profile)
@@ -940,24 +862,24 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         )
         logger.info("Configured model fallback %s -> %s", model_id, fallback_model_id)
 
-    # Plan mode is entered only when the model decides to (the `enter_plan_mode`
-    # tool sets it in run state). The configurable value just carries that
-    # decision across a thread's messages and the approve/reject follow-ups; a
-    # fresh run with nothing set starts out of plan mode.
-    plan_mode = configurable.get("plan_mode") is True
-    if plan_mode:
-        logger.info("Plan mode enabled for thread %s", thread_id)
-    # Installed unconditionally and state-aware: it also restricts tools after a
-    # mid-run `enter_plan_mode` call, not just when plan mode is set up front.
-    plan_mode_middleware: list[Any] = [
-        PlanModeMiddleware(excluded=PLAN_MODE_EXCLUDED_TOOLS, initial=plan_mode)
-    ]
-
     source = (
         configurable.get("source") if isinstance(configurable.get("source"), str) else "dashboard"
     )
     user_email = configurable.get("user_email")
     user_email = user_email if isinstance(user_email, str) else ""
+
+    # Plan mode is entered only when the model decides to (the `enter_plan_mode`
+    # tool sets it in run state). The configurable value just carries that
+    # decision across a thread's messages and the approve/reject follow-ups; a
+    # fresh run with nothing set starts out of plan mode. Installed
+    # unconditionally and state-aware: it also restricts tools after a mid-run
+    # `enter_plan_mode` call, not just when plan mode is set up front.
+    plan_mode = configurable.get("plan_mode") is True
+    if plan_mode:
+        logger.info("Plan mode enabled for thread %s", thread_id)
+    plan_mode_middleware: list[Any] = [
+        PlanModeMiddleware(excluded=PLAN_MODE_EXCLUDED_TOOLS, initial=plan_mode)
+    ]
 
     observability_tools = await _load_observability_tools(
         await _observability_authorized(config, profile_login)
@@ -1040,9 +962,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             refresh_github_proxy_before_model,
             check_message_queue_before_model,
             SlackAssistantStatusMiddleware(),
-            ensure_no_empty_msg,
             notify_step_limit_reached,
-            SandboxCircuitBreakerMiddleware(),
             *fallback_middleware,
             *plan_mode_middleware,
             SanitizeOpenAIResponsesMiddleware(),
