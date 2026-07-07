@@ -26,7 +26,7 @@ dependencies = [
     "langchain-daytona>=0.0.5",
     "langchain-modal>=0.0.3",
     "langchain-runloop>=0.0.4",
-    "langchain-e2b>=0.0.4",
+    "langchain-e2b==0.0.4",
     "exa-py>=2.13.0",
     "langchain-google-genai>=4.2.4",
     "langchain-mcp-adapters>=0.2.2",
