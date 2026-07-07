@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Locator, type Page } from "@playwright/test";
 
 // Exercises the sidebar's "Copy sandbox ID" action against the REAL dashboard
 // UI and a REAL (local-provider) sandbox: the Slack flow runs the agent, which
@@ -38,8 +38,13 @@ async function createThreadWithSandbox(page: Page): Promise<string> {
 const copyItem = (page: Page) =>
   page.getByRole("menuitem", { name: "Copy sandbox ID" });
 
+// The kebab sits beside the row Link (not inside the anchor), so reach it via
+// their shared wrapper — the Link's parent.
+const kebabFor = (row: Locator) =>
+  row.locator("..").getByRole("button", { name: "Thread actions" });
+
 test.describe("thread sandbox id (real dashboard UI)", () => {
-  test("desktop: right-click menu copies the real sandbox id", async ({
+  test("desktop: kebab menu copies the real sandbox id", async ({
     page,
     baseURL,
   }) => {
@@ -53,7 +58,9 @@ test.describe("thread sandbox id (real dashboard UI)", () => {
 
     const row = page.locator(`a[href$="/agents/${threadId}"]`).first();
     await expect(row).toBeVisible();
-    await row.click({ button: "right" });
+    // The kebab is revealed on hover on pointer devices.
+    await row.hover();
+    await kebabFor(row).click();
 
     await expect(copyItem(page)).toBeEnabled();
     await copyItem(page).click();
@@ -90,7 +97,7 @@ test.describe("thread sandbox id (real dashboard UI)", () => {
     const rowA = page.locator(`a[href$="/agents/${threadA}"]`).first();
     await expect(rowA).toBeVisible();
 
-    const kebab = rowA.getByRole("button", { name: "Thread actions" });
+    const kebab = kebabFor(rowA);
     await expect(kebab).toBeVisible();
     await kebab.tap();
 
