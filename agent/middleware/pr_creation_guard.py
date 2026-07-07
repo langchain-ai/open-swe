@@ -78,12 +78,41 @@ def _contains_gh_pr_create(tokens: list[str]) -> bool:
     return False
 
 
+_GH_API_VALUE_FLAGS = {
+    "-X",
+    "--method",
+    "-H",
+    "--header",
+    "-F",
+    "--field",
+    "-f",
+    "--raw-field",
+    "--hostname",
+    "--input",
+    "-q",
+    "--jq",
+    "-p",
+    "--preview",
+    "--cache",
+    "-t",
+    "--template",
+}
+
+
 def _gh_api_endpoint(subtokens: list[str]) -> str | None:
     for index, token in enumerate(subtokens):
         if token != "api":
             continue
+        skip_next = False
         for candidate in subtokens[index + 1 :]:
-            if candidate.startswith("-") or _is_assignment(candidate):
+            if skip_next:
+                skip_next = False
+                continue
+            if candidate.startswith("-"):
+                if "=" not in candidate and candidate in _GH_API_VALUE_FLAGS:
+                    skip_next = True
+                continue
+            if _is_assignment(candidate):
                 continue
             return candidate.strip("'\"")
     return None

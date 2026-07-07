@@ -30,6 +30,12 @@ def test_detects_pr_creation_fallback_commands() -> None:
         "gh api repos/langchain-ai/open-swe/pulls -X POST -f title=x"
     )
     assert is_pr_creation_fallback_command(
+        "gh api -X POST repos/langchain-ai/open-swe/pulls -f title=x"
+    )
+    assert is_pr_creation_fallback_command(
+        "GH_TOKEN=dummy gh api -X POST repos/langchain-ai/open-swe/pulls -f title=x"
+    )
+    assert is_pr_creation_fallback_command(
         "curl -X POST https://api.github.com/repos/langchain-ai/open-swe/pulls -d '{}'"
     )
 
@@ -45,6 +51,7 @@ async def test_middleware_blocks_execute_pr_creation_fallbacks() -> None:
     for command in (
         "GH_TOKEN=dummy gh pr create --draft",
         "gh api repos/langchain-ai/open-swe/pulls -X POST -f title=x",
+        "GH_TOKEN=dummy gh api -X POST repos/langchain-ai/open-swe/pulls -f title=x",
         "curl -X POST https://api.github.com/repos/langchain-ai/open-swe/pulls -d '{}'",
     ):
         result = await PullRequestCreationGuardMiddleware().awrap_tool_call(
