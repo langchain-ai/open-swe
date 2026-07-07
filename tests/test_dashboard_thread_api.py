@@ -375,7 +375,7 @@ async def test_recovery_patch_downloads_generated_patch(monkeypatch) -> None:
             return [SimpleNamespace(content=b"patch bytes")]
 
     monkeypatch.setattr(thread_api, "_authorized_thread", fake_authorized_thread)
-    monkeypatch.setattr(thread_api, "create_sandbox", lambda sandbox_id: FakeSandbox())
+    monkeypatch.setattr(thread_api, "create_sandbox", AsyncMock(return_value=FakeSandbox()))
 
     content, filename = await thread_api.get_dashboard_thread_recovery_patch("tid", "octocat")
 
@@ -395,7 +395,7 @@ async def test_recovery_patch_rejects_empty_patch(monkeypatch) -> None:
             )
 
     monkeypatch.setattr(thread_api, "_authorized_thread", fake_authorized_thread)
-    monkeypatch.setattr(thread_api, "create_sandbox", lambda sandbox_id: FakeSandbox())
+    monkeypatch.setattr(thread_api, "create_sandbox", AsyncMock(return_value=FakeSandbox()))
 
     with pytest.raises(HTTPException) as exc_info:
         await thread_api.get_dashboard_thread_recovery_patch("tid", "octocat")
@@ -422,7 +422,7 @@ async def test_recovery_patch_enforces_size_limit(monkeypatch) -> None:
             )
 
     monkeypatch.setattr(thread_api, "_authorized_thread", fake_authorized_thread)
-    monkeypatch.setattr(thread_api, "create_sandbox", lambda sandbox_id: FakeSandbox())
+    monkeypatch.setattr(thread_api, "create_sandbox", AsyncMock(return_value=FakeSandbox()))
 
     with pytest.raises(HTTPException) as exc_info:
         await thread_api.get_dashboard_thread_recovery_patch("tid", "octocat")

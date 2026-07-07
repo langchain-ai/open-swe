@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import json
 import logging
 import re
 import shlex
-import threading
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
@@ -302,29 +300,6 @@ def _approval_url(thread_id: str | None, fingerprint: str) -> str | None:
     return dashboard_workflow_approval_url(thread_id, fingerprint)
 
 
-def _run_coroutine_sync(coro: Awaitable[ToolMessage | Command]) -> ToolMessage | Command:
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        return asyncio.run(coro)
-
-    result: dict[str, ToolMessage | Command | BaseException] = {}
-
-    def target() -> None:
-        try:
-            result["value"] = asyncio.run(coro)
-        except BaseException as exc:  # noqa: BLE001
-            result["value"] = exc
-
-    thread = threading.Thread(target=target)
-    thread.start()
-    thread.join()
-    value = result["value"]
-    if isinstance(value, BaseException):
-        raise value
-    return value
-
-
 def _workflow_change_for_push(backend: Any, parsed: ParsedGitPush) -> WorkflowPushChange | None:
     root_result = _run_git(backend, parsed.repo_dir, "rev-parse --show-toplevel")
     if not root_result.ok:
@@ -598,22 +573,6 @@ class WorkflowPushGuardMiddleware(AgentMiddleware):
                 already_rejected=state == "rejected",
             ),
             request,
-        )
-
-    def wrap_tool_call(
-        self,
-        request: ToolCallRequest,
-        handler: Callable[[ToolCallRequest], ToolMessage | Command],
-    ) -> ToolMessage | Command:
-        change = self._change_for_request(request)
-        if change is None:
-            return handler(request)
-
-        async def run_handler() -> ToolMessage | Command:
-            return handler(request)
-
-        return _run_coroutine_sync(
-            self._handle_change_async(request, lambda _request: run_handler(), change)
         )
 
     async def awrap_tool_call(
