@@ -64,6 +64,7 @@ jobs:
         working-directory: tests/e2e
         run: |
           npm ci
+          sudo rm -f /etc/apt/sources.list.d/azure-cli.list /etc/apt/sources.list.d/microsoft-prod.list
           npx playwright install --with-deps chromium
       # Playwright's webServer boots `langgraph dev`; globalSetup builds the real
       # ui/ SPA. The fake LLM/GitHub/Slack boundaries need no secrets.
