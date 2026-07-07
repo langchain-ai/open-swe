@@ -235,21 +235,15 @@ async def test_unapproved_workflow_push_blocks_and_posts_slack(
     assert posted["blocks"][1]["elements"][0]["value"]
 
 
-async def test_approved_workflow_push_elevates_and_restores(
+async def test_approved_workflow_push_runs_fixed_command(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     guard.SANDBOX_BACKENDS["thread-1"] = _Backend()
-    refreshed: list[dict[str, str]] = []
 
     async def fake_approved(thread_id: str, fingerprint: str) -> bool:
         return True
 
-    async def fake_refresh(thread_id: str | None, *, permissions: dict[str, str]) -> bool:
-        refreshed.append(dict(permissions))
-        return True
-
     monkeypatch.setattr(guard, "workflow_push_approved", fake_approved)
-    monkeypatch.setattr(guard, "refresh_proxy_token", fake_refresh)
 
     pushed_command = ""
 
@@ -266,36 +260,6 @@ async def test_approved_workflow_push_elevates_and_restores(
         pushed_command
         == "git -C /repo push origin aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:refs/heads/feature"
     )
-    assert refreshed[0]["workflows"] == "write"
-    assert "workflows" not in refreshed[1]
-    assert refreshed[1]["actions"] == "read"
-
-
-async def test_workflow_push_restoration_falls_back_when_actions_read_unavailable(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    guard.SANDBOX_BACKENDS["thread-1"] = _Backend()
-    refreshed: list[dict[str, str]] = []
-
-    async def fake_approved(thread_id: str, fingerprint: str) -> bool:
-        return True
-
-    async def fake_refresh(thread_id: str | None, *, permissions: dict[str, str]) -> bool:
-        refreshed.append(dict(permissions))
-        return "actions" not in permissions
-
-    monkeypatch.setattr(guard, "workflow_push_approved", fake_approved)
-    monkeypatch.setattr(guard, "refresh_proxy_token", fake_refresh)
-
-    async def handler(_request: Any) -> ToolMessage:
-        return ToolMessage(content="pushed", tool_call_id="call-1")
-
-    await guard.WorkflowPushGuardMiddleware().awrap_tool_call(_Request(), handler)
-
-    assert refreshed[0]["workflows"] == "write"
-    assert refreshed[1]["actions"] == "read"
-    assert refreshed[2] == guard.BASE_RUNTIME_PROXY_TOKEN_PERMISSIONS
-    assert "actions" not in refreshed[2]
 
 
 async def test_non_workflow_push_runs_without_approval(monkeypatch: pytest.MonkeyPatch) -> None:
