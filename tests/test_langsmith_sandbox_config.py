@@ -13,6 +13,7 @@ from agent.integrations.langsmith import (
     LangSmithProvider,
     _create_sandbox_with_retry,
     _get_sandbox_snapshot_config,
+    _wait_for_reconnected_sandbox,
 )
 
 
@@ -116,6 +117,22 @@ class _FakeSandboxClient:
         return {"sandbox": kwargs["snapshot_id"]}
 
 
+class _FakeStatusSandbox:
+    def __init__(self, status: str) -> None:
+        self.status = status
+
+
+class _FakeReconnectClient:
+    def __init__(self, statuses: list[str]) -> None:
+        self.statuses = statuses
+        self.calls = 0
+
+    async def get_sandbox(self, *, name: str) -> _FakeStatusSandbox:
+        self.calls += 1
+        status = self.statuses[min(self.calls - 1, len(self.statuses) - 1)]
+        return _FakeStatusSandbox(status)
+
+
 @pytest.mark.asyncio
 async def test_create_sandbox_with_retry_retries_transient_errors(monkeypatch) -> None:  # noqa: ANN001
     client = _FakeSandboxClient(failures=2)
@@ -134,3 +151,21 @@ async def test_create_sandbox_with_retry_retries_transient_errors(monkeypatch) -
 
     assert result == {"sandbox": "snap-1"}
     assert client.calls == 3
+
+
+@pytest.mark.asyncio
+async def test_wait_for_reconnected_sandbox_polls_until_ready(monkeypatch) -> None:  # noqa: ANN001
+    client = _FakeReconnectClient(["starting", "starting", "running"])
+    sleep = AsyncMock()
+    monkeypatch.setattr("agent.integrations.langsmith.asyncio.sleep", sleep)
+
+    sandbox = await _wait_for_reconnected_sandbox(
+        client,
+        "sandbox-1",
+        timeout_seconds=30,
+        poll_seconds=2,
+    )
+
+    assert sandbox.status == "running"
+    assert client.calls == 3
+    assert sleep.await_count == 2

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 
+import httpx
 import pytest
 
 from agent.middleware.task_retry import task_on_failure, task_retry_on
@@ -18,9 +19,18 @@ class _InvalidPromptError(Exception):
 
 
 def test_task_retry_on_transient_status() -> None:
+    assert task_retry_on(_HTTPError(408)) is True
+    assert task_retry_on(_HTTPError(409)) is True
+    assert task_retry_on(_HTTPError(425)) is True
     assert task_retry_on(_HTTPError(429)) is True
     assert task_retry_on(_HTTPError(503)) is True
+    assert task_retry_on(_HTTPError(529)) is True
     assert task_retry_on(_HTTPError(400)) is False
+
+
+def test_task_retry_on_httpx_transport_subclasses() -> None:
+    assert task_retry_on(httpx.RemoteProtocolError("stream dropped")) is True
+    assert task_retry_on(httpx.ConnectError("connect failed")) is True
 
 
 def test_task_on_failure_returns_model_fixable_error() -> None:

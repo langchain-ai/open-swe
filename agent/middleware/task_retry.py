@@ -4,7 +4,7 @@ import json
 
 _RETURN_TO_MODEL_CODES = frozenset({"invalid_prompt", "context_length_exceeded"})
 _RETURN_TO_MODEL_STATUS_CODES = frozenset({400, 422})
-_RETRY_HTTP_STATUS_CODES = frozenset({429})
+_RETRY_HTTP_STATUS_CODES = frozenset({408, 409, 425, 429, 500, 502, 503, 504, 529})
 _TRANSIENT_ERROR_NAMES = frozenset(
     {
         "APIConnectionError",
@@ -49,11 +49,19 @@ def _error_fields(exc: Exception) -> dict[str, object]:
     return out
 
 
+def _is_httpx_transport_error(exc: Exception) -> bool:
+    try:
+        import httpx
+    except ImportError:  # pragma: no cover - dependency is declared in production
+        return False
+    return isinstance(exc, httpx.TransportError)
+
+
 def task_retry_on(exc: Exception) -> bool:
     status = _status_code(exc)
     if isinstance(status, int) and (status in _RETRY_HTTP_STATUS_CODES or status >= 500):
         return True
-    return exc.__class__.__name__ in _TRANSIENT_ERROR_NAMES
+    return exc.__class__.__name__ in _TRANSIENT_ERROR_NAMES or _is_httpx_transport_error(exc)
 
 
 def task_on_failure(exc: Exception) -> str:

@@ -40,6 +40,9 @@ SANDBOX_CREATE_RETRY_DELAYS_SECONDS = (1.0, 3.0)
 SANDBOX_CREATE_RETRYABLE_STATUS_CODES = frozenset({408, 409, 425, 429, 500, 502, 503, 504, 529})
 SANDBOX_READY_STATUSES = frozenset({"ready", "running"})
 SANDBOX_RECONNECT_STARTABLE_STATUSES = frozenset({"stopped", "paused", "idle"})
+SANDBOX_RECONNECT_PENDING_STATUSES = frozenset({"creating", "pending", "starting", "resuming"})
+SANDBOX_RECONNECT_READY_TIMEOUT_SECONDS = 30.0
+SANDBOX_RECONNECT_READY_POLL_SECONDS = 2.0
 PROXY_CONFIG_MAX_ATTEMPTS = 3
 PROXY_CONFIG_TIMEOUT_SECONDS = 10.0
 PROXY_CONFIG_RETRY_DELAYS_SECONDS = (0.5, 1.0)
@@ -162,6 +165,27 @@ def _is_retryable_sandbox_create_error(exc: BaseException) -> bool:
         "SandboxConnectionError",
         "SandboxNotReadyError",
     }
+
+
+async def _wait_for_reconnected_sandbox(
+    client: AsyncSandboxClient,
+    sandbox_id: str,
+    *,
+    timeout_seconds: float = SANDBOX_RECONNECT_READY_TIMEOUT_SECONDS,
+    poll_seconds: float = SANDBOX_RECONNECT_READY_POLL_SECONDS,
+) -> Any:
+    deadline = asyncio.get_running_loop().time() + timeout_seconds
+    last_sandbox = await client.get_sandbox(name=sandbox_id)
+    while True:
+        status = _status_text(last_sandbox)
+        if status in SANDBOX_READY_STATUSES or status not in SANDBOX_RECONNECT_PENDING_STATUSES:
+            return last_sandbox
+        if asyncio.get_running_loop().time() >= deadline:
+            return last_sandbox
+        await asyncio.sleep(
+            min(poll_seconds, max(deadline - asyncio.get_running_loop().time(), 0.0))
+        )
+        last_sandbox = await client.get_sandbox(name=sandbox_id)
 
 
 async def _create_sandbox_with_retry(
@@ -554,7 +578,7 @@ class LangSmithProvider(SandboxProvider):
                                 status,
                             )
                             await client.start_sandbox(sandbox_id)
-                            sandbox = await client.get_sandbox(name=sandbox_id)
+                            sandbox = await _wait_for_reconnected_sandbox(client, sandbox_id)
                             status = _status_text(sandbox)
                         except Exception as e:
                             msg = f"Failed to start existing sandbox '{sandbox_id}' ({status})"

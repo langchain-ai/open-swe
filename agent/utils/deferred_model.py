@@ -33,4 +33,4 @@ class DeferredErrorModel(BaseChatModel):
 def make_deferred_error_model(
     error: BaseException, *, model_id: str | None = None
 ) -> BaseChatModel:
-    return DeferredErrorModel(error_message=str(error), model_id=model_id)
+    return DeferredErrorModel(error_message=f"{type(error).__name__}: {error}", model_id=model_id)

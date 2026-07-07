@@ -138,9 +138,37 @@ async def test_missing_thread_id_is_ignored() -> None:
 
 
 @pytest.mark.asyncio
-async def test_missing_run_id_is_ignored() -> None:
+async def test_missing_run_id_falls_back_to_thread_level_dedupe(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _FakeClient(_slack_metadata())
+    monkeypatch.setattr(completion, "langgraph_client", lambda: client)
+    reply = AsyncMock(return_value=True)
+    monkeypatch.setattr(completion, "post_slack_thread_reply", reply)
+
     result = await completion.handle_run_completion({"thread_id": "t1", "status": "error"})
+
+    assert result["status"] == "ok"
+    reply.assert_awaited_once()
+    assert client.threads.updates == [{"failure_reply_posted": True}]
+
+
+@pytest.mark.asyncio
+async def test_missing_run_id_respects_thread_level_dedupe(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    metadata = _slack_metadata()
+    metadata["failure_reply_posted"] = True
+    client = _FakeClient(metadata)
+    monkeypatch.setattr(completion, "langgraph_client", lambda: client)
+    reply = AsyncMock(return_value=True)
+    monkeypatch.setattr(completion, "post_slack_thread_reply", reply)
+
+    result = await completion.handle_run_completion({"thread_id": "t1", "status": "error"})
+
     assert result["status"] == "ignored"
+    reply.assert_not_called()
+    assert client.threads.updates == []
 
 
 @pytest.mark.asyncio
