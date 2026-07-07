@@ -38,15 +38,26 @@ def test_webapp_does_not_import_agent_stack() -> None:
 
 
 def test_server_does_not_import_exa_or_dashboard_routes() -> None:
-    loaded = _closure_check("agent.server", ["exa_py"])
+    loaded = _closure_check("agent.server", ["exa_py", "agent.dashboard.routes", "agent.webapp"])
     assert not any(loaded.values()), f"forbidden modules imported by agent.server: {loaded}"
 
 
 def test_lazy_names_all_resolve() -> None:
-    code = (
-        "import agent.tools, agent.middleware, agent.dashboard;"
-        "[getattr(agent.tools, n) for n in agent.tools.__all__];"
-        "[getattr(agent.middleware, n) for n in agent.middleware.__all__];"
-        "agent.dashboard.router"
-    )
+    code = """
+import importlib
+import types
+
+for package_name in ("agent.tools", "agent.middleware"):
+    package = importlib.import_module(package_name)
+    for name in package.__all__:
+        namespace = {}
+        exec(f"from {package_name} import {name} as value", namespace)
+        if isinstance(namespace["value"], types.ModuleType):
+            raise AssertionError(f"{package_name}.{name} resolved to a module")
+
+namespace = {}
+exec("from agent.dashboard import router as value", namespace)
+if isinstance(namespace["value"], types.ModuleType):
+    raise AssertionError("agent.dashboard.router resolved to a module")
+"""
     subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True)

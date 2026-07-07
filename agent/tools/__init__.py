@@ -111,6 +111,7 @@ class _LazyToolsModule(ModuleType):
         module_map = ModuleType.__getattribute__(self, "__dict__").get("_TOOL_MODULES", {})
         if name not in module_map:
             return ModuleType.__getattribute__(self, name)
+        # Prefer public exports over same-named submodule attributes set by importlib.
         existing = ModuleType.__getattribute__(self, "__dict__").get(name)
         if existing is not None and not isinstance(existing, ModuleType):
             return existing

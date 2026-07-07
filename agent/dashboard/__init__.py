@@ -15,5 +15,6 @@ def __getattr__(name: str) -> Any:
     if name == "router":
         from .routes import router
 
+        globals()[name] = router
         return router
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

@@ -647,18 +647,6 @@ async def _load_corridor_mcp_tools() -> list[Any]:
     )
 
 
-async def warm_deployment_tool_caches() -> None:
-    """Best-effort warmup for deployment-scoped optional tool loaders."""
-    results = await asyncio.gather(
-        _load_corridor_mcp_tools(),
-        _load_observability_tools(True),
-        return_exceptions=True,
-    )
-    for result in results:
-        if isinstance(result, Exception):
-            logger.debug("Deployment tool cache warmup failed", exc_info=result)
-
-
 async def _cached_team_default_model_pair(kind: str):
     return await ttl_cache.cached(
         f"team-default-model-pair:{kind}:{id(get_team_default_model_pair)}",
