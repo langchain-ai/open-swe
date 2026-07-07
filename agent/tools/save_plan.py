@@ -1,20 +1,25 @@
-"""Tool: ``save_plan``. Publish the sandbox plan file for review.
+"""Tool: ``save_plan``. Publish sandbox Markdown for review or sharing.
 
-Reads the Markdown plan file the agent created in the sandbox and publishes it to
-the plan-review page, where the user and collaborators read it, comment inline,
-and approve or request changes. Available in plan mode (it does not modify the
-repository under review).
+Reads the Markdown file the agent created in the sandbox and publishes it to the
+plan-review page. In plan mode it is an approvable implementation plan; outside
+plan mode it is read-only shared content.
 """
 
 from __future__ import annotations
 
 import logging
 from collections.abc import Mapping
-from typing import Any
+from typing import Annotated, Any
 
 from langgraph.config import get_config
+from langgraph.prebuilt import InjectedState
 
-from ..dashboard.plan_store import PLAN_FILE_DIRECTORY, PLAN_STATUS_READY, save_plan_content
+from ..dashboard.plan_store import (
+    PLAN_FILE_DIRECTORY,
+    PLAN_STATUS_READY,
+    PLAN_STATUS_SHARED,
+    save_plan_content,
+)
 from ..utils.sandbox_state import get_sandbox_backend
 
 logger = logging.getLogger(__name__)
@@ -23,20 +28,22 @@ _MAX_PLAN_LINES = 20_000
 _MARKDOWN_EXTENSIONS = (".md", ".markdown")
 
 
-async def save_plan(plan_file_path: str) -> dict[str, Any]:
+async def save_plan(
+    plan_file_path: str,
+    state: Annotated[dict[str, Any] | None, InjectedState] = None,
+) -> dict[str, Any]:
     """Publish a Markdown plan file from the sandbox for review.
 
-    Use this in plan mode once your plan is ready. First create a Markdown file
-    under ``/workspace/plans/`` using a dated, descriptive filename, then pass
-    that file path here. The file contents are published to the plan-review page
-    linked in the conversation, where the user (the owner) and any collaborators
-    can read it, leave inline comments, and then approve it or request changes.
-    Call it again to publish a revised file when addressing feedback.
+    Use this in plan mode once your plan is ready. Outside plan mode, use it to
+    share long Slack responses without switching the thread into plan mode. First
+    create a Markdown file under ``/workspace/plans/`` using a dated, descriptive
+    filename, then pass that file path here. The file contents are published to
+    the plan-review page linked in the conversation. In plan mode, the user can
+    comment, approve, or request changes; outside plan mode, the page is read-only
+    shared content.
 
-    Write the plan in standard Markdown — headings, bullet/numbered lists, and
-    fenced code blocks all render. Keep it concise and high level, focusing on
-    approach, decisions/tradeoffs, risks, and verification; avoid file/function
-    details unless they are unusually tricky or controversial.
+    Write the content in standard Markdown — headings, bullet/numbered lists, and
+    fenced code blocks all render.
 
     Args:
         plan_file_path: Path to the Markdown plan file in the sandbox.
@@ -68,17 +75,27 @@ async def save_plan(plan_file_path: str) -> dict[str, Any]:
         content = (await _read_plan_file(str(thread_id), path)).strip()
         if not content:
             return {"success": False, "error": "plan file cannot be empty"}
-        await _save(str(thread_id), content, path)
+        await _save(str(thread_id), content, path, plan_mode=_active_plan_mode(state, configurable))
     except Exception as exc:  # noqa: BLE001
         logger.exception("save_plan failed for thread %s", thread_id)
         return {"success": False, "error": f"failed to save plan: {exc}"}
     return {"success": True, "path": path}
 
 
-async def _save(thread_id: str, content: str, path: str) -> None:
+async def _save(thread_id: str, content: str, path: str, *, plan_mode: bool) -> None:
     await save_plan_content(
-        thread_id, markdown=content, status=PLAN_STATUS_READY, plan_file_path=path
+        thread_id,
+        markdown=content,
+        status=PLAN_STATUS_READY if plan_mode else PLAN_STATUS_SHARED,
+        plan_file_path=path,
+        plan_mode=plan_mode or None,
     )
+
+
+def _active_plan_mode(state: dict[str, Any] | None, configurable: Any) -> bool:
+    if isinstance(state, dict) and state.get("plan_mode") is True:
+        return True
+    return isinstance(configurable, dict) and configurable.get("plan_mode") is True
 
 
 async def _read_plan_file(thread_id: str, path: str) -> str:

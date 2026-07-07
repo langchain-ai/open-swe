@@ -24,11 +24,7 @@ export interface PlanUser {
 }
 
 export type PlanStatus =
-  | "planning"
-  | "ready"
-  | "revising"
-  | "approved"
-  | "cancelled"
+  "planning" | "ready" | "shared" | "revising" | "approved" | "cancelled"
 
 export interface PlanData {
   threadId: string

@@ -161,12 +161,16 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
                 <MapIcon className="size-3.5 text-[var(--ui-accent)]" />
                 {thread.planStatus === "ready"
                   ? "A plan is ready for your review."
-                  : thread.planStatus === "revising"
-                    ? "The agent is revising the plan."
-                    : "The agent is writing a plan."}
+                  : thread.planStatus === "shared"
+                    ? "The agent shared a longer response."
+                    : thread.planStatus === "revising"
+                      ? "The agent is revising the plan."
+                      : "The agent is writing a plan."}
               </span>
               <span className="font-medium text-[var(--ui-accent)]">
-                Review plan →
+                {thread.planStatus === "shared"
+                  ? "Open response →"
+                  : "Review plan →"}
               </span>
             </Link>
           )}
