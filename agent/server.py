@@ -75,6 +75,7 @@ from .middleware import (
     SanitizeThinkingBlocksMiddleware,
     SanitizeToolInputsMiddleware,
     SlackAssistantStatusMiddleware,
+    SubdirAgentsReadMiddleware,
     TimeoutWrapupMiddleware,
     ToolArtifactMiddleware,
     ToolErrorMiddleware,
@@ -1024,6 +1025,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             SanitizeToolInputsMiddleware(),
             ModelCallLimitMiddleware(run_limit=MODEL_CALL_RECURSION_LIMIT, exit_behavior="end"),
             ToolErrorMiddleware(),
+            SubdirAgentsReadMiddleware(),
             ToolRetryMiddleware(
                 max_retries=2,
                 tools=["task"],
