@@ -1,0 +1,27 @@
+agent/utils/github_app.py
+  s_d7c1c14c9b6ac2::t_241378132efb43 29-31,36-43,50-54
+agent/server.py
+  s_d7c1c14c9b6ac2::t_a114ba6bb410e7 237-254
+  s_d7c1c14c9b6ac2::t_4864fdad761ad1 122
+tests/test_github_app.py
+  s_d7c1c14c9b6ac2::t_455eec811deb8a 158-178
+tests/test_proxy_auth.py
+  s_d7c1c14c9b6ac2::t_fb79b8fd2027bc 14-15
+  s_d7c1c14c9b6ac2::t_2a9088280bcbec 255-307
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "a1205645af531e64f14b07709aff8ffb804ccef8",
+  "prompts": {},
+  "sessions": {
+    "s_d7c1c14c9b6ac2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9ba14734-62d5-4587-b842-2ad48f6597e4",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "open-swe[bot] <open-swe@users.noreply.github.com>"
+    }
+  }
+}
