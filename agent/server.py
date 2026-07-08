@@ -243,14 +243,15 @@ async def _resolve_proxy_token(
             permissions=scope,
             log_errors=index == last,
         )
-        if token:
-            if index:
-                logger.warning(
-                    "GitHub proxy token minted with reduced scope %s; installation is "
-                    "missing higher-privilege grants",
-                    sorted(scope),
-                )
-            return token, expires_at, scope
+        if not token:
+            continue
+        if index:
+            logger.warning(
+                "GitHub proxy token minted with reduced scope %s; installation is "
+                "missing higher-privilege grants",
+                sorted(scope),
+            )
+        return token, expires_at, scope
     return None, None, None
 
 
