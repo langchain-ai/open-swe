@@ -560,6 +560,15 @@ async def _build_source_reference_lines(configurable: dict[str, Any]) -> list[st
             lines.append(f"- Linear ticket: [{identifier or url}]({url})")
         elif identifier:
             lines.append(f"- Linear ticket: {identifier}")
+    elif source in ("github", "github_issue"):
+        github_issue = configurable.get("github_issue") or {}
+        url = github_issue.get("url")
+        number = github_issue.get("number")
+        if url:
+            label = f"#{number}" if number else url
+            lines.append(f"- GitHub issue: [{label}]({url})")
+        elif number:
+            lines.append(f"- GitHub issue: #{number}")
 
     return lines
 

@@ -552,6 +552,31 @@ def test_appends_linear_reference_for_private_repo(monkeypatch: pytest.MonkeyPat
     assert "- Linear ticket: [AB-12](https://linear.app/x/AB-12)" in sent_body
 
 
+def test_appends_github_issue_reference_for_private_repo(monkeypatch: pytest.MonkeyPatch) -> None:
+    _set_config(
+        monkeypatch,
+        {
+            "source": "github",
+            "github_issue": {
+                "url": "https://github.com/langchain-ai/open-swe/issues/42",
+                "number": 42,
+            },
+        },
+    )
+    _stub_token(monkeypatch)
+
+    client = _RoutingClient(
+        post=_FakeResponse(201, {"html_url": "u", "number": 1, "user": {}}),
+        get_routes={"/repos/langchain-ai/open-swe": _FakeResponse(200, {"private": True})},
+    )
+    _install_client(monkeypatch, client)
+
+    _open_with_body("body")
+
+    sent_body = client.post_calls[0]["json"]["body"]
+    assert "- GitHub issue: [#42](https://github.com/langchain-ai/open-swe/issues/42)" in sent_body
+
+
 def test_skips_append_when_no_source_context(monkeypatch: pytest.MonkeyPatch) -> None:
     _set_config(monkeypatch, {"source": "slack"})
     _stub_token(monkeypatch)

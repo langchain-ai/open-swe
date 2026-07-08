@@ -144,6 +144,8 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
         )
 
     identifier = full_issue.get("identifier", "") or issue_data.get("identifier", "")
+    ticket_url = full_issue.get("url", "") or issue_data.get("url", "")
+    ticket_url_line = f"## Linear Ticket URL: {ticket_url}\n\n" if ticket_url else ""
 
     triggered_by_line = f"## Triggered by: {user_name}\n\n" if user_name else ""
     tag_instruction = (
@@ -157,9 +159,14 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
         f"## Title: {title}\n\n"
         f"{triggered_by_line}"
         f"## Linear Ticket: {identifier} - Ticket ID: {issue_id}\n\n"
+        f"{ticket_url_line}"
         f"## Description:\n{description}\n"
         f"{comments_text}\n\n"
-        f"Please analyze this issue and implement the necessary changes. "
+        "Please analyze this issue and implement the necessary changes. "
+        "If you open a PR for this issue, make sure the PR description links back to "
+        "this Linear ticket and follows this repository's PR conventions for the title, body, "
+        "release note, and/or changelog. Inspect AGENTS.md, PR templates, "
+        ".changelog/README.md, and nearby docs before choosing the PR title/body format. "
         f"When you're done, commit and push your changes. {tag_instruction}"
     )
     content_blocks: list[dict[str, Any]] = [create_text_block(prompt)]
