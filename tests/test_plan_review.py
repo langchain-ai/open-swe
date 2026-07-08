@@ -284,7 +284,19 @@ async def test_save_plan_preserves_plan_mode_from_config_when_active(
 def test_plan_routes_registered() -> None:
     from agent.webapp import app
 
-    paths = {getattr(route, "path", "") for route in app.routes}
+    def route_paths(routes: list[Any]) -> set[str]:
+        paths: set[str] = set()
+        for route in routes:
+            path = getattr(route, "path", None)
+            if isinstance(path, str):
+                paths.add(path)
+            original_router = getattr(route, "original_router", None)
+            nested_routes = getattr(original_router, "routes", None)
+            if nested_routes:
+                paths.update(route_paths(nested_routes))
+        return paths
+
+    paths = route_paths(app.routes)
     assert "/dashboard/api/plan/{thread_id}" in paths
     assert "/dashboard/api/plan/{thread_id}/approve" in paths
     assert "/dashboard/api/plan/{thread_id}/reject" in paths
