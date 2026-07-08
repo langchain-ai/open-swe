@@ -119,8 +119,7 @@ from .utils.authorship import (
 from .utils.dashboard_links import dashboard_plan_url, dashboard_thread_url
 from .utils.deferred_model import make_deferred_error_model
 from .utils.github_app import (
-    BASE_RUNTIME_PROXY_TOKEN_PERMISSIONS,
-    RUNTIME_PROXY_TOKEN_PERMISSIONS,
+    PROXY_TOKEN_PERMISSION_LADDER,
     PermissionMap,
     get_github_app_installation_token_with_expiry,
 )
@@ -235,18 +234,24 @@ async def _resolve_proxy_token(
         )
         return token, expires_at, permissions
 
-    token, expires_at = await get_github_app_installation_token_with_expiry(
-        permissions=RUNTIME_PROXY_TOKEN_PERMISSIONS,
-        log_errors=False,
-    )
-    if token:
-        return token, expires_at, RUNTIME_PROXY_TOKEN_PERMISSIONS
-
-    logger.warning("Retrying GitHub proxy token mint without optional Actions read permission")
-    token, expires_at = await get_github_app_installation_token_with_expiry(
-        permissions=BASE_RUNTIME_PROXY_TOKEN_PERMISSIONS
-    )
-    return token, expires_at, BASE_RUNTIME_PROXY_TOKEN_PERMISSIONS if token else None
+    # Walk from the richest scope to the guaranteed core so an installation that
+    # hasn't granted workflows:write / actions:read degrades instead of failing.
+    ladder = PROXY_TOKEN_PERMISSION_LADDER
+    last = len(ladder) - 1
+    for index, scope in enumerate(ladder):
+        token, expires_at = await get_github_app_installation_token_with_expiry(
+            permissions=scope,
+            log_errors=index == last,
+        )
+        if token:
+            if index:
+                logger.warning(
+                    "GitHub proxy token minted with reduced scope %s; installation is "
+                    "missing higher-privilege grants",
+                    sorted(scope),
+                )
+            return token, expires_at, scope
+    return None, None, None
 
 
 async def _resolve_snapshot_id_for_repo(repo: dict[str, str] | None) -> str | None:
