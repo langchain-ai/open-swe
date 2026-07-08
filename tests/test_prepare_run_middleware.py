@@ -18,6 +18,53 @@ class DummyPrepareMiddleware(BasePrepareRunMiddleware):
         return {"work_dir": "/tmp/work", "rendered_system_prompt": "prepared prompt"}
 
 
+class FailingPrepareMiddleware(BasePrepareRunMiddleware):
+    async def _prepare(self, state, runtime):
+        raise ValueError("Cannot configure proxy: GitHub App installation token is unavailable")
+
+
+@pytest.mark.asyncio
+async def test_prepare_failure_posts_slack_closeout_and_reraises(monkeypatch):
+    middleware = FailingPrepareMiddleware()
+    posted: list[tuple[str, str, str]] = []
+
+    monkeypatch.setattr(
+        "agent.middleware.prepare_run.get_config",
+        lambda: {"configurable": {"slack_thread": {"channel_id": "C1", "thread_ts": "123.45"}}},
+    )
+
+    async def fake_reply(channel_id, thread_ts, text):
+        posted.append((channel_id, thread_ts, text))
+        return True
+
+    monkeypatch.setattr("agent.utils.slack.post_slack_thread_reply", fake_reply)
+
+    with pytest.raises(ValueError):
+        await middleware.abefore_agent({}, None)
+
+    assert len(posted) == 1
+    assert posted[0][0] == "C1"
+    assert posted[0][1] == "123.45"
+
+
+@pytest.mark.asyncio
+async def test_prepare_failure_closeout_error_does_not_mask_original(monkeypatch):
+    middleware = FailingPrepareMiddleware()
+
+    monkeypatch.setattr(
+        "agent.middleware.prepare_run.get_config",
+        lambda: {"configurable": {"slack_thread": {"channel_id": "C1", "thread_ts": "123.45"}}},
+    )
+
+    async def boom(channel_id, thread_ts, text):
+        raise RuntimeError("slack down")
+
+    monkeypatch.setattr("agent.utils.slack.post_slack_thread_reply", boom)
+
+    with pytest.raises(ValueError):
+        await middleware.abefore_agent({}, None)
+
+
 @pytest.mark.asyncio
 async def test_prepare_latch_skips_second_call():
     middleware = DummyPrepareMiddleware()

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from collections.abc import Awaitable, Callable
 from typing import Any, NotRequired
 
@@ -12,7 +13,15 @@ from langchain.agents.middleware.types import (
     ModelResponse,
 )
 from langchain_core.messages import SystemMessage
+from langgraph.config import get_config
 from langgraph.runtime import Runtime
+
+logger = logging.getLogger(__name__)
+
+_STARTUP_FAILURE_MESSAGE = (
+    "I couldn't start on this request — a temporary GitHub authentication or "
+    "sandbox setup issue got in the way. Please try again in a moment."
+)
 
 
 class PrepareRunState(AgentState):
@@ -59,8 +68,60 @@ class BasePrepareRunMiddleware(AgentMiddleware):
         fingerprint = self._prepare_fingerprint(state, runtime)
         if state.get("run_prepared") and state.get("run_prepared_for") == fingerprint:
             return None
-        updates = await self._prepare(state, runtime)
+        try:
+            updates = await self._prepare(state, runtime)
+        except Exception as exc:
+            # Startup failures (e.g. an unavailable GitHub App proxy token) must
+            # not crash silently — post a source-channel closeout, then re-raise
+            # so the failure is still recorded.
+            await self._notify_startup_failure(exc)
+            raise
         return {"run_prepared": True, "run_prepared_for": fingerprint, **updates}
+
+    async def _notify_startup_failure(self, exc: Exception) -> None:
+        """Post a source-channel closeout when run preparation fails."""
+        try:
+            config = get_config()
+        except Exception:
+            logger.warning("Startup preparation failed; no run config for closeout", exc_info=exc)
+            return
+        configurable = config.get("configurable") or {}
+        try:
+            await self._post_startup_failure_closeout(configurable)
+        except Exception:
+            # A secondary failure must not mask the original startup error.
+            logger.exception("Failed to post startup-failure closeout")
+
+    async def _post_startup_failure_closeout(self, configurable: dict[str, Any]) -> None:
+        slack_thread = configurable.get("slack_thread")
+        if isinstance(slack_thread, dict):
+            channel_id = slack_thread.get("channel_id")
+            thread_ts = slack_thread.get("thread_ts")
+            if (
+                isinstance(channel_id, str)
+                and channel_id
+                and isinstance(thread_ts, str)
+                and thread_ts
+            ):
+                from ..utils.slack import post_slack_thread_reply
+
+                await post_slack_thread_reply(channel_id, thread_ts, _STARTUP_FAILURE_MESSAGE)
+                return
+
+        linear_issue = configurable.get("linear_issue")
+        if isinstance(linear_issue, dict):
+            issue_id = linear_issue.get("id")
+            if isinstance(issue_id, str) and issue_id:
+                from ..utils.linear import comment_on_linear_issue
+
+                await comment_on_linear_issue(
+                    issue_id,
+                    _STARTUP_FAILURE_MESSAGE,
+                    parent_id=configurable.get("triggering_comment_id") or None,
+                )
+                return
+
+        logger.info("Startup preparation failed; no source channel available for closeout")
 
     def _prepare_fingerprint(self, state: PrepareRunState, runtime: Runtime) -> str:  # noqa: ARG002
         payload = {
