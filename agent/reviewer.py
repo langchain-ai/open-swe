@@ -48,6 +48,7 @@ from .middleware import (
     BasePrepareRunMiddleware,
     PrepareRunState,
     RepairOrphanedToolCallsMiddleware,
+    ReviewerLoopGuardMiddleware,
     SanitizeFireworksMessagesMiddleware,
     SanitizeOpenAIResponsesMiddleware,
     SanitizeThinkingBlocksMiddleware,
@@ -102,6 +103,10 @@ from .utils.repo_prep import materialize_trusted_skills, prepare_review_repo
 from .utils.sandbox_paths import aresolve_sandbox_work_dir
 from .utils.tracing import REVIEW_TRACING_PROJECT, traced_graph_factory
 
+# LangSmith terminates runs at ~1000 child runs; force a publishing wrap-up
+# before the ceiling so a review is always emitted instead of a null output.
+REVIEWER_CHILD_RUN_CAP = 1_000
+
 REVIEWER_PROMPT_TEMPLATE = """You are a specialized code reviewer agent. Your job is to review one GitHub PR and publish a single review.
 
 Sandbox: `{working_dir}`. Invoke `gh` as `GH_TOKEN=dummy gh <command>`.
@@ -119,6 +124,19 @@ GH_TOKEN=dummy gh api repos/{repo_owner}/{repo_name}/compare/<last_reviewed_sha>
 ```
 
 {repo_checkout_note}
+
+# Empty results are terminal — never loop
+
+Roughly half of `read_file`/`grep` failures come back empty or `null`. An empty
+or no-match result is an ANSWER, not a reason to retry: if a `read_file` or
+`grep` on a given (path, pattern) returns empty/null, do NOT re-issue the
+identical call. Adapt the path or pattern exactly once, or record that the
+file/pattern is unavailable and move on. If `gh pr diff` / `git diff` comes back
+empty, treat it as "no diff to review" and proceed to `publish_review` rather
+than re-fetching. Re-issuing byte-identical calls on empty results burns the run
+until it is killed with no review published — that is the worst outcome. A guard
+may short-circuit repeated identical empty calls with a `repeated_empty_result`
+message; when you see it, stop retrying that call and move toward publishing.
 
 If a skills section appears below, the repo ships reviewer-relevant skills. Read
 the `SKILL.md` that matches the area you're reviewing and apply it.
@@ -1327,10 +1345,11 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
             SanitizeToolInputsMiddleware(),
             ModelCallLimitMiddleware(run_limit=MODEL_CALL_RECURSION_LIMIT, exit_behavior="end"),
             ToolErrorMiddleware(),
+            ReviewerLoopGuardMiddleware(),
             refresh_github_proxy_before_model,
             check_message_queue_before_model,
             SlackAssistantStatusMiddleware(),
-            TimeoutWrapupMiddleware(),
+            TimeoutWrapupMiddleware(child_run_cap=REVIEWER_CHILD_RUN_CAP),
             SanitizeOpenAIResponsesMiddleware(),
             SanitizeFireworksMessagesMiddleware(),
             SanitizeThinkingBlocksMiddleware(),
