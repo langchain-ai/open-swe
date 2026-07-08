@@ -135,6 +135,9 @@ from .utils.sandbox_state import (
 )
 from .utils.tracing import AGENT_TRACING_PROJECT, traced_graph_factory
 
+from monocle_apptrace import setup_monocle_telemetry
+setup_monocle_telemetry(workflow_name="open-swe", monocle_exporters_list="file")
+
 client = get_client()
 
 DEFAULT_TOOL_LOADER_TIMEOUT_SECONDS = 5.0

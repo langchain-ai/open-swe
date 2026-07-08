@@ -31,6 +31,7 @@ dependencies = [
     "langchain-google-genai>=4.2.4",
     "langchain-mcp-adapters>=0.2.2",
     "stagehand>=3.21.0",
+    "monocle_apptrace",
 ]
 
 [project.optional-dependencies]
