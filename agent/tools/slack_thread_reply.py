@@ -30,6 +30,12 @@ async def slack_thread_reply(
     posting a brief status update first so the user knows what's happening.
     Always end the run with a final reply summarizing what you did.
 
+    Do NOT claim an action is complete (e.g. "opened the PR", "checks are
+    green", "pushed") until the corresponding tool call has actually run AND
+    returned success. Before the action, phrase updates as intent
+    ("opening the PR now"); only after the tool succeeds should you report it
+    as done, and the final summary must reflect the real tool outcome.
+
     Format messages using Slack's mrkdwn format, NOT standard Markdown.
     Key differences: *bold*, _italic_, ~strikethrough~, <url|link text>,
     bullet lists with "• ", ```code blocks```, > blockquotes.
