@@ -31,6 +31,8 @@ async def list_workflow_push_approvals(
     if not _thread_is_readable(metadata):
         raise HTTPException(404, "thread not found")
     is_owner = _user_owns_thread(metadata, session["sub"], session.get("email"))
+    if not is_owner:
+        raise HTTPException(403, "only the thread owner can view workflow approvals")
     approvals = await get_workflow_push_approvals(thread_id)
     return {
         "threadId": thread_id,
