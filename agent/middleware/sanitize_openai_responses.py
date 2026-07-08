@@ -46,21 +46,54 @@ def _is_stale_reasoning_reference(block: dict[str, Any]) -> bool:
     return isinstance(block_id, str) and block_id.startswith("rs_")
 
 
+def _is_reasoning_block(block: dict[str, Any]) -> bool:
+    return block.get("type") == "reasoning"
+
+
+def _is_function_call_block(block: dict[str, Any]) -> bool:
+    return block.get("type") in ("function_call", "tool_call")
+
+
 def _sanitize_messages(messages: list[Any]) -> None:
-    removed = 0
+    removed_reasoning = 0
+    removed_calls = 0
     for message in messages:
         if not isinstance(message, AIMessage) or not isinstance(message.content, list):
             continue
+        dicts = [block for block in message.content if isinstance(block, dict)]
+        dropped_reasoning = any(_is_stale_reasoning_reference(block) for block in dicts)
+        if not dropped_reasoning:
+            continue
+        # The Responses API links a function_call to its reasoning item
+        # positionally within the same message, not by an explicit key. Once we
+        # drop the reasoning item(s), any function_call left in this message is
+        # orphaned and the API rejects the replay with a 400, so drop the calls
+        # too unless a valid reasoning item survives to anchor them.
+        surviving_reasoning = any(
+            _is_reasoning_block(block) and not _is_stale_reasoning_reference(block)
+            for block in dicts
+        )
         content = []
         for block in message.content:
             if isinstance(block, dict) and _is_stale_reasoning_reference(block):
-                removed += 1
+                removed_reasoning += 1
+                continue
+            if (
+                not surviving_reasoning
+                and isinstance(block, dict)
+                and _is_function_call_block(block)
+            ):
+                removed_calls += 1
                 continue
             content.append(block)
-        if len(content) != len(message.content):
-            message.content = content
-    if removed:
-        logger.warning("Removed %d stale OpenAI Responses reasoning reference(s)", removed)
+        message.content = content
+    if removed_reasoning or removed_calls:
+        logger.warning(
+            "Removed %d stale OpenAI Responses reasoning reference(s) and "
+            "%d orphaned function_call/tool_call block(s)",
+            removed_reasoning,
+            removed_calls,
+        )
 
 
 class SanitizeOpenAIResponsesMiddleware(AgentMiddleware):

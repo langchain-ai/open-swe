@@ -81,6 +81,11 @@ def _should_fallback(exc: BaseException) -> bool:
         status = getattr(exc, "status_code", None)
         if isinstance(status, int) and status in _RETRYABLE_STATUS_CODES:
             return True
+    # A replayed OpenAI Responses history that lost its reasoning item raises a
+    # 400 the primary keeps rejecting; fail over so the turn survives instead of
+    # crashing. Kept narrow (reasoning-item message) so genuine 400s still surface.
+    if isinstance(exc, openai.BadRequestError) and "reasoning" in str(exc):
+        return True
     return False
 
 

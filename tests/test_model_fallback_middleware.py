@@ -48,6 +48,21 @@ def _anthropic_model_not_available_error() -> anthropic.BadRequestError:
     return anthropic.BadRequestError("model unavailable", response=response, body=body)
 
 
+def _openai_missing_reasoning_item_error() -> openai.BadRequestError:
+    body = {
+        "error": {
+            "message": (
+                "Item 'fc_abc' of type 'function_call' was provided without its "
+                "required 'reasoning' item: 'rs_abc'."
+            ),
+            "type": "invalid_request_error",
+        }
+    }
+    request = httpx.Request("POST", "https://api.openai.com/v1/responses")
+    response = httpx.Response(400, request=request, json=body)
+    return openai.BadRequestError(body["error"]["message"], response=response, body=body)
+
+
 def _make_request() -> MagicMock:
     request = MagicMock()
     request.override = MagicMock(return_value=MagicMock(name="overridden_request"))
@@ -77,6 +92,15 @@ class TestShouldFallback:
         request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
         response = httpx.Response(400, request=request, json={"error": {}})
         exc = anthropic.BadRequestError("bad", response=response, body={})
+        assert _should_fallback(exc) is False
+
+    def test_openai_missing_reasoning_item_400_falls_back(self) -> None:
+        assert _should_fallback(_openai_missing_reasoning_item_error()) is True
+
+    def test_openai_generic_400_does_not_fall_back(self) -> None:
+        request = httpx.Request("POST", "https://api.openai.com/v1/responses")
+        response = httpx.Response(400, request=request, json={"error": {"message": "bad"}})
+        exc = openai.BadRequestError("bad", response=response, body={})
         assert _should_fallback(exc) is False
 
     def test_value_error_does_not_fall_back(self) -> None:
