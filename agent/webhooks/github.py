@@ -24,9 +24,11 @@ def build_github_issue_prompt(
     *,
     github_login: str,
     issue_author: str = "",
+    issue_url: str = "",
 ) -> str:
     """Build the user prompt for a GitHub issue-triggered run."""
     triggered_by_line = f"## Triggered by: {github_login}\n\n" if github_login else ""
+    issue_url_line = f"## Issue URL: {issue_url}\n\n" if issue_url else ""
     comments_text = webapp._build_github_issue_comments_text(comments)
     sanitized_title = webapp.sanitize_github_comment_body(title)
     formatted_body = webapp.format_github_comment_body_for_prompt(
@@ -37,10 +39,15 @@ def build_github_issue_prompt(
         f"## Repository: {repo_config.get('owner')}/{repo_config.get('name')}\n\n"
         f"{triggered_by_line}"
         f"## GitHub Issue: #{issue_number} - Issue ID: {issue_id}\n\n"
+        f"{issue_url_line}"
         f"## Title: {sanitized_title}\n\n"
         f"## Description:\n{formatted_body}\n"
         f"{comments_text}\n\n"
         "Please analyze this issue and implement the necessary changes. "
+        "If you open a PR for this issue, make sure the PR description links back to "
+        "this issue and follows this repository's PR conventions for the title, body, "
+        "release note, and/or changelog. Inspect AGENTS.md, PR templates, "
+        ".changelog/README.md, and nearby docs before choosing the PR title/body format. "
         "When you need to communicate on GitHub, use `GH_TOKEN=dummy gh issue comment` "
         "with the issue number."
     )
@@ -977,6 +984,7 @@ async def process_github_issue(payload: dict[str, Any], event_type: str) -> None
             comments,
             github_login=github_login,
             issue_author=issue_author,
+            issue_url=issue_url,
         )
     configurable: dict[str, Any] = {
         "source": "github",

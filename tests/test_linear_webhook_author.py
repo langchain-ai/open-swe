@@ -28,12 +28,15 @@ def _issue_data(*, user_email: str | None, user_name: str = "Zhen") -> dict:
     return data
 
 
-def _run_process(issue_data: dict, repo_config: dict[str, str]) -> tuple[dict, dict, str | None]:
+def _run_process(
+    issue_data: dict, repo_config: dict[str, str]
+) -> tuple[dict, dict, str | None, object]:
     captured: dict[str, Any] = {}
 
     async def fake_dispatch(
         thread_id, content, configurable, *, source, metadata=None, client=None
     ):
+        captured["content"] = content
         captured["configurable"] = configurable
         return {"run_id": "run-1"}
 
@@ -80,11 +83,12 @@ def _run_process(issue_data: dict, repo_config: dict[str, str]) -> tuple[dict, d
         captured.get("configurable", {}),
         captured.get("upsert", {}),
         captured.get("resolved_email"),
+        captured.get("content"),
     )
 
 
 def test_linear_configurable_carries_github_login() -> None:
-    configurable, _upsert, resolved_email = _run_process(
+    configurable, _upsert, resolved_email, _content = _run_process(
         _issue_data(user_email="zhen@example.com"),
         {"owner": "langchain-ai", "name": "open-swe"},
     )
@@ -96,7 +100,7 @@ def test_linear_configurable_carries_github_login() -> None:
 
 
 def test_linear_upsert_tags_thread_with_login() -> None:
-    _configurable, upsert, _email = _run_process(
+    _configurable, upsert, _email, _content = _run_process(
         _issue_data(user_email="zhen@example.com"),
         {"owner": "langchain-ai", "name": "open-swe"},
     )
@@ -106,7 +110,7 @@ def test_linear_upsert_tags_thread_with_login() -> None:
 
 
 def test_linear_omits_login_when_unmapped() -> None:
-    configurable, upsert, resolved_email = _run_process(
+    configurable, upsert, resolved_email, _content = _run_process(
         _issue_data(user_email="nobody@example.com"),
         {"owner": "langchain-ai", "name": "open-swe"},
     )
@@ -114,3 +118,16 @@ def test_linear_omits_login_when_unmapped() -> None:
     assert resolved_email == "nobody@example.com"
     assert "github_login" not in configurable
     assert upsert["github_login"] == ""
+
+
+def test_linear_issue_prompt_mentions_pr_references_and_conventions() -> None:
+    _configurable, _upsert, _email, content = _run_process(
+        _issue_data(user_email="zhen@example.com"),
+        {"owner": "langchain-ai", "name": "open-swe"},
+    )
+
+    prompt = content[0]["text"]
+    assert "https://linear.app/x/issue/OS-42" in prompt
+    assert "PR description links back to this Linear ticket" in prompt
+    assert "repository's PR conventions" in prompt
+    assert ".changelog/README.md" in prompt
