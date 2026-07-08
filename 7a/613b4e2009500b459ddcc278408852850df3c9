@@ -1,0 +1,19 @@
+agent/server.py
+  s_d7c1c14c9b6ac2::t_4f9f8ef31277b2 246-254
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "7a613b4e2009500b459ddcc278408852850df3c9",
+  "prompts": {},
+  "sessions": {
+    "s_d7c1c14c9b6ac2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9ba14734-62d5-4587-b842-2ad48f6597e4",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "open-swe[bot] <open-swe@users.noreply.github.com>"
+    }
+  }
+}
