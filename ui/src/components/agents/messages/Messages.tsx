@@ -2,6 +2,7 @@ import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useStat
 import { ChevronDown } from "lucide-react";
 
 import { AgentMessage } from "./AgentMessage";
+import { CollapsedUserText } from "./CollapsedUserText";
 import { ThinkingSpinner } from "./ThinkingSpinner";
 import { UserMessage } from "./UserMessage";
 import type { MessagesProps } from "./types";
@@ -32,7 +33,12 @@ function QueuedMessages({
               </span>
               <span className="h-1.5 w-1.5 rounded-full bg-[var(--ui-accent)]" />
             </div>
-            {message.content && <div className="whitespace-pre-wrap break-words">{message.content}</div>}
+            {message.content && (
+              <CollapsedUserText
+                text={message.content}
+                className="whitespace-pre-wrap break-words"
+              />
+            )}
             {imageCount > 0 && (
               <div className="mt-1 text-xs text-[color:var(--ui-text-muted)]">
                 {imageCount} image{imageCount === 1 ? "" : "s"} attached

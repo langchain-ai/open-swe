@@ -1,5 +1,6 @@
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
 
+import { CollapsedUserText } from "./CollapsedUserText";
 import { MessageTimestamp } from "./MessageTimestamp";
 import type { Message } from "@/lib/agents/types";
 
@@ -60,7 +61,7 @@ export function UserMessage({ message }: { message: Message }) {
                 WebkitMaskImage: textEdgeMask,
               }}
             >
-              {text}
+              <CollapsedUserText text={text} />
             </div>
           </div>
         )}
