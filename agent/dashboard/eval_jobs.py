@@ -23,6 +23,7 @@ from agent.reviewer_eval_store import (
     EVALS_NAMESPACE,
     REVIEWER_EVAL_KEY,
 )
+from agent.reviewer_findings import REVIEW_FINDING_CAP
 
 logger = logging.getLogger(__name__)
 
@@ -54,9 +55,9 @@ DEFAULT_REVIEWER_EVAL_CONFIG: ReviewerEvalConfig = {
     "assistant_id": "reviewer",
     "model_id": "google_genai:gemini-3.5-flash",
     "reasoning_effort": "medium",
-    "score_mode": "all_findings",
-    "severity_threshold": "medium",
-    "cap": 4,
+    "score_mode": "surfaced_findings",
+    "severity_threshold": "low",
+    "cap": REVIEW_FINDING_CAP,
 }
 
 

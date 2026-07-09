@@ -22,6 +22,25 @@ def test_reviewer_system_prompt_formats_without_keyerror() -> None:
     assert "benchmark" not in prompt.lower()
     assert "golden" not in prompt.lower()
     assert "at least 1 finding" not in prompt.lower()
+    assert "wrong identifier/value/key" in prompt
+    assert "Keep at most 6 findings" in prompt
+    assert "Delegate at most one review pass" in prompt
+
+
+def test_reviewer_eval_prompt_omits_historical_and_benchmark_gaming() -> None:
+    prompt = reviewer._reviewer_system_prompt(
+        "/workspace/repo",
+        repo_owner="acme",
+        repo_name="repo",
+        pr_number=42,
+        reviewer_eval=True,
+    )
+
+    assert "Pre-existing PR review threads" not in prompt
+    assert "golden" not in prompt.lower()
+    assert "hard minimum" not in prompt.lower()
+    assert "expected" not in prompt.lower()
+    assert "Do not query or use historical PR comments" in prompt
 
 
 def test_reviewer_system_prompt_repo_ready_note() -> None:
@@ -144,9 +163,9 @@ def test_reviewer_system_prompt_includes_dependency_vetting_guidance() -> None:
         pr_number=42,
     )
     assert "New dependencies." in prompt
-    assert "unpinned/floating" in prompt
-    assert "missing/non-permissive license" in prompt
-    assert "not a style nit" in prompt
+    assert "concrete compatibility, security, licensing, or" in prompt
+    assert "merely" in prompt
+    assert "lacks a manifest bound" in prompt
 
 
 def test_finding_reply_context_wraps_reply_as_untrusted_data() -> None:
@@ -414,6 +433,7 @@ async def test_reviewer_injects_repo_style_during_eval() -> None:
         "configurable": {
             "__is_for_execution__": True,
             "thread_id": "reviewer-thread-id",
+            "source": "github",
             "reviewer_eval": True,
             "eval": True,
             "repo": {"owner": "getsentry", "name": "sentry"},
@@ -431,7 +451,13 @@ async def test_reviewer_injects_repo_style_during_eval() -> None:
         captured["middleware"] = kwargs["middleware"]
         return _DummyAgent()
 
+    fetch_threads = AsyncMock(return_value=[])
     with (
+        patch(
+            "agent.reviewer.get_github_app_installation_token_with_expiry",
+            new_callable=AsyncMock,
+            return_value=("gh-token", None),
+        ),
         patch(
             "agent.reviewer.ensure_sandbox_for_thread",
             new_callable=AsyncMock,
@@ -449,6 +475,9 @@ async def test_reviewer_injects_repo_style_during_eval() -> None:
         ),
         patch("agent.reviewer.make_model", return_value=MagicMock()),
         patch("agent.reviewer.create_deep_agent", side_effect=fake_create_deep_agent),
+        patch("agent.reviewer.fetch_pr_review_threads", fetch_threads),
+        patch("agent.reviewer.fetch_pr_diff", new_callable=AsyncMock, return_value=None),
+        patch("agent.reviewer.fetch_pr_metadata", new_callable=AsyncMock, return_value=None),
         patch(
             "agent.reviewer.fetch_agents_md",
             new_callable=AsyncMock,
@@ -462,6 +491,8 @@ async def test_reviewer_injects_repo_style_during_eval() -> None:
 
     assert "Repository-specific review style" in captured["system_prompt"]
     assert "Flag table rerender regressions" in captured["system_prompt"]
+    assert "Pre-existing PR review threads" not in captured["system_prompt"]
+    fetch_threads.assert_not_awaited()
 
 
 @pytest.mark.asyncio

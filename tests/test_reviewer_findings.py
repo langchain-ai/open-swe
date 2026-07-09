@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import copy
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
@@ -9,6 +11,7 @@ import pytest
 
 from agent.reviewer_findings import (
     SEVERITY_ORDER,
+    DiffSide,
     Finding,
     append_finding,
     filter_findings_for_publish,
@@ -61,6 +64,30 @@ def test_new_finding_defaults() -> None:
     assert finding["last_human_reply_at"] is None
     assert finding["resolution_note"] is None
     assert finding["suggestion"] is None
+
+
+def test_fingerprint_covers_side_and_full_description() -> None:
+    prefix = "x" * 200
+
+    def _with(*, side: DiffSide, description: str) -> Finding:
+        return new_finding(
+            severity="high",
+            confidence="high",
+            category="correctness",
+            file="foo.py",
+            start_line=10,
+            end_line=10,
+            description=description,
+            sha="abc123",
+            side=side,
+        )
+
+    right = _with(side="RIGHT", description=f"{prefix} one")
+    left = _with(side="LEFT", description=f"{prefix} one")
+    different_suffix = _with(side="RIGHT", description=f"{prefix} two")
+
+    assert right["fingerprint"] != left["fingerprint"]
+    assert right["fingerprint"] != different_suffix["fingerprint"]
 
 
 def test_severity_order_monotonic() -> None:
@@ -129,7 +156,7 @@ async def test_replace_findings_calls_threads_update() -> None:
 @pytest.mark.asyncio
 async def test_append_finding_appends_to_existing_list() -> None:
     existing = _f(id="f_a")
-    new = _f(id="f_b")
+    new = _f(id="f_b", description="different")
 
     fake_client = AsyncMock()
     fake_client.threads.get.return_value = {"metadata": {"findings": [existing]}}
@@ -137,10 +164,75 @@ async def test_append_finding_appends_to_existing_list() -> None:
     with patch("agent.reviewer_findings.get_client", return_value=fake_client):
         result = await append_finding("tid", new)
 
-    assert result["id"] == "f_b"
+    assert result["finding"]["id"] == "f_b"
+    assert result["created"] is True
     args = fake_client.threads.update.await_args
     persisted = args.kwargs["metadata"]["findings"]
     assert [f["id"] for f in persisted] == ["f_a", "f_b"]
+
+
+@pytest.mark.asyncio
+async def test_concurrent_append_finding_preserves_distinct_findings() -> None:
+    metadata: dict[str, Any] = {"findings": []}
+
+    class Threads:
+        async def get(self, _thread_id: str) -> dict[str, Any]:
+            await asyncio.sleep(0)
+            return {"metadata": copy.deepcopy(metadata)}
+
+        async def update(self, *, thread_id: str, metadata: dict[str, Any]) -> None:
+            assert thread_id == "tid"
+            await asyncio.sleep(0)
+            stored = metadata.get("findings")
+            if isinstance(stored, list):
+                metadata_copy = copy.deepcopy(stored)
+                metadata_holder["findings"] = metadata_copy
+
+    metadata_holder = metadata
+
+    class Client:
+        threads = Threads()
+
+    with patch("agent.reviewer_findings.get_client", return_value=Client()):
+        first, second = await asyncio.gather(
+            append_finding("tid", _f(id="f_a", description="first")),
+            append_finding("tid", _f(id="f_b", description="second")),
+        )
+
+    assert first["created"] is True
+    assert second["created"] is True
+    assert {finding["id"] for finding in metadata["findings"]} == {"f_a", "f_b"}
+
+
+@pytest.mark.asyncio
+async def test_concurrent_identical_findings_are_idempotent() -> None:
+    metadata: dict[str, Any] = {"findings": []}
+
+    class Threads:
+        async def get(self, _thread_id: str) -> dict[str, Any]:
+            await asyncio.sleep(0)
+            return {"metadata": copy.deepcopy(metadata)}
+
+        async def update(self, *, thread_id: str, metadata: dict[str, Any]) -> None:
+            assert thread_id == "tid"
+            stored = metadata.get("findings")
+            if isinstance(stored, list):
+                metadata_holder["findings"] = copy.deepcopy(stored)
+
+    metadata_holder = metadata
+
+    class Client:
+        threads = Threads()
+
+    with patch("agent.reviewer_findings.get_client", return_value=Client()):
+        first, second = await asyncio.gather(
+            append_finding("tid", _f(id="f_a")),
+            append_finding("tid", _f(id="f_b")),
+        )
+
+    assert sum(result["created"] for result in (first, second)) == 1
+    assert first["finding"]["id"] == second["finding"]["id"]
+    assert len(metadata["findings"]) == 1
 
 
 @pytest.mark.asyncio
@@ -175,6 +267,18 @@ async def test_mutate_findings_skips_write_when_unchanged() -> None:
 
     with patch("agent.reviewer_findings.get_client", return_value=fake_client):
         await mutate_findings("tid", lambda _findings: False)
+
+    fake_client.threads.update.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_mutate_findings_does_not_write_after_transient_read_failure() -> None:
+    fake_client = AsyncMock()
+    fake_client.threads.get.side_effect = RuntimeError("transient")
+
+    with patch("agent.reviewer_findings.get_client", return_value=fake_client):
+        with pytest.raises(RuntimeError, match="transient"):
+            await mutate_findings("tid", lambda findings: bool(findings.append(_f(id="f_new"))))
 
     fake_client.threads.update.assert_not_called()
 

@@ -164,10 +164,14 @@ async def add_finding(
     )
 
     try:
-        await append_finding(thread_id, finding)
+        append_result = await append_finding(thread_id, finding)
     except ReviewerThreadMissingError as exc:
         return thread_missing_tool_result(exc)
-    result: dict[str, Any] = {"success": True, "finding_id": finding["id"]}
+    result: dict[str, Any] = {
+        "success": True,
+        "finding_id": append_result["finding"]["id"],
+        "duplicate": not append_result["created"],
+    }
     if suggestion_dropped:
         result["suggestion_dropped"] = True
         result["warning"] = (
