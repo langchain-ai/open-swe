@@ -138,6 +138,22 @@ def test_team_settings_update_normalizes_stale_openai_models() -> None:
     assert update.default_reviewer_subagent_model == "openai:gpt-5.6-sol"
 
 
+def test_team_settings_update_rejects_unknown_openai_model() -> None:
+    with pytest.raises(ValueError, match="unsupported agent model"):
+        TeamSettingsUpdate(
+            default_agent_model="openai:gpt-5.6-slo",
+            default_agent_reasoning_effort="medium",
+        )
+
+
+def test_team_settings_update_rejects_invalid_effort_for_retired_model() -> None:
+    with pytest.raises(ValueError, match="effort 'bogus' not supported"):
+        TeamSettingsUpdate(
+            default_agent_model="openai:gpt-5.5",
+            default_agent_reasoning_effort="bogus",
+        )
+
+
 def test_team_settings_response_normalizes_stale_openai_models() -> None:
     settings = normalize_team_settings_for_response(
         {

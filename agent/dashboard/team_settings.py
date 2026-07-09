@@ -186,12 +186,17 @@ def _validate_model_effort_pair(model: str | None, effort: str | None, role: str
         raise ValueError(f"effort {effort!r} not supported by {role} model {model!r}")
 
 
+_RETIRED_MODEL_REPLACEMENTS: dict[str, str] = {
+    "openai:gpt-5.5": "openai:gpt-5.6-sol",
+}
+
+
 def _normalize_stale_model_pair(
     model: str | None, effort: str | None
 ) -> tuple[str | None, str | None]:
-    if model is None or model in SUPPORTED_MODEL_IDS or effort is None:
+    if model is None:
         return model, effort
-    return provider_fallback_pair(model, effort) or (model, effort)
+    return _RETIRED_MODEL_REPLACEMENTS.get(model, model), effort
 
 
 _MODEL_PAIR_FIELDS: tuple[tuple[str, str], ...] = (
