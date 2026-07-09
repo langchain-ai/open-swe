@@ -431,6 +431,41 @@ async def test_publish_review_eval_mode_does_not_call_github() -> None:
     )
 
 
+async def test_publish_review_eval_mode_uses_configured_cap() -> None:
+    from agent.tools.publish_review import publish_review
+
+    findings = [
+        _f(id="f_first", severity="high", file="a.py", start_line=1, end_line=1),
+        _f(id="f_second", severity="high", file="b.py", start_line=2, end_line=2),
+    ]
+
+    with (
+        patch(
+            "agent.tools.publish_review.get_config",
+            return_value={
+                "configurable": {
+                    "thread_id": "tid",
+                    "repo": {"owner": "o", "name": "r"},
+                    "pr_number": 7,
+                    "head_sha": "sha",
+                    "reviewer_eval": True,
+                    "reviewer_eval_cap": 1,
+                },
+                "metadata": {},
+            },
+        ),
+        patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
+        patch("agent.tools.publish_review.list_findings_async", AsyncMock(return_value=findings)),
+        patch("agent.tools.publish_review.set_reviewer_thread_metadata", AsyncMock()) as set_meta,
+    ):
+        result = await publish_review()
+
+    assert result["surfaced_count"] == 1
+    publication = set_meta.await_args.kwargs["extra"]["reviewer_eval_publication"]
+    assert publication["cap"] == 1
+    assert publication["finding_ids"] == ["f_first"]
+
+
 @pytest.mark.asyncio
 async def test_publish_review_surfaces_additional_findings_count_in_body() -> None:
     """When all surfaced findings are above threshold but sub-threshold findings

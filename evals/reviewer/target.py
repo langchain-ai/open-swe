@@ -125,6 +125,7 @@ def _build_configurable(inputs: dict[str, Any]) -> dict[str, Any]:
         "head_sha": inputs.get("head_sha", ""),
         "branch_name": inputs.get("head_ref", ""),
         "reviewer_eval_severity_threshold": _score_severity_threshold(),
+        "reviewer_eval_cap": _score_cap(),
     }
     model_id = get_reviewer_model_id()
     if model_id:

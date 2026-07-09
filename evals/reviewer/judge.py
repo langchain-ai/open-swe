@@ -270,6 +270,14 @@ def _is_medium_plus(comment: ReviewComment) -> bool:
     return comment.get("severity", "").casefold() in {"medium", "high", "critical"}
 
 
+def _recall_at_cap(tp: int, golden_count: int, cap: int) -> tuple[float, float]:
+    if golden_count == 0:
+        return 0.0, 0.0
+    reachable_goldens = min(cap, golden_count)
+    recall_at_cap = min(tp, reachable_goldens) / reachable_goldens if reachable_goldens else 0.0
+    return recall_at_cap, reachable_goldens / golden_count
+
+
 def judge_match(run: Run, example: Example) -> dict[str, Any]:
     """Judge every pair, then choose the strongest maximum-cardinality matching."""
     raw_candidates = _coerce_comments((run.outputs or {}).get("comments"))
@@ -343,9 +351,7 @@ def judge_match(run: Run, example: Example) -> dict[str, Any]:
             if not any(pair[0] == index for pair in selected)
         ],
     }
-    recall_ceiling_at_cap = min(REVIEW_FINDING_CAP, len(goldens)) / len(goldens)
-    reachable_goldens = min(REVIEW_FINDING_CAP, len(goldens))
-    recall_at_cap = tp / reachable_goldens if reachable_goldens else 0.0
+    recall_at_cap, recall_ceiling_at_cap = _recall_at_cap(tp, len(goldens), REVIEW_FINDING_CAP)
 
     return {
         "results": [

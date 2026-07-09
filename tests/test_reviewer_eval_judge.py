@@ -30,6 +30,13 @@ def test_select_pairs_uses_confidence_to_break_cardinality_ties() -> None:
     assert set(judge._select_pairs(matrix)) == {(0, 0), (1, 1)}
 
 
+def test_recall_at_cap_never_exceeds_one() -> None:
+    recall_at_cap, ceiling = judge._recall_at_cap(tp=7, golden_count=7, cap=6)
+
+    assert recall_at_cap == 1.0
+    assert ceiling == 6 / 7
+
+
 def test_judge_match_deduplicates_and_persists_full_matrix() -> None:
     run = SimpleNamespace(
         outputs={

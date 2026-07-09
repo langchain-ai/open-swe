@@ -25,7 +25,25 @@ def test_eval_target_marks_runs_as_eval_dry_run(monkeypatch: pytest.MonkeyPatch)
     assert configurable["reviewer_eval"] is True
     assert configurable["eval"] is True
     assert configurable["__is_for_execution__"] is True
+    assert configurable["reviewer_eval_cap"] == 6
     assert "source" not in configurable
+
+
+def test_eval_target_passes_configured_cap(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("REVIEWER_EVAL_CAP", "1")
+
+    configurable = target._build_configurable(
+        {
+            "repo": "acme/repo",
+            "pr_number": 1,
+            "pr_url": "https://github.com/acme/repo/pull/1",
+            "base_sha": "base",
+            "head_sha": "head",
+            "head_ref": "branch",
+        }
+    )
+
+    assert configurable["reviewer_eval_cap"] == 1
 
 
 def test_eval_target_passes_model_overrides(monkeypatch: pytest.MonkeyPatch) -> None:

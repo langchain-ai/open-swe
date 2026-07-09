@@ -129,11 +129,14 @@ async def publish_review(
             "critical",
         }:
             severity_threshold = eval_threshold
+        eval_cap = configurable.get("reviewer_eval_cap")
+        if not isinstance(eval_cap, int) or isinstance(eval_cap, bool) or eval_cap < 0:
+            eval_cap = REVIEW_FINDING_CAP
         try:
             return await _publish_review_eval_dry_run_async(
                 head_sha=head_sha,
                 severity_threshold=_cast_severity(severity_threshold),
-                cap=REVIEW_FINDING_CAP,
+                cap=eval_cap,
             )
         except ReviewerThreadMissingError as exc:
             return thread_missing_tool_result(exc)
