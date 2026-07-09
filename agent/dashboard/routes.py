@@ -64,6 +64,7 @@ from .profiles import (
     ProfileUpdate,
     get_profile,
     get_valid_access_token,
+    normalize_profile_for_response,
     upsert_access_token_from_github_response,
     upsert_profile,
 )
@@ -454,7 +455,9 @@ async def get_my_profile(
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
     profile = await get_profile(session["sub"])
-    return profile or {}
+    if not profile:
+        return {}
+    return normalize_profile_for_response(profile)
 
 
 @router.put("/profile")
