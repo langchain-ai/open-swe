@@ -75,10 +75,30 @@ def _repair_messages(messages: list[Any]) -> list[Any] | None:
         for message in messages
         if isinstance(message, ToolMessage) and isinstance(message.tool_call_id, str)
     }
+    # Reverse orphan: a ToolMessage whose tool_call was pruned (e.g. by
+    # summarization/history-truncation) has no matching AIMessage.tool_call. OpenAI
+    # rejects it with "No tool call found for function call output with call_id ...".
+    known_call_ids = {
+        call_id
+        for message in messages
+        if isinstance(message, AIMessage)
+        for call_id, _ in _iter_tool_calls(message)
+    }
 
     repaired: list[Any] = []
     inserted = 0
     for message in messages:
+        if (
+            isinstance(message, ToolMessage)
+            and isinstance(message.tool_call_id, str)
+            and message.tool_call_id not in known_call_ids
+        ):
+            logger.warning(
+                "Dropped orphaned tool_result with no matching tool_call: %s",
+                message.tool_call_id,
+            )
+            inserted += 1
+            continue
         repaired.append(message)
         if not isinstance(message, AIMessage):
             continue

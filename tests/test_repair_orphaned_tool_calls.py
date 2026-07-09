@@ -104,6 +104,18 @@ class TestRepairOrphanedToolCallsMiddleware:
         assert synthetic[0].tool_call_id == "call_2"
 
     @pytest.mark.asyncio
+    async def test_drops_reverse_orphan_tool_result(self) -> None:
+        human = HumanMessage(content="hi")
+        ai = _ai_with_tool_call("call_1")
+        tool = ToolMessage(content="done", tool_call_id="call_1")
+        orphan = ToolMessage(content="stale", tool_call_id="call_missing")
+        request = _make_request([human, ai, tool, orphan])
+
+        await RepairOrphanedToolCallsMiddleware().awrap_model_call(request, _noop_handler)
+
+        assert request.messages == [human, ai, tool]
+
+    @pytest.mark.asyncio
     async def test_async_inserts_synthetic_result(self) -> None:
         ai = _ai_with_tool_call("call_1")
         request = _make_request([ai, HumanMessage(content="hi")])
