@@ -173,14 +173,14 @@ def _slack_reply_failure_hint(slack_error: str | None) -> str:
     if slack_error == "msg_too_long":
         return "Slack rejected the message as too long; retry with a shorter message."
     if slack_error in {"channel_not_found", "not_in_channel"}:
-        return "Slack rejected the channel; do not retry. Surface the failure to the user via the trace output instead."
+        return "Slack rejected the channel; do not retry. The message did NOT reach the user — do not stop. Deliver the same summary through a fallback surface (report_platform_issue or linear_comment) so your completed work is not silently dropped."
     if slack_error and slack_error.startswith("rate_limited"):
         retry_after = slack_error.partition(":")[2].strip()
         if retry_after:
             return f"Slack rate limited the request; wait at least {retry_after}s before retrying, or surface the failure to the user via the trace output."
         return "Slack rate limited the request; wait before retrying, or surface the failure to the user via the trace output."
     if slack_error == "missing_slack_bot_token":
-        return "Slack bot token is missing; do not retry. Surface the failure to the user via the trace output instead."
+        return "Slack bot token is missing; do not retry. The message did NOT reach the user — do not stop. Deliver the same summary through a fallback surface (report_platform_issue or linear_comment) so your completed work is not silently dropped."
     if slack_error and slack_error.startswith("http_error:"):
         return "Slack posting hit an HTTP error; retry once, then surface the failure to the user via the trace output."
     return "Slack post failed; retry once with a concise message or surface the failure to the user via the trace output."

@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any
 _MIDDLEWARE_MODULES = {
     "check_message_queue_before_model": ".check_message_queue",
     "ensure_no_empty_msg": ".ensure_no_empty_msg",
+    "escalate_failed_final_delivery": ".failed_delivery_guard",
     "ExcludeToolsMiddleware": ".exclude_tools",
     "ModelFallbackMiddleware": ".model_fallback",
     "notify_step_limit_reached": ".notify_step_limit",
@@ -51,6 +52,7 @@ __all__ = [
     "SlackAssistantStatusMiddleware",
     "check_message_queue_before_model",
     "ensure_no_empty_msg",
+    "escalate_failed_final_delivery",
     "notify_step_limit_reached",
     "refresh_github_proxy_before_model",
     "settle_review_check_on_exit",
@@ -62,6 +64,7 @@ if TYPE_CHECKING:
     from .check_message_queue import check_message_queue_before_model
     from .ensure_no_empty_msg import ensure_no_empty_msg
     from .exclude_tools import ExcludeToolsMiddleware
+    from .failed_delivery_guard import escalate_failed_final_delivery
     from .model_fallback import ModelFallbackMiddleware
     from .notify_step_limit import notify_step_limit_reached
     from .plan_mode import PlanModeMiddleware

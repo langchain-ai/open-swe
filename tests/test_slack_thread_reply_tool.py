@@ -69,7 +69,8 @@ async def test_slack_thread_reply_hints_not_to_retry_channel_errors(
     assert result["slack_error"] == slack_error
     assert result["message_chars"] == 5
     assert "do not retry" in result["hint"]
-    assert "trace output" in result["hint"]
+    assert "fallback surface" in result["hint"]
+    assert "report_platform_issue" in result["hint"]
 
 
 async def test_slack_thread_reply_rate_limited_hint_includes_retry_after(

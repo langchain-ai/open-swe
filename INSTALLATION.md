@@ -388,6 +388,10 @@ Slack Block Kit option buttons only work when Interactivity is enabled and point
 - `SLACK_BOT_USER_ID`: the bot's user ID (find it in Slack by clicking the bot's profile)
 - `SLACK_BOT_USERNAME`: the bot's display name (e.g. `open-swe`)
 
+**Invite the bot to your channels:**
+
+The Slack app can only post to channels it is a member of. Invite the bot to every channel Open SWE replies in — including incident channels (e.g. `INC-*`) — with `/invite @open-swe`. If the bot is not a member, `slack_thread_reply` fails with `not_in_channel` (or `channel_not_found`) and the final summary never reaches the developer. Private channels require an explicit invite; public channels the bot has not joined also need one.
+
 **Default repo:**
 
 Slack messages are routed to the Slack default repo (`SLACK_REPO_OWNER`/`SLACK_REPO_NAME`, falling back to `DEFAULT_REPO_OWNER`/`DEFAULT_REPO_NAME` — see step 6) unless the user specifies one with `repo:owner/name` in their message.
