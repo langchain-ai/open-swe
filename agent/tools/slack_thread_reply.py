@@ -24,11 +24,13 @@ async def slack_thread_reply(
 ) -> dict[str, Any]:
     """Post a message to the current Slack thread.
 
-    Use this for clarifying questions, mid-run progress updates, and the final
-    summary. You can call this multiple times during a run — if you're about to
-    do long-running work (cloning, large refactors, big test runs) consider
-    posting a brief status update first so the user knows what's happening.
-    Always end the run with a final reply summarizing what you did.
+    Use this for clarifying questions, essential progress updates, and the final
+    outcome. Make `message` as terse as possible: default to one sentence with
+    only the outcome/status and link, or one blocking question. Omit greetings,
+    preambles, headings, recaps, implementation details, and redundant context;
+    use bullets only when multiple items are essential. This terseness rule is
+    specific to Slack tool messages, not normal web UI assistant messages.
+    Always end the run with a terse final outcome.
 
     Format messages using Slack's mrkdwn format, NOT standard Markdown.
     Key differences: *bold*, _italic_, ~strikethrough~, <url|link text>,
