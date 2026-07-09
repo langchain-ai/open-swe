@@ -14,7 +14,11 @@ from agent.dashboard.options import (
     provider_fallback_pair,
 )
 from agent.dashboard.profiles import ProfileUpdate, normalize_profile_for_response
-from agent.dashboard.team_settings import get_team_default_model
+from agent.dashboard.team_settings import (
+    TeamSettingsUpdate,
+    get_team_default_model,
+    normalize_team_settings_for_response,
+)
 
 STALE_ANTHROPIC = "anthropic:claude-opus-4-7"
 SUPPORTED_ANTHROPIC = "anthropic:claude-opus-4-8"
@@ -115,6 +119,40 @@ def test_profile_response_normalizes_stale_openai_models() -> None:
     assert profile["reasoning_effort"] == "medium"
     assert profile["default_subagent_model"] == "openai:gpt-5.6-sol"
     assert profile["subagent_reasoning_effort"] == "low"
+
+
+def test_team_settings_update_normalizes_stale_openai_models() -> None:
+    update = TeamSettingsUpdate(
+        default_agent_model="openai:gpt-5.6-sol",
+        default_agent_reasoning_effort="medium",
+        default_agent_subagent_model="openai:gpt-5.5",
+        default_agent_subagent_reasoning_effort="medium",
+        default_reviewer_model="openai:gpt-5.5",
+        default_reviewer_reasoning_effort="medium",
+        default_reviewer_subagent_model="openai:gpt-5.5",
+        default_reviewer_subagent_reasoning_effort="low",
+    )
+
+    assert update.default_agent_subagent_model == "openai:gpt-5.6-sol"
+    assert update.default_reviewer_model == "openai:gpt-5.6-sol"
+    assert update.default_reviewer_subagent_model == "openai:gpt-5.6-sol"
+
+
+def test_team_settings_response_normalizes_stale_openai_models() -> None:
+    settings = normalize_team_settings_for_response(
+        {
+            "default_agent_subagent_model": "openai:gpt-5.5",
+            "default_agent_subagent_reasoning_effort": "medium",
+            "default_reviewer_model": "openai:gpt-5.5",
+            "default_reviewer_reasoning_effort": "medium",
+            "default_reviewer_subagent_model": "openai:gpt-5.5",
+            "default_reviewer_subagent_reasoning_effort": "low",
+        }
+    )
+
+    assert settings["default_agent_subagent_model"] == "openai:gpt-5.6-sol"
+    assert settings["default_reviewer_model"] == "openai:gpt-5.6-sol"
+    assert settings["default_reviewer_subagent_model"] == "openai:gpt-5.6-sol"
 
 
 def test_profile_update_rejects_unknown_provider() -> None:

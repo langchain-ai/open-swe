@@ -95,6 +95,39 @@ class TeamSettingsUpdate(BaseModel):
 
     @model_validator(mode="after")
     def _validate_model_pairs(self) -> TeamSettingsUpdate:
+        self.default_agent_model, self.default_agent_reasoning_effort = _normalize_stale_model_pair(
+            self.default_agent_model,
+            self.default_agent_reasoning_effort,
+        )
+        self.default_agent_subagent_model, self.default_agent_subagent_reasoning_effort = (
+            _normalize_stale_model_pair(
+                self.default_agent_subagent_model,
+                self.default_agent_subagent_reasoning_effort,
+            )
+        )
+        self.default_reviewer_model, self.default_reviewer_reasoning_effort = (
+            _normalize_stale_model_pair(
+                self.default_reviewer_model,
+                self.default_reviewer_reasoning_effort,
+            )
+        )
+        (
+            self.default_reviewer_subagent_model,
+            self.default_reviewer_subagent_reasoning_effort,
+        ) = _normalize_stale_model_pair(
+            self.default_reviewer_subagent_model,
+            self.default_reviewer_subagent_reasoning_effort,
+        )
+        self.default_grouping_model, self.default_grouping_reasoning_effort = (
+            _normalize_stale_model_pair(
+                self.default_grouping_model,
+                self.default_grouping_reasoning_effort,
+            )
+        )
+        self.default_chat_model, self.default_chat_reasoning_effort = _normalize_stale_model_pair(
+            self.default_chat_model,
+            self.default_chat_reasoning_effort,
+        )
         _validate_model_effort_pair(
             self.default_agent_model, self.default_agent_reasoning_effort, "agent"
         )
@@ -151,6 +184,37 @@ def _validate_model_effort_pair(model: str | None, effort: str | None, role: str
         raise ValueError(f"unsupported {role} model: {model}")
     if effort is None or not model_supports_effort(model, effort):
         raise ValueError(f"effort {effort!r} not supported by {role} model {model!r}")
+
+
+def _normalize_stale_model_pair(
+    model: str | None, effort: str | None
+) -> tuple[str | None, str | None]:
+    if model is None or model in SUPPORTED_MODEL_IDS or effort is None:
+        return model, effort
+    return provider_fallback_pair(model, effort) or (model, effort)
+
+
+_MODEL_PAIR_FIELDS: tuple[tuple[str, str], ...] = (
+    ("default_agent_model", "default_agent_reasoning_effort"),
+    ("default_agent_subagent_model", "default_agent_subagent_reasoning_effort"),
+    ("default_reviewer_model", "default_reviewer_reasoning_effort"),
+    ("default_reviewer_subagent_model", "default_reviewer_subagent_reasoning_effort"),
+    ("default_grouping_model", "default_grouping_reasoning_effort"),
+    ("default_chat_model", "default_chat_reasoning_effort"),
+)
+
+
+def normalize_team_settings_for_response(settings: dict[str, Any]) -> dict[str, Any]:
+    value = dict(settings)
+    for model_field, effort_field in _MODEL_PAIR_FIELDS:
+        model = value.get(model_field)
+        effort = value.get(effort_field)
+        if isinstance(model, str):
+            value[model_field], value[effort_field] = _normalize_stale_model_pair(
+                model,
+                effort if isinstance(effort, str) else None,
+            )
+    return value
 
 
 def _client():
@@ -226,7 +290,7 @@ async def get_team_settings() -> dict[str, Any]:
         "review_author_context_enabled",
     ):
         merged.pop(stale_field, None)
-    return merged
+    return normalize_team_settings_for_response(merged)
 
 
 async def upsert_team_settings(update: TeamSettingsUpdate) -> dict[str, Any]:
