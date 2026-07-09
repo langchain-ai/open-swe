@@ -57,6 +57,9 @@ credentials.json
 # Test traces
 apps/cli/test_traces/
 
+# Monocle runtime traces (committed fixtures live in tests/monocle_test/traces/)
+.monocle/
+
 # Python
 .venv/
 __pycache__/
