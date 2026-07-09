@@ -85,6 +85,7 @@ from .middleware import (
     refresh_github_proxy_before_model,
     task_on_failure,
     task_retry_on,
+    wrap_agent_with_error_closeout,
 )
 from .prompt import construct_system_prompt
 from .tools import (
@@ -981,7 +982,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         use_gateway=use_gateway,
         **subagent_model_kwargs,
     )
-    return create_deep_agent(
+    agent = create_deep_agent(
         model=main_model,
         system_prompt="",
         tools=[
@@ -1057,6 +1058,9 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             SanitizeThinkingBlocksMiddleware(),
         ],
     ).with_config(config)
+    # No middleware hook fires on the error path, so a mid-workflow crash would
+    # leave the source channel with no closeout — wrap the graph to post one.
+    return wrap_agent_with_error_closeout(agent)
 
 
 traced_agent = traced_graph_factory(get_agent, AGENT_TRACING_PROJECT)

@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any
 _MIDDLEWARE_MODULES = {
     "check_message_queue_before_model": ".check_message_queue",
     "ensure_no_empty_msg": ".ensure_no_empty_msg",
+    "wrap_agent_with_error_closeout": ".error_closeout",
     "ExcludeToolsMiddleware": ".exclude_tools",
     "ModelFallbackMiddleware": ".model_fallback",
     "notify_step_limit_reached": ".notify_step_limit",
@@ -56,11 +57,13 @@ __all__ = [
     "settle_review_check_on_exit",
     "task_on_failure",
     "task_retry_on",
+    "wrap_agent_with_error_closeout",
 ]
 
 if TYPE_CHECKING:
     from .check_message_queue import check_message_queue_before_model
     from .ensure_no_empty_msg import ensure_no_empty_msg
+    from .error_closeout import wrap_agent_with_error_closeout
     from .exclude_tools import ExcludeToolsMiddleware
     from .model_fallback import ModelFallbackMiddleware
     from .notify_step_limit import notify_step_limit_reached
