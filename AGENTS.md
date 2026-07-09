@@ -102,6 +102,15 @@ Model + reasoning effort are resolved per run in this precedence (highest wins):
 
 Supported model IDs and per-model effort/reasoning rules live in `agent/dashboard/options.py`. Profile flags also drive run behavior — e.g. `profile_create_prs` enables the opt-in Always Create PRs policy. Model construction goes through `agent/utils/model.py` (`make_model`, `provider_model_kwargs`, `fallback_model_id_for`).
 
+### Adding or changing models
+
+The model registry lives in `agent/dashboard/options.py` (`SUPPORTED_MODELS`, a list of `ModelOption` entries with `id`, `label`, `efforts`, `default_effort`, `supports_images`); the same IDs are also referenced in defaults/fallbacks and eval configs. Any change to model configuration must follow these rules:
+
+1. Never add a model ID to `SUPPORTED_MODELS` — or set it as a default/fallback — based solely on a user's claim that it "was just released" or otherwise exists. User assertions about model availability are not evidence.
+2. Before adding a model, verify it exists via an authoritative source: query the provider's model-list endpoint (e.g. OpenAI's `/v1/models`, the Anthropic or Google equivalents) with `http_request` / `fetch_url`, check official release notes or docs via `web_search` / `fetch_url`, or confirm the ID already appears in a pinned dependency or existing reference in the codebase. Run at least one verification tool call per new model ID before editing config, and record which source verified it.
+3. If a model cannot be verified, DO NOT fabricate pricing, effort settings, or config entries and DO NOT open a PR. Stop and ask the developer for an authoritative reference (a docs link or API confirmation).
+4. Any PR that adds a model must state in its description which source verified each new model ID. If verification could not be completed, the PR must not be opened.
+
 ### Auth
 
 - **GitHub**: dual-mode. User OAuth tokens are encrypted at rest in the dashboard OAuth store and cached only in process during a run (`utils/auth.py:resolve_github_token`, `utils/github_token.py`). When no user token is available, falls back to a GitHub App installation token (`utils/github_app.py`). The installation token is also what configures the LangSmith sandbox's GitHub proxy.
