@@ -1498,7 +1498,7 @@ wheels = [
 
 [[package]]
 name = "langchain-fireworks"
-version = "1.4.3"
+version = "1.4.4"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiohttp" },
@@ -1507,9 +1507,9 @@ dependencies = [
     { name = "openai" },
     { name = "requests" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/47/2d/8e8f5876ee0b209214b23db9d202fd310767d306a3bfae4667eccac30881/langchain_fireworks-1.4.3.tar.gz", hash = "sha256:320e07fd7021b7c01f28ed802a88b4c7cbe66972695a57f64a3d46ba006c44ee", size = 214372, upload-time = "2026-06-26T06:51:51.681Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/15/22/4d371099cbfb44a78f8d93b6e9f4aff77799045065ac4f5b5b163abe773b/langchain_fireworks-1.4.4.tar.gz", hash = "sha256:2dad0e6f2243e4e0c5286fbab5fd23539afc258007ec6f0e980bc60b85edcff5", size = 217152, upload-time = "2026-07-09T17:56:35.551Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/1e/32/b6cc530726e62313fb9d53264b6c82013cc0ec27937087fe45aca4615e69/langchain_fireworks-1.4.3-py3-none-any.whl", hash = "sha256:6c07d3c30e53cc3dc4142bb6dd4b628abbfae6b1efc65ff91c1855ea7b96a52c", size = 25181, upload-time = "2026-06-26T06:51:50.751Z" },
+    { url = "https://files.pythonhosted.org/packages/a5/ab/37e901f77ca7619ff091a2252588e64b9c3aee2b4d93c23594faa40e3011/langchain_fireworks-1.4.4-py3-none-any.whl", hash = "sha256:977b187c3fa98d6446e5a8902e77b1834d5a8e7e43934864f381f257f0a0b0b1", size = 26141, upload-time = "2026-07-09T17:56:34.424Z" },
 ]
 
 [[package]]
@@ -2081,7 +2081,7 @@ requires-dist = [
     { name = "langchain-anthropic", specifier = ">=1.4.6" },
     { name = "langchain-daytona", specifier = ">=0.0.7" },
     { name = "langchain-e2b", specifier = "==0.0.5" },
-    { name = "langchain-fireworks", specifier = ">=1.4.3" },
+    { name = "langchain-fireworks", specifier = ">=1.4.4" },
     { name = "langchain-google-genai", specifier = ">=4.2.4" },
     { name = "langchain-mcp-adapters", specifier = ">=0.3.0" },
     { name = "langchain-modal", specifier = ">=0.0.5" },
