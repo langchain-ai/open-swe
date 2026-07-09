@@ -460,3 +460,42 @@ async def resolve_github_token(config: RunnableConfig, thread_id: str) -> tuple[
     except ValueError as exc:
         logger.error("GitHub auth failed for thread %s: %s", thread_id, str(exc))
         raise RuntimeError(str(exc)) from exc
+
+
+async def resolve_scm_credential(
+    config: RunnableConfig,
+    thread_id: str,
+) -> tuple[str | None, str | None, str | None]:
+    """Resolve SCM credentials for the configured repo.
+
+    Returns ``(token, expires_at, provider)`` where ``provider`` is ``github`` (default)
+    or ``azure_devops``. For Azure DevOps, ``expires_at`` is always ``None``.
+    """
+    from .scm import is_azure_devops_repo
+
+    configurable = config.get("configurable") or {}
+    repo_cfg = configurable.get("repo") or {}
+    if is_azure_devops_repo(repo_cfg if isinstance(repo_cfg, dict) else None):
+        from .azure_devops import resolve_azure_devops_pat_async
+        from .azure_devops_identity_token import is_entra_mode_requested
+
+        pat = await resolve_azure_devops_pat_async(configurable)
+        if not pat:
+            if is_entra_mode_requested():
+                detail = (
+                    "Azure DevOps Entra mode is enabled but token acquisition failed — "
+                    "check AZURE_TENANT_ID, AZURE_CLIENT_ID, certificate/secret paths, "
+                    "and server logs for azure-identity errors."
+                )
+            else:
+                detail = (
+                    "Azure DevOps credential required: set AZURE_DEVOPS_PAT "
+                    "(or configurable azure_devops_pat), or enable Entra with "
+                    "AZURE_DEVOPS_USE_ENTRA_IDENTITY=1, AZURE_TENANT_ID, AZURE_CLIENT_ID, "
+                    "and AZURE_CLIENT_CERTIFICATE_PATH (or AZURE_CLIENT_SECRET)."
+                )
+            raise RuntimeError(detail)
+        return pat, None, "azure_devops"
+
+    token, expires_at = await resolve_github_token(config, thread_id)
+    return token, expires_at, "github"

@@ -110,7 +110,7 @@ from .tools import (
     web_search,
 )
 from .utils import ttl_cache
-from .utils.auth import resolve_github_token
+from .utils.auth import resolve_scm_credential
 from .utils.authorship import (
     OPEN_SWE_BOT_EMAIL,
     OPEN_SWE_BOT_NAME,
@@ -133,6 +133,8 @@ from .utils.model import (
 )
 from .utils.sandbox import create_sandbox
 from .utils.sandbox_paths import aresolve_sandbox_work_dir
+from .utils.scm import azure_devops_repo_ready
+from .utils.scm_clone import clone_or_pull_azure_devops_repo_in_sandbox
 from .utils.sandbox_state import (
     SANDBOX_BACKENDS,
     get_or_create_sandbox_backend_proxy,
@@ -168,7 +170,14 @@ async def _resolve_prompt_default_repo(configurable: dict[str, Any]) -> dict[str
         owner = repo_config.get("owner")
         name = repo_config.get("name")
         if isinstance(owner, str) and isinstance(name, str):
-            return {"owner": owner, "name": name}
+            resolved: dict[str, str] = {"owner": owner, "name": name}
+            scm = repo_config.get("scm_provider")
+            if isinstance(scm, str) and scm.strip():
+                resolved["scm_provider"] = scm.strip()
+            project = repo_config.get("project")
+            if isinstance(project, str) and project.strip():
+                resolved["project"] = project.strip()
+            return resolved
 
     if configurable.get("repo_explicitly_none") is True:
         return None
@@ -754,8 +763,13 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         }
 
     async def _prepare(self, state: dict[str, Any], runtime: object) -> dict[str, Any]:  # noqa: ARG002
-        github_token, _expires_at = await resolve_github_token(self._config, self._thread_id)
         configurable = (self._config or {}).get("configurable") or {}
+        repo_cfg = configurable.get("repo") if isinstance(configurable.get("repo"), dict) else {}
+        scm_token, token_expires_at, scm_provider = await resolve_scm_credential(
+            self._config, self._thread_id
+        )
+        github_token = scm_token if scm_provider == "github" else None
+        ado_pat = scm_token if scm_provider == "azure_devops" else None
         prompt_default_repo = await _resolve_prompt_default_repo(configurable)
         triggering_user_identity_task = asyncio.create_task(
             asyncio.to_thread(resolve_triggering_user_identity, self._config, github_token)
@@ -767,7 +781,26 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             triggering_user_identity_task,
             sandbox_task,
         )
-        del github_token
+        del github_token, scm_token, token_expires_at
+
+        ado_repo = repo_cfg if azure_devops_repo_ready(repo_cfg) else prompt_default_repo
+        if scm_provider == "azure_devops" and ado_pat and ado_repo and azure_devops_repo_ready(ado_repo):
+            checkout_branch: str | None = None
+            pr_ctx = configurable.get("azure_devops_pull_request")
+            if isinstance(pr_ctx, dict):
+                branch = pr_ctx.get("source_branch_short_name")
+                if isinstance(branch, str) and branch.strip():
+                    checkout_branch = branch.strip()
+            org = ado_repo.get("owner") or ado_repo.get("organization")
+            await clone_or_pull_azure_devops_repo_in_sandbox(
+                sandbox_backend,
+                str(org),
+                str(ado_repo["project"]),
+                str(ado_repo["name"]),
+                ado_pat,
+                checkout_branch=checkout_branch,
+            )
+
         work_dir = await aresolve_sandbox_work_dir(sandbox_backend)
         repo_custom_instructions = await _resolve_repo_custom_instructions(prompt_default_repo)
 
