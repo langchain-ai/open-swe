@@ -38,9 +38,13 @@ async def refresh_github_proxy_before_model(
 
     try:
         await maybe_refresh_proxy_token(thread_id)
+        from ..utils.azure_devops_proxy import ado_proxy_active, refresh_ado_proxy_if_active
+
+        if ado_proxy_active(thread_id):
+            await refresh_ado_proxy_if_active(thread_id)
     except Exception:  # noqa: BLE001
         logger.warning(
-            "Failed to refresh GitHub proxy token for thread %s",
+            "Failed to refresh sandbox proxy token for thread %s",
             thread_id,
             exc_info=True,
         )

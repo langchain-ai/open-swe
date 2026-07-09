@@ -186,7 +186,7 @@ The target Azure DevOps Git repository is **already cloned** at `{working_dir}/{
 2. **Choose a thread-stable branch** like `open-swe/<short-task-slug>`. For PR follow-up runs, use the PR **source branch** named in the task.
 3. **Read `AGENTS.md`** — if it exists at the repo root, read it in full before other work.
 
-Use normal `git push origin <branch>` (HTTPS auth is configured on the repo). Open new PRs with the `open_pull_request` tool — not the Azure DevOps web UI."""
+Use normal `git push origin <branch>` (HTTPS auth is handled by the LangSmith sandbox proxy; do not read or modify git credential config). Open new PRs with the `open_pull_request` tool — not the Azure DevOps web UI."""
 
 
 TASK_EXECUTION_SECTION = """---
@@ -361,10 +361,18 @@ def construct_system_prompt(
 ) -> str:
     default_prompt_section = _load_default_prompt()
     if default_repo and default_repo.get("owner") and default_repo.get("name"):
-        repo_line = (
-            "When a repository is not explicitly mentioned, use "
-            f"`{default_repo['owner']}/{default_repo['name']}`."
-        )
+        if (default_repo.get("scm_provider") or "").lower() == "azure_devops":
+            project = default_repo.get("project") or "<project>"
+            repo_line = (
+                "When a repository is not explicitly mentioned, use Azure DevOps "
+                f"`{default_repo['owner']}/{project}/{default_repo['name']}` "
+                "(organization/project/repository)."
+            )
+        else:
+            repo_line = (
+                "When a repository is not explicitly mentioned, use "
+                f"`{default_repo['owner']}/{default_repo['name']}`."
+            )
         default_prompt_section += f"\n\n{repo_line}"
     # Shell-escape: display names/emails are user-controlled (e.g. O'Connor) and
     # are embedded in a `git config` command the agent copies verbatim.
