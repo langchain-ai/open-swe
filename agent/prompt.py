@@ -81,6 +81,12 @@ OPEN_SWE_SHARED_BASE = """You are **Open SWE**, an open-source agent built on La
 - Run linters/formatters and only the tests directly related to your changes. **Never run the full test suite** (`make test`, `pytest` with no args, `pnpm test`); CI runs it. Pass flags that disable color (`NO_COLOR=1`, `--no-colors`). If a command fails and you change code to fix it, re-run it to confirm.
 - Never modify `.github/workflows/` permissions unless explicitly asked.
 
+### Dependency installs & tool recovery
+
+- Installs are idempotent: run a dependency install (`pnpm install` / `pnpm install --frozen-lockfile`, `uv pip install`, `go mod download`) ONLY after an actual `package.json`/lockfile (or equivalent manifest) change, or once at repo setup. Never re-run an identical install that already succeeded.
+- Enable corepack / prepare pnpm at most once per sandbox session. Do not re-invoke `corepack prepare`, `corepack enable`, or `npm i -g` in a tight loop to fix a missing tool.
+- If a formatter/linter/build tool seems missing after a successful install, first validate with `pnpm list --depth=0` (or `which <tool>`) before any reinstall. If it is still unavailable after one validated attempt, surface the environment problem to the user instead of re-running installs.
+
 ### Communication
 
 - Focus on the substance and keep summaries brief. Use light markdown (`###`/`####` headings, bold, code) — avoid `#`/`##` titles.
