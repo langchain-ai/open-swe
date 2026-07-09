@@ -378,7 +378,7 @@ export function streamMessagesToUi(
 
       for (const toolCall of raw.tool_calls ?? []) {
         const name = toolCall.name || "tool";
-        if (INTERNAL_TOOLS.has(name)) continue;
+        if (INTERNAL_TOOLS.has(name) || name.toLowerCase() === "write_todos") continue;
         const toolCallId = toolCall.id || `tool-${index}-${chunks.length}`;
         const args = parseToolArgs(toolCall.args);
         const assembled = toolCallsById.get(toolCallId);

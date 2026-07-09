@@ -18,7 +18,9 @@ import {
 import { AgentPromptBar } from "@/components/agents/AgentPromptBar"
 import { WorkflowApprovalCard } from "@/components/agents/WorkflowApprovalCard"
 import { Messages } from "@/components/agents/messages"
+import { TodoList } from "@/components/agents/ported/TodoList"
 import { streamMessagesToUi } from "@/lib/agents/streamMessagesToUi"
+import { todosFromState } from "@/lib/agents/todos"
 import { messageArrivalTimestamp } from "@/lib/agents/messageTimestamps"
 import { useSubmitAgentMessage } from "@/lib/agents/provider/useSubmitAgentMessage"
 import { useModelOptions } from "@/lib/agents/provider/useModelOptions"
@@ -27,6 +29,10 @@ import { cn } from "@/lib/utils"
 
 interface AgentThreadViewProps {
   thread: AgentThread
+}
+
+interface AgentThreadState {
+  todos?: unknown
 }
 
 function messageText(message: Message): string {
@@ -71,7 +77,7 @@ function visibleQueuedMessages(
 // survives the home → thread navigation), so this view only consumes it.
 export function AgentThreadView({ thread }: AgentThreadViewProps) {
   const sendMessage = useSubmitAgentMessage(thread.id)
-  const stream = useAgentThreadStream()
+  const stream = useAgentThreadStream<AgentThreadState>()
   const isMobile = useIsMobile()
 
   const { models, defaultSelection } = useModelOptions()
@@ -113,6 +119,10 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
     if (thread.messages.length > 0) return thread.messages
     return live
   }, [stream.messages, stream.toolCalls, stream.subagents, thread.messages])
+  const todos = useMemo(
+    () => todosFromState(stream.values.todos),
+    [stream.values.todos]
+  )
 
   const isStreaming = thread.status === "running" || stream.isLoading
   const queuedMessages = useMemo(
@@ -185,11 +195,23 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
               settingUpSandbox={settingUpSandbox}
               contentWidthClass="max-w-3xl"
             />
+            {todos.length > 0 && (
+              <div className="shrink-0 px-4">
+                <div className="mx-auto -mb-2 w-full max-w-3xl min-w-0">
+                  <TodoList
+                    todos={todos}
+                    runActive={isStreaming}
+                    className="rounded-t-xl rounded-b-none pb-2"
+                  />
+                </div>
+              </div>
+            )}
             <div className="shrink-0 px-4 pb-4">
               <div className="mx-auto w-full max-w-3xl min-w-0">
                 <AgentPromptBar
                   placeholder="Add a follow up"
                   compact
+                  connectedTop={todos.length > 0}
                   busy={isStreaming}
                   onSubmit={(content, images) =>
                     sendMessage.mutateAsync({

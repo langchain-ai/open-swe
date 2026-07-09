@@ -129,6 +129,7 @@ export interface CloudPromptBarProps {
   /** When provided, a Plan mode toggle is shown. Plan mode researches read-only and proposes a plan before editing. */
   planMode?: boolean
   onPlanModeChange?: (next: boolean) => void
+  connectedTop?: boolean
 }
 
 function fileToImageChunk(file: File): Promise<ImageChunk | null> {
@@ -172,6 +173,7 @@ export const CloudPromptBar = memo(function CloudPromptBarComponent({
   onRepoChange,
   planMode = false,
   onPlanModeChange,
+  connectedTop = false,
 }: CloudPromptBarProps) {
   const [value, setValue] = useState("")
   const [pendingImages, setPendingImages] = useState<Array<ImageChunk>>([])
@@ -364,6 +366,7 @@ export const CloudPromptBar = memo(function CloudPromptBarComponent({
         className={cn(
           "relative flex min-h-[106px] flex-col rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface)] px-3 py-2.5 shadow-sm",
           compact && "min-h-[88px]",
+          connectedTop && "-mt-px rounded-t-none border-t-0",
           isDragOver && "border-[var(--ui-accent)]"
         )}
       >
