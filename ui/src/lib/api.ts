@@ -166,6 +166,7 @@ export interface TeamSettings {
   review_trace_links: boolean
   /** Tri-state LLM Gateway toggle; null inherits the LANGSMITH_GATEWAY_ENABLED default. */
   gateway_enabled?: boolean | null
+  fable_enabled?: boolean
   review_tracing_project?: string | null
   org_guidelines?: string | null
   default_agent_model?: string | null

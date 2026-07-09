@@ -29,8 +29,29 @@ SUPPORTED_MODELS: list[ModelOption] = [
         "supports_images": True,
     },
     {
-        "id": "openai:gpt-5.5",
-        "label": "GPT-5.5",
+        "id": "anthropic:claude-fable-5",
+        "label": "Fable 5",
+        "efforts": ["low", "medium", "high", "xhigh", "max"],
+        "default_effort": "high",
+        "supports_images": True,
+    },
+    {
+        "id": "openai:gpt-5.6-sol",
+        "label": "GPT-5.6 Sol",
+        "efforts": ["none", "low", "medium", "high", "xhigh"],
+        "default_effort": "xhigh",
+        "supports_images": True,
+    },
+    {
+        "id": "openai:gpt-5.6-terra",
+        "label": "GPT-5.6 Terra",
+        "efforts": ["none", "low", "medium", "high", "xhigh"],
+        "default_effort": "xhigh",
+        "supports_images": True,
+    },
+    {
+        "id": "openai:gpt-5.6-luna",
+        "label": "GPT-5.6 Luna",
         "efforts": ["none", "low", "medium", "high", "xhigh"],
         "default_effort": "xhigh",
         "supports_images": True,
@@ -67,7 +88,34 @@ SUPPORTED_MODELS: list[ModelOption] = [
 
 SUPPORTED_MODEL_IDS: frozenset[str] = frozenset(m["id"] for m in SUPPORTED_MODELS)
 
-DEFAULT_MODEL_ID: str = "openai:gpt-5.5"
+FABLE_MODEL_IDS: frozenset[str] = frozenset(
+    m["id"] for m in SUPPORTED_MODELS if m["id"].startswith("anthropic:claude-fable")
+)
+
+
+def fable_disabled_fallback(effort: object = None) -> tuple[str, str]:
+    """Newest supported non-Fable Anthropic model (keeps the Claude family),
+    else the global default. Substitutes a Fable selection when Fable is
+    disabled workspace-wide, preserving ``effort`` when the fallback supports it."""
+    for m in SUPPORTED_MODELS:
+        if m["id"].startswith("anthropic:") and m["id"] not in FABLE_MODEL_IDS:
+            return m["id"], _fallback_effort_for(m, effort) or m["default_effort"]
+    return default_model_pair()
+
+
+def gate_fable_model(
+    model_id: str, effort: str | None, *, fable_enabled: bool
+) -> tuple[str, str | None]:
+    """ZDR guard: if Fable is disabled but a Fable id was resolved, swap in a
+    safe non-Fable model. Non-Fable selections pass through unchanged. Applied
+    at every model-construction entrypoint so a disabled Fable model can never
+    reach ``make_model``, no matter which layer selected it."""
+    if not fable_enabled and isinstance(model_id, str) and model_id in FABLE_MODEL_IDS:
+        return fable_disabled_fallback(effort)
+    return model_id, effort
+
+
+DEFAULT_MODEL_ID: str = "openai:gpt-5.6-sol"
 DEFAULT_MODEL_EFFORT: str = "medium"
 
 

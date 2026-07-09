@@ -25,7 +25,25 @@ def test_eval_target_marks_runs_as_eval_dry_run(monkeypatch: pytest.MonkeyPatch)
     assert configurable["reviewer_eval"] is True
     assert configurable["eval"] is True
     assert configurable["__is_for_execution__"] is True
+    assert configurable["reviewer_eval_cap"] == 6
     assert "source" not in configurable
+
+
+def test_eval_target_passes_configured_cap(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("REVIEWER_EVAL_CAP", "1")
+
+    configurable = target._build_configurable(
+        {
+            "repo": "acme/repo",
+            "pr_number": 1,
+            "pr_url": "https://github.com/acme/repo/pull/1",
+            "base_sha": "base",
+            "head_sha": "head",
+            "head_ref": "branch",
+        }
+    )
+
+    assert configurable["reviewer_eval_cap"] == 1
 
 
 def test_eval_target_passes_model_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -105,7 +123,16 @@ async def test_extract_surfaced_comments_uses_publish_filter(
 
     class Threads:
         async def get(self, _thread_id: str) -> dict[str, Any]:
-            return {"metadata": {"findings": [high, low]}}
+            return {
+                "metadata": {
+                    "findings": [high, low],
+                    "reviewer_eval_publication": {
+                        "finding_ids": ["f_high"],
+                        "severity_threshold": "medium",
+                        "cap": 6,
+                    },
+                }
+            }
 
     class Client:
         threads = Threads()
@@ -113,7 +140,7 @@ async def test_extract_surfaced_comments_uses_publish_filter(
     monkeypatch.setenv("REVIEWER_EVAL_SEVERITY_THRESHOLD", "medium")
     monkeypatch.setenv("REVIEWER_EVAL_CAP", "4")
 
-    comments = await target._extract_surfaced_comments(Client(), "tid")
+    comments, publish_completed = await target._extract_surfaced_comments(Client(), "tid")
 
     assert comments == [
         {
@@ -123,6 +150,36 @@ async def test_extract_surfaced_comments_uses_publish_filter(
             "severity": "high",
         }
     ]
+    assert publish_completed is True
+
+
+@pytest.mark.asyncio
+async def test_extract_surfaced_comments_requires_publication_snapshot() -> None:
+    class Threads:
+        async def get(self, _thread_id: str) -> dict[str, Any]:
+            return {"metadata": {"findings": []}}
+
+    class Client:
+        threads = Threads()
+
+    comments, publish_completed = await target._extract_surfaced_comments(Client(), "tid")
+
+    assert comments == []
+    assert publish_completed is False
+
+
+def test_extract_comments_deduplicates_identical_tool_calls() -> None:
+    finding = {
+        "file": "a.py",
+        "severity": "high",
+        "description": "Same issue",
+        "start_line": 1,
+        "end_line": 1,
+    }
+
+    comments = target._extract_comments(_result_with_findings([finding, finding]))
+
+    assert len(comments) == 1
 
 
 def test_completed_counter_increments() -> None:

@@ -105,7 +105,7 @@ function PlanPage() {
       <Centered>
         <div className="space-y-3 text-center text-sm text-[var(--ui-text-dim)]">
           <p>
-            The agent is still writing the plan. This page will update
+            The agent is still writing the content. This page will update
             automatically…
           </p>
           <BackLink threadId={threadId} />

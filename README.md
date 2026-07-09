@@ -41,7 +41,7 @@ Rather than forking an existing agent or building from scratch, Open SWE **compo
 
 ```python
 create_deep_agent(
-    model="openai:gpt-5.5",
+    model="openai:gpt-5.6-sol",
     system_prompt=construct_system_prompt(...),
     tools=[http_request, fetch_url, linear_comment, slack_thread_reply],
     backend=sandbox_backend,

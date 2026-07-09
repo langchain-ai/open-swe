@@ -44,12 +44,18 @@ from .dashboard.agent_overrides import (
     resolve_github_login,
 )
 from .dashboard.agent_usage import record_agent_thread_usage
-from .dashboard.options import DEFAULT_MODEL_ID, SUPPORTED_MODEL_IDS, model_supports_effort
+from .dashboard.options import (
+    DEFAULT_MODEL_ID,
+    SUPPORTED_MODEL_IDS,
+    gate_fable_model,
+    model_supports_effort,
+)
 from .dashboard.repo_snapshots import resolve_repo_snapshot_id
 from .dashboard.team_settings import (
     get_effective_gateway_enabled,
     get_team_default_model_pair,
     get_team_default_repo,
+    get_team_fable_enabled,
 )
 from .dashboard.user_mappings import email_for_login
 from .integrations.corridor_mcp import load_corridor_tools
@@ -69,6 +75,7 @@ from .middleware import (
     SanitizeThinkingBlocksMiddleware,
     SanitizeToolInputsMiddleware,
     SlackAssistantStatusMiddleware,
+    SubdirAgentsReadMiddleware,
     TimeoutWrapupMiddleware,
     ToolArtifactMiddleware,
     ToolErrorMiddleware,
@@ -92,6 +99,7 @@ from .tools import (
     linear_list_teams,
     linear_update_issue,
     open_pull_request,
+    report_platform_issue,
     request_pr_review,
     save_plan,
     schedule_thread_wakeup,
@@ -111,8 +119,7 @@ from .utils.authorship import (
 from .utils.dashboard_links import dashboard_plan_url, dashboard_thread_url
 from .utils.deferred_model import make_deferred_error_model
 from .utils.github_app import (
-    BASE_RUNTIME_PROXY_TOKEN_PERMISSIONS,
-    RUNTIME_PROXY_TOKEN_PERMISSIONS,
+    PROXY_TOKEN_PERMISSION_LADDER,
     PermissionMap,
     get_github_app_installation_token_with_expiry,
 )
@@ -230,18 +237,25 @@ async def _resolve_proxy_token(
         )
         return token, expires_at, permissions
 
-    token, expires_at = await get_github_app_installation_token_with_expiry(
-        permissions=RUNTIME_PROXY_TOKEN_PERMISSIONS,
-        log_errors=False,
-    )
-    if token:
-        return token, expires_at, RUNTIME_PROXY_TOKEN_PERMISSIONS
-
-    logger.warning("Retrying GitHub proxy token mint without optional Actions read permission")
-    token, expires_at = await get_github_app_installation_token_with_expiry(
-        permissions=BASE_RUNTIME_PROXY_TOKEN_PERMISSIONS
-    )
-    return token, expires_at, BASE_RUNTIME_PROXY_TOKEN_PERMISSIONS if token else None
+    # Walk from the richest scope to the guaranteed core so an installation that
+    # hasn't granted workflows:write / actions:read degrades instead of failing.
+    ladder = PROXY_TOKEN_PERMISSION_LADDER
+    last = len(ladder) - 1
+    for index, scope in enumerate(ladder):
+        token, expires_at = await get_github_app_installation_token_with_expiry(
+            permissions=scope,
+            log_errors=index == last,
+        )
+        if not token:
+            continue
+        if index:
+            logger.warning(
+                "GitHub proxy token minted with reduced scope %s; installation is "
+                "missing higher-privilege grants",
+                sorted(scope),
+            )
+        return token, expires_at, scope
+    return None, None, None
 
 
 async def _resolve_snapshot_id_for_repo(repo: dict[str, str] | None) -> str | None:
@@ -671,6 +685,14 @@ async def _cached_gateway_enabled() -> bool:
     )
 
 
+async def _cached_fable_enabled() -> bool:
+    return await ttl_cache.cached(
+        f"team:fable-enabled:{id(get_team_fable_enabled)}",
+        60,
+        get_team_fable_enabled,
+    )
+
+
 async def _cached_profile(profile_login: str | None):
     if not profile_login:
         return None
@@ -811,10 +833,11 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     configurable = (config or {}).get("configurable") or {}
     # Team/profile settings are accepted stale for a short TTL so graph factories
     # stay off the critical path during worker load and retry storms.
-    team_defaults, use_gateway, profile = await asyncio.gather(
+    team_defaults, use_gateway, profile, fable_enabled = await asyncio.gather(
         _cached_team_default_model_pair("agent"),
         _cached_gateway_enabled(),
         _cached_profile(profile_login),
+        _cached_fable_enabled(),
     )
 
     linear_issue = config["configurable"].get("linear_issue", {})
@@ -881,6 +904,13 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     always_create_prs = profile_create_prs(profile)
     if always_create_prs:
         logger.info("Always Create PRs enabled by profile for %s", profile_login)
+
+    model_id, profile_effort = gate_fable_model(
+        model_id, profile_effort, fable_enabled=fable_enabled
+    )
+    subagent_model_id, subagent_effort = gate_fable_model(
+        subagent_model_id, subagent_effort, fable_enabled=fable_enabled
+    )
 
     model_kwargs = provider_model_kwargs(
         model_id,
@@ -972,6 +1002,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             linear_update_issue,
             open_pull_request,
             request_pr_review,
+            report_platform_issue,
             schedule_thread_wakeup,
             slack_add_reaction,
             slack_read_thread_messages,
@@ -1005,6 +1036,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             SanitizeToolInputsMiddleware(),
             ModelCallLimitMiddleware(run_limit=MODEL_CALL_RECURSION_LIMIT, exit_behavior="end"),
             ToolErrorMiddleware(),
+            SubdirAgentsReadMiddleware(),
             ToolRetryMiddleware(
                 max_retries=2,
                 tools=["task"],

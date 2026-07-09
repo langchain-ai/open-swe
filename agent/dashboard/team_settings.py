@@ -17,8 +17,10 @@ from pydantic import BaseModel, field_validator, model_validator
 
 from ..utils.gateway import resolve_gateway_enabled
 from .options import (
+    FABLE_MODEL_IDS,
     SUPPORTED_MODEL_IDS,
     default_model_pair,
+    gate_fable_model,
     model_supports_effort,
     provider_fallback_pair,
 )
@@ -41,6 +43,7 @@ class TeamSettingsUpdate(BaseModel):
     # Tri-state LLM Gateway toggle: True/False is authoritative, None inherits the
     # LANGSMITH_GATEWAY_ENABLED deployment default.
     gateway_enabled: bool | None = None
+    fable_enabled: bool = False
     review_tracing_project: str | None = None
     org_guidelines: str | None = None
     default_agent_model: str | None = None
@@ -92,6 +95,39 @@ class TeamSettingsUpdate(BaseModel):
 
     @model_validator(mode="after")
     def _validate_model_pairs(self) -> TeamSettingsUpdate:
+        self.default_agent_model, self.default_agent_reasoning_effort = _normalize_stale_model_pair(
+            self.default_agent_model,
+            self.default_agent_reasoning_effort,
+        )
+        self.default_agent_subagent_model, self.default_agent_subagent_reasoning_effort = (
+            _normalize_stale_model_pair(
+                self.default_agent_subagent_model,
+                self.default_agent_subagent_reasoning_effort,
+            )
+        )
+        self.default_reviewer_model, self.default_reviewer_reasoning_effort = (
+            _normalize_stale_model_pair(
+                self.default_reviewer_model,
+                self.default_reviewer_reasoning_effort,
+            )
+        )
+        (
+            self.default_reviewer_subagent_model,
+            self.default_reviewer_subagent_reasoning_effort,
+        ) = _normalize_stale_model_pair(
+            self.default_reviewer_subagent_model,
+            self.default_reviewer_subagent_reasoning_effort,
+        )
+        self.default_grouping_model, self.default_grouping_reasoning_effort = (
+            _normalize_stale_model_pair(
+                self.default_grouping_model,
+                self.default_grouping_reasoning_effort,
+            )
+        )
+        self.default_chat_model, self.default_chat_reasoning_effort = _normalize_stale_model_pair(
+            self.default_chat_model,
+            self.default_chat_reasoning_effort,
+        )
         _validate_model_effort_pair(
             self.default_agent_model, self.default_agent_reasoning_effort, "agent"
         )
@@ -116,6 +152,26 @@ class TeamSettingsUpdate(BaseModel):
         _validate_model_effort_pair(
             self.default_chat_model, self.default_chat_reasoning_effort, "review chat"
         )
+        if not self.fable_enabled:
+            # Disabling Fable is the ZDR kill switch and must always succeed: rather
+            # than reject a payload that still carries a Fable default, swap each
+            # Fable default to its safe non-Fable fallback (mirrors the runtime
+            # gate_fable_model guard) so the stored record can't advertise Fable.
+            for model_field, effort_field in (
+                ("default_agent_model", "default_agent_reasoning_effort"),
+                ("default_agent_subagent_model", "default_agent_subagent_reasoning_effort"),
+                ("default_reviewer_model", "default_reviewer_reasoning_effort"),
+                ("default_reviewer_subagent_model", "default_reviewer_subagent_reasoning_effort"),
+                ("default_grouping_model", "default_grouping_reasoning_effort"),
+                ("default_chat_model", "default_chat_reasoning_effort"),
+            ):
+                model = getattr(self, model_field)
+                if model in FABLE_MODEL_IDS:
+                    new_model, new_effort = gate_fable_model(
+                        model, getattr(self, effort_field), fable_enabled=False
+                    )
+                    setattr(self, model_field, new_model)
+                    setattr(self, effort_field, new_effort)
         return self
 
 
@@ -128,6 +184,42 @@ def _validate_model_effort_pair(model: str | None, effort: str | None, role: str
         raise ValueError(f"unsupported {role} model: {model}")
     if effort is None or not model_supports_effort(model, effort):
         raise ValueError(f"effort {effort!r} not supported by {role} model {model!r}")
+
+
+_RETIRED_MODEL_REPLACEMENTS: dict[str, str] = {
+    "openai:gpt-5.5": "openai:gpt-5.6-sol",
+}
+
+
+def _normalize_stale_model_pair(
+    model: str | None, effort: str | None
+) -> tuple[str | None, str | None]:
+    if model is None:
+        return model, effort
+    return _RETIRED_MODEL_REPLACEMENTS.get(model, model), effort
+
+
+_MODEL_PAIR_FIELDS: tuple[tuple[str, str], ...] = (
+    ("default_agent_model", "default_agent_reasoning_effort"),
+    ("default_agent_subagent_model", "default_agent_subagent_reasoning_effort"),
+    ("default_reviewer_model", "default_reviewer_reasoning_effort"),
+    ("default_reviewer_subagent_model", "default_reviewer_subagent_reasoning_effort"),
+    ("default_grouping_model", "default_grouping_reasoning_effort"),
+    ("default_chat_model", "default_chat_reasoning_effort"),
+)
+
+
+def normalize_team_settings_for_response(settings: dict[str, Any]) -> dict[str, Any]:
+    value = dict(settings)
+    for model_field, effort_field in _MODEL_PAIR_FIELDS:
+        model = value.get(model_field)
+        effort = value.get(effort_field)
+        if isinstance(model, str):
+            value[model_field], value[effort_field] = _normalize_stale_model_pair(
+                model,
+                effort if isinstance(effort, str) else None,
+            )
+    return value
 
 
 def _client():
@@ -156,6 +248,7 @@ def _default_settings() -> dict[str, Any]:
         "pr_summaries": True,
         "review_trace_links": True,
         "gateway_enabled": None,
+        "fable_enabled": False,
         "review_tracing_project": None,
         "org_guidelines": None,
         "default_agent_model": fallback_model,
@@ -202,7 +295,7 @@ async def get_team_settings() -> dict[str, Any]:
         "review_author_context_enabled",
     ):
         merged.pop(stale_field, None)
-    return merged
+    return normalize_team_settings_for_response(merged)
 
 
 async def upsert_team_settings(update: TeamSettingsUpdate) -> dict[str, Any]:
@@ -211,6 +304,7 @@ async def upsert_team_settings(update: TeamSettingsUpdate) -> dict[str, Any]:
         "pr_summaries": update.pr_summaries,
         "review_trace_links": update.review_trace_links,
         "gateway_enabled": update.gateway_enabled,
+        "fable_enabled": update.fable_enabled,
         "review_tracing_project": update.review_tracing_project,
         "org_guidelines": update.org_guidelines,
         "default_agent_model": update.default_agent_model,
@@ -336,6 +430,13 @@ async def get_team_gateway_enabled() -> bool | None:
     settings = await get_team_settings()
     value = settings.get("gateway_enabled")
     return value if isinstance(value, bool) else None
+
+
+async def get_team_fable_enabled() -> bool:
+    """Return whether Fable models are enabled for the team."""
+    settings = await get_team_settings()
+    value = settings.get("fable_enabled")
+    return bool(value) if isinstance(value, bool) else False
 
 
 async def get_effective_gateway_enabled() -> bool:

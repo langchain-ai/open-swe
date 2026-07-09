@@ -21,6 +21,7 @@ _MIDDLEWARE_MODULES = {
     "SanitizeThinkingBlocksMiddleware": ".sanitize_thinking_blocks",
     "SanitizeToolInputsMiddleware": ".sanitize_tool_inputs",
     "settle_review_check_on_exit": ".settle_review_check",
+    "SubdirAgentsReadMiddleware": ".subdir_agents",
     "task_on_failure": ".task_retry",
     "task_retry_on": ".task_retry",
     "TimeoutWrapupMiddleware": ".timeout_wrapup",
@@ -41,6 +42,7 @@ __all__ = [
     "SanitizeOpenAIResponsesMiddleware",
     "SanitizeThinkingBlocksMiddleware",
     "SanitizeToolInputsMiddleware",
+    "SubdirAgentsReadMiddleware",
     "ToolArtifactMiddleware",
     "ToolErrorMiddleware",
     "TimeoutWrapupMiddleware",
@@ -74,6 +76,7 @@ if TYPE_CHECKING:
     from .sanitize_thinking_blocks import SanitizeThinkingBlocksMiddleware
     from .sanitize_tool_inputs import SanitizeToolInputsMiddleware
     from .settle_review_check import settle_review_check_on_exit
+    from .subdir_agents import SubdirAgentsReadMiddleware
     from .task_retry import task_on_failure, task_retry_on
     from .timeout_wrapup import TimeoutWrapupMiddleware
     from .tool_artifact import ToolArtifactMiddleware

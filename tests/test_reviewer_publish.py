@@ -418,7 +418,52 @@ async def test_publish_review_eval_mode_does_not_call_github() -> None:
     assert result["hidden_count"] == 1
     get_token.assert_not_called()
     post_review.assert_not_called()
-    set_meta.assert_awaited_once_with("tid", last_reviewed_sha="sha")
+    set_meta.assert_awaited_once_with(
+        "tid",
+        last_reviewed_sha="sha",
+        extra={
+            "reviewer_eval_publication": {
+                "finding_ids": ["f_high"],
+                "severity_threshold": "medium",
+                "cap": 6,
+            }
+        },
+    )
+
+
+async def test_publish_review_eval_mode_uses_configured_cap() -> None:
+    from agent.tools.publish_review import publish_review
+
+    findings = [
+        _f(id="f_first", severity="high", file="a.py", start_line=1, end_line=1),
+        _f(id="f_second", severity="high", file="b.py", start_line=2, end_line=2),
+    ]
+
+    with (
+        patch(
+            "agent.tools.publish_review.get_config",
+            return_value={
+                "configurable": {
+                    "thread_id": "tid",
+                    "repo": {"owner": "o", "name": "r"},
+                    "pr_number": 7,
+                    "head_sha": "sha",
+                    "reviewer_eval": True,
+                    "reviewer_eval_cap": 1,
+                },
+                "metadata": {},
+            },
+        ),
+        patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
+        patch("agent.tools.publish_review.list_findings_async", AsyncMock(return_value=findings)),
+        patch("agent.tools.publish_review.set_reviewer_thread_metadata", AsyncMock()) as set_meta,
+    ):
+        result = await publish_review()
+
+    assert result["surfaced_count"] == 1
+    publication = set_meta.await_args.kwargs["extra"]["reviewer_eval_publication"]
+    assert publication["cap"] == 1
+    assert publication["finding_ids"] == ["f_first"]
 
 
 @pytest.mark.asyncio

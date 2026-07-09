@@ -205,7 +205,7 @@ async def test_add_finding_persists_to_thread_metadata() -> None:
 
     async def fake_append(thread_id: str, finding: Any) -> Any:
         captured.append((thread_id, finding))
-        return finding
+        return {"finding": finding, "created": True}
 
     with (
         patch("agent.tools.add_finding.get_config", return_value=_config()),
@@ -245,7 +245,7 @@ async def test_add_finding_uses_resolved_head_sha_for_provenance() -> None:
 
     async def fake_append(thread_id: str, finding: Any) -> Any:
         captured.append(finding)
-        return finding
+        return {"finding": finding, "created": True}
 
     with (
         patch("agent.tools.add_finding.get_config", return_value=_config()),
@@ -279,7 +279,7 @@ async def test_add_finding_allows_file_level_with_no_lines() -> None:
         patch(
             "agent.tools.add_finding.append_finding",
             new_callable=AsyncMock,
-            side_effect=lambda _t, f: f,
+            side_effect=lambda _t, f: {"finding": f, "created": True},
         ),
     ):
         result = await add_finding(
@@ -321,6 +321,7 @@ async def test_resolve_finding_thread_resolves_all_known_threads() -> None:
         patch("agent.tools.resolve_finding_thread.resolve_review_thread", resolve),
         patch("agent.tools.resolve_finding_thread.reply_to_review_comment", reply),
         patch("agent.tools.resolve_finding_thread.update_finding_fields", update),
+        patch("agent.tools.resolve_finding_thread.update_finding_surface", AsyncMock()),
     ):
         result = await resolve_finding_thread(
             "f1", status="resolved", note="Fixed in the latest commit"
@@ -394,7 +395,7 @@ async def test_add_finding_drops_long_suggestion() -> None:
 
     async def fake_append(thread_id: str, finding: Any) -> Any:
         captured.append(finding)
-        return finding
+        return {"finding": finding, "created": True}
 
     long_suggestion = "\n".join(f"line_{i}" for i in range(6))
     with (
@@ -425,7 +426,7 @@ async def test_add_finding_keeps_short_suggestion() -> None:
 
     async def fake_append(thread_id: str, finding: Any) -> Any:
         captured.append(finding)
-        return finding
+        return {"finding": finding, "created": True}
 
     short_suggestion = "a\nb\nc\nd"  # exactly 4 lines — at the cap
     with (
@@ -456,7 +457,7 @@ async def test_add_finding_preserves_multi_line_range() -> None:
 
     async def fake_append(thread_id: str, finding: Any) -> Any:
         captured.append(finding)
-        return finding
+        return {"finding": finding, "created": True}
 
     with (
         patch("agent.tools.add_finding.get_config", return_value=_config()),

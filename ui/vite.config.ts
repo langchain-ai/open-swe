@@ -145,7 +145,9 @@ const config = defineConfig({
       registerType: "prompt",
       outDir: ".output/public",
       devOptions: {
-        enabled: true,
+        // Off in dev: the service worker precaches assets and defeats HMR (and
+        // a stale registration lingers per-origin). Dev is HMR-only.
+        enabled: false,
       },
       integration: {
         closeBundleOrder: "pre",

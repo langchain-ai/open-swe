@@ -1,17 +1,19 @@
 import base64
 import json
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi import HTTPException
 
-from agent.dashboard import thread_api
+from agent.dashboard import routes, thread_api
 from agent.dashboard.agent_overrides import resolve_agent_model_id
 from agent.dashboard.options import model_supports_images
 
 _TEXT_ONLY_MODEL = "fireworks:accounts/fireworks/models/deepseek-v4-pro"
-_VISION_MODEL = "openai:gpt-5.5"
+_VISION_MODEL = "openai:gpt-5.6-sol"
+_FABLE = "anthropic:claude-fable-5"
+_PAIR = ("openai:gpt-5.6-sol", "medium")
 
 
 def _image() -> thread_api.DashboardImageBody:
@@ -311,6 +313,18 @@ def test_thread_summary_omits_pr_when_no_pr_metadata() -> None:
 
     assert "pr" not in summary
     assert "diffStats" not in summary
+
+
+def test_thread_summary_exposes_sandbox_id() -> None:
+    summary = thread_api._thread_summary(_thread_with_metadata({"sandbox_id": "sb-abc123"}))
+
+    assert summary["sandboxId"] == "sb-abc123"
+
+
+def test_thread_summary_hides_creating_sandbox_sentinel() -> None:
+    summary = thread_api._thread_summary(_thread_with_metadata({"sandbox_id": "__creating__"}))
+
+    assert summary["sandboxId"] is None
 
 
 async def test_recovery_patch_requires_thread_owner(monkeypatch) -> None:
@@ -1414,3 +1428,101 @@ async def test_status_filter_refreshes_threads_missing_run_status(monkeypatch) -
     assert {item["id"] for item in result["items"]} == {"t0"}
     assert result["items"][0]["status"] == "finished"
     assert set(run_list_thread_ids) == {"t0", "t1"}
+
+
+@pytest.mark.asyncio
+async def test_get_my_profile_normalizes_stale_openai_models() -> None:
+    with patch(
+        "agent.dashboard.routes.get_profile",
+        new_callable=AsyncMock,
+        return_value={
+            "default_model": "openai:gpt-5.5",
+            "reasoning_effort": "medium",
+            "default_subagent_model": "openai:gpt-5.5",
+            "subagent_reasoning_effort": "low",
+        },
+    ):
+        payload = await routes.get_my_profile({"sub": "octocat"})
+
+    assert payload["default_model"] == "openai:gpt-5.6-sol"
+    assert payload["reasoning_effort"] == "medium"
+    assert payload["default_subagent_model"] == "openai:gpt-5.6-sol"
+    assert payload["subagent_reasoning_effort"] == "low"
+
+
+@pytest.mark.asyncio
+async def test_options_omits_fable_when_disabled() -> None:
+    with (
+        patch(
+            "agent.dashboard.routes.get_team_fable_enabled",
+            new_callable=AsyncMock,
+            return_value=False,
+        ),
+        patch(
+            "agent.dashboard.routes.get_team_default_model",
+            new_callable=AsyncMock,
+            return_value=_PAIR,
+        ),
+        patch(
+            "agent.dashboard.routes.get_team_default_subagent_model",
+            new_callable=AsyncMock,
+            return_value=_PAIR,
+        ),
+    ):
+        payload = await routes.options()
+    assert _FABLE not in [m["id"] for m in payload["models"]]
+
+
+@pytest.mark.asyncio
+async def test_options_includes_fable_when_enabled() -> None:
+    with (
+        patch(
+            "agent.dashboard.routes.get_team_fable_enabled",
+            new_callable=AsyncMock,
+            return_value=True,
+        ),
+        patch(
+            "agent.dashboard.routes.get_team_default_model",
+            new_callable=AsyncMock,
+            return_value=_PAIR,
+        ),
+        patch(
+            "agent.dashboard.routes.get_team_default_subagent_model",
+            new_callable=AsyncMock,
+            return_value=_PAIR,
+        ),
+    ):
+        payload = await routes.options()
+    assert _FABLE in [m["id"] for m in payload["models"]]
+
+
+@pytest.mark.asyncio
+async def test_options_gates_stale_fable_default_when_disabled() -> None:
+    # A stale Fable team default must not be advertised as the default while Fable
+    # is omitted from the selectable list, or the Cloud Agents page would offer a
+    # default that PUT /profile then rejects.
+    fable_pair = (_FABLE, "high")
+    with (
+        patch(
+            "agent.dashboard.routes.get_team_fable_enabled",
+            new_callable=AsyncMock,
+            return_value=False,
+        ),
+        patch(
+            "agent.dashboard.routes.get_team_default_model",
+            new_callable=AsyncMock,
+            return_value=fable_pair,
+        ),
+        patch(
+            "agent.dashboard.routes.get_team_default_subagent_model",
+            new_callable=AsyncMock,
+            return_value=fable_pair,
+        ),
+    ):
+        payload = await routes.options()
+    model_ids = [m["id"] for m in payload["models"]]
+    assert _FABLE not in model_ids
+    assert payload["default_agent_model"] != _FABLE
+    assert payload["default_agent_subagent_model"] != _FABLE
+    assert payload["default_agent_model"] in model_ids
+    assert payload["default_agent_subagent_model"] in model_ids

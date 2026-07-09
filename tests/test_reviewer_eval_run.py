@@ -111,7 +111,7 @@ def test_load_env_config_reads_all_supported_keys() -> None:
         "LANGGRAPH_URL": "https://lg.env",
         "LANGSMITH_PROJECT": "project-env",
         "REVIEWER_ASSISTANT_ID": "reviewer-env",
-        "REVIEWER_EVAL_MODEL_ID": "openai:gpt-5.5",
+        "REVIEWER_EVAL_MODEL_ID": "openai:gpt-5.6-sol",
         "REVIEWER_EVAL_REASONING_EFFORT": "xhigh",
         "REVIEWER_EVAL_SCORE_MODE": "surfaced_findings",
         "REVIEWER_EVAL_SEVERITY_THRESHOLD": "critical",
@@ -125,7 +125,7 @@ def test_load_env_config_reads_all_supported_keys() -> None:
         "langgraph_url": "https://lg.env",
         "langsmith_project": "project-env",
         "assistant_id": "reviewer-env",
-        "model_id": "openai:gpt-5.5",
+        "model_id": "openai:gpt-5.6-sol",
         "reasoning_effort": "xhigh",
         "score_mode": "surfaced_findings",
         "severity_threshold": "critical",
@@ -159,13 +159,13 @@ def test_resolve_config_prefers_cli_then_env_then_toml() -> None:
         config = _resolve_config(
             {
                 "experiment_prefix": "experiment-cli",
-                "model_id": "openai:gpt-5.5",
+                "model_id": "openai:gpt-5.6-sol",
                 "reasoning_effort": "xhigh",
             }
         )
 
     assert config["dataset_name"] == "dataset-config"
     assert config["experiment_prefix"] == "experiment-cli"
-    assert config["model_id"] == "openai:gpt-5.5"
+    assert config["model_id"] == "openai:gpt-5.6-sol"
     assert config["reasoning_effort"] == "xhigh"
     assert config["langsmith_project"] == "project-env"

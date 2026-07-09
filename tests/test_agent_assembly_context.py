@@ -61,7 +61,7 @@ async def _capture_create_deep_agent_kwargs() -> dict[str, object]:
         patch(
             "agent.server.get_team_default_model_pair",
             new_callable=AsyncMock,
-            return_value=(("openai:gpt-5.5", "medium"), ("openai:gpt-5.5", "low")),
+            return_value=(("openai:gpt-5.6-sol", "medium"), ("openai:gpt-5.6-sol", "low")),
         ),
         patch("agent.server.load_profile", new_callable=AsyncMock, return_value=None),
         patch("agent.server.fallback_model_id_for", return_value=None),
@@ -101,6 +101,16 @@ async def test_agent_keeps_message_queue_and_step_limit_middleware() -> None:
     present = {type(m).__name__ for m in middleware}
     assert "check_message_queue_before_model" in present
     assert "notify_step_limit_reached" in present
+
+
+@pytest.mark.asyncio
+async def test_agent_includes_report_platform_issue_tool() -> None:
+    from agent.tools import report_platform_issue
+
+    captured = await _capture_create_deep_agent_kwargs()
+    tools = captured["tools"]
+    assert isinstance(tools, list)
+    assert report_platform_issue in tools
 
 
 @pytest.mark.asyncio

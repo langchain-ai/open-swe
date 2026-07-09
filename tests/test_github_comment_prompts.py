@@ -89,6 +89,16 @@ def test_construct_system_prompt_identifies_own_repo() -> None:
     assert "Open SWE" in OPEN_SWE_SHARED_BASE
 
 
+def test_shared_base_requires_terse_slack_replies_with_share_path() -> None:
+    from agent.prompt import OPEN_SWE_SHARED_BASE
+
+    assert "keep every reply terse" in OPEN_SWE_SHARED_BASE
+    assert "Do not paste long output" in OPEN_SWE_SHARED_BASE
+    assert "`save_plan`" in OPEN_SWE_SHARED_BASE
+    assert "plan-review link" in OPEN_SWE_SHARED_BASE
+    assert "does not enter plan mode" in OPEN_SWE_SHARED_BASE
+
+
 def test_harness_profile_replaces_deepagents_base_for_supported_providers() -> None:
     """The Open SWE base prompt is registered per provider and replaces the SDK base."""
     import deepagents.profiles.harness.harness_profiles as hp
@@ -149,9 +159,19 @@ def test_construct_system_prompt_does_not_require_pr_for_questions() -> None:
 
     assert "Do not create commits, branches, or pull requests for questions" in prompt
     assert "For information-only requests" in prompt
+    assert "check them out before answering" in prompt
+    assert "answer fully inline" in prompt
     assert "open or update a draft PR when the user asks for one" in prompt
     assert "Always Create PRs Policy Override" not in prompt
     assert "Always push, open/update the draft PR" not in prompt
+
+
+def test_shared_base_summarizes_slack_information_answers() -> None:
+    from agent.prompt import OPEN_SWE_SHARED_BASE
+
+    assert "Slack-triggered information-only answers" in OPEN_SWE_SHARED_BASE
+    assert "post only a concise summary" in OPEN_SWE_SHARED_BASE
+    assert "complete answer inline" in OPEN_SWE_SHARED_BASE
 
 
 def test_construct_system_prompt_includes_always_create_prs_override() -> None:

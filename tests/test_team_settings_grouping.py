@@ -10,7 +10,7 @@ from agent.dashboard.team_settings import (
     get_team_default_grouping_model,
 )
 
-_REVIEWER_SUBAGENT_PAIR = ("openai:gpt-5.5", "low")
+_REVIEWER_SUBAGENT_PAIR = ("openai:gpt-5.6-sol", "low")
 _GROUPING_PAIR = ("google_genai:gemini-3.5-flash", "low")
 
 
