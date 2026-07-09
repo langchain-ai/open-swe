@@ -50,7 +50,7 @@ async def test_agent_uses_profile_subagent_model_override() -> None:
         patch(
             "agent.server.get_team_default_model_pair",
             new_callable=AsyncMock,
-            return_value=(("openai:gpt-5.5", "medium"), ("openai:gpt-5.5", "low")),
+            return_value=(("openai:gpt-5.6-sol", "medium"), ("openai:gpt-5.6-sol", "low")),
         ),
         patch(
             "agent.server.load_profile",
@@ -58,7 +58,7 @@ async def test_agent_uses_profile_subagent_model_override() -> None:
             return_value={
                 "default_model": "anthropic:claude-opus-4-8",
                 "reasoning_effort": "high",
-                "default_subagent_model": "openai:gpt-5.5",
+                "default_subagent_model": "openai:gpt-5.6-sol",
                 "subagent_reasoning_effort": "xhigh",
             },
         ),
@@ -81,7 +81,7 @@ async def test_agent_uses_profile_subagent_model_override() -> None:
     assert main_call.kwargs["effort"] == "high"
 
     subagent_call = make_model.call_args_list[1]
-    assert subagent_call.args == ("openai:gpt-5.5",)
+    assert subagent_call.args == ("openai:gpt-5.6-sol",)
     assert subagent_call.kwargs["reasoning"] == {"effort": "xhigh", "summary": "auto"}
 
 
@@ -123,7 +123,7 @@ async def test_agent_subagent_inherits_profile_model_override_without_explicit_p
         patch(
             "agent.server.get_team_default_model_pair",
             new_callable=AsyncMock,
-            return_value=(("openai:gpt-5.5", "medium"), ("openai:gpt-5.5", "low")),
+            return_value=(("openai:gpt-5.6-sol", "medium"), ("openai:gpt-5.6-sol", "low")),
         ),
         patch(
             "agent.server.load_profile",
@@ -188,7 +188,7 @@ async def test_agent_gate_swaps_disabled_fable_profile_to_opus() -> None:
         patch(
             "agent.server.get_team_default_model_pair",
             new_callable=AsyncMock,
-            return_value=(("openai:gpt-5.5", "medium"), ("openai:gpt-5.5", "low")),
+            return_value=(("openai:gpt-5.6-sol", "medium"), ("openai:gpt-5.6-sol", "low")),
         ),
         # Profile selected Fable back when it was allowed; it's now disabled.
         patch(

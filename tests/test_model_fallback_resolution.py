@@ -6,6 +6,8 @@ from agent.dashboard.agent_overrides import normalize_profile_overrides
 from agent.dashboard.options import (
     DEFAULT_MODEL_ID,
     FABLE_MODEL_IDS,
+    SUPPORTED_MODEL_IDS,
+    SUPPORTED_MODELS,
     default_model_pair,
     fable_disabled_fallback,
     gate_fable_model,
@@ -28,8 +30,18 @@ def test_provider_fallback_uses_default_effort_when_unsupported() -> None:
 
 def test_provider_fallback_resolves_openai_within_provider() -> None:
     model, effort = provider_fallback_pair("openai:gpt-5-legacy", "low")
-    assert model.startswith("openai:")
+    assert model == "openai:gpt-5.6-sol"
     assert effort == "low"
+
+
+def test_supported_openai_models_replace_gpt_5_5() -> None:
+    assert "openai:gpt-5.5" not in SUPPORTED_MODEL_IDS
+    openai_options = [model for model in SUPPORTED_MODELS if model["id"].startswith("openai:")]
+    assert [(model["id"], model["label"]) for model in openai_options] == [
+        ("openai:gpt-5.6-sol", "GPT-5.6 Sol"),
+        ("openai:gpt-5.6-terra", "GPT-5.6 Terra"),
+        ("openai:gpt-5.6-luna", "GPT-5.6 Luna"),
+    ]
 
 
 @pytest.mark.parametrize("model_id", ["unknown:model", "no-colon", "", None, 123])
@@ -99,8 +111,8 @@ def test_gate_fable_swaps_to_opus_when_disabled() -> None:
 
 
 def test_gate_fable_leaves_non_fable_ids_alone() -> None:
-    assert gate_fable_model("openai:gpt-5.5", "high", fable_enabled=False) == (
-        "openai:gpt-5.5",
+    assert gate_fable_model("openai:gpt-5.6-sol", "high", fable_enabled=False) == (
+        "openai:gpt-5.6-sol",
         "high",
     )
 

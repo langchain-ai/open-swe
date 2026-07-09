@@ -135,14 +135,14 @@ See `deepagents.backends.LangSmithSandbox` and `agent/integrations/langsmith.py`
 
 ## 2. Model
 
-The model is configured in the `get_agent()` function in `agent/server.py`. By default it uses `openai:gpt-5.5` with medium reasoning effort, but you can override the model with the `LLM_MODEL_ID` environment variable:
+The model is configured in the `get_agent()` function in `agent/server.py`. By default it uses `openai:gpt-5.6-sol` with medium reasoning effort, but you can override the model with the `LLM_MODEL_ID` environment variable:
 
 ```bash
 # Set the model via environment variable (uses provider:model format)
 LLM_MODEL_ID="anthropic:claude-sonnet-5"
 ```
 
-If `LLM_MODEL_ID` is not set, the default model (`openai:gpt-5.5`) is used.
+If `LLM_MODEL_ID` is not set, the default model (`openai:gpt-5.6-sol`) is used.
 
 `max_tokens` is a maximum completion/output token budget, not the model's total context window. For OpenAI reasoning models, this budget can include both internal reasoning tokens and final response tokens.
 
@@ -155,7 +155,7 @@ Use the `provider:model` format:
 model=make_model("anthropic:claude-sonnet-5", temperature=0, max_tokens=16_000)
 
 # OpenAI (uses Responses API by default)
-model=make_model("openai:gpt-5.5", max_tokens=128_000, reasoning={"effort": "medium"})
+model=make_model("openai:gpt-5.6-sol", max_tokens=128_000, reasoning={"effort": "medium"})
 
 # Google
 model=make_model("google_genai:gemini-2.5-pro", temperature=0, max_tokens=16_000)
@@ -187,7 +187,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         model = make_model("anthropic:claude-sonnet-5", temperature=0, max_tokens=16_000)
     else:
         # Full model for code changes from Linear
-        model = make_model("openai:gpt-5.5", max_tokens=128_000, reasoning={"effort": "medium"})
+        model = make_model("openai:gpt-5.6-sol", max_tokens=128_000, reasoning={"effort": "medium"})
     
     return create_deep_agent(model=model, ...)
 ```

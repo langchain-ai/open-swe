@@ -11,9 +11,9 @@ from agent.dashboard.agent_overrides import resolve_agent_model_id
 from agent.dashboard.options import model_supports_images
 
 _TEXT_ONLY_MODEL = "fireworks:accounts/fireworks/models/deepseek-v4-pro"
-_VISION_MODEL = "openai:gpt-5.5"
+_VISION_MODEL = "openai:gpt-5.6-sol"
 _FABLE = "anthropic:claude-fable-5"
-_PAIR = ("openai:gpt-5.5", "medium")
+_PAIR = ("openai:gpt-5.6-sol", "medium")
 
 
 def _image() -> thread_api.DashboardImageBody:
