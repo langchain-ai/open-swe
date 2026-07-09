@@ -11,9 +11,9 @@ from agent.dashboard.agent_overrides import resolve_agent_model_id
 from agent.dashboard.options import model_supports_images
 
 _TEXT_ONLY_MODEL = "fireworks:accounts/fireworks/models/deepseek-v4-pro"
-_VISION_MODEL = "openai:gpt-5.5"
+_VISION_MODEL = "openai:gpt-5.6-sol"
 _FABLE = "anthropic:claude-fable-5"
-_PAIR = ("openai:gpt-5.5", "medium")
+_PAIR = ("openai:gpt-5.6-sol", "medium")
 
 
 def _image() -> thread_api.DashboardImageBody:
@@ -1428,6 +1428,26 @@ async def test_status_filter_refreshes_threads_missing_run_status(monkeypatch) -
     assert {item["id"] for item in result["items"]} == {"t0"}
     assert result["items"][0]["status"] == "finished"
     assert set(run_list_thread_ids) == {"t0", "t1"}
+
+
+@pytest.mark.asyncio
+async def test_get_my_profile_normalizes_stale_openai_models() -> None:
+    with patch(
+        "agent.dashboard.routes.get_profile",
+        new_callable=AsyncMock,
+        return_value={
+            "default_model": "openai:gpt-5.5",
+            "reasoning_effort": "medium",
+            "default_subagent_model": "openai:gpt-5.5",
+            "subagent_reasoning_effort": "low",
+        },
+    ):
+        payload = await routes.get_my_profile({"sub": "octocat"})
+
+    assert payload["default_model"] == "openai:gpt-5.6-sol"
+    assert payload["reasoning_effort"] == "medium"
+    assert payload["default_subagent_model"] == "openai:gpt-5.6-sol"
+    assert payload["subagent_reasoning_effort"] == "low"
 
 
 @pytest.mark.asyncio

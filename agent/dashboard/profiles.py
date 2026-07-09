@@ -19,7 +19,7 @@ from typing import Any
 
 import httpx
 from langgraph_sdk import get_client
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, model_validator
 
 from ..encryption import decrypt_token, encrypt_token
 from .oauth import (
@@ -27,7 +27,7 @@ from .oauth import (
     is_unrecoverable_refresh_error,
     refresh_user_access_token,
 )
-from .options import SUPPORTED_MODEL_IDS, model_supports_effort
+from .options import SUPPORTED_MODEL_IDS, model_supports_effort, provider_fallback_pair
 
 logger = logging.getLogger(__name__)
 
@@ -47,12 +47,20 @@ class ProfileUpdate(BaseModel):
     create_prs: bool = False
     review_draft_prs: bool | None = None
 
-    @field_validator("default_model")
-    @classmethod
-    def _model_supported(cls, v: str) -> str:
-        if v not in SUPPORTED_MODEL_IDS:
-            raise ValueError(f"unsupported model: {v}")
-        return v
+    @model_validator(mode="after")
+    def _normalize_stale_model_pairs(self) -> ProfileUpdate:
+        self.default_model, self.reasoning_effort = _normalize_stale_model_pair(
+            self.default_model,
+            self.reasoning_effort,
+        )
+        if self.default_subagent_model is not None:
+            self.default_subagent_model, self.subagent_reasoning_effort = (
+                _normalize_stale_model_pair(
+                    self.default_subagent_model,
+                    self.subagent_reasoning_effort,
+                )
+            )
+        return self
 
     def validate_pairing(self) -> None:
         if not model_supports_effort(self.default_model, self.reasoning_effort):
@@ -73,6 +81,36 @@ class ProfileUpdate(BaseModel):
                 f"effort {self.subagent_reasoning_effort!r} not supported by "
                 f"{self.default_subagent_model!r}"
             )
+
+
+def _normalize_stale_model_pair(model: str, effort: str | None) -> tuple[str, str | None]:
+    if model in SUPPORTED_MODEL_IDS or effort is None:
+        return model, effort
+    fallback = provider_fallback_pair(model, effort)
+    if fallback is None:
+        return model, effort
+    return fallback
+
+
+def normalize_profile_for_response(profile: dict[str, Any]) -> dict[str, Any]:
+    value = dict(profile)
+    model = value.get("default_model")
+    effort = value.get("reasoning_effort")
+    if isinstance(model, str):
+        value["default_model"], value["reasoning_effort"] = _normalize_stale_model_pair(
+            model,
+            effort if isinstance(effort, str) else None,
+        )
+    subagent_model = value.get("default_subagent_model")
+    subagent_effort = value.get("subagent_reasoning_effort")
+    if isinstance(subagent_model, str):
+        value["default_subagent_model"], value["subagent_reasoning_effort"] = (
+            _normalize_stale_model_pair(
+                subagent_model,
+                subagent_effort if isinstance(subagent_effort, str) else None,
+            )
+        )
+    return value
 
 
 def _client():

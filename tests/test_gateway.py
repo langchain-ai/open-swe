@@ -37,7 +37,7 @@ def test_openai_overrides_use_responses_by_default(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("LANGSMITH_API_KEY", "ls-key")
-    overrides = gateway.gateway_overrides("openai:gpt-5.5")
+    overrides = gateway.gateway_overrides("openai:gpt-5.6-sol")
     assert overrides == {
         "base_url": "https://gateway.smith.langchain.com/openai/v1",
         "api_key": "ls-key",
@@ -48,7 +48,7 @@ def test_openai_overrides_use_responses_by_default(
 def test_openai_overrides_chat_completions_optout(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("LANGSMITH_API_KEY", "ls-key")
     monkeypatch.setenv("LANGSMITH_GATEWAY_OPENAI_USE_RESPONSES", "false")
-    overrides = gateway.gateway_overrides("openai:gpt-5.5")
+    overrides = gateway.gateway_overrides("openai:gpt-5.6-sol")
     assert overrides is not None
     assert overrides["use_responses_api"] is False
 
@@ -65,7 +65,7 @@ async def test_openai_sdk_uses_gateway_responses_path() -> None:
                 "object": "response",
                 "created_at": 0,
                 "status": "completed",
-                "model": "gpt-5.5",
+                "model": "gpt-5.6-sol",
                 "output": [
                     {
                         "id": "msg_test",
@@ -82,7 +82,7 @@ async def test_openai_sdk_uses_gateway_responses_path() -> None:
     http_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     try:
         chat_model = ChatOpenAI(
-            model="gpt-5.5",
+            model="gpt-5.6-sol",
             api_key="dummy",
             base_url="https://gateway.smith.langchain.com/openai/v1",
             use_responses_api=True,
@@ -254,7 +254,7 @@ def test_unsupported_provider_passes_through(monkeypatch: pytest.MonkeyPatch) ->
 
 
 def test_missing_api_key_passes_through(monkeypatch: pytest.MonkeyPatch) -> None:
-    assert gateway.gateway_overrides("openai:gpt-5.5") is None
+    assert gateway.gateway_overrides("openai:gpt-5.6-sol") is None
 
 
 def test_prod_key_used_as_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -331,7 +331,7 @@ def _capture_init_chat_model() -> tuple[dict[str, Any], Any]:
 def test_make_model_direct_openai_uses_responses_websocket() -> None:
     captured, fake = _capture_init_chat_model()
     with patch.object(model, "init_chat_model", fake):
-        model.make_model("openai:gpt-5.5", use_gateway=False)
+        model.make_model("openai:gpt-5.6-sol", use_gateway=False)
     assert captured["base_url"] == model.OPENAI_RESPONSES_WS_BASE_URL
     assert captured["use_responses_api"] is True
     assert captured["store"] is False
@@ -344,7 +344,7 @@ def test_make_model_gateway_openai_replaces_websocket(
     monkeypatch.setenv("LANGSMITH_API_KEY", "ls-key")
     captured, fake = _capture_init_chat_model()
     with patch.object(model, "init_chat_model", fake):
-        model.make_model("openai:gpt-5.5", use_gateway=True)
+        model.make_model("openai:gpt-5.6-sol", use_gateway=True)
     assert captured["base_url"] == "https://gateway.smith.langchain.com/openai/v1"
     assert captured["use_responses_api"] is True
     assert captured["store"] is False
@@ -360,7 +360,7 @@ def test_make_model_gateway_openai_chat_completions_optout_converts_reasoning(
     captured, fake = _capture_init_chat_model()
     with patch.object(model, "init_chat_model", fake):
         model.make_model(
-            "openai:gpt-5.5",
+            "openai:gpt-5.6-sol",
             use_gateway=True,
             reasoning={"effort": "high", "summary": "auto"},
         )
@@ -378,7 +378,7 @@ def test_make_model_gateway_openai_preserves_reasoning_none(
     captured, fake = _capture_init_chat_model()
     with patch.object(model, "init_chat_model", fake):
         model.make_model(
-            "openai:gpt-5.5",
+            "openai:gpt-5.6-sol",
             use_gateway=True,
             reasoning={"effort": "none"},
         )
@@ -396,7 +396,7 @@ def test_make_model_gateway_openai_responses_keeps_reasoning(
     reasoning = {"effort": "high", "summary": "auto"}
     captured, fake = _capture_init_chat_model()
     with patch.object(model, "init_chat_model", fake):
-        model.make_model("openai:gpt-5.5", use_gateway=True, reasoning=reasoning)
+        model.make_model("openai:gpt-5.6-sol", use_gateway=True, reasoning=reasoning)
     assert captured["use_responses_api"] is True
     assert captured["store"] is False
     assert captured["include"] == ["reasoning.encrypted_content"]
@@ -428,7 +428,7 @@ def test_make_model_gateway_without_key_falls_back_direct(
 ) -> None:
     captured, fake = _capture_init_chat_model()
     with patch.object(model, "init_chat_model", fake):
-        model.make_model("openai:gpt-5.5", use_gateway=True)  # no LangSmith key
+        model.make_model("openai:gpt-5.6-sol", use_gateway=True)  # no LangSmith key
     # No key -> overrides skipped -> the direct-provider websocket base stands.
     assert captured["base_url"] == model.OPENAI_RESPONSES_WS_BASE_URL
     assert captured["use_responses_api"] is True

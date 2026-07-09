@@ -105,10 +105,10 @@ def test_disable_transition_coerces_all_fable_defaults() -> None:
 def test_update_leaves_non_fable_defaults_untouched_when_disabled() -> None:
     # Coercion only rewrites Fable ids; other selections pass through unchanged.
     update = TeamSettingsUpdate(
-        default_agent_model="openai:gpt-5.5",
+        default_agent_model="openai:gpt-5.6-sol",
         default_agent_reasoning_effort="medium",
     )
-    assert update.default_agent_model == "openai:gpt-5.5"
+    assert update.default_agent_model == "openai:gpt-5.6-sol"
     assert update.default_agent_reasoning_effort == "medium"
 
 

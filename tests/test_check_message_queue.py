@@ -106,7 +106,7 @@ async def test_build_blocks_skips_images_for_text_only_model() -> None:
 @pytest.mark.asyncio
 async def test_build_blocks_includes_images_for_vision_model() -> None:
     payload: dict[str, Any] = {"text": "see this", "image_urls": []}
-    blocks = await _build_blocks_from_payload(payload, model_id="openai:gpt-5.5")
+    blocks = await _build_blocks_from_payload(payload, model_id="openai:gpt-5.6-sol")
     assert blocks == [{"type": "text", "text": "see this"}]
 
 
