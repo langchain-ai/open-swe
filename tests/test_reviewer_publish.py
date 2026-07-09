@@ -418,7 +418,17 @@ async def test_publish_review_eval_mode_does_not_call_github() -> None:
     assert result["hidden_count"] == 1
     get_token.assert_not_called()
     post_review.assert_not_called()
-    set_meta.assert_awaited_once_with("tid", last_reviewed_sha="sha")
+    set_meta.assert_awaited_once_with(
+        "tid",
+        last_reviewed_sha="sha",
+        extra={
+            "reviewer_eval_publication": {
+                "finding_ids": ["f_high"],
+                "severity_threshold": "medium",
+                "cap": 6,
+            }
+        },
+    )
 
 
 @pytest.mark.asyncio

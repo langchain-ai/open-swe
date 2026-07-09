@@ -12,16 +12,23 @@ already uses for durable non-secret run state like ``sandbox_id``.
 
 from __future__ import annotations
 
+import asyncio
+import hashlib
+import json
 import logging
 import uuid
+import weakref
 from collections.abc import Callable
-from typing import Any, Literal, TypedDict, cast
+from typing import Any, Literal, NotRequired, TypedDict, cast
 
 from langgraph.config import get_config
 from langgraph_sdk import get_client
 from langgraph_sdk.errors import NotFoundError as LangGraphSDKNotFoundError
 
 logger = logging.getLogger(__name__)
+_FINDING_MUTATION_LOCKS: weakref.WeakValueDictionary[tuple[str, int], asyncio.Lock] = (
+    weakref.WeakValueDictionary()
+)
 
 
 class ReviewerThreadMissingError(RuntimeError):
@@ -38,6 +45,7 @@ class ReviewerThreadMissingError(RuntimeError):
 
 
 REVIEWER_THREAD_KIND = "reviewer"
+REVIEWER_EVAL_PUBLICATION_KEY = "reviewer_eval_publication"
 
 # Suggestions are only useful when the reader can scan them at a glance and
 # accept with one click. Anything longer reads as the reviewer rewriting the
@@ -46,6 +54,8 @@ REVIEWER_THREAD_KIND = "reviewer"
 MAX_SUGGESTION_LINES = 4
 MAX_FINDING_TITLE_LENGTH = 120
 DEFAULT_FINDING_TITLE = "Code review finding"
+REVIEW_FINDING_CAP = 6
+FINDING_FINGERPRINT_VERSION = 1
 
 
 def clip_suggestion(suggestion: str | None) -> tuple[str | None, bool]:
@@ -89,18 +99,18 @@ SEVERITY_ORDER: dict[Severity, int] = {
 # the discipline.
 
 
-class Finding(TypedDict, total=False):
+class Finding(TypedDict):
     """A single review finding.
 
-    All fields are optional at the TypedDict level so partial updates and
-    legacy findings without generated titles are representable.
+    Core fields are required for newly-created findings. Legacy and
+    publication-only fields remain optional while old thread metadata ages out.
     """
 
     id: str
     severity: Severity
     confidence: Confidence
     category: str
-    title: str
+    title: NotRequired[str]
     file: str
     start_line: int | None
     end_line: int | None
@@ -111,25 +121,30 @@ class Finding(TypedDict, total=False):
     status: FindingStatus
     first_seen_sha: str
     last_confirmed_sha: str
-    github_review_id: int | None
-    github_review_comment_id: int | None
-    github_review_comment_ids: list[int]
-    github_review_thread_id: str | None
-    github_review_thread_ids: list[str]
-    github_review_run_id: str | None
-    github_thread_resolved: bool
-    github_resolved_thread_ids: list[str]
-    github_posted_resolution_comment_ids: list[int]
-    last_human_reply_at: str | None
-    last_human_reply_author: str | None
-    last_human_reply_body: str | None
-    last_reconciliation_note: str | None
-    resolution_note: str | None
-    diff_hunk: str | None
+    github_review_id: NotRequired[int | None]
+    github_review_comment_id: NotRequired[int | None]
+    github_review_comment_ids: NotRequired[list[int]]
+    github_review_thread_id: NotRequired[str | None]
+    github_review_thread_ids: NotRequired[list[str]]
+    github_review_run_id: NotRequired[str | None]
+    github_thread_resolved: NotRequired[bool]
+    github_resolved_thread_ids: NotRequired[list[str]]
+    github_posted_resolution_comment_ids: NotRequired[list[int]]
+    last_human_reply_at: NotRequired[str | None]
+    last_human_reply_author: NotRequired[str | None]
+    last_human_reply_body: NotRequired[str | None]
+    last_reconciliation_note: NotRequired[str | None]
+    resolution_note: NotRequired[str | None]
+    diff_hunk: NotRequired[str | None]
     fingerprint: str
-    anchor: FindingAnchor
-    surface: FindingSurface
-    interactions: list[FindingInteraction]
+    anchor: NotRequired[FindingAnchor]
+    surface: NotRequired[FindingSurface]
+    interactions: NotRequired[list[FindingInteraction]]
+
+
+class AppendFindingResult(TypedDict):
+    finding: Finding
+    created: bool
 
 
 class FindingAnchor(TypedDict):
@@ -179,6 +194,12 @@ class ReviewerSlackThread(TypedDict, total=False):
 
     channel_id: str
     thread_ts: str
+
+
+class ReviewerEvalPublication(TypedDict):
+    finding_ids: list[str]
+    severity_threshold: Severity
+    cap: int
 
 
 def new_finding_id() -> str:
@@ -252,7 +273,7 @@ def new_finding(
         "last_reconciliation_note": None,
         "resolution_note": None,
         "diff_hunk": diff_hunk,
-        "fingerprint": _finding_fingerprint(file, start_line, end_line, description),
+        "fingerprint": _finding_fingerprint(file, side, start_line, end_line, description),
         "anchor": anchor,
         "surface": surface,
         "interactions": [],
@@ -264,12 +285,21 @@ def new_finding(
 
 def _finding_fingerprint(
     file: str,
+    side: DiffSide,
     start_line: int | None,
     end_line: int | None,
     description: str,
 ) -> str:
-    normalized_description = " ".join(description.strip().lower().split())
-    return f"{file}:{start_line or ''}:{end_line or ''}:{normalized_description[:160]}"
+    payload = {
+        "version": FINDING_FINGERPRINT_VERSION,
+        "file": file,
+        "side": side,
+        "start_line": start_line,
+        "end_line": end_line,
+        "description": " ".join(description.casefold().split()),
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    return f"v{FINDING_FINGERPRINT_VERSION}:{hashlib.sha256(encoded).hexdigest()}"
 
 
 def _coerce_finding(value: Any) -> Finding | None:
@@ -310,14 +340,21 @@ async def get_thread_metadata(thread_id: str) -> dict[str, Any]:
     finding found" instead of the do-not-retry contract). Other transient
     failures still degrade to ``{}``.
     """
+    try:
+        return await _get_thread_metadata_strict(thread_id)
+    except ReviewerThreadMissingError:
+        raise
+    except Exception:  # noqa: BLE001
+        logger.exception("Failed to fetch thread metadata for %s", thread_id)
+        return {}
+
+
+async def _get_thread_metadata_strict(thread_id: str) -> dict[str, Any]:
     client = get_client()
     try:
         thread = await client.threads.get(thread_id)
     except LangGraphSDKNotFoundError as exc:
         raise ReviewerThreadMissingError(thread_id, exc) from exc
-    except Exception:  # noqa: BLE001
-        logger.exception("Failed to fetch thread metadata for %s", thread_id)
-        return {}
     metadata = thread.get("metadata") if isinstance(thread, dict) else None
     return metadata if isinstance(metadata, dict) else {}
 
@@ -356,12 +393,17 @@ async def get_finding(thread_id: str, finding_id: str) -> Finding | None:
 
 
 async def replace_findings(thread_id: str, findings: list[Finding]) -> None:
-    """Overwrite the findings list on a thread's metadata.
+    """Merge a findings snapshot without dropping concurrently-added records."""
+    async with _finding_mutation_lock(thread_id):
+        metadata = await _get_thread_metadata_strict(thread_id)
+        latest = _coerce_findings_list(metadata.get("findings"))
+        incoming_by_id = {finding["id"]: finding for finding in findings}
+        merged = [incoming_by_id.pop(finding["id"], finding) for finding in latest]
+        merged.extend(incoming_by_id.values())
+        await _replace_findings_unlocked(thread_id, merged)
 
-    Prefer :func:`mutate_findings` for read-modify-write updates: it re-reads the
-    freshest persisted list immediately before mutating, which shrinks the
-    lost-update window a blind overwrite here leaves open.
-    """
+
+async def _replace_findings_unlocked(thread_id: str, findings: list[Finding]) -> None:
     client = get_client()
     try:
         await client.threads.update(thread_id=thread_id, metadata={"findings": findings})
@@ -398,21 +440,52 @@ async def mutate_findings(
     list in place and returns ``True`` when it changed something; we only write
     on change, so a no-op mutation never clobbers a concurrent update.
     """
-    findings = await list_findings(thread_id)
-    if mutator(findings):
-        await replace_findings(thread_id, findings)
-    return findings
+    async with _finding_mutation_lock(thread_id):
+        metadata = await _get_thread_metadata_strict(thread_id)
+        findings = _coerce_findings_list(metadata.get("findings"))
+        if mutator(findings):
+            await _replace_findings_unlocked(thread_id, findings)
+        return findings
 
 
-async def append_finding(thread_id: str, finding: Finding) -> Finding:
-    """Append a finding and persist the new list."""
+def _finding_mutation_lock(thread_id: str) -> asyncio.Lock:
+    key = (thread_id, id(asyncio.get_running_loop()))
+    lock = _FINDING_MUTATION_LOCKS.get(key)
+    if lock is None:
+        lock = asyncio.Lock()
+        _FINDING_MUTATION_LOCKS[key] = lock
+    return lock
+
+
+def _current_fingerprint(finding: Finding) -> str:
+    return _finding_fingerprint(
+        finding["file"],
+        finding.get("side", "RIGHT"),
+        finding.get("start_line"),
+        finding.get("end_line"),
+        finding["description"],
+    )
+
+
+async def append_finding(thread_id: str, finding: Finding) -> AppendFindingResult:
+    """Persist a finding once and return the canonical stored record."""
+    captured: dict[str, Finding] = {}
+    fingerprint = _current_fingerprint(finding)
 
     def _append(findings: list[Finding]) -> bool:
+        for existing in findings:
+            if existing.get("status", "open") != "open":
+                continue
+            if _current_fingerprint(existing) == fingerprint:
+                captured["finding"] = existing
+                return False
         findings.append(finding)
+        captured["finding"] = finding
         return True
 
     await mutate_findings(thread_id, _append)
-    return finding
+    persisted = captured["finding"]
+    return {"finding": persisted, "created": persisted["id"] == finding["id"]}
 
 
 async def update_finding_fields(
@@ -604,7 +677,7 @@ def filter_findings_for_publish(
     findings: list[Finding],
     *,
     severity_threshold: Severity = "medium",
-    cap: int = 4,
+    cap: int = REVIEW_FINDING_CAP,
 ) -> list[Finding]:
     """Return findings to surface to GitHub.
 

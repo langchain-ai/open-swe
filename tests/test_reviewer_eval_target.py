@@ -105,7 +105,16 @@ async def test_extract_surfaced_comments_uses_publish_filter(
 
     class Threads:
         async def get(self, _thread_id: str) -> dict[str, Any]:
-            return {"metadata": {"findings": [high, low]}}
+            return {
+                "metadata": {
+                    "findings": [high, low],
+                    "reviewer_eval_publication": {
+                        "finding_ids": ["f_high"],
+                        "severity_threshold": "medium",
+                        "cap": 6,
+                    },
+                }
+            }
 
     class Client:
         threads = Threads()
@@ -113,7 +122,7 @@ async def test_extract_surfaced_comments_uses_publish_filter(
     monkeypatch.setenv("REVIEWER_EVAL_SEVERITY_THRESHOLD", "medium")
     monkeypatch.setenv("REVIEWER_EVAL_CAP", "4")
 
-    comments = await target._extract_surfaced_comments(Client(), "tid")
+    comments, publish_completed = await target._extract_surfaced_comments(Client(), "tid")
 
     assert comments == [
         {
@@ -123,6 +132,36 @@ async def test_extract_surfaced_comments_uses_publish_filter(
             "severity": "high",
         }
     ]
+    assert publish_completed is True
+
+
+@pytest.mark.asyncio
+async def test_extract_surfaced_comments_requires_publication_snapshot() -> None:
+    class Threads:
+        async def get(self, _thread_id: str) -> dict[str, Any]:
+            return {"metadata": {"findings": []}}
+
+    class Client:
+        threads = Threads()
+
+    comments, publish_completed = await target._extract_surfaced_comments(Client(), "tid")
+
+    assert comments == []
+    assert publish_completed is False
+
+
+def test_extract_comments_deduplicates_identical_tool_calls() -> None:
+    finding = {
+        "file": "a.py",
+        "severity": "high",
+        "description": "Same issue",
+        "start_line": 1,
+        "end_line": 1,
+    }
+
+    comments = target._extract_comments(_result_with_findings([finding, finding]))
+
+    assert len(comments) == 1
 
 
 def test_completed_counter_increments() -> None:

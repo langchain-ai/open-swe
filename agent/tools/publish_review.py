@@ -10,6 +10,8 @@ from langgraph.prebuilt import InjectedState
 from ..dashboard.team_settings import get_team_review_trace_links_enabled
 from ..reviewer_diff import compute_diff_line_set, fetch_pr_diff, is_range_in_diff
 from ..reviewer_findings import (
+    REVIEW_FINDING_CAP,
+    REVIEWER_EVAL_PUBLICATION_KEY,
     SEVERITY_ORDER,
     Finding,
     ReviewerThreadMissingError,
@@ -58,7 +60,6 @@ from ..utils.tracing import REVIEW_TRACING_PROJECT
 
 async def publish_review(
     severity_threshold: str = "medium",
-    cap: int = 4,
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
 ) -> dict[str, Any]:
     """Post all current findings to the PR as a GitHub Review.
@@ -78,8 +79,6 @@ async def publish_review(
             (default ``medium``). Lower-severity findings stay in state and are
             mentioned in the review summary with a link to the web app, but are
             not posted as inline PR comments.
-        cap: Maximum number of inline comments to publish (default 4).
-
     Returns:
         Dictionary with ``success``, ``review_id``, ``surfaced_count``,
         ``hidden_count``, ``resolved_thread_count``, and sometimes
@@ -122,11 +121,19 @@ async def publish_review(
         return {"success": False, "error": "Missing head_sha in run config"}
 
     if _is_reviewer_eval_mode(configurable):
+        eval_threshold = configurable.get("reviewer_eval_severity_threshold")
+        if isinstance(eval_threshold, str) and eval_threshold in {
+            "low",
+            "medium",
+            "high",
+            "critical",
+        }:
+            severity_threshold = eval_threshold
         try:
             return await _publish_review_eval_dry_run_async(
                 head_sha=head_sha,
                 severity_threshold=_cast_severity(severity_threshold),
-                cap=cap,
+                cap=REVIEW_FINDING_CAP,
             )
         except ReviewerThreadMissingError as exc:
             return thread_missing_tool_result(exc)
@@ -143,7 +150,7 @@ async def publish_review(
             head_sha=head_sha,
             token=token,
             severity_threshold=_cast_severity(severity_threshold),
-            cap=cap,
+            cap=REVIEW_FINDING_CAP,
             is_re_review=is_re_review,
             langgraph_run_id=_current_run_id(config),
             trace_link_config_override=configurable.get("review_trace_link_enabled"),
@@ -201,20 +208,34 @@ async def _publish_review_eval_dry_run_async(
         severity_threshold=severity_threshold,
         cap=cap,
     )
-    inline_comments = [
-        payload
+    eligible_with_payload = [
+        (finding, payload)
         for finding in eligible
         if (payload := render_inline_comment_payload(finding)) is not None
     ]
+    finding_ids = [
+        finding["id"]
+        for finding, _payload in eligible_with_payload
+        if isinstance(finding.get("id"), str)
+    ]
+    publication = {
+        "finding_ids": finding_ids,
+        "severity_threshold": severity_threshold,
+        "cap": cap,
+    }
 
-    await set_reviewer_thread_metadata(thread_id, last_reviewed_sha=head_sha)
+    await set_reviewer_thread_metadata(
+        thread_id,
+        last_reviewed_sha=head_sha,
+        extra={REVIEWER_EVAL_PUBLICATION_KEY: publication},
+    )
 
     return {
         "success": True,
         "dry_run": True,
         "review_id": None,
-        "surfaced_count": len(inline_comments),
-        "hidden_count": max(len(open_unpublished) - len(inline_comments), 0),
+        "surfaced_count": len(eligible_with_payload),
+        "hidden_count": max(len(open_unpublished) - len(eligible_with_payload), 0),
         "resolved_thread_count": 0,
     }
 
@@ -740,9 +761,6 @@ async def _record_review_publication(
     }
     comment_id_by_finding_id = _comment_id_by_finding_id(inline_with_payload, comment_records)
 
-    # Re-read the freshest persisted list right before mutating so this single
-    # write merges onto any update that landed since the snapshot the caller
-    # passed in, instead of blindly overwriting it.
     latest = await list_findings_async(thread_id)
     changed = _apply_review_id(
         latest,
