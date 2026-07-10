@@ -12,9 +12,13 @@ from langgraph_sdk import get_client
 
 from ..dashboard.agent_usage import record_agent_pr_usage
 from ..dashboard.plan_store import get_plan_content
+from ..utils.azure_devops import resolve_azure_devops_pat
+from ..utils.azure_devops_identity_token import is_entra_mode_requested
 from ..utils.dashboard_links import dashboard_plan_url
 from ..utils.github_app import get_github_app_installation_token
 from ..utils.github_comments import derive_pr_state
+from ..utils.scm import is_azure_devops_repo
+from ..utils.scm_pull_request import pull_request_client_from_repo_config
 from ..utils.slack import get_slack_permalink
 
 logger = logging.getLogger(__name__)
@@ -620,6 +624,55 @@ async def _open_pull_request(
     body: str,
     draft: bool,
 ) -> dict[str, Any]:
+    config = get_config()
+    configurable = config.get("configurable", {}) if isinstance(config, dict) else {}
+    repo_config = configurable.get("repo") if isinstance(configurable, dict) else {}
+    if isinstance(repo_config, dict) and is_azure_devops_repo(repo_config):
+        pat = resolve_azure_devops_pat(configurable if isinstance(configurable, dict) else None)
+        if not pat:
+            if is_entra_mode_requested():
+                error = (
+                    "Azure DevOps Entra token unavailable — check AZURE_* env vars "
+                    "and server logs."
+                )
+            else:
+                error = (
+                    "Missing Azure DevOps credential: set AZURE_DEVOPS_PAT or enable Entra "
+                    "with AZURE_DEVOPS_USE_ENTRA_IDENTITY=1."
+                )
+            return {"success": False, "error": error}
+        try:
+            pr_client = pull_request_client_from_repo_config(repo_config, pat)
+        except ValueError as exc:
+            return {"success": False, "error": str(exc)}
+        wi = configurable.get("azure_devops_work_item") if isinstance(configurable, dict) else None
+        work_item_ids: list[int] | None = None
+        if isinstance(wi, dict) and wi.get("id") is not None:
+            try:
+                work_item_ids = [int(wi["id"])]
+            except (TypeError, ValueError):
+                work_item_ids = None
+        if not base:
+            base = await pr_client.get_default_branch()
+        pr_url, pr_number, existed = await pr_client.create_pull_request(
+            title=title,
+            body=body,
+            head_branch=head,
+            base_branch=base,
+            draft=draft,
+            work_item_ids=work_item_ids,
+        )
+        if pr_url:
+            return {
+                "success": True,
+                "created": not existed,
+                "url": pr_url,
+                "number": pr_number,
+                "author": None,
+                "token_kind": "azure_devops_pat",
+            }
+        return {"success": False, "error": "Azure DevOps pull request creation failed."}
+
     token, kind = await _resolve_pr_author_token()
     if not token:
         return _failure_payload(

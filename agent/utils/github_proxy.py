@@ -140,10 +140,12 @@ async def refresh_proxy_token(
         logger.warning("Proxy token refresh for thread %s failed: no installation token", thread_id)
         return False
 
-    from ..integrations.langsmith import _configure_github_proxy
+    from ..integrations.langsmith import _configure_sandbox_proxy
+    from .azure_devops_proxy import ado_proxy_active, resolve_ado_proxy_pat
 
+    ado_pat = await resolve_ado_proxy_pat(thread_id) if ado_proxy_active(thread_id) else None
     current_backend = unwrap_sandbox_backend(sandbox_backend)
-    await _configure_github_proxy(current_backend.id, token)
+    await _configure_sandbox_proxy(current_backend.id, github_token=token, ado_pat=ado_pat)
     record_proxy_token_expiry(
         thread_id,
         expires_at,

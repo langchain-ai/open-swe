@@ -171,6 +171,24 @@ Before any task that changes code, set up the repo in your sandbox, in order:
 Complete all of these before any other work."""
 
 
+ADO_REPO_SETUP_SECTION = """---
+
+### Repository Setup (Azure DevOps Git)
+
+The target Azure DevOps Git repository is **already cloned** at `{working_dir}/{repo_name}`.
+
+1. **Set the commit identity** — `cd` into the repo and run:
+
+   ```bash
+   git config user.name {commit_identity_name} && git config user.email {commit_identity_email}
+   ```
+
+2. **Choose a thread-stable branch** like `open-swe/<short-task-slug>`. For PR follow-up runs, use the PR **source branch** named in the task.
+3. **Read `AGENTS.md`** — if it exists at the repo root, read it in full before other work.
+
+Use normal `git push origin <branch>` (HTTPS auth is handled by the LangSmith sandbox proxy; do not read or modify git credential config). Open new PRs with the `open_pull_request` tool — not the Azure DevOps web UI."""
+
+
 TASK_EXECUTION_SECTION = """---
 
 ### Task Execution
@@ -316,7 +334,7 @@ SYSTEM_PROMPT_TEMPLATE = (
     + "{plan_mode_section}"
     + SELF_AWARENESS_SECTION
     + "{default_prompt_section}"
-    + REPO_SETUP_SECTION
+    + "{repo_setup_section}"
     + TASK_EXECUTION_SECTION
     + "{corridor_prompt_section}"
     + DEPENDENCY_SECTION
@@ -343,10 +361,18 @@ def construct_system_prompt(
 ) -> str:
     default_prompt_section = _load_default_prompt()
     if default_repo and default_repo.get("owner") and default_repo.get("name"):
-        repo_line = (
-            "When a repository is not explicitly mentioned, use "
-            f"`{default_repo['owner']}/{default_repo['name']}`."
-        )
+        if (default_repo.get("scm_provider") or "").lower() == "azure_devops":
+            project = default_repo.get("project") or "<project>"
+            repo_line = (
+                "When a repository is not explicitly mentioned, use Azure DevOps "
+                f"`{default_repo['owner']}/{project}/{default_repo['name']}` "
+                "(organization/project/repository)."
+            )
+        else:
+            repo_line = (
+                "When a repository is not explicitly mentioned, use "
+                f"`{default_repo['owner']}/{default_repo['name']}`."
+            )
         default_prompt_section += f"\n\n{repo_line}"
     # Shell-escape: display names/emails are user-controlled (e.g. O'Connor) and
     # are embedded in a `git config` command the agent copies verbatim.
@@ -356,6 +382,24 @@ def construct_system_prompt(
     else:
         commit_identity_name = shlex.quote(OPEN_SWE_BOT_NAME)
         commit_identity_email = shlex.quote(OPEN_SWE_BOT_EMAIL)
+
+    repo_setup_section = REPO_SETUP_SECTION.format(
+        working_dir=working_dir,
+        commit_identity_name=commit_identity_name,
+        commit_identity_email=commit_identity_email,
+    )
+    if (
+        default_repo
+        and (default_repo.get("scm_provider") or "").lower() == "azure_devops"
+        and default_repo.get("name")
+    ):
+        repo_setup_section = ADO_REPO_SETUP_SECTION.format(
+            working_dir=working_dir,
+            repo_name=default_repo["name"],
+            commit_identity_name=commit_identity_name,
+            commit_identity_email=commit_identity_email,
+        )
+
     return SYSTEM_PROMPT_TEMPLATE.format(
         working_dir=working_dir,
         linear_project_id=linear_project_id or "<PROJECT_ID>",
@@ -373,6 +417,7 @@ def construct_system_prompt(
         repo_instructions_section=_render_repo_instructions_section(repo_custom_instructions),
         commit_identity_name=commit_identity_name,
         commit_identity_email=commit_identity_email,
+        repo_setup_section=repo_setup_section,
     )
 
 

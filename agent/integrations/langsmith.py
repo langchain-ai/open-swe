@@ -227,24 +227,58 @@ async def _create_sandbox_with_retry(
     raise RuntimeError("unreachable sandbox retry state")
 
 
-async def _configure_github_proxy(sandbox_name: str, github_token: str) -> None:
-    """Configure sandbox proxy to inject GitHub auth for GitHub traffic.
+def _azure_devops_proxy_rules(pat: str) -> list[dict[str, Any]]:
+    """Proxy rules that inject Basic auth for Azure DevOps Git HTTPS (no token in sandbox)."""
+    b64 = base64.b64encode(f":{pat}".encode()).decode()
+    hosts = ["dev.azure.com", "*.visualstudio.com"]
+    raw = (os.environ.get("AZURE_DEVOPS_PROXY_MATCH_HOSTS") or "").strip()
+    if raw:
+        hosts = [h.strip() for h in raw.split(",") if h.strip()]
+    return [
+        {
+            "name": "azure-devops-git",
+            "match_hosts": hosts,
+            "headers": [
+                {
+                    "name": "Authorization",
+                    "type": "opaque",
+                    "value": f"Basic {b64}",
+                }
+            ],
+        },
+    ]
 
-    Uses the LangSmith proxy-config API to set up header injection so that
-    git operations (clone, pull, push) authenticate via the proxy rather than
-    writing credentials to disk in the sandbox.
 
-    Args:
-        sandbox_name: The sandbox name/ID returned by the LangSmith API.
-        github_token: GitHub token to inject as Authorization header.
-    """
+def _build_sandbox_proxy_rules(
+    *,
+    github_token: str | None = None,
+    ado_pat: str | None = None,
+) -> list[dict[str, Any]]:
+    rules: list[dict[str, Any]] = []
+    if github_token:
+        rules.extend(_github_proxy_rules(github_token))
+    if ado_pat:
+        rules.extend(_azure_devops_proxy_rules(ado_pat))
+    return rules
+
+
+async def _configure_sandbox_proxy(
+    sandbox_name: str,
+    *,
+    github_token: str | None = None,
+    ado_pat: str | None = None,
+) -> None:
+    """Configure LangSmith sandbox egress proxy rules (GitHub and/or Azure DevOps)."""
+    rules = _build_sandbox_proxy_rules(github_token=github_token, ado_pat=ado_pat)
+    if not rules:
+        return
     api_key = _get_langsmith_api_key()
     if not api_key:
-        logger.warning("No LangSmith API key found, skipping GitHub proxy configuration")
+        logger.warning("No LangSmith API key found, skipping sandbox proxy configuration")
         return
     langsmith_endpoint = os.environ.get("LANGSMITH_ENDPOINT", "https://api.smith.langchain.com")
     url = f"{langsmith_endpoint}/v2/sandboxes/boxes/{sandbox_name}"
-    payload = {"proxy_config": {"rules": _github_proxy_rules(github_token)}}
+    payload = {"proxy_config": {"rules": rules}}
     async with httpx.AsyncClient(timeout=PROXY_CONFIG_TIMEOUT_SECONDS) as client:
         for attempt in range(PROXY_CONFIG_MAX_ATTEMPTS):
             try:
@@ -272,13 +306,23 @@ async def _configure_github_proxy(sandbox_name: str, github_token: str) -> None:
                     ]
                 )
                 logger.warning(
-                    "Failed to configure GitHub proxy for sandbox %s (%s); retrying in %.1fs",
+                    "Failed to configure sandbox proxy for %s (%s); retrying in %.1fs",
                     sandbox_name,
                     type(exc).__name__,
                     delay,
                 )
                 await asyncio.sleep(delay)
-    logger.info("Configured GitHub proxy for sandbox %s", sandbox_name)
+    logger.info(
+        "Configured sandbox proxy for %s (github=%s ado=%s)",
+        sandbox_name,
+        bool(github_token),
+        bool(ado_pat),
+    )
+
+
+async def _configure_github_proxy(sandbox_name: str, github_token: str) -> None:
+    """Configure sandbox proxy to inject GitHub auth for GitHub traffic."""
+    await _configure_sandbox_proxy(sandbox_name, github_token=github_token)
 
 
 def get_async_sandbox_client() -> AsyncSandboxClient:

@@ -227,6 +227,12 @@ ALLOWED_GITHUB_REPOS: frozenset[str] = frozenset(
     if repo.strip()
 )
 
+AZURE_DEVOPS_WEBHOOK_SECRET = os.environ.get("AZURE_DEVOPS_WEBHOOK_SECRET", "")
+AZURE_DEVOPS_WEBHOOK_SECRET_HEADER = os.environ.get(
+    "AZURE_DEVOPS_WEBHOOK_SECRET_HEADER",
+    "X-Azure-DevOps-Webhook-Secret",
+)
+
 LINEAR_API_KEY = os.environ.get("LINEAR_API_KEY", "")
 
 _GITHUB_BOT_MESSAGE_PREFIXES = (
@@ -1991,6 +1997,47 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks) ->
 
     logger.info("Ignoring unsupported GitHub payload shape for event=%s", event_type)
     return {"status": "ignored", "reason": f"Unsupported payload for event type: {event_type}"}
+
+
+@app.post("/webhooks/azure-devops")
+async def azure_devops_webhook(
+    request: Request, background_tasks: BackgroundTasks
+) -> dict[str, str]:
+    """Handle Azure DevOps Service Hooks (work item commented, PR commented)."""
+    from .utils.azure_devops_webhook import (
+        azure_devops_service_hook_should_process,
+        verify_azure_devops_webhook_secret,
+    )
+    from .webhooks.azure_devops import handle_azure_devops_webhook_payload
+
+    if not verify_azure_devops_webhook_secret(
+        request,
+        AZURE_DEVOPS_WEBHOOK_SECRET,
+        header_name=AZURE_DEVOPS_WEBHOOK_SECRET_HEADER,
+    ):
+        logger.warning("Invalid or missing Azure DevOps webhook secret")
+        raise HTTPException(status_code=401, detail="Invalid signature")
+
+    try:
+        payload = json.loads(await request.body())
+    except json.JSONDecodeError:
+        logger.exception("Failed to parse Azure DevOps webhook JSON")
+        return {"status": "error", "message": "Invalid JSON"}
+
+    if not azure_devops_service_hook_should_process(payload):
+        return {
+            "status": "ignored",
+            "reason": "Unsupported event or missing @openswe in payload",
+        }
+
+    background_tasks.add_task(handle_azure_devops_webhook_payload, payload)
+    return {"status": "accepted", "message": "Processing Azure DevOps webhook"}
+
+
+@app.get("/webhooks/azure-devops")
+async def azure_devops_webhook_verify() -> dict[str, str]:
+    """Verify endpoint for Azure DevOps Service Hook URL checks."""
+    return {"status": "ok", "message": "Azure DevOps webhook endpoint is active"}
 
 
 # ---- Webhook handlers (moved to agent/webhooks/, re-exported here) ----
