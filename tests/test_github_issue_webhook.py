@@ -105,7 +105,7 @@ def test_build_github_issue_followup_prompt_only_includes_comment() -> None:
     assert "## Title" not in prompt
 
 
-def test_reviewer_enablement_uses_dashboard_opt_in(monkeypatch) -> None:
+def test_auto_review_enablement_uses_dashboard_opt_in(monkeypatch) -> None:
     seen: dict[str, str] = {}
 
     async def fake_is_review_repo_enabled(owner: str, name: str) -> bool:
@@ -117,17 +117,50 @@ def test_reviewer_enablement_uses_dashboard_opt_in(monkeypatch) -> None:
 
     assert (
         asyncio.run(
-            webapp._is_repo_enabled_for_review({"owner": "langchain-ai", "name": "open-swe-app"})
+            webapp._is_repo_auto_review_enabled({"owner": "langchain-ai", "name": "open-swe-app"})
         )
         is True
     )
     assert seen == {"owner": "langchain-ai", "name": "open-swe-app"}
     assert (
         asyncio.run(
-            webapp._is_repo_enabled_for_review({"owner": "langchain-ai", "name": "open-swe"})
+            webapp._is_repo_auto_review_enabled({"owner": "langchain-ai", "name": "open-swe"})
         )
         is False
     )
+
+
+def test_github_webhook_skips_automatic_review_when_disabled(monkeypatch) -> None:
+    called = False
+
+    async def fake_auto_review_enabled(_repo_config: dict[str, str]) -> bool:
+        return False
+
+    async def fake_process_github_pr_ready(_payload: dict[str, object]) -> None:
+        nonlocal called
+        called = True
+
+    monkeypatch.setattr(webapp, "_is_repo_auto_review_enabled", fake_auto_review_enabled)
+    monkeypatch.setattr(webapp, "process_github_pr_ready", fake_process_github_pr_ready)
+    monkeypatch.setattr(webapp, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
+
+    client = TestClient(webapp.app)
+    response = _post_github_webhook(
+        client,
+        "pull_request",
+        {
+            "action": "opened",
+            "repository": {"owner": {"login": "langchain-ai"}, "name": "open-swe"},
+            "pull_request": {"number": 1244},
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "status": "ignored",
+        "reason": "Automatic review disabled for repository",
+    }
+    assert called is False
 
 
 def test_github_webhook_accepts_issue_events(monkeypatch) -> None:
@@ -259,17 +292,20 @@ def test_github_webhook_ignores_unmentioned_comment_without_info_log(monkeypatch
 
 def test_github_webhook_routes_review_comment_reply_without_tag(monkeypatch) -> None:
     called: dict[str, object] = {}
+    auto_review_checked = False
 
     async def fake_process_github_review_finding_reply(payload: dict[str, object]) -> None:
         called["payload"] = payload
 
-    async def fake_repo_enabled(_repo_config: dict[str, str]) -> bool:
-        return True
+    async def fake_auto_review_enabled(_repo_config: dict[str, str]) -> bool:
+        nonlocal auto_review_checked
+        auto_review_checked = True
+        return False
 
     monkeypatch.setattr(
         webapp, "process_github_review_finding_reply", fake_process_github_review_finding_reply
     )
-    monkeypatch.setattr(webapp, "_is_repo_enabled_for_review", fake_repo_enabled)
+    monkeypatch.setattr(webapp, "_is_repo_auto_review_enabled", fake_auto_review_enabled)
     monkeypatch.setattr(webapp, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
 
     client = TestClient(webapp.app)
@@ -295,6 +331,7 @@ def test_github_webhook_routes_review_comment_reply_without_tag(monkeypatch) -> 
 
     assert response.status_code == 200
     assert response.json()["status"] == "accepted"
+    assert auto_review_checked is False
     payload = called["payload"]
     assert isinstance(payload, dict)
     assert payload["comment"]["in_reply_to_id"] == 111
@@ -917,6 +954,12 @@ def test_process_github_pr_ready_creates_reviewer_run(monkeypatch) -> None:
 
 def test_trigger_pr_review_from_ref_creates_reviewer_run(monkeypatch) -> None:
     captured: dict[str, object] = {}
+    auto_review_checked = False
+
+    async def fake_auto_review_enabled(_repo_config: dict[str, str]) -> bool:
+        nonlocal auto_review_checked
+        auto_review_checked = True
+        return False
 
     async def fake_get_github_app_installation_token() -> str | None:
         return "app-token"
@@ -959,6 +1002,7 @@ def test_trigger_pr_review_from_ref_creates_reviewer_run(monkeypatch) -> None:
         captured["set_metadata_thread_id"] = thread_id
         captured["set_metadata_kwargs"] = kwargs
 
+    monkeypatch.setattr(webapp, "_is_repo_auto_review_enabled", fake_auto_review_enabled)
     monkeypatch.setattr(
         webapp, "get_github_app_installation_token", fake_get_github_app_installation_token
     )
@@ -996,6 +1040,7 @@ def test_trigger_pr_review_from_ref_creates_reviewer_run(monkeypatch) -> None:
     prompt = kwargs["input"]["messages"][0]["content"]
     config = kwargs["config"]["configurable"]
     assert result["success"] is True
+    assert auto_review_checked is False
     assert captured["graph"] == "reviewer"
     assert captured["thread_create_kwargs"] == {
         "thread_id": captured["thread_id"],
@@ -1017,39 +1062,6 @@ def test_trigger_pr_review_from_ref_creates_reviewer_run(monkeypatch) -> None:
     assert captured["set_metadata_kwargs"]["head_sha"] == "head-sha"
     # A live status comment is posted on dispatch so the PR shows "reviewing".
     assert captured["status_comment_kwargs"]["pr_number"] == 1244
-
-
-def test_trigger_pr_review_from_ref_respects_dashboard_opt_in(monkeypatch) -> None:
-    called = False
-
-    async def fake_get_github_app_installation_token() -> str | None:
-        nonlocal called
-        called = True
-        return "app-token"
-
-    monkeypatch.setattr(
-        webapp, "get_github_app_installation_token", fake_get_github_app_installation_token
-    )
-
-    async def fake_is_review_repo_enabled(_owner: str, _name: str) -> bool:
-        return False
-
-    monkeypatch.setattr(webapp, "is_review_repo_enabled", fake_is_review_repo_enabled)
-
-    result = asyncio.run(
-        webapp.trigger_pr_review_from_ref(
-            GitHubPrRef(
-                owner="langchain-ai",
-                repo="blocked",
-                number=1,
-                url="https://github.com/langchain-ai/blocked/pull/1",
-            ),
-            source="slack",
-        )
-    )
-
-    assert result == {"success": False, "error": "Repository not enabled for review"}
-    assert called is False
 
 
 async def test_request_pr_review_tool_uses_shared_trigger(monkeypatch) -> None:

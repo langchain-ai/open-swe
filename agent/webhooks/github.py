@@ -99,8 +99,6 @@ async def trigger_pr_review_from_ref(
     slack_thread_ts: str = "",
 ) -> dict[str, Any]:
     repo_config = {"owner": pr_ref.owner, "name": pr_ref.repo}
-    if not await webapp._is_repo_enabled_for_review(repo_config):
-        return {"success": False, "error": "Repository not enabled for review"}
 
     # Full token to read PR metadata (privacy/id aren't in the trigger ref);
     # re-scoped below once we know whether the repo is public.
@@ -360,8 +358,6 @@ async def process_github_pr_close(payload: dict[str, Any]) -> None:
     pr_number = pull_request.get("number")
     if not pr_number or not isinstance(pr_number, int):
         return
-    if not await webapp._is_repo_enabled_for_review(repo_config):
-        return
 
     thread_id = webapp.generate_reviewer_thread_id(
         repo_config.get("owner", ""), repo_config.get("name", ""), pr_number
@@ -424,9 +420,9 @@ async def process_github_push_event(payload: dict[str, Any]) -> None:
             "Push to %s ignored: repository owner/name missing from payload", head_ref
         )
         return
-    if not await webapp._is_repo_enabled_for_review(repo_config):
+    if not await webapp._is_repo_auto_review_enabled(repo_config):
         webapp.logger.info(
-            "Push to %s/%s head=%s ignored: repo not enabled for review",
+            "Push to %s/%s head=%s ignored: automatic review disabled",
             repo_config["owner"],
             repo_config["name"],
             head_ref,

@@ -46,7 +46,7 @@ async def test_push_event_skips_branch_deletion() -> None:
         ref="refs/heads/feat-x", after="0000000000000000000000000000000000000000"
     )
     with patch(
-        "agent.webapp._is_repo_enabled_for_review", new_callable=AsyncMock, return_value=True
+        "agent.webapp._is_repo_auto_review_enabled", new_callable=AsyncMock, return_value=True
     ):
         await webapp.process_github_push_event(payload)
     # If we got here without crashing and with no other patches needed, the
@@ -68,7 +68,7 @@ async def test_push_event_skips_when_thread_not_watching() -> None:
 
     with (
         patch(
-            "agent.webapp._is_repo_enabled_for_review", new_callable=AsyncMock, return_value=True
+            "agent.webapp._is_repo_auto_review_enabled", new_callable=AsyncMock, return_value=True
         ),
         patch(
             "agent.webapp.get_github_app_installation_token",
@@ -107,7 +107,7 @@ async def test_push_event_skips_when_pr_diff_unchanged_since_last_review() -> No
 
     with (
         patch(
-            "agent.webapp._is_repo_enabled_for_review", new_callable=AsyncMock, return_value=True
+            "agent.webapp._is_repo_auto_review_enabled", new_callable=AsyncMock, return_value=True
         ),
         patch(
             "agent.webapp.get_github_app_installation_token_with_expiry",
@@ -175,7 +175,7 @@ async def test_push_event_triggers_re_review_run_when_watching() -> None:
 
     with (
         patch(
-            "agent.webapp._is_repo_enabled_for_review", new_callable=AsyncMock, return_value=True
+            "agent.webapp._is_repo_auto_review_enabled", new_callable=AsyncMock, return_value=True
         ),
         patch(
             "agent.webapp.get_github_app_installation_token",
@@ -267,7 +267,7 @@ async def test_push_event_idempotent_when_head_unchanged() -> None:
 
     with (
         patch(
-            "agent.webapp._is_repo_enabled_for_review", new_callable=AsyncMock, return_value=True
+            "agent.webapp._is_repo_auto_review_enabled", new_callable=AsyncMock, return_value=True
         ),
         patch(
             "agent.webapp.get_github_app_installation_token",
@@ -352,7 +352,7 @@ async def test_push_event_public_repo_uses_scoped_token() -> None:
 
     with (
         patch(
-            "agent.webapp._is_repo_enabled_for_review", new_callable=AsyncMock, return_value=True
+            "agent.webapp._is_repo_auto_review_enabled", new_callable=AsyncMock, return_value=True
         ),
         patch("agent.webapp.get_github_app_installation_token_with_expiry", get_token),
         patch("agent.webapp._fetch_open_pr_for_branch", new_callable=AsyncMock, return_value=pr),
@@ -396,7 +396,7 @@ async def test_push_event_rescopes_token_when_pr_metadata_reveals_public() -> No
 
     with (
         patch(
-            "agent.webapp._is_repo_enabled_for_review", new_callable=AsyncMock, return_value=True
+            "agent.webapp._is_repo_auto_review_enabled", new_callable=AsyncMock, return_value=True
         ),
         patch("agent.webapp.get_github_app_installation_token_with_expiry", get_token),
         patch("agent.webapp._fetch_open_pr_for_branch", new_callable=AsyncMock, return_value=pr),
@@ -432,8 +432,8 @@ async def test_pr_close_disables_watch() -> None:
 
     with (
         patch(
-            "agent.webapp._is_repo_enabled_for_review", new_callable=AsyncMock, return_value=True
-        ),
+            "agent.webapp._is_repo_auto_review_enabled", new_callable=AsyncMock, return_value=False
+        ) as auto_review_enabled,
         patch(
             "agent.webapp._get_thread_metadata_safe",
             new_callable=AsyncMock,
@@ -442,6 +442,7 @@ async def test_pr_close_disables_watch() -> None:
         patch("agent.webapp.set_reviewer_thread_metadata", side_effect=fake_set),
     ):
         await webapp.process_github_pr_close(_pr_close_payload(action="closed"))
+    auto_review_enabled.assert_not_awaited()
     assert captured and captured[0][1]["watch"] is False
 
 
@@ -453,9 +454,6 @@ async def test_pr_reopened_re_enables_watch() -> None:
         captured.append((thread_id, kwargs))
 
     with (
-        patch(
-            "agent.webapp._is_repo_enabled_for_review", new_callable=AsyncMock, return_value=True
-        ),
         patch(
             "agent.webapp._get_thread_metadata_safe",
             new_callable=AsyncMock,
@@ -471,9 +469,6 @@ async def test_pr_reopened_re_enables_watch() -> None:
 async def test_pr_close_skips_non_reviewer_threads() -> None:
     fake_set = AsyncMock()
     with (
-        patch(
-            "agent.webapp._is_repo_enabled_for_review", new_callable=AsyncMock, return_value=True
-        ),
         patch(
             "agent.webapp._get_thread_metadata_safe",
             new_callable=AsyncMock,
