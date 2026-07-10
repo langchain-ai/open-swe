@@ -72,6 +72,7 @@ export interface ThreadRecoveryPatch {
 export interface ThreadsPageParams {
   limit?: number
   offset?: number
+  all?: boolean
   resolved?: boolean
   viewed?: boolean
   source?: string
@@ -173,6 +174,7 @@ function buildThreadsPageQuery(params: ThreadsPageParams): string {
   const search = new URLSearchParams()
   if (params.limit != null) search.set("limit", String(params.limit))
   if (params.offset != null) search.set("offset", String(params.offset))
+  if (params.all != null) search.set("all", String(params.all))
   if (params.resolved != null) search.set("resolved", String(params.resolved))
   if (params.viewed != null) search.set("viewed", String(params.viewed))
   if (params.source) search.set("source", params.source)
@@ -265,6 +267,13 @@ export const agentsApi = {
   cancelThread: (threadId: string) =>
     agentsRequest<AgentThread>(
       `/threads/${encodeURIComponent(threadId)}/cancel`,
+      {
+        method: "POST",
+      }
+    ),
+  adminCancelThread: (threadId: string) =>
+    agentsRequest<AgentThread>(
+      `/admin/threads/${encodeURIComponent(threadId)}/cancel`,
       {
         method: "POST",
       }

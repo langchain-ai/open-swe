@@ -153,6 +153,7 @@ from .team_settings import (
 from .thread_api import (
     ThreadMessageBody,
     ThreadResolveBody,
+    admin_cancel_dashboard_thread,
     cancel_dashboard_thread,
     delete_dashboard_thread,
     get_dashboard_thread,
@@ -1637,6 +1638,14 @@ async def api_cancel_thread(
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
     return await cancel_dashboard_thread(thread_id, session["sub"], email=session.get("email"))
+
+
+@router.post("/admin/threads/{thread_id}/cancel")
+async def admin_cancel_thread(
+    thread_id: str,
+    _admin: dict[str, Any] = _ADMIN_DEP,
+) -> dict[str, Any]:
+    return await admin_cancel_dashboard_thread(thread_id)
 
 
 @router.delete("/threads/{thread_id}")

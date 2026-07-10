@@ -1526,3 +1526,94 @@ async def test_options_gates_stale_fable_default_when_disabled() -> None:
     assert payload["default_agent_subagent_model"] != _FABLE
     assert payload["default_agent_model"] in model_ids
     assert payload["default_agent_subagent_model"] in model_ids
+
+
+async def test_admin_cancel_dashboard_thread_interrupts_all_active_runs(monkeypatch) -> None:
+    calls: list[tuple[str, dict[str, object]]] = []
+    thread = {
+        "thread_id": "thread-1",
+        "status": "busy",
+        "metadata": {
+            "title": "Runaway thread",
+            "latest_run_status": "running",
+            "updated_at_ms": 1,
+        },
+    }
+
+    class FakeThreads:
+        async def get(self, thread_id: str) -> dict[str, object]:
+            assert thread_id == "thread-1"
+            return thread
+
+        async def update(self, **kwargs: object) -> None:
+            calls.append(("update", kwargs))
+            metadata = kwargs["metadata"]
+            assert isinstance(metadata, dict)
+            thread["metadata"].update(metadata)
+
+    class FakeRuns:
+        async def cancel_many(self, **kwargs: object) -> None:
+            calls.append(("cancel_many", kwargs))
+
+    class FakeClient:
+        threads = FakeThreads()
+        runs = FakeRuns()
+
+    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
+
+    result = await thread_api.admin_cancel_dashboard_thread("thread-1")
+
+    assert calls[0] == (
+        "cancel_many",
+        {"thread_id": "thread-1", "status": "all", "action": "interrupt"},
+    )
+    assert calls[1][0] == "update"
+    assert thread["metadata"]["latest_run_status"] == "interrupted"
+    assert result["id"] == "thread-1"
+
+
+async def test_admin_cancel_dashboard_thread_does_not_update_on_cancel_failure(monkeypatch) -> None:
+    updated = False
+
+    class FakeThreads:
+        async def get(self, thread_id: str) -> dict[str, object]:
+            return {"thread_id": thread_id, "status": "busy", "metadata": {}}
+
+        async def update(self, **kwargs: object) -> None:
+            nonlocal updated
+            updated = True
+
+    class FakeRuns:
+        async def cancel_many(self, **kwargs: object) -> None:
+            raise RuntimeError("runtime unavailable")
+
+    class FakeClient:
+        threads = FakeThreads()
+        runs = FakeRuns()
+
+    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
+
+    with pytest.raises(HTTPException) as exc_info:
+        await thread_api.admin_cancel_dashboard_thread("thread-1")
+
+    assert exc_info.value.status_code == 502
+    assert updated is False
+
+
+async def test_admin_cancel_thread_route_delegates_without_owner_identity(monkeypatch) -> None:
+    cancel = AsyncMock(return_value={"id": "thread-1", "status": "interrupted"})
+    monkeypatch.setattr(routes, "admin_cancel_dashboard_thread", cancel)
+
+    result = await routes.admin_cancel_thread("thread-1", _admin={"sub": "admin"})
+
+    assert result == {"id": "thread-1", "status": "interrupted"}
+    cancel.assert_awaited_once_with("thread-1")
+
+
+def test_admin_cancel_thread_dependency_rejects_non_admin(monkeypatch) -> None:
+    monkeypatch.setenv("CONFIGURED_ADMINS", "admin")
+
+    with pytest.raises(HTTPException) as exc_info:
+        routes._require_admin({"sub": "not-admin", "email": "user@example.com"})
+
+    assert exc_info.value.status_code == 403

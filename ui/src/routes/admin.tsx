@@ -24,6 +24,10 @@ import {
 import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
 import { api } from "@/lib/api"
+import {
+  useAdminCancelAgentThread,
+  useThreadsPage,
+} from "@/features/agents/lib/queries"
 import { RequireLogin } from "@/lib/auth-redirect"
 import { useSession } from "@/lib/session"
 
@@ -62,6 +66,8 @@ function AdminPage() {
 
       <TriggerReviewSection />
 
+      <RunningAgentsSection />
+
       <SettingsSection title="Evals">
         <Link
           to="/admin/evals"
@@ -86,6 +92,97 @@ function AdminPage() {
 
       <UserMappingsSection enabled={!!session.data.is_admin} />
     </AppShell>
+  )
+}
+
+function RunningAgentsSection() {
+  const threads = useThreadsPage({
+    all: true,
+    status: "running",
+    limit: 50,
+  })
+  const cancel = useAdminCancelAgentThread()
+  const [message, setMessage] = useState<string | null>(null)
+
+  return (
+    <SettingsSection
+      title="Running agents"
+      description="Workspace-wide active threads. Killing a thread requests interruption of all pending and running runs without deleting its history."
+    >
+      <div className="flex flex-col gap-3 p-4">
+        <div className="flex items-center justify-between">
+          <span className="text-xs text-muted-foreground">
+            {threads.data?.items.length ?? 0} running
+          </span>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => void threads.refetch()}
+            disabled={threads.isFetching}
+          >
+            {threads.isFetching ? "Refreshing…" : "Refresh"}
+          </Button>
+        </div>
+
+        {threads.isLoading ? (
+          <Skeleton className="h-20" />
+        ) : threads.data?.items.length ? (
+          <div className="flex flex-col">
+            {threads.data.items.map((thread) => {
+              const isCancelling =
+                cancel.isPending && cancel.variables === thread.id
+              return (
+                <div
+                  key={thread.id}
+                  className="flex items-center justify-between gap-3 border-b border-border py-2 last:border-b-0"
+                >
+                  <Link
+                    to="/agents/$threadId"
+                    params={{ threadId: thread.id }}
+                    className="min-w-0 flex-1 hover:underline"
+                  >
+                    <p className="truncate text-xs font-medium text-foreground">
+                      {thread.title}
+                    </p>
+                    <p className="truncate font-mono text-[11px] text-muted-foreground">
+                      {thread.repoFullName || "no repo"} · {thread.id}
+                    </p>
+                  </Link>
+                  <Button
+                    size="sm"
+                    variant="destructive"
+                    disabled={cancel.isPending}
+                    onClick={() => {
+                      setMessage(null)
+                      cancel.mutate(thread.id, {
+                        onSuccess: () =>
+                          setMessage(`Interruption requested for ${thread.title}.`),
+                        onError: (error: Error) => setMessage(error.message),
+                      })
+                    }}
+                  >
+                    {isCancelling ? "Killing…" : "Kill"}
+                  </Button>
+                </div>
+              )
+            })}
+          </div>
+        ) : (
+          <p className="text-xs text-muted-foreground">No running agents.</p>
+        )}
+
+        {threads.error && (
+          <p className="text-xs text-destructive">{threads.error.message}</p>
+        )}
+        {message && (
+          <p
+            className={`text-xs ${cancel.isError ? "text-destructive" : "text-muted-foreground"}`}
+          >
+            {message}
+          </p>
+        )}
+      </div>
+    </SettingsSection>
   )
 }
 
