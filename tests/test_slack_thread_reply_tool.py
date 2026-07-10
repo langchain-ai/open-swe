@@ -19,6 +19,15 @@ def _config() -> dict[str, Any]:
     }
 
 
+def test_slack_thread_reply_prompt_requires_slack_only_terseness() -> None:
+    prompt = slack_reply_tool.slack_thread_reply.__doc__ or ""
+
+    assert "as terse as possible" in prompt
+    assert "default to one sentence" in prompt
+    assert "specific to Slack tool messages" in prompt
+    assert "not normal web UI assistant messages" in prompt
+
+
 async def test_slack_thread_reply_returns_structured_error_for_msg_too_long(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
