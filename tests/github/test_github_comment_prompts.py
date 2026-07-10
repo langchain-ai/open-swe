@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from agent.dashboard.agent_overrides import profile_create_prs
 from agent.prompt import construct_system_prompt
 from agent.utils import github_comments
@@ -118,15 +120,27 @@ def test_harness_profile_replaces_deepagents_base_for_supported_providers() -> N
         assert profile.base_system_prompt == OPEN_SWE_SHARED_BASE
 
 
-def test_harness_profile_disables_todos_for_gpt_5_6_sol() -> None:
+@pytest.mark.parametrize(
+    "model_id",
+    [
+        "openai:gpt-5.6-sol",
+        "anthropic:claude-opus-4-8",
+        "anthropic:claude-sonnet-5",
+        "anthropic:claude-fable-5",
+    ],
+)
+def test_harness_profile_disables_todos_for_sol_and_its_primary_models(model_id: str) -> None:
     import deepagents.profiles.harness.harness_profiles as hp
 
     import agent.prompt  # noqa: F401
     from agent.prompt import TODO_DISABLED_MODEL_KEYS
+    from agent.utils.model import fallback_model_id_for
 
     hp._ensure_harness_profiles_loaded()
-    assert TODO_DISABLED_MODEL_KEYS == ("openai:gpt-5.6-sol",)
-    profile = hp._get_harness_profile("openai:gpt-5.6-sol")
+    assert model_id in TODO_DISABLED_MODEL_KEYS
+    if model_id.startswith("anthropic:"):
+        assert fallback_model_id_for(model_id) == "openai:gpt-5.6-sol"
+    profile = hp._get_harness_profile(model_id)
     assert profile is not None
     assert profile.base_system_prompt == agent.prompt.OPEN_SWE_SHARED_BASE
     assert profile.excluded_middleware == frozenset({"TodoListMiddleware"})

@@ -28,7 +28,12 @@ HARNESS_EXCLUDED_TOOLS: frozenset[str] = frozenset()
 # deepagents' generic base regardless of which supported provider the team or
 # profile selects for the agent.
 HARNESS_PROFILE_KEYS: tuple[str, ...] = ("anthropic", "openai", "google_genai", "fireworks")
-TODO_DISABLED_MODEL_KEYS: tuple[str, ...] = ("openai:gpt-5.6-sol",)
+TODO_DISABLED_MODEL_KEYS: tuple[str, ...] = (
+    "openai:gpt-5.6-sol",
+    "anthropic:claude-opus-4-8",
+    "anthropic:claude-sonnet-5",
+    "anthropic:claude-fable-5",
+)
 
 
 def _load_default_prompt() -> str:
