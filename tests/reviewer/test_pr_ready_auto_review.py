@@ -7,7 +7,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from agent import webapp
+from agent.webhooks import common as webhook_common
+from agent.webhooks import github as github_webhooks
 
 
 def _pr_payload(
@@ -38,14 +39,16 @@ def _pr_payload(
 
 def _patch_dispatch_deps(monkeypatch: pytest.MonkeyPatch, fake_client: Any) -> None:
     monkeypatch.setattr(
-        webapp,
+        webhook_common,
         "get_github_app_installation_token_with_expiry",
         AsyncMock(return_value=("token", None)),
     )
-    monkeypatch.setattr(webapp, "_ensure_thread_exists_for_metadata", AsyncMock(return_value=True))
-    monkeypatch.setattr(webapp, "cache_github_token_for_thread", MagicMock())
-    monkeypatch.setattr(webapp, "set_reviewer_thread_metadata", AsyncMock())
-    monkeypatch.setattr(webapp, "get_client", lambda url: fake_client)
+    monkeypatch.setattr(
+        webhook_common, "_ensure_thread_exists_for_metadata", AsyncMock(return_value=True)
+    )
+    monkeypatch.setattr(webhook_common, "cache_github_token_for_thread", MagicMock())
+    monkeypatch.setattr(webhook_common, "set_reviewer_thread_metadata", AsyncMock())
+    monkeypatch.setattr(webhook_common, "get_client", lambda url: fake_client)
 
 
 @pytest.mark.asyncio
@@ -53,10 +56,10 @@ async def test_pr_ready_non_draft_triggers_run(monkeypatch: pytest.MonkeyPatch) 
     fake_client = MagicMock()
     fake_client.runs.create = AsyncMock()
     _patch_dispatch_deps(monkeypatch, fake_client)
-    monkeypatch.setattr(webapp, "get_profile", AsyncMock(return_value=None))
-    monkeypatch.setattr(webapp, "get_team_settings", AsyncMock(return_value={}))
+    monkeypatch.setattr(webhook_common, "get_profile", AsyncMock(return_value=None))
+    monkeypatch.setattr(webhook_common, "get_team_settings", AsyncMock(return_value={}))
 
-    await webapp.process_github_pr_ready(_pr_payload(action="opened", draft=False))
+    await github_webhooks.process_github_pr_ready(_pr_payload(action="opened", draft=False))
 
     fake_client.runs.create.assert_awaited_once()
     _, kwargs = fake_client.runs.create.await_args
@@ -71,16 +74,20 @@ async def test_pr_ready_public_repo_uses_scoped_reviewer_token(
     fake_client = MagicMock()
     fake_client.runs.create = AsyncMock()
     get_token = AsyncMock(return_value=("scoped-token", "expires"))
-    monkeypatch.setattr(webapp, "get_github_app_installation_token_with_expiry", get_token)
-    monkeypatch.setattr(webapp, "_ensure_thread_exists_for_metadata", AsyncMock(return_value=True))
+    monkeypatch.setattr(webhook_common, "get_github_app_installation_token_with_expiry", get_token)
+    monkeypatch.setattr(
+        webhook_common, "_ensure_thread_exists_for_metadata", AsyncMock(return_value=True)
+    )
     cache_token = MagicMock()
-    monkeypatch.setattr(webapp, "cache_github_token_for_thread", cache_token)
-    monkeypatch.setattr(webapp, "set_reviewer_thread_metadata", AsyncMock())
-    monkeypatch.setattr(webapp, "get_client", lambda url: fake_client)
-    monkeypatch.setattr(webapp, "get_profile", AsyncMock(return_value=None))
-    monkeypatch.setattr(webapp, "get_team_settings", AsyncMock(return_value={}))
+    monkeypatch.setattr(webhook_common, "cache_github_token_for_thread", cache_token)
+    monkeypatch.setattr(webhook_common, "set_reviewer_thread_metadata", AsyncMock())
+    monkeypatch.setattr(webhook_common, "get_client", lambda url: fake_client)
+    monkeypatch.setattr(webhook_common, "get_profile", AsyncMock(return_value=None))
+    monkeypatch.setattr(webhook_common, "get_team_settings", AsyncMock(return_value={}))
 
-    await webapp.process_github_pr_ready(_pr_payload(action="opened", draft=False, private=False))
+    await github_webhooks.process_github_pr_ready(
+        _pr_payload(action="opened", draft=False, private=False)
+    )
 
     get_token.assert_awaited_once_with(repository_ids=[123])
     _, kwargs = fake_client.runs.create.await_args
@@ -94,15 +101,19 @@ async def test_pr_ready_private_repo_uses_full_reviewer_token(
     fake_client = MagicMock()
     fake_client.runs.create = AsyncMock()
     get_token = AsyncMock(return_value=("full-token", "expires"))
-    monkeypatch.setattr(webapp, "get_github_app_installation_token_with_expiry", get_token)
-    monkeypatch.setattr(webapp, "_ensure_thread_exists_for_metadata", AsyncMock(return_value=True))
-    monkeypatch.setattr(webapp, "cache_github_token_for_thread", MagicMock())
-    monkeypatch.setattr(webapp, "set_reviewer_thread_metadata", AsyncMock())
-    monkeypatch.setattr(webapp, "get_client", lambda url: fake_client)
-    monkeypatch.setattr(webapp, "get_profile", AsyncMock(return_value=None))
-    monkeypatch.setattr(webapp, "get_team_settings", AsyncMock(return_value={}))
+    monkeypatch.setattr(webhook_common, "get_github_app_installation_token_with_expiry", get_token)
+    monkeypatch.setattr(
+        webhook_common, "_ensure_thread_exists_for_metadata", AsyncMock(return_value=True)
+    )
+    monkeypatch.setattr(webhook_common, "cache_github_token_for_thread", MagicMock())
+    monkeypatch.setattr(webhook_common, "set_reviewer_thread_metadata", AsyncMock())
+    monkeypatch.setattr(webhook_common, "get_client", lambda url: fake_client)
+    monkeypatch.setattr(webhook_common, "get_profile", AsyncMock(return_value=None))
+    monkeypatch.setattr(webhook_common, "get_team_settings", AsyncMock(return_value={}))
 
-    await webapp.process_github_pr_ready(_pr_payload(action="opened", draft=False, private=True))
+    await github_webhooks.process_github_pr_ready(
+        _pr_payload(action="opened", draft=False, private=True)
+    )
 
     get_token.assert_awaited_once_with()
     _, kwargs = fake_client.runs.create.await_args
@@ -114,11 +125,13 @@ async def test_pr_ready_for_review_triggers_run(monkeypatch: pytest.MonkeyPatch)
     fake_client = MagicMock()
     fake_client.runs.create = AsyncMock()
     _patch_dispatch_deps(monkeypatch, fake_client)
-    monkeypatch.setattr(webapp, "_get_thread_metadata_safe", AsyncMock(return_value=None))
-    monkeypatch.setattr(webapp, "get_profile", AsyncMock(return_value=None))
-    monkeypatch.setattr(webapp, "get_team_settings", AsyncMock(return_value={}))
+    monkeypatch.setattr(webhook_common, "_get_thread_metadata_safe", AsyncMock(return_value=None))
+    monkeypatch.setattr(webhook_common, "get_profile", AsyncMock(return_value=None))
+    monkeypatch.setattr(webhook_common, "get_team_settings", AsyncMock(return_value={}))
 
-    await webapp.process_github_pr_ready(_pr_payload(action="ready_for_review", draft=False))
+    await github_webhooks.process_github_pr_ready(
+        _pr_payload(action="ready_for_review", draft=False)
+    )
 
     fake_client.runs.create.assert_awaited_once()
 
@@ -131,10 +144,10 @@ async def test_pr_ready_for_review_skips_when_head_already_reviewed(
     fake_client.runs.create = AsyncMock()
     set_metadata = AsyncMock()
     get_token = AsyncMock(return_value=("token", None))
-    monkeypatch.setattr(webapp, "get_github_app_installation_token_with_expiry", get_token)
-    monkeypatch.setattr(webapp, "set_reviewer_thread_metadata", set_metadata)
+    monkeypatch.setattr(webhook_common, "get_github_app_installation_token_with_expiry", get_token)
+    monkeypatch.setattr(webhook_common, "set_reviewer_thread_metadata", set_metadata)
     monkeypatch.setattr(
-        webapp,
+        webhook_common,
         "_get_thread_metadata_safe",
         AsyncMock(
             return_value={
@@ -144,11 +157,13 @@ async def test_pr_ready_for_review_skips_when_head_already_reviewed(
             }
         ),
     )
-    monkeypatch.setattr(webapp, "get_client", lambda url: fake_client)
-    monkeypatch.setattr(webapp, "get_profile", AsyncMock(return_value=None))
-    monkeypatch.setattr(webapp, "get_team_settings", AsyncMock(return_value={}))
+    monkeypatch.setattr(webhook_common, "get_client", lambda url: fake_client)
+    monkeypatch.setattr(webhook_common, "get_profile", AsyncMock(return_value=None))
+    monkeypatch.setattr(webhook_common, "get_team_settings", AsyncMock(return_value={}))
 
-    await webapp.process_github_pr_ready(_pr_payload(action="ready_for_review", draft=False))
+    await github_webhooks.process_github_pr_ready(
+        _pr_payload(action="ready_for_review", draft=False)
+    )
 
     fake_client.runs.create.assert_not_called()
     get_token.assert_not_awaited()
@@ -164,7 +179,7 @@ async def test_pr_ready_for_review_uses_re_review_after_previous_review(
     fake_client.runs.create = AsyncMock()
     _patch_dispatch_deps(monkeypatch, fake_client)
     monkeypatch.setattr(
-        webapp,
+        webhook_common,
         "_get_thread_metadata_safe",
         AsyncMock(
             return_value={
@@ -174,10 +189,12 @@ async def test_pr_ready_for_review_uses_re_review_after_previous_review(
             }
         ),
     )
-    monkeypatch.setattr(webapp, "get_profile", AsyncMock(return_value=None))
-    monkeypatch.setattr(webapp, "get_team_settings", AsyncMock(return_value={}))
+    monkeypatch.setattr(webhook_common, "get_profile", AsyncMock(return_value=None))
+    monkeypatch.setattr(webhook_common, "get_team_settings", AsyncMock(return_value={}))
 
-    await webapp.process_github_pr_ready(_pr_payload(action="ready_for_review", draft=False))
+    await github_webhooks.process_github_pr_ready(
+        _pr_payload(action="ready_for_review", draft=False)
+    )
 
     fake_client.runs.create.assert_awaited_once()
     _, kwargs = fake_client.runs.create.await_args
@@ -188,7 +205,7 @@ async def test_pr_ready_for_review_uses_re_review_after_previous_review(
     assert "marked ready for review" in kwargs["input"]["messages"][0]["content"]
     head_sha_writes = [
         c.kwargs.get("head_sha")
-        for c in webapp.set_reviewer_thread_metadata.await_args_list
+        for c in webhook_common.set_reviewer_thread_metadata.await_args_list
         if c.kwargs.get("head_sha") is not None
     ]
     assert "headsha" in head_sha_writes
@@ -202,15 +219,15 @@ async def test_pr_ready_draft_user_override_off_wins_over_team_on(
     fake_client.runs.create = AsyncMock()
     _patch_dispatch_deps(monkeypatch, fake_client)
     monkeypatch.setattr(
-        webapp,
+        webhook_common,
         "get_profile",
         AsyncMock(return_value={"login": "alice", "review_draft_prs": False}),
     )
     monkeypatch.setattr(
-        webapp, "get_team_settings", AsyncMock(return_value={"review_draft_prs": True})
+        webhook_common, "get_team_settings", AsyncMock(return_value={"review_draft_prs": True})
     )
 
-    await webapp.process_github_pr_ready(_pr_payload(action="opened", draft=True))
+    await github_webhooks.process_github_pr_ready(_pr_payload(action="opened", draft=True))
 
     fake_client.runs.create.assert_not_called()
 
@@ -223,17 +240,17 @@ async def test_pr_ready_draft_user_override_on_wins_over_team_off(
     fake_client.runs.create = AsyncMock()
     _patch_dispatch_deps(monkeypatch, fake_client)
     monkeypatch.setattr(
-        webapp,
+        webhook_common,
         "get_profile",
         AsyncMock(return_value={"login": "alice", "review_draft_prs": True}),
     )
     monkeypatch.setattr(
-        webapp,
+        webhook_common,
         "get_team_settings",
         AsyncMock(return_value={"review_draft_prs": False}),
     )
 
-    await webapp.process_github_pr_ready(_pr_payload(action="opened", draft=True))
+    await github_webhooks.process_github_pr_ready(_pr_payload(action="opened", draft=True))
 
     fake_client.runs.create.assert_awaited_once()
 
@@ -247,15 +264,15 @@ async def test_pr_ready_draft_user_default_falls_back_to_team_on(
     _patch_dispatch_deps(monkeypatch, fake_client)
     # User profile exists but review_draft_prs is None — inherit team default.
     monkeypatch.setattr(
-        webapp,
+        webhook_common,
         "get_profile",
         AsyncMock(return_value={"login": "alice", "review_draft_prs": None}),
     )
     monkeypatch.setattr(
-        webapp, "get_team_settings", AsyncMock(return_value={"review_draft_prs": True})
+        webhook_common, "get_team_settings", AsyncMock(return_value={"review_draft_prs": True})
     )
 
-    await webapp.process_github_pr_ready(_pr_payload(action="opened", draft=True))
+    await github_webhooks.process_github_pr_ready(_pr_payload(action="opened", draft=True))
 
     fake_client.runs.create.assert_awaited_once()
 
@@ -268,14 +285,14 @@ async def test_pr_ready_draft_no_profile_falls_back_to_team_off(
     fake_client.runs.create = AsyncMock()
     _patch_dispatch_deps(monkeypatch, fake_client)
     # External contributor — inherit team default (off).
-    monkeypatch.setattr(webapp, "get_profile", AsyncMock(return_value=None))
+    monkeypatch.setattr(webhook_common, "get_profile", AsyncMock(return_value=None))
     monkeypatch.setattr(
-        webapp,
+        webhook_common,
         "get_team_settings",
         AsyncMock(return_value={"review_draft_prs": False}),
     )
 
-    await webapp.process_github_pr_ready(_pr_payload(action="opened", draft=True))
+    await github_webhooks.process_github_pr_ready(_pr_payload(action="opened", draft=True))
 
     fake_client.runs.create.assert_not_called()
 
@@ -287,12 +304,12 @@ async def test_pr_ready_draft_no_profile_falls_back_to_team_on(
     fake_client = MagicMock()
     fake_client.runs.create = AsyncMock()
     _patch_dispatch_deps(monkeypatch, fake_client)
-    monkeypatch.setattr(webapp, "get_profile", AsyncMock(return_value=None))
+    monkeypatch.setattr(webhook_common, "get_profile", AsyncMock(return_value=None))
     monkeypatch.setattr(
-        webapp, "get_team_settings", AsyncMock(return_value={"review_draft_prs": True})
+        webhook_common, "get_team_settings", AsyncMock(return_value={"review_draft_prs": True})
     )
 
-    await webapp.process_github_pr_ready(_pr_payload(action="opened", draft=True))
+    await github_webhooks.process_github_pr_ready(_pr_payload(action="opened", draft=True))
 
     fake_client.runs.create.assert_awaited_once()
 
@@ -320,23 +337,23 @@ async def test_converted_to_draft_disables_watch_when_drafts_off(
 
     with (
         patch(
-            "agent.webapp._get_thread_metadata_safe",
+            "agent.webhooks.common._get_thread_metadata_safe",
             new_callable=AsyncMock,
             return_value={"kind": "reviewer", "watch": True},
         ),
         patch(
-            "agent.webapp.get_profile",
+            "agent.webhooks.common.get_profile",
             new_callable=AsyncMock,
             return_value={"login": "alice", "review_draft_prs": False},
         ),
         patch(
-            "agent.webapp.get_team_settings",
+            "agent.webhooks.common.get_team_settings",
             new_callable=AsyncMock,
             return_value={"review_draft_prs": False},
         ),
-        patch("agent.webapp.set_reviewer_thread_metadata", side_effect=fake_set),
+        patch("agent.webhooks.common.set_reviewer_thread_metadata", side_effect=fake_set),
     ):
-        await webapp.process_github_pr_close(_converted_to_draft_payload())
+        await github_webhooks.process_github_pr_close(_converted_to_draft_payload())
     assert captured and captured[0][1]["watch"] is False
 
 
@@ -347,23 +364,23 @@ async def test_converted_to_draft_keeps_watch_when_author_drafts_on(
     fake_set = AsyncMock()
     with (
         patch(
-            "agent.webapp._get_thread_metadata_safe",
+            "agent.webhooks.common._get_thread_metadata_safe",
             new_callable=AsyncMock,
             return_value={"kind": "reviewer", "watch": True},
         ),
         patch(
-            "agent.webapp.get_profile",
+            "agent.webhooks.common.get_profile",
             new_callable=AsyncMock,
             return_value={"login": "alice", "review_draft_prs": True},
         ),
         patch(
-            "agent.webapp.get_team_settings",
+            "agent.webhooks.common.get_team_settings",
             new_callable=AsyncMock,
             return_value={"review_draft_prs": False},
         ),
-        patch("agent.webapp.set_reviewer_thread_metadata", new=fake_set),
+        patch("agent.webhooks.common.set_reviewer_thread_metadata", new=fake_set),
     ):
-        await webapp.process_github_pr_close(_converted_to_draft_payload())
+        await github_webhooks.process_github_pr_close(_converted_to_draft_payload())
     fake_set.assert_not_called()
 
 
@@ -374,22 +391,22 @@ async def test_converted_to_draft_keeps_watch_when_team_default_drafts_on(
     fake_set = AsyncMock()
     with (
         patch(
-            "agent.webapp._get_thread_metadata_safe",
+            "agent.webhooks.common._get_thread_metadata_safe",
             new_callable=AsyncMock,
             return_value={"kind": "reviewer", "watch": True},
         ),
         # Author inherits team default — team has drafts on.
         patch(
-            "agent.webapp.get_profile",
+            "agent.webhooks.common.get_profile",
             new_callable=AsyncMock,
             return_value={"login": "alice", "review_draft_prs": None},
         ),
         patch(
-            "agent.webapp.get_team_settings",
+            "agent.webhooks.common.get_team_settings",
             new_callable=AsyncMock,
             return_value={"review_draft_prs": True},
         ),
-        patch("agent.webapp.set_reviewer_thread_metadata", new=fake_set),
+        patch("agent.webhooks.common.set_reviewer_thread_metadata", new=fake_set),
     ):
-        await webapp.process_github_pr_close(_converted_to_draft_payload())
+        await github_webhooks.process_github_pr_close(_converted_to_draft_payload())
     fake_set.assert_not_called()

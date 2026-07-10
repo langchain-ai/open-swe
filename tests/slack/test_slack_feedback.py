@@ -3,12 +3,13 @@ from typing import Any
 
 import pytest
 
-from agent import webapp
 from agent.utils import slack_feedback
 from agent.utils.slack_feedback import (
     process_slack_reaction_added,
     process_slack_reaction_removed,
 )
+from agent.webhooks import common as webhook_common
+from agent.webhooks import slack_routes
 
 
 class _FakeStore:
@@ -221,12 +222,12 @@ async def test_slack_webhook_queues_reaction_added(monkeypatch: pytest.MonkeyPat
     payload = {"type": "event_callback", "event_id": "Ev1", "event": event}
     background_tasks = _FakeBackgroundTasks()
 
-    monkeypatch.setattr(webapp, "verify_slack_signature", lambda **kwargs: True)
+    monkeypatch.setattr(webhook_common, "verify_slack_signature", lambda **kwargs: True)
 
-    response = await webapp.slack_webhook(_FakeRequest(payload), background_tasks)
+    response = await slack_routes.slack_webhook(_FakeRequest(payload), background_tasks)
 
     assert response == {"status": "accepted", "message": "Reaction feedback queued"}
-    assert background_tasks.tasks == [(webapp.process_slack_reaction_added, (event, "Ev1"))]
+    assert background_tasks.tasks == [(webhook_common.process_slack_reaction_added, (event, "Ev1"))]
 
 
 @pytest.mark.asyncio
@@ -235,12 +236,14 @@ async def test_slack_webhook_queues_reaction_removed(monkeypatch: pytest.MonkeyP
     payload = {"type": "event_callback", "event_id": "Ev2", "event": event}
     background_tasks = _FakeBackgroundTasks()
 
-    monkeypatch.setattr(webapp, "verify_slack_signature", lambda **kwargs: True)
+    monkeypatch.setattr(webhook_common, "verify_slack_signature", lambda **kwargs: True)
 
-    response = await webapp.slack_webhook(_FakeRequest(payload), background_tasks)
+    response = await slack_routes.slack_webhook(_FakeRequest(payload), background_tasks)
 
     assert response == {"status": "accepted", "message": "Reaction removal queued"}
-    assert background_tasks.tasks == [(webapp.process_slack_reaction_removed, (event, "Ev2"))]
+    assert background_tasks.tasks == [
+        (webhook_common.process_slack_reaction_removed, (event, "Ev2"))
+    ]
 
 
 @pytest.mark.asyncio
@@ -249,9 +252,9 @@ async def test_slack_webhook_ignores_untracked_reaction(monkeypatch: pytest.Monk
     payload = {"type": "event_callback", "event_id": "Ev3", "event": event}
     background_tasks = _FakeBackgroundTasks()
 
-    monkeypatch.setattr(webapp, "verify_slack_signature", lambda **kwargs: True)
+    monkeypatch.setattr(webhook_common, "verify_slack_signature", lambda **kwargs: True)
 
-    response = await webapp.slack_webhook(_FakeRequest(payload), background_tasks)
+    response = await slack_routes.slack_webhook(_FakeRequest(payload), background_tasks)
 
     assert response == {"status": "ignored", "reason": "Reaction not tracked for feedback"}
     assert background_tasks.tasks == []

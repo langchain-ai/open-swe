@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from agent import webapp
 from agent.dashboard.agent_overrides import profile_create_prs
 from agent.prompt import construct_system_prompt
 from agent.utils import github_comments
@@ -11,6 +10,7 @@ from agent.utils.authorship import (
     add_pr_collaboration_note,
     resolve_triggering_user_identity,
 )
+from agent.webhooks import github as github_webhooks
 
 _BOT_TRAILER = f"Co-authored-by: {OPEN_SWE_BOT_NAME} <{OPEN_SWE_BOT_EMAIL}>"
 
@@ -369,7 +369,7 @@ def test_build_github_issue_prompt_only_wraps_external_comments() -> None:
         [{"github_login": "bracesproul", "work_email": "brace@x.com", "status": "active"}]
     )
     try:
-        prompt = webapp.build_github_issue_prompt(
+        prompt = github_webhooks.build_github_issue_prompt(
             {"owner": "langchain-ai", "name": "open-swe"},
             42,
             "12345",

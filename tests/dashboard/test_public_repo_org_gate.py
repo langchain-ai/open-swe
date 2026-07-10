@@ -9,7 +9,9 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
-from agent import webapp
+from agent.api.app import app
+from agent.webhooks import common as webhook_common
+from agent.webhooks import github as github_webhooks
 
 _TEST_WEBHOOK_SECRET = "test-secret-for-webhook"
 
@@ -40,14 +42,14 @@ def _install_membership_stub(monkeypatch, members: set[str]) -> dict[str, list[s
         seen["calls"].append(username)
         return username in members
 
-    monkeypatch.setattr(webapp, "is_user_active_org_member", fake_is_user_active_org_member)
+    monkeypatch.setattr(webhook_common, "is_user_active_org_member", fake_is_user_active_org_member)
     return seen
 
 
 def _common_setup(monkeypatch, *, gate: str = "langchain-ai") -> None:
-    monkeypatch.setattr(webapp, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
-    monkeypatch.setattr(webapp, "PUBLIC_REPO_ORG_GATE", gate)
-    monkeypatch.setattr(webapp, "ALLOWED_GITHUB_ORGS", frozenset())
+    monkeypatch.setattr(webhook_common, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
+    monkeypatch.setattr(webhook_common, "PUBLIC_REPO_ORG_GATE", gate)
+    monkeypatch.setattr(webhook_common, "ALLOWED_GITHUB_ORGS", frozenset())
 
 
 def test_gate_blocks_non_member_on_public_pr_comment(monkeypatch) -> None:
@@ -57,9 +59,11 @@ def test_gate_blocks_non_member_on_public_pr_comment(monkeypatch) -> None:
     async def fake_process_github_pr_comment(*_args, **_kwargs) -> None:
         raise AssertionError("should not be called")
 
-    monkeypatch.setattr(webapp, "process_github_pr_comment", fake_process_github_pr_comment)
+    monkeypatch.setattr(
+        github_webhooks, "process_github_pr_comment", fake_process_github_pr_comment
+    )
 
-    client = TestClient(webapp.app)
+    client = TestClient(app)
     response = _post_github_webhook(
         client,
         "issue_comment",
@@ -99,9 +103,11 @@ def test_gate_allows_org_member_on_public_pr_comment(monkeypatch) -> None:
     async def fake_process_github_pr_comment(payload, event_type) -> None:
         called["event"] = event_type
 
-    monkeypatch.setattr(webapp, "process_github_pr_comment", fake_process_github_pr_comment)
+    monkeypatch.setattr(
+        github_webhooks, "process_github_pr_comment", fake_process_github_pr_comment
+    )
 
-    client = TestClient(webapp.app)
+    client = TestClient(app)
     response = _post_github_webhook(
         client,
         "issue_comment",
@@ -139,9 +145,11 @@ def test_gate_skipped_on_private_repo(monkeypatch) -> None:
     async def fake_process_github_pr_comment(payload, event_type) -> None:
         called["event"] = event_type
 
-    monkeypatch.setattr(webapp, "process_github_pr_comment", fake_process_github_pr_comment)
+    monkeypatch.setattr(
+        github_webhooks, "process_github_pr_comment", fake_process_github_pr_comment
+    )
 
-    client = TestClient(webapp.app)
+    client = TestClient(app)
     response = _post_github_webhook(
         client,
         "issue_comment",
@@ -180,9 +188,11 @@ def test_gate_disabled_when_env_unset(monkeypatch) -> None:
     async def fake_process_github_pr_comment(payload, event_type) -> None:
         called["event"] = event_type
 
-    monkeypatch.setattr(webapp, "process_github_pr_comment", fake_process_github_pr_comment)
+    monkeypatch.setattr(
+        github_webhooks, "process_github_pr_comment", fake_process_github_pr_comment
+    )
 
-    client = TestClient(webapp.app)
+    client = TestClient(app)
     response = _post_github_webhook(
         client,
         "issue_comment",
@@ -219,9 +229,9 @@ def test_gate_blocks_non_member_on_public_issue(monkeypatch) -> None:
     async def fake_process_github_issue(*_args, **_kwargs) -> None:
         raise AssertionError("should not be called")
 
-    monkeypatch.setattr(webapp, "process_github_issue", fake_process_github_issue)
+    monkeypatch.setattr(github_webhooks, "process_github_issue", fake_process_github_issue)
 
-    client = TestClient(webapp.app)
+    client = TestClient(app)
     response = _post_github_webhook(
         client,
         "issues",
@@ -252,7 +262,7 @@ def test_review_requested_is_unsupported_before_public_repo_gate(monkeypatch) ->
     _common_setup(monkeypatch)
     seen = _install_membership_stub(monkeypatch, members={"insider"})
 
-    client = TestClient(webapp.app)
+    client = TestClient(app)
     response = _post_github_webhook(
         client,
         "pull_request",
@@ -291,9 +301,11 @@ def test_gate_allows_internal_bot_sender(monkeypatch) -> None:
     async def fake_process_github_pr_comment(payload, event_type) -> None:
         called["event"] = event_type
 
-    monkeypatch.setattr(webapp, "process_github_pr_comment", fake_process_github_pr_comment)
+    monkeypatch.setattr(
+        github_webhooks, "process_github_pr_comment", fake_process_github_pr_comment
+    )
 
-    client = TestClient(webapp.app)
+    client = TestClient(app)
     response = _post_github_webhook(
         client,
         "issue_comment",

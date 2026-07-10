@@ -5,12 +5,13 @@ from typing import Any
 
 import pytest
 
-from agent import webapp
 from agent.utils import github_feedback
 from agent.utils.github_feedback import (
     process_github_reaction_added,
     process_github_reaction_removed,
 )
+from agent.webhooks import common as webhook_common
+from agent.webhooks import github_routes
 
 
 class _FakeStore:
@@ -176,9 +177,9 @@ async def test_github_webhook_ignores_reaction_event(monkeypatch: pytest.MonkeyP
     payload = _reaction_payload()
     background_tasks = _FakeBackgroundTasks()
 
-    monkeypatch.setattr(webapp, "verify_github_signature", lambda *args, **kwargs: True)
+    monkeypatch.setattr(webhook_common, "verify_github_signature", lambda *args, **kwargs: True)
 
-    response = await webapp.github_webhook(_FakeRequest(payload), background_tasks)
+    response = await github_routes.github_webhook(_FakeRequest(payload), background_tasks)
 
     assert response == {"status": "ignored", "reason": "Unsupported event type: reaction"}
     assert background_tasks.tasks == []

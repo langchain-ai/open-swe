@@ -33,18 +33,18 @@ async def test_slack_processing_error_posts_dashboard_link(
 
     monkeypatch.setattr(slack_webhook, "_process_slack_mention_impl", fail_processing)
     monkeypatch.setattr(
-        slack_webhook.webapp, "generate_thread_id_from_slack_thread", lambda *_: "t1"
+        slack_webhook.common, "generate_thread_id_from_slack_thread", lambda *_: "t1"
     )
     monkeypatch.setattr(
-        slack_webhook.webapp, "strip_bot_mention", lambda text, *_args, **_kwargs: text
+        slack_webhook.common, "strip_bot_mention", lambda text, *_args, **_kwargs: text
     )
-    monkeypatch.setattr(slack_webhook.webapp, "upsert_agent_thread_owner_metadata", upsert)
-    monkeypatch.setattr(slack_webhook.webapp, "get_client", lambda *, url: client)
-    monkeypatch.setattr(slack_webhook.webapp, "set_slack_assistant_status", set_status)
+    monkeypatch.setattr(slack_webhook.common, "upsert_agent_thread_owner_metadata", upsert)
+    monkeypatch.setattr(slack_webhook.common, "get_client", lambda *, url: client)
+    monkeypatch.setattr(slack_webhook.common, "set_slack_assistant_status", set_status)
     monkeypatch.setattr(
-        slack_webhook.webapp, "dashboard_thread_url", lambda thread_id: f"https://ui/{thread_id}"
+        slack_webhook.common, "dashboard_thread_url", lambda thread_id: f"https://ui/{thread_id}"
     )
-    monkeypatch.setattr(slack_webhook.webapp, "post_slack_thread_reply", post_reply)
+    monkeypatch.setattr(slack_webhook.common, "post_slack_thread_reply", post_reply)
 
     await slack_webhook.process_slack_mention(
         {

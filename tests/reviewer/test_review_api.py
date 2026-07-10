@@ -14,7 +14,7 @@ from agent.dashboard.review_api import (
     get_pr_head_sha,
     reviewer_thread_id,
 )
-from agent.webapp import generate_reviewer_thread_id
+from agent.webhooks.common import generate_reviewer_thread_id
 
 
 def test_classify_finding():

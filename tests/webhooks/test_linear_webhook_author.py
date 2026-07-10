@@ -58,24 +58,24 @@ def _run_process(
         return "zhen" if email == "zhen@example.com" else None
 
     with (
-        patch.object(linear_webhook.webapp, "react_to_linear_comment", new_callable=AsyncMock),
+        patch.object(linear_webhook.common, "react_to_linear_comment", new_callable=AsyncMock),
         patch.object(
-            linear_webhook.webapp, "generate_thread_id_from_issue", return_value="thread-1"
+            linear_webhook.common, "generate_thread_id_from_issue", return_value="thread-1"
         ),
         patch.object(
-            linear_webhook.webapp,
+            linear_webhook.common,
             "fetch_linear_issue_details",
             new_callable=AsyncMock,
             return_value=_full_issue(user_email=issue_data.get("comment_author", {}).get("email")),
         ),
         patch.object(
-            linear_webhook.webapp, "resolve_login_from_email_async", side_effect=fake_resolve_login
+            linear_webhook.common, "resolve_login_from_email_async", side_effect=fake_resolve_login
         ),
-        patch.object(linear_webhook.webapp, "dispatch_agent_run", side_effect=fake_dispatch),
+        patch.object(linear_webhook.common, "dispatch_agent_run", side_effect=fake_dispatch),
         patch.object(
-            linear_webhook.webapp, "upsert_agent_thread_owner_metadata", side_effect=fake_upsert
+            linear_webhook.common, "upsert_agent_thread_owner_metadata", side_effect=fake_upsert
         ),
-        patch.object(linear_webhook.webapp, "post_linear_trace_comment", new_callable=AsyncMock),
+        patch.object(linear_webhook.common, "post_linear_trace_comment", new_callable=AsyncMock),
     ):
         asyncio.run(linear_webhook.process_linear_issue(issue_data, repo_config))
 
