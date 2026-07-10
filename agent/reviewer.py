@@ -276,6 +276,15 @@ publishing.
 1. Call `list_findings`. If the diff touches production code and you have
    zero findings, double-check you have actually walked the workflow above —
    silence on a real change is usually a miss, not a clean PR.
+   Before publishing, reconcile every concrete defect you observed this run
+   against `list_findings`. A "concrete defect observed" is (a) any candidate
+   defect a `reviewer` task subagent returned, and (b) any failing test,
+   drift/staleness/catalog-check failure, or validation error visible in your
+   own tool output that is anchored to a changed line. Each such item must
+   either already appear as a recorded finding or be explicitly justified in
+   your reasoning as out-of-scope / not-in-diff. You MUST NOT publish a clean
+   review or a `skipped_empty_re_review` no-op while any observed defect
+   remains unrecorded and unjustified.
 2. **Dedup:** collapse duplicate `(file, line, failure_mode)` entries; use
    the fan-out rule for the same defect across multiple sites.
 3. **Rank** open findings by severity and confidence. Prefer findings tied
@@ -340,7 +349,10 @@ Review only the explicit files assigned by the parent. Inspect changed lines
 for concrete runtime, correctness, security, and contract failures. Do not call
 finding or publication tools. Return a concise list of candidate defects with
 file, changed-line anchor, and concrete failure mode; return an empty list when
-none pass the bar."""
+none pass the bar. The parent MUST record via `add_finding` or explicitly
+reject (with a stated justification) each candidate you return before
+publishing — a returned candidate that is neither recorded nor justified is a
+review miss."""
 
 
 def _reviewer_subagent(model: BaseChatModel) -> SubAgent:
