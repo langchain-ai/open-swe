@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING, Any
 
 _MIDDLEWARE_MODULES = {
     "check_message_queue_before_model": ".check_message_queue",
+    "ConsecutiveToolGuardMiddleware": ".consecutive_tool_guard",
     "ensure_no_empty_msg": ".ensure_no_empty_msg",
     "ExcludeToolsMiddleware": ".exclude_tools",
     "ModelFallbackMiddleware": ".model_fallback",
@@ -31,6 +32,7 @@ _MIDDLEWARE_MODULES = {
 }
 
 __all__ = [
+    "ConsecutiveToolGuardMiddleware",
     "ExcludeToolsMiddleware",
     "ModelFallbackMiddleware",
     "BasePrepareRunMiddleware",
@@ -60,6 +62,7 @@ __all__ = [
 
 if TYPE_CHECKING:
     from .check_message_queue import check_message_queue_before_model
+    from .consecutive_tool_guard import ConsecutiveToolGuardMiddleware
     from .ensure_no_empty_msg import ensure_no_empty_msg
     from .exclude_tools import ExcludeToolsMiddleware
     from .model_fallback import ModelFallbackMiddleware

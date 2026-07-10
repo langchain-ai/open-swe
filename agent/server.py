@@ -67,6 +67,7 @@ from .integrations.notion_mcp import load_notion_tools
 from .integrations.stagehand_browser import load_browser_tools
 from .middleware import (
     BasePrepareRunMiddleware,
+    ConsecutiveToolGuardMiddleware,
     ModelFallbackMiddleware,
     PlanModeMiddleware,
     PullRequestCreationGuardMiddleware,
@@ -1045,6 +1046,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             ToolArtifactMiddleware(),
             PullRequestCreationGuardMiddleware(),
             WorkflowPushGuardMiddleware(),
+            ConsecutiveToolGuardMiddleware(),
             refresh_github_proxy_before_model,
             check_message_queue_before_model,
             SlackAssistantStatusMiddleware(),
