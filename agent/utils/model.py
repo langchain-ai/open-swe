@@ -80,6 +80,7 @@ class ModelKwargs(TypedDict, total=False):
     max_retries: int | None
     store: bool | None
     include: list[str] | None
+    output_version: Literal["responses/v1"] | None
     model_kwargs: dict[str, object] | None
 
 
@@ -100,6 +101,7 @@ def _configure_openai_responses_kwargs(model_kwargs: dict[str, object]) -> None:
     if model_kwargs.get("use_responses_api") is False:
         return
     model_kwargs.setdefault("store", False)
+    model_kwargs.setdefault("output_version", "responses/v1")
     include = model_kwargs.get("include")
     if include is None:
         model_kwargs["include"] = ["reasoning.encrypted_content"]

@@ -239,6 +239,9 @@ async def test_reviewer_resolves_app_installation_token_at_run_start() -> None:
     mock_cache_token.assert_called_once_with("reviewer-thread-id", "app-token", expires_at=None)
     middleware = create_agent.call_args.kwargs["middleware"]
     assert reviewer.check_message_queue_before_model in middleware
+    middleware_names = {type(item).__name__ for item in middleware}
+    assert "RepairOrphanedToolCallsMiddleware" in middleware_names
+    assert "SanitizeOpenAIResponsesMiddleware" not in middleware_names
 
 
 @pytest.mark.asyncio

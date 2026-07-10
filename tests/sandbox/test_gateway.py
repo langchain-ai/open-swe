@@ -336,6 +336,7 @@ def test_make_model_direct_openai_uses_responses_websocket() -> None:
     assert captured["use_responses_api"] is True
     assert captured["store"] is False
     assert captured["include"] == ["reasoning.encrypted_content"]
+    assert captured["output_version"] == "responses/v1"
 
 
 def test_make_model_gateway_openai_replaces_websocket(
@@ -349,6 +350,7 @@ def test_make_model_gateway_openai_replaces_websocket(
     assert captured["use_responses_api"] is True
     assert captured["store"] is False
     assert captured["include"] == ["reasoning.encrypted_content"]
+    assert captured["output_version"] == "responses/v1"
     assert captured["api_key"] == "ls-key"
 
 
