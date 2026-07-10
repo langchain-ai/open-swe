@@ -5,6 +5,7 @@ import hmac
 import json
 import logging
 import os
+import re
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -770,42 +771,100 @@ async def _slack_user_is_thread_owner(thread_id: str, slack_user_id: str) -> boo
     return isinstance(owner_id, str) and bool(owner_id) and owner_id == slack_user_id
 
 
-async def _get_thread_plan_mode(thread_id: str) -> bool | None:
-    """Return the persisted plan-mode flag for a thread, or ``None`` if unset."""
+async def _get_thread_plan_state(thread_id: str) -> tuple[bool | None, str | None]:
     langgraph_client = get_client(url=LANGGRAPH_URL)
     try:
         thread = await langgraph_client.threads.get(thread_id)
     except Exception as exc:  # noqa: BLE001
         if _is_not_found_error(exc):
-            return None
-        logger.warning("Failed to fetch plan-mode metadata for thread %s", thread_id)
-        return None
+            return None, None
+        logger.warning("Failed to fetch plan metadata for thread %s", thread_id)
+        return None, None
     metadata = thread.get("metadata") if isinstance(thread, dict) else None
     if not isinstance(metadata, dict):
-        return None
-    value = metadata.get("plan_mode")
-    return value if isinstance(value, bool) else None
+        return None, None
+    mode = metadata.get("plan_mode")
+    status = metadata.get("plan_status")
+    return (
+        mode if isinstance(mode, bool) else None,
+        status if isinstance(status, str) else None,
+    )
 
 
-async def _set_thread_plan_mode(thread_id: str, enabled: bool) -> None:
-    """Persist the plan-mode flag onto thread metadata."""
-    langgraph_client = get_client(url=LANGGRAPH_URL)
-    try:
-        await langgraph_client.threads.update(
-            thread_id=thread_id, metadata={"plan_mode": bool(enabled)}
-        )
-    except Exception as exc:  # noqa: BLE001
-        if _is_not_found_error(exc):
-            try:
-                await langgraph_client.threads.create(
-                    thread_id=thread_id,
-                    if_exists="do_nothing",
-                    metadata={"plan_mode": bool(enabled)},
-                )
-            except Exception:  # noqa: BLE001
-                logger.exception("Failed to create thread %s while persisting plan_mode", thread_id)
-            return
-        logger.exception("Failed to persist plan_mode for thread %s", thread_id)
+async def _get_thread_plan_mode(thread_id: str) -> bool | None:
+    mode, _ = await _get_thread_plan_state(thread_id)
+    return mode
+
+
+async def _slack_user_can_reply_to_ready_plan(
+    channel_id: str, thread_ts: str, slack_user_id: str
+) -> bool:
+    if not channel_id or not thread_ts or not slack_user_id:
+        return False
+    thread_id = generate_thread_id_from_slack_thread(channel_id, thread_ts)
+    mode, status = await _get_thread_plan_state(thread_id)
+    return (
+        mode is True
+        and status == "ready"
+        and await _slack_user_is_thread_owner(thread_id, slack_user_id)
+    )
+
+
+_PLAN_APPROVAL_REPLIES = {
+    "approve",
+    "approve it",
+    "approve plan",
+    "approve the plan",
+    "approved",
+    "go ahead",
+    "go ahead and implement",
+    "go ahead and implement it",
+    "go ahead with implementation",
+    "i approve",
+    "i approve the plan",
+    "implement it",
+    "lgtm",
+    "looks good",
+    "looks good go ahead",
+    "looks good please proceed",
+    "looks good to me",
+    "please proceed",
+    "proceed",
+    "ship it",
+    "start implementation",
+    "this looks good",
+    "yeah",
+    "yep",
+    "yes",
+    "yes please",
+}
+_PLAN_APPROVAL_NEGATIONS = {
+    "cancel",
+    "change",
+    "changes",
+    "deny",
+    "denied",
+    "do not",
+    "don t",
+    "dont",
+    "hold",
+    "no",
+    "not",
+    "reject",
+    "revise",
+    "stop",
+    "wait",
+}
+
+
+def _is_natural_language_plan_approval(text: str) -> bool:
+    normalized = re.sub(r"[^a-z0-9]+", " ", text.lower()).strip()
+    if not normalized:
+        return False
+    padded = f" {normalized} "
+    if any(f" {phrase} " in padded for phrase in _PLAN_APPROVAL_NEGATIONS):
+        return False
+    return normalized in _PLAN_APPROVAL_REPLIES
 
 
 async def _post_account_link_prompt(
@@ -1030,7 +1089,7 @@ async def linear_webhook_verify() -> dict[str, str]:
 
 @app.post("/webhooks/slack")
 async def slack_webhook(request: Request, background_tasks: BackgroundTasks) -> dict[str, str]:
-    """Handle Slack Event API webhooks for app mentions."""
+    """Handle Slack Event API webhooks for mentions and plan-review replies."""
     body = await request.body()
 
     signature = request.headers.get("X-Slack-Signature", "")
@@ -1089,8 +1148,17 @@ async def slack_webhook(request: Request, background_tasks: BackgroundTasks) -> 
             and SLACK_BOT_USER_ID
             and f"<@{SLACK_BOT_USER_ID}>" in message_text
         )
-        if not (has_username_mention or has_id_mention):
-            return {"status": "ignored", "reason": "Not an app_mention event"}
+        is_ready_plan_reply = bool(
+            event.get("type") == "message"
+            and event.get("thread_ts")
+            and await _slack_user_can_reply_to_ready_plan(
+                str(event.get("channel") or ""),
+                str(event.get("thread_ts") or ""),
+                str(event.get("user") or ""),
+            )
+        )
+        if not (has_username_mention or has_id_mention or is_ready_plan_reply):
+            return {"status": "ignored", "reason": "Not an app mention or plan reply"}
 
     if event.get("subtype") == "bot_message" or event.get("bot_id"):
         return {"status": "ignored", "reason": "Event from a bot"}
@@ -1253,60 +1321,6 @@ async def slack_interactivity(
             repo_config,
         )
         return {"status": "accepted", "message": "Workflow push approved, retry queued"}
-
-    if action_value.get("type") == "plan_approval":
-        plan_action = str(action_value.get("action") or "").strip()
-        channel = payload.get("channel") if isinstance(payload.get("channel"), dict) else {}
-        message = payload.get("message") if isinstance(payload.get("message"), dict) else {}
-        container = payload.get("container") if isinstance(payload.get("container"), dict) else {}
-        user = payload.get("user") if isinstance(payload.get("user"), dict) else {}
-        channel_id = str(channel.get("id") or container.get("channel_id") or "")
-        thread_ts = str(
-            message.get("thread_ts") or message.get("ts") or container.get("thread_ts") or ""
-        )
-        user_id = str(user.get("id") or "")
-        if not channel_id or not thread_ts:
-            return {"status": "ignored", "reason": "Missing Slack action context"}
-
-        thread_id = generate_thread_id_from_slack_thread(channel_id, thread_ts)
-
-        if plan_action == "cancel":
-            await post_slack_thread_reply(
-                channel_id=channel_id,
-                thread_ts=thread_ts,
-                text="Plan cancelled. No changes will be made.",
-            )
-            return {"status": "accepted", "message": "Plan cancelled"}
-
-        if plan_action == "approve":
-            if not await _slack_user_is_thread_owner(thread_id, user_id):
-                await post_slack_thread_reply(
-                    channel_id=channel_id,
-                    thread_ts=thread_ts,
-                    text="Only the person who requested this plan can approve it. Anyone can reply with feedback or use *Revise Plan*.",
-                )
-                return {"status": "ignored", "reason": "approver is not the thread owner"}
-            await _set_thread_plan_mode(thread_id, False)
-            channel_context = await _get_slack_channel_context(channel_id)
-            repo_config = await get_slack_repo_config(
-                channel_id, thread_ts, slack_user_id=user_id, channel_context=channel_context
-            )
-            background_tasks.add_task(
-                process_slack_mention,
-                {
-                    "channel_id": channel_id,
-                    "channel_context": channel_context,
-                    "thread_ts": thread_ts,
-                    "event_ts": str(message.get("ts") or ""),
-                    "user_id": user_id,
-                    "text": "Proceed with the approved plan. Implement the changes as described in the plan.",
-                    "bot_user_id": SLACK_BOT_USER_ID,
-                },
-                repo_config,
-            )
-            return {"status": "accepted", "message": "Plan approved, starting implementation"}
-
-        return {"status": "accepted", "message": "Reply to revise the plan"}
 
     if action_value.get("type") != "open_swe_option":
         return {"status": "ignored", "reason": "Unknown action type"}

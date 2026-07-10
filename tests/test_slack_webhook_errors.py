@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from agent.dashboard import plan_api
 from agent.webhooks import slack as slack_webhook
 
 
@@ -69,3 +70,39 @@ async def test_slack_processing_error_posts_dashboard_link(
     post_reply.assert_awaited_once()
     assert post_reply.await_args.args[:2] == ("C1", "123.45")
     assert "<https://ui/t1|Open SWE Web>" in post_reply.await_args.args[2]
+
+
+async def test_natural_language_plan_approval_uses_shared_approval_flow(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    can_reply = AsyncMock(return_value=True)
+    metadata = {"plan_status": "ready"}
+    load_metadata = AsyncMock(return_value=metadata)
+    approve = AsyncMock(return_value={"status": "approved"})
+
+    monkeypatch.setattr(slack_webhook.webapp, "_slack_user_can_reply_to_ready_plan", can_reply)
+    monkeypatch.setattr(plan_api, "_thread_metadata", load_metadata)
+    monkeypatch.setattr(plan_api, "approve_plan_for_thread", approve)
+
+    handled = await slack_webhook._maybe_approve_ready_plan_reply(
+        "t1", "C1", "123.45", "U1", "Alice", "Looks good!"
+    )
+
+    assert handled is True
+    can_reply.assert_awaited_once_with("C1", "123.45", "U1")
+    load_metadata.assert_awaited_once_with("t1")
+    approve.assert_awaited_once_with("t1", metadata=metadata, actor="Alice")
+
+
+async def test_plan_revision_reply_does_not_trigger_approval(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    can_reply = AsyncMock(return_value=True)
+    monkeypatch.setattr(slack_webhook.webapp, "_slack_user_can_reply_to_ready_plan", can_reply)
+
+    handled = await slack_webhook._maybe_approve_ready_plan_reply(
+        "t1", "C1", "123.45", "U1", "Alice", "Do not approve; revise the tests"
+    )
+
+    assert handled is False
+    can_reply.assert_not_awaited()

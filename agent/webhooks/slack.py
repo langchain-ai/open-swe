@@ -43,12 +43,36 @@ def _format_slack_thread_section(
 
 
 async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[str, str]) -> None:
-    """Process a Slack app mention by creating a run or queuing a mid-run message."""
+    """Process a Slack request by creating a run or queuing a mid-run message."""
     try:
         await _process_slack_mention_impl(event_data, repo_config)
     except Exception:  # noqa: BLE001
         webapp.logger.exception("Unexpected error while processing Slack mention")
         await _notify_slack_processing_error(event_data, repo_config)
+
+
+async def _maybe_approve_ready_plan_reply(
+    thread_id: str,
+    channel_id: str,
+    thread_ts: str,
+    user_id: str,
+    user_name: str,
+    text: str,
+) -> bool:
+    if not webapp._is_natural_language_plan_approval(text):
+        return False
+    if not await webapp._slack_user_can_reply_to_ready_plan(channel_id, thread_ts, user_id):
+        return False
+
+    from agent.dashboard.plan_api import _thread_metadata, approve_plan_for_thread
+
+    metadata = await _thread_metadata(thread_id)
+    await approve_plan_for_thread(
+        thread_id,
+        metadata=metadata,
+        actor=user_name or user_id or "Slack user",
+    )
+    return True
 
 
 async def _notify_slack_processing_error(
@@ -200,6 +224,10 @@ async def _process_slack_mention_impl(
         webapp.strip_bot_mention(text, bot_user_id, bot_username=webapp.SLACK_BOT_USERNAME)
         or "(no text in mention)"
     )
+    if await _maybe_approve_ready_plan_reply(
+        thread_id, channel_id, thread_ts, user_id, user_name, clean_text
+    ):
+        return
     trigger_user = user_name or (f"<@{user_id}>" if user_id else "Unknown user")
 
     # Auto-resolve cross-posted Slack message links in context
