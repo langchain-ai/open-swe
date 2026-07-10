@@ -75,12 +75,12 @@ from .reviewer_trace_context import (
     format_pr_trace_context_prompt,
     prepare_pr_trace_context,
 )
-from .server import (
+from .runtime import (
     DEFAULT_LLM_MAX_TOKENS,
     DEFAULT_RECURSION_LIMIT,
     MODEL_CALL_RECURSION_LIMIT,
-    _get_cached_sandbox_backend,
     ensure_sandbox_for_thread,
+    get_cached_sandbox_backend,
     graph_loaded_for_execution,
 )
 from .tools import (
@@ -1326,7 +1326,7 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
         return sandbox_backend
 
     def backend_factory(_runtime: object, _thread_id: str = thread_id):
-        return _get_cached_sandbox_backend(_thread_id, reconnect=reconnect_backend)
+        return get_cached_sandbox_backend(_thread_id, reconnect=reconnect_backend)
 
     return create_deep_agent(
         model=reviewer_model,
