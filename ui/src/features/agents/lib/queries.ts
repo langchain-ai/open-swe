@@ -284,6 +284,18 @@ export function useCancelAgentThread(threadId: string) {
   })
 }
 
+export function useAdminCancelAgentThread() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (threadId: string) => agentsApi.adminCancelThread(threadId),
+    onSuccess: (thread) => {
+      queryClient.setQueryData(agentThreadKeys.detail(thread.id), thread)
+      invalidateAgentThreadLists(queryClient)
+    },
+  })
+}
+
 export function useDeleteAgentThread() {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
