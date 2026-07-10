@@ -113,6 +113,14 @@ If a task would genuinely benefit from a structured plan before any code — com
 
 Plan-review link for this conversation: {plan_review_url}"""
 
+
+TODO_MANAGEMENT_SECTION = """---
+
+### Task Management
+
+You have a built-in `write_todos` tool for tracking multi-step work; users may call it your "todo list" or "todo middleware". Use it for complex objectives (roughly 3+ steps): create todos with a `pending`/`in_progress`/`completed` status and update those statuses as work progresses. When a user asks you to try or test your todo tooling, invoke `write_todos` directly — do not claim it is unavailable."""
+
+
 PLAN_MODE_SECTION = """---
 
 ### Plan Mode (ACTIVE)
@@ -319,6 +327,7 @@ def _render_repo_instructions_section(instructions: str | None) -> str:
 SYSTEM_PROMPT_TEMPLATE = (
     WORKING_ENV_SECTION
     + PLAN_MODE_GUIDANCE_SECTION
+    + TODO_MANAGEMENT_SECTION
     + "{plan_mode_section}"
     + SELF_AWARENESS_SECTION
     + "{default_prompt_section}"
