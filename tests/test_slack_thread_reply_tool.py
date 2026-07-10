@@ -81,6 +81,31 @@ async def test_slack_thread_reply_hints_not_to_retry_channel_errors(
     assert "trace output" in result["hint"]
 
 
+async def test_slack_thread_reply_invalid_blocks_hint_directs_plaintext_retry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_post_and_store_mapping(
+        channel_id: str,
+        thread_ts: str,
+        message: str,
+        *,
+        blocks: list[dict[str, Any]] | None = None,
+    ) -> tuple[str | None, str | None]:
+        return None, "invalid_blocks"
+
+    monkeypatch.setattr(slack_reply_tool, "get_config", _config)
+    monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", fake_post_and_store_mapping)
+
+    result = await slack_reply_tool.slack_thread_reply("plan ready", plan_approval=True)
+
+    assert result["success"] is False
+    assert result["error"] == "invalid_blocks"
+    assert result["slack_error"] == "invalid_blocks"
+    assert "do not resend the same blocks" in result["hint"]
+    assert "plain-text" in result["hint"]
+    assert "report_platform_issue" in result["hint"]
+
+
 async def test_slack_thread_reply_rate_limited_hint_includes_retry_after(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

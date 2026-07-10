@@ -172,6 +172,13 @@ def build_workflow_approval_blocks(message: str, fingerprint: str) -> list[dict[
 
 
 def _slack_reply_failure_hint(slack_error: str | None) -> str:
+    if slack_error == "invalid_blocks":
+        return (
+            "Slack rejected the Block Kit payload; do not resend the same blocks. Retry once as a "
+            "plain-text message with no rich blocks and, for plan approval, no button block — put the "
+            "plan/answer summary plus the review URL inline. If that also fails, call "
+            "report_platform_issue and surface the undelivered content via the trace output."
+        )
     if slack_error == "msg_too_long":
         return "Slack rejected the message as too long; retry with a shorter message."
     if slack_error in {"channel_not_found", "not_in_channel"}:
