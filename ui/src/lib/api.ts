@@ -733,12 +733,12 @@ export const api = {
     request<NotionCredentialStatus>("/my-credentials/notion", {
       method: "DELETE",
     }),
-  listEnabledReviewRepos: () =>
+  listAutoReviewRepos: () =>
     request<{ repos: Array<string> }>("/enabled-review-repos"),
-  setEnabledReviewRepo: (full_name: string, enabled: boolean) =>
+  setAutoReviewRepo: (full_name: string, runAutomatically: boolean) =>
     request<{ repos: Array<string> }>("/enabled-review-repos", {
       method: "PUT",
-      body: JSON.stringify({ full_name, enabled }),
+      body: JSON.stringify({ full_name, enabled: runAutomatically }),
     }),
   usageLeaderboard: (period: UsageLeaderboardPeriod = "30d", limit = 10) =>
     request<UsageLeaderboardPayload>(

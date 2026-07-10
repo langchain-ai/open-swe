@@ -1405,6 +1405,32 @@ async def cancel_dashboard_thread(
     )
 
 
+async def admin_cancel_dashboard_thread(thread_id: str) -> dict[str, Any]:
+    client = langgraph_client()
+    try:
+        thread = await client.threads.get(thread_id)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(404, "thread not found") from exc
+
+    metadata = thread.get("metadata") if isinstance(thread.get("metadata"), dict) else {}
+    try:
+        await client.runs.cancel_many(thread_id=thread_id, status="all", action="interrupt")
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Failed to cancel active runs for thread %s", thread_id)
+        raise HTTPException(502, "failed to request thread cancellation") from exc
+
+    await client.threads.update(
+        thread_id=thread_id,
+        metadata={"latest_run_status": "interrupted", "updated_at_ms": _now_ms()},
+    )
+    updated_thread = await client.threads.get(thread_id)
+    return _thread_summary(
+        updated_thread
+        if isinstance(updated_thread, dict)
+        else {"thread_id": thread_id, "metadata": metadata}
+    )
+
+
 async def delete_dashboard_thread(thread_id: str, login: str, *, email: str | None = None) -> None:
     client = langgraph_client()
     try:

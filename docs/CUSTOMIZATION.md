@@ -1,0 +1,535 @@
+# Customization Guide
+
+Open SWE is designed to be forked and customized for your org. The core agent is assembled in a single function — `get_agent()` in `agent/server.py` — where you can swap out the sandbox, model, tools, and triggers.
+
+```python
+# agent/server.py — the key lines
+model_id = os.environ.get("LLM_MODEL_ID", DEFAULT_LLM_MODEL_ID)
+model_kwargs = {"max_tokens": DEFAULT_LLM_MAX_TOKENS}
+if model_id == DEFAULT_LLM_MODEL_ID:
+    model_kwargs["reasoning"] = DEFAULT_LLM_REASONING
+
+return create_deep_agent(
+    model=make_model(model_id, **model_kwargs),
+    system_prompt=construct_system_prompt(...),
+    tools=[http_request, fetch_url, linear_comment, slack_thread_reply],
+    backend=sandbox_backend,
+    middleware=[
+        ToolErrorMiddleware(),
+        check_message_queue_before_model,
+        ensure_no_empty_msg,
+        notify_step_limit_reached,
+    ],
+)
+```
+
+---
+
+## 1. Sandbox
+
+By default, Open SWE runs each task in a [LangSmith cloud sandbox](https://docs.smith.langchain.com/) — an isolated Linux environment where the agent clones the repo and executes commands. Sandbox creation and connection is handled in `agent/integrations/langsmith.py`.
+
+### Using a custom sandbox snapshot
+
+Build a snapshot in LangSmith (UI or `SandboxClient.create_snapshot`) from your Docker image and point Open SWE at its UUID:
+
+```bash
+DEFAULT_SANDBOX_SNAPSHOT_ID="<snapshot-uuid>"                      # Required
+DEFAULT_SANDBOX_SNAPSHOT_FS_CAPACITY_BYTES="34359738368"           # Optional, default 32 GiB
+DEFAULT_SANDBOX_VCPUS="4"                                          # Optional, default 4
+DEFAULT_SANDBOX_MEM_BYTES="16106127360"                            # Optional, default 15 GiB
+DEFAULT_SANDBOX_IDLE_TTL_SECONDS="7200"                            # Optional, default 7200 (2 h); 0 disables
+DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS="86400"                  # Optional, default 86400 (24 h); 0 disables
+REPO_SNAPSHOT_BASE_IMAGE="<registry>/<open-swe-sandbox-image>"      # Optional; required for admin-generated repo snapshot templates
+```
+
+This is useful for pre-installing languages, frameworks, or internal tools that your repos depend on — reducing setup time per agent run. The default snapshot includes the GitHub CLI; agents invoke it as `GH_TOKEN=dummy gh <command>` and rely on the LangSmith proxy for the real credentials.
+
+`REPO_SNAPSHOT_BASE_IMAGE` should point to the published Docker image used to create your default Open SWE sandbox snapshot (typically the image built from this repository's `Dockerfile`). The admin **Repository Snapshots** page uses it as the base image when generating per-repo Dockerfile templates. If it is not configured, template generation fails closed instead of suggesting a bare image that would be missing Open SWE's required sandbox tools.
+
+For LangSmith sandboxes, Open SWE configures two GitHub proxy rules whenever a sandbox is created or reattached to a run:
+
+- `github.com` / `*.github.com` receive Basic auth for git-over-HTTPS operations.
+- `api.github.com` receives Bearer auth for `gh` and REST API operations.
+
+The proxy token is minted at runtime from the GitHub App installation credentials. Do not store GitHub access tokens as deployment environment variables.
+
+### Using a different sandbox provider
+
+Set the `SANDBOX_TYPE` environment variable to switch providers. Each provider has a corresponding integration file in `agent/integrations/` and a factory function registered in `agent/utils/sandbox.py`:
+
+| `SANDBOX_TYPE` | Integration file | Required env vars |
+|---|---|---|
+| `langsmith` (default) | `agent/integrations/langsmith.py` | `LANGSMITH_API_KEY_PROD`, `SANDBOX_TYPE="langsmith"` |
+| `daytona` | `agent/integrations/daytona.py` | `DAYTONA_API_KEY`, `SANDBOX_TYPE="daytona"`, optional `DAYTONA_SANDBOX_SNAPSHOT` |
+| `runloop` | `agent/integrations/runloop.py` | `RUNLOOP_API_KEY`, `SANDBOX_TYPE="runloop"` |
+| `e2b` | `agent/integrations/e2b.py` | `E2B_API_KEY`, `SANDBOX_TYPE="e2b"`, optional `E2B_TEMPLATE` |
+| `modal` | `agent/integrations/modal.py` | Modal credentials, `SANDBOX_TYPE="modal"` |
+| `lightning` | `agent/integrations/lightning.py` (`langchain-lightning`) | `LIGHTNING_API_KEY` (or `LIGHTNING_SANDBOX_API_KEY`), `SANDBOX_TYPE="lightning"`; defaults to `runtime=python313`; optional `LIGHTNING_SANDBOX_INSTANCE_TYPE`, `LIGHTNING_SANDBOX_TIMEOUT_MS`, `LIGHTNING_SANDBOX_WORKDIR`, `LIGHTNING_SANDBOX_IMAGE`, `LIGHTNING_SANDBOX_PERSISTENT` |
+| `local` | `agent/integrations/local.py` | None (no isolation — development only), `SANDBOX_TYPE="local"` |
+
+> **Warning**: `local` runs commands directly on your host with no sandboxing. Only use for local development with human-in-the-loop enabled.
+
+### Adding a new sandbox provider
+
+1. **Create an integration file** at `agent/integrations/my_provider.py` with a factory function matching this signature:
+
+```python
+def create_my_provider_sandbox(sandbox_id: str | None = None):
+    """Create or reconnect to a sandbox.
+
+    Args:
+        sandbox_id: Optional existing sandbox ID to reconnect to.
+            If None, creates a new sandbox.
+
+    Returns:
+        An object implementing SandboxBackendProtocol.
+    """
+    ...
+```
+
+2. **Register it** in `agent/utils/sandbox.py` by adding it to `SANDBOX_FACTORIES`:
+
+```python
+SANDBOX_FACTORIES = {
+    ...
+    "my_provider": ("agent.integrations.my_provider", "create_my_provider_sandbox"),
+}
+```
+
+The factory must return an object implementing `SandboxBackendProtocol` from `deepagents`. See the existing integration files for reference.
+
+### Building a custom sandbox provider
+
+If none of the built-in providers fit, you can build your own. The agent accepts any backend that implements `SandboxBackendProtocol` from `deepagents`. The protocol requires:
+
+- **File operations**: `ls()`, `read()`, `write()`, `edit()`, `glob()`, `grep()`
+- **Shell execution**: `execute(command, timeout=None) -> ExecuteResponse`
+- **Identity**: `id` property returning a unique sandbox identifier
+
+The easiest approach is to extend `BaseSandbox` from `deepagents.backends.sandbox` — it implements all file operations by delegating to `execute()`, so you only need to implement the shell execution layer:
+
+```python
+from deepagents.backends.sandbox import BaseSandbox
+from deepagents.backends.protocol import ExecuteResponse
+
+class MySandbox(BaseSandbox):
+    def __init__(self, connection):
+        self._conn = connection
+
+    @property
+    def id(self) -> str:
+        return self._conn.id
+
+    def execute(self, command: str, *, timeout: int | None = None) -> ExecuteResponse:
+        result = self._conn.run(command, timeout=timeout or 300)
+        return ExecuteResponse(
+            output=result.stdout + result.stderr,
+            exit_code=result.exit_code,
+            truncated=False,
+        )
+```
+
+See `deepagents.backends.LangSmithSandbox` and `agent/integrations/langsmith.py` for a full reference implementation.
+
+---
+
+## 2. Model
+
+The model is configured in the `get_agent()` function in `agent/server.py`. By default it uses `openai:gpt-5.6-sol` with medium reasoning effort, but you can override the model with the `LLM_MODEL_ID` environment variable:
+
+```bash
+# Set the model via environment variable (uses provider:model format)
+LLM_MODEL_ID="anthropic:claude-sonnet-5"
+```
+
+If `LLM_MODEL_ID` is not set, the default model (`openai:gpt-5.6-sol`) is used.
+
+`max_tokens` is a maximum completion/output token budget, not the model's total context window. For OpenAI reasoning models, this budget can include both internal reasoning tokens and final response tokens.
+
+### Switching models
+
+Use the `provider:model` format:
+
+```python
+# Anthropic
+model=make_model("anthropic:claude-sonnet-5", temperature=0, max_tokens=16_000)
+
+# OpenAI (uses Responses API by default)
+model=make_model("openai:gpt-5.6-sol", max_tokens=128_000, reasoning={"effort": "medium"})
+
+# Google
+model=make_model("google_genai:gemini-2.5-pro", temperature=0, max_tokens=16_000)
+```
+
+The `make_model()` helper in `agent/utils/model.py` wraps `langchain.chat_models.init_chat_model`. For OpenAI models, it automatically enables the Responses API. For full control, pass a pre-configured model instance directly:
+
+```python
+from langchain_anthropic import ChatAnthropic
+
+model = ChatAnthropic(model_name="claude-sonnet-5", temperature=0, max_tokens=16_000)
+
+return create_deep_agent(
+    model=model,
+    ...
+)
+```
+
+### Using different models per context
+
+You can route to different models based on task complexity, repo, or trigger source:
+
+```python
+async def get_agent(config: RunnableConfig) -> Pregel:
+    source = config["configurable"].get("source")
+    
+    if source == "slack":
+        # Faster model for Slack Q&A
+        model = make_model("anthropic:claude-sonnet-5", temperature=0, max_tokens=16_000)
+    else:
+        # Full model for code changes from Linear
+        model = make_model("openai:gpt-5.6-sol", max_tokens=128_000, reasoning={"effort": "medium"})
+    
+    return create_deep_agent(model=model, ...)
+```
+
+### Routing through the LangSmith LLM Gateway
+
+Model calls can be proxied through the [LangSmith LLM Gateway](https://docs.langchain.com/langsmith/llm-gateway) (private beta) instead of hitting providers directly. The gateway authenticates with a **LangSmith API key** that has the `gateway:invoke` permission and resolves the real provider key from workspace Provider Secrets, so no provider API keys are needed at runtime — and it adds central spend limits, PII/secrets redaction, and tracing. Your org must have the gateway enabled with Provider Secrets configured.
+
+Routing is opt-in and off by default. Enable it either way:
+
+| Env var | Default | Purpose |
+|---|---|---|
+| `LANGSMITH_GATEWAY_ENABLED` | `false` | Deployment-level default for gateway routing. |
+| `LANGSMITH_GATEWAY_API_KEY` | unset | Optional dedicated LangSmith key for Gateway calls. Prefer this in LangGraph Cloud if the platform-provided `LANGSMITH_API_KEY` lacks `gateway:invoke`. Falls back to `LANGSMITH_API_KEY_PROD`, then `LANGSMITH_API_KEY`. |
+| `LANGSMITH_GATEWAY_BASE_URL` | `https://gateway.smith.langchain.com` | Override for a regional or self-hosted gateway host. |
+| `LANGSMITH_GATEWAY_OPENAI_USE_RESPONSES` | `true` | Use the OpenAI Responses API through the gateway. Set to `false` only to force Chat Completions for OpenAI models. |
+
+The admin panel (**Admin → LLM Gateway**) exposes a per-workspace toggle stored in team settings; when set it overrides the `LANGSMITH_GATEWAY_ENABLED` env default (a `None`/unset team value inherits the env default).
+
+Routing is applied centrally in `make_model` (`agent/utils/model.py`), which resolves the effective on/off and delegates URL/key wiring to `agent/utils/gateway.py`. **OpenAI, Anthropic, Fireworks, and Google Gemini** are routed (their LangChain integrations accept `base_url` + `api_key`); Google Vertex (service-account auth) and any other provider call the provider directly with a logged warning.
+
+**Caveat — OpenAI endpoint:** open-swe uses the OpenAI Responses API by default because OpenAI reasoning models with function tools reject `reasoning_effort` on Chat Completions. Direct OpenAI calls use a `wss://` base URL; gateway-routed OpenAI uses the HTTPS gateway base URL with Responses enabled. Set `LANGSMITH_GATEWAY_OPENAI_USE_RESPONSES=false` only if you need to force Chat Completions. Anthropic and Fireworks are unaffected.
+
+---
+
+## 3. Tools
+
+Open SWE ships with a small set of custom tools on top of the built-in Deep Agents tools (file operations, shell execution, subagents, todos). GitHub operations are handled by `GH_TOKEN=dummy gh` inside the sandbox.
+
+| Tool | File | Purpose |
+|---|---|---|
+| `fetch_url` | `agent/tools/fetch_url.py` | Fetch web pages as markdown |
+| `http_request` | `agent/tools/http_request.py` | HTTP API calls |
+| `linear_comment` | `agent/tools/linear_comment.py` | Post comments on Linear tickets |
+| `slack_thread_reply` | `agent/tools/slack_thread_reply.py` | Reply in Slack threads |
+
+### Adding a tool
+
+Create a new file in `agent/tools/`, define a function, and add it to the tools list.
+
+**Example — adding a Datadog search tool:**
+
+```python
+# agent/tools/datadog_search.py
+import requests
+from typing import Any
+
+def datadog_search(query: str, time_range: str = "1h") -> dict[str, Any]:
+    """Search Datadog logs for debugging context.
+
+    Args:
+        query: Datadog log query string
+        time_range: Time range to search (e.g. "1h", "24h", "7d")
+
+    Returns:
+        Dictionary with matching log entries
+    """
+    # Your Datadog API integration here
+    ...
+```
+
+Then register it in `agent/server.py`:
+
+```python
+from .tools import fetch_url, http_request, linear_comment, slack_thread_reply
+from .tools.datadog_search import datadog_search
+
+return create_deep_agent(
+    ...
+    tools=[
+        http_request, fetch_url,
+        linear_comment, slack_thread_reply,
+        datadog_search,  # new tool
+    ],
+    ...
+)
+```
+
+The agent will automatically see the tool's name, docstring, and parameter types — the docstring serves as the tool description, so write it clearly.
+
+### Removing tools
+
+If you only use Linear (not Slack), remove `slack_thread_reply` from the tools list and vice versa. If you don't need web fetching, remove `fetch_url`.
+
+### Conditional tools
+
+You can vary the toolset based on the trigger source:
+
+```python
+base_tools = [http_request, fetch_url]
+source = config["configurable"].get("source")
+
+if source == "linear":
+    tools = [*base_tools, linear_comment]
+elif source == "slack":
+    tools = [*base_tools, slack_thread_reply]
+else:
+    tools = [*base_tools, linear_comment, slack_thread_reply]
+
+return create_deep_agent(tools=tools, ...)
+```
+
+### Browser automation (Stagehand + Browserbase)
+
+A `browser` subagent drives a real Chromium via the [Stagehand](https://github.com/browserbase/stagehand-python) SDK, exposing `browser_navigate`, `browser_act`, `browser_observe`, `browser_extract`, and `browser_close`. The main agent delegates to it for tasks that need live interaction or JS-rendered pages (logging in, clicking flows, reproducing UI bugs, scraping structured data); static reads should still use `fetch_url`.
+
+The tools are added in `agent/server.py` (gated by `load_browser_tools()`), and live in `agent/integrations/stagehand_browser.py`. One browser session is kept per agent thread and reused across calls. The tools are a no-op unless configured:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `STAGEHAND_ENV` | `LOCAL` | `LOCAL` runs a local Chromium in-process; `BROWSERBASE` runs the browser on Browserbase cloud. |
+| `STAGEHAND_MODEL_API_KEY` | falls back to `MODEL_API_KEY`, then `ANTHROPIC_API_KEY` | LLM key Stagehand uses for `act`/`observe`/`extract`. Required for `LOCAL`; optional for `BROWSERBASE` (the hosted Stagehand API ships with model support). |
+| `STAGEHAND_MODEL` | `anthropic/claude-sonnet-4-5` | Model Stagehand uses. |
+| `BROWSERBASE_API_KEY` / `BROWSERBASE_PROJECT_ID` | — | `BROWSERBASE_API_KEY` is required when `STAGEHAND_ENV=BROWSERBASE`; `BROWSERBASE_PROJECT_ID` is forwarded when set. |
+| `STAGEHAND_LOCAL_CHROME_PATH` | `/usr/bin/chromium` in Docker | Path to the Chrome/Chromium binary for `LOCAL` mode. |
+| `STAGEHAND_HEADLESS` | `true` | Run the local browser headless. |
+
+For `LOCAL` mode the Dockerfile installs `chromium`; for `BROWSERBASE` mode no browser binary is needed in the image.
+
+---
+
+## 4. Triggers
+
+Open SWE supports three invocation surfaces: Linear, Slack, and GitHub. Each is implemented as a webhook endpoint in `agent/webapp.py`. You can add, remove, or modify triggers independently.
+
+### Removing a trigger
+
+If you don't use Linear, simply don't configure the Linear webhook and remove the env vars. Same for Slack. The webhook endpoints still exist but won't receive events.
+
+To fully remove a trigger's code, delete the corresponding endpoint from `agent/webapp.py`:
+
+- **Linear**: `linear_webhook()` and `process_linear_issue()`
+- **Slack**: `slack_webhook()` and `process_slack_mention()`
+
+### Default repository
+
+Set the default GitHub org and repo used across all triggers (Slack, Linear, GitHub) when no repo is specified:
+
+```bash
+DEFAULT_REPO_OWNER="my-org"      # Default GitHub org (used everywhere)
+DEFAULT_REPO_NAME="my-repo"      # Default GitHub repo (used everywhere)
+```
+
+These are used as the fallback when:
+- A Slack message doesn't specify a repo (and no thread metadata exists)
+- A Linear issue's team/project isn't in the `LINEAR_TEAM_TO_REPO` mapping
+- A user writes `repo:name` without an org prefix — the org defaults to `DEFAULT_REPO_OWNER`
+
+### Repository extraction from messages
+
+Both Slack and Linear support specifying a target repo directly in the message or comment text. The shared utility `extract_repo_from_text()` in `agent/utils/repo.py` handles parsing these formats:
+
+- `repo:owner/name` — explicit org and repo
+- `repo owner/name` — space syntax (same result)
+- `repo:name` — repo name only; the org defaults to `DEFAULT_REPO_OWNER`
+- `https://github.com/owner/name` — GitHub URL
+
+### Customizing Linear routing
+
+The `LINEAR_TEAM_TO_REPO` dict in `agent/utils/linear_team_repo_map.py` maps Linear teams and projects to GitHub repos:
+
+```python
+LINEAR_TEAM_TO_REPO = {
+    "Engineering": {
+        "projects": {
+            "backend": {"owner": "my-org", "name": "backend"},
+            "frontend": {"owner": "my-org", "name": "frontend"},
+        },
+        "default": {"owner": "my-org", "name": "monorepo"},
+    },
+}
+```
+
+Users can also override the team/project mapping on a per-comment basis by including `repo:owner/name` in their `@openswe` comment. This takes priority over the mapping — the mapping is used as a fallback when no repo is specified in the comment. If the team/project isn't found in the mapping either, `DEFAULT_REPO_OWNER`/`DEFAULT_REPO_NAME` is used.
+
+### Customizing Slack routing
+
+Slack repo resolution (`get_slack_repo_config` in `agent/webapp.py`) checks, in order:
+
+1. Repo carried over from the existing Slack thread's metadata.
+2. A `repo:owner/name` (or GitHub URL) token in the channel's **topic or purpose** (its "description"). This lets a channel be pinned to a repo without anyone repeating it per-message.
+3. The triggering user's dashboard `default_repo`.
+4. The team default repo.
+5. `SLACK_REPO_OWNER`/`SLACK_REPO_NAME`, falling back to `DEFAULT_REPO_OWNER`/`DEFAULT_REPO_NAME`.
+
+Users can still override per-message with `repo:owner/name` syntax in their Slack message (this is read from the message text by the agent). A shorthand `repo:name` (without the org) is also supported — the org defaults to `DEFAULT_REPO_OWNER`.
+
+Reading the channel topic/purpose requires the bot's Slack token to have the `channels:read` (and `groups:read` for private channels) scope so `conversations.info` succeeds.
+
+### Adding a new trigger
+
+To add a new invocation surface (e.g. Jira, Discord, a custom API):
+
+1. **Add a webhook endpoint** in `agent/webapp.py`:
+
+```python
+@app.post("/webhooks/my-trigger")
+async def my_trigger_webhook(request: Request, background_tasks: BackgroundTasks):
+    # Parse the incoming event
+    payload = await request.json()
+    
+    # Extract task description and repo info
+    task_description = payload["description"]
+    repo_config = {"owner": "my-org", "name": "my-repo"}
+    
+    # Create a LangGraph run
+    background_tasks.add_task(process_my_trigger, task_description, repo_config)
+    return {"status": "accepted"}
+```
+
+2. **Create a processing function** that builds the prompt and starts an agent run:
+
+```python
+async def process_my_trigger(task_description: str, repo_config: dict):
+    thread_id = generate_deterministic_id(task_description)
+    langgraph_client = get_client(url=LANGGRAPH_URL)
+    
+    await langgraph_client.runs.create(
+        thread_id,
+        "agent",
+        input={"messages": [{"role": "user", "content": task_description}]},
+        config={"configurable": {
+            "repo": repo_config,
+            "source": "my-trigger",
+            "user_email": "user@example.com",
+        }},
+        if_not_exists="create",
+    )
+```
+
+3. **Add a communication tool** (optional) so the agent can report back:
+
+```python
+# agent/tools/my_trigger_reply.py
+def my_trigger_reply(message: str) -> dict:
+    """Post a reply to the triggering service."""
+    # Your API call here
+    ...
+```
+
+The key fields in `config.configurable` are:
+- `repo`: `{"owner": "...", "name": "..."}` — which GitHub repo to work on
+- `source`: string identifying the trigger (used for auth routing and communication)
+- `user_email`: the triggering user's email (for GitHub OAuth resolution)
+
+---
+
+## 5. System prompt
+
+The system prompt is assembled in `agent/prompt.py` from modular sections. You can customize behavior by editing individual sections:
+
+| Section | What it controls |
+|---|---|
+| `WORKING_ENV_SECTION` | Sandbox paths and execution constraints |
+| `TASK_EXECUTION_SECTION` | Workflow steps (understand → implement → verify → submit) |
+| `CODING_STANDARDS_SECTION` | Code style, testing, and quality rules |
+| `COMMIT_PR_SECTION` | PR title/body format and commit conventions |
+| `CODE_REVIEW_GUIDELINES_SECTION` | How the agent reviews code changes |
+| `COMMUNICATION_SECTION` | Formatting and messaging guidelines |
+
+### Default prompt file
+
+Open SWE supports a `default_prompt.md` file for org-level instructions that apply to **every** agent run, regardless of which repository is being worked on. This is the recommended way to set default repository preferences, org conventions, and shared guidelines.
+
+The file is loaded at agent startup and injected into the system prompt between the task overview and repository setup sections.
+
+**Location:** [`agent/resources/default_prompt.md`](../agent/resources/default_prompt.md) for the bundled default.
+
+**Override:** Set the `DEFAULT_PROMPT_PATH` environment variable to use a different file:
+
+```bash
+DEFAULT_PROMPT_PATH="/path/to/my-org-prompt.md"
+```
+
+**Format:** Write plain markdown. The content is injected as-is under a `### Custom Instructions` heading in the system prompt. Example:
+
+```markdown
+# Default Prompt
+
+## Default Repository
+
+When no repository is specified, work on the **my-app** repository under **my-org**.
+
+## Organization Conventions
+
+- Use conventional commits: feat:, fix:, chore:
+- Always tag the requesting user when work is complete
+```
+
+**Loading order:** Default prompt → System prompt sections → AGENTS.md (per-repo). If the file is missing or empty, it is silently skipped — no error is raised.
+
+**When to use `default_prompt.md` vs `AGENTS.md`:**
+
+| | `default_prompt.md` | `AGENTS.md` |
+|---|---|---|
+| Scope | All tasks, all repos | Single repository |
+| Location | Open SWE project root | Target repo root |
+| Use for | Default repo, org conventions | Repo-specific coding standards |
+
+### Using AGENTS.md
+
+Drop an `AGENTS.md` file in the root of any repository to add repo-specific instructions. The agent reads it from the sandbox at startup and appends it to the system prompt. This is the easiest way to encode conventions per-repo without modifying Open SWE's code.
+
+---
+
+## 6. Middleware
+
+Middleware hooks run around the agent loop. Open SWE includes:
+
+| Middleware | Type | Purpose |
+|---|---|---|
+| `ToolErrorMiddleware` | Tool error handler | Catches and formats tool errors |
+| `check_message_queue_before_model` | Before model | Injects follow-up messages that arrived mid-run |
+| `ensure_no_empty_msg` | After model | Re-injects a tool call when the model stops without one, so runs don't end prematurely |
+| `notify_step_limit_reached` | After agent | Posts a Slack reply when the agent hits the model-call limit |
+
+There is intentionally no after-agent middleware that opens a PR for the agent. The agent is responsible for committing, pushing, opening/updating the draft PR, and replying in the source channel. If you want a deterministic backstop for your fork, add an `@after_agent` hook here.
+
+Add custom middleware by appending to the middleware list in `get_agent()`. See the [LangChain middleware docs](https://python.langchain.com/docs/concepts/agents/#middleware) for the `@before_model` and `@after_agent` decorators.
+
+**Example — adding a CI check after agent completion:**
+
+```python
+from langchain.agents.middleware import AgentState, after_agent
+from langgraph.runtime import Runtime
+
+@after_agent
+async def run_ci_check(state: AgentState, runtime: Runtime):
+    """Run CI checks after the agent finishes."""
+    # Trigger your CI pipeline here
+    ...
+```
+
+Then add it to the middleware list:
+
+```python
+middleware=[
+    ToolErrorMiddleware(),
+    check_message_queue_before_model,
+    ensure_no_empty_msg,
+    notify_step_limit_reached,
+    run_ci_check,  # new middleware
+],
+```

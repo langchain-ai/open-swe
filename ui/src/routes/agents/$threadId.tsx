@@ -1,9 +1,9 @@
 import { Navigate, createFileRoute } from "@tanstack/react-router"
 
-import { AgentThreadView } from "@/components/agents/AgentThreadView"
+import { AgentThreadView } from "@/features/agents/components/AgentThreadView"
 import { Skeleton } from "@/components/ui/skeleton"
-import { AgentThreadStreamBoundary } from "@/lib/agents/provider/useIsInAgentThreadStream"
-import { useAgentThread } from "@/lib/agents/queries"
+import { AgentThreadStreamBoundary } from "@/features/agents/lib/provider/useIsInAgentThreadStream"
+import { useAgentThread } from "@/features/agents/lib/queries"
 
 export const Route = createFileRoute("/agents/$threadId")({
   component: AgentThreadPage,

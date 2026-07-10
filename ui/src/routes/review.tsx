@@ -91,7 +91,7 @@ function ReviewPage() {
     <AppShell
       user={session.data}
       title="Open SWE Review"
-      description="Automatically review pull requests for bugs and issues. Runs are billed based on underlying agent usage."
+      description="Review pull requests for bugs and issues on demand, or run reviews automatically. Runs are billed based on underlying agent usage."
     >
       <RepositoriesSection canEdit={canEdit} />
 
@@ -202,14 +202,14 @@ function RepositoriesSection({ canEdit: _canEdit }: { canEdit: boolean }) {
     },
   });
 
-  const enabled = useQuery({
-    queryKey: ["enabledReviewRepos"],
-    queryFn: api.listEnabledReviewRepos,
+  const autoReview = useQuery({
+    queryKey: ["autoReviewRepos"],
+    queryFn: api.listAutoReviewRepos,
   });
 
-  const enabledSet = useMemo(
-    () => new Set(enabled.data?.repos ?? []),
-    [enabled.data?.repos],
+  const autoReviewSet = useMemo(
+    () => new Set(autoReview.data?.repos ?? []),
+    [autoReview.data?.repos],
   );
 
   const grouped = useMemo(() => {
@@ -224,12 +224,12 @@ function RepositoriesSection({ canEdit: _canEdit }: { canEdit: boolean }) {
     return Array.from(byOwner.entries()).sort(([a], [b]) => a.localeCompare(b));
   }, [repos.data?.repositories]);
 
-  const loading = repos.isLoading || enabled.isLoading;
+  const loading = repos.isLoading || autoReview.isLoading;
 
   return (
     <SettingsSection
       title="Repositories"
-      description="Source-control installations. Click into one to enable repos for automatic review."
+      description="All installed repositories support on-demand reviews. Click into an installation to configure automatic reviews."
     >
       <div className="divide-y divide-border">
         {loading && (
@@ -244,7 +244,7 @@ function RepositoriesSection({ canEdit: _canEdit }: { canEdit: boolean }) {
           </p>
         )}
         {grouped.map(([owner, list]) => {
-          const enabledCount = list.filter((r) => enabledSet.has(r.full_name)).length;
+          const autoReviewCount = list.filter((r) => autoReviewSet.has(r.full_name)).length;
           return (
             <Link
               key={owner}
@@ -263,7 +263,7 @@ function RepositoriesSection({ canEdit: _canEdit }: { canEdit: boolean }) {
               </div>
               <div className="flex items-center gap-2 text-xs text-muted-foreground">
                 <span>
-                  {enabledCount}/{list.length} Repositories Enabled
+                  {autoReviewCount}/{list.length} Run Automatically
                 </span>
                 <CaretRightIcon className="size-3.5" />
               </div>

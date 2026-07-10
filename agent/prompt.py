@@ -1,6 +1,7 @@
 import logging
 import os
 import shlex
+from importlib import resources
 from pathlib import Path
 
 from deepagents import HarnessProfile, register_harness_profile
@@ -15,10 +16,7 @@ from .utils.github_comments import UNTRUSTED_GITHUB_COMMENT_OPEN_TAG
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_PROMPT_PATH = os.environ.get(
-    "DEFAULT_PROMPT_PATH",
-    str(Path(__file__).resolve().parent.parent / "default_prompt.md"),
-)
+DEFAULT_PROMPT_PATH = os.environ.get("DEFAULT_PROMPT_PATH")
 
 # Tools stripped from the agent regardless of run state (none today: plan-mode
 # tool stripping is dynamic and handled by PlanModeMiddleware, not the profile).
@@ -30,6 +28,12 @@ HARNESS_EXCLUDED_TOOLS: frozenset[str] = frozenset()
 # deepagents' generic base regardless of which supported provider the team or
 # profile selects for the agent.
 HARNESS_PROFILE_KEYS: tuple[str, ...] = ("anthropic", "openai", "google_genai", "fireworks")
+TODO_DISABLED_MODEL_KEYS: tuple[str, ...] = (
+    "openai:gpt-5.6-sol",
+    "anthropic:claude-opus-4-8",
+    "anthropic:claude-sonnet-5",
+    "anthropic:claude-fable-5",
+)
 
 
 def _load_default_prompt() -> str:
@@ -38,19 +42,27 @@ def _load_default_prompt() -> str:
     Returns empty string if the file doesn't exist or can't be read.
     """
     try:
-        path = Path(DEFAULT_PROMPT_PATH)
-        if path.is_file():
-            content = path.read_text().strip()
-            if content:
-                # Escape curly braces so .format() doesn't choke on them
-                escaped = content.replace("{", "{{").replace("}", "}}")
-                return f"""---
+        if DEFAULT_PROMPT_PATH:
+            content = Path(DEFAULT_PROMPT_PATH).read_text().strip()
+        else:
+            content = (
+                resources.files("agent.resources")
+                .joinpath("default_prompt.md")
+                .read_text(encoding="utf-8")
+                .strip()
+            )
+        if content:
+            escaped = content.replace("{", "{{").replace("}", "}}")
+            return f"""---
 
 ### Custom Instructions
 
 {escaped}"""
     except Exception:
-        logger.warning("Failed to read default prompt file at %s", DEFAULT_PROMPT_PATH)
+        logger.warning(
+            "Failed to read default prompt from %s",
+            DEFAULT_PROMPT_PATH or "agent.resources/default_prompt.md",
+        )
     return ""
 
 
@@ -103,7 +115,7 @@ PLAN_MODE_GUIDANCE_SECTION = """---
 
 ### Plan Mode
 
-If a task would genuinely benefit from a structured plan before any code — complex, many files, or multiple valid approaches — call the `enter_plan_mode` tool. This is NOT triggered by the word "plan" in the request; use judgment. Once in plan mode, stay read-only for the target repo, research the code, create/edit your plan as a dated Markdown file under `/workspace/plans/` (for example, `/workspace/plans/YYYY-MM-DD-short-task-slug.md`), publish it with `save_plan`, and share the plan-review link with the user, who approves before you implement.
+If a task would genuinely benefit from a structured plan before any code — complex, many files, or multiple valid approaches — call the `enter_plan_mode` tool. This is NOT triggered by the word "plan" in the request; use judgment. Once in plan mode, stay read-only for the target repo, research the code, create/edit your plan as a dated Markdown file under `/workspace/plans/` (for example, `/workspace/plans/YYYY-MM-DD-short-task-slug.md`), publish it with `save_plan`, and share the plan-review link with the user. In Slack, ask the plan owner to reply naturally in the thread to approve the plan or request changes; do not send plan-approval buttons.
 
 Plan-review link for this conversation: {plan_review_url}"""
 
@@ -140,7 +152,7 @@ You are in a read-only research-and-planning phase for the target repo. Your sin
 - <targeted tests or manual checks that prove the behavior>
 ```
 
-After saving, post a brief completion message with the plan-review link via `slack_thread_reply` (Slack) or `linear_comment` (Linear), invite the user to review/comment/approve, then stop. Do not implement — you will be re-invoked with the approval and any feedback."""
+After saving, post a brief completion message with the plan-review link via `slack_thread_reply` (Slack) or `linear_comment` (Linear), invite the user to review/comment/approve, then stop. For Slack, use plain text and tell the plan owner to reply naturally in the thread to approve or request changes; do not use Block Kit or approval buttons. Do not implement — you will be re-invoked with the approval and any feedback."""
 
 
 SELF_AWARENESS_SECTION = """---
@@ -396,6 +408,11 @@ def register_open_swe_harness_profile() -> None:
     )
     for key in HARNESS_PROFILE_KEYS:
         register_harness_profile(key, profile)
+    for key in TODO_DISABLED_MODEL_KEYS:
+        register_harness_profile(
+            key,
+            HarnessProfile(excluded_middleware=frozenset({"TodoListMiddleware"})),
+        )
 
 
 register_open_swe_harness_profile()

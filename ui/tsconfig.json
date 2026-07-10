@@ -1,16 +1,7 @@
 {
   "include": ["**/*.ts", "**/*.tsx", "eslint.config.js", "prettier.config.js", "vite.config.js"],
   "exclude": [
-    // Ported from a desktop host app; not typechecked until integrated (see file headers).
-    "src/components/agents/ported/ChatView.tsx",
-    "src/components/agents/ported/PromptBar.tsx",
-    "src/components/agents/ported/BranchSelector.tsx",
-    "src/components/agents/ported/ContextIndicator.tsx",
-    "src/components/agents/ported/SourceControlPanel.tsx",
-    // Depends on host-provided window.git; live dashboard uses AgentGitPanel instead.
-    "src/components/agents/ported/SourceControlTile.tsx",
-    "src/components/agents/ported/Footer.tsx",
-    "src/components/agents/ported/ThreadPicker.tsx"
+    "src/features/agents/experiments/**"
   ],
 
   "compilerOptions": {
