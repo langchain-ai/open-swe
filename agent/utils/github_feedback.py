@@ -10,7 +10,7 @@ from typing import Any
 from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
 
-from ..reviewer_findings import list_findings
+from ..review.findings import list_findings
 from .langsmith import create_langsmith_feedback, delete_langsmith_feedback
 from .reviewer_outcomes import outcome_from_score, upsert_finding_outcome
 

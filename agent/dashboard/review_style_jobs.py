@@ -10,7 +10,7 @@ from typing import Any
 from langgraph_sdk import get_client
 
 from ..dispatch import create_durable_run
-from ..review_style_collector import (
+from ..review.style_collector import (
     collect_review_samples,
     format_samples_for_analyzer,
     generate_review_style_thread_id,
