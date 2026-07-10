@@ -118,6 +118,21 @@ def test_harness_profile_replaces_deepagents_base_for_supported_providers() -> N
         assert profile.base_system_prompt == OPEN_SWE_SHARED_BASE
 
 
+def test_harness_profile_disables_todos_for_gpt_5_6_sol() -> None:
+    import deepagents.profiles.harness.harness_profiles as hp
+
+    import agent.prompt  # noqa: F401
+    from agent.prompt import TODO_DISABLED_MODEL_KEYS
+
+    hp._ensure_harness_profiles_loaded()
+    assert TODO_DISABLED_MODEL_KEYS == ("openai:gpt-5.6-sol",)
+    profile = hp._get_harness_profile("openai:gpt-5.6-sol")
+    assert profile is not None
+    assert profile.base_system_prompt == agent.prompt.OPEN_SWE_SHARED_BASE
+    assert profile.excluded_middleware == frozenset({"TodoListMiddleware"})
+    assert not hp._HARNESS_PROFILES["openai"].excluded_middleware
+
+
 def test_shared_base_is_neutral_for_read_only_agents() -> None:
     """Shared base carries no PR/commit/mutation guidance (it also underlies the reviewer)."""
     from agent.prompt import OPEN_SWE_SHARED_BASE

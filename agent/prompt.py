@@ -30,6 +30,7 @@ HARNESS_EXCLUDED_TOOLS: frozenset[str] = frozenset()
 # deepagents' generic base regardless of which supported provider the team or
 # profile selects for the agent.
 HARNESS_PROFILE_KEYS: tuple[str, ...] = ("anthropic", "openai", "google_genai", "fireworks")
+TODO_DISABLED_MODEL_KEYS: tuple[str, ...] = ("openai:gpt-5.6-sol",)
 
 
 def _load_default_prompt() -> str:
@@ -396,6 +397,11 @@ def register_open_swe_harness_profile() -> None:
     )
     for key in HARNESS_PROFILE_KEYS:
         register_harness_profile(key, profile)
+    for key in TODO_DISABLED_MODEL_KEYS:
+        register_harness_profile(
+            key,
+            HarnessProfile(excluded_middleware=frozenset({"TodoListMiddleware"})),
+        )
 
 
 register_open_swe_harness_profile()
