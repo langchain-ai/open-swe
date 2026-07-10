@@ -67,8 +67,9 @@ Configured in `agent/server.py:get_agent`, runs around every model call (in this
 5. `SlackAssistantStatusMiddleware` — keeps the Slack "assistant is typing"-style status up to date around model calls.
 6. `ensure_no_empty_msg` — after-model hook; when the model emits a message with no tool call (and hasn't already messaged the user or confirmed completion) it re-injects a synthetic `no_op` / `confirming_completion` tool call so the run continues instead of ending prematurely.
 7. `notify_step_limit_reached` — after-agent hook that posts a Slack reply when the agent hits the step limit, so the user gets a clear signal instead of silence.
-8. `SandboxCircuitBreakerMiddleware` — trips the agent out of repeated sandbox failures instead of looping.
-9. `ModelFallbackMiddleware` (optional, last) — added only when `LLM_FALLBACK_MODEL_ID` or the per-model default fallback differs from the primary model.
+8. `ensure_slack_closeout_reply` — after-agent hook that, for Slack-origin runs, posts a synthesized closeout reply (final assistant summary + last successful PR URL) if the run ended without a successful `slack_thread_reply`. Completion means the developer was told in-thread — a successful `git push` / `open_pull_request` / `gh pr edit` is not a substitute.
+9. `SandboxCircuitBreakerMiddleware` — trips the agent out of repeated sandbox failures instead of looping.
+10. `ModelFallbackMiddleware` (optional, last) — added only when `LLM_FALLBACK_MODEL_ID` or the per-model default fallback differs from the primary model.
 
 The system prompt instructs the agent to call a tool every turn, and `ensure_no_empty_msg` re-injects a tool call when it doesn't — together these keep runs from stopping partway through a task.
 
