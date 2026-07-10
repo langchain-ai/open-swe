@@ -1,4 +1,4 @@
-"""Middleware that removes stale OpenAI Responses reasoning references."""
+"""Middleware that sanitizes replayed OpenAI Responses history."""
 
 from __future__ import annotations
 
@@ -46,6 +46,20 @@ def _is_stale_reasoning_reference(block: dict[str, Any]) -> bool:
     return isinstance(block_id, str) and block_id.startswith("rs_")
 
 
+def _content_tool_call(block: dict[str, Any]) -> tuple[bool, str | None]:
+    """Return whether a content block is a tool call and its call ID."""
+    if block.get("type") == "non_standard" and isinstance(block.get("value"), dict):
+        block = block["value"]
+    block_type = block.get("type")
+    if block_type == "tool_call":
+        call_id = block.get("id")
+    elif block_type in ("function_call", "custom_tool_call", "computer_call"):
+        call_id = block.get("call_id")
+    else:
+        return False, None
+    return True, call_id if isinstance(call_id, str) else None
+
+
 def _sanitize_ai_message(message: AIMessage) -> tuple[int, set[str]]:
     """Drop stale reasoning blocks and their dependent function_call blocks.
 
@@ -66,38 +80,82 @@ def _sanitize_ai_message(message: AIMessage) -> tuple[int, set[str]]:
             dropping = True
             removed_reasoning += 1
             continue
-        if dropping and isinstance(block, dict) and block.get("type") == "function_call":
-            call_id = block.get("call_id")
-            if isinstance(call_id, str):
-                dropped_call_ids.add(call_id)
-            continue
+        if dropping and isinstance(block, dict):
+            is_tool_call, call_id = _content_tool_call(block)
+            if is_tool_call:
+                if call_id is not None:
+                    dropped_call_ids.add(call_id)
+                continue
         dropping = False
         content.append(block)
     if len(content) != len(message.content):
         message.content = content
+    if removed_reasoning:
+        content_call_ids: set[str] = set()
+        for block in content:
+            if not isinstance(block, dict):
+                continue
+            _, call_id = _content_tool_call(block)
+            if call_id is not None:
+                content_call_ids.add(call_id)
+        dropped_call_ids.update(
+            call_id
+            for tool_call in (*message.tool_calls, *message.invalid_tool_calls)
+            if isinstance(call_id := tool_call.get("id"), str) and call_id not in content_call_ids
+        )
     if dropped_call_ids and message.tool_calls:
         message.tool_calls = [
             tool_call
             for tool_call in message.tool_calls
             if tool_call.get("id") not in dropped_call_ids
         ]
+    if dropped_call_ids and message.invalid_tool_calls:
+        message.invalid_tool_calls = [
+            tool_call
+            for tool_call in message.invalid_tool_calls
+            if tool_call.get("id") not in dropped_call_ids
+        ]
     return removed_reasoning, dropped_call_ids
+
+
+def _assistant_tool_call_ids(message: AIMessage) -> set[str]:
+    """Return every tool call ID that the Responses API can replay."""
+    call_ids = {
+        call_id
+        for tool_call in (*message.tool_calls, *message.invalid_tool_calls)
+        if isinstance(call_id := tool_call.get("id"), str)
+    }
+    if isinstance(message.content, list):
+        for block in message.content:
+            if not isinstance(block, dict):
+                continue
+            _, call_id = _content_tool_call(block)
+            if call_id is not None:
+                call_ids.add(call_id)
+    return call_ids
 
 
 def _sanitize_messages(messages: list[Any]) -> None:
     removed_reasoning = 0
     dropped_call_ids: set[str] = set()
+    valid_call_ids: set[str] = set()
+    sanitized_messages = []
+    removed_orphans = 0
     for message in messages:
-        if not isinstance(message, AIMessage) or not isinstance(message.content, list):
+        if isinstance(message, AIMessage):
+            if isinstance(message.content, list):
+                message_removed, message_dropped = _sanitize_ai_message(message)
+                removed_reasoning += message_removed
+                dropped_call_ids |= message_dropped
+            valid_call_ids |= _assistant_tool_call_ids(message)
+        elif isinstance(message, ToolMessage) and message.tool_call_id not in valid_call_ids:
+            removed_orphans += 1
             continue
-        message_removed, message_dropped = _sanitize_ai_message(message)
-        removed_reasoning += message_removed
-        dropped_call_ids |= message_dropped
-    if dropped_call_ids:
-        for index in range(len(messages) - 1, -1, -1):
-            message = messages[index]
-            if isinstance(message, ToolMessage) and message.tool_call_id in dropped_call_ids:
-                del messages[index]
+        sanitized_messages.append(message)
+
+    if removed_orphans:
+        messages[:] = sanitized_messages
+
     if removed_reasoning:
         logger.warning(
             "Removed %d stale OpenAI Responses reasoning reference(s) and %d "
@@ -105,10 +163,15 @@ def _sanitize_messages(messages: list[Any]) -> None:
             removed_reasoning,
             len(dropped_call_ids),
         )
+    if removed_orphans:
+        logger.warning(
+            "Removed %d OpenAI tool result(s) without matching function calls",
+            removed_orphans,
+        )
 
 
 class SanitizeOpenAIResponsesMiddleware(AgentMiddleware):
-    """Drop non-replayable OpenAI Responses reasoning item references."""
+    """Drop non-replayable reasoning references and orphaned tool results."""
 
     async def awrap_model_call(
         self,
