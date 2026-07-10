@@ -1431,7 +1431,7 @@ async def test_status_filter_refreshes_threads_missing_run_status(monkeypatch) -
 
 
 @pytest.mark.asyncio
-async def test_get_my_profile_normalizes_stale_openai_models() -> None:
+async def test_get_my_profile_preserves_gpt_5_5_models() -> None:
     with patch(
         "agent.dashboard.routes.get_profile",
         new_callable=AsyncMock,
@@ -1444,9 +1444,9 @@ async def test_get_my_profile_normalizes_stale_openai_models() -> None:
     ):
         payload = await routes.get_my_profile({"sub": "octocat"})
 
-    assert payload["default_model"] == "openai:gpt-5.6-sol"
+    assert payload["default_model"] == "openai:gpt-5.5"
     assert payload["reasoning_effort"] == "medium"
-    assert payload["default_subagent_model"] == "openai:gpt-5.6-sol"
+    assert payload["default_subagent_model"] == "openai:gpt-5.5"
     assert payload["subagent_reasoning_effort"] == "low"
 
 
