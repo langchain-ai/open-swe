@@ -90,6 +90,7 @@ async def test_agent_does_not_add_custom_repair_middleware() -> None:
     names = {type(m).__name__ for m in middleware}
     # Built-in PatchToolCallsMiddleware (added by create_deep_agent) replaces it.
     assert "RepairOrphanedToolCallsMiddleware" not in names
+    assert "SanitizeOpenAIResponsesMiddleware" not in names
 
 
 @pytest.mark.asyncio
