@@ -6,6 +6,7 @@ import pytest
 from langgraph.graph.state import RunnableConfig
 
 from agent import reviewer
+from agent.reviewer_scout import ScoutLead, ScoutReport
 
 
 def test_reviewer_system_prompt_formats_without_keyerror() -> None:
@@ -24,7 +25,11 @@ def test_reviewer_system_prompt_formats_without_keyerror() -> None:
     assert "at least 1 finding" not in prompt.lower()
     assert "wrong identifier/value/key" in prompt
     assert "Keep at most 6 findings" in prompt
-    assert "Delegate at most one review pass" in prompt
+    assert "Invoke the `general-purpose` subagent exactly once" in prompt
+    assert "Independently inspect every changed hunk" in prompt
+    assert "Only you may call finding-management" in prompt
+    assert "Finding-reply mode" in prompt
+    assert "reassessment of one existing finding" in prompt
 
 
 def test_reviewer_eval_prompt_omits_historical_and_benchmark_gaming() -> None:
@@ -224,6 +229,11 @@ async def test_reviewer_resolves_app_installation_token_at_run_start() -> None:
             return_value="/workspace",
         ),
         patch("agent.reviewer.make_model", return_value=MagicMock()),
+        patch(
+            "agent.reviewer.generate_scout_report",
+            new_callable=AsyncMock,
+            return_value=ScoutReport(leads=[]),
+        ),
         patch("agent.reviewer.create_deep_agent", return_value=dummy_agent) as create_agent,
     ):
         await reviewer.get_reviewer_agent(config)
@@ -280,6 +290,11 @@ async def test_reviewer_reuses_app_token_for_sandbox_proxy() -> None:
         ),
         patch("agent.reviewer.fetch_agents_md", new_callable=AsyncMock, return_value=None),
         patch("agent.reviewer.make_model", return_value=MagicMock()),
+        patch(
+            "agent.reviewer.generate_scout_report",
+            new_callable=AsyncMock,
+            return_value=ScoutReport(leads=[]),
+        ),
         patch("agent.reviewer.create_deep_agent", return_value=_DummyAgent()) as create_agent,
     ):
         await reviewer.get_reviewer_agent(config)
@@ -318,6 +333,11 @@ async def test_reviewer_raises_when_app_installation_token_unavailable() -> None
             return_value=MagicMock(),
         ) as mock_sandbox,
         patch("agent.reviewer.make_model", return_value=MagicMock()),
+        patch(
+            "agent.reviewer.generate_scout_report",
+            new_callable=AsyncMock,
+            return_value=ScoutReport(leads=[]),
+        ),
         patch("agent.reviewer.create_deep_agent", return_value=_DummyAgent()) as create_agent,
     ):
         await reviewer.get_reviewer_agent(config)
@@ -329,7 +349,7 @@ async def test_reviewer_raises_when_app_installation_token_unavailable() -> None
 
 
 @pytest.mark.asyncio
-async def test_reviewer_applies_eval_model_and_effort_overrides() -> None:
+async def test_reviewer_uses_fixed_staged_model_profile() -> None:
     config: RunnableConfig = {
         "configurable": {
             "__is_for_execution__": True,
@@ -341,14 +361,108 @@ async def test_reviewer_applies_eval_model_and_effort_overrides() -> None:
             "head_sha": "head",
             "reviewer_model_id": "anthropic:claude-opus-4-8",
             "reviewer_reasoning_effort": "high",
-            "reviewer_subagent_model_id": "openai:gpt-5.6-sol",
+            "reviewer_subagent_model_id": "openai:gpt-5.6-terra",
             "reviewer_subagent_reasoning_effort": "low",
         },
         "metadata": {},
     }
     dummy_agent = _DummyAgent()
+    scout_model = MagicMock()
+    parent_model = MagicMock()
+    delegated_model = MagicMock()
+    parent_model.model_copy.return_value = delegated_model
 
     with (
+        patch("agent.reviewer.make_model", side_effect=[scout_model, parent_model]) as make_model,
+        patch("agent.reviewer.create_deep_agent", return_value=dummy_agent) as create_agent,
+    ):
+        await reviewer.get_reviewer_agent(config)
+
+    assert [call.args[0] for call in make_model.call_args_list] == [
+        "openai:gpt-5.6-sol",
+        "openai:gpt-5.6-luna",
+    ]
+    for call in make_model.call_args_list:
+        assert call.kwargs["reasoning"] == {"effort": "xhigh", "summary": "auto"}
+    parent_model.model_copy.assert_called_once_with()
+    assert create_agent.call_args.kwargs["model"] is parent_model
+
+    subagent = create_agent.call_args.kwargs["subagents"][0]
+    assert subagent["name"] == "general-purpose"
+    assert subagent["model"] is delegated_model
+    assert subagent["model"] is not create_agent.call_args.kwargs["model"]
+    assert subagent["tools"] == []
+    assert subagent["response_format"] is reviewer.DeepReviewReport
+    assert len(subagent["middleware"]) == 2
+    assert subagent["middleware"][1]._excluded == frozenset({"write_file", "edit_file"})
+    assert "add_finding" not in subagent["system_prompt"]
+    assert "publish_review" not in subagent["system_prompt"]
+    assert "cannot manage findings or publish reviews" in subagent["system_prompt"]
+
+
+@pytest.mark.asyncio
+async def test_reviewer_runs_scout_before_parent_and_shares_report_with_both_paths() -> None:
+    config: RunnableConfig = {
+        "configurable": {
+            "__is_for_execution__": True,
+            "thread_id": "reviewer-thread-id",
+            "source": "github",
+            "repo": {"owner": "acme", "name": "repo"},
+            "pr_number": 1,
+            "pr_url": "https://github.com/acme/repo/pull/1",
+            "base_sha": "base",
+            "head_sha": "head",
+        },
+        "metadata": {},
+    }
+    report = ScoutReport(
+        leads=[
+            ScoutLead(
+                id="L01",
+                file="src/a.py",
+                start_line=8,
+                end_line=8,
+                suspicious_change="Changed cache key",
+                failure_mode="Writes and reads use different keys",
+                supporting_clue="The key literal changed",
+                verification_steps=["Compare cache writers and readers"],
+                priority="high",
+            ),
+            ScoutLead(
+                id="L02",
+                file="src/b.py",
+                start_line=13,
+                end_line=13,
+                suspicious_change="Removed await",
+                failure_mode="The update can race publication",
+                supporting_clue="The call is no longer awaited",
+                verification_steps=["Inspect the callee contract"],
+                priority="medium",
+            ),
+        ]
+    )
+    events: list[str] = []
+    captured: dict[str, object] = {}
+
+    async def fake_scout(**kwargs: object) -> ScoutReport:
+        events.append("scout")
+        assert "diff --git" in str(kwargs["diff_text"])
+        assert "repo: acme/repo" in str(kwargs["review_context"])
+        return report
+
+    def fake_create_deep_agent(**kwargs: object) -> _DummyAgent:
+        events.append("parent-created")
+        captured.update(kwargs)
+        return _DummyAgent()
+
+    with (
+        patch("agent.reviewer.make_model", return_value=MagicMock()),
+        patch("agent.reviewer.create_deep_agent", side_effect=fake_create_deep_agent),
+        patch(
+            "agent.reviewer.get_github_app_installation_token_with_expiry",
+            new_callable=AsyncMock,
+            return_value=("gh-token", None),
+        ),
         patch(
             "agent.reviewer.ensure_sandbox_for_thread",
             new_callable=AsyncMock,
@@ -359,44 +473,71 @@ async def test_reviewer_applies_eval_model_and_effort_overrides() -> None:
             new_callable=AsyncMock,
             return_value="/workspace",
         ),
-        patch("agent.reviewer.make_model", return_value=MagicMock()) as make_model,
-        patch("agent.reviewer.create_deep_agent", return_value=dummy_agent),
+        patch("agent.reviewer.prepare_review_repo", new_callable=AsyncMock, return_value=True),
+        patch("agent.reviewer.materialize_trusted_skills", new_callable=AsyncMock, return_value=[]),
         patch(
-            "agent.reviewer.fetch_agents_md",
+            "agent.reviewer.fetch_pr_diff",
             new_callable=AsyncMock,
-            return_value=None,
+            return_value="diff --git a/src/a.py b/src/a.py\n",
         ),
+        patch(
+            "agent.reviewer.fetch_pr_metadata",
+            new_callable=AsyncMock,
+            return_value=("Title", "Body"),
+        ),
+        patch("agent.reviewer.fetch_agents_md", new_callable=AsyncMock, return_value=None),
+        patch("agent.reviewer.generate_scout_report", side_effect=fake_scout),
     ):
         await reviewer.get_reviewer_agent(config)
+        prepare = captured["middleware"][0]
+        assert events == ["parent-created"]
+        updates = await prepare.abefore_agent({}, None)
 
-    main_model_call = make_model.call_args_list[0]
-    assert main_model_call.args == ("anthropic:claude-opus-4-8",)
-    assert main_model_call.kwargs["thinking"] == {"type": "adaptive", "display": "summarized"}
-    assert main_model_call.kwargs["effort"] == "high"
-    subagent_model_call = make_model.call_args_list[1]
-    assert subagent_model_call.args == ("openai:gpt-5.6-sol",)
-    assert subagent_model_call.kwargs["reasoning"] == {"effort": "low", "summary": "auto"}
+    assert events == ["parent-created", "scout"]
+    prompt = updates["rendered_system_prompt"]
+    staged = updates["staged_review_context"]
+    assert '"id": "L01"' in prompt
+    assert '"id": "L02"' in prompt
+    assert "Parent assignments: L01" in prompt
+    assert "Delegated assignments: L02" in prompt
+    assert staged in prompt
+
+    subagent = captured["subagents"][0]
+    middleware = subagent["middleware"][0]
+    request = MagicMock()
+    request.state = {"staged_review_context": staged}
+    request.system_message = None
+    request.override.side_effect = lambda **kwargs: kwargs
+    handler = AsyncMock(return_value="ok")
+    await middleware.awrap_model_call(request, handler)
+    injected = handler.await_args.args[0]["system_message"].text
+    assert '"id": "L01"' in injected
+    assert '"id": "L02"' in injected
+    assert "Delegated assignments: L02" in injected
 
 
 @pytest.mark.asyncio
-async def test_reviewer_subagent_inherits_eval_model_without_explicit_override() -> None:
+async def test_reviewer_scout_failure_stops_before_parent_model_call() -> None:
     config: RunnableConfig = {
         "configurable": {
             "__is_for_execution__": True,
             "thread_id": "reviewer-thread-id",
             "repo": {"owner": "acme", "name": "repo"},
             "pr_number": 1,
-            "pr_url": "https://github.com/acme/repo/pull/1",
             "base_sha": "base",
             "head_sha": "head",
-            "reviewer_model_id": "anthropic:claude-opus-4-8",
-            "reviewer_reasoning_effort": "high",
         },
         "metadata": {},
     }
-    dummy_agent = _DummyAgent()
+    captured: dict[str, object] = {}
+
+    def fake_create_deep_agent(**kwargs: object) -> _DummyAgent:
+        captured.update(kwargs)
+        return _DummyAgent()
 
     with (
+        patch("agent.reviewer.make_model", return_value=MagicMock()),
+        patch("agent.reviewer.create_deep_agent", side_effect=fake_create_deep_agent),
         patch(
             "agent.reviewer.ensure_sandbox_for_thread",
             new_callable=AsyncMock,
@@ -407,24 +548,20 @@ async def test_reviewer_subagent_inherits_eval_model_without_explicit_override()
             new_callable=AsyncMock,
             return_value="/workspace",
         ),
-        patch("agent.reviewer.make_model", return_value=MagicMock()) as make_model,
-        patch("agent.reviewer.create_deep_agent", return_value=dummy_agent),
+        patch("agent.reviewer.prepare_review_repo", new_callable=AsyncMock, return_value=True),
+        patch("agent.reviewer.materialize_trusted_skills", new_callable=AsyncMock, return_value=[]),
+        patch("agent.reviewer.fetch_pr_diff", new_callable=AsyncMock, return_value="diff"),
+        patch("agent.reviewer.fetch_agents_md", new_callable=AsyncMock, return_value=None),
         patch(
-            "agent.reviewer.fetch_agents_md",
+            "agent.reviewer.generate_scout_report",
             new_callable=AsyncMock,
-            return_value=None,
+            side_effect=RuntimeError("scout failed"),
         ),
     ):
         await reviewer.get_reviewer_agent(config)
-
-    main_model_call = make_model.call_args_list[0]
-    assert main_model_call.args == ("anthropic:claude-opus-4-8",)
-    assert main_model_call.kwargs["thinking"] == {"type": "adaptive", "display": "summarized"}
-    assert main_model_call.kwargs["effort"] == "high"
-    subagent_model_call = make_model.call_args_list[1]
-    assert subagent_model_call.args == ("anthropic:claude-opus-4-8",)
-    assert subagent_model_call.kwargs["thinking"] == {"type": "adaptive", "display": "summarized"}
-    assert subagent_model_call.kwargs["effort"] == "high"
+        prepare = captured["middleware"][0]
+        with pytest.raises(RuntimeError, match="scout failed"):
+            await prepare.abefore_agent({}, None)
 
 
 @pytest.mark.asyncio
@@ -474,6 +611,11 @@ async def test_reviewer_injects_repo_style_during_eval() -> None:
             return_value="Flag table rerender regressions.",
         ),
         patch("agent.reviewer.make_model", return_value=MagicMock()),
+        patch(
+            "agent.reviewer.generate_scout_report",
+            new_callable=AsyncMock,
+            return_value=ScoutReport(leads=[]),
+        ),
         patch("agent.reviewer.create_deep_agent", side_effect=fake_create_deep_agent),
         patch("agent.reviewer.fetch_pr_review_threads", fetch_threads),
         patch("agent.reviewer.fetch_pr_diff", new_callable=AsyncMock, return_value=None),
@@ -549,6 +691,11 @@ async def test_reviewer_inlines_org_guidelines_into_system_prompt() -> None:
             return_value=None,
         ),
         patch("agent.reviewer.make_model", return_value=MagicMock()),
+        patch(
+            "agent.reviewer.generate_scout_report",
+            new_callable=AsyncMock,
+            return_value=ScoutReport(leads=[]),
+        ),
         patch("agent.reviewer.create_deep_agent", side_effect=fake_create_deep_agent),
     ):
         await reviewer.get_reviewer_agent(config)
@@ -618,6 +765,11 @@ async def test_reviewer_inlines_agents_md_into_system_prompt() -> None:
             return_value="Always use the design system IconButton.",
         ) as mock_fetch_agents_md,
         patch("agent.reviewer.make_model", return_value=MagicMock()),
+        patch(
+            "agent.reviewer.generate_scout_report",
+            new_callable=AsyncMock,
+            return_value=ScoutReport(leads=[]),
+        ),
         patch("agent.reviewer.create_deep_agent", side_effect=fake_create_deep_agent),
     ):
         await reviewer.get_reviewer_agent(config)
@@ -674,6 +826,11 @@ async def test_reviewer_inlines_claude_md_when_agents_md_absent() -> None:
             return_value="# CLAUDE.md\nUse semantic tokens only.",
         ) as mock_fetch_agents_md,
         patch("agent.reviewer.make_model", return_value=MagicMock()),
+        patch(
+            "agent.reviewer.generate_scout_report",
+            new_callable=AsyncMock,
+            return_value=ScoutReport(leads=[]),
+        ),
         patch("agent.reviewer.create_deep_agent", side_effect=fake_create_deep_agent),
     ):
         await reviewer.get_reviewer_agent(config)
@@ -1043,6 +1200,11 @@ async def test_reviewer_injects_pr_review_threads_into_first_review_context() ->
             return_value=fake_threads,
         ) as mock_fetch_threads,
         patch("agent.reviewer.make_model", return_value=MagicMock()),
+        patch(
+            "agent.reviewer.generate_scout_report",
+            new_callable=AsyncMock,
+            return_value=ScoutReport(leads=[]),
+        ),
         patch("agent.reviewer.create_deep_agent", side_effect=fake_create_deep_agent),
     ):
         await reviewer.get_reviewer_agent(config)
@@ -1123,6 +1285,11 @@ async def test_reviewer_injects_pr_review_threads_into_re_review_context() -> No
             return_value=[],
         ),
         patch("agent.reviewer.make_model", return_value=MagicMock()),
+        patch(
+            "agent.reviewer.generate_scout_report",
+            new_callable=AsyncMock,
+            return_value=ScoutReport(leads=[]),
+        ),
         patch("agent.reviewer.create_deep_agent", side_effect=fake_create_deep_agent),
     ):
         await reviewer.get_reviewer_agent(config)
@@ -1185,6 +1352,11 @@ async def test_reviewer_omits_threads_block_when_fetch_returns_empty() -> None:
             return_value=[],
         ),
         patch("agent.reviewer.make_model", return_value=MagicMock()),
+        patch(
+            "agent.reviewer.generate_scout_report",
+            new_callable=AsyncMock,
+            return_value=ScoutReport(leads=[]),
+        ),
         patch("agent.reviewer.create_deep_agent", side_effect=fake_create_deep_agent),
     ):
         await reviewer.get_reviewer_agent(config)
@@ -1248,6 +1420,11 @@ async def test_reviewer_continues_when_thread_fetch_raises() -> None:
             side_effect=RuntimeError("network down"),
         ),
         patch("agent.reviewer.make_model", return_value=MagicMock()),
+        patch(
+            "agent.reviewer.generate_scout_report",
+            new_callable=AsyncMock,
+            return_value=ScoutReport(leads=[]),
+        ),
         patch("agent.reviewer.create_deep_agent", side_effect=fake_create_deep_agent),
     ):
         await reviewer.get_reviewer_agent(config)
@@ -1326,6 +1503,11 @@ async def test_reviewer_populates_diff_line_set_from_github_api() -> None:
             return_value=pr_diff,
         ) as mock_fetch_diff,
         patch("agent.reviewer.make_model", return_value=MagicMock()),
+        patch(
+            "agent.reviewer.generate_scout_report",
+            new_callable=AsyncMock,
+            return_value=ScoutReport(leads=[]),
+        ),
         patch("agent.reviewer.create_deep_agent", side_effect=fake_create_deep_agent),
     ):
         await reviewer.get_reviewer_agent(config)
@@ -1396,6 +1578,11 @@ async def test_reviewer_leaves_validation_disabled_when_diff_fetch_fails() -> No
             return_value=None,
         ),
         patch("agent.reviewer.make_model", return_value=MagicMock()),
+        patch(
+            "agent.reviewer.generate_scout_report",
+            new_callable=AsyncMock,
+            return_value=ScoutReport(leads=[]),
+        ),
         patch("agent.reviewer.create_deep_agent", side_effect=fake_create_deep_agent),
     ):
         await reviewer.get_reviewer_agent(config)
@@ -1465,6 +1652,11 @@ async def test_reviewer_injects_pr_title_and_body_into_context() -> None:
             return_value=("Add retry logic for uploads", "Retries flaky uploads up to 3 times."),
         ) as mock_fetch_metadata,
         patch("agent.reviewer.make_model", return_value=MagicMock()),
+        patch(
+            "agent.reviewer.generate_scout_report",
+            new_callable=AsyncMock,
+            return_value=ScoutReport(leads=[]),
+        ),
         patch("agent.reviewer.create_deep_agent", side_effect=fake_create_deep_agent),
     ):
         await reviewer.get_reviewer_agent(config)

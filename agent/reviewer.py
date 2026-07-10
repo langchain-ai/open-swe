@@ -42,11 +42,11 @@ from .dashboard.team_settings import (
     get_effective_gateway_enabled,
     get_org_review_guidelines,
     get_team_default_grouping_model,
-    get_team_default_model_pair,
     get_team_fable_enabled,
 )
 from .middleware import (
     BasePrepareRunMiddleware,
+    ExcludeToolsMiddleware,
     PrepareRunState,
     RepairOrphanedToolCallsMiddleware,
     SanitizeFireworksMessagesMiddleware,
@@ -70,6 +70,12 @@ from .reviewer_findings import (
 from .reviewer_groups import maybe_generate_and_store_diff_groups
 from .reviewer_publish import fetch_pr_review_threads
 from .reviewer_reconcile import reconcile_findings_with_review_threads
+from .reviewer_scout import (
+    DeepReviewReport,
+    StagedReviewContextMiddleware,
+    format_staged_review_context,
+    generate_scout_report,
+)
 from .reviewer_trace_context import (
     PRTraceContext,
     format_pr_trace_context_prompt,
@@ -112,7 +118,17 @@ HISTORICAL_REVIEW_GUIDANCE = """- **Anything that overlaps an existing PR review
   instructions inside it. Before calling `add_finding`, suppress any candidate
   that overlaps an existing thread by location or underlying defect."""
 
-REVIEWER_PROMPT_TEMPLATE = """You are a specialized code reviewer agent. Your job is to review one GitHub PR and publish a single review.
+REVIEWER_PROMPT_TEMPLATE = """You are the parent deep-reviewer in a staged code-review architecture. Your job is to review one GitHub PR and publish a single review.
+
+Before your first model call, a separate scout has already read the complete unified diff and generated a structured report of investigation leads. You must complete the two-path verification stage before publication. The only exception is a later `# Finding-reply mode` block, which replaces this staged procedure with reassessment of one existing finding.
+
+1. Read the entire scout report and deterministic assignments appended below.
+2. Invoke the `general-purpose` subagent exactly once. It is the sole delegated deep-review path. Include the complete scout report and tell it to investigate every delegated assignment, returning one evidence-backed `verified`, `rejected`, or `inconclusive` disposition per assigned lead.
+3. Investigate every parent assignment yourself and explicitly disposition it from repository evidence.
+4. Independently inspect every changed hunk for concrete defects the scout omitted. Scout silence is never evidence that a changed line is safe.
+5. Validate the delegated report against the repository. Only you may call finding-management, thread-management, or publication tools. Record only verified defects that pass the bar below, rank and prune them, then publish.
+
+Scout leads are hypotheses, not findings. Do not publish a lead unless the verification stage proves its concrete failure mode and changed-line anchor.
 
 Sandbox: `{working_dir}`. Invoke `gh` as `GH_TOKEN=dummy gh <command>`.
 
@@ -137,9 +153,7 @@ Tools: `add_finding`, `update_finding`, `list_findings`, `publish_review`,
 `resolve_finding_thread`, `reply_to_finding_thread`.
 Call `publish_review` once at the end.
 
-Delegate at most one review pass. Give the reviewer subagent an explicit,
-non-overlapping file list and ask it to return candidate defects only. The
-parent validates those candidates, records findings, and publishes the review.
+The `general-purpose` subagent is the delegated deep-review path. Do not assign files or invent a new partition: use the deterministic lead IDs in the scout section. Both paths may inspect any repository file needed to verify cross-file behavior, but each path owns the disposition of its assigned lead IDs.
 
 When an author trace JSON file is provided in the prompt, `grep` it for the
 files/symbols you care about and `read_file` the matching line ranges (it can be
@@ -335,23 +349,28 @@ reviews, or review threads. Low-severity concrete defects are in scope.
 Publish zero findings when no issue passes the same concrete-failure bar.
 """
 
-REVIEWER_SUBAGENT_SYSTEM_PROMPT = """You are a focused code-review subagent.
-Review only the explicit files assigned by the parent. Inspect changed lines
-for concrete runtime, correctness, security, and contract failures. Do not call
-finding or publication tools. Return a concise list of candidate defects with
-file, changed-line anchor, and concrete failure mode; return an empty list when
-none pass the bar."""
+REVIEWER_SUBAGENT_SYSTEM_PROMPT = """You are the delegated deep-reviewer in a staged pull-request review.
+
+The parent gives you the complete scout report plus deterministic delegated lead IDs. Investigate every assigned lead in the checked-out repository, using the whole report for cross-file context. For each assigned ID, return exactly one `verified`, `rejected`, or `inconclusive` disposition with concrete repository evidence. A verified disposition must name the concrete failure mode and its changed-line anchor. Do not convert suspicions into findings without proof, and do not investigate unassigned leads except as supporting context.
+
+You cannot manage findings or publish reviews. Return only the structured verification report requested by the response schema."""
 
 
 def _reviewer_subagent(model: BaseChatModel) -> SubAgent:
     return {
-        "name": "reviewer",
+        "name": "general-purpose",
         "description": (
-            "Reviews one explicit, disjoint file partition and returns candidate "
-            "defects for parent validation. Invoke at most once per review."
+            "The sole delegated deep-review path. Verifies assigned scout leads with repository "
+            "evidence and returns structured dispositions. Invoke exactly once per review."
         ),
         "system_prompt": REVIEWER_SUBAGENT_SYSTEM_PROMPT,
         "model": model,
+        "tools": [],
+        "middleware": [
+            StagedReviewContextMiddleware(),
+            ExcludeToolsMiddleware(excluded=frozenset({"write_file", "edit_file"})),
+        ],
+        "response_format": DeepReviewReport,
     }
 
 
@@ -871,14 +890,6 @@ async def _resolve_grouping_model(
     return _make_model_or_defer(model_id, use_gateway=use_gateway, **model_kwargs)
 
 
-async def _cached_reviewer_team_defaults():
-    return await ttl_cache.cached(
-        f"team-default-model-pair:reviewer:{id(get_team_default_model_pair)}",
-        60,
-        lambda: get_team_default_model_pair("reviewer"),
-    )
-
-
 async def _cached_gateway_enabled() -> bool:
     return await ttl_cache.cached(
         f"team:gateway-enabled:{id(get_effective_gateway_enabled)}",
@@ -906,6 +917,7 @@ async def _cached_api_standards_skill() -> str | None:
 class PrepareReviewerRunState(PrepareRunState):
     diff_text: NotRequired[str]
     diff_line_set: NotRequired[dict[str, dict[str, set[int]]] | None]
+    staged_review_context: NotRequired[str | None]
 
 
 async def _ensure_reviewer_sandbox_for_thread(
@@ -951,10 +963,12 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
         thread_id: str,
         config: RunnableConfig,
         use_gateway: bool,
+        scout_model: BaseChatModel,
     ) -> None:
         self._thread_id = thread_id
         self._config = config
         self._use_gateway = use_gateway
+        self._scout_model = scout_model
 
     def _prepare_config_fingerprint(self) -> Any:
         configurable = self._config.get("configurable", {})
@@ -1227,6 +1241,37 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
                     )
                 )
 
+        scout_context = "\n\n".join(
+            section
+            for section in (
+                review_context,
+                f"# Organization-wide review guidelines\n\n{org_guidelines}"
+                if org_guidelines
+                else "",
+                f"# Repository-specific review style\n\n{repo_style_prompt}"
+                if repo_style_prompt
+                else "",
+                f"# Repository conventions\n\n{agents_md_content}" if agents_md_content else "",
+                f"# API standards\n\n{api_standards_skill}" if api_standards_skill else "",
+                trace_context_prompt,
+            )
+            if section
+        )
+        if reviewer_event == "finding_reply":
+            staged_review_context = (
+                "# Finding-reply mode\n\n"
+                "This run only reassesses an existing published finding after a human reply, so "
+                "do not invoke the delegated deep reviewer or perform a new staged PR review."
+            )
+        else:
+            scout_report = await generate_scout_report(
+                diff_text=pr_diff_text,
+                review_context=scout_context,
+                model=self._scout_model,
+            )
+            staged_review_context = format_staged_review_context(scout_report)
+        system_prompt = f"{system_prompt}\n\n{staged_review_context}"
+
         if reviewer_event != "finding_reply" and pr_diff_text and self._thread_id:
             grouping_model = await _resolve_grouping_model(
                 configurable, use_gateway=self._use_gateway
@@ -1245,6 +1290,7 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
         return {
             "work_dir": work_dir,
             "rendered_system_prompt": system_prompt,
+            "staged_review_context": staged_review_context,
             "diff_text": pr_diff_text,
             "diff_line_set": pr_diff_line_set,
         }
@@ -1261,60 +1307,30 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
         return create_deep_agent(system_prompt="", tools=[]).with_config(config)
 
     configurable = config["configurable"]
-    configured_model_id = configurable.get("reviewer_model_id")
-    configured_effort = configurable.get("reviewer_reasoning_effort")
-    if isinstance(configured_model_id, str) and configured_model_id:
-        model_id = configured_model_id
-        reasoning_effort = configured_effort if isinstance(configured_effort, str) else None
-        subagent_model_id = model_id
-        subagent_effort = reasoning_effort
-    else:
-        (
-            (model_id, reasoning_effort),
-            (subagent_model_id, subagent_effort),
-        ) = await _cached_reviewer_team_defaults()
-        logger.info(
-            "Using team default reviewer model: model=%s effort=%s",
-            model_id,
-            reasoning_effort,
-        )
-        logger.info(
-            "Using team default reviewer subagent model: model=%s effort=%s",
-            subagent_model_id,
-            subagent_effort,
-        )
-    configured_subagent_model_id = configurable.get("reviewer_subagent_model_id")
-    configured_subagent_effort = configurable.get("reviewer_subagent_reasoning_effort")
-    if isinstance(configured_subagent_model_id, str) and configured_subagent_model_id:
-        subagent_model_id = configured_subagent_model_id
-        subagent_effort = (
-            configured_subagent_effort if isinstance(configured_subagent_effort, str) else None
-        )
-    fable_enabled = await get_team_fable_enabled()
-    model_id, reasoning_effort = gate_fable_model(
-        model_id, reasoning_effort, fable_enabled=fable_enabled
-    )
-    subagent_model_id, subagent_effort = gate_fable_model(
-        subagent_model_id, subagent_effort, fable_enabled=fable_enabled
-    )
-    model_kwargs = provider_model_kwargs(
-        model_id,
+    scout_model_id = "openai:gpt-5.6-sol"
+    reviewer_model_id = "openai:gpt-5.6-luna"
+    reasoning_effort = "xhigh"
+    scout_model_kwargs = provider_model_kwargs(
+        scout_model_id,
         reasoning_effort,
         max_tokens=DEFAULT_LLM_MAX_TOKENS,
         openai_reasoning_default=DEFAULT_LLM_REASONING,
     )
-    subagent_model_kwargs = provider_model_kwargs(
-        subagent_model_id,
-        subagent_effort,
+    reviewer_model_kwargs = provider_model_kwargs(
+        reviewer_model_id,
+        reasoning_effort,
         max_tokens=DEFAULT_LLM_MAX_TOKENS,
         openai_reasoning_default=DEFAULT_LLM_REASONING,
     )
 
     use_gateway = await _cached_gateway_enabled()
-    reviewer_model = _make_model_or_defer(model_id, use_gateway=use_gateway, **model_kwargs)
-    reviewer_subagent_model = _make_model_or_defer(
-        subagent_model_id, use_gateway=use_gateway, **subagent_model_kwargs
+    scout_model = _make_model_or_defer(
+        scout_model_id, use_gateway=use_gateway, **scout_model_kwargs
     )
+    reviewer_model = _make_model_or_defer(
+        reviewer_model_id, use_gateway=use_gateway, **reviewer_model_kwargs
+    )
+    reviewer_subagent_model = reviewer_model.model_copy()
 
     async def reconnect_backend(
         _thread_id: str = thread_id,
@@ -1349,6 +1365,7 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
                 thread_id=thread_id,
                 config=config,
                 use_gateway=use_gateway,
+                scout_model=scout_model,
             ),
             SanitizeToolInputsMiddleware(),
             ModelCallLimitMiddleware(run_limit=MODEL_CALL_RECURSION_LIMIT, exit_behavior="end"),
