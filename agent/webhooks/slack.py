@@ -4,6 +4,8 @@ Helpers and constants stay in common.py; they are accessed through the module
 object (``common.X``) so tests that monkeypatch them keep working.
 """
 
+import asyncio
+import re
 from datetime import UTC, datetime
 from typing import Any
 
@@ -11,6 +13,80 @@ import httpx
 from langchain_core.messages.content import create_text_block
 
 from . import common
+
+_PLAN_APPROVAL_PHRASES = {
+    "approve",
+    "approve it",
+    "approve plan",
+    "approve the plan",
+    "approved",
+    "go ahead",
+    "go ahead and implement",
+    "go ahead and implement it",
+    "go ahead with implementation",
+    "i approve",
+    "i approve the plan",
+    "implement it",
+    "lgtm",
+    "looks good",
+    "looks good go ahead",
+    "looks good please proceed",
+    "looks good to me",
+    "please implement",
+    "please proceed",
+    "proceed",
+    "ship it",
+    "start implementation",
+    "this looks good",
+    "yeah",
+    "yep",
+    "yes",
+    "yes please",
+}
+_PLAN_APPROVAL_NEGATIONS = {
+    "cancel",
+    "change",
+    "changes",
+    "deny",
+    "denied",
+    "do not",
+    "don t",
+    "dont",
+    "hold",
+    "no",
+    "not",
+    "reject",
+    "revise",
+    "stop",
+    "wait",
+}
+_plan_approval_locks: dict[str, asyncio.Lock] = {}
+
+
+def _is_natural_language_plan_approval(text: str) -> bool:
+    normalized = re.sub(r"[^a-z0-9]+", " ", text.lower()).strip()
+    if not normalized:
+        return False
+    padded = f" {normalized} "
+    if any(f" {phrase} " in padded for phrase in _PLAN_APPROVAL_NEGATIONS):
+        return False
+    return any(f" {phrase} " in padded for phrase in _PLAN_APPROVAL_PHRASES)
+
+
+async def _slack_user_can_reply_to_ready_plan(
+    channel_id: str, thread_ts: str, slack_user_id: str
+) -> bool:
+    if not channel_id or not thread_ts or not slack_user_id:
+        return False
+    from agent.dashboard.plan_api import _thread_metadata
+
+    thread_id = common.generate_thread_id_from_slack_thread(channel_id, thread_ts)
+    metadata = await _thread_metadata(thread_id)
+    return (
+        metadata.get("plan_mode") is True
+        and metadata.get("plan_status") == "ready"
+        and await common._slack_user_is_thread_owner(thread_id, slack_user_id)
+    )
 
 
 def _format_slack_thread_section(
@@ -43,12 +119,40 @@ def _format_slack_thread_section(
 
 
 async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[str, str]) -> None:
-    """Process a Slack app mention by creating a run or queuing a mid-run message."""
+    """Process a Slack request by creating a run or queuing a mid-run message."""
     try:
         await _process_slack_mention_impl(event_data, repo_config)
     except Exception:  # noqa: BLE001
         common.logger.exception("Unexpected error while processing Slack mention")
         await _notify_slack_processing_error(event_data, repo_config)
+
+
+async def _maybe_approve_ready_plan_reply(
+    thread_id: str,
+    channel_id: str,
+    thread_ts: str,
+    user_id: str,
+    user_name: str,
+    text: str,
+) -> bool:
+    if not _is_natural_language_plan_approval(text):
+        return False
+    if not await common._slack_user_is_thread_owner(thread_id, user_id):
+        return False
+
+    from agent.dashboard.plan_api import _thread_metadata, approve_plan_for_thread
+
+    lock = _plan_approval_locks.setdefault(thread_id, asyncio.Lock())
+    async with lock:
+        metadata = await _thread_metadata(thread_id)
+        if metadata.get("plan_mode") is not True or metadata.get("plan_status") != "ready":
+            return False
+        await approve_plan_for_thread(
+            thread_id,
+            metadata=metadata,
+            actor=user_name or user_id or "Slack user",
+        )
+    return True
 
 
 async def _notify_slack_processing_error(
@@ -310,6 +414,11 @@ async def _process_slack_mention_impl(
                 channel_id, thread_ts, user_id, user_email, reason=reason
             )
         await common.set_slack_assistant_status(channel_id, thread_ts, status="")
+        return
+
+    if await _maybe_approve_ready_plan_reply(
+        thread_id, channel_id, thread_ts, user_id, user_name, clean_text
+    ):
         return
 
     configurable: dict[str, Any] = {

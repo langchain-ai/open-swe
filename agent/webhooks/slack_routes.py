@@ -71,8 +71,16 @@ async def slack_webhook(
             and common.SLACK_BOT_USER_ID
             and f"<@{common.SLACK_BOT_USER_ID}>" in message_text
         )
-        if not (has_username_mention or has_id_mention):
-            return {"status": "ignored", "reason": "Not an app_mention event"}
+        is_ready_plan_reply = bool(
+            event.get("type") == "message"
+            and await service._slack_user_can_reply_to_ready_plan(
+                str(event.get("channel") or ""),
+                str(event.get("thread_ts") or ""),
+                str(event.get("user") or ""),
+            )
+        )
+        if not (has_username_mention or has_id_mention or is_ready_plan_reply):
+            return {"status": "ignored", "reason": "Not an app mention or plan reply"}
 
     if event.get("subtype") == "bot_message" or event.get("bot_id"):
         return {"status": "ignored", "reason": "Event from a bot"}

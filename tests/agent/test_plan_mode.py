@@ -196,29 +196,42 @@ def test_enter_plan_mode_exported() -> None:
     assert callable(enter_plan_mode)
 
 
-def test_build_plan_approval_blocks_has_three_buttons() -> None:
-    from agent.tools.slack_thread_reply import _build_plan_approval_blocks
+@pytest.mark.parametrize(
+    "reply",
+    [
+        "approve",
+        "Approved!",
+        "Looks good to me.",
+        "go ahead",
+        "ship it",
+        "yes",
+    ],
+)
+def test_natural_language_plan_approval_accepts_affirmative_replies(reply: str) -> None:
+    from agent.webhooks.slack import _is_natural_language_plan_approval
 
-    blocks = _build_plan_approval_blocks("Here is my plan")
-    assert len(blocks) == 2
-    assert blocks[0]["type"] == "section"
-    actions = blocks[1]
-    assert actions["type"] == "actions"
-    elements = actions["elements"]
-    assert len(elements) == 3
-    texts = [e["text"]["text"] for e in elements]
-    assert "Approve & Implement" in texts
-    assert "Revise Plan" in texts
-    assert "Cancel" in texts
+    assert _is_natural_language_plan_approval(reply) is True
 
 
-def test_build_plan_approval_blocks_values_have_plan_approval_type() -> None:
-    import json
+@pytest.mark.parametrize(
+    "reply",
+    [
+        "do not approve",
+        "No, revise the plan",
+        "approve after these changes",
+        "looks mostly good, but change the tests",
+        "cancel",
+        "what changed?",
+    ],
+)
+def test_natural_language_plan_approval_rejects_ambiguous_or_negative_replies(reply: str) -> None:
+    from agent.webhooks.slack import _is_natural_language_plan_approval
 
-    from agent.tools.slack_thread_reply import _build_plan_approval_blocks
+    assert _is_natural_language_plan_approval(reply) is False
 
-    blocks = _build_plan_approval_blocks("plan text")
-    for element in blocks[1]["elements"]:
-        value = json.loads(element["value"])
-        assert value["type"] == "plan_approval"
-        assert value["action"] in ("approve", "revise", "cancel")
+
+def test_plan_mode_prompt_uses_plain_text_slack_approval() -> None:
+    prompt = construct_system_prompt(working_dir="/work", plan_mode=True)
+
+    assert "reply naturally in the thread" in prompt
+    assert "do not use Block Kit or approval buttons" in prompt

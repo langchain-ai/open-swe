@@ -26,6 +26,8 @@ def test_slack_thread_reply_prompt_requires_slack_only_terseness() -> None:
     assert "default to one sentence" in prompt
     assert "specific to Slack tool messages" in prompt
     assert "not normal web UI assistant messages" in prompt
+    assert "reply naturally" in prompt
+    assert "plan_approval" not in prompt
 
 
 async def test_slack_thread_reply_returns_structured_error_for_msg_too_long(
@@ -148,6 +150,32 @@ async def test_slack_thread_reply_uses_post_failed_without_slack_error(
     assert result["error"] == "post failed"
     assert result["slack_error"] is None
     assert result["message_chars"] == 5
+
+
+async def test_slack_thread_reply_posts_plain_text_without_options(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    async def fake_post_and_store_mapping(
+        channel_id: str,
+        thread_ts: str,
+        message: str,
+        *,
+        blocks: list[dict[str, Any]] | None = None,
+    ) -> tuple[str | None, str | None]:
+        captured.update(message=message, blocks=blocks)
+        return "2.0", None
+
+    monkeypatch.setattr(slack_reply_tool, "get_config", _config)
+    monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", fake_post_and_store_mapping)
+
+    result = await slack_reply_tool.slack_thread_reply(
+        "Plan ready: review it and reply naturally to approve or request changes."
+    )
+
+    assert result == {"success": True}
+    assert captured["blocks"] is None
 
 
 async def test_slack_thread_reply_builds_option_blocks(monkeypatch: pytest.MonkeyPatch) -> None:
