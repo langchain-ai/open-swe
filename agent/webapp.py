@@ -484,12 +484,8 @@ def _is_repo_allowed(repo_config: dict[str, str]) -> bool:
     return False
 
 
-async def _is_repo_enabled_for_review(repo_config: dict[str, str]) -> bool:
-    """Check the dashboard opt-in list for reviewer-agent entrypoints.
-
-    The opt-in list is empty by default, so repos are off until an admin
-    enables them in the dashboard's Open SWE Review tab.
-    """
+async def _is_repo_auto_review_enabled(repo_config: dict[str, str]) -> bool:
+    """Return whether automatic reviews are enabled for a repository."""
     return await is_review_repo_enabled(repo_config.get("owner", ""), repo_config.get("name", ""))
 
 
@@ -1882,14 +1878,12 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks) ->
         if action in _GH_PR_AGENT_STATE_ACTIONS:
             background_tasks.add_task(update_agent_thread_pr_state, payload)
         if action in _GH_PR_WATCH_TOGGLE_ACTIONS:
-            if not await _is_repo_enabled_for_review(webhook_repo_config):
-                return {"status": "ignored", "reason": "Repository not enabled for review"}
             logger.info("Accepted GitHub PR %s webhook, scheduling reviewer watch update", action)
             background_tasks.add_task(process_github_pr_close, payload)
             return {"status": "accepted", "message": f"Processing PR {action} for reviewer watch"}
         if action in _GH_PR_FIRST_REVIEW_ACTIONS:
-            if not await _is_repo_enabled_for_review(webhook_repo_config):
-                return {"status": "ignored", "reason": "Repository not enabled for review"}
+            if not await _is_repo_auto_review_enabled(webhook_repo_config):
+                return {"status": "ignored", "reason": "Automatic review disabled for repository"}
             gate_rejection = await _enforce_public_repo_org_gate(payload, "pull_request")
             if gate_rejection is not None:
                 return gate_rejection
@@ -1903,8 +1897,8 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks) ->
         }
 
     if event_type == "push":
-        if not await _is_repo_enabled_for_review(webhook_repo_config):
-            return {"status": "ignored", "reason": "Repository not enabled for review"}
+        if not await _is_repo_auto_review_enabled(webhook_repo_config):
+            return {"status": "ignored", "reason": "Automatic review disabled for repository"}
         logger.info("Accepted GitHub push webhook, scheduling reviewer watch evaluation")
         background_tasks.add_task(process_github_push_event, payload)
         return {"status": "accepted", "message": "Processing GitHub push for reviewer watch"}
@@ -1957,8 +1951,6 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks) ->
         event_type == "pull_request_review_comment"
         and _review_comment_reply_parent_id(payload) is not None
     ):
-        if not await _is_repo_enabled_for_review(webhook_repo_config):
-            return {"status": "ignored", "reason": "Repository not enabled for review"}
         gate_rejection = await _enforce_public_repo_org_gate(payload, event_type)
         if gate_rejection is not None:
             return gate_rejection
