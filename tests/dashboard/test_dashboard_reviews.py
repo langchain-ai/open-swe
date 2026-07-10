@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from agent.dashboard import review_api, routes
-from agent.reviewer_findings import REVIEWER_THREAD_KIND
+from agent.review.findings import REVIEWER_THREAD_KIND
 
 
 def _thread(owner: str, name: str, number: int, author: str) -> dict[str, Any]:

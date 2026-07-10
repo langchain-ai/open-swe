@@ -38,7 +38,7 @@ from .middleware import (
     TimeoutWrapupMiddleware,
     ToolErrorMiddleware,
 )
-from .review_style_guidance import REVIEWER_STYLE_THEMES
+from .review.style_guidance import REVIEWER_STYLE_THEMES
 from .runtime import (
     DEFAULT_LLM_MAX_TOKENS,
     DEFAULT_LLM_MODEL_ID,

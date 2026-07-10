@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from agent.reviewer_groups import (
+from agent.review.groups import (
     _build_prompt,
     _DiffGroupingResult,
     _DiffGroupModel,
@@ -124,13 +124,13 @@ async def test_maybe_generate_skips_when_signature_unchanged() -> None:
     }
     with (
         patch(
-            "agent.reviewer_groups.get_thread_metadata",
+            "agent.review.groups.get_thread_metadata",
             new_callable=AsyncMock,
             return_value=existing,
         ),
-        patch("agent.reviewer_groups.generate_diff_groups", new_callable=AsyncMock) as gen,
+        patch("agent.review.groups.generate_diff_groups", new_callable=AsyncMock) as gen,
         patch(
-            "agent.reviewer_groups.set_reviewer_thread_metadata",
+            "agent.review.groups.set_reviewer_thread_metadata",
             new_callable=AsyncMock,
         ) as set_meta,
     ):
@@ -146,17 +146,17 @@ async def test_maybe_generate_stores_when_changed() -> None:
     groups = [{"title": "t", "summary": "s", "files": ["foo.py"]}]
     with (
         patch(
-            "agent.reviewer_groups.get_thread_metadata",
+            "agent.review.groups.get_thread_metadata",
             new_callable=AsyncMock,
             return_value={},
         ),
         patch(
-            "agent.reviewer_groups.generate_diff_groups",
+            "agent.review.groups.generate_diff_groups",
             new_callable=AsyncMock,
             return_value=groups,
         ) as gen,
         patch(
-            "agent.reviewer_groups.set_reviewer_thread_metadata",
+            "agent.review.groups.set_reviewer_thread_metadata",
             new_callable=AsyncMock,
         ) as set_meta,
     ):

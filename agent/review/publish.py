@@ -25,22 +25,22 @@ from typing import Any, TypedDict
 
 import httpx
 
-from .reviewer_findings import (
+from ..utils.dashboard_links import dashboard_thread_url
+from ..utils.github_checks import CheckConclusion, complete_review_check_run
+from ..utils.github_http import (
+    GITHUB_API_BASE,
+    GITHUB_GRAPHQL,
+    github_client,
+    github_request,
+)
+from ..utils.github_token import GitHubAuthError
+from .findings import (
     DiffSide,
     Finding,
     get_thread_metadata,
     normalize_finding_title,
     set_reviewer_thread_metadata,
 )
-from .utils.dashboard_links import dashboard_thread_url
-from .utils.github_checks import CheckConclusion, complete_review_check_run
-from .utils.github_http import (
-    GITHUB_API_BASE,
-    GITHUB_GRAPHQL,
-    github_client,
-    github_request,
-)
-from .utils.github_token import GitHubAuthError
 
 logger = logging.getLogger(__name__)
 

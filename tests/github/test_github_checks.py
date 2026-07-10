@@ -5,7 +5,7 @@ from typing import Any
 import httpx
 import pytest
 
-from agent import reviewer_publish
+from agent.review import publish as reviewer_publish
 from agent.utils import github_checks
 
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from agent.reviewer_diff import (
+from agent.review.diff import (
     compute_diff_line_set,
     extract_diff_hunk,
     is_range_in_diff,
@@ -103,7 +103,7 @@ async def test_compute_diff_in_sandbox_uses_three_dot_for_merge_base() -> None:
     """First-review path passes merge_base=True so we use base...head, not base..head."""
     from unittest.mock import MagicMock
 
-    from agent.reviewer_diff import compute_diff_in_sandbox
+    from agent.review.diff import compute_diff_in_sandbox
 
     backend = MagicMock()
     backend.execute = MagicMock(return_value="")
@@ -122,7 +122,7 @@ async def test_compute_diff_in_sandbox_uses_two_dot_by_default() -> None:
     """Re-review delta path passes merge_base=False so we use base..head."""
     from unittest.mock import MagicMock
 
-    from agent.reviewer_diff import compute_diff_in_sandbox
+    from agent.review.diff import compute_diff_in_sandbox
 
     backend = MagicMock()
     backend.execute = MagicMock(return_value="")

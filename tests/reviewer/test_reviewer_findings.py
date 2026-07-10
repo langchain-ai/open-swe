@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from agent.reviewer_findings import (
+from agent.review.findings import (
     SEVERITY_ORDER,
     DiffSide,
     Finding,
@@ -120,7 +120,7 @@ def test_filter_findings_for_publish_caps_results() -> None:
 async def test_list_findings_returns_empty_on_missing_metadata() -> None:
     fake_client = AsyncMock()
     fake_client.threads.get.return_value = {"metadata": {}}
-    with patch("agent.reviewer_findings.get_client", return_value=fake_client):
+    with patch("agent.review.findings.get_client", return_value=fake_client):
         findings = await list_findings("tid")
     assert findings == []
 
@@ -137,7 +137,7 @@ async def test_list_findings_coerces_bad_entries() -> None:
             ]
         }
     }
-    with patch("agent.reviewer_findings.get_client", return_value=fake_client):
+    with patch("agent.review.findings.get_client", return_value=fake_client):
         findings = await list_findings("tid")
     assert [f["id"] for f in findings] == ["f_ok"]
 
@@ -146,7 +146,7 @@ async def test_list_findings_coerces_bad_entries() -> None:
 async def test_replace_findings_calls_threads_update() -> None:
     fake_client = AsyncMock()
     findings = [_f(id="f_x")]
-    with patch("agent.reviewer_findings.get_client", return_value=fake_client):
+    with patch("agent.review.findings.get_client", return_value=fake_client):
         await replace_findings("tid", findings)
     fake_client.threads.update.assert_awaited_once_with(
         thread_id="tid", metadata={"findings": findings}
@@ -161,7 +161,7 @@ async def test_append_finding_appends_to_existing_list() -> None:
     fake_client = AsyncMock()
     fake_client.threads.get.return_value = {"metadata": {"findings": [existing]}}
 
-    with patch("agent.reviewer_findings.get_client", return_value=fake_client):
+    with patch("agent.review.findings.get_client", return_value=fake_client):
         result = await append_finding("tid", new)
 
     assert result["finding"]["id"] == "f_b"
@@ -193,7 +193,7 @@ async def test_concurrent_append_finding_preserves_distinct_findings() -> None:
     class Client:
         threads = Threads()
 
-    with patch("agent.reviewer_findings.get_client", return_value=Client()):
+    with patch("agent.review.findings.get_client", return_value=Client()):
         first, second = await asyncio.gather(
             append_finding("tid", _f(id="f_a", description="first")),
             append_finding("tid", _f(id="f_b", description="second")),
@@ -224,7 +224,7 @@ async def test_concurrent_identical_findings_are_idempotent() -> None:
     class Client:
         threads = Threads()
 
-    with patch("agent.reviewer_findings.get_client", return_value=Client()):
+    with patch("agent.review.findings.get_client", return_value=Client()):
         first, second = await asyncio.gather(
             append_finding("tid", _f(id="f_a")),
             append_finding("tid", _f(id="f_b")),
@@ -250,7 +250,7 @@ async def test_mutate_findings_reads_latest_before_mutating() -> None:
         findings[0]["status"] = "resolved"
         return True
 
-    with patch("agent.reviewer_findings.get_client", return_value=fake_client):
+    with patch("agent.review.findings.get_client", return_value=fake_client):
         result = await mutate_findings("tid", _mutator)
 
     assert seen == ["f_fresh"]
@@ -265,7 +265,7 @@ async def test_mutate_findings_skips_write_when_unchanged() -> None:
     fake_client = AsyncMock()
     fake_client.threads.get.return_value = {"metadata": {"findings": [_f(id="f_a")]}}
 
-    with patch("agent.reviewer_findings.get_client", return_value=fake_client):
+    with patch("agent.review.findings.get_client", return_value=fake_client):
         await mutate_findings("tid", lambda _findings: False)
 
     fake_client.threads.update.assert_not_called()
@@ -276,7 +276,7 @@ async def test_mutate_findings_does_not_write_after_transient_read_failure() -> 
     fake_client = AsyncMock()
     fake_client.threads.get.side_effect = RuntimeError("transient")
 
-    with patch("agent.reviewer_findings.get_client", return_value=fake_client):
+    with patch("agent.review.findings.get_client", return_value=fake_client):
         with pytest.raises(RuntimeError, match="transient"):
             await mutate_findings("tid", lambda findings: bool(findings.append(_f(id="f_new"))))
 
@@ -291,7 +291,7 @@ async def test_update_finding_fields_mutates_only_target() -> None:
     fake_client = AsyncMock()
     fake_client.threads.get.return_value = {"metadata": {"findings": [a, b]}}
 
-    with patch("agent.reviewer_findings.get_client", return_value=fake_client):
+    with patch("agent.review.findings.get_client", return_value=fake_client):
         updated = await update_finding_fields("tid", "f_b", {"status": "resolved"})
 
     assert updated is not None
@@ -306,7 +306,7 @@ async def test_update_finding_fields_mutates_only_target() -> None:
 async def test_update_finding_fields_returns_none_for_unknown_id() -> None:
     fake_client = AsyncMock()
     fake_client.threads.get.return_value = {"metadata": {"findings": [_f(id="f_a")]}}
-    with patch("agent.reviewer_findings.get_client", return_value=fake_client):
+    with patch("agent.review.findings.get_client", return_value=fake_client):
         result = await update_finding_fields("tid", "f_missing", {"status": "resolved"})
     assert result is None
     fake_client.threads.update.assert_not_called()
@@ -315,7 +315,7 @@ async def test_update_finding_fields_returns_none_for_unknown_id() -> None:
 @pytest.mark.asyncio
 async def test_set_reviewer_thread_metadata_includes_kind() -> None:
     fake_client = AsyncMock()
-    with patch("agent.reviewer_findings.get_client", return_value=fake_client):
+    with patch("agent.review.findings.get_client", return_value=fake_client):
         await set_reviewer_thread_metadata("tid", watch=True, last_reviewed_sha="sha")
     metadata = fake_client.threads.update.await_args.kwargs["metadata"]
     assert metadata["kind"] == "reviewer"
@@ -328,7 +328,7 @@ async def test_set_reviewer_thread_metadata_includes_kind() -> None:
 @pytest.mark.asyncio
 async def test_set_reviewer_thread_metadata_persists_head_sha() -> None:
     fake_client = AsyncMock()
-    with patch("agent.reviewer_findings.get_client", return_value=fake_client):
+    with patch("agent.review.findings.get_client", return_value=fake_client):
         await set_reviewer_thread_metadata("tid", head_sha="newhead")
     metadata = fake_client.threads.update.await_args.kwargs["metadata"]
     assert metadata["head_sha"] == "newhead"
@@ -340,7 +340,7 @@ async def test_resolve_review_head_sha_prefers_metadata_over_config() -> None:
     the stale head frozen in the run's config."""
     fake_client = AsyncMock()
     fake_client.threads.get.return_value = {"metadata": {"head_sha": "metahead"}}
-    with patch("agent.reviewer_findings.get_client", return_value=fake_client):
+    with patch("agent.review.findings.get_client", return_value=fake_client):
         head = await resolve_review_head_sha("tid", {"head_sha": "confighead"})
     assert head == "metahead"
 
@@ -349,7 +349,7 @@ async def test_resolve_review_head_sha_prefers_metadata_over_config() -> None:
 async def test_resolve_review_head_sha_falls_back_to_config_when_metadata_empty() -> None:
     fake_client = AsyncMock()
     fake_client.threads.get.return_value = {"metadata": {}}
-    with patch("agent.reviewer_findings.get_client", return_value=fake_client):
+    with patch("agent.review.findings.get_client", return_value=fake_client):
         head = await resolve_review_head_sha("tid", {"head_sha": "confighead"})
     assert head == "confighead"
 
@@ -357,7 +357,7 @@ async def test_resolve_review_head_sha_falls_back_to_config_when_metadata_empty(
 @pytest.mark.asyncio
 async def test_resolve_review_head_sha_falls_back_without_thread_id() -> None:
     fake_client = AsyncMock()
-    with patch("agent.reviewer_findings.get_client", return_value=fake_client):
+    with patch("agent.review.findings.get_client", return_value=fake_client):
         head = await resolve_review_head_sha("", {"head_sha": "confighead"})
     assert head == "confighead"
     fake_client.threads.get.assert_not_called()
@@ -368,7 +368,7 @@ async def test_replace_findings_raises_domain_error_when_thread_missing() -> Non
     import httpx
     from langgraph_sdk.errors import NotFoundError
 
-    from agent.reviewer_findings import ReviewerThreadMissingError
+    from agent.review.findings import ReviewerThreadMissingError
 
     not_found = NotFoundError(
         "thread tid not found",
@@ -378,7 +378,7 @@ async def test_replace_findings_raises_domain_error_when_thread_missing() -> Non
     fake_client = AsyncMock()
     fake_client.threads.update.side_effect = not_found
 
-    with patch("agent.reviewer_findings.get_client", return_value=fake_client):
+    with patch("agent.review.findings.get_client", return_value=fake_client):
         with pytest.raises(ReviewerThreadMissingError) as excinfo:
             await replace_findings("tid", [_f(id="f_a")])
 
@@ -402,30 +402,30 @@ async def test_get_thread_metadata_raises_domain_error_when_thread_missing() -> 
     """A missing thread must surface as ReviewerThreadMissingError, not be
     swallowed into ``{}`` — that produced misleading tool results like
     "No finding found" instead of the do-not-retry contract."""
-    from agent.reviewer_findings import ReviewerThreadMissingError, get_thread_metadata
+    from agent.review.findings import ReviewerThreadMissingError, get_thread_metadata
 
     fake_client = AsyncMock()
     fake_client.threads.get.side_effect = _not_found()
 
-    with patch("agent.reviewer_findings.get_client", return_value=fake_client):
+    with patch("agent.review.findings.get_client", return_value=fake_client):
         with pytest.raises(ReviewerThreadMissingError):
             await get_thread_metadata("tid")
 
 
 @pytest.mark.asyncio
 async def test_get_thread_metadata_still_degrades_on_other_failures() -> None:
-    from agent.reviewer_findings import get_thread_metadata
+    from agent.review.findings import get_thread_metadata
 
     fake_client = AsyncMock()
     fake_client.threads.get.side_effect = RuntimeError("transient")
 
-    with patch("agent.reviewer_findings.get_client", return_value=fake_client):
+    with patch("agent.review.findings.get_client", return_value=fake_client):
         assert await get_thread_metadata("tid") == {}
 
 
 @pytest.mark.asyncio
 async def test_set_reviewer_thread_metadata_raises_domain_error_when_thread_missing() -> None:
-    from agent.reviewer_findings import (
+    from agent.review.findings import (
         ReviewerThreadMissingError,
         set_reviewer_thread_metadata,
     )
@@ -433,6 +433,6 @@ async def test_set_reviewer_thread_metadata_raises_domain_error_when_thread_miss
     fake_client = AsyncMock()
     fake_client.threads.update.side_effect = _not_found("PATCH")
 
-    with patch("agent.reviewer_findings.get_client", return_value=fake_client):
+    with patch("agent.review.findings.get_client", return_value=fake_client):
         with pytest.raises(ReviewerThreadMissingError):
             await set_reviewer_thread_metadata("tid", last_reviewed_sha="sha")

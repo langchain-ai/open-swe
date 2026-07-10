@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from agent.dashboard.team_credentials import LangSmithCredentials
-from agent.reviewer_trace_context import (
+from agent.review.trace_context import (
     PRTraceContext,
     format_pr_trace_context_prompt,
     prepare_pr_trace_context,
@@ -108,15 +108,15 @@ def _patches(client: _FakeLangSmithClient) -> Any:
     creds = LangSmithCredentials(api_key="k", endpoint="https://api.smith.langchain.com")
     return (
         patch(
-            "agent.reviewer_trace_context.get_team_review_tracing_project",
+            "agent.review.trace_context.get_team_review_tracing_project",
             AsyncMock(return_value="pajuha"),
         ),
         patch(
-            "agent.reviewer_trace_context.get_langsmith_credentials", AsyncMock(return_value=creds)
+            "agent.review.trace_context.get_langsmith_credentials", AsyncMock(return_value=creds)
         ),
-        patch("agent.reviewer_trace_context._client", return_value=client),
+        patch("agent.review.trace_context._client", return_value=client),
         patch(
-            "agent.reviewer_trace_context.get_langsmith_trace_url",
+            "agent.review.trace_context.get_langsmith_trace_url",
             return_value="https://smith/t/thread-1",
         ),
     )

@@ -719,7 +719,7 @@ async def test_list_findings_returns_all_when_filter_omitted() -> None:
 async def test_add_finding_returns_structured_error_when_thread_missing() -> None:
     """A missing reviewer thread must come back as a do-not-retry tool result,
     not a raised exception the agent retries against 10-30 times."""
-    from agent.reviewer_findings import ReviewerThreadMissingError
+    from agent.review.findings import ReviewerThreadMissingError
 
     async def fake_append(thread_id: str, finding: Any) -> Any:
         raise ReviewerThreadMissingError(thread_id, RuntimeError("thread X not found"))
@@ -746,7 +746,7 @@ async def test_add_finding_returns_structured_error_when_thread_missing() -> Non
 
 
 async def test_update_finding_returns_structured_error_when_thread_missing() -> None:
-    from agent.reviewer_findings import ReviewerThreadMissingError
+    from agent.review.findings import ReviewerThreadMissingError
 
     async def fake_update(thread_id: str, finding_id: str, updates: Any) -> Any:
         raise ReviewerThreadMissingError(thread_id, RuntimeError("thread X not found"))

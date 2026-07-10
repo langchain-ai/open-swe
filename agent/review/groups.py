@@ -22,8 +22,8 @@ from typing import TypedDict
 from langchain_core.language_models.chat_models import BaseChatModel
 from pydantic import BaseModel, Field
 
-from .reviewer_diff import parse_unified_diff
-from .reviewer_findings import get_thread_metadata, set_reviewer_thread_metadata
+from .diff import parse_unified_diff
+from .findings import get_thread_metadata, set_reviewer_thread_metadata
 
 logger = logging.getLogger(__name__)
 

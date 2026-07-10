@@ -4,7 +4,7 @@ from typing import Any
 
 import pytest
 
-from agent.reviewer_findings import new_finding
+from agent.review.findings import new_finding
 from evals.reviewer import target
 
 

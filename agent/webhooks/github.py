@@ -9,7 +9,7 @@ from typing import Any
 
 from agent import webapp
 
-from ..reviewer_findings import FindingInteraction, ReviewerPRMeta, ReviewerSlackThread
+from ..review.findings import FindingInteraction, ReviewerPRMeta, ReviewerSlackThread
 from ..utils.github_comments import GitHubAuthError
 from ..utils.slack import GitHubPrRef
 

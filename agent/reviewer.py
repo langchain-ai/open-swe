@@ -60,17 +60,17 @@ from .middleware import (
     refresh_github_proxy_before_model,
     settle_review_check_on_exit,
 )
-from .reviewer_diff import compute_diff_line_set, fetch_pr_diff, fetch_pr_metadata
-from .reviewer_findings import (
+from .review.diff import compute_diff_line_set, fetch_pr_diff, fetch_pr_metadata
+from .review.findings import (
     REVIEW_FINDING_CAP,
 )
-from .reviewer_findings import (
+from .review.findings import (
     list_findings as list_findings_async,
 )
-from .reviewer_groups import maybe_generate_and_store_diff_groups
-from .reviewer_publish import fetch_pr_review_threads
-from .reviewer_reconcile import reconcile_findings_with_review_threads
-from .reviewer_trace_context import (
+from .review.groups import maybe_generate_and_store_diff_groups
+from .review.publish import fetch_pr_review_threads
+from .review.reconcile import reconcile_findings_with_review_threads
+from .review.trace_context import (
     PRTraceContext,
     format_pr_trace_context_prompt,
     prepare_pr_trace_context,

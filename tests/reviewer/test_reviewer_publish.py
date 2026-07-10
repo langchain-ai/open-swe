@@ -8,8 +8,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from agent.reviewer_findings import Finding, new_finding
-from agent.reviewer_publish import (
+from agent.review.findings import Finding, new_finding
+from agent.review.publish import (
     clear_review_started_comment,
     fetch_pr_review_threads,
     open_swe_review_exists,
@@ -278,10 +278,10 @@ async def test_post_review_started_comment_posts_and_persists_id() -> None:
     post = AsyncMock(return_value=4242)
     set_meta = AsyncMock()
     with (
-        patch("agent.reviewer_publish.get_thread_metadata", AsyncMock(return_value={})),
-        patch("agent.reviewer_publish.post_status_comment", post),
-        patch("agent.reviewer_publish.delete_status_comment", AsyncMock()) as delete,
-        patch("agent.reviewer_publish.set_reviewer_thread_metadata", set_meta),
+        patch("agent.review.publish.get_thread_metadata", AsyncMock(return_value={})),
+        patch("agent.review.publish.post_status_comment", post),
+        patch("agent.review.publish.delete_status_comment", AsyncMock()) as delete,
+        patch("agent.review.publish.set_reviewer_thread_metadata", set_meta),
     ):
         cid = await post_review_started_comment(
             thread_id="tid", owner="o", repo="r", pr_number=7, token="t"
@@ -298,12 +298,12 @@ async def test_post_review_started_comment_deletes_lingering_before_reposting() 
     delete = AsyncMock(return_value=True)
     with (
         patch(
-            "agent.reviewer_publish.get_thread_metadata",
+            "agent.review.publish.get_thread_metadata",
             AsyncMock(return_value={"status_comment_id": 99}),
         ),
-        patch("agent.reviewer_publish.post_status_comment", post),
-        patch("agent.reviewer_publish.delete_status_comment", delete),
-        patch("agent.reviewer_publish.set_reviewer_thread_metadata", AsyncMock()),
+        patch("agent.review.publish.post_status_comment", post),
+        patch("agent.review.publish.delete_status_comment", delete),
+        patch("agent.review.publish.set_reviewer_thread_metadata", AsyncMock()),
     ):
         cid = await post_review_started_comment(
             thread_id="tid", owner="o", repo="r", pr_number=7, token="t"
@@ -319,11 +319,11 @@ async def test_clear_review_started_comment_deletes_and_clears_metadata() -> Non
     set_meta = AsyncMock()
     with (
         patch(
-            "agent.reviewer_publish.get_thread_metadata",
+            "agent.review.publish.get_thread_metadata",
             AsyncMock(return_value={"status_comment_id": 99}),
         ),
-        patch("agent.reviewer_publish.delete_status_comment", delete),
-        patch("agent.reviewer_publish.set_reviewer_thread_metadata", set_meta),
+        patch("agent.review.publish.delete_status_comment", delete),
+        patch("agent.review.publish.set_reviewer_thread_metadata", set_meta),
     ):
         await clear_review_started_comment(thread_id="tid", owner="o", repo="r", token="t")
     delete.assert_awaited_once()
@@ -336,9 +336,9 @@ async def test_clear_review_started_comment_noop_without_tracked_id() -> None:
     delete = AsyncMock()
     set_meta = AsyncMock()
     with (
-        patch("agent.reviewer_publish.get_thread_metadata", AsyncMock(return_value={})),
-        patch("agent.reviewer_publish.delete_status_comment", delete),
-        patch("agent.reviewer_publish.set_reviewer_thread_metadata", set_meta),
+        patch("agent.review.publish.get_thread_metadata", AsyncMock(return_value={})),
+        patch("agent.review.publish.delete_status_comment", delete),
+        patch("agent.review.publish.set_reviewer_thread_metadata", set_meta),
     ):
         await clear_review_started_comment(thread_id="tid", owner="o", repo="r", token="t")
     delete.assert_not_called()
@@ -1145,8 +1145,8 @@ async def test_re_review_backfills_existing_marker_and_skips_duplicate_post() ->
             "agent.tools.publish_review.fetch_pr_review_threads", AsyncMock(return_value=[thread])
         ),
         patch("agent.tools.publish_review.list_findings_async", AsyncMock(return_value=findings)),
-        patch("agent.reviewer_reconcile.list_findings", AsyncMock(return_value=findings)),
-        patch("agent.reviewer_reconcile.replace_findings", AsyncMock()),
+        patch("agent.review.reconcile.list_findings", AsyncMock(return_value=findings)),
+        patch("agent.review.reconcile.replace_findings", AsyncMock()),
         patch("agent.tools.publish_review.post_pull_request_review", post_review),
         patch(
             "agent.tools.publish_review._resolve_threads_for_resolved_findings",
@@ -1221,8 +1221,8 @@ async def test_re_review_backfills_and_resolves_duplicate_existing_threads() -> 
             "agent.tools.publish_review.fetch_pr_review_threads", AsyncMock(return_value=threads)
         ),
         patch("agent.tools.publish_review.list_findings_async", AsyncMock(return_value=findings)),
-        patch("agent.reviewer_reconcile.list_findings", AsyncMock(return_value=findings)),
-        patch("agent.reviewer_reconcile.replace_findings", AsyncMock()),
+        patch("agent.review.reconcile.list_findings", AsyncMock(return_value=findings)),
+        patch("agent.review.reconcile.replace_findings", AsyncMock()),
         patch("agent.tools.publish_review.post_pull_request_review", AsyncMock()),
         patch("agent.tools.publish_review.resolve_review_thread", resolve_thread),
         patch(
@@ -1284,8 +1284,8 @@ async def test_publish_review_backfills_from_threads_when_review_comments_are_em
         patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
         patch("agent.tools.publish_review.fetch_pr_review_threads", fetch_threads),
         patch("agent.tools.publish_review.list_findings_async", AsyncMock(return_value=findings)),
-        patch("agent.reviewer_reconcile.list_findings", AsyncMock(return_value=findings)),
-        patch("agent.reviewer_reconcile.replace_findings", AsyncMock()),
+        patch("agent.review.reconcile.list_findings", AsyncMock(return_value=findings)),
+        patch("agent.review.reconcile.replace_findings", AsyncMock()),
         patch(
             "agent.tools.publish_review.post_pull_request_review",
             AsyncMock(return_value={"id": 999}),
@@ -2242,7 +2242,7 @@ async def test_publish_review_fetches_pr_diff_when_diff_line_set_missing() -> No
 async def test_publish_review_tool_returns_structured_error_when_thread_missing() -> None:
     """A missing reviewer thread surfaces as a do-not-retry tool result instead
     of an exception the middleware swallows into an empty tool message."""
-    from agent.reviewer_findings import ReviewerThreadMissingError
+    from agent.review.findings import ReviewerThreadMissingError
     from agent.tools.publish_review import publish_review
 
     publish_async = AsyncMock(

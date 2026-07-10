@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from agent.review_style_collector import (
+from agent.review.style_collector import (
     ReviewSample,
     ReviewStyleSamples,
     format_samples_for_analyzer,
