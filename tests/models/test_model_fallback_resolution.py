@@ -35,14 +35,15 @@ def test_provider_fallback_uses_default_effort_when_unsupported() -> None:
 
 def test_provider_fallback_resolves_openai_within_provider() -> None:
     model, effort = provider_fallback_pair("openai:gpt-5-legacy", "low")
-    assert model == "openai:gpt-5.6-sol"
+    assert model == "openai:gpt-5.5"
     assert effort == "low"
 
 
-def test_supported_openai_models_replace_gpt_5_5() -> None:
-    assert "openai:gpt-5.5" not in SUPPORTED_MODEL_IDS
+def test_supported_openai_models_include_gpt_5_5_and_gpt_5_6() -> None:
+    assert "openai:gpt-5.5" in SUPPORTED_MODEL_IDS
     openai_options = [model for model in SUPPORTED_MODELS if model["id"].startswith("openai:")]
     assert [(model["id"], model["label"]) for model in openai_options] == [
+        ("openai:gpt-5.5", "GPT-5.5"),
         ("openai:gpt-5.6-sol", "GPT-5.6 Sol"),
         ("openai:gpt-5.6-terra", "GPT-5.6 Terra"),
         ("openai:gpt-5.6-luna", "GPT-5.6 Luna"),
@@ -87,14 +88,14 @@ def test_profile_stale_anthropic_upgrades_to_supported() -> None:
     assert normalize_profile_overrides(profile) == (SUPPORTED_ANTHROPIC, "high")
 
 
-def test_profile_update_normalizes_stale_openai_model() -> None:
+def test_profile_update_preserves_gpt_5_5_model() -> None:
     update = ProfileUpdate(default_model="openai:gpt-5.5", reasoning_effort="medium")
     update.validate_pairing()
-    assert update.default_model == "openai:gpt-5.6-sol"
+    assert update.default_model == "openai:gpt-5.5"
     assert update.reasoning_effort == "medium"
 
 
-def test_profile_update_normalizes_stale_openai_subagent_model() -> None:
+def test_profile_update_preserves_gpt_5_5_subagent_model() -> None:
     update = ProfileUpdate(
         default_model="openai:gpt-5.6-terra",
         reasoning_effort="high",
@@ -102,11 +103,11 @@ def test_profile_update_normalizes_stale_openai_subagent_model() -> None:
         subagent_reasoning_effort="low",
     )
     update.validate_pairing()
-    assert update.default_subagent_model == "openai:gpt-5.6-sol"
+    assert update.default_subagent_model == "openai:gpt-5.5"
     assert update.subagent_reasoning_effort == "low"
 
 
-def test_profile_response_normalizes_stale_openai_models() -> None:
+def test_profile_response_preserves_gpt_5_5_models() -> None:
     profile = normalize_profile_for_response(
         {
             "default_model": "openai:gpt-5.5",
@@ -115,13 +116,13 @@ def test_profile_response_normalizes_stale_openai_models() -> None:
             "subagent_reasoning_effort": "low",
         }
     )
-    assert profile["default_model"] == "openai:gpt-5.6-sol"
+    assert profile["default_model"] == "openai:gpt-5.5"
     assert profile["reasoning_effort"] == "medium"
-    assert profile["default_subagent_model"] == "openai:gpt-5.6-sol"
+    assert profile["default_subagent_model"] == "openai:gpt-5.5"
     assert profile["subagent_reasoning_effort"] == "low"
 
 
-def test_team_settings_update_normalizes_stale_openai_models() -> None:
+def test_team_settings_update_preserves_gpt_5_5_models() -> None:
     update = TeamSettingsUpdate(
         default_agent_model="openai:gpt-5.6-sol",
         default_agent_reasoning_effort="medium",
@@ -133,9 +134,9 @@ def test_team_settings_update_normalizes_stale_openai_models() -> None:
         default_reviewer_subagent_reasoning_effort="low",
     )
 
-    assert update.default_agent_subagent_model == "openai:gpt-5.6-sol"
-    assert update.default_reviewer_model == "openai:gpt-5.6-sol"
-    assert update.default_reviewer_subagent_model == "openai:gpt-5.6-sol"
+    assert update.default_agent_subagent_model == "openai:gpt-5.5"
+    assert update.default_reviewer_model == "openai:gpt-5.5"
+    assert update.default_reviewer_subagent_model == "openai:gpt-5.5"
 
 
 def test_team_settings_update_rejects_unknown_openai_model() -> None:
@@ -146,7 +147,7 @@ def test_team_settings_update_rejects_unknown_openai_model() -> None:
         )
 
 
-def test_team_settings_update_rejects_invalid_effort_for_retired_model() -> None:
+def test_team_settings_update_rejects_invalid_effort_for_gpt_5_5() -> None:
     with pytest.raises(ValueError, match="effort 'bogus' not supported"):
         TeamSettingsUpdate(
             default_agent_model="openai:gpt-5.5",
@@ -154,7 +155,7 @@ def test_team_settings_update_rejects_invalid_effort_for_retired_model() -> None
         )
 
 
-def test_team_settings_response_normalizes_stale_openai_models() -> None:
+def test_team_settings_response_preserves_gpt_5_5_models() -> None:
     settings = normalize_team_settings_for_response(
         {
             "default_agent_subagent_model": "openai:gpt-5.5",
@@ -166,9 +167,9 @@ def test_team_settings_response_normalizes_stale_openai_models() -> None:
         }
     )
 
-    assert settings["default_agent_subagent_model"] == "openai:gpt-5.6-sol"
-    assert settings["default_reviewer_model"] == "openai:gpt-5.6-sol"
-    assert settings["default_reviewer_subagent_model"] == "openai:gpt-5.6-sol"
+    assert settings["default_agent_subagent_model"] == "openai:gpt-5.5"
+    assert settings["default_reviewer_model"] == "openai:gpt-5.5"
+    assert settings["default_reviewer_subagent_model"] == "openai:gpt-5.5"
 
 
 def test_profile_update_rejects_unknown_provider() -> None:
@@ -186,9 +187,9 @@ def test_profile_unknown_provider_defers_to_team_default() -> None:
     assert normalize_profile_overrides(profile) == (None, None)
 
 
-def test_global_default_is_supported() -> None:
+def test_global_default_is_gpt_5_5() -> None:
     model, _ = default_model_pair()
-    assert model == DEFAULT_MODEL_ID
+    assert model == DEFAULT_MODEL_ID == "openai:gpt-5.5"
 
 
 def test_gate_fable_passthrough_when_enabled() -> None:

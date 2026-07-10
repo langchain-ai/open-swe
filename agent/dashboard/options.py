@@ -36,6 +36,13 @@ SUPPORTED_MODELS: list[ModelOption] = [
         "supports_images": True,
     },
     {
+        "id": "openai:gpt-5.5",
+        "label": "GPT-5.5",
+        "efforts": ["none", "low", "medium", "high", "xhigh"],
+        "default_effort": "xhigh",
+        "supports_images": True,
+    },
+    {
         "id": "openai:gpt-5.6-sol",
         "label": "GPT-5.6 Sol",
         "efforts": ["none", "low", "medium", "high", "xhigh"],
@@ -115,7 +122,7 @@ def gate_fable_model(
     return model_id, effort
 
 
-DEFAULT_MODEL_ID: str = "openai:gpt-5.6-sol"
+DEFAULT_MODEL_ID: str = "openai:gpt-5.5"
 DEFAULT_MODEL_EFFORT: str = "medium"
 
 
