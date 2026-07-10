@@ -23,6 +23,7 @@ from __future__ import annotations
 import os
 from typing import Any
 
+from deepagents.backends.protocol import SandboxBackendProtocol
 from langchain_lightning import (
     LightningSandbox,
     ensure_workdir,
@@ -66,7 +67,7 @@ def _sandbox_config() -> SandboxConfig:
     return SandboxConfig(api_key=api_key, base_url=base_url)
 
 
-def create_lightning_sandbox(sandbox_id: str | None = None) -> LightningSandbox:
+def create_lightning_sandbox(sandbox_id: str | None = None) -> SandboxBackendProtocol:
     """Create or reconnect to a Lightning AI sandbox.
 
     Args:
