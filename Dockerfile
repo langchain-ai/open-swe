@@ -23,6 +23,7 @@ RUN apt-get update && apt-get install -y \
     gnupg \
     lsb-release \
     build-essential \
+    cargo \
     openssh-client \
     jq \
     ripgrep \
@@ -101,6 +102,7 @@ RUN echo "=== Installed versions ===" \
     && yarn --version \
     && sfw --version \
     && go version \
+    && cargo --version \
     && docker --version \
     && git --version \
     && gh --version
