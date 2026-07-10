@@ -4,7 +4,7 @@ from typing import Any
 
 from langgraph.config import get_config
 
-from ..reviewer_findings import (
+from ..review.findings import (
     FindingInteraction,
     ReviewerThreadMissingError,
     append_finding_interaction,
@@ -13,7 +13,7 @@ from ..reviewer_findings import (
     thread_missing_tool_result,
     update_finding_fields,
 )
-from ..reviewer_publish import reply_to_review_comment
+from ..review.publish import reply_to_review_comment
 from ..utils.github_token import get_github_token
 
 
