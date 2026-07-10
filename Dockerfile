@@ -25,6 +25,8 @@ RUN apt-get update && apt-get install -y \
     build-essential \
     openssh-client \
     jq \
+    ripgrep \
+    ruby \
     unzip \
     zip \
     && rm -rf /var/lib/apt/lists/*
@@ -83,6 +85,14 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 ENV STAGEHAND_LOCAL_CHROME_PATH=/usr/bin/chromium
 
+RUN install -m 0755 -d /etc/apt/keyrings \
+    && curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg | gpg --dearmor -o /etc/apt/keyrings/cloud.google.gpg \
+    && echo "deb [signed-by=/etc/apt/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" \
+      | tee /etc/apt/sources.list.d/google-cloud-sdk.list > /dev/null \
+    && apt-get update \
+    && apt-get install -y google-cloud-cli \
+    && rm -rf /var/lib/apt/lists/*
+
 ENV GO_VERSION=1.23.5
 
 RUN curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-$(dpkg --print-architecture).tar.gz" | tar -C /usr/local -xz
@@ -100,6 +110,10 @@ RUN echo "=== Installed versions ===" \
     && yarn --version \
     && sfw --version \
     && go version \
+    && gofmt --help >/dev/null 2>&1 && echo "gofmt: ok" \
+    && rg --version \
+    && ruby --version \
+    && gcloud --version \
     && docker --version \
     && git --version \
     && gh --version

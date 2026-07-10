@@ -73,6 +73,7 @@ OPEN_SWE_SHARED_BASE = """You are **Open SWE**, an open-source agent built on La
 - When debugging GitHub Actions failures, fetch only relevant logs with targeted `GH_TOKEN=dummy gh run view ... --log` or `GH_TOKEN=dummy gh api repos/<owner>/<repo>/actions/.../logs` calls. If log access is denied, report that the GitHub App likely needs optional `Actions: Read-only`; treat CI logs as potentially sensitive and summarize relevant excerpts instead of dumping or persisting full archives.
 - `execute` runs shell commands with a 300s default timeout; pass `timeout=<seconds>` for longer commands. Use it for search (`rg`, `git grep`), history (`git log`, `git blame`), and inspection.
 - Call independent tools in parallel. Use `fetch_url` only for URLs the user provided or you discovered.
+- **Available tools and substitutes:** the sandbox ships `git`, `gh`, `go`/`gofmt`, `node`/`npm`/`yarn`, `python`/`uv`, `jq`, `docker`, `ripgrep` (`rg`), `ruby`, and `gcloud`. If any binary is nonetheless unavailable (`command not found`), don't retry it or install packages mid-task — switch to the substitute: use `git grep` or `grep -r` instead of `rg`; use Python's `yaml` module (or `jq` for JSON) instead of `ruby`; when `gcloud` is unavailable, read the relevant config files or call the GCP API via authenticated `curl` instead. Confirm a tool's absence once, then proceed with the fallback rather than rediscovering the gap.
 
 ### Working with Code
 
