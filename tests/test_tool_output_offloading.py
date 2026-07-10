@@ -87,6 +87,7 @@ async def test_web_search_saves_results_and_returns_only_path(monkeypatch) -> No
     assert result == {
         "success": True,
         "results_path": "/workspace/web-search-result.jsonl",
+        "results": None,
         "result_chars": len(raw_results),
         "error": None,
     }
@@ -95,19 +96,23 @@ async def test_web_search_saves_results_and_returns_only_path(monkeypatch) -> No
     assert raw_results not in str(result)
 
 
-async def test_web_search_does_not_inline_results_when_sandbox_write_fails(monkeypatch) -> None:
-    raw_results = "secret marker " + "x" * 200_000
+async def test_web_search_returns_bounded_inline_results_without_sandbox(monkeypatch) -> None:
+    raw_results = "search marker " + "x" * 200_000
     FakeExa.result = raw_results
     monkeypatch.setitem(sys.modules, "exa_py", types.SimpleNamespace(Exa=FakeExa))
     monkeypatch.setenv("EXA_API_KEY", "test-key")
 
     async def fail_write(tool_name: str, content: str, extension: str) -> str:
-        raise RuntimeError("sandbox unavailable")
+        raise ValueError("Missing sandbox_id in thread metadata for review-chat")
 
     monkeypatch.setattr(web_search_tool, "write_sandbox_output", fail_write)
 
     result = await web_search_tool.web_search("python docs")
 
-    assert result["success"] is False
+    assert result["success"] is True
     assert result["results_path"] is None
+    assert result["result_chars"] == len(raw_results)
+    assert result["results"].startswith("search marker ")
+    assert "[results truncated: 100000/200014 chars]" in result["results"]
+    assert len(result["results"]) < 100_100
     assert raw_results not in str(result)
