@@ -59,8 +59,9 @@ _SLACK_USERS: dict[str, dict[str, str]] = {
     },
 }
 
+from agent.api.app import app  # noqa: E402
 from agent.dashboard.oauth import COOKIE_NAME, issue_session  # noqa: E402
-from agent.webapp import app, generate_thread_id_from_slack_thread  # noqa: E402
+from agent.utils.thread_ids import generate_thread_id_from_slack_thread  # noqa: E402
 
 GITHUB_WEBHOOK_SECRET = os.environ["GITHUB_WEBHOOK_SECRET"]
 SLACK_SIGNING_SECRET = os.environ["SLACK_SIGNING_SECRET"]

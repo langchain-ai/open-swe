@@ -14,7 +14,7 @@ async def trigger_pr_review_from_ref(
     slack_channel_id: str = "",
     slack_thread_ts: str = "",
 ) -> dict[str, Any]:
-    from agent.webapp import trigger_pr_review_from_ref as _trigger_pr_review_from_ref
+    from agent.webhooks.github import trigger_pr_review_from_ref as _trigger_pr_review_from_ref
 
     return await _trigger_pr_review_from_ref(
         pr_ref,

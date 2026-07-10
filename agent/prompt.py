@@ -1,6 +1,7 @@
 import logging
 import os
 import shlex
+from importlib import resources
 from pathlib import Path
 
 from deepagents import HarnessProfile, register_harness_profile
@@ -15,10 +16,7 @@ from .utils.github_comments import UNTRUSTED_GITHUB_COMMENT_OPEN_TAG
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_PROMPT_PATH = os.environ.get(
-    "DEFAULT_PROMPT_PATH",
-    str(Path(__file__).resolve().parent.parent / "default_prompt.md"),
-)
+DEFAULT_PROMPT_PATH = os.environ.get("DEFAULT_PROMPT_PATH")
 
 # Tools stripped from the agent regardless of run state (none today: plan-mode
 # tool stripping is dynamic and handled by PlanModeMiddleware, not the profile).
@@ -38,19 +36,27 @@ def _load_default_prompt() -> str:
     Returns empty string if the file doesn't exist or can't be read.
     """
     try:
-        path = Path(DEFAULT_PROMPT_PATH)
-        if path.is_file():
-            content = path.read_text().strip()
-            if content:
-                # Escape curly braces so .format() doesn't choke on them
-                escaped = content.replace("{", "{{").replace("}", "}}")
-                return f"""---
+        if DEFAULT_PROMPT_PATH:
+            content = Path(DEFAULT_PROMPT_PATH).read_text().strip()
+        else:
+            content = (
+                resources.files("agent.resources")
+                .joinpath("default_prompt.md")
+                .read_text(encoding="utf-8")
+                .strip()
+            )
+        if content:
+            escaped = content.replace("{", "{{").replace("}", "}}")
+            return f"""---
 
 ### Custom Instructions
 
 {escaped}"""
     except Exception:
-        logger.warning("Failed to read default prompt file at %s", DEFAULT_PROMPT_PATH)
+        logger.warning(
+            "Failed to read default prompt from %s",
+            DEFAULT_PROMPT_PATH or "agent.resources/default_prompt.md",
+        )
     return ""
 
 
