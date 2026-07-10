@@ -185,11 +185,14 @@ async def approve_plan(thread_id: str, session: dict[str, Any] = _SESSION_DEP) -
     metadata = await _thread_metadata(thread_id)
     if not _user_owns_thread(metadata, session["sub"], session.get("email")):
         raise HTTPException(403, "only the plan owner can approve")
-    # Read the published plan + comments BEFORE mutating state: a store failure
-    # here aborts the decision (500) rather than dispatching without them. The
-    # published markdown may have been edited by the reviewer, so it is the
-    # source of truth handed to the agent (not its own stale history) — read it
-    # strictly so a transient failure can't silently drop the edit.
+    return await approve_plan_for_thread(
+        thread_id, metadata=metadata, actor=_approval_actor_name(session)
+    )
+
+
+async def approve_plan_for_thread(
+    thread_id: str, *, metadata: dict[str, Any], actor: str
+) -> dict[str, Any]:
     content = await get_plan_content(thread_id, raise_on_error=True) or {}
     _reject_shared_content(content)
     plan_markdown = str(content.get("markdown", "")).strip()
@@ -210,7 +213,7 @@ async def approve_plan(thread_id: str, session: dict[str, Any] = _SESSION_DEP) -
     await _maybe_post_plan_approved_to_slack(
         metadata,
         comment_count=len(comments),
-        actor=_approval_actor_name(session),
+        actor=actor,
     )
     return {"status": PLAN_STATUS_APPROVED}
 

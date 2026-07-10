@@ -19,8 +19,8 @@ from typing import Any
 import httpx
 from fastapi import HTTPException
 
-from ..reviewer_diff import fetch_pr_diff
-from ..reviewer_findings import REVIEWER_THREAD_KIND
+from ..review.diff import fetch_pr_diff
+from ..review.findings import REVIEWER_THREAD_KIND
 from ..utils.github_app import get_github_app_installation_token
 from ..utils.thread_ops import langgraph_client, langgraph_url
 from .options import SUPPORTED_MODEL_IDS, model_supports_effort

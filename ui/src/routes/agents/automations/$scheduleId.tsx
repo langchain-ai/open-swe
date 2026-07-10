@@ -1,8 +1,8 @@
 import { Link, createFileRoute } from "@tanstack/react-router"
 
-import { AutomationEditor } from "@/components/agents/AutomationEditor"
+import { AutomationEditor } from "@/features/automations/components/AutomationEditor"
 import { Skeleton } from "@/components/ui/skeleton"
-import { useAgentSchedules } from "@/lib/agents/queries"
+import { useAgentSchedules } from "@/features/agents/lib/queries"
 
 export const Route = createFileRoute("/agents/automations/$scheduleId")({
   component: EditAutomationPage,
