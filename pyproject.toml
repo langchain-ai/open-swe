@@ -32,6 +32,7 @@ dependencies = [
     "langchain-mcp-adapters>=0.3.0",
     "stagehand>=3.21.0",
     "lightning-sdk>=2026.7.9.post0",
+    "langchain-lightning",
 ]
 
 [project.optional-dependencies]
@@ -73,3 +74,6 @@ ignore = [
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+
+[tool.uv.sources]
+langchain-lightning = { git = "https://github.com/Lightning-AI/langchain-lightning.git", rev = "feat/open-swe-readiness" }

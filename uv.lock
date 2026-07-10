@@ -1551,6 +1551,15 @@ wheels = [
 ]
 
 [[package]]
+name = "langchain-lightning"
+version = "0.0.2"
+source = { git = "https://github.com/Lightning-AI/langchain-lightning.git?rev=feat%2Fopen-swe-readiness#79f73b821eff0c4b49d04a49b923e04c1d4c8bb9" }
+dependencies = [
+    { name = "deepagents" },
+    { name = "lightning-sdk" },
+]
+
+[[package]]
 name = "langchain-mcp-adapters"
 version = "0.3.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2095,6 +2104,7 @@ dependencies = [
     { name = "langchain-e2b" },
     { name = "langchain-fireworks" },
     { name = "langchain-google-genai" },
+    { name = "langchain-lightning" },
     { name = "langchain-mcp-adapters" },
     { name = "langchain-modal" },
     { name = "langchain-openai" },
@@ -2132,6 +2142,7 @@ requires-dist = [
     { name = "langchain-e2b", specifier = "==0.0.5" },
     { name = "langchain-fireworks", specifier = ">=1.4.4" },
     { name = "langchain-google-genai", specifier = ">=4.2.4" },
+    { name = "langchain-lightning", git = "https://github.com/Lightning-AI/langchain-lightning.git?rev=feat%2Fopen-swe-readiness" },
     { name = "langchain-mcp-adapters", specifier = ">=0.3.0" },
     { name = "langchain-modal", specifier = ">=0.0.5" },
     { name = "langchain-openai", specifier = ">=1.3.4" },

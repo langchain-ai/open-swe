@@ -65,7 +65,7 @@ Set the `SANDBOX_TYPE` environment variable to switch providers. Each provider h
 | `runloop` | `agent/integrations/runloop.py` | `RUNLOOP_API_KEY`, `SANDBOX_TYPE="runloop"` |
 | `e2b` | `agent/integrations/e2b.py` | `E2B_API_KEY`, `SANDBOX_TYPE="e2b"`, optional `E2B_TEMPLATE` |
 | `modal` | `agent/integrations/modal.py` | Modal credentials, `SANDBOX_TYPE="modal"` |
-| `lightning` | `agent/integrations/lightning.py` | `LIGHTNING_API_KEY` (or `LIGHTNING_SANDBOX_API_KEY`), `SANDBOX_TYPE="lightning"`; optional `LIGHTNING_SANDBOX_INSTANCE_TYPE`, `LIGHTNING_SANDBOX_TIMEOUT_MS`, `LIGHTNING_SANDBOX_WORKDIR`, `LIGHTNING_SANDBOX_IMAGE`, `LIGHTNING_SANDBOX_BOOTSTRAP` (installs python3/git when missing; default on) |
+| `lightning` | `agent/integrations/lightning.py` (`langchain-lightning`) | `LIGHTNING_API_KEY` (or `LIGHTNING_SANDBOX_API_KEY`), `SANDBOX_TYPE="lightning"`; defaults to `runtime=python313`; optional `LIGHTNING_SANDBOX_INSTANCE_TYPE`, `LIGHTNING_SANDBOX_TIMEOUT_MS`, `LIGHTNING_SANDBOX_WORKDIR`, `LIGHTNING_SANDBOX_IMAGE`, `LIGHTNING_SANDBOX_PERSISTENT` |
 | `local` | `agent/integrations/local.py` | None (no isolation — development only), `SANDBOX_TYPE="local"` |
 
 > **Warning**: `local` runs commands directly on your host with no sandboxing. Only use for local development with human-in-the-loop enabled.
