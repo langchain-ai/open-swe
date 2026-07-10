@@ -5,6 +5,9 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+WEB_SEARCH_MAX_CHARS = 50_000
+WEB_SEARCH_CONTENT_MAX_CHARS = 4_000
+
 
 async def web_search(
     query: str,
@@ -43,7 +46,7 @@ async def web_search(
             result = await asyncio.to_thread(
                 client.search_and_contents,
                 query,
-                text=True,
+                text={"max_characters": WEB_SEARCH_CONTENT_MAX_CHARS},
                 num_results=num_results,
                 type="auto",
             )
@@ -54,7 +57,13 @@ async def web_search(
                 num_results=num_results,
                 type="auto",
             )
-        return {"success": True, "results": str(result), "error": None}
+        results_str = str(result)
+        if len(results_str) > WEB_SEARCH_MAX_CHARS:
+            results_str = (
+                results_str[:WEB_SEARCH_MAX_CHARS] + "\n... [content truncated: "
+                f"{WEB_SEARCH_MAX_CHARS}/{len(results_str)} chars]\n"
+            )
+        return {"success": True, "results": results_str, "error": None}
 
     try:
         return await _search()

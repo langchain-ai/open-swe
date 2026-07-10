@@ -9,6 +9,18 @@ _MAX_REDIRECTS = 5
 
 _REDIRECT_CODES = {301, 302, 303, 307, 308}
 
+HTTP_REQUEST_MAX_CHARS = 100_000
+
+
+def _truncate_content(content: Any) -> Any:
+    """Cap string response bodies so oversized results don't flood model context."""
+    if isinstance(content, str) and len(content) > HTTP_REQUEST_MAX_CHARS:
+        return (
+            content[:HTTP_REQUEST_MAX_CHARS] + "\n... [content truncated: "
+            f"{HTTP_REQUEST_MAX_CHARS}/{len(content)} chars]\n"
+        )
+    return content
+
 
 def _blocked_response(url: str, reason: str) -> dict[str, Any]:
     return {
@@ -142,10 +154,13 @@ async def http_request(
         if blocked:
             return blocked
 
-        try:
-            content = response.json()
-        except ValueError:
-            content = response.text
+        if len(response.text) > HTTP_REQUEST_MAX_CHARS:
+            content: Any = _truncate_content(response.text)
+        else:
+            try:
+                content = response.json()
+            except ValueError:
+                content = response.text
 
         return {
             "success": response.status_code < 400,
