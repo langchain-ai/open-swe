@@ -43,6 +43,7 @@ from .dashboard.team_settings import (
 from .middleware import (
     BasePrepareRunMiddleware,
     ExcludeToolsMiddleware,
+    RepairOrphanedReasoningItemsMiddleware,
     SanitizeFireworksMessagesMiddleware,
     SanitizeThinkingBlocksMiddleware,
     SanitizeToolInputsMiddleware,
@@ -220,6 +221,7 @@ async def get_chat_agent(config: RunnableConfig) -> Pregel:
             ExcludeToolsMiddleware(excluded=_EXCLUDED_TOOLS),
             SanitizeFireworksMessagesMiddleware(),
             SanitizeThinkingBlocksMiddleware(),
+            RepairOrphanedReasoningItemsMiddleware(),
         ],
     ).with_config(config)
 

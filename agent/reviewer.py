@@ -48,6 +48,7 @@ from .dashboard.team_settings import (
 from .middleware import (
     BasePrepareRunMiddleware,
     PrepareRunState,
+    RepairOrphanedReasoningItemsMiddleware,
     RepairOrphanedToolCallsMiddleware,
     SanitizeFireworksMessagesMiddleware,
     SanitizeThinkingBlocksMiddleware,
@@ -1359,6 +1360,7 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
             SanitizeFireworksMessagesMiddleware(),
             SanitizeThinkingBlocksMiddleware(),
             RepairOrphanedToolCallsMiddleware(),
+            RepairOrphanedReasoningItemsMiddleware(),
             settle_review_check_on_exit,
         ],
     ).with_config(config)

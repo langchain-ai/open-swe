@@ -14,6 +14,7 @@ _MIDDLEWARE_MODULES = {
     "PullRequestCreationGuardMiddleware": ".pr_creation_guard",
     "refresh_github_proxy_before_model": ".refresh_github_proxy",
     "SlackAssistantStatusMiddleware": ".refresh_slack_status",
+    "RepairOrphanedReasoningItemsMiddleware": ".repair_orphaned_reasoning_items",
     "RepairOrphanedToolCallsMiddleware": ".repair_orphaned_tool_calls",
     "SandboxCircuitBreakerMiddleware": ".sandbox_circuit_breaker",
     "SanitizeFireworksMessagesMiddleware": ".sanitize_fireworks_messages",
@@ -36,6 +37,7 @@ __all__ = [
     "PlanModeMiddleware",
     "PrepareRunState",
     "PullRequestCreationGuardMiddleware",
+    "RepairOrphanedReasoningItemsMiddleware",
     "RepairOrphanedToolCallsMiddleware",
     "SanitizeFireworksMessagesMiddleware",
     "SanitizeThinkingBlocksMiddleware",
@@ -67,6 +69,7 @@ if TYPE_CHECKING:
     from .prepare_run import BasePrepareRunMiddleware, PrepareRunState
     from .refresh_github_proxy import refresh_github_proxy_before_model
     from .refresh_slack_status import SlackAssistantStatusMiddleware
+    from .repair_orphaned_reasoning_items import RepairOrphanedReasoningItemsMiddleware
     from .repair_orphaned_tool_calls import RepairOrphanedToolCallsMiddleware
     from .sandbox_circuit_breaker import SandboxCircuitBreakerMiddleware
     from .sanitize_fireworks_messages import SanitizeFireworksMessagesMiddleware
