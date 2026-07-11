@@ -3,7 +3,7 @@ import type { AcpToolKind } from "@/features/agents/lib/types";
 function stripProjectPath(path: string, projectPath?: string): string {
   if (!projectPath || !path.startsWith(projectPath)) return path;
   const relative = path.slice(projectPath.length);
-  return relative.startsWith("/") ? "." + relative : "./" + relative;
+  return relative.replace(/^\/+/, "") || ".";
 }
 
 function firstStringArg(
@@ -47,22 +47,22 @@ export function formatToolDisplay(
     case "read": {
       if (path) {
         const displayPath = stripProjectPath(path, projectPath);
-        return toolName === "ls" ? `List(${displayPath})` : `Read(${displayPath})`;
+        return toolName === "ls" ? `List ${displayPath}` : `Read ${displayPath}`;
       }
       return humanizeToolTitle(title);
     }
     case "search": {
-      if (pattern) return `Search("${truncateMiddle(pattern, 40)}")`;
-      if (query) return `Search("${truncateMiddle(query, 40)}")`;
-      if (path) return `Search(${stripProjectPath(path, projectPath)})`;
+      if (pattern) return `Search "${truncateMiddle(pattern, 40)}"`;
+      if (query) return `Search "${truncateMiddle(query, 40)}"`;
+      if (path) return `Search ${stripProjectPath(path, projectPath)}`;
       return humanizeToolTitle(title);
     }
     case "fetch": {
-      if (url) return `Fetch(${truncateMiddle(url, 50)})`;
+      if (url) return `Fetch ${truncateMiddle(url, 50)}`;
       return humanizeToolTitle(title);
     }
     case "execute": {
-      if (command) return `Shell(${truncateMiddle(command, 60)})`;
+      if (command) return `Shell ${truncateMiddle(command, 60)}`;
       return humanizeToolTitle(title);
     }
     case "edit":
@@ -75,7 +75,7 @@ export function formatToolDisplay(
       if (toolName === "write_todos" || title.toLowerCase().startsWith("write todos")) {
         return "Update todos";
       }
-      if (toolName === "ls" && path) return `List(${stripProjectPath(path, projectPath)})`;
+      if (toolName === "ls" && path) return `List ${stripProjectPath(path, projectPath)}`;
       return humanizeToolTitle(title);
     }
   }
