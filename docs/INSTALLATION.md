@@ -462,6 +462,10 @@ ALLOWED_GITHUB_REPOS=""                # e.g. "some-user/their-repo,another-org/
 DEFAULT_REPO_OWNER=""                  # Default GitHub org (e.g. "my-org")
 DEFAULT_REPO_NAME=""                   # Default GitHub repo (e.g. "my-repo")
 
+# === Agent Behavior (optional) ===
+# Todos are hidden from the agent by default. Set true to re-enable the write_todos tool.
+OPEN_SWE_ENABLE_TODOS=""
+
 # === Dashboard (required to run the web dashboard) ===
 # Public URL that browsers use for /dashboard/api/* and OAuth callbacks.
 # Use the FastAPI backend URL for local/cross-origin direct API calls.

@@ -108,16 +108,28 @@ def test_harness_profile_replaces_deepagents_base_for_supported_providers() -> N
     import deepagents.profiles.harness.harness_profiles as hp
 
     import agent.prompt  # noqa: F401  (registers the profile on import)
-    from agent.prompt import HARNESS_PROFILE_KEYS, OPEN_SWE_SHARED_BASE
+    from agent.prompt import HARNESS_EXCLUDED_TOOLS, HARNESS_PROFILE_KEYS, OPEN_SWE_SHARED_BASE
 
     hp._ensure_harness_profiles_loaded()
     assert set(HARNESS_PROFILE_KEYS) >= {"anthropic", "openai", "google_genai", "fireworks"}
+    assert "write_todos" in HARNESS_EXCLUDED_TOOLS
     for key in HARNESS_PROFILE_KEYS:
         profile = hp._HARNESS_PROFILES.get(key)
         assert profile is not None, f"no harness profile registered for {key!r}"
         assert profile.base_system_prompt == OPEN_SWE_SHARED_BASE
+        assert HARNESS_EXCLUDED_TOOLS <= profile.excluded_tools
         assert not profile.excluded_middleware
-    assert not hp._get_harness_profile("openai:gpt-5.6-sol").excluded_middleware
+    resolved_profile = hp._get_harness_profile("openai:gpt-5.6-sol")
+    assert "write_todos" in resolved_profile.excluded_tools
+    assert not resolved_profile.excluded_middleware
+
+
+def test_enable_todos_env_clears_harness_exclusions(monkeypatch) -> None:
+    from agent import prompt as prompt_module
+
+    monkeypatch.setenv(prompt_module.ENABLE_TODOS_ENV_VAR, "true")
+
+    assert prompt_module._harness_excluded_tools() == frozenset()
 
 
 def test_shared_base_is_neutral_for_read_only_agents() -> None:

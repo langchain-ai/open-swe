@@ -17,10 +17,18 @@ from .utils.github_comments import UNTRUSTED_GITHUB_COMMENT_OPEN_TAG
 logger = logging.getLogger(__name__)
 
 DEFAULT_PROMPT_PATH = os.environ.get("DEFAULT_PROMPT_PATH")
+ENABLE_TODOS_ENV_VAR = "OPEN_SWE_ENABLE_TODOS"
 
-# Tools stripped from the agent regardless of run state (none today: plan-mode
-# tool stripping is dynamic and handled by PlanModeMiddleware, not the profile).
-HARNESS_EXCLUDED_TOOLS: frozenset[str] = frozenset()
+
+def _env_flag(name: str) -> bool:
+    return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _harness_excluded_tools() -> frozenset[str]:
+    return frozenset() if _env_flag(ENABLE_TODOS_ENV_VAR) else frozenset({"write_todos"})
+
+
+HARNESS_EXCLUDED_TOOLS: frozenset[str] = _harness_excluded_tools()
 
 # Provider keys the harness profile is registered under. deepagents resolves a
 # pre-built model's profile by `provider:identifier` then a provider-only
