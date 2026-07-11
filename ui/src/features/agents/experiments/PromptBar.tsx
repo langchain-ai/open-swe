@@ -528,7 +528,7 @@ export const PromptBar = memo(function PromptBar({
             <div key={i} className="relative group">
               <img
                 src={`data:${img.mimeType};base64,${img.base64}`}
-                alt={img.fileName || "pending image"}
+                alt={img.fileName || "Pending image"}
                 className="w-16 h-16 object-cover rounded border border-gray-600"
               />
               <button

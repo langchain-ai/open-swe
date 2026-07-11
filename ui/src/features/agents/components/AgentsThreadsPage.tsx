@@ -61,6 +61,10 @@ function triToBool(value: TriState): boolean | undefined {
   return undefined
 }
 
+function displayStatus(status: AgentStatus): string {
+  return STATUS_OPTIONS.find((option) => option.value === status)?.label ?? status
+}
+
 export function AgentsThreadsPage({
   filters,
   onFiltersChange,
@@ -279,8 +283,8 @@ function ThreadListItem({ thread }: { thread: AgentThread }) {
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm text-[var(--ui-text)]">{thread.title}</p>
         <p className="truncate text-[11px] text-[var(--ui-text-dim)]">
-          {thread.repoFullName || "no repo"} · {thread.status}
-          {isResolved ? " · resolved" : ""}
+          {thread.repoFullName || "No repo"} · {displayStatus(thread.status)}
+          {isResolved ? " · Resolved" : ""}
         </p>
       </div>
       <button
