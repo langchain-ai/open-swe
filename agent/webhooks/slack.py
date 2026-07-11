@@ -278,8 +278,13 @@ async def _process_slack_mention_impl(
     if not any(str(message.get("ts")) == str(event_ts) for message in thread_messages):
         thread_messages.append({"ts": event_ts, "text": text, "user": user_id})
 
+    treat_all_messages_as_mentions = bool(event_data.get("treat_all_messages_as_mentions"))
     context_messages, context_mode = common.select_slack_context_messages(
-        thread_messages, event_ts, bot_user_id, common.SLACK_BOT_USERNAME
+        thread_messages,
+        event_ts,
+        bot_user_id,
+        common.SLACK_BOT_USERNAME,
+        treat_all_messages_as_mentions=treat_all_messages_as_mentions,
     )
     context_user_ids = [
         value
@@ -295,11 +300,13 @@ async def _process_slack_mention_impl(
         bot_user_id=bot_user_id,
         bot_username=common.SLACK_BOT_USERNAME,
     )
-    context_source = (
-        "the previous message where I was tagged"
-        if context_mode == "last_mention"
-        else "the beginning of the thread"
-    )
+    context_source = "the beginning of the thread"
+    if context_mode == "last_mention":
+        context_source = (
+            "the previous direct message"
+            if treat_all_messages_as_mentions
+            else "the previous message where I was tagged"
+        )
     clean_text = (
         common.strip_bot_mention(text, bot_user_id, bot_username=common.SLACK_BOT_USERNAME)
         or "(no text in mention)"
