@@ -76,6 +76,7 @@ fakes.seed_bare_remote()
 @app.post("/control/reset")
 async def control_reset() -> JSONResponse:
     fakes.reset()
+    CURRENT_THREAD["channel"] = DEMO_CHANNEL
     CURRENT_THREAD["thread_ts"] = None
     return JSONResponse({"ok": True})
 
@@ -94,27 +95,32 @@ async def slack_send(request: Request) -> JSONResponse:
     form = await request.json()
     text = str(form.get("text", ""))
     mention_bot = bool(form.get("mention_bot", True))
+    channel_type = str(form.get("channel_type") or "")
     # Sender defaults to the first test user (Alice) — the canonical owner the
     # automated tests log in as; the mock UI passes the chosen test user.
     user_id = str(form.get("user") or TEST_USERS[0]["slack_id"])
-    channel = DEMO_CHANNEL
+    channel = str(form.get("channel") or ("D_DEMO" if channel_type == "im" else DEMO_CHANNEL))
 
     ts = fakes.new_thread_ts()
+    CURRENT_THREAD["channel"] = channel
     CURRENT_THREAD["thread_ts"] = ts
     fakes.add_slack_message(channel, ts, user=user_id, text=text, is_bot=False)
 
+    event = {
+        "type": "app_mention" if mention_bot else "message",
+        "channel": channel,
+        "user": user_id,
+        "text": text,
+        "ts": ts,
+        "thread_ts": ts,
+    }
+    if channel_type:
+        event["channel_type"] = channel_type
     payload = {
         "type": "event_callback",
         "event_id": f"Ev{ts}",
         "authorizations": [{"user_id": BOT_USER_ID}],
-        "event": {
-            "type": "app_mention" if mention_bot else "message",
-            "channel": channel,
-            "user": user_id,
-            "text": text,
-            "ts": ts,
-            "thread_ts": ts,
-        },
+        "event": event,
     }
     raw = json.dumps(payload).encode()
     req_ts = str(int(time.time()))
