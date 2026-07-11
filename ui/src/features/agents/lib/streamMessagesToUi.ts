@@ -5,10 +5,11 @@ import type { AssembledToolCall, SubagentDiscoverySnapshot } from "@langchain/re
 
 import type { Chunk, DiffData, Message, ToolExecutionChunk } from "./types";
 
-const READ_TOOLS = new Set(["read_file", "read", "glob", "grep"]);
+const READ_TOOLS = new Set(["read_file", "read", "ls"]);
 const EDIT_TOOLS = new Set(["write_file", "edit_file", "str_replace", "write", "edit", "patch"]);
 const EXECUTE_TOOLS = new Set(["execute", "bash", "shell", "run_terminal_cmd"]);
-const SEARCH_TOOLS = new Set(["glob", "grep", "web_search", "fetch_url", "search"]);
+const SEARCH_TOOLS = new Set(["glob", "grep", "web_search", "search"]);
+const FETCH_TOOLS = new Set(["fetch", "fetch_url", "http_request"]);
 const INTERNAL_TOOLS = new Set(["confirming_completion", "no_op"]);
 
 type ToolKind = ToolExecutionChunk["toolKind"];
@@ -19,14 +20,15 @@ function toolKind(name: string): ToolKind {
   if (lowered === "task") return "task";
   if (lowered === "slack_thread_reply") return "slack";
   if (lowered === "linear_comment") return "linear";
+  if (lowered === "write_todos") return "other";
   if (EDIT_TOOLS.has(lowered) || ["edit", "write", "replace"].some((t) => lowered.includes(t))) {
     return "edit";
   }
   if (EXECUTE_TOOLS.has(lowered)) return "execute";
+  if (FETCH_TOOLS.has(lowered)) return "fetch";
   if (SEARCH_TOOLS.has(lowered)) return "search";
   if (READ_TOOLS.has(lowered) || lowered.includes("read")) return "read";
   if (lowered === "think") return "think";
-  if (["fetch", "fetch_url", "http_request"].includes(lowered)) return "fetch";
   return "other";
 }
 
