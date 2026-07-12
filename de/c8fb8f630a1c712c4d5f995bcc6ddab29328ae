@@ -1,0 +1,24 @@
+tests/slack/test_slack_webhook_errors.py
+  s_fb4d346e2789b0::t_75168f1ca7d4bc 286-291,311-316,324,334-339,342,346-369
+tests/e2e/tests/slack_debounce.spec.ts
+  s_fb4d346e2789b0::t_65f43d5d59c2c6 3,5-8,24-32,55,60-61,63,68-73,75-82,87,89-90,98,100-101,109
+agent/webhooks/slack.py
+  s_fb4d346e2789b0::t_2959a88262231b 125,127,131-135,137-141
+  s_fb4d346e2789b0::t_16592da9db0703 547-550,552-557
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "dec8fb8f630a1c712c4d5f995bcc6ddab29328ae",
+  "prompts": {},
+  "sessions": {
+    "s_fb4d346e2789b0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bb95763c-6b49-4db5-8cae-71a7ca5462e5",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "open-swe[bot] <open-swe@users.noreply.github.com>"
+    }
+  }
+}
