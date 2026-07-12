@@ -301,10 +301,9 @@ async def test_debounce_first_message_schedules_delayed_interrupt(
 ) -> None:
     client = _FakeStoreClient(item=None)
     dispatch = AsyncMock(return_value={"run_id": "run-1"})
-    queue = AsyncMock(return_value=True)
     monkeypatch.setattr(slack_webhook.common, "dispatch_agent_run", dispatch)
-    monkeypatch.setattr(slack_webhook.common, "queue_message_for_thread", queue)
     monkeypatch.setattr(slack_webhook.common, "SLACK_INTERRUPT_DEBOUNCE_SECONDS", 15.0)
+    monkeypatch.setattr(slack_webhook.common, "SLACK_INTERRUPT_DEBOUNCE_MAX_BLOCKS", 200)
 
     blocks = [{"type": "text", "text": "first"}]
     run = await slack_webhook._schedule_debounced_slack_interrupt(
@@ -312,41 +311,40 @@ async def test_debounce_first_message_schedules_delayed_interrupt(
     )
 
     assert run == {"run_id": "run-1"}
-    # First message is the anchor input, not queued, and schedules a delayed interrupt.
-    queue.assert_not_awaited()
+    # First message becomes the burst input and schedules a delayed interrupt.
     assert dispatch.await_args.args[1] == blocks
     assert dispatch.await_args.kwargs["after_seconds"] == 15.0
     stored = client.store.puts[-1]
     assert (
-        stored["deadline"] == 115.0 and stored["run_id"] == "run-1" and stored["anchor"] == blocks
+        stored["deadline"] == 115.0 and stored["run_id"] == "run-1" and stored["blocks"] == blocks
     )
 
 
 @pytest.mark.asyncio
-async def test_debounce_follow_up_extends_window_and_keeps_anchor(
+async def test_debounce_follow_up_accumulates_burst_and_resets_timer(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    anchor = [{"type": "text", "text": "first"}]
+    first = [{"type": "text", "text": "first"}]
     client = _FakeStoreClient(
-        item={"value": {"deadline": 110.0, "run_id": "run-1", "anchor": anchor}}
+        item={"value": {"deadline": 110.0, "run_id": "run-1", "blocks": first}}
     )
     dispatch = AsyncMock(return_value={"run_id": "run-2"})
-    queue = AsyncMock(return_value=True)
     monkeypatch.setattr(slack_webhook.common, "dispatch_agent_run", dispatch)
-    monkeypatch.setattr(slack_webhook.common, "queue_message_for_thread", queue)
     monkeypatch.setattr(slack_webhook.common, "SLACK_INTERRUPT_DEBOUNCE_SECONDS", 15.0)
+    monkeypatch.setattr(slack_webhook.common, "SLACK_INTERRUPT_DEBOUNCE_MAX_BLOCKS", 200)
 
     later = [{"type": "text", "text": "second"}]
     await slack_webhook._schedule_debounced_slack_interrupt(client, "t1", later, {}, now=105.0)
 
-    # Later message is coalesced onto the queue; the pending interrupt is cancelled.
-    queue.assert_awaited_once_with("t1", later)
+    # The still-pending interrupt is cancelled and rescheduled; no shared queue involved.
     assert client.runs.cancelled == [("run-1", "rollback")]
-    # The rescheduled run still carries the original anchor and a fresh deadline.
-    assert dispatch.await_args.args[1] == anchor
+    # The rescheduled run carries the whole burst in arrival order with a fresh deadline.
+    assert dispatch.await_args.args[1] == [*first, *later]
     stored = client.store.puts[-1]
     assert (
-        stored["deadline"] == 120.0 and stored["run_id"] == "run-2" and stored["anchor"] == anchor
+        stored["deadline"] == 120.0
+        and stored["run_id"] == "run-2"
+        and stored["blocks"] == [*first, *later]
     )
 
 
@@ -354,18 +352,16 @@ async def test_debounce_follow_up_extends_window_and_keeps_anchor(
 async def test_debounce_expired_claim_starts_fresh_burst(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    client = _FakeStoreClient(item={"value": {"deadline": 50.0, "run_id": "old", "anchor": ["x"]}})
+    client = _FakeStoreClient(item={"value": {"deadline": 50.0, "run_id": "old", "blocks": ["x"]}})
     dispatch = AsyncMock(return_value={"run_id": "run-3"})
-    queue = AsyncMock(return_value=True)
     monkeypatch.setattr(slack_webhook.common, "dispatch_agent_run", dispatch)
-    monkeypatch.setattr(slack_webhook.common, "queue_message_for_thread", queue)
     monkeypatch.setattr(slack_webhook.common, "SLACK_INTERRUPT_DEBOUNCE_SECONDS", 15.0)
+    monkeypatch.setattr(slack_webhook.common, "SLACK_INTERRUPT_DEBOUNCE_MAX_BLOCKS", 200)
 
     blocks = [{"type": "text", "text": "new burst"}]
     await slack_webhook._schedule_debounced_slack_interrupt(client, "t1", blocks, {}, now=100.0)
 
-    # Expired claim: treat as a fresh burst — no queue, no cancel, new anchor.
-    queue.assert_not_awaited()
+    # Expired claim: fresh burst — no cancel, the stale burst is dropped.
     assert client.runs.cancelled == []
     assert dispatch.await_args.args[1] == blocks
-    assert client.store.puts[-1]["anchor"] == blocks
+    assert client.store.puts[-1]["blocks"] == blocks

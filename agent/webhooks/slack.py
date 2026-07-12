@@ -128,14 +128,14 @@ async def _schedule_debounced_slack_interrupt(
     """Schedule (or reschedule) a single delayed interrupt of a busy thread.
 
     Trailing-edge debounce: the quiet window restarts on every follow-up. The
-    first message of a burst is the anchor carried as the eventual run input;
-    each later message is coalesced onto the store queue (drained by the run at
-    its first model call) and resets the timer by cancelling the still-pending
-    interrupt and rescheduling it ``window`` seconds out.
+    whole burst is accumulated in debounce-specific storage (never the thread's
+    normal message queue, which the *active* run would drain mid-window) and
+    carried, in arrival order, as the eventual interrupt run's input. Each
+    follow-up appends its blocks, cancels the still-pending interrupt, and
+    reschedules it a full window out.
     """
     namespace = ("slack_debounce", thread_id)
-    key = "claim"
-    anchor = content_blocks
+    key = "burst"
 
     try:
         existing = await client.store.get_item(namespace, key)
@@ -146,8 +146,8 @@ async def _schedule_debounced_slack_interrupt(
 
     deadline = value.get("deadline") if isinstance(value, dict) else None
     if isinstance(deadline, (int, float)) and deadline > now:
-        anchor = value.get("anchor") or content_blocks
-        await common.queue_message_for_thread(thread_id, content_blocks)
+        prior = value.get("blocks") if isinstance(value.get("blocks"), list) else []
+        blocks = [*prior, *content_blocks]
         pending_run_id = value.get("run_id")
         if isinstance(pending_run_id, str) and pending_run_id:
             try:
@@ -157,10 +157,15 @@ async def _schedule_debounced_slack_interrupt(
                     "Could not cancel pending Slack interrupt %s", pending_run_id, exc_info=True
                 )
         common.logger.info("Extended debounced Slack interrupt window for thread %s", thread_id)
+    else:
+        blocks = list(content_blocks)
+
+    if len(blocks) > common.SLACK_INTERRUPT_DEBOUNCE_MAX_BLOCKS:
+        blocks = blocks[-common.SLACK_INTERRUPT_DEBOUNCE_MAX_BLOCKS :]
 
     run = await common.dispatch_agent_run(
         thread_id,
-        anchor,
+        blocks,
         configurable,
         source="slack",
         metadata=common._AGENT_VERSION_METADATA,
@@ -175,7 +180,7 @@ async def _schedule_debounced_slack_interrupt(
             {
                 "deadline": now + common.SLACK_INTERRUPT_DEBOUNCE_SECONDS,
                 "run_id": run_id,
-                "anchor": anchor,
+                "blocks": blocks,
             },
         )
     except Exception:  # noqa: BLE001
