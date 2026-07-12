@@ -122,16 +122,23 @@ async def _dispatch_or_queue_slack_run(
     thread_id: str,
     content_blocks: list[dict[str, Any]],
     configurable: dict[str, Any],
+    *,
     is_first_mention: bool,
+    explicitly_tagged: bool,
 ) -> dict[str, Any] | None:
     """Start a run, or coalesce onto the thread queue if one is already in flight.
 
-    Debounces interrupts: while the agent is busy, rapid follow-ups are parked on
-    the store queue and picked up together at its next model call (via
-    ``check_message_queue_before_model``) instead of each halting and resuming the
-    active run. Returns the run dict, or ``None`` when the message was queued.
+    An explicit @-mention always interrupts immediately (the active run halts and
+    resumes with the new message). Only untagged follow-ups are debounced: while
+    the agent is busy they are parked on the store queue and picked up together at
+    its next model call (via ``check_message_queue_before_model``). Returns the run
+    dict, or ``None`` when the message was queued.
     """
-    if not is_first_mention and await _slack_thread_is_busy(client, thread_id):
+    if (
+        not explicitly_tagged
+        and not is_first_mention
+        and await _slack_thread_is_busy(client, thread_id)
+    ):
         await common.queue_message_for_thread(thread_id, content_blocks)
         return None
     return await common.dispatch_agent_run(
@@ -537,8 +544,17 @@ async def _process_slack_mention_impl(
         source_context={"slack_thread": configurable["slack_thread"]},
     )
 
+    explicitly_tagged = bool(
+        (bot_user_id and f"<@{bot_user_id}>" in text)
+        or (common.SLACK_BOT_USERNAME and f"@{common.SLACK_BOT_USERNAME}" in text)
+    )
     run = await _dispatch_or_queue_slack_run(
-        langgraph_client, thread_id, content_blocks, configurable, is_first_mention
+        langgraph_client,
+        thread_id,
+        content_blocks,
+        configurable,
+        is_first_mention=is_first_mention,
+        explicitly_tagged=explicitly_tagged,
     )
     if run is None:
         common.logger.info("Coalesced Slack follow-up onto the queue for busy thread %s", thread_id)

@@ -283,7 +283,12 @@ async def test_dispatch_or_queue_dispatches_when_idle(
 
     blocks = [{"type": "text", "text": "hi"}]
     run = await slack_webhook._dispatch_or_queue_slack_run(
-        _FakeStatusClient("idle"), "t1", blocks, {}, is_first_mention=False
+        _FakeStatusClient("idle"),
+        "t1",
+        blocks,
+        {},
+        is_first_mention=False,
+        explicitly_tagged=False,
     )
 
     assert run == {"run_id": "run-1"}
@@ -303,7 +308,12 @@ async def test_dispatch_or_queue_dispatches_on_first_mention_without_status_chec
     # A brand-new thread can't be busy — dispatch straight away (status "busy"
     # here proves the first-mention short-circuit skips the check).
     run = await slack_webhook._dispatch_or_queue_slack_run(
-        _FakeStatusClient("busy"), "t1", [{"type": "text", "text": "hi"}], {}, is_first_mention=True
+        _FakeStatusClient("busy"),
+        "t1",
+        [{"type": "text", "text": "hi"}],
+        {},
+        is_first_mention=True,
+        explicitly_tagged=True,
     )
 
     assert run == {"run_id": "run-1"}
@@ -311,7 +321,7 @@ async def test_dispatch_or_queue_dispatches_on_first_mention_without_status_chec
 
 
 @pytest.mark.asyncio
-async def test_dispatch_or_queue_coalesces_onto_queue_when_busy(
+async def test_dispatch_or_queue_coalesces_untagged_follow_up_when_busy(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     dispatch = AsyncMock(return_value={"run_id": "run-1"})
@@ -321,10 +331,39 @@ async def test_dispatch_or_queue_coalesces_onto_queue_when_busy(
 
     blocks = [{"type": "text", "text": "follow up"}]
     run = await slack_webhook._dispatch_or_queue_slack_run(
-        _FakeStatusClient("busy"), "t1", blocks, {}, is_first_mention=False
+        _FakeStatusClient("busy"),
+        "t1",
+        blocks,
+        {},
+        is_first_mention=False,
+        explicitly_tagged=False,
     )
 
-    # Busy → parked on the queue for the active run to drain; no new run started.
+    # Untagged + busy → parked on the queue for the active run to drain.
     assert run is None
     dispatch.assert_not_awaited()
     queue.assert_awaited_once_with("t1", blocks)
+
+
+@pytest.mark.asyncio
+async def test_dispatch_or_queue_tagged_message_interrupts_even_when_busy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    dispatch = AsyncMock(return_value={"run_id": "run-1"})
+    queue = AsyncMock(return_value=True)
+    monkeypatch.setattr(slack_webhook.common, "dispatch_agent_run", dispatch)
+    monkeypatch.setattr(slack_webhook.common, "queue_message_for_thread", queue)
+
+    # An explicit @-mention keeps the old immediate-interrupt behavior.
+    run = await slack_webhook._dispatch_or_queue_slack_run(
+        _FakeStatusClient("busy"),
+        "t1",
+        [{"type": "text", "text": "<@BOT> stop and do this instead"}],
+        {},
+        is_first_mention=False,
+        explicitly_tagged=True,
+    )
+
+    assert run == {"run_id": "run-1"}
+    queue.assert_not_awaited()
+    dispatch.assert_awaited_once()

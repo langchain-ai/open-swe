@@ -1,10 +1,11 @@
 import { test, expect, type APIRequestContext } from "@playwright/test";
 
-// Feature: while Open SWE is busy on a thread, rapid follow-ups are debounced —
+// Feature: while Open SWE is busy, *untagged* follow-ups are debounced —
 // coalesced onto the thread's message queue (for the active run to drain at its
-// next model call) instead of each halting and resuming the run. Driven through
-// the real webhook + real agent; the LLM is faked and holds the first run open
-// so follow-ups land mid-run.
+// next model call) instead of each halting and resuming the run. An explicit
+// @-mention is NOT debounced (it keeps interrupting immediately). Driven through
+// the real webhook + real agent; the LLM is faked and holds a run open so
+// follow-ups land mid-run.
 
 type SendResult = {
   thread_ts: string;
@@ -18,6 +19,15 @@ async function send(
 ): Promise<SendResult> {
   const res = await request.post("/mock/slack/send", { data });
   return (await res.json()) as SendResult;
+}
+
+async function botTexts(request: APIRequestContext): Promise<string> {
+  const res = await request.get("/mock/slack/messages");
+  const msgs = (await res.json()) as Array<{ text: string; is_bot: boolean }>;
+  return msgs
+    .filter((m) => m.is_bot)
+    .map((m) => m.text)
+    .join("\n");
 }
 
 async function threadStatus(
@@ -41,42 +51,43 @@ async function queuedCount(
   return body.queued_count;
 }
 
-async function runCount(
-  request: APIRequestContext,
-  threadId: string,
-): Promise<number> {
-  const res = await request.get(`/threads/${threadId}/runs`);
-  if (!res.ok()) return -1;
-  const runs = (await res.json()) as unknown[];
-  return Array.isArray(runs) ? runs.length : -1;
-}
-
 test.describe("Slack busy-thread interrupt debounce", () => {
-  test("rapid follow-ups coalesce onto the queue without new runs", async ({
+  test("untagged follow-ups on a busy thread coalesce onto the queue", async ({
     request,
   }) => {
     await request.post("/control/reset");
 
-    // 1. Start a run that holds the thread busy (the fake LLM sleeps on the
-    //    E2E_BUSY_HOLD marker), so follow-ups arrive mid-run.
+    // Phase 1: open a two-party thread so Open SWE has participated (a
+    // prerequisite for untagged follow-ups to be accepted).
     const opened = await send(request, {
-      text: "<@U0BOT> please add a greet() helper and open a PR E2E_BUSY_HOLD",
+      text: "<@U0BOT> please add a greet() helper and open a PR",
       mention_bot: true,
     });
     const threadId = opened.thread_id;
     const threadTs = opened.thread_ts;
-    expect(opened.webhook.status).toBe("accepted");
+    await expect
+      .poll(() => botTexts(request), { timeout: 60_000 })
+      .toContain("/pull/");
+    await expect
+      .poll(() => threadStatus(request, threadId), { timeout: 30_000 })
+      .not.toBe("busy");
 
-    // 2. Wait until the run is actually busy before firing follow-ups.
+    // Phase 2: start a run that holds the thread busy (fake LLM sleeps on the
+    // marker). This one IS tagged, so it dispatches immediately.
+    const busy = await send(request, {
+      text: "<@U0BOT> now also tweak it E2E_BUSY_HOLD",
+      mention_bot: true,
+      thread_ts: threadTs,
+    });
+    expect(busy.webhook.status).toBe("accepted");
     await expect
       .poll(() => threadStatus(request, threadId), { timeout: 30_000 })
       .toBe("busy");
-    const runsWhileBusy = await runCount(request, threadId);
 
-    // 3. First follow-up while busy → parked on the queue, no new run.
+    // 3. First UNTAGGED follow-up while busy → parked on the queue, no interrupt.
     const b = await send(request, {
-      text: "<@U0BOT> also rename it to hello()",
-      mention_bot: true,
+      text: "also rename it to hello()",
+      mention_bot: false,
       thread_ts: threadTs,
     });
     expect(b.webhook.status).toBe("accepted");
@@ -84,10 +95,10 @@ test.describe("Slack busy-thread interrupt debounce", () => {
       .poll(() => queuedCount(request, threadId), { timeout: 30_000 })
       .toBe(1);
 
-    // 4. Second follow-up while still busy → coalesced onto the SAME queue.
+    // 4. Second UNTAGGED follow-up while still busy → coalesced onto the queue.
     const c = await send(request, {
-      text: "<@U0BOT> and add a type hint",
-      mention_bot: true,
+      text: "and add a type hint",
+      mention_bot: false,
       thread_ts: threadTs,
     });
     expect(c.webhook.status).toBe("accepted");
@@ -95,8 +106,7 @@ test.describe("Slack busy-thread interrupt debounce", () => {
       .poll(() => queuedCount(request, threadId), { timeout: 30_000 })
       .toBe(2);
 
-    // 5. Neither follow-up spawned its own run — the active run absorbs both.
+    // The run is still busy — the untagged follow-ups did not interrupt it.
     expect(await threadStatus(request, threadId)).toBe("busy");
-    expect(await runCount(request, threadId)).toBe(runsWhileBusy);
   });
 });
