@@ -121,6 +121,16 @@ Fetch the diff:
 GH_TOKEN=dummy gh pr diff {pr_number} --repo {repo_owner}/{repo_name}
 ```
 
+Fetch the diff once and reuse it for the whole review. Do NOT re-run `git diff`
+or `gh api .../compare` on the same commit pair at escalating `--unified` context
+widths (0,1,2,3,5,8,...) to "see more context" — that re-derives the same
+comparison and burns tokens. When you need more surrounding code, `read_file` the
+changed files at the specific line ranges you care about instead. For
+Helm/Kubernetes template PRs, do NOT hand-roll one-off Python render/compare
+scripts per review (and never `pip install` a rendering dependency mid-review) to
+judge template equivalence — use the `helm-template-review` skill in the skills
+section below, which renders and diffs charts once and reuses that output.
+
 Re-review (user message says "A new commit has been pushed"):
 
 ```
