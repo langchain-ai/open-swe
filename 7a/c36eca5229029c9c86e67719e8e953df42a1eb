@@ -1,0 +1,29 @@
+agent/dispatch.py
+  s_fb4d346e2789b0::t_4dbaec37f85c34 160,166-167,177
+agent/webhooks/common.py
+  s_fb4d346e2789b0::t_d67c7fdf4f6f4b 237
+  s_fb4d346e2789b0::t_acc4d2372db9ee 123
+  s_fb4d346e2789b0::t_02802719ce743a 286-287
+tests/slack/test_slack_webhook_errors.py
+  s_fb4d346e2789b0::t_2c54003988b54d 235-287
+agent/webhooks/slack.py
+  s_fb4d346e2789b0::t_219aea5c2fb0ab 535-550,558
+  s_fb4d346e2789b0::t_dfc7113db3e6fe 9
+  s_fb4d346e2789b0::t_95061e1b9f161d 106-146
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "7ac36eca5229029c9c86e67719e8e953df42a1eb",
+  "prompts": {},
+  "sessions": {
+    "s_fb4d346e2789b0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bb95763c-6b49-4db5-8cae-71a7ca5462e5",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "open-swe[bot] <open-swe@users.noreply.github.com>"
+    }
+  }
+}
