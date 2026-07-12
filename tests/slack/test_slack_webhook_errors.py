@@ -158,3 +158,77 @@ async def test_plan_revision_reply_does_not_trigger_approval(
 
     assert handled is False
     is_owner.assert_not_awaited()
+
+
+def _thread(*users: str) -> list[dict[str, Any]]:
+    return [{"ts": f"1.{i}", "user": user} for i, user in enumerate(users)]
+
+
+@pytest.mark.asyncio
+async def test_untagged_reply_allowed_for_two_party_thread(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    messages = _thread("UHUMAN", "BOT", "UHUMAN")
+    monkeypatch.setattr(
+        slack_webhook.common, "fetch_slack_thread_messages", AsyncMock(return_value=messages)
+    )
+
+    assert await slack_webhook._slack_thread_allows_untagged_reply(
+        "C1", "123.45", "no worries, keep going", "BOT"
+    )
+
+
+@pytest.mark.asyncio
+async def test_untagged_reply_blocked_when_mentioning_other_user(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    messages = _thread("UHUMAN", "BOT")
+    monkeypatch.setattr(
+        slack_webhook.common, "fetch_slack_thread_messages", AsyncMock(return_value=messages)
+    )
+
+    assert not await slack_webhook._slack_thread_allows_untagged_reply(
+        "C1", "123.45", "hey <@UOTHER> can you look?", "BOT"
+    )
+
+
+@pytest.mark.asyncio
+async def test_untagged_reply_mentioning_only_bot_allowed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    messages = _thread("UHUMAN", "BOT")
+    monkeypatch.setattr(
+        slack_webhook.common, "fetch_slack_thread_messages", AsyncMock(return_value=messages)
+    )
+
+    assert await slack_webhook._slack_thread_allows_untagged_reply(
+        "C1", "123.45", "<@BOT> keep going", "BOT"
+    )
+
+
+@pytest.mark.asyncio
+async def test_untagged_reply_blocked_for_three_party_thread(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    messages = _thread("UHUMAN", "BOT", "USECOND")
+    monkeypatch.setattr(
+        slack_webhook.common, "fetch_slack_thread_messages", AsyncMock(return_value=messages)
+    )
+
+    assert not await slack_webhook._slack_thread_allows_untagged_reply(
+        "C1", "123.45", "keep going", "BOT"
+    )
+
+
+@pytest.mark.asyncio
+async def test_untagged_reply_blocked_when_bot_absent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    messages = _thread("UHUMAN", "UHUMAN")
+    monkeypatch.setattr(
+        slack_webhook.common, "fetch_slack_thread_messages", AsyncMock(return_value=messages)
+    )
+
+    assert not await slack_webhook._slack_thread_allows_untagged_reply(
+        "C1", "123.45", "keep going", "BOT"
+    )

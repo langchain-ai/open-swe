@@ -73,6 +73,35 @@ def _is_natural_language_plan_approval(text: str) -> bool:
     return any(f" {phrase} " in padded for phrase in _PLAN_APPROVAL_PHRASES)
 
 
+async def _slack_thread_allows_untagged_reply(
+    channel_id: str, thread_ts: str, text: str, bot_user_id: str
+) -> bool:
+    """Allow an untagged follow-up when Open SWE and exactly one human share the thread.
+
+    Skipped when the message mentions any user other than Open SWE, so tagging a
+    different person still hands the turn to them rather than the agent.
+    """
+    if not channel_id or not thread_ts or not bot_user_id:
+        return False
+
+    mentioned = set(re.findall(r"<@([A-Z0-9]+)>", text or ""))
+    if any(user_id != bot_user_id for user_id in mentioned):
+        return False
+
+    messages = await common.fetch_slack_thread_messages(channel_id, thread_ts)
+    bot_participated = False
+    humans: set[str] = set()
+    for message in messages:
+        author = message.get("user")
+        if author == bot_user_id or message.get("bot_id"):
+            bot_participated = True
+            continue
+        if isinstance(author, str) and author:
+            humans.add(author)
+
+    return bot_participated and len(humans) == 1
+
+
 async def _slack_user_can_reply_to_ready_plan(
     channel_id: str, thread_ts: str, slack_user_id: str
 ) -> bool:
