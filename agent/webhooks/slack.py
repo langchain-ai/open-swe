@@ -6,6 +6,7 @@ object (``common.X``) so tests that monkeypatch them keep working.
 
 import asyncio
 import re
+import time
 from datetime import UTC, datetime
 from typing import Any
 
@@ -100,6 +101,47 @@ async def _slack_thread_allows_untagged_reply(
             humans.add(author)
 
     return bot_participated and len(humans) == 1
+
+
+async def _slack_thread_is_busy(client: Any, thread_id: str) -> bool:
+    try:
+        thread = await client.threads.get(thread_id)
+    except Exception:  # noqa: BLE001
+        common.logger.debug(
+            "Could not read Slack thread status for %s; treating as idle", thread_id, exc_info=True
+        )
+        return False
+    status = thread.get("status") if isinstance(thread, dict) else None
+    return status == "busy"
+
+
+async def _claim_slack_interrupt_debounce(client: Any, thread_id: str, now: float) -> bool:
+    """Claim the debounce slot for a busy thread.
+
+    Returns True when this message is the leader that should schedule the single
+    delayed interrupt; False when an interrupt is already pending within the
+    quiet window, in which case the caller should coalesce onto the store queue.
+    """
+    namespace = ("slack_debounce", thread_id)
+    key = "claim"
+    try:
+        existing = await client.store.get_item(namespace, key)
+        deadline = None
+        if existing and isinstance(existing.get("value"), dict):
+            deadline = existing["value"].get("deadline")
+        if isinstance(deadline, (int, float)) and deadline > now:
+            return False
+        await client.store.put_item(
+            namespace, key, {"deadline": now + common.SLACK_INTERRUPT_DEBOUNCE_SECONDS}
+        )
+        return True
+    except Exception:  # noqa: BLE001
+        common.logger.warning(
+            "Slack debounce bookkeeping failed for %s; scheduling interrupt anyway",
+            thread_id,
+            exc_info=True,
+        )
+        return True
 
 
 async def _slack_user_can_reply_to_ready_plan(
@@ -490,6 +532,22 @@ async def _process_slack_mention_impl(
         source_context={"slack_thread": configurable["slack_thread"]},
     )
 
+    # Debounce interrupts: when the thread is already working, hold the interrupt
+    # for a quiet window and coalesce rapid follow-ups. The leader schedules one
+    # delayed interrupt (carrying its own message); followers within the window
+    # drop onto the store queue, which the run drains at its next model call.
+    after_seconds: float | None = None
+    if not is_first_mention and await _slack_thread_is_busy(langgraph_client, thread_id):
+        if await _claim_slack_interrupt_debounce(langgraph_client, thread_id, time.time()):
+            after_seconds = common.SLACK_INTERRUPT_DEBOUNCE_SECONDS
+        else:
+            await common.queue_message_for_thread(thread_id, content_blocks)
+            common.logger.info(
+                "Coalesced Slack follow-up onto pending debounced interrupt for thread %s",
+                thread_id,
+            )
+            return
+
     run = await common.dispatch_agent_run(
         thread_id,
         content_blocks,
@@ -497,6 +555,7 @@ async def _process_slack_mention_impl(
         source="slack",
         metadata=common._AGENT_VERSION_METADATA,
         client=langgraph_client,
+        after_seconds=after_seconds,
     )
     common.logger.info(
         "Slack LangGraph run %s dispatched for thread %s",

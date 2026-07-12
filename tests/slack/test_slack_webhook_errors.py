@@ -232,3 +232,56 @@ async def test_untagged_reply_blocked_when_bot_absent(
     assert not await slack_webhook._slack_thread_allows_untagged_reply(
         "C1", "123.45", "keep going", "BOT"
     )
+
+
+class _FakeStore:
+    def __init__(self, item: dict[str, Any] | None = None) -> None:
+        self.item = item
+        self.puts: list[dict[str, Any]] = []
+
+    async def get_item(self, namespace: tuple[str, ...], key: str) -> dict[str, Any] | None:
+        return self.item
+
+    async def put_item(self, namespace: tuple[str, ...], key: str, value: dict[str, Any]) -> None:
+        self.item = {"value": value}
+        self.puts.append(value)
+
+
+class _FakeStoreClient:
+    class _Threads:
+        def __init__(self, status: str) -> None:
+            self._status = status
+
+        async def get(self, thread_id: str) -> dict[str, str]:
+            return {"status": self._status}
+
+    def __init__(self, status: str = "busy", item: dict[str, Any] | None = None) -> None:
+        self.store = _FakeStore(item)
+        self.threads = _FakeStoreClient._Threads(status)
+
+
+@pytest.mark.asyncio
+async def test_slack_thread_is_busy_reflects_status() -> None:
+    assert await slack_webhook._slack_thread_is_busy(_FakeStoreClient("busy"), "t1") is True
+    assert await slack_webhook._slack_thread_is_busy(_FakeStoreClient("idle"), "t1") is False
+
+
+@pytest.mark.asyncio
+async def test_debounce_leader_claims_slot_when_none_pending() -> None:
+    client = _FakeStoreClient(item=None)
+    assert await slack_webhook._claim_slack_interrupt_debounce(client, "t1", now=100.0) is True
+    assert client.store.puts and client.store.puts[0]["deadline"] > 100.0
+
+
+@pytest.mark.asyncio
+async def test_debounce_follower_when_claim_still_active() -> None:
+    client = _FakeStoreClient(item={"value": {"deadline": 200.0}})
+    assert await slack_webhook._claim_slack_interrupt_debounce(client, "t1", now=100.0) is False
+    assert client.store.puts == []
+
+
+@pytest.mark.asyncio
+async def test_debounce_leader_when_prior_claim_expired() -> None:
+    client = _FakeStoreClient(item={"value": {"deadline": 50.0}})
+    assert await slack_webhook._claim_slack_interrupt_debounce(client, "t1", now=100.0) is True
+    assert client.store.puts

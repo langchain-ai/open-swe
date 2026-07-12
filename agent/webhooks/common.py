@@ -120,6 +120,7 @@ from ..utils.slack_feedback import (
     process_slack_reaction_removed,
 )
 from ..utils.thread_ids import generate_thread_id_from_slack_thread
+from ..utils.thread_ops import queue_message_for_thread  # noqa: F401
 
 __all__ = [
     "Any",
@@ -233,6 +234,7 @@ __all__ = [
     "post_slack_trace_reply",
     "process_slack_reaction_added",
     "process_slack_reaction_removed",
+    "queue_message_for_thread",
     "react_to_github_comment",
     "react_to_linear_comment",
     "reconcile_findings_with_review_threads",
@@ -281,6 +283,8 @@ GITHUB_WEBHOOK_SECRET = os.environ.get("GITHUB_WEBHOOK_SECRET", "")
 SLACK_SIGNING_SECRET = os.environ.get("SLACK_SIGNING_SECRET", "")
 SLACK_BOT_USER_ID = os.environ.get("SLACK_BOT_USER_ID", "")
 SLACK_BOT_USERNAME = os.environ.get("SLACK_BOT_USERNAME", "")
+# Quiet window (seconds) to coalesce rapid follow-ups into one interrupt of a busy thread.
+SLACK_INTERRUPT_DEBOUNCE_SECONDS = float(os.environ.get("SLACK_INTERRUPT_DEBOUNCE_SECONDS", "15"))
 DEFAULT_REPO_OWNER = os.environ.get("DEFAULT_REPO_OWNER", "langchain-ai")
 DEFAULT_REPO_NAME = os.environ.get("DEFAULT_REPO_NAME", "")
 SLACK_REPO_OWNER = os.environ.get("SLACK_REPO_OWNER", "") or DEFAULT_REPO_OWNER
