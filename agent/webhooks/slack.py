@@ -94,8 +94,11 @@ async def _slack_thread_allows_untagged_reply(
     humans: set[str] = set()
     for message in messages:
         author = message.get("user")
-        if author == bot_user_id or message.get("bot_id"):
+        if author == bot_user_id:
             bot_participated = True
+            continue
+        # Skip other apps (GitHub/CI bots) — they are neither Open SWE nor a human participant.
+        if message.get("bot_id"):
             continue
         if isinstance(author, str) and author:
             humans.add(author)

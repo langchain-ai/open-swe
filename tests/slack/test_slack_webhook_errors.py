@@ -234,6 +234,25 @@ async def test_untagged_reply_blocked_when_bot_absent(
     )
 
 
+@pytest.mark.asyncio
+async def test_untagged_reply_blocked_when_only_third_party_bot_present(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # One human + a GitHub/CI bot reply, but no Open SWE message: not a two-party
+    # Open SWE thread, so an untagged follow-up must not start a run.
+    messages = [
+        {"ts": "1.0", "user": "UHUMAN"},
+        {"ts": "1.1", "user": "UGH", "bot_id": "BGITHUB"},
+    ]
+    monkeypatch.setattr(
+        slack_webhook.common, "fetch_slack_thread_messages", AsyncMock(return_value=messages)
+    )
+
+    assert not await slack_webhook._slack_thread_allows_untagged_reply(
+        "C1", "123.45", "keep going", "BOT"
+    )
+
+
 class _FakeStore:
     def __init__(self, item: dict[str, Any] | None = None) -> None:
         self.item = item
