@@ -1,0 +1,49 @@
+tests/e2e/playwright.config.ts
+  s_fb4d346e2789b0::t_55043f6fd595d6 43-45
+tests/e2e/tests/slack_untagged_reply.spec.ts
+  s_fb4d346e2789b0::t_673288a6e451f1 66-70
+  s_fb4d346e2789b0::t_fb6b21db35a0cc 1-26,37-65,71-119
+  s_fb4d346e2789b0::t_3f99825fa9efb9 27-36
+tests/slack/test_slack_webhook_errors.py
+  s_fb4d346e2789b0::t_153d70c074eb42 256-258,260-261,264-266,271-272,276,280,282,284-286,290,295,298-299,301,303-306,309-311,314,317-318,320,322-325,327-330
+tests/e2e/tests/slack_debounce.spec.ts
+  s_fb4d346e2789b0::t_d5e1c5b30a5154 4-7,33,36,38,40-51,55,70,74,76,84,86-87,95,98-100
+  s_fb4d346e2789b0::t_cf4909308eebd0 1-3,8-32,34-35,37,39,52-54,56-69,71-73,75,77-82,88-94,96,101-102
+  s_fb4d346e2789b0::t_65adbedb8125b0 83,85,97
+tests/e2e/fake_llm.py
+  s_fb4d346e2789b0::t_1c10fd60a3c1ec 409-414
+  s_fb4d346e2789b0::t_ad2f882141e7ef 12
+agent/dispatch.py
+  s_fb4d346e2789b0::t_c6e317f084525c 165
+agent/webhooks/common.py
+  s_fb4d346e2789b0::t_830e8e3507eb42 237
+  s_fb4d346e2789b0::t_07d130e779fc75 123
+tests/e2e/harness.py
+  s_fb4d346e2789b0::t_387554b8247596 103
+  s_fb4d346e2789b0::t_1c6e0ff95aff24 122-132,136,143-144
+  s_fb4d346e2789b0::t_2681be53bd58ba 93,97-101,104-105,108-109
+  s_fb4d346e2789b0::t_c39d8bae0a9081 165-166
+  s_fb4d346e2789b0::t_e6c3d931462025 90-92,94-96,102,106-107
+agent/webhooks/slack.py
+  s_fb4d346e2789b0::t_e371df0efbe488 540-543,545
+  s_fb4d346e2789b0::t_6a0bca7ab8814b 155-160
+  s_fb4d346e2789b0::t_a5bddf1b1088c1 120,125-132,134-137,139
+  s_fb4d346e2789b0::t_982cb56f37b7ec 87
+  s_fb4d346e2789b0::t_f96dfba5487715 544
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "042a9ae109944b40bcfb2acdd272d3b246eec1b5",
+  "prompts": {},
+  "sessions": {
+    "s_fb4d346e2789b0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bb95763c-6b49-4db5-8cae-71a7ca5462e5",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "open-swe[bot] <open-swe@users.noreply.github.com>"
+    }
+  }
+}
