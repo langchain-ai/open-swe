@@ -6,7 +6,6 @@ object (``common.X``) so tests that monkeypatch them keep working.
 
 import asyncio
 import re
-import time
 from datetime import UTC, datetime
 from typing import Any
 
@@ -85,7 +84,7 @@ async def _slack_thread_allows_untagged_reply(
     if not channel_id or not thread_ts or not bot_user_id:
         return False
 
-    mentioned = set(re.findall(r"<@([A-Z0-9]+)>", text or ""))
+    mentioned = set(re.findall(r"<@([A-Z0-9_]+)", text or ""))
     if any(user_id != bot_user_id for user_id in mentioned):
         return False
 
@@ -118,74 +117,31 @@ async def _slack_thread_is_busy(client: Any, thread_id: str) -> bool:
     return status == "busy"
 
 
-async def _schedule_debounced_slack_interrupt(
+async def _dispatch_or_queue_slack_run(
     client: Any,
     thread_id: str,
     content_blocks: list[dict[str, Any]],
     configurable: dict[str, Any],
-    now: float,
-) -> dict[str, Any]:
-    """Schedule (or reschedule) a single delayed interrupt of a busy thread.
+    is_first_mention: bool,
+) -> dict[str, Any] | None:
+    """Start a run, or coalesce onto the thread queue if one is already in flight.
 
-    Trailing-edge debounce: the quiet window restarts on every follow-up. The
-    whole burst is accumulated in debounce-specific storage (never the thread's
-    normal message queue, which the *active* run would drain mid-window) and
-    carried, in arrival order, as the eventual interrupt run's input. Each
-    follow-up appends its blocks, cancels the still-pending interrupt, and
-    reschedules it a full window out.
+    Debounces interrupts: while the agent is busy, rapid follow-ups are parked on
+    the store queue and picked up together at its next model call (via
+    ``check_message_queue_before_model``) instead of each halting and resuming the
+    active run. Returns the run dict, or ``None`` when the message was queued.
     """
-    namespace = ("slack_debounce", thread_id)
-    key = "burst"
-
-    try:
-        existing = await client.store.get_item(namespace, key)
-        value = existing.get("value") if isinstance(existing, dict) else None
-    except Exception:  # noqa: BLE001
-        common.logger.warning("Slack debounce read failed for %s", thread_id, exc_info=True)
-        value = None
-
-    deadline = value.get("deadline") if isinstance(value, dict) else None
-    if isinstance(deadline, (int, float)) and deadline > now:
-        prior = value.get("blocks") if isinstance(value.get("blocks"), list) else []
-        blocks = [*prior, *content_blocks]
-        pending_run_id = value.get("run_id")
-        if isinstance(pending_run_id, str) and pending_run_id:
-            try:
-                await client.runs.cancel(thread_id, pending_run_id, action="rollback")
-            except Exception:  # noqa: BLE001
-                common.logger.debug(
-                    "Could not cancel pending Slack interrupt %s", pending_run_id, exc_info=True
-                )
-        common.logger.info("Extended debounced Slack interrupt window for thread %s", thread_id)
-    else:
-        blocks = list(content_blocks)
-
-    if len(blocks) > common.SLACK_INTERRUPT_DEBOUNCE_MAX_BLOCKS:
-        blocks = blocks[-common.SLACK_INTERRUPT_DEBOUNCE_MAX_BLOCKS :]
-
-    run = await common.dispatch_agent_run(
+    if not is_first_mention and await _slack_thread_is_busy(client, thread_id):
+        await common.queue_message_for_thread(thread_id, content_blocks)
+        return None
+    return await common.dispatch_agent_run(
         thread_id,
-        blocks,
+        content_blocks,
         configurable,
         source="slack",
         metadata=common._AGENT_VERSION_METADATA,
         client=client,
-        after_seconds=common.SLACK_INTERRUPT_DEBOUNCE_SECONDS,
     )
-    run_id = run.get("run_id") if isinstance(run, dict) else None
-    try:
-        await client.store.put_item(
-            namespace,
-            key,
-            {
-                "deadline": now + common.SLACK_INTERRUPT_DEBOUNCE_SECONDS,
-                "run_id": run_id,
-                "blocks": blocks,
-            },
-        )
-    except Exception:  # noqa: BLE001
-        common.logger.warning("Slack debounce write failed for %s", thread_id, exc_info=True)
-    return run
 
 
 async def _slack_user_can_reply_to_ready_plan(
@@ -196,7 +152,12 @@ async def _slack_user_can_reply_to_ready_plan(
     from agent.dashboard.plan_api import _thread_metadata
 
     thread_id = common.generate_thread_id_from_slack_thread(channel_id, thread_ts)
-    metadata = await _thread_metadata(thread_id)
+    try:
+        metadata = await _thread_metadata(thread_id)
+    except Exception:  # noqa: BLE001
+        # A brand-new thread has no metadata (_thread_metadata raises 404); an
+        # untagged message there simply isn't a plan reply — don't abort the gate.
+        return False
     return (
         metadata.get("plan_mode") is True
         and metadata.get("plan_status") == "ready"
@@ -576,21 +537,12 @@ async def _process_slack_mention_impl(
         source_context={"slack_thread": configurable["slack_thread"]},
     )
 
-    # When the thread is already working, debounce the interrupt: coalesce rapid
-    # follow-ups and only interrupt once the burst goes quiet (see the scheduler).
-    if not is_first_mention and await _slack_thread_is_busy(langgraph_client, thread_id):
-        run = await _schedule_debounced_slack_interrupt(
-            langgraph_client, thread_id, content_blocks, configurable, time.time()
-        )
-    else:
-        run = await common.dispatch_agent_run(
-            thread_id,
-            content_blocks,
-            configurable,
-            source="slack",
-            metadata=common._AGENT_VERSION_METADATA,
-            client=langgraph_client,
-        )
+    run = await _dispatch_or_queue_slack_run(
+        langgraph_client, thread_id, content_blocks, configurable, is_first_mention
+    )
+    if run is None:
+        common.logger.info("Coalesced Slack follow-up onto the queue for busy thread %s", thread_id)
+        return
     common.logger.info(
         "Slack LangGraph run %s dispatched for thread %s",
         common._run_id_for_logging(run),

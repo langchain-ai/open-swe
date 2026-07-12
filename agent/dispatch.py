@@ -157,14 +157,12 @@ async def dispatch_agent_run(
     assistant_id: str = "agent",
     metadata: dict[str, Any] | None = None,
     client: LangGraphClient | None = None,
-    after_seconds: int | float | None = None,
 ) -> dict[str, Any]:
     """Create (or interrupt-and-resume) a run for ``thread_id``.
 
     Routes every Slack / Linear / GitHub / dashboard trigger through one
     contract. ``source`` is for logging/metadata only; ``assistant_id`` selects
-    the graph (``"agent"`` or ``"reviewer"``). ``after_seconds`` delays the run's
-    start (used to debounce rapid interrupts of a busy thread).
+    the graph (``"agent"`` or ``"reviewer"``).
     """
     return await create_durable_run(
         thread_id,
@@ -174,5 +172,4 @@ async def dispatch_agent_run(
         metadata=metadata or {},
         source=source,
         client=client or dispatch_client(),
-        after_seconds=after_seconds,
     )
