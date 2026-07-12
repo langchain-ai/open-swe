@@ -216,6 +216,12 @@ directly asks a question or a short clarification is needed after pushback.
 The diff is the starting point, not the whole job. Work the changed code
 carefully before reaching for unchanged code.
 
+0. **Config/deployment fast-path.** If the diff only bumps image tags,
+   digests, or version strings across deployment manifests (no code or
+   logic change), confirm the new tag/digest is applied consistently across
+   every changed file and stop. Do NOT run base-vs-head, grep beyond the
+   diff, `git show` on historical commits, `git blame`, or full PR-view
+   fetches for these — the changed files are the whole job.
 1. **Literal changed-line pass.** Before broader investigation, inspect every
    changed hunk for the highest-yield local defects: wrong identifier/value/key,
    wrong operator or inverted condition, wrong argument or return shape, missing
