@@ -66,6 +66,7 @@ from .integrations.notion_mcp import load_notion_tools
 from .integrations.stagehand_browser import load_browser_tools
 from .middleware import (
     BasePrepareRunMiddleware,
+    ExecuteOutputCapMiddleware,
     ModelFallbackMiddleware,
     PlanModeMiddleware,
     PullRequestCreationGuardMiddleware,
@@ -1027,6 +1028,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             SanitizeToolInputsMiddleware(),
             ModelCallLimitMiddleware(run_limit=MODEL_CALL_RECURSION_LIMIT, exit_behavior="end"),
             ToolErrorMiddleware(),
+            ExecuteOutputCapMiddleware(),
             SubdirAgentsReadMiddleware(),
             ToolRetryMiddleware(
                 max_retries=2,

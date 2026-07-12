@@ -47,6 +47,7 @@ from .dashboard.team_settings import (
 )
 from .middleware import (
     BasePrepareRunMiddleware,
+    ExecuteOutputCapMiddleware,
     PrepareRunState,
     RepairOrphanedToolCallsMiddleware,
     SanitizeFireworksMessagesMiddleware,
@@ -115,17 +116,31 @@ REVIEWER_PROMPT_TEMPLATE = """You are a specialized code reviewer agent. Your jo
 
 Sandbox: `{working_dir}`. Invoke `gh` as `GH_TOKEN=dummy gh <command>`.
 
-Fetch the diff:
+Bound every diff fetch. A single whole-PR or commit-range diff can be
+multiple megabytes and blow the token budget, so never run a raw
+`gh api .../compare/<sha>...<sha> -H "Accept: application/vnd.github.v3.diff"`
+that returns the entire diff in one call. Instead, first list the changed
+files, then fetch diffs per file or in small file-scoped batches:
 
 ```
-GH_TOKEN=dummy gh pr diff {pr_number} --repo {repo_owner}/{repo_name}
+# changed files for the PR
+GH_TOKEN=dummy gh pr diff {pr_number} --repo {repo_owner}/{repo_name} --name-only
+# then per file (or a few files):
+GH_TOKEN=dummy gh pr diff {pr_number} --repo {repo_owner}/{repo_name} -- <path>
 ```
 
-Re-review (user message says "A new commit has been pushed"):
+Re-review (user message says "A new commit has been pushed") — list the
+changed files first, then fetch per file:
 
 ```
-GH_TOKEN=dummy gh api repos/{repo_owner}/{repo_name}/compare/<last_reviewed_sha>...<head_sha> -H "Accept: application/vnd.github.v3.diff"
+# changed files between the reviewed SHA and head
+GH_TOKEN=dummy gh api repos/{repo_owner}/{repo_name}/compare/<last_reviewed_sha>...<head_sha> --jq '.files[].filename'
+# then per file (or a few files):
+GH_TOKEN=dummy gh api repos/{repo_owner}/{repo_name}/compare/<last_reviewed_sha>...<head_sha> --jq '.files[] | select(.filename=="<path>") | .patch'
 ```
+
+When a diff is very large, review it file-by-file rather than ingesting it
+whole.
 
 {repo_checkout_note}
 
@@ -600,10 +615,13 @@ def _build_re_review_context(
         f"{overview_section}"
         f"## Existing findings\n\n{existing_findings_block}\n\n"
         f"{prior_threads_section}"
-        f"Fetch the diff since the previous reviewed SHA yourself with "
-        f"`GH_TOKEN=dummy gh api repos/{repo_owner}/{repo_name}/compare/"
-        f'{last_reviewed_sha}...{head_sha} -H "Accept: application/vnd.github.v3.diff"`, '
-        f"then review only what's in that diff.\n\n"
+        f"Fetch the diff since the previous reviewed SHA in bounded, file-scoped "
+        f"pieces — never pull the whole compare diff in one call. First list the "
+        f"changed files with `GH_TOKEN=dummy gh api repos/{repo_owner}/{repo_name}/"
+        f"compare/{last_reviewed_sha}...{head_sha} --jq '.files[].filename'`, then "
+        f"fetch each file's patch with `--jq '.files[] | "
+        f"select(.filename==\"<path>\") | .patch'`, and review only what's in that "
+        f"diff.\n\n"
         f"For each open finding above, decide whether the new commits resolved "
         f'it (`update_finding(id, status="resolved", note="<full reply body>")`), left it unchanged '
         f"(no action), or changed it materially (`update_finding` with new "
@@ -1352,6 +1370,7 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
             SanitizeToolInputsMiddleware(),
             ModelCallLimitMiddleware(run_limit=MODEL_CALL_RECURSION_LIMIT, exit_behavior="end"),
             ToolErrorMiddleware(),
+            ExecuteOutputCapMiddleware(),
             refresh_github_proxy_before_model,
             check_message_queue_before_model,
             SlackAssistantStatusMiddleware(),
