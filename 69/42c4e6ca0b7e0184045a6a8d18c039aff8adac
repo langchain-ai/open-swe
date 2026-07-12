@@ -1,0 +1,24 @@
+agent/webhooks/slack.py
+  s_fb4d346e2789b0::t_f81b8b5add7fda 76-104
+agent/webhooks/slack_routes.py
+  s_fb4d346e2789b0::t_cd484117c0df33 62-75,96-111
+tests/slack/test_slack_webhook_errors.py
+  s_fb4d346e2789b0::t_eeac3db14bb23b 161-170,172-184,186-190,192-198,200-212,214-226,228-234
+  s_fb4d346e2789b0::t_f7d28e9d3bc930 171,185,191,199,213,227
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "6942c4e6ca0b7e0184045a6a8d18c039aff8adac",
+  "prompts": {},
+  "sessions": {
+    "s_fb4d346e2789b0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bb95763c-6b49-4db5-8cae-71a7ca5462e5",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "open-swe[bot] <open-swe@users.noreply.github.com>"
+    }
+  }
+}
