@@ -216,3 +216,48 @@ class TestRefreshGithubProxyMiddleware:
             result = await refresh_github_proxy_before_model.abefore_model({}, MagicMock())
 
         assert result is None
+
+
+class TestUpdateSandboxGitRemotes:
+    @pytest.mark.asyncio
+    async def test_executes_python_script_in_sandbox(self) -> None:
+        from agent.utils.github_proxy import update_sandbox_git_remotes
+        backend = MagicMock()
+        backend.execute = MagicMock(return_value=MagicMock(exit_code=0))
+
+        await update_sandbox_git_remotes(backend, "test-token")
+
+        backend.execute.assert_called_once()
+        cmd = backend.execute.call_args[0][0]
+        assert "python" in cmd
+        assert "git" in cmd
+        assert "test-token" in cmd
+
+
+class TestNonLangSmithTokenRefresh:
+    @pytest.mark.asyncio
+    async def test_refreshes_for_non_langsmith_sandbox(self) -> None:
+        from agent.utils.github_proxy import refresh_proxy_token
+        backend = MagicMock(id="sb-local")
+        new_expiry = "2025-01-01T13:00:00Z"
+
+        with (
+            patch.dict("os.environ", {"SANDBOX_TYPE": "local"}),
+            patch.dict(github_proxy.SANDBOX_BACKENDS, {"thread-local": backend}, clear=True),
+            patch(
+                "agent.utils.github_proxy.get_github_app_installation_token_with_expiry",
+                new=AsyncMock(return_value=("ghs_local", new_expiry)),
+            ),
+            patch("agent.utils.github_proxy.update_sandbox_git_remotes", new=AsyncMock()) as mock_update_remotes,
+            patch("agent.utils.github_token.cache_github_token_for_thread") as mock_cache_token,
+        ):
+            record_proxy_token_expiry("thread-local", "2025-01-01T12:00:00Z")
+            res = await refresh_proxy_token("thread-local")
+
+            assert res is True
+            mock_update_remotes.assert_called_once_with(backend, "ghs_local")
+            mock_cache_token.assert_called_once_with("thread-local", "ghs_local", expires_at=new_expiry, is_bot_token=True)
+
+            # verify record updated
+            record = github_proxy._PROXY_TOKEN_EXPIRY["thread-local"]
+            assert record[0] == datetime(2025, 1, 1, 13, 0, 0, tzinfo=UTC)

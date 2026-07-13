@@ -74,3 +74,83 @@ class TestSanitizeReadFileArgs:
         args = {"file_path": "foo.ts", "offset": "1, 80"}
         _ = _sanitize_read_file_args(args)
         assert args["offset"] == "1, 80"
+
+
+class TestSanitizeExecuteCommand:
+    def test_replaces_dummy_tokens_when_not_langsmith(self) -> None:
+        from unittest.mock import MagicMock, patch
+        from langgraph.prebuilt.tool_node import ToolCallRequest
+        from agent.middleware.sanitize_tool_inputs import SanitizeToolInputsMiddleware
+
+        middleware = SanitizeToolInputsMiddleware()
+        runtime = MagicMock(config={"configurable": {"thread_id": "thread-1"}})
+        request = ToolCallRequest(
+            tool_call={
+                "name": "execute",
+                "args": {"command": "GH_TOKEN=dummy GITHUB_TOKEN=dummy gh repo clone foo"},
+                "id": "tc1",
+            },
+            tool=MagicMock(),
+            state={},
+            runtime=runtime,
+        )
+
+        with (
+            patch.dict("os.environ", {"SANDBOX_TYPE": "local"}),
+            patch("agent.utils.github_token.get_github_token", return_value="real-secret-token"),
+        ):
+            sanitized = middleware._sanitize_request(request)
+            args = sanitized.tool_call["args"]
+            assert args["command"] == "GH_TOKEN=real-secret-token GITHUB_TOKEN=real-secret-token gh repo clone foo"
+
+    def test_does_not_replace_dummy_tokens_when_langsmith(self) -> None:
+        from unittest.mock import MagicMock, patch
+        from langgraph.prebuilt.tool_node import ToolCallRequest
+        from agent.middleware.sanitize_tool_inputs import SanitizeToolInputsMiddleware
+
+        middleware = SanitizeToolInputsMiddleware()
+        runtime = MagicMock(config={"configurable": {"thread_id": "thread-1"}})
+        request = ToolCallRequest(
+            tool_call={
+                "name": "execute",
+                "args": {"command": "GH_TOKEN=dummy GITHUB_TOKEN=dummy gh repo clone foo"},
+                "id": "tc1",
+            },
+            tool=MagicMock(),
+            state={},
+            runtime=runtime,
+        )
+
+        with (
+            patch.dict("os.environ", {"SANDBOX_TYPE": "langsmith"}),
+            patch("agent.utils.github_token.get_github_token", return_value="real-secret-token"),
+        ):
+            sanitized = middleware._sanitize_request(request)
+            args = sanitized.tool_call["args"]
+            assert args["command"] == "GH_TOKEN=dummy GITHUB_TOKEN=dummy gh repo clone foo"
+
+    def test_does_not_replace_if_no_token_available(self) -> None:
+        from unittest.mock import MagicMock, patch
+        from langgraph.prebuilt.tool_node import ToolCallRequest
+        from agent.middleware.sanitize_tool_inputs import SanitizeToolInputsMiddleware
+
+        middleware = SanitizeToolInputsMiddleware()
+        runtime = MagicMock(config={"configurable": {"thread_id": "thread-1"}})
+        request = ToolCallRequest(
+            tool_call={
+                "name": "execute",
+                "args": {"command": "GH_TOKEN=dummy GITHUB_TOKEN=dummy gh repo clone foo"},
+                "id": "tc1",
+            },
+            tool=MagicMock(),
+            state={},
+            runtime=runtime,
+        )
+
+        with (
+            patch.dict("os.environ", {"SANDBOX_TYPE": "local"}),
+            patch("agent.utils.github_token.get_github_token", return_value=None),
+        ):
+            sanitized = middleware._sanitize_request(request)
+            args = sanitized.tool_call["args"]
+            assert args["command"] == "GH_TOKEN=dummy GITHUB_TOKEN=dummy gh repo clone foo"

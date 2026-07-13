@@ -64,14 +64,32 @@ class SanitizeToolInputsMiddleware(AgentMiddleware):
 
     def _sanitize_request(self, request: ToolCallRequest) -> ToolCallRequest:
         tool_call = request.tool_call
-        if not isinstance(tool_call, dict) or tool_call.get("name") != "read_file":
+        if not isinstance(tool_call, dict):
             return request
-        args = tool_call.get("args", {})
-        sanitized_args = _sanitize_read_file_args(args)
-        if sanitized_args is args:
-            return request
-        new_tool_call = {**tool_call, "args": sanitized_args}
-        return request.override(tool_call=new_tool_call)
+
+        name = tool_call.get("name")
+        if name == "read_file":
+            args = tool_call.get("args", {})
+            sanitized_args = _sanitize_read_file_args(args)
+            if sanitized_args is not args:
+                new_tool_call = {**tool_call, "args": sanitized_args}
+                return request.override(tool_call=new_tool_call)
+        elif name == "execute":
+            import os
+            if os.getenv("SANDBOX_TYPE", "langsmith") != "langsmith":
+                args = tool_call.get("args", {})
+                command = args.get("command")
+                if isinstance(command, str) and ("GH_TOKEN=dummy" in command or "GITHUB_TOKEN=dummy" in command):
+                    from ..utils.github_token import get_github_token
+                    runtime = getattr(request, "runtime", None)
+                    config = getattr(runtime, "config", None) if runtime else None
+                    token = get_github_token(config)
+                    if token:
+                        new_command = command.replace("GH_TOKEN=dummy", f"GH_TOKEN={token}").replace("GITHUB_TOKEN=dummy", f"GITHUB_TOKEN={token}")
+                        new_tool_call = {**tool_call, "args": {**args, "command": new_command}}
+                        return request.override(tool_call=new_tool_call)
+
+        return request
 
     async def awrap_tool_call(
         self,

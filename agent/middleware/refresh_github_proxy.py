@@ -38,6 +38,16 @@ async def refresh_github_proxy_before_model(
 
     try:
         await maybe_refresh_proxy_token(thread_id)
+        import os
+        if os.getenv("SANDBOX_TYPE", "langsmith") != "langsmith":
+            from ..utils.github_token import get_github_token
+            from ..utils.github_proxy import update_sandbox_git_remotes
+            from ..utils.sandbox_state import SANDBOX_BACKENDS
+            token = get_github_token()
+            if token:
+                sandbox_backend = SANDBOX_BACKENDS.get(thread_id)
+                if sandbox_backend:
+                    await update_sandbox_git_remotes(sandbox_backend, token)
     except Exception:  # noqa: BLE001
         logger.warning(
             "Failed to refresh GitHub proxy token for thread %s",
