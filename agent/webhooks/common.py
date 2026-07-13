@@ -81,6 +81,7 @@ from ..utils.github_org_membership import INTERNAL_BOT_LOGINS, is_user_active_or
 from ..utils.github_token import (
     cache_github_token_for_thread,
     get_github_token_from_thread,
+    github_token_principal,
     invalidate_cached_github_token,
 )
 from ..utils.http import DEFAULT_HTTP_TIMEOUT
@@ -1336,12 +1337,15 @@ async def _get_or_resolve_thread_github_token(thread_id: str, email: str) -> str
     if is_bot_token_only_mode():
         bot_token, expires_at = await get_github_app_installation_token_with_expiry()
         if bot_token:
-            cache_github_token_for_thread(thread_id, bot_token, expires_at=expires_at)
+            cache_github_token_for_thread(
+                thread_id, bot_token, expires_at=expires_at, is_bot_token=True
+            )
             return bot_token
         logger.warning("Bot-token-only mode but GitHub App token unavailable")
         return None
 
-    github_token, _expires_at = await get_github_token_from_thread(thread_id)
+    principal = github_token_principal(email=email)
+    github_token, _expires_at = await get_github_token_from_thread(thread_id, principal=principal)
     if github_token:
         return github_token
 
@@ -1352,7 +1356,10 @@ async def _get_or_resolve_thread_github_token(thread_id: str, email: str) -> str
 
     expires_at = auth_result.get("expires_at")
     cache_github_token_for_thread(
-        thread_id, github_token, expires_at=expires_at if isinstance(expires_at, str) else None
+        thread_id,
+        github_token,
+        expires_at=expires_at if isinstance(expires_at, str) else None,
+        principal=principal,
     )
     return github_token
 

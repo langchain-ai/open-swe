@@ -25,6 +25,9 @@ def test_reviewer_system_prompt_formats_without_keyerror() -> None:
     assert "wrong identifier/value/key" in prompt
     assert "Keep at most 6 findings" in prompt
     assert "Delegate at most one review pass" in prompt
+    assert "fetch_review_diff" in prompt
+    assert "gh pr diff" not in prompt
+    assert "gh api repos/" not in prompt
 
 
 def test_reviewer_eval_prompt_omits_historical_and_benchmark_gaming() -> None:
@@ -236,7 +239,9 @@ async def test_reviewer_resolves_app_installation_token_at_run_start() -> None:
     # Token is resolved in this process at run start (scoped to the repo), not read
     # from a cache the webhook handler populated in a different process.
     mock_app_token.assert_awaited_once_with(repositories=["repo"])
-    mock_cache_token.assert_called_once_with("reviewer-thread-id", "app-token", expires_at=None)
+    mock_cache_token.assert_called_once_with(
+        "reviewer-thread-id", "app-token", expires_at=None, is_bot_token=True
+    )
     middleware = create_agent.call_args.kwargs["middleware"]
     assert reviewer.check_message_queue_before_model in middleware
     middleware_names = {type(item).__name__ for item in middleware}

@@ -1,7 +1,8 @@
 import { memo, useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { MultiFileDiff } from "@pierre/diffs/react";
 import { DiffView } from "./DiffView";
-import type { AcpToolKind, ToolExecutionChunk } from "@/features/agents/lib/types";
+import { formatToolDisplay } from "./toolExecutionDisplay";
+import type { ToolExecutionChunk } from "@/features/agents/lib/types";
 import { useDiffOptions } from "@/features/agents/utils/diffUtils";
 import { countLineChanges } from "@/features/agents/utils/diffStats";
 
@@ -25,60 +26,6 @@ function getFileName(path: string): string {
   const normalized = path.replace(/\\/g, "/");
   const parts = normalized.split("/").filter(Boolean);
   return parts[parts.length - 1] || path;
-}
-
-function formatToolDisplay(
-  title: string,
-  toolKind: AcpToolKind,
-  input: Record<string, unknown> | undefined,
-  projectPath?: string,
-): string {
-  const path = input?.path as string | undefined;
-  const pattern = input?.pattern as string | undefined;
-  const query = input?.query as string | undefined;
-  const url = input?.url as string | undefined;
-  const command = input?.command as string | undefined;
-
-  switch (toolKind) {
-    case "read": {
-      if (path) {
-        const displayPath = stripProjectPath(path, projectPath);
-        return `Read(${displayPath})`;
-      }
-      return title;
-    }
-    case "search": {
-      if (pattern) {
-        const truncated = pattern.length > 40 ? pattern.slice(0, 40) + "..." : pattern;
-        return `Search("${truncated}")`;
-      }
-      if (query) {
-        return `Search("${query.slice(0, 40)}${query.length > 40 ? "..." : ""}")`;
-      }
-      return title;
-    }
-    case "fetch": {
-      if (url) {
-        return `Fetch(${url.slice(0, 50)}${url.length > 50 ? "..." : ""})`;
-      }
-      return title;
-    }
-    case "execute": {
-      if (command) {
-        const truncated = command.length > 60 ? command.slice(0, 60) + "..." : command;
-        return `Shell(${truncated})`;
-      }
-      return title;
-    }
-    case "edit":
-    case "delete":
-    case "move":
-      return title;
-    case "think":
-      return "Thinking...";
-    default:
-      return title;
-  }
 }
 
 const InlineDiffCollapsible = memo(function InlineDiffCollapsible({

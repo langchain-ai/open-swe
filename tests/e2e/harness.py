@@ -76,6 +76,7 @@ fakes.seed_bare_remote()
 @app.post("/control/reset")
 async def control_reset() -> JSONResponse:
     fakes.reset()
+    CURRENT_THREAD["channel"] = DEMO_CHANNEL
     CURRENT_THREAD["thread_ts"] = None
     return JSONResponse({"ok": True})
 
@@ -114,35 +115,42 @@ async def slack_send(request: Request) -> JSONResponse:
     form = await request.json()
     text = str(form.get("text", ""))
     mention_bot = bool(form.get("mention_bot", True))
+    channel_type = str(form.get("channel_type") or "")
     # Sender defaults to the first test user (Alice) — the canonical owner the
     # automated tests log in as; the mock UI passes the chosen test user.
     user_id = str(form.get("user") or TEST_USERS[0]["slack_id"])
-    channel = DEMO_CHANNEL
+    channel = str(form.get("channel") or ("D_DEMO" if channel_type == "im" else DEMO_CHANNEL))
 
     # ``thread_ts`` replies into an existing thread (a distinct message ts under
     # the same thread); omitting it opens a fresh thread, as the mock UI does.
     reply_thread_ts = str(form.get("thread_ts") or "")
     if reply_thread_ts:
         thread_ts = reply_thread_ts
-        event_ts = fakes.add_slack_message(channel, thread_ts, user=user_id, text=text)
+        event_ts = fakes.add_slack_message(
+            channel, thread_ts, user=user_id, text=text, is_bot=False
+        )
     else:
         thread_ts = fakes.new_thread_ts()
-        CURRENT_THREAD["thread_ts"] = thread_ts
-        fakes.add_slack_message(channel, thread_ts, user=user_id, text=text)
+        fakes.add_slack_message(channel, thread_ts, user=user_id, text=text, is_bot=False)
         event_ts = thread_ts
+    CURRENT_THREAD["channel"] = channel
+    CURRENT_THREAD["thread_ts"] = thread_ts
 
+    event = {
+        "type": "app_mention" if mention_bot else "message",
+        "channel": channel,
+        "user": user_id,
+        "text": text,
+        "ts": event_ts,
+        "thread_ts": thread_ts,
+    }
+    if channel_type:
+        event["channel_type"] = channel_type
     payload = {
         "type": "event_callback",
         "event_id": f"Ev{event_ts}",
         "authorizations": [{"user_id": BOT_USER_ID}],
-        "event": {
-            "type": "app_mention" if mention_bot else "message",
-            "channel": channel,
-            "user": user_id,
-            "text": text,
-            "ts": event_ts,
-            "thread_ts": thread_ts,
-        },
+        "event": event,
     }
     raw = json.dumps(payload).encode()
     req_ts = str(int(time.time()))
