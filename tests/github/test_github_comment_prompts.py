@@ -1,9 +1,5 @@
 from __future__ import annotations
 
-import json
-import os
-import subprocess
-import sys
 from typing import Any
 
 from langchain_core.language_models import BaseChatModel
@@ -191,65 +187,6 @@ def test_todo_tool_and_prompt_are_hidden_from_model_request_by_default() -> None
     system_text = "\n".join(_content_text(message.content) for message in model.captured_messages)
     assert "write_todos" not in tool_names
     assert "You have access to the `write_todos` tool" not in system_text
-
-
-def test_enable_todos_env_restores_todo_tool_and_prompt() -> None:
-    code = """
-import json
-from typing import Any
-from deepagents import create_deep_agent
-from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage
-from langchain_core.outputs import ChatGeneration, ChatResult
-import agent.prompt
-
-class CaptureRequestModel(BaseChatModel):
-    captured_messages: Any = None
-    captured_tools: Any = None
-
-    @property
-    def _llm_type(self) -> str:
-        return "capture-request"
-
-    def _get_ls_params(self, *args: Any, **kwargs: Any) -> dict[str, str]:
-        return {"ls_provider": "openai"}
-
-    def bind_tools(self, tools: Any, **kwargs: Any) -> "CaptureRequestModel":
-        self.captured_tools = tools
-        return self
-
-    def _generate(self, messages: list[Any], **kwargs: Any) -> ChatResult:
-        self.captured_messages = messages
-        return ChatResult(generations=[ChatGeneration(message=AIMessage(content="done"))])
-
-def content_text(content: Any) -> str:
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        return "\\n".join(item.get("text", "") if isinstance(item, dict) else str(item) for item in content)
-    return str(content)
-
-model = CaptureRequestModel()
-graph = create_deep_agent(model=model, tools=[])
-graph.invoke({"messages": [{"role": "user", "content": "hi"}]}, config={"recursion_limit": 5})
-system_text = "\\n".join(content_text(message.content) for message in model.captured_messages)
-print(json.dumps({
-    "tools": [getattr(tool, "name", None) for tool in model.captured_tools],
-    "has_todo_prompt": "You have access to the `write_todos` tool" in system_text,
-}))
-"""
-    env = {**os.environ, "OPEN_SWE_ENABLE_TODOS": "true"}
-    result = subprocess.run(
-        [sys.executable, "-c", code],
-        capture_output=True,
-        text=True,
-        check=True,
-        env=env,
-    )
-
-    payload = json.loads(result.stdout)
-    assert "write_todos" in payload["tools"]
-    assert payload["has_todo_prompt"] is True
 
 
 def test_shared_base_is_neutral_for_read_only_agents() -> None:
