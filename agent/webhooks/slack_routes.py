@@ -102,6 +102,7 @@ async def slack_webhook(
         is_untagged_two_party_reply = bool(
             event.get("type") == "message"
             and not event.get("subtype")
+            and not is_direct_message
             and await service._slack_thread_allows_untagged_reply(
                 str(event.get("channel") or ""),
                 str(event.get("thread_ts") or ""),
