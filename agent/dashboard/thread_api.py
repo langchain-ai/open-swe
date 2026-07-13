@@ -36,6 +36,7 @@ from .options import (
 )
 from .pr_diff import build_pr_diff_files
 from .profiles import get_profile, get_valid_access_token
+from .repo_access import repo_config_for_user
 from .team_settings import get_team_default_model, get_team_fable_enabled
 from .user_mappings import email_for_login
 
@@ -193,6 +194,14 @@ def _parse_repo(full_name: str | None) -> dict[str, str] | None:
     if not owner or not name:
         return None
     return {"owner": owner, "name": name}
+
+
+async def _validate_dashboard_repo(login: str, repo_config: dict[str, str]) -> dict[str, str]:
+    owner = repo_config.get("owner")
+    name = repo_config.get("name")
+    if not owner or not name:
+        return {}
+    return await repo_config_for_user(login, f"{owner}/{name}") or {}
 
 
 def _decode_dashboard_image(image: DashboardImageBody) -> bytes:
@@ -1200,10 +1209,15 @@ async def _enrich_run_start_command(
         # forwarded to LangGraph. The repo hint rides in the client
         # configurable; it never reaches the run config (which is rebuilt from
         # the stamped metadata below).
+        repo_hint = client_configurable.get("repo")
+        requested_repo = _parse_repo(repo_hint)
+        if repo_hint is not None and requested_repo is None:
+            raise HTTPException(422, "repository must use owner/name format")
+        validated_repo = await _validate_dashboard_repo(login, requested_repo or {})
         thread = await _create_dashboard_thread_record(
             thread_id,
             login=login,
-            repo_config=_parse_repo(client_configurable.get("repo")) or {},
+            repo_config=validated_repo,
             repo_explicitly_none=client_configurable.get("repo_explicitly_none") is True,
             prompt=_command_prompt_text(content),
             images=command_images,
@@ -1222,6 +1236,8 @@ async def _enrich_run_start_command(
             overrides["agent_model_id"] = chosen_model
             overrides["agent_effort"] = chosen_effort
     else:
+        if _thread_source(metadata) == _DASHBOARD_SOURCE:
+            await _validate_dashboard_repo(login, _repo_config_from_metadata(metadata))
         run_model = chosen_model or _metadata_model_id(metadata)
         run_effort = chosen_effort
         if not run_effort:

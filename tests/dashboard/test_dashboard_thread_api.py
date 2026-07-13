@@ -158,10 +158,15 @@ def _patch_new_thread_deps(monkeypatch, *, profile: dict[str, object]) -> None:
     async def fake_resolve_email(login: str, prof: dict[str, object]) -> str:
         return f"{login}@example.com"
 
+    async def fake_repo_config(login: str, full_name: str) -> dict[str, str]:
+        owner, name = full_name.split("/", 1)
+        return {"owner": owner, "name": name}
+
     monkeypatch.setattr(thread_api, "get_profile", fake_profile)
     monkeypatch.setattr(thread_api, "get_team_default_model", fake_team_default)
     monkeypatch.setattr(thread_api, "_ensure_dashboard_github_token", fake_ensure_token)
     monkeypatch.setattr(thread_api, "_resolve_run_email", fake_resolve_email)
+    monkeypatch.setattr(thread_api, "repo_config_for_user", fake_repo_config)
 
 
 async def test_enrich_run_start_command_creates_and_stamps_new_thread(monkeypatch) -> None:
@@ -208,6 +213,59 @@ async def test_enrich_run_start_command_creates_and_stamps_new_thread(monkeypatc
     # Dashboard-only creation hints must not leak into the run config.
     assert "repo_explicitly_none" not in configurable
     assert enriched["params"]["assistant_id"] == "agent"
+
+
+async def test_enrich_run_start_command_rejects_inaccessible_repo_before_stamping(
+    monkeypatch,
+) -> None:
+    created: dict[str, object] = {}
+    _patch_new_thread_deps(monkeypatch, profile={})
+    monkeypatch.setattr(thread_api, "langgraph_client", lambda: _new_thread_client(created))
+
+    async def deny_repo(login: str, full_name: str) -> dict[str, str]:
+        raise HTTPException(403, "no access to this private repository")
+
+    monkeypatch.setattr(thread_api, "repo_config_for_user", deny_repo)
+    command = {
+        "method": "run.start",
+        "params": {
+            "input": {"messages": [{"type": "human", "content": "Read secrets"}]},
+            "config": {"configurable": {"repo": "private/target"}},
+        },
+    }
+
+    with pytest.raises(HTTPException) as exc_info:
+        await thread_api._enrich_run_start_command(
+            "new-tid",
+            "attacker",
+            command,
+            metadata={},
+            creating=True,
+        )
+
+    assert exc_info.value.status_code == 403
+    assert created == {}
+
+
+async def test_enrich_run_start_command_rejects_malformed_repo_hint(monkeypatch) -> None:
+    created: dict[str, object] = {}
+    _patch_new_thread_deps(monkeypatch, profile={})
+    monkeypatch.setattr(thread_api, "langgraph_client", lambda: _new_thread_client(created))
+    command = {
+        "method": "run.start",
+        "params": {
+            "input": {"messages": [{"type": "human", "content": "Fix it"}]},
+            "config": {"configurable": {"repo": {"owner": "private", "name": "target"}}},
+        },
+    }
+
+    with pytest.raises(HTTPException) as exc_info:
+        await thread_api._enrich_run_start_command(
+            "new-tid", "attacker", command, metadata={}, creating=True
+        )
+
+    assert exc_info.value.status_code == 422
+    assert created == {}
 
 
 async def test_enrich_run_start_command_uses_vision_fallback_for_text_only_model(
@@ -666,10 +724,16 @@ async def test_enrich_run_start_command_allowlists_client_configurable(monkeypat
         assert login == "octocat"
         return "octocat@example.com"
 
+    async def fake_repo_config(login: str, full_name: str) -> dict[str, str]:
+        assert login == "octocat"
+        assert full_name == "octo/repo"
+        return {"owner": "octo", "name": "repo"}
+
     monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
     monkeypatch.setattr(thread_api, "get_profile", fake_get_profile)
     monkeypatch.setattr(thread_api, "_ensure_dashboard_github_token", fake_ensure_token)
     monkeypatch.setattr(thread_api, "_resolve_run_email", fake_resolve_email)
+    monkeypatch.setattr(thread_api, "repo_config_for_user", fake_repo_config)
 
     command = {
         "method": "run.start",

@@ -230,6 +230,7 @@ async def _start_langsmith_sandbox_if_needed(sandbox_backend: SandboxBackendProt
 async def _resolve_proxy_token(
     github_proxy_token: str | None,
     *,
+    repositories: Sequence[str] | None = None,
     permissions: PermissionMap | None = None,
 ) -> tuple[str | None, str | None, PermissionMap | None]:
     """Resolve the proxy token, its expiry, and the effective permission scope."""
@@ -237,7 +238,8 @@ async def _resolve_proxy_token(
         return github_proxy_token, None, None
     if permissions is not None:
         token, expires_at = await get_github_app_installation_token_with_expiry(
-            permissions=permissions
+            repositories=repositories,
+            permissions=permissions,
         )
         return token, expires_at, permissions
 
@@ -247,6 +249,7 @@ async def _resolve_proxy_token(
     last = len(ladder) - 1
     for index, scope in enumerate(ladder):
         token, expires_at = await get_github_app_installation_token_with_expiry(
+            repositories=repositories,
             permissions=scope,
             log_errors=index == last,
         )
@@ -290,7 +293,10 @@ async def _create_sandbox_with_proxy(
 
     sandbox_type = os.getenv("SANDBOX_TYPE", "langsmith")
     if sandbox_type == "langsmith":
-        token, expires_at, permissions = await _resolve_proxy_token(github_proxy_token)
+        token, expires_at, permissions = await _resolve_proxy_token(
+            github_proxy_token,
+            repositories=github_proxy_repositories,
+        )
         if not token:
             msg = "Cannot configure proxy: GitHub App installation token is unavailable"
             logger.error(msg)
@@ -318,7 +324,10 @@ async def _refresh_github_proxy(
     if os.getenv("SANDBOX_TYPE", "langsmith") != "langsmith":
         return
 
-    token, expires_at, permissions = await _resolve_proxy_token(github_proxy_token)
+    token, expires_at, permissions = await _resolve_proxy_token(
+        github_proxy_token,
+        repositories=github_proxy_repositories,
+    )
     if not token:
         logger.warning(
             "Skipping GitHub proxy refresh for sandbox %s: installation token unavailable",
@@ -754,8 +763,17 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         triggering_user_identity_task = asyncio.create_task(
             asyncio.to_thread(resolve_triggering_user_identity, self._config, github_token)
         )
+        proxy_repositories = (
+            [prompt_default_repo["name"]]
+            if prompt_default_repo and prompt_default_repo.get("name")
+            else None
+        )
         sandbox_task = asyncio.create_task(
-            ensure_sandbox_for_thread(self._thread_id, repo=prompt_default_repo)
+            ensure_sandbox_for_thread(
+                self._thread_id,
+                github_proxy_repositories=proxy_repositories,
+                repo=prompt_default_repo,
+            )
         )
         triggering_user_identity, sandbox_backend = await asyncio.gather(
             triggering_user_identity_task,
@@ -840,7 +858,16 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         _configurable: dict[str, Any] = configurable,
     ) -> SandboxBackendProtocol:
         prompt_default_repo = await _resolve_prompt_default_repo(_configurable)
-        return await ensure_sandbox_for_thread(_thread_id, repo=prompt_default_repo)
+        proxy_repositories = (
+            [prompt_default_repo["name"]]
+            if prompt_default_repo and prompt_default_repo.get("name")
+            else None
+        )
+        return await ensure_sandbox_for_thread(
+            _thread_id,
+            github_proxy_repositories=proxy_repositories,
+            repo=prompt_default_repo,
+        )
 
     def backend_factory(_runtime: object, _thread_id: str = thread_id) -> SandboxBackendProtocol:
         return _get_cached_sandbox_backend(_thread_id, reconnect=reconnect_backend)

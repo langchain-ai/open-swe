@@ -208,10 +208,11 @@ class TestCreateSandboxWithProxy:
 
             from agent.server import _create_sandbox_with_proxy
 
-            await _create_sandbox_with_proxy()
+            await _create_sandbox_with_proxy(github_proxy_repositories=["open-swe"])
 
             mock_create.assert_called_once_with(snapshot_id=None)
             mock_proxy.assert_called_once_with("sandbox-123", "ghs_install")
+            assert mock_get_token.await_args.kwargs["repositories"] == ["open-swe"]
             assert (
                 mock_get_token.await_args.kwargs["permissions"] == RUNTIME_PROXY_TOKEN_PERMISSIONS
             )
