@@ -126,13 +126,15 @@ async def slack_send(request: Request) -> JSONResponse:
     reply_thread_ts = str(form.get("thread_ts") or "")
     if reply_thread_ts:
         thread_ts = reply_thread_ts
-        event_ts = fakes.add_slack_message(channel, thread_ts, user=user_id, text=text)
+        event_ts = fakes.add_slack_message(
+            channel, thread_ts, user=user_id, text=text, is_bot=False
+        )
     else:
         thread_ts = fakes.new_thread_ts()
-        CURRENT_THREAD["channel"] = channel
-        CURRENT_THREAD["thread_ts"] = thread_ts
-        fakes.add_slack_message(channel, thread_ts, user=user_id, text=text)
+        fakes.add_slack_message(channel, thread_ts, user=user_id, text=text, is_bot=False)
         event_ts = thread_ts
+    CURRENT_THREAD["channel"] = channel
+    CURRENT_THREAD["thread_ts"] = thread_ts
 
     event = {
         "type": "app_mention" if mention_bot else "message",
