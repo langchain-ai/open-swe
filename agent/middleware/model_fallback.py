@@ -76,6 +76,13 @@ MODEL_OUTAGE_MESSAGE = (
 def _should_fallback(exc: BaseException) -> bool:
     if isinstance(exc, _TRANSIENT_EXCEPTIONS):
         return True
+    if isinstance(exc, openai.BadRequestError):
+        provider_message = _nested_str(_error_body(exc), "error", "message") or ""
+        if (
+            "of type 'function_call' was provided without its required 'reasoning' item"
+            in provider_message
+        ):
+            return True
     # Catches OverloadedError (529) and other 5xx/429 surfaced as APIStatusError.
     if isinstance(exc, (anthropic.APIStatusError, openai.APIStatusError)):
         status = getattr(exc, "status_code", None)

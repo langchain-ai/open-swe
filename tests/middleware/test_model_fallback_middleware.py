@@ -33,6 +33,23 @@ def _openai_5xx() -> openai.APIStatusError:
     return openai.APIStatusError("unavailable", response=response, body=response.json())
 
 
+def _openai_missing_reasoning_error() -> openai.BadRequestError:
+    body = {
+        "error": {
+            "message": (
+                "Item 'fc_test' of type 'function_call' was provided without its required "
+                "'reasoning' item: 'rs_test'."
+            ),
+            "type": "invalid_request_error",
+            "param": "input",
+            "code": None,
+        }
+    }
+    request = httpx.Request("POST", "https://api.openai.com/v1/responses")
+    response = httpx.Response(400, request=request, json=body)
+    return openai.BadRequestError("missing reasoning", response=response, body=body)
+
+
 def _anthropic_model_not_available_error() -> anthropic.BadRequestError:
     body = {
         "type": "error",
@@ -73,10 +90,19 @@ class TestShouldFallback:
         )
         assert _should_fallback(exc) is True
 
+    def test_openai_missing_reasoning_400_falls_back(self) -> None:
+        assert _should_fallback(_openai_missing_reasoning_error()) is True
+
     def test_anthropic_400_does_not_fall_back(self) -> None:
         request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
         response = httpx.Response(400, request=request, json={"error": {}})
         exc = anthropic.BadRequestError("bad", response=response, body={})
+        assert _should_fallback(exc) is False
+
+    def test_openai_unrelated_400_does_not_fall_back(self) -> None:
+        request = httpx.Request("POST", "https://api.openai.com/v1/responses")
+        response = httpx.Response(400, request=request, json={"error": {"message": "bad input"}})
+        exc = openai.BadRequestError("bad", response=response, body=response.json())
         assert _should_fallback(exc) is False
 
     def test_value_error_does_not_fall_back(self) -> None:
@@ -105,6 +131,26 @@ class TestModelFallbackMiddleware:
         assert len(calls) == 2
         request.override.assert_called_once_with(model=fallback_model)
         assert calls[1] is request.override.return_value
+
+    @pytest.mark.asyncio
+    async def test_async_falls_over_on_missing_reasoning_error(self) -> None:
+        fallback_model = MagicMock(name="fallback_model")
+        middleware = ModelFallbackMiddleware(fallback_model)
+        good_response = MagicMock(result=[AIMessage(content="ok from fallback")])
+        calls: list[object] = []
+
+        async def handler(req: object) -> object:
+            calls.append(req)
+            if len(calls) == 1:
+                raise _openai_missing_reasoning_error()
+            return good_response
+
+        request = _make_request()
+        result = await middleware.awrap_model_call(request, handler)
+
+        assert result is good_response
+        assert calls == [request, request.override.return_value]
+        request.override.assert_called_once_with(model=fallback_model)
 
     @pytest.mark.asyncio
     async def test_async_falls_over_on_stream_transport_error(self) -> None:
