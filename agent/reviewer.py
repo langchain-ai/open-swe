@@ -922,7 +922,9 @@ async def _ensure_reviewer_sandbox_for_thread(
             raise RuntimeError(
                 f"GitHub App installation token unavailable for reviewer thread {thread_id}"
             )
-        cache_github_token_for_thread(thread_id, github_token, expires_at=expires_at)
+        cache_github_token_for_thread(
+            thread_id, github_token, expires_at=expires_at, is_bot_token=True
+        )
 
     repo_name_for_scope = str(repo_config.get("name") or "")
     repo_for_snapshot = (
