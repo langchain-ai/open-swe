@@ -183,6 +183,8 @@ def select_slack_context_messages(
     current_message_ts: str,
     bot_user_id: str,
     bot_username: str = "",
+    *,
+    treat_all_messages_as_mentions: bool = False,
 ) -> tuple[list[dict[str, Any]], str]:
     """Select context from thread start or previous bot mention."""
     if not messages:
@@ -199,13 +201,24 @@ def select_slack_context_messages(
         mention_tokens.append(f"<@{bot_user_id}>")
     if bot_username:
         mention_tokens.append(f"@{bot_username}")
-    if not mention_tokens:
+    if not mention_tokens and not treat_all_messages_as_mentions:
         return up_to_current, "thread_start"
 
     last_mention_index = -1
     for index, message in enumerate(up_to_current[:-1]):
         text = message.get("text", "")
-        if isinstance(text, str) and any(token in text for token in mention_tokens):
+        is_explicit_mention = isinstance(text, str) and any(
+            token in text for token in mention_tokens
+        )
+        user_id = message.get("user")
+        is_user_message = (
+            isinstance(user_id, str)
+            and bool(user_id)
+            and user_id != bot_user_id
+            and not message.get("bot_id")
+            and not message.get("bot_profile")
+        )
+        if is_explicit_mention or (treat_all_messages_as_mentions and is_user_message):
             last_mention_index = index
 
     if last_mention_index >= 0:
