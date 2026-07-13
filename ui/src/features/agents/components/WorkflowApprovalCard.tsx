@@ -75,11 +75,11 @@ export function WorkflowApprovalCard({
                   </div>
                   <p className="text-xs text-[var(--ui-text-dim)]">
                     {approval.repo || "Repository"} on{" "}
-                    {approval.branch || "current branch"} ·{" "}
+                    {approval.branch || "Current branch"} ·{" "}
                     {shortSha(approval.baseSha)} → {shortSha(approval.headSha)}
                   </p>
                   <p className="font-mono text-[0.68rem] break-all text-[var(--ui-text-dim)]">
-                    fingerprint: {approval.fingerprint}
+                    Fingerprint: {approval.fingerprint}
                   </p>
                 </div>
                 <div className="flex shrink-0 flex-wrap gap-2">

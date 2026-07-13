@@ -73,6 +73,11 @@ async def slack_webhook(
             if isinstance(first_user, str):
                 bot_user_id = first_user
 
+    is_direct_message = (
+        event.get("type") == "message"
+        and event.get("channel_type") == "im"
+        and bool(event.get("user"))
+    )
     if event.get("type") != "app_mention":
         message_text = event.get("text", "")
         has_username_mention = bool(
@@ -87,6 +92,7 @@ async def slack_webhook(
         )
         is_ready_plan_reply = bool(
             event.get("type") == "message"
+            and not is_direct_message
             and await service._slack_user_can_reply_to_ready_plan(
                 str(event.get("channel") or ""),
                 str(event.get("thread_ts") or ""),
@@ -103,13 +109,17 @@ async def slack_webhook(
                 bot_user_id,
             )
         )
-        if not (
-            has_username_mention
-            or has_id_mention
-            or is_ready_plan_reply
-            or is_untagged_two_party_reply
-        ):
-            return {"status": "ignored", "reason": "Not an app mention or plan reply"}
+        should_handle_message = any(
+            (
+                has_username_mention,
+                has_id_mention,
+                is_ready_plan_reply,
+                is_direct_message,
+                is_untagged_two_party_reply,
+            )
+        )
+        if not should_handle_message:
+            return {"status": "ignored", "reason": "Not an app mention, DM, or plan reply"}
 
     if event.get("subtype") == "bot_message" or event.get("bot_id"):
         return {"status": "ignored", "reason": "Event from a bot"}
@@ -144,6 +154,7 @@ async def slack_webhook(
         "user_id": user_id,
         "text": text,
         "bot_user_id": bot_user_id,
+        "treat_all_messages_as_mentions": is_direct_message,
     }
     repo_config = await common.get_slack_repo_config(
         channel_id, thread_ts, slack_user_id=user_id, channel_context=channel_context

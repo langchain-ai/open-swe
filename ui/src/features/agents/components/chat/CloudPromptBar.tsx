@@ -393,7 +393,7 @@ export const CloudPromptBar = memo(function CloudPromptBarComponent({
               >
                 <img
                   src={`data:${image.mimeType};base64,${image.base64}`}
-                  alt={image.fileName || "pending image"}
+                  alt={image.fileName || "Pending image"}
                   className="size-16 rounded-lg border border-[var(--ui-border)] object-cover"
                 />
                 <button

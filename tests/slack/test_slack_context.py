@@ -96,6 +96,27 @@ def test_select_slack_context_messages_ignores_messages_after_current_event() ->
     assert [item["ts"] for item in selected] == ["1.0", "2.0", "3.0"]
 
 
+def test_select_slack_context_messages_treats_direct_user_messages_as_mentions() -> None:
+    bot_user_id = "UBOT"
+    messages = [
+        {"ts": "1.0", "text": "first request", "user": "U1"},
+        {"ts": "2.0", "text": "agent response", "user": "UBOT", "bot_id": "B1"},
+        {"ts": "3.0", "text": "follow up", "user": "U1"},
+        {"ts": "3.5", "text": "agent response", "user": "UBOT", "bot_id": "B1"},
+        {"ts": "4.0", "text": "latest", "user": "U1"},
+    ]
+
+    selected, mode = select_slack_context_messages(
+        messages,
+        "4.0",
+        bot_user_id,
+        treat_all_messages_as_mentions=True,
+    )
+
+    assert mode == "last_mention"
+    assert [item["ts"] for item in selected] == ["3.0", "3.5", "4.0"]
+
+
 def test_strip_bot_mention_removes_bot_tag() -> None:
     assert strip_bot_mention("<@UBOT> please check", "UBOT") == "please check"
 
@@ -573,6 +594,62 @@ def test_process_slack_mention_creates_thread_first_run_with_trace_reply(
     assert prompt_block["text"].count("## Slack Thread") == 1
     assert f"Thread TS: {thread_ts}" in prompt_block["text"]
     assert "## Latest Mention Request\ncontinue on the branch" in prompt_block["text"]
+
+
+def test_process_slack_mention_treats_direct_message_as_implicit_mention(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+    _setup_slack_mention_fakes(monkeypatch, captured)
+
+    async def fake_thread_exists(thread_id: str) -> bool:
+        return True
+
+    async def fake_fetch_slack_thread_messages(channel_id: str, thread_ts: str) -> list[dict]:
+        captured["fetch_thread"] = {"channel_id": channel_id, "thread_ts": thread_ts}
+        return [
+            {"ts": "1700000000.000100", "text": "first request", "user": "U123"},
+            {
+                "ts": "1700000000.000150",
+                "text": "agent response",
+                "user": "UBOT",
+                "bot_id": "B1",
+            },
+            {"ts": "1700000000.000200", "text": "continue on the branch", "user": "U123"},
+        ]
+
+    monkeypatch.setattr(webhook_common, "_thread_exists", fake_thread_exists)
+    monkeypatch.setattr(
+        webhook_common, "fetch_slack_thread_messages", fake_fetch_slack_thread_messages
+    )
+
+    asyncio.run(
+        slack_webhooks.process_slack_mention(
+            {
+                "channel_id": "D123",
+                "thread_ts": "1700000000.000100",
+                "event_ts": "1700000000.000200",
+                "user_id": "U123",
+                "text": "continue on the branch",
+                "bot_user_id": "UBOT",
+                "treat_all_messages_as_mentions": True,
+            },
+            {"owner": "langchain-ai", "name": "open-swe"},
+        )
+    )
+
+    run_create = captured["run_create"]
+    assert isinstance(run_create, dict)
+    prompt_block = run_create["kwargs"]["input"]["messages"][0]["content"][0]
+    assert "Context starts at: the previous direct message" in prompt_block["text"]
+    assert "## Latest Mention Request\ncontinue on the branch" in prompt_block["text"]
+    context_messages = captured["context_messages"]
+    assert isinstance(context_messages, list)
+    assert [message["ts"] for message in context_messages] == [
+        "1700000000.000100",
+        "1700000000.000150",
+        "1700000000.000200",
+    ]
 
 
 def test_process_slack_mention_skips_trace_reply_on_followup_mention(

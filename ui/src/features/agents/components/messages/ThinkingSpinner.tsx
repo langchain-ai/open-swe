@@ -3,17 +3,17 @@ import { useEffect, useRef, useState } from "react";
 import { formatElapsed } from "@/lib/utils";
 
 const BUSY_TEXTS: Array<{ present: string; past: string }> = [
-  { present: "vibing...", past: "Vibed" },
-  { present: "noodling...", past: "Noodled" },
-  { present: "pondering...", past: "Pondered" },
-  { present: "thinking really hard...", past: "Thought really hard" },
-  { present: "spinning up...", past: "Spun up" },
-  { present: "connecting the dots...", past: "Connected the dots" },
-  { present: "brewing ideas...", past: "Brewed ideas" },
-  { present: "cooking...", past: "Cooked" },
-  { present: "crunching...", past: "Crunched" },
-  { present: "scheming...", past: "Schemed" },
-  { present: "processing...", past: "Processed" },
+  { present: "Vibing...", past: "Vibed" },
+  { present: "Noodling...", past: "Noodled" },
+  { present: "Pondering...", past: "Pondered" },
+  { present: "Thinking really hard...", past: "Thought really hard" },
+  { present: "Spinning up...", past: "Spun up" },
+  { present: "Connecting the dots...", past: "Connected the dots" },
+  { present: "Brewing ideas...", past: "Brewed ideas" },
+  { present: "Cooking...", past: "Cooked" },
+  { present: "Crunching...", past: "Crunched" },
+  { present: "Scheming...", past: "Schemed" },
+  { present: "Processing...", past: "Processed" },
 ];
 
 const THINKING_SETTLE_MS = 300;

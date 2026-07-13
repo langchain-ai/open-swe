@@ -15,6 +15,7 @@ The reviewer needs three things from a PR diff:
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import re
 from dataclasses import dataclass
@@ -33,6 +34,17 @@ _HUNK_HEADER_RE = re.compile(
     r"^@@ -(?P<old_start>\d+)(?:,(?P<old_count>\d+))? "
     r"\+(?P<new_start>\d+)(?:,(?P<new_count>\d+))? @@"
 )
+_GIT_SHA_RE = re.compile(r"^[0-9a-fA-F]{7,64}$")
+
+
+@dataclass(frozen=True)
+class MaterializedReviewDiff:
+    path: str
+    diff_text: str
+    base_ref: str
+    head_ref: str
+    merge_base: bool
+    cached: bool
 
 
 @dataclass(frozen=True)
@@ -272,6 +284,102 @@ async def fetch_pr_metadata(
     return (title if isinstance(title, str) else "", body if isinstance(body, str) else "")
 
 
+def review_diff_range(
+    *,
+    base_sha: str,
+    head_sha: str,
+    last_reviewed_sha: str = "",
+    re_review: bool = False,
+) -> tuple[str, str, bool]:
+    """Resolve the trusted commit range for the current review invocation."""
+    base_ref = last_reviewed_sha if re_review and last_reviewed_sha else base_sha
+    if not _GIT_SHA_RE.fullmatch(base_ref) or not _GIT_SHA_RE.fullmatch(head_sha):
+        raise ValueError("review diff requires valid Git commit SHAs")
+    return base_ref.lower(), head_sha.lower(), not re_review
+
+
+def review_diff_path(work_dir: str, base_ref: str, head_ref: str, merge_base: bool) -> str:
+    """Return a deterministic sandbox path for one review diff range."""
+    operator = "..." if merge_base else ".."
+    digest = hashlib.sha256(f"{base_ref}{operator}{head_ref}".encode()).hexdigest()[:16]
+    return f"{work_dir.rstrip('/')}/review-diff-{digest}.patch"
+
+
+async def materialize_review_diff(
+    sandbox_backend: SandboxBackendProtocol,
+    *,
+    work_dir: str,
+    base_ref: str,
+    head_ref: str,
+    merge_base: bool,
+    diff_text: str | None = None,
+) -> MaterializedReviewDiff:
+    """Idempotently write a review diff to the sandbox."""
+    path = review_diff_path(work_dir, base_ref, head_ref, merge_base)
+    if diff_text is None:
+        responses = await sandbox_backend.adownload_files([path])
+        response = responses[0] if responses else None
+        cached_content = _download_content(response)
+        if cached_content is not None:
+            return MaterializedReviewDiff(
+                path=path,
+                diff_text=cached_content,
+                base_ref=base_ref,
+                head_ref=head_ref,
+                merge_base=merge_base,
+                cached=True,
+            )
+        diff_text = await compute_diff_in_sandbox(
+            sandbox_backend,
+            work_dir,
+            base_ref,
+            head_ref,
+            merge_base=merge_base,
+        )
+
+    responses = await sandbox_backend.aupload_files([(path, diff_text.encode())])
+    response = responses[0] if responses else None
+    error = (
+        response.get("error") if isinstance(response, dict) else getattr(response, "error", None)
+    )
+    if error:
+        raise RuntimeError(f"failed to materialize review diff: {error}")
+    return MaterializedReviewDiff(
+        path=path,
+        diff_text=diff_text,
+        base_ref=base_ref,
+        head_ref=head_ref,
+        merge_base=merge_base,
+        cached=False,
+    )
+
+
+def changed_files(diff_text: str) -> list[str]:
+    """Return changed paths from a unified diff without exposing its body."""
+    paths = (
+        match.group("b")
+        for line in diff_text.splitlines()
+        if (match := _DIFF_FILE_HEADER_RE.match(line))
+    )
+    return list(dict.fromkeys(paths))
+
+
+def _download_content(response: object) -> str | None:
+    if response is None:
+        return None
+    if isinstance(response, dict):
+        content = response.get("content")
+        error = response.get("error")
+    else:
+        content = getattr(response, "content", None)
+        error = getattr(response, "error", None)
+    if error or content is None:
+        return None
+    if isinstance(content, bytes):
+        return content.decode(errors="replace")
+    return content if isinstance(content, str) else None
+
+
 async def compute_diff_in_sandbox(
     sandbox_backend: SandboxBackendProtocol,
     work_dir: str,
@@ -322,6 +430,9 @@ def _stdout_from_result(result: object) -> str:
     stdout = getattr(result, "stdout", None)
     if isinstance(stdout, str):
         return stdout
+    output = getattr(result, "output", None)
+    if isinstance(output, str):
+        return output
     text = getattr(result, "text", None)
     if isinstance(text, str):
         return text
