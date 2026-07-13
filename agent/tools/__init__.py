@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any
 _TOOL_MODULES = {
     "add_finding": ".add_finding",
     "enter_plan_mode": ".enter_plan_mode",
+    "fetch_review_diff": ".fetch_review_diff",
     "fetch_url": ".fetch_url",
     "http_request": ".http_request",
     "linear_comment": ".linear_comment",
@@ -37,6 +38,7 @@ _TOOL_MODULES = {
 __all__ = [
     "add_finding",
     "enter_plan_mode",
+    "fetch_review_diff",
     "fetch_url",
     "http_request",
     "linear_comment",
@@ -69,6 +71,7 @@ __all__ = [
 if TYPE_CHECKING:
     from .add_finding import add_finding
     from .enter_plan_mode import enter_plan_mode
+    from .fetch_review_diff import fetch_review_diff
     from .fetch_url import fetch_url
     from .http_request import http_request
     from .linear_comment import linear_comment
