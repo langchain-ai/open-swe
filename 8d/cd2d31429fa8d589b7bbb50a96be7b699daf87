@@ -1,0 +1,19 @@
+agent/webhooks/slack_routes.py
+  s_fb4d346e2789b0::t_8fdd569ae6ee88 105
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "8dcd2d31429fa8d589b7bbb50a96be7b699daf87",
+  "prompts": {},
+  "sessions": {
+    "s_fb4d346e2789b0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bb95763c-6b49-4db5-8cae-71a7ca5462e5",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "open-swe[bot] <open-swe@users.noreply.github.com>"
+    }
+  }
+}
