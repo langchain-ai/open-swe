@@ -5,10 +5,13 @@ from __future__ import annotations
 import pytest
 
 from agent.review.diff import (
+    changed_files,
     compute_diff_line_set,
     extract_diff_hunk,
     is_range_in_diff,
+    materialize_review_diff,
     parse_unified_diff,
+    review_diff_range,
 )
 
 _TWO_FILE_DIFF = """diff --git a/foo.py b/foo.py
@@ -96,6 +99,64 @@ def test_extract_diff_hunk_supports_single_line_and_range(start: int, end: int) 
     hunk = extract_diff_hunk(_TWO_FILE_DIFF, "bar.py", start, end)
     assert hunk is not None
     assert "import sys" in hunk
+
+
+def test_review_diff_range_uses_previous_head_for_re_review() -> None:
+    assert review_diff_range(
+        base_sha="a" * 40,
+        head_sha="c" * 40,
+        last_reviewed_sha="b" * 40,
+        re_review=True,
+    ) == ("b" * 40, "c" * 40, False)
+
+
+def test_changed_files_returns_bounded_path_list() -> None:
+    assert changed_files(_TWO_FILE_DIFF) == ["foo.py", "bar.py"]
+
+
+@pytest.mark.asyncio
+async def test_materialize_review_diff_reuses_existing_file() -> None:
+    from unittest.mock import AsyncMock, MagicMock
+
+    backend = MagicMock()
+    backend.adownload_files = AsyncMock(return_value=[{"content": _TWO_FILE_DIFF.encode()}])
+    backend.aupload_files = AsyncMock()
+
+    result = await materialize_review_diff(
+        backend,
+        work_dir="/workspace",
+        base_ref="a" * 40,
+        head_ref="b" * 40,
+        merge_base=True,
+    )
+
+    assert result.cached is True
+    assert result.diff_text == _TWO_FILE_DIFF
+    backend.aupload_files.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_materialize_review_diff_writes_supplied_diff() -> None:
+    from unittest.mock import AsyncMock, MagicMock
+
+    backend = MagicMock()
+    backend.adownload_files = AsyncMock()
+    backend.aupload_files = AsyncMock(return_value=[{"error": None}])
+
+    result = await materialize_review_diff(
+        backend,
+        work_dir="/workspace",
+        base_ref="a" * 40,
+        head_ref="b" * 40,
+        merge_base=True,
+        diff_text=_TWO_FILE_DIFF,
+    )
+
+    assert result.cached is False
+    uploaded_path, uploaded_content = backend.aupload_files.await_args.args[0][0]
+    assert uploaded_path == result.path
+    assert uploaded_content == _TWO_FILE_DIFF.encode()
+    backend.adownload_files.assert_not_awaited()
 
 
 @pytest.mark.asyncio

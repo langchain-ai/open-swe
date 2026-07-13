@@ -25,6 +25,9 @@ def test_reviewer_system_prompt_formats_without_keyerror() -> None:
     assert "wrong identifier/value/key" in prompt
     assert "Keep at most 6 findings" in prompt
     assert "Delegate at most one review pass" in prompt
+    assert "fetch_review_diff" in prompt
+    assert "gh pr diff" not in prompt
+    assert "gh api repos/" not in prompt
 
 
 def test_reviewer_eval_prompt_omits_historical_and_benchmark_gaming() -> None:
