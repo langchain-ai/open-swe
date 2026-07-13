@@ -3,7 +3,7 @@ from typing import Any
 import httpx
 from markdownify import markdownify
 
-from ..utils.ssrf import request_with_safe_redirects
+from ..utils.url_safety import request_with_safe_redirects
 
 FETCH_URL_MAX_CHARS = 100_000
 

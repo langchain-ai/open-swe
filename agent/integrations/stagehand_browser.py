@@ -37,7 +37,7 @@ from typing import Any
 
 from langgraph.config import get_config
 
-from ..utils.ssrf import is_url_safe
+from ..utils.url_safety import is_url_safe
 
 logger = logging.getLogger(__name__)
 

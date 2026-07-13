@@ -2,7 +2,7 @@ from typing import Any
 
 import httpx
 
-from ..utils.ssrf import (
+from ..utils.url_safety import (
     request_with_safe_redirects as _request_with_safe_redirects,
 )
 

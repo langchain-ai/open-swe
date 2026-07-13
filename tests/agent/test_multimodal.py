@@ -7,7 +7,7 @@ from urllib.parse import urlparse
 import httpx
 
 import agent.utils.multimodal as multimodal
-import agent.utils.ssrf as ssrf
+import agent.utils.url_safety as url_safety
 from agent.utils.multimodal import (
     extract_image_urls,
     fetch_image_block,
@@ -163,11 +163,16 @@ class FakeImageClient:
 
 def _patch_image_dns(monkeypatch: Any) -> None:
     def fake_getaddrinfo(host: str, port: int | None, *args: Any, **kwargs: Any) -> list[tuple]:
-        public_hosts = {"example.com", "files.slack.com", "cdn.example.com"}
+        public_hosts = {
+            "cdn.example.com",
+            "example.com",
+            "files.slack.com",
+            "private.files.slack.com",
+        }
         ip = "93.184.216.34" if host in public_hosts else host
         return [_addr_info(ip, port)]
 
-    monkeypatch.setattr(ssrf.socket, "getaddrinfo", fake_getaddrinfo)
+    monkeypatch.setattr(url_safety.socket, "getaddrinfo", fake_getaddrinfo)
 
 
 async def test_fetch_image_block_blocks_redirect_to_internal_url(monkeypatch: Any) -> None:
@@ -194,7 +199,7 @@ async def test_fetch_image_block_does_not_forward_slack_auth_to_redirect_host(
     monkeypatch: Any,
 ) -> None:
     _patch_image_dns(monkeypatch)
-    monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-secret")
+    monkeypatch.setenv("SLACK_BOT_TOKEN", "test-slack-token")
     monkeypatch.setattr(multimodal, "create_image_block", lambda **kwargs: kwargs)
 
     def responder(method: str, url: str, **kwargs: Any) -> FakeImageResponse:
@@ -218,6 +223,66 @@ async def test_fetch_image_block_does_not_forward_slack_auth_to_redirect_host(
 
     assert result == {"base64": "cG5n", "mime_type": "image/png"}
     assert len(client.calls) == 2
-    assert client.calls[0]["headers"]["Authorization"] == "Bearer xoxb-secret"
+    assert client.calls[0]["headers"]["Authorization"] == "Bearer test-slack-token"
     assert "Authorization" not in client.calls[1]["headers"]
     assert client.calls[1]["headers"]["Host"] == "cdn.example.com"
+
+
+async def test_fetch_image_block_does_not_add_slack_auth_after_untrusted_redirect(
+    monkeypatch: Any,
+) -> None:
+    _patch_image_dns(monkeypatch)
+    monkeypatch.setenv("SLACK_BOT_TOKEN", "test-slack-token")
+    monkeypatch.setattr(multimodal, "create_image_block", lambda **kwargs: kwargs)
+
+    def responder(method: str, url: str, **kwargs: Any) -> FakeImageResponse:
+        if kwargs["headers"]["Host"] == "example.com":
+            return FakeImageResponse(
+                status_code=302,
+                url=url,
+                headers={"Location": "https://files.slack.com/private.png"},
+            )
+        return FakeImageResponse(
+            status_code=200,
+            url=url,
+            headers={"Content-Type": "image/png"},
+            content=b"png",
+        )
+
+    client = FakeImageClient(responder)
+
+    result = await fetch_image_block("https://example.com/start.png", client)
+
+    assert result == {"base64": "cG5n", "mime_type": "image/png"}
+    assert len(client.calls) == 2
+    assert all("Authorization" not in call["headers"] for call in client.calls)
+
+
+async def test_fetch_image_block_keeps_auth_within_slack_host_family(monkeypatch: Any) -> None:
+    _patch_image_dns(monkeypatch)
+    monkeypatch.setenv("SLACK_BOT_TOKEN", "test-slack-token")
+    monkeypatch.setattr(multimodal, "create_image_block", lambda **kwargs: kwargs)
+
+    def responder(method: str, url: str, **kwargs: Any) -> FakeImageResponse:
+        if kwargs["headers"]["Host"] == "files.slack.com":
+            return FakeImageResponse(
+                status_code=302,
+                url=url,
+                headers={"Location": "https://private.files.slack.com/image.png"},
+            )
+        return FakeImageResponse(
+            status_code=200,
+            url=url,
+            headers={"Content-Type": "image/png"},
+            content=b"png",
+        )
+
+    client = FakeImageClient(responder)
+
+    result = await fetch_image_block("https://files.slack.com/image.png", client)
+
+    assert result == {"base64": "cG5n", "mime_type": "image/png"}
+    assert len(client.calls) == 2
+    assert all(
+        call["headers"]["Authorization"] == "Bearer test-slack-token" for call in client.calls
+    )

@@ -13,7 +13,7 @@ from urllib.parse import urlparse
 import httpx
 from langchain_core.messages.content import create_image_block
 
-from .ssrf import request_with_safe_redirects
+from .url_safety import request_with_safe_redirects
 
 logger = logging.getLogger(__name__)
 
@@ -48,23 +48,34 @@ def vision_not_supported_warning(model_id: str, image_count: int) -> str:
     )
 
 
-def _image_auth_headers_for_url(image_url: str) -> dict[str, str] | None:
+def _image_provider(image_url: str) -> str | None:
     host = (urlparse(image_url).hostname or "").lower()
     if host == "uploads.linear.app" or host.endswith(".uploads.linear.app"):
+        return "linear"
+    if host == "files.slack.com" or host.endswith(".files.slack.com"):
+        return "slack"
+    return None
+
+
+def _image_auth_headers_for_url(original_url: str, current_url: str) -> dict[str, str] | None:
+    provider = _image_provider(original_url)
+    if provider is None or _image_provider(current_url) != provider:
+        return None
+    if provider == "linear":
         linear_api_key = os.environ.get("LINEAR_API_KEY", "")
         if linear_api_key:
             return {"Authorization": linear_api_key}
         logger.warning(
             "LINEAR_API_KEY not set; cannot authenticate image fetch for %s",
-            image_url,
+            current_url,
         )
-    elif host == "files.slack.com" or host.endswith(".files.slack.com"):
+    else:
         slack_bot_token = os.environ.get("SLACK_BOT_TOKEN", "")
         if slack_bot_token:
             return {"Authorization": f"Bearer {slack_bot_token}"}
         logger.warning(
             "SLACK_BOT_TOKEN not set; cannot authenticate image fetch for %s",
-            image_url,
+            current_url,
         )
     return None
 

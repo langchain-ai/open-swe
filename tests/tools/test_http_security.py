@@ -18,7 +18,7 @@ importlib.import_module("agent.tools.fetch_url")
 importlib.import_module("agent.tools.http_request")
 fetch_url_tool = sys.modules["agent.tools.fetch_url"]
 http_request_tool = sys.modules["agent.tools.http_request"]
-ssrf = importlib.import_module("agent.utils.ssrf")
+url_safety = importlib.import_module("agent.utils.url_safety")
 
 _NO_JSON = object()
 
@@ -97,11 +97,19 @@ def _install_client(monkeypatch, module, responder) -> type:
     return factory
 
 
+def _patch_public_dns(monkeypatch) -> None:
+    monkeypatch.setattr(
+        url_safety.socket,
+        "getaddrinfo",
+        lambda host, port, *a, **k: [_addr_info("93.184.216.34", port)],
+    )
+
+
 # --- _resolve_and_validate (pure IP gating) ----------------------------------
 
 
 def test_resolve_and_validate_rejects_unsupported_scheme() -> None:
-    is_safe, reason, _, _ = ssrf.resolve_and_validate("ftp://example.com/x")
+    is_safe, reason, _, _ = url_safety.resolve_and_validate("ftp://example.com/x")
     assert is_safe is False
     assert "scheme" in reason.lower()
 
@@ -112,11 +120,11 @@ def test_resolve_and_validate_rejects_unsupported_scheme() -> None:
 )
 def test_resolve_and_validate_rejects_private_ranges(monkeypatch, ip: str) -> None:
     monkeypatch.setattr(
-        ssrf.socket,
+        url_safety.socket,
         "getaddrinfo",
         lambda host, port, *a, **k: [_addr_info(ip, port)],
     )
-    is_safe, reason, hostname, _ = ssrf.resolve_and_validate("http://evil.test/")
+    is_safe, reason, hostname, _ = url_safety.resolve_and_validate("http://evil.test/")
     assert is_safe is False
     assert "blocked address" in reason
     assert hostname == "evil.test"
@@ -124,11 +132,13 @@ def test_resolve_and_validate_rejects_private_ranges(monkeypatch, ip: str) -> No
 
 def test_resolve_and_validate_accepts_public_ip(monkeypatch) -> None:
     monkeypatch.setattr(
-        ssrf.socket,
+        url_safety.socket,
         "getaddrinfo",
         lambda host, port, *a, **k: [_addr_info("93.184.216.34", port)],
     )
-    is_safe, reason, hostname, addr_infos = ssrf.resolve_and_validate("https://example.com/path")
+    is_safe, reason, hostname, addr_infos = url_safety.resolve_and_validate(
+        "https://example.com/path"
+    )
     assert is_safe is True
     assert reason == ""
     assert hostname == "example.com"
@@ -137,11 +147,11 @@ def test_resolve_and_validate_accepts_public_ip(monkeypatch) -> None:
 
 def test_pinned_url_rewrites_host_to_ip_keeping_path_and_port() -> None:
     assert (
-        ssrf.pinned_url("https://example.com:8443/a/b?q=1", "93.184.216.34")
+        url_safety.pinned_url("https://example.com:8443/a/b?q=1", "93.184.216.34")
         == "https://93.184.216.34:8443/a/b?q=1"
     )
     # IPv6 literal is bracketed
-    assert ssrf.pinned_url("http://h/x", "::1").startswith("http://[::1]/x")
+    assert url_safety.pinned_url("http://h/x", "::1").startswith("http://[::1]/x")
 
 
 # --- fetch_url ---------------------------------------------------------------
@@ -168,7 +178,7 @@ async def test_fetch_url_blocks_redirects_to_private_ips(monkeypatch) -> None:
         ip = "93.184.216.34" if host == "example.com" else host
         return [_addr_info(ip, port)]
 
-    monkeypatch.setattr(ssrf.socket, "getaddrinfo", fake_getaddrinfo)
+    monkeypatch.setattr(url_safety.socket, "getaddrinfo", fake_getaddrinfo)
 
     def responder(method: str, url: str, **kwargs: Any) -> FakeResponse:
         return FakeResponse(
@@ -215,7 +225,7 @@ async def test_http_request_pins_connection_to_validated_public_ip(monkeypatch) 
         ip = public_addr if call_count["n"] == 1 else private_addr
         return [_addr_info(ip, port)]
 
-    monkeypatch.setattr(ssrf.socket, "getaddrinfo", fake_getaddrinfo)
+    monkeypatch.setattr(url_safety.socket, "getaddrinfo", fake_getaddrinfo)
 
     def responder(method: str, url: str, **kwargs: Any) -> FakeResponse:
         return FakeResponse(status_code=200, url=url, text="ok", json_data="ok")
@@ -242,7 +252,7 @@ async def test_http_request_blocks_when_only_private_ips(monkeypatch) -> None:
     private_addr = "169.254.169.254"
 
     monkeypatch.setattr(
-        ssrf.socket,
+        url_safety.socket,
         "getaddrinfo",
         lambda host, port, *a, **k: [_addr_info(private_addr, port)],
     )
@@ -264,7 +274,7 @@ async def test_http_request_downgrades_method_on_303(monkeypatch) -> None:
     def fake_getaddrinfo(host, port, *args, **kwargs):  # type: ignore[no-untyped-def]
         return [_addr_info("93.184.216.34", port)]
 
-    monkeypatch.setattr(ssrf.socket, "getaddrinfo", fake_getaddrinfo)
+    monkeypatch.setattr(url_safety.socket, "getaddrinfo", fake_getaddrinfo)
 
     def responder(method: str, url: str, **kwargs: Any) -> FakeResponse:
         if "start" in url:
@@ -291,11 +301,132 @@ async def test_http_request_downgrades_method_on_303(monkeypatch) -> None:
     assert result["content"] == {"ok": True}
 
 
+async def test_http_request_drops_secrets_and_params_on_cross_origin_redirect(
+    monkeypatch,
+) -> None:
+    _patch_public_dns(monkeypatch)
+
+    def responder(method: str, url: str, **kwargs: Any) -> FakeResponse:
+        if kwargs["headers"]["Host"] == "example.com":
+            return FakeResponse(
+                status_code=307,
+                url=url,
+                headers={"Location": "https://redirect.example.net/done"},
+            )
+        return FakeResponse(status_code=200, url=url, json_data={"ok": True})
+
+    _install_client(monkeypatch, http_request_tool, responder)
+
+    result = await http_request_tool.http_request(
+        "https://example.com/start",
+        headers={
+            "Authorization": "Bearer secret",
+            "Cookie": "session=secret",
+            "X-API-Key": "secret",
+            "X-Request-ID": "safe",
+        },
+        params={"token": "secret"},
+    )
+
+    client = FakeAsyncClient.last_instance
+    assert client is not None
+    assert len(client.calls) == 2
+    assert client.calls[0]["params"] == {"token": "secret"}
+    assert "params" not in client.calls[1]
+    assert client.calls[1]["headers"]["X-Request-ID"] == "safe"
+    assert "Authorization" not in client.calls[1]["headers"]
+    assert "Cookie" not in client.calls[1]["headers"]
+    assert "X-API-Key" not in client.calls[1]["headers"]
+    assert result["status_code"] == 200
+
+
+async def test_http_request_keeps_auth_on_same_origin_redirect(monkeypatch) -> None:
+    _patch_public_dns(monkeypatch)
+
+    def responder(method: str, url: str, **kwargs: Any) -> FakeResponse:
+        if "start" in url:
+            return FakeResponse(
+                status_code=307,
+                url=url,
+                headers={"Location": "/done"},
+            )
+        return FakeResponse(status_code=200, url=url, json_data={"ok": True})
+
+    _install_client(monkeypatch, http_request_tool, responder)
+
+    await http_request_tool.http_request(
+        "https://example.com/start",
+        headers={"Authorization": "Bearer secret"},
+    )
+
+    client = FakeAsyncClient.last_instance
+    assert client is not None
+    assert client.calls[1]["headers"]["Authorization"] == "Bearer secret"
+
+
+@pytest.mark.parametrize(
+    ("status_code", "method"),
+    [(301, "PUT"), (303, "HEAD")],
+)
+async def test_http_request_preserves_method_when_redirect_requires_it(
+    monkeypatch, status_code: int, method: str
+) -> None:
+    _patch_public_dns(monkeypatch)
+
+    def responder(request_method: str, url: str, **kwargs: Any) -> FakeResponse:
+        if "start" in url:
+            return FakeResponse(
+                status_code=status_code,
+                url=url,
+                headers={"Location": "/done"},
+            )
+        return FakeResponse(status_code=200, url=url, json_data={"ok": True})
+
+    _install_client(monkeypatch, http_request_tool, responder)
+
+    await http_request_tool.http_request("https://example.com/start", method=method)
+
+    client = FakeAsyncClient.last_instance
+    assert client is not None
+    assert [call["method"] for call in client.calls] == [method, method]
+
+
+async def test_http_request_drops_entity_headers_when_redirect_changes_to_get(
+    monkeypatch,
+) -> None:
+    _patch_public_dns(monkeypatch)
+
+    def responder(method: str, url: str, **kwargs: Any) -> FakeResponse:
+        if "start" in url:
+            return FakeResponse(
+                status_code=302,
+                url=url,
+                headers={"Location": "/done"},
+            )
+        return FakeResponse(status_code=200, url=url, json_data={"ok": True})
+
+    _install_client(monkeypatch, http_request_tool, responder)
+
+    await http_request_tool.http_request(
+        "https://example.com/start",
+        method="POST",
+        headers={"Content-Length": "7", "Content-Type": "application/json"},
+        data={"x": 1},
+    )
+
+    client = FakeAsyncClient.last_instance
+    assert client is not None
+    assert client.calls[1]["method"] == "GET"
+    assert "json" not in client.calls[1]
+    assert "Content-Length" not in client.calls[1]["headers"]
+    assert "Content-Type" not in client.calls[1]["headers"]
+
+
 async def test_http_request_returns_timeout_result(monkeypatch) -> None:
     def fake_getaddrinfo(host, port, *args, **kwargs):  # type: ignore[no-untyped-def]
         return [_addr_info("93.184.216.34", port)]
 
-    monkeypatch.setattr(ssrf.socket, "getaddrinfo", fake_getaddrinfo)
+    monkeypatch.setattr(url_safety.socket, "getaddrinfo", fake_getaddrinfo)
 
     def responder(method: str, url: str, **kwargs: Any) -> FakeResponse:
         raise httpx.TimeoutException("timed out")
