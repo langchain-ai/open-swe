@@ -1,0 +1,76 @@
+agent/tools/__init__.py
+  s_fb4d346e2789b0::t_448ca148fbdffd 8,41,74
+tests/e2e/harness.py
+  s_fb4d346e2789b0::t_5c2ab28d806610 132,142-143
+  s_fb4d346e2789b0::t_448ca148fbdffd 79,118,122,137-141,144-146,151
+ui/src/features/agents/components/chat/ToolExecution.test.ts
+  s_fb4d346e2789b0::t_448ca148fbdffd 1-39
+agent/utils/github_token.py
+  s_fb4d346e2789b0::t_448ca148fbdffd 20-31,39-44,46,49-52,54,99-100,103-104,107-109,112-126,137-146,150-152,156-160,164-166
+agent/tools/fetch_review_diff.py
+  s_fb4d346e2789b0::t_448ca148fbdffd 1-64
+tests/e2e/tests/full_flow.spec.ts
+  s_fb4d346e2789b0::t_448ca148fbdffd 40-60
+ui/src/features/agents/components/chat/CloudPromptBar.tsx
+  s_fb4d346e2789b0::t_448ca148fbdffd 396
+ui/src/features/agents/experiments/PromptBar.tsx
+  s_fb4d346e2789b0::t_448ca148fbdffd 531
+agent/utils/auth.py
+  s_fb4d346e2789b0::t_448ca148fbdffd 17-21,295-300,302-308,376-382,403-406,422-424,476-478
+tests/github/test_github_issue_webhook.py
+  s_fb4d346e2789b0::t_448ca148fbdffd 894-951,1026
+ui/src/features/agents/components/AgentsThreadsPage.tsx
+  s_fb4d346e2789b0::t_448ca148fbdffd 64-67,286-287
+agent/webhooks/slack_routes.py
+  s_fb4d346e2789b0::t_448ca148fbdffd 76-80,95,112,120-122,157
+  s_fb4d346e2789b0::t_74055eb182558e 113-119
+agent/review/diff.py
+  s_fb4d346e2789b0::t_448ca148fbdffd 18,37-47,287-382,433-435
+ui/src/features/agents/components/chat/toolExecutionDisplay.ts
+  s_fb4d346e2789b0::t_448ca148fbdffd 1-82
+tests/reviewer/test_fetch_review_diff_tool.py
+  s_fb4d346e2789b0::t_448ca148fbdffd 1-106
+ui/src/features/agents/components/WorkflowApprovalCard.tsx
+  s_fb4d346e2789b0::t_448ca148fbdffd 78,82
+ui/src/features/agents/lib/streamMessagesToUi.ts
+  s_fb4d346e2789b0::t_448ca148fbdffd 8,11-12,23,28
+agent/reviewer.py
+  s_fb4d346e2789b0::t_448ca148fbdffd 62-68,93,123-124,126-128,135-136,562-563,602-604,923-925,1032-1063,1357
+agent/webhooks/common.py
+  s_fb4d346e2789b0::t_448ca148fbdffd 84,1340-1342,1347-1348,1359-1362
+agent/webhooks/slack.py
+  s_fb4d346e2789b0::t_448ca148fbdffd 364,366-370,386-392
+  s_fb4d346e2789b0::t_98d17a7f63853a 554-555,557-558
+ui/src/features/agents/components/chat/ToolExecution.tsx
+  s_fb4d346e2789b0::t_448ca148fbdffd 4-5
+ui/src/features/agents/components/messages/ThinkingSpinner.tsx
+  s_fb4d346e2789b0::t_448ca148fbdffd 6-16
+tests/reviewer/test_reviewer.py
+  s_fb4d346e2789b0::t_448ca148fbdffd 28-30,242-244
+tests/auth/test_github_token_ttl.py
+  s_fb4d346e2789b0::t_448ca148fbdffd 55-57,63-65,70,74-95,100-104,111-116,122-124,133-135,143
+agent/utils/slack.py
+  s_fb4d346e2789b0::t_448ca148fbdffd 186-187,204,210-221
+tests/reviewer/test_reviewer_diff.py
+  s_fb4d346e2789b0::t_448ca148fbdffd 8,12,14,104-161,181-196
+  s_fb4d346e2789b0::t_509ab4fb020fcc 197-198
+tests/slack/test_slack_context.py
+  s_fb4d346e2789b0::t_448ca148fbdffd 99-119,599-652
+  s_fb4d346e2789b0::t_84234fa2591534 653-654
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "c1caeb5422a417ac2197136cd65999cae3a0a345",
+  "prompts": {},
+  "sessions": {
+    "s_fb4d346e2789b0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bb95763c-6b49-4db5-8cae-71a7ca5462e5",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "open-swe[bot] <open-swe@users.noreply.github.com>"
+    }
+  }
+}
