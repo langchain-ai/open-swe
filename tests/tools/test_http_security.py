@@ -18,8 +18,7 @@ importlib.import_module("agent.tools.fetch_url")
 importlib.import_module("agent.tools.http_request")
 fetch_url_tool = sys.modules["agent.tools.fetch_url"]
 http_request_tool = sys.modules["agent.tools.http_request"]
-# SSRF resolution now lives in the shared validator; patch DNS there.
-url_safety = importlib.import_module("agent.utils.url_safety")
+ssrf = importlib.import_module("agent.utils.ssrf")
 
 _NO_JSON = object()
 
@@ -102,7 +101,7 @@ def _install_client(monkeypatch, module, responder) -> type:
 
 
 def test_resolve_and_validate_rejects_unsupported_scheme() -> None:
-    is_safe, reason, _, _ = http_request_tool._resolve_and_validate("ftp://example.com/x")
+    is_safe, reason, _, _ = ssrf.resolve_and_validate("ftp://example.com/x")
     assert is_safe is False
     assert "scheme" in reason.lower()
 
@@ -113,11 +112,11 @@ def test_resolve_and_validate_rejects_unsupported_scheme() -> None:
 )
 def test_resolve_and_validate_rejects_private_ranges(monkeypatch, ip: str) -> None:
     monkeypatch.setattr(
-        url_safety.socket,
+        ssrf.socket,
         "getaddrinfo",
         lambda host, port, *a, **k: [_addr_info(ip, port)],
     )
-    is_safe, reason, hostname, _ = http_request_tool._resolve_and_validate("http://evil.test/")
+    is_safe, reason, hostname, _ = ssrf.resolve_and_validate("http://evil.test/")
     assert is_safe is False
     assert "blocked address" in reason
     assert hostname == "evil.test"
@@ -125,13 +124,11 @@ def test_resolve_and_validate_rejects_private_ranges(monkeypatch, ip: str) -> No
 
 def test_resolve_and_validate_accepts_public_ip(monkeypatch) -> None:
     monkeypatch.setattr(
-        url_safety.socket,
+        ssrf.socket,
         "getaddrinfo",
         lambda host, port, *a, **k: [_addr_info("93.184.216.34", port)],
     )
-    is_safe, reason, hostname, addr_infos = http_request_tool._resolve_and_validate(
-        "https://example.com/path"
-    )
+    is_safe, reason, hostname, addr_infos = ssrf.resolve_and_validate("https://example.com/path")
     assert is_safe is True
     assert reason == ""
     assert hostname == "example.com"
@@ -140,11 +137,11 @@ def test_resolve_and_validate_accepts_public_ip(monkeypatch) -> None:
 
 def test_pinned_url_rewrites_host_to_ip_keeping_path_and_port() -> None:
     assert (
-        http_request_tool._pinned_url("https://example.com:8443/a/b?q=1", "93.184.216.34")
+        ssrf.pinned_url("https://example.com:8443/a/b?q=1", "93.184.216.34")
         == "https://93.184.216.34:8443/a/b?q=1"
     )
     # IPv6 literal is bracketed
-    assert http_request_tool._pinned_url("http://h/x", "::1").startswith("http://[::1]/x")
+    assert ssrf.pinned_url("http://h/x", "::1").startswith("http://[::1]/x")
 
 
 # --- fetch_url ---------------------------------------------------------------
@@ -171,7 +168,7 @@ async def test_fetch_url_blocks_redirects_to_private_ips(monkeypatch) -> None:
         ip = "93.184.216.34" if host == "example.com" else host
         return [_addr_info(ip, port)]
 
-    monkeypatch.setattr(url_safety.socket, "getaddrinfo", fake_getaddrinfo)
+    monkeypatch.setattr(ssrf.socket, "getaddrinfo", fake_getaddrinfo)
 
     def responder(method: str, url: str, **kwargs: Any) -> FakeResponse:
         return FakeResponse(
@@ -218,7 +215,7 @@ async def test_http_request_pins_connection_to_validated_public_ip(monkeypatch) 
         ip = public_addr if call_count["n"] == 1 else private_addr
         return [_addr_info(ip, port)]
 
-    monkeypatch.setattr(url_safety.socket, "getaddrinfo", fake_getaddrinfo)
+    monkeypatch.setattr(ssrf.socket, "getaddrinfo", fake_getaddrinfo)
 
     def responder(method: str, url: str, **kwargs: Any) -> FakeResponse:
         return FakeResponse(status_code=200, url=url, text="ok", json_data="ok")
@@ -245,7 +242,7 @@ async def test_http_request_blocks_when_only_private_ips(monkeypatch) -> None:
     private_addr = "169.254.169.254"
 
     monkeypatch.setattr(
-        url_safety.socket,
+        ssrf.socket,
         "getaddrinfo",
         lambda host, port, *a, **k: [_addr_info(private_addr, port)],
     )
@@ -267,7 +264,7 @@ async def test_http_request_downgrades_method_on_303(monkeypatch) -> None:
     def fake_getaddrinfo(host, port, *args, **kwargs):  # type: ignore[no-untyped-def]
         return [_addr_info("93.184.216.34", port)]
 
-    monkeypatch.setattr(url_safety.socket, "getaddrinfo", fake_getaddrinfo)
+    monkeypatch.setattr(ssrf.socket, "getaddrinfo", fake_getaddrinfo)
 
     def responder(method: str, url: str, **kwargs: Any) -> FakeResponse:
         if "start" in url:
@@ -298,7 +295,7 @@ async def test_http_request_returns_timeout_result(monkeypatch) -> None:
     def fake_getaddrinfo(host, port, *args, **kwargs):  # type: ignore[no-untyped-def]
         return [_addr_info("93.184.216.34", port)]
 
-    monkeypatch.setattr(url_safety.socket, "getaddrinfo", fake_getaddrinfo)
+    monkeypatch.setattr(ssrf.socket, "getaddrinfo", fake_getaddrinfo)
 
     def responder(method: str, url: str, **kwargs: Any) -> FakeResponse:
         raise httpx.TimeoutException("timed out")
