@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router"
 
-import { AutomationsList } from "@/components/agents/AutomationsList"
+import { AutomationsList } from "@/features/automations/components/AutomationsList"
 
 export const Route = createFileRoute("/agents/automations/")({
   component: AutomationsIndexPage,

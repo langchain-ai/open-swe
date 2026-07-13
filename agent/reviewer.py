@@ -50,7 +50,6 @@ from .middleware import (
     PrepareRunState,
     RepairOrphanedToolCallsMiddleware,
     SanitizeFireworksMessagesMiddleware,
-    SanitizeOpenAIResponsesMiddleware,
     SanitizeThinkingBlocksMiddleware,
     SanitizeToolInputsMiddleware,
     SlackAssistantStatusMiddleware,
@@ -60,27 +59,27 @@ from .middleware import (
     refresh_github_proxy_before_model,
     settle_review_check_on_exit,
 )
-from .reviewer_diff import compute_diff_line_set, fetch_pr_diff, fetch_pr_metadata
-from .reviewer_findings import (
+from .review.diff import compute_diff_line_set, fetch_pr_diff, fetch_pr_metadata
+from .review.findings import (
     REVIEW_FINDING_CAP,
 )
-from .reviewer_findings import (
+from .review.findings import (
     list_findings as list_findings_async,
 )
-from .reviewer_groups import maybe_generate_and_store_diff_groups
-from .reviewer_publish import fetch_pr_review_threads
-from .reviewer_reconcile import reconcile_findings_with_review_threads
-from .reviewer_trace_context import (
+from .review.groups import maybe_generate_and_store_diff_groups
+from .review.publish import fetch_pr_review_threads
+from .review.reconcile import reconcile_findings_with_review_threads
+from .review.trace_context import (
     PRTraceContext,
     format_pr_trace_context_prompt,
     prepare_pr_trace_context,
 )
-from .server import (
+from .runtime import (
     DEFAULT_LLM_MAX_TOKENS,
     DEFAULT_RECURSION_LIMIT,
     MODEL_CALL_RECURSION_LIMIT,
-    _get_cached_sandbox_backend,
     ensure_sandbox_for_thread,
+    get_cached_sandbox_backend,
     graph_loaded_for_execution,
 )
 from .tools import (
@@ -1326,7 +1325,7 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
         return sandbox_backend
 
     def backend_factory(_runtime: object, _thread_id: str = thread_id):
-        return _get_cached_sandbox_backend(_thread_id, reconnect=reconnect_backend)
+        return get_cached_sandbox_backend(_thread_id, reconnect=reconnect_backend)
 
     return create_deep_agent(
         model=reviewer_model,
@@ -1357,7 +1356,6 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
             check_message_queue_before_model,
             SlackAssistantStatusMiddleware(),
             TimeoutWrapupMiddleware(),
-            SanitizeOpenAIResponsesMiddleware(),
             SanitizeFireworksMessagesMiddleware(),
             SanitizeThinkingBlocksMiddleware(),
             RepairOrphanedToolCallsMiddleware(),

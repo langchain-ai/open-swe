@@ -8,8 +8,8 @@ from langgraph.config import get_config
 from langgraph.prebuilt import InjectedState
 
 from ..dashboard.team_settings import get_team_review_trace_links_enabled
-from ..reviewer_diff import compute_diff_line_set, fetch_pr_diff, is_range_in_diff
-from ..reviewer_findings import (
+from ..review.diff import compute_diff_line_set, fetch_pr_diff, is_range_in_diff
+from ..review.findings import (
     REVIEW_FINDING_CAP,
     REVIEWER_EVAL_PUBLICATION_KEY,
     SEVERITY_ORDER,
@@ -27,10 +27,10 @@ from ..reviewer_findings import (
     set_reviewer_thread_metadata,
     thread_missing_tool_result,
 )
-from ..reviewer_findings import (
+from ..review.findings import (
     list_findings as list_findings_async,
 )
-from ..reviewer_publish import (
+from ..review.publish import (
     clear_review_started_comment,
     fetch_pr_review_threads,
     fetch_review_comments,
@@ -45,7 +45,7 @@ from ..reviewer_publish import (
     resolve_review_thread,
     settle_review_check_run,
 )
-from ..reviewer_reconcile import reconcile_findings_with_review_threads
+from ..review.reconcile import reconcile_findings_with_review_threads
 from ..utils.dashboard_links import dashboard_review_url
 from ..utils.github_checks import review_check_conclusion
 from ..utils.github_token import (
