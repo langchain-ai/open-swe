@@ -430,6 +430,9 @@ def _stdout_from_result(result: object) -> str:
     stdout = getattr(result, "stdout", None)
     if isinstance(stdout, str):
         return stdout
+    output = getattr(result, "output", None)
+    if isinstance(output, str):
+        return output
     text = getattr(result, "text", None)
     if isinstance(text, str):
         return text

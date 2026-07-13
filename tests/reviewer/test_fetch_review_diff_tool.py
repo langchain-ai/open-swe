@@ -22,6 +22,7 @@ async def test_fetch_review_diff_returns_metadata_without_diff_body() -> None:
     config = {
         "configurable": {
             "thread_id": "thread-1",
+            "repo": {"owner": "acme", "name": "repo"},
             "base_sha": "a" * 40,
             "head_sha": "b" * 40,
         }
@@ -55,6 +56,7 @@ async def test_fetch_review_diff_returns_metadata_without_diff_body() -> None:
         "cached": True,
     }
     assert diff_text not in str(result)
+    assert mock_materialize.await_args.kwargs["work_dir"] == "/workspace/repo"
     assert mock_materialize.await_args.kwargs["merge_base"] is True
 
 
@@ -63,6 +65,7 @@ async def test_fetch_review_diff_uses_incremental_range_for_re_review() -> None:
     config = {
         "configurable": {
             "thread_id": "thread-1",
+            "repo": {"owner": "acme", "name": "repo"},
             "base_sha": "a" * 40,
             "last_reviewed_sha": "b" * 40,
             "head_sha": "c" * 40,
@@ -96,7 +99,7 @@ async def test_fetch_review_diff_uses_incremental_range_for_re_review() -> None:
 
     assert result["base_sha"] == "b" * 40
     assert mock_materialize.await_args.kwargs == {
-        "work_dir": "/workspace",
+        "work_dir": "/workspace/repo",
         "base_ref": "b" * 40,
         "head_ref": "c" * 40,
         "merge_base": False,

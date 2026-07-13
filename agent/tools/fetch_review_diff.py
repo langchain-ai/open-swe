@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from langgraph.config import get_config
@@ -11,6 +12,7 @@ from ..runtime import get_cached_sandbox_backend
 from ..utils.sandbox_paths import aresolve_sandbox_work_dir
 
 _MAX_CHANGED_FILES = 200
+_REPO_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 
 
 async def fetch_review_diff() -> dict[str, Any]:
@@ -23,6 +25,10 @@ async def fetch_review_diff() -> dict[str, Any]:
     thread_id = configurable.get("thread_id")
     if not isinstance(thread_id, str) or not thread_id:
         return {"success": False, "error": "review thread unavailable"}
+    repo = configurable.get("repo")
+    repo_name = repo.get("name") if isinstance(repo, dict) else None
+    if not isinstance(repo_name, str) or not _REPO_NAME_RE.fullmatch(repo_name):
+        return {"success": False, "error": "review repository unavailable"}
 
     try:
         base_ref, head_ref, merge_base = review_diff_range(
@@ -35,7 +41,7 @@ async def fetch_review_diff() -> dict[str, Any]:
         work_dir = await aresolve_sandbox_work_dir(sandbox_backend)
         materialized = await materialize_review_diff(
             sandbox_backend,
-            work_dir=work_dir,
+            work_dir=f"{work_dir}/{repo_name}",
             base_ref=base_ref,
             head_ref=head_ref,
             merge_base=merge_base,

@@ -179,6 +179,24 @@ async def test_compute_diff_in_sandbox_uses_three_dot_for_merge_base() -> None:
 
 
 @pytest.mark.asyncio
+async def test_compute_diff_in_sandbox_reads_execute_response_output() -> None:
+    from unittest.mock import MagicMock
+
+    from deepagents.backends.protocol import ExecuteResponse
+
+    from agent.review.diff import compute_diff_in_sandbox
+
+    backend = MagicMock()
+    backend.execute = MagicMock(return_value=ExecuteResponse(output=_TWO_FILE_DIFF, exit_code=0))
+
+    result = await compute_diff_in_sandbox(
+        backend, work_dir="/w/repo", base_ref="base", head_ref="head"
+    )
+
+    assert result == _TWO_FILE_DIFF
+
+
+@pytest.mark.asyncio
 async def test_compute_diff_in_sandbox_uses_two_dot_by_default() -> None:
     """Re-review delta path passes merge_base=False so we use base..head."""
     from unittest.mock import MagicMock

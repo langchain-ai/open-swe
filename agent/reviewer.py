@@ -1046,7 +1046,7 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
                 )
                 materialized = await materialize_review_diff(
                     sandbox_backend,
-                    work_dir=work_dir,
+                    work_dir=f"{work_dir}/{repo_name}",
                     base_ref=diff_base,
                     head_ref=diff_head,
                     merge_base=merge_base,
