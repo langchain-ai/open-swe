@@ -187,6 +187,18 @@ async def _resolve_prompt_default_repo(configurable: dict[str, Any]) -> dict[str
         return None
 
 
+def _sandbox_proxy_auth(
+    source: str,
+    repo: dict[str, str] | None,
+    user_token: str | None = None,
+) -> tuple[str | None, list[str] | None]:
+    if repo and repo.get("name"):
+        return None, [repo["name"]]
+    if source == "dashboard":
+        return user_token, None
+    return None, None
+
+
 async def _resolve_repo_custom_instructions(
     default_repo: dict[str, str] | None,
 ) -> str | None:
@@ -763,14 +775,13 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         triggering_user_identity_task = asyncio.create_task(
             asyncio.to_thread(resolve_triggering_user_identity, self._config, github_token)
         )
-        proxy_repositories = (
-            [prompt_default_repo["name"]]
-            if prompt_default_repo and prompt_default_repo.get("name")
-            else None
+        proxy_token, proxy_repositories = _sandbox_proxy_auth(
+            self._source, prompt_default_repo, github_token
         )
         sandbox_task = asyncio.create_task(
             ensure_sandbox_for_thread(
                 self._thread_id,
+                github_proxy_token=proxy_token,
                 github_proxy_repositories=proxy_repositories,
                 repo=prompt_default_repo,
             )
@@ -858,13 +869,16 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         _configurable: dict[str, Any] = configurable,
     ) -> SandboxBackendProtocol:
         prompt_default_repo = await _resolve_prompt_default_repo(_configurable)
-        proxy_repositories = (
-            [prompt_default_repo["name"]]
-            if prompt_default_repo and prompt_default_repo.get("name")
-            else None
+        source = str(_configurable.get("source") or "")
+        proxy_token = None
+        if source == "dashboard" and prompt_default_repo is None:
+            proxy_token, _expires_at = await resolve_github_token(config, _thread_id)
+        proxy_token, proxy_repositories = _sandbox_proxy_auth(
+            source, prompt_default_repo, proxy_token
         )
         return await ensure_sandbox_for_thread(
             _thread_id,
+            github_proxy_token=proxy_token,
             github_proxy_repositories=proxy_repositories,
             repo=prompt_default_repo,
         )

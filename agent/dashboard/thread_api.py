@@ -37,7 +37,7 @@ from .options import (
 from .pr_diff import build_pr_diff_files
 from .profiles import get_profile, get_valid_access_token
 from .repo_access import repo_config_for_user
-from .team_settings import get_team_default_model, get_team_fable_enabled
+from .team_settings import get_team_default_model, get_team_default_repo, get_team_fable_enabled
 from .user_mappings import email_for_login
 
 logger = logging.getLogger(__name__)
@@ -1209,16 +1209,19 @@ async def _enrich_run_start_command(
         # forwarded to LangGraph. The repo hint rides in the client
         # configurable; it never reaches the run config (which is rebuilt from
         # the stamped metadata below).
+        repo_explicitly_none = client_configurable.get("repo_explicitly_none") is True
         repo_hint = client_configurable.get("repo")
         requested_repo = _parse_repo(repo_hint)
         if repo_hint is not None and requested_repo is None:
             raise HTTPException(422, "repository must use owner/name format")
+        if requested_repo is None and not repo_explicitly_none:
+            requested_repo = await get_team_default_repo()
         validated_repo = await _validate_dashboard_repo(login, requested_repo or {})
         thread = await _create_dashboard_thread_record(
             thread_id,
             login=login,
             repo_config=validated_repo,
-            repo_explicitly_none=client_configurable.get("repo_explicitly_none") is True,
+            repo_explicitly_none=repo_explicitly_none,
             prompt=_command_prompt_text(content),
             images=command_images,
             model_id=client_configurable.get("agent_model_id"),

@@ -162,11 +162,15 @@ def _patch_new_thread_deps(monkeypatch, *, profile: dict[str, object]) -> None:
         owner, name = full_name.split("/", 1)
         return {"owner": owner, "name": name}
 
+    async def fake_team_default_repo() -> None:
+        return None
+
     monkeypatch.setattr(thread_api, "get_profile", fake_profile)
     monkeypatch.setattr(thread_api, "get_team_default_model", fake_team_default)
     monkeypatch.setattr(thread_api, "_ensure_dashboard_github_token", fake_ensure_token)
     monkeypatch.setattr(thread_api, "_resolve_run_email", fake_resolve_email)
     monkeypatch.setattr(thread_api, "repo_config_for_user", fake_repo_config)
+    monkeypatch.setattr(thread_api, "get_team_default_repo", fake_team_default_repo)
 
 
 async def test_enrich_run_start_command_creates_and_stamps_new_thread(monkeypatch) -> None:
@@ -213,6 +217,37 @@ async def test_enrich_run_start_command_creates_and_stamps_new_thread(monkeypatc
     # Dashboard-only creation hints must not leak into the run config.
     assert "repo_explicitly_none" not in configurable
     assert enriched["params"]["assistant_id"] == "agent"
+
+
+async def test_enrich_run_start_command_validates_implicit_team_default_repo(
+    monkeypatch,
+) -> None:
+    created: dict[str, object] = {}
+    _patch_new_thread_deps(monkeypatch, profile={})
+    monkeypatch.setattr(thread_api, "langgraph_client", lambda: _new_thread_client(created))
+    checked: list[tuple[str, str]] = []
+
+    async def team_default_repo() -> dict[str, str]:
+        return {"owner": "team", "name": "default"}
+
+    async def validate_repo(login: str, full_name: str) -> dict[str, str]:
+        checked.append((login, full_name))
+        return {"owner": "team", "name": "default"}
+
+    monkeypatch.setattr(thread_api, "get_team_default_repo", team_default_repo)
+    monkeypatch.setattr(thread_api, "repo_config_for_user", validate_repo)
+    command = {
+        "method": "run.start",
+        "params": {"input": {"messages": [{"type": "human", "content": "Fix it"}]}},
+    }
+
+    await thread_api._enrich_run_start_command(
+        "new-tid", "octocat", command, metadata={}, creating=True
+    )
+
+    assert checked == [("octocat", "team/default")]
+    assert created["metadata"]["repo_owner"] == "team"
+    assert created["metadata"]["repo_name"] == "default"
 
 
 async def test_enrich_run_start_command_rejects_inaccessible_repo_before_stamping(

@@ -22,8 +22,10 @@ class FakeSandboxBackend(SandboxBackendProtocol):
         return ExecuteResponse(output=f"{self.id}: {command}: {timeout}", exit_code=0)
 
 
-def _tool_request(thread_id: str = "thread-1") -> ToolCallRequest:
-    runtime = MagicMock(config={"configurable": {"thread_id": thread_id}})
+def _tool_request(
+    thread_id: str = "thread-1", configurable: dict[str, object] | None = None
+) -> ToolCallRequest:
+    runtime = MagicMock(config={"configurable": {"thread_id": thread_id, **(configurable or {})}})
     return ToolCallRequest(
         tool_call={"name": "ls", "args": {"path": "/"}, "id": "tc1"},
         tool=MagicMock(),
@@ -70,7 +72,12 @@ async def test_sandbox_client_error_recreates_sandbox() -> None:
             result = await middleware.awrap_tool_call(request, handler)
 
         assert isinstance(result, ToolMessage)
-        mock_recreate.assert_awaited_once_with("thread-1")
+        mock_recreate.assert_awaited_once_with(
+            "thread-1",
+            github_proxy_token=None,
+            github_proxy_repositories=None,
+            repo=None,
+        )
         mock_client.threads.update.assert_awaited_once_with(
             thread_id="thread-1",
             metadata={"sandbox_id": "sb-new"},
@@ -88,6 +95,70 @@ async def test_sandbox_client_error_recreates_sandbox() -> None:
         assert "sb-new" in payload["error"]
     finally:
         clear_sandbox_backend("thread-1")
+
+
+@pytest.mark.asyncio
+async def test_sandbox_recovery_preserves_repository_scope() -> None:
+    middleware = ToolErrorMiddleware()
+    request = _tool_request(
+        configurable={
+            "source": "dashboard",
+            "repo": {"owner": "langchain-ai", "name": "open-swe"},
+        }
+    )
+
+    async def handler(_request: ToolCallRequest) -> ToolMessage:
+        raise SandboxClientError("Sandbox request timed out: sb-dead")
+
+    with (
+        patch("agent.server._recreate_sandbox", new_callable=AsyncMock) as mock_recreate,
+        patch("agent.server.client") as mock_client,
+    ):
+        mock_recreate.return_value = FakeSandboxBackend()
+        mock_client.threads.update = AsyncMock()
+        await middleware.awrap_tool_call(request, handler)
+
+    mock_recreate.assert_awaited_once_with(
+        "thread-1",
+        github_proxy_token=None,
+        github_proxy_repositories=["open-swe"],
+        repo={"owner": "langchain-ai", "name": "open-swe"},
+    )
+
+
+@pytest.mark.asyncio
+async def test_repo_less_dashboard_recovery_uses_user_token() -> None:
+    middleware = ToolErrorMiddleware()
+    request = _tool_request(
+        configurable={
+            "source": "dashboard",
+            "github_login": "octocat",
+            "repo_explicitly_none": True,
+        }
+    )
+
+    async def handler(_request: ToolCallRequest) -> ToolMessage:
+        raise SandboxClientError("Sandbox request timed out: sb-dead")
+
+    with (
+        patch("agent.server._recreate_sandbox", new_callable=AsyncMock) as mock_recreate,
+        patch("agent.server.client") as mock_client,
+        patch(
+            "agent.utils.auth.resolve_github_token",
+            new_callable=AsyncMock,
+            return_value=("user-token", None),
+        ),
+    ):
+        mock_recreate.return_value = FakeSandboxBackend()
+        mock_client.threads.update = AsyncMock()
+        await middleware.awrap_tool_call(request, handler)
+
+    mock_recreate.assert_awaited_once_with(
+        "thread-1",
+        github_proxy_token="user-token",
+        github_proxy_repositories=None,
+        repo=None,
+    )
 
 
 def test_repeated_sandbox_errors_trigger_circuit_breaker_once() -> None:

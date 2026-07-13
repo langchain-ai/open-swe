@@ -90,7 +90,7 @@ def _get_tool_call_id(request: ToolCallRequest) -> str | None:
     return None
 
 
-def _get_thread_id(request: ToolCallRequest) -> str | None:
+def _get_configurable(request: ToolCallRequest) -> Mapping[str, Any]:
     runtime_config = getattr(getattr(request, "runtime", None), "config", None)
     config: Mapping[str, Any] | None = (
         runtime_config if isinstance(runtime_config, Mapping) else None
@@ -100,23 +100,41 @@ def _get_thread_id(request: ToolCallRequest) -> str | None:
             maybe_config = get_config()
         except Exception:
             logger.exception("Failed to read runnable config while handling sandbox error")
-            return None
+            return {}
         config = maybe_config if isinstance(maybe_config, Mapping) else None
     if config is None:
-        return None
+        return {}
 
     configurable = config.get("configurable", {})
-    if not isinstance(configurable, Mapping):
-        return None
+    return configurable if isinstance(configurable, Mapping) else {}
+
+
+def _get_thread_id(configurable: Mapping[str, Any]) -> str | None:
     thread_id = configurable.get("thread_id")
     return thread_id if isinstance(thread_id, str) and thread_id else None
 
 
-async def _recreate_sandbox_for_thread(thread_id: str) -> str:
+async def _recreate_sandbox_for_thread(thread_id: str, configurable: Mapping[str, Any]) -> str:
     from agent.server import _configure_git_identity, _recreate_sandbox, client
+    from agent.utils.auth import resolve_github_token
     from agent.utils.sandbox_state import set_sandbox_backend
 
-    sandbox_backend = await _recreate_sandbox(thread_id)
+    repo = configurable.get("repo")
+    repo_config = repo if isinstance(repo, dict) else None
+    proxy_repositories = (
+        [repo_config["name"]] if repo_config and isinstance(repo_config.get("name"), str) else None
+    )
+    proxy_token = None
+    if configurable.get("source") == "dashboard" and repo_config is None:
+        proxy_token, _expires_at = await resolve_github_token(
+            {"configurable": dict(configurable)}, thread_id
+        )
+    sandbox_backend = await _recreate_sandbox(
+        thread_id,
+        github_proxy_token=proxy_token,
+        github_proxy_repositories=proxy_repositories,
+        repo=repo_config,
+    )
     sandbox_backend = set_sandbox_backend(thread_id, sandbox_backend)
     await client.threads.update(thread_id=thread_id, metadata={"sandbox_id": sandbox_backend.id})
     await _configure_git_identity(sandbox_backend)
@@ -164,10 +182,11 @@ class ToolErrorMiddleware(AgentMiddleware):
             return await handler(request)
         except SandboxClientError as e:
             logger.exception("Sandbox error during tool call handling; request=%r", request)
-            thread_id = _get_thread_id(request)
+            configurable = _get_configurable(request)
+            thread_id = _get_thread_id(configurable)
             if thread_id:
                 try:
-                    sandbox_id = await _recreate_sandbox_for_thread(thread_id)
+                    sandbox_id = await _recreate_sandbox_for_thread(thread_id, configurable)
                     return _sandbox_recreated_tool_message(e, sandbox_id, request)
                 except Exception:
                     logger.exception("Failed to recreate sandbox for thread %s", thread_id)
