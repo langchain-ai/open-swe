@@ -16,6 +16,7 @@ agent for code review only:
 # ruff: noqa: E402
 
 import asyncio
+import copy
 import logging
 import posixpath
 import re
@@ -1274,9 +1275,9 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
 
 async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
     """Get or create a reviewer agent with checkpointed run prep."""
+    config = copy.deepcopy(config)
+    config.setdefault("recursion_limit", DEFAULT_RECURSION_LIMIT)
     thread_id = config["configurable"].get("thread_id", None)
-
-    config["recursion_limit"] = DEFAULT_RECURSION_LIMIT
 
     if thread_id is None or not graph_loaded_for_execution(config):
         logger.info("No thread_id or not for execution, returning reviewer agent without sandbox")

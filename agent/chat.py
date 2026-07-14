@@ -16,6 +16,7 @@ GitHub-backed tools never receive a user credential.
 
 from __future__ import annotations
 
+import copy
 import logging
 import warnings
 from typing import Any
@@ -183,8 +184,9 @@ async def _resolve_chat_model(configurable: dict) -> tuple[str, str]:
 
 async def get_chat_agent(config: RunnableConfig) -> Pregel:
     """Get a read-only PR chat agent. No sandbox; PR context comes via config."""
+    config = copy.deepcopy(config)
+    config.setdefault("recursion_limit", DEFAULT_RECURSION_LIMIT)
     thread_id = config["configurable"].get("thread_id")
-    config["recursion_limit"] = DEFAULT_RECURSION_LIMIT
 
     if thread_id is None or not graph_loaded_for_execution(config):
         return create_deep_agent(system_prompt="", tools=[]).with_config(config)
