@@ -111,12 +111,43 @@ def proxy_token_needs_refresh(thread_id: str | None, *, now: datetime | None = N
     return (current - recorded_at) >= PROXY_TOKEN_FALLBACK_TTL
 
 
-async def update_sandbox_git_remotes(sandbox_backend: SandboxBackendProtocol, token: str) -> None:
-    """Find all Git repositories in the sandbox and update their remote origin URLs with the fresh token."""
+async def configure_sandbox_github_auth(sandbox_backend: SandboxBackendProtocol, token: str) -> None:
+    """Configure secure GitHub authentication in the sandbox for non-LangSmith sandboxes."""
     import shlex
     import asyncio
+
     py_cmd = (
         "import os, re, subprocess; "
+        "home = os.path.expanduser('~'); "
+        "token_file = os.path.join(home, '.github-token'); "
+        f"with open(token_file, 'w') as f: f.write('{token}');\n"
+        "os.chmod(token_file, 0o600);\n"
+        "gh_config_dir = os.path.join(home, '.config', 'gh'); "
+        "os.makedirs(gh_config_dir, exist_ok=True); "
+        "hosts_file = os.path.join(gh_config_dir, 'hosts.yml'); "
+        "with open(hosts_file, 'w') as f: "
+        f"    f.write('github.com:\\n    oauth_token: {token}\\n    user: x-access-token\\n');\n"
+        "os.chmod(hosts_file, 0o600);\n"
+        "helper_file = os.path.join(home, '.git-credential-openswe'); "
+        "helper_content = ("
+        "    '#!/usr/bin/env python3\\n' "
+        "    'import sys, os\\n' "
+        "    'lines = sys.stdin.read().splitlines()\\n' "
+        "    'host = \"\"\\n' "
+        "    'for line in lines:\\n' "
+        "    '    if line.startswith(\"host=\"):\\n' "
+        "    '        host = line.split(\"=\", 1)[1].strip()\\n' "
+        "    'if host == \"github.com\":\\n' "
+        "    '    token_file = os.path.expanduser(\"~/.github-token\")\\n' "
+        "    '    if os.path.exists(token_file):\\n' "
+        "    '        with open(token_file, \"r\") as f:\\n' "
+        "    '            token = f.read().strip()\\n' "
+        "    '        print(\"username=x-access-token\")\\n' "
+        "    '        print(f\"password={token}\")\\n' "
+        "); "
+        "with open(helper_file, 'w') as f: f.write(helper_content);\n"
+        "os.chmod(helper_file, 0o755);\n"
+        f"subprocess.run(['git', 'config', '--global', 'credential.helper', helper_file], check=True);\n"
         "root_dir = os.environ.get('LOCAL_SANDBOX_ROOT_DIR') or '/workspace'; "
         "if os.path.exists(root_dir): "
         "    for root, dirs, files in os.walk(root_dir): "
@@ -127,8 +158,8 @@ async def update_sandbox_git_remotes(sandbox_backend: SandboxBackendProtocol, to
         "                match = re.search(r'github\\.com/([^/]+)/([^/]+?)(?:\\.git)?$', url); "
         "                if match: "
         "                    owner, repo = match.groups(); "
-        f"                    new_url = \"https://x-access-token:{token}@github.com/\" + owner + \"/\" + repo + \".git\"; "
-        "                    subprocess.run(['git', 'remote', 'set-url', 'origin', new_url], cwd=repo_dir, check=True); "
+        "                    clean_url = f\"https://github.com/{owner}/{repo}.git\"; "
+        "                    subprocess.run(['git', 'remote', 'set-url', 'origin', clean_url], cwd=repo_dir, check=True); "
         "            except Exception: "
         "                pass"
     )
@@ -136,7 +167,7 @@ async def update_sandbox_git_remotes(sandbox_backend: SandboxBackendProtocol, to
     try:
         await asyncio.to_thread(sandbox_backend.execute, cmd)
     except Exception:
-        logger.warning("Failed to update sandbox git remotes", exc_info=True)
+        logger.warning("Failed to configure sandbox secure github auth", exc_info=True)
 
 
 async def refresh_proxy_token(
@@ -189,7 +220,7 @@ async def refresh_proxy_token(
         current_backend = unwrap_sandbox_backend(sandbox_backend)
         await _configure_github_proxy(current_backend.id, token)
     else:
-        await update_sandbox_git_remotes(sandbox_backend, token)
+        await configure_sandbox_github_auth(sandbox_backend, token)
 
     logger.info("Refreshed GitHub token for thread %s", thread_id)
     return True

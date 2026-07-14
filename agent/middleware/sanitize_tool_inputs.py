@@ -80,12 +80,14 @@ class SanitizeToolInputsMiddleware(AgentMiddleware):
                 args = tool_call.get("args", {})
                 command = args.get("command")
                 if isinstance(command, str) and ("GH_TOKEN=dummy" in command or "GITHUB_TOKEN=dummy" in command):
-                    from ..utils.github_token import get_github_token
-                    runtime = getattr(request, "runtime", None)
-                    config = getattr(runtime, "config", None) if runtime else None
-                    token = get_github_token(config)
-                    if token:
-                        new_command = command.replace("GH_TOKEN=dummy", f"GH_TOKEN={token}").replace("GITHUB_TOKEN=dummy", f"GITHUB_TOKEN={token}")
+                    # Strip the dummy token environment variables.
+                    # This ensures we never format a live token into the command string.
+                    # The commands will instead use the secure git credential helper and hosts.yml config.
+                    import re
+                    new_command = command
+                    new_command = re.sub(r'\bGH_TOKEN=dummy\s*', '', new_command)
+                    new_command = re.sub(r'\bGITHUB_TOKEN=dummy\s*', '', new_command)
+                    if new_command != command:
                         new_tool_call = {**tool_call, "args": {**args, "command": new_command}}
                         return request.override(tool_call=new_tool_call)
 

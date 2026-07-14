@@ -295,8 +295,8 @@ async def _create_sandbox_with_proxy(
             await _start_langsmith_sandbox_if_needed(sandbox_backend)
             await _configure_github_proxy(sandbox_backend.id, token)
         else:
-            from .utils.github_proxy import update_sandbox_git_remotes
-            await update_sandbox_git_remotes(sandbox_backend, token)
+            from .utils.github_proxy import configure_sandbox_github_auth
+            await configure_sandbox_github_auth(sandbox_backend, token)
 
         record_proxy_token_expiry(
             thread_id,

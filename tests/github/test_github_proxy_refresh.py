@@ -218,19 +218,20 @@ class TestRefreshGithubProxyMiddleware:
         assert result is None
 
 
-class TestUpdateSandboxGitRemotes:
+class TestConfigureSandboxGithubAuth:
     @pytest.mark.asyncio
     async def test_executes_python_script_in_sandbox(self) -> None:
-        from agent.utils.github_proxy import update_sandbox_git_remotes
+        from agent.utils.github_proxy import configure_sandbox_github_auth
         backend = MagicMock()
         backend.execute = MagicMock(return_value=MagicMock(exit_code=0))
 
-        await update_sandbox_git_remotes(backend, "test-token")
+        await configure_sandbox_github_auth(backend, "test-token")
 
         backend.execute.assert_called_once()
         cmd = backend.execute.call_args[0][0]
         assert "python" in cmd
-        assert "git" in cmd
+        assert "hosts.yml" in cmd
+        assert "credential.helper" in cmd
         assert "test-token" in cmd
 
 
@@ -248,14 +249,14 @@ class TestNonLangSmithTokenRefresh:
                 "agent.utils.github_proxy.get_github_app_installation_token_with_expiry",
                 new=AsyncMock(return_value=("ghs_local", new_expiry)),
             ),
-            patch("agent.utils.github_proxy.update_sandbox_git_remotes", new=AsyncMock()) as mock_update_remotes,
+            patch("agent.utils.github_proxy.configure_sandbox_github_auth", new=AsyncMock()) as mock_configure_auth,
             patch("agent.utils.github_token.cache_github_token_for_thread") as mock_cache_token,
         ):
             record_proxy_token_expiry("thread-local", "2025-01-01T12:00:00Z")
             res = await refresh_proxy_token("thread-local")
 
             assert res is True
-            mock_update_remotes.assert_called_once_with(backend, "ghs_local")
+            mock_configure_auth.assert_called_once_with(backend, "ghs_local")
             mock_cache_token.assert_called_once_with("thread-local", "ghs_local", expires_at=new_expiry, is_bot_token=True)
 
             # verify record updated
