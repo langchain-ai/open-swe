@@ -33,6 +33,7 @@ from langchain_core.outputs import ChatGeneration, ChatResult
 # fresh shell rooted at the sandbox dir, so the clone+commit+push is bundled.
 _IMPLEMENT_SCRIPT = f"""
 set -e
+sleep 8
 rm -rf repo
 git clone "$E2E_REMOTE" repo
 cd repo
