@@ -88,9 +88,6 @@ function commonDirPrefix(paths: Array<string>): string {
 }
 
 const PANEL_STORAGE_WIDTH = "open-swe.gitpanel.width"
-const PANEL_STORAGE_COLLAPSED = "open-swe.gitpanel.collapsed"
-const COLLAPSED_STATE_TRUE = "1"
-const COLLAPSED_STATE_FALSE = "0"
 const PANEL_DEFAULT_WIDTH = 420
 const PANEL_MIN_WIDTH = 320
 // Keep at least this much room for the chat so the panel can grow to nearly the
@@ -117,23 +114,6 @@ function readStoredPanelWidth(): number {
   const parsed = raw ? Number(raw) : NaN
   if (!Number.isFinite(parsed)) return PANEL_DEFAULT_WIDTH
   return clampPanelWidth(parsed)
-}
-
-export function readStoredPanelCollapsed(): boolean {
-  if (typeof window === "undefined") return true
-  // Default to collapsed until the user opens it once.
-  return (
-    window.localStorage.getItem(PANEL_STORAGE_COLLAPSED) !==
-    COLLAPSED_STATE_FALSE
-  )
-}
-
-export function writeStoredPanelCollapsed(collapsed: boolean): void {
-  if (typeof window === "undefined") return
-  window.localStorage.setItem(
-    PANEL_STORAGE_COLLAPSED,
-    collapsed ? COLLAPSED_STATE_TRUE : COLLAPSED_STATE_FALSE
-  )
 }
 
 function PanelResizeHandle({
