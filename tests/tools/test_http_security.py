@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import json
 import socket as real_socket
 import sys
 import types
@@ -438,3 +439,68 @@ async def test_http_request_returns_timeout_result(monkeypatch) -> None:
     assert result["success"] is False
     assert result["status_code"] == 0
     assert "timed out after 7 seconds" in result["content"]
+
+
+async def test_http_request_offloads_oversized_response(monkeypatch) -> None:
+    monkeypatch.setattr(
+        url_safety.socket,
+        "getaddrinfo",
+        lambda host, port, *a, **k: [_addr_info("93.184.216.34", port)],
+    )
+    large_content = "sensitive marker " + "x" * 1_000
+
+    def responder(method: str, url: str, **kwargs: Any) -> FakeResponse:
+        return FakeResponse(
+            status_code=200,
+            url=url,
+            headers={"content-type": "application/json"},
+            json_data={"payload": large_content},
+        )
+
+    _install_client(monkeypatch, http_request_tool, responder)
+    monkeypatch.setattr(http_request_tool, "HTTP_REQUEST_MAX_INLINE_CHARS", 100)
+    writes: list[tuple[str, str, str]] = []
+
+    async def fake_write(tool_name: str, content: str, extension: str) -> str:
+        writes.append((tool_name, content, extension))
+        return "/workspace/http-response-result.jsonl"
+
+    monkeypatch.setattr(http_request_tool, "write_sandbox_output", fake_write)
+
+    result = await http_request_tool.http_request("https://example.com/data")
+
+    saved_response = "".join(json.loads(line)["text"] for line in writes[0][1].splitlines())
+    assert result["success"] is True
+    assert result["response_path"] == "/workspace/http-response-result.jsonl"
+    assert result["response_chars"] == len(saved_response)
+    assert "content" not in result
+    assert "headers" not in result
+    assert large_content not in str(result)
+    assert writes[0][0::2] == ("http-response", "jsonl")
+    assert large_content in saved_response
+
+
+async def test_http_request_does_not_inline_oversized_response_when_write_fails(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(http_request_tool, "HTTP_REQUEST_MAX_INLINE_CHARS", 100)
+    large_content = "sensitive marker " + "x" * 1_000
+
+    async def fail_write(tool_name: str, content: str, extension: str) -> str:
+        raise RuntimeError("sandbox unavailable")
+
+    monkeypatch.setattr(http_request_tool, "write_sandbox_output", fail_write)
+
+    result = await http_request_tool._offload_large_response(
+        {
+            "success": True,
+            "status_code": 200,
+            "headers": {},
+            "content": large_content,
+            "url": "https://example.com/data",
+        }
+    )
+
+    assert result["success"] is False
+    assert "could not be saved" in result["content"]
+    assert large_content not in str(result)
