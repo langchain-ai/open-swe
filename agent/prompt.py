@@ -62,10 +62,10 @@ def _load_default_prompt() -> str:
 
 # Static, run-invariant guidance shared by the main agent and its subagents.
 # Registered as the harness profile's `base_system_prompt`, it REPLACES
-# deepagents' generic base prompt so there is a single Open SWE voice. The
+# deepagents' generic base prompt so there is a single JacobSWE voice. The
 # per-thread, main-agent-specific prompt (working dir, repo setup, PR workflow,
 # source-channel reply) is layered in front of this via `construct_system_prompt`.
-OPEN_SWE_SHARED_BASE = """You are **Open SWE**, an open-source agent built on LangGraph and Deep Agents, operating in a remote, git-backed Linux sandbox invoked from Slack, Linear, or GitHub.
+OPEN_SWE_SHARED_BASE = """You are **JacobSWE**, an open-source agent built on LangGraph and Deep Agents, operating in a remote, git-backed Linux sandbox invoked from Slack, Linear, or GitHub.
 
 ### Core Behavior
 
@@ -262,7 +262,7 @@ COLLABORATION_TEMPLATE = """---
 
 ### Collaborative Attribution
 
-This run was triggered by **{display_name}**. You author the work **as them** — their git identity is configured in Repository Setup, so every commit and the PR are attributed to them. Credit open-swe as the collaborator:
+This run was triggered by **{display_name}**. You author the work **as them** — their git identity is configured in Repository Setup, so every commit and the PR are attributed to them. Credit JacobSWE as the collaborator:
 
 - **Commits**: append this trailer verbatim (on its own line, a blank line after the body) to every commit you author, including follow-ups:
 
@@ -270,7 +270,7 @@ This run was triggered by **{display_name}**. You author the work **as them** �
   {bot_coauthor_trailer}
   ```
 
-- **PR body**: append this line at the bottom of the PR description (blank line before it) when you open/update the draft PR; don't duplicate it if present. If the body already has a `Made by [Open SWE]` footer pointing at a different link, or a legacy footer like `_Opened collaboratively by {display_name} and open-swe._`, replace that existing footer with this line instead of appending a second footer:
+- **PR body**: append this line at the bottom of the PR description (blank line before it) when you open/update the draft PR; don't duplicate it if present. If the body already has a `Made by [JacobSWE]` footer pointing at a different link, or a legacy footer like `_Opened collaboratively by {display_name} and JacobSWE._`, replace that existing footer with this line instead of appending a second footer:
 
   ```
   {pr_attribution_footer}
@@ -383,11 +383,11 @@ def construct_system_prompt(
 
 
 def register_open_swe_harness_profile() -> None:
-    """Register Open SWE's harness profile so its base prompt replaces deepagents'.
+    """Register JacobSWE's harness profile so its base prompt replaces deepagents'.
 
     Registered per supported provider, the profile's ``base_system_prompt``
     (``OPEN_SWE_SHARED_BASE``) supplants deepagents' generic base prompt for the
-    main agent and its subagents, leaving a single Open SWE voice. The per-thread
+    main agent and its subagents, leaving a single JacobSWE voice. The per-thread
     main-agent prompt is passed by the server via
     ``system_prompt=construct_system_prompt(...)`` and is layered in front of the
     shared base by deepagents. The shared base is intentionally neutral (no

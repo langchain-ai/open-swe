@@ -1,7 +1,7 @@
 [project]
-name = "open-swe-agent"
+name = "jacobswe-agent"
 version = "0.1.0"
-description = "Open SWE Agent - Python agent for automating software engineering tasks"
+description = "JacobSWE Agent - Python agent for automating software engineering tasks"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
