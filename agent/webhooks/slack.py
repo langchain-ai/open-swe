@@ -12,6 +12,8 @@ from typing import Any
 import httpx
 from langchain_core.messages.content import create_text_block
 
+from agent.utils.langsmith import get_langsmith_trace_url
+
 from . import common
 
 _PLAN_APPROVAL_PHRASES = {
@@ -198,6 +200,20 @@ def _format_slack_thread_section(
         for description_line in channel_description.splitlines():
             if description_line.strip():
                 lines.append(f"  {description_line.strip()}")
+    return "\n".join(lines)
+
+
+def _format_slack_run_links_section(thread_id: str) -> str:
+    dashboard_url = common.dashboard_thread_url(thread_id)
+    trace_url = get_langsmith_trace_url(thread_id)
+    lines = ["## Open SWE Links"]
+    if dashboard_url:
+        lines.append(f"- Web: {dashboard_url}")
+    if trace_url:
+        lines.append(f"- Trace: {trace_url}")
+    lines.append(
+        "- A compact Web footer is added automatically to Slack replies; do not duplicate it manually. Share the Web or trace URL above only if asked."
+    )
     return "\n".join(lines)
 
 
@@ -411,6 +427,7 @@ async def _process_slack_mention_impl(
         "Use this only if the Slack conversation does not identify a different repository.\n\n"
         f"## Triggered by\n{trigger_user}\n\n"
         f"{slack_thread_section}\n\n"
+        f"{_format_slack_run_links_section(thread_id)}\n\n"
         f"## Conversation Context\n{context_text}\n\n"
         f"## Latest Mention Request\n{clean_text}\n\n"
         + (f"{resolved_links_section}\n\n" if resolved_links_section else "")
@@ -576,7 +593,6 @@ async def _process_slack_mention_impl(
     )
     run_id = run.get("run_id")
     if is_first_mention:
-        trace_message_ts = await common.post_slack_trace_reply(channel_id, thread_ts, thread_id)
         await common.set_slack_assistant_status(channel_id, thread_ts)
         if isinstance(run_id, str) and run_id:
             await common.store_slack_run_mapping(
@@ -584,9 +600,7 @@ async def _process_slack_mention_impl(
                 channel_id,
                 thread_ts,
                 run_id,
-                message_ts=trace_message_ts,
                 triggering_user_id=user_id,
-                trace_message_ts=trace_message_ts,
             )
     else:
         common.logger.info(
