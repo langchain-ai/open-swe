@@ -5,6 +5,7 @@ from importlib import resources
 from pathlib import Path
 
 from deepagents import HarnessProfile, register_harness_profile
+from langchain.agents.middleware import TodoListMiddleware
 
 from .utils.authorship import (
     OPEN_SWE_BOT_EMAIL,
@@ -17,10 +18,23 @@ from .utils.github_comments import UNTRUSTED_GITHUB_COMMENT_OPEN_TAG
 logger = logging.getLogger(__name__)
 
 DEFAULT_PROMPT_PATH = os.environ.get("DEFAULT_PROMPT_PATH")
+ENABLE_TODOS_ENV_VAR = "OPEN_SWE_ENABLE_TODOS"
 
-# Tools stripped from the agent regardless of run state (none today: plan-mode
-# tool stripping is dynamic and handled by PlanModeMiddleware, not the profile).
-HARNESS_EXCLUDED_TOOLS: frozenset[str] = frozenset()
+
+def _env_flag(name: str) -> bool:
+    return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _harness_excluded_tools() -> frozenset[str]:
+    return frozenset() if _env_flag(ENABLE_TODOS_ENV_VAR) else frozenset({"write_todos"})
+
+
+def _harness_excluded_middleware() -> frozenset[type[TodoListMiddleware]]:
+    return frozenset() if _env_flag(ENABLE_TODOS_ENV_VAR) else frozenset({TodoListMiddleware})
+
+
+HARNESS_EXCLUDED_TOOLS: frozenset[str] = _harness_excluded_tools()
+HARNESS_EXCLUDED_MIDDLEWARE: frozenset[type[TodoListMiddleware]] = _harness_excluded_middleware()
 
 # Provider keys the harness profile is registered under. deepagents resolves a
 # pre-built model's profile by `provider:identifier` then a provider-only
@@ -399,6 +413,7 @@ def register_open_swe_harness_profile() -> None:
     profile = HarnessProfile(
         base_system_prompt=OPEN_SWE_SHARED_BASE,
         excluded_tools=HARNESS_EXCLUDED_TOOLS,
+        excluded_middleware=HARNESS_EXCLUDED_MIDDLEWARE,
     )
     for key in HARNESS_PROFILE_KEYS:
         register_harness_profile(key, profile)

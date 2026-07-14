@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+from typing import Any
+
+from langchain_core.language_models import BaseChatModel
+from langchain_core.messages import AIMessage
+from langchain_core.outputs import ChatGeneration, ChatResult
+
 from agent.dashboard.agent_overrides import profile_create_prs
 from agent.prompt import construct_system_prompt
 from agent.utils import github_comments
@@ -13,6 +19,36 @@ from agent.utils.authorship import (
 from agent.webhooks import github as github_webhooks
 
 _BOT_TRAILER = f"Co-authored-by: {OPEN_SWE_BOT_NAME} <{OPEN_SWE_BOT_EMAIL}>"
+
+
+class _CaptureRequestModel(BaseChatModel):
+    captured_messages: Any = None
+    captured_tools: Any = None
+
+    @property
+    def _llm_type(self) -> str:
+        return "capture-request"
+
+    def _get_ls_params(self, *args: Any, **kwargs: Any) -> dict[str, str]:
+        return {"ls_provider": "openai"}
+
+    def bind_tools(self, tools: Any, **kwargs: Any) -> _CaptureRequestModel:
+        self.captured_tools = tools
+        return self
+
+    def _generate(self, messages: list[Any], **kwargs: Any) -> ChatResult:
+        self.captured_messages = messages
+        return ChatResult(generations=[ChatGeneration(message=AIMessage(content="done"))])
+
+
+def _content_text(content: Any) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "\n".join(
+            item.get("text", "") if isinstance(item, dict) else str(item) for item in content
+        )
+    return str(content)
 
 
 def test_build_pr_prompt_wraps_external_comments_without_trust_section() -> None:
@@ -108,16 +144,49 @@ def test_harness_profile_replaces_deepagents_base_for_supported_providers() -> N
     import deepagents.profiles.harness.harness_profiles as hp
 
     import agent.prompt  # noqa: F401  (registers the profile on import)
-    from agent.prompt import HARNESS_PROFILE_KEYS, OPEN_SWE_SHARED_BASE
+    from agent.prompt import (
+        HARNESS_EXCLUDED_MIDDLEWARE,
+        HARNESS_EXCLUDED_TOOLS,
+        HARNESS_PROFILE_KEYS,
+        OPEN_SWE_SHARED_BASE,
+    )
 
     hp._ensure_harness_profiles_loaded()
     assert set(HARNESS_PROFILE_KEYS) >= {"anthropic", "openai", "google_genai", "fireworks"}
+    assert "write_todos" in HARNESS_EXCLUDED_TOOLS
+    assert HARNESS_EXCLUDED_MIDDLEWARE
     for key in HARNESS_PROFILE_KEYS:
         profile = hp._HARNESS_PROFILES.get(key)
         assert profile is not None, f"no harness profile registered for {key!r}"
         assert profile.base_system_prompt == OPEN_SWE_SHARED_BASE
-        assert not profile.excluded_middleware
-    assert not hp._get_harness_profile("openai:gpt-5.6-sol").excluded_middleware
+        assert HARNESS_EXCLUDED_TOOLS <= profile.excluded_tools
+        assert HARNESS_EXCLUDED_MIDDLEWARE <= profile.excluded_middleware
+    resolved_profile = hp._get_harness_profile("openai:gpt-5.6-sol")
+    assert "write_todos" in resolved_profile.excluded_tools
+    assert HARNESS_EXCLUDED_MIDDLEWARE <= resolved_profile.excluded_middleware
+
+
+def test_enable_todos_env_clears_harness_exclusions(monkeypatch) -> None:
+    from agent import prompt as prompt_module
+
+    monkeypatch.setenv(prompt_module.ENABLE_TODOS_ENV_VAR, "true")
+
+    assert prompt_module._harness_excluded_tools() == frozenset()
+    assert prompt_module._harness_excluded_middleware() == frozenset()
+
+
+def test_todo_tool_and_prompt_are_hidden_from_model_request_by_default() -> None:
+    from deepagents import create_deep_agent
+
+    model = _CaptureRequestModel()
+    graph = create_deep_agent(model=model, tools=[])
+
+    graph.invoke({"messages": [{"role": "user", "content": "hi"}]}, config={"recursion_limit": 5})
+
+    tool_names = {getattr(tool, "name", None) for tool in model.captured_tools}
+    system_text = "\n".join(_content_text(message.content) for message in model.captured_messages)
+    assert "write_todos" not in tool_names
+    assert "You have access to the `write_todos` tool" not in system_text
 
 
 def test_shared_base_is_neutral_for_read_only_agents() -> None:
