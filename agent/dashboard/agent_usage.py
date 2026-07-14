@@ -12,7 +12,7 @@ from typing import Any, Literal
 import httpx
 from langgraph_sdk import get_client
 
-from ..reviewer_findings import REVIEWER_THREAD_KIND
+from ..review.findings import REVIEWER_THREAD_KIND
 from ..utils.github_app import get_github_app_installation_token
 
 USAGE_THREAD_NAMESPACE: list[str] = ["agent_usage", "threads"]

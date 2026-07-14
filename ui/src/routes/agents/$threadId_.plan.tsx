@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query"
 import { useEffect, useState } from "react"
 import { ArrowLeft } from "lucide-react"
 
-import { PlanReview } from "@/components/agents/PlanReview"
+import { PlanReview } from "@/features/agents/components/PlanReview"
 import { buttonVariants } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { loginUrl } from "@/lib/api"

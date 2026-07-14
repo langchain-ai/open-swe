@@ -37,6 +37,27 @@ test.describe("Open SWE full flow", () => {
     await expect(page.locator('.pr[data-pr="1"]')).toContainText("greet.py");
   });
 
+  test("Slack DM request without a bot mention still starts a run", async ({ page, request }) => {
+    const send = await request.post("/mock/slack/send", {
+      data: {
+        text: "please add a greet() helper and open a PR",
+        mention_bot: false,
+        channel_type: "im",
+      },
+    });
+    const sent = await send.json();
+    expect(sent.webhook).toMatchObject({ status: "accepted", message: "Slack mention queued" });
+
+    await expect(page.locator(".msg").filter({ hasText: "add a greet() helper" })).toBeVisible();
+    const reply = page.locator(".msg.bot").filter({ hasText: "Add greet() helper" });
+    await expect(reply).toBeVisible();
+    await expect(reply.locator('a[href*="/pull/"]')).toBeVisible();
+
+    await page.goto("/mock/github");
+    await expect(page.locator('.pr[data-pr="1"]')).toContainText("Add greet() helper");
+    await expect(page.locator('.pr[data-pr="1"]')).toContainText("greet.py");
+  });
+
   test("Slack breakout request starts a new top-level Open SWE thread", async ({ page }) => {
     await page.locator("#text").fill("<@U0BOT> please break out adding a greet() helper into a separate thread");
     await page.locator("#send").click();

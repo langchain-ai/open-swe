@@ -1,9 +1,11 @@
 import logging
 import os
 import shlex
+from importlib import resources
 from pathlib import Path
 
 from deepagents import HarnessProfile, register_harness_profile
+from langchain.agents.middleware import TodoListMiddleware
 
 from .utils.authorship import (
     OPEN_SWE_BOT_EMAIL,
@@ -15,14 +17,24 @@ from .utils.github_comments import UNTRUSTED_GITHUB_COMMENT_OPEN_TAG
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_PROMPT_PATH = os.environ.get(
-    "DEFAULT_PROMPT_PATH",
-    str(Path(__file__).resolve().parent.parent / "default_prompt.md"),
-)
+DEFAULT_PROMPT_PATH = os.environ.get("DEFAULT_PROMPT_PATH")
+ENABLE_TODOS_ENV_VAR = "OPEN_SWE_ENABLE_TODOS"
 
-# Tools stripped from the agent regardless of run state (none today: plan-mode
-# tool stripping is dynamic and handled by PlanModeMiddleware, not the profile).
-HARNESS_EXCLUDED_TOOLS: frozenset[str] = frozenset()
+
+def _env_flag(name: str) -> bool:
+    return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _harness_excluded_tools() -> frozenset[str]:
+    return frozenset() if _env_flag(ENABLE_TODOS_ENV_VAR) else frozenset({"write_todos"})
+
+
+def _harness_excluded_middleware() -> frozenset[type[TodoListMiddleware]]:
+    return frozenset() if _env_flag(ENABLE_TODOS_ENV_VAR) else frozenset({TodoListMiddleware})
+
+
+HARNESS_EXCLUDED_TOOLS: frozenset[str] = _harness_excluded_tools()
+HARNESS_EXCLUDED_MIDDLEWARE: frozenset[type[TodoListMiddleware]] = _harness_excluded_middleware()
 
 # Provider keys the harness profile is registered under. deepagents resolves a
 # pre-built model's profile by `provider:identifier` then a provider-only
@@ -38,19 +50,27 @@ def _load_default_prompt() -> str:
     Returns empty string if the file doesn't exist or can't be read.
     """
     try:
-        path = Path(DEFAULT_PROMPT_PATH)
-        if path.is_file():
-            content = path.read_text().strip()
-            if content:
-                # Escape curly braces so .format() doesn't choke on them
-                escaped = content.replace("{", "{{").replace("}", "}}")
-                return f"""---
+        if DEFAULT_PROMPT_PATH:
+            content = Path(DEFAULT_PROMPT_PATH).read_text().strip()
+        else:
+            content = (
+                resources.files("agent.resources")
+                .joinpath("default_prompt.md")
+                .read_text(encoding="utf-8")
+                .strip()
+            )
+        if content:
+            escaped = content.replace("{", "{{").replace("}", "}}")
+            return f"""---
 
 ### Custom Instructions
 
 {escaped}"""
     except Exception:
-        logger.warning("Failed to read default prompt file at %s", DEFAULT_PROMPT_PATH)
+        logger.warning(
+            "Failed to read default prompt from %s",
+            DEFAULT_PROMPT_PATH or "agent.resources/default_prompt.md",
+        )
     return ""
 
 
@@ -84,7 +104,7 @@ OPEN_SWE_SHARED_BASE = """You are **Open SWE**, an open-source agent built on La
 ### Communication
 
 - Focus on the substance and keep summaries brief. Use light markdown (`###`/`####` headings, bold, code) — avoid `#`/`##` titles.
-- In Slack, keep every reply terse — a few sentences at most. Lead with the answer or outcome; skip preamble, restating the request, and step-by-step recaps. Do not paste long output, diffs, file listings, or multi-section write-ups into a Slack reply. When the response would genuinely be long — a detailed report, a design/analysis write-up, a large code or log excerpt — write that content to a Markdown file under `/workspace/plans/` and publish it with the `save_plan` tool, then post a terse Slack reply with a one-line summary and the plan-review link so the user can read the full version there. This non-plan share path does not enter plan mode; use it instead of splitting a long answer across multiple Slack messages.
+- Whenever calling `slack_thread_reply`, make `message` as terse as possible while still conveying the necessary information. Default to one sentence containing only the outcome/status and link, or one blocking question. Omit greetings, preambles, headings, recaps, implementation details, and redundant context; use bullets only when multiple items are essential. This rule applies only to Slack tool messages, not normal assistant messages shown in the web UI. Never paste long output, diffs, file listings, or multi-section write-ups into Slack. When detail is necessary, write it to a Markdown file under `/workspace/plans/`, publish it with `save_plan`, and send only a one-line summary plus the plan-review link. This non-plan share path does not enter plan mode.
 - In Slack, when a user asks to “break out,” “split out,” or “start a separate thread” for part of the work, summarize the requested aspect and relevant context into self-contained instructions, then call `slack_start_new_thread` instead of only replying in the current thread.
 - In Slack, when acknowledging a user follow-up while you continue working, prefer `slack_add_reaction` with the default `eyes` reaction over posting a perfunctory “Updating…” / “I’ll check…” confirmation reply.
 - For Slack-triggered information-only answers, post only a concise summary in the associated Slack thread with `slack_thread_reply`, then provide the complete answer inline in your final assistant response. For other Slack updates, keep thread replies brief and avoid duplicating the same text later.
@@ -103,7 +123,7 @@ PLAN_MODE_GUIDANCE_SECTION = """---
 
 ### Plan Mode
 
-If a task would genuinely benefit from a structured plan before any code — complex, many files, or multiple valid approaches — call the `enter_plan_mode` tool. This is NOT triggered by the word "plan" in the request; use judgment. Once in plan mode, stay read-only for the target repo, research the code, create/edit your plan as a dated Markdown file under `/workspace/plans/` (for example, `/workspace/plans/YYYY-MM-DD-short-task-slug.md`), publish it with `save_plan`, and share the plan-review link with the user, who approves before you implement.
+If a task would genuinely benefit from a structured plan before any code — complex, many files, or multiple valid approaches — call the `enter_plan_mode` tool. This is NOT triggered by the word "plan" in the request; use judgment. Once in plan mode, stay read-only for the target repo, research the code, create/edit your plan as a dated Markdown file under `/workspace/plans/` (for example, `/workspace/plans/YYYY-MM-DD-short-task-slug.md`), publish it with `save_plan`, and share the plan-review link with the user. In Slack, ask the plan owner to reply naturally in the thread to approve the plan or request changes; do not send plan-approval buttons.
 
 Plan-review link for this conversation: {plan_review_url}"""
 
@@ -140,7 +160,7 @@ You are in a read-only research-and-planning phase for the target repo. Your sin
 - <targeted tests or manual checks that prove the behavior>
 ```
 
-After saving, post a brief completion message with the plan-review link via `slack_thread_reply` (Slack) or `linear_comment` (Linear), invite the user to review/comment/approve, then stop. Do not implement — you will be re-invoked with the approval and any feedback."""
+After saving, post a brief completion message with the plan-review link via `slack_thread_reply` (Slack) or `linear_comment` (Linear), invite the user to review/comment/approve, then stop. For Slack, use plain text and tell the plan owner to reply naturally in the thread to approve or request changes; do not use Block Kit or approval buttons. Do not implement — you will be re-invoked with the approval and any feedback."""
 
 
 SELF_AWARENESS_SECTION = """---
@@ -393,6 +413,7 @@ def register_open_swe_harness_profile() -> None:
     profile = HarnessProfile(
         base_system_prompt=OPEN_SWE_SHARED_BASE,
         excluded_tools=HARNESS_EXCLUDED_TOOLS,
+        excluded_middleware=HARNESS_EXCLUDED_MIDDLEWARE,
     )
     for key in HARNESS_PROFILE_KEYS:
         register_harness_profile(key, profile)

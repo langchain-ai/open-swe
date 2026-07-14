@@ -13,7 +13,7 @@ from urllib.parse import urlparse
 import httpx
 from langchain_core.messages.content import create_image_block
 
-from .url_safety import is_url_safe
+from .url_safety import request_with_safe_redirects
 
 logger = logging.getLogger(__name__)
 
@@ -48,38 +48,56 @@ def vision_not_supported_warning(model_id: str, image_count: int) -> str:
     )
 
 
+def _image_provider(image_url: str) -> str | None:
+    host = (urlparse(image_url).hostname or "").lower()
+    if host == "uploads.linear.app" or host.endswith(".uploads.linear.app"):
+        return "linear"
+    if host == "files.slack.com" or host.endswith(".files.slack.com"):
+        return "slack"
+    return None
+
+
+def _image_auth_headers_for_url(original_url: str, current_url: str) -> dict[str, str] | None:
+    provider = _image_provider(original_url)
+    if provider is None or _image_provider(current_url) != provider:
+        return None
+    if provider == "linear":
+        linear_api_key = os.environ.get("LINEAR_API_KEY", "")
+        if linear_api_key:
+            return {"Authorization": linear_api_key}
+        logger.warning(
+            "LINEAR_API_KEY not set; cannot authenticate image fetch for %s",
+            current_url,
+        )
+    else:
+        slack_bot_token = os.environ.get("SLACK_BOT_TOKEN", "")
+        if slack_bot_token:
+            return {"Authorization": f"Bearer {slack_bot_token}"}
+        logger.warning(
+            "SLACK_BOT_TOKEN not set; cannot authenticate image fetch for %s",
+            current_url,
+        )
+    return None
+
+
 async def fetch_image_block(
     image_url: str,
     client: httpx.AsyncClient,
 ) -> dict[str, Any] | None:
     """Fetch image bytes and build an image content block."""
     try:
-        safe, reason = is_url_safe(image_url)
-        if not safe:
-            logger.warning("Refusing to fetch image (SSRF guard) %s: %s", image_url, reason)
-            return None
         logger.debug("Fetching image from %s", image_url)
-        headers = None
-        host = (urlparse(image_url).hostname or "").lower()
-        if host == "uploads.linear.app" or host.endswith(".uploads.linear.app"):
-            linear_api_key = os.environ.get("LINEAR_API_KEY", "")
-            if linear_api_key:
-                headers = {"Authorization": linear_api_key}
-            else:
-                logger.warning(
-                    "LINEAR_API_KEY not set; cannot authenticate image fetch for %s",
-                    image_url,
-                )
-        elif host == "files.slack.com" or host.endswith(".files.slack.com"):
-            slack_bot_token = os.environ.get("SLACK_BOT_TOKEN", "")
-            if slack_bot_token:
-                headers = {"Authorization": f"Bearer {slack_bot_token}"}
-            else:
-                logger.warning(
-                    "SLACK_BOT_TOKEN not set; cannot authenticate image fetch for %s",
-                    image_url,
-                )
-        response = await client.get(image_url, headers=headers, follow_redirects=True)
+        response, blocked = await request_with_safe_redirects(
+            client,
+            "GET",
+            image_url,
+            headers_for_url=_image_auth_headers_for_url,
+        )
+        if blocked:
+            logger.warning(
+                "Refusing to fetch image (SSRF guard) %s: %s", image_url, blocked["content"]
+            )
+            return None
         response.raise_for_status()
         content_type = response.headers.get("Content-Type", "").split(";")[0].strip()
         if not content_type:

@@ -186,9 +186,7 @@ def _validate_model_effort_pair(model: str | None, effort: str | None, role: str
         raise ValueError(f"effort {effort!r} not supported by {role} model {model!r}")
 
 
-_RETIRED_MODEL_REPLACEMENTS: dict[str, str] = {
-    "openai:gpt-5.5": "openai:gpt-5.6-sol",
-}
+_RETIRED_MODEL_REPLACEMENTS: dict[str, str] = {}
 
 
 def _normalize_stale_model_pair(

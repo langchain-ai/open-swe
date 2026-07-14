@@ -50,7 +50,6 @@ from .middleware import (
     PrepareRunState,
     RepairOrphanedToolCallsMiddleware,
     SanitizeFireworksMessagesMiddleware,
-    SanitizeOpenAIResponsesMiddleware,
     SanitizeThinkingBlocksMiddleware,
     SanitizeToolInputsMiddleware,
     SlackAssistantStatusMiddleware,
@@ -60,31 +59,38 @@ from .middleware import (
     refresh_github_proxy_before_model,
     settle_review_check_on_exit,
 )
-from .reviewer_diff import compute_diff_line_set, fetch_pr_diff, fetch_pr_metadata
-from .reviewer_findings import (
+from .review.diff import (
+    compute_diff_line_set,
+    fetch_pr_diff,
+    fetch_pr_metadata,
+    materialize_review_diff,
+    review_diff_range,
+)
+from .review.findings import (
     REVIEW_FINDING_CAP,
 )
-from .reviewer_findings import (
+from .review.findings import (
     list_findings as list_findings_async,
 )
-from .reviewer_groups import maybe_generate_and_store_diff_groups
-from .reviewer_publish import fetch_pr_review_threads
-from .reviewer_reconcile import reconcile_findings_with_review_threads
-from .reviewer_trace_context import (
+from .review.groups import maybe_generate_and_store_diff_groups
+from .review.publish import fetch_pr_review_threads
+from .review.reconcile import reconcile_findings_with_review_threads
+from .review.trace_context import (
     PRTraceContext,
     format_pr_trace_context_prompt,
     prepare_pr_trace_context,
 )
-from .server import (
+from .runtime import (
     DEFAULT_LLM_MAX_TOKENS,
     DEFAULT_RECURSION_LIMIT,
     MODEL_CALL_RECURSION_LIMIT,
-    _get_cached_sandbox_backend,
     ensure_sandbox_for_thread,
+    get_cached_sandbox_backend,
     graph_loaded_for_execution,
 )
 from .tools import (
     add_finding,
+    fetch_review_diff,
     fetch_url,
     http_request,
     list_findings,
@@ -114,27 +120,20 @@ HISTORICAL_REVIEW_GUIDANCE = """- **Anything that overlaps an existing PR review
 
 REVIEWER_PROMPT_TEMPLATE = """You are a specialized code reviewer agent. Your job is to review one GitHub PR and publish a single review.
 
-Sandbox: `{working_dir}`. Invoke `gh` as `GH_TOKEN=dummy gh <command>`.
+Sandbox: `{working_dir}`. Review target: `{repo_owner}/{repo_name}#{pr_number}`.
+Invoke `gh` as `GH_TOKEN=dummy gh <command>`.
 
-Fetch the diff:
-
-```
-GH_TOKEN=dummy gh pr diff {pr_number} --repo {repo_owner}/{repo_name}
-```
-
-Re-review (user message says "A new commit has been pushed"):
-
-```
-GH_TOKEN=dummy gh api repos/{repo_owner}/{repo_name}/compare/<last_reviewed_sha>...<head_sha> -H "Accept: application/vnd.github.v3.diff"
-```
+Call `fetch_review_diff` to materialize the current review range in the sandbox.
+It returns only the file path and bounded metadata. Inspect that file with `grep`
+and paginated `read_file` calls; never fetch a full diff through `execute` or `gh`.
 
 {repo_checkout_note}
 
 If a skills section appears below, the repo ships reviewer-relevant skills. Read
 the `SKILL.md` that matches the area you're reviewing and apply it.
 
-Tools: `add_finding`, `update_finding`, `list_findings`, `publish_review`,
-`resolve_finding_thread`, `reply_to_finding_thread`.
+Tools: `fetch_review_diff`, `add_finding`, `update_finding`, `list_findings`,
+`publish_review`, `resolve_finding_thread`, `reply_to_finding_thread`.
 Call `publish_review` once at the end.
 
 Delegate at most one review pass. Give the reviewer subagent an explicit,
@@ -560,9 +559,8 @@ def _build_first_review_context(
         f"- head_sha: {head_sha}\n"
         f"{overview_section}"
         f"{prior_section}\n"
-        f"Fetch the diff yourself with "
-        f"`GH_TOKEN=dummy gh pr diff {pr_number} --repo {repo_owner}/{repo_name}`, "
-        f"then review using the ordered passes (mechanical grep → diff-line audit "
+        f"Call `fetch_review_diff`, then inspect its sandbox file with `grep` and "
+        f"paginated `read_file` calls. Review using the ordered passes (mechanical grep → diff-line audit "
         f"→ security/auth if applicable → pipeline sweep → deep flow).\n\n"
         f"This is a first review — there are no existing findings recorded by "
         f"you.{historical_guidance} Record net-new issues with `add_finding`, "
@@ -601,10 +599,9 @@ def _build_re_review_context(
         f"{overview_section}"
         f"## Existing findings\n\n{existing_findings_block}\n\n"
         f"{prior_threads_section}"
-        f"Fetch the diff since the previous reviewed SHA yourself with "
-        f"`GH_TOKEN=dummy gh api repos/{repo_owner}/{repo_name}/compare/"
-        f'{last_reviewed_sha}...{head_sha} -H "Accept: application/vnd.github.v3.diff"`, '
-        f"then review only what's in that diff.\n\n"
+        f"Call `fetch_review_diff` to materialize the changes since the previous reviewed "
+        f"SHA, then inspect its sandbox file with `grep` and paginated `read_file` calls. "
+        f"Review only what's in that diff.\n\n"
         f"For each open finding above, decide whether the new commits resolved "
         f'it (`update_finding(id, status="resolved", note="<full reply body>")`), left it unchanged '
         f"(no action), or changed it materially (`update_finding` with new "
@@ -923,7 +920,9 @@ async def _ensure_reviewer_sandbox_for_thread(
             raise RuntimeError(
                 f"GitHub App installation token unavailable for reviewer thread {thread_id}"
             )
-        cache_github_token_for_thread(thread_id, github_token, expires_at=expires_at)
+        cache_github_token_for_thread(
+            thread_id, github_token, expires_at=expires_at, is_bot_token=True
+        )
 
     repo_name_for_scope = str(repo_config.get("name") or "")
     repo_for_snapshot = (
@@ -1030,15 +1029,38 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
         async def _fetch_diff_context() -> tuple[str, dict[str, dict[str, set[int]]] | None]:
             if not can_fetch_pr or github_token is None or not isinstance(pr_number, int):
                 return "", None
-            fetched_diff = await fetch_pr_diff(
-                owner=repo_owner,
-                repo=repo_name,
-                pr_number=pr_number,
-                token=github_token,
-            )
-            if fetched_diff is None:
-                return "", None
-            return fetched_diff, compute_diff_line_set(fetched_diff)
+            fetched_diff: str | None = None
+            if not (is_re_review and last_reviewed_sha):
+                fetched_diff = await fetch_pr_diff(
+                    owner=repo_owner,
+                    repo=repo_name,
+                    pr_number=pr_number,
+                    token=github_token,
+                )
+                if fetched_diff is None:
+                    return "", None
+            try:
+                diff_base, diff_head, merge_base = review_diff_range(
+                    base_sha=base_sha,
+                    head_sha=head_sha,
+                    last_reviewed_sha=last_reviewed_sha,
+                    re_review=is_re_review,
+                )
+                materialized = await materialize_review_diff(
+                    sandbox_backend,
+                    work_dir=f"{work_dir}/{repo_name}",
+                    base_ref=diff_base,
+                    head_ref=diff_head,
+                    merge_base=merge_base,
+                    diff_text=fetched_diff,
+                )
+                diff_text = materialized.diff_text
+            except (RuntimeError, ValueError):
+                logger.exception("Failed to materialize review diff")
+                if fetched_diff is None:
+                    return "", None
+                diff_text = fetched_diff
+            return diff_text, compute_diff_line_set(diff_text)
 
         async def _fetch_pr_overview() -> tuple[str, str]:
             if not can_fetch_pr or github_token is None or not isinstance(pr_number, int):
@@ -1326,12 +1348,13 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
         return sandbox_backend
 
     def backend_factory(_runtime: object, _thread_id: str = thread_id):
-        return _get_cached_sandbox_backend(_thread_id, reconnect=reconnect_backend)
+        return get_cached_sandbox_backend(_thread_id, reconnect=reconnect_backend)
 
     return create_deep_agent(
         model=reviewer_model,
         system_prompt="",
         tools=[
+            fetch_review_diff,
             add_finding,
             update_finding,
             list_findings,
@@ -1357,7 +1380,6 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
             check_message_queue_before_model,
             SlackAssistantStatusMiddleware(),
             TimeoutWrapupMiddleware(),
-            SanitizeOpenAIResponsesMiddleware(),
             SanitizeFireworksMessagesMiddleware(),
             SanitizeThinkingBlocksMiddleware(),
             RepairOrphanedToolCallsMiddleware(),

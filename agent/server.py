@@ -45,7 +45,6 @@ from .dashboard.agent_overrides import (
 )
 from .dashboard.agent_usage import record_agent_thread_usage
 from .dashboard.options import (
-    DEFAULT_MODEL_ID,
     SUPPORTED_MODEL_IDS,
     gate_fable_model,
     model_supports_effort,
@@ -71,7 +70,6 @@ from .middleware import (
     PlanModeMiddleware,
     PullRequestCreationGuardMiddleware,
     SanitizeFireworksMessagesMiddleware,
-    SanitizeOpenAIResponsesMiddleware,
     SanitizeThinkingBlocksMiddleware,
     SanitizeToolInputsMiddleware,
     SlackAssistantStatusMiddleware,
@@ -87,6 +85,15 @@ from .middleware import (
     task_retry_on,
 )
 from .prompt import construct_system_prompt
+from .runtime.constants import (
+    DEFAULT_LLM_MAX_TOKENS,
+    DEFAULT_RECURSION_LIMIT,
+    MODEL_CALL_RECURSION_LIMIT,
+)
+from .runtime.constants import (
+    DEFAULT_LLM_MODEL_ID as DEFAULT_LLM_MODEL_ID,
+)
+from .runtime.execution import graph_loaded_for_execution
 from .tools import (
     enter_plan_mode,
     fetch_url,
@@ -422,15 +429,6 @@ async def check_or_recreate_sandbox(
     return sandbox_backend
 
 
-def graph_loaded_for_execution(config: RunnableConfig) -> bool:
-    """Check if the graph is loaded for actual execution vs introspection."""
-    return (
-        config["configurable"].get("__is_for_execution__", False)
-        if "configurable" in config
-        else False
-    )
-
-
 async def ensure_sandbox_for_thread(
     thread_id: str,
     *,
@@ -513,15 +511,6 @@ async def ensure_sandbox_for_thread(
     return sandbox_backend
 
 
-DEFAULT_LLM_MODEL_ID = DEFAULT_MODEL_ID
-DEFAULT_LLM_MAX_TOKENS = 64_000
-# Kept high across all graphs: coding tasks legitimately run 30-60 minutes and
-# make many tool/model calls. These are runaway backstops, not step budgets; a
-# run that hits the model-call cap still ends with a signal via
-# ``notify_step_limit_reached`` rather than dying silently.
-DEFAULT_RECURSION_LIMIT = 9_999
-MODEL_CALL_RECURSION_LIMIT = 5_000
-
 # Mutating external tools hidden from the model while plan mode is active so it
 # can only research and propose a plan. File edit tools stay available so the
 # agent can draft and revise a plan under `/workspace/plans/`; prompt guidance
@@ -603,6 +592,11 @@ def _get_cached_sandbox_backend(
     reconnect: Callable[[], Awaitable[SandboxBackendProtocol]] | None = None,
 ) -> SandboxBackendProtocol:
     return get_or_create_sandbox_backend_proxy(thread_id, reconnect=reconnect)
+
+
+get_cached_sandbox_backend = _get_cached_sandbox_backend
+configure_git_identity = _configure_git_identity
+recreate_sandbox = _recreate_sandbox
 
 
 async def _observability_authorized(config: RunnableConfig, profile_login: str | None) -> bool:
@@ -1052,7 +1046,6 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             notify_step_limit_reached,
             *fallback_middleware,
             *plan_mode_middleware,
-            SanitizeOpenAIResponsesMiddleware(),
             SanitizeFireworksMessagesMiddleware(),
             SanitizeThinkingBlocksMiddleware(),
         ],
