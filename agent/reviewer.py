@@ -1274,9 +1274,15 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
 
 async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
     """Get or create a reviewer agent with checkpointed run prep."""
+    # Caller's RunnableConfig is a per-run entrypoint arg; keep it read-only. We set
+    # recursion_limit on it below, so shallow-copy config (and the nested configurable
+    # dict) to avoid leaking run-scoped state across runs that share a base config. #1584
+    config = {**config}
+    config["configurable"] = {**config.get("configurable", {})}
+
     thread_id = config["configurable"].get("thread_id", None)
 
-    config["recursion_limit"] = DEFAULT_RECURSION_LIMIT
+    config.setdefault("recursion_limit", DEFAULT_RECURSION_LIMIT)
 
     if thread_id is None or not graph_loaded_for_execution(config):
         logger.info("No thread_id or not for execution, returning reviewer agent without sandbox")
