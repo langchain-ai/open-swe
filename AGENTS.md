@@ -13,7 +13,7 @@ A separate **reviewer** graph runs read-only code reviews on PRs, and a **review
 Dependencies are managed with **uv**. Tests use pytest (`asyncio_mode = "auto"`). Lint/format is **ruff** (line-length 100, target py311). `requires-python = ">=3.11"`; `langgraph.json` pins the runtime to 3.12.
 
 ```bash
-make install            # uv pip install -e .
+make install            # uv sync
 make dev                # uv run langgraph dev — serves all three graphs + the FastAPI app from langgraph.json
 make run                # uvicorn agent.webapp:app --reload --port 8000 (FastAPI only, no LangGraph runtime)
 make test               # uv run pytest -vvv tests/
