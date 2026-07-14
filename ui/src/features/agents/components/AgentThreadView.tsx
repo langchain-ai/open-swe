@@ -12,11 +12,13 @@ import type { ModelSelection } from "@/features/agents/lib/provider/useModelOpti
 import {
   AgentGitPanel,
   PANEL_MIN_CHAT_WIDTH,
-  readStoredPanelCollapsed,
-  writeStoredPanelCollapsed,
 } from "@/features/agents/components/AgentGitPanel"
 import { AgentPromptBar } from "@/features/agents/components/AgentPromptBar"
 import { WorkflowApprovalCard } from "@/features/agents/components/WorkflowApprovalCard"
+import {
+  readStoredPanelCollapsed,
+  writeStoredPanelCollapsed,
+} from "@/features/agents/lib/gitPanelPreferences"
 import { Messages } from "@/features/agents/components/messages"
 import { streamMessagesToUi } from "@/features/agents/lib/streamMessagesToUi"
 import { messageArrivalTimestamp } from "@/features/agents/lib/messageTimestamps"
