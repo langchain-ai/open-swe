@@ -277,6 +277,12 @@ def _followup_step(messages: list[BaseMessage]) -> AIMessage:
 SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
     "implement": (
         _tool_step(
+            "Acknowledging the Slack request before starting work.",
+            "slack_thread_reply",
+            {"message": "On it!"},
+            "call-ack",
+        ),
+        _tool_step(
             "Setting up the repo and implementing the change.",
             "execute",
             {"command": _IMPLEMENT_SCRIPT},
