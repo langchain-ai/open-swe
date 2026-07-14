@@ -120,7 +120,9 @@ def _run_prompt(
         "## Breakout Instructions\n"
         f"{instructions}\n\n"
         "Use `slack_thread_reply` to communicate in this new Slack thread for clarifications, "
-        "status updates, and final summaries."
+        "status updates, and final summaries. For Slack requests that require non-trivial work, "
+        "post a very short acknowledgement like `On it!` as soon as possible before "
+        "cloning/checking out repositories, then continue."
     )
 
 

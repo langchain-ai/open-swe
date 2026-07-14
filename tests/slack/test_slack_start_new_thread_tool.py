@@ -169,6 +169,8 @@ async def test_slack_start_new_thread_success(monkeypatch: pytest.MonkeyPatch) -
     assert f"- Web: https://dashboard.example/agents/{expected_thread_id}" in dispatch["content"]
     assert "- Trace: https://smith/x" in dispatch["content"]
     assert "do not duplicate it manually" in dispatch["content"]
+    assert "post a very short acknowledgement like `On it!`" in dispatch["content"]
+    assert "before cloning/checking out repositories" in dispatch["content"]
     assert "trace" not in captured
     assert [item["message_ts"] for item in captured["stored_mappings"]] == [new_ts]
     assert all(item["triggering_user_id"] == "U1" for item in captured["stored_mappings"])

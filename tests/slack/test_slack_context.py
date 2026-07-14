@@ -601,6 +601,8 @@ def test_process_slack_mention_creates_thread_first_run_without_trace_reply(
     assert f"- Web: https://app.example.com/agents/{expected_thread_id}" in prompt_block["text"]
     assert "- Trace: https://smith/x" in prompt_block["text"]
     assert "do not duplicate it manually" in prompt_block["text"]
+    assert "post a very short acknowledgement like `On it!`" in prompt_block["text"]
+    assert "before cloning/checking out repositories" in prompt_block["text"]
     assert "## Latest Mention Request\ncontinue on the branch" in prompt_block["text"]
 
 
