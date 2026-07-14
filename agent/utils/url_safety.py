@@ -119,20 +119,26 @@ async def request_with_safe_redirects(
         if not is_safe or hostname is None or addr_infos is None:
             return None, _blocked_response(current_url, reason)
 
-        pinned_ip = addr_infos[0][4][0]
         parsed = urlparse(current_url)
         per_hop_headers = dict(headers_for_url(url, current_url) or {}) if headers_for_url else {}
         headers = {**caller_headers, **per_hop_headers, "Host": parsed.netloc}
         extensions = {**caller_extensions, "sni_hostname": hostname}
 
-        response = await client.request(
-            current_method,
-            pinned_url(current_url, pinned_ip),
-            follow_redirects=False,
-            headers=headers,
-            extensions=extensions,
-            **request_kwargs,
-        )
+        pinned_ips = list(dict.fromkeys(addr_info[4][0] for addr_info in addr_infos))
+        for address_index, pinned_ip in enumerate(pinned_ips):
+            try:
+                response = await client.request(
+                    current_method,
+                    pinned_url(current_url, pinned_ip),
+                    follow_redirects=False,
+                    headers=headers,
+                    extensions=extensions,
+                    **request_kwargs,
+                )
+                break
+            except (httpx.ConnectError, httpx.ConnectTimeout):
+                if address_index == len(pinned_ips) - 1:
+                    raise
 
         if response.status_code not in _REDIRECT_CODES:
             return response, None

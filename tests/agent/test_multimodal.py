@@ -195,6 +195,38 @@ async def test_fetch_image_block_blocks_redirect_to_internal_url(monkeypatch: An
     assert client.calls[0]["headers"]["Host"] == "example.com"
 
 
+async def test_fetch_image_block_tries_each_validated_address(monkeypatch: Any) -> None:
+    monkeypatch.setattr(
+        url_safety.socket,
+        "getaddrinfo",
+        lambda host, port, *args, **kwargs: [
+            _addr_info("93.184.216.34", port),
+            _addr_info("93.184.216.35", port),
+        ],
+    )
+    monkeypatch.setattr(multimodal, "create_image_block", lambda **kwargs: kwargs)
+
+    def responder(method: str, url: str, **kwargs: Any) -> FakeImageResponse:
+        if urlparse(url).hostname == "93.184.216.34":
+            raise httpx.ConnectError("address unreachable")
+        return FakeImageResponse(
+            status_code=200,
+            url=url,
+            headers={"Content-Type": "image/png"},
+            content=b"png",
+        )
+
+    client = FakeImageClient(responder)
+
+    result = await fetch_image_block("https://example.com/image.png", client)
+
+    assert result == {"base64": "cG5n", "mime_type": "image/png"}
+    assert [urlparse(call["url"]).hostname for call in client.calls] == [
+        "93.184.216.34",
+        "93.184.216.35",
+    ]
+
+
 async def test_fetch_image_block_does_not_forward_slack_auth_to_redirect_host(
     monkeypatch: Any,
 ) -> None:
