@@ -48,7 +48,7 @@ DEFAULT_LOADING_MESSAGES: tuple[str, ...] = (
     "Tinkering…",
     "Schlepping…",
 )
-SLACK_WEB_LINK_FOOTER_CHAR = "◆"
+SLACK_WEB_LINK_FOOTER_LABEL = "web"
 
 
 @dataclass(frozen=True)
@@ -374,11 +374,11 @@ def format_slack_web_link_footer(dashboard_url: str | None) -> str:
     """Format the compact Slack Web footer link."""
     if not dashboard_url:
         return ""
-    return f"<{dashboard_url}|{SLACK_WEB_LINK_FOOTER_CHAR}>"
+    return f"<{dashboard_url}|{SLACK_WEB_LINK_FOOTER_LABEL}>"
 
 
 def append_slack_web_link_footer(text: str, dashboard_url: str | None) -> str:
-    """Append the compact Slack Web footer link to text."""
+    """Append the compact Slack Web footer link to fallback text."""
     footer = format_slack_web_link_footer(dashboard_url)
     if not footer or footer in text:
         return text
@@ -388,24 +388,40 @@ def append_slack_web_link_footer(text: str, dashboard_url: str | None) -> str:
     return f"{stripped} {footer}"
 
 
-def _append_slack_web_link_footer_to_blocks(
-    blocks: list[dict[str, Any]] | None, dashboard_url: str | None
-) -> list[dict[str, Any]] | None:
+def _slack_web_link_context_block(dashboard_url: str | None) -> dict[str, Any] | None:
     footer = format_slack_web_link_footer(dashboard_url)
-    if not blocks or not footer:
+    if not footer:
+        return None
+    return {"type": "context", "elements": [{"type": "mrkdwn", "text": footer}]}
+
+
+def _block_contains_text(block: dict[str, Any], needle: str) -> bool:
+    text = block.get("text")
+    if isinstance(text, dict) and needle in str(text.get("text") or ""):
+        return True
+    elements = block.get("elements")
+    if isinstance(elements, list):
+        return any(
+            isinstance(item, dict) and needle in str(item.get("text") or "") for item in elements
+        )
+    return False
+
+
+def _with_slack_web_link_context_block(
+    text: str, blocks: list[dict[str, Any]] | None, dashboard_url: str | None
+) -> list[dict[str, Any]] | None:
+    context_block = _slack_web_link_context_block(dashboard_url)
+    if context_block is None:
         return blocks
+    if not blocks:
+        return [
+            {"type": "section", "text": {"type": "mrkdwn", "text": text}},
+            context_block,
+        ]
     updated_blocks = copy.deepcopy(blocks)
-    for block in updated_blocks:
-        if block.get("type") != "section":
-            continue
-        text = block.get("text")
-        if not isinstance(text, dict) or text.get("type") != "mrkdwn":
-            continue
-        value = text.get("text")
-        if not isinstance(value, str):
-            continue
-        text["text"] = append_slack_web_link_footer(value, dashboard_url)
-        break
+    if any(_block_contains_text(block, dashboard_url) for block in updated_blocks):
+        return updated_blocks
+    updated_blocks.append(context_block)
     return updated_blocks
 
 
@@ -420,8 +436,8 @@ async def post_slack_thread_reply_with_ts(
 ) -> tuple[str | None, str | None]:
     """Post a reply in a Slack thread and return its Slack timestamp and error."""
     dashboard_url = _slack_thread_dashboard_url(channel_id, thread_ts)
+    blocks = _with_slack_web_link_context_block(text, blocks, dashboard_url)
     text = append_slack_web_link_footer(text, dashboard_url)
-    blocks = _append_slack_web_link_footer_to_blocks(blocks, dashboard_url)
     return await _post_slack_message_with_ts(
         channel_id,
         text,

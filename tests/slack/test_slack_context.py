@@ -195,7 +195,7 @@ def test_format_slack_messages_for_prompt_replaces_bot_id_mention_in_text() -> N
     assert formatted == "@alice(U123): @open-swe status update?"
 
 
-def test_post_slack_thread_reply_appends_web_footer(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_post_slack_thread_reply_adds_web_context_block(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, object] = {}
 
     async def fake_post_message_with_ts(
@@ -225,11 +225,17 @@ def test_post_slack_thread_reply_appends_web_footer(monkeypatch: pytest.MonkeyPa
     asyncio.run(slack_utils.post_slack_thread_reply_with_ts("C123", "1.0", "Done"))
 
     expected_thread_id = generate_thread_id_from_slack_thread("C123", "1.0")
-    assert captured["text"] == f"Done <https://app.example.com/agents/{expected_thread_id}|◆>"
-    assert captured["blocks"] is None
+    expected_footer = f"<https://app.example.com/agents/{expected_thread_id}|web>"
+    assert captured["text"] == f"Done {expected_footer}"
+    posted_blocks = captured["blocks"]
+    assert isinstance(posted_blocks, list)
+    assert posted_blocks == [
+        {"type": "section", "text": {"type": "mrkdwn", "text": "Done"}},
+        {"type": "context", "elements": [{"type": "mrkdwn", "text": expected_footer}]},
+    ]
 
 
-def test_post_slack_thread_reply_appends_web_footer_to_mrkdwn_blocks(
+def test_post_slack_thread_reply_appends_web_context_block_to_blocks(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     captured: dict[str, object] = {}
@@ -258,11 +264,15 @@ def test_post_slack_thread_reply_appends_web_footer_to_mrkdwn_blocks(
     )
 
     expected_thread_id = generate_thread_id_from_slack_thread("C123", "1.0")
-    expected_footer = f"<https://app.example.com/agents/{expected_thread_id}|◆>"
+    expected_footer = f"<https://app.example.com/agents/{expected_thread_id}|web>"
     assert captured["text"] == f"Pick one {expected_footer}"
     posted_blocks = captured["blocks"]
     assert isinstance(posted_blocks, list)
-    assert posted_blocks[0]["text"]["text"] == f"Pick one {expected_footer}"
+    assert posted_blocks[:-1] == blocks
+    assert posted_blocks[-1] == {
+        "type": "context",
+        "elements": [{"type": "mrkdwn", "text": expected_footer}],
+    }
     assert blocks[0]["text"]["text"] == "Pick one"
 
 
