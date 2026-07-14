@@ -14,7 +14,11 @@ from langgraph.graph.state import RunnableConfig
 from langgraph_sdk import get_client
 
 from .github_app import get_github_app_installation_token_with_expiry
-from .github_token import cache_github_token_for_thread, get_github_token_from_thread
+from .github_token import (
+    cache_github_token_for_thread,
+    get_github_token_from_thread,
+    github_token_principal,
+)
 from .http import DEFAULT_HTTP_TIMEOUT
 from .linear import comment_on_linear_issue
 from .slack import post_slack_thread_reply
@@ -288,9 +292,20 @@ async def leave_failure_comment(
 
 
 def _cache_resolved_github_token(
-    thread_id: str, token: str, expires_at: str | None = None
+    thread_id: str,
+    token: str,
+    expires_at: str | None = None,
+    *,
+    principal: str | None = None,
+    is_bot_token: bool = False,
 ) -> tuple[str, str | None]:
-    cache_github_token_for_thread(thread_id, token, expires_at=expires_at)
+    cache_github_token_for_thread(
+        thread_id,
+        token,
+        expires_at=expires_at,
+        principal=principal,
+        is_bot_token=is_bot_token,
+    )
     return token, expires_at
 
 
@@ -358,7 +373,13 @@ async def resolve_token_from_email(
 
     expires_at = auth_result.get("expires_at") if isinstance(auth_result, dict) else None
     return _cache_resolved_github_token(
-        thread_id, token, expires_at=expires_at if isinstance(expires_at, str) else None
+        thread_id,
+        token,
+        expires_at=expires_at if isinstance(expires_at, str) else None,
+        principal=github_token_principal(
+            login=configurable.get("github_login"),
+            email=email,
+        ),
     )
 
 
@@ -379,7 +400,10 @@ async def _resolve_dashboard_user_token(
     record = await get_oauth_record(OAUTH_TOKENS_NAMESPACE, login)
     expires_at = record.get("token_expires_at") if isinstance(record, dict) else None
     return _cache_resolved_github_token(
-        thread_id, token, expires_at=expires_at if isinstance(expires_at, str) else None
+        thread_id,
+        token,
+        expires_at=expires_at if isinstance(expires_at, str) else None,
+        principal=github_token_principal(login=login),
     )
 
 
@@ -395,14 +419,18 @@ async def _resolve_bot_installation_token(thread_id: str) -> tuple[str, str | No
     logger.info(
         "Using GitHub App installation token for thread %s (bot-token-only mode)", thread_id
     )
-    return _cache_resolved_github_token(thread_id, bot_token, expires_at=expires_at)
+    return _cache_resolved_github_token(
+        thread_id, bot_token, expires_at=expires_at, is_bot_token=True
+    )
 
 
 async def resolve_github_token(config: RunnableConfig, thread_id: str) -> tuple[str, str | None]:
     """Resolve a GitHub token from the run config based on the source.
 
-    Routes to the correct auth method depending on whether the run was
-    triggered from GitHub (login-based) or Linear/Slack (email-based).
+    Routes to the correct auth method depending on the source. Sources that
+    carry a mapped GitHub login (Slack, Linear, dashboard, schedule) resolve a
+    per-user OAuth token from the dashboard store; GitHub runs are login-based;
+    otherwise resolution falls back to email-based auth.
 
     In bot-token-only mode (LANGSMITH_API_KEY_PROD set without
     X_SERVICE_AUTH_JWT_SECRET), the GitHub App installation token is used
@@ -420,10 +448,10 @@ async def resolve_github_token(config: RunnableConfig, thread_id: str) -> tuple[
     github_login = configurable.get("github_login")
 
     # Per-user OAuth from the dashboard store wins even in bot-token-only mode,
-    # for sources that carry a mapped GitHub login (Slack, dashboard). This is
-    # what lets the agent open PRs as the triggering user.
+    # for sources that carry a mapped GitHub login (Slack, Linear, dashboard).
+    # This is what lets the agent open PRs as the triggering user.
     if (
-        source in ("slack", "dashboard", "schedule")
+        source in ("slack", "linear", "dashboard", "schedule")
         and isinstance(github_login, str)
         and github_login.strip()
     ):
@@ -445,7 +473,9 @@ async def resolve_github_token(config: RunnableConfig, thread_id: str) -> tuple[
 
     try:
         if source == "github":
-            cached_token, cached_expires_at = await get_github_token_from_thread(thread_id)
+            cached_token, cached_expires_at = await get_github_token_from_thread(
+                thread_id, principal=github_token_principal(login=github_login)
+            )
             if cached_token:
                 return cached_token, cached_expires_at
             from ..dashboard.user_mappings import email_for_login

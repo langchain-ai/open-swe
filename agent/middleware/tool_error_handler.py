@@ -6,7 +6,6 @@ returned as error ToolMessages instead of crashing the agent run.
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 from collections.abc import Awaitable, Callable, Mapping
@@ -124,16 +123,6 @@ async def _recreate_sandbox_for_thread(thread_id: str) -> str:
     return sandbox_backend.id
 
 
-def _recreate_sandbox_for_thread_sync(thread_id: str) -> str:
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        return asyncio.run(_recreate_sandbox_for_thread(thread_id))
-    raise RuntimeError(
-        "Cannot recreate sandbox from a sync tool call while an event loop is running"
-    )
-
-
 def _sandbox_recreated_tool_message(
     e: SandboxClientError,
     sandbox_id: str,
@@ -165,27 +154,6 @@ class ToolErrorMiddleware(AgentMiddleware):
     """
 
     state_schema = AgentState
-
-    def wrap_tool_call(
-        self,
-        request: ToolCallRequest,
-        handler: Callable[[ToolCallRequest], ToolMessage | Command],
-    ) -> ToolMessage | Command:
-        try:
-            return handler(request)
-        except SandboxClientError as e:
-            logger.exception("Sandbox error during tool call handling; request=%r", request)
-            thread_id = _get_thread_id(request)
-            if thread_id:
-                try:
-                    sandbox_id = _recreate_sandbox_for_thread_sync(thread_id)
-                    return _sandbox_recreated_tool_message(e, sandbox_id, request)
-                except Exception:
-                    logger.exception("Failed to recreate sandbox for thread %s", thread_id)
-            return _generic_error_tool_message(e, request)
-        except Exception as e:
-            logger.exception("Error during tool call handling; request=%r", request)
-            return _generic_error_tool_message(e, request)
 
     async def awrap_tool_call(
         self,

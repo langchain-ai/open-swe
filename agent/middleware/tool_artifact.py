@@ -193,18 +193,6 @@ class ToolArtifactMiddleware(AgentMiddleware):
             return None
         return SANDBOX_BACKENDS.get(thread_id)
 
-    def _read_before_sync(self, request: ToolCallRequest) -> tuple[str | None, str | None]:
-        backend = self._backend(request)
-        file_path = _file_path(_tool_args(request))
-        if backend is None or file_path is None:
-            return None, "other"
-        try:
-            result = backend.read(file_path, offset=0, limit=_MAX_DIFF_LINES)
-        except Exception:
-            logger.debug("tool_artifact: read failed for %s", file_path, exc_info=True)
-            return None, "other"
-        return _classify_read(result)
-
     async def _read_before_async(self, request: ToolCallRequest) -> tuple[str | None, str | None]:
         backend = self._backend(request)
         file_path = _file_path(_tool_args(request))
@@ -216,19 +204,6 @@ class ToolArtifactMiddleware(AgentMiddleware):
             logger.debug("tool_artifact: aread failed for %s", file_path, exc_info=True)
             return None, "other"
         return _classify_read(result)
-
-    def wrap_tool_call(
-        self,
-        request: ToolCallRequest,
-        handler: Callable[[ToolCallRequest], ToolMessage | Command],
-    ) -> ToolMessage | Command:
-        name = _tool_name(request)
-        if name not in _DIFF_TOOLS:
-            return handler(request)
-        before, kind = self._read_before_sync(request)
-        result = handler(request)
-        _stamp(result, _build_diff_artifact(name, _tool_args(request), before, kind))
-        return result
 
     async def awrap_tool_call(
         self,

@@ -19,7 +19,6 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from ..utils.dashboard_handoff import DASHBOARD_HANDOFF_INSTRUCTION
 from ..utils.langsmith import get_langsmith_trace_url
-from ..utils.sandbox import create_sandbox
 from ..utils.slack import lookup_slack_thread_run_mapping, update_slack_trace_reply_for_web_handoff
 from ..utils.thread_ops import (
     get_thread_active_status,
@@ -31,12 +30,13 @@ from .agent_overrides import normalize_profile_overrides
 from .options import (
     SUPPORTED_MODEL_IDS,
     default_vision_model_pair,
+    gate_fable_model,
     model_supports_effort,
     model_supports_images,
 )
 from .pr_diff import build_pr_diff_files
 from .profiles import get_profile, get_valid_access_token
-from .team_settings import get_team_default_model
+from .team_settings import get_team_default_model, get_team_fable_enabled
 from .user_mappings import email_for_login
 
 logger = logging.getLogger(__name__)
@@ -66,6 +66,13 @@ _SURFACED_SOURCES: tuple[str, ...] = ("dashboard", "github", "slack", "linear", 
 _PR_STATES: frozenset[str] = frozenset({"draft", "open", "merged", "closed"})
 _RECOVERY_PATCH_LIMIT_BYTES = 25 * 1024 * 1024
 _RECOVERY_PATCH_TIMEOUT_SECONDS = 120
+
+
+async def create_sandbox(*args: Any, **kwargs: Any) -> Any:
+    # deferred: pulls deepagents -> langchain_anthropic -> anthropic at import time
+    from ..utils.sandbox import create_sandbox as _create_sandbox
+
+    return await _create_sandbox(*args, **kwargs)
 
 
 def _agent_version_metadata() -> dict[str, str]:
@@ -153,6 +160,9 @@ async def _resolve_agent_model_choice(
     chosen_model, chosen_effort = _normalize_model_choice(model_id, effort)
     if chosen_model and chosen_effort:
         resolved_model, resolved_effort = chosen_model, chosen_effort
+    resolved_model, resolved_effort = gate_fable_model(
+        resolved_model, resolved_effort, fable_enabled=await get_team_fable_enabled()
+    )
     return resolved_model, resolved_effort
 
 
@@ -374,6 +384,14 @@ def _thread_summary(
     thread_id = thread.get("thread_id") or thread.get("id")
     trace_url = get_langsmith_trace_url(thread_id) if isinstance(thread_id, str) else None
 
+    raw_sandbox_id = metadata.get("sandbox_id")
+    # "__creating__" is the in-flight sentinel written before the real id lands.
+    sandbox_id = (
+        raw_sandbox_id
+        if isinstance(raw_sandbox_id, str) and raw_sandbox_id and raw_sandbox_id != "__creating__"
+        else None
+    )
+
     summary: dict[str, Any] = {
         "id": thread_id,
         "title": title,
@@ -402,6 +420,7 @@ def _thread_summary(
         "updatedAt": int(updated_at) if isinstance(updated_at, (int, float)) else _now_ms(),
         "isOwner": (_user_owns_thread(metadata, owner_login, owner_email) if owner_login else True),
         "traceUrl": trace_url,
+        "sandboxId": sandbox_id,
     }
     if isinstance(pr_number, int) and isinstance(pr_url, str):
         summary["pr"] = {
@@ -1386,6 +1405,32 @@ async def cancel_dashboard_thread(
     )
 
 
+async def admin_cancel_dashboard_thread(thread_id: str) -> dict[str, Any]:
+    client = langgraph_client()
+    try:
+        thread = await client.threads.get(thread_id)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(404, "thread not found") from exc
+
+    metadata = thread.get("metadata") if isinstance(thread.get("metadata"), dict) else {}
+    try:
+        await client.runs.cancel_many(thread_id=thread_id, status="all", action="interrupt")
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Failed to cancel active runs for thread %s", thread_id)
+        raise HTTPException(502, "failed to request thread cancellation") from exc
+
+    await client.threads.update(
+        thread_id=thread_id,
+        metadata={"latest_run_status": "interrupted", "updated_at_ms": _now_ms()},
+    )
+    updated_thread = await client.threads.get(thread_id)
+    return _thread_summary(
+        updated_thread
+        if isinstance(updated_thread, dict)
+        else {"thread_id": thread_id, "metadata": metadata}
+    )
+
+
 async def delete_dashboard_thread(thread_id: str, login: str, *, email: str | None = None) -> None:
     client = langgraph_client()
     try:
@@ -1679,7 +1724,7 @@ async def get_dashboard_thread_recovery_patch(
         raise HTTPException(404, "thread has no recoverable sandbox")
 
     try:
-        sandbox = await asyncio.to_thread(create_sandbox, sandbox_id)
+        sandbox = await create_sandbox(sandbox_id)
     except Exception as exc:  # noqa: BLE001
         logger.debug("Could not connect to sandbox %s for recovery", sandbox_id, exc_info=True)
         raise HTTPException(502, "could not connect to thread sandbox") from exc

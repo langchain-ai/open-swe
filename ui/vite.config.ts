@@ -1,5 +1,5 @@
 import http from "node:http"
-import { defineConfig, type Plugin } from "vite"
+import { defineConfig } from "vite"
 import { devtools } from "@tanstack/devtools-vite"
 import { tanstackStart } from "@tanstack/react-start/plugin/vite"
 import viteReact from "@vitejs/plugin-react"
@@ -7,6 +7,7 @@ import viteTsConfigPaths from "vite-tsconfig-paths"
 import tailwindcss from "@tailwindcss/vite"
 import { nitro } from "nitro/vite"
 import { VitePWA } from "vite-plugin-pwa"
+import type { Plugin } from "vite"
 
 // Dev-only: when E2E_HARNESS is set (the `dev:mock` local harness) serve the app
 // and the harness from one origin by proxying the API routes + the Yjs collab
@@ -60,8 +61,8 @@ function mockHarnessProxy(): Plugin | null {
           socket.write(
             `HTTP/1.1 ${proxyRes.statusCode} ${proxyRes.statusMessage}\r\n${lines}\r\n\r\n`
           )
-          if (proxyHead?.length) socket.write(proxyHead)
-          if (head?.length) proxySocket.write(head)
+          if (proxyHead.length) socket.write(proxyHead)
+          if (head.length) proxySocket.write(head)
           proxySocket.on("error", () => socket.destroy())
           socket.on("error", () => proxySocket.destroy())
           proxySocket.pipe(socket)
@@ -145,7 +146,9 @@ const config = defineConfig({
       registerType: "prompt",
       outDir: ".output/public",
       devOptions: {
-        enabled: true,
+        // Off in dev: the service worker precaches assets and defeats HMR (and
+        // a stale registration lingers per-origin). Dev is HMR-only.
+        enabled: false,
       },
       integration: {
         closeBundleOrder: "pre",

@@ -3,11 +3,11 @@ import { useQuery } from "@tanstack/react-query"
 import { useEffect, useState } from "react"
 import { ArrowLeft } from "lucide-react"
 
-import { PlanReview } from "@/components/agents/PlanReview"
+import { PlanReview } from "@/features/agents/components/PlanReview"
 import { buttonVariants } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { loginUrl } from "@/lib/api"
-import { authRedirectUrl, currentAuthRedirectPath } from "@/lib/auth-redirect"
+import { currentAuthRedirectPath } from "@/lib/auth-redirect"
 import { PlanApiError, getPlan } from "@/lib/plan"
 
 export const Route = createFileRoute("/agents/$threadId_/plan")({
@@ -36,7 +36,7 @@ function BackLink({ threadId }: { threadId: string }) {
 }
 
 export function planSignInHref(): string {
-  return loginUrl(authRedirectUrl(currentAuthRedirectPath()))
+  return loginUrl(currentAuthRedirectPath())
 }
 
 export function PlanSignInButton() {
@@ -105,7 +105,7 @@ function PlanPage() {
       <Centered>
         <div className="space-y-3 text-center text-sm text-[var(--ui-text-dim)]">
           <p>
-            The agent is still writing the plan. This page will update
+            The agent is still writing the content. This page will update
             automatically…
           </p>
           <BackLink threadId={threadId} />

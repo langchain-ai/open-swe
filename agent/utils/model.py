@@ -1,5 +1,6 @@
+import asyncio
 import os
-from typing import Literal, TypedDict, Unpack
+from typing import Any, Literal, TypedDict, Unpack
 
 from langchain.chat_models import init_chat_model
 
@@ -11,6 +12,37 @@ OPENAI_RESPONSES_WS_BASE_URL = "wss://api.openai.com/v1"
 # Anthropic SDK default is 2; a 529 burst can outlive that. Bump to give the
 # primary provider a fair chance before the fallback middleware kicks in.
 DEFAULT_MAX_RETRIES = 6
+
+_MODEL_CACHE: dict[
+    tuple[str, bool | None, int | None, tuple[tuple[str, str], ...], int | None], Any
+] = {}
+
+
+def _loop_cache_key() -> int | None:
+    try:
+        return id(asyncio.get_running_loop())
+    except RuntimeError:
+        return None
+
+
+def _freeze_model_kwargs(kwargs: dict[str, object]) -> tuple[tuple[str, str], ...]:
+    return tuple(sorted((key, repr(value)) for key, value in kwargs.items()))
+
+
+async def close_cached_models() -> None:
+    models = list(_MODEL_CACHE.values())
+    _MODEL_CACHE.clear()
+    for model in models:
+        close = getattr(model, "aclose", None)
+        if callable(close):
+            await close()
+            continue
+        close = getattr(model, "close", None)
+        if callable(close):
+            result = close()
+            if asyncio.iscoroutine(result):
+                await result
+
 
 OpenAIReasoningEffort = Literal["none", "low", "medium", "high", "xhigh"]
 # OpenAI's Responses API only returns human-readable reasoning text when a
@@ -46,6 +78,9 @@ class ModelKwargs(TypedDict, total=False):
     thinking_level: GoogleThinkingLevel | None
     temperature: float | None
     max_retries: int | None
+    store: bool | None
+    include: list[str] | None
+    output_version: Literal["responses/v1"] | None
     model_kwargs: dict[str, object] | None
 
 
@@ -60,6 +95,18 @@ def _coerce_openai_chat_completions_kwargs(model_kwargs: dict[str, object]) -> N
         effort = reasoning.get("effort")
         if isinstance(effort, str):
             model_kwargs.setdefault("reasoning_effort", effort)
+
+
+def _configure_openai_responses_kwargs(model_kwargs: dict[str, object]) -> None:
+    if model_kwargs.get("use_responses_api") is False:
+        return
+    model_kwargs.setdefault("store", False)
+    model_kwargs.setdefault("output_version", "responses/v1")
+    include = model_kwargs.get("include")
+    if include is None:
+        model_kwargs["include"] = ["reasoning.encrypted_content"]
+    elif isinstance(include, list) and "reasoning.encrypted_content" not in include:
+        include.append("reasoning.encrypted_content")
 
 
 def make_model(model_id: str, *, use_gateway: bool | None = None, **kwargs: Unpack[ModelKwargs]):
@@ -86,9 +133,22 @@ def make_model(model_id: str, *, use_gateway: bool | None = None, **kwargs: Unpa
             model_kwargs.update(overrides)
 
     if model_id.startswith("openai:"):
+        _configure_openai_responses_kwargs(model_kwargs)
         _coerce_openai_chat_completions_kwargs(model_kwargs)
 
-    return init_chat_model(model=model_id, **model_kwargs)
+    key = (
+        model_id,
+        use_gateway,
+        model_kwargs.get("max_tokens") if isinstance(model_kwargs.get("max_tokens"), int) else None,
+        _freeze_model_kwargs(model_kwargs),
+        _loop_cache_key(),
+    )
+    cached = _MODEL_CACHE.get(key)
+    if cached is not None:
+        return cached
+    model = init_chat_model(model=model_id, **model_kwargs)
+    _MODEL_CACHE[key] = model
+    return model
 
 
 def fallback_model_id_for(primary_model_id: str) -> str | None:
@@ -99,7 +159,7 @@ def fallback_model_id_for(primary_model_id: str) -> str | None:
     local, or self-hosted providers we don't want to silently route off-host).
     """
     if primary_model_id.startswith("anthropic:"):
-        return "openai:gpt-5.5"
+        return "openai:gpt-5.6-sol"
     if primary_model_id.startswith("openai:"):
         return "anthropic:claude-opus-4-8"
     return None

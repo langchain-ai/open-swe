@@ -26,20 +26,32 @@ GITHUB_APP_INSTALLATION_ID = os.environ.get("GITHUB_APP_INSTALLATION_ID", "")
 # 5-minute refresh window (``github_proxy.PROXY_TOKEN_REFRESH_WINDOW``) so a
 # near-expiry proxy refresh still mints a genuinely fresh token.
 _TOKEN_CACHE_MARGIN = timedelta(minutes=10)
-BASE_RUNTIME_PROXY_TOKEN_PERMISSIONS: dict[str, str] = {
+# Granted on every installation at install time, so a token scoped to these
+# always mints — the terminal rung of the fallback ladder.
+CORE_RUNTIME_PROXY_TOKEN_PERMISSIONS: dict[str, str] = {
     "contents": "write",
     "pull_requests": "write",
     "issues": "write",
     "checks": "write",
 }
+# `workflows:write` (workflow-file pushes) and `actions:read` (CI log reads) are
+# later additions an installation may not have accepted. GitHub 422s a mint that
+# requests an ungranted permission, so ``_resolve_proxy_token`` walks
+# ``PROXY_TOKEN_PERMISSION_LADDER`` high→low and degrades to what is granted
+# instead of failing the whole run.
+BASE_RUNTIME_PROXY_TOKEN_PERMISSIONS: dict[str, str] = {
+    **CORE_RUNTIME_PROXY_TOKEN_PERMISSIONS,
+    "workflows": "write",
+}
 RUNTIME_PROXY_TOKEN_PERMISSIONS: dict[str, str] = {
     **BASE_RUNTIME_PROXY_TOKEN_PERMISSIONS,
     "actions": "read",
 }
-WORKFLOW_RUNTIME_PROXY_TOKEN_PERMISSIONS: dict[str, str] = {
-    **BASE_RUNTIME_PROXY_TOKEN_PERMISSIONS,
-    "workflows": "write",
-}
+PROXY_TOKEN_PERMISSION_LADDER: tuple[dict[str, str], ...] = (
+    RUNTIME_PROXY_TOKEN_PERMISSIONS,
+    BASE_RUNTIME_PROXY_TOKEN_PERMISSIONS,
+    CORE_RUNTIME_PROXY_TOKEN_PERMISSIONS,
+)
 
 PermissionMap = Mapping[str, str]
 PermissionKey = tuple[tuple[str, str], ...]

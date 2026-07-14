@@ -22,7 +22,12 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Switch } from "@/components/ui/switch"
 import { api } from "@/lib/api"
+import {
+  useAdminCancelAgentThread,
+  useThreadsPage,
+} from "@/features/agents/lib/queries"
 import { RequireLogin } from "@/lib/auth-redirect"
 import { useSession } from "@/lib/session"
 
@@ -57,7 +62,11 @@ function AdminPage() {
 
       <LLMGatewaySection />
 
+      <FableSection />
+
       <TriggerReviewSection />
+
+      <RunningAgentsSection />
 
       <SettingsSection title="Evals">
         <Link
@@ -83,6 +92,97 @@ function AdminPage() {
 
       <UserMappingsSection enabled={!!session.data.is_admin} />
     </AppShell>
+  )
+}
+
+function RunningAgentsSection() {
+  const threads = useThreadsPage({
+    all: true,
+    status: "running",
+    limit: 50,
+  })
+  const cancel = useAdminCancelAgentThread()
+  const [message, setMessage] = useState<string | null>(null)
+
+  return (
+    <SettingsSection
+      title="Running agents"
+      description="Workspace-wide active threads. Killing a thread requests interruption of all pending and running runs without deleting its history."
+    >
+      <div className="flex flex-col gap-3 p-4">
+        <div className="flex items-center justify-between">
+          <span className="text-xs text-muted-foreground">
+            {threads.data?.items.length ?? 0} running
+          </span>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => void threads.refetch()}
+            disabled={threads.isFetching}
+          >
+            {threads.isFetching ? "Refreshing…" : "Refresh"}
+          </Button>
+        </div>
+
+        {threads.isLoading ? (
+          <Skeleton className="h-20" />
+        ) : threads.data?.items.length ? (
+          <div className="flex flex-col">
+            {threads.data.items.map((thread) => {
+              const isCancelling =
+                cancel.isPending && cancel.variables === thread.id
+              return (
+                <div
+                  key={thread.id}
+                  className="flex items-center justify-between gap-3 border-b border-border py-2 last:border-b-0"
+                >
+                  <Link
+                    to="/agents/$threadId"
+                    params={{ threadId: thread.id }}
+                    className="min-w-0 flex-1 hover:underline"
+                  >
+                    <p className="truncate text-xs font-medium text-foreground">
+                      {thread.title}
+                    </p>
+                    <p className="truncate font-mono text-[11px] text-muted-foreground">
+                      {thread.repoFullName || "no repo"} · {thread.id}
+                    </p>
+                  </Link>
+                  <Button
+                    size="sm"
+                    variant="destructive"
+                    disabled={cancel.isPending}
+                    onClick={() => {
+                      setMessage(null)
+                      cancel.mutate(thread.id, {
+                        onSuccess: () =>
+                          setMessage(`Interruption requested for ${thread.title}.`),
+                        onError: (error: Error) => setMessage(error.message),
+                      })
+                    }}
+                  >
+                    {isCancelling ? "Killing…" : "Kill"}
+                  </Button>
+                </div>
+              )
+            })}
+          </div>
+        ) : (
+          <p className="text-xs text-muted-foreground">No running agents.</p>
+        )}
+
+        {threads.error && (
+          <p className="text-xs text-destructive">{threads.error.message}</p>
+        )}
+        {message && (
+          <p
+            className={`text-xs ${cancel.isError ? "text-destructive" : "text-muted-foreground"}`}
+          >
+            {message}
+          </p>
+        )}
+      </div>
+    </SettingsSection>
   )
 }
 
@@ -637,6 +737,44 @@ function LLMGatewaySection() {
                 <SelectItem value="disabled">Disabled</SelectItem>
               </SelectContent>
             </Select>
+          }
+        />
+      </div>
+      {error && <p className="px-4 pb-3 text-xs text-destructive">{error}</p>}
+    </SettingsSection>
+  )
+}
+
+function FableSection() {
+  const qc = useQueryClient()
+  const settings = useQuery({ queryKey: ["teamSettings"], queryFn: api.getTeamSettings })
+  const [error, setError] = useState<string | null>(null)
+  const save = useMutation({
+    mutationFn: (body: TeamSettings) => api.saveTeamSettings(body),
+    onSuccess: (saved) => {
+      qc.setQueryData(["teamSettings"], saved)
+      qc.invalidateQueries({ queryKey: ["options"] }) // refresh pickers so Fable appears/disappears
+      setError(null)
+    },
+    onError: (e: Error) => setError(e.message),
+  })
+  return (
+    <SettingsSection
+      title="Fable"
+      description="Claude Fable 5 runs safety classifiers that inspect and may retain requests, so it is not compatible with Zero Data Retention (ZDR). Off by default; enable only if your workspace does not require ZDR."
+    >
+      <div className="divide-y divide-border">
+        <SettingsRow
+          label="Allow Fable models"
+          description="When on, Fable 5 is selectable in the agent, reviewer, and chat model pickers. When off, it is hidden and any run that resolves to Fable falls back to Opus."
+          control={
+            <Switch
+              checked={!!settings.data?.fable_enabled}
+              onCheckedChange={(next) =>
+                settings.data && save.mutate({ ...settings.data, fable_enabled: next })
+              }
+              disabled={!settings.data || save.isPending}
+            />
           }
         />
       </div>

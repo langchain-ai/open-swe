@@ -1,9 +1,9 @@
 import { Outlet, createFileRoute, useRouterState } from "@tanstack/react-router"
 
-import { AgentsShell } from "@/components/agents/AgentsSidebar"
+import { AgentsShell } from "@/features/agents/components/AgentsSidebar"
 import { Skeleton } from "@/components/ui/skeleton"
 import agentsCss from "@/styles/agents.css?url"
-import { AgentThreadStreamProvider } from "@/lib/agents/AgentThreadStreamProvider"
+import { AgentThreadStreamProvider } from "@/features/agents/lib/AgentThreadStreamProvider"
 import { RequireLogin } from "@/lib/auth-redirect"
 import { useSession } from "@/lib/session"
 

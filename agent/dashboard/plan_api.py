@@ -29,6 +29,7 @@ from .plan_store import (
     PLAN_STATUS_CANCELLED,
     PLAN_STATUS_READY,
     PLAN_STATUS_REVISING,
+    PLAN_STATUS_SHARED,
     add_plan_comment,
     delete_plan_comment,
     get_plan_content,
@@ -113,6 +114,7 @@ async def update_plan(
     if not markdown:
         raise HTTPException(422, "plan markdown cannot be empty")
     content = await get_plan_content(thread_id) or {}
+    _reject_shared_content(content)
     status = content.get("status") or metadata.get("plan_status") or "planning"
     if status in (PLAN_STATUS_APPROVED, PLAN_STATUS_CANCELLED):
         raise HTTPException(409, f"cannot edit a {status} plan")
@@ -148,6 +150,7 @@ async def post_plan_comment(
     metadata = await _thread_metadata(thread_id)
     if not _thread_is_readable(metadata):
         raise HTTPException(404, "thread not found")
+    _reject_shared_content(await get_plan_content(thread_id) or {})
     text = body.body.strip()
     if not text:
         raise HTTPException(422, "comment body cannot be empty")
@@ -164,6 +167,7 @@ async def remove_plan_comment(
     metadata = await _thread_metadata(thread_id)
     if not _thread_is_readable(metadata):
         raise HTTPException(404, "thread not found")
+    _reject_shared_content(await get_plan_content(thread_id) or {})
     comments = await list_plan_comments(thread_id)
     target = next((c for c in comments if c.get("id") == comment_id), None)
     if target is None:
@@ -181,12 +185,16 @@ async def approve_plan(thread_id: str, session: dict[str, Any] = _SESSION_DEP) -
     metadata = await _thread_metadata(thread_id)
     if not _user_owns_thread(metadata, session["sub"], session.get("email")):
         raise HTTPException(403, "only the plan owner can approve")
-    # Read the published plan + comments BEFORE mutating state: a store failure
-    # here aborts the decision (500) rather than dispatching without them. The
-    # published markdown may have been edited by the reviewer, so it is the
-    # source of truth handed to the agent (not its own stale history) — read it
-    # strictly so a transient failure can't silently drop the edit.
+    return await approve_plan_for_thread(
+        thread_id, metadata=metadata, actor=_approval_actor_name(session)
+    )
+
+
+async def approve_plan_for_thread(
+    thread_id: str, *, metadata: dict[str, Any], actor: str
+) -> dict[str, Any]:
     content = await get_plan_content(thread_id, raise_on_error=True) or {}
+    _reject_shared_content(content)
     plan_markdown = str(content.get("markdown", "")).strip()
     comments = await list_plan_comments(thread_id, raise_on_error=True)
     feedback = _format_comments(comments)
@@ -205,7 +213,7 @@ async def approve_plan(thread_id: str, session: dict[str, Any] = _SESSION_DEP) -
     await _maybe_post_plan_approved_to_slack(
         metadata,
         comment_count=len(comments),
-        actor=_approval_actor_name(session),
+        actor=actor,
     )
     return {"status": PLAN_STATUS_APPROVED}
 
@@ -215,6 +223,8 @@ async def reject_plan(thread_id: str, session: dict[str, Any] = _SESSION_DEP) ->
     metadata = await _thread_metadata(thread_id)
     if not _thread_is_readable(metadata):
         raise HTTPException(404, "thread not found")
+    content = await get_plan_content(thread_id, raise_on_error=True) or {}
+    _reject_shared_content(content)
     feedback = _format_comments(await list_plan_comments(thread_id, raise_on_error=True))
     await set_plan_status(thread_id, PLAN_STATUS_REVISING, plan_mode=True)
     text = (
@@ -225,6 +235,11 @@ async def reject_plan(thread_id: str, session: dict[str, Any] = _SESSION_DEP) ->
     )
     await _dispatch_followup(thread_id, metadata, text, plan_mode=True)
     return {"status": PLAN_STATUS_REVISING}
+
+
+def _reject_shared_content(content: dict[str, Any]) -> None:
+    if content.get("status") == PLAN_STATUS_SHARED:
+        raise HTTPException(409, "shared content is not an implementation plan")
 
 
 def _approval_actor_name(session: dict[str, Any]) -> str:

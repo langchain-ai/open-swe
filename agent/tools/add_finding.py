@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Annotated, Any
 
 from langgraph.config import get_config
+from langgraph.prebuilt import InjectedState
 
-from ..reviewer_diff import is_range_in_diff
-from ..reviewer_findings import (
+from ..review.diff import compute_diff_line_set, fetch_pr_diff, is_range_in_diff
+from ..review.findings import (
     DEFAULT_FINDING_TITLE,
     MAX_SUGGESTION_LINES,
     Confidence,
@@ -23,6 +24,7 @@ from ..reviewer_findings import (
     resolve_review_head_sha,
     thread_missing_tool_result,
 )
+from ..utils.github_token import get_github_token
 
 
 async def add_finding(
@@ -36,6 +38,7 @@ async def add_finding(
     end_line: int | None = None,
     suggestion: str | None = None,
     side: str = "RIGHT",
+    state: Annotated[dict[str, Any] | None, InjectedState] = None,
 ) -> dict[str, Any]:
     """Record a review finding on the reviewer thread.
 
@@ -114,8 +117,7 @@ async def add_finding(
 
     config = get_config()
     configurable = config.get("configurable", {}) if isinstance(config, dict) else {}
-    diff_line_set = configurable.get("diff_line_set") if isinstance(configurable, dict) else None
-    diff_text = configurable.get("diff_text", "") if isinstance(configurable, dict) else ""
+    diff_line_set, diff_text = await _resolve_diff_context(state, configurable)
 
     in_diff = not isinstance(diff_line_set, dict) or is_range_in_diff(
         diff_line_set, file, start_line, end_line, side=_cast_side(side)
@@ -133,7 +135,7 @@ async def add_finding(
 
     diff_hunk: str | None = None
     if isinstance(diff_text, str) and diff_text:
-        from ..reviewer_diff import extract_diff_hunk
+        from ..review.diff import extract_diff_hunk
 
         diff_hunk = extract_diff_hunk(diff_text, file, start_line, end_line)
 
@@ -162,10 +164,14 @@ async def add_finding(
     )
 
     try:
-        await append_finding(thread_id, finding)
+        append_result = await append_finding(thread_id, finding)
     except ReviewerThreadMissingError as exc:
         return thread_missing_tool_result(exc)
-    result: dict[str, Any] = {"success": True, "finding_id": finding["id"]}
+    result: dict[str, Any] = {
+        "success": True,
+        "finding_id": append_result["finding"]["id"],
+        "duplicate": not append_result["created"],
+    }
     if suggestion_dropped:
         result["suggestion_dropped"] = True
         result["warning"] = (
@@ -174,6 +180,41 @@ async def add_finding(
             "include `suggestion` for small, obvious fixes."
         )
     return result
+
+
+async def _resolve_diff_context(
+    state: dict[str, Any] | None,
+    configurable: dict[str, Any] | Any,
+) -> tuple[dict[str, Any] | None, str]:
+    if isinstance(state, dict):
+        state_line_set = state.get("diff_line_set")
+        state_diff_text = state.get("diff_text")
+        if isinstance(state_line_set, dict):
+            return state_line_set, state_diff_text if isinstance(state_diff_text, str) else ""
+    if isinstance(configurable, dict):
+        config_line_set = configurable.get("diff_line_set")
+        config_diff_text = configurable.get("diff_text")
+        if isinstance(config_line_set, dict):
+            return config_line_set, config_diff_text if isinstance(config_diff_text, str) else ""
+        repo_config = configurable.get("repo")
+        pr_number = configurable.get("pr_number")
+        token = get_github_token()
+        if (
+            isinstance(repo_config, dict)
+            and isinstance(repo_config.get("owner"), str)
+            and isinstance(repo_config.get("name"), str)
+            and isinstance(pr_number, int)
+            and token
+        ):
+            diff_text = await fetch_pr_diff(
+                owner=repo_config["owner"],
+                repo=repo_config["name"],
+                pr_number=pr_number,
+                token=token,
+            )
+            if diff_text is not None:
+                return compute_diff_line_set(diff_text), diff_text
+    return None, ""
 
 
 def _cast_severity(value: str) -> Severity:

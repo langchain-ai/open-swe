@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Annotated, Any
 
 from langgraph.config import get_config
+from langgraph.prebuilt import InjectedState
 
 from ..dashboard.team_settings import get_team_review_trace_links_enabled
-from ..reviewer_diff import compute_diff_line_set, fetch_pr_diff, is_range_in_diff
-from ..reviewer_findings import (
+from ..review.diff import compute_diff_line_set, fetch_pr_diff, is_range_in_diff
+from ..review.findings import (
+    REVIEW_FINDING_CAP,
+    REVIEWER_EVAL_PUBLICATION_KEY,
     SEVERITY_ORDER,
     Finding,
     ReviewerThreadMissingError,
@@ -24,10 +27,10 @@ from ..reviewer_findings import (
     set_reviewer_thread_metadata,
     thread_missing_tool_result,
 )
-from ..reviewer_findings import (
+from ..review.findings import (
     list_findings as list_findings_async,
 )
-from ..reviewer_publish import (
+from ..review.publish import (
     clear_review_started_comment,
     fetch_pr_review_threads,
     fetch_review_comments,
@@ -42,7 +45,7 @@ from ..reviewer_publish import (
     resolve_review_thread,
     settle_review_check_run,
 )
-from ..reviewer_reconcile import reconcile_findings_with_review_threads
+from ..review.reconcile import reconcile_findings_with_review_threads
 from ..utils.dashboard_links import dashboard_review_url
 from ..utils.github_checks import review_check_conclusion
 from ..utils.github_token import (
@@ -57,7 +60,7 @@ from ..utils.tracing import REVIEW_TRACING_PROJECT
 
 async def publish_review(
     severity_threshold: str = "medium",
-    cap: int = 4,
+    state: Annotated[dict[str, Any] | None, InjectedState] = None,
 ) -> dict[str, Any]:
     """Post all current findings to the PR as a GitHub Review.
 
@@ -76,8 +79,6 @@ async def publish_review(
             (default ``medium``). Lower-severity findings stay in state and are
             mentioned in the review summary with a link to the web app, but are
             not posted as inline PR comments.
-        cap: Maximum number of inline comments to publish (default 4).
-
     Returns:
         Dictionary with ``success``, ``review_id``, ``surfaced_count``,
         ``hidden_count``, ``resolved_thread_count``, and sometimes
@@ -120,11 +121,22 @@ async def publish_review(
         return {"success": False, "error": "Missing head_sha in run config"}
 
     if _is_reviewer_eval_mode(configurable):
+        eval_threshold = configurable.get("reviewer_eval_severity_threshold")
+        if isinstance(eval_threshold, str) and eval_threshold in {
+            "low",
+            "medium",
+            "high",
+            "critical",
+        }:
+            severity_threshold = eval_threshold
+        eval_cap = configurable.get("reviewer_eval_cap")
+        if not isinstance(eval_cap, int) or isinstance(eval_cap, bool) or eval_cap < 0:
+            eval_cap = REVIEW_FINDING_CAP
         try:
             return await _publish_review_eval_dry_run_async(
                 head_sha=head_sha,
                 severity_threshold=_cast_severity(severity_threshold),
-                cap=cap,
+                cap=eval_cap,
             )
         except ReviewerThreadMissingError as exc:
             return thread_missing_tool_result(exc)
@@ -141,10 +153,11 @@ async def publish_review(
             head_sha=head_sha,
             token=token,
             severity_threshold=_cast_severity(severity_threshold),
-            cap=cap,
+            cap=REVIEW_FINDING_CAP,
             is_re_review=is_re_review,
             langgraph_run_id=_current_run_id(config),
             trace_link_config_override=configurable.get("review_trace_link_enabled"),
+            state=state,
         )
     except ReviewerThreadMissingError as exc:
         return thread_missing_tool_result(exc)
@@ -198,20 +211,34 @@ async def _publish_review_eval_dry_run_async(
         severity_threshold=severity_threshold,
         cap=cap,
     )
-    inline_comments = [
-        payload
+    eligible_with_payload = [
+        (finding, payload)
         for finding in eligible
         if (payload := render_inline_comment_payload(finding)) is not None
     ]
+    finding_ids = [
+        finding["id"]
+        for finding, _payload in eligible_with_payload
+        if isinstance(finding.get("id"), str)
+    ]
+    publication = {
+        "finding_ids": finding_ids,
+        "severity_threshold": severity_threshold,
+        "cap": cap,
+    }
 
-    await set_reviewer_thread_metadata(thread_id, last_reviewed_sha=head_sha)
+    await set_reviewer_thread_metadata(
+        thread_id,
+        last_reviewed_sha=head_sha,
+        extra={REVIEWER_EVAL_PUBLICATION_KEY: publication},
+    )
 
     return {
         "success": True,
         "dry_run": True,
         "review_id": None,
-        "surfaced_count": len(inline_comments),
-        "hidden_count": max(len(open_unpublished) - len(inline_comments), 0),
+        "surfaced_count": len(eligible_with_payload),
+        "hidden_count": max(len(open_unpublished) - len(eligible_with_payload), 0),
         "resolved_thread_count": 0,
     }
 
@@ -228,6 +255,7 @@ async def _publish_review_async(
     is_re_review: bool,
     langgraph_run_id: str | None = None,
     trace_link_config_override: object = None,
+    state: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     thread_id = get_thread_id_from_runtime()
     # The run config's head_sha is frozen at run creation; a push that arrived
@@ -362,6 +390,7 @@ async def _publish_review_async(
             repo=repo,
             pr_number=pr_number,
             token=token,
+            state=state,
         )
         if dropped_ids and valid_with_payload:
             retry_inline = [p for _, p in valid_with_payload]
@@ -735,9 +764,6 @@ async def _record_review_publication(
     }
     comment_id_by_finding_id = _comment_id_by_finding_id(inline_with_payload, comment_records)
 
-    # Re-read the freshest persisted list right before mutating so this single
-    # write merges onto any update that landed since the snapshot the caller
-    # passed in, instead of blindly overwriting it.
     latest = await list_findings_async(thread_id)
     changed = _apply_review_id(
         latest,
@@ -762,6 +788,7 @@ async def _resolve_diff_line_set(
     repo: str,
     pr_number: int,
     token: str,
+    state: dict[str, Any] | None = None,
 ) -> dict[str, set[int]] | None:
     """Return the new-side line set for the PR diff, fetching it if needed.
 
@@ -772,6 +799,10 @@ async def _resolve_diff_line_set(
     fly. Returns ``None`` if the fetch fails — caller treats that as "we
     can't tell which finding is bad, don't retry blindly".
     """
+    if isinstance(state, dict):
+        state_cached = state.get("diff_line_set")
+        if isinstance(state_cached, dict):
+            return state_cached
     config = get_config()
     configurable = config.get("configurable", {}) if isinstance(config, dict) else {}
     cached = configurable.get("diff_line_set") if isinstance(configurable, dict) else None
@@ -791,6 +822,7 @@ async def _filter_against_pr_diff(
     repo: str,
     pr_number: int,
     token: str,
+    state: dict[str, Any] | None = None,
 ) -> tuple[list[tuple[dict[str, Any], dict[str, Any]]], list[str]]:
     """Drop findings whose path/line range is not in the current PR diff.
 
@@ -800,7 +832,7 @@ async def _filter_against_pr_diff(
     original error rather than retry blindly.
     """
     diff_line_set = await _resolve_diff_line_set(
-        owner=owner, repo=repo, pr_number=pr_number, token=token
+        owner=owner, repo=repo, pr_number=pr_number, token=token, state=state
     )
     if diff_line_set is None:
         return list(eligible_with_payload), []

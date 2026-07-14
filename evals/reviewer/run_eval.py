@@ -23,7 +23,8 @@ from langgraph_sdk import get_client
 from langsmith import Client, aevaluate
 from langsmith.schemas import Example
 
-from agent.reviewer_eval_store import _EXPERIMENT_URL_RE, _LOG_TAIL_CHARS
+from agent.review.eval_store import _EXPERIMENT_URL_RE, _LOG_TAIL_CHARS
+from agent.review.findings import REVIEW_FINDING_CAP
 from evals.reviewer.judge import aggregate_pr, judge_match
 from evals.reviewer.store_reporter import StoreReporter, is_enabled
 from evals.reviewer.target import (
@@ -80,9 +81,9 @@ DEFAULT_CONFIG: ReviewerEvalConfig = {
     "assistant_id": "reviewer",
     "model_id": "google_genai:gemini-3.5-flash",
     "reasoning_effort": "medium",
-    "score_mode": "all_findings",
-    "severity_threshold": "medium",
-    "cap": 4,
+    "score_mode": "surfaced_findings",
+    "severity_threshold": "low",
+    "cap": REVIEW_FINDING_CAP,
 }
 
 

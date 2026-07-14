@@ -59,8 +59,9 @@ _SLACK_USERS: dict[str, dict[str, str]] = {
     },
 }
 
+from agent.api.app import app  # noqa: E402
 from agent.dashboard.oauth import COOKIE_NAME, issue_session  # noqa: E402
-from agent.webapp import app, generate_thread_id_from_slack_thread  # noqa: E402
+from agent.utils.thread_ids import generate_thread_id_from_slack_thread  # noqa: E402
 
 GITHUB_WEBHOOK_SECRET = os.environ["GITHUB_WEBHOOK_SECRET"]
 SLACK_SIGNING_SECRET = os.environ["SLACK_SIGNING_SECRET"]
@@ -75,6 +76,7 @@ fakes.seed_bare_remote()
 @app.post("/control/reset")
 async def control_reset() -> JSONResponse:
     fakes.reset()
+    CURRENT_THREAD["channel"] = DEMO_CHANNEL
     CURRENT_THREAD["thread_ts"] = None
     return JSONResponse({"ok": True})
 
@@ -93,27 +95,32 @@ async def slack_send(request: Request) -> JSONResponse:
     form = await request.json()
     text = str(form.get("text", ""))
     mention_bot = bool(form.get("mention_bot", True))
+    channel_type = str(form.get("channel_type") or "")
     # Sender defaults to the first test user (Alice) — the canonical owner the
     # automated tests log in as; the mock UI passes the chosen test user.
     user_id = str(form.get("user") or TEST_USERS[0]["slack_id"])
-    channel = DEMO_CHANNEL
+    channel = str(form.get("channel") or ("D_DEMO" if channel_type == "im" else DEMO_CHANNEL))
 
     ts = fakes.new_thread_ts()
+    CURRENT_THREAD["channel"] = channel
     CURRENT_THREAD["thread_ts"] = ts
     fakes.add_slack_message(channel, ts, user=user_id, text=text, is_bot=False)
 
+    event = {
+        "type": "app_mention" if mention_bot else "message",
+        "channel": channel,
+        "user": user_id,
+        "text": text,
+        "ts": ts,
+        "thread_ts": ts,
+    }
+    if channel_type:
+        event["channel_type"] = channel_type
     payload = {
         "type": "event_callback",
         "event_id": f"Ev{ts}",
         "authorizations": [{"user_id": BOT_USER_ID}],
-        "event": {
-            "type": "app_mention" if mention_bot else "message",
-            "channel": channel,
-            "user": user_id,
-            "text": text,
-            "ts": ts,
-            "thread_ts": ts,
-        },
+        "event": event,
     }
     raw = json.dumps(payload).encode()
     req_ts = str(int(time.time()))
@@ -425,6 +432,13 @@ def _gh_pr_json(pr: dict[str, Any]) -> dict[str, Any]:
 @app.get("/fake-gh/repos/{owner}/{repo}")
 async def gh_get_repo(owner: str, repo: str) -> JSONResponse:
     return JSONResponse({"full_name": f"{owner}/{repo}", "private": False})
+
+
+@app.get("/fake-gh/repos/{owner}/{repo}/branches/{branch:path}")
+async def gh_get_branch(owner: str, repo: str, branch: str) -> JSONResponse:  # noqa: ARG001
+    if not fakes.branch_exists(branch):
+        return JSONResponse({"message": "Branch not found"}, status_code=404)
+    return JSONResponse({"name": branch, "commit": {"sha": "deadbeef"}})
 
 
 @app.get("/fake-gh/repos/{owner}/{repo}/pulls")

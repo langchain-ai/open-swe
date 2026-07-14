@@ -1,7 +1,8 @@
 # Reviewer Eval
 
-Offline LangSmith eval for the Open SWE Reviewer graph against the 50 PRs from
-`withmartian/code-review-benchmark`.
+Offline LangSmith eval for the Open SWE Reviewer graph against the 50 PRs and
+136 reference findings from `withmartian/code-review-benchmark`. Examples have
+1–6 references (mean 2.72).
 
 ## Layout
 
@@ -41,9 +42,10 @@ upstream PR drift can't invalidate it.
 
 ## 2. Run the eval
 
-The reviewer graph must be running and accept a `pr` input matching the
-example schema, and must emit a `submit_review` tool call (or set
-`state["review"]["comments"]`) with `[{file, line, severity, body}, ...]`.
+The reviewer graph must be running and accept the benchmark message/config
+input. Eval runs record findings with `add_finding` and finish with
+`publish_review`, which persists the exact ordered publication snapshot scored
+by the harness.
 
 ```bash
 uv run python -m evals.reviewer.run_eval
@@ -108,9 +110,10 @@ Before scoring with repo-specific styles, run **Review styles** analysis in the
 dashboard for each repo (or copy prompts into store). Re-run `make dev` so the
 reviewer graph sees the same store.
 
-By default the judge scores final `add_finding` calls. Set
-`score_mode = "surfaced_findings"` in the config to score only findings that
-would pass the production threshold/cap.
+By default the judge scores the exact final `surfaced_findings` snapshot,
+including only renderable findings selected by `publish_review`. Set
+`score_mode = "all_findings"` only to diagnose deduplicated `add_finding`
+calls before publication.
 
 `model_id` and `reasoning_effort` in the config are passed to the reviewer run,
 so isolated benchmark deployments can test a specific model/effort without
@@ -120,6 +123,6 @@ changing deployment-wide defaults.
 
 - No GitHub forks needed — both upstream repos and martian's benchmark forks
   (`ai-code-review-evaluation/*`) are public.
-- `judge_match` charges judge LLM tokens proportional to
-  `n_candidates × n_goldens` per example. For 50 PRs with ~3 goldens each and
-  agents emitting ~10 candidates, expect ~1500 judge calls per experiment.
+- `judge_match` evaluates the full deduplicated
+  `n_candidates × n_goldens` matrix so matching is order-independent and its
+  reasoning remains auditable in LangSmith.

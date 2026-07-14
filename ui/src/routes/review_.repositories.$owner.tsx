@@ -36,17 +36,17 @@ function RepositoriesOwnerPage() {
     enabled: !!session.data,
   });
 
-  const enabled = useQuery({
-    queryKey: ["enabledReviewRepos"],
-    queryFn: api.listEnabledReviewRepos,
+  const autoReview = useQuery({
+    queryKey: ["autoReviewRepos"],
+    queryFn: api.listAutoReviewRepos,
     enabled: !!session.data,
   });
 
-  const toggle = useMutation({
+  const toggleAutoReview = useMutation({
     mutationFn: ({ full_name, on }: { full_name: string; on: boolean }) =>
-      api.setEnabledReviewRepo(full_name, on),
+      api.setAutoReviewRepo(full_name, on),
     onSuccess: (data) => {
-      qc.setQueryData(["enabledReviewRepos"], data);
+      qc.setQueryData(["autoReviewRepos"], data);
     },
   });
 
@@ -58,9 +58,9 @@ function RepositoriesOwnerPage() {
     [repos.data?.repositories, owner],
   );
 
-  const enabledSet = useMemo(
-    () => new Set(enabled.data?.repos ?? []),
-    [enabled.data?.repos],
+  const autoReviewSet = useMemo(
+    () => new Set(autoReview.data?.repos ?? []),
+    [autoReview.data?.repos],
   );
 
   const [page, setPage] = useState(0);
@@ -82,8 +82,8 @@ function RepositoriesOwnerPage() {
   if (!session.data) return <RequireLogin />;
 
   const canEdit = session.data.is_admin;
-  const enabledCount = ownerRepos.filter((r) => enabledSet.has(r.full_name)).length;
-  const loading = repos.isLoading || enabled.isLoading;
+  const autoReviewCount = ownerRepos.filter((r) => autoReviewSet.has(r.full_name)).length;
+  const loading = repos.isLoading || autoReview.isLoading;
 
   return (
     <AppShell
@@ -91,8 +91,8 @@ function RepositoriesOwnerPage() {
       title={owner}
       description={
         canEdit
-          ? "Toggle a repository to opt it into automatic Open SWE Review."
-          : "Only team admins can modify enabled repositories."
+          ? "Choose which repositories run Open SWE Review automatically. All installed repositories remain available for on-demand reviews."
+          : "Automatic review settings are read-only for non-admins."
       }
       backTo={{ to: "/review", label: "Back to Open SWE Review" }}
     >
@@ -102,7 +102,7 @@ function RepositoriesOwnerPage() {
             Repositories
           </h2>
           <span className="text-xs text-muted-foreground">
-            {enabledCount}/{ownerRepos.length} enabled
+            {autoReviewCount}/{ownerRepos.length} run automatically
           </span>
         </div>
         <div className="rounded-lg border border-border bg-card">
@@ -118,7 +118,7 @@ function RepositoriesOwnerPage() {
           )}
           <ul className="divide-y divide-border">
             {pageRepos.map((r) => {
-              const isEnabled = enabledSet.has(r.full_name);
+              const runsAutomatically = autoReviewSet.has(r.full_name);
               return (
                 <li
                   key={r.full_name}
@@ -135,22 +135,26 @@ function RepositoriesOwnerPage() {
                       <span className="text-[10px] text-muted-foreground">private</span>
                     )}
                   </div>
-                  <span
-                    title={
-                      !canEdit
-                        ? "Only team admins can modify enabled repositories"
-                        : undefined
-                    }
-                    className={!canEdit ? "cursor-not-allowed" : undefined}
-                  >
-                    <Switch
-                      checked={isEnabled}
-                      disabled={!canEdit || toggle.isPending}
-                      onCheckedChange={(v) =>
-                        toggle.mutate({ full_name: r.full_name, on: v })
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-muted-foreground">Run automatically</span>
+                    <span
+                      title={
+                        !canEdit
+                          ? "Only team admins can modify automatic review settings"
+                          : undefined
                       }
-                    />
-                  </span>
+                      className={!canEdit ? "cursor-not-allowed" : undefined}
+                    >
+                      <Switch
+                        aria-label={`Run reviews automatically for ${r.full_name}`}
+                        checked={runsAutomatically}
+                        disabled={!canEdit || toggleAutoReview.isPending}
+                        onCheckedChange={(v) =>
+                          toggleAutoReview.mutate({ full_name: r.full_name, on: v })
+                        }
+                      />
+                    </span>
+                  </div>
                 </li>
               );
             })}

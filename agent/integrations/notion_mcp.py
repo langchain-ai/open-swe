@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from datetime import timedelta
 from typing import Any
@@ -65,10 +64,6 @@ class _RefreshingNotionMCPTool(BaseTool):
     mcp_tool_name: str
 
     def _run(self, *args: Any, **kwargs: Any) -> Any:
-        try:
-            asyncio.get_running_loop()
-        except RuntimeError:
-            return asyncio.run(self._arun(*args, **kwargs))
         raise RuntimeError("Notion MCP tools must be called asynchronously")
 
     async def _arun(self, *args: Any, **kwargs: Any) -> Any:

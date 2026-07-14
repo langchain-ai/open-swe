@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from "react"
 import type { ModelOption } from "@/lib/api"
 import { AppShell, SettingsRow, SettingsSection } from "@/components/AppShell"
 import { Button } from "@/components/ui/button"
-import { RepoSelector } from "@/components/agents/RepoSelector"
+import { RepoSelector } from "@/features/settings/components/RepoSelector"
 import { Input } from "@/components/ui/input"
 import {
   Select,
@@ -332,7 +332,7 @@ function CloudAgentsPage() {
           </div>
           <CaretRightIcon className="size-3.5 shrink-0 text-muted-foreground" />
         </Link>
-        {session.data?.is_admin && (
+        {session.data.is_admin && (
           <Link
             to="/agents/snapshots"
             className="flex items-center justify-between gap-6 px-4 py-3 hover:bg-muted/40"

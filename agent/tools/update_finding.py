@@ -6,7 +6,7 @@ from typing import Any
 
 from langgraph.config import get_config
 
-from ..reviewer_findings import (
+from ..review.findings import (
     DEFAULT_FINDING_TITLE,
     MAX_SUGGESTION_LINES,
     Finding,

@@ -6,7 +6,6 @@ import asyncio
 import base64
 import logging
 import os
-import time
 from abc import ABC, abstractmethod
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FuturesTimeout
@@ -16,19 +15,34 @@ import httpx
 from deepagents.backends import LangSmithSandbox
 from deepagents.backends.protocol import ExecuteResponse, SandboxBackendProtocol
 from langsmith.sandbox import (
+    AsyncSandboxClient,
     CommandTimeoutError,
-    SandboxClient,
     SandboxConnectionError,
     SandboxServerReloadError,
 )
 
 logger = logging.getLogger(__name__)
 
+try:
+    from langsmith.sandbox import SandboxNotReadyError
+except ImportError:  # pragma: no cover - depends on langsmith SDK version
+    SANDBOX_NOT_READY_ERRORS: tuple[type[BaseException], ...] = ()
+else:
+    SANDBOX_NOT_READY_ERRORS = (SandboxNotReadyError,)
+
 DEFAULT_SNAPSHOT_FS_CAPACITY_BYTES = 32 * 1024**3
 DEFAULT_SANDBOX_VCPUS = 2
 DEFAULT_SANDBOX_MEM_BYTES = 7936 * 1024**2  # 7936 MiB ("large" tier cap)
 DEFAULT_SANDBOX_IDLE_TTL_SECONDS = 2 * 60 * 60  # 2 hours
 DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS = 24 * 60 * 60  # 24 hours
+SANDBOX_CREATE_MAX_ATTEMPTS = 3
+SANDBOX_CREATE_RETRY_DELAYS_SECONDS = (1.0, 3.0)
+SANDBOX_CREATE_RETRYABLE_STATUS_CODES = frozenset({408, 409, 425, 429, 500, 502, 503, 504, 529})
+SANDBOX_READY_STATUSES = frozenset({"ready", "running"})
+SANDBOX_RECONNECT_STARTABLE_STATUSES = frozenset({"stopped", "paused", "idle"})
+SANDBOX_RECONNECT_PENDING_STATUSES = frozenset({"creating", "pending", "starting", "resuming"})
+SANDBOX_RECONNECT_READY_TIMEOUT_SECONDS = 30.0
+SANDBOX_RECONNECT_READY_POLL_SECONDS = 2.0
 PROXY_CONFIG_MAX_ATTEMPTS = 3
 PROXY_CONFIG_TIMEOUT_SECONDS = 10.0
 PROXY_CONFIG_RETRY_DELAYS_SECONDS = (0.5, 1.0)
@@ -134,7 +148,86 @@ def _is_retryable_proxy_config_error(exc: BaseException) -> bool:
     return isinstance(exc, httpx.TransportError)
 
 
-def _configure_github_proxy(sandbox_name: str, github_token: str) -> None:
+def _status_text(sandbox_or_status: Any) -> str:
+    status = getattr(sandbox_or_status, "status", sandbox_or_status)
+    status = getattr(status, "value", status)
+    return str(status or "").lower()
+
+
+def _is_retryable_sandbox_create_error(exc: BaseException) -> bool:
+    response = getattr(exc, "response", None)
+    status_code = getattr(response, "status_code", None) or getattr(exc, "status_code", None)
+    if isinstance(status_code, int):
+        return status_code in SANDBOX_CREATE_RETRYABLE_STATUS_CODES
+    return exc.__class__.__name__ in {
+        "ResourceCreationError",
+        "SandboxAPIError",
+        "SandboxConnectionError",
+        "SandboxNotReadyError",
+    }
+
+
+async def _wait_for_reconnected_sandbox(
+    client: AsyncSandboxClient,
+    sandbox_id: str,
+    *,
+    timeout_seconds: float = SANDBOX_RECONNECT_READY_TIMEOUT_SECONDS,
+    poll_seconds: float = SANDBOX_RECONNECT_READY_POLL_SECONDS,
+) -> Any:
+    deadline = asyncio.get_running_loop().time() + timeout_seconds
+    last_sandbox = await client.get_sandbox(name=sandbox_id)
+    while True:
+        status = _status_text(last_sandbox)
+        if status in SANDBOX_READY_STATUSES or status not in SANDBOX_RECONNECT_PENDING_STATUSES:
+            return last_sandbox
+        if asyncio.get_running_loop().time() >= deadline:
+            return last_sandbox
+        await asyncio.sleep(
+            min(poll_seconds, max(deadline - asyncio.get_running_loop().time(), 0.0))
+        )
+        last_sandbox = await client.get_sandbox(name=sandbox_id)
+
+
+async def _create_sandbox_with_retry(
+    client: AsyncSandboxClient,
+    *,
+    snapshot_id: str,
+    fs_capacity_bytes: int | None,
+    vcpus: int | None,
+    mem_bytes: int | None,
+    idle_ttl_seconds: int | None,
+    delete_after_stop_seconds: int | None,
+    timeout: int,
+) -> Any:
+    for attempt in range(SANDBOX_CREATE_MAX_ATTEMPTS):
+        try:
+            return await client.create_sandbox(
+                snapshot_id=snapshot_id,
+                fs_capacity_bytes=fs_capacity_bytes,
+                vcpus=vcpus,
+                mem_bytes=mem_bytes,
+                idle_ttl_seconds=idle_ttl_seconds,
+                delete_after_stop_seconds=delete_after_stop_seconds,
+                timeout=timeout,
+            )
+        except Exception as exc:
+            if attempt == SANDBOX_CREATE_MAX_ATTEMPTS - 1 or not _is_retryable_sandbox_create_error(
+                exc
+            ):
+                raise
+            delay = SANDBOX_CREATE_RETRY_DELAYS_SECONDS[
+                min(attempt, len(SANDBOX_CREATE_RETRY_DELAYS_SECONDS) - 1)
+            ]
+            logger.warning(
+                "Failed to create LangSmith sandbox (%s); retrying in %.1fs",
+                type(exc).__name__,
+                delay,
+            )
+            await asyncio.sleep(delay)
+    raise RuntimeError("unreachable sandbox retry state")
+
+
+async def _configure_github_proxy(sandbox_name: str, github_token: str) -> None:
     """Configure sandbox proxy to inject GitHub auth for GitHub traffic.
 
     Uses the LangSmith proxy-config API to set up header injection so that
@@ -154,10 +247,10 @@ def _configure_github_proxy(sandbox_name: str, github_token: str) -> None:
     )
     url = f"{langsmith_endpoint}/v2/sandboxes/boxes/{sandbox_name}"
     payload = {"proxy_config": {"rules": _github_proxy_rules(github_token)}}
-    with httpx.Client(timeout=PROXY_CONFIG_TIMEOUT_SECONDS) as client:
+    async with httpx.AsyncClient(timeout=PROXY_CONFIG_TIMEOUT_SECONDS) as client:
         for attempt in range(PROXY_CONFIG_MAX_ATTEMPTS):
             try:
-                response = client.patch(
+                response = await client.patch(
                     url,
                     json=payload,
                     headers={"X-API-Key": api_key},
@@ -186,11 +279,16 @@ def _configure_github_proxy(sandbox_name: str, github_token: str) -> None:
                     type(exc).__name__,
                     delay,
                 )
-                time.sleep(delay)
+                await asyncio.sleep(delay)
     logger.info("Configured GitHub proxy for sandbox %s", sandbox_name)
 
 
-def create_langsmith_sandbox(
+def get_async_sandbox_client() -> AsyncSandboxClient:
+    """Build an ``AsyncSandboxClient`` from the resolved LangSmith API key."""
+    return AsyncSandboxClient(api_key=_get_langsmith_api_key())
+
+
+async def create_langsmith_sandbox(
     sandbox_id: str | None = None,
     github_token: str | None = None,
     *,
@@ -226,7 +324,7 @@ def create_langsmith_sandbox(
     effective_snapshot_id = snapshot_id or default_snapshot_id
 
     provider = LangSmithProvider(api_key=api_key)
-    backend = provider.get_or_create(
+    backend = await provider.get_or_create(
         sandbox_id=sandbox_id,
         snapshot_id=effective_snapshot_id,
         fs_capacity_bytes=fs_capacity_bytes,
@@ -235,19 +333,17 @@ def create_langsmith_sandbox(
         idle_ttl_seconds=idle_ttl_seconds,
         delete_after_stop_seconds=delete_after_stop_seconds,
     )
-    _update_thread_sandbox_metadata(backend.id)
+    await _update_thread_sandbox_metadata(backend.id)
 
     if sandbox_id is None and github_token:
-        _configure_github_proxy(backend.id, github_token)
+        await _configure_github_proxy(backend.id, github_token)
 
     return backend
 
 
-def _update_thread_sandbox_metadata(sandbox_id: str) -> None:
+async def _update_thread_sandbox_metadata(sandbox_id: str) -> None:
     """Update thread metadata with sandbox_id."""
     try:
-        import asyncio
-
         from langgraph.config import get_config
         from langgraph_sdk import get_client
 
@@ -256,19 +352,10 @@ def _update_thread_sandbox_metadata(sandbox_id: str) -> None:
         if not thread_id:
             return
         client = get_client()
-
-        async def _update() -> None:
-            await client.threads.update(
-                thread_id=thread_id,
-                metadata={"sandbox_id": sandbox_id},
-            )
-
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            asyncio.run(_update())
-        else:
-            loop.create_task(_update())
+        await client.threads.update(
+            thread_id=thread_id,
+            metadata={"sandbox_id": sandbox_id},
+        )
     except Exception:
         pass
 
@@ -335,7 +422,7 @@ class TimeoutLangSmithSandbox(LangSmithSandbox):
         # connect/setup failures raise here — fall back to the base path.
         try:
             handle = self._sandbox.run(command, timeout=effective, wait=False)
-        except (*self._WS_FALLBACK_ERRORS, TimeoutError):
+        except (*self._WS_FALLBACK_ERRORS, *SANDBOX_NOT_READY_ERRORS, TimeoutError):
             return self._base_execute(command, timeout)
         deadline = self._deadline(effective)
         pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="sbx-exec")
@@ -348,7 +435,7 @@ class TimeoutLangSmithSandbox(LangSmithSandbox):
                 return self._timeout_response(deadline, server_side=False)
             except CommandTimeoutError:
                 return self._timeout_response(effective, server_side=True)
-            except self._WS_FALLBACK_ERRORS:
+            except (*self._WS_FALLBACK_ERRORS, *SANDBOX_NOT_READY_ERRORS):
                 return self._base_execute(command, timeout)
             return self._result_to_response(result)
         finally:
@@ -371,7 +458,7 @@ class TimeoutLangSmithSandbox(LangSmithSandbox):
             handle = await asyncio.to_thread(
                 self._sandbox.run, command, timeout=effective, wait=False
             )
-        except (*self._WS_FALLBACK_ERRORS, TimeoutError):
+        except (*self._WS_FALLBACK_ERRORS, *SANDBOX_NOT_READY_ERRORS, TimeoutError):
             return await asyncio.to_thread(self._base_execute, command, timeout)
         deadline = self._deadline(effective)
         try:
@@ -383,7 +470,7 @@ class TimeoutLangSmithSandbox(LangSmithSandbox):
             return self._timeout_response(deadline, server_side=False)
         except CommandTimeoutError:
             return self._timeout_response(effective, server_side=True)
-        except self._WS_FALLBACK_ERRORS:
+        except (*self._WS_FALLBACK_ERRORS, *SANDBOX_NOT_READY_ERRORS):
             return await asyncio.to_thread(self._base_execute, command, timeout)
         return self._result_to_response(result)
 
@@ -392,7 +479,7 @@ class SandboxProvider(ABC):
     """Interface for creating and deleting sandbox backends."""
 
     @abstractmethod
-    def get_or_create(
+    async def get_or_create(
         self,
         *,
         sandbox_id: str | None = None,
@@ -402,7 +489,7 @@ class SandboxProvider(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def delete(
+    async def delete(
         self,
         *,
         sandbox_id: str,
@@ -416,13 +503,10 @@ class LangSmithProvider(SandboxProvider):
     """LangSmith sandbox provider implementation."""
 
     def __init__(self, api_key: str | None = None) -> None:
-        from langsmith import sandbox
-
         self._api_key = api_key or _get_langsmith_api_key()
         if not self._api_key:
             msg = "LANGSMITH_API_KEY (or LANGSMITH_API_KEY_PROD) not set"
             raise ValueError(msg)
-        self._client: SandboxClient = sandbox.SandboxClient(api_key=self._api_key)
 
     @classmethod
     def validate_startup_config(cls) -> None:
@@ -456,7 +540,7 @@ class LangSmithProvider(SandboxProvider):
                 msg = f"{name} must be >= 0, got {value}"
                 raise ValueError(msg)
 
-    def get_or_create(
+    async def get_or_create(
         self,
         *,
         sandbox_id: str | None = None,
@@ -469,38 +553,65 @@ class LangSmithProvider(SandboxProvider):
         delete_after_stop_seconds: int | None = None,
         **kwargs: Any,
     ) -> SandboxBackendProtocol:
-        """Get existing or create new LangSmith sandbox."""
+        """Get existing or create new LangSmith sandbox.
+
+        Provisioning runs natively async via ``AsyncSandboxClient``. The
+        resulting ``AsyncSandbox`` is converted to a sync ``Sandbox`` via
+        ``to_sync()`` so it satisfies the deepagents sync ``SandboxBackendProtocol``
+        that ``TimeoutLangSmithSandbox`` and the agent's file/execute tools expect.
+        """
         if kwargs:
             msg = f"Received unsupported arguments: {list(kwargs.keys())}"
             raise TypeError(msg)
-        if sandbox_id:
+        async with AsyncSandboxClient(api_key=self._api_key) as client:
+            if sandbox_id:
+                try:
+                    sandbox = await client.get_sandbox(name=sandbox_id)
+                except Exception as e:
+                    msg = f"Failed to connect to existing sandbox '{sandbox_id}': {e}"
+                    raise RuntimeError(msg) from e
+                status = _status_text(sandbox)
+                if status and status not in SANDBOX_READY_STATUSES:
+                    if status in SANDBOX_RECONNECT_STARTABLE_STATUSES:
+                        try:
+                            logger.info(
+                                "Starting LangSmith sandbox %s before reconnect (status=%s)",
+                                sandbox_id,
+                                status,
+                            )
+                            await client.start_sandbox(sandbox_id)
+                            sandbox = await _wait_for_reconnected_sandbox(client, sandbox_id)
+                            status = _status_text(sandbox)
+                        except Exception as e:
+                            msg = f"Failed to start existing sandbox '{sandbox_id}' ({status})"
+                            raise RuntimeError(msg) from e
+                    if status not in SANDBOX_READY_STATUSES:
+                        msg = f"Existing sandbox '{sandbox_id}' is {status or 'unknown'}, not reusable"
+                        raise RuntimeError(msg)
+                return TimeoutLangSmithSandbox(sandbox.to_sync())
+
+            if not snapshot_id:
+                msg = "DEFAULT_SANDBOX_SNAPSHOT_ID must be set when SANDBOX_TYPE=langsmith"
+                raise ValueError(msg)
+
             try:
-                sandbox = self._client.get_sandbox(name=sandbox_id)
+                sandbox = await _create_sandbox_with_retry(
+                    client,
+                    snapshot_id=snapshot_id,
+                    fs_capacity_bytes=fs_capacity_bytes,
+                    vcpus=vcpus,
+                    mem_bytes=mem_bytes,
+                    idle_ttl_seconds=idle_ttl_seconds,
+                    delete_after_stop_seconds=delete_after_stop_seconds,
+                    timeout=timeout,
+                )
             except Exception as e:
-                msg = f"Failed to connect to existing sandbox '{sandbox_id}': {e}"
+                msg = f"Failed to create sandbox from snapshot '{snapshot_id}': {e}"
                 raise RuntimeError(msg) from e
-            return TimeoutLangSmithSandbox(sandbox)
 
-        if not snapshot_id:
-            msg = "DEFAULT_SANDBOX_SNAPSHOT_ID must be set when SANDBOX_TYPE=langsmith"
-            raise ValueError(msg)
+            return TimeoutLangSmithSandbox(sandbox.to_sync())
 
-        try:
-            sandbox = self._client.create_sandbox(
-                snapshot_id=snapshot_id,
-                fs_capacity_bytes=fs_capacity_bytes,
-                vcpus=vcpus,
-                mem_bytes=mem_bytes,
-                idle_ttl_seconds=idle_ttl_seconds,
-                delete_after_stop_seconds=delete_after_stop_seconds,
-                timeout=timeout,
-            )
-        except Exception as e:
-            msg = f"Failed to create sandbox from snapshot '{snapshot_id}': {e}"
-            raise RuntimeError(msg) from e
-
-        return TimeoutLangSmithSandbox(sandbox)
-
-    def delete(self, *, sandbox_id: str, **kwargs: Any) -> None:
+    async def delete(self, *, sandbox_id: str, **kwargs: Any) -> None:
         """Delete a LangSmith sandbox."""
-        self._client.delete_sandbox(sandbox_id)
+        async with AsyncSandboxClient(api_key=self._api_key) as client:
+            await client.delete_sandbox(sandbox_id)

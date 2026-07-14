@@ -166,6 +166,7 @@ export interface TeamSettings {
   review_trace_links: boolean
   /** Tri-state LLM Gateway toggle; null inherits the LANGSMITH_GATEWAY_ENABLED default. */
   gateway_enabled?: boolean | null
+  fable_enabled?: boolean
   review_tracing_project?: string | null
   org_guidelines?: string | null
   default_agent_model?: string | null
@@ -732,12 +733,12 @@ export const api = {
     request<NotionCredentialStatus>("/my-credentials/notion", {
       method: "DELETE",
     }),
-  listEnabledReviewRepos: () =>
+  listAutoReviewRepos: () =>
     request<{ repos: Array<string> }>("/enabled-review-repos"),
-  setEnabledReviewRepo: (full_name: string, enabled: boolean) =>
+  setAutoReviewRepo: (full_name: string, runAutomatically: boolean) =>
     request<{ repos: Array<string> }>("/enabled-review-repos", {
       method: "PUT",
-      body: JSON.stringify({ full_name, enabled }),
+      body: JSON.stringify({ full_name, enabled: runAutomatically }),
     }),
   usageLeaderboard: (period: UsageLeaderboardPeriod = "30d", limit = 10) =>
     request<UsageLeaderboardPayload>(
@@ -816,7 +817,10 @@ export const api = {
 
 export function loginUrl(redirectTo?: string): string {
   const target =
-    redirectTo ?? (typeof window !== "undefined" ? window.location.href : "")
+    redirectTo ??
+    (typeof window !== "undefined"
+      ? `${window.location.pathname}${window.location.search}${window.location.hash}`
+      : "")
   const qs = target ? `?redirect_to=${encodeURIComponent(target)}` : ""
   return `${API_BASE}/dashboard/api/auth/login${qs}`
 }

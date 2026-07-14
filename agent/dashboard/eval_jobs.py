@@ -17,12 +17,13 @@ from typing import Any, Literal, TypedDict
 
 from langgraph_sdk import get_client
 
-from agent.reviewer_eval_store import (
+from agent.review.eval_store import (
     _HEARTBEAT_STALE_SECONDS,
     DEFAULT_EVAL_PROJECT,
     EVALS_NAMESPACE,
     REVIEWER_EVAL_KEY,
 )
+from agent.review.findings import REVIEW_FINDING_CAP
 
 logger = logging.getLogger(__name__)
 
@@ -54,9 +55,9 @@ DEFAULT_REVIEWER_EVAL_CONFIG: ReviewerEvalConfig = {
     "assistant_id": "reviewer",
     "model_id": "google_genai:gemini-3.5-flash",
     "reasoning_effort": "medium",
-    "score_mode": "all_findings",
-    "severity_threshold": "medium",
-    "cap": 4,
+    "score_mode": "surfaced_findings",
+    "severity_threshold": "low",
+    "cap": REVIEW_FINDING_CAP,
 }
 
 

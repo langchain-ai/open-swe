@@ -124,6 +124,15 @@ def _diff_files(base: str, head: str) -> list[dict[str, Any]]:
     return files
 
 
+def branch_exists(branch: str) -> bool:
+    """Check whether a branch exists in the bare remote (the fake GitHub)."""
+    try:
+        _git("--git-dir", str(BARE_REMOTE), "rev-parse", "--verify", f"refs/heads/{branch}")
+        return True
+    except subprocess.CalledProcessError:
+        return False
+
+
 def create_pull(
     owner: str, repo: str, *, head: str, base: str, title: str, body: str, draft: bool
 ) -> dict[str, Any]:

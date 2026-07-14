@@ -35,14 +35,14 @@ on:
       score_mode:
         description: all_findings | surfaced_findings
         type: choice
-        default: all_findings
+        default: surfaced_findings
         options:
           - all_findings
           - surfaced_findings
       severity_threshold:
         description: Severity threshold (surfaced_findings only)
         type: choice
-        default: medium
+        default: low
         options:
           - low
           - medium
@@ -51,7 +51,7 @@ on:
       cap:
         description: Max surfaced findings per PR (surfaced_findings only)
         type: string
-        default: "4"
+        default: "6"
       limit:
         description: Run only the first N examples (blank = full dataset)
         type: string
@@ -78,7 +78,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 360
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
       - name: Install dependencies
         run: uv sync --locked

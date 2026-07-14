@@ -3,8 +3,6 @@ import logging
 import os
 from typing import Any
 
-from exa_py import Exa
-
 logger = logging.getLogger(__name__)
 
 
@@ -38,6 +36,8 @@ async def web_search(
         }
 
     async def _search() -> dict[str, Any]:
+        from exa_py import Exa  # deferred: heavy import
+
         client = Exa(api_key=api_key)
         if include_contents:
             result = await asyncio.to_thread(

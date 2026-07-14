@@ -1,4 +1,4 @@
-FROM python:3.14.5-slim-trixie
+FROM python:3.14.6-slim-trixie
 
 ARG DOCKER_CLI_VERSION=5:29.1.5-1~debian.13~trixie
 ARG NODEJS_VERSION=22.22.0-1nodesource1
@@ -23,8 +23,10 @@ RUN apt-get update && apt-get install -y \
     gnupg \
     lsb-release \
     build-essential \
+    cargo \
     openssh-client \
     jq \
+    ripgrep \
     unzip \
     zip \
     && rm -rf /var/lib/apt/lists/*
@@ -100,6 +102,7 @@ RUN echo "=== Installed versions ===" \
     && yarn --version \
     && sfw --version \
     && go version \
+    && cargo --version \
     && docker --version \
     && git --version \
     && gh --version
