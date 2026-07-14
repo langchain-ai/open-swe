@@ -268,7 +268,13 @@ async def test_post_slack_thread_reply_with_ts_sends_blocks(
         )
 
     assert result == ("1.0", None)
-    assert client_cm.post.call_args.kwargs["json"]["blocks"] == blocks
+    payload = client_cm.post.call_args.kwargs["json"]
+    expected_footer = f"<{slack_utils._slack_thread_dashboard_url('C1', '1.0')}|Open in Web>"
+    assert payload["text"] == f"Pick {expected_footer}"
+    assert payload["blocks"] == [
+        *blocks,
+        {"type": "context", "elements": [{"type": "mrkdwn", "text": expected_footer}]},
+    ]
 
 
 @pytest.mark.asyncio
