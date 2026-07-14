@@ -63,6 +63,7 @@ _TOOL_STATUS: dict[str, str] = {
     "linear_get_issue": "checking Linear...",
     "linear_get_issue_comments": "checking Linear...",
     "linear_list_teams": "checking Linear...",
+    "linear_search_issues": "searching Linear...",
     "linear_update_issue": "updating Linear...",
     "linear_delete_issue": "updating Linear...",
     "add_finding": "recording review findings...",

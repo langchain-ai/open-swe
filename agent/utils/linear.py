@@ -132,6 +132,84 @@ async def get_issue(issue_id: str) -> dict[str, Any]:
     return {"issue": result.get("issue")}
 
 
+async def search_issues(
+    query: str,
+    team_id: str | None = None,
+    limit: int = 10,
+    include_archived: bool = False,
+    include_comments: bool = False,
+    after: str | None = None,
+) -> dict[str, Any]:
+    """Search Linear issues by free-text query."""
+    query = query.strip()
+    if not query:
+        return {"error": "Search query must not be empty"}
+    if not 1 <= limit <= 50:
+        return {"error": "Search limit must be between 1 and 50"}
+
+    search_query = """
+    query SearchIssues(
+        $query: String!
+        $filter: IssueFilter
+        $limit: Int!
+        $includeArchived: Boolean
+        $includeComments: Boolean
+        $after: String
+    ) {
+        searchIssues(
+            term: $query
+            filter: $filter
+            first: $limit
+            includeArchived: $includeArchived
+            includeComments: $includeComments
+            after: $after
+        ) {
+            totalCount
+            pageInfo {
+                hasNextPage
+                endCursor
+            }
+            nodes {
+                id
+                identifier
+                title
+                priority
+                priorityLabel
+                state { id name type }
+                assignee { id name email }
+                team { id name key }
+                project { id name }
+                labels { nodes { id name } }
+                createdAt
+                updatedAt
+                archivedAt
+                url
+            }
+        }
+    }
+    """
+    result = await _graphql_request(
+        search_query,
+        {
+            "query": query,
+            "filter": {"team": {"id": {"eq": team_id}}} if team_id else None,
+            "limit": limit,
+            "includeArchived": include_archived,
+            "includeComments": include_comments,
+            "after": after,
+        },
+    )
+    if "error" in result:
+        return result
+
+    search_results = result.get("searchIssues", {})
+    return {
+        "issues": search_results.get("nodes", []),
+        "total_count": search_results.get("totalCount", 0),
+        "page_info": search_results.get("pageInfo", {}),
+    }
+
+
 async def create_issue(
     team_id: str,
     title: str,
