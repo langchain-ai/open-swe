@@ -73,6 +73,84 @@ def _is_natural_language_plan_approval(text: str) -> bool:
     return any(f" {phrase} " in padded for phrase in _PLAN_APPROVAL_PHRASES)
 
 
+async def _slack_thread_allows_untagged_reply(
+    channel_id: str, thread_ts: str, text: str, bot_user_id: str
+) -> bool:
+    """Allow an untagged follow-up when Open SWE and exactly one human share the thread.
+
+    Skipped when the message mentions any user other than Open SWE, so tagging a
+    different person still hands the turn to them rather than the agent.
+    """
+    if not channel_id or not thread_ts or not bot_user_id:
+        return False
+
+    mentioned = set(re.findall(r"<@([A-Z0-9_]+)", text or ""))
+    if any(user_id != bot_user_id for user_id in mentioned):
+        return False
+
+    messages = await common.fetch_slack_thread_messages(channel_id, thread_ts)
+    bot_participated = False
+    humans: set[str] = set()
+    for message in messages:
+        author = message.get("user")
+        if author == bot_user_id:
+            bot_participated = True
+            continue
+        # Skip other apps (GitHub/CI bots) — they are neither Open SWE nor a human participant.
+        if message.get("bot_id"):
+            continue
+        if isinstance(author, str) and author:
+            humans.add(author)
+
+    return bot_participated and len(humans) == 1
+
+
+async def _slack_thread_is_busy(client: Any, thread_id: str) -> bool:
+    try:
+        thread = await client.threads.get(thread_id)
+    except Exception:  # noqa: BLE001
+        common.logger.debug(
+            "Could not read Slack thread status for %s; treating as idle", thread_id, exc_info=True
+        )
+        return False
+    status = thread.get("status") if isinstance(thread, dict) else None
+    return status == "busy"
+
+
+async def _dispatch_or_queue_slack_run(
+    client: Any,
+    thread_id: str,
+    content_blocks: list[dict[str, Any]],
+    configurable: dict[str, Any],
+    *,
+    is_first_mention: bool,
+    explicitly_tagged: bool,
+) -> dict[str, Any] | None:
+    """Start a run, or coalesce onto the thread queue if one is already in flight.
+
+    An explicit @-mention always interrupts immediately (the active run halts and
+    resumes with the new message). Only untagged follow-ups are debounced: while
+    the agent is busy they are parked on the store queue and picked up together at
+    its next model call (via ``check_message_queue_before_model``). Returns the run
+    dict, or ``None`` when the message was queued.
+    """
+    if (
+        not explicitly_tagged
+        and not is_first_mention
+        and await _slack_thread_is_busy(client, thread_id)
+    ):
+        await common.queue_message_for_thread(thread_id, content_blocks)
+        return None
+    return await common.dispatch_agent_run(
+        thread_id,
+        content_blocks,
+        configurable,
+        source="slack",
+        metadata=common._AGENT_VERSION_METADATA,
+        client=client,
+    )
+
+
 async def _slack_user_can_reply_to_ready_plan(
     channel_id: str, thread_ts: str, slack_user_id: str
 ) -> bool:
@@ -81,7 +159,12 @@ async def _slack_user_can_reply_to_ready_plan(
     from agent.dashboard.plan_api import _thread_metadata
 
     thread_id = common.generate_thread_id_from_slack_thread(channel_id, thread_ts)
-    metadata = await _thread_metadata(thread_id)
+    try:
+        metadata = await _thread_metadata(thread_id)
+    except Exception:  # noqa: BLE001
+        # A brand-new thread has no metadata (_thread_metadata raises 404); an
+        # untagged message there simply isn't a plan reply — don't abort the gate.
+        return False
     return (
         metadata.get("plan_mode") is True
         and metadata.get("plan_status") == "ready"
@@ -468,14 +551,24 @@ async def _process_slack_mention_impl(
         source_context={"slack_thread": configurable["slack_thread"]},
     )
 
-    run = await common.dispatch_agent_run(
+    # A DM (treat_all_messages_as_mentions) is inherently directed at the bot, so
+    # it interrupts immediately like an explicit @-mention rather than debouncing.
+    explicitly_tagged = bool(
+        treat_all_messages_as_mentions
+        or (bot_user_id and f"<@{bot_user_id}>" in text)
+        or (common.SLACK_BOT_USERNAME and f"@{common.SLACK_BOT_USERNAME}" in text)
+    )
+    run = await _dispatch_or_queue_slack_run(
+        langgraph_client,
         thread_id,
         content_blocks,
         configurable,
-        source="slack",
-        metadata=common._AGENT_VERSION_METADATA,
-        client=langgraph_client,
+        is_first_mention=is_first_mention,
+        explicitly_tagged=explicitly_tagged,
     )
+    if run is None:
+        common.logger.info("Coalesced Slack follow-up onto the queue for busy thread %s", thread_id)
+        return
     common.logger.info(
         "Slack LangGraph run %s dispatched for thread %s",
         common._run_id_for_logging(run),
