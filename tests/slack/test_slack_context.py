@@ -225,7 +225,7 @@ def test_post_slack_thread_reply_adds_web_context_block(monkeypatch: pytest.Monk
     asyncio.run(slack_utils.post_slack_thread_reply_with_ts("C123", "1.0", "Done"))
 
     expected_thread_id = generate_thread_id_from_slack_thread("C123", "1.0")
-    expected_footer = f"<https://app.example.com/agents/{expected_thread_id}|web>"
+    expected_footer = f"<https://app.example.com/agents/{expected_thread_id}|Open in Web>"
     assert captured["text"] == f"Done {expected_footer}"
     posted_blocks = captured["blocks"]
     assert isinstance(posted_blocks, list)
@@ -264,7 +264,7 @@ def test_post_slack_thread_reply_appends_web_context_block_to_blocks(
     )
 
     expected_thread_id = generate_thread_id_from_slack_thread("C123", "1.0")
-    expected_footer = f"<https://app.example.com/agents/{expected_thread_id}|web>"
+    expected_footer = f"<https://app.example.com/agents/{expected_thread_id}|Open in Web>"
     assert captured["text"] == f"Pick one {expected_footer}"
     posted_blocks = captured["blocks"]
     assert isinstance(posted_blocks, list)

@@ -48,7 +48,7 @@ DEFAULT_LOADING_MESSAGES: tuple[str, ...] = (
     "Tinkering…",
     "Schlepping…",
 )
-SLACK_WEB_LINK_FOOTER_LABEL = "web"
+SLACK_WEB_LINK_FOOTER_LABEL = "Open in Web"
 
 
 @dataclass(frozen=True)
