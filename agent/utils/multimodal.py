@@ -11,7 +11,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 import httpx
-from langchain_core.messages.content import create_image_block
+from langchain_core.messages.content import create_image_block, create_text_block
 
 from .url_safety import request_with_safe_redirects
 
@@ -86,7 +86,7 @@ async def fetch_image_block(
     image_url: str,
     client: httpx.AsyncClient,
 ) -> dict[str, Any] | None:
-    """Fetch image bytes and build an image content block."""
+    """Fetch image bytes and build a model content block."""
     try:
         logger.debug("Fetching image from %s", image_url)
         response, blocked = await request_with_safe_redirects(
@@ -126,7 +126,9 @@ async def fetch_image_block(
                 image_url,
                 _MAX_IMAGE_BYTES,
             )
-            return None
+            return create_text_block(
+                "An attached image was skipped because it exceeded the 10 MiB size limit."
+            )
 
         encoded = base64.b64encode(response.content).decode("ascii")
         logger.info(
