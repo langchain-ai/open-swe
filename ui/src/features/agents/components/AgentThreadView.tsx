@@ -139,6 +139,19 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
           <div className="border-b border-[var(--ui-border)] bg-[var(--ui-danger)]/10 px-4 py-2 text-xs text-[var(--ui-danger)]">
             The last run hit an error before it could finish. Send another
             message to retry.
+            {thread.traceUrl && (
+              <>
+                {" "}
+                <a
+                  href={thread.traceUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="font-medium underline underline-offset-2"
+                >
+                  Open trace
+                </a>
+              </>
+            )}
           </div>
         )}
         <WorkflowApprovalCard
