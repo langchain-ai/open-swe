@@ -17,6 +17,8 @@ from .url_safety import request_with_safe_redirects
 
 logger = logging.getLogger(__name__)
 
+_MAX_IMAGE_BYTES = 10 * 1024 * 1024
+
 IMAGE_MARKDOWN_RE = re.compile(r"!\[[^\]]*\]\((https?://[^\s)]+)\)")
 IMAGE_URL_RE = re.compile(
     r"(https?://[^\s)]+\.(?:png|jpe?g|gif|webp|bmp|tiff)(?:\?[^\s)]+)?)",
@@ -116,6 +118,13 @@ async def fetch_image_block(
                 "Unsupported content type '%s' for %s; skipping image",
                 content_type,
                 image_url,
+            )
+            return None
+        if len(response.content) > _MAX_IMAGE_BYTES:
+            logger.warning(
+                "Image %s exceeds the %d-byte limit; skipping image",
+                image_url,
+                _MAX_IMAGE_BYTES,
             )
             return None
 

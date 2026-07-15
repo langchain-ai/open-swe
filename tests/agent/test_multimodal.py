@@ -227,6 +227,42 @@ async def test_fetch_image_block_tries_each_validated_address(monkeypatch: Any) 
     ]
 
 
+async def test_fetch_image_block_accepts_image_at_size_limit(monkeypatch: Any) -> None:
+    _patch_image_dns(monkeypatch)
+    monkeypatch.setattr(multimodal, "_MAX_IMAGE_BYTES", 3)
+    monkeypatch.setattr(multimodal, "create_image_block", lambda **kwargs: kwargs)
+
+    def responder(method: str, url: str, **kwargs: Any) -> FakeImageResponse:
+        return FakeImageResponse(
+            status_code=200,
+            url=url,
+            headers={"Content-Type": "image/png"},
+            content=b"png",
+        )
+
+    result = await fetch_image_block("https://example.com/image.png", FakeImageClient(responder))
+
+    assert result == {"base64": "cG5n", "mime_type": "image/png"}
+
+
+async def test_fetch_image_block_skips_image_above_size_limit(monkeypatch: Any) -> None:
+    _patch_image_dns(monkeypatch)
+    monkeypatch.setattr(multimodal, "_MAX_IMAGE_BYTES", 3)
+    monkeypatch.setattr(multimodal, "create_image_block", lambda **kwargs: kwargs)
+
+    def responder(method: str, url: str, **kwargs: Any) -> FakeImageResponse:
+        return FakeImageResponse(
+            status_code=200,
+            url=url,
+            headers={"Content-Type": "image/png"},
+            content=b"large",
+        )
+
+    result = await fetch_image_block("https://example.com/image.png", FakeImageClient(responder))
+
+    assert result is None
+
+
 async def test_fetch_image_block_does_not_forward_slack_auth_to_redirect_host(
     monkeypatch: Any,
 ) -> None:
