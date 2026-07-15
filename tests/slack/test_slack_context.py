@@ -235,6 +235,35 @@ def test_post_slack_thread_reply_adds_web_context_block(monkeypatch: pytest.Monk
     ]
 
 
+def test_post_slack_thread_reply_keeps_long_messages_text_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    async def fake_post_message_with_ts(
+        channel_id: str,
+        text: str,
+        *,
+        thread_ts: str | None = None,
+        unfurl_links: bool = True,
+        unfurl_media: bool = True,
+        blocks: list[dict] | None = None,
+    ) -> tuple[str | None, str | None]:
+        captured.update({"text": text, "blocks": blocks})
+        return "1.1", None
+
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://app.example.com")
+    monkeypatch.setattr(slack_utils, "_post_slack_message_with_ts", fake_post_message_with_ts)
+
+    long_text = "x" * (slack_utils.SLACK_SECTION_TEXT_MAX_CHARS + 1)
+    asyncio.run(slack_utils.post_slack_thread_reply_with_ts("C123", "1.0", long_text))
+
+    expected_thread_id = generate_thread_id_from_slack_thread("C123", "1.0")
+    expected_footer = f"<https://app.example.com/agents/{expected_thread_id}|Open in Web>"
+    assert captured["text"] == f"{long_text} {expected_footer}"
+    assert captured["blocks"] is None
+
+
 def test_post_slack_thread_reply_appends_web_context_block_to_blocks(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

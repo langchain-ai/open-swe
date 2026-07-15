@@ -49,6 +49,7 @@ DEFAULT_LOADING_MESSAGES: tuple[str, ...] = (
     "Schlepping…",
 )
 SLACK_WEB_LINK_FOOTER_LABEL = "Open in Web"
+SLACK_SECTION_TEXT_MAX_CHARS = 3000
 
 
 @dataclass(frozen=True)
@@ -414,6 +415,8 @@ def _with_slack_web_link_context_block(
     if context_block is None:
         return blocks
     if not blocks:
+        if len(text) > SLACK_SECTION_TEXT_MAX_CHARS:
+            return None
         return [
             {"type": "section", "text": {"type": "mrkdwn", "text": text}},
             context_block,
