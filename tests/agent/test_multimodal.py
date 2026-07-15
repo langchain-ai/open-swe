@@ -318,3 +318,42 @@ async def test_fetch_image_block_keeps_auth_within_slack_host_family(monkeypatch
     assert all(
         call["headers"]["Authorization"] == "Bearer test-slack-token" for call in client.calls
     )
+
+
+async def test_fetch_image_block_skips_oversized_image(monkeypatch: Any) -> None:
+    _patch_image_dns(monkeypatch)
+    monkeypatch.setattr(multimodal, "create_image_block", lambda **kwargs: kwargs)
+
+    def responder(method: str, url: str, **kwargs: Any) -> FakeImageResponse:
+        return FakeImageResponse(
+            status_code=200,
+            url=url,
+            headers={"Content-Type": "image/png"},
+            content=b"x" * (multimodal.MAX_IMAGE_BYTES + 1),
+        )
+
+    client = FakeImageClient(responder)
+
+    result = await fetch_image_block("https://example.com/huge.png", client)
+
+    assert result is None
+
+
+async def test_fetch_image_block_allows_image_at_limit(monkeypatch: Any) -> None:
+    _patch_image_dns(monkeypatch)
+    monkeypatch.setattr(multimodal, "create_image_block", lambda **kwargs: kwargs)
+
+    def responder(method: str, url: str, **kwargs: Any) -> FakeImageResponse:
+        return FakeImageResponse(
+            status_code=200,
+            url=url,
+            headers={"Content-Type": "image/png"},
+            content=b"x" * multimodal.MAX_IMAGE_BYTES,
+        )
+
+    client = FakeImageClient(responder)
+
+    result = await fetch_image_block("https://example.com/big.png", client)
+
+    assert result is not None
+    assert result["mime_type"] == "image/png"

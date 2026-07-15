@@ -17,6 +17,10 @@ from .url_safety import request_with_safe_redirects
 
 logger = logging.getLogger(__name__)
 
+# Provider hard limit for a single base64-encoded image. Shared by every image
+# ingestion path (Slack, Linear, dashboard) so one limit governs them all.
+MAX_IMAGE_BYTES = 10 * 1024 * 1024
+
 IMAGE_MARKDOWN_RE = re.compile(r"!\[[^\]]*\]\((https?://[^\s)]+)\)")
 IMAGE_URL_RE = re.compile(
     r"(https?://[^\s)]+\.(?:png|jpe?g|gif|webp|bmp|tiff)(?:\?[^\s)]+)?)",
@@ -116,6 +120,15 @@ async def fetch_image_block(
                 "Unsupported content type '%s' for %s; skipping image",
                 content_type,
                 image_url,
+            )
+            return None
+
+        if len(response.content) > MAX_IMAGE_BYTES:
+            logger.warning(
+                "Skipping oversized image %s (%d bytes > %d limit)",
+                image_url,
+                len(response.content),
+                MAX_IMAGE_BYTES,
             )
             return None
 

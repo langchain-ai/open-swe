@@ -473,11 +473,20 @@ async def _process_slack_mention_impl(
             resolved_model_id = fallback_model_id
             image_model_override = (fallback_model_id, fallback_effort)
         common.logger.info("Preparing %d image(s) for Slack mention", len(image_urls))
+        dropped_images = 0
         async with httpx.AsyncClient(timeout=common.DEFAULT_HTTP_TIMEOUT) as http_client:
             for image_url in image_urls:
                 image_block = await common.fetch_image_block(image_url, http_client)
                 if image_block:
                     content_blocks.append(image_block)
+                else:
+                    dropped_images += 1
+        if dropped_images:
+            content_blocks.append(
+                create_text_block(
+                    f"[{dropped_images} attached image(s) were too large or could not be included]"
+                )
+            )
 
     # Open SWE opens PRs as the triggering user, so a run only proceeds when we
     # have a valid user GitHub token. Users who have never signed in with
