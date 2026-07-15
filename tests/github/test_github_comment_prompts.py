@@ -133,6 +133,8 @@ def test_shared_base_requires_terse_slack_replies_with_share_path() -> None:
     assert "Default to one sentence" in OPEN_SWE_SHARED_BASE
     assert "applies only to Slack tool messages" in OPEN_SWE_SHARED_BASE
     assert "not normal assistant messages shown in the web UI" in OPEN_SWE_SHARED_BASE
+    assert "post a very short acknowledgement" in OPEN_SWE_SHARED_BASE
+    assert "before cloning/checking out repositories" in OPEN_SWE_SHARED_BASE
     assert "Never paste long output" in OPEN_SWE_SHARED_BASE
     assert "`save_plan`" in OPEN_SWE_SHARED_BASE
     assert "plan-review link" in OPEN_SWE_SHARED_BASE

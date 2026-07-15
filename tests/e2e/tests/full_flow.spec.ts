@@ -70,7 +70,7 @@ test.describe("Open SWE full flow", () => {
     expect(breakoutThreadTs).toBeTruthy();
 
     const breakoutThreadMessages = page.locator(`.msg.bot[data-thread-ts="${breakoutThreadTs}"]`);
-    await expect(breakoutThreadMessages.locator('a[href*="/agents/"]')).toBeVisible({
+    await expect(breakoutThreadMessages.locator('a[href*="/agents/"]').first()).toBeVisible({
       timeout: 60_000,
     });
     await expect(

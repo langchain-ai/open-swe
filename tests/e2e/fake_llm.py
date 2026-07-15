@@ -33,6 +33,7 @@ from langchain_core.outputs import ChatGeneration, ChatResult
 # fresh shell rooted at the sandbox dir, so the clone+commit+push is bundled.
 _IMPLEMENT_SCRIPT = f"""
 set -e
+sleep 8
 rm -rf repo
 git clone "$E2E_REMOTE" repo
 cd repo
@@ -276,6 +277,12 @@ def _followup_step(messages: list[BaseMessage]) -> AIMessage:
 
 SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
     "implement": (
+        _tool_step(
+            "Acknowledging the Slack request before starting work.",
+            "slack_thread_reply",
+            {"message": "On it!"},
+            "call-ack",
+        ),
         _tool_step(
             "Setting up the repo and implementing the change.",
             "execute",
