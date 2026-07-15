@@ -112,6 +112,36 @@ async def test_cache_is_scoped_per_repository_set(monkeypatch: pytest.MonkeyPatc
 
 
 @pytest.mark.asyncio
+async def test_invalidating_one_scope_forces_only_that_scope_to_remint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    future = (datetime.now(UTC) + timedelta(hours=1)).isoformat()
+
+    class Client(_CountingClient):
+        posts = 0
+        expires_at = future
+
+    _configure(monkeypatch, Client)
+    permissions = {"contents": "read", "pull_requests": "write"}
+
+    await github_app.get_github_app_installation_token_with_expiry(
+        repositories=["a"], permissions=permissions
+    )
+    await github_app.get_github_app_installation_token_with_expiry(
+        repositories=["b"], permissions=permissions
+    )
+    github_app.invalidate_cached_app_token(repositories=["a"], permissions=permissions)
+    await github_app.get_github_app_installation_token_with_expiry(
+        repositories=["a"], permissions=permissions
+    )
+    await github_app.get_github_app_installation_token_with_expiry(
+        repositories=["b"], permissions=permissions
+    )
+
+    assert Client.posts == 3
+
+
+@pytest.mark.asyncio
 async def test_near_expiry_token_is_not_cached(monkeypatch: pytest.MonkeyPatch) -> None:
     soon = (datetime.now(UTC) + timedelta(minutes=2)).isoformat()
 

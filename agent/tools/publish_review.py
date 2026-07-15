@@ -2,12 +2,21 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Annotated, Any
+from uuid import UUID
 
 from langgraph.config import get_config
 from langgraph.prebuilt import InjectedState
 
 from ..dashboard.team_settings import get_team_review_trace_links_enabled
+from ..review.auth import (
+    ReviewerPublicationContextError,
+    ReviewerPublicationContextUnavailableError,
+    ReviewerTokenUnavailableError,
+    invalidate_reviewer_github_token,
+    recover_reviewer_github_token,
+)
 from ..review.diff import compute_diff_line_set, fetch_pr_diff, is_range_in_diff
 from ..review.findings import (
     REVIEW_FINDING_CAP,
@@ -48,14 +57,12 @@ from ..review.publish import (
 from ..review.reconcile import reconcile_findings_with_review_threads
 from ..utils.dashboard_links import dashboard_review_url
 from ..utils.github_checks import review_check_conclusion
-from ..utils.github_token import (
-    GitHubAuthError,
-    get_github_token,
-    invalidate_cached_github_token,
-)
+from ..utils.github_token import GitHubAuthError, invalidate_cached_github_token
 from ..utils.langsmith import get_langsmith_trace_url
 from ..utils.slack import post_slack_thread_reply
 from ..utils.tracing import REVIEW_TRACING_PROJECT
+
+logger = logging.getLogger(__name__)
 
 
 async def publish_review(
@@ -141,38 +148,174 @@ async def publish_review(
         except ReviewerThreadMissingError as exc:
             return thread_missing_tool_result(exc)
 
-    token = get_github_token()
-    if not token:
-        return {"success": False, "error": "No GitHub token available"}
+    owner = str(repo_config["owner"])
+    repo = str(repo_config["name"])
+    run_id = _current_run_id(config)
+    try:
+        thread_id = get_thread_id_from_runtime()
+        token = await recover_reviewer_github_token(
+            run_config=config,
+            thread_id=thread_id,
+            owner=owner,
+            repo=repo,
+            pr_number=pr_number,
+            run_id=run_id,
+        )
+    except ReviewerThreadMissingError as exc:
+        return thread_missing_tool_result(exc)
+    except ReviewerPublicationContextUnavailableError:
+        return {
+            "success": False,
+            "error": "Reviewer publication context is temporarily unavailable",
+            "error_code": "publication_context_unavailable",
+            "retryable": True,
+            "publication_pending": False,
+        }
+    except ReviewerPublicationContextError:
+        return {
+            "success": False,
+            "error": "Reviewer publication context validation failed",
+            "error_code": "publication_context_mismatch",
+            "retryable": False,
+        }
+    except ReviewerTokenUnavailableError:
+        try:
+            await _record_review_publication_pending(
+                thread_id=thread_id,
+                owner=owner,
+                repo=repo,
+                pr_number=pr_number,
+                head_sha=head_sha,
+                severity_threshold=_cast_severity(severity_threshold),
+                run_id=run_id,
+                error_code="github_app_token_unavailable",
+            )
+        except ReviewerThreadMissingError as exc:
+            return thread_missing_tool_result(exc)
+        except Exception:
+            logger.exception(
+                "Failed to record token-recovery publication state for thread %s",
+                thread_id,
+            )
+            return {
+                "success": False,
+                "error": "GitHub App token unavailable; findings remain stored on the thread",
+                "error_code": "github_app_token_unavailable",
+                "retryable": True,
+                "publication_pending": False,
+            }
+        return {
+            "success": False,
+            "error": "GitHub App token unavailable; findings were preserved for retry",
+            "error_code": "github_app_token_unavailable",
+            "retryable": True,
+            "publication_pending": True,
+        }
 
     try:
-        return await _publish_review_async(
-            owner=str(repo_config["owner"]),
-            repo=str(repo_config["name"]),
+        result = await _publish_review_async(
+            owner=owner,
+            repo=repo,
             pr_number=pr_number,
             head_sha=head_sha,
             token=token,
             severity_threshold=_cast_severity(severity_threshold),
             cap=REVIEW_FINDING_CAP,
             is_re_review=is_re_review,
-            langgraph_run_id=_current_run_id(config),
+            langgraph_run_id=run_id,
             trace_link_config_override=configurable.get("review_trace_link_enabled"),
             state=state,
         )
+        if result.get("success"):
+            try:
+                await set_reviewer_thread_metadata(
+                    thread_id,
+                    extra={"review_publication_pending": None},
+                )
+            except Exception:
+                logger.exception(
+                    "Published review but failed to clear pending state for thread %s",
+                    thread_id,
+                )
+        return result
     except ReviewerThreadMissingError as exc:
         return thread_missing_tool_result(exc)
     except GitHubAuthError as exc:
-        thread_id = get_thread_id_from_runtime()
-        if thread_id:
-            await invalidate_cached_github_token(thread_id)
+        await invalidate_cached_github_token(thread_id)
+        invalidate_reviewer_github_token(repo)
+        publication_pending = True
+        try:
+            await _record_review_publication_pending(
+                thread_id=thread_id,
+                owner=owner,
+                repo=repo,
+                pr_number=pr_number,
+                head_sha=head_sha,
+                severity_threshold=_cast_severity(severity_threshold),
+                run_id=run_id,
+                error_code="github_token_rejected",
+            )
+        except Exception:
+            publication_pending = False
+            logger.exception(
+                "Failed to record rejected-token publication state for thread %s",
+                thread_id,
+            )
         return {
             "success": False,
             "error": (
-                "GitHub returned 401 — the cached OAuth token is invalid or revoked. "
-                "Please re-authenticate and trigger the review again."
+                "GitHub returned 401 — the cached reviewer token was rejected. "
+                "Retry publish_review to provision a fresh GitHub App token."
             ),
             "auth_error": str(exc),
+            "error_code": "github_token_rejected",
+            "retryable": True,
+            "publication_pending": publication_pending,
         }
+
+
+async def _record_review_publication_pending(
+    *,
+    thread_id: str,
+    owner: str,
+    repo: str,
+    pr_number: int,
+    head_sha: str,
+    severity_threshold: Severity,
+    run_id: str | None,
+    error_code: str,
+) -> None:
+    """Persist sanitized state for a later publication retry."""
+    metadata = await get_thread_metadata(thread_id)
+    findings = await list_findings_async(thread_id)
+    previous = metadata.get("review_publication_pending")
+    previous_attempts = previous.get("attempt_count") if isinstance(previous, dict) else 0
+    attempt_count = (
+        previous_attempts + 1
+        if isinstance(previous_attempts, int) and not isinstance(previous_attempts, bool)
+        else 1
+    )
+    finding_ids = [
+        finding["id"]
+        for finding in findings
+        if isinstance(finding.get("id"), str)
+        and finding.get("status", "open") == "open"
+        and not isinstance(finding.get("github_review_comment_id"), int)
+    ]
+    pending: dict[str, Any] = {
+        "target": {"owner": owner, "repo": repo, "pr_number": pr_number},
+        "head_sha": head_sha,
+        "severity_threshold": severity_threshold,
+        "finding_ids": finding_ids,
+        "attempt_count": attempt_count,
+        "error_code": error_code,
+    }
+    if run_id:
+        pending["run_id"] = run_id
+    await set_reviewer_thread_metadata(
+        thread_id,
+        extra={"review_publication_pending": pending},
+    )
 
 
 def _cast_severity(value: str) -> Severity:
@@ -1062,7 +1205,12 @@ def _current_run_id(config: dict[str, Any]) -> str | None:
     configurable = config.get("configurable")
     if isinstance(configurable, dict):
         candidates.append(configurable.get("run_id"))
+    metadata = config.get("metadata")
+    if isinstance(metadata, dict):
+        candidates.append(metadata.get("run_id"))
     for candidate in candidates:
         if isinstance(candidate, str) and candidate:
             return candidate
+        if isinstance(candidate, UUID):
+            return str(candidate)
     return None

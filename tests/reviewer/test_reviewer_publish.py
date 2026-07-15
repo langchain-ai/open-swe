@@ -407,7 +407,10 @@ async def test_publish_review_eval_mode_does_not_call_github() -> None:
         patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
         patch("agent.tools.publish_review.list_findings_async", AsyncMock(return_value=findings)),
         patch("agent.tools.publish_review.set_reviewer_thread_metadata", AsyncMock()) as set_meta,
-        patch("agent.tools.publish_review.get_github_token") as get_token,
+        patch(
+            "agent.tools.publish_review.recover_reviewer_github_token",
+            new_callable=AsyncMock,
+        ) as recover_token,
         patch("agent.tools.publish_review.post_pull_request_review", AsyncMock()) as post_review,
     ):
         result = await publish_review()
@@ -416,7 +419,7 @@ async def test_publish_review_eval_mode_does_not_call_github() -> None:
     assert result["dry_run"] is True
     assert result["surfaced_count"] == 1
     assert result["hidden_count"] == 1
-    get_token.assert_not_called()
+    recover_token.assert_not_awaited()
     post_review.assert_not_called()
     set_meta.assert_awaited_once_with(
         "tid",
@@ -529,13 +532,309 @@ async def test_publish_review_forwards_trace_link_config_override() -> None:
                 "metadata": {},
             },
         ),
-        patch("agent.tools.publish_review.get_github_token", return_value="token"),
+        patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="thread"),
+        patch(
+            "agent.tools.publish_review.recover_reviewer_github_token",
+            AsyncMock(return_value="token"),
+        ),
         patch("agent.tools.publish_review._publish_review_async", publish_async),
+        patch("agent.tools.publish_review.set_reviewer_thread_metadata", AsyncMock()),
     ):
         result = await publish_review()
 
     assert result == {"success": True}
     assert publish_async.call_args.kwargs["trace_link_config_override"] is False
+
+
+def test_current_run_id_accepts_runnable_config_uuid() -> None:
+    from uuid import UUID
+
+    from agent.tools.publish_review import _current_run_id
+
+    run_id = UUID("12345678-1234-5678-1234-567812345678")
+    assert _current_run_id({"run_id": run_id}) == str(run_id)
+    assert _current_run_id({"metadata": {"run_id": run_id}}) == str(run_id)
+
+
+async def test_publish_review_recovers_token_after_durable_resume() -> None:
+    from agent.tools.publish_review import publish_review
+
+    config = {
+        "configurable": {
+            "thread_id": "reviewer-thread-id",
+            "repo": {"owner": "o", "name": "r"},
+            "pr_number": 7,
+            "head_sha": "sha",
+            "run_id": "run-1",
+        },
+        "metadata": {},
+    }
+    recover = AsyncMock(return_value="recovered-token")
+    publish_async = AsyncMock(return_value={"success": True, "review_id": 42})
+    set_metadata = AsyncMock()
+    with (
+        patch("agent.tools.publish_review.get_config", return_value=config),
+        patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="thread"),
+        patch("agent.tools.publish_review.recover_reviewer_github_token", recover),
+        patch("agent.tools.publish_review._publish_review_async", publish_async),
+        patch("agent.tools.publish_review.set_reviewer_thread_metadata", set_metadata),
+    ):
+        result = await publish_review()
+
+    assert result == {"success": True, "review_id": 42}
+    recover.assert_awaited_once_with(
+        run_config=config,
+        thread_id="thread",
+        owner="o",
+        repo="r",
+        pr_number=7,
+        run_id="run-1",
+    )
+    assert publish_async.await_count == 1
+    assert publish_async.await_args.kwargs["token"] == "recovered-token"
+    set_metadata.assert_awaited_once_with(
+        "thread",
+        extra={"review_publication_pending": None},
+    )
+
+
+async def test_publish_review_returns_retryable_context_unavailable() -> None:
+    from agent.review.auth import ReviewerPublicationContextUnavailableError
+    from agent.tools.publish_review import publish_review
+
+    config = {
+        "configurable": {
+            "thread_id": "thread",
+            "repo": {"owner": "o", "name": "r"},
+            "pr_number": 7,
+            "head_sha": "sha",
+        },
+        "metadata": {},
+    }
+    with (
+        patch("agent.tools.publish_review.get_config", return_value=config),
+        patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="thread"),
+        patch(
+            "agent.tools.publish_review.recover_reviewer_github_token",
+            AsyncMock(side_effect=ReviewerPublicationContextUnavailableError),
+        ),
+    ):
+        result = await publish_review()
+
+    assert result == {
+        "success": False,
+        "error": "Reviewer publication context is temporarily unavailable",
+        "error_code": "publication_context_unavailable",
+        "retryable": True,
+        "publication_pending": False,
+    }
+
+
+async def test_publish_review_does_not_retry_after_pending_cleanup_failure() -> None:
+    from agent.tools.publish_review import publish_review
+
+    config = {
+        "configurable": {
+            "thread_id": "thread",
+            "repo": {"owner": "o", "name": "r"},
+            "pr_number": 7,
+            "head_sha": "sha",
+        },
+        "metadata": {},
+    }
+    publish_async = AsyncMock(return_value={"success": True, "review_id": 42})
+    with (
+        patch("agent.tools.publish_review.get_config", return_value=config),
+        patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="thread"),
+        patch(
+            "agent.tools.publish_review.recover_reviewer_github_token",
+            AsyncMock(return_value="token"),
+        ),
+        patch("agent.tools.publish_review._publish_review_async", publish_async),
+        patch(
+            "agent.tools.publish_review.set_reviewer_thread_metadata",
+            AsyncMock(side_effect=RuntimeError("metadata unavailable")),
+        ),
+    ):
+        result = await publish_review()
+
+    assert result == {"success": True, "review_id": 42}
+    assert publish_async.await_count == 1
+
+
+async def test_publish_review_preserves_pending_state_when_token_recovery_fails() -> None:
+    from agent.review.auth import ReviewerTokenUnavailableError
+    from agent.tools.publish_review import publish_review
+
+    config = {
+        "configurable": {
+            "thread_id": "thread",
+            "repo": {"owner": "o", "name": "r"},
+            "pr_number": 7,
+            "head_sha": "sha",
+        },
+        "metadata": {},
+    }
+    record_pending = AsyncMock()
+    publish_async = AsyncMock()
+    with (
+        patch("agent.tools.publish_review.get_config", return_value=config),
+        patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="thread"),
+        patch(
+            "agent.tools.publish_review.recover_reviewer_github_token",
+            AsyncMock(side_effect=ReviewerTokenUnavailableError),
+        ),
+        patch("agent.tools.publish_review._record_review_publication_pending", record_pending),
+        patch("agent.tools.publish_review._publish_review_async", publish_async),
+    ):
+        result = await publish_review()
+
+    assert result == {
+        "success": False,
+        "error": "GitHub App token unavailable; findings were preserved for retry",
+        "error_code": "github_app_token_unavailable",
+        "retryable": True,
+        "publication_pending": True,
+    }
+    record_pending.assert_awaited_once_with(
+        thread_id="thread",
+        owner="o",
+        repo="r",
+        pr_number=7,
+        head_sha="sha",
+        severity_threshold="medium",
+        run_id=None,
+        error_code="github_app_token_unavailable",
+    )
+    publish_async.assert_not_awaited()
+
+
+async def test_publish_review_invalidates_exact_app_scope_after_401() -> None:
+    from agent.tools.publish_review import GitHubAuthError, publish_review
+
+    config = {
+        "configurable": {
+            "thread_id": "thread",
+            "repo": {"owner": "o", "name": "r"},
+            "pr_number": 7,
+            "head_sha": "sha",
+        },
+        "metadata": {},
+    }
+    invalidate_thread = AsyncMock()
+    invalidate_app = MagicMock()
+    record_pending = AsyncMock()
+    with (
+        patch("agent.tools.publish_review.get_config", return_value=config),
+        patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="thread"),
+        patch(
+            "agent.tools.publish_review.recover_reviewer_github_token",
+            AsyncMock(return_value="token"),
+        ),
+        patch(
+            "agent.tools.publish_review._publish_review_async",
+            AsyncMock(side_effect=GitHubAuthError("rejected")),
+        ),
+        patch(
+            "agent.tools.publish_review.invalidate_cached_github_token",
+            invalidate_thread,
+        ),
+        patch("agent.tools.publish_review.invalidate_reviewer_github_token", invalidate_app),
+        patch("agent.tools.publish_review._record_review_publication_pending", record_pending),
+    ):
+        result = await publish_review()
+
+    assert result["error_code"] == "github_token_rejected"
+    assert result["retryable"] is True
+    invalidate_thread.assert_awaited_once_with("thread")
+    invalidate_app.assert_called_once_with("r")
+    record_pending.assert_awaited_once()
+
+
+async def test_publish_review_keeps_structured_error_when_pending_write_fails() -> None:
+    from agent.review.auth import ReviewerTokenUnavailableError
+    from agent.tools.publish_review import publish_review
+
+    config = {
+        "configurable": {
+            "thread_id": "thread",
+            "repo": {"owner": "o", "name": "r"},
+            "pr_number": 7,
+            "head_sha": "sha",
+        },
+        "metadata": {},
+    }
+    with (
+        patch("agent.tools.publish_review.get_config", return_value=config),
+        patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="thread"),
+        patch(
+            "agent.tools.publish_review.recover_reviewer_github_token",
+            AsyncMock(side_effect=ReviewerTokenUnavailableError),
+        ),
+        patch(
+            "agent.tools.publish_review._record_review_publication_pending",
+            AsyncMock(side_effect=RuntimeError("metadata unavailable")),
+        ),
+    ):
+        result = await publish_review()
+
+    assert result == {
+        "success": False,
+        "error": "GitHub App token unavailable; findings remain stored on the thread",
+        "error_code": "github_app_token_unavailable",
+        "retryable": True,
+        "publication_pending": False,
+    }
+
+
+async def test_pending_publication_metadata_contains_no_finding_bodies() -> None:
+    from agent.tools.publish_review import _record_review_publication_pending
+
+    findings = [
+        {
+            "id": "f_open",
+            "status": "open",
+            "description": "sensitive finding body",
+            "github_review_comment_id": None,
+        },
+        {
+            "id": "f_posted",
+            "status": "open",
+            "description": "already posted",
+            "github_review_comment_id": 12,
+        },
+    ]
+    set_metadata = AsyncMock()
+    with (
+        patch(
+            "agent.tools.publish_review.get_thread_metadata",
+            AsyncMock(return_value={"review_publication_pending": {"attempt_count": 2}}),
+        ),
+        patch("agent.tools.publish_review.list_findings_async", AsyncMock(return_value=findings)),
+        patch("agent.tools.publish_review.set_reviewer_thread_metadata", set_metadata),
+    ):
+        await _record_review_publication_pending(
+            thread_id="thread",
+            owner="o",
+            repo="r",
+            pr_number=7,
+            head_sha="sha",
+            severity_threshold="high",
+            run_id="run-1",
+            error_code="github_app_token_unavailable",
+        )
+
+    pending = set_metadata.await_args.kwargs["extra"]["review_publication_pending"]
+    assert pending == {
+        "target": {"owner": "o", "repo": "r", "pr_number": 7},
+        "head_sha": "sha",
+        "severity_threshold": "high",
+        "finding_ids": ["f_open"],
+        "attempt_count": 3,
+        "error_code": "github_app_token_unavailable",
+        "run_id": "run-1",
+    }
+    assert "sensitive finding body" not in repr(pending)
 
 
 @pytest.mark.asyncio
@@ -2261,8 +2560,13 @@ async def test_publish_review_tool_returns_structured_error_when_thread_missing(
                 "metadata": {},
             },
         ),
-        patch("agent.tools.publish_review.get_github_token", return_value="token"),
+        patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="thread"),
+        patch(
+            "agent.tools.publish_review.recover_reviewer_github_token",
+            AsyncMock(return_value="token"),
+        ),
         patch("agent.tools.publish_review._publish_review_async", publish_async),
+        patch("agent.tools.publish_review.set_reviewer_thread_metadata", AsyncMock()),
     ):
         result = await publish_review()
 

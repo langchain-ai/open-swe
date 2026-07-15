@@ -349,6 +349,11 @@ async def get_thread_metadata(thread_id: str) -> dict[str, Any]:
         return {}
 
 
+async def get_thread_metadata_strict(thread_id: str) -> dict[str, Any]:
+    """Fetch reviewer metadata without swallowing transient failures."""
+    return await _get_thread_metadata_strict(thread_id)
+
+
 async def _get_thread_metadata_strict(thread_id: str) -> dict[str, Any]:
     client = get_client()
     try:
