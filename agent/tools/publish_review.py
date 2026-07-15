@@ -58,6 +58,10 @@ from ..utils.slack import post_slack_thread_reply
 from ..utils.tracing import REVIEW_TRACING_PROJECT
 
 
+class MissingGitHubTokenError(Exception):
+    """Raised when publish_review has no GitHub token to post the review with."""
+
+
 async def publish_review(
     severity_threshold: str = "medium",
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
@@ -143,7 +147,15 @@ async def publish_review(
 
     token = get_github_token()
     if not token:
-        return {"success": False, "error": "No GitHub token available"}
+        # Don't return a terminal no-op: the reviewer has already derived
+        # findings, and silently succeeding drops them. Raise a distinct,
+        # actionable error so the harness can retry once a token is provisioned
+        # instead of discarding a full review's worth of work.
+        raise MissingGitHubTokenError(
+            "No GitHub token available to publish the review; the derived "
+            "findings were not posted. Re-provision the reviewer's GitHub token "
+            "and retry publish_review."
+        )
 
     try:
         return await _publish_review_async(

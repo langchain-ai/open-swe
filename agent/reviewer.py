@@ -905,13 +905,22 @@ class PrepareReviewerRunState(PrepareRunState):
     diff_line_set: NotRequired[dict[str, dict[str, set[int]]] | None]
 
 
+def _is_reviewer_eval_run(configurable: dict[str, Any]) -> bool:
+    return configurable.get("reviewer_eval") is True or configurable.get("eval") is True
+
+
 async def _ensure_reviewer_sandbox_for_thread(
     thread_id: str,
     configurable: dict[str, Any],
 ) -> tuple[SandboxBackendProtocol, str | None]:
     repo_config = configurable.get("repo") or {}
     github_token: str | None = None
-    if configurable.get("source"):
+    # Every real review ends at publish_review, which posts findings with this
+    # GitHub token. Provision it for any non-eval run — not only when a `source`
+    # is set — and fail loudly rather than let the run derive findings that
+    # publish_review would silently drop for lack of a credential. Eval runs keep
+    # the prior `source`-gated behavior (dry-run publishes never touch GitHub).
+    if not _is_reviewer_eval_run(configurable) or configurable.get("source"):
         repo_name_for_token = str(repo_config.get("name") or "")
         github_token, expires_at = await get_github_app_installation_token_with_expiry(
             repositories=[repo_name_for_token] if repo_name_for_token else None
@@ -988,6 +997,16 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
         sandbox_backend, github_token = await _ensure_reviewer_sandbox_for_thread(
             self._thread_id, configurable
         )
+        # Fail-fast pre-flight: a real review will end at publish_review, which
+        # needs a GitHub token. Abort here — before any diff reading or finding
+        # derivation — so an entire review isn't computed and then discarded when
+        # the credential is absent.
+        if not _is_reviewer_eval_run(configurable) and not github_token:
+            raise RuntimeError(
+                "GitHub token unavailable for reviewer thread "
+                f"{self._thread_id}; aborting before deriving findings so a "
+                "review is not computed and then dropped at publish time."
+            )
         work_dir = await aresolve_sandbox_work_dir(sandbox_backend)
 
         repo_owner = str(repo_config.get("owner", ""))

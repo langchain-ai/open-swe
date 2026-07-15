@@ -538,6 +538,32 @@ async def test_publish_review_forwards_trace_link_config_override() -> None:
     assert publish_async.call_args.kwargs["trace_link_config_override"] is False
 
 
+async def test_publish_review_raises_when_github_token_missing() -> None:
+    from agent.tools.publish_review import MissingGitHubTokenError, publish_review
+
+    publish_async = AsyncMock(return_value={"success": True})
+    with (
+        patch(
+            "agent.tools.publish_review.get_config",
+            return_value={
+                "configurable": {
+                    "thread_id": "reviewer-thread-id",
+                    "repo": {"owner": "o", "name": "r"},
+                    "pr_number": 7,
+                    "head_sha": "sha",
+                },
+                "metadata": {},
+            },
+        ),
+        patch("agent.tools.publish_review.get_github_token", return_value=None),
+        patch("agent.tools.publish_review._publish_review_async", publish_async),
+    ):
+        with pytest.raises(MissingGitHubTokenError):
+            await publish_review()
+
+    publish_async.assert_not_awaited()
+
+
 @pytest.mark.asyncio
 async def test_resolve_review_trace_url_enabled_by_team_setting() -> None:
     from agent.tools.publish_review import _resolve_review_trace_url
