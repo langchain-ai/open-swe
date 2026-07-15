@@ -5,6 +5,7 @@ from typing import Any
 from langgraph.config import get_config
 from langgraph_sdk import get_client
 
+from ..middleware.sanitize_reasoning_envelope import strip_reasoning_envelope
 from ..utils.slack import (
     convert_mentions_to_slack_format,
     post_slack_thread_reply_with_ts,
@@ -58,6 +59,7 @@ async def slack_thread_reply(
             "error": "Missing slack_thread.channel_id or slack_thread.thread_ts in config",
         }
 
+    message = strip_reasoning_envelope(message)
     if not message.strip():
         return {"success": False, "error": "Message cannot be empty"}
 
