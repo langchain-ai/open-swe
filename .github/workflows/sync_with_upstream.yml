@@ -17,6 +17,7 @@ jobs:
         with:
           fetch-depth: 0
           ref: main
+          persist-credentials: false
       - name: Configure git identity
         run: |
           git config user.name "Nikolas Pitsillos"
