@@ -29,18 +29,44 @@ from agent.review.publish import (
 
 
 def _f(**overrides: Any) -> Finding:
-    base = new_finding(
-        severity="high",
-        confidence="high",
-        category="correctness",
-        file="src/foo.py",
-        start_line=10,
-        end_line=10,
-        description="boom",
-        sha="abc",
-    )
-    base.update(overrides)  # type: ignore[arg-type]
-    return base
+    construct_keys = {
+        "severity",
+        "confidence",
+        "category",
+        "file",
+        "start_line",
+        "end_line",
+        "description",
+        "sha",
+        "title",
+        "side",
+        "suggestion",
+        "diff_hunk",
+        "finding_id",
+        "in_diff",
+    }
+    kwargs: dict[str, Any] = {
+        "severity": "high",
+        "confidence": "high",
+        "category": "correctness",
+        "file": "src/foo.py",
+        "start_line": 10,
+        "end_line": 10,
+        "description": "boom",
+        "sha": "abc",
+    }
+    rest: dict[str, Any] = {}
+    for key, value in overrides.items():
+        if key == "id":
+            kwargs["finding_id"] = value
+        elif key in construct_keys:
+            kwargs[key] = value
+        else:
+            rest[key] = value
+    finding = new_finding(**kwargs)
+    if rest:
+        finding.update(rest)  # type: ignore[typeddict-item]
+    return finding
 
 
 @pytest.fixture(autouse=True)
@@ -310,6 +336,7 @@ async def test_post_review_started_comment_deletes_lingering_before_reposting() 
         )
     assert cid == 500
     delete.assert_awaited_once()
+    assert delete.await_args is not None
     assert delete.await_args.kwargs["comment_id"] == 99
 
 
@@ -327,6 +354,7 @@ async def test_clear_review_started_comment_deletes_and_clears_metadata() -> Non
     ):
         await clear_review_started_comment(thread_id="tid", owner="o", repo="r", token="t")
     delete.assert_awaited_once()
+    assert delete.await_args is not None
     assert delete.await_args.kwargs["comment_id"] == 99
     set_meta.assert_awaited_once_with("tid", extra={"status_comment_id": None})
 
@@ -461,6 +489,7 @@ async def test_publish_review_eval_mode_uses_configured_cap() -> None:
         result = await publish_review()
 
     assert result["surfaced_count"] == 1
+    assert set_meta.await_args is not None
     publication = set_meta.await_args.kwargs["extra"]["reviewer_eval_publication"]
     assert publication["cap"] == 1
     assert publication["finding_ids"] == ["f_first"]
@@ -506,6 +535,7 @@ async def test_publish_review_surfaces_additional_findings_count_in_body() -> No
 
     assert result["success"] is True
     assert result["surfaced_count"] == 0
+    assert post_review.await_args is not None
     posted_body = post_review.await_args.kwargs["body"]
     assert "No issues found" in posted_body
     assert "2 additional findings can be viewed in the web app." in posted_body
@@ -535,6 +565,7 @@ async def test_publish_review_forwards_trace_link_config_override() -> None:
         result = await publish_review()
 
     assert result == {"success": True}
+    assert publish_async.call_args is not None
     assert publish_async.call_args.kwargs["trace_link_config_override"] is False
 
 
@@ -722,6 +753,7 @@ async def test_publish_review_skips_findings_already_published() -> None:
 
     assert result["success"] is True
     assert result["surfaced_count"] == 1
+    assert post_review.await_args is not None
     posted = post_review.await_args.kwargs["inline_comments"]
     paths = {c["path"] for c in posted}
     assert paths == {"b.py"}
@@ -939,6 +971,7 @@ async def test_publish_review_uses_resolved_head_sha_for_commit_and_last_reviewe
         )
 
     assert result["success"] is True
+    assert post_review.await_args is not None
     assert post_review.await_args.kwargs["head_sha"] == "freshhead"
     final = set_metadata.await_args_list[-1]
     assert final.args[0] == "tid"
@@ -1365,6 +1398,7 @@ async def test_re_review_only_posts_current_head_unpublished_findings() -> None:
 
     assert result["success"] is True
     assert result["surfaced_count"] == 1
+    assert post_review.await_args is not None
     inline_comments = post_review.await_args.kwargs["inline_comments"]
     assert [comment["path"] for comment in inline_comments] == ["new.py"]
     assert old["github_review_id"] is None
@@ -1525,6 +1559,7 @@ async def test_publish_review_posts_summary_when_no_findings() -> None:
     assert result["surfaced_count"] == 0
     assert result["review_id"] == 555
     post_review.assert_awaited_once()
+    assert post_review.await_args is not None
     posted_body = post_review.await_args.kwargs["body"]
     posted_inline = post_review.await_args.kwargs["inline_comments"]
     assert posted_inline == []
@@ -1575,6 +1610,7 @@ async def test_publish_review_posts_slack_reply_on_first_review_with_slack_ref()
         )
 
     slack_post.assert_awaited_once()
+    assert slack_post.await_args is not None
     args = slack_post.await_args.args
     assert args[0] == "C1"
     assert args[1] == "1234.5"
@@ -1630,6 +1666,7 @@ async def test_publish_review_uses_plural_findings_in_slack_reply() -> None:
         )
 
     slack_post.assert_awaited_once()
+    assert slack_post.await_args is not None
     text = slack_post.await_args.args[2]
     assert "found 2 potential issues" in text
 

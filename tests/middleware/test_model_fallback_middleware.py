@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+from typing import Any, cast
 from unittest.mock import MagicMock
 
 import anthropic
 import httpx
 import openai
 import pytest
+from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_core.messages import AIMessage
 
 from agent.middleware.model_fallback import (
@@ -48,10 +50,10 @@ def _anthropic_model_not_available_error() -> anthropic.BadRequestError:
     return anthropic.BadRequestError("model unavailable", response=response, body=body)
 
 
-def _make_request() -> MagicMock:
+def _make_request() -> ModelRequest[None]:
     request = MagicMock()
     request.override = MagicMock(return_value=MagicMock(name="overridden_request"))
-    return request
+    return cast(ModelRequest[None], request)
 
 
 class TestShouldFallback:
@@ -92,19 +94,20 @@ class TestModelFallbackMiddleware:
         calls: list[object] = []
         good_response = MagicMock(result=[AIMessage(content="ok from fallback")])
 
-        async def handler(req: object) -> object:
+        async def handler(req: ModelRequest[None]) -> ModelResponse[Any]:
             calls.append(req)
             if len(calls) == 1:
                 raise _anthropic_overloaded()
-            return good_response
+            return cast(ModelResponse[Any], good_response)
 
         request = _make_request()
         result = await middleware.awrap_model_call(request, handler)
 
         assert result is good_response
         assert len(calls) == 2
-        request.override.assert_called_once_with(model=fallback_model)
-        assert calls[1] is request.override.return_value
+        override = cast(MagicMock, request.override)
+        override.assert_called_once_with(model=fallback_model)
+        assert calls[1] is override.return_value
 
     @pytest.mark.asyncio
     async def test_async_falls_over_on_stream_transport_error(self) -> None:
@@ -114,29 +117,30 @@ class TestModelFallbackMiddleware:
         calls: list[object] = []
         good_response = MagicMock(result=[AIMessage(content="ok from fallback")])
 
-        async def handler(req: object) -> object:
+        async def handler(req: ModelRequest[None]) -> ModelResponse[Any]:
             calls.append(req)
             if len(calls) == 1:
                 raise httpx.RemoteProtocolError(
                     "peer closed connection without sending complete message body "
                     "(incomplete chunked read)"
                 )
-            return good_response
+            return cast(ModelResponse[Any], good_response)
 
         request = _make_request()
         result = await middleware.awrap_model_call(request, handler)
 
         assert result is good_response
         assert len(calls) == 2
-        request.override.assert_called_once_with(model=fallback_model)
-        assert calls[1] is request.override.return_value
+        override = cast(MagicMock, request.override)
+        override.assert_called_once_with(model=fallback_model)
+        assert calls[1] is override.return_value
 
     @pytest.mark.asyncio
     async def test_async_propagates_non_transient_error(self) -> None:
         middleware = ModelFallbackMiddleware(MagicMock())
         calls: list[object] = []
 
-        async def handler(req: object) -> object:
+        async def handler(req: ModelRequest[None]) -> ModelResponse[Any]:
             calls.append(req)
             raise ValueError("not transient")
 
@@ -149,7 +153,7 @@ class TestModelFallbackMiddleware:
     async def test_async_surfaces_model_unavailable_error(self) -> None:
         middleware = ModelFallbackMiddleware(MagicMock())
 
-        async def handler(_req: object) -> object:
+        async def handler(_req: ModelRequest[None]) -> ModelResponse[Any]:
             raise _anthropic_model_not_available_error()
 
         result = await middleware.awrap_model_call(_make_request(), handler)
@@ -166,11 +170,11 @@ class TestModelFallbackMiddleware:
         calls: list[object] = []
         good_response = MagicMock(result=[AIMessage(content="ok from primary retry")])
 
-        async def handler(req: object) -> object:
+        async def handler(req: ModelRequest[None]) -> ModelResponse[Any]:
             calls.append(req)
             if len(calls) <= 2:  # primary fails, then fallback fails
                 raise _openai_5xx()
-            return good_response
+            return cast(ModelResponse[Any], good_response)
 
         request = _make_request()
         result = await middleware.awrap_model_call(request, handler)
@@ -179,7 +183,7 @@ class TestModelFallbackMiddleware:
         assert len(calls) == 3
         # Attempts alternate primary -> fallback -> primary.
         assert calls[0] is request
-        assert calls[1] is request.override.return_value
+        assert calls[1] is cast(MagicMock, request.override).return_value
         assert calls[2] is request
 
     @pytest.mark.asyncio
@@ -188,7 +192,7 @@ class TestModelFallbackMiddleware:
         middleware = ModelFallbackMiddleware(MagicMock(), backoff_schedule=(0.0, 0.0))
         calls: list[object] = []
 
-        async def handler(req: object) -> object:
+        async def handler(req: ModelRequest[None]) -> ModelResponse[Any]:
             calls.append(req)
             raise _openai_5xx()
 
@@ -205,7 +209,7 @@ class TestModelFallbackMiddleware:
         )
         calls: list[object] = []
 
-        async def handler(req: object) -> object:
+        async def handler(req: ModelRequest[None]) -> ModelResponse[Any]:
             calls.append(req)
             raise _openai_5xx()
 

@@ -1,8 +1,10 @@
 """Tests for LangSmith sandbox env-var configuration parsing."""
 
+from typing import cast
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from langsmith.sandbox import AsyncSandboxClient
 
 from agent.integrations.langsmith import (
     DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS,
@@ -141,7 +143,7 @@ async def test_create_sandbox_with_retry_retries_transient_errors(monkeypatch) -
     monkeypatch.setattr("agent.integrations.langsmith.asyncio.sleep", AsyncMock())
 
     result = await _create_sandbox_with_retry(
-        client,
+        cast(AsyncSandboxClient, client),
         snapshot_id="snap-1",
         fs_capacity_bytes=None,
         vcpus=None,
@@ -162,7 +164,7 @@ async def test_wait_for_reconnected_sandbox_polls_until_ready(monkeypatch) -> No
     monkeypatch.setattr("agent.integrations.langsmith.asyncio.sleep", sleep)
 
     sandbox = await _wait_for_reconnected_sandbox(
-        client,
+        cast(AsyncSandboxClient, client),
         "sandbox-1",
         timeout_seconds=30,
         poll_seconds=2,

@@ -23,6 +23,7 @@ from urllib.parse import urlparse
 
 from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
+from langgraph_sdk.schema import Run
 
 logger = logging.getLogger(__name__)
 
@@ -118,7 +119,7 @@ async def create_durable_run(
     stream_mode: Any | None = None,
     stream_resumable: bool | None = None,
     after_seconds: int | float | None = None,
-) -> dict[str, Any]:
+) -> Run:
     """Create a run with Open SWE's durable LangGraph defaults."""
     client = client or dispatch_client()
     create_kwargs: dict[str, Any] = {
@@ -157,7 +158,7 @@ async def dispatch_agent_run(
     assistant_id: str = "agent",
     metadata: dict[str, Any] | None = None,
     client: LangGraphClient | None = None,
-) -> dict[str, Any]:
+) -> Run:
     """Create (or interrupt-and-resume) a run for ``thread_id``.
 
     Routes every Slack / Linear / GitHub / dashboard trigger through one

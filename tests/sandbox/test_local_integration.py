@@ -1,3 +1,5 @@
+from typing import cast
+
 import agent.integrations.local as local_mod
 
 
@@ -16,9 +18,10 @@ def test_create_local_sandbox_creates_missing_root_dir(monkeypatch, tmp_path):
     backend = local_mod.create_local_sandbox()
 
     assert root.is_dir()
-    assert backend.root_dir == str(root)
-    assert backend.virtual_mode is True
-    assert backend.inherit_env is True
+    stub = cast(_StubLocalShellBackend, backend)
+    assert stub.root_dir == str(root)
+    assert stub.virtual_mode is True
+    assert stub.inherit_env is True
 
 
 def test_create_local_sandbox_defaults_to_cwd(monkeypatch, tmp_path):
@@ -28,5 +31,6 @@ def test_create_local_sandbox_defaults_to_cwd(monkeypatch, tmp_path):
 
     backend = local_mod.create_local_sandbox()
 
-    assert backend.root_dir == str(tmp_path)
-    assert backend.virtual_mode is True
+    stub = cast(_StubLocalShellBackend, backend)
+    assert stub.root_dir == str(tmp_path)
+    assert stub.virtual_mode is True

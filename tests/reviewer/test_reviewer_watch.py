@@ -157,12 +157,15 @@ async def test_push_event_skips_when_pr_diff_unchanged_since_last_review() -> No
 
     fake_client.runs.create.assert_not_called()
     set_metadata.assert_awaited_once()
+    assert set_metadata.await_args is not None
     assert set_metadata.await_args.kwargs["last_reviewed_sha"] == "newsha"
     # Even without a re-review, a settled check lands on the new head so the
     # review stays visible after the head moves.
     create_check.assert_awaited_once()
+    assert create_check.await_args is not None
     assert create_check.await_args.kwargs["head_sha"] == "newsha"
     complete_check.assert_awaited_once()
+    assert complete_check.await_args is not None
     assert complete_check.await_args.kwargs["check_run_id"] == 42
     assert complete_check.await_args.kwargs["conclusion"] == "success"
 
@@ -235,6 +238,7 @@ async def test_push_event_triggers_re_review_run_when_watching() -> None:
         await github_webhooks.process_github_push_event(payload)
 
     fake_client.runs.create.assert_awaited_once()
+    assert fake_client.runs.create.await_args is not None
     args, kwargs = fake_client.runs.create.await_args
     assert args[1] == "reviewer"
     configurable = kwargs["config"]["configurable"]
@@ -252,6 +256,7 @@ async def test_push_event_triggers_re_review_run_when_watching() -> None:
     # A fresh check run is created on the new head SHA (GitHub only shows
     # checks on the current head), and its id is persisted for settling.
     create_check.assert_awaited_once()
+    assert create_check.await_args is not None
     assert create_check.await_args.kwargs["head_sha"] == "newsha"
     check_id_writes = [
         c.kwargs.get("extra", {}).get("review_check_run_id")
@@ -396,6 +401,7 @@ async def test_push_event_public_repo_uses_scoped_token() -> None:
         await github_webhooks.process_github_push_event(payload)
 
     get_token.assert_awaited_once_with(repository_ids=[123])
+    assert fake_client.runs.create.await_args is not None
     _, kwargs = fake_client.runs.create.await_args
     assert kwargs["config"]["configurable"]["repo_private"] is False
 
@@ -450,6 +456,7 @@ async def test_push_event_rescopes_token_when_pr_metadata_reveals_public() -> No
         await github_webhooks.process_github_push_event(payload)
 
     assert get_token.await_args_list == [call(), call(repository_ids=[456])]
+    assert fake_client.runs.create.await_args is not None
     _, kwargs = fake_client.runs.create.await_args
     assert kwargs["config"]["configurable"]["repo_private"] is False
 

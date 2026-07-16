@@ -183,6 +183,7 @@ async def test_enter_plan_mode_tool_returns_command() -> None:
         {"name": "enter_plan_mode", "args": {}, "id": "call-1", "type": "tool_call"}
     )
     assert isinstance(result, Command)
+    assert result.update is not None
     assert result.update["plan_mode"] is True
     messages = result.update["messages"]
     assert len(messages) == 1

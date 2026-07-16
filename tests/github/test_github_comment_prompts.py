@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from typing import Any
 
+from langchain_core.callbacks.manager import CallbackManagerForLLMRun
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage
+from langchain_core.language_models.base import LangSmithParams
+from langchain_core.messages import AIMessage, BaseMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 
 from agent.dashboard.agent_overrides import profile_create_prs
@@ -29,14 +31,20 @@ class _CaptureRequestModel(BaseChatModel):
     def _llm_type(self) -> str:
         return "capture-request"
 
-    def _get_ls_params(self, *args: Any, **kwargs: Any) -> dict[str, str]:
-        return {"ls_provider": "openai"}
+    def _get_ls_params(self, stop: list[str] | None = None, **kwargs: Any) -> LangSmithParams:
+        return LangSmithParams(ls_provider="openai")
 
     def bind_tools(self, tools: Any, **kwargs: Any) -> _CaptureRequestModel:
         self.captured_tools = tools
         return self
 
-    def _generate(self, messages: list[Any], **kwargs: Any) -> ChatResult:
+    def _generate(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: CallbackManagerForLLMRun | None = None,
+        **kwargs: Any,
+    ) -> ChatResult:
         self.captured_messages = messages
         return ChatResult(generations=[ChatGeneration(message=AIMessage(content="done"))])
 
@@ -164,6 +172,7 @@ def test_harness_profile_replaces_deepagents_base_for_supported_providers() -> N
         assert HARNESS_EXCLUDED_TOOLS <= profile.excluded_tools
         assert HARNESS_EXCLUDED_MIDDLEWARE <= profile.excluded_middleware
     resolved_profile = hp._get_harness_profile("openai:gpt-5.6-sol")
+    assert resolved_profile is not None
     assert "write_todos" in resolved_profile.excluded_tools
     assert HARNESS_EXCLUDED_MIDDLEWARE <= resolved_profile.excluded_middleware
 

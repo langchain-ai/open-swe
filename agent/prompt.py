@@ -3,9 +3,11 @@ import os
 import shlex
 from importlib import resources
 from pathlib import Path
+from typing import Any, cast
 
 from deepagents import HarnessProfile, register_harness_profile
 from langchain.agents.middleware import TodoListMiddleware
+from langchain.agents.middleware.types import AgentMiddleware, AgentState
 
 from .utils.authorship import (
     OPEN_SWE_BOT_EMAIL,
@@ -414,7 +416,10 @@ def register_open_swe_harness_profile() -> None:
     profile = HarnessProfile(
         base_system_prompt=OPEN_SWE_SHARED_BASE,
         excluded_tools=HARNESS_EXCLUDED_TOOLS,
-        excluded_middleware=HARNESS_EXCLUDED_MIDDLEWARE,
+        excluded_middleware=cast(
+            frozenset[type[AgentMiddleware[AgentState[Any], None, Any]] | str],
+            HARNESS_EXCLUDED_MIDDLEWARE,
+        ),
     )
     for key in HARNESS_PROFILE_KEYS:
         register_harness_profile(key, profile)

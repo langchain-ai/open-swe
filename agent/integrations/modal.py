@@ -16,11 +16,10 @@ def create_modal_sandbox(sandbox_id: str | None = None):
     Returns:
         ModalSandbox instance implementing SandboxBackendProtocol.
     """
-    app = modal.App.lookup(MODAL_APP_NAME)
-
     if sandbox_id:
-        sandbox = modal.Sandbox.from_id(sandbox_id, app=app)
+        sandbox = modal.Sandbox.from_id(sandbox_id)
     else:
+        app = modal.App.lookup(MODAL_APP_NAME)
         sandbox = modal.Sandbox.create(app=app)
 
     return ModalSandbox(sandbox=sandbox)

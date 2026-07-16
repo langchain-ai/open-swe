@@ -19,7 +19,7 @@ import logging
 import uuid
 import weakref
 from collections.abc import Callable
-from typing import Any, Literal, NotRequired, TypedDict, cast
+from typing import Any, Literal, TypedDict, cast
 
 from langgraph.config import get_config
 from langgraph_sdk import get_client
@@ -110,7 +110,7 @@ class Finding(TypedDict):
     severity: Severity
     confidence: Confidence
     category: str
-    title: NotRequired[str]
+    title: str
     file: str
     start_line: int | None
     end_line: int | None
@@ -121,25 +121,25 @@ class Finding(TypedDict):
     status: FindingStatus
     first_seen_sha: str
     last_confirmed_sha: str
-    github_review_id: NotRequired[int | None]
-    github_review_comment_id: NotRequired[int | None]
-    github_review_comment_ids: NotRequired[list[int]]
-    github_review_thread_id: NotRequired[str | None]
-    github_review_thread_ids: NotRequired[list[str]]
-    github_review_run_id: NotRequired[str | None]
-    github_thread_resolved: NotRequired[bool]
-    github_resolved_thread_ids: NotRequired[list[str]]
-    github_posted_resolution_comment_ids: NotRequired[list[int]]
-    last_human_reply_at: NotRequired[str | None]
-    last_human_reply_author: NotRequired[str | None]
-    last_human_reply_body: NotRequired[str | None]
-    last_reconciliation_note: NotRequired[str | None]
-    resolution_note: NotRequired[str | None]
-    diff_hunk: NotRequired[str | None]
+    github_review_id: int | None
+    github_review_comment_id: int | None
+    github_review_comment_ids: list[int]
+    github_review_thread_id: str | None
+    github_review_thread_ids: list[str]
+    github_review_run_id: str | None
+    github_thread_resolved: bool
+    github_resolved_thread_ids: list[str]
+    github_posted_resolution_comment_ids: list[int]
+    last_human_reply_at: str | None
+    last_human_reply_author: str | None
+    last_human_reply_body: str | None
+    last_reconciliation_note: str | None
+    resolution_note: str | None
+    diff_hunk: str | None
     fingerprint: str
-    anchor: NotRequired[FindingAnchor]
-    surface: NotRequired[FindingSurface]
-    interactions: NotRequired[list[FindingInteraction]]
+    anchor: FindingAnchor | None
+    surface: FindingSurface | None
+    interactions: list[FindingInteraction]
 
 
 class AppendFindingResult(TypedDict):
@@ -248,6 +248,7 @@ def new_finding(
         "severity": severity,
         "confidence": confidence,
         "category": category,
+        "title": normalize_finding_title(title, description),
         "file": file,
         "start_line": start_line,
         "end_line": end_line,
@@ -278,8 +279,6 @@ def new_finding(
         "surface": surface,
         "interactions": [],
     }
-    if title is not None:
-        finding["title"] = normalize_finding_title(title)
     return finding
 
 
@@ -499,7 +498,7 @@ async def update_finding_fields(
     def _apply(findings: list[Finding]) -> bool:
         for finding in findings:
             if finding.get("id") == finding_id:
-                finding.update(updates)
+                finding.update(cast(Finding, updates))
                 captured["finding"] = finding
                 return True
         return False
@@ -521,7 +520,7 @@ async def update_finding_surface(
             if finding.get("id") != finding_id:
                 continue
             surface = _coerce_surface(finding, finding_id)
-            surface.update(updates)
+            surface.update(cast(FindingSurface, updates))
             finding["surface"] = surface
             _sync_legacy_surface_fields(finding, surface)
             captured["finding"] = finding
@@ -565,6 +564,7 @@ async def append_finding_interaction(
 
 def _coerce_surface(finding: Finding, finding_id: str) -> FindingSurface:
     surface = finding.get("surface")
+    coerced: FindingSurface
     if isinstance(surface, dict):
         coerced = cast(FindingSurface, dict(surface))
     else:
@@ -576,13 +576,20 @@ def _coerce_surface(finding: Finding, finding_id: str) -> FindingSurface:
             coerced["state"] = "surfaced"
         else:
             coerced["state"] = "not_surfaced"
-    coerced.setdefault("github_review_id", finding.get("github_review_id"))
-    coerced.setdefault("github_review_comment_id", finding.get("github_review_comment_id"))
-    coerced.setdefault("github_review_thread_id", finding.get("github_review_thread_id"))
-    coerced.setdefault("severity_threshold_at_publish", None)
-    coerced.setdefault("surfaced_at_sha", None)
-    coerced.setdefault("last_github_sync_at", None)
-    coerced.setdefault("last_error", None)
+    if "github_review_id" not in coerced:
+        coerced["github_review_id"] = finding.get("github_review_id")
+    if "github_review_comment_id" not in coerced:
+        coerced["github_review_comment_id"] = finding.get("github_review_comment_id")
+    if "github_review_thread_id" not in coerced:
+        coerced["github_review_thread_id"] = finding.get("github_review_thread_id")
+    if "severity_threshold_at_publish" not in coerced:
+        coerced["severity_threshold_at_publish"] = None
+    if "surfaced_at_sha" not in coerced:
+        coerced["surfaced_at_sha"] = None
+    if "last_github_sync_at" not in coerced:
+        coerced["last_github_sync_at"] = None
+    if "last_error" not in coerced:
+        coerced["last_error"] = None
     return coerced
 
 

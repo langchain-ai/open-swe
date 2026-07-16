@@ -20,21 +20,23 @@ import logging
 import posixpath
 import re
 import warnings
-from typing import Any, NotRequired
+from typing import Any, NotRequired, cast
 
 logger = logging.getLogger(__name__)
 
 from langgraph.graph.state import RunnableConfig
 from langgraph.pregel import Pregel
+from langgraph.runtime import Runtime
 
 warnings.filterwarnings("ignore", module="langchain_core._api.deprecation")
 warnings.filterwarnings("ignore", message=".*Pydantic V1.*", category=UserWarning)
 
 from deepagents import create_deep_agent
 from deepagents.backends.protocol import SandboxBackendProtocol
-from deepagents.middleware.skills import SkillsMiddleware
+from deepagents.middleware.skills import SkillsMiddleware, SkillsState
 from deepagents.middleware.subagents import SubAgent
 from langchain.agents.middleware import ModelCallLimitMiddleware
+from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.language_models.chat_models import BaseChatModel
 
 from .dashboard.options import gate_fable_model
@@ -47,7 +49,6 @@ from .dashboard.team_settings import (
 )
 from .middleware import (
     BasePrepareRunMiddleware,
-    PrepareRunState,
     RepairOrphanedToolCallsMiddleware,
     SanitizeFireworksMessagesMiddleware,
     SanitizeThinkingBlocksMiddleware,
@@ -59,6 +60,7 @@ from .middleware import (
     refresh_github_proxy_before_model,
     settle_review_check_on_exit,
 )
+from .middleware.prepare_run import PrepareRunState
 from .review.diff import (
     compute_diff_line_set,
     fetch_pr_diff,
@@ -68,6 +70,7 @@ from .review.diff import (
 )
 from .review.findings import (
     REVIEW_FINDING_CAP,
+    Finding,
 )
 from .review.findings import (
     list_findings as list_findings_async,
@@ -788,23 +791,23 @@ def _format_pr_review_threads(threads: list[dict]) -> str:
     return "\n".join(out)
 
 
-def _format_existing_findings(findings: list[dict]) -> str:
+def _format_existing_findings(findings: list[Finding]) -> str:
     if not findings:
         return "_(none)_"
     lines: list[str] = []
     for f in findings:
         if f.get("status") != "open":
             continue
-        location = f.get("file", "<unknown>")
-        start = f.get("start_line")
-        end = f.get("end_line")
+        location = f["file"]
+        start = f["start_line"]
+        end = f["end_line"]
         if start is not None and end is not None:
             location += f":{start}" if start == end else f":{start}-{end}"
         title = f.get("title")
         title_prefix = f"{title}: " if isinstance(title, str) and title.strip() else ""
         lines.append(
-            f"- [{f.get('id')}] ({f.get('severity')}, {f.get('category')}) "
-            f"{location} — {title_prefix}{f.get('description', '').strip()}"
+            f"- [{f['id']}] ({f['severity']}, {f['category']}) "
+            f"{location} — {title_prefix}{f['description'].strip()}"
         )
         human_reply = f.get("last_human_reply_body")
         if isinstance(human_reply, str) and human_reply:
@@ -982,8 +985,8 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
             else None,
         }
 
-    async def _prepare(self, state: dict[str, Any], runtime: object) -> dict[str, Any]:
-        configurable = self._config["configurable"]
+    async def _prepare(self, state: PrepareRunState, runtime: Runtime) -> dict[str, Any]:
+        configurable = self._config.get("configurable") or {}
         repo_config = configurable.get("repo") or {}
         sandbox_backend, github_token = await _ensure_reviewer_sandbox_for_thread(
             self._thread_id, configurable
@@ -1140,25 +1143,22 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
                 logger.exception("Failed to prepare PR trace context; continuing without it")
                 return None
 
-        (
-            diff_context,
-            pr_overview,
-            existing_threads_block,
-            repo_style_prompt,
-            agents_md_content,
-            org_guidelines,
-            api_standards_skill,
-            pr_trace_context,
-        ) = await asyncio.gather(
-            _fetch_diff_context(),
-            _fetch_pr_overview(),
-            _fetch_existing_threads_block(),
-            _fetch_repo_style_prompt(),
-            _fetch_agents_md_context(),
-            _cached_org_review_guidelines(),
-            _cached_api_standards_skill(),
-            _prepare_pr_trace_context(),
-        )
+        diff_context_task = asyncio.create_task(_fetch_diff_context())
+        pr_overview_task = asyncio.create_task(_fetch_pr_overview())
+        existing_threads_task = asyncio.create_task(_fetch_existing_threads_block())
+        repo_style_task = asyncio.create_task(_fetch_repo_style_prompt())
+        agents_md_task = asyncio.create_task(_fetch_agents_md_context())
+        org_guidelines_task = asyncio.create_task(_cached_org_review_guidelines())
+        api_standards_task = asyncio.create_task(_cached_api_standards_skill())
+        pr_trace_context_task = asyncio.create_task(_prepare_pr_trace_context())
+        diff_context = await diff_context_task
+        pr_overview = await pr_overview_task
+        existing_threads_block = await existing_threads_task
+        repo_style_prompt = await repo_style_task
+        agents_md_content = await agents_md_task
+        org_guidelines = await org_guidelines_task
+        api_standards_skill = await api_standards_task
+        pr_trace_context = await pr_trace_context_task
         pr_diff_text, pr_diff_line_set = diff_context
         pr_title, pr_body = pr_overview
 
@@ -1227,7 +1227,14 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
             system_prompt = f"{system_prompt}\n\n{review_context}"
         if skill_sources:
             skill_middleware = SkillsMiddleware(backend=sandbox_backend, sources=skill_sources)
-            skill_update = await skill_middleware.abefore_agent({}, runtime, self._config) or {}
+            skill_update = (
+                await skill_middleware.abefore_agent(
+                    cast(SkillsState, {}),
+                    cast(Runtime[None], runtime),
+                    self._config,
+                )
+                or {}
+            )
             skill_request_state = {
                 "skills_metadata": skill_update.get("skills_metadata", []),
                 "skills_load_errors": skill_update.get("skills_load_errors", []),
@@ -1275,15 +1282,15 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
 async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
     """Get or create a reviewer agent with checkpointed run prep."""
     config = config.copy()
-    config["configurable"] = config["configurable"].copy()
+    configurable = dict(config.get("configurable") or {})
+    config["configurable"] = configurable
     config.setdefault("recursion_limit", DEFAULT_RECURSION_LIMIT)
-    thread_id = config["configurable"].get("thread_id", None)
+    thread_id = configurable.get("thread_id")
 
     if thread_id is None or not graph_loaded_for_execution(config):
         logger.info("No thread_id or not for execution, returning reviewer agent without sandbox")
         return create_deep_agent(system_prompt="", tools=[]).with_config(config)
 
-    configurable = config["configurable"]
     configured_model_id = configurable.get("reviewer_model_id")
     configured_effort = configurable.get("reviewer_reasoning_effort")
     if isinstance(configured_model_id, str) and configured_model_id:
@@ -1368,24 +1375,27 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
         ],
         subagents=[_reviewer_subagent(reviewer_subagent_model)],
         backend=backend_factory,
-        middleware=[
-            PrepareReviewerRunMiddleware(
-                thread_id=thread_id,
-                config=config,
-                use_gateway=use_gateway,
-            ),
-            SanitizeToolInputsMiddleware(),
-            ModelCallLimitMiddleware(run_limit=MODEL_CALL_RECURSION_LIMIT, exit_behavior="end"),
-            ToolErrorMiddleware(),
-            refresh_github_proxy_before_model,
-            check_message_queue_before_model,
-            SlackAssistantStatusMiddleware(),
-            TimeoutWrapupMiddleware(),
-            SanitizeFireworksMessagesMiddleware(),
-            SanitizeThinkingBlocksMiddleware(),
-            RepairOrphanedToolCallsMiddleware(),
-            settle_review_check_on_exit,
-        ],
+        middleware=cast(
+            list[AgentMiddleware[Any, Any, Any]],
+            [
+                PrepareReviewerRunMiddleware(
+                    thread_id=thread_id,
+                    config=config,
+                    use_gateway=use_gateway,
+                ),
+                SanitizeToolInputsMiddleware(),
+                ModelCallLimitMiddleware(run_limit=MODEL_CALL_RECURSION_LIMIT, exit_behavior="end"),
+                ToolErrorMiddleware(),
+                refresh_github_proxy_before_model,
+                check_message_queue_before_model,
+                SlackAssistantStatusMiddleware(),
+                TimeoutWrapupMiddleware(),
+                SanitizeFireworksMessagesMiddleware(),
+                SanitizeThinkingBlocksMiddleware(),
+                RepairOrphanedToolCallsMiddleware(),
+                settle_review_check_on_exit,
+            ],
+        ),
     ).with_config(config)
 
 

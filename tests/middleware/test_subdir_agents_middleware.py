@@ -46,6 +46,11 @@ def _ok(name: str, content: str = "file content") -> ToolMessage:
     return ToolMessage(content=content, tool_call_id="call-1", status="success", name=name)
 
 
+def _tool_result(result: object) -> ToolMessage:
+    assert isinstance(result, ToolMessage)
+    return result
+
+
 @pytest.fixture
 def register_backend():
     registered: list[str] = []
@@ -73,7 +78,7 @@ async def test_read_file_appends_applicable_agents_in_root_to_leaf_order(registe
     async def handler(_req: Any) -> ToolMessage:
         return _ok("read_file")
 
-    result = await SubdirAgentsReadMiddleware().awrap_tool_call(request, handler)
+    result = _tool_result(await SubdirAgentsReadMiddleware().awrap_tool_call(request, handler))
 
     assert isinstance(result.content, str)
     assert "<system-reminder>" in result.content
@@ -98,11 +103,15 @@ async def test_read_file_does_not_reload_same_agents_file(register_backend) -> N
     async def handler(_req: Any) -> ToolMessage:
         return _ok("read_file")
 
-    first = await middleware.awrap_tool_call(
-        _request("read_file", {"file_path": "/repo/pkg/a.py"}), handler
+    first = _tool_result(
+        await middleware.awrap_tool_call(
+            _request("read_file", {"file_path": "/repo/pkg/a.py"}), handler
+        )
     )
-    second = await middleware.awrap_tool_call(
-        _request("read_file", {"file_path": "/repo/pkg/b.py"}), handler
+    second = _tool_result(
+        await middleware.awrap_tool_call(
+            _request("read_file", {"file_path": "/repo/pkg/b.py"}), handler
+        )
     )
 
     assert isinstance(first.content, str)
@@ -120,7 +129,7 @@ async def test_reading_agents_md_directly_does_not_append_reminder(register_back
     async def handler(_req: Any) -> ToolMessage:
         return _ok("read_file", "pkg rules")
 
-    result = await SubdirAgentsReadMiddleware().awrap_tool_call(request, handler)
+    result = _tool_result(await SubdirAgentsReadMiddleware().awrap_tool_call(request, handler))
 
     assert result.content == "pkg rules"
     assert backend.reads == []
@@ -134,7 +143,7 @@ async def test_non_read_file_tool_is_untouched(register_backend) -> None:
     async def handler(_req: Any) -> ToolMessage:
         return _ok("edit_file")
 
-    result = await SubdirAgentsReadMiddleware().awrap_tool_call(request, handler)
+    result = _tool_result(await SubdirAgentsReadMiddleware().awrap_tool_call(request, handler))
 
     assert result.content == "file content"
     assert backend.reads == []
@@ -146,7 +155,7 @@ async def test_missing_backend_is_graceful() -> None:
     async def handler(_req: Any) -> ToolMessage:
         return _ok("read_file")
 
-    result = await SubdirAgentsReadMiddleware().awrap_tool_call(request, handler)
+    result = _tool_result(await SubdirAgentsReadMiddleware().awrap_tool_call(request, handler))
 
     assert result.content == "file content"
 

@@ -22,7 +22,10 @@ from fastapi import HTTPException, Response
 from ..review.findings import REVIEWER_THREAD_KIND
 from ..utils.github_app import get_github_app_installation_token
 from ..utils.github_checks import github_headers
+from ..utils.json_types import ThreadLike, as_json_object, thread_metadata
 from ..utils.thread_ops import langgraph_client
+from ..webhooks.common import fetch_github_pr_metadata
+from ..webhooks.github import trigger_pr_review_from_ref
 from .pr_diff import build_pr_diff_files
 
 logger = logging.getLogger(__name__)
@@ -212,7 +215,7 @@ def _finding_counts(findings: list[dict[str, Any]]) -> dict[str, int]:
     return counts
 
 
-def _run_status(thread: dict[str, Any], metadata: dict[str, Any]) -> str:
+def _run_status(thread: ThreadLike, metadata: dict[str, Any]) -> str:
     if thread.get("status") == "busy":
         return "running"
     latest = metadata.get("latest_run_status")
@@ -223,8 +226,8 @@ def _run_status(thread: dict[str, Any], metadata: dict[str, Any]) -> str:
     return "idle"
 
 
-def _thread_review_summary(thread: dict[str, Any]) -> dict[str, Any] | None:
-    metadata = thread.get("metadata") if isinstance(thread.get("metadata"), dict) else {}
+def _thread_review_summary(thread: ThreadLike) -> dict[str, Any] | None:
+    metadata = thread_metadata(thread)
     pr = metadata.get("pr")
     if not isinstance(pr, dict):
         return None
@@ -455,8 +458,9 @@ def _clean_comment_body(body: str) -> str:
 
 
 def _normalize_review_comment(item: dict[str, Any]) -> dict[str, Any]:
-    body = item.get("body") if isinstance(item.get("body"), str) else ""
-    user = item.get("user") if isinstance(item.get("user"), dict) else {}
+    raw_body = item.get("body")
+    body = raw_body if isinstance(raw_body, str) else ""
+    user = as_json_object(item.get("user"))
     line = item.get("line")
     if not isinstance(line, int):
         original = item.get("original_line")
@@ -519,7 +523,7 @@ async def get_review(owner: str, repo: str, pr_number: int) -> dict[str, Any]:
         raise HTTPException(404, "review not found") from exc
     if not isinstance(thread, dict):
         raise HTTPException(404, "review not found")
-    metadata = thread.get("metadata") if isinstance(thread.get("metadata"), dict) else {}
+    metadata = thread_metadata(thread)
     summary = _thread_review_summary(thread)
     if not summary:
         raise HTTPException(404, "review not found")
@@ -697,7 +701,6 @@ async def proxy_pr_image(owner: str, repo: str, pr_number: int, url: str) -> Res
 
 async def trigger_re_review(owner: str, repo: str, pr_number: int, login: str) -> dict[str, Any]:
     from ..utils.slack import GitHubPrRef
-    from ..webapp import trigger_pr_review_from_ref
 
     pr_ref = GitHubPrRef(
         owner=owner,
@@ -718,7 +721,6 @@ async def dry_run_trace_resolution(owner: str, repo: str, pr_number: int) -> dic
     from ..review.trace_context import resolve_pr_trace
     from ..utils.github_app import get_github_app_installation_token_with_expiry
     from ..utils.slack import GitHubPrRef
-    from ..webapp import fetch_github_pr_metadata
 
     pr_ref = GitHubPrRef(
         owner=owner,

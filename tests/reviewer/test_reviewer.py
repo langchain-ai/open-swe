@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+from typing import cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from langchain.agents.middleware import AgentMiddleware, AgentState
 from langgraph.graph.state import RunnableConfig
+from langgraph.runtime import Runtime
 
 from agent import reviewer
 
@@ -193,6 +196,14 @@ class _DummyAgent:
     def with_config(self, config: dict[str, object]) -> _DummyAgent:
         self.config = config
         return self
+
+
+async def _run_prepare(prepare: AgentMiddleware) -> dict[str, object]:
+    updates = await prepare.abefore_agent(
+        cast(AgentState, {"messages": []}), cast(Runtime[None], MagicMock())
+    )
+    assert updates is not None
+    return cast(dict[str, object], updates)
 
 
 @pytest.mark.asyncio
@@ -452,7 +463,7 @@ async def test_reviewer_injects_repo_style_during_eval() -> None:
         },
         "metadata": {},
     }
-    captured: dict[str, str] = {}
+    captured: dict[str, object] = {}
 
     def fake_create_deep_agent(*, system_prompt: str, **kwargs: object) -> _DummyAgent:
         captured["system_prompt"] = system_prompt
@@ -493,9 +504,11 @@ async def test_reviewer_injects_repo_style_during_eval() -> None:
         ),
     ):
         await reviewer.get_reviewer_agent(config)
-        prepare = captured["middleware"][0]
-        updates = await prepare.abefore_agent({}, None)
-        captured["system_prompt"] = updates["rendered_system_prompt"]
+        middleware = captured["middleware"]
+        assert isinstance(middleware, list)
+        prepare = cast(AgentMiddleware, middleware[0])
+        updates = await _run_prepare(prepare)
+        captured["system_prompt"] = cast(str, updates["rendered_system_prompt"])
 
     assert "Repository-specific review style" in captured["system_prompt"]
     assert "Flag table rerender regressions" in captured["system_prompt"]
@@ -518,7 +531,7 @@ async def test_reviewer_inlines_org_guidelines_into_system_prompt() -> None:
         },
         "metadata": {},
     }
-    captured: dict[str, str] = {}
+    captured: dict[str, object] = {}
 
     def fake_create_deep_agent(*, system_prompt: str, **kwargs: object) -> _DummyAgent:
         captured["system_prompt"] = system_prompt
@@ -560,9 +573,11 @@ async def test_reviewer_inlines_org_guidelines_into_system_prompt() -> None:
         patch("agent.reviewer.create_deep_agent", side_effect=fake_create_deep_agent),
     ):
         await reviewer.get_reviewer_agent(config)
-        prepare = captured["middleware"][0]
-        updates = await prepare.abefore_agent({}, None)
-        captured["system_prompt"] = updates["rendered_system_prompt"]
+        middleware = captured["middleware"]
+        assert isinstance(middleware, list)
+        prepare = cast(AgentMiddleware, middleware[0])
+        updates = await _run_prepare(prepare)
+        captured["system_prompt"] = cast(str, updates["rendered_system_prompt"])
 
     assert "Organization-wide review guidelines" in captured["system_prompt"]
     assert "disables a CI gate" in captured["system_prompt"]
@@ -597,7 +612,7 @@ async def test_reviewer_inlines_agents_md_into_system_prompt() -> None:
         },
         "metadata": {},
     }
-    captured: dict[str, str] = {}
+    captured: dict[str, object] = {}
 
     def fake_create_deep_agent(*, system_prompt: str, **kwargs: object) -> _DummyAgent:
         captured["system_prompt"] = system_prompt
@@ -629,9 +644,11 @@ async def test_reviewer_inlines_agents_md_into_system_prompt() -> None:
         patch("agent.reviewer.create_deep_agent", side_effect=fake_create_deep_agent),
     ):
         await reviewer.get_reviewer_agent(config)
-        prepare = captured["middleware"][0]
-        updates = await prepare.abefore_agent({}, None)
-        captured["system_prompt"] = updates["rendered_system_prompt"]
+        middleware = captured["middleware"]
+        assert isinstance(middleware, list)
+        prepare = cast(AgentMiddleware, middleware[0])
+        updates = await _run_prepare(prepare)
+        captured["system_prompt"] = cast(str, updates["rendered_system_prompt"])
 
     mock_fetch_agents_md.assert_awaited_once_with("acme", "repo", "base-sha-xyz", token="gh-token")
     assert "Repository conventions (AGENTS.md / CLAUDE.md)" in captured["system_prompt"]
@@ -653,7 +670,7 @@ async def test_reviewer_inlines_claude_md_when_agents_md_absent() -> None:
         },
         "metadata": {},
     }
-    captured: dict[str, str] = {}
+    captured: dict[str, object] = {}
 
     def fake_create_deep_agent(*, system_prompt: str, **kwargs: object) -> _DummyAgent:
         captured["system_prompt"] = system_prompt
@@ -685,9 +702,11 @@ async def test_reviewer_inlines_claude_md_when_agents_md_absent() -> None:
         patch("agent.reviewer.create_deep_agent", side_effect=fake_create_deep_agent),
     ):
         await reviewer.get_reviewer_agent(config)
-        prepare = captured["middleware"][0]
-        updates = await prepare.abefore_agent({}, None)
-        captured["system_prompt"] = updates["rendered_system_prompt"]
+        middleware = captured["middleware"]
+        assert isinstance(middleware, list)
+        prepare = cast(AgentMiddleware, middleware[0])
+        updates = await _run_prepare(prepare)
+        captured["system_prompt"] = cast(str, updates["rendered_system_prompt"])
 
     mock_fetch_agents_md.assert_awaited_once_with("acme", "repo", "base-sha-xyz", token="gh-token")
     assert "Repository conventions (AGENTS.md / CLAUDE.md)" in captured["system_prompt"]
@@ -995,7 +1014,7 @@ async def test_reviewer_injects_pr_review_threads_into_first_review_context() ->
         },
         "metadata": {},
     }
-    captured: dict[str, str] = {}
+    captured: dict[str, object] = {}
 
     def fake_create_deep_agent(*, system_prompt: str, **kwargs: object) -> _DummyAgent:
         captured["system_prompt"] = system_prompt
@@ -1054,9 +1073,11 @@ async def test_reviewer_injects_pr_review_threads_into_first_review_context() ->
         patch("agent.reviewer.create_deep_agent", side_effect=fake_create_deep_agent),
     ):
         await reviewer.get_reviewer_agent(config)
-        prepare = captured["middleware"][0]
-        updates = await prepare.abefore_agent({}, None)
-        captured["system_prompt"] = updates["rendered_system_prompt"]
+        middleware = captured["middleware"]
+        assert isinstance(middleware, list)
+        prepare = cast(AgentMiddleware, middleware[0])
+        updates = await _run_prepare(prepare)
+        captured["system_prompt"] = cast(str, updates["rendered_system_prompt"])
 
     mock_fetch_threads.assert_awaited_once()
     assert "Pre-existing PR review threads" in captured["system_prompt"]
@@ -1081,7 +1102,7 @@ async def test_reviewer_injects_pr_review_threads_into_re_review_context() -> No
         },
         "metadata": {},
     }
-    captured: dict[str, str] = {}
+    captured: dict[str, object] = {}
 
     def fake_create_deep_agent(*, system_prompt: str, **kwargs: object) -> _DummyAgent:
         captured["system_prompt"] = system_prompt
@@ -1134,9 +1155,11 @@ async def test_reviewer_injects_pr_review_threads_into_re_review_context() -> No
         patch("agent.reviewer.create_deep_agent", side_effect=fake_create_deep_agent),
     ):
         await reviewer.get_reviewer_agent(config)
-        prepare = captured["middleware"][0]
-        updates = await prepare.abefore_agent({}, None)
-        captured["system_prompt"] = updates["rendered_system_prompt"]
+        middleware = captured["middleware"]
+        assert isinstance(middleware, list)
+        prepare = cast(AgentMiddleware, middleware[0])
+        updates = await _run_prepare(prepare)
+        captured["system_prompt"] = cast(str, updates["rendered_system_prompt"])
 
     assert "A new commit has been pushed" in captured["system_prompt"]
     assert "Pre-existing PR review threads" in captured["system_prompt"]
@@ -1159,7 +1182,7 @@ async def test_reviewer_omits_threads_block_when_fetch_returns_empty() -> None:
         },
         "metadata": {},
     }
-    captured: dict[str, str] = {}
+    captured: dict[str, object] = {}
 
     def fake_create_deep_agent(*, system_prompt: str, **kwargs: object) -> _DummyAgent:
         captured["system_prompt"] = system_prompt
@@ -1196,9 +1219,11 @@ async def test_reviewer_omits_threads_block_when_fetch_returns_empty() -> None:
         patch("agent.reviewer.create_deep_agent", side_effect=fake_create_deep_agent),
     ):
         await reviewer.get_reviewer_agent(config)
-        prepare = captured["middleware"][0]
-        updates = await prepare.abefore_agent({}, None)
-        captured["system_prompt"] = updates["rendered_system_prompt"]
+        middleware = captured["middleware"]
+        assert isinstance(middleware, list)
+        prepare = cast(AgentMiddleware, middleware[0])
+        updates = await _run_prepare(prepare)
+        captured["system_prompt"] = cast(str, updates["rendered_system_prompt"])
 
     # The rule text mentions the wrapper tag, but the actual rendered XML
     # data block (which always has a `</pr_review_threads>` closer and a
@@ -1222,7 +1247,7 @@ async def test_reviewer_continues_when_thread_fetch_raises() -> None:
         },
         "metadata": {},
     }
-    captured: dict[str, str] = {}
+    captured: dict[str, object] = {}
 
     def fake_create_deep_agent(*, system_prompt: str, **kwargs: object) -> _DummyAgent:
         captured["system_prompt"] = system_prompt
@@ -1259,9 +1284,11 @@ async def test_reviewer_continues_when_thread_fetch_raises() -> None:
         patch("agent.reviewer.create_deep_agent", side_effect=fake_create_deep_agent),
     ):
         await reviewer.get_reviewer_agent(config)
-        prepare = captured["middleware"][0]
-        updates = await prepare.abefore_agent({}, None)
-        captured["system_prompt"] = updates["rendered_system_prompt"]
+        middleware = captured["middleware"]
+        assert isinstance(middleware, list)
+        prepare = cast(AgentMiddleware, middleware[0])
+        updates = await _run_prepare(prepare)
+        captured["system_prompt"] = cast(str, updates["rendered_system_prompt"])
 
     # The reviewer must still produce a usable prompt even if the thread
     # fetch fails; the first-review user-message context should still appear.
@@ -1337,8 +1364,10 @@ async def test_reviewer_populates_diff_line_set_from_github_api() -> None:
         patch("agent.reviewer.create_deep_agent", side_effect=fake_create_deep_agent),
     ):
         await reviewer.get_reviewer_agent(config)
-        prepare = captured["middleware"][0]
-        updates = await prepare.abefore_agent({}, None)
+        middleware = captured["middleware"]
+        assert isinstance(middleware, list)
+        prepare = cast(AgentMiddleware, middleware[0])
+        updates = await _run_prepare(prepare)
 
     mock_fetch_diff.assert_awaited_once_with(
         owner="acme", repo="repo", pr_number=42, token="gh-token"
@@ -1407,8 +1436,10 @@ async def test_reviewer_leaves_validation_disabled_when_diff_fetch_fails() -> No
         patch("agent.reviewer.create_deep_agent", side_effect=fake_create_deep_agent),
     ):
         await reviewer.get_reviewer_agent(config)
-        prepare = captured["middleware"][0]
-        updates = await prepare.abefore_agent({}, None)
+        middleware = captured["middleware"]
+        assert isinstance(middleware, list)
+        prepare = cast(AgentMiddleware, middleware[0])
+        updates = await _run_prepare(prepare)
 
     assert updates["diff_text"] == ""
     assert updates["diff_line_set"] is None
@@ -1429,7 +1460,7 @@ async def test_reviewer_injects_pr_title_and_body_into_context() -> None:
         },
         "metadata": {},
     }
-    captured: dict[str, str] = {}
+    captured: dict[str, object] = {}
 
     def fake_create_deep_agent(*, system_prompt: str, **kwargs: object) -> _DummyAgent:
         captured["system_prompt"] = system_prompt
@@ -1476,9 +1507,11 @@ async def test_reviewer_injects_pr_title_and_body_into_context() -> None:
         patch("agent.reviewer.create_deep_agent", side_effect=fake_create_deep_agent),
     ):
         await reviewer.get_reviewer_agent(config)
-        prepare = captured["middleware"][0]
-        updates = await prepare.abefore_agent({}, None)
-        captured["system_prompt"] = updates["rendered_system_prompt"]
+        middleware = captured["middleware"]
+        assert isinstance(middleware, list)
+        prepare = cast(AgentMiddleware, middleware[0])
+        updates = await _run_prepare(prepare)
+        captured["system_prompt"] = cast(str, updates["rendered_system_prompt"])
 
     mock_fetch_metadata.assert_awaited_once_with(
         owner="acme", repo="repo", pr_number=42, token="gh-token"

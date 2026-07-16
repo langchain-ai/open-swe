@@ -97,6 +97,7 @@ async def test_agent_does_not_add_custom_repair_middleware() -> None:
 async def test_agent_keeps_message_queue_and_step_limit_middleware() -> None:
     captured = await _capture_create_deep_agent_kwargs()
     middleware = captured["middleware"]
+    assert isinstance(middleware, list)
     # The dashboard depends on check_message_queue_before_model; the step-limit
     # notifier must still fire when the lowered run budget is hit.
     present = {type(m).__name__ for m in middleware}
