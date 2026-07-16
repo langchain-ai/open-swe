@@ -98,8 +98,15 @@ jobs:
         run: |
           FORK_COMMITS="${{ steps.collect.outputs.commits }}"
           FAILED_FILES=""
+          SYNC_WORKFLOW=".github/workflows/sync_with_upstream.yml"
           for COMMIT in $FORK_COMMITS; do
             SUBJECT=$(git log -1 --format='%s' "$COMMIT")
+            # Skip commits that only touch the sync workflow itself
+            CHANGED_FILES=$(git diff-tree --no-commit-id --name-only -r "$COMMIT")
+            if [ "$CHANGED_FILES" = "$SYNC_WORKFLOW" ]; then
+              echo "Skipping (sync workflow only): $SUBJECT ($COMMIT)"
+              continue
+            fi
             echo "Cherry-picking: $SUBJECT ($COMMIT)"
             if ! git cherry-pick "$COMMIT" --no-edit; then
               CONFLICTS=$(git diff --name-only --diff-filter=U | sort)
@@ -139,17 +146,14 @@ jobs:
           if [ "${{ steps.replay.outputs.has_conflicts }}" = "true" ]; then
             CONFLICT_FILES="${{ steps.replay.outputs.files }}"
             FILE_LIST=$(echo "$CONFLICT_FILES" | sed 's/^/- `/' | sed 's/$/`/')
-            BODY=$(cat <<PREOF
-Upstream changes applied, then aeteq commits replayed on top.
+            BODY="Upstream changes applied, then aeteq commits replayed on top.
 
-Some commits conflicted — resolved by keeping our fork's version.
+            Some commits conflicted — resolved by keeping our fork's version.
 
-**Files with conflicts (our version kept):**
-${FILE_LIST}
+            **Files with conflicts (our version kept):**
+            ${FILE_LIST}
 
-Review these files to check if upstream made important changes.
-PREOF
-            )
+            Review these files to check if upstream made important changes."
             gh pr create --repo aeteq/open-swe --head sync-upstream --base main \
               --title "chore: sync with upstream (conflicts auto-resolved)" \
               --body "$BODY"
