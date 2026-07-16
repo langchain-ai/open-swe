@@ -12,7 +12,9 @@ from agent.integrations.langsmith import (
     DEFAULT_SNAPSHOT_FS_CAPACITY_BYTES,
     LangSmithProvider,
     _create_sandbox_with_retry,
+    _get_sandbox_create_extra_fields,
     _get_sandbox_snapshot_config,
+    _install_create_extra_fields,
     _wait_for_reconnected_sandbox,
 )
 
@@ -169,3 +171,69 @@ async def test_wait_for_reconnected_sandbox_polls_until_ready(monkeypatch) -> No
     assert sandbox.status == "running"
     assert client.calls == 3
     assert sleep.await_count == 2
+
+
+def test_extra_fields_unset_is_empty() -> None:
+    with patch.dict("os.environ", {}, clear=True):
+        assert _get_sandbox_create_extra_fields() == {}
+    with patch.dict("os.environ", {"SANDBOX_CREATE_EXTRA_JSON": "  "}, clear=True):
+        assert _get_sandbox_create_extra_fields() == {}
+
+
+def test_extra_fields_parsed() -> None:
+    with patch.dict(
+        "os.environ",
+        {"SANDBOX_CREATE_EXTRA_JSON": '{"_internal_runtime": "v2"}'},
+        clear=True,
+    ):
+        assert _get_sandbox_create_extra_fields() == {"_internal_runtime": "v2"}
+
+
+def test_extra_fields_rejects_invalid_json() -> None:
+    with patch.dict("os.environ", {"SANDBOX_CREATE_EXTRA_JSON": "{not json"}, clear=True):
+        with pytest.raises(ValueError, match="valid JSON"):
+            _get_sandbox_create_extra_fields()
+
+
+def test_extra_fields_rejects_non_object() -> None:
+    with patch.dict("os.environ", {"SANDBOX_CREATE_EXTRA_JSON": "[1, 2]"}, clear=True):
+        with pytest.raises(ValueError, match="JSON object"):
+            _get_sandbox_create_extra_fields()
+
+
+@pytest.mark.asyncio
+async def test_install_create_extra_fields_merges_only_boxes_post() -> None:
+    calls: list[tuple[str, dict]] = []
+
+    class _FakeHttp:
+        async def post(self, url, **kwargs):  # noqa: ANN001, ANN003
+            calls.append((url, kwargs.get("json")))
+            return "ok"
+
+    class _FakeClient:
+        def __init__(self) -> None:
+            self._http = _FakeHttp()
+
+    client = _FakeClient()
+    _install_create_extra_fields(client, {"_internal_runtime": "v2"})
+
+    await client._http.post("https://api/v2/sandboxes/boxes", json={"snapshot_id": "s"})
+    await client._http.post("https://api/v2/sandboxes/boxes/abc/start", json={"foo": "bar"})
+
+    assert calls[0][1] == {"snapshot_id": "s", "_internal_runtime": "v2"}
+    assert calls[1][1] == {"foo": "bar"}
+
+
+@pytest.mark.asyncio
+async def test_install_create_extra_fields_noop_when_empty() -> None:
+    class _FakeHttp:
+        def __init__(self) -> None:
+            self.post = "sentinel"
+
+    class _FakeClient:
+        def __init__(self) -> None:
+            self._http = _FakeHttp()
+
+    client = _FakeClient()
+    _install_create_extra_fields(client, {})
+    assert client._http.post == "sentinel"
