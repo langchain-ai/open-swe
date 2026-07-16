@@ -1,5 +1,6 @@
 import { AIMessage, HumanMessage, ToolMessage } from "@langchain/core/messages";
 import { messageArrivalTimestamp } from "./messageTimestamps";
+import { humanizeToolName } from "./toolNames";
 import type { BaseMessage, ContentBlock } from "@langchain/core/messages";
 import type { AssembledToolCall, SubagentDiscoverySnapshot } from "@langchain/react";
 
@@ -39,7 +40,7 @@ function toolTitle(name: string, args: Record<string, unknown>): string {
   if (typeof command === "string" && command.trim()) {
     return command.trim().split("\n")[0]?.slice(0, 120) ?? "";
   }
-  return name.replace(/_/g, " ").trim() || "Tool";
+  return humanizeToolName(name);
 }
 
 function parseToolArgs(raw: unknown): Record<string, unknown> {
