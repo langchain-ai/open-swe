@@ -111,6 +111,16 @@ def clear_app_token_cache() -> None:
     _TOKEN_CACHE.clear()
 
 
+def invalidate_cached_app_token(
+    *,
+    repository_ids: Sequence[int] | None = None,
+    repositories: Sequence[str] | None = None,
+    permissions: PermissionMap | None = None,
+) -> None:
+    """Drop one cached installation-token scope."""
+    _TOKEN_CACHE.pop(_scope_key(repository_ids, repositories, permissions), None)
+
+
 def _generate_app_jwt() -> str:
     """Generate a short-lived JWT signed with the GitHub App private key."""
     now = int(time.time())

@@ -59,6 +59,7 @@ from .middleware import (
     refresh_github_proxy_before_model,
     settle_review_check_on_exit,
 )
+from .review.auth import REVIEWER_GITHUB_TOKEN_PERMISSIONS
 from .review.diff import (
     compute_diff_line_set,
     fetch_pr_diff,
@@ -913,8 +914,11 @@ async def _ensure_reviewer_sandbox_for_thread(
     github_token: str | None = None
     if configurable.get("source"):
         repo_name_for_token = str(repo_config.get("name") or "")
+        if not repo_name_for_token:
+            raise RuntimeError(f"Repository unavailable for reviewer thread {thread_id}")
         github_token, expires_at = await get_github_app_installation_token_with_expiry(
-            repositories=[repo_name_for_token] if repo_name_for_token else None
+            repositories=[repo_name_for_token],
+            permissions=REVIEWER_GITHUB_TOKEN_PERMISSIONS,
         )
         if not github_token:
             raise RuntimeError(

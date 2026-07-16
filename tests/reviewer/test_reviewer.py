@@ -238,7 +238,10 @@ async def test_reviewer_resolves_app_installation_token_at_run_start() -> None:
     assert "github_token_encrypted" not in metadata
     # Token is resolved in this process at run start (scoped to the repo), not read
     # from a cache the webhook handler populated in a different process.
-    mock_app_token.assert_awaited_once_with(repositories=["repo"])
+    mock_app_token.assert_awaited_once_with(
+        repositories=["repo"],
+        permissions=reviewer.REVIEWER_GITHUB_TOKEN_PERMISSIONS,
+    )
     mock_cache_token.assert_called_once_with(
         "reviewer-thread-id", "app-token", expires_at=None, is_bot_token=True
     )
