@@ -66,9 +66,9 @@ jobs:
             TITLE="Sync with upstream"
             BODY="Automated PR to pull in upstream changes."
           fi
-          EXISTING_PR=$(gh pr list --head sync-upstream --base main --json number --jq '.[0].number')
+          EXISTING_PR=$(gh pr list --repo aeteq/open-swe --head sync-upstream --base main --json number --jq '.[0].number')
           if [ -n "$EXISTING_PR" ]; then
             echo "PR #$EXISTING_PR already exists."
           else
-            gh pr create --head sync-upstream --base main --title "$TITLE" --body "$BODY"
+            gh pr create --repo aeteq/open-swe --head sync-upstream --base main --title "$TITLE" --body "$BODY"
           fi
