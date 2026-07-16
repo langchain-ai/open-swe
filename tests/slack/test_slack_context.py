@@ -1,4 +1,5 @@
 import asyncio
+from typing import cast
 
 import pytest
 
@@ -910,7 +911,10 @@ def test_process_slack_mention_mapped_user_with_token_runs_as_user(
     )
 
     run_create = captured["run_create"]
-    configurable = run_create["kwargs"]["config"]["configurable"]
+    run_create_data = cast(dict[str, object], run_create)
+    kwargs = cast(dict[str, object], run_create_data["kwargs"])
+    config = cast(dict[str, object], kwargs["config"])
+    configurable = cast(dict[str, object], config["configurable"])
     assert configurable["github_login"] == "mason-gh"
     # The thread is tagged with the login resolved from the Slack user id, so it
     # surfaces in the web Agents UI even when the Slack profile email does not

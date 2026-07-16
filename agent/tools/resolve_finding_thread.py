@@ -224,7 +224,7 @@ def _str_list(value: Any) -> list[str]:
     return [item for item in value if isinstance(item, str) and item]
 
 
-def _comment_ids_for_finding(finding: dict[str, Any]) -> list[int]:
+def _comment_ids_for_finding(finding: Finding) -> list[int]:
     comment_ids = _int_list(finding.get("github_review_comment_ids"))
     comment_id = finding.get("github_review_comment_id")
     if isinstance(comment_id, int) and comment_id not in comment_ids:
@@ -232,7 +232,7 @@ def _comment_ids_for_finding(finding: dict[str, Any]) -> list[int]:
     return comment_ids
 
 
-def _thread_ids_for_finding(finding: dict[str, Any]) -> list[str]:
+def _thread_ids_for_finding(finding: Finding) -> list[str]:
     thread_ids = _str_list(finding.get("github_review_thread_ids"))
     thread_id = finding.get("github_review_thread_id")
     if isinstance(thread_id, str) and thread_id and thread_id not in thread_ids:

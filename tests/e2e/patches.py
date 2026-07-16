@@ -61,10 +61,10 @@ def apply() -> None:
         return "dummy-installation-token"
 
     auth.get_github_app_installation_token_with_expiry = _dummy_install_token_with_expiry
-    opr.get_github_app_installation_token = _dummy_install_token
+    opr.__dict__["get_github_app_installation_token"] = _dummy_install_token
 
     # Point the real PR/Slack code at the in-process fakes.
-    opr.GITHUB_API = FAKE_GITHUB_API
+    opr.__dict__["GITHUB_API"] = FAKE_GITHUB_API
     slack_utils.SLACK_API_BASE_URL = FAKE_SLACK_API
 
     # Keep the triggering-user identity lookup offline; the real fallback to

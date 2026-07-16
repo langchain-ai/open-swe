@@ -48,7 +48,9 @@ async def test_error_status_posts_slack_failure_reply(monkeypatch: pytest.Monkey
 
     assert result["status"] == "ok"
     reply.assert_awaited_once()
-    args = reply.await_args.args
+    await_args = reply.await_args
+    assert await_args is not None
+    args = await_args.args
     assert args[0] == "C1"
     assert args[1] == "123.45"
     assert "<https://ui/t1|Open SWE Web>" in args[2]
@@ -128,7 +130,9 @@ async def test_linear_source_comments_on_issue(monkeypatch: pytest.MonkeyPatch) 
 
     assert result["status"] == "ok"
     comment.assert_awaited_once()
-    assert comment.await_args.args[0] == "iss_1"
+    await_args = comment.await_args
+    assert await_args is not None
+    assert await_args.args[0] == "iss_1"
 
 
 @pytest.mark.asyncio

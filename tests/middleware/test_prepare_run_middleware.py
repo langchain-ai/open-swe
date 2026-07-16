@@ -1,9 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+from typing import Any, cast
+from unittest.mock import MagicMock
 
 import pytest
+from langchain.agents.middleware import AgentState
+from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_core.messages import HumanMessage
+from langgraph.runtime import Runtime
 
 from agent.middleware.prepare_run import BasePrepareRunMiddleware
 from agent.utils import ttl_cache
@@ -22,7 +27,10 @@ class DummyPrepareMiddleware(BasePrepareRunMiddleware):
 async def test_prepare_latch_skips_second_call():
     middleware = DummyPrepareMiddleware()
 
-    update = await middleware.abefore_agent({}, None)
+    update = await middleware.abefore_agent(
+        cast(AgentState, {"messages": []}), cast(Runtime[None], MagicMock())
+    )
+    assert update is not None
     fingerprint = update.pop("run_prepared_for")
     assert isinstance(fingerprint, str)
     assert update == {
@@ -32,7 +40,10 @@ async def test_prepare_latch_skips_second_call():
     }
     assert (
         await middleware.abefore_agent(
-            {"run_prepared": True, "run_prepared_for": fingerprint}, None
+            cast(
+                AgentState, {"messages": [], "run_prepared": True, "run_prepared_for": fingerprint}
+            ),
+            cast(Runtime[None], MagicMock()),
         )
         is None
     )
@@ -43,7 +54,10 @@ async def test_prepare_latch_skips_second_call():
 async def test_prepare_latch_reruns_when_fingerprint_changes():
     middleware = DummyPrepareMiddleware()
 
-    assert await middleware.abefore_agent({"run_prepared": True, "run_prepared_for": "stale"}, None)
+    assert await middleware.abefore_agent(
+        cast(AgentState, {"messages": [], "run_prepared": True, "run_prepared_for": "stale"}),
+        cast(Runtime[None], MagicMock()),
+    )
     assert middleware.calls == 1
 
 
@@ -52,9 +66,9 @@ async def test_prepare_prompt_injection():
     middleware = DummyPrepareMiddleware()
     seen = {}
 
-    async def handler(request):
+    async def handler(request: ModelRequest[None]) -> ModelResponse[Any]:
         seen["system_prompt"] = request.system_prompt
-        return None
+        return cast(ModelResponse[Any], MagicMock())
 
     request = type(
         "Request",
@@ -76,7 +90,7 @@ async def test_prepare_prompt_injection():
             )(),
         },
     )()
-    await middleware.awrap_model_call(request, handler)
+    await middleware.awrap_model_call(cast(ModelRequest[None], request), handler)
     assert seen["system_prompt"] == "prepared prompt"
 
 

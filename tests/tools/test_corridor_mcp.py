@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+from typing import cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from langchain.agents.middleware import AgentMiddleware, AgentState
+from langchain_core.runnables import RunnableConfig
+from langgraph.runtime import Runtime
 
 from agent import server
 from agent.integrations import corridor_mcp
@@ -177,9 +181,12 @@ async def test_get_agent_passes_corridor_prompt_state() -> None:
             patch.object(server, "construct_system_prompt", return_value="prompt") as prompt,
             patch.object(server, "create_deep_agent", side_effect=fake_create_deep_agent),
         ):
-            await server.get_agent(config)
-            prepare = captured["middleware"][0]
-            await prepare.abefore_agent({}, None)
+            await server.get_agent(cast(RunnableConfig, config))
+            prepare = cast(AgentMiddleware, cast(list[object], captured["middleware"])[0])
+            await prepare.abefore_agent(
+                cast(AgentState[object], {"messages": []}),
+                cast(Runtime[None], MagicMock()),
+            )
         return bool(prompt.call_args.kwargs["corridor_enabled"])
 
     assert await run_with_corridor_tools([]) is False

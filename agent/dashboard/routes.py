@@ -251,7 +251,7 @@ def _frontend_base_url() -> str:
     return v
 
 
-def _cookie_security() -> tuple[bool, str]:
+def _cookie_security() -> tuple[bool, Literal["lax", "none"]]:
     """Cookie ``secure``/``samesite`` flags derived from the API scheme.
 
     Production serves the API over HTTPS and the dashboard is a separate

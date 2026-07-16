@@ -7,11 +7,12 @@ object (``common.X``) so tests that monkeypatch them keep working.
 import asyncio
 import re
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 
 import httpx
 from langchain_core.messages.content import create_text_block
 
+from agent.utils.json_types import as_json_object
 from agent.utils.langsmith import get_langsmith_trace_url
 
 from . import common
@@ -143,13 +144,15 @@ async def _dispatch_or_queue_slack_run(
     ):
         await common.queue_message_for_thread(thread_id, content_blocks)
         return None
-    return await common.dispatch_agent_run(
-        thread_id,
-        content_blocks,
-        configurable,
-        source="slack",
-        metadata=common._AGENT_VERSION_METADATA,
-        client=client,
+    return as_json_object(
+        await common.dispatch_agent_run(
+            thread_id,
+            content_blocks,
+            configurable,
+            source="slack",
+            metadata=common._AGENT_VERSION_METADATA,
+            client=client,
+        )
     )
 
 
@@ -439,7 +442,7 @@ async def _process_slack_mention_impl(
         "Use `slack_read_thread_messages` to read any Slack messages by providing channel_id "
         "and message_ts."
     )
-    content_blocks: list[dict[str, Any]] = [create_text_block(prompt)]
+    content_blocks: list[dict[str, Any]] = [cast(dict[str, Any], create_text_block(prompt))]
 
     image_urls = common.dedupe_urls(
         [url for msg in context_messages for url in common.extract_image_urls(msg.get("text", ""))]
@@ -477,7 +480,7 @@ async def _process_slack_mention_impl(
             for image_url in image_urls:
                 image_block = await common.fetch_image_block(image_url, http_client)
                 if image_block:
-                    content_blocks.append(image_block)
+                    content_blocks.append(cast(dict[str, Any], image_block))
 
     # Open SWE opens PRs as the triggering user, so a run only proceeds when we
     # have a valid user GitHub token. Users who have never signed in with

@@ -8,7 +8,7 @@ human messages before the next model call.
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, cast
 
 import httpx
 from langchain.agents.middleware import AgentState, before_model
@@ -81,7 +81,7 @@ async def _build_blocks_from_payload(
         for image_url in image_urls:
             image_block = await fetch_image_block(image_url, client)
             if image_block:
-                blocks.append(image_block)
+                blocks.append(cast(dict[str, Any], image_block))
     return blocks
 
 
