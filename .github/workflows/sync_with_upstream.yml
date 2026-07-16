@@ -56,6 +56,6 @@ jobs:
         with:
           token: ${{ steps.app-token.outputs.token }}
           branch: sync-upstream
-          base: origin/main
+          base: main
           title: ${{ steps.merge.outputs.conflict == 'true' && '⚠️ Sync with upstream (has conflicts)' || 'Sync with upstream' }}
           body: ${{ steps.merge.outputs.conflict == 'true' && 'Automated sync hit merge conflicts. Files contain conflict markers that need manual resolution before merging.' || 'Automated PR to pull in upstream changes.' }}
