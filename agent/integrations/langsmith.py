@@ -6,6 +6,7 @@ import asyncio
 import base64
 import logging
 import os
+import uuid
 from abc import ABC, abstractmethod
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FuturesTimeout
@@ -79,6 +80,33 @@ def _get_sandbox_endpoint() -> str:
         or os.environ.get("LANGSMITH_ENDPOINT")
         or "https://api.smith.langchain.com"
     )
+
+
+def _current_thread_id() -> str | None:
+    """The LangGraph thread id for the active run, if any."""
+    try:
+        from langgraph.config import get_config
+
+        return get_config().get("configurable", {}).get("thread_id")
+    except Exception:
+        return None
+
+
+def _sandbox_name_for_thread(thread_id: str | None) -> str | None:
+    """Deterministic, thread-traceable sandbox name: ``openswe-<b32(thread uuid)>``.
+
+    The thread id (a UUID) is base32-encoded lowercase without padding so the
+    name is a compact, hyphen-free token that maps back to the thread. Returns
+    None when the thread id is missing or not a UUID, leaving the name unset.
+    """
+    if not thread_id:
+        return None
+    try:
+        raw = uuid.UUID(thread_id).bytes
+    except ValueError:
+        return None
+    encoded = base64.b32encode(raw).decode("ascii").rstrip("=").lower()
+    return f"openswe-{encoded}"
 
 
 def _parse_optional_int(name: str, default: int) -> int:
@@ -215,6 +243,7 @@ async def _create_sandbox_with_retry(
     client: AsyncSandboxClient,
     *,
     snapshot_id: str,
+    name: str | None,
     fs_capacity_bytes: int | None,
     vcpus: int | None,
     mem_bytes: int | None,
@@ -226,6 +255,7 @@ async def _create_sandbox_with_retry(
         try:
             return await client.create_sandbox(
                 snapshot_id=snapshot_id,
+                name=name,
                 fs_capacity_bytes=fs_capacity_bytes,
                 vcpus=vcpus,
                 mem_bytes=mem_bytes,
@@ -348,6 +378,7 @@ async def create_langsmith_sandbox(
     backend = await provider.get_or_create(
         sandbox_id=sandbox_id,
         snapshot_id=effective_snapshot_id,
+        name=_sandbox_name_for_thread(_current_thread_id()),
         fs_capacity_bytes=fs_capacity_bytes,
         vcpus=vcpus,
         mem_bytes=mem_bytes,
@@ -365,11 +396,9 @@ async def create_langsmith_sandbox(
 async def _update_thread_sandbox_metadata(sandbox_id: str) -> None:
     """Update thread metadata with sandbox_id."""
     try:
-        from langgraph.config import get_config
         from langgraph_sdk import get_client
 
-        config = get_config()
-        thread_id = config.get("configurable", {}).get("thread_id")
+        thread_id = _current_thread_id()
         if not thread_id:
             return
         client = get_client()
@@ -568,6 +597,7 @@ class LangSmithProvider(SandboxProvider):
         sandbox_id: str | None = None,
         timeout: int = 180,
         snapshot_id: str | None = None,
+        name: str | None = None,
         fs_capacity_bytes: int | None = None,
         vcpus: int | None = None,
         mem_bytes: int | None = None,
@@ -622,6 +652,7 @@ class LangSmithProvider(SandboxProvider):
                 sandbox = await _create_sandbox_with_retry(
                     client,
                     snapshot_id=snapshot_id,
+                    name=name,
                     fs_capacity_bytes=fs_capacity_bytes,
                     vcpus=vcpus,
                     mem_bytes=mem_bytes,

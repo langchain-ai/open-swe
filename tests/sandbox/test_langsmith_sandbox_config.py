@@ -1,5 +1,7 @@
 """Tests for LangSmith sandbox env-var configuration parsing."""
 
+import base64
+import uuid
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -13,8 +15,27 @@ from agent.integrations.langsmith import (
     LangSmithProvider,
     _create_sandbox_with_retry,
     _get_sandbox_snapshot_config,
+    _sandbox_name_for_thread,
     _wait_for_reconnected_sandbox,
 )
+
+
+def test_sandbox_name_for_thread_encodes_uuid() -> None:
+    thread_id = "12345678-1234-5678-1234-567812345678"
+    name = _sandbox_name_for_thread(thread_id)
+    assert name is not None
+    prefix, _, encoded = name.partition("-")
+    assert prefix == "openswe"
+    assert encoded == encoded.lower()
+    assert "=" not in encoded and "-" not in encoded
+    # Round-trips back to the original UUID.
+    padded = encoded.upper() + "=" * (-len(encoded) % 8)
+    assert uuid.UUID(bytes=base64.b32decode(padded)) == uuid.UUID(thread_id)
+
+
+def test_sandbox_name_for_thread_none_or_invalid() -> None:
+    assert _sandbox_name_for_thread(None) is None
+    assert _sandbox_name_for_thread("not-a-uuid") is None
 
 
 def test_defaults_when_env_unset() -> None:
@@ -112,6 +133,7 @@ class _FakeSandboxClient:
 
     async def create_sandbox(self, **kwargs):
         self.calls += 1
+        self.last_kwargs = kwargs
         if self.calls <= self.failures:
             raise _RetryableCreateError("try again")
         return {"sandbox": kwargs["snapshot_id"]}
@@ -141,6 +163,7 @@ async def test_create_sandbox_with_retry_retries_transient_errors(monkeypatch) -
     result = await _create_sandbox_with_retry(
         client,
         snapshot_id="snap-1",
+        name="openswe-abc",
         fs_capacity_bytes=None,
         vcpus=None,
         mem_bytes=None,
@@ -151,6 +174,7 @@ async def test_create_sandbox_with_retry_retries_transient_errors(monkeypatch) -
 
     assert result == {"sandbox": "snap-1"}
     assert client.calls == 3
+    assert client.last_kwargs["name"] == "openswe-abc"
 
 
 @pytest.mark.asyncio
