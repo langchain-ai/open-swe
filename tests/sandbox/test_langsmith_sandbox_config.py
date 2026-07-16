@@ -14,10 +14,24 @@ from agent.integrations.langsmith import (
     DEFAULT_SNAPSHOT_FS_CAPACITY_BYTES,
     LangSmithProvider,
     _create_sandbox_with_retry,
+    _get_sandbox_api_endpoint,
     _get_sandbox_snapshot_config,
     _sandbox_name_for_thread,
     _wait_for_reconnected_sandbox,
 )
+
+
+def test_sandbox_api_endpoint_appends_v2_sandboxes() -> None:
+    with patch.dict("os.environ", {"LANGSMITH_ENDPOINT": "https://eu.smith.langchain.com"}):
+        assert _get_sandbox_api_endpoint() == "https://eu.smith.langchain.com/v2/sandboxes"
+
+
+def test_sandbox_api_endpoint_no_double_suffix() -> None:
+    with patch.dict(
+        "os.environ",
+        {"SANDBOX_LANGSMITH_ENDPOINT": "https://x.smith.langchain.com/v2/sandboxes"},
+    ):
+        assert _get_sandbox_api_endpoint() == "https://x.smith.langchain.com/v2/sandboxes"
 
 
 def test_sandbox_name_for_thread_encodes_uuid() -> None:

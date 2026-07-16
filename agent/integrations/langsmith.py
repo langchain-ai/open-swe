@@ -70,16 +70,29 @@ def _get_sandbox_api_key() -> str | None:
 
 
 def _get_sandbox_endpoint() -> str:
-    """LangSmith API endpoint for sandbox operations.
+    """LangSmith API **root** for sandbox operations.
 
     Overridable via ``SANDBOX_LANGSMITH_ENDPOINT`` to pair with
-    ``SANDBOX_LANGSMITH_API_KEY``; falls back to ``LANGSMITH_ENDPOINT``.
+    ``SANDBOX_LANGSMITH_API_KEY``; falls back to ``LANGSMITH_ENDPOINT``. This is
+    the bare root (e.g. ``https://api.smith.langchain.com``) used to build the
+    proxy-config URL; the SDK clients take :func:`_get_sandbox_api_endpoint`.
     """
     return (
         os.environ.get("SANDBOX_LANGSMITH_ENDPOINT")
         or os.environ.get("LANGSMITH_ENDPOINT")
         or "https://api.smith.langchain.com"
     )
+
+
+def _get_sandbox_api_endpoint() -> str:
+    """Sandbox API base URL for the langsmith SDK clients.
+
+    The SDK's ``api_endpoint`` is the sandbox base (root + ``/v2/sandboxes``),
+    not the API root, and its methods append ``/boxes``, ``/snapshots``, etc.
+    """
+    root = _get_sandbox_endpoint().rstrip("/")
+    suffix = "/v2/sandboxes"
+    return root if root.endswith(suffix) else f"{root}{suffix}"
 
 
 def _current_thread_id() -> str | None:
@@ -336,7 +349,9 @@ async def _configure_github_proxy(sandbox_name: str, github_token: str) -> None:
 
 def get_async_sandbox_client() -> AsyncSandboxClient:
     """Build an ``AsyncSandboxClient`` from the resolved sandbox LangSmith credentials."""
-    return AsyncSandboxClient(api_key=_get_sandbox_api_key(), api_endpoint=_get_sandbox_endpoint())
+    return AsyncSandboxClient(
+        api_key=_get_sandbox_api_key(), api_endpoint=_get_sandbox_api_endpoint()
+    )
 
 
 async def create_langsmith_sandbox(
@@ -554,7 +569,7 @@ class LangSmithProvider(SandboxProvider):
 
     def __init__(self, api_key: str | None = None) -> None:
         self._api_key = api_key or _get_sandbox_api_key()
-        self._api_endpoint = _get_sandbox_endpoint()
+        self._api_endpoint = _get_sandbox_api_endpoint()
         if not self._api_key:
             msg = "LANGSMITH_API_KEY (or LANGSMITH_API_KEY_PROD) not set"
             raise ValueError(msg)
