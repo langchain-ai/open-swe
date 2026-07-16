@@ -36,4 +36,14 @@ describe("formatToolDisplay", () => {
   it("normalizes write_todos", () => {
     expect(formatToolDisplay("write todos", "other", {}, projectPath)).toBe("Update todos");
   });
+
+  it("title-cases raw tool names", () => {
+    expect(formatToolDisplay("enter_plan_mode", "other", {}, projectPath)).toBe(
+      "Enter Plan Mode",
+    );
+    expect(formatToolDisplay("save_plan", "other", {}, projectPath)).toBe("Save Plan");
+    expect(formatToolDisplay("slack_thread_reply", "other", {}, projectPath)).toBe(
+      "Slack Thread Reply",
+    );
+  });
 });
