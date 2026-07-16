@@ -189,7 +189,7 @@ def test_profile_unknown_provider_defers_to_team_default() -> None:
 
 def test_global_default_is_gpt_5_5() -> None:
     model, _ = default_model_pair()
-    assert model == DEFAULT_MODEL_ID == "openai:gpt-5.5"
+    assert model == DEFAULT_MODEL_ID == "anthropic:claude-opus-4-8"
 
 
 def test_gate_fable_passthrough_when_enabled() -> None:

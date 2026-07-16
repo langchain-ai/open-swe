@@ -93,10 +93,7 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     const busyComposer = page.getByPlaceholder(
       "Send a message to queue next...",
     );
-    await expect(async () => {
-      await page.reload();
-      await expect(busyComposer).toBeVisible({ timeout: 8000 });
-    }).toPass({ timeout: 60000 });
+    await expect(busyComposer).toBeVisible();
     await busyComposer.fill(queuedText);
     await busyComposer.press("Enter");
 

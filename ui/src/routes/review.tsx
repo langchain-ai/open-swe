@@ -90,7 +90,7 @@ function ReviewPage() {
   return (
     <AppShell
       user={session.data}
-      title="Open SWE Review"
+      title="Jarvis Review"
       description="Review pull requests for bugs and issues on demand, or run reviews automatically. Runs are billed based on underlying agent usage."
     >
       <RepositoriesSection canEdit={canEdit} />
@@ -143,7 +143,7 @@ function ReviewPage() {
         <div className="divide-y divide-border">
           <SettingsRow
             label="Review Draft PRs"
-            description="Org-wide default for whether Open SWE Review runs on draft PRs. Each user can override this in Profile Settings."
+            description="Org-wide default for whether Jarvis Review runs on draft PRs. Each user can override this in Profile Settings."
             control={
               <Switch
                 checked={current.review_draft_prs}
@@ -239,7 +239,7 @@ function RepositoriesSection({ canEdit: _canEdit }: { canEdit: boolean }) {
         )}
         {!loading && grouped.length === 0 && (
           <p className="px-4 py-3 text-xs text-muted-foreground">
-            No GitHub App installations found. Install the open-swe GitHub App on an
+            No GitHub App installations found. Install the Jarvis GitHub App on an
             account or org to manage repos here.
           </p>
         )}
