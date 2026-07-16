@@ -7,11 +7,10 @@ import logging
 import mimetypes
 import os
 import re
-from typing import Any
 from urllib.parse import urlparse
 
 import httpx
-from langchain_core.messages.content import create_image_block
+from langchain_core.messages.content import ImageContentBlock, create_image_block
 
 from .url_safety import request_with_safe_redirects
 
@@ -83,7 +82,7 @@ def _image_auth_headers_for_url(original_url: str, current_url: str) -> dict[str
 async def fetch_image_block(
     image_url: str,
     client: httpx.AsyncClient,
-) -> dict[str, Any] | None:
+) -> ImageContentBlock | None:
     """Fetch image bytes and build an image content block."""
     try:
         logger.debug("Fetching image from %s", image_url)
@@ -97,6 +96,8 @@ async def fetch_image_block(
             logger.warning(
                 "Refusing to fetch image (SSRF guard) %s: %s", image_url, blocked["content"]
             )
+            return None
+        if response is None:
             return None
         response.raise_for_status()
         content_type = response.headers.get("Content-Type", "").split(";")[0].strip()

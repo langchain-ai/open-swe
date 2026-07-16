@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
+from agent.review.findings import Finding
 from agent.utils import reviewer_outcomes
 from agent.utils.reviewer_outcomes import (
     FALSE_POSITIVE,
@@ -76,23 +77,26 @@ class _FakeClient:
         self.updated.append(kwargs)
 
 
-def _finding() -> dict[str, Any]:
-    return {
-        "id": "f_abc",
-        "file": "app/x.rb",
-        "start_line": 10,
-        "end_line": 12,
-        "side": "RIGHT",
-        "diff_hunk": "@@ -1 +1 @@\n-foo\n+bar",
-        "title": "NoMethodError on nil",
-        "description": "body",
-        "severity": "high",
-        "confidence": "high",
-        "category": "correctness",
-        "first_seen_sha": "aaa",
-        "github_review_run_id": "run_1",
-        "resolution_note": "fixed in def",
-    }
+def _finding() -> Finding:
+    return cast(
+        Finding,
+        {
+            "id": "f_abc",
+            "file": "app/x.rb",
+            "start_line": 10,
+            "end_line": 12,
+            "side": "RIGHT",
+            "diff_hunk": "@@ -1 +1 @@\n-foo\n+bar",
+            "title": "NoMethodError on nil",
+            "description": "body",
+            "severity": "high",
+            "confidence": "high",
+            "category": "correctness",
+            "first_seen_sha": "aaa",
+            "github_review_run_id": "run_1",
+            "resolution_note": "fixed in def",
+        },
+    )
 
 
 def test_upsert_finding_outcome_builds_payload(monkeypatch) -> None:  # noqa: ANN001

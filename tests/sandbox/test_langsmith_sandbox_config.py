@@ -2,9 +2,11 @@
 
 import base64
 import uuid
+from typing import cast
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from langsmith.sandbox import AsyncSandboxClient
 
 from agent.integrations.langsmith import (
     DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS,
@@ -15,7 +17,10 @@ from agent.integrations.langsmith import (
     LangSmithProvider,
     _create_sandbox_with_retry,
     _get_sandbox_api_endpoint,
+    _get_sandbox_create_extra_fields,
     _get_sandbox_snapshot_config,
+    _install_create_extra_fields,
+    _release_sandbox_name,
     _sandbox_name_for_thread,
     _wait_for_reconnected_sandbox,
 )
@@ -50,6 +55,24 @@ def test_sandbox_name_for_thread_encodes_uuid() -> None:
 def test_sandbox_name_for_thread_none_or_invalid() -> None:
     assert _sandbox_name_for_thread(None) is None
     assert _sandbox_name_for_thread("not-a-uuid") is None
+
+
+@pytest.mark.asyncio
+async def test_release_sandbox_name_deletes_stale_box() -> None:
+    client = AsyncMock()
+    await _release_sandbox_name(client, "openswe-abc")
+    client.delete_sandbox.assert_awaited_once_with("openswe-abc")
+
+
+@pytest.mark.asyncio
+async def test_release_sandbox_name_swallows_missing_and_skips_none() -> None:
+    client = AsyncMock()
+    client.delete_sandbox.side_effect = RuntimeError("not found")
+    await _release_sandbox_name(client, "openswe-abc")  # must not raise
+
+    client.delete_sandbox.reset_mock(side_effect=True)
+    await _release_sandbox_name(client, None)
+    client.delete_sandbox.assert_not_awaited()
 
 
 def test_defaults_when_env_unset() -> None:
@@ -175,7 +198,7 @@ async def test_create_sandbox_with_retry_retries_transient_errors(monkeypatch) -
     monkeypatch.setattr("agent.integrations.langsmith.asyncio.sleep", AsyncMock())
 
     result = await _create_sandbox_with_retry(
-        client,
+        cast(AsyncSandboxClient, client),
         snapshot_id="snap-1",
         name="openswe-abc",
         fs_capacity_bytes=None,
@@ -198,7 +221,7 @@ async def test_wait_for_reconnected_sandbox_polls_until_ready(monkeypatch) -> No
     monkeypatch.setattr("agent.integrations.langsmith.asyncio.sleep", sleep)
 
     sandbox = await _wait_for_reconnected_sandbox(
-        client,
+        cast(AsyncSandboxClient, client),
         "sandbox-1",
         timeout_seconds=30,
         poll_seconds=2,
@@ -207,3 +230,69 @@ async def test_wait_for_reconnected_sandbox_polls_until_ready(monkeypatch) -> No
     assert sandbox.status == "running"
     assert client.calls == 3
     assert sleep.await_count == 2
+
+
+def test_extra_fields_unset_is_empty() -> None:
+    with patch.dict("os.environ", {}, clear=True):
+        assert _get_sandbox_create_extra_fields() == {}
+    with patch.dict("os.environ", {"SANDBOX_CREATE_EXTRA_JSON": "  "}, clear=True):
+        assert _get_sandbox_create_extra_fields() == {}
+
+
+def test_extra_fields_parsed() -> None:
+    with patch.dict(
+        "os.environ",
+        {"SANDBOX_CREATE_EXTRA_JSON": '{"_internal_runtime": "v2"}'},
+        clear=True,
+    ):
+        assert _get_sandbox_create_extra_fields() == {"_internal_runtime": "v2"}
+
+
+def test_extra_fields_rejects_invalid_json() -> None:
+    with patch.dict("os.environ", {"SANDBOX_CREATE_EXTRA_JSON": "{not json"}, clear=True):
+        with pytest.raises(ValueError, match="valid JSON"):
+            _get_sandbox_create_extra_fields()
+
+
+def test_extra_fields_rejects_non_object() -> None:
+    with patch.dict("os.environ", {"SANDBOX_CREATE_EXTRA_JSON": "[1, 2]"}, clear=True):
+        with pytest.raises(ValueError, match="JSON object"):
+            _get_sandbox_create_extra_fields()
+
+
+@pytest.mark.asyncio
+async def test_install_create_extra_fields_merges_only_boxes_post() -> None:
+    calls: list[tuple[str, dict]] = []
+
+    class _FakeHttp:
+        async def post(self, url, **kwargs):  # noqa: ANN001, ANN003
+            calls.append((url, kwargs.get("json")))
+            return "ok"
+
+    class _FakeClient:
+        def __init__(self) -> None:
+            self._http = _FakeHttp()
+
+    client = _FakeClient()
+    _install_create_extra_fields(client, {"_internal_runtime": "v2"})
+
+    await client._http.post("https://api/v2/sandboxes/boxes", json={"snapshot_id": "s"})
+    await client._http.post("https://api/v2/sandboxes/boxes/abc/start", json={"foo": "bar"})
+
+    assert calls[0][1] == {"snapshot_id": "s", "_internal_runtime": "v2"}
+    assert calls[1][1] == {"foo": "bar"}
+
+
+@pytest.mark.asyncio
+async def test_install_create_extra_fields_noop_when_empty() -> None:
+    class _FakeHttp:
+        def __init__(self) -> None:
+            self.post = "sentinel"
+
+    class _FakeClient:
+        def __init__(self) -> None:
+            self._http = _FakeHttp()
+
+    client = _FakeClient()
+    _install_create_extra_fields(client, {})
+    assert client._http.post == "sentinel"

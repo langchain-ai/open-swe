@@ -362,7 +362,9 @@ async def mock_users() -> JSONResponse:
 
 @app.get("/mock/slack/messages")
 async def slack_messages() -> JSONResponse:
-    msgs = fakes.slack_messages(CURRENT_THREAD["channel"])
+    channel = CURRENT_THREAD["channel"]
+    assert channel is not None
+    msgs = fakes.slack_messages(channel)
     return JSONResponse(
         [
             {

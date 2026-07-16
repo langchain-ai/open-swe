@@ -6,8 +6,10 @@ import hmac
 import importlib
 import json
 import logging
+from typing import cast
 
 from fastapi.testclient import TestClient
+from httpx import Response
 
 from agent.api.app import app
 from agent.tools import request_pr_review as request_pr_review_tool
@@ -29,7 +31,9 @@ def _sign_body(body: bytes, secret: str = _TEST_WEBHOOK_SECRET) -> str:
     return f"sha256={sig}"
 
 
-def _post_github_webhook(client: TestClient, event_type: str, payload: dict) -> object:
+def _post_github_webhook(
+    client: TestClient, event_type: str, payload: dict[object, object]
+) -> Response:
     """Send a signed GitHub webhook POST request."""
     body = json.dumps(payload, separators=(",", ":")).encode()
     return client.post(
@@ -49,7 +53,7 @@ def _sign_slack_body(body: bytes, timestamp: str = "1700000000") -> str:
     return f"v0={sig}"
 
 
-def _post_slack_webhook(client: TestClient, payload: dict) -> object:
+def _post_slack_webhook(client: TestClient, payload: dict[object, object]) -> Response:
     body = json.dumps(payload, separators=(",", ":")).encode()
     timestamp = "1700000000"
     return client.post(
@@ -991,7 +995,8 @@ def test_slack_webhook_accepts_unmentioned_ready_plan_reply(monkeypatch) -> None
     assert response.status_code == 200
     assert response.json()["message"] == "Slack mention queued"
     assert captured["plan_reply_check"] == ("C123", "1700000000.000100", "U123")
-    assert captured["event_data"]["text"] == "looks good, go ahead"
+    event_data = cast(dict[str, object], captured["event_data"])
+    assert event_data["text"] == "looks good, go ahead"
 
 
 def test_slack_webhook_ignores_unmentioned_non_plan_reply(monkeypatch) -> None:
@@ -1093,9 +1098,10 @@ def test_process_github_pr_ready_creates_reviewer_run(monkeypatch) -> None:
         )
     )
 
-    kwargs = captured["kwargs"]
-    prompt = kwargs["input"]["messages"][0]["content"]
-    config = kwargs["config"]["configurable"]
+    kwargs = cast(dict[str, object], captured["kwargs"])
+    input_data = cast(dict[str, object], kwargs["input"])
+    prompt = cast(list[dict[str, str]], input_data["messages"])[0]["content"]
+    config = cast(dict[str, object], cast(dict[str, object], kwargs["config"])["configurable"])
 
     assert captured["graph"] == "reviewer"
     assert captured["thread_create_kwargs"] == {
@@ -1199,9 +1205,10 @@ def test_trigger_pr_review_from_ref_creates_reviewer_run(monkeypatch) -> None:
         )
     )
 
-    kwargs = captured["kwargs"]
-    prompt = kwargs["input"]["messages"][0]["content"]
-    config = kwargs["config"]["configurable"]
+    kwargs = cast(dict[str, object], captured["kwargs"])
+    input_data = cast(dict[str, object], kwargs["input"])
+    prompt = cast(list[dict[str, str]], input_data["messages"])[0]["content"]
+    config = cast(dict[str, object], cast(dict[str, object], kwargs["config"])["configurable"])
     assert result["success"] is True
     assert auto_review_checked is False
     assert captured["graph"] == "reviewer"
@@ -1222,9 +1229,11 @@ def test_trigger_pr_review_from_ref_creates_reviewer_run(monkeypatch) -> None:
     }
     # The live head must be persisted to metadata so resolve_review_head_sha
     # doesn't return a stale head left by a prior push/ready dispatch.
-    assert captured["set_metadata_kwargs"]["head_sha"] == "head-sha"
+    metadata_kwargs = cast(dict[str, object], captured["set_metadata_kwargs"])
+    assert metadata_kwargs["head_sha"] == "head-sha"
     # A live status comment is posted on dispatch so the PR shows "reviewing".
-    assert captured["status_comment_kwargs"]["pr_number"] == 1244
+    status_comment_kwargs = cast(dict[str, object], captured["status_comment_kwargs"])
+    assert status_comment_kwargs["pr_number"] == 1244
 
 
 async def test_request_pr_review_tool_uses_shared_trigger(monkeypatch) -> None:
@@ -1489,7 +1498,8 @@ def test_process_github_issue_existing_thread_uses_followup_prompt(monkeypatch) 
     )
 
     assert captured["prompt"] == "**octocat:**\n@openswe please handle this"
-    assert "## Repository" not in captured["prompt"]
+    prompt = cast(str, captured["prompt"])
+    assert "## Repository" not in prompt
 
 
 def test_github_webhook_routes_pr_comment_review_to_agent(monkeypatch) -> None:

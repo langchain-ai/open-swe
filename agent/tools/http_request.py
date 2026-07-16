@@ -64,6 +64,14 @@ async def http_request(
             )
         if blocked:
             return blocked
+        if response is None:
+            return {
+                "success": False,
+                "status_code": 0,
+                "headers": {},
+                "content": "Request completed without a response",
+                "url": url,
+            }
 
         try:
             content = response.json()

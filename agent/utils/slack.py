@@ -10,6 +10,7 @@ import logging
 import os
 import re
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlparse
@@ -422,7 +423,9 @@ def _with_slack_web_link_context_block(
             context_block,
         ]
     updated_blocks = copy.deepcopy(blocks)
-    if any(_block_contains_text(block, dashboard_url) for block in updated_blocks):
+    if dashboard_url and any(
+        _block_contains_text(block, dashboard_url) for block in updated_blocks
+    ):
         return updated_blocks
     updated_blocks.append(context_block)
     return updated_blocks
@@ -1101,7 +1104,7 @@ _THREAD_RUN_KEY_PREFIX = "thread:"
 _MESSAGE_RUN_KEY_PREFIX = "message:"
 
 
-def _extract_run_id_from_store_item(item: dict[str, Any] | None) -> str | None:
+def _extract_run_id_from_store_item(item: Mapping[str, Any] | None) -> str | None:
     if not item:
         return None
     value = item.get("value")

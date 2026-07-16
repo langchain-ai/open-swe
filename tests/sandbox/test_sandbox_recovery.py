@@ -1,8 +1,10 @@
 import json
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from deepagents.backends.protocol import ExecuteResponse, SandboxBackendProtocol
+from langchain.agents.middleware import AgentState
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langsmith.sandbox import SandboxClientError
@@ -16,7 +18,12 @@ from agent.utils.sandbox_state import SANDBOX_BACKENDS, clear_sandbox_backend, s
 
 
 class FakeSandboxBackend(SandboxBackendProtocol):
-    id = "sb-new"
+    def __init__(self, sandbox_id: str = "sb-new") -> None:
+        self._sandbox_id = sandbox_id
+
+    @property
+    def id(self) -> str:
+        return self._sandbox_id
 
     def execute(self, command: str, *, timeout: int | None = None) -> ExecuteResponse:
         return ExecuteResponse(output=f"{self.id}: {command}: {timeout}", exit_code=0)
@@ -50,10 +57,8 @@ def _sandbox_error_message(tool_call_id: str, sandbox_id: str = "sb-dead") -> To
 async def test_sandbox_client_error_recreates_sandbox() -> None:
     middleware = ToolErrorMiddleware()
     request = _tool_request()
-    old_backend = FakeSandboxBackend()
-    backend = FakeSandboxBackend()
-    old_backend.id = "sb-old"
-    backend.id = "sb-new"
+    old_backend = FakeSandboxBackend("sb-old")
+    backend = FakeSandboxBackend("sb-new")
     proxy = set_sandbox_backend("thread-1", old_backend)
 
     async def handler(_request: ToolCallRequest) -> ToolMessage:
@@ -80,6 +85,7 @@ async def test_sandbox_client_error_recreates_sandbox() -> None:
         assert proxy.id == "sb-new"
         assert proxy.execute("echo ok").output == "sb-new: echo ok: None"
 
+        assert isinstance(result.content, str)
         payload = json.loads(result.content)
         assert payload["status"] == "error"
         assert payload["error_type"] == "SandboxClientError"
@@ -208,7 +214,7 @@ async def test_circuit_breaker_posts_one_user_notification() -> None:
             new_callable=AsyncMock,
         ) as mock_github,
     ):
-        result = await middleware.aafter_agent(state, MagicMock())
+        result = await middleware.aafter_agent(cast(AgentState[Any], state), MagicMock())
 
     assert result is None
     mock_slack.assert_awaited_once_with("C123", "171.123", SANDBOX_UNRECOVERABLE_MESSAGE)

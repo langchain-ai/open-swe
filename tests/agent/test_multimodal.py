@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import socket
-from typing import Any
+from typing import Any, cast
 from urllib.parse import urlparse
 
 import httpx
@@ -148,7 +148,11 @@ class FakeImageResponse:
 
     def raise_for_status(self) -> None:
         if self.status_code >= 400:
-            raise httpx.HTTPStatusError(f"{self.status_code} error", request=None, response=None)
+            raise httpx.HTTPStatusError(
+                f"{self.status_code} error",
+                request=httpx.Request("GET", self.url),
+                response=httpx.Response(self.status_code, request=httpx.Request("GET", self.url)),
+            )
 
 
 class FakeImageClient:
@@ -187,7 +191,9 @@ async def test_fetch_image_block_blocks_redirect_to_internal_url(monkeypatch: An
 
     client = FakeImageClient(responder)
 
-    result = await fetch_image_block("https://example.com/start.png", client)
+    result = await fetch_image_block(
+        "https://example.com/start.png", cast(httpx.AsyncClient, client)
+    )
 
     assert result is None
     assert len(client.calls) == 1
@@ -218,7 +224,9 @@ async def test_fetch_image_block_tries_each_validated_address(monkeypatch: Any) 
 
     client = FakeImageClient(responder)
 
-    result = await fetch_image_block("https://example.com/image.png", client)
+    result = await fetch_image_block(
+        "https://example.com/image.png", cast(httpx.AsyncClient, client)
+    )
 
     assert result == {"base64": "cG5n", "mime_type": "image/png"}
     assert [urlparse(call["url"]).hostname for call in client.calls] == [
@@ -251,7 +259,9 @@ async def test_fetch_image_block_does_not_forward_slack_auth_to_redirect_host(
 
     client = FakeImageClient(responder)
 
-    result = await fetch_image_block("https://files.slack.com/image.png", client)
+    result = await fetch_image_block(
+        "https://files.slack.com/image.png", cast(httpx.AsyncClient, client)
+    )
 
     assert result == {"base64": "cG5n", "mime_type": "image/png"}
     assert len(client.calls) == 2
@@ -283,7 +293,9 @@ async def test_fetch_image_block_does_not_add_slack_auth_after_untrusted_redirec
 
     client = FakeImageClient(responder)
 
-    result = await fetch_image_block("https://example.com/start.png", client)
+    result = await fetch_image_block(
+        "https://example.com/start.png", cast(httpx.AsyncClient, client)
+    )
 
     assert result == {"base64": "cG5n", "mime_type": "image/png"}
     assert len(client.calls) == 2
@@ -311,7 +323,9 @@ async def test_fetch_image_block_keeps_auth_within_slack_host_family(monkeypatch
 
     client = FakeImageClient(responder)
 
-    result = await fetch_image_block("https://files.slack.com/image.png", client)
+    result = await fetch_image_block(
+        "https://files.slack.com/image.png", cast(httpx.AsyncClient, client)
+    )
 
     assert result == {"base64": "cG5n", "mime_type": "image/png"}
     assert len(client.calls) == 2

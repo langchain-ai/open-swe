@@ -20,6 +20,8 @@ from typing import Any
 
 from langsmith import Client as LangSmithClient
 
+from ..review.findings import Finding
+
 logger = logging.getLogger(__name__)
 
 OUTCOMES_DATASET_NAME = os.environ.get("REVIEWER_OUTCOMES_DATASET", "openswe-reviewer-outcomes")
@@ -126,7 +128,7 @@ def _create_or_update_example(
 
 
 def upsert_finding_outcome(
-    finding: dict[str, Any],
+    finding: Finding,
     *,
     label: str,
     label_source: str,
@@ -247,7 +249,7 @@ def repo_full_name_from_config(configurable: dict[str, Any]) -> str:
 
 
 def emit_finding_status_outcome(
-    finding: dict[str, Any],
+    finding: Finding,
     status: str,
     *,
     configurable: dict[str, Any],

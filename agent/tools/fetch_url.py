@@ -47,6 +47,8 @@ async def fetch_url(url: str, timeout: int = 30) -> dict[str, Any]:
                     "status_code": blocked["status_code"],
                     "url": blocked["url"],
                 }
+            if response is None:
+                return {"error": "Fetch URL error: no response received", "url": url}
 
             response.raise_for_status()
 

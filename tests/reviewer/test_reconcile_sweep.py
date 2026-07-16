@@ -76,6 +76,7 @@ async def test_cancels_only_stale_pending_runs(monkeypatch: pytest.MonkeyPatch) 
 
     assert counts == {"threads_checked": 1, "stale_runs": 2, "cancelled": 2}
     runs.cancel_many.assert_awaited_once()
+    assert runs.cancel_many.await_args is not None
     kwargs = runs.cancel_many.await_args.kwargs
     assert kwargs["thread_id"] == "t1"
     assert sorted(kwargs["run_ids"]) == ["old1", "old2"]
@@ -109,6 +110,7 @@ async def test_bad_thread_does_not_abort_sweep(monkeypatch: pytest.MonkeyPatch) 
     # Both threads counted; the good thread is still reconciled despite the bad one.
     assert counts == {"threads_checked": 2, "stale_runs": 1, "cancelled": 1}
     runs.cancel_many.assert_awaited_once()
+    assert runs.cancel_many.await_args is not None
     assert runs.cancel_many.await_args.kwargs["thread_id"] == "good"
     assert runs.cancel_many.await_args.kwargs["run_ids"] == ["old1"]
 
@@ -155,4 +157,5 @@ async def test_unparseable_created_at_is_skipped(monkeypatch: pytest.MonkeyPatch
     counts = await reconcile.reconcile_stale_runs(max_age_seconds=1800)
 
     assert counts == {"threads_checked": 1, "stale_runs": 1, "cancelled": 1}
+    assert runs.cancel_many.await_args is not None
     assert runs.cancel_many.await_args.kwargs["run_ids"] == ["old"]

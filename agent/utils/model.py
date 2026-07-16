@@ -1,6 +1,6 @@
 import asyncio
 import os
-from typing import Any, Literal, TypedDict, Unpack
+from typing import Any, Literal, TypedDict, Unpack, cast
 
 from langchain.chat_models import init_chat_model
 
@@ -35,7 +35,9 @@ async def close_cached_models() -> None:
     for model in models:
         close = getattr(model, "aclose", None)
         if callable(close):
-            await close()
+            result = close()
+            if asyncio.iscoroutine(result):
+                await result
             continue
         close = getattr(model, "close", None)
         if callable(close):
@@ -117,7 +119,7 @@ def make_model(model_id: str, *, use_gateway: bool | None = None, **kwargs: Unpa
     gateway ``base_url``/``api_key``/``use_responses_api`` override the direct
     provider defaults below (see :mod:`agent.utils.gateway`).
     """
-    model_kwargs: dict[str, object] = kwargs.copy()
+    model_kwargs: dict[str, object] = dict(kwargs)
     model_kwargs.setdefault("max_retries", DEFAULT_MAX_RETRIES)
 
     if model_id.startswith("openai:"):
@@ -136,17 +138,19 @@ def make_model(model_id: str, *, use_gateway: bool | None = None, **kwargs: Unpa
         _configure_openai_responses_kwargs(model_kwargs)
         _coerce_openai_chat_completions_kwargs(model_kwargs)
 
+    max_tokens = model_kwargs.get("max_tokens")
+    max_tokens_key = max_tokens if type(max_tokens) is int else None
     key = (
         model_id,
         use_gateway,
-        model_kwargs.get("max_tokens") if isinstance(model_kwargs.get("max_tokens"), int) else None,
+        max_tokens_key,
         _freeze_model_kwargs(model_kwargs),
         _loop_cache_key(),
     )
     cached = _MODEL_CACHE.get(key)
     if cached is not None:
         return cached
-    model = init_chat_model(model=model_id, **model_kwargs)
+    model = init_chat_model(model=model_id, **cast(dict[str, Any], model_kwargs))
     _MODEL_CACHE[key] = model
     return model
 

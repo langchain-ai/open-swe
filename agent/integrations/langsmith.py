@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import json
 import logging
 import os
 import uuid
@@ -165,6 +166,43 @@ def _get_sandbox_snapshot_config() -> tuple[str | None, int, int, int, int, int]
     )
 
 
+def _get_sandbox_create_extra_fields() -> dict[str, Any]:
+    """Parse SANDBOX_CREATE_EXTRA_JSON into extra fields merged into the
+    sandbox-create request body, e.g. ``{"_internal_runtime": "v2"}``."""
+    raw = os.environ.get("SANDBOX_CREATE_EXTRA_JSON")
+    if not raw or not raw.strip():
+        return {}
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as e:
+        msg = f"SANDBOX_CREATE_EXTRA_JSON must be valid JSON, got {raw!r}"
+        raise ValueError(msg) from e
+    if not isinstance(parsed, dict):
+        msg = f"SANDBOX_CREATE_EXTRA_JSON must be a JSON object, got {type(parsed).__name__}"
+        raise ValueError(msg)
+    return parsed
+
+
+def _install_create_extra_fields(client: AsyncSandboxClient, extra: dict[str, Any]) -> None:
+    """Merge ``extra`` into the JSON body of the sandbox-create request.
+
+    The SDK's ``create_sandbox`` builds a fixed payload with no passthrough, so
+    wrap the HTTP client's ``post`` to inject the fields on the ``POST /boxes``
+    request only (other endpoints post to ``/boxes/{name}/...``).
+    """
+    if not extra:
+        return
+    original_post = client._http.post
+
+    async def post_with_extra(url: Any, *args: Any, **kwargs: Any) -> Any:
+        payload = kwargs.get("json")
+        if str(url).endswith("/boxes") and isinstance(payload, dict):
+            kwargs["json"] = {**payload, **extra}
+        return await original_post(url, *args, **kwargs)
+
+    client._http.post = post_with_extra
+
+
 def _github_proxy_rules(github_token: str) -> list[dict[str, Any]]:
     basic_auth = base64.b64encode(f"x-access-token:{github_token}".encode()).decode()
     return [
@@ -250,6 +288,22 @@ async def _wait_for_reconnected_sandbox(
             min(poll_seconds, max(deadline - asyncio.get_running_loop().time(), 0.0))
         )
         last_sandbox = await client.get_sandbox(name=sandbox_id)
+
+
+async def _release_sandbox_name(client: AsyncSandboxClient, name: str | None) -> None:
+    """Best-effort delete of any existing sandbox holding ``name``.
+
+    Sandbox names are unique in LangSmith and thread-deterministic, so the only
+    box that can hold this name is this thread's own — typically a dead one
+    (idle-stopped past its TTL) we're recreating. Provisioning is serialized per
+    thread, so this never races a live box. Without this, recreate would 409.
+    """
+    if not name:
+        return
+    try:
+        await client.delete_sandbox(name)
+    except Exception as exc:  # noqa: BLE001 - name is free if nothing to delete
+        logger.debug("No pre-existing sandbox %s to release (%s)", name, type(exc).__name__)
 
 
 async def _create_sandbox_with_retry(
@@ -605,6 +659,7 @@ class LangSmithProvider(SandboxProvider):
             ):
                 msg = f"{name} must be >= 0, got {value}"
                 raise ValueError(msg)
+        _get_sandbox_create_extra_fields()
 
     async def get_or_create(
         self,
@@ -662,6 +717,9 @@ class LangSmithProvider(SandboxProvider):
             if not snapshot_id:
                 msg = "DEFAULT_SANDBOX_SNAPSHOT_ID must be set when SANDBOX_TYPE=langsmith"
                 raise ValueError(msg)
+
+            _install_create_extra_fields(client, _get_sandbox_create_extra_fields())
+            await _release_sandbox_name(client, name)
 
             try:
                 sandbox = await _create_sandbox_with_retry(

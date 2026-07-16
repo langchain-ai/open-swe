@@ -10,10 +10,10 @@ A separate **reviewer** graph runs read-only code reviews on PRs, and a **review
 
 ## Commands
 
-Dependencies are managed with **uv**. Tests use pytest (`asyncio_mode = "auto"`). Lint/format is **ruff** (line-length 100, target py311). `requires-python = ">=3.11"`; `langgraph.json` pins the runtime to 3.12.
+Dependencies are managed with **uv**. Tests use pytest (`asyncio_mode = "auto"`). Lint/format is **ruff** (line-length 100, target py311). Type checking is **basedpyright** (`typeCheckingMode = "standard"`). `requires-python = ">=3.11"`; `langgraph.json` pins the runtime to 3.12.
 
 ```bash
-make install            # uv sync
+make install            # uv sync --extra dev (pytest, ruff, …)
 make dev                # uv run langgraph dev — serves all three graphs + the FastAPI app from langgraph.json
 make run                # uvicorn agent.webapp:app --reload --port 8000 (FastAPI only, no LangGraph runtime)
 make test               # uv run pytest -vvv tests/
@@ -21,6 +21,7 @@ make test TEST_FILE=tests/github/test_open_pull_request.py    # single test file
 uv run pytest -vvv tests/github/test_open_pull_request.py::test_name  # single test
 make lint               # ruff check + ruff format --diff
 make format             # ruff format + ruff check --fix
+make typecheck          # basedpyright agent tests
 ```
 
 `langgraph.json` declares three graph entrypoints and the FastAPI app, all served together by `langgraph dev`:

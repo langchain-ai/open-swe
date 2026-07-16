@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, cast
 
+from langchain.agents.middleware.types import ToolCallRequest
 from langchain_core.messages import ToolMessage
 
 from agent.middleware.pr_creation_guard import (
@@ -55,7 +56,7 @@ async def test_middleware_blocks_execute_pr_creation_fallbacks() -> None:
         "curl -X POST https://api.github.com/repos/langchain-ai/open-swe/pulls -d '{}'",
     ):
         result = await PullRequestCreationGuardMiddleware().awrap_tool_call(
-            _Request(command), _handler
+            cast(ToolCallRequest, _Request(command)), _handler
         )
 
         assert isinstance(result, ToolMessage)
@@ -69,7 +70,7 @@ async def test_middleware_blocks_execute_pr_creation_fallbacks() -> None:
 
 async def test_middleware_allows_safe_pr_view() -> None:
     result = await PullRequestCreationGuardMiddleware().awrap_tool_call(
-        _Request("GH_TOKEN=dummy gh pr view 1 --json url"), _handler
+        cast(ToolCallRequest, _Request("GH_TOKEN=dummy gh pr view 1 --json url")), _handler
     )
 
     assert isinstance(result, ToolMessage)

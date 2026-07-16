@@ -1,4 +1,5 @@
 import os
+from typing import Any, cast
 
 from langchain_runloop import RunloopSandbox
 from runloop_api_client import Client
@@ -27,4 +28,4 @@ def create_runloop_sandbox(sandbox_id: str | None = None):
     else:
         devbox = client.devboxes.create()
 
-    return RunloopSandbox(devbox=devbox)
+    return RunloopSandbox(devbox=cast(Any, devbox))
