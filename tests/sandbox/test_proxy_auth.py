@@ -130,6 +130,34 @@ class TestConfigureGithubProxy:
             headers = mock_client.patch.call_args.kwargs["headers"]
             assert headers == {"X-API-Key": "my-api-key"}
 
+    async def test_sandbox_overrides_take_precedence(self) -> None:
+        """SANDBOX_LANGSMITH_* override the shared key/endpoint for the proxy call."""
+        with (
+            patch("agent.integrations.langsmith.httpx.AsyncClient") as mock_client_cls,
+            patch.dict(
+                "os.environ",
+                {
+                    "LANGSMITH_API_KEY": "shared-key",
+                    "LANGSMITH_ENDPOINT": "https://shared.smith.langchain.com",
+                    "SANDBOX_LANGSMITH_API_KEY": "sandbox-key",
+                    "SANDBOX_LANGSMITH_ENDPOINT": "https://sandbox.smith.langchain.com",
+                },
+            ),
+        ):
+            mock_client = MagicMock()
+            mock_response = MagicMock()
+            mock_response.raise_for_status = MagicMock()
+            mock_client.patch = AsyncMock(return_value=mock_response)
+            _mock_async_client(mock_client_cls, mock_client)
+
+            await _configure_github_proxy("sandbox-abc", "token")
+
+            assert (
+                mock_client.patch.call_args.args[0]
+                == "https://sandbox.smith.langchain.com/v2/sandboxes/boxes/sandbox-abc"
+            )
+            assert mock_client.patch.call_args.kwargs["headers"] == {"X-API-Key": "sandbox-key"}
+
     async def test_retries_transient_http_error(self) -> None:
         """Transient proxy API errors should be retried on the same sandbox."""
         request = httpx.Request(

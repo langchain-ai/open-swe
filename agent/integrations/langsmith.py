@@ -58,6 +58,29 @@ def _get_langsmith_api_key() -> str | None:
     return os.environ.get("LANGSMITH_API_KEY") or os.environ.get("LANGSMITH_API_KEY_PROD")
 
 
+def _get_sandbox_api_key() -> str | None:
+    """LangSmith API key for sandbox operations.
+
+    ``SANDBOX_LANGSMITH_API_KEY`` lets sandboxes run against a different
+    LangSmith workspace than the one used for tracing/other API calls; falls
+    back to the standard key.
+    """
+    return os.environ.get("SANDBOX_LANGSMITH_API_KEY") or _get_langsmith_api_key()
+
+
+def _get_sandbox_endpoint() -> str:
+    """LangSmith API endpoint for sandbox operations.
+
+    Overridable via ``SANDBOX_LANGSMITH_ENDPOINT`` to pair with
+    ``SANDBOX_LANGSMITH_API_KEY``; falls back to ``LANGSMITH_ENDPOINT``.
+    """
+    return (
+        os.environ.get("SANDBOX_LANGSMITH_ENDPOINT")
+        or os.environ.get("LANGSMITH_ENDPOINT")
+        or "https://api.smith.langchain.com"
+    )
+
+
 def _parse_optional_int(name: str, default: int) -> int:
     raw = os.environ.get(name)
     if not raw:
@@ -238,11 +261,11 @@ async def _configure_github_proxy(sandbox_name: str, github_token: str) -> None:
         sandbox_name: The sandbox name/ID returned by the LangSmith API.
         github_token: GitHub token to inject as Authorization header.
     """
-    api_key = _get_langsmith_api_key()
+    api_key = _get_sandbox_api_key()
     if not api_key:
         logger.warning("No LangSmith API key found, skipping GitHub proxy configuration")
         return
-    langsmith_endpoint = os.environ.get("LANGSMITH_ENDPOINT", "https://api.smith.langchain.com")
+    langsmith_endpoint = _get_sandbox_endpoint()
     url = f"{langsmith_endpoint}/v2/sandboxes/boxes/{sandbox_name}"
     payload = {"proxy_config": {"rules": _github_proxy_rules(github_token)}}
     async with httpx.AsyncClient(timeout=PROXY_CONFIG_TIMEOUT_SECONDS) as client:
@@ -282,8 +305,8 @@ async def _configure_github_proxy(sandbox_name: str, github_token: str) -> None:
 
 
 def get_async_sandbox_client() -> AsyncSandboxClient:
-    """Build an ``AsyncSandboxClient`` from the resolved LangSmith API key."""
-    return AsyncSandboxClient(api_key=_get_langsmith_api_key())
+    """Build an ``AsyncSandboxClient`` from the resolved sandbox LangSmith credentials."""
+    return AsyncSandboxClient(api_key=_get_sandbox_api_key(), api_endpoint=_get_sandbox_endpoint())
 
 
 async def create_langsmith_sandbox(
@@ -309,7 +332,7 @@ async def create_langsmith_sandbox(
     Returns:
         SandboxBackendProtocol instance
     """
-    api_key = _get_langsmith_api_key()
+    api_key = _get_sandbox_api_key()
     (
         default_snapshot_id,
         fs_capacity_bytes,
@@ -501,7 +524,8 @@ class LangSmithProvider(SandboxProvider):
     """LangSmith sandbox provider implementation."""
 
     def __init__(self, api_key: str | None = None) -> None:
-        self._api_key = api_key or _get_langsmith_api_key()
+        self._api_key = api_key or _get_sandbox_api_key()
+        self._api_endpoint = _get_sandbox_endpoint()
         if not self._api_key:
             msg = "LANGSMITH_API_KEY (or LANGSMITH_API_KEY_PROD) not set"
             raise ValueError(msg)
@@ -561,7 +585,9 @@ class LangSmithProvider(SandboxProvider):
         if kwargs:
             msg = f"Received unsupported arguments: {list(kwargs.keys())}"
             raise TypeError(msg)
-        async with AsyncSandboxClient(api_key=self._api_key) as client:
+        async with AsyncSandboxClient(
+            api_key=self._api_key, api_endpoint=self._api_endpoint
+        ) as client:
             if sandbox_id:
                 try:
                     sandbox = await client.get_sandbox(name=sandbox_id)
@@ -611,5 +637,7 @@ class LangSmithProvider(SandboxProvider):
 
     async def delete(self, *, sandbox_id: str, **kwargs: Any) -> None:
         """Delete a LangSmith sandbox."""
-        async with AsyncSandboxClient(api_key=self._api_key) as client:
+        async with AsyncSandboxClient(
+            api_key=self._api_key, api_endpoint=self._api_endpoint
+        ) as client:
             await client.delete_sandbox(sandbox_id)
