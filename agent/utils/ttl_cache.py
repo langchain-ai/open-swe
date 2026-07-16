@@ -63,12 +63,13 @@ async def _refresh_stale_entry(
     key: str, ttl_seconds: float, loader: Callable[[], Awaitable[object]]
 ) -> None:
     async with _lock_for(key):
+        refreshed_at = _now()
         try:
             value = await loader()
         except Exception:
             logger.warning("TTL cache background refresh failed for %s", key, exc_info=True)
             return
-        _CACHE[key] = (value, _now() + ttl_seconds)
+        _CACHE[key] = (value, refreshed_at + ttl_seconds)
 
 
 def _schedule_refresh(
