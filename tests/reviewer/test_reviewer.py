@@ -468,6 +468,7 @@ async def test_reviewer_injects_repo_style_during_eval() -> None:
     def fake_create_deep_agent(*, system_prompt: str, **kwargs: object) -> _DummyAgent:
         captured["system_prompt"] = system_prompt
         captured["middleware"] = kwargs["middleware"]
+        captured["tools"] = kwargs["tools"]
         return _DummyAgent()
 
     fetch_threads = AsyncMock(return_value=[])
@@ -513,6 +514,9 @@ async def test_reviewer_injects_repo_style_during_eval() -> None:
     assert "Repository-specific review style" in captured["system_prompt"]
     assert "Flag table rerender regressions" in captured["system_prompt"]
     assert "Pre-existing PR review threads" not in captured["system_prompt"]
+    tools = captured["tools"]
+    assert isinstance(tools, list)
+    assert reviewer.set_stackability_review in tools
     fetch_threads.assert_not_awaited()
 
 

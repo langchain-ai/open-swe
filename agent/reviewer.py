@@ -100,6 +100,7 @@ from .tools import (
     publish_review,
     reply_to_finding_thread,
     resolve_finding_thread,
+    set_stackability_review,
     update_finding,
     web_search,
 )
@@ -1369,6 +1370,7 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
             publish_review,
             resolve_finding_thread,
             reply_to_finding_thread,
+            set_stackability_review,
             web_search,
             fetch_url,
             http_request,
