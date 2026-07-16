@@ -17,7 +17,7 @@ def test_fireworks_reasoning_effort_maps_effort() -> None:
 
 def test_provider_model_kwargs_for_fireworks() -> None:
     kwargs = provider_model_kwargs(
-        "fireworks:accounts/fireworks/models/kimi-k2p7-code",
+        "fireworks:accounts/fireworks/models/kimi-k3",
         "high",
         max_tokens=16_000,
     )
@@ -25,16 +25,17 @@ def test_provider_model_kwargs_for_fireworks() -> None:
     assert kwargs.get("model_kwargs") == {"reasoning_effort": "high"}
 
 
-def test_kimi_k2p7_is_supported() -> None:
-    kimi_k2p7 = next(
-        (m for m in SUPPORTED_MODELS if m["id"].endswith("kimi-k2p7-code")),
+def test_kimi_k3_is_supported_and_k2p7_is_removed() -> None:
+    kimi_k3 = next(
+        (m for m in SUPPORTED_MODELS if m["id"].endswith("kimi-k3")),
         None,
     )
-    assert kimi_k2p7 is not None
-    assert kimi_k2p7.get("efforts") == ["low", "medium", "high"]
-    assert "none" not in kimi_k2p7.get("efforts", [])
-    assert kimi_k2p7.get("default_effort") == "high"
-    model_id = kimi_k2p7.get("id")
+    assert kimi_k3 is not None
+    assert not any(m["id"].endswith("kimi-k2p7-code") for m in SUPPORTED_MODELS)
+    assert kimi_k3.get("efforts") == ["low", "medium", "high"]
+    assert "none" not in kimi_k3.get("efforts", [])
+    assert kimi_k3.get("default_effort") == "high"
+    model_id = kimi_k3.get("id")
     assert isinstance(model_id, str)
     kwargs = provider_model_kwargs(model_id, "high", max_tokens=16_000)
     assert kwargs.get("model_kwargs") == {"reasoning_effort": "high"}
