@@ -147,6 +147,31 @@ async def github_webhook(
     if gate_rejection is not None:
         return gate_rejection
 
+    if (
+        is_pull_request_comment
+        or event_type in {"pull_request_review_comment", "pull_request_review"}
+    ) and service.is_stackability_directive(comment_body):
+        pull_request = payload.get("pull_request") or issue
+        pr_number = pull_request.get("number") or issue.get("number")
+        pr_url = pull_request.get("html_url") or issue.get("html_url", "")
+        if isinstance(pr_number, int):
+            pr_ref = common.GitHubPrRef(
+                owner=webhook_repo_config.get("owner", ""),
+                repo=webhook_repo_config.get("name", ""),
+                number=pr_number,
+                url=pr_url,
+            )
+            sender = payload.get("sender") or {}
+            background_tasks.add_task(
+                service.trigger_pr_review_from_ref,
+                pr_ref,
+                source="github_stackability",
+                github_login=sender.get("login", ""),
+                github_user_id=sender.get("id"),
+                review_mode="stackability",
+            )
+            return {"status": "accepted", "message": "Processing stackability review request"}
+
     common.logger.info("Accepted GitHub webhook: event=%s, scheduling background task", event_type)
     if is_pull_request_comment or event_type in {
         "pull_request_review_comment",

@@ -2,6 +2,7 @@ from typing import Any
 
 from langgraph.config import get_config
 
+from agent.review.stackability import ReviewMode
 from agent.utils.slack import GitHubPrRef, parse_github_pr_url
 
 
@@ -13,6 +14,7 @@ async def trigger_pr_review_from_ref(
     github_user_id: int | None = None,
     slack_channel_id: str = "",
     slack_thread_ts: str = "",
+    review_mode: ReviewMode = "bug_review",
 ) -> dict[str, Any]:
     from agent.webhooks.github import trigger_pr_review_from_ref as _trigger_pr_review_from_ref
 
@@ -23,10 +25,11 @@ async def trigger_pr_review_from_ref(
         github_user_id=github_user_id,
         slack_channel_id=slack_channel_id,
         slack_thread_ts=slack_thread_ts,
+        review_mode=review_mode,
     )
 
 
-async def request_pr_review(pr_url: str) -> dict[str, Any]:
+async def request_pr_review(pr_url: str, review_mode: ReviewMode = "bug_review") -> dict[str, Any]:
     """Start the reviewer agent for a GitHub pull request URL."""
     pr_ref = parse_github_pr_url(pr_url)
     if not pr_ref:
@@ -45,4 +48,5 @@ async def request_pr_review(pr_url: str) -> dict[str, Any]:
         github_user_id=configurable.get("github_user_id"),
         slack_channel_id=slack_thread.get("channel_id", ""),
         slack_thread_ts=slack_thread.get("thread_ts", ""),
+        review_mode=review_mode,
     )

@@ -200,7 +200,7 @@ TASK_EXECUTION_SECTION = """---
 
 First decide: is the user asking for code/repository changes, or for information only? Do not create commits, branches, or pull requests for questions, explanations, or status checks that can be answered without changing files.
 
-If a Slack- or GitHub-triggered request asks you to review a GitHub pull request, do not clone/edit/commit/push/open a PR — call `request_pr_review` once with the PR URL, reply in the source channel saying whether the review started or why not, and stop.
+If a Slack-, GitHub-, or Web-triggered request asks you to review a GitHub pull request, do not clone/edit/commit/push/open a PR — call `request_pr_review` once with the PR URL, reply in the source channel saying whether the review started or why not, and stop. If the request specifically asks for a stackability assessment, pass `review_mode="stackability"`; ordinary bug-review requests should omit `review_mode`.
 
 **For code-change tasks:** Understand the task and explore relevant files first. Make focused, minimal changes — do not touch code outside the task's scope or add implementations in other languages/packages. Verify with linters and only the tests related to your changes. Then commit, push, and (when a PR is warranted) open/update the draft PR — see Committing below.
 

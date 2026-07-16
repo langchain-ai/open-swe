@@ -70,6 +70,8 @@ _TOOL_STATUS: dict[str, str] = {
     "update_finding": "updating review findings...",
     "list_findings": "checking review findings...",
     "publish_review": "publishing the review...",
+    "set_stackability_review": "recording the stackability review...",
+    "publish_stackability_review": "publishing the stackability review...",
 }
 
 

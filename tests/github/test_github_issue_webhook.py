@@ -1247,6 +1247,7 @@ async def test_request_pr_review_tool_uses_shared_trigger(monkeypatch) -> None:
         github_user_id: int | None = None,
         slack_channel_id: str = "",
         slack_thread_ts: str = "",
+        review_mode: str = "bug_review",
     ) -> dict[str, object]:
         captured["pr_ref"] = pr_ref
         captured["source"] = source
@@ -1254,6 +1255,7 @@ async def test_request_pr_review_tool_uses_shared_trigger(monkeypatch) -> None:
         captured["github_user_id"] = github_user_id
         captured["slack_channel_id"] = slack_channel_id
         captured["slack_thread_ts"] = slack_thread_ts
+        captured["review_mode"] = review_mode
         return {"success": True, "thread_id": "thread-id"}
 
     monkeypatch.setattr(
@@ -1282,6 +1284,7 @@ async def test_request_pr_review_tool_uses_shared_trigger(monkeypatch) -> None:
     assert captured["github_user_id"] == 123
     assert captured["slack_channel_id"] == "C123"
     assert captured["slack_thread_ts"] == "1700000000.000100"
+    assert captured["review_mode"] == "bug_review"
     assert result["success"] is True
 
 

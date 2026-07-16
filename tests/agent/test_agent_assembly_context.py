@@ -117,12 +117,13 @@ async def test_agent_includes_report_platform_issue_tool() -> None:
 
 @pytest.mark.asyncio
 async def test_agent_excludes_stackability_review_tool() -> None:
-    from agent.tools import set_stackability_review
+    from agent.tools import publish_stackability_review, set_stackability_review
 
     captured = await _capture_create_deep_agent_kwargs()
     tools = captured["tools"]
     assert isinstance(tools, list)
     assert set_stackability_review not in tools
+    assert publish_stackability_review not in tools
 
 
 @pytest.mark.asyncio

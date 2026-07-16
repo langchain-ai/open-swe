@@ -20,6 +20,7 @@ _TOOL_MODULES = {
     "list_review_findings": ".list_review_findings",
     "open_pull_request": ".open_pull_request",
     "publish_review": ".publish_review",
+    "publish_stackability_review": ".publish_stackability_review",
     "read_repo_file": ".read_repo_file",
     "report_platform_issue": ".report_platform_issue",
     "request_pr_review": ".request_pr_review",
@@ -55,6 +56,7 @@ __all__ = [
     "list_review_findings",
     "open_pull_request",
     "publish_review",
+    "publish_stackability_review",
     "read_repo_file",
     "report_platform_issue",
     "request_pr_review",
@@ -90,6 +92,7 @@ if TYPE_CHECKING:
     from .list_review_findings import list_review_findings
     from .open_pull_request import open_pull_request
     from .publish_review import publish_review
+    from .publish_stackability_review import publish_stackability_review
     from .read_repo_file import read_repo_file
     from .reply_to_finding_thread import reply_to_finding_thread
     from .report_platform_issue import report_platform_issue

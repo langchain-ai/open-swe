@@ -33,6 +33,41 @@ def test_reviewer_system_prompt_formats_without_keyerror() -> None:
     assert "gh api repos/" not in prompt
 
 
+def test_stackability_prompt_requires_complete_inspection_and_publication_sequence() -> None:
+    prompt = reviewer._stackability_system_prompt(
+        "/workspace/repo", repo_owner="acme", repo_name="repo", pr_number=42
+    )
+
+    assert "complete PR diff" in prompt
+    assert "file layout and statistics" in prompt
+    assert "full commit history" in prompt
+    assert "Stackability rubric" in prompt
+    assert "independently testable" in prompt
+    assert "Harness handoff requirements" in prompt
+    assert "set_stackability_review" in prompt
+    assert "publish_stackability_review" in prompt
+    assert prompt.index("set_stackability_review") < prompt.index("publish_stackability_review")
+    assert "Do not create bug findings" in prompt
+
+
+def test_reviewer_prepare_fingerprint_distinguishes_review_modes() -> None:
+    base_config: RunnableConfig = {
+        "configurable": {"thread_id": "reviewer-thread", "review_mode": "bug_review"}
+    }
+    stack_config: RunnableConfig = {
+        "configurable": {"thread_id": "reviewer-thread", "review_mode": "stackability"}
+    }
+
+    bug = reviewer.PrepareReviewerRunMiddleware(
+        thread_id="reviewer-thread", config=base_config, use_gateway=False
+    )
+    stack = reviewer.PrepareReviewerRunMiddleware(
+        thread_id="reviewer-thread", config=stack_config, use_gateway=False
+    )
+
+    assert bug._prepare_config_fingerprint() != stack._prepare_config_fingerprint()
+
+
 def test_reviewer_eval_prompt_omits_historical_and_benchmark_gaming() -> None:
     prompt = reviewer._reviewer_system_prompt(
         "/workspace/repo",

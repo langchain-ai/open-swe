@@ -11,6 +11,7 @@ StackabilityVerdict = Literal[
 StackabilityConfidence = Literal["low", "medium", "high"]
 StackabilityPublishingMode = Literal["manual_advisory", "automatic_advisory", "blocking"]
 StackabilityPublicationState = Literal["unpublished", "published"]
+ReviewMode = Literal["bug_review", "stackability"]
 
 
 class StackStep(TypedDict):

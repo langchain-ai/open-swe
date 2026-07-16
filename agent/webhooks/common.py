@@ -53,6 +53,7 @@ from ..review.findings import (
 )
 from ..review.publish import fetch_pr_review_threads, post_review_started_comment  # noqa: F401
 from ..review.reconcile import reconcile_findings_with_review_threads  # noqa: F401
+from ..review.stackability import ReviewMode
 from ..utils.auth import (
     is_bot_token_only_mode,
     resolve_github_token_from_email,
@@ -1125,6 +1126,8 @@ def _build_reviewer_configurable(
     base_sha: str,
     head_sha: str,
     branch_name: str,
+    base_branch_name: str = "",
+    review_mode: ReviewMode = "bug_review",
     repo_private: bool | None = None,
     re_review: bool = False,
     last_reviewed_sha: str = "",
@@ -1143,9 +1146,12 @@ def _build_reviewer_configurable(
         "head_sha": head_sha,
         "review_requested": True,
         "re_review": re_review,
+        "review_mode": review_mode,
     }
     if branch_name:
         configurable["branch_name"] = branch_name
+    if base_branch_name:
+        configurable["base_branch_name"] = base_branch_name
     if repo_private is not None:
         configurable["repo_private"] = repo_private
     if last_reviewed_sha:
