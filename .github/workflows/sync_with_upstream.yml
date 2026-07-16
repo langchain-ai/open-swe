@@ -52,10 +52,23 @@ jobs:
           git remote set-url origin https://x-access-token:${{ steps.app-token.outputs.token }}@github.com/aeteq/open-swe.git
           git push -u origin sync-upstream --force-with-lease
       - name: Create or update PR
-        uses: peter-evans/create-pull-request@v6
-        with:
-          token: ${{ steps.app-token.outputs.token }}
-          branch: sync-upstream
-          base: main
-          title: ${{ steps.merge.outputs.conflict == 'true' && '⚠️ Sync with upstream (has conflicts)' || 'Sync with upstream' }}
-          body: ${{ steps.merge.outputs.conflict == 'true' && 'Automated sync hit merge conflicts. Files contain conflict markers that need manual resolution before merging.' || 'Automated PR to pull in upstream changes.' }}
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          if git diff --quiet main...sync-upstream; then
+            echo "No upstream changes to sync."
+            exit 0
+          fi
+          if [ "${{ steps.merge.outputs.conflict }}" = "true" ]; then
+            TITLE="⚠️ Sync with upstream (has conflicts)"
+            BODY="Automated sync hit merge conflicts. Files contain conflict markers that need manual resolution before merging."
+          else
+            TITLE="Sync with upstream"
+            BODY="Automated PR to pull in upstream changes."
+          fi
+          EXISTING_PR=$(gh pr list --head sync-upstream --base main --json number --jq '.[0].number')
+          if [ -n "$EXISTING_PR" ]; then
+            echo "PR #$EXISTING_PR already exists."
+          else
+            gh pr create --head sync-upstream --base main --title "$TITLE" --body "$BODY"
+          fi
