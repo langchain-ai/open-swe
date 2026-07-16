@@ -40,6 +40,7 @@ def _configure(monkeypatch) -> None:
     )
     monkeypatch.setattr(publisher, "get_github_token", lambda: "token")
     monkeypatch.setattr(publisher, "resolve_review_head_sha", AsyncMock(return_value="head"))
+    monkeypatch.setattr(publisher, "fetch_issue_comments", AsyncMock(return_value=[]))
 
 
 @pytest.mark.asyncio
@@ -78,6 +79,40 @@ async def test_publish_stackability_review_is_idempotent(monkeypatch) -> None:
 
     assert result == {"success": True, "github_comment_id": 91, "already_published": True}
     post.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_publish_stackability_review_updates_prior_marker_comment(monkeypatch) -> None:
+    _configure(monkeypatch)
+    post = AsyncMock()
+    update_comment = AsyncMock(return_value=True)
+    update_artifact = AsyncMock()
+    monkeypatch.setattr(publisher, "get_stackability_review", AsyncMock(return_value=_artifact()))
+    monkeypatch.setattr(
+        publisher,
+        "fetch_issue_comments",
+        AsyncMock(
+            return_value=[
+                {
+                    "comment_id": 91,
+                    "body": "<!-- open-swe-stackability-review -->\nOld advisory",
+                }
+            ]
+        ),
+    )
+    monkeypatch.setattr(publisher, "post_status_comment", post)
+    monkeypatch.setattr(publisher, "update_status_comment", update_comment)
+    monkeypatch.setattr(publisher, "update_stackability_review", update_artifact)
+
+    result = await publisher.publish_stackability_review()
+
+    assert result == {"success": True, "github_comment_id": 91, "already_published": False}
+    update_comment.assert_awaited_once()
+    assert update_comment.await_args is not None
+    assert "Old advisory" not in update_comment.await_args.kwargs["body"]
+    post.assert_not_awaited()
+    assert update_artifact.await_args is not None
+    assert update_artifact.await_args.kwargs["publication"]["github_comment_id"] == 91
 
 
 @pytest.mark.asyncio

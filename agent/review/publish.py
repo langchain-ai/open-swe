@@ -369,6 +369,26 @@ async def post_status_comment(
     return comment_id if isinstance(comment_id, int) else None
 
 
+async def update_status_comment(
+    *,
+    owner: str,
+    repo: str,
+    comment_id: int,
+    body: str,
+    token: str,
+) -> bool:
+    """PATCH an existing PR issue comment. Returns whether the update succeeded."""
+    url = f"{_GITHUB_API_BASE}/repos/{owner}/{repo}/issues/comments/{comment_id}"
+    async with github_client(token=token) as client:
+        try:
+            response = await github_request(client, "PATCH", url, json={"body": body})
+            response.raise_for_status()
+        except httpx.HTTPError:
+            logger.exception("Failed to update status comment %s on %s/%s", comment_id, owner, repo)
+            return False
+    return True
+
+
 async def delete_status_comment(
     *,
     owner: str,

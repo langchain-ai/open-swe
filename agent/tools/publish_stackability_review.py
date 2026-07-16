@@ -11,12 +11,14 @@ from ..review.findings import (
     resolve_review_head_sha,
     thread_missing_tool_result,
 )
-from ..review.publish import post_status_comment
+from ..review.publish import post_status_comment, update_status_comment
 from ..review.stackability import (
+    STACKABILITY_REVIEW_MARKER,
     get_stackability_review,
     render_stackability_advisory,
     update_stackability_review,
 )
+from ..utils.github_comments import fetch_issue_comments
 from ..utils.github_token import get_github_token
 
 
@@ -59,13 +61,36 @@ async def publish_stackability_review() -> dict[str, Any]:
                 "live_head_sha": live_head,
             }
 
-        comment_id = await post_status_comment(
-            owner=str(repo["owner"]),
-            repo=str(repo["name"]),
-            pr_number=pr_number,
-            body=render_stackability_advisory(artifact),
-            token=token,
+        owner = str(repo["owner"])
+        repo_name = str(repo["name"])
+        body = render_stackability_advisory(artifact)
+        comments = await fetch_issue_comments(repo, pr_number, token=token)
+        prior_comment_id = next(
+            (
+                comment.get("comment_id")
+                for comment in comments
+                if STACKABILITY_REVIEW_MARKER in str(comment.get("body", ""))
+                and isinstance(comment.get("comment_id"), int)
+            ),
+            None,
         )
+        if isinstance(prior_comment_id, int):
+            updated = await update_status_comment(
+                owner=owner,
+                repo=repo_name,
+                comment_id=prior_comment_id,
+                body=body,
+                token=token,
+            )
+            comment_id = prior_comment_id if updated else None
+        else:
+            comment_id = await post_status_comment(
+                owner=owner,
+                repo=repo_name,
+                pr_number=pr_number,
+                body=body,
+                token=token,
+            )
         if comment_id is None:
             return {"success": False, "error": "stackability_publication_failed"}
         await update_stackability_review(
