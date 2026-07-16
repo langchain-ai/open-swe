@@ -124,12 +124,11 @@ def _validate_stack_step(
 
     title = value.get("title")
     title_is_valid = _validate_non_empty_string(title, f"{path}.title", errors)
+    normalized_title: str | None = None
     if title_is_valid and isinstance(title, str):
         normalized_title = title.strip().casefold()
         if normalized_title in seen_titles:
             errors.append(f"{path}.title: must be unique within proposed_stack")
-        else:
-            seen_titles.add(normalized_title)
 
     _validate_non_empty_string(value.get("purpose"), f"{path}.purpose", errors)
     _validate_string_list(value.get("include"), f"{path}.include", errors, require_non_empty=True)
@@ -140,6 +139,11 @@ def _validate_stack_step(
         errors.append(f"{path}.depends_on: must be a string or null")
     elif isinstance(depends_on, str) and not depends_on.strip():
         errors.append(f"{path}.depends_on: must be a non-empty string or null")
+    elif isinstance(depends_on, str) and depends_on.strip().casefold() not in seen_titles:
+        errors.append(f"{path}.depends_on: must reference an earlier step title")
+
+    if normalized_title is not None:
+        seen_titles.add(normalized_title)
 
     _validate_non_empty_string(
         value.get("independently_testable_because"),

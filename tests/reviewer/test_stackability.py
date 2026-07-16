@@ -142,6 +142,37 @@ def test_duplicate_step_titles_are_rejected_after_trimming() -> None:
     )
 
 
+@pytest.mark.parametrize(
+    ("step_index", "depends_on"),
+    [
+        (1, "Missing step"),
+        (0, "Adopt the migrated schema"),
+        (0, "Add the storage migration"),
+    ],
+)
+def test_step_dependencies_must_reference_an_earlier_step(step_index: int, depends_on: str) -> None:
+    review = _split_review()
+    stack = review["proposed_stack"]
+    assert isinstance(stack, list)
+    assert isinstance(stack[step_index], dict)
+    stack[step_index]["depends_on"] = depends_on
+
+    assert (
+        f"proposed_stack[{step_index}].depends_on: must reference an earlier step title"
+        in validate_stackability_review(review)
+    )
+
+
+def test_step_dependencies_match_titles_after_normalization() -> None:
+    review = _split_review()
+    stack = review["proposed_stack"]
+    assert isinstance(stack, list)
+    assert isinstance(stack[1], dict)
+    stack[1]["depends_on"] = "  ADD THE STORAGE MIGRATION  "
+
+    assert validate_stackability_review(review) == []
+
+
 def test_split_recommended_requires_at_least_two_steps() -> None:
     review = _split_review()
     stack = review["proposed_stack"]
