@@ -4,13 +4,21 @@ Helpers and constants stay in common.py; they are accessed through the module
 object (``common.X``) so tests that monkeypatch them keep working.
 """
 
+import re
 import uuid
 from typing import Any
 
 from ..review.findings import FindingInteraction, ReviewerPRMeta, ReviewerSlackThread
+from ..review.stackability import ReviewMode
 from ..utils.github_comments import GitHubAuthError
 from ..utils.slack import GitHubPrRef
 from . import common
+
+
+def is_stackability_directive(body: str) -> bool:
+    """Return whether a comment explicitly requests a stackability review."""
+    aliases = "|".join(re.escape(tag) for tag in common.OPEN_SWE_TAGS)
+    return re.search(rf"(?:{aliases})\s+stackability\b", body, re.IGNORECASE) is not None
 
 
 def build_github_issue_prompt(
@@ -96,7 +104,10 @@ async def trigger_pr_review_from_ref(
     github_user_id: int | None = None,
     slack_channel_id: str = "",
     slack_thread_ts: str = "",
+    review_mode: ReviewMode = "bug_review",
 ) -> dict[str, Any]:
+    if review_mode not in {"bug_review", "stackability"}:
+        return {"success": False, "error": f"Unsupported review mode: {review_mode}"}
     repo_config = {"owner": pr_ref.owner, "name": pr_ref.repo}
 
     # Full token to read PR metadata (privacy/id aren't in the trigger ref);
@@ -153,16 +164,22 @@ async def trigger_pr_review_from_ref(
             "channel_id": slack_channel_id,
             "thread_ts": slack_thread_ts,
         }
-    await common.set_reviewer_thread_metadata(
-        thread_id, pr=pr_meta, watch=True, slack_thread=slack_thread_meta, head_sha=head_sha
-    )
-    await common.post_review_started_comment(
-        thread_id=thread_id,
-        owner=pr_ref.owner,
-        repo=pr_ref.repo,
-        pr_number=pr_ref.number,
-        token=app_token,
-    )
+    metadata_kwargs: dict[str, Any] = {
+        "pr": pr_meta,
+        "slack_thread": slack_thread_meta,
+        "head_sha": head_sha,
+    }
+    if review_mode == "bug_review":
+        metadata_kwargs["watch"] = True
+    await common.set_reviewer_thread_metadata(thread_id, **metadata_kwargs)
+    if review_mode == "bug_review":
+        await common.post_review_started_comment(
+            thread_id=thread_id,
+            owner=pr_ref.owner,
+            repo=pr_ref.repo,
+            pr_number=pr_ref.number,
+            token=app_token,
+        )
 
     prompt = build_github_pr_review_prompt(repo_config, pr_ref.number, pr_url, base_sha, head_sha)
     configurable = common._build_reviewer_configurable(
@@ -175,6 +192,8 @@ async def trigger_pr_review_from_ref(
         base_sha=base_sha,
         head_sha=head_sha,
         branch_name=branch_name,
+        base_branch_name=base_ref,
+        review_mode=review_mode,
         repo_private=repo_private,
         slack_channel_id=slack_channel_id,
         slack_thread_ts=slack_thread_ts,
@@ -298,6 +317,7 @@ async def _dispatch_first_review_from_pr_payload(payload: dict[str, Any], *, sou
         base_sha=base_sha,
         head_sha=head_sha,
         branch_name=branch_name,
+        base_branch_name=base_ref,
         repo_private=repo_private,
         re_review=is_re_review,
         last_reviewed_sha=last_reviewed_sha,
@@ -604,6 +624,7 @@ async def process_github_push_event(payload: dict[str, Any]) -> None:
         base_sha=base_sha,
         head_sha=head_sha,
         branch_name=head_ref,
+        base_branch_name=base_ref,
         repo_private=repo_private,
         re_review=True,
         last_reviewed_sha=last_reviewed_sha if isinstance(last_reviewed_sha, str) else "",
@@ -825,6 +846,7 @@ async def process_github_review_finding_reply(payload: dict[str, Any]) -> None:
     head_sha = pull_request.get("head", {}).get("sha", "")
     pr_url = pull_request.get("html_url", "") or pull_request.get("url", "")
     branch_name = pull_request.get("head", {}).get("ref", "")
+    base_branch_name = pull_request.get("base", {}).get("ref", "")
     configurable = common._build_reviewer_configurable(
         source="github_review_comment",
         github_login=reply_author,
@@ -835,6 +857,7 @@ async def process_github_review_finding_reply(payload: dict[str, Any]) -> None:
         base_sha=base_sha,
         head_sha=head_sha,
         branch_name=branch_name,
+        base_branch_name=base_branch_name,
         repo_private=repo_private,
         re_review=True,
     )

@@ -20,6 +20,7 @@ _TOOL_MODULES = {
     "list_review_findings": ".list_review_findings",
     "open_pull_request": ".open_pull_request",
     "publish_review": ".publish_review",
+    "publish_stackability_review": ".publish_stackability_review",
     "read_repo_file": ".read_repo_file",
     "report_platform_issue": ".report_platform_issue",
     "request_pr_review": ".request_pr_review",
@@ -28,6 +29,7 @@ _TOOL_MODULES = {
     "save_plan": ".save_plan",
     "schedule_thread_wakeup": ".schedule_thread_wakeup",
     "search_repo_code": ".search_repo_code",
+    "set_stackability_review": ".set_stackability_review",
     "slack_add_reaction": ".slack_add_reaction",
     "slack_read_thread_messages": ".slack_read_thread_messages",
     "slack_start_new_thread": ".slack_start_new_thread",
@@ -54,6 +56,7 @@ __all__ = [
     "list_review_findings",
     "open_pull_request",
     "publish_review",
+    "publish_stackability_review",
     "read_repo_file",
     "report_platform_issue",
     "request_pr_review",
@@ -62,6 +65,7 @@ __all__ = [
     "save_plan",
     "schedule_thread_wakeup",
     "search_repo_code",
+    "set_stackability_review",
     "slack_add_reaction",
     "slack_read_thread_messages",
     "slack_start_new_thread",
@@ -88,6 +92,7 @@ if TYPE_CHECKING:
     from .list_review_findings import list_review_findings
     from .open_pull_request import open_pull_request
     from .publish_review import publish_review
+    from .publish_stackability_review import publish_stackability_review
     from .read_repo_file import read_repo_file
     from .reply_to_finding_thread import reply_to_finding_thread
     from .report_platform_issue import report_platform_issue
@@ -96,6 +101,7 @@ if TYPE_CHECKING:
     from .save_plan import save_plan
     from .schedule_thread_wakeup import schedule_thread_wakeup
     from .search_repo_code import search_repo_code
+    from .set_stackability_review import set_stackability_review
     from .slack_add_reaction import slack_add_reaction
     from .slack_read_thread_messages import slack_read_thread_messages
     from .slack_start_new_thread import slack_start_new_thread
