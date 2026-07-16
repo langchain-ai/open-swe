@@ -271,6 +271,15 @@ async def test_get_stackability_review_returns_none_for_missing_or_malformed_met
         }
         assert await get_stackability_review("tid") is None
 
+        record = new_stackability_review_record("abc123", _split_review())
+        for field, malformed_value in (("mode", []), ("state", {})):
+            malformed_record = deepcopy(record)
+            malformed_record["publication"][field] = malformed_value  # type: ignore[literal-required]
+            fake_client.threads.get.return_value = {
+                "metadata": {"stackability_review": malformed_record}
+            }
+            assert await get_stackability_review("tid") is None
+
 
 @pytest.mark.asyncio
 async def test_update_stackability_review_preserves_assessment_and_sha() -> None:

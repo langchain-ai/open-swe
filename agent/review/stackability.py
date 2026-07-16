@@ -258,9 +258,9 @@ def _coerce_publication(value: object) -> StackabilityPublication | None:
     comment_id = value.get("github_comment_id")
     review_id = value.get("github_review_id")
     review_thread_id = value.get("github_review_thread_id")
-    if mode is not None and mode not in _PUBLISHING_MODES:
+    if mode is not None and (not isinstance(mode, str) or mode not in _PUBLISHING_MODES):
         return None
-    if state not in _PUBLICATION_STATES:
+    if not isinstance(state, str) or state not in _PUBLICATION_STATES:
         return None
     if comment_id is not None and (not isinstance(comment_id, int) or isinstance(comment_id, bool)):
         return None
