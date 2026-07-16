@@ -37,16 +37,23 @@ jobs:
       - name: Reset sync branch to fork's main
         run: |
           git checkout -B sync-upstream origin/main     
-      - name: Merge upstream, committing conflicts if any
+      - name: Detect conflicting files
+        id: conflicts
+        run: |
+          if git merge --no-commit --no-ff upstream/main 2>/dev/null; then
+            echo "files=" >> $GITHUB_OUTPUT
+          else
+            CONFLICT_FILES=$(git diff --name-only --diff-filter=U | sort)
+            EOF=$(dd if=/dev/urandom bs=15 count=1 status=none | base64)
+            echo "files<<$EOF" >> $GITHUB_OUTPUT
+            echo "$CONFLICT_FILES" >> $GITHUB_OUTPUT
+            echo "$EOF" >> $GITHUB_OUTPUT
+          fi
+          git merge --abort 2>/dev/null || true
+      - name: Merge upstream, keeping our version on conflicts
         id: merge
         run: |
-          if git merge upstream/main --no-edit; then
-            echo "conflict=false" >> $GITHUB_OUTPUT
-          else
-            echo "conflict=true" >> $GITHUB_OUTPUT
-            git add -A
-            git commit --no-edit -m "Merge upstream/main into sync-upstream (unresolved conflicts)"
-          fi
+          git merge upstream/main --no-edit -X ours
       - name: Push sync branch
         run: |
           git remote set-url origin https://x-access-token:${{ steps.app-token.outputs.token }}@github.com/aeteq/open-swe.git
@@ -59,11 +66,18 @@ jobs:
             echo "No upstream changes to sync."
             exit 0
           fi
-          if [ "${{ steps.merge.outputs.conflict }}" = "true" ]; then
-            TITLE="⚠️ Sync with upstream (has conflicts)"
-            BODY="Automated sync hit merge conflicts. Files contain conflict markers that need manual resolution before merging."
+          CONFLICT_FILES="${{ steps.conflicts.outputs.files }}"
+          if [ -n "$CONFLICT_FILES" ]; then
+            TITLE="chore: sync with upstream (conflicts auto-resolved)"
+            FILE_LIST=$(echo "$CONFLICT_FILES" | sed 's/^/- `/' | sed 's/$/`/')
+            BODY="Automated sync hit merge conflicts that were auto-resolved by keeping our fork's version (\`-X ours\`).
+
+**Files where our version was kept over upstream's:**
+$FILE_LIST
+
+Review these files to check if upstream made important changes."
           else
-            TITLE="Sync with upstream"
+            TITLE="chore: sync with upstream"
             BODY="Automated PR to pull in upstream changes."
           fi
           EXISTING_PR=$(gh pr list --repo aeteq/open-swe --head sync-upstream --base main --json number --jq '.[0].number')
