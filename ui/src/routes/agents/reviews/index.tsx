@@ -70,7 +70,7 @@ function ReviewsPage() {
           PR Reviews
         </h1>
         <p className="mt-1 text-xs text-[var(--ui-text-muted)]">
-          Pull requests reviewed by Open SWE Review. Click into one for the full
+          Pull requests reviewed by Jarvis Review. Click into one for the full
           analysis.
         </p>
 
@@ -117,7 +117,7 @@ function ReviewsPage() {
             <p className="px-4 py-3 text-xs text-[var(--ui-text-muted)]">
               {mine
                 ? "No reviews on your PRs yet. Switch to All to see every review you have access to."
-                : "No reviews yet. Enable repositories under Open SWE Review settings and open a PR."}
+                : "No reviews yet. Enable repositories under Jarvis Review settings and open a PR."}
             </p>
           )}
           <div className="divide-y divide-[var(--ui-border)]">

@@ -140,7 +140,7 @@ export function AgentsSidebar({
           className="flex items-center gap-2 font-heading text-sm font-medium tracking-tight text-[var(--ui-text)]"
         >
           <img src="/logo-mark.png" alt="" className="size-5" />
-          open-swe
+          jarvis
         </Link>
         <SidebarCollapseButton onToggle={layout.toggle} />
       </div>

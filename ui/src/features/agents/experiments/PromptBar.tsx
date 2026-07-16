@@ -68,7 +68,7 @@ function buildApprovalPromptContent(request: PromptApprovalRequest): ApprovalPro
           label: `Yes, and don't ask again for commands that start with ${truncateText(commandPreview, 64)}`,
           decision: 'auto-approve',
         },
-        { label: 'No, and tell Open SWE what to do differently', decision: 'reject' },
+        { label: 'No, and tell Jarvis what to do differently', decision: 'reject' },
       ],
     };
   }
@@ -108,7 +108,7 @@ function buildApprovalPromptContent(request: PromptApprovalRequest): ApprovalPro
           : 'Yes, and allow similar actions for this session',
         decision: 'auto-approve',
       },
-      { label: 'No, and tell Open SWE what to do differently', decision: 'reject' },
+      { label: 'No, and tell Jarvis what to do differently', decision: 'reject' },
     ],
   };
 }
@@ -689,7 +689,7 @@ export const PromptBar = memo(function PromptBar({
               onChange={handleInputChange}
               onSelect={handleInputSelect}
               onKeyDown={handleKeyDown}
-              placeholder={busy ? "Send a message to queue next..." : "Ask Open SWE anything, @ to add files, / for commands"}
+              placeholder={busy ? "Send a message to queue next..." : "Ask Jarvis anything, @ to add files, / for commands"}
               className="w-full min-h-[52px] bg-transparent text-[color:var(--ui-text)] outline-none placeholder-[color:var(--ui-text-dim)] resize-none overflow-hidden leading-[1.45] min-w-0"
               style={{ maxHeight: PROMPT_TEXTAREA_MAX_HEIGHT }}
             />

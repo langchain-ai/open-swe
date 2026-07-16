@@ -1,5 +1,5 @@
 {
-  "name": "open-swe-dashboard",
+  "name": "jarvis-dashboard",
   "private": true,
   "packageManager": "pnpm@11.9.0",
   "type": "module",

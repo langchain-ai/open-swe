@@ -71,7 +71,7 @@ function UserMappingSection({ session }: { session: SessionUser }) {
   return (
     <SettingsSection
       title="User mapping"
-      description="Connect your Slack account so Open SWE can resolve your GitHub account when you tag it in Slack. We use the email Slack verifies, which also lets Linear mentions resolve to you."
+      description="Connect your Slack account so Jarvis can resolve your GitHub account when you tag it in Slack. We use the email Slack verifies, which also lets Linear mentions resolve to you."
     >
       <div className="divide-y divide-border">
         <SettingsRow
@@ -416,10 +416,10 @@ function MySettingsPage() {
 
       <UserMappingSection session={session.data} />
 
-      <SettingsSection title="Open SWE Review">
+      <SettingsSection title="Jarvis Review">
         <SettingsRow
           label="Review my draft PRs"
-          description="Whether Open SWE Review runs on pull requests you open in draft. When set to the team default, your admin's org-wide setting applies."
+          description="Whether Jarvis Review runs on pull requests you open in draft. When set to the team default, your admin's org-wide setting applies."
           control={
             <Select
               value={draftChoice}

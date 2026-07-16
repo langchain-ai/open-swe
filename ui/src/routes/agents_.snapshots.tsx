@@ -28,7 +28,7 @@ function RepoSnapshotsPage() {
       user={session.data}
       title="Repository Snapshots"
       description="Build a per-repo sandbox image from a custom Dockerfile. Repos without a ready snapshot fall back to the default sandbox image."
-      backTo={{ to: "/cloud-agents", label: "Back to Open SWE Agent" }}
+      backTo={{ to: "/cloud-agents", label: "Back to Jarvis Agent" }}
     >
       <div className="rounded-lg border border-border bg-card">
         <RepoSnapshotsPanel />

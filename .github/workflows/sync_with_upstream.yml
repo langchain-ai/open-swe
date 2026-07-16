@@ -14,6 +14,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          ref: main
+      - name: Configure git identity
+        run: |
+          git config user.name "Nikolas Pitsillos"
+          git config user.email "npitsillos@users.noreply.github.com"
       - name: Fetch upstream
         run: |
           git remote add upstream https://github.com/langchain-ai/open-swe.git

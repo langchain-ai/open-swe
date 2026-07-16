@@ -47,7 +47,7 @@ export function AutomationsList() {
           Automations
         </h1>
         <p className="mt-1 text-xs text-[var(--ui-text-muted)]">
-          Run Open SWE on a recurring schedule. Each run starts a fresh agent
+          Run Jarvis on a recurring schedule. Each run starts a fresh agent
           thread.
         </p>
 
@@ -125,7 +125,7 @@ function EmptyState() {
         No automations yet
       </h3>
       <p className="mt-1 max-w-sm text-xs text-[var(--ui-text-muted)]">
-        Schedule Open SWE to run on a recurring cadence — review code, triage
+        Schedule Jarvis to run on a recurring cadence — review code, triage
         issues, or keep docs up to date.
       </p>
       <Link

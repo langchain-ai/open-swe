@@ -14,7 +14,7 @@ export interface AutomationTemplate {
   id: string
   name: string
   description: string
-  /** Seed instructions sent to Open SWE on each scheduled run. */
+  /** Seed instructions sent to Jarvis on each scheduled run. */
   prompt: string
   /** Default 5-field cron expression (UTC). */
   schedule: string

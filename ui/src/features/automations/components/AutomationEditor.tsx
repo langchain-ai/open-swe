@@ -251,7 +251,7 @@ export function AutomationEditor({
           <textarea
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
-            placeholder="What should Open SWE do each time this runs?"
+            placeholder="What should Jarvis do each time this runs?"
             rows={5}
             className="w-full resize-none bg-transparent text-sm leading-relaxed text-[var(--ui-text)] outline-none placeholder:text-[var(--ui-text-dim)]"
           />

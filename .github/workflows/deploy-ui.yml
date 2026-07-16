@@ -2,6 +2,11 @@ name: Deploy UI to S3
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - "ui/**"
 
 permissions:
   id-token: write
