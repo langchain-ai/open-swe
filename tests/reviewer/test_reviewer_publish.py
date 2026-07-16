@@ -466,6 +466,51 @@ async def test_publish_review_eval_mode_uses_configured_cap() -> None:
     assert publication["finding_ids"] == ["f_first"]
 
 
+async def test_publish_review_second_call_in_same_run_short_circuits() -> None:
+    import importlib
+
+    publish_review_mod = importlib.import_module("agent.tools.publish_review")
+    from agent.tools.publish_review import publish_review
+
+    findings = [_f(id="f_high", severity="high", file="a.py", start_line=1, end_line=1)]
+    config = {
+        "run_id": "run-guard-1",
+        "configurable": {
+            "thread_id": "tid",
+            "repo": {"owner": "o", "name": "r"},
+            "pr_number": 7,
+            "head_sha": "sha",
+            "reviewer_eval": True,
+        },
+        "metadata": {},
+    }
+
+    publish_review_mod._PUBLISHED_RUN_IDS.discard("run-guard-1")
+    try:
+        with (
+            patch("agent.tools.publish_review.get_config", return_value=config),
+            patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
+            patch(
+                "agent.tools.publish_review.list_findings_async",
+                AsyncMock(return_value=findings),
+            ),
+            patch(
+                "agent.tools.publish_review.set_reviewer_thread_metadata", AsyncMock()
+            ) as set_meta,
+        ):
+            first = await publish_review()
+            second = await publish_review()
+
+        assert first["success"] is True
+        assert first.get("already_published_in_this_run") is not True
+        assert second["success"] is True
+        assert second["already_published_in_this_run"] is True
+        assert second["review_id"] is None
+        set_meta.assert_awaited_once()
+    finally:
+        publish_review_mod._PUBLISHED_RUN_IDS.discard("run-guard-1")
+
+
 @pytest.mark.asyncio
 async def test_publish_review_surfaces_additional_findings_count_in_body() -> None:
     """When all surfaced findings are above threshold but sub-threshold findings

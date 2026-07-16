@@ -90,6 +90,8 @@ Wired into `get_agent`:
 
 Reviewer-only tools (in `agent/reviewer.py`): `add_finding`, `update_finding`, `list_findings`, `publish_review`. The review-style analyzer uses `save_review_style` (exported as `save_review_style_prompt`).
 
+Call `publish_review` exactly once per run. Once you have published in a run, do NOT re-fetch the diff, re-list findings, or call `publish_review` again — even if a new message arrives, a new commit push is handled by a newly dispatched run. `publish_review` is guarded by a run-scoped latch (`_PUBLISHED_RUN_IDS`) and returns `already_published_in_this_run` on any repeat call within the same run; when you see that signal, stop and report the outcome of the publish you already made.
+
 Built-in deepagents tools (`read_file`, `write_file`, `edit_file`, `ls`, `glob`, `grep`, `execute`, `write_todos`, `task` for subagent spawning, …) are added by `create_deep_agent` itself; don't duplicate them.
 
 ### Models, profiles, and team defaults

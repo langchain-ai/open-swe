@@ -57,6 +57,14 @@ from ..utils.langsmith import get_langsmith_trace_url
 from ..utils.slack import post_slack_thread_reply
 from ..utils.tracing import REVIEW_TRACING_PROJECT
 
+# Run-scoped guard: run ids for which publish_review has already reached a
+# terminal outcome. A push landing mid-run is delivered as a queued human
+# message into the still-running review run; without this the queued message
+# reads as a fresh "review this PR" directive and restarts the
+# fetch_review_diff -> list_findings -> publish_review cycle. A newly dispatched
+# run handles the new commit, so publish is allowed at most once per run.
+_PUBLISHED_RUN_IDS: set[str] = set()
+
 
 async def publish_review(
     severity_threshold: str = "medium",
@@ -94,6 +102,11 @@ async def publish_review(
         - ``dry_run: true`` (with ``review_id: null``): eval/benchmark mode —
           the publish was simulated and nothing was posted to GitHub. Do not
           claim publication.
+        - ``already_published_in_this_run: true`` (with ``review_id: null``):
+          this run already published once, so the repeat call was a no-op. A
+          new commit push is handled by a newly dispatched run; do not re-fetch
+          the diff, re-list findings, or re-publish — stop and report the
+          outcome of the publish you already made.
 
         Only a numeric ``review_id`` (with neither flag set) confirms a real
         GitHub Review was created.
@@ -102,6 +115,16 @@ async def publish_review(
         return {"success": False, "error": f"Invalid severity_threshold: {severity_threshold}"}
 
     config = get_config()
+    run_id = _current_run_id(config if isinstance(config, dict) else {})
+    if run_id is not None and run_id in _PUBLISHED_RUN_IDS:
+        return {
+            "success": True,
+            "already_published_in_this_run": True,
+            "review_id": None,
+            "surfaced_count": 0,
+            "hidden_count": 0,
+            "resolved_thread_count": 0,
+        }
     raw_configurable = config.get("configurable", {}) if isinstance(config, dict) else {}
     configurable = raw_configurable if isinstance(raw_configurable, dict) else {}
     repo_config = configurable.get("repo")
@@ -133,11 +156,13 @@ async def publish_review(
         if not isinstance(eval_cap, int) or isinstance(eval_cap, bool) or eval_cap < 0:
             eval_cap = REVIEW_FINDING_CAP
         try:
-            return await _publish_review_eval_dry_run_async(
+            result = await _publish_review_eval_dry_run_async(
                 head_sha=head_sha,
                 severity_threshold=_cast_severity(severity_threshold),
                 cap=eval_cap,
             )
+            _mark_published_if_terminal(run_id, result)
+            return result
         except ReviewerThreadMissingError as exc:
             return thread_missing_tool_result(exc)
 
@@ -146,7 +171,7 @@ async def publish_review(
         return {"success": False, "error": "No GitHub token available"}
 
     try:
-        return await _publish_review_async(
+        result = await _publish_review_async(
             owner=str(repo_config["owner"]),
             repo=str(repo_config["name"]),
             pr_number=pr_number,
@@ -155,10 +180,12 @@ async def publish_review(
             severity_threshold=_cast_severity(severity_threshold),
             cap=REVIEW_FINDING_CAP,
             is_re_review=is_re_review,
-            langgraph_run_id=_current_run_id(config),
+            langgraph_run_id=run_id,
             trace_link_config_override=configurable.get("review_trace_link_enabled"),
             state=state,
         )
+        _mark_published_if_terminal(run_id, result)
+        return result
     except ReviewerThreadMissingError as exc:
         return thread_missing_tool_result(exc)
     except GitHubAuthError as exc:
@@ -1055,6 +1082,14 @@ async def _resolve_threads_for_resolved_findings(
         await replace_findings(thread_id, findings)
 
     return resolved_count
+
+
+def _mark_published_if_terminal(run_id: str | None, result: dict[str, Any]) -> None:
+    """Latch the run as published so queued mid-run messages can't re-publish."""
+    if run_id is None or not isinstance(result, dict):
+        return
+    if result.get("success") is True:
+        _PUBLISHED_RUN_IDS.add(run_id)
 
 
 def _current_run_id(config: dict[str, Any]) -> str | None:

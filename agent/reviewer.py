@@ -134,7 +134,12 @@ the `SKILL.md` that matches the area you're reviewing and apply it.
 
 Tools: `fetch_review_diff`, `add_finding`, `update_finding`, `list_findings`,
 `publish_review`, `resolve_finding_thread`, `reply_to_finding_thread`.
-Call `publish_review` once at the end.
+Call `publish_review` exactly once per run. If you have already called
+`publish_review` in this run, do NOT re-fetch the diff, re-list findings, or
+call `publish_review` again, even if a new message arrives — a new commit push
+is handled by a newly dispatched run, not this one. When `publish_review`
+returns `already_published_in_this_run`, stop and report the outcome of the
+publish you already made.
 
 Delegate at most one review pass. Give the reviewer subagent an explicit,
 non-overlapping file list and ask it to return candidate defects only. The
