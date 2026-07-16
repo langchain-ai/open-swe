@@ -1,5 +1,7 @@
 """Tests for LangSmith sandbox env-var configuration parsing."""
 
+import base64
+import uuid
 from typing import cast
 from unittest.mock import AsyncMock, patch
 
@@ -14,11 +16,63 @@ from agent.integrations.langsmith import (
     DEFAULT_SNAPSHOT_FS_CAPACITY_BYTES,
     LangSmithProvider,
     _create_sandbox_with_retry,
+    _get_sandbox_api_endpoint,
     _get_sandbox_create_extra_fields,
     _get_sandbox_snapshot_config,
     _install_create_extra_fields,
+    _release_sandbox_name,
+    _sandbox_name_for_thread,
     _wait_for_reconnected_sandbox,
 )
+
+
+def test_sandbox_api_endpoint_appends_v2_sandboxes() -> None:
+    with patch.dict("os.environ", {"LANGSMITH_ENDPOINT": "https://eu.smith.langchain.com"}):
+        assert _get_sandbox_api_endpoint() == "https://eu.smith.langchain.com/v2/sandboxes"
+
+
+def test_sandbox_api_endpoint_no_double_suffix() -> None:
+    with patch.dict(
+        "os.environ",
+        {"SANDBOX_LANGSMITH_ENDPOINT": "https://x.smith.langchain.com/v2/sandboxes"},
+    ):
+        assert _get_sandbox_api_endpoint() == "https://x.smith.langchain.com/v2/sandboxes"
+
+
+def test_sandbox_name_for_thread_encodes_uuid() -> None:
+    thread_id = "12345678-1234-5678-1234-567812345678"
+    name = _sandbox_name_for_thread(thread_id)
+    assert name is not None
+    prefix, _, encoded = name.partition("-")
+    assert prefix == "openswe"
+    assert encoded == encoded.lower()
+    assert "=" not in encoded and "-" not in encoded
+    # Round-trips back to the original UUID.
+    padded = encoded.upper() + "=" * (-len(encoded) % 8)
+    assert uuid.UUID(bytes=base64.b32decode(padded)) == uuid.UUID(thread_id)
+
+
+def test_sandbox_name_for_thread_none_or_invalid() -> None:
+    assert _sandbox_name_for_thread(None) is None
+    assert _sandbox_name_for_thread("not-a-uuid") is None
+
+
+@pytest.mark.asyncio
+async def test_release_sandbox_name_deletes_stale_box() -> None:
+    client = AsyncMock()
+    await _release_sandbox_name(client, "openswe-abc")
+    client.delete_sandbox.assert_awaited_once_with("openswe-abc")
+
+
+@pytest.mark.asyncio
+async def test_release_sandbox_name_swallows_missing_and_skips_none() -> None:
+    client = AsyncMock()
+    client.delete_sandbox.side_effect = RuntimeError("not found")
+    await _release_sandbox_name(client, "openswe-abc")  # must not raise
+
+    client.delete_sandbox.reset_mock(side_effect=True)
+    await _release_sandbox_name(client, None)
+    client.delete_sandbox.assert_not_awaited()
 
 
 def test_defaults_when_env_unset() -> None:
@@ -116,6 +170,7 @@ class _FakeSandboxClient:
 
     async def create_sandbox(self, **kwargs):
         self.calls += 1
+        self.last_kwargs = kwargs
         if self.calls <= self.failures:
             raise _RetryableCreateError("try again")
         return {"sandbox": kwargs["snapshot_id"]}
@@ -145,6 +200,7 @@ async def test_create_sandbox_with_retry_retries_transient_errors(monkeypatch) -
     result = await _create_sandbox_with_retry(
         cast(AsyncSandboxClient, client),
         snapshot_id="snap-1",
+        name="openswe-abc",
         fs_capacity_bytes=None,
         vcpus=None,
         mem_bytes=None,
@@ -155,6 +211,7 @@ async def test_create_sandbox_with_retry_retries_transient_errors(monkeypatch) -
 
     assert result == {"sandbox": "snap-1"}
     assert client.calls == 3
+    assert client.last_kwargs["name"] == "openswe-abc"
 
 
 @pytest.mark.asyncio

@@ -7,6 +7,7 @@ import base64
 import json
 import logging
 import os
+import uuid
 from abc import ABC, abstractmethod
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FuturesTimeout
@@ -57,6 +58,69 @@ def _get_langsmith_api_key() -> str | None:
     for LangGraph Cloud deployments where LANGSMITH_API_KEY is reserved.
     """
     return os.environ.get("LANGSMITH_API_KEY") or os.environ.get("LANGSMITH_API_KEY_PROD")
+
+
+def _get_sandbox_api_key() -> str | None:
+    """LangSmith API key for sandbox operations.
+
+    ``SANDBOX_LANGSMITH_API_KEY`` lets sandboxes run against a different
+    LangSmith workspace than the one used for tracing/other API calls; falls
+    back to the standard key.
+    """
+    return os.environ.get("SANDBOX_LANGSMITH_API_KEY") or _get_langsmith_api_key()
+
+
+def _get_sandbox_endpoint() -> str:
+    """LangSmith API **root** for sandbox operations.
+
+    Overridable via ``SANDBOX_LANGSMITH_ENDPOINT`` to pair with
+    ``SANDBOX_LANGSMITH_API_KEY``; falls back to ``LANGSMITH_ENDPOINT``. This is
+    the bare root (e.g. ``https://api.smith.langchain.com``) used to build the
+    proxy-config URL; the SDK clients take :func:`_get_sandbox_api_endpoint`.
+    """
+    return (
+        os.environ.get("SANDBOX_LANGSMITH_ENDPOINT")
+        or os.environ.get("LANGSMITH_ENDPOINT")
+        or "https://api.smith.langchain.com"
+    )
+
+
+def _get_sandbox_api_endpoint() -> str:
+    """Sandbox API base URL for the langsmith SDK clients.
+
+    The SDK's ``api_endpoint`` is the sandbox base (root + ``/v2/sandboxes``),
+    not the API root, and its methods append ``/boxes``, ``/snapshots``, etc.
+    """
+    root = _get_sandbox_endpoint().rstrip("/")
+    suffix = "/v2/sandboxes"
+    return root if root.endswith(suffix) else f"{root}{suffix}"
+
+
+def _current_thread_id() -> str | None:
+    """The LangGraph thread id for the active run, if any."""
+    try:
+        from langgraph.config import get_config
+
+        return get_config().get("configurable", {}).get("thread_id")
+    except Exception:
+        return None
+
+
+def _sandbox_name_for_thread(thread_id: str | None) -> str | None:
+    """Deterministic, thread-traceable sandbox name: ``openswe-<b32(thread uuid)>``.
+
+    The thread id (a UUID) is base32-encoded lowercase without padding so the
+    name is a compact, hyphen-free token that maps back to the thread. Returns
+    None when the thread id is missing or not a UUID, leaving the name unset.
+    """
+    if not thread_id:
+        return None
+    try:
+        raw = uuid.UUID(thread_id).bytes
+    except ValueError:
+        return None
+    encoded = base64.b32encode(raw).decode("ascii").rstrip("=").lower()
+    return f"openswe-{encoded}"
 
 
 def _parse_optional_int(name: str, default: int) -> int:
@@ -226,10 +290,27 @@ async def _wait_for_reconnected_sandbox(
         last_sandbox = await client.get_sandbox(name=sandbox_id)
 
 
+async def _release_sandbox_name(client: AsyncSandboxClient, name: str | None) -> None:
+    """Best-effort delete of any existing sandbox holding ``name``.
+
+    Sandbox names are unique in LangSmith and thread-deterministic, so the only
+    box that can hold this name is this thread's own — typically a dead one
+    (idle-stopped past its TTL) we're recreating. Provisioning is serialized per
+    thread, so this never races a live box. Without this, recreate would 409.
+    """
+    if not name:
+        return
+    try:
+        await client.delete_sandbox(name)
+    except Exception as exc:  # noqa: BLE001 - name is free if nothing to delete
+        logger.debug("No pre-existing sandbox %s to release (%s)", name, type(exc).__name__)
+
+
 async def _create_sandbox_with_retry(
     client: AsyncSandboxClient,
     *,
     snapshot_id: str,
+    name: str | None,
     fs_capacity_bytes: int | None,
     vcpus: int | None,
     mem_bytes: int | None,
@@ -241,6 +322,7 @@ async def _create_sandbox_with_retry(
         try:
             return await client.create_sandbox(
                 snapshot_id=snapshot_id,
+                name=name,
                 fs_capacity_bytes=fs_capacity_bytes,
                 vcpus=vcpus,
                 mem_bytes=mem_bytes,
@@ -276,11 +358,11 @@ async def _configure_github_proxy(sandbox_name: str, github_token: str) -> None:
         sandbox_name: The sandbox name/ID returned by the LangSmith API.
         github_token: GitHub token to inject as Authorization header.
     """
-    api_key = _get_langsmith_api_key()
+    api_key = _get_sandbox_api_key()
     if not api_key:
         logger.warning("No LangSmith API key found, skipping GitHub proxy configuration")
         return
-    langsmith_endpoint = os.environ.get("LANGSMITH_ENDPOINT", "https://api.smith.langchain.com")
+    langsmith_endpoint = _get_sandbox_endpoint()
     url = f"{langsmith_endpoint}/v2/sandboxes/boxes/{sandbox_name}"
     payload = {"proxy_config": {"rules": _github_proxy_rules(github_token)}}
     async with httpx.AsyncClient(timeout=PROXY_CONFIG_TIMEOUT_SECONDS) as client:
@@ -320,8 +402,10 @@ async def _configure_github_proxy(sandbox_name: str, github_token: str) -> None:
 
 
 def get_async_sandbox_client() -> AsyncSandboxClient:
-    """Build an ``AsyncSandboxClient`` from the resolved LangSmith API key."""
-    return AsyncSandboxClient(api_key=_get_langsmith_api_key())
+    """Build an ``AsyncSandboxClient`` from the resolved sandbox LangSmith credentials."""
+    return AsyncSandboxClient(
+        api_key=_get_sandbox_api_key(), api_endpoint=_get_sandbox_api_endpoint()
+    )
 
 
 async def create_langsmith_sandbox(
@@ -347,7 +431,7 @@ async def create_langsmith_sandbox(
     Returns:
         SandboxBackendProtocol instance
     """
-    api_key = _get_langsmith_api_key()
+    api_key = _get_sandbox_api_key()
     (
         default_snapshot_id,
         fs_capacity_bytes,
@@ -363,6 +447,7 @@ async def create_langsmith_sandbox(
     backend = await provider.get_or_create(
         sandbox_id=sandbox_id,
         snapshot_id=effective_snapshot_id,
+        name=_sandbox_name_for_thread(_current_thread_id()),
         fs_capacity_bytes=fs_capacity_bytes,
         vcpus=vcpus,
         mem_bytes=mem_bytes,
@@ -380,11 +465,9 @@ async def create_langsmith_sandbox(
 async def _update_thread_sandbox_metadata(sandbox_id: str) -> None:
     """Update thread metadata with sandbox_id."""
     try:
-        from langgraph.config import get_config
         from langgraph_sdk import get_client
 
-        config = get_config()
-        thread_id = config.get("configurable", {}).get("thread_id")
+        thread_id = _current_thread_id()
         if not thread_id:
             return
         client = get_client()
@@ -539,7 +622,8 @@ class LangSmithProvider(SandboxProvider):
     """LangSmith sandbox provider implementation."""
 
     def __init__(self, api_key: str | None = None) -> None:
-        self._api_key = api_key or _get_langsmith_api_key()
+        self._api_key = api_key or _get_sandbox_api_key()
+        self._api_endpoint = _get_sandbox_api_endpoint()
         if not self._api_key:
             msg = "LANGSMITH_API_KEY (or LANGSMITH_API_KEY_PROD) not set"
             raise ValueError(msg)
@@ -583,6 +667,7 @@ class LangSmithProvider(SandboxProvider):
         sandbox_id: str | None = None,
         timeout: int = 180,
         snapshot_id: str | None = None,
+        name: str | None = None,
         fs_capacity_bytes: int | None = None,
         vcpus: int | None = None,
         mem_bytes: int | None = None,
@@ -600,7 +685,9 @@ class LangSmithProvider(SandboxProvider):
         if kwargs:
             msg = f"Received unsupported arguments: {list(kwargs.keys())}"
             raise TypeError(msg)
-        async with AsyncSandboxClient(api_key=self._api_key) as client:
+        async with AsyncSandboxClient(
+            api_key=self._api_key, api_endpoint=self._api_endpoint
+        ) as client:
             if sandbox_id:
                 try:
                     sandbox = await client.get_sandbox(name=sandbox_id)
@@ -632,11 +719,13 @@ class LangSmithProvider(SandboxProvider):
                 raise ValueError(msg)
 
             _install_create_extra_fields(client, _get_sandbox_create_extra_fields())
+            await _release_sandbox_name(client, name)
 
             try:
                 sandbox = await _create_sandbox_with_retry(
                     client,
                     snapshot_id=snapshot_id,
+                    name=name,
                     fs_capacity_bytes=fs_capacity_bytes,
                     vcpus=vcpus,
                     mem_bytes=mem_bytes,
@@ -652,5 +741,7 @@ class LangSmithProvider(SandboxProvider):
 
     async def delete(self, *, sandbox_id: str, **kwargs: Any) -> None:
         """Delete a LangSmith sandbox."""
-        async with AsyncSandboxClient(api_key=self._api_key) as client:
+        async with AsyncSandboxClient(
+            api_key=self._api_key, api_endpoint=self._api_endpoint
+        ) as client:
             await client.delete_sandbox(sandbox_id)

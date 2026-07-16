@@ -342,9 +342,9 @@ def _build_snapshot_sync(record: dict[str, Any], snapshot_name: str) -> tuple[st
     """
     from langsmith.sandbox import SandboxClient
 
-    from agent.integrations.langsmith import _get_langsmith_api_key
+    from agent.integrations.langsmith import _get_sandbox_api_endpoint, _get_sandbox_api_key
 
-    api_key = _get_langsmith_api_key()
+    api_key = _get_sandbox_api_key()
     if not api_key:
         raise RuntimeError("LANGSMITH_API_KEY is not configured")
 
@@ -356,7 +356,7 @@ def _build_snapshot_sync(record: dict[str, Any], snapshot_name: str) -> tuple[st
     timeout = int(
         os.environ.get("REPO_SNAPSHOT_BUILD_TIMEOUT_SECONDS", DEFAULT_BUILD_TIMEOUT_SECONDS)
     )
-    client = SandboxClient(api_key=api_key)
+    client = SandboxClient(api_key=api_key, api_endpoint=_get_sandbox_api_endpoint())
     try:
         with tempfile.TemporaryDirectory(prefix="openswe-snapshot-") as context_dir:
             dockerfile_path = Path(context_dir) / "Dockerfile"
