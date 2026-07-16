@@ -1,4 +1,7 @@
-from typing import Literal, TypedDict
+from copy import deepcopy
+from typing import Any, Literal, TypedDict, cast
+
+from .findings import get_thread_metadata, set_reviewer_thread_metadata
 
 StackabilityVerdict = Literal[
     "split_recommended",
@@ -7,6 +10,7 @@ StackabilityVerdict = Literal[
 ]
 StackabilityConfidence = Literal["low", "medium", "high"]
 StackabilityPublishingMode = Literal["manual_advisory", "automatic_advisory", "blocking"]
+StackabilityPublicationState = Literal["unpublished", "published"]
 
 
 class StackStep(TypedDict):
@@ -26,6 +30,20 @@ class StackabilityReview(TypedDict):
     proposed_stack: list[StackStep]
     harness_prompt: str
     risks_or_human_decisions: list[str]
+
+
+class StackabilityPublication(TypedDict):
+    mode: StackabilityPublishingMode | None
+    state: StackabilityPublicationState
+    github_comment_id: int | None
+    github_review_id: int | None
+    github_review_thread_id: str | None
+
+
+class StoredStackabilityReview(TypedDict):
+    reviewed_head_sha: str
+    review: StackabilityReview
+    publication: StackabilityPublication
 
 
 STACKABILITY_REVIEW_RUBRIC = """
@@ -71,6 +89,10 @@ explicitly authorizes another approach.
 
 _VERDICTS = {"split_recommended", "not_worth_splitting", "needs_human_context"}
 _CONFIDENCES = {"low", "medium", "high"}
+_PUBLISHING_MODES = {"manual_advisory", "automatic_advisory", "blocking"}
+_PUBLICATION_STATES = {"unpublished", "published"}
+_STACKABILITY_METADATA_KEY = "stackability_review"
+STACKABILITY_REVIEW_MARKER = "<!-- open-swe-stackability-review -->"
 _REVIEW_FIELDS = (
     "verdict",
     "confidence",
@@ -203,3 +225,213 @@ def validate_stackability_review(value: object) -> list[str]:
         )
 
     return errors
+
+
+def new_stackability_review_record(
+    reviewed_head_sha: str,
+    review: object,
+) -> StoredStackabilityReview:
+    """Create an unpublished stackability record ready for thread metadata."""
+    if not isinstance(reviewed_head_sha, str) or not reviewed_head_sha.strip():
+        raise ValueError("reviewed_head_sha must be a non-empty string")
+    errors = validate_stackability_review(review)
+    if errors:
+        raise ValueError("Invalid stackability review: " + "; ".join(errors))
+    return {
+        "reviewed_head_sha": reviewed_head_sha.strip(),
+        "review": cast(StackabilityReview, deepcopy(review)),
+        "publication": {
+            "mode": None,
+            "state": "unpublished",
+            "github_comment_id": None,
+            "github_review_id": None,
+            "github_review_thread_id": None,
+        },
+    }
+
+
+def _coerce_publication(value: object) -> StackabilityPublication | None:
+    if not isinstance(value, dict):
+        return None
+    mode = value.get("mode")
+    state = value.get("state")
+    comment_id = value.get("github_comment_id")
+    review_id = value.get("github_review_id")
+    review_thread_id = value.get("github_review_thread_id")
+    if mode is not None and mode not in _PUBLISHING_MODES:
+        return None
+    if state not in _PUBLICATION_STATES:
+        return None
+    if comment_id is not None and (not isinstance(comment_id, int) or isinstance(comment_id, bool)):
+        return None
+    if review_id is not None and (not isinstance(review_id, int) or isinstance(review_id, bool)):
+        return None
+    if review_thread_id is not None and (
+        not isinstance(review_thread_id, str) or not review_thread_id
+    ):
+        return None
+    return cast(StackabilityPublication, deepcopy(value))
+
+
+def _coerce_stored_review(value: object) -> StoredStackabilityReview | None:
+    if not isinstance(value, dict):
+        return None
+    reviewed_head_sha = value.get("reviewed_head_sha")
+    review = value.get("review")
+    publication = _coerce_publication(value.get("publication"))
+    if not isinstance(reviewed_head_sha, str) or not reviewed_head_sha:
+        return None
+    if validate_stackability_review(review) or publication is None:
+        return None
+    return {
+        "reviewed_head_sha": reviewed_head_sha,
+        "review": cast(StackabilityReview, deepcopy(review)),
+        "publication": publication,
+    }
+
+
+async def get_stackability_review(thread_id: str) -> StoredStackabilityReview | None:
+    """Fetch the latest valid stackability record from reviewer metadata."""
+    metadata = await get_thread_metadata(thread_id)
+    return _coerce_stored_review(metadata.get(_STACKABILITY_METADATA_KEY))
+
+
+async def set_stackability_review(thread_id: str, record: object) -> None:
+    """Persist the latest stackability record separately from bug findings."""
+    coerced = _coerce_stored_review(record)
+    if coerced is None:
+        raise ValueError("Invalid stored stackability review")
+    await set_reviewer_thread_metadata(
+        thread_id,
+        extra={_STACKABILITY_METADATA_KEY: coerced},
+    )
+
+
+async def update_stackability_review(
+    thread_id: str,
+    *,
+    reviewed_head_sha: str | None = None,
+    review: object | None = None,
+    publication: object | None = None,
+) -> StoredStackabilityReview | None:
+    """Replace selected fields on the latest record and persist the result."""
+    current = await get_stackability_review(thread_id)
+    if current is None:
+        return None
+    candidate: dict[str, Any] = deepcopy(dict(current))
+    if reviewed_head_sha is not None:
+        candidate["reviewed_head_sha"] = reviewed_head_sha
+    if review is not None:
+        candidate["review"] = review
+    if publication is not None:
+        candidate["publication"] = publication
+    coerced = _coerce_stored_review(candidate)
+    if coerced is None:
+        raise ValueError("Invalid stackability review update")
+    await set_stackability_review(thread_id, coerced)
+    return coerced
+
+
+_VERDICT_LABELS: dict[str, str] = {
+    "split_recommended": "Split recommended",
+    "not_worth_splitting": "Not worth splitting",
+    "needs_human_context": "Human context needed",
+}
+
+
+def _render_string_list(values: list[str]) -> str:
+    return "\n".join(f"- {value}" for value in values) if values else "- None"
+
+
+def _render_review_details(record: StoredStackabilityReview) -> str:
+    review = record["review"]
+    parts = [
+        f"**Verdict:** {_VERDICT_LABELS[review['verdict']]}",
+        f"**Confidence:** {review['confidence'].capitalize()}",
+        "",
+        review["rationale"].strip(),
+    ]
+    if review["proposed_stack"]:
+        parts.extend(["", "### Proposed stack"])
+        for index, step in enumerate(review["proposed_stack"], start=1):
+            dependency = step["depends_on"] or "None"
+            parts.extend(
+                [
+                    "",
+                    f"#### {index}. {step['title']}",
+                    "",
+                    step["purpose"],
+                    "",
+                    "**Include**",
+                    _render_string_list(step["include"]),
+                    "",
+                    "**Exclude or defer**",
+                    _render_string_list(step["exclude_or_defer"]),
+                    "",
+                    f"**Depends on:** {dependency}",
+                    f"**Independently testable because:** {step['independently_testable_because']}",
+                    "",
+                    "**Suggested checks**",
+                    _render_string_list(step["suggested_checks"]),
+                ]
+            )
+    if review["risks_or_human_decisions"]:
+        parts.extend(
+            [
+                "",
+                "### Risks, decisions, or questions",
+                _render_string_list(review["risks_or_human_decisions"]),
+            ]
+        )
+    parts.extend(
+        [
+            "",
+            "### Restacking handoff prompt",
+            "",
+            "```text",
+            review["harness_prompt"].strip(),
+            "```",
+        ]
+    )
+    return "\n".join(parts)
+
+
+def render_stackability_advisory(record: StoredStackabilityReview) -> str:
+    """Render a non-blocking GitHub issue-comment advisory."""
+    return "\n".join(
+        [
+            STACKABILITY_REVIEW_MARKER,
+            "",
+            "## Open SWE Stackability Review (non-blocking)",
+            "",
+            _render_review_details(record),
+        ]
+    )
+
+
+def render_stackability_blocking_body(record: StoredStackabilityReview) -> str:
+    """Render the body for an opt-in resolvable GitHub review thread."""
+    verdict = record["review"]["verdict"]
+    disposition = "No split recommended" if verdict == "not_worth_splitting" else "Action required"
+    return "\n".join(
+        [
+            STACKABILITY_REVIEW_MARKER,
+            "",
+            f"## Open SWE Stackability Review — {disposition}",
+            "",
+            _render_review_details(record),
+        ]
+    )
+
+
+def render_stackability_dashboard_markdown(record: StoredStackabilityReview) -> str:
+    """Render dashboard-friendly Markdown without GitHub synchronization metadata."""
+    return "\n".join(
+        [
+            "## Stackability review",
+            "",
+            f"Reviewed head: `{record['reviewed_head_sha']}`",
+            "",
+            _render_review_details(record),
+        ]
+    )

@@ -1,8 +1,18 @@
 from copy import deepcopy
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from agent.review.stackability import validate_stackability_review
+from agent.review.stackability import (
+    get_stackability_review,
+    new_stackability_review_record,
+    render_stackability_advisory,
+    render_stackability_blocking_body,
+    render_stackability_dashboard_markdown,
+    set_stackability_review,
+    update_stackability_review,
+    validate_stackability_review,
+)
 
 
 def _split_review() -> dict[str, object]:
@@ -212,3 +222,126 @@ def test_validation_does_not_mutate_input() -> None:
     validate_stackability_review(review)
 
     assert review == original
+
+
+def test_new_record_defaults_to_unpublished() -> None:
+    review = _split_review()
+
+    record = new_stackability_review_record("abc123", review)
+
+    assert record["reviewed_head_sha"] == "abc123"
+    assert record["review"] == review
+    assert record["publication"] == {
+        "mode": None,
+        "state": "unpublished",
+        "github_comment_id": None,
+        "github_review_id": None,
+        "github_review_thread_id": None,
+    }
+
+
+@pytest.mark.asyncio
+async def test_set_and_get_stackability_review_use_separate_metadata_key() -> None:
+    record = new_stackability_review_record("abc123", _split_review())
+    fake_client = AsyncMock()
+    fake_client.threads.get.return_value = {
+        "metadata": {"findings": [{"id": "f_existing"}], "stackability_review": record}
+    }
+
+    with patch("agent.review.findings.get_client", return_value=fake_client):
+        await set_stackability_review("tid", record)
+        loaded = await get_stackability_review("tid")
+
+    fake_client.threads.update.assert_awaited_once_with(
+        thread_id="tid",
+        metadata={"kind": "reviewer", "stackability_review": record},
+    )
+    assert loaded == record
+
+
+@pytest.mark.asyncio
+async def test_get_stackability_review_returns_none_for_missing_or_malformed_metadata() -> None:
+    fake_client = AsyncMock()
+    with patch("agent.review.findings.get_client", return_value=fake_client):
+        fake_client.threads.get.return_value = {"metadata": {}}
+        assert await get_stackability_review("tid") is None
+
+        fake_client.threads.get.return_value = {
+            "metadata": {"stackability_review": {"reviewed_head_sha": "abc123"}}
+        }
+        assert await get_stackability_review("tid") is None
+
+
+@pytest.mark.asyncio
+async def test_update_stackability_review_preserves_assessment_and_sha() -> None:
+    record = new_stackability_review_record("abc123", _split_review())
+    fake_client = AsyncMock()
+    fake_client.threads.get.return_value = {"metadata": {"stackability_review": record}}
+
+    with patch("agent.review.findings.get_client", return_value=fake_client):
+        updated = await update_stackability_review(
+            "tid",
+            publication={
+                "mode": "manual_advisory",
+                "state": "published",
+                "github_comment_id": 42,
+                "github_review_id": None,
+                "github_review_thread_id": None,
+            },
+        )
+
+    assert updated is not None
+    assert updated["reviewed_head_sha"] == "abc123"
+    assert updated["review"] == record["review"]
+    assert updated["publication"]["github_comment_id"] == 42
+    fake_client.threads.update.assert_awaited_once_with(
+        thread_id="tid",
+        metadata={"kind": "reviewer", "stackability_review": updated},
+    )
+
+
+def test_stackability_rendering_is_deterministic_and_complete() -> None:
+    record = new_stackability_review_record("abc123", _split_review())
+
+    advisory = render_stackability_advisory(record)
+    blocking = render_stackability_blocking_body(record)
+    dashboard = render_stackability_dashboard_markdown(record)
+
+    assert advisory == render_stackability_advisory(record)
+    assert blocking == render_stackability_blocking_body(record)
+    assert advisory.count("<!-- open-swe-stackability-review -->") == 1
+    assert blocking.count("<!-- open-swe-stackability-review -->") == 1
+    assert "non-blocking" in advisory.lower()
+    assert "Add the storage migration" in advisory
+    assert "migrations/" in advisory
+    assert "agent/feature.py" in advisory
+    assert "Migration tests exercise the schema alone." in advisory
+    assert "uv run pytest tests/migrations" in advisory
+    assert "Confirm the migration can precede" in advisory
+    assert "Create the two ordered PRs" in advisory
+    assert "Action required" in blocking
+    assert "Reviewed head: `abc123`" in dashboard
+    assert "<!-- open-swe-stackability-review -->" not in dashboard
+
+
+@pytest.mark.parametrize(
+    ("verdict", "expected"),
+    [
+        ("split_recommended", "Split recommended"),
+        ("not_worth_splitting", "Not worth splitting"),
+        ("needs_human_context", "Human context needed"),
+    ],
+)
+def test_dashboard_rendering_labels_each_verdict(verdict: str, expected: str) -> None:
+    review = _split_review()
+    review["verdict"] = verdict
+    if verdict != "split_recommended":
+        review["proposed_stack"] = []
+    if verdict == "needs_human_context":
+        review["risks_or_human_decisions"] = ["Which rollout order should be preserved?"]
+
+    rendered = render_stackability_dashboard_markdown(
+        new_stackability_review_record("abc123", review)
+    )
+
+    assert expected in rendered
