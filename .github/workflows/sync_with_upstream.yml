@@ -10,7 +10,7 @@ permissions:
   pull-requests: write
 
 jobs:
-  create-update-pr:
+  merge-upstream:
     runs-on: ubuntu-latest
     steps:
       - name: Generate app token
@@ -21,128 +21,64 @@ jobs:
           private-key: ${{ secrets.APP_PRIVATE_KEY }}
           owner: aeteq
           repositories: open-swe
+
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           ref: main
           persist-credentials: false
+
       - name: Configure git identity
         run: |
           git config user.name "Nikolas Pitsillos"
           git config user.email "npitsillos@users.noreply.github.com"
+
+      - name: Restore rerere cache
+        uses: actions/cache@v4
+        with:
+          path: .git/rr-cache
+          key: rerere-cache-${{ github.run_id }}
+          restore-keys: rerere-cache-
+
+      - name: Enable rerere
+        run: git config rerere.enabled true
+
       - name: Fetch upstream
         run: |
           git remote add upstream https://github.com/langchain-ai/open-swe.git
           git fetch upstream
-      - name: Get aeteq org members
-        id: org-members
-        env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+
+      - name: Create merge branch
+        run: git checkout -B sync-upstream main
+
+      - name: Merge upstream into fork
+        id: merge
         run: |
-          # Get GitHub usernames of all aeteq org members
-          MEMBERS=$(gh api orgs/aeteq/members --jq '.[].login' | tr '\n' '|')
-          # Add the bot app
-          MEMBERS="${MEMBERS}jarvis-aeteq[bot]"
-          echo "pattern=$MEMBERS" >> $GITHUB_OUTPUT
-          echo "Org members pattern: $MEMBERS"
-      - name: Start from clean upstream
-        run: |
-          git checkout -B sync-upstream upstream/main
-      - name: Collect fork commits by aeteq members
-        id: collect
-        env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
-        run: |
-          MEMBERS_PATTERN="${{ steps.org-members.outputs.pattern }}"
-
-          # Get all non-merge commits from fork that aren't in upstream
-          ALL_COMMITS=$(git rev-list --reverse --no-merges upstream/main..origin/main)
-          if [ -z "$ALL_COMMITS" ]; then
-            echo "No fork-specific commits found."
-            echo "has_commits=false" >> $GITHUB_OUTPUT
-            exit 0
-          fi
-
-          # Filter to only commits authored by aeteq org members or the bot
-          FORK_COMMITS=""
-          SKIPPED=""
-          for COMMIT in $ALL_COMMITS; do
-            AUTHOR=$(gh api "repos/aeteq/open-swe/commits/$COMMIT" --jq '.author.login // .commit.author.name' 2>/dev/null || git log -1 --format='%an' "$COMMIT")
-            if echo "$AUTHOR" | grep -qiE "^(${MEMBERS_PATTERN})$"; then
-              FORK_COMMITS="$FORK_COMMITS $COMMIT"
-            else
-              SUBJECT=$(git log -1 --format='%s' "$COMMIT")
-              SKIPPED="$SKIPPED\n  - $SUBJECT (by $AUTHOR)"
-            fi
-          done
-
-          FORK_COMMITS=$(echo "$FORK_COMMITS" | xargs)
-          if [ -z "$FORK_COMMITS" ]; then
-            echo "No commits by aeteq members found."
-            echo "has_commits=false" >> $GITHUB_OUTPUT
-            exit 0
-          fi
-
-          if [ -n "$SKIPPED" ]; then
-            echo "Skipped non-aeteq commits:$SKIPPED"
-          fi
-
-          echo "has_commits=true" >> $GITHUB_OUTPUT
-          EOF_DELIM=$(dd if=/dev/urandom bs=15 count=1 status=none | base64)
-          echo "commits<<$EOF_DELIM" >> $GITHUB_OUTPUT
-          echo "$FORK_COMMITS" >> $GITHUB_OUTPUT
-          echo "$EOF_DELIM" >> $GITHUB_OUTPUT
-      - name: Replay aeteq commits on top of upstream
-        if: steps.collect.outputs.has_commits == 'true'
-        id: replay
-        run: |
-          FORK_COMMITS="${{ steps.collect.outputs.commits }}"
-          FAILED_FILES=""
-          SYNC_WORKFLOW=".github/workflows/sync_with_upstream.yml"
-          for COMMIT in $FORK_COMMITS; do
-            SUBJECT=$(git log -1 --format='%s' "$COMMIT")
-            # Skip commits that only touch the sync workflow itself
-            CHANGED_FILES=$(git diff-tree --no-commit-id --name-only -r "$COMMIT")
-            if [ "$CHANGED_FILES" = "$SYNC_WORKFLOW" ]; then
-              echo "Skipping (sync workflow only): $SUBJECT ($COMMIT)"
-              continue
-            fi
-            echo "Cherry-picking: $SUBJECT ($COMMIT)"
-            OUTPUT=$(git cherry-pick -X theirs "$COMMIT" --no-edit 2>&1) || {
-              echo "$OUTPUT"
-              REMAINING=$(git diff --name-only --diff-filter=U | sort)
-              if [ -n "$REMAINING" ]; then
-                FAILED_FILES=$(printf '%s\n%s' "$FAILED_FILES" "$REMAINING")
-                echo "$REMAINING" | while IFS= read -r P; do
-                  [ -z "$P" ] && continue
-                  git checkout --theirs -- "$P" 2>/dev/null && git add -- "$P" || git rm -f -- "$P" 2>/dev/null || true
-                done
-                git -c core.editor=true cherry-pick --continue
-              fi
-            }
-            echo "$OUTPUT"
-            TOUCHED=$(echo "$OUTPUT" | grep -oP '(?<=^Auto-merging )\S+' || true)
-            if [ -n "$TOUCHED" ]; then
-              FAILED_FILES=$(printf '%s\n%s\n%s' "$FAILED_FILES" "$TOUCHED")
-            fi
-          done
-          FAILED_FILES=$(echo "$FAILED_FILES" | sort -u | sed '/^$/d')
-          if [ -n "$FAILED_FILES" ]; then
-            echo "has_conflicts=true" >> $GITHUB_OUTPUT
-            EOF_DELIM=$(dd if=/dev/urandom bs=15 count=1 status=none | base64)
-            echo "files<<$EOF_DELIM" >> $GITHUB_OUTPUT
-            echo "$FAILED_FILES" >> $GITHUB_OUTPUT
-            echo "$EOF_DELIM" >> $GITHUB_OUTPUT
+          if git merge upstream/main --no-edit; then
+            echo "clean=true" >> $GITHUB_OUTPUT
           else
-            echo "has_conflicts=false" >> $GITHUB_OUTPUT
+            # rerere may have auto-resolved some/all conflicts using
+            # previously recorded resolutions
+            REMAINING=$(git diff --name-only --diff-filter=U)
+            if [ -z "$REMAINING" ]; then
+              git add -A
+              git commit --no-edit
+              echo "clean=true" >> $GITHUB_OUTPUT
+            else
+              echo "clean=false" >> $GITHUB_OUTPUT
+              EOF_DELIM=$(dd if=/dev/urandom bs=15 count=1 status=none | base64)
+              echo "conflicts<<$EOF_DELIM" >> $GITHUB_OUTPUT
+              echo "$REMAINING" >> $GITHUB_OUTPUT
+              echo "$EOF_DELIM" >> $GITHUB_OUTPUT
+            fi
           fi
+
       - name: Push sync branch
-        if: steps.collect.outputs.has_commits == 'true'
         run: |
           git remote set-url origin https://x-access-token:${{ steps.app-token.outputs.token }}@github.com/aeteq/open-swe.git
           git push -u origin sync-upstream --force
+
       - name: Create or update PR
-        if: steps.collect.outputs.has_commits == 'true'
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
@@ -151,22 +87,20 @@ jobs:
             echo "PR #$EXISTING_PR already exists, force-pushed update."
             exit 0
           fi
-          if [ "${{ steps.replay.outputs.has_conflicts }}" = "true" ]; then
-            CONFLICT_FILES="${{ steps.replay.outputs.files }}"
+          if [ "${{ steps.merge.outputs.clean }}" = "false" ]; then
+            CONFLICT_FILES="${{ steps.merge.outputs.conflicts }}"
             FILE_LIST=$(echo "$CONFLICT_FILES" | sed 's/^/- `/' | sed 's/$/`/')
-            BODY="Upstream changes applied, then aeteq commits replayed on top.
+            BODY="Upstream merge has UNRESOLVED conflicts requiring manual review — rerere had no recorded resolution for these.
 
-            Some commits conflicted — resolved by keeping our fork's version.
-
-            **Files with conflicts (our version kept):**
+            **Conflicted files:**
             ${FILE_LIST}
 
-            Review these files to check if upstream made important changes."
+            Resolve locally: \`git fetch origin && git checkout sync-upstream && git merge upstream/main\`, fix conflicts, commit, push. rerere will remember your resolution for next time."
             gh pr create --repo aeteq/open-swe --head sync-upstream --base main \
-              --title "chore: sync with upstream (conflicts auto-resolved)" \
+              --title "chore: sync with upstream (manual conflict resolution needed)" \
               --body "$BODY"
           else
             gh pr create --repo aeteq/open-swe --head sync-upstream --base main \
               --title "chore: sync with upstream" \
-              --body "Upstream changes applied, then aeteq commits replayed cleanly on top."
+              --body "Upstream merged cleanly (or auto-resolved via rerere)."
           fi
