@@ -108,14 +108,22 @@ jobs:
               continue
             fi
             echo "Cherry-picking: $SUBJECT ($COMMIT)"
-            if ! git cherry-pick "$COMMIT" --no-edit; then
-              CONFLICTS=$(git diff --name-only --diff-filter=U | sort)
-              if [ -n "$CONFLICTS" ]; then
-                FAILED_FILES=$(printf '%s\n%s' "$FAILED_FILES" "$CONFLICTS")
+            OUTPUT=$(git cherry-pick -X theirs "$COMMIT" --no-edit 2>&1) || {
+              echo "$OUTPUT"
+              REMAINING=$(git diff --name-only --diff-filter=U | sort)
+              if [ -n "$REMAINING" ]; then
+                FAILED_FILES=$(printf '%s\n%s' "$FAILED_FILES" "$REMAINING")
+                echo "$REMAINING" | while IFS= read -r P; do
+                  [ -z "$P" ] && continue
+                  git checkout --theirs -- "$P" 2>/dev/null && git add -- "$P" || git rm -f -- "$P" 2>/dev/null || true
+                done
+                git -c core.editor=true cherry-pick --continue
               fi
-              git checkout --theirs .
-              git add -A
-              git -c core.editor=true cherry-pick --continue
+            }
+            echo "$OUTPUT"
+            TOUCHED=$(echo "$OUTPUT" | grep -oP '(?<=^Auto-merging )\S+' || true)
+            if [ -n "$TOUCHED" ]; then
+              FAILED_FILES=$(printf '%s\n%s\n%s' "$FAILED_FILES" "$TOUCHED")
             fi
           done
           FAILED_FILES=$(echo "$FAILED_FILES" | sort -u | sed '/^$/d')
