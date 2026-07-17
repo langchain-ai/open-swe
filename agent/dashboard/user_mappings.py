@@ -136,6 +136,18 @@ def cached_email_for_login(login: str | None) -> str | None:
     return email or None
 
 
+def cached_slack_id_for_login(login: str | None) -> str | None:
+    norm = _norm_login(login)
+    if not norm:
+        return None
+    with _cache_lock:
+        record = _by_login.get(norm.lower())
+    if not record or record.get("status", "active") != "active":
+        return None
+    slack_id = _norm_slack_id(record.get("slack_user_id"))
+    return slack_id or None
+
+
 def cached_login_for_email(email: str | None) -> str | None:
     norm = _norm_email(email)
     if not norm:
@@ -235,6 +247,15 @@ async def email_for_login(login: str | None) -> str | None:
         return cached
     await _ensure_cache_loaded()
     return cached_email_for_login(login)
+
+
+async def slack_id_for_login(login: str | None) -> str | None:
+    """Async login→Slack ID with cache fallthrough to the Store."""
+    cached = cached_slack_id_for_login(login)
+    if cached is not None:
+        return cached
+    await _ensure_cache_loaded()
+    return cached_slack_id_for_login(login)
 
 
 async def login_for_email(email: str | None) -> str | None:
