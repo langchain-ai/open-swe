@@ -198,20 +198,6 @@ def test_enter_plan_mode_exported() -> None:
     assert callable(enter_plan_mode)
 
 
-async def test_approve_plan_tool_rejects_implicit_request() -> None:
-    from agent.tools.approve_plan import approve_plan
-
-    result = await approve_plan(
-        "looks good to me",
-        state={"plan_mode": True},
-        tool_call_id="call-1",
-    )
-
-    assert isinstance(result, dict)
-    assert result["success"] is False
-    assert "explicit request" in result["error"]
-
-
 async def test_approve_plan_tool_exits_plan_mode(monkeypatch: pytest.MonkeyPatch) -> None:
     import importlib
 
@@ -268,7 +254,6 @@ async def test_approve_plan_tool_exits_plan_mode(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr(approve_plan_tool, "set_plan_status", fake_set_status)
 
     result = await approve_plan_tool.approve_plan(
-        "approve the plan",
         state={"plan_mode": True},
         tool_call_id="call-1",
     )
@@ -314,7 +299,6 @@ async def test_approve_plan_tool_rejects_non_owner(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(approve_plan_tool, "_thread_metadata", fake_thread_metadata)
 
     result = await approve_plan_tool.approve_plan(
-        "approve the plan",
         state={"plan_mode": True},
         tool_call_id="call-1",
     )
