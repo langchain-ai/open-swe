@@ -72,6 +72,9 @@ export function AutomationEditor({
     initialCron ? !isDescribableCron(initialCron) : false
   )
   const [repo, setRepo] = useState<string | null>(schedule?.repo ?? null)
+  const [slackChannelId, setSlackChannelId] = useState(
+    schedule?.slackChannelId ?? ""
+  )
   const [enabled, setEnabled] = useState(schedule?.enabled ?? true)
   // undefined = untouched (derive from the schedule / default as models load).
   const [selectionOverride, setSelectionOverride] = useState<
@@ -113,6 +116,7 @@ export function AutomationEditor({
           prompt: prompt.trim(),
           schedule: cron.trim(),
           repo,
+          slack_channel_id: slackChannelId.trim() || null,
           model_id: modelId,
           effort,
         },
@@ -129,6 +133,7 @@ export function AutomationEditor({
           prompt: prompt.trim(),
           schedule: cron.trim(),
           repo: repo ?? "",
+          slack_channel_id: slackChannelId.trim() || null,
           model_id: modelId,
           effort,
           enabled,
@@ -244,6 +249,21 @@ export function AutomationEditor({
             onSelect={onPickTrigger}
             triggerLabel={cron ? "Change trigger" : "Add Trigger"}
           />
+        </div>
+
+        <SectionLabel>Slack destination</SectionLabel>
+        <div className="rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface)] p-3">
+          <input
+            value={slackChannelId}
+            onChange={(e) => setSlackChannelId(e.target.value)}
+            placeholder="C0123456789"
+            spellCheck={false}
+            className="w-full bg-transparent font-mono text-sm text-[var(--ui-text)] outline-none placeholder:text-[var(--ui-text-dim)]"
+          />
+          <p className="mt-2 text-xs text-[var(--ui-text-dim)]">
+            Optional Slack channel ID. Each run starts a new thread there; the
+            Open SWE bot must be a member of the channel.
+          </p>
         </div>
 
         <SectionLabel>Agent Instructions</SectionLabel>
