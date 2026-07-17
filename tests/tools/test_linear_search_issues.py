@@ -66,7 +66,59 @@ async def test_search_issues_returns_results_and_pagination(
     }
 
 
-async def test_search_issues_rejects_blank_query(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_search_issues_filters_without_text(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, Any] = {}
+
+    async def fake_graphql_request(
+        query: str, variables: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        captured.update({"query": query, "variables": variables})
+        return {
+            "issues": {
+                "nodes": [{"id": "issue-id", "identifier": "DCD-21", "title": "Fix filters"}],
+                "totalCount": 1,
+                "pageInfo": {"hasNextPage": False, "endCursor": None},
+            }
+        }
+
+    monkeypatch.setattr(linear, "_graphql_request", fake_graphql_request)
+    filters = {"labels": {"some": {"name": {"eq": "open-swe"}}}}
+
+    result = await linear.search_issues(filters=filters, limit=1)
+
+    assert "issues(" in captured["query"]
+    assert "searchIssues" not in captured["query"]
+    assert captured["variables"] == {
+        "filter": filters,
+        "limit": 1,
+        "includeArchived": False,
+        "after": None,
+    }
+    assert result["issues"][0]["identifier"] == "DCD-21"
+
+
+async def test_search_issues_combines_filters_with_team(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, Any] = {}
+
+    async def fake_graphql_request(
+        _query: str, variables: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        captured["variables"] = variables
+        return {"searchIssues": {"nodes": [], "totalCount": 0, "pageInfo": {}}}
+
+    monkeypatch.setattr(linear, "_graphql_request", fake_graphql_request)
+    filters = {"state": {"name": {"eq": "Todo"}}}
+
+    await linear.search_issues("fix", team_id="team-id", filters=filters)
+
+    assert captured["variables"]["filter"] == {
+        "and": [filters, {"team": {"id": {"eq": "team-id"}}}]
+    }
+
+
+async def test_search_issues_rejects_missing_query_and_filters(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     async def unexpected_request(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
         pytest.fail("GraphQL request should not be made")
 
@@ -74,7 +126,7 @@ async def test_search_issues_rejects_blank_query(monkeypatch: pytest.MonkeyPatch
 
     result = await linear.search_issues("   ")
 
-    assert result == {"error": "Search query must not be empty"}
+    assert result == {"error": "Search query or filters must be provided"}
 
 
 @pytest.mark.parametrize("limit", [0, 51])
@@ -114,6 +166,7 @@ async def test_linear_search_issues_tool_delegates(monkeypatch: pytest.MonkeyPat
     result = await linear_search_tool.linear_search_issues(
         "styling",
         team_id="team-id",
+        filters={"priority": {"eq": 1}},
         limit=20,
         include_archived=True,
         include_comments=True,
@@ -124,6 +177,7 @@ async def test_linear_search_issues_tool_delegates(monkeypatch: pytest.MonkeyPat
     assert captured == {
         "query": "styling",
         "team_id": "team-id",
+        "filters": {"priority": {"eq": 1}},
         "limit": 20,
         "include_archived": True,
         "include_comments": True,
