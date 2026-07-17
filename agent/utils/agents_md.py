@@ -149,39 +149,43 @@ async def fetch_scoped_agents_md(
     semaphore = asyncio.Semaphore(_SCOPED_FETCH_CONCURRENCY)
     async with httpx.AsyncClient(timeout=timeout) as client:
 
-        async def _fetch(path: str) -> tuple[str, str] | None:
-            url_path = quote(path, safe="/")
-            url = f"https://api.github.com/repos/{owner}/{repo}/contents/{url_path}"
-            try:
-                async with semaphore:
-                    response = await client.get(url, headers=headers, params={"ref": ref})
-            except httpx.HTTPError:
-                logger.exception("Failed to fetch %s from %s/%s@%s", path, owner, repo, ref)
-                return None
-            if response.status_code == 404:
-                return None
-            if response.status_code != 200:
-                logger.warning(
-                    "Unexpected status %s fetching %s from %s/%s@%s",
-                    response.status_code,
-                    path,
-                    owner,
-                    repo,
-                    ref,
-                )
-                return None
-            content = response.text
-            if len(content.encode("utf-8")) > _MAX_AGENTS_MD_BYTES:
-                logger.info(
-                    "%s in %s/%s@%s exceeds %d bytes; skipping inline",
-                    path,
-                    owner,
-                    repo,
-                    ref,
-                    _MAX_AGENTS_MD_BYTES,
-                )
-                return None
-            return path, content
+        async def _fetch(candidate: str) -> tuple[str, str] | None:
+            directory = posixpath.dirname(candidate)
+            for filename in _AGENT_DOC_FILENAMES:
+                path = posixpath.join(directory, filename)
+                url_path = quote(path, safe="/")
+                url = f"https://api.github.com/repos/{owner}/{repo}/contents/{url_path}"
+                try:
+                    async with semaphore:
+                        response = await client.get(url, headers=headers, params={"ref": ref})
+                except httpx.HTTPError:
+                    logger.exception("Failed to fetch %s from %s/%s@%s", path, owner, repo, ref)
+                    return None
+                if response.status_code == 404:
+                    continue
+                if response.status_code != 200:
+                    logger.warning(
+                        "Unexpected status %s fetching %s from %s/%s@%s",
+                        response.status_code,
+                        path,
+                        owner,
+                        repo,
+                        ref,
+                    )
+                    return None
+                content = response.text
+                if len(content.encode("utf-8")) > _MAX_AGENTS_MD_BYTES:
+                    logger.info(
+                        "%s in %s/%s@%s exceeds %d bytes; skipping inline",
+                        path,
+                        owner,
+                        repo,
+                        ref,
+                        _MAX_AGENTS_MD_BYTES,
+                    )
+                    return None
+                return path, content
+            return None
 
         fetched = await asyncio.gather(*(_fetch(path) for path in candidates))
 
