@@ -433,6 +433,14 @@ def test_plan_mode_middleware_self_activation_via_state() -> None:
     assert _names(cast(_FakeReq, mw._filter(cast(Any, on)))) == {"read_file"}
 
 
+def test_plan_mode_middleware_self_deactivation_via_state() -> None:
+    from agent.middleware import PlanModeMiddleware
+
+    mw = PlanModeMiddleware(excluded=frozenset({"write_file"}), initial=True)
+    off = _FakeReq([{"name": "read_file"}, {"name": "write_file"}], {"plan_mode": False})
+    assert _names(cast(_FakeReq, mw._filter(cast(Any, off)))) == {"read_file", "write_file"}
+
+
 # --- manual plan editing -------------------------------------------------
 
 

@@ -54,12 +54,16 @@ class PlanModeMiddleware(AgentMiddleware):
         return {"plan_mode": self._initial}
 
     def _active(self, request: ModelRequest) -> bool:
-        if self._initial:
-            return True
         state = getattr(request, "state", None)
         if isinstance(state, dict):
-            return state.get("plan_mode") is True
-        return getattr(state, "plan_mode", None) is True
+            value = state.get("plan_mode")
+            if isinstance(value, bool):
+                return value
+        else:
+            value = getattr(state, "plan_mode", None)
+            if isinstance(value, bool):
+                return value
+        return self._initial
 
     def _filter(self, request: ModelRequest) -> ModelRequest:
         if not self._excluded or not self._active(request):
