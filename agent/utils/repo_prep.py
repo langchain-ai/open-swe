@@ -202,9 +202,8 @@ async def materialize_trusted_skills(
                 "unknown",
             )
             logger.info(
-                "Prepared trusted skill source repo=%s ref=%s dir=%s cache=%s",
+                "Prepared trusted skill source repo=%s dir=%s cache=%s",
                 posixpath.basename(repo_dir),
-                trusted_ref,
                 skill_dir,
                 cache_status,
             )
@@ -308,10 +307,9 @@ async def prepare_main_agent_repo_skills(
         dest_dirname=posixpath.join(MAIN_AGENT_SKILLS_DIRNAME, repo_owner, repo_name),
     )
     logger.info(
-        "Repository skill preparation complete repo=%s/%s ref=%s sources=%d",
+        "Repository skill preparation complete repo=%s/%s sources=%d",
         repo_owner,
         repo_name,
-        trusted_ref,
         len(sources),
     )
     return PreparedRepoSkills(trusted_ref=trusted_ref, sources=tuple(sources))

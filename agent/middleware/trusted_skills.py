@@ -45,8 +45,7 @@ class TrustedSkillsMiddleware(SkillsMiddleware):
         metadata = update.get("skills_metadata", [])
         errors = update.get("skills_load_errors", [])
         logger.info(
-            "Loaded trusted repository skills ref=%s valid=%d failures=%d",
-            self._trusted_ref,
+            "Loaded trusted repository skills valid=%d failures=%d",
             len(metadata),
             len(errors),
         )
