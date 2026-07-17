@@ -98,6 +98,17 @@ async def publish_review(
 
         Only a numeric ``review_id`` (with neither flag set) confirms a real
         GitHub Review was created.
+
+        On a re-review the head SHA can advance after a finding was added, which
+        moves or removes the lines the finding was anchored to. Such a finding
+        cannot be posted inline (GitHub rejects the anchor), so this tool demotes
+        it into the review summary body instead of dropping it, and lists its id
+        in ``unresolvable_findings``. This is still ``success: true`` with a real
+        ``review_id`` — the review WAS posted, but some findings landed in the
+        summary rather than inline. When ``unresolvable_findings`` is present you
+        MUST report those findings as demoted-to-summary in your closing summary;
+        never claim the review posted cleanly. Do not retry publish_review on
+        this — the demotion is already handled here.
     """
     if severity_threshold not in {"low", "medium", "high", "critical"}:
         return {"success": False, "error": f"Invalid severity_threshold: {severity_threshold}"}
@@ -313,6 +324,31 @@ async def _publish_review_async(
         inline_comments.append(payload)
         eligible_with_payload.append((finding, payload))
 
+    # add_finding anchors + stamps each finding against the diff at add time,
+    # but publish posts against the run-config head_sha, which on a re-review is
+    # a newer commit. When an intervening commit shifted or removed the anchored
+    # lines the inline POST would 422 "Path could not be resolved" and the
+    # finding would be dropped. Re-check every eligible finding against the
+    # publish-time diff up front and demote the ones no longer in it to the
+    # summary body so a real defect still reaches the author.
+    demoted_findings: list[Finding] = []
+    unresolvable_findings: list[str] = []
+    if eligible_with_payload:
+        valid_with_payload, demoted_ids = await _filter_against_pr_diff(
+            eligible_with_payload,
+            owner=owner,
+            repo=repo,
+            pr_number=pr_number,
+            token=token,
+            state=state,
+        )
+        if demoted_ids:
+            demoted_set = set(demoted_ids)
+            demoted_findings = [f for f, _ in eligible_with_payload if f.get("id") in demoted_set]
+            unresolvable_findings = list(demoted_ids)
+            eligible_with_payload = valid_with_payload
+            inline_comments = [p for _, p in valid_with_payload]
+
     # With nothing new to surface, skip the "no issues found" summary if Open
     # SWE has already reviewed this PR — the user already saw the previous
     # result, and posting another summary on every push is noise. We can't rely
@@ -323,13 +359,17 @@ async def _publish_review_async(
     # SWE review summary) instead. Still resolve threads for findings that just
     # moved to resolved, and advance last_reviewed_sha so subsequent pushes
     # don't redo the same diff.
-    if not inline_comments and await _open_swe_already_reviewed(
-        thread_id=thread_id,
-        owner=owner,
-        repo=repo,
-        pr_number=pr_number,
-        token=token,
-        is_re_review=is_re_review,
+    if (
+        not inline_comments
+        and not demoted_findings
+        and await _open_swe_already_reviewed(
+            thread_id=thread_id,
+            owner=owner,
+            repo=repo,
+            pr_number=pr_number,
+            token=token,
+            is_re_review=is_re_review,
+        )
     ):
         resolved_thread_count = await _resolve_threads_for_resolved_findings(
             owner=owner,
@@ -364,6 +404,7 @@ async def _publish_review_async(
         surfaced_count=len(inline_comments),
         trace_url=review_trace_url,
         ui_url=review_ui_url,
+        out_of_diff_findings=demoted_findings,
         additional_findings_count=additional_findings_count,
     )
 
@@ -376,11 +417,12 @@ async def _publish_review_async(
         inline_comments=inline_comments,
         token=token,
     )
-    # If GitHub rejected the batch because one or more inline comments anchor
-    # to a file/line that's not in the PR diff, drop just those findings and
-    # retry once. Returning the bare 422 to the agent only invites it to
-    # retry publish_review with byte-identical args until findings drain.
-    unresolvable_findings: list[str] = []
+    # The up-front re-check against the publish-time diff catches the common
+    # case, but a race (a commit landing between the diff fetch and the POST) or
+    # a diff we couldn't recompute can still yield a 422 "Path could not be
+    # resolved". Recover instead of failing: drop the offending findings from
+    # the inline batch, demote them into the summary body, and retry once so the
+    # finding still reaches the author rather than being silently lost.
     if (
         isinstance(review_response, dict)
         and review_response.get("_error_kind") == "unresolved_anchor"
@@ -393,13 +435,19 @@ async def _publish_review_async(
             token=token,
             state=state,
         )
-        if dropped_ids and valid_with_payload:
+        if dropped_ids:
+            dropped_set = set(dropped_ids)
+            demoted_findings = demoted_findings + [
+                f for f, _ in eligible_with_payload if f.get("id") in dropped_set
+            ]
+            unresolvable_findings = unresolvable_findings + dropped_ids
             retry_inline = [p for _, p in valid_with_payload]
             retry_body = render_review_body(
                 pr_number=pr_number,
                 surfaced_count=len(retry_inline),
                 trace_url=review_trace_url,
                 ui_url=review_ui_url,
+                out_of_diff_findings=demoted_findings,
                 additional_findings_count=additional_findings_count,
             )
             retry_response = await post_pull_request_review(
@@ -415,7 +463,6 @@ async def _publish_review_async(
                 review_response = retry_response
                 inline_comments = retry_inline
                 eligible_with_payload = valid_with_payload
-                unresolvable_findings = dropped_ids
             else:
                 retry_error = (
                     retry_response.get("_error", "unknown error")
@@ -425,21 +472,20 @@ async def _publish_review_async(
                 return {
                     "success": False,
                     "error": f"Failed to POST PR review: {retry_error}",
-                    "unresolvable_findings": dropped_ids,
+                    "unresolvable_findings": unresolvable_findings,
                     "hint": (
                         "Call update_finding(status='resolved') on these ids "
                         "or fix their file/line before retrying."
                     ),
                 }
         else:
-            # Either nothing to drop (no diff_line_set available, so we can't
-            # tell which findings are bad) or everything would be dropped.
-            # Either way, do not retry — surface the structural signal so the
-            # agent stops retrying with the same args.
+            # No diff_line_set available, so we can't tell which findings are
+            # bad. Do not retry — surface the structural signal so the agent
+            # stops retrying with the same args.
             return {
                 "success": False,
                 "error": f"Failed to POST PR review: {review_response['_error']}",
-                "unresolvable_findings": dropped_ids,
+                "unresolvable_findings": unresolvable_findings,
                 "hint": (
                     "Call update_finding(status='resolved') on these ids "
                     "or fix their file/line before retrying."
@@ -514,6 +560,10 @@ async def _publish_review_async(
         findings=await list_findings_async(thread_id),
     )
 
+    # Demoted findings still reach the author (in the summary body), so count
+    # them toward the surfaced total for the check run and Slack reply — a
+    # review that demoted a finding is not a "no issues found" review.
+    surfaced_total = len(inline_comments) + len(demoted_findings)
     if not is_re_review:
         await _maybe_post_slack_completion_reply(
             thread_id=thread_id,
@@ -521,12 +571,12 @@ async def _publish_review_async(
             repo=repo,
             pr_number=pr_number,
             review_id=review_id,
-            surfaced_count=len(inline_comments),
+            surfaced_count=surfaced_total,
         )
 
     await set_reviewer_thread_metadata(thread_id, last_reviewed_sha=head_sha)
     await clear_review_started_comment(thread_id=thread_id, owner=owner, repo=repo, token=token)
-    conclusion, check_title, check_summary = review_check_conclusion(len(inline_comments))
+    conclusion, check_title, check_summary = review_check_conclusion(surfaced_total)
     await settle_review_check_run(
         thread_id=thread_id,
         owner=owner,
@@ -547,8 +597,11 @@ async def _publish_review_async(
     if unresolvable_findings:
         result["unresolvable_findings"] = unresolvable_findings
         result["hint"] = (
-            "Some findings had anchors not in the PR diff; "
-            "call update_finding to fix or resolve them."
+            "These findings' anchors were no longer in the publish-time diff "
+            "(the head SHA advanced since they were added), so they were demoted "
+            "into the review summary instead of posted inline. Report them as "
+            "demoted in your closing summary — do not claim the review posted "
+            "cleanly."
         )
     return result
 
@@ -804,7 +857,10 @@ async def _resolve_diff_line_set(
         state_cached = state.get("diff_line_set")
         if isinstance(state_cached, dict):
             return state_cached
-    config = get_config()
+    try:
+        config = get_config()
+    except RuntimeError:
+        config = None
     configurable = config.get("configurable", {}) if isinstance(config, dict) else {}
     cached = configurable.get("diff_line_set") if isinstance(configurable, dict) else None
     if isinstance(cached, dict):

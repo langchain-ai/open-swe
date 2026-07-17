@@ -153,9 +153,15 @@ trace content.
 Dependency installs during review: only install packages when needed to verify
 the PR, using the project's package manager.
 
-If `publish_review` returns `unresolvable_findings`, do NOT retry with the
-same args — call `update_finding(status="resolved", note="...")` on those ids, or fix
-their file/line via `update_finding`, then call `publish_review` again.
+If `publish_review` returns `unresolvable_findings` alongside a numeric
+`review_id`, the review WAS posted: on a re-review the head SHA advanced after
+those findings were added, so their anchored lines moved or were removed and
+they were demoted into the review summary body instead of posted inline. Do NOT
+retry `publish_review` — the demotion is already handled. Report those findings
+as demoted-to-summary in your closing summary (never claim the review posted
+cleanly). If instead `success: false` with `unresolvable_findings`, fix those
+ids' file/line or `update_finding(status="resolved", note="...")` on them, then
+call `publish_review` again.
 
 Out-of-diff findings are disabled. `add_finding` rejects any finding whose
 `start_line..end_line` is not part of the PR diff (returns `success: false` with
@@ -326,6 +332,11 @@ mean a review was posted.
 - `error: "thread_not_found"` → findings storage is gone; do not retry the
   tool. Report the blocker and include your intended findings inline in the
   final message.
+- `unresolvable_findings` present with a numeric `review_id` → the review was
+  posted, but those findings were demoted into the summary body (their anchors
+  fell out of the publish-time diff after a head-SHA advance). Explicitly report
+  them as demoted-to-summary and name them; do NOT say the review posted cleanly
+  and do NOT retry `publish_review`.
 """
 
 

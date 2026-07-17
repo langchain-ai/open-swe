@@ -1995,29 +1995,23 @@ async def test_post_pull_request_review_does_not_tag_unrelated_422() -> None:
 
 
 @pytest.mark.asyncio
-async def test_publish_review_drops_unresolvable_findings_and_retries_once() -> None:
-    """When GitHub rejects the batch with an ``unresolved_anchor`` 422, the
-    tool must filter the bad findings against the PR diff_line_set, re-POST
-    with only the valid ones, return ``success=True``, and report the dropped
-    finding ids via ``unresolvable_findings`` plus a corrective hint."""
+async def test_publish_review_demotes_unresolvable_findings_before_posting() -> None:
+    """When a finding's anchor is no longer in the publish-time diff, the tool
+    must re-check up front, demote the stale finding into the review summary
+    body (never drop it), POST once with only the in-diff finding inline, and
+    still report the demoted id via ``unresolvable_findings`` with
+    ``success=True`` and a real ``review_id``."""
     from agent.tools.publish_review import _publish_review_async
 
     findings = [
         _f(id="f_good", severity="high", file="in_diff.py", start_line=10, end_line=10),
         _f(id="f_bad", severity="high", file="not_in_diff.py", start_line=99, end_line=99),
     ]
-    # The PR diff only covers in_diff.py:10. f_bad anchors to a file/line not
-    # in the diff, so it must be dropped on retry.
+    # The publish-time PR diff only covers in_diff.py:10. f_bad anchors to a
+    # file/line not in the diff, so it must be demoted to the summary body.
     diff_line_set = {"in_diff.py": {"RIGHT": {10}, "LEFT": set()}}
 
-    first_response = {
-        "_error": "HTTP 422: ...",
-        "_error_kind": "unresolved_anchor",
-        "_raw_errors": ["Path could not be resolved"],
-        "_status": 422,
-    }
-    retry_response = {"id": 7777}
-    post_review = AsyncMock(side_effect=[first_response, retry_response])
+    post_review = AsyncMock(return_value={"id": 7777})
     fetch_comments = AsyncMock(return_value=[])
     set_metadata = AsyncMock()
 
@@ -2064,15 +2058,109 @@ async def test_publish_review_drops_unresolvable_findings_and_retries_once() -> 
             is_re_review=False,
         )
 
-    assert post_review.await_count == 2
-    # Retry must contain only the in-diff finding.
-    retry_inline = post_review.await_args_list[1].kwargs["inline_comments"]
-    assert {c["path"] for c in retry_inline} == {"in_diff.py"}
+    # A single POST, with only the in-diff finding inline.
+    assert post_review.await_count == 1
+    posted_inline = post_review.await_args_list[0].kwargs["inline_comments"]
+    assert {c["path"] for c in posted_inline} == {"in_diff.py"}
+    # The demoted finding lands in the summary body, not dropped.
+    posted_body = post_review.await_args_list[0].kwargs["body"]
+    assert "out-of-diff" in posted_body
     assert result["success"] is True
     assert result["review_id"] == 7777
     assert result["surfaced_count"] == 1
     assert result["unresolvable_findings"] == ["f_bad"]
-    assert "update_finding" in result["hint"]
+    assert "demoted" in result["hint"]
+
+
+@pytest.mark.asyncio
+async def test_publish_review_demotes_unresolvable_findings_on_422_retry() -> None:
+    """If the up-front re-check misses a stale anchor (e.g. a commit lands
+    between the diff fetch and the POST) and GitHub returns an
+    ``unresolved_anchor`` 422, the tool must recover: re-filter, demote the bad
+    findings into the summary body, retry once, and return ``success=True``
+    with the demoted ids in ``unresolvable_findings``."""
+    from agent.tools.publish_review import _publish_review_async
+
+    findings = [
+        _f(id="f_good", severity="high", file="in_diff.py", start_line=10, end_line=10),
+        _f(id="f_bad", severity="high", file="not_in_diff.py", start_line=99, end_line=99),
+    ]
+
+    first_response = {
+        "_error": "HTTP 422: ...",
+        "_error_kind": "unresolved_anchor",
+        "_raw_errors": ["Path could not be resolved"],
+        "_status": 422,
+    }
+    retry_response = {"id": 7777}
+    post_review = AsyncMock(side_effect=[first_response, retry_response])
+    fetch_comments = AsyncMock(return_value=[])
+    set_metadata = AsyncMock()
+
+    # No diff_line_set up front (the re-check can't demote f_bad), but the
+    # on-demand fetch on the 422 path recovers it.
+    call_count = {"n": 0}
+
+    async def _resolve_diff_line_set(**_kwargs: Any) -> Any:
+        call_count["n"] += 1
+        # First call (up-front) sees no diff; second call (422 recovery) does.
+        if call_count["n"] == 1:
+            return None
+        return {"in_diff.py": {"RIGHT": {10}, "LEFT": set()}}
+
+    with (
+        patch(
+            "agent.tools.publish_review.get_config",
+            return_value={"configurable": {"thread_id": "tid"}},
+        ),
+        patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
+        patch(
+            "agent.tools.publish_review.list_findings_async",
+            AsyncMock(return_value=findings),
+        ),
+        patch("agent.tools.publish_review.post_pull_request_review", post_review),
+        patch("agent.tools.publish_review.fetch_review_comments", fetch_comments),
+        patch(
+            "agent.tools.publish_review._resolve_diff_line_set",
+            _resolve_diff_line_set,
+        ),
+        patch(
+            "agent.tools.publish_review._resolve_threads_for_resolved_findings",
+            new_callable=AsyncMock,
+            return_value=0,
+        ),
+        patch(
+            "agent.tools.publish_review._store_thread_ids_on_findings",
+            new_callable=AsyncMock,
+        ),
+        patch("agent.tools.publish_review.set_reviewer_thread_metadata", set_metadata),
+        patch(
+            "agent.tools.publish_review._maybe_post_slack_completion_reply",
+            new_callable=AsyncMock,
+        ),
+    ):
+        result = await _publish_review_async(
+            owner="o",
+            repo="r",
+            pr_number=7,
+            head_sha="sha",
+            token="t",
+            severity_threshold="medium",
+            cap=15,
+            is_re_review=False,
+        )
+
+    assert post_review.await_count == 2
+    # Retry must contain only the in-diff finding, with f_bad demoted to body.
+    retry_inline = post_review.await_args_list[1].kwargs["inline_comments"]
+    assert {c["path"] for c in retry_inline} == {"in_diff.py"}
+    retry_body = post_review.await_args_list[1].kwargs["body"]
+    assert "out-of-diff" in retry_body
+    assert result["success"] is True
+    assert result["review_id"] == 7777
+    assert result["surfaced_count"] == 1
+    assert result["unresolvable_findings"] == ["f_bad"]
+    assert "demoted" in result["hint"]
 
 
 @pytest.mark.asyncio
@@ -2200,24 +2288,17 @@ async def test_publish_review_does_not_retry_when_no_findings_can_be_dropped() -
 @pytest.mark.asyncio
 async def test_publish_review_fetches_pr_diff_when_diff_line_set_missing() -> None:
     """Reviewer runs clear ``diff_line_set`` from config before the agent
-    starts, so the publish-time retry path must fall back to fetching the
-    PR's unified diff on demand and recomputing the line set — otherwise no
-    finding is ever droppable and the retry surfaces empty
-    ``unresolvable_findings`` for the reachable production case."""
+    starts, so the publish-time re-check must fall back to fetching the PR's
+    unified diff on demand and recomputing the line set — otherwise no finding
+    is ever demoted and a stale anchor is silently lost for the reachable
+    production case."""
     from agent.tools.publish_review import _publish_review_async
 
     findings = [
         _f(id="f_good", severity="high", file="in_diff.py", start_line=10, end_line=10),
         _f(id="f_bad", severity="high", file="not_in_diff.py", start_line=99, end_line=99),
     ]
-    first_response = {
-        "_error": "HTTP 422: ...",
-        "_error_kind": "unresolved_anchor",
-        "_raw_errors": ["Path could not be resolved"],
-        "_status": 422,
-    }
-    retry_response = {"id": 9999}
-    post_review = AsyncMock(side_effect=[first_response, retry_response])
+    post_review = AsyncMock(return_value={"id": 9999})
 
     pr_diff = (
         "diff --git a/in_diff.py b/in_diff.py\n"
@@ -2269,9 +2350,13 @@ async def test_publish_review_fetches_pr_diff_when_diff_line_set_missing() -> No
             is_re_review=False,
         )
 
-    assert post_review.await_count == 2
-    retry_inline = post_review.await_args_list[1].kwargs["inline_comments"]
-    assert {c["path"] for c in retry_inline} == {"in_diff.py"}
+    # The up-front re-check (fed by fetch_pr_diff) demotes f_bad, so a single
+    # POST carries only the in-diff finding inline.
+    assert post_review.await_count == 1
+    posted_inline = post_review.await_args_list[0].kwargs["inline_comments"]
+    assert {c["path"] for c in posted_inline} == {"in_diff.py"}
+    posted_body = post_review.await_args_list[0].kwargs["body"]
+    assert "out-of-diff" in posted_body
     assert result["success"] is True
     assert result["unresolvable_findings"] == ["f_bad"]
 
