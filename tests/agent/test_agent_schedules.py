@@ -116,6 +116,9 @@ def auth(monkeypatch) -> None:  # noqa: ANN001
     async def fake_require_repo_access_for_user(login: str, full_name: str) -> str:
         return "gho_token"
 
+    async def fake_slack_id_for_login(login: str | None) -> str | None:
+        return "UALICE" if login == "alice" else None
+
     monkeypatch.setattr(schedules, "get_valid_access_token", fake_get_valid_access_token)
     monkeypatch.setattr(schedules, "get_profile", fake_get_profile)
     monkeypatch.setattr(schedules, "_resolve_run_email", fake_resolve_run_email)
@@ -123,6 +126,7 @@ def auth(monkeypatch) -> None:  # noqa: ANN001
     monkeypatch.setattr(
         schedules, "require_repo_access_for_user", fake_require_repo_access_for_user
     )
+    monkeypatch.setattr(schedules, "slack_id_for_login", fake_slack_id_for_login)
 
 
 def test_cron_validation_rejects_non_five_field_expression() -> None:
@@ -462,6 +466,7 @@ async def test_launch_scheduled_agent_run_connects_slack_thread(
     slack_thread = metadata["source_context"]["slack_thread"]
     assert slack_thread["channel_id"] == "C0123456789"
     assert slack_thread["thread_ts"] == "1784302353.900029"
+    assert slack_thread["triggering_user_id"] == "UALICE"
     run = fake_client.runs.created[0]
     assert run["config"]["configurable"]["slack_thread"] == slack_thread
     assert "slack_thread_reply" in run["input"]["messages"][0]["content"]

@@ -21,6 +21,7 @@ from .profiles import get_profile, get_valid_access_token
 from .repo_access import repo_config_for_user, require_repo_access_for_user
 from .team_settings import get_team_fable_enabled
 from .thread_api import _agent_version_metadata, _now_ms, _resolve_run_email
+from .user_mappings import slack_id_for_login
 
 logger = logging.getLogger(__name__)
 
@@ -510,6 +511,10 @@ async def launch_scheduled_agent_run(schedule_id: str) -> dict[str, Any]:
             "channel_id": slack_channel_id,
             "thread_ts": message_ts,
             "triggering_event_ts": message_ts,
+            "triggering_user_id": await slack_id_for_login(
+                record.get("created_by") if isinstance(record.get("created_by"), str) else None
+            )
+            or "",
             "triggering_user_email": record.get("user_email") or "",
         }
         thread_id = generate_thread_id_from_slack_thread(slack_channel_id, message_ts)
