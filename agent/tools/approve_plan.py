@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Mapping
-from typing import Annotated, Any
+from typing import Annotated, Any, TypedDict
 
 from langchain_core.messages import ToolMessage
 from langchain_core.tools import InjectedToolCallId
@@ -25,8 +25,13 @@ from ..dashboard.thread_api import _user_owns_thread
 logger = logging.getLogger(__name__)
 
 
+class ApprovePlanState(TypedDict, total=False):
+    plan_mode: bool
+    plan_approval_blocked: bool
+
+
 async def approve_plan(
-    state: Annotated[dict[str, Any] | None, InjectedState] = None,
+    state: Annotated[ApprovePlanState | None, InjectedState] = None,
     tool_call_id: Annotated[str, InjectedToolCallId] = "",
 ) -> Command | dict[str, Any]:
     """Approve the current plan and exit plan mode.
@@ -47,6 +52,11 @@ async def approve_plan(
         metadata = await _thread_metadata(str(thread_id))
         if not _active_plan_mode(state, configurable, metadata):
             return {"success": False, "error": "plan mode is not active for this thread"}
+        if isinstance(state, dict) and state.get("plan_approval_blocked") is True:
+            return {
+                "success": False,
+                "error": "a non-owner dashboard follow-up cannot approve the plan",
+            }
         if not _current_user_owns_thread(metadata, configurable):
             return {"success": False, "error": "only the plan owner can approve the plan"}
         content = await get_plan_content(str(thread_id), raise_on_error=True) or {}
@@ -82,7 +92,7 @@ async def _thread_metadata(thread_id: str) -> dict[str, Any]:
 
 
 def _active_plan_mode(
-    state: dict[str, Any] | None, configurable: Any, metadata: Mapping[str, Any]
+    state: Mapping[str, Any] | None, configurable: Any, metadata: Mapping[str, Any]
 ) -> bool:
     if isinstance(state, dict) and "plan_mode" in state:
         return state.get("plan_mode") is True

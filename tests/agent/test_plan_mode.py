@@ -270,6 +270,46 @@ async def test_approve_plan_tool_exits_plan_mode(monkeypatch: pytest.MonkeyPatch
     assert "add tests" in messages[0].content
 
 
+async def test_approve_plan_tool_rejects_non_owner_followup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import importlib
+
+    approve_plan_tool = importlib.import_module("agent.tools.approve_plan")
+
+    monkeypatch.setattr(
+        approve_plan_tool,
+        "get_config",
+        lambda: {
+            "configurable": {
+                "thread_id": "t1",
+                "github_login": "octo",
+                "user_email": "octo@example.com",
+                "plan_mode": True,
+            }
+        },
+    )
+
+    async def fake_thread_metadata(thread_id: str) -> dict[str, Any]:
+        return {
+            "source": "dashboard",
+            "github_login": "octo",
+            "triggering_user_email": "octo@example.com",
+            "plan_mode": True,
+        }
+
+    monkeypatch.setattr(approve_plan_tool, "_thread_metadata", fake_thread_metadata)
+
+    result = await approve_plan_tool.approve_plan(
+        state={"plan_mode": True, "plan_approval_blocked": True},
+        tool_call_id="call-1",
+    )
+
+    assert isinstance(result, dict)
+    assert result["success"] is False
+    assert "non-owner" in result["error"]
+
+
 async def test_approve_plan_tool_rejects_non_owner(monkeypatch: pytest.MonkeyPatch) -> None:
     import importlib
 
