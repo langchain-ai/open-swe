@@ -80,7 +80,6 @@ from .middleware import (
     ToolArtifactMiddleware,
     ToolErrorMiddleware,
     TrustedSkillsMiddleware,
-    WorkflowPushGuardMiddleware,
     check_message_queue_before_model,
     notify_step_limit_reached,
     refresh_github_proxy_before_model,
@@ -130,11 +129,7 @@ from .utils.authorship import (
 )
 from .utils.dashboard_links import dashboard_plan_url, dashboard_thread_url
 from .utils.deferred_model import make_deferred_error_model
-from .utils.github_app import (
-    PROXY_TOKEN_PERMISSION_LADDER,
-    PermissionMap,
-    get_github_app_installation_token_with_expiry,
-)
+from .utils.github_app import get_github_app_installation_token_with_expiry
 from .utils.github_proxy import record_proxy_token_expiry
 from .utils.json_types import as_json_object
 from .utils.model import (
@@ -236,37 +231,12 @@ async def _start_langsmith_sandbox_if_needed(sandbox_backend: SandboxBackendProt
 
 async def _resolve_proxy_token(
     github_proxy_token: str | None,
-    *,
-    permissions: PermissionMap | None = None,
-) -> tuple[str | None, str | None, PermissionMap | None]:
-    """Resolve the proxy token, its expiry, and the effective permission scope."""
+) -> tuple[str | None, str | None, None]:
+    """Resolve the proxy token and its expiry."""
     if github_proxy_token:
         return github_proxy_token, None, None
-    if permissions is not None:
-        token, expires_at = await get_github_app_installation_token_with_expiry(
-            permissions=permissions
-        )
-        return token, expires_at, permissions
-
-    # Walk from the richest scope to the guaranteed core so an installation that
-    # hasn't granted workflows:write / actions:read degrades instead of failing.
-    ladder = PROXY_TOKEN_PERMISSION_LADDER
-    last = len(ladder) - 1
-    for index, scope in enumerate(ladder):
-        token, expires_at = await get_github_app_installation_token_with_expiry(
-            permissions=scope,
-            log_errors=index == last,
-        )
-        if not token:
-            continue
-        if index:
-            logger.warning(
-                "GitHub proxy token minted with reduced scope %s; installation is "
-                "missing higher-privilege grants",
-                sorted(scope),
-            )
-        return token, expires_at, scope
-    return None, None, None
+    token, expires_at = await get_github_app_installation_token_with_expiry()
+    return token, expires_at, None
 
 
 async def _resolve_snapshot_id_for_repo(repo: dict[str, str] | None) -> str | None:
@@ -1128,7 +1098,6 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 ),
                 ToolArtifactMiddleware(),
                 PullRequestCreationGuardMiddleware(),
-                WorkflowPushGuardMiddleware(),
                 refresh_github_proxy_before_model,
                 check_message_queue_before_model,
                 SlackAssistantStatusMiddleware(),

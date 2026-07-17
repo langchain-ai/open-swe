@@ -62,6 +62,7 @@ from .middleware import (
 )
 from .middleware.prepare_run import PrepareRunState
 from .review.diff import (
+    changed_files,
     compute_diff_line_set,
     fetch_pr_diff,
     fetch_pr_metadata,
@@ -104,7 +105,7 @@ from .tools import (
     web_search,
 )
 from .utils import ttl_cache
-from .utils.agents_md import fetch_agents_md
+from .utils.agents_md import fetch_agents_md, fetch_scoped_agents_md
 from .utils.api_standards_skill import fetch_api_standards_skill
 from .utils.deferred_model import make_deferred_error_model
 from .utils.github_app import get_github_app_installation_token_with_expiry
@@ -410,6 +411,7 @@ def _reviewer_system_prompt(
     org_guidelines: str | None = None,
     repo_style_prompt: str | None = None,
     agents_md_content: str | None = None,
+    scoped_agents_md: dict[str, str] | None = None,
     api_standards_skill: str | None = None,
 ) -> str:
     prompt = REVIEWER_PROMPT_TEMPLATE.format(
@@ -450,12 +452,22 @@ def _reviewer_system_prompt(
             "they refine tone, severity, and what this team typically flags.\n\n"
             f"{repo_style_prompt}"
         )
-    if agents_md_content:
+    if agents_md_content or scoped_agents_md:
+        instruction_sections: list[str] = []
+        if agents_md_content:
+            instruction_sections.append(
+                f"## Root instructions (scope: entire repository)\n\n```\n{agents_md_content}\n```"
+            )
+        for path, content in (scoped_agents_md or {}).items():
+            scope = posixpath.dirname(path)
+            instruction_sections.append(
+                f"## Instructions from `{path}` (scope: `{scope}/`)\n\n```\n{content}\n```"
+            )
         prompt = (
             f"{prompt}\n\n"
             "# Repository conventions (AGENTS.md / CLAUDE.md)\n\n"
-            "The following is the `AGENTS.md` or `CLAUDE.md` file from the target "
-            "branch (the PR's base), not from the PR head. It documents the "
+            "The following files come from the target branch (the PR's base), "
+            "not from the PR head. They document the "
             "project's conventions, architecture, and rules. These rules are "
             "**mandatory** — the project enforces them on every contributor and "
             "they are not optional style preferences. When a changed line "
@@ -475,9 +487,9 @@ def _reviewer_system_prompt(
             "- **Process / CI rules** — if the repo requires tests, changelog "
             "entries, or specific CI steps for certain changes and the PR skips "
             "them, that is a finding.\n\n"
-            "```\n"
-            f"{agents_md_content}\n"
-            "```"
+            "Each scoped `AGENTS.md` applies only to changed files under its "
+            "listed directory. When instructions conflict, the most deeply "
+            "nested applicable file takes precedence.\n\n" + "\n\n".join(instruction_sections)
         )
     if api_standards_skill:
         prompt = (
@@ -1152,14 +1164,24 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
         api_standards_task = asyncio.create_task(_cached_api_standards_skill())
         pr_trace_context_task = asyncio.create_task(_prepare_pr_trace_context())
         diff_context = await diff_context_task
+        pr_diff_text, pr_diff_line_set = diff_context
+        scoped_agents_md_task = asyncio.create_task(
+            fetch_scoped_agents_md(
+                repo_owner,
+                repo_name,
+                base_sha,
+                changed_files(pr_diff_text),
+                token=github_token,
+            )
+        )
         pr_overview = await pr_overview_task
         existing_threads_block = await existing_threads_task
         repo_style_prompt = await repo_style_task
         agents_md_content = await agents_md_task
+        scoped_agents_md = await scoped_agents_md_task
         org_guidelines = await org_guidelines_task
         api_standards_skill = await api_standards_task
         pr_trace_context = await pr_trace_context_task
-        pr_diff_text, pr_diff_line_set = diff_context
         pr_title, pr_body = pr_overview
 
         review_context = ""
@@ -1218,6 +1240,7 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
             org_guidelines=org_guidelines,
             repo_style_prompt=repo_style_prompt,
             agents_md_content=agents_md_content,
+            scoped_agents_md=scoped_agents_md,
             api_standards_skill=api_standards_skill,
         )
         trace_context_prompt = format_pr_trace_context_prompt(pr_trace_context)
