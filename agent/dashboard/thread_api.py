@@ -363,6 +363,17 @@ def _is_thread_resolved(metadata: Mapping[str, Any]) -> bool:
     return metadata.get("resolved") is True
 
 
+def _thread_source_url(metadata: Mapping[str, Any]) -> str | None:
+    source_context = metadata.get("source_context")
+    if not isinstance(source_context, dict):
+        return None
+    slack_thread = source_context.get("slack_thread")
+    if not isinstance(slack_thread, dict):
+        return None
+    permalink = slack_thread.get("permalink")
+    return permalink.strip() if isinstance(permalink, str) and permalink.strip() else None
+
+
 def _thread_summary(
     thread: ThreadLike,
     *,
@@ -429,6 +440,7 @@ def _thread_summary(
         "updatedAt": int(updated_at) if isinstance(updated_at, (int, float)) else _now_ms(),
         "isOwner": (_user_owns_thread(metadata, owner_login, owner_email) if owner_login else True),
         "traceUrl": trace_url,
+        "sourceUrl": _thread_source_url(metadata),
         "sandboxId": sandbox_id,
     }
     if isinstance(pr_number, int) and isinstance(pr_url, str):

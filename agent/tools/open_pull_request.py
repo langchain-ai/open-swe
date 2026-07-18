@@ -549,10 +549,13 @@ async def _build_source_reference_lines(configurable: dict[str, Any]) -> list[st
         slack_thread = configurable.get("slack_thread") or {}
         channel_id = slack_thread.get("channel_id")
         thread_ts = slack_thread.get("thread_ts")
-        if channel_id and thread_ts:
-            permalink = await get_slack_permalink(channel_id, thread_ts)
-            if permalink:
-                lines.append(f"- Slack thread: {permalink}")
+        permalink = slack_thread.get("permalink")
+        if not isinstance(permalink, str) or not permalink.strip():
+            permalink = None
+            if channel_id and thread_ts:
+                permalink = await get_slack_permalink(channel_id, thread_ts)
+        if isinstance(permalink, str) and permalink.strip():
+            lines.append(f"- Slack thread: {permalink.strip()}")
     elif source == "linear":
         linear_issue = configurable.get("linear_issue") or {}
         url = linear_issue.get("url")
@@ -599,8 +602,11 @@ async def _maybe_append_references(
             lines.append(plan_line)
         try:
             source_lines = await _build_source_reference_lines(configurable)
-            if source_lines and await _is_private_repo(client, token, owner, repo):
-                lines.extend(source_lines)
+            if source_lines:
+                if configurable.get("source") == "slack" or await _is_private_repo(
+                    client, token, owner, repo
+                ):
+                    lines.extend(source_lines)
         except Exception:
             logger.debug("Failed to append source references to PR body", exc_info=True)
         if not lines:

@@ -2,6 +2,7 @@ import { useCallback, useMemo, useState } from "react"
 import { Link } from "@tanstack/react-router"
 import { useStreamContext as useAgentThreadStream } from "@langchain/react"
 import { Map as MapIcon } from "lucide-react"
+import { IoLogoSlack } from "react-icons/io5"
 
 import type {
   AgentThread,
@@ -161,6 +162,20 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
               </>
             )}
           </div>
+        )}
+        {thread.sourceUrl && (
+          <a
+            href={thread.sourceUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="flex items-center justify-between gap-2 border-b border-[var(--ui-border)] bg-[var(--ui-panel)] px-4 py-2 text-xs text-[var(--ui-text)] hover:bg-[var(--ui-panel-2)]"
+          >
+            <span className="flex items-center gap-2">
+              <IoLogoSlack className="size-3.5 text-[var(--ui-text-dim)]" />
+              Originating Slack thread
+            </span>
+            <span className="font-medium text-[var(--ui-accent)]">Open →</span>
+          </a>
         )}
         <WorkflowApprovalCard
           threadId={thread.id}

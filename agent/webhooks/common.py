@@ -103,6 +103,7 @@ from ..utils.slack import (
     get_slack_channel_context_description,
     get_slack_channel_description,
     get_slack_channel_info,
+    get_slack_permalink,
     get_slack_user_info,
     get_slack_user_names,  # noqa: F401
     is_slack_channel_named,
@@ -661,6 +662,39 @@ async def _upsert_slack_thread_repo_metadata(
         )
 
 
+async def _source_context_with_slack_permalink(
+    source_context: dict[str, Any],
+) -> dict[str, Any]:
+    enriched = dict(source_context)
+    slack_thread = enriched.get("slack_thread")
+    if not isinstance(slack_thread, dict):
+        return enriched
+
+    enriched_slack_thread = dict(slack_thread)
+    permalink = enriched_slack_thread.get("permalink")
+    if isinstance(permalink, str) and permalink.strip():
+        enriched_slack_thread["permalink"] = permalink.strip()
+        enriched["slack_thread"] = enriched_slack_thread
+        return enriched
+
+    channel_id = enriched_slack_thread.get("channel_id")
+    thread_ts = enriched_slack_thread.get("thread_ts")
+    if not isinstance(channel_id, str) or not channel_id.strip():
+        return enriched
+    if not isinstance(thread_ts, str) or not thread_ts.strip():
+        return enriched
+
+    try:
+        permalink = await get_slack_permalink(channel_id.strip(), thread_ts.strip())
+    except Exception:  # noqa: BLE001
+        logger.debug("Failed to resolve Slack permalink for thread metadata", exc_info=True)
+        permalink = None
+    if permalink:
+        enriched_slack_thread["permalink"] = permalink
+        enriched["slack_thread"] = enriched_slack_thread
+    return enriched
+
+
 async def upsert_agent_thread_owner_metadata(
     thread_id: str,
     *,
@@ -691,7 +725,7 @@ async def upsert_agent_thread_owner_metadata(
     if title:
         metadata["title"] = title[:80]
     if source_context:
-        metadata["source_context"] = source_context
+        metadata["source_context"] = await _source_context_with_slack_permalink(source_context)
 
     langgraph_client = get_client(url=LANGGRAPH_URL)
     try:

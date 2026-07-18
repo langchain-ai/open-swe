@@ -328,6 +328,19 @@ def test_thread_summary_hides_creating_sandbox_sentinel() -> None:
     assert summary["sandboxId"] is None
 
 
+def test_thread_summary_includes_slack_source_url() -> None:
+    summary = thread_api._thread_summary(
+        _thread_with_metadata(
+            {
+                "source": "slack",
+                "source_context": {"slack_thread": {"permalink": "https://slack.example/thread"}},
+            }
+        )
+    )
+
+    assert summary["sourceUrl"] == "https://slack.example/thread"
+
+
 async def test_recovery_patch_requires_thread_owner(monkeypatch) -> None:
     class FakeThreads:
         async def get(self, thread_id: str) -> dict[str, object]:
