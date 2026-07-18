@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from functools import cache, lru_cache
 from importlib import import_module
 from typing import NotRequired, TypedDict, cast
@@ -103,29 +103,32 @@ FABLE_MODEL_IDS: frozenset[str] = frozenset(
     m["id"] for m in SUPPORTED_MODELS if m["id"].startswith("anthropic:claude-fable")
 )
 
-ProfileRegistry = Mapping[str, Mapping[str, object]]
+ProfileLoader = Callable[[str], Mapping[str, object]]
 
-_PROFILE_DATA_MODULES: dict[str, str] = {
-    "anthropic": "langchain_anthropic.data._profiles",
-    "fireworks": "langchain_fireworks.data._profiles",
-    "google_genai": "langchain_google_genai.data._profiles",
-    "openai": "langchain_openai.data._profiles",
+# LangChain partner packages expose ``_get_default_model_profile`` — the same
+# accessor that populates ``ChatModel.profile`` from bundled models.dev data —
+# so context windows come from LangChain profiles instead of hardcoded numbers.
+_PROFILE_LOADER_MODULES: dict[str, str] = {
+    "anthropic": "langchain_anthropic.chat_models",
+    "fireworks": "langchain_fireworks.chat_models",
+    "google_genai": "langchain_google_genai.chat_models",
+    "openai": "langchain_openai.chat_models.base",
 }
 
 
 @cache
-def _profile_registry(provider: str) -> ProfileRegistry | None:
-    module_path = _PROFILE_DATA_MODULES.get(provider)
+def _profile_loader(provider: str) -> ProfileLoader | None:
+    module_path = _PROFILE_LOADER_MODULES.get(provider)
     if module_path is None:
         return None
     try:
         module = import_module(module_path)
     except ImportError:
         return None
-    profiles = getattr(module, "_PROFILES", None)
-    if not isinstance(profiles, Mapping):
+    loader = getattr(module, "_get_default_model_profile", None)
+    if not callable(loader):
         return None
-    return cast(ProfileRegistry, profiles)
+    return cast(ProfileLoader, loader)
 
 
 @lru_cache(maxsize=512)
@@ -133,12 +136,10 @@ def model_profile_context_window(model_id: str) -> int | None:
     provider, _, model_name = model_id.partition(":")
     if not provider or not model_name:
         return None
-    registry = _profile_registry(provider)
-    if registry is None:
+    loader = _profile_loader(provider)
+    if loader is None:
         return None
-    profile = registry.get(model_name)
-    if profile is None:
-        return None
+    profile = loader(model_name)
     context_window = profile.get("max_input_tokens")
     if isinstance(context_window, int) and context_window > 0:
         return context_window
