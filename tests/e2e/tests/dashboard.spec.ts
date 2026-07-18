@@ -77,6 +77,18 @@ async function latestPrBody(page: Page): Promise<string> {
   return prs[prs.length - 1]?.body ?? "";
 }
 
+async function openThreadActionsMenu(page: Page) {
+  await page
+    .getByRole("link", { name: /please add a greet/ })
+    .first()
+    .hover();
+  const actionsButton = page
+    .getByRole("button", { name: "Thread actions" })
+    .first();
+  await expect(actionsButton).toBeVisible();
+  await actionsButton.click();
+}
+
 test.describe("Slack → web handoff (real dashboard UI)", () => {
   test("the SAME user continues the conversation in the web app", async ({
     page,
@@ -121,9 +133,8 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     await loginAs(page, SAME_USER);
     await openThreadViaSlackLink(page);
 
-    await expect(
-      page.getByRole("link", { name: /Originating Slack thread/ }),
-    ).toHaveCount(0);
+    await openThreadActionsMenu(page);
+    await expect(page.getByText("Open Slack thread")).toHaveCount(0);
     await expect.poll(() => latestPrBody(page)).not.toContain("Slack thread");
   });
 
@@ -133,11 +144,13 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     await loginAs(page, SAME_USER);
     await openThreadViaSlackLink(page, { repoPrivate: true });
 
-    const sourceLink = page.getByRole("link", {
-      name: /Originating Slack thread/,
-    });
-    await expect(sourceLink).toBeVisible();
-    await expect(sourceLink).toHaveAttribute("href", /\/mock\/slack/);
+    await openThreadActionsMenu(page);
+    const sourceItem = page.getByText("Open Slack thread");
+    await expect(sourceItem).toBeVisible();
+    const popupPromise = page.waitForEvent("popup");
+    await sourceItem.click();
+    const popup = await popupPromise;
+    await expect(popup).toHaveURL(/\/mock\/slack/);
     await expect.poll(() => latestPrBody(page)).toContain("Slack thread");
   });
 

@@ -397,6 +397,11 @@ function ThreadRow({
     window.open(thread.traceUrl, "_blank", "noopener,noreferrer")
   }
 
+  const openSource = () => {
+    if (!thread.sourceUrl) return
+    window.open(thread.sourceUrl, "_blank", "noopener,noreferrer")
+  }
+
   const copySandboxId = () => {
     if (!thread.sandboxId) return
     void navigator.clipboard.writeText(thread.sandboxId)
@@ -493,6 +498,15 @@ function ThreadRow({
                   <TreeStructureIcon className="size-3.5" />
                   Open trace
                 </Menu.Item>
+                {thread.sourceUrl && (
+                  <Menu.Item
+                    onClick={openSource}
+                    className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-xs outline-none select-none data-highlighted:bg-muted data-disabled:pointer-events-none data-disabled:opacity-50"
+                  >
+                    <IoLogoSlack className="size-3.5" />
+                    Open Slack thread
+                  </Menu.Item>
+                )}
                 <Menu.Item
                   disabled={!thread.sandboxId}
                   onClick={copySandboxId}
