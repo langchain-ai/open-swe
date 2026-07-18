@@ -364,6 +364,8 @@ def _is_thread_resolved(metadata: Mapping[str, Any]) -> bool:
 
 
 def _thread_source_url(metadata: Mapping[str, Any]) -> str | None:
+    if metadata.get("repo_private") is not True:
+        return None
     source_context = metadata.get("source_context")
     if not isinstance(source_context, dict):
         return None

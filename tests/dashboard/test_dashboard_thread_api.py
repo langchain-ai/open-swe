@@ -328,17 +328,32 @@ def test_thread_summary_hides_creating_sandbox_sentinel() -> None:
     assert summary["sandboxId"] is None
 
 
-def test_thread_summary_includes_slack_source_url() -> None:
+def test_thread_summary_includes_slack_source_url_for_private_repo() -> None:
     summary = thread_api._thread_summary(
         _thread_with_metadata(
             {
                 "source": "slack",
+                "repo_private": True,
                 "source_context": {"slack_thread": {"permalink": "https://slack.example/thread"}},
             }
         )
     )
 
     assert summary["sourceUrl"] == "https://slack.example/thread"
+
+
+def test_thread_summary_omits_slack_source_url_for_public_repo() -> None:
+    summary = thread_api._thread_summary(
+        _thread_with_metadata(
+            {
+                "source": "slack",
+                "repo_private": False,
+                "source_context": {"slack_thread": {"permalink": "https://slack.example/thread"}},
+            }
+        )
+    )
+
+    assert summary["sourceUrl"] is None
 
 
 async def test_recovery_patch_requires_thread_owner(monkeypatch) -> None:

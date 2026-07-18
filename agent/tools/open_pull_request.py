@@ -500,23 +500,27 @@ async def _record_pr_telemetry(
             merged=merged,
         )
         if isinstance(thread_id, str) and thread_id:
-            await get_client().threads.update(
-                thread_id=thread_id,
-                metadata={
-                    "agent_kind": "agent",
-                    "pr_url": pr_url if isinstance(pr_url, str) else "",
-                    "pr_number": pr_number,
-                    "pr_state": derive_pr_state(state=state, merged=merged, draft=is_draft),
-                    "pr_title": details.get("title") or pr.get("title"),
-                    "branch_name": head,
-                    "base_branch": base,
-                    "diff_stats": {
-                        "files": changed_files,
-                        "additions": additions,
-                        "deletions": deletions,
-                    },
+            repo_private = None
+            base_repo = details.get("base", {}).get("repo")
+            if isinstance(base_repo, dict) and isinstance(base_repo.get("private"), bool):
+                repo_private = base_repo["private"]
+            metadata: dict[str, Any] = {
+                "agent_kind": "agent",
+                "pr_url": pr_url if isinstance(pr_url, str) else "",
+                "pr_number": pr_number,
+                "pr_state": derive_pr_state(state=state, merged=merged, draft=is_draft),
+                "pr_title": details.get("title") or pr.get("title"),
+                "branch_name": head,
+                "base_branch": base,
+                "diff_stats": {
+                    "files": changed_files,
+                    "additions": additions,
+                    "deletions": deletions,
                 },
-            )
+            }
+            if repo_private is not None:
+                metadata["repo_private"] = repo_private
+            await get_client().threads.update(thread_id=thread_id, metadata=metadata)
     except Exception:
         logger.debug(
             "Failed to record PR usage for %s/%s#%s", owner, repo, pr_number, exc_info=True
@@ -602,11 +606,8 @@ async def _maybe_append_references(
             lines.append(plan_line)
         try:
             source_lines = await _build_source_reference_lines(configurable)
-            if source_lines:
-                if configurable.get("source") == "slack" or await _is_private_repo(
-                    client, token, owner, repo
-                ):
-                    lines.extend(source_lines)
+            if source_lines and await _is_private_repo(client, token, owner, repo):
+                lines.extend(source_lines)
         except Exception:
             logger.debug("Failed to append source references to PR body", exc_info=True)
         if not lines:

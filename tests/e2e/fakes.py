@@ -69,6 +69,7 @@ def slack_messages(channel: str) -> list[dict[str, Any]]:
 
 # --- GitHub ----------------------------------------------------------------
 PULLS: list[dict[str, Any]] = []
+REPO_PRIVATE = [False]
 _pr_seq = [0]
 
 
@@ -163,8 +164,17 @@ def find_pull(number: int) -> dict[str, Any] | None:
     return next((p for p in PULLS if p["number"] == number), None)
 
 
+def set_repo_private(value: bool) -> None:
+    REPO_PRIVATE[0] = value
+
+
+def repo_private() -> bool:
+    return REPO_PRIVATE[0]
+
+
 def reset() -> None:
     SLACK_MESSAGES.clear()
     PULLS.clear()
+    REPO_PRIVATE[0] = False
     _pr_seq[0] = 0
     seed_bare_remote()

@@ -400,7 +400,7 @@ def test_uses_stored_slack_permalink_reference(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr(opr, "get_slack_permalink", fail_permalink)
     client = _RoutingClient(
         post=_FakeResponse(201, {"html_url": "u", "number": 1, "user": {}}),
-        get_routes={"/repos/langchain-ai/open-swe": _FakeResponse(200, {"private": False})},
+        get_routes={"/repos/langchain-ai/open-swe": _FakeResponse(200, {"private": True})},
     )
     _install_client(monkeypatch, client)
 
@@ -504,7 +504,7 @@ def test_plan_reference_survives_source_reference_failure(
     assert client.post_calls
 
 
-def test_appends_slack_reference_for_public_repo(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_omits_slack_reference_for_public_repo(monkeypatch: pytest.MonkeyPatch) -> None:
     _set_config(
         monkeypatch,
         {
@@ -525,12 +525,10 @@ def test_appends_slack_reference_for_public_repo(monkeypatch: pytest.MonkeyPatch
 
     _open_with_body("original body")
 
-    assert client.post_calls[0]["json"]["body"] == (
-        "original body\n\n## References\n- Slack thread: https://slack.example/p1"
-    )
+    assert client.post_calls[0]["json"]["body"] == "original body"
 
 
-def test_public_repo_appends_plan_and_slack_reference(
+def test_public_repo_appends_plan_but_not_slack_reference(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dashboard.example")
@@ -558,7 +556,7 @@ def test_public_repo_appends_plan_and_slack_reference(
 
     sent_body = client.post_calls[0]["json"]["body"]
     assert "- Plan: https://dashboard.example/agents/thread-1/plan" in sent_body
-    assert "- Slack thread: https://slack.example/p1" in sent_body
+    assert "Slack thread" not in sent_body
 
 
 def test_appends_linear_reference_for_private_repo(monkeypatch: pytest.MonkeyPatch) -> None:

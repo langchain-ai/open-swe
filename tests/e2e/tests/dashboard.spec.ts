@@ -10,6 +10,13 @@ async function loginAs(page: Page, user: { login: string; email: string }) {
   expect(res.ok()).toBeTruthy();
 }
 
+async function setRepoPrivate(page: Page, value: boolean) {
+  const res = await page.request.post("/control/repo-private", {
+    data: { private: value },
+  });
+  expect(res.ok()).toBeTruthy();
+}
+
 async function openRunningThreadViaSlackLink(page: Page) {
   await page.goto("/mock/slack");
   await page.locator("#reset").click();
@@ -27,9 +34,15 @@ async function openRunningThreadViaSlackLink(page: Page) {
 
 // Run the Slack flow so a thread + PR exist, then click the bot's real
 // "Open in Web" link, landing on the actual dashboard app.
-async function openThreadViaSlackLink(page: Page) {
+async function openThreadViaSlackLink(
+  page: Page,
+  options: { repoPrivate?: boolean } = {},
+) {
   await page.goto("/mock/slack");
   await page.locator("#reset").click();
+  if (options.repoPrivate) {
+    await setRepoPrivate(page, true);
+  }
   await expect(page.locator("#thread")).toContainText("No messages yet");
   await page
     .locator("#text")
@@ -54,6 +67,14 @@ async function expectTranscriptVisible(page: Page) {
       page.getByRole("link", { name: "Add greet() helper" }).first(),
     ).toBeVisible({ timeout: 8000 });
   }).toPass({ timeout: 60000 });
+}
+
+async function latestPrBody(page: Page): Promise<string> {
+  const res = await page.request.get("/mock/github/data");
+  expect(res.ok()).toBeTruthy();
+  const prs = (await res.json()) as Array<{ body?: string }>;
+  expect(prs.length).toBeGreaterThan(0);
+  return prs[prs.length - 1]?.body ?? "";
 }
 
 test.describe("Slack → web handoff (real dashboard UI)", () => {
@@ -92,6 +113,32 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     await expect(
       page.getByRole("link", { name: "Add greet() helper" }).first(),
     ).toBeVisible();
+  });
+
+  test("does not expose the originating Slack thread for public repos", async ({
+    page,
+  }) => {
+    await loginAs(page, SAME_USER);
+    await openThreadViaSlackLink(page);
+
+    await expect(
+      page.getByRole("link", { name: /Originating Slack thread/ }),
+    ).toHaveCount(0);
+    await expect.poll(() => latestPrBody(page)).not.toContain("Slack thread");
+  });
+
+  test("exposes the originating Slack thread for private repos", async ({
+    page,
+  }) => {
+    await loginAs(page, SAME_USER);
+    await openThreadViaSlackLink(page, { repoPrivate: true });
+
+    const sourceLink = page.getByRole("link", {
+      name: /Originating Slack thread/,
+    });
+    await expect(sourceLink).toBeVisible();
+    await expect(sourceLink).toHaveAttribute("href", /\/mock\/slack/);
+    await expect.poll(() => latestPrBody(page)).toContain("Slack thread");
   });
 
   test("shows follow-ups queued while the agent is still running", async ({
