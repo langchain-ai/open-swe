@@ -11,6 +11,8 @@ from agent.dashboard.options import (
     default_model_pair,
     fable_disabled_fallback,
     gate_fable_model,
+    model_profile_context_window,
+    models_with_profile_context_windows,
     provider_fallback_pair,
 )
 from agent.dashboard.profiles import ProfileUpdate, normalize_profile_for_response
@@ -50,6 +52,26 @@ def test_supported_openai_models_include_gpt_5_5_and_gpt_5_6() -> None:
         ("openai:gpt-5.6-terra", "GPT-5.6 Terra"),
         ("openai:gpt-5.6-luna", "GPT-5.6 Luna"),
     ]
+
+
+def test_supported_models_do_not_hardcode_context_windows() -> None:
+    assert all("context_window" not in model for model in SUPPORTED_MODELS)
+
+
+def test_model_profile_context_window_uses_langchain_profile() -> None:
+    assert model_profile_context_window("openai:gpt-5.5") == 1_050_000
+
+
+def test_models_with_profile_context_windows_enriches_copies() -> None:
+    openai_models = [model for model in SUPPORTED_MODELS if model["id"].startswith("openai:")]
+    enriched = models_with_profile_context_windows(openai_models)
+    assert all("context_window" not in model for model in openai_models)
+    assert {model["id"]: model.get("context_window") for model in enriched} == {
+        "openai:gpt-5.5": 1_050_000,
+        "openai:gpt-5.6-sol": 1_050_000,
+        "openai:gpt-5.6-terra": 1_050_000,
+        "openai:gpt-5.6-luna": 1_050_000,
+    }
 
 
 @pytest.mark.parametrize("model_id", ["unknown:model", "no-colon", "", None, 123])
