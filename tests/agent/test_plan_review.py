@@ -369,6 +369,14 @@ def test_save_plan_exported_and_wired() -> None:
     assert callable(save_plan)
 
 
+def test_save_plan_description_warns_about_slack_images() -> None:
+    from agent.tools import save_plan
+
+    description = save_plan.__doc__ or ""
+    assert "persist Markdown text only" in description
+    assert "post them directly in Slack" in description
+
+
 def test_plan_status_constants() -> None:
     from agent.dashboard import plan_store
 
